@@ -43,7 +43,7 @@ const VALID = {
   recommendations: ['Reasigna la etapa del jefe.'],
 };
 
-function build(opts: { defs?: typeof DEFS; reports?: ReturnType<typeof report>; run?: unknown; lastManual?: Date | null; existingWeek?: boolean; existingWeekStatus?: string; retries?: number; lock?: boolean; createError?: unknown } = {}) {
+function build(opts: { defs?: typeof DEFS; reports?: ReturnType<typeof report>; run?: unknown; lastManual?: Date | null; existingWeek?: boolean; existingWeekStatus?: string; retries?: number; lock?: boolean; createError?: unknown; restricted?: number[]; hidden?: number[]; rows?: unknown[] } = {}) {
   const created: any[] = [];
   const updated: any[] = [];
   const prisma = {
@@ -52,7 +52,7 @@ function build(opts: { defs?: typeof DEFS; reports?: ReturnType<typeof report>; 
     },
     workflow_definitions: { findMany: jest.fn().mockResolvedValue(opts.defs ?? DEFS) },
     workflow_ai_summaries: {
-      findMany: jest.fn().mockResolvedValue([]),
+      findMany: jest.fn().mockResolvedValue(opts.rows ?? []),
       findFirst: jest.fn(async (args: any) => {
         if (args.where.kind === 'manual') return opts.lastManual ? { created_at: opts.lastManual } : null;
         if (args.where.week_key) {
@@ -88,8 +88,19 @@ function build(opts: { defs?: typeof DEFS; reports?: ReturnType<typeof report>; 
     incr: jest.fn(async () => ++retries),
     expire: jest.fn().mockResolvedValue(1),
   };
-  const service = new WorkflowInsightsService(prisma as any, analytics as any, ai as any, notifications as any, redis as any);
-  return { service, prisma, analytics, ai, notifications, redis, created, updated };
+  const access = {
+    restrictedDefinitionIds: jest.fn().mockResolvedValue(opts.restricted ?? []),
+    hiddenDefinitionIds: jest.fn().mockResolvedValue(opts.hidden ?? []),
+  };
+  const service = new WorkflowInsightsService(
+    prisma as any,
+    analytics as any,
+    ai as any,
+    notifications as any,
+    redis as any,
+    access as any,
+  );
+  return { service, prisma, analytics, ai, notifications, redis, access, created, updated };
 }
 
 describe('WorkflowInsightsService', () => {
@@ -267,6 +278,17 @@ describe('WorkflowInsightsService', () => {
     });
   });
 
+  it('P7.3: leaves out of the AI input a flow some staff member may not see', async () => {
+    const { service, analytics, ai } = build({ restricted: [2] });
+    await service.generateManual(MONDAY);
+    expect(analytics.report).toHaveBeenCalledTimes(1);
+    expect(analytics.report).toHaveBeenCalledWith(1, expect.anything());
+    const sent = JSON.parse(ai.run.mock.calls[0][0].messages[0].content);
+    expect(sent.flows.map((f: { key: string }) => f.key)).toEqual(['pqr']);
+    expect(JSON.stringify(sent)).not.toContain('Vacaciones');
+    expect(sent.totals.active_flows).toBe(1);
+  });
+
   it('leaves out a flow whose metrics fail and still writes the summary', async () => {
     const { service, analytics, created } = build();
     analytics.report.mockRejectedValueOnce(new Error('metrics down'));
@@ -372,6 +394,35 @@ describe('WorkflowInsightsService', () => {
     it('never offers generation to a user without manage permission', async () => {
       const { service } = build();
       await expect(service.list(12, false, MONDAY)).resolves.toMatchObject({ can_generate: false, next_generate_at: null });
+    });
+
+    it('P7.3: a reader does not get the part of a summary about a flow hidden from them', async () => {
+      const content = {
+        headline: 'h',
+        summary: 's',
+        flows: [
+          { key: 'pqr', definition_id: 1, name: 'PQR', text: 'a' },
+          { key: 'vacaciones', definition_id: 2, name: 'Vacaciones', text: 'b' },
+        ],
+        recommendations: [],
+      };
+      const row = {
+        id: 3,
+        kind: 'manual',
+        status: 'ready',
+        period_from: new Date('2026-10-11T00:00:00Z'),
+        period_to: new Date('2026-11-09T00:00:00Z'),
+        week_key: null,
+        content,
+        tokens_used: 15,
+        model: 'm-1',
+        error: null,
+        created_at: new Date('2026-11-09T13:00:00Z'),
+      };
+      const hiddenFor = await build({ rows: [row], hidden: [2] }).service.list(12, false, MONDAY);
+      expect(hiddenFor.items[0].content?.flows.map((f) => f.definition_id)).toEqual([1]);
+      const seesAll = await build({ rows: [row] }).service.list(12, true, MONDAY);
+      expect(seesAll.items[0].content?.flows.map((f) => f.definition_id)).toEqual([1, 2]);
     });
 
     it('reads only this store newest first with the requested limit', async () => {

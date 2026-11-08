@@ -11,6 +11,7 @@ import {
   describeDestructiveE2E,
 } from '../../../../testing/destructive-e2e.guard';
 import { DossiersService } from '../../documents/dossiers.service';
+import { WorkflowAuditService } from '../audit/workflow-audit.service';
 import { WorkflowCommentsService } from '../instances/workflow-comments.service';
 import { WorkflowInstancesService } from '../instances/workflow-instances.service';
 import { WorkflowWebhookEmitter } from '../webhooks/workflow-webhook-emitter.service';
@@ -91,16 +92,18 @@ describeDestructiveE2E('Flujos contra Postgres real (M5)', () => {
     dossiers,
     advancer,
   );
+  const workflowAudit = new WorkflowAuditService(prisma);
   const engine = new WorkflowEngineService(
     prisma,
     loader,
     assignment,
     starter,
-    new WorkflowCompleteService(loader, assignment, requirements, advancer, events, stages),
+    new WorkflowCompleteService(loader, assignment, requirements, advancer, events, stages, workflowAudit),
     advancer,
     stages,
     events,
     new WorkflowTickService(prisma, loader, assignment, advancer, stages, events, requirements),
+    workflowAudit,
   );
   const instances = new WorkflowInstancesService(prisma, assignment, requirements, dossiers, events);
   const comments = new WorkflowCommentsService(prisma, instances, events);

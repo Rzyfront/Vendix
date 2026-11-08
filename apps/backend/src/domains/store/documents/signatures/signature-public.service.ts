@@ -4,6 +4,7 @@ import { Injectable, Logger } from '@nestjs/common';
 import { RequestContextService } from '@common/context/request-context.service';
 import { ErrorCodes, VendixHttpException } from '@common/errors';
 import { StorePrismaService } from '../../../../prisma/services/store-prisma.service';
+import { WorkflowAuditService } from '../../workflows/audit/workflow-audit.service';
 import { storeAllowsFlows } from '../../workflows/engine/workflow-industry';
 import { hashTrackingToken } from '../../workflows/tracking/workflow-tracking-links.service';
 import { bytesMatchMime } from '../file-signature';
@@ -70,6 +71,8 @@ export class SignaturePublicService {
     private readonly files: StoredFilesService,
     private readonly seal: SignatureSealService,
     private readonly flow: SignatureFlowNotifier,
+    /** Append-only audit trail (P7.2): required, so no path runs unaudited. */
+    private readonly audit: WorkflowAuditService,
   ) {}
 
   // ---- view --------------------------------------------------------------
@@ -100,10 +103,24 @@ export class SignaturePublicService {
         where: { id: r.store_id },
         select: { name: true },
       });
-      const pdf =
-        state === 'pending' && r.document.file_id
-          ? await this.files.signedDownloadUrl(r.document.file_id)
-          : null;
+      let pdf: Awaited<ReturnType<StoredFilesService['signedDownloadUrl']>> | null = null;
+      if (state === 'pending' && r.document.file_id) {
+        // Fail-closed: the signer's access is written before the URL exists.
+        await this.audit.recordNow({
+          action: 'document.public_file_downloaded',
+          target_type: 'issued_document',
+          target_id: r.document.id,
+          instance_id: r.document.workflow_instance_id,
+          actor: { type: 'public', id: null, label: r.signer.name },
+          summary: `${r.signer.name} abrió el documento ${r.document.reference} para firmarlo`,
+          details: {
+            signature_request_id: r.request.id,
+            signer_id: r.signer.id,
+            file_id: r.document.file_id,
+          },
+        });
+        pdf = await this.files.signedDownloadUrl(r.document.file_id);
+      }
       return {
         state,
         store: { name: store?.name ?? '' },

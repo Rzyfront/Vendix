@@ -1,11 +1,12 @@
 import { randomUUID, createHash } from 'crypto';
-import { Injectable, Logger } from '@nestjs/common';
+import { Injectable, Logger, Optional } from '@nestjs/common';
 import { RequestContextService } from '@common/context/request-context.service';
 import { ErrorCodes, VendixHttpException } from '@common/errors';
 import { S3Service } from '@common/services/s3.service';
 import { S3PathHelper } from '@common/helpers/s3-path.helper';
 import { AuditAction, AuditService } from '@common/audit/audit.service';
 import { StorePrismaService } from '../../../prisma/services/store-prisma.service';
+import { WorkflowLimitsService } from '../workflows/limits/workflow-limits.service';
 import {
   ALLOWED_MIME_EXTENSIONS,
   DEFAULT_MAX_FILE_BYTES,
@@ -83,6 +84,9 @@ export class StoredFilesService {
     private readonly s3: S3Service,
     private readonly paths: S3PathHelper,
     private readonly audit: AuditService,
+    // P7.1: optional so specs that wire the service by hand keep working;
+    // Nest always provides it.
+    @Optional() private readonly limits?: WorkflowLimitsService,
   ) {}
 
   private ctx() {
@@ -143,6 +147,18 @@ export class StoredFilesService {
   async upload(input: UploadFileInput, tx?: any): Promise<StoredFileRow> {
     const c = this.ctx();
     const { mime, name, ext } = this.validate(input);
+    // P7.1: files that bring outside bytes (staff uploads, public forms and
+    // mailbox attachments) stop at the plan's storage cap, before S3 is
+    // touched. Files Vendix generates (seals, issued documents, signature
+    // images) never stop a live process.
+    const source = input.source ?? 'upload';
+    if (this.limits && (source === 'upload' || source === 'public_form')) {
+      await this.limits.assertStorage(
+        c.store_id,
+        input.buffer.length,
+        source === 'public_form' ? 'outsider' : 'staff',
+      );
+    }
     const sha256 = createHash('sha256').update(input.buffer).digest('hex');
     const [store, organization] = await Promise.all([
       this.prisma.stores.findFirst({

@@ -22,6 +22,7 @@ import {
   parseInsightsContent,
 } from './workflow-insights.content';
 import { WORKFLOW_INSIGHTS_APP_KEY, WorkflowAiService } from './workflow-ai.service';
+import { WorkflowAccessPolicy } from '../access/workflow-access.policy';
 
 export const INSIGHTS_WINDOW_DAYS = 30;
 export const INSIGHTS_MANUAL_COOLDOWN_MS = 60 * 60 * 1000;
@@ -99,21 +100,24 @@ export class WorkflowInsightsService {
     private readonly ai: WorkflowAiService,
     private readonly notifications: NotificationsService,
     @Inject(REDIS_CLIENT) private readonly redis: Redis,
+    private readonly access: WorkflowAccessPolicy,
   ) {}
 
   async list(limit: number, canManage: boolean, now = new Date()): Promise<WorkflowInsightsList> {
     const storeId = this.storeId();
-    const [rows, lastManual] = await Promise.all([
+    const [rows, lastManual, hidden] = await Promise.all([
       this.prisma.workflow_ai_summaries.findMany({
         where: { store_id: storeId },
         orderBy: [{ created_at: 'desc' }, { id: 'desc' }],
         take: limit,
       }) as Promise<SummaryRow[]>,
       this.lastManual(storeId),
+      this.access.hiddenDefinitionIds(),
     ]);
     const coolsDownUntil = cooldownEnd(lastManual, now);
+    const hiddenIds = new Set(hidden);
     return {
-      items: rows.map(present),
+      items: rows.map((row) => present(row, hiddenIds)),
       can_generate: canManage && coolsDownUntil === null,
       next_generate_at: coolsDownUntil ? coolsDownUntil.toISOString() : null,
     };
@@ -185,11 +189,14 @@ export class WorkflowInsightsService {
     const to = localDateString(now, timezone);
     const period: Period = { from: addDaysToDateString(to, -(INSIGHTS_WINDOW_DAYS - 1)), to, timezone };
 
-    const definitions = (await this.prisma.workflow_definitions.findMany({
+    // Everyone with read permission gets this summary, so a flow some staff
+    // member may not see never reaches the AI (P7.3).
+    const restricted = new Set(await this.access.restrictedDefinitionIds());
+    const definitions = ((await this.prisma.workflow_definitions.findMany({
       where: { store_id: storeId, status: 'active', published_version_id: { not: null } },
       select: { id: true, key: true, name: true },
       orderBy: { id: 'asc' },
-    })) as Array<{ id: number; key: string; name: string }>;
+    })) as Array<{ id: number; key: string; name: string }>).filter((d) => !restricted.has(d.id));
 
     const flows: WorkflowInsightsFlowInput[] = [];
     for (const def of definitions) {
@@ -371,7 +378,12 @@ function isUniqueViolation(e: unknown): boolean {
   return typeof e === 'object' && e !== null && (e as { code?: string }).code === 'P2002';
 }
 
-function present(row: SummaryRow): WorkflowInsightsSummary {
+/**
+ * A summary as the API returns it. `hidden` are the flows the reader may not
+ * see: their part is dropped (summaries written before a flow was restricted).
+ */
+function present(row: SummaryRow, hidden: ReadonlySet<number> = new Set()): WorkflowInsightsSummary {
+  const content = (row.content as WorkflowInsightsContent | null) ?? null;
   return {
     id: row.id,
     kind: row.kind as WorkflowInsightsKind,
@@ -379,7 +391,10 @@ function present(row: SummaryRow): WorkflowInsightsSummary {
     period_from: dateOnlyString(row.period_from),
     period_to: dateOnlyString(row.period_to),
     week_key: row.week_key,
-    content: (row.content as WorkflowInsightsContent | null) ?? null,
+    content:
+      content && hidden.size && Array.isArray(content.flows)
+        ? { ...content, flows: content.flows.filter((f) => !hidden.has(f.definition_id)) }
+        : content,
     tokens_used: row.tokens_used,
     model: row.model,
     error: row.error,

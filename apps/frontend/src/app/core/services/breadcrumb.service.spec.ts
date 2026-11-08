@@ -112,6 +112,30 @@ describe('BreadcrumbService', () => {
       expect(crumb.current.label).toBe('Analítica IA');
       expect(crumb.parent?.label).toBe('Flujos');
     });
+
+    for (const [url, label] of [
+      ['/admin/workflows/usage', 'Uso del plan'],
+      ['/admin/workflows/audit', 'Auditoría'],
+      ['/admin/workflows/exports', 'Exportación'],
+      ['/admin/workflows/help', 'Ayuda'],
+    ]) {
+      it(`P7: resolves ${url} → "Flujos / ${label}"`, () => {
+        routerEvents$.next(new NavigationEnd(1, url, url));
+        const crumb = service.breadcrumb();
+        expect(crumb.current.label).toBe(label);
+        expect(crumb.parent?.label).toBe('Flujos');
+      });
+    }
+
+    it('P7: names the tab of /super-admin/workflows-ops "Super Admin > Operación de Flujos"', () => {
+      titleSetSpy.calls.reset();
+      routerEvents$.next(
+        new NavigationEnd(5, '/super-admin/workflows-ops', '/super-admin/workflows-ops'),
+      );
+      TestBed.tick();
+      expect(service.breadcrumb().current.label).toBe('Operación de Flujos');
+      expect(titleSetSpy).toHaveBeenCalledWith('Super Admin > Operación de Flujos | Vendix');
+    });
   });
 
   describe('document.title sync (effect)', () => {

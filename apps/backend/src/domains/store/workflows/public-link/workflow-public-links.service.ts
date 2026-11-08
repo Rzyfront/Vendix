@@ -3,6 +3,7 @@ import { RequestContextService } from '@common/context/request-context.service';
 import { ErrorCodes, VendixHttpException } from '@common/errors';
 import { WorkflowDefinitionV1 } from '@common/workflows/contract';
 import { StorePrismaService } from '../../../../prisma/services/store-prisma.service';
+import { WorkflowAccessPolicy } from '../access/workflow-access.policy';
 import { WorkflowTx } from '../engine/workflow-engine.types';
 import {
   PUBLIC_FORM_UNAVAILABLE_MESSAGES,
@@ -11,10 +12,16 @@ import {
   publicStoreOrigin,
 } from './workflow-public-link.rules';
 
-/** Design-side management of the public link of a flow (one active per flow). */
+/**
+ * Design-side management of the public link of a flow (one active per flow).
+ * The state follows "Quién ve" and every change follows "Quién diseña" (P7.3).
+ */
 @Injectable()
 export class WorkflowPublicLinksService {
-  constructor(private readonly prisma: StorePrismaService) {}
+  constructor(
+    private readonly prisma: StorePrismaService,
+    private readonly access: WorkflowAccessPolicy,
+  ) {}
 
   private ctx() {
     const c = RequestContextService.getContext();
@@ -28,6 +35,7 @@ export class WorkflowPublicLinksService {
   async status(definitionId: number) {
     const c = this.ctx();
     await this.loadDefinition(this.prisma, c.store_id, definitionId, false);
+    await this.access.assertCanView(definitionId);
     const link = await this.prisma.workflow_public_links.findFirst({
       where: { store_id: c.store_id, definition_id: definitionId, is_active: true },
       orderBy: { id: 'desc' },
@@ -48,6 +56,7 @@ export class WorkflowPublicLinksService {
   ) {
     const c = this.ctx();
     await this.loadDefinition(this.prisma, c.store_id, definitionId, false);
+    await this.access.assertCanDesign(definitionId);
     const expiresAt =
       input.expires_at === undefined
         ? undefined
@@ -79,6 +88,7 @@ export class WorkflowPublicLinksService {
   /** Creates the link (revoking the previous one). The raw token is returned once. */
   async create(definitionId: number) {
     const c = this.ctx();
+    await this.access.assertCanDesign(definitionId);
     const created = await this.prisma.$transaction(async (tx: WorkflowTx) => {
       const { published } = await this.loadDefinition(tx, c.store_id, definitionId);
       const availability = publicFormAvailability(published);
@@ -127,6 +137,7 @@ export class WorkflowPublicLinksService {
   async revoke(definitionId: number) {
     const c = this.ctx();
     await this.loadDefinition(this.prisma, c.store_id, definitionId, false);
+    await this.access.assertCanDesign(definitionId);
     const res = await this.prisma.workflow_public_links.updateMany({
       where: { store_id: c.store_id, definition_id: definitionId, is_active: true },
       data: { is_active: false },

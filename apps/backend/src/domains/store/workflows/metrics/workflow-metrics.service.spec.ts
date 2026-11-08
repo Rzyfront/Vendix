@@ -326,3 +326,40 @@ describe('WorkflowMetricsService.stageMetrics', () => {
     ).rejects.toBeInstanceOf(VendixHttpException);
   });
 });
+
+describe('WorkflowMetricsService.stageMetrics flow permissions (P7.3)', () => {
+  const restricted = (prisma: any) => {
+    prisma.workflow_definitions.findFirst.mockResolvedValue({
+      id: 7,
+      draft_definition: null,
+      published_version_id: null,
+      access: { view: { roles: ['manager'], user_ids: [] } },
+    });
+    prisma.user_roles = { findMany: jest.fn().mockResolvedValue([]) };
+  };
+  const asUser = <T>(fn: () => Promise<T>, extra: Record<string, unknown> = {}) =>
+    RequestContextService.run(
+      { store_id: 1, organization_id: 1, user_id: 9, is_super_admin: false, is_owner: false, ...extra } as any,
+      fn,
+    );
+
+  it('answers 404 for someone who may not see the flow, before reading any metric', async () => {
+    const { prisma, service } = build({ events: [], completed: 0 });
+    restricted(prisma);
+    const err = await asUser(() => service.stageMetrics(7, range)).catch((e) => e);
+    expect(err).toBeInstanceOf(VendixHttpException);
+    expect(err.errorCode).toBe('WORKFLOW_DEFINITION_NOT_FOUND');
+    expect(prisma.workflow_instances.findMany).not.toHaveBeenCalled();
+  });
+
+  it('serves a holder of the view role and the bypass holders', async () => {
+    const { prisma, service } = build({ events: [], completed: 0 });
+    restricted(prisma);
+    prisma.user_roles.findMany.mockResolvedValue([{ roles: { name: 'manager', organization_id: null } }]);
+    await expect(asUser(() => service.stageMetrics(7, range))).resolves.toMatchObject({ definition_id: 7 });
+    prisma.user_roles.findMany.mockResolvedValue([]);
+    await expect(
+      asUser(() => service.stageMetrics(7, range), { permissions: ['store:workflows:manage'] }),
+    ).resolves.toMatchObject({ definition_id: 7 });
+  });
+});

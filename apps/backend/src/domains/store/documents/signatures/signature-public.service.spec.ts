@@ -3,6 +3,8 @@ import 'reflect-metadata';
 jest.mock('../../../../messaging/messaging.service', () => ({ MessagingService: class {} }));
 jest.mock('../../../../email/email.service', () => ({ EmailService: class {} }));
 
+import { ErrorCodes, VendixHttpException } from '@common/errors';
+import { WorkflowAuditRow, WorkflowAuditService } from '../../workflows/audit/workflow-audit.service';
 import {
   buildSignatureKit,
   codeOfError,
@@ -117,6 +119,66 @@ describe('Public signing (P4.2)', () => {
       expect(table('signature_signers')[0].status).toBe('viewed');
       // Nothing sensitive: no e-mail, no hashes of the code or the link.
       expect(JSON.stringify(v)).not.toMatch(/laura@example|token_hash|otp_hash/);
+    });
+  });
+
+  describe('view audit (P7.2)', () => {
+    let audit: WorkflowAuditService;
+    const rows = () => table('workflow_audit_log') as WorkflowAuditRow[];
+
+    beforeEach(() => {
+      audit = new WorkflowAuditService(k.kit.prisma);
+      Object.assign(k.publicSvc, { audit });
+    });
+
+    it('writes document.public_file_downloaded as the signer before the PDF url exists', async () => {
+      const { tokens } = await createRequest();
+      const order: string[] = [];
+      const record = audit.recordNow.bind(audit);
+      jest.spyOn(audit, 'recordNow').mockImplementation(async (input) => {
+        order.push('audit');
+        return record(input);
+      });
+      k.kit.s3.getPresignedUrl.mockImplementation(async (key: string) => {
+        order.push('url');
+        return `https://signed.example/${key}`;
+      });
+
+      const v = await view(tokens[0]);
+
+      expect(order).toEqual(['audit', 'url']);
+      expect(v.pdf_url).toContain('https://signed.example/');
+      expect(rows()).toHaveLength(1);
+      expect(rows()[0]).toMatchObject({
+        store_id: 1,
+        action: 'document.public_file_downloaded',
+        category: 'document',
+        actor_type: 'public',
+        actor_id: null,
+        actor_label: 'Laura Pérez',
+        target_type: 'issued_document',
+        instance_id: 1,
+        summary: 'Laura Pérez abrió el documento DOC-000001 para firmarlo',
+      });
+      expect(JSON.stringify(rows()[0], (_k, v) => (typeof v === 'bigint' ? v.toString() : v))).not.toMatch(/signed\.example|token|laura@example/);
+    });
+
+    it('returns no PDF url when the access cannot be audited', async () => {
+      const { tokens } = await createRequest();
+      k.kit.s3.getPresignedUrl.mockClear();
+      jest.spyOn(audit, 'recordNow').mockRejectedValue(new VendixHttpException(ErrorCodes.WORKFLOW_AUDIT_UNAVAILABLE));
+
+      expect(await codeOfError(view(tokens[0]))).toBe('WORKFLOW_AUDIT_UNAVAILABLE');
+      expect(k.kit.s3.getPresignedUrl).not.toHaveBeenCalled();
+    });
+
+    it('a signer who already signed gets no PDF url and leaves no audit row', async () => {
+      const { tokens } = await createRequest();
+      await signFully(tokens[0]);
+      const before = rows().length;
+      const v = await view(tokens[0]);
+      expect(v.pdf_url).toBeNull();
+      expect(rows()).toHaveLength(before);
     });
   });
 

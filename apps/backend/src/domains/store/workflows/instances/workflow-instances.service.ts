@@ -327,7 +327,7 @@ export class WorkflowInstancesService {
               : null;
         const can_act =
           active && c.user_id !== null
-            ? await this.assignment.canAct(this.prisma, t, c.user_id, c.store_id, c.organization_id)
+            ? await this.assignment.canActQuietly(this.prisma, t, c.user_id, c.store_id, c.organization_id)
             : false;
         return {
           id: t.id,

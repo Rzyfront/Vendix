@@ -9,6 +9,7 @@ import { Injectable, Logger } from '@nestjs/common';
 import { RequestContextService } from '@common/context/request-context.service';
 import { ErrorCodes, VendixHttpException } from '@common/errors';
 import { StorePrismaService } from '../../../../prisma/services/store-prisma.service';
+import { WorkflowAuditService } from '../../workflows/audit/workflow-audit.service';
 import { hashTrackingToken } from '../../workflows/tracking/workflow-tracking-links.service';
 import { StoredFilesService } from '../stored-files.service';
 import { CreateSignatureRequestDto } from './dto/signature.dto';
@@ -48,6 +49,8 @@ export class SignatureRequestsService {
     private readonly flow: SignatureFlowNotifier,
     private readonly seal: SignatureSealService,
     private readonly files: StoredFilesService,
+    /** Append-only audit trail (P7.2): required, so no path runs unaudited. */
+    private readonly audit: WorkflowAuditService,
   ) {}
 
   private ctx() {
@@ -382,10 +385,28 @@ export class SignatureRequestsService {
     const c = this.ctx();
     const request = await this.prisma.signature_requests.findFirst({
       where: { id: requestId, store_id: c.store_id },
-      select: { sealed_file_id: true },
+      select: { sealed_file_id: true, issued_document_id: true },
     });
     if (!request) throw new VendixHttpException(ErrorCodes.SIGNATURE_REQUEST_NOT_FOUND);
     if (!request.sealed_file_id) throw new VendixHttpException(ErrorCodes.DOCUMENT_NOT_FOUND);
+    // Fail-closed: written before the signed URL exists.
+    const document: { reference: string; title: string; workflow_instance_id: number | null } | null =
+      await this.prisma.issued_documents.findFirst({
+        where: { id: request.issued_document_id, store_id: c.store_id },
+        select: { reference: true, title: true, workflow_instance_id: true },
+      });
+    await this.audit.recordNow({
+      action: 'document.sealed_downloaded',
+      target_type: 'signature_request',
+      target_id: requestId,
+      instance_id: document?.workflow_instance_id ?? null,
+      summary: `Descargó el documento firmado ${document?.reference ?? `de la solicitud de firma ${requestId}`}`,
+      details: {
+        file_id: request.sealed_file_id,
+        issued_document_id: request.issued_document_id,
+        document_title: document?.title ?? null,
+      },
+    });
     return this.files.signedDownloadUrl(request.sealed_file_id);
   }
 

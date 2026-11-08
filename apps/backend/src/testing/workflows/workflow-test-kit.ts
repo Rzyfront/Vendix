@@ -1,6 +1,7 @@
 import { AsyncLocalStorage } from 'async_hooks';
 import { RequestContextService } from '@common/context/request-context.service';
 import { WorkflowDefinitionV1 } from '@common/workflows/contract';
+import { WorkflowAuditService } from '../../domains/store/workflows/audit/workflow-audit.service';
 import { WorkflowAdvanceService } from '../../domains/store/workflows/engine/workflow-advance.service';
 import { WorkflowAiStepService } from '../../domains/store/workflows/engine/workflow-ai-step.service';
 import { WorkflowAssignmentService } from '../../domains/store/workflows/engine/workflow-assignment.service';
@@ -21,6 +22,7 @@ import { WorkflowCommentsService } from '../../domains/store/workflows/instances
 import { WorkflowInboxService } from '../../domains/store/workflows/inbox/workflow-inbox.service';
 import { WorkflowBoardService } from '../../domains/store/workflows/board/workflow-board.service';
 import { WorkflowPublicLinksService } from '../../domains/store/workflows/public-link/workflow-public-links.service';
+import { WorkflowAccessPolicy } from '../../domains/store/workflows/access/workflow-access.policy';
 import { WorkflowFilesService } from '../../domains/store/workflows/files/workflow-files.service';
 import { WorkflowInstancesService } from '../../domains/store/workflows/instances/workflow-instances.service';
 import { WorkGroupsService } from '../../domains/store/workflows/work-groups.service';
@@ -58,6 +60,8 @@ export function buildWorkflowKit(opts: { unscopedTx?: boolean } = {}) {
   };
   const audit = { log: jest.fn(async () => undefined) };
   const storedFiles = new StoredFilesService(prisma, s3 as any, new S3PathHelper(), audit as any);
+  // P7.2: the real append-only chain on the fake (its advisory lock is a no-op).
+  const workflowAudit = new WorkflowAuditService(prisma);
   const completer = new WorkflowCompleteService(
     loader,
     assignment,
@@ -65,6 +69,7 @@ export function buildWorkflowKit(opts: { unscopedTx?: boolean } = {}) {
     advancer,
     events,
     stages,
+    workflowAudit,
   );
   const ticker = new WorkflowTickService(
     prisma,
@@ -85,6 +90,7 @@ export function buildWorkflowKit(opts: { unscopedTx?: boolean } = {}) {
     stages,
     events,
     ticker,
+    workflowAudit,
   );
   // The metered AI gateway is a mock: specs script `aiGateway.run`.
   const aiGateway = { run: jest.fn() };
@@ -106,11 +112,12 @@ export function buildWorkflowKit(opts: { unscopedTx?: boolean } = {}) {
     dossiers,
     storedFiles,
     instances,
+    workflowAudit,
   );
   const comments = new WorkflowCommentsService(prisma, instances, events);
   const inbox = new WorkflowInboxService(prisma);
   const board = new WorkflowBoardService(prisma, instances, requirements);
-  const publicLinks = new WorkflowPublicLinksService(prisma);
+  const publicLinks = new WorkflowPublicLinksService(prisma, new WorkflowAccessPolicy(prisma));
   let ctx: TestCtx = {
     store_id: 1,
     organization_id: 1,
@@ -125,6 +132,7 @@ export function buildWorkflowKit(opts: { unscopedTx?: boolean } = {}) {
     db,
     prisma,
     engine,
+    workflowAudit,
     aiStep,
     aiGateway,
     groups,

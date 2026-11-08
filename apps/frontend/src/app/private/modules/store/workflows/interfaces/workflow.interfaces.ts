@@ -428,3 +428,28 @@ export type AiStepTestResult =
       message: string;
       tokens?: number;
     };
+
+/** Roles (by name) and people allowed to do something in a flow (P7.3). */
+export interface WorkflowAccessGroup {
+  roles: string[];
+  user_ids: number[];
+}
+
+/** `workflow_definitions.access`; `null` / missing keys mean open. */
+export interface WorkflowAccessDoc {
+  design?: WorkflowAccessGroup;
+  view?: WorkflowAccessGroup;
+  stages?: Record<string, { act: WorkflowAccessGroup }>;
+}
+
+/** What the "Permisos" panel needs: the document plus what to pick from. */
+export interface WorkflowAccessView {
+  access: WorkflowAccessDoc | null;
+  /** `start_roles` of the published version (edited in the flow's start settings). */
+  start_roles: string[];
+  stages: Array<{ key: string; name: string }>;
+  options: {
+    roles: string[];
+    users: Array<{ id: number; name: string }>;
+  };
+}

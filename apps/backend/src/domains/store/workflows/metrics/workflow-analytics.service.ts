@@ -10,6 +10,7 @@ import {
   resolveStoreTimezone,
 } from '@common/utils/store-timezone.util';
 import { StorePrismaService } from '../../../../prisma/services/store-prisma.service';
+import { WorkflowAccessPolicy } from '../access/workflow-access.policy';
 import {
   MAX_WINDOW_INSTANCES,
   WorkflowMetricsService,
@@ -119,11 +120,16 @@ interface TaskRow {
  */
 @Injectable()
 export class WorkflowAnalyticsService {
+  private readonly access: WorkflowAccessPolicy;
+
+  // The policy only needs the store-scoped Prisma client (see the definitions service).
   constructor(
     private readonly prisma: StorePrismaService,
     private readonly metrics: WorkflowMetricsService,
     @Inject(CACHE_MANAGER) private readonly cache: Cache,
-  ) {}
+  ) {
+    this.access = new WorkflowAccessPolicy(prisma);
+  }
 
   private storeId(): number {
     const id = RequestContextService.getContext()?.store_id;
@@ -137,6 +143,8 @@ export class WorkflowAnalyticsService {
     query: { from?: string; to?: string } = {},
   ): Promise<WorkflowAnalyticsReport> {
     const store_id = this.storeId();
+    // P7.3: checked before the cache, which is shared by everyone in the store.
+    await this.access.assertCanView(definitionId);
     const timezone = await resolveStoreTimezone(this.prisma, store_id);
 
     const to = query.to ?? localDateString(new Date(), timezone);

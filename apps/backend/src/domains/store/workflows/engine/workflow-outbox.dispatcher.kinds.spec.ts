@@ -149,6 +149,17 @@ describe('WorkflowOutboxDispatcher · webhook / start_instance / action', () => 
     }
   });
 
+  it('start_instance con el tope mensual del plan alcanzado (P7.1): se omite sin reintentar ni alertar', async () => {
+    engine.startSystem.mockRejectedValue(new VendixHttpException(ErrorCodes.WORKFLOW_PLAN_LIMIT_REACHED));
+    enqueue(
+      'start_instance',
+      { definition_id: 4, event: 'order.created', idempotency_key: 'k' },
+      { instance_id: null },
+    );
+    expect(await dispatcher.dispatchBatch()).toMatchObject({ done: 1, retried: 0, dead: 0 });
+    expect(db.table('workflow_outbox')[0].status).toBe('done');
+  });
+
   it('start_instance con un error real se reintenta', async () => {
     engine.startSystem.mockRejectedValue(new Error('db down'));
     enqueue(

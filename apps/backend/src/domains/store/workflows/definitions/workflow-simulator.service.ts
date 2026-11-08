@@ -487,8 +487,10 @@ export class WorkflowSimulatorService {
     id: number,
     input: SimulateInput & { definition?: Record<string, unknown> },
   ): Promise<SimulationResult> {
-    const definition =
-      input.definition ?? (await this.definitions.getDraft(id)).definition;
+    // The draft read checks the id even when the body brings the definition:
+    // a flow the caller cannot see is a 404 here too (P7.3).
+    const draft = await this.definitions.getDraft(id);
+    const definition = input.definition ?? draft.definition;
     const check = await this.definitions.validateDefinition(definition);
     if (!check.valid) {
       return { ...emptyResult(), valid: false, issues: check.errors };

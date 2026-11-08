@@ -242,7 +242,9 @@ describe('WorkflowSimulatorService', () => {
     const issue = { code: 'SHAPE_INVALID', path: '', message: 'mala' };
     const { svc, definitions } = make({}, false, [issue]);
     const r = await svc.simulate(3, { definition: { x: 1 } });
-    expect(definitions.getDraft).not.toHaveBeenCalled();
+    // The id is still checked (P7.3), but the body is what gets validated.
+    expect(definitions.getDraft).toHaveBeenCalledWith(3);
+    expect(definitions.validateDefinition).toHaveBeenCalledWith({ x: 1 });
     expect(r).toMatchObject({ valid: false, issues: [issue], path: [], tasks: [], to_stage: null });
   });
 });

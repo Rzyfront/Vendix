@@ -25,7 +25,7 @@ import {
 import { WorkflowDefinitionRow } from '../interfaces/workflow.interfaces';
 import { WorkflowBoardApiService } from '../services/workflow-board-api.service';
 import { WorkflowsApiService } from '../services/workflows-api.service';
-import { toWorkflowError } from '../utils/workflow-errors.util';
+import { isPlanLimit, toWorkflowError } from '../utils/workflow-errors.util';
 
 const NO_LOCATION = 'none';
 
@@ -153,7 +153,7 @@ export class StartInstanceModalComponent implements OnInit {
         error: (error) => {
           const parsed = toWorkflowError(error);
           this.busy.set(false);
-          this.errorMessage.set(parsed.message);
+          this.errorMessage.set(isPlanLimit(parsed) ? '' : parsed.message);
           // A 4xx is a definitive refusal: the next attempt is a new action.
           if (
             parsed.status !== null &&

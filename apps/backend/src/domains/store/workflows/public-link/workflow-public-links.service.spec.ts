@@ -167,4 +167,43 @@ describe('WorkflowPublicLinksService', () => {
       expect([expired, inactive]).toEqual(['WORKFLOW_PUBLIC_NOT_FOUND', 'WORKFLOW_PUBLIC_NOT_FOUND']);
     });
   });
+
+  describe('flow permissions (P7.3)', () => {
+    const ADMINS_ONLY = { roles: ['owner'], user_ids: [] };
+    const restrict = (access: unknown) =>
+      Object.assign(kit.db.table('workflow_definitions').find((d) => d.id === defId)!, { access });
+
+    it('a designer outside "Quién diseña" cannot create, rotate, revoke or edit the link', async () => {
+      const live = await kit.publicLinks.create(defId);
+      restrict({ design: ADMINS_ONLY });
+      // u2 holds `manager` and `store:workflows:design`, but not the flow's design group.
+      kit.as({ user_id: 2, permissions: ['store:workflows:design'] });
+      expect(await codeOf(kit.publicLinks.create(defId))).toBe('WORKFLOW_DESIGN_FORBIDDEN');
+      expect(await codeOf(kit.publicLinks.revoke(defId))).toBe('WORKFLOW_DESIGN_FORBIDDEN');
+      expect(await codeOf(kit.publicLinks.updateSettings(defId, { captcha_required: true }))).toBe(
+        'WORKFLOW_DESIGN_FORBIDDEN',
+      );
+      expect(links()).toHaveLength(1);
+      expect(links()[0]).toMatchObject({
+        is_active: true,
+        token_hash: hashPublicToken(live.token),
+        captcha_required: false,
+      });
+      // The state only needs "Quién ve", open here.
+      expect(await kit.publicLinks.status(defId)).toMatchObject({ active: true });
+    });
+
+    it('a role in "Quién diseña" still rotates it', async () => {
+      restrict({ design: ADMINS_ONLY });
+      kit.as({ user_id: 1, permissions: ['store:workflows:design'] });
+      expect((await kit.publicLinks.create(defId)).token).toBeTruthy();
+    });
+
+    it('a flow hidden by "Quién ve" answers 404 on the state', async () => {
+      restrict({ view: ADMINS_ONLY });
+      kit.as({ user_id: 2, permissions: ['store:workflows:design'] });
+      expect(await codeOf(kit.publicLinks.status(defId))).toBe('WORKFLOW_DEFINITION_NOT_FOUND');
+      expect(await codeOf(kit.publicLinks.create(defId))).toBe('WORKFLOW_DEFINITION_NOT_FOUND');
+    });
+  });
 });

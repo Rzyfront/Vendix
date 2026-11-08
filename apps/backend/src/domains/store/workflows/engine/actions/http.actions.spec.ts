@@ -220,4 +220,100 @@ describe('vendix.http.request', () => {
     expect(e.kind).toBe('blocked');
     expect(e.retryable).toBe(false);
   });
+
+  describe('P7.1 plan limit and secret.used audit', () => {
+    const withExtras = (opts: {
+      allowed?: boolean;
+      secrets?: Record<string, string>;
+      auditFails?: boolean;
+    }) => {
+      const b = build({ secrets: opts.secrets });
+      const consume = jest.fn(async () => ({
+        metric: 'monthly_http_calls',
+        allowed: opts.allowed !== false,
+        used: 3,
+        cap: 3,
+        period: '2026-11',
+      }));
+      const refusal = jest.fn((use: any) => {
+        const { VendixHttpException, ErrorCodes } = require('@common/errors');
+        return new VendixHttpException(
+          ErrorCodes.WORKFLOW_PLAN_LIMIT_REACHED,
+          'Llegaste al límite de llamadas HTTP de tu plan (3 de 3 este mes).',
+          { limit: 'monthly_http_calls', used: use.used, cap: use.cap, period: use.period },
+        );
+      });
+      const recordNow = jest.fn(async () => {
+        if (opts.auditFails) throw new Error('audit down');
+      });
+      (b.actions as any).limits = { consume, refusal };
+      (b.actions as any).audit = { recordNow };
+      return { ...b, consume, refusal, recordNow };
+    };
+
+    it('counts one HTTP call per perform and sends it while under the cap', async () => {
+      const b = withExtras({});
+      await b.actions.perform(1, { method: 'GET', url: PUBLIC_URL });
+      expect(b.consume).toHaveBeenCalledWith(1, 'monthly_http_calls');
+      expect(b.sent).toHaveLength(1);
+      expect(b.recordNow).not.toHaveBeenCalled();
+    });
+
+    it('past the cap perform throws WORKFLOW_PLAN_LIMIT_REACHED and nothing leaves', async () => {
+      const b = withExtras({ allowed: false });
+      const e = await b.actions.perform(1, { method: 'GET', url: PUBLIC_URL }).catch((x) => x);
+      expect(e.errorCode).toBe('WORKFLOW_PLAN_LIMIT_REACHED');
+      expect(b.sent).toHaveLength(0);
+    });
+
+    it('a blocked URL is refused before the call is counted', async () => {
+      const b = withExtras({});
+      await b.actions.perform(1, { method: 'GET', url: 'http://127.0.0.1/' }).catch(() => undefined);
+      expect(b.consume).not.toHaveBeenCalled();
+    });
+
+    it('the action handler turns the refusal into a plain input error with the resume hint', async () => {
+      const b = withExtras({ allowed: false });
+      const e = await call(b, {}).catch((x) => x);
+      expect(e).toBeInstanceOf(WorkflowActionInputError);
+      expect(e.message).toContain('Llegaste al límite de llamadas HTTP de tu plan (3 de 3 este mes).');
+      expect(e.message).toContain('próximo mes');
+    });
+
+    it('records secret.used with the names only, never the value', async () => {
+      const b = withExtras({ secrets: { CRM_TOKEN: SECRET_VALUE, OTHER: 'zzz-secret' } });
+      await b.actions.perform(1, {
+        method: 'POST',
+        url: PUBLIC_URL,
+        headers: 'Authorization: Bearer {{secrets.CRM_TOKEN}}\nX-K: {{secrets.OTHER}}',
+      });
+      expect(b.recordNow).toHaveBeenCalledTimes(1);
+      const arg = (b.recordNow.mock.calls[0] as any[])[0];
+      expect(arg).toMatchObject({
+        action: 'secret.used',
+        target_type: 'secret',
+        details: { names: ['CRM_TOKEN', 'OTHER'], method: 'POST', host: 'api.example.com' },
+      });
+      expect(JSON.stringify(arg)).not.toContain(SECRET_VALUE);
+      expect(JSON.stringify(arg)).not.toContain('zzz-secret');
+    });
+
+    it('a call without secrets writes no audit row', async () => {
+      const b = withExtras({});
+      await b.actions.perform(1, { method: 'GET', url: PUBLIC_URL });
+      expect(b.recordNow).not.toHaveBeenCalled();
+    });
+
+    it('fail-closed: when the audit cannot be written the call is never sent', async () => {
+      const b = withExtras({ secrets: { CRM_TOKEN: SECRET_VALUE }, auditFails: true });
+      await expect(
+        b.actions.perform(1, {
+          method: 'GET',
+          url: PUBLIC_URL,
+          headers: 'Authorization: Bearer {{secrets.CRM_TOKEN}}',
+        }),
+      ).rejects.toThrow();
+      expect(b.sent).toHaveLength(0);
+    });
+  });
 });

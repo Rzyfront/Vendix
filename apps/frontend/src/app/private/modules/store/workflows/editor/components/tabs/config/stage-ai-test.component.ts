@@ -10,6 +10,7 @@ import {
   ToggleComponent,
 } from '../../../../../../../../shared/components/index';
 import type { InputType } from '../../../../../../../../shared/components/input/input.component';
+import { SubscriptionAccessService } from '../../../../../../../../core/services/subscription-access.service';
 import { WorkflowFieldDef, WorkflowStageDef } from '../../../../../../../../shared/workflows/contract/workflow-contract';
 import { AiStepTestResult } from '../../../../interfaces/workflow.interfaces';
 import { WorkflowsApiService } from '../../../../services/workflows-api.service';
@@ -108,6 +109,7 @@ export class StageAiTestComponent {
   private readonly api = inject(WorkflowsApiService);
   private readonly store = inject(WorkflowEditorStore);
   private readonly destroyRef = inject(DestroyRef);
+  private readonly access = inject(SubscriptionAccessService);
 
   readonly stage = input.required<WorkflowStageDef>();
 
@@ -184,6 +186,12 @@ export class StageAiTestComponent {
       .subscribe({
         next: (res) => {
           this.busy.set(false);
+          if (res.status === 'skipped_quota') {
+            // No AI quota left: the plan paywall (same as every AI feature)
+            // explains it and offers the upgrade; no inline error on top.
+            this.access.openPaywall('SUBSCRIPTION_006', res.message);
+            return;
+          }
           this.result.set(res);
         },
         error: (e) => {

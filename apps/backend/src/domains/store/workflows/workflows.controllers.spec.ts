@@ -11,6 +11,10 @@ import { WorkflowInboxController } from './inbox/workflow-inbox.controller';
 import { WorkflowTasksController } from './tasks/workflow-tasks.controller';
 import { WorkflowAnalyticsController } from './metrics/workflow-analytics.controller';
 import { WorkGroupsController } from './work-groups.controller';
+import { WorkflowLimitsController } from './limits/workflow-limits.controller';
+import { WorkflowAuditController } from './audit/workflow-audit.controller';
+import { WorkflowAccessController } from './access/workflow-access.controller';
+import { WorkflowExportController } from './export/workflow-export.controller';
 
 const R = 'store:workflows:read';
 const D = 'store:workflows:design';
@@ -59,6 +63,16 @@ const EXPECTED: Array<[any, string, string | string[], string, string]> = [
   [WorkGroupsController, 'update', G, 'PATCH', ':id'],
   [WorkGroupsController, 'setMember', G, 'PUT', ':id/members/:userId'],
   [WorkGroupsController, 'removeMember', G, 'DELETE', ':id/members/:userId'],
+  // P7: plan usage, audit trail, per-flow access and full export.
+  [WorkflowLimitsController, 'get', R, 'GET', '/'],
+  [WorkflowAuditController, 'list', M, 'GET', '/'],
+  [WorkflowAuditController, 'verify', M, 'GET', 'verify'],
+  [WorkflowAuditController, 'export', M, 'GET', 'export'],
+  [WorkflowAccessController, 'get', R, 'GET', '/'],
+  [WorkflowAccessController, 'update', D, 'PUT', '/'],
+  [WorkflowExportController, 'request', M, 'POST', '/'],
+  [WorkflowExportController, 'list', M, 'GET', '/'],
+  [WorkflowExportController, 'download', M, 'GET', ':id/download'],
 ];
 const METHODS = ['GET', 'POST', 'PUT', 'DELETE', 'PATCH'];
 
@@ -71,6 +85,10 @@ describe('controladores de Flujos', () => {
     WorkflowBoardController,
     WorkflowAnalyticsController,
     WorkGroupsController,
+    WorkflowLimitsController,
+    WorkflowAuditController,
+    WorkflowAccessController,
+    WorkflowExportController,
   ])('%p usa PermissionsGuard + IndustryModuleGuard y el módulo "flows"', (ctrl) => {
     expect(Reflect.getMetadata('__guards__', ctrl)).toEqual([PermissionsGuard, IndustryModuleGuard]);
     expect(Reflect.getMetadata(INDUSTRY_MODULE_KEY, ctrl)).toBe('flows');
@@ -84,6 +102,10 @@ describe('controladores de Flujos', () => {
     expect(Reflect.getMetadata('path', WorkflowBoardController)).toBe('store/workflows/board');
     expect(Reflect.getMetadata('path', WorkflowAnalyticsController)).toBe('store/workflows/analytics');
     expect(Reflect.getMetadata('path', WorkGroupsController)).toBe('store/work-groups');
+    expect(Reflect.getMetadata('path', WorkflowLimitsController)).toBe('store/workflows/usage');
+    expect(Reflect.getMetadata('path', WorkflowAuditController)).toBe('store/workflows/audit');
+    expect(Reflect.getMetadata('path', WorkflowAccessController)).toBe('store/workflows/definitions/:id/access');
+    expect(Reflect.getMetadata('path', WorkflowExportController)).toBe('store/workflows/exports');
   });
 
   it.each(EXPECTED)('%p.%s exige %s y expone %s %s', (ctrl, handler, permission, method, path) => {
@@ -96,7 +118,16 @@ describe('controladores de Flujos', () => {
   });
 
   it('todo handler HTTP de cada controlador tiene permiso declarado (nada queda abierto)', () => {
-    for (const ctrl of [WorkflowDefinitionsController, WorkflowInstancesController, WorkflowTasksController, WorkGroupsController]) {
+    for (const ctrl of [
+      WorkflowDefinitionsController,
+      WorkflowInstancesController,
+      WorkflowTasksController,
+      WorkGroupsController,
+      WorkflowLimitsController,
+      WorkflowAuditController,
+      WorkflowAccessController,
+      WorkflowExportController,
+    ]) {
       for (const name of Object.getOwnPropertyNames(ctrl.prototype)) {
         const fn = ctrl.prototype[name];
         if (name === 'constructor' || Reflect.getMetadata('path', fn) === undefined) continue;

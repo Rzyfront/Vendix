@@ -15,7 +15,7 @@ import { StoreSettingsFacade } from '../../../../../../../core/store/store-setti
 import { CurrencyPipe } from '../../../../../../../shared/pipes/currency/currency.pipe';
 import { formatStoreDateTime } from '../../../../../../../shared/utils/date.util';
 import { DossierItemView } from '../../../interfaces/workflow.interfaces';
-import { toWorkflowError } from '../../../utils/workflow-errors.util';
+import { isPlanLimit, toWorkflowError } from '../../../utils/workflow-errors.util';
 import {
   formatFileSize,
   instanceStatusLabel,
@@ -287,7 +287,9 @@ export class RecordDetailPageComponent implements OnInit {
         },
         error: (error) => {
           this.uploading.set(false);
-          this.uploadError.set(toWorkflowError(error).message);
+          const failure = toWorkflowError(error);
+          // A plan limit already opened the paywall: no error of its own on top.
+          this.uploadError.set(isPlanLimit(failure) ? '' : failure.message);
         },
       });
   }
@@ -328,7 +330,8 @@ export class RecordDetailPageComponent implements OnInit {
         },
         error: (error) => {
           this.starting.set(null);
-          this.startError.set(toWorkflowError(error).message);
+          const failure = toWorkflowError(error);
+          this.startError.set(isPlanLimit(failure) ? '' : failure.message);
         },
       });
   }

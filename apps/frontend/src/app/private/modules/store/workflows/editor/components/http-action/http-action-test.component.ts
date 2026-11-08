@@ -12,7 +12,7 @@ import {
   WorkflowActionMapValue,
   WorkflowFieldDef,
 } from '../../../../../../../shared/workflows/contract/workflow-contract';
-import { toWorkflowError } from '../../../utils/workflow-errors.util';
+import { isPlanLimit, toWorkflowError } from '../../../utils/workflow-errors.util';
 import { HttpActionApiService, HttpTestErrorKind, HttpTestResult } from './http-action-api.service';
 import { usedFieldKeys } from './http-action.utils';
 
@@ -194,7 +194,9 @@ export class HttpActionTestComponent {
         },
         error: (error) => {
           this.busy.set(false);
-          this.failure.set(toWorkflowError(error).message);
+          const failure = toWorkflowError(error);
+          if (isPlanLimit(failure)) return;
+          this.failure.set(failure.message);
         },
       });
   }

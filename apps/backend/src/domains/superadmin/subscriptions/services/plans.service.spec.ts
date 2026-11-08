@@ -750,4 +750,61 @@ describe('PlansService', () => {
   it('ErrorCodes registry contains PLAN_001 for future wiring', () => {
     expect(ErrorCodes.PLAN_001).toBeDefined();
   });
+
+  describe('P7.1 workflow_limits', () => {
+    const updateData = () => tx.subscription_plans.updateMany.mock.calls[0][0].data;
+
+    it('create persists a valid workflow_limits object and keeps null keys (unlimited)', async () => {
+      prisma.subscription_plans.findUnique.mockResolvedValue(null);
+      prisma.subscription_plans.create.mockResolvedValue(planFixture());
+      await service.create({
+        code: 'pro',
+        name: 'Pro',
+        base_price: 1,
+        workflow_limits: { monthly_instances: 500, storage_bytes: null },
+      } as any);
+      expect(prisma.subscription_plans.create.mock.calls[0][0].data.workflow_limits).toEqual({
+        monthly_instances: 500,
+        storage_bytes: null,
+      });
+    });
+
+    it('create without workflow_limits leaves the column out (platform defaults)', async () => {
+      prisma.subscription_plans.findUnique.mockResolvedValue(null);
+      prisma.subscription_plans.create.mockResolvedValue(planFixture());
+      await service.create({ code: 'pro', name: 'Pro', base_price: 1 } as any);
+      expect(prisma.subscription_plans.create.mock.calls[0][0].data).not.toHaveProperty('workflow_limits');
+    });
+
+    it('create rejects an invalid object with WORKFLOW_LIMITS_INVALID and writes nothing', async () => {
+      prisma.subscription_plans.findUnique.mockResolvedValue(null);
+      const err: any = await service
+        .create({ code: 'pro', name: 'Pro', base_price: 1, workflow_limits: { monthly_instances: -1 } } as any)
+        .catch((e) => e);
+      expect(err).toBeInstanceOf(VendixHttpException);
+      expect(err.errorCode).toBe('WORKFLOW_LIMITS_INVALID');
+      expect(prisma.subscription_plans.create).not.toHaveBeenCalled();
+    });
+
+    it('update persists the limits, null clears the column, absent keeps it', async () => {
+      prisma.subscription_plans.findUnique.mockResolvedValue(planFixture());
+      await service.update(1, { workflow_limits: { monthly_http_calls: 10 } } as any);
+      expect(updateData().workflow_limits).toEqual({ monthly_http_calls: 10 });
+
+      tx.subscription_plans.updateMany.mockClear();
+      await service.update(1, { workflow_limits: null } as any);
+      expect(updateData().workflow_limits).toBe(Prisma.DbNull);
+
+      tx.subscription_plans.updateMany.mockClear();
+      await service.update(1, { name: 'Otro' } as any);
+      expect(updateData()).not.toHaveProperty('workflow_limits');
+    });
+
+    it('update rejects an unknown key with WORKFLOW_LIMITS_INVALID and writes nothing', async () => {
+      prisma.subscription_plans.findUnique.mockResolvedValue(planFixture());
+      const err: any = await service.update(1, { workflow_limits: { nope: 1 } } as any).catch((e) => e);
+      expect(err.errorCode).toBe('WORKFLOW_LIMITS_INVALID');
+      expect(tx.subscription_plans.updateMany).not.toHaveBeenCalled();
+    });
+  });
 });

@@ -1,11 +1,16 @@
-import { Injectable, Logger } from '@nestjs/common';
+import { Inject, Injectable, Logger, Optional } from '@nestjs/common';
+import type Redis from 'ioredis';
 import { Cron, CronExpression } from '@nestjs/schedule';
 import { Prisma } from '@prisma/client';
 import { WorkflowDefinitionV1, findStage } from '@common/workflows/contract';
 import { RequestContextService } from '@common/context/request-context.service';
+import { REDIS_CLIENT } from '@common/redis/redis.module';
 import { StorePrismaService } from '../../../../prisma/services/store-prisma.service';
 import { NotificationsService } from '../../notifications/notifications.service';
 import {
+  DISPATCHER_CYCLE_BUDGET_MS,
+  DISPATCHER_HEARTBEAT_KEY,
+  DISPATCHER_HEARTBEAT_TTL_SECONDS,
   OUTBOX_BACKOFF_MINUTES,
   OUTBOX_BATCH,
   OUTBOX_MAX_ATTEMPTS,
@@ -67,6 +72,14 @@ export interface DispatchSummary {
   dead: number;
 }
 
+/** What the last dispatcher cycle left in Redis for the superadmin screen. */
+export interface DispatcherHeartbeat {
+  at: string;
+  processed: number;
+  batches: number;
+  duration_ms: number;
+}
+
 /**
  * Drains `workflow_outbox`. Crons run only in the worker process (the API
  * unmounts them, see `unmountScheduledJobs` in main.ts). The claim is one
@@ -89,18 +102,64 @@ export class WorkflowOutboxDispatcher {
     private readonly fanout: WorkflowTriggerFanout,
     private readonly gates: ApprovalGateProcessor,
     private readonly aiStep: WorkflowAiStepService,
+    @Optional() @Inject(REDIS_CLIENT) private readonly redis?: Redis,
   ) {}
 
   @Cron(CronExpression.EVERY_MINUTE)
   async handle(): Promise<void> {
     if (this.running) return;
     this.running = true;
+    const startedAt = Date.now();
     try {
-      await this.dispatchBatch();
+      const { processed, batches } = await this.drain();
+      // Only a cycle that drained beats: a failing one leaves the heartbeat to
+      // age, so the superadmin screen and the `dispatcher_stalled` alert see it.
+      await this.writeHeartbeat({
+        at: new Date().toISOString(),
+        processed,
+        batches,
+        duration_ms: Date.now() - startedAt,
+      });
     } catch (e) {
       this.logger.error(`Outbox dispatch failed: ${(e as Error)?.message}`);
     } finally {
       this.running = false;
+    }
+  }
+
+  /**
+   * Runs batches back to back until no due row is left or the cycle budget is
+   * spent, so a burst is not throttled to one batch per minute. A batch that
+   * claims nothing means the queue is empty (rows scheduled for later stay put).
+   */
+  async drain(
+    budgetMs = DISPATCHER_CYCLE_BUDGET_MS,
+    clock: () => number = Date.now,
+  ): Promise<{ processed: number; batches: number }> {
+    const startedAt = clock();
+    let processed = 0;
+    let batches = 0;
+    for (;;) {
+      const summary = await this.dispatchBatch();
+      batches++;
+      processed += summary.done + summary.retried + summary.dead;
+      if (summary.claimed === 0 || clock() - startedAt >= budgetMs) break;
+    }
+    return { processed, batches };
+  }
+
+  /** The heartbeat is observability: failing to write it never fails a cycle. */
+  private async writeHeartbeat(beat: DispatcherHeartbeat): Promise<void> {
+    if (!this.redis) return;
+    try {
+      await this.redis.set(
+        DISPATCHER_HEARTBEAT_KEY,
+        JSON.stringify(beat),
+        'EX',
+        DISPATCHER_HEARTBEAT_TTL_SECONDS,
+      );
+    } catch (e) {
+      this.logger.warn(`Outbox heartbeat not written: ${(e as Error)?.message}`);
     }
   }
 
@@ -119,7 +178,7 @@ export class WorkflowOutboxDispatcher {
         await this.process(row, orgByStore);
         const { count } = await this.prisma.withoutScope().workflow_outbox.updateMany({
           where: { id: row.id, status: 'processing' },
-          data: { status: 'done', last_error: null },
+          data: { status: 'done', last_error: null, processed_at: new Date() },
         });
         if (count === 0) {
           this.logger.warn(
@@ -169,7 +228,7 @@ export class WorkflowOutboxDispatcher {
       const lastError = r.last_error ?? OUTBOX_ABANDONED_ERROR;
       const { count } = await db.workflow_outbox.updateMany({
         where: { ...where, id: r.id },
-        data: { status: 'dead', last_error: lastError },
+        data: { status: 'dead', last_error: lastError, processed_at: new Date() },
       });
       if (count === 0) continue;
       buried++;
@@ -229,7 +288,7 @@ export class WorkflowOutboxDispatcher {
     await this.prisma.withoutScope().workflow_outbox.updateMany({
       where: { id: row.id },
       data: dead
-        ? { status: 'dead', last_error: message }
+        ? { status: 'dead', last_error: message, processed_at: new Date() }
         : {
             status: 'pending',
             last_error: message,
@@ -301,8 +360,8 @@ export class WorkflowOutboxDispatcher {
 
   /**
    * Business event → instance (actor `system`). A definition that was
-   * deactivated or lost its trigger since the event is a permanent skip, not a
-   * retry loop.
+   * deactivated or lost its trigger since the event, or a store over its
+   * monthly plan cap, is a permanent skip, not a retry loop.
    */
   private async startFromEvent(row: ClaimedOutboxRow): Promise<void> {
     const p = row.payload;
@@ -322,9 +381,14 @@ export class WorkflowOutboxDispatcher {
     } catch (e) {
       if (
         e instanceof VendixHttpException &&
-        ['WORKFLOW_NOT_ACTIVE', 'WORKFLOW_DEFINITION_NOT_FOUND', 'WORKFLOW_DISABLED'].includes(
-          e.errorCode,
-        )
+        // P7.1: a reached monthly cap is not a failure to retry; the owners
+        // were already told once by the limits service.
+        [
+          'WORKFLOW_NOT_ACTIVE',
+          'WORKFLOW_DEFINITION_NOT_FOUND',
+          'WORKFLOW_DISABLED',
+          'WORKFLOW_PLAN_LIMIT_REACHED',
+        ].includes(e.errorCode)
       ) {
         this.logger.warn(
           `start_instance ${row.id} skipped: ${e.errorCode} (definition ${String(p.definition_id)})`,

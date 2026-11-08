@@ -475,6 +475,35 @@ jobs:
           src/domains/store/workflows/ai/workflow-insights.service.spec.ts
           src/domains/store/workflows/definitions/workflow-ai-step-test.service.spec.ts
           src/domains/store/workflows/engine/workflow-ai-step.spec.ts
+      # Operación de producción (Flujos P7): límites por plan con paywall,
+      # auditoría append-only con cadena de hashes, permisos por flujo y por
+      # etapa, observabilidad del outbox para Quickss y exportación ZIP.
+      - name: Jest — operación de producción (Flujos P7)
+        working-directory: apps/backend
+        run: >-
+          npx jest --ci --runInBand --config jest.isolated.config.js --runTestsByPath
+          src/domains/store/workflows/access/workflow-access.service.spec.ts
+          src/domains/store/workflows/access/workflow-access.types.spec.ts
+          src/domains/store/workflows/audit/workflow-audit.controller.spec.ts
+          src/domains/store/workflows/audit/workflow-audit.interceptor.spec.ts
+          src/domains/store/workflows/audit/workflow-audit.service.spec.ts
+          src/domains/store/workflows/definitions/workflow-migration.service.spec.ts
+          src/domains/store/workflows/engine/workflow-assignment.access.spec.ts
+          src/domains/store/workflows/engine/workflow-complete.audit.spec.ts
+          src/domains/store/workflows/engine/workflow-engine.audit.spec.ts
+          src/domains/store/workflows/engine/workflow-outbox.heartbeat.spec.ts
+          src/domains/store/workflows/engine/workflow-start.limits.spec.ts
+          src/domains/store/workflows/export/workflow-export.service.spec.ts
+          src/domains/store/workflows/files/workflow-files.service.spec.ts
+          src/domains/store/workflows/limits/workflow-limits.service.spec.ts
+          src/domains/store/workflows/limits/workflow-usage.service.spec.ts
+          src/domains/store/workflows/metrics/workflow-analytics.service.spec.ts
+          src/domains/store/workflows/metrics/workflow-metrics.service.spec.ts
+          src/domains/store/workflows/public-link/workflow-public-uploads.service.spec.ts
+          src/domains/superadmin/subscriptions/services/plans.service.spec.ts
+          src/domains/superadmin/workflows-ops/workflows-ops-alerts.service.spec.ts
+          src/domains/superadmin/workflows-ops/workflows-ops-metrics.service.spec.ts
+          src/domains/superadmin/workflows-ops/workflows-ops.controller.spec.ts
       # Specs que toca la fase P1 de Flujos (acciones, productores y servicios
       # de dominio gobernados): con más de 25 specs cambiados el job de
       # regresiones los omite, así que corren aquí, de forma explícita.
@@ -668,6 +697,23 @@ jobs:
           --include='**/shared/constants/module-industries.spec.ts'
           --include='**/core/services/plan-paywall.service.spec.ts'
           --include='**/subscription/pages/plans/plan-catalog.preselect.spec.ts'
+          --include='**/core/interceptors/subscription-paywall.interceptor.spec.ts'
+          --include='**/core/services/subscription-access.service.spec.ts'
+          --include='**/workflows/components/workflow-access-panel/workflow-access-panel.component.spec.ts'
+          --include='**/workflows/editor/components/http-action/http-action-test.component.spec.ts'
+          --include='**/workflows/pages/audit-page/audit-page.component.spec.ts'
+          --include='**/workflows/pages/export-page/export-page.component.spec.ts'
+          --include='**/workflows/pages/help-page/help-page.component.spec.ts'
+          --include='**/workflows/pages/plan-usage-page/plan-usage-page.component.spec.ts'
+          --include='**/workflows/services/workflow-audit-api.service.spec.ts'
+          --include='**/workflows/services/workflow-export-api.service.spec.ts'
+          --include='**/workflows/services/workflow-limits-api.service.spec.ts'
+          --include='**/workflows/utils/workflow-errors.util.spec.ts'
+          --include='**/workflows/records/pages/record-detail-page/record-detail-page.component.spec.ts'
+          --include='**/documents/pages/templates-editor/templates-editor-page.component.spec.ts'
+          --include='**/super-admin/subscriptions/pages/plans/plan-form.component.spec.ts'
+          --include='**/super-admin/subscriptions/pages/plans/workflow-limits.util.spec.ts'
+          --include='**/super-admin/workflows-ops/**/*.spec.ts'
 
   mobile:
     name: Mobile

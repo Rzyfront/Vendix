@@ -4,6 +4,7 @@ import { RequestContextService } from '@common/context/request-context.service';
 import { ErrorCodes, VendixHttpException } from '@common/errors';
 import { WorkflowDefinitionV1 } from '@common/workflows/contract';
 import { StorePrismaService } from '../../../../prisma/services/store-prisma.service';
+import { WorkflowAccessPolicy } from '../access/workflow-access.policy';
 import { declaresTrigger, generateMailboxLocalPart } from './workflow-inbound.rules';
 
 /** Same approved domains as the document inbox (`facturas-` addresses). */
@@ -21,12 +22,16 @@ const STATE_SELECT = {
   created_at: true,
 } as const;
 
-/** Admin side of the per-flow mailbox (`store:workflows:design`). */
+/**
+ * Admin side of the per-flow mailbox (`store:workflows:design`). The state
+ * follows "Quién ve" and every change follows "Quién diseña" (P7.3).
+ */
 @Injectable()
 export class WorkflowMailboxService {
   constructor(
     private readonly prisma: StorePrismaService,
     private readonly config: ConfigService,
+    private readonly access: WorkflowAccessPolicy,
   ) {}
 
   private ctx() {
@@ -53,12 +58,14 @@ export class WorkflowMailboxService {
     return domain;
   }
 
-  private async loadDefinition(storeId: number, id: number) {
+  private async loadDefinition(storeId: number, id: number, use: 'view' | 'design') {
     const def = await this.prisma.workflow_definitions.findFirst({
       where: { id, store_id: storeId },
       select: { id: true, status: true, published_version_id: true },
     });
     if (!def) throw new VendixHttpException(ErrorCodes.WORKFLOW_DEFINITION_NOT_FOUND);
+    if (use === 'view') await this.access.assertCanView(id);
+    else await this.access.assertCanDesign(id);
     return def;
   }
 
@@ -113,7 +120,7 @@ export class WorkflowMailboxService {
   /** The mailbox of the flow, or null when never activated. */
   async state(definitionId: number) {
     const c = this.ctx();
-    await this.loadDefinition(c.store_id, definitionId);
+    await this.loadDefinition(c.store_id, definitionId, 'view');
     const box = await this.prisma.workflow_mailboxes.findFirst({
       where: { store_id: c.store_id, definition_id: definitionId },
       select: STATE_SELECT,
@@ -124,7 +131,7 @@ export class WorkflowMailboxService {
   /** Creates the mailbox, or switches a deactivated one back on (same address). */
   async activate(definitionId: number) {
     const c = this.ctx();
-    const def = await this.loadDefinition(c.store_id, definitionId);
+    const def = await this.loadDefinition(c.store_id, definitionId, 'design');
     await this.assertDeclaresEmail(c.store_id, def);
     const domain = this.receptionDomain();
     const existing = await this.prisma.workflow_mailboxes.findFirst({
@@ -154,7 +161,7 @@ export class WorkflowMailboxService {
 
   async update(definitionId: number, patch: { is_active: boolean }) {
     const c = this.ctx();
-    const def = await this.loadDefinition(c.store_id, definitionId);
+    const def = await this.loadDefinition(c.store_id, definitionId, 'design');
     const existing = await this.prisma.workflow_mailboxes.findFirst({
       where: { store_id: c.store_id, definition_id: definitionId },
       select: { id: true, is_active: true },
