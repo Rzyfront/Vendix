@@ -138,6 +138,7 @@ export const ErrorCodes = {
   WORKFLOW_INSIGHTS_RATE_LIMITED: { code: 'WORKFLOW_INSIGHTS_RATE_LIMITED', httpStatus: 429, devMessage: 'Ya se generó un resumen hace menos de una hora.' },
   // Operación de producción (flujos-adm P7)
   WORKFLOW_PLAN_LIMIT_REACHED: { code: 'WORKFLOW_PLAN_LIMIT_REACHED', httpStatus: 402, devMessage: 'Llegaste al límite de tu plan para Flujos este mes.' },
+  WORKFLOW_INTAKE_UNAVAILABLE: { code: 'WORKFLOW_INTAKE_UNAVAILABLE', httpStatus: 503, devMessage: 'Este formulario no está recibiendo solicitudes en este momento. Intenta más tarde.' },
   WORKFLOW_LIMITS_INVALID: { code: 'WORKFLOW_LIMITS_INVALID', httpStatus: 422, devMessage: 'Los límites de Flujos del plan no son válidos.' },
   WORKFLOW_ACCESS_INVALID: { code: 'WORKFLOW_ACCESS_INVALID', httpStatus: 422, devMessage: 'Los permisos del flujo no son válidos.' },
   WORKFLOW_DESIGN_FORBIDDEN: { code: 'WORKFLOW_DESIGN_FORBIDDEN', httpStatus: 403, devMessage: 'No tienes permiso para diseñar este flujo.' },
