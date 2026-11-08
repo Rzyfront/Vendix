@@ -31,6 +31,15 @@ export function toWorkflowError(error: unknown): WorkflowApiError {
   };
 }
 
+/**
+ * `true` for a Flows plan limit (402). The paywall interceptor already opened
+ * "Límite de Flujos alcanzado" with "Mejorar plan", so the screen adds no
+ * error of its own on top of it.
+ */
+export function isPlanLimit(error: WorkflowApiError): boolean {
+  return error.status === 402 || error.code === 'WORKFLOW_PLAN_LIMIT_REACHED';
+}
+
 /** `true` for the codes that mean "your view is outdated: reload". */
 export function isStaleCode(code: string | null): boolean {
   return code === 'WORKFLOW_STALE' || code === 'WORKFLOW_TASK_CLOSED';
