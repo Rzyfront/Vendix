@@ -136,6 +136,18 @@ export const ErrorCodes = {
   WORKFLOW_AI_TEST_INVALID: { code: 'WORKFLOW_AI_TEST_INVALID', httpStatus: 422, devMessage: 'Los datos de prueba del paso de IA no son válidos.' },
   WORKFLOW_AI_USAGE_MONTH_INVALID: { code: 'WORKFLOW_AI_USAGE_MONTH_INVALID', httpStatus: 422, devMessage: 'El mes debe tener el formato AAAA-MM y estar dentro de los últimos 12 meses.' },
   WORKFLOW_INSIGHTS_RATE_LIMITED: { code: 'WORKFLOW_INSIGHTS_RATE_LIMITED', httpStatus: 429, devMessage: 'Ya se generó un resumen hace menos de una hora.' },
+  // Operación de producción (flujos-adm P7)
+  WORKFLOW_PLAN_LIMIT_REACHED: { code: 'WORKFLOW_PLAN_LIMIT_REACHED', httpStatus: 402, devMessage: 'Llegaste al límite de tu plan para Flujos este mes.' },
+  WORKFLOW_LIMITS_INVALID: { code: 'WORKFLOW_LIMITS_INVALID', httpStatus: 422, devMessage: 'Los límites de Flujos del plan no son válidos.' },
+  WORKFLOW_ACCESS_INVALID: { code: 'WORKFLOW_ACCESS_INVALID', httpStatus: 422, devMessage: 'Los permisos del flujo no son válidos.' },
+  WORKFLOW_DESIGN_FORBIDDEN: { code: 'WORKFLOW_DESIGN_FORBIDDEN', httpStatus: 403, devMessage: 'No tienes permiso para diseñar este flujo.' },
+  WORKFLOW_STAGE_ACT_FORBIDDEN: { code: 'WORKFLOW_STAGE_ACT_FORBIDDEN', httpStatus: 403, devMessage: 'Esta etapa solo la pueden decidir las personas que el flujo indica.' },
+  WORKFLOW_AUDIT_UNAVAILABLE: { code: 'WORKFLOW_AUDIT_UNAVAILABLE', httpStatus: 503, devMessage: 'No se pudo registrar la auditoría; la acción no se realizó. Intenta de nuevo.' },
+  WORKFLOW_AUDIT_FILTER_INVALID: { code: 'WORKFLOW_AUDIT_FILTER_INVALID', httpStatus: 422, devMessage: 'Los filtros de la auditoría no son válidos.' },
+  WORKFLOW_EXPORT_IN_PROGRESS: { code: 'WORKFLOW_EXPORT_IN_PROGRESS', httpStatus: 409, devMessage: 'Ya hay una exportación en curso.' },
+  WORKFLOW_EXPORT_NOT_FOUND: { code: 'WORKFLOW_EXPORT_NOT_FOUND', httpStatus: 404, devMessage: 'No se encontró la exportación.' },
+  WORKFLOW_EXPORT_NOT_READY: { code: 'WORKFLOW_EXPORT_NOT_READY', httpStatus: 409, devMessage: 'La exportación todavía no está lista.' },
+  WORKFLOW_EXPORT_EXPIRED: { code: 'WORKFLOW_EXPORT_EXPIRED', httpStatus: 410, devMessage: 'La exportación venció. Solicita una nueva.' },
   // Documental D1 (flujos-documental S5)
   DOCUMENT_TOO_LARGE: { code: 'DOCUMENT_TOO_LARGE', httpStatus: 413, devMessage: 'El archivo supera el tamaño máximo permitido.' },
   DOCUMENT_TYPE_NOT_ALLOWED: { code: 'DOCUMENT_TYPE_NOT_ALLOWED', httpStatus: 415, devMessage: 'Este tipo de archivo no está permitido.' },
