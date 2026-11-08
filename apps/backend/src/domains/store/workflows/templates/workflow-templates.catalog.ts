@@ -559,9 +559,16 @@ const PQR: WorkflowTemplate = {
             'Clasifica el caso del cliente como Petición, Queja o Reclamo según su asunto y detalle. Una petición solicita información o un servicio; una queja expresa inconformidad con la atención; un reclamo exige corregir un error o cumplir algo pendiente.',
           inputs: ['asunto', 'detalle'],
           outputs: ['tipo'],
+          // Without quota or with a failed answer the type is still required:
+          // a person picks it by hand before the draft.
+          on_error: { then: 'route', route_to: 'clasificar_manual' },
         },
         transitions: [{ on: 'auto', to: 'redactar' }],
       },
+      form('clasificar_manual', 'Clasificar a mano', ['tipo'], 'redactar', {
+        assignee: role('employee'),
+        dueHours: 24,
+      }),
       {
         key: 'redactar',
         name: 'Redactar respuesta con IA',
