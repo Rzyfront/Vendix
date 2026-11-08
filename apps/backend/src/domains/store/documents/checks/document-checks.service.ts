@@ -353,6 +353,17 @@ export class DocumentChecksService {
     // No vision model linked → fail before consuming anything.
     await this.ai.assertVisionModelLinked(DOCUMENT_EXTRACT_APP_KEY);
 
+    // P6.3 soft block: with the plan quota used up the read does not call the
+    // AI, like the AI step; the screen shows "cupo agotado" and the person
+    // fills the fields by hand.
+    const blocked = await this.workflowAi.blockedQuota({
+      purpose: 'document_read',
+      appKey: DOCUMENT_EXTRACT_APP_KEY,
+      instanceId: input.instance_id,
+      definitionId,
+    });
+    if (blocked) throw new VendixHttpException(ErrorCodes.SUBSCRIPTION_006);
+
     const created: CheckRow = await this.prisma.document_checks.create({
       data: {
         organization_id: c.organization_id,

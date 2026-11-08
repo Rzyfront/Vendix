@@ -77,7 +77,7 @@ describe('DocumentChecksService · Leer con IA', () => {
   let ai: { run: jest.Mock; assertVisionModelLinked: jest.Mock };
   let pages: { prepare: jest.Mock };
   let s3: { downloadFile: jest.Mock };
-  let workflowAi: { recordUsage: jest.Mock; warnIfThresholdReached: jest.Mock };
+  let workflowAi: { recordUsage: jest.Mock; warnIfThresholdReached: jest.Mock; blockedQuota: jest.Mock };
   let instanceId: number;
   let fileId: number;
   const FIELDS = ['proveedor', 'nit', 'fecha', 'total'];
@@ -103,7 +103,11 @@ describe('DocumentChecksService · Leer con IA', () => {
       })),
     };
     s3 = { downloadFile: jest.fn(async () => PDF) };
-    workflowAi = { recordUsage: jest.fn(async () => undefined), warnIfThresholdReached: jest.fn(async () => undefined) };
+    workflowAi = {
+      recordUsage: jest.fn(async () => undefined),
+      warnIfThresholdReached: jest.fn(async () => undefined),
+      blockedQuota: jest.fn(async () => null),
+    };
     service = new DocumentChecksService(
       kit.prisma,
       kit.storedFiles,
@@ -384,6 +388,22 @@ describe('DocumentChecksService · Leer con IA', () => {
       // A failed reading is never served from the cache.
       answer(aiJson());
       expect((await read()).cached).toBe(false);
+    });
+
+    it('cupo de Flujos al 100 % (bloqueo suave, r1): no llama a la IA ni crea la lectura y avisa "cupo agotado"', async () => {
+      workflowAi.blockedQuota.mockResolvedValueOnce({ state: 'blocked', used: 1000, cap: 1000, percent: 100 });
+      expect(await codeOf(read())).toBe('SUBSCRIPTION_006');
+      expect(ai.run).not.toHaveBeenCalled();
+      expect(kit.db.table('document_checks')).toHaveLength(0);
+      const definitionId = kit.db.table('workflow_instances').find((i) => i.id === instanceId)!.definition_id;
+      expect(workflowAi.blockedQuota).toHaveBeenCalledWith({
+        purpose: 'document_read',
+        appKey: DOCUMENT_EXTRACT_APP_KEY,
+        instanceId,
+        definitionId,
+      });
+      // No double ledger row: the skipped call is recorded by blockedQuota.
+      expect(workflowAi.recordUsage).not.toHaveBeenCalled();
     });
 
     it('sin modelo de visión no se crea la lectura', async () => {

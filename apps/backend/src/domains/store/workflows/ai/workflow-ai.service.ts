@@ -93,6 +93,9 @@ export interface WorkflowAiUsageInput {
   stageKey?: string | null;
 }
 
+/** What a ledger row is attributed to, before its status is known. */
+export type WorkflowAiUsageRef = Omit<WorkflowAiUsageInput, 'status'>;
+
 /** Errors of configuration or permission: retrying the same call cannot help. */
 const NON_RETRYABLE_CODES = new Set(['SUBSCRIPTION_005', 'AI_APP_001', 'AI_APP_003', 'AI_CONFIG_001', 'AI_PROVIDER_002']);
 
@@ -136,7 +139,7 @@ export class WorkflowAiService {
 
   async run(input: WorkflowAiRunInput): Promise<WorkflowAiRunResult> {
     const quota = await this.quota();
-    if (quota.state === 'blocked') return this.skipped(input, quota);
+    if (quota.state === 'blocked') return this.skipped(usageRef(input), quota);
 
     let response: AIResponse;
     try {
@@ -144,7 +147,7 @@ export class WorkflowAiService {
     } catch (e) {
       const code = e instanceof VendixHttpException ? e.errorCode : null;
       if (code === 'SUBSCRIPTION_006') {
-        return this.skipped(input, { ...quota, state: 'blocked', reason: code });
+        return this.skipped(usageRef(input), { ...quota, state: 'blocked', reason: code });
       }
       await this.recordUsage({ ...usageRef(input), status: 'failed' });
       return {
@@ -216,8 +219,20 @@ export class WorkflowAiService {
     }
   }
 
-  private async skipped(input: WorkflowAiRunInput, quota: WorkflowAiQuota): Promise<WorkflowAiRunResult> {
-    await this.recordUsage({ ...usageRef(input), status: 'skipped_quota' });
+  /**
+   * Soft block for an AI call made outside `run()` (the document read): when
+   * the plan quota is used up it records the skipped call and alerts once,
+   * like the AI step, and returns the quota; null means the call may go on.
+   */
+  async blockedQuota(ref: WorkflowAiUsageRef): Promise<WorkflowAiQuota | null> {
+    const quota = await this.quota();
+    if (quota.state !== 'blocked') return null;
+    await this.skipped(ref, quota);
+    return quota;
+  }
+
+  private async skipped(ref: WorkflowAiUsageRef, quota: WorkflowAiQuota): Promise<WorkflowAiRunResult> {
+    await this.recordUsage({ ...ref, status: 'skipped_quota' });
     await this.alertOnce(WORKFLOW_AI_BLOCK_PERCENT, quota);
     return { status: 'skipped_quota', quota };
   }
@@ -260,7 +275,7 @@ export class WorkflowAiService {
   }
 }
 
-function usageRef(input: WorkflowAiRunInput): Omit<WorkflowAiUsageInput, 'status'> {
+function usageRef(input: WorkflowAiRunInput): WorkflowAiUsageRef {
   return {
     purpose: input.purpose,
     appKey: input.appKey,

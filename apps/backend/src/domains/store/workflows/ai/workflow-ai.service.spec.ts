@@ -192,6 +192,34 @@ describe('WorkflowAiService', () => {
     await expect(service.recordUsage({ purpose: 'document_read', status: 'success' })).resolves.toBeUndefined();
   });
 
+  describe('blockedQuota (calls made outside run(), r1)', () => {
+    const ref = { purpose: 'document_read' as const, appKey: 'document_extract', instanceId: 70, definitionId: 7 };
+
+    it('at 100 % returns the quota, records the skipped call against the flow and alerts once', async () => {
+      const { service, create, notifications } = build({ used: 1000 });
+
+      await expect(service.blockedQuota(ref)).resolves.toMatchObject({ state: 'blocked', percent: 100 });
+      expect(create).toHaveBeenCalledWith({
+        data: expect.objectContaining({
+          status: 'skipped_quota',
+          purpose: 'document_read',
+          instance_id: 70,
+          definition_id: 7,
+          total_tokens: 0,
+        }),
+      });
+      expect(notifications.createAndBroadcast.mock.calls[0][2]).toBe(WORKFLOW_AI_BLOCK_TITLE);
+    });
+
+    it('below 100 % lets the call go on and writes nothing', async () => {
+      const { service, create, notifications } = build({ used: 850 });
+
+      await expect(service.blockedQuota(ref)).resolves.toBeNull();
+      expect(create).not.toHaveBeenCalled();
+      expect(notifications.createAndBroadcast).not.toHaveBeenCalled();
+    });
+  });
+
   it('warns after a call made outside run() when the counter crossed 80 %', async () => {
     const { service, notifications } = build({ used: 850 });
 
