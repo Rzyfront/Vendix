@@ -13,6 +13,18 @@ export interface WorkflowInsightsFlowInput {
   insufficient_data: boolean;
 }
 
+/**
+ * The whole store over the period, computed here: the AI quotes these figures
+ * and never adds up the flows itself (it only sees the busiest ones).
+ */
+export interface WorkflowInsightsTotals {
+  active_flows: number;
+  started: number;
+  completed: number;
+  open: number;
+  completion_rate_percent: number | null;
+}
+
 export interface WorkflowInsightsFlowText {
   key: string;
   definition_id: number;

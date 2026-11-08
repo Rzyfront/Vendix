@@ -15,6 +15,7 @@ import {
   InsightsFlowRef,
   WorkflowInsightsContent,
   WorkflowInsightsFlowInput,
+  WorkflowInsightsTotals,
   addDaysToDateString,
   emptyInsightsContent,
   isoWeekKey,
@@ -188,8 +189,9 @@ export class WorkflowInsightsService {
         .map((d) => [d.key, { definition_id: d.id, name: d.name }]),
     );
 
+    const totals = storeTotals(flows);
     const outcome = narrated.length > 0
-      ? await this.narrate(period, narrated, refs)
+      ? await this.narrate(period, totals, narrated, refs)
       : { status: 'ready' as const, content: emptyInsightsContent(definitions.length > 0), tokens: 0, model: null, error: null };
 
     try {
@@ -202,7 +204,7 @@ export class WorkflowInsightsService {
           week_key: weekKey,
           status: outcome.status,
           content: outcome.content ? (outcome.content as unknown as object) : undefined,
-          metrics: { period, flows } as unknown as object,
+          metrics: { period, totals, flows } as unknown as object,
           model: outcome.model,
           tokens_used: outcome.tokens,
           error: outcome.error,
@@ -217,13 +219,14 @@ export class WorkflowInsightsService {
 
   private async narrate(
     period: Period,
+    totals: WorkflowInsightsTotals,
     flows: WorkflowInsightsFlowInput[],
     refs: ReadonlyMap<string, InsightsFlowRef>,
   ): Promise<Outcome> {
     const result = await this.ai.run({
       appKey: WORKFLOW_INSIGHTS_APP_KEY,
       purpose: 'insights_summary',
-      messages: [{ role: 'user', content: JSON.stringify({ period: { from: period.from, to: period.to }, flows }) }],
+      messages: [{ role: 'user', content: JSON.stringify({ period: { from: period.from, to: period.to }, totals, flows }) }],
     });
     if (result.status === 'skipped_quota') {
       return { status: 'skipped_quota', content: null, tokens: 0, model: null, error: INSIGHTS_QUOTA_ERROR };
@@ -286,6 +289,21 @@ function flowInput(key: string, name: string, report: WorkflowAnalyticsReport): 
     overdue_share_percent: kpis.active > 0 ? percent(kpis.overdue / kpis.active) : null,
     slowest_stage: slowest ? { name: slowest.name, open_tasks: slowest.wip } : null,
     insufficient_data: report.insufficient_data,
+  };
+}
+
+/** The store over the period, across every flow with activity (narrated or not). */
+export function storeTotals(flows: WorkflowInsightsFlowInput[]): WorkflowInsightsTotals {
+  const active = flows.filter((f) => f.started + f.completed + f.open > 0);
+  const sum = (pick: (f: WorkflowInsightsFlowInput) => number) => active.reduce((acc, f) => acc + pick(f), 0);
+  const started = sum((f) => f.started);
+  const completed = sum((f) => f.completed);
+  return {
+    active_flows: active.length,
+    started,
+    completed,
+    open: sum((f) => f.open),
+    completion_rate_percent: started > 0 ? percent(completed / started) : null,
   };
 }
 

@@ -185,6 +185,25 @@ describe('WorkflowInsightsService', () => {
       expect(summary.content?.flows).toEqual([{ key: 'f10', definition_id: 10, name: 'F10', text: 'El más activo.' }]);
     });
 
+    it('sends the store totals over every active flow, also the ones left out of the narration', async () => {
+      const defs = [
+        ...Array.from({ length: 10 }, (_, i) => ({ id: i + 1, key: `f${i + 1}`, name: `F${i + 1}` })),
+        { id: 11, key: 'idle', name: 'Idle' },
+      ];
+      const { service, ai, analytics } = build({ defs });
+      analytics.report.mockImplementation(async (id: number) =>
+        id === 11
+          ? report({ started: 0, completed: 0, active: 0, overdue: 0 })
+          : report({ started: 2, completed: 1, active: 1, overdue: 0 }),
+      );
+
+      await service.generateManual(MONDAY);
+
+      const sent = JSON.parse(ai.run.mock.calls[0][0].messages[0].content);
+      expect(sent.flows).toHaveLength(8);
+      expect(sent.totals).toEqual({ active_flows: 10, started: 20, completed: 10, open: 10, completion_rate_percent: 50 });
+    });
+
     it('stores skipped_quota without an error code and with the Spanish message', async () => {
       const { service } = build({ run: { status: 'skipped_quota', quota: {} } });
       await expect(service.generateManual(MONDAY)).resolves.toMatchObject({
