@@ -21,7 +21,7 @@ import {
   WorkflowAuditFilters,
   WorkflowAuditVerification,
 } from '../../services/workflow-audit-api.service';
-import { toWorkflowError } from '../../utils/workflow-errors.util';
+import { toWorkflowError, toWorkflowErrorOfBlob } from '../../utils/workflow-errors.util';
 import { Subscription } from 'rxjs';
 
 const PAGE_SIZE = 25;
@@ -345,7 +345,7 @@ export class AuditPageComponent implements OnInit {
         },
         error: (err) => {
           this.exporting.set(false);
-          this.toast.error(toWorkflowError(err).message);
+          void toWorkflowErrorOfBlob(err).then((failure) => this.toast.error(failure.message));
         },
       });
   }

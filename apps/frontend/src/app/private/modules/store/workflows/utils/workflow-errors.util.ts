@@ -1,3 +1,4 @@
+import { HttpErrorResponse } from '@angular/common/http';
 import { parseApiError } from '../../../../../core/utils/parse-api-error';
 import { WorkflowApiError } from '../interfaces/workflow.interfaces';
 
@@ -38,6 +39,23 @@ export function toWorkflowError(error: unknown): WorkflowApiError {
  */
 export function isPlanLimit(error: WorkflowApiError): boolean {
   return error.status === 402 || error.code === 'WORKFLOW_PLAN_LIMIT_REACHED';
+}
+
+/**
+ * `toWorkflowError` for a request made with `responseType: 'blob'` (a file
+ * download): its JSON error arrives inside a Blob and is read first.
+ */
+export async function toWorkflowErrorOfBlob(error: unknown): Promise<WorkflowApiError> {
+  const raw = error as { status?: number; error?: unknown } | null;
+  if (raw?.error instanceof Blob) {
+    try {
+      const body: unknown = JSON.parse(await raw.error.text());
+      return toWorkflowError(new HttpErrorResponse({ status: raw.status ?? 0, error: body }));
+    } catch {
+      // Not JSON: the generic message below.
+    }
+  }
+  return toWorkflowError(error);
 }
 
 /** `true` for the codes that mean "your view is outdated: reload". */

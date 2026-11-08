@@ -3,6 +3,7 @@ import { provideZonelessChangeDetection } from '@angular/core';
 import { ComponentFixture, TestBed } from '@angular/core/testing';
 import { provideRouter } from '@angular/router';
 import { Observable, Subject, of, throwError } from 'rxjs';
+import { ToastService } from '../../../../../../shared/components/toast/toast.service';
 import { ReportExportService } from '../../../reports/services/report-export.service';
 import {
   WorkflowAuditApiService,
@@ -210,6 +211,26 @@ describe('AuditPageComponent', () => {
     expect(exportFilters[0].category).toBe('export');
     expect(downloads.length).toBe(1);
     expect(downloads[0].name).toMatch(/^auditoria-flujos-\d{4}-\d{2}-\d{2}$/);
+  });
+
+  it('a failed export says why, with the message the API sent inside the blob', async () => {
+    const body = JSON.stringify({
+      error_code: 'WORKFLOW_AUDIT_UNAVAILABLE',
+      message: 'No se pudo registrar la auditoría. Intenta de nuevo.',
+    });
+    exportResult = () =>
+      throwError(
+        () => new HttpErrorResponse({ status: 503, error: new Blob([body], { type: 'application/json' }) }),
+      );
+    await render();
+    const toast = spyOn(TestBed.inject(ToastService), 'error');
+    button('Exportar')?.click();
+    await settle();
+    // The message is read from the Blob asynchronously.
+    for (let i = 0; i < 50 && toast.calls.count() === 0; i++) {
+      await new Promise((resolve) => setTimeout(resolve, 10));
+    }
+    expect(toast).toHaveBeenCalledWith('No se pudo registrar la auditoría. Intenta de nuevo.');
   });
 
   it('a failed export downloads nothing and the button is usable again', async () => {
