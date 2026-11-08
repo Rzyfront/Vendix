@@ -6,6 +6,7 @@ import {
   seedDefinition,
   seedPeople,
 } from '../../../../testing/workflows/workflow-test-kit';
+import { WorkflowAccessPolicy } from '../access/workflow-access.policy';
 import { WorkflowAuditRow, WorkflowAuditService } from '../audit/workflow-audit.service';
 import { WorkflowCollectionsService } from './workflow-collections.service';
 import { WorkflowRecordsService } from './workflow-records.service';
@@ -67,6 +68,8 @@ describe('WorkflowRecordsService (P3.6)', () => {
       kit.storedFiles,
       kit.engine,
       kit.workflowAudit,
+      kit.instances,
+      new WorkflowAccessPolicy(kit.prisma),
     );
     kit.as({ is_owner: true, permissions: [] });
     collectionId = (
@@ -255,7 +258,16 @@ describe('WorkflowRecordsService (P3.6)', () => {
 
       beforeEach(() => {
         audit = new WorkflowAuditService(kit.prisma);
-        audited = new WorkflowRecordsService(kit.prisma, collections, kit.dossiers, kit.storedFiles, kit.engine, audit);
+        audited = new WorkflowRecordsService(
+          kit.prisma,
+          collections,
+          kit.dossiers,
+          kit.storedFiles,
+          kit.engine,
+          audit,
+          kit.instances,
+          new WorkflowAccessPolicy(kit.prisma),
+        );
       });
 
       it('writes document.file_downloaded before the signed URL exists', async () => {
@@ -395,6 +407,38 @@ describe('WorkflowRecordsService (P3.6)', () => {
       expect((await svc.get(r.id)).flows).toEqual([
         expect.objectContaining({ id: definitionId, key: 'renovacion' }),
       ]);
+    });
+
+    it('P7.3: the detail leaves out requests and flows the caller may not see', async () => {
+      const r = await svc.create({ collection_id: collectionId, values: { cliente: 'Acme' } });
+      seedRelation();
+      const restricted = seedDefinition(kit.db, flow('contratos', 'nomina')).definitionId;
+      const open = seedDefinition(kit.db, flow('contratos', 'abierto')).definitionId;
+      const restrictedRow = kit.db.table('workflow_definitions').find((d) => d.id === restricted)!;
+      restrictedRow.name = 'Nómina';
+      // The owner starts one request per flow; u6 starts one of the open flow.
+      const ownersHidden = await svc.startFlow(r.id, restricted, 'k3');
+      const ownersOpen = await svc.startFlow(r.id, open, 'k4');
+      const employee = { is_owner: false, user_id: 6, permissions: ['store:workflows:read', 'store:workflows:start'] };
+      kit.as(employee);
+      const mine = await svc.startFlow(r.id, open, 'k5');
+      restrictedRow.access = { view: { roles: ['manager'], user_ids: [] } };
+
+      const seen = await svc.get(r.id);
+      // Participation: only the request u6 started; the hidden flow is not even named.
+      expect(seen.instances.map((i) => i.id)).toEqual([mine.instance.id]);
+      expect(seen.flows.map((f) => f.id)).toEqual([open]);
+      expect(JSON.stringify(seen)).not.toContain('Nómina');
+      expect(JSON.stringify(seen)).not.toContain(ownersHidden.instance.reference);
+
+      kit.as({ is_owner: true, user_id: 1, permissions: [] });
+      const all = await svc.get(r.id);
+      expect(all.instances.map((i) => i.id)).toEqual([
+        mine.instance.id,
+        ownersOpen.instance.id,
+        ownersHidden.instance.id,
+      ]);
+      expect(all.flows.map((f) => f.id).sort()).toEqual([restricted, open].sort());
     });
   });
 });

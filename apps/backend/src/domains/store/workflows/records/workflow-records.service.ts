@@ -5,9 +5,11 @@ import { WorkflowDefinitionV1 } from '@common/workflows/contract';
 import { StorePrismaService } from '../../../../prisma/services/store-prisma.service';
 import { DossiersService } from '../../documents/dossiers.service';
 import { StoredFilesService } from '../../documents/stored-files.service';
+import { WorkflowAccessPolicy } from '../access/workflow-access.policy';
 import { WorkflowAuditService } from '../audit/workflow-audit.service';
 import { WorkflowCommandResult } from '../engine/workflow-engine.types';
 import { WorkflowEngineService } from '../engine/workflow-engine.service';
+import { WorkflowInstancesService } from '../instances/workflow-instances.service';
 import { WorkflowCollectionRow, WorkflowCollectionsService } from './workflow-collections.service';
 import {
   CreateWorkflowRecordDto,
@@ -38,6 +40,18 @@ export interface WorkflowRecordRow {
   archived_at: Date | null;
   created_at: Date;
   updated_at: Date;
+}
+
+/** A request about the record, as the detail shows it. */
+interface RecordInstanceRow {
+  id: number;
+  reference: string;
+  title: string;
+  status: string;
+  current_stage_key: string | null;
+  definition_id: number;
+  created_at: Date;
+  completed_at: Date | null;
 }
 
 export interface UploadedRecordFile {
@@ -72,6 +86,9 @@ export class WorkflowRecordsService {
     private readonly engine: WorkflowEngineService,
     /** Append-only audit trail (P7.2): required, so no path runs unaudited. */
     private readonly audit: WorkflowAuditService,
+    /** P7.3: the requests and flows of a record follow the same visibility as everywhere else. */
+    private readonly instances: WorkflowInstancesService,
+    private readonly access: WorkflowAccessPolicy,
   ) {}
 
   private ctx() {
@@ -118,15 +135,26 @@ export class WorkflowRecordsService {
   /**
    * Record with its collection, dossier items and the requests about it. An
    * archived record (listed with `include_archived`) is readable with the same
-   * flag; every write still treats it as gone.
+   * flag; every write still treats it as gone. The requests follow the
+   * participation rule and leave out flows the caller cannot see (P7.3).
    */
   async get(id: number, opts: { include_archived?: boolean } = {}) {
     const record = await this.load(id, opts.include_archived === true);
     const collection = await this.collections.get(record.collection_id);
     const dossier = await this.findDossier(record.id);
     const { store_id } = this.ctx();
-    const instances = await this.prisma.workflow_instances.findMany({
-      where: { store_id, subject_type: RECORD_SUBJECT, subject_id: record.id },
+    const [visibleInstances, hiddenFlows] = await Promise.all([
+      this.instances.visibleWhere(),
+      this.access.hiddenDefinitionIds(),
+    ]);
+    const instances = (await this.prisma.workflow_instances.findMany({
+      where: {
+        AND: [
+          ...visibleInstances,
+          { subject_type: RECORD_SUBJECT, subject_id: record.id },
+          ...(hiddenFlows.length ? [{ definition_id: { notIn: hiddenFlows } }] : []),
+        ],
+      },
       select: {
         id: true,
         reference: true,
@@ -138,8 +166,8 @@ export class WorkflowRecordsService {
         completed_at: true,
       },
       orderBy: { id: 'desc' },
-    });
-    const definitionIds = [...new Set((instances as Array<{ definition_id: number }>).map((i) => i.definition_id))];
+    })) as RecordInstanceRow[];
+    const definitionIds = [...new Set(instances.map((i) => i.definition_id))];
     const defs = definitionIds.length
       ? ((await this.prisma.workflow_definitions.findMany({
           where: { store_id, id: { in: definitionIds } },
@@ -165,11 +193,11 @@ export class WorkflowRecordsService {
             items: await this.dossiers.items(dossier.id),
           }
         : null,
-      instances: (instances as Array<Record<string, unknown> & { definition_id: number }>).map((i) => ({
+      instances: instances.map((i) => ({
         ...i,
         definition_name: names.get(i.definition_id) ?? null,
       })),
-      /** Published, switched-on flows of this collection ("Iniciar flujo"). */
+      /** Published, switched-on flows of this collection the caller sees ("Iniciar flujo"). */
       flows: await this.startableFlows(collection.key),
     };
   }
@@ -182,6 +210,7 @@ export class WorkflowRecordsService {
         status: 'active',
         is_enabled: true,
         published_version_id: { not: null },
+        ...(await this.access.visibleDefinitionsWhere()),
       },
       select: { id: true, key: true, name: true, published_version_id: true },
       orderBy: { name: 'asc' },
