@@ -66,3 +66,47 @@ export function auditCategoryOf(action: WorkflowAuditAction): WorkflowAuditCateg
 export function isWorkflowAuditAction(value: unknown): value is WorkflowAuditAction {
   return typeof value === 'string' && Object.prototype.hasOwnProperty.call(WORKFLOW_AUDIT_ACTIONS, value);
 }
+
+/** Spanish label of every action, as the screen and the XLSX export show it. */
+export const WORKFLOW_AUDIT_ACTION_LABELS: Record<WorkflowAuditAction, string> = {
+  'definition.created': 'Flujo creado',
+  'definition.draft_saved': 'Borrador guardado',
+  'definition.published': 'Flujo publicado',
+  'definition.imported': 'Flujo importado',
+  'definition.exported': 'Flujo exportado',
+  'definition.enabled': 'Flujo activado',
+  'definition.disabled': 'Flujo desactivado',
+  'definition.archived': 'Flujo archivado',
+  'definition.unarchived': 'Flujo restaurado',
+  'definition.access_changed': 'Permisos del flujo cambiados',
+  'definition.instances_migrated': 'Solicitudes migradas a otra versión',
+  'decision.task_completed': 'Tarea decidida',
+  'decision.task_voted': 'Voto registrado',
+  'decision.instance_cancelled': 'Solicitud cancelada',
+  'decision.instance_forced': 'Solicitud movida a la fuerza',
+  'document.file_downloaded': 'Archivo descargado',
+  'document.sealed_downloaded': 'Documento firmado descargado',
+  'document.issued_downloaded': 'Documento emitido descargado',
+  'document.public_file_downloaded': 'Documento abierto por una persona externa',
+  'secret.created': 'Secreto creado',
+  'secret.updated': 'Secreto actualizado',
+  'secret.deleted': 'Secreto eliminado',
+  'secret.used': 'Secreto usado en una llamada',
+  'export.requested': 'Exportación solicitada',
+  'export.downloaded': 'Exportación descargada',
+  'audit.exported': 'Auditoría exportada',
+};
+
+/** Spanish name of the kind of object a row points at (`target_type`). */
+export const WORKFLOW_AUDIT_TARGET_LABELS: Record<string, string> = {
+  definition: 'Flujo',
+  instance: 'Solicitud',
+  task: 'Tarea',
+  file: 'Archivo',
+  issued_document: 'Documento emitido',
+  signature_request: 'Solicitud de firma',
+  record: 'Registro',
+  secret: 'Secreto',
+  export: 'Exportación',
+  audit: 'Auditoría',
+};

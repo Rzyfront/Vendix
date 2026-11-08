@@ -8,6 +8,7 @@ import {
   stageOutcomes,
   validateFormValues,
 } from '@common/workflows/contract';
+import { WorkflowAuditService } from '../audit/workflow-audit.service';
 import { firedGuard } from './workflow-guards';
 import { WorkflowAdvanceService } from './workflow-advance.service';
 import { WorkflowAssignmentService } from './workflow-assignment.service';
@@ -31,6 +32,13 @@ import {
 const TASK_PERMISSION = 'store:workflows:task';
 const CLOSED_TASK = ['done', 'cancelled', 'expired'];
 
+const OUTCOME_VERBS: Record<string, string> = {
+  approve: 'Aprobó',
+  reject: 'Rechazó',
+  return: 'Devolvió',
+  submit: 'Envió',
+};
+
 /** `completeTask` inside the engine transaction (algorithm §5.4, steps 1–11). */
 @Injectable()
 export class WorkflowCompleteService {
@@ -41,7 +49,49 @@ export class WorkflowCompleteService {
     private readonly advancer: WorkflowAdvanceService,
     private readonly events: WorkflowEventsService,
     private readonly stages: WorkflowStageService,
+    /** Append-only audit trail (P7.2): required, so no path runs unaudited. */
+    private readonly audit: WorkflowAuditService,
   ) {}
+
+  /**
+   * One audit row for a decision, in the decision's own transaction: it
+   * commits or rolls back with it. Call it as the last statement, after every
+   * row it depends on was written.
+   */
+  private async auditDecision(
+    tx: WorkflowTx,
+    action: 'decision.task_completed' | 'decision.task_voted',
+    d: {
+      instance: WorkflowInstanceRow;
+      task: WorkflowTaskRow;
+      stage: WorkflowStageDef;
+      outcome: string;
+      comment?: string | null;
+      extra?: Record<string, unknown>;
+    },
+  ): Promise<void> {
+    const lead =
+      action === 'decision.task_voted'
+        ? 'Votó a favor'
+        : (OUTCOME_VERBS[d.outcome] ?? `Decidió «${d.outcome}»`);
+    await this.audit.append(tx, {
+      action,
+      target_type: 'task',
+      target_id: d.task.id,
+      definition_id: d.instance.definition_id,
+      instance_id: d.instance.id,
+      summary: `${lead} en la etapa «${d.stage.name}» de la solicitud ${d.instance.reference}`,
+      details: {
+        outcome: d.outcome,
+        stage_key: d.stage.key,
+        stage_name: d.stage.name,
+        task_id: d.task.id,
+        instance_reference: d.instance.reference,
+        has_comment: !!d.comment?.trim(),
+        ...d.extra,
+      },
+    });
+  }
 
   async execute(
     tx: WorkflowTx,
@@ -188,6 +238,14 @@ export class WorkflowCompleteService {
           },
           idempotencyKey: input.idempotencyKey ?? null,
         });
+        await this.auditDecision(tx, 'decision.task_voted', {
+          instance,
+          task,
+          stage,
+          outcome: 'approve',
+          comment: input.comment,
+          extra: { approvals, required },
+        });
         return {
           instance,
           task,
@@ -295,6 +353,14 @@ export class WorkflowCompleteService {
         payload: { message: guard.message, to: transition.to },
       });
     }
+    await this.auditDecision(tx, 'decision.task_completed', {
+      instance,
+      task,
+      stage,
+      outcome: input.outcome,
+      comment: input.comment,
+      extra: { to_stage_key: transition.to, ...(quorum ? { quorum_required: required } : {}) },
+    });
     return {
       instance: updated,
       task: await this.loader.loadTask(tx, task.id),
@@ -418,6 +484,7 @@ export class WorkflowCompleteService {
     });
     const task = await this.loader.loadTask(tx, loaded.task.id);
     if (!joined) {
+    await this.auditBranch(tx, loaded, branch.key, input);
       return {
         instance,
         task,
@@ -440,6 +507,7 @@ export class WorkflowCompleteService {
         actor: { type: 'system', id: null },
         payload: { message: guard.message },
       });
+    await this.auditBranch(tx, loaded, branch.key, input);
       return {
         instance,
         task,
@@ -475,6 +543,7 @@ export class WorkflowCompleteService {
         },
       },
     });
+    await this.auditBranch(tx, { ...loaded, instance }, branch.key, input);
     return {
       instance,
       task,
@@ -483,6 +552,23 @@ export class WorkflowCompleteService {
       from_stage_key: stage.key,
       to_stage_key: transition.to,
     };
+  }
+
+  /** The submission of one branch of a parallel stage is a decision too. */
+  private auditBranch(
+    tx: WorkflowTx,
+    loaded: { task: WorkflowTaskRow; instance: WorkflowInstanceRow; stage: WorkflowStageDef },
+    branchKey: string,
+    input: CompleteTaskInput,
+  ): Promise<void> {
+    return this.auditDecision(tx, 'decision.task_completed', {
+      instance: loaded.instance,
+      task: loaded.task,
+      stage: loaded.stage,
+      outcome: 'submit',
+      comment: input.comment,
+      extra: { branch_key: branchKey },
+    });
   }
 
   private stagesApply(

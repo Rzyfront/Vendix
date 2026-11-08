@@ -4,6 +4,7 @@ import { WorkflowStageDef } from '@common/workflows/contract';
 import { StorePrismaService } from '../../../../prisma/services/store-prisma.service';
 import { DossiersService } from '../../documents/dossiers.service';
 import { StoredFilesService } from '../../documents/stored-files.service';
+import { WorkflowAuditService } from '../audit/workflow-audit.service';
 import { WorkflowAssignmentService } from '../engine/workflow-assignment.service';
 import { WorkflowTaskRow } from '../engine/workflow-engine.types';
 import {
@@ -41,6 +42,8 @@ export class WorkflowFilesService {
     private readonly dossiers: DossiersService,
     private readonly files: StoredFilesService,
     private readonly instances: WorkflowInstancesService,
+    /** Append-only audit trail (P7.2): required, so no path runs unaudited. */
+    private readonly audit: WorkflowAuditService,
   ) {}
 
   async upload(instanceId: number, blob: UploadedBlob | undefined, target: WorkflowFileTarget) {
@@ -122,7 +125,42 @@ export class WorkflowFilesService {
       // 404 (not 403): do not reveal that the file exists.
       if (!allowed) throw new VendixHttpException(ErrorCodes.DOCUMENT_NOT_FOUND);
     }
+    await this.auditDownload(fileId, ctx.store_id);
     return this.files.signedDownloadUrl(fileId);
+  }
+
+  /**
+   * Fail-closed: the access is written BEFORE the signed URL exists, so a
+   * file nobody could audit is never handed out. The PDF of an issued
+   * document is recorded as such.
+   */
+  private async auditDownload(fileId: number, storeId: number): Promise<void> {
+    const file = await this.files.findOne(fileId);
+    const issued: { id: number; reference: string; title: string; workflow_instance_id: number | null } | null =
+      await this.prisma.issued_documents.findFirst({
+        where: { file_id: fileId, store_id: storeId },
+        select: { id: true, reference: true, title: true, workflow_instance_id: true },
+      });
+    const instanceId = issued?.workflow_instance_id ?? (await this.dossiers.instanceIdsOfFile(fileId))[0] ?? null;
+    await this.audit.recordNow(
+      issued
+        ? {
+            action: 'document.issued_downloaded',
+            target_type: 'issued_document',
+            target_id: issued.id,
+            instance_id: instanceId,
+            summary: `Descargó el documento emitido ${issued.reference} «${issued.title}»`,
+            details: { file_id: fileId, file_name: file.original_name, sha256: file.sha256 },
+          }
+        : {
+            action: 'document.file_downloaded',
+            target_type: 'file',
+            target_id: fileId,
+            instance_id: instanceId,
+            summary: `Descargó el archivo «${file.original_name}»`,
+            details: { file_name: file.original_name, mime_type: file.mime_type, sha256: file.sha256 },
+          },
+    );
   }
 
   private async assertMayUpload(
@@ -146,7 +184,7 @@ export class WorkflowFilesService {
     });
     for (const task of tasks) {
       if (
-        await this.assignment.canAct(
+        await this.assignment.canActQuietly(
           this.prisma,
           task,
           ctx.user_id,

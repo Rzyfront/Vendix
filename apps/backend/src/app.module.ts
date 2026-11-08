@@ -12,6 +12,8 @@ import { AppController } from './app.controller';
 import { AppService } from './app.service';
 import { AuthModule } from './domains/auth/auth.module';
 import { PrismaModule } from './prisma/prisma.module';
+import { WorkflowAuditModule } from './domains/store/workflows/audit/workflow-audit.module';
+import { WorkflowAuditInterceptor } from './domains/store/workflows/audit/workflow-audit.interceptor';
 import { UsersModule } from './domains/organization/users/users.module';
 import { TestModule } from './test/test.module';
 import { DomainsModule } from './domains/domains.module';
@@ -154,6 +156,8 @@ function resolveThrottleSetting(
     EventEmitterModule.forRoot(),
     AuthModule,
     PrismaModule,
+    // Flujos P7.2: WorkflowAuditInterceptor (global) writes through it.
+    WorkflowAuditModule,
     UsersModule,
     TestModule,
     DomainsModule,
@@ -235,6 +239,13 @@ function resolveThrottleSetting(
     {
       provide: APP_INTERCEPTOR,
       useClass: AuditInterceptor,
+    },
+    // Flujos P7.2: request origin (IP, user agent) for the append-only audit
+    // trail and audit of secret changes. Registered after
+    // RequestContextInterceptor so it runs inside the store context.
+    {
+      provide: APP_INTERCEPTOR,
+      useClass: WorkflowAuditInterceptor,
     },
   ],
 })

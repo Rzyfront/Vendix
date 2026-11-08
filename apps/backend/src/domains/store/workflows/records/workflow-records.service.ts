@@ -5,6 +5,7 @@ import { WorkflowDefinitionV1 } from '@common/workflows/contract';
 import { StorePrismaService } from '../../../../prisma/services/store-prisma.service';
 import { DossiersService } from '../../documents/dossiers.service';
 import { StoredFilesService } from '../../documents/stored-files.service';
+import { WorkflowAuditService } from '../audit/workflow-audit.service';
 import { WorkflowCommandResult } from '../engine/workflow-engine.types';
 import { WorkflowEngineService } from '../engine/workflow-engine.service';
 import { WorkflowCollectionRow, WorkflowCollectionsService } from './workflow-collections.service';
@@ -69,6 +70,8 @@ export class WorkflowRecordsService {
     private readonly dossiers: DossiersService,
     private readonly files: StoredFilesService,
     private readonly engine: WorkflowEngineService,
+    /** Append-only audit trail (P7.2): required, so no path runs unaudited. */
+    private readonly audit: WorkflowAuditService,
   ) {}
 
   private ctx() {
@@ -349,6 +352,15 @@ export class WorkflowRecordsService {
         })
       : null;
     if (!item) throw new VendixHttpException(ErrorCodes.DOCUMENT_NOT_FOUND);
+    // Fail-closed: written before the signed URL exists.
+    const file = await this.files.findOne(fileId);
+    await this.audit.recordNow({
+      action: 'document.file_downloaded',
+      target_type: 'file',
+      target_id: fileId,
+      summary: `Descargó el archivo «${file.original_name}» del expediente del registro ${record.id}`,
+      details: { record_id: record.id, file_name: file.original_name, sha256: file.sha256 },
+    });
     return this.files.signedDownloadUrl(fileId);
   }
 

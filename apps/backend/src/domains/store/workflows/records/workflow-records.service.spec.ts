@@ -1,4 +1,4 @@
-import { VendixHttpException } from '@common/errors';
+import { ErrorCodes, VendixHttpException } from '@common/errors';
 import { WorkflowDefinitionV1 } from '@common/workflows/contract';
 import {
   buildWorkflowKit,
@@ -6,6 +6,7 @@ import {
   seedDefinition,
   seedPeople,
 } from '../../../../testing/workflows/workflow-test-kit';
+import { WorkflowAuditRow, WorkflowAuditService } from '../audit/workflow-audit.service';
 import { WorkflowCollectionsService } from './workflow-collections.service';
 import { WorkflowRecordsService } from './workflow-records.service';
 import {
@@ -59,7 +60,14 @@ describe('WorkflowRecordsService (P3.6)', () => {
       return [{ n: row.next_number - 1 }];
     });
     collections = new WorkflowCollectionsService(kit.prisma);
-    svc = new WorkflowRecordsService(kit.prisma, collections, kit.dossiers, kit.storedFiles, kit.engine);
+    svc = new WorkflowRecordsService(
+      kit.prisma,
+      collections,
+      kit.dossiers,
+      kit.storedFiles,
+      kit.engine,
+      kit.workflowAudit,
+    );
     kit.as({ is_owner: true, permissions: [] });
     collectionId = (
       await collections.create({
@@ -238,6 +246,64 @@ describe('WorkflowRecordsService (P3.6)', () => {
       expect((await svc.downloadFile(a.id, fa.file_id)).url).toContain('https://signed.example/');
       expect((await failure(svc.downloadFile(a.id, fb.file_id)))?.code).toBe('DOCUMENT_NOT_FOUND');
       expect((await failure(svc.downloadFile(a.id, 9999)))?.code).toBe('DOCUMENT_NOT_FOUND');
+    });
+
+    describe('download audit (P7.2)', () => {
+      let audit: WorkflowAuditService;
+      let audited: WorkflowRecordsService;
+      const rows = () => kit.db.table('workflow_audit_log') as WorkflowAuditRow[];
+
+      beforeEach(() => {
+        audit = new WorkflowAuditService(kit.prisma);
+        audited = new WorkflowRecordsService(kit.prisma, collections, kit.dossiers, kit.storedFiles, kit.engine, audit);
+      });
+
+      it('writes document.file_downloaded before the signed URL exists', async () => {
+        const r = await audited.create({ collection_id: collectionId, values: { cliente: 'A' } });
+        const f = await audited.uploadFile(r.id, pdf('contrato.pdf'));
+        const order: string[] = [];
+        const record = audit.recordNow.bind(audit);
+        jest.spyOn(audit, 'recordNow').mockImplementation(async (input) => {
+          order.push('audit');
+          return record(input);
+        });
+        kit.s3.getPresignedUrl.mockImplementation(async (key: string) => {
+          order.push('url');
+          return `https://signed.example/${key}`;
+        });
+
+        await audited.downloadFile(r.id, f.file_id);
+
+        expect(order).toEqual(['audit', 'url']);
+        expect(rows()).toHaveLength(1);
+        expect(rows()[0]).toMatchObject({
+          action: 'document.file_downloaded',
+          category: 'document',
+          target_type: 'file',
+          target_id: String(f.file_id),
+          summary: `Descargó el archivo «contrato.pdf» del expediente del registro ${r.id}`,
+        });
+        expect(rows()[0].details).toMatchObject({ record_id: r.id, file_name: 'contrato.pdf' });
+        expect(JSON.stringify(rows()[0].details)).not.toContain('signed.example');
+      });
+
+      it('returns no URL when the access cannot be audited', async () => {
+        const r = await audited.create({ collection_id: collectionId, values: { cliente: 'A' } });
+        const f = await audited.uploadFile(r.id, pdf());
+        kit.s3.getPresignedUrl.mockClear();
+        jest.spyOn(audit, 'recordNow').mockRejectedValue(new VendixHttpException(ErrorCodes.WORKFLOW_AUDIT_UNAVAILABLE));
+
+        expect((await failure(audited.downloadFile(r.id, f.file_id)))?.code).toBe('WORKFLOW_AUDIT_UNAVAILABLE');
+        expect(kit.s3.getPresignedUrl).not.toHaveBeenCalled();
+      });
+
+      it('a file outside the record dossier is a 404 with no audit row', async () => {
+        const a = await audited.create({ collection_id: collectionId, values: { cliente: 'A' } });
+        const b = await audited.create({ collection_id: collectionId, values: { cliente: 'B' } });
+        const fb = await audited.uploadFile(b.id, pdf());
+        expect((await failure(audited.downloadFile(a.id, fb.file_id)))?.code).toBe('DOCUMENT_NOT_FOUND');
+        expect(rows()).toHaveLength(0);
+      });
     });
   });
 

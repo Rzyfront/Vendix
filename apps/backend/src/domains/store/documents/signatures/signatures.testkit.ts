@@ -76,8 +76,8 @@ export function buildSignatureKit() {
   const flow = new SignatureFlowNotifier({ get: () => kit.events } as any);
   const fake = fakeRenderer();
   const seal = new SignatureSealService(prisma, evidence, fake.renderer, kit.storedFiles, dossiers, s3, flow);
-  const requests = new SignatureRequestsService(prisma, evidence, delivery, flow, seal, kit.storedFiles);
-  const publicSvc = new SignaturePublicService(prisma, evidence, delivery, kit.storedFiles, seal, flow);
+  const requests = new SignatureRequestsService(prisma, evidence, delivery, flow, seal, kit.storedFiles, kit.workflowAudit);
+  const publicSvc = new SignaturePublicService(prisma, evidence, delivery, kit.storedFiles, seal, flow, kit.workflowAudit);
   const cron = new SignatureExpiryCron(prisma, requests);
 
   /** Issued PDF file + dossier + workflow request + issued document of store 1. */

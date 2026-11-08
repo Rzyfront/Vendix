@@ -9,6 +9,7 @@ import {
   findStage,
 } from '@common/workflows/contract';
 import { StorePrismaService } from '../../../../prisma/services/store-prisma.service';
+import { WorkflowAuditService } from '../audit/workflow-audit.service';
 import { WorkflowAdvanceService } from './workflow-advance.service';
 import { WorkflowAssignmentService } from './workflow-assignment.service';
 import {
@@ -61,6 +62,8 @@ export class WorkflowEngineService {
     private readonly stages: WorkflowStageService,
     private readonly events: WorkflowEventsService,
     private readonly ticker: WorkflowTickService,
+    /** Append-only audit trail (P7.2): required, so no path runs unaudited. */
+    private readonly audit: WorkflowAuditService,
   ) {}
 
   // ---- start -------------------------------------------------------------
@@ -561,6 +564,23 @@ export class WorkflowEngineService {
         runExitHooks: false,
         event: { type: 'forced', payload: { reason: input.reason } },
       });
+      // Only the manual move of `POST instances/:id/force-transition` comes
+      // through here; automatic transitions go through the advancer.
+      const target = findStage(definition, input.to);
+      await this.audit.append(tx, {
+        action: 'decision.instance_forced',
+        target_type: 'instance',
+        target_id: instance.id,
+        definition_id: instance.definition_id,
+        instance_id: instance.id,
+        summary: `Movió la solicitud ${instance.reference} de «${from.name}» a «${target?.name ?? input.to}» a la fuerza`,
+        details: {
+          from_stage_key: from.key,
+          to_stage_key: input.to,
+          reason: input.reason,
+          instance_reference: instance.reference,
+        },
+      });
       return {
         instance: updated,
         task: null,
@@ -610,6 +630,19 @@ export class WorkflowEngineService {
         payload: { reason: input.reason },
       });
       await this.cancelWaitedChildren(tx, instance, actor, now, 1);
+      await this.audit.append(tx, {
+        action: 'decision.instance_cancelled',
+        target_type: 'instance',
+        target_id: instance.id,
+        definition_id: instance.definition_id,
+        instance_id: instance.id,
+        summary: `Canceló la solicitud ${instance.reference}`,
+        details: {
+          reason: input.reason,
+          stage_key: instance.current_stage_key,
+          instance_reference: instance.reference,
+        },
+      });
       return this.loader.loadInstance(tx, instance.id);
     });
   }
