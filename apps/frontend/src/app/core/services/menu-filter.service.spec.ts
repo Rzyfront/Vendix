@@ -1162,6 +1162,10 @@ describe('MenuFilterService — hijos de Flujos y Documentos (P5.7)', () => {
       { label: 'Registros', route: '/admin/workflows/records', key: 'flows_records' },
       { label: 'Conectores', route: '/admin/workflows/connectors', key: 'flows_connectors' },
       { label: 'Integraciones', route: '/admin/workflows/integrations', key: 'flows_integrations' },
+      { label: 'Uso del plan', route: '/admin/workflows/usage', key: 'flows_usage' },
+      { label: 'Auditoría', route: '/admin/workflows/audit', key: 'flows_audit' },
+      { label: 'Exportación', route: '/admin/workflows/exports', key: 'flows_exports' },
+      { label: 'Ayuda', route: '/admin/workflows/help', key: 'flows_help' },
     ],
     Documentos: [
       { label: 'Expedientes', route: '/admin/documents', key: 'documents_dossiers' },
@@ -1268,12 +1272,29 @@ describe('MenuFilterService — hijos de Flujos y Documentos (P5.7)', () => {
     });
   }
 
-  it('un rol con solo tareas ve «Mis tareas» y abre por URL la solicitud de una tarea', async () => {
+  it('un rol con solo tareas ve «Mis tareas» y «Ayuda» (P7.7) y abre por URL la solicitud de una tarea', async () => {
     owner = false;
     permissions = ['store:workflows:task'];
-    expect(await childRoutes()).toEqual(['/admin/workflows/inbox']);
+    expect(await childRoutes()).toEqual(['/admin/workflows/inbox', '/admin/workflows/help']);
     expect(service.administrationPermissionBlockForUrl('/admin/workflows/instances/12')).toBeNull();
     expect(service.administrationPermissionBlockForUrl('/admin/workflows/connectors')).not.toBeNull();
+  });
+
+  it('P7: lectura ve «Uso del plan» y «Ayuda»; «Auditoría» y «Exportación» exigen administrar', async () => {
+    owner = false;
+    permissions = ['store:workflows:read'];
+    let routes = await childRoutes();
+    expect(routes).toContain('/admin/workflows/usage');
+    expect(routes).toContain('/admin/workflows/help');
+    expect(routes).not.toContain('/admin/workflows/audit');
+    expect(routes).not.toContain('/admin/workflows/exports');
+    expect(service.administrationPermissionBlockForUrl('/admin/workflows/audit')).not.toBeNull();
+
+    permissions = ['store:workflows:read', 'store:workflows:manage'];
+    routes = await childRoutes();
+    expect(routes).toContain('/admin/workflows/audit');
+    expect(routes).toContain('/admin/workflows/exports');
+    expect(service.administrationPermissionBlockForUrl('/admin/workflows/exports')).toBeNull();
   });
 
   it('una tienda sin la industria conserva ambos grupos con candado en el padre y en cada hijo', async () => {

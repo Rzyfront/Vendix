@@ -1129,6 +1129,30 @@ export class BreadcrumbService {
       icon: 'plug',
     },
     {
+      path: '/admin/workflows/usage',
+      title: 'Uso del plan',
+      parent: 'Flujos',
+      icon: 'gauge',
+    },
+    {
+      path: '/admin/workflows/audit',
+      title: 'Auditoría',
+      parent: 'Flujos',
+      icon: 'shield-check',
+    },
+    {
+      path: '/admin/workflows/exports',
+      title: 'Exportación',
+      parent: 'Flujos',
+      icon: 'download',
+    },
+    {
+      path: '/admin/workflows/help',
+      title: 'Ayuda',
+      parent: 'Flujos',
+      icon: 'help-circle',
+    },
+    {
       path: '/admin/workflows/connectors',
       title: 'Conectores',
       parent: 'Flujos',

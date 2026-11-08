@@ -112,6 +112,20 @@ describe('BreadcrumbService', () => {
       expect(crumb.current.label).toBe('Analítica IA');
       expect(crumb.parent?.label).toBe('Flujos');
     });
+
+    for (const [url, label] of [
+      ['/admin/workflows/usage', 'Uso del plan'],
+      ['/admin/workflows/audit', 'Auditoría'],
+      ['/admin/workflows/exports', 'Exportación'],
+      ['/admin/workflows/help', 'Ayuda'],
+    ]) {
+      it(`P7: resolves ${url} → "Flujos / ${label}"`, () => {
+        routerEvents$.next(new NavigationEnd(1, url, url));
+        const crumb = service.breadcrumb();
+        expect(crumb.current.label).toBe(label);
+        expect(crumb.parent?.label).toBe('Flujos');
+      });
+    }
   });
 
   describe('document.title sync (effect)', () => {

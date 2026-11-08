@@ -42,6 +42,38 @@ export const workflowsRoutes: Routes = [
       ),
   },
   {
+    // P7.1: month usage against the plan limits (sidebar child `flows_usage`).
+    path: 'usage',
+    loadComponent: () =>
+      import('../pages/plan-usage-page/plan-usage-page.component').then(
+        (c) => c.PlanUsagePageComponent,
+      ),
+  },
+  {
+    // P7.2: append-only audit trail, integrity check and XLSX (`flows_audit`).
+    path: 'audit',
+    loadComponent: () =>
+      import('../pages/audit-page/audit-page.component').then(
+        (c) => c.AuditPageComponent,
+      ),
+  },
+  {
+    // P7.6: full ZIP export of flows, requests and dossiers (`flows_exports`).
+    path: 'exports',
+    loadComponent: () =>
+      import('../pages/export-page/export-page.component').then(
+        (c) => c.ExportPageComponent,
+      ),
+  },
+  {
+    // P7.7: help and FAQ of Flows and Documents (`flows_help`).
+    path: 'help',
+    loadComponent: () =>
+      import('../pages/help-page/help-page.component').then(
+        (c) => c.HelpPageComponent,
+      ),
+  },
+  {
     // P5.4: gallery of ready-made Administration templates.
     path: 'templates',
     loadComponent: () =>

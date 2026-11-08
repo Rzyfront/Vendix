@@ -309,7 +309,16 @@ describe('Administración (flujos-documental S6): entradas del sidebar', () => {
     // Parents are groups: navigation lives in each child.
     expect(flows?.route).toBeUndefined();
     expect(documents?.route).toBeUndefined();
-    expect(flows?.children?.length).toBe(8);
+    // P7: + Uso del plan, Auditoría, Exportación y Ayuda.
+    expect(flows?.children?.length).toBe(12);
+    expect(flows?.children?.map((child) => child.route)).toEqual(
+      jasmine.arrayContaining([
+        '/admin/workflows/usage',
+        '/admin/workflows/audit',
+        '/admin/workflows/exports',
+        '/admin/workflows/help',
+      ]),
+    );
     expect(documents?.children?.length).toBe(6);
     expect(flows?.children?.map((child) => child.route)).toContain('/admin/workflows');
     expect(documents?.children?.map((child) => child.route)).toContain('/admin/documents');

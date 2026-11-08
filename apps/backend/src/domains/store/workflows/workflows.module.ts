@@ -120,6 +120,21 @@ import { WorkflowTemplatesController } from './templates/workflow-templates.cont
 import { WorkflowTemplatesService } from './templates/workflow-templates.service';
 import { WorkflowLiveController } from './live/workflow-live.controller';
 import { WorkflowLiveListener } from './live/workflow-live.listener';
+// P7: plan limits, audit trail, per-flow access and full export.
+import { WorkflowLimitsModule } from './limits/workflow-limits.module';
+import { WorkflowLimitsController } from './limits/workflow-limits.controller';
+import { WorkflowUsageService } from './limits/workflow-usage.service';
+import { WorkflowAuditModule } from './audit/workflow-audit.module';
+import { WorkflowAuditController } from './audit/workflow-audit.controller';
+import { WorkflowAuditQueryService } from './audit/workflow-audit.query';
+import { WorkflowAuditExportService } from './audit/workflow-audit.export.service';
+import { WorkflowAccessController } from './access/workflow-access.controller';
+import { WorkflowAccessService } from './access/workflow-access.service';
+import { WorkflowAccessPolicy } from './access/workflow-access.policy';
+import { WorkflowExportController } from './export/workflow-export.controller';
+import { WorkflowExportService } from './export/workflow-export.service';
+import { WorkflowExportBuilder } from './export/workflow-export.builder';
+import { WorkflowExportCron } from './export/workflow-export.cron';
 
 /**
  * Flujos: motor (start / completeTask / claim / transition / cancel / tick),
@@ -153,6 +168,9 @@ import { WorkflowLiveListener } from './live/workflow-live.listener';
     InvoiceDeliveryModule,
     OrderFlowModule,
     OrdersModule,
+    // P7.1 / P7.2: shared with DocumentsModule (storage limit, download audit).
+    WorkflowLimitsModule,
+    WorkflowAuditModule,
   ],
   controllers: [
     WorkflowDefinitionsController,
@@ -184,6 +202,11 @@ import { WorkflowLiveListener } from './live/workflow-live.listener';
     WorkflowTemplatesController,
     // P5.6: actualización en vivo (SSE sobre NOTIFY workflow_live).
     WorkflowLiveController,
+    // P7: uso del plan, auditoría, permisos por flujo y exportación completa.
+    WorkflowLimitsController,
+    WorkflowAuditController,
+    WorkflowAccessController,
+    WorkflowExportController,
   ],
   providers: [
     WorkGroupsService,
@@ -272,6 +295,18 @@ import { WorkflowLiveListener } from './live/workflow-live.listener';
       provide: WorkflowRequirementsService,
       useClass: DossierWorkflowRequirementsService,
     },
+    // P7.1: usage snapshot of the plan limits (counters + AI quota).
+    WorkflowUsageService,
+    // P7.2: list / verify / XLSX of the audit trail.
+    WorkflowAuditQueryService,
+    WorkflowAuditExportService,
+    // P7.3: who designs, sees and acts on each flow.
+    WorkflowAccessPolicy,
+    WorkflowAccessService,
+    // P7.6: full ZIP export, processed in the background and expired after 7 days.
+    WorkflowExportService,
+    WorkflowExportBuilder,
+    WorkflowExportCron,
   ],
   exports: [
     WorkflowEngineService,
