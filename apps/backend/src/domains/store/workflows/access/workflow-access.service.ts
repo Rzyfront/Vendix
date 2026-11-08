@@ -14,7 +14,7 @@ import {
   WorkflowAccess,
 } from './workflow-access.types';
 
-interface StageOption {
+export interface StageOption {
   key: string;
   name: string;
 }
