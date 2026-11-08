@@ -1,6 +1,7 @@
 import { provideZonelessChangeDetection } from '@angular/core';
 import { ComponentFixture, TestBed } from '@angular/core/testing';
 import { provideRouter } from '@angular/router';
+import { AuthFacade } from '../../../../../../core/store/auth/auth.facade';
 import { Observable, of, throwError } from 'rxjs';
 import {
   WORKFLOW_ACTION_CATALOG,
@@ -35,14 +36,23 @@ describe('HelpPageComponent', () => {
   let component: HelpPageComponent;
   let usage: jasmine.Spy<() => Observable<WorkflowUsageSnapshot>>;
 
-  async function setup(response: Observable<WorkflowUsageSnapshot> = of(SNAPSHOT)): Promise<void> {
+  /** `null` = the store owner; otherwise the permissions the person holds. */
+  async function setup(
+    response: Observable<WorkflowUsageSnapshot> = of(SNAPSHOT),
+    permissions: string[] | null = null,
+  ): Promise<void> {
     usage = jasmine.createSpy('usage').and.returnValue(response);
+    const auth = {
+      isOwner: () => permissions === null,
+      hasPermission: (p: string) => permissions?.includes(p) ?? true,
+    };
     await TestBed.configureTestingModule({
       imports: [HelpPageComponent],
       providers: [
         provideZonelessChangeDetection(),
         provideRouter([]),
         { provide: WorkflowLimitsApiService, useValue: { usage } },
+        { provide: AuthFacade, useValue: auth },
       ],
     }).compileComponents();
     fixture = TestBed.createComponent(HelpPageComponent);
@@ -222,6 +232,21 @@ describe('HelpPageComponent', () => {
       expect(q('limit-storage_bytes')?.textContent).toContain('5 MB de 10 GB');
       expect(q('limit-monthly_ai_tokens')?.textContent).toContain('No incluido en tu plan');
       expect(usage).toHaveBeenCalledTimes(1);
+    });
+
+    it('someone who can only start flows or do tasks is not sent to screens their role cannot open', async () => {
+      await setup(of(SNAPSHOT), ['store:workflows:start', 'store:workflows:task']);
+      expect(usage).not.toHaveBeenCalled();
+      await open('plan-limit');
+      expect(q('limits-live')).toBeNull();
+      expect(host().textContent).toContain('El uso del plan lo ve quien administra Flujos');
+      expect(host().textContent).not.toContain('No se pudo cargar tu uso actual');
+      const hrefs = Array.from(host().querySelectorAll('[data-testid="entry-plan-limit"] a')).map((a) =>
+        a.getAttribute('href'),
+      );
+      expect(hrefs).not.toContain('/admin/workflows/usage');
+      await open('audit');
+      expect(host().querySelector('[data-testid="entry-audit"] a[href="/admin/workflows/audit"]')).toBeNull();
     });
 
     it('keeps the answer and warns when the limits cannot be loaded', async () => {

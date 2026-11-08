@@ -16,11 +16,15 @@ import {
   InputsearchComponent,
   StickyHeaderComponent,
 } from '../../../../../../shared/components/index';
+import { ADMINISTRATION_PERMISSION_ROUTES } from '../../../../../../core/services/menu-filter.service';
+import { AuthFacade } from '../../../../../../core/store/auth/auth.facade';
 import { WorkflowLimitsApiService } from '../../services/workflow-limits-api.service';
-import { HELP_ENTRIES, HELP_GROUPS, HelpLiveKind, NOT_DOING } from './help-page.data';
+import { HELP_ENTRIES, HELP_GROUPS, HelpLink, HelpLiveKind, NOT_DOING } from './help-page.data';
 import { LimitRow, LiveGroup, limitRow, liveGroups, matchesQuery } from './help-page.util';
 
-type LimitsState = 'loading' | 'ready' | 'error';
+const BASE_ROUTE = '/admin/workflows';
+
+type LimitsState = 'loading' | 'ready' | 'error' | 'not-allowed';
 
 /**
  * "Ayuda" (Flujos P7.7): searchable FAQ and short guides. Stage types,
@@ -95,6 +99,11 @@ type LimitsState = 'loading' | 'ready' | 'error';
                           @case ('loading') {
                             <p class="text-xs">Cargando tu uso del plan...</p>
                           }
+                          @case ('not-allowed') {
+                            <p class="text-xs">
+                              El uso del plan lo ve quien administra Flujos en tu tienda.
+                            </p>
+                          }
                           @case ('error') {
                             <app-alert-banner variant="warning" icon="alert-triangle">
                               No se pudo cargar tu uso actual. Revísalo en «Uso del plan».
@@ -123,7 +132,7 @@ type LimitsState = 'loading' | 'ready' | 'error';
                       }
                     }
                     <p class="mt-3 flex flex-wrap gap-x-4 gap-y-1">
-                      @for (link of entry.links; track link.path) {
+                      @for (link of allowedLinks(entry.links); track link.path) {
                         <a class="font-medium text-primary hover:underline" [routerLink]="link.path"
                           >Ir a {{ link.label }}</a
                         >
@@ -154,6 +163,7 @@ type LimitsState = 'loading' | 'ready' | 'error';
 })
 export class HelpPageComponent implements OnInit {
   private readonly limitsApi = inject(WorkflowLimitsApiService);
+  private readonly auth = inject(AuthFacade);
   private readonly destroyRef = inject(DestroyRef);
 
   readonly query = signal('');
@@ -183,6 +193,12 @@ export class HelpPageComponent implements OnInit {
   });
 
   ngOnInit(): void {
+    // The help is open to people who only start flows or do tasks; the plan
+    // usage API is not, so it is not called for them.
+    if (!this.canOpen(`${BASE_ROUTE}/usage`)) {
+      this.limitsState.set('not-allowed');
+      return;
+    }
     this.limitsApi
       .usage()
       .pipe(takeUntilDestroyed(this.destroyRef))
@@ -193,6 +209,17 @@ export class HelpPageComponent implements OnInit {
         },
         error: () => this.limitsState.set('error'),
       });
+  }
+
+  /** Links to screens the person can open, by the same permissions as the sidebar. */
+  allowedLinks(links: readonly HelpLink[]): HelpLink[] {
+    return links.filter((link) => this.canOpen(link.path));
+  }
+
+  private canOpen(path: string): boolean {
+    const needs = ADMINISTRATION_PERMISSION_ROUTES[path];
+    if (!needs || this.auth.isOwner()) return true;
+    return needs.some((permission) => this.auth.hasPermission(permission));
   }
 
   isOpen(id: string): boolean {
