@@ -220,7 +220,15 @@ describe('parseWorkflowLimits', () => {
     ['a string', { monthly_http_calls: '10' }],
     ['an array', [1, 2]],
     ['a string body', 'x'],
+    ['a monthly cap past the INTEGER counter', { monthly_instances: 2_147_483_648 }],
+    ['an HTTP cap past the INTEGER counter', { monthly_http_calls: Number.MAX_SAFE_INTEGER }],
   ])('rejects %s with WORKFLOW_LIMITS_INVALID', (_name, raw) => {
     expect(code(raw)).toBe('WORKFLOW_LIMITS_INVALID');
+  });
+
+  it('accepts the largest monthly cap the counter holds and a storage cap past it', () => {
+    expect(
+      parseWorkflowLimits({ monthly_instances: 2_147_483_647, storage_bytes: 5 * 1024 ** 4 }),
+    ).toEqual({ monthly_instances: 2_147_483_647, storage_bytes: 5 * 1024 ** 4 });
   });
 });
