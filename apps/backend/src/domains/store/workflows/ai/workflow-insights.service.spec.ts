@@ -162,14 +162,27 @@ describe('WorkflowInsightsService', () => {
       expect(summary).toMatchObject({ status: 'failed', content: null, error: 'La respuesta de la IA no fue válida', tokens_used: 2 });
     });
 
-    it('marks the summary failed when the answer has more than 8 flows', async () => {
-      const defs = Array.from({ length: 9 }, (_, i) => ({ id: i + 1, key: `f${i}`, name: `F${i}` }));
-      const json = { ...VALID, flows: defs.map((d) => ({ key: d.key, text: 't' })) };
-      const { service } = build({
+    it('narrates only the 8 busiest active flows and drops any other key in the answer', async () => {
+      // Loads 1..10 by id, plus an idle flow that must never reach the AI.
+      const defs = [
+        ...Array.from({ length: 10 }, (_, i) => ({ id: i + 1, key: `f${i + 1}`, name: `F${i + 1}` })),
+        { id: 11, key: 'idle', name: 'Idle' },
+      ];
+      const json = { ...VALID, flows: [{ key: 'f10', text: 'El más activo.' }, { key: 'f1', text: 'Fuera del corte.' }] };
+      const { service, ai, analytics } = build({
         defs,
-        run: { status: 'success', content: 'x', json, model: null, tokens: { prompt: 1, completion: 1, total: 2 } },
+        run: { status: 'success', content: 'x', json, model: 'm-1', tokens: { prompt: 1, completion: 1, total: 2 } },
       });
-      await expect(service.generateManual(MONDAY)).resolves.toMatchObject({ status: 'failed' });
+      analytics.report.mockImplementation(async (id: number) =>
+        id === 11 ? report({ started: 0, completed: 0, active: 0, overdue: 0 }) : report({ started: id, completed: 0, active: 0, overdue: 0 }),
+      );
+
+      const summary = await service.generateManual(MONDAY);
+
+      const sent = JSON.parse(ai.run.mock.calls[0][0].messages[0].content);
+      expect(sent.flows.map((f: { key: string }) => f.key)).toEqual(['f10', 'f9', 'f8', 'f7', 'f6', 'f5', 'f4', 'f3']);
+      expect(summary).toMatchObject({ status: 'ready' });
+      expect(summary.content?.flows).toEqual([{ key: 'f10', definition_id: 10, name: 'F10', text: 'El más activo.' }]);
     });
 
     it('stores skipped_quota without an error code and with the Spanish message', async () => {

@@ -10,6 +10,7 @@ import { WorkflowAnalyticsReport, WorkflowAnalyticsService } from '../metrics/wo
 import {
   INSIGHTS_FAILED_ERROR,
   INSIGHTS_INVALID_ERROR,
+  INSIGHTS_LIMITS,
   INSIGHTS_QUOTA_ERROR,
   InsightsFlowRef,
   WorkflowInsightsContent,
@@ -177,12 +178,18 @@ export class WorkflowInsightsService {
         this.logger.warn(`Insights metrics of flow ${def.id} failed: ${(e as Error)?.message}`);
       }
     }
+    // Only the busiest flows reach the AI: the answer may narrate at most
+    // INSIGHTS_LIMITS.flows of them, and a key it was not given is dropped.
+    const narrated = flowsToNarrate(flows);
+    const narratedKeys = new Set(narrated.map((f) => f.key));
     const refs = new Map<string, InsightsFlowRef>(
-      definitions.map((d) => [d.key, { definition_id: d.id, name: d.name }]),
+      definitions
+        .filter((d) => narratedKeys.has(d.key))
+        .map((d) => [d.key, { definition_id: d.id, name: d.name }]),
     );
 
-    const outcome = hasActivity(flows)
-      ? await this.narrate(period, flows, refs)
+    const outcome = narrated.length > 0
+      ? await this.narrate(period, narrated, refs)
       : { status: 'ready' as const, content: emptyInsightsContent(definitions.length > 0), tokens: 0, model: null, error: null };
 
     try {
@@ -282,8 +289,17 @@ function flowInput(key: string, name: string, report: WorkflowAnalyticsReport): 
   };
 }
 
-function hasActivity(flows: WorkflowInsightsFlowInput[]): boolean {
-  return flows.some((f) => f.started > 0 || f.completed > 0 || f.open > 0);
+/**
+ * The flows the AI narrates: those with activity in the window, the busiest
+ * first (started + completed + open), at most INSIGHTS_LIMITS.flows.
+ */
+export function flowsToNarrate(flows: WorkflowInsightsFlowInput[]): WorkflowInsightsFlowInput[] {
+  return flows
+    .map((flow, index) => ({ flow, index, load: flow.started + flow.completed + flow.open }))
+    .filter((f) => f.load > 0)
+    .sort((a, b) => b.load - a.load || a.index - b.index)
+    .slice(0, INSIGHTS_LIMITS.flows)
+    .map((f) => f.flow);
 }
 
 function percent(ratio: number): number {
