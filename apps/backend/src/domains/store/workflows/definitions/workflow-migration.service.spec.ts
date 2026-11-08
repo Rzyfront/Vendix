@@ -1,4 +1,5 @@
-import { VendixHttpException } from '@common/errors';
+import { ErrorCodes, VendixHttpException } from '@common/errors';
+import { WorkflowAuditService } from '../audit/workflow-audit.service';
 import { WorkflowMigrationService } from './workflow-migration.service';
 import {
   buildWorkflowKit,
@@ -60,18 +61,55 @@ describe('WorkflowMigrationService permissions and audit (P7.2, P7.3)', () => {
   });
   afterEach(() => jest.restoreAllMocks());
 
-  it('moves the live request and audits it with the counts and the stage map', async () => {
+  it('audits the intent before moving and the outcome after, with the counts and the stage map', async () => {
     as(2);
     expect(await svc.migrate(defId, plan)).toEqual({ migrated: 1, failed: [] });
-    expect(audit()).toHaveLength(1);
+    expect(audit()).toHaveLength(2);
     expect(audit()[0]).toMatchObject({
       action: 'definition.instances_migrated',
       category: 'definition',
       definition_id: defId,
       actor_id: 2,
+      summary: 'Inició la migración de 1 solicitud de «Compra» de v1 a v2',
+    });
+    expect(audit()[0].details).toMatchObject({ phase: 'started', planned: 1, stage_map: { manager: 'manager' } });
+    expect(audit()[1]).toMatchObject({
+      action: 'definition.instances_migrated',
+      actor_id: 2,
       summary: 'Migró 1 solicitud de «Compra» de v1 a v2',
     });
-    expect(audit()[0].details).toMatchObject({ migrated: 1, failed: 0, stage_map: { manager: 'manager' } });
+    expect(audit()[1].details).toMatchObject({
+      phase: 'finished',
+      migrated: 1,
+      failed: 0,
+      stage_map: { manager: 'manager' },
+    });
+  });
+
+  it('when the intent cannot be audited, nothing moves and the answer says so', async () => {
+    as(2);
+    jest
+      .spyOn(WorkflowAuditService.prototype, 'recordNow')
+      .mockRejectedValueOnce(new VendixHttpException(ErrorCodes.WORKFLOW_AUDIT_UNAVAILABLE));
+    expect((await fail(svc.migrate(defId, plan)))?.errorCode).toBe('WORKFLOW_AUDIT_UNAVAILABLE');
+    expect(kit.db.table('workflow_instances').find((i) => i.id === instanceId)!.version_id).toBe(plan.from_version_id);
+  });
+
+  it('when only the outcome cannot be audited, the moved requests are still reported as moved', async () => {
+    as(2);
+    const original = WorkflowAuditService.prototype.recordNow;
+    jest
+      .spyOn(WorkflowAuditService.prototype, 'recordNow')
+      .mockImplementationOnce(function (this: WorkflowAuditService, input) {
+        return original.call(this, input);
+      })
+      .mockRejectedValueOnce(new VendixHttpException(ErrorCodes.WORKFLOW_AUDIT_UNAVAILABLE));
+    expect(await svc.migrate(defId, plan)).toEqual({ migrated: 1, failed: [] });
+    expect(kit.db.table('workflow_instances').find((i) => i.id === instanceId)!.version_id).not.toBe(
+      plan.from_version_id,
+    );
+    expect(audit()).toHaveLength(1);
+    expect(audit()[0].details).toMatchObject({ phase: 'started', planned: 1 });
   });
 
   it('a preview changes nothing and leaves no audit row', async () => {

@@ -1,4 +1,4 @@
-import { Injectable } from '@nestjs/common';
+import { Injectable, Logger } from '@nestjs/common';
 import { RequestContextService } from '@common/context/request-context.service';
 import { ErrorCodes, VendixHttpException } from '@common/errors';
 import { WorkflowDefinitionV1, findStage } from '@common/workflows/contract';
@@ -48,6 +48,7 @@ export const MIGRATION_WAITING_CHILDREN =
  */
 @Injectable()
 export class WorkflowMigrationService {
+  private readonly logger = new Logger(WorkflowMigrationService.name);
   private readonly access: WorkflowAccessPolicy;
   private readonly audit: WorkflowAuditService;
 
@@ -113,6 +114,31 @@ export class WorkflowMigrationService {
     }
     const { store_id, user_id } = this.ctx();
     const map = new Map(plan.stages.map((s) => [s.from_stage_key, s.to_stage_key as string]));
+    const flow: { name: string } | null = await this.prisma.workflow_definitions.findFirst({
+      where: { id: definitionId, store_id },
+      select: { name: true },
+    });
+    const flowName = flow?.name ?? String(definitionId);
+    const versions = `de v${plan.from_version.version} a v${plan.to_version.version}`;
+    const audited = {
+      target_type: 'definition',
+      target_id: definitionId,
+      definition_id: definitionId,
+    } as const;
+    // P7.2: the intent is audited before any request moves, fail-closed, so a
+    // migration never runs unaudited and a refusal here really moved nothing.
+    await this.audit.recordNow({
+      ...audited,
+      action: 'definition.instances_migrated',
+      summary: `Inició la migración de ${plan.total} solicitud${plan.total === 1 ? '' : 'es'} de «${flowName}» ${versions}`,
+      details: {
+        phase: 'started',
+        from_version: plan.from_version.version,
+        to_version: plan.to_version.version,
+        planned: plan.total,
+        stage_map: Object.fromEntries(map),
+      },
+    });
     const ids: Array<{ id: number; reference: string }> =
       await this.prisma.workflow_instances.findMany({
         where: {
@@ -142,24 +168,28 @@ export class WorkflowMigrationService {
         });
       }
     }
-    const flow: { name: string } | null = await this.prisma.workflow_definitions.findFirst({
-      where: { id: definitionId, store_id },
-      select: { name: true },
-    });
-    await this.audit.recordNow({
-      action: 'definition.instances_migrated',
-      target_type: 'definition',
-      target_id: definitionId,
-      definition_id: definitionId,
-      summary: `Migró ${migrated} solicitud${migrated === 1 ? '' : 'es'} de «${flow?.name ?? definitionId}» de v${plan.from_version.version} a v${plan.to_version.version}`,
-      details: {
-        from_version: plan.from_version.version,
-        to_version: plan.to_version.version,
-        migrated,
-        failed: failed.length,
-        stage_map: Object.fromEntries(map),
-      },
-    });
+    // The requests already moved (each one committed with its `migrated`
+    // event): a failure to write the outcome row must not answer "the action
+    // was not performed". The intent row above already holds the migration.
+    try {
+      await this.audit.recordNow({
+        ...audited,
+        action: 'definition.instances_migrated',
+        summary: `Migró ${migrated} solicitud${migrated === 1 ? '' : 'es'} de «${flowName}» ${versions}`,
+        details: {
+          phase: 'finished',
+          from_version: plan.from_version.version,
+          to_version: plan.to_version.version,
+          migrated,
+          failed: failed.length,
+          stage_map: Object.fromEntries(map),
+        },
+      });
+    } catch (e) {
+      this.logger.error(
+        `Migration outcome of definition ${definitionId} not audited (${migrated} moved, ${failed.length} failed): ${(e as Error)?.message}`,
+      );
+    }
     return { migrated, failed };
   }
 
