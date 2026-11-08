@@ -3,6 +3,8 @@ import { RequestContextService } from '@common/context/request-context.service';
 import { ErrorCodes, VendixHttpException } from '@common/errors';
 import { WorkflowDefinitionV1, findStage } from '@common/workflows/contract';
 import { StorePrismaService } from '../../../../prisma/services/store-prisma.service';
+import { WorkflowAccessPolicy } from '../access/workflow-access.policy';
+import { WorkflowAuditService } from '../audit/workflow-audit.service';
 import {
   WorkflowInstanceRow,
   WorkflowTx,
@@ -46,11 +48,18 @@ export const MIGRATION_WAITING_CHILDREN =
  */
 @Injectable()
 export class WorkflowMigrationService {
+  private readonly access: WorkflowAccessPolicy;
+  private readonly audit: WorkflowAuditService;
+
+  // Both helpers only need the store-scoped Prisma client (see the definitions service).
   constructor(
     private readonly prisma: StorePrismaService,
     private readonly stages: WorkflowStageService,
     private readonly events: WorkflowEventsService,
-  ) {}
+  ) {
+    this.access = new WorkflowAccessPolicy(prisma);
+    this.audit = new WorkflowAuditService(prisma);
+  }
 
   private ctx() {
     const c = RequestContextService.getContext();
@@ -60,6 +69,8 @@ export class WorkflowMigrationService {
 
   async preview(definitionId: number, input: MigrationInput) {
     const { store_id } = this.ctx();
+    // `migrate` goes through here first, so it is covered too.
+    await this.access.assertCanDesign(definitionId);
     const { from, to, target } = await this.versions(store_id, definitionId, input);
     const source = from.definition as WorkflowDefinitionV1;
     const groups: Array<{ current_stage_key: string; _count: { _all: number } }> =
@@ -131,6 +142,24 @@ export class WorkflowMigrationService {
         });
       }
     }
+    const flow: { name: string } | null = await this.prisma.workflow_definitions.findFirst({
+      where: { id: definitionId, store_id },
+      select: { name: true },
+    });
+    await this.audit.recordNow({
+      action: 'definition.instances_migrated',
+      target_type: 'definition',
+      target_id: definitionId,
+      definition_id: definitionId,
+      summary: `Migró ${migrated} solicitud${migrated === 1 ? '' : 'es'} de «${flow?.name ?? definitionId}» de v${plan.from_version.version} a v${plan.to_version.version}`,
+      details: {
+        from_version: plan.from_version.version,
+        to_version: plan.to_version.version,
+        migrated,
+        failed: failed.length,
+        stage_map: Object.fromEntries(map),
+      },
+    });
     return { migrated, failed };
   }
 

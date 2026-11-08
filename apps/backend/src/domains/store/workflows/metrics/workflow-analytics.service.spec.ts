@@ -352,3 +352,36 @@ describe('XLSX is built from the same dataset', () => {
     });
   });
 });
+
+describe('WorkflowAnalyticsService.report flow permissions (P7.3)', () => {
+  const asUser = <T>(fn: () => Promise<T>, extra: Record<string, unknown> = {}) =>
+    RequestContextService.run(
+      { store_id: 1, organization_id: 1, user_id: 9, is_super_admin: false, is_owner: false, ...extra } as any,
+      fn,
+    );
+  const restrict = (prisma: any) => {
+    prisma.workflow_definitions.findFirst.mockResolvedValue({
+      id: 7,
+      name: 'Compras',
+      published_version_id: null,
+      access: { view: { roles: ['manager'], user_ids: [] } },
+    });
+    prisma.user_roles = { findMany: jest.fn().mockResolvedValue([]) };
+  };
+
+  it('answers 404 before the cache so a cached report never leaks to someone who may not see the flow', async () => {
+    const { service, prisma, cache, metrics } = build({ cached: { cached: true } });
+    restrict(prisma);
+    const err: any = await asUser(() => service.report(7, Q)).catch((e) => e);
+    expect(err.errorCode).toBe('WORKFLOW_DEFINITION_NOT_FOUND');
+    expect(cache.get).not.toHaveBeenCalled();
+    expect(metrics.stageMetrics).not.toHaveBeenCalled();
+  });
+
+  it('serves the report to a bypass holder', async () => {
+    const { service, prisma } = build();
+    restrict(prisma);
+    const r = await asUser(() => service.report(7, Q), { permissions: ['store:workflows:manage'] });
+    expect(r.definition.id).toBe(7);
+  });
+});

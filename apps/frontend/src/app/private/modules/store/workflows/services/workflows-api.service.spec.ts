@@ -95,4 +95,36 @@ describe('WorkflowsApiService — contrato con el backend', () => {
     req.flush({ data: { status: 'skipped_quota', message: 'Sin cupo' } });
     expect(result).toEqual({ status: 'skipped_quota', message: 'Sin cupo' });
   });
+
+  it('permisos: GET /access devuelve el documento con sus opciones', () => {
+    let view: unknown;
+    api.getAccess(3).subscribe((r) => (view = r));
+    const req = http.expectOne((r) => r.url.endsWith('/definitions/3/access'));
+    expect(req.request.method).toBe('GET');
+    const data = {
+      access: { view: { roles: ['manager'], user_ids: [] } },
+      start_roles: [],
+      stages: [{ key: 'revision', name: 'Revisión' }],
+      options: { roles: ['manager'], users: [{ id: 2, name: 'Ana Pérez' }] },
+    };
+    req.flush({ data });
+    expect(view).toEqual(data);
+  });
+
+  it('permisos: PUT /access manda el documento y null reabre el flujo', () => {
+    let first: unknown;
+    const doc = { design: { roles: [], user_ids: [2] } };
+    api.updateAccess(3, doc).subscribe((r) => (first = r));
+    const req = http.expectOne((r) => r.url.endsWith('/definitions/3/access'));
+    expect(req.request.method).toBe('PUT');
+    expect(req.request.body).toEqual({ access: doc });
+    req.flush({ data: { access: doc, start_roles: [], stages: [], options: { roles: [], users: [] } } });
+    expect((first as { access: unknown }).access).toEqual(doc);
+
+    api.updateAccess(3, null).subscribe();
+    const reopen = http.expectOne((r) => r.url.endsWith('/definitions/3/access'));
+    expect(reopen.request.body).toEqual({ access: null });
+    reopen.flush({ data: { access: null, start_roles: [], stages: [], options: { roles: [], users: [] } } });
+  });
 });
+

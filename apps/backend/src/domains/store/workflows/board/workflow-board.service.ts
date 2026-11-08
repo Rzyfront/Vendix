@@ -3,6 +3,7 @@ import { RequestContextService } from '@common/context/request-context.service';
 import { ErrorCodes, VendixHttpException } from '@common/errors';
 import { WorkflowDefinitionV1, WorkflowStageDef, findStage } from '@common/workflows/contract';
 import { StorePrismaService } from '../../../../prisma/services/store-prisma.service';
+import { WorkflowAccessPolicy } from '../access/workflow-access.policy';
 import { hasBlockingRequirement, stageMoves } from '../engine/workflow-move-rules';
 import { WorkflowRequirementsService } from '../engine/workflow-engine.types';
 import { WorkflowInstancesService } from '../instances/workflow-instances.service';
@@ -61,16 +62,23 @@ interface ColumnSpec {
  */
 @Injectable()
 export class WorkflowBoardService {
+  private readonly access: WorkflowAccessPolicy;
+
+  // The policy only needs the store-scoped Prisma client (see the definitions service).
   constructor(
     private readonly prisma: StorePrismaService,
     private readonly instances: WorkflowInstancesService,
     private readonly requirements: WorkflowRequirementsService,
-  ) {}
+  ) {
+    this.access = new WorkflowAccessPolicy(prisma);
+  }
 
   async board(definitionId: number, query: BoardQuery = {}) {
     const c = RequestContextService.getContext();
     if (!c?.store_id) throw new VendixHttpException(ErrorCodes.WORKFLOW_DEFINITION_NOT_FOUND);
     const store_id = c.store_id;
+    // P7.3: a flow the caller may not see has no board.
+    await this.access.assertCanView(definitionId);
     const definitionRow = await this.prisma.workflow_definitions.findFirst({
       where: { id: definitionId, store_id },
       select: { id: true, name: true, published_version_id: true },
@@ -222,7 +230,7 @@ export class WorkflowBoardService {
     const store_id = c.store_id;
     const [definitions, roles, locations] = await Promise.all([
       this.prisma.workflow_definitions.findMany({
-        where: { store_id, status: 'active' },
+        where: { store_id, status: 'active', ...(await this.access.visibleDefinitionsWhere()) },
         select: { id: true, name: true },
         orderBy: { name: 'asc' },
       }),
@@ -271,6 +279,7 @@ export class WorkflowBoardService {
         select: { id: true },
       });
       if (!row) throw new VendixHttpException(ErrorCodes.WORKFLOW_DEFINITION_NOT_FOUND);
+      await this.access.assertCanView(query.definition_id);
     }
     if (query.location_id) {
       const row = await this.prisma.inventory_locations.findFirst({

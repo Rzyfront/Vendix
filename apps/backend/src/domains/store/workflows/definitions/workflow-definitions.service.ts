@@ -13,9 +13,17 @@ import {
   validateWorkflowDefinition,
 } from '@common/workflows/contract';
 import { StorePrismaService } from '../../../../prisma/services/store-prisma.service';
+import { WorkflowAccessPolicy } from '../access/workflow-access.policy';
+import { WorkflowAuditService } from '../audit/workflow-audit.service';
 import { WorkflowTx } from '../engine/workflow-engine.types';
 
 export const MAX_DRAFT_BYTES = 256 * 1024;
+/**
+ * The editor autosaves, so `definition.draft_saved` is recorded at most once
+ * per person and flow in this window; publishing and every other change is
+ * always recorded.
+ */
+export const DRAFT_AUDIT_WINDOW_MS = 10 * 60 * 1000;
 
 type Json = Record<string, unknown>;
 
@@ -83,7 +91,15 @@ const isObj = (v: unknown): v is Json =>
 /** Draft CRUD, validation, publishing and versioning of workflow definitions. */
 @Injectable()
 export class WorkflowDefinitionsService {
-  constructor(private readonly prisma: StorePrismaService) {}
+  private readonly access: WorkflowAccessPolicy;
+  private readonly audit: WorkflowAuditService;
+
+  // Both helpers only need the store-scoped Prisma client, so they are built
+  // here instead of widening the constructor every spec and the kit call.
+  constructor(private readonly prisma: StorePrismaService) {
+    this.access = new WorkflowAccessPolicy(prisma);
+    this.audit = new WorkflowAuditService(prisma);
+  }
 
   private ctx() {
     const c = RequestContextService.getContext();
@@ -104,6 +120,9 @@ export class WorkflowDefinitionsService {
     const page = Math.max(1, input.page ?? 1);
     const limit = Math.min(100, Math.max(1, input.limit ?? 10));
     const where: Json = { store_id };
+    // P7.3: flows the caller may not see are absent (also from the start catalog).
+    const visible = await this.access.visibleDefinitionsWhere();
+    if (visible) where.id = visible.id;
     if (input.status) where.status = input.status;
     if (input.search?.trim()) {
       const q = input.search.trim();
@@ -137,6 +156,7 @@ export class WorkflowDefinitionsService {
 
   async get(id: number) {
     const { store_id } = this.ctx();
+    await this.access.assertCanView(id);
     const row = await this.load(this.prisma, store_id, id);
     const version = row.published_version_id
       ? ((await this.versionSummaries(this.prisma, store_id, [row.published_version_id])).get(
@@ -151,6 +171,7 @@ export class WorkflowDefinitionsService {
 
   async getDraft(id: number) {
     const { store_id } = this.ctx();
+    await this.access.assertCanView(id);
     const row = await this.load(this.prisma, store_id, id);
     return {
       id: row.id,
@@ -162,6 +183,7 @@ export class WorkflowDefinitionsService {
 
   async versions(id: number) {
     const { store_id } = this.ctx();
+    await this.access.assertCanView(id);
     await this.load(this.prisma, store_id, id);
     return this.prisma.workflow_versions.findMany({
       where: { definition_id: id, store_id },
@@ -172,6 +194,7 @@ export class WorkflowDefinitionsService {
 
   async version(id: number, versionNumber: number) {
     const { store_id } = this.ctx();
+    await this.access.assertCanView(id);
     await this.load(this.prisma, store_id, id);
     const v = await this.prisma.workflow_versions.findFirst({
       where: { definition_id: id, store_id, version: versionNumber },
@@ -183,14 +206,33 @@ export class WorkflowDefinitionsService {
   /** The published JSON (or a given version); the draft when nothing is published. */
   async export(id: number, opts: { version?: number } = {}) {
     const { store_id } = this.ctx();
+    await this.access.assertCanView(id);
     const row = await this.load(this.prisma, store_id, id);
+    const out = await this.exportBody(store_id, row, opts);
+    // The JSON leaves the store: it is audited and, like any export, fail-closed.
+    await this.audit.recordNow({
+      action: 'definition.exported',
+      target_type: 'definition',
+      target_id: id,
+      definition_id: id,
+      summary: `Exportó «${row.name}» (${out.version ? `v${out.version}` : 'borrador'})`,
+      details: { source: out.source, version: out.version },
+    });
+    return out;
+  }
+
+  private async exportBody(
+    storeId: number,
+    row: { id: number; published_version_id: number | null; draft_definition?: unknown },
+    opts: { version?: number },
+  ) {
     if (opts.version !== undefined) {
-      const v = await this.version(id, opts.version);
+      const v = await this.version(row.id, opts.version);
       return { source: 'version', version: v.version, definition: v.definition };
     }
     if (row.published_version_id) {
       const v = await this.prisma.workflow_versions.findFirst({
-        where: { id: row.published_version_id, store_id },
+        where: { id: row.published_version_id, store_id: storeId },
       });
       if (v) return { source: 'published', version: v.version, definition: v.definition };
     }
@@ -218,16 +260,27 @@ export class WorkflowDefinitionsService {
     key = explicit ? key : await this.freeKey(store_id, key);
     const draft = this.forceKey(input.definition ?? this.skeleton(key, name), key);
     this.assertDraftShape(draft);
-    const row = await this.insertDraft({
-      store_id,
-      organization_id,
-      user_id,
-      key,
-      name,
-      description: input.description ?? null,
-      category: input.category ?? null,
-      source_template_key: input.source_template_key ?? null,
-      draft,
+    const row = await this.prisma.$transaction(async (tx: WorkflowTx) => {
+      const created = await this.insertDraft(tx, {
+        store_id,
+        organization_id,
+        user_id,
+        key,
+        name,
+        description: input.description ?? null,
+        category: input.category ?? null,
+        source_template_key: input.source_template_key ?? null,
+        draft,
+      });
+      await this.audit.append(tx, {
+        action: 'definition.created',
+        target_type: 'definition',
+        target_id: created.id,
+        definition_id: created.id,
+        summary: `Creó el flujo «${created.name}»`,
+        details: { key, source_template_key: input.source_template_key ?? null },
+      });
+      return created;
     });
     return this.present(row, null);
   }
@@ -238,6 +291,7 @@ export class WorkflowDefinitionsService {
   ) {
     const { store_id, user_id } = this.ctx();
     this.assertDraftShape(input.definition);
+    await this.access.assertCanDesign(id);
     const row = await this.load(this.prisma, store_id, id);
     if (input.expected_draft_updated_at) {
       const expected = new Date(input.expected_draft_updated_at).getTime();
@@ -249,17 +303,38 @@ export class WorkflowDefinitionsService {
       }
     }
     const now = new Date();
-    const res = await this.prisma.workflow_definitions.updateMany({
-      where: { id, store_id, draft_updated_at: row.draft_updated_at ?? null },
-      data: {
-        draft_definition: this.forceKey(input.definition, row.key),
-        draft_updated_at: now,
-        updated_by_user_id: user_id,
-      },
+    await this.prisma.$transaction(async (tx: WorkflowTx) => {
+      const res = await tx.workflow_definitions.updateMany({
+        where: { id, store_id, draft_updated_at: row.draft_updated_at ?? null },
+        data: {
+          draft_definition: this.forceKey(input.definition, row.key),
+          draft_updated_at: now,
+          updated_by_user_id: user_id,
+        },
+      });
+      if (res.count === 0) {
+        throw new VendixHttpException(ErrorCodes.WORKFLOW_DRAFT_CONFLICT);
+      }
+      const recent = await tx.workflow_audit_log.findFirst({
+        where: {
+          store_id,
+          action: 'definition.draft_saved',
+          definition_id: id,
+          actor_id: user_id,
+          created_at: { gte: new Date(now.getTime() - DRAFT_AUDIT_WINDOW_MS) },
+        },
+        select: { seq: true },
+      });
+      if (!recent) {
+        await this.audit.append(tx, {
+          action: 'definition.draft_saved',
+          target_type: 'definition',
+          target_id: id,
+          definition_id: id,
+          summary: `Guardó el borrador de «${row.name}»`,
+        });
+      }
     });
-    if (res.count === 0) {
-      throw new VendixHttpException(ErrorCodes.WORKFLOW_DRAFT_CONFLICT);
-    }
     return { id, draft_updated_at: now };
   }
 
@@ -281,6 +356,7 @@ export class WorkflowDefinitionsService {
 
   async publish(id: number, input: { changelog?: string | null } = {}) {
     const { store_id, organization_id, user_id } = this.ctx();
+    await this.access.assertCanDesign(id);
     try {
       return await this.prisma.$transaction(async (tx: WorkflowTx) => {
         const row = await this.load(tx, store_id, id);
@@ -340,6 +416,19 @@ export class WorkflowDefinitionsService {
         if (upd.count === 0) {
           throw new VendixHttpException(ErrorCodes.WORKFLOW_DEFINITION_NOT_FOUND);
         }
+        await this.audit.append(tx, {
+          action: 'definition.published',
+          target_type: 'definition',
+          target_id: id,
+          definition_id: id,
+          summary: `Publicó «${definition.name}» v${created.version}`,
+          details: {
+            version: created.version,
+            version_id: created.id,
+            definition_hash: hash,
+            changelog: created.changelog,
+          },
+        });
         const { definition: _body, ...summary } = created;
         return { unchanged: false, version: summary, warnings: result.warnings };
       });
@@ -376,15 +465,26 @@ export class WorkflowDefinitionsService {
     const key = await this.freeKey(store_id, wanted);
     const draft = this.forceKey({ ...input.definition, name }, key);
     this.assertDraftShape(draft);
-    const row = await this.insertDraft({
-      store_id,
-      organization_id,
-      user_id,
-      key,
-      name: name.slice(0, 160),
-      description: null,
-      category: null,
-      draft,
+    const row = await this.prisma.$transaction(async (tx: WorkflowTx) => {
+      const created = await this.insertDraft(tx, {
+        store_id,
+        organization_id,
+        user_id,
+        key,
+        name: name.slice(0, 160),
+        description: null,
+        category: null,
+        draft,
+      });
+      await this.audit.append(tx, {
+        action: 'definition.imported',
+        target_type: 'definition',
+        target_id: created.id,
+        definition_id: created.id,
+        summary: `Importó «${created.name}» como borrador`,
+        details: { key },
+      });
+      return created;
     });
     return {
       definition: this.present(row, null),
@@ -403,10 +503,20 @@ export class WorkflowDefinitionsService {
    */
   async setEnabled(id: number, enabled: boolean) {
     const { store_id, user_id } = this.ctx();
-    await this.load(this.prisma, store_id, id);
-    await this.prisma.workflow_definitions.updateMany({
-      where: { id, store_id },
-      data: { is_enabled: enabled, updated_by_user_id: user_id },
+    await this.access.assertCanDesign(id);
+    const row = await this.load(this.prisma, store_id, id);
+    await this.prisma.$transaction(async (tx: WorkflowTx) => {
+      await tx.workflow_definitions.updateMany({
+        where: { id, store_id },
+        data: { is_enabled: enabled, updated_by_user_id: user_id },
+      });
+      await this.audit.append(tx, {
+        action: enabled ? 'definition.enabled' : 'definition.disabled',
+        target_type: 'definition',
+        target_id: id,
+        definition_id: id,
+        summary: `${enabled ? 'Encendió' : 'Apagó'} «${row.name}»`,
+      });
     });
     return this.get(id);
   }
@@ -422,10 +532,22 @@ export class WorkflowDefinitionsService {
 
   private async setStatus(id: number, status: 'draft' | 'active' | 'archived') {
     const { store_id, user_id } = this.ctx();
-    await this.load(this.prisma, store_id, id);
-    await this.prisma.workflow_definitions.updateMany({
-      where: { id, store_id },
-      data: { status, updated_by_user_id: user_id },
+    await this.access.assertCanDesign(id);
+    const row = await this.load(this.prisma, store_id, id);
+    await this.prisma.$transaction(async (tx: WorkflowTx) => {
+      await tx.workflow_definitions.updateMany({
+        where: { id, store_id },
+        data: { status, updated_by_user_id: user_id },
+      });
+      const archived = status === 'archived';
+      await this.audit.append(tx, {
+        action: archived ? 'definition.archived' : 'definition.unarchived',
+        target_type: 'definition',
+        target_id: id,
+        definition_id: id,
+        summary: `${archived ? 'Archivó' : 'Desarchivó'} «${row.name}»`,
+        details: { from: row.status, to: status },
+      });
     });
     return this.get(id);
   }
@@ -534,7 +656,7 @@ export class WorkflowDefinitionsService {
     throw new VendixHttpException(ErrorCodes.WORKFLOW_KEY_TAKEN);
   }
 
-  private async insertDraft(p: {
+  private async insertDraft(db: WorkflowTx, p: {
     store_id: number;
     organization_id: number;
     user_id: number;
@@ -546,7 +668,7 @@ export class WorkflowDefinitionsService {
     draft: Json;
   }) {
     try {
-      return await this.prisma.workflow_definitions.create({
+      return await db.workflow_definitions.create({
         data: {
           store_id: p.store_id,
           organization_id: p.organization_id,

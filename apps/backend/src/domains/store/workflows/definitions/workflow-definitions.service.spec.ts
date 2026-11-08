@@ -362,4 +362,93 @@ describe('WorkflowDefinitionsService', () => {
       expect((await svc.create({ name: 'Ajeno', key: 'ajeno' })).store_id).toBe(1);
     });
   });
+
+  describe('auditoría de definiciones (P7.2)', () => {
+    const rows = (action?: string) =>
+      kit.db.table('workflow_audit_log').filter((r) => !action || r.action === action);
+    const flow = (name = 'Compra') => svc.create({ name, key: 'purchase', definition: purchaseDefinition() as any });
+
+    it('registra crear, publicar, importar y exportar con su resumen en español y el actor', async () => {
+      const d = await flow();
+      await svc.publish(d.id, { changelog: 'primera' });
+      await svc.import({ definition: purchaseDefinition() as any, name: 'Copia' });
+      await svc.export(d.id);
+      expect(rows().map((r) => r.action)).toEqual([
+        'definition.created',
+        'definition.published',
+        'definition.imported',
+        'definition.exported',
+      ]);
+      expect(rows('definition.created')[0]).toMatchObject({
+        summary: 'Creó el flujo «Compra»',
+        actor_id: 1,
+        definition_id: d.id,
+        category: 'definition',
+      });
+      expect(rows('definition.published')[0]).toMatchObject({ summary: 'Publicó «Compra» v1' });
+      expect(rows('definition.published')[0].details).toMatchObject({ version: 1, changelog: 'primera' });
+      expect(rows('definition.imported')[0].summary).toBe('Importó «Copia» como borrador');
+      expect(rows('definition.exported')[0].summary).toBe('Exportó «Compra» (v1)');
+      expect(await kit.prisma.workflow_audit_log.count({ where: { store_id: 1 } })).toBe(4);
+    });
+
+    it('republicar sin cambios no deja un registro nuevo', async () => {
+      const d = await flow();
+      await svc.publish(d.id);
+      await svc.publish(d.id);
+      expect(rows('definition.published')).toHaveLength(1);
+    });
+
+    it('encender, apagar, archivar y desarchivar quedan registrados', async () => {
+      const d = await flow();
+      await svc.setEnabled(d.id, false);
+      await svc.setEnabled(d.id, true);
+      await svc.archive(d.id);
+      await svc.unarchive(d.id);
+      expect(rows().slice(1).map((r) => [r.action, r.summary])).toEqual([
+        ['definition.disabled', 'Apagó «Compra»'],
+        ['definition.enabled', 'Encendió «Compra»'],
+        ['definition.archived', 'Archivó «Compra»'],
+        ['definition.unarchived', 'Desarchivó «Compra»'],
+      ]);
+    });
+
+    it('el autoguardado registra el borrador una vez por persona y flujo cada 10 minutos', async () => {
+      const d = await flow();
+      const save = (n: number) =>
+        svc.saveDraft(d.id, { definition: purchaseDefinition({ description: `v${n}` }) as any });
+      await save(1);
+      await save(2);
+      expect(rows('definition.draft_saved')).toHaveLength(1);
+      expect(rows('definition.draft_saved')[0].summary).toBe('Guardó el borrador de «Compra»');
+      // another person is recorded on their own
+      kit.as({ user_id: 2 });
+      await save(3);
+      expect(rows('definition.draft_saved').map((r) => r.actor_id)).toEqual([1, 2]);
+      // after the window the same person is recorded again
+      kit.as({ user_id: 1 });
+      rows('definition.draft_saved')[0].created_at = new Date(Date.now() - 11 * 60_000);
+      await save(4);
+      expect(rows('definition.draft_saved')).toHaveLength(3);
+    });
+
+    it('un guardado en conflicto no deja registro', async () => {
+      const d = await flow();
+      const before = rows().length;
+      await fail(svc.saveDraft(d.id, { definition: {} as any, expected_draft_updated_at: new Date(0) }));
+      expect(rows()).toHaveLength(before);
+    });
+
+    it('si la auditoría no se puede escribir, el cambio no queda hecho', async () => {
+      const d = await flow();
+      kit.db.rawHandlers.push((text) => {
+        if (text.includes('pg_advisory_xact_lock')) throw new Error('down');
+        return undefined;
+      });
+      expect(await fail(svc.setEnabled(d.id, false))).toBeDefined();
+      kit.db.rawHandlers.pop();
+      expect((await svc.get(d.id)).is_enabled).toBe(true);
+    });
+  });
 });
+

@@ -23,6 +23,8 @@ import {
   StartInstanceResult,
   UploadedFileResult,
   WorkGroupRow,
+  WorkflowAccessDoc,
+  WorkflowAccessView,
   WorkflowVersionDetail,
   WorkflowVersionRow,
   ValidateDefinitionResult,
@@ -357,6 +359,25 @@ export class WorkflowsApiService {
 
   revokePublicLink(definitionId: number): Observable<unknown> {
     return this.http.delete(`${this.base}/definitions/${definitionId}/public-link`);
+  }
+
+  /** P7.3: who designs, sees and decides each stage of the flow. */
+  getAccess(definitionId: number): Observable<WorkflowAccessView> {
+    return this.http
+      .get<ApiResponse<WorkflowAccessView>>(`${this.base}/definitions/${definitionId}/access`)
+      .pipe(map((res) => res.data));
+  }
+
+  /** `null` opens the flow again. Takes effect at once, without a new version. */
+  updateAccess(
+    definitionId: number,
+    access: WorkflowAccessDoc | null,
+  ): Observable<WorkflowAccessView> {
+    return this.http
+      .put<ApiResponse<WorkflowAccessView>>(`${this.base}/definitions/${definitionId}/access`, {
+        access,
+      })
+      .pipe(map((res) => res.data));
   }
 
   // ─── Files ───────────────────────────────────────────────────────────
