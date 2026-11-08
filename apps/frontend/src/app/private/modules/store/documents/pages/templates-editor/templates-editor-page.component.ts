@@ -15,7 +15,11 @@ import {
   StickyHeaderComponent,
   ToastService,
 } from '../../../../../../shared/components/index';
-import { apiErrorMessage } from '../../../workflows/utils/workflow-errors.util';
+import {
+  apiErrorMessage,
+  isPlanLimit,
+  toWorkflowError,
+} from '../../../workflows/utils/workflow-errors.util';
 import {
   BasePdfBody,
   BasePdfPage,
@@ -464,6 +468,8 @@ export class TemplatesEditorPageComponent implements OnInit {
         },
         error: (error) => {
           this.uploading.set(false);
+          // The storage cap of the plan already opened the paywall: no toast on top.
+          if (isPlanLimit(toWorkflowError(error))) return;
           this.fail(error);
         },
       });
