@@ -19,10 +19,11 @@
  *   2. Starts LOAD_STARTS requests with LOAD_CONCURRENCY in flight, each with
  *      its own Idempotency-Key, then replays LOAD_REPLAYS of them with the
  *      same key: a replay must return the same instance and create nothing.
- *   3. Approves LOAD_APPROVALS requests at the same instant. Each approval is
- *      sent three times at once: twice with the same Idempotency-Key (a
- *      network retry) and once with a fresh key (a double click). Exactly one
- *      completion per task must win; the others replay or are refused.
+ *   3. Submits the start form of LOAD_APPROVALS requests, then approves them
+ *      at the same instant. Each approval is sent three times at once: twice
+ *      with the same Idempotency-Key (a network retry) and once with a fresh
+ *      key (a double click). Exactly one completion per task must win; the
+ *      others replay or are refused.
  *   4. Counts what the API reports for the run's flow.
  *
  * The database invariants (one instance per idempotency key, one completion
@@ -238,8 +239,22 @@ async function main() {
     latency_ms: percentiles(replays.map((r) => r.ms)),
   };
 
-  // Phase 3: simultaneous approvals, each sent three times at once.
+  // Phase 3: simultaneous approvals, each sent three times at once. A request
+  // starts on its "solicitud" form (assigned to whoever started it), so each
+  // target first submits that form to reach its "aprobacion" task.
   const targets = [...uniqueStarted].slice(0, APPROVALS);
+  const submits = await pool(targets, CONCURRENCY, async (id) => {
+    const detail = must(await call('GET', `/store/workflows/instances/${id}`), `instance ${id}`);
+    const form = openTaskOf(detail, 'solicitud');
+    const version = rowVersionOf(detail);
+    if (!form || version === null) return null;
+    return call(
+      'POST',
+      `/store/workflows/tasks/${form.id}/complete`,
+      { outcome: 'submit', values: { concepto: `Gasto ${id}`, monto: 1000 }, expected_row_version: version },
+      { 'idempotency-key': `p7-submit-${RUN}-${form.id}` },
+    );
+  });
   const prepared = [];
   for (const id of targets) {
     const detail = must(await call('GET', `/store/workflows/instances/${id}`), `instance ${id}`);
@@ -272,6 +287,7 @@ async function main() {
     (b) => [b.first, b.retry, b.doubleClick].filter((r) => r.status < 300 && r.json?.data?.replayed !== true).length,
   );
   report.approvals = {
+    form_submits: tally(submits.filter((r) => r !== null)),
     tasks: prepared.length,
     requests: all.length,
     statuses: tally(all),
