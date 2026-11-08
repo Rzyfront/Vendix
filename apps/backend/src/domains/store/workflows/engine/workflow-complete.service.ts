@@ -484,7 +484,7 @@ export class WorkflowCompleteService {
     });
     const task = await this.loader.loadTask(tx, loaded.task.id);
     if (!joined) {
-    await this.auditBranch(tx, loaded, branch.key, input);
+      await this.auditBranch(tx, loaded, branch.key, input);
       return {
         instance,
         task,
@@ -507,7 +507,7 @@ export class WorkflowCompleteService {
         actor: { type: 'system', id: null },
         payload: { message: guard.message },
       });
-    await this.auditBranch(tx, loaded, branch.key, input);
+      await this.auditBranch(tx, loaded, branch.key, input);
       return {
         instance,
         task,
