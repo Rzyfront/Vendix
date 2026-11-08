@@ -5,9 +5,13 @@ export type WorkflowLimitsPayload = Partial<
 
 export type WorkflowLimitKey = keyof WorkflowLimitsPayload;
 
-/** One line of the "Límites de Flujos" section: the number shown (storage in GB) and the "Sin límite" toggle. */
+/**
+ * One line of the "Límites de Flujos" section: the number shown (storage in GB)
+ * and the "Sin límite" toggle. `app-input` hands the control the text the person
+ * typed, so a typed line arrives as a string; a loaded plan arrives as a number.
+ */
 export interface WorkflowLimitFieldValue {
-  value: number | null;
+  value: number | string | null;
   unlimited: boolean;
 }
 
@@ -34,6 +38,14 @@ const toStored = (key: WorkflowLimitKey, value: number): number =>
 const toShown = (key: WorkflowLimitKey, stored: number): number =>
   key === 'storage_bytes' ? Math.round((stored / GIB) * 100) / 100 : stored;
 
+/** The number of a line, typed (text) or loaded (number); empty, negative or not a number is `null`. */
+const typedNumber = (value: number | string | null): number | null => {
+  const text = typeof value === 'string' ? value.trim() : value;
+  if (text === null || text === '') return null;
+  const n = Number(text);
+  return Number.isFinite(n) && n >= 0 ? n : null;
+};
+
 /**
  * What the form sends: an empty section (nothing typed, no toggle) is `null`,
  * which clears the plan's limits so the platform defaults apply. Otherwise only
@@ -46,9 +58,10 @@ export function buildWorkflowLimits(form: WorkflowLimitsFormValue): WorkflowLimi
     const line = form[key];
     if (line.unlimited) {
       out[key] = null;
-    } else if (typeof line.value === 'number' && Number.isFinite(line.value) && line.value >= 0) {
-      out[key] = toStored(key, line.value);
+      continue;
     }
+    const typed = typedNumber(line.value);
+    if (typed !== null) out[key] = toStored(key, typed);
   }
   return Object.keys(out).length === 0 ? null : out;
 }

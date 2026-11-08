@@ -1,6 +1,9 @@
+import { provideHttpClient } from '@angular/common/http';
+import { provideHttpClientTesting } from '@angular/common/http/testing';
 import { provideZonelessChangeDetection } from '@angular/core';
-import { TestBed } from '@angular/core/testing';
+import { ComponentFixture, TestBed } from '@angular/core/testing';
 import { ActivatedRoute, Router, convertToParamMap } from '@angular/router';
+import { provideMockStore } from '@ngrx/store/testing';
 import { of } from 'rxjs';
 import { ToastService } from '../../../../../../shared/components/toast/toast.service';
 import { AIEngineService } from '../../../ai-engine/services/ai-engine.service';
@@ -16,6 +19,8 @@ describe('PlanFormComponent: Límites de Flujos (P7.1)', () => {
     createPlan: jasmine.createSpy('createPlan'),
   };
 
+  let fixture: ComponentFixture<PlanFormComponent>;
+
   function setup(planId: string | null, plan?: Record<string, unknown>) {
     service.getPlanById.calls.reset();
     service.updatePlan.calls.reset();
@@ -27,6 +32,9 @@ describe('PlanFormComponent: Límites de Flujos (P7.1)', () => {
       imports: [PlanFormComponent],
       providers: [
         provideZonelessChangeDetection(),
+        provideHttpClient(),
+        provideHttpClientTesting(),
+        provideMockStore({ initialState: { tenant: { domainConfig: null } } }),
         { provide: SubscriptionAdminService, useValue: service },
         {
           provide: AIEngineService,
@@ -45,7 +53,8 @@ describe('PlanFormComponent: Límites de Flujos (P7.1)', () => {
         },
       ],
     });
-    return TestBed.createComponent(PlanFormComponent).componentInstance;
+    fixture = TestBed.createComponent(PlanFormComponent);
+    return fixture.componentInstance;
   }
 
   const stored = (over: Record<string, unknown> = {}) => ({
@@ -82,6 +91,22 @@ describe('PlanFormComponent: Límites de Flujos (P7.1)', () => {
     expect(cmp.limitsForm.getRawValue().storage_bytes.value).toBe(5);
     cmp.onSubmit();
     expect(service.updatePlan.calls.mostRecent().args[1].workflow_limits).toEqual(limits);
+  });
+
+  it('a number typed in the field is saved (the input hands the control text)', async () => {
+    const cmp = setup('7', stored());
+    cmp.activeTab.set('workflows');
+    fixture.detectChanges();
+    await fixture.whenStable();
+    const input = fixture.nativeElement.querySelector(
+      '[data-testid="workflow-limits-section"] input',
+    ) as HTMLInputElement;
+    input.value = '750';
+    input.dispatchEvent(new Event('input'));
+    cmp.onSubmit();
+    expect(service.updatePlan.calls.mostRecent().args[1].workflow_limits).toEqual({
+      monthly_instances: 750,
+    });
   });
 
   it('clearing every line of a stored plan sends null so the defaults apply again', () => {

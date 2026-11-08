@@ -33,6 +33,24 @@ describe('workflow limits of a plan (P7.1)', () => {
     expect(buildWorkflowLimits(form)).toEqual({ monthly_instances: 0 });
   });
 
+  it('a number typed in the field arrives as text and is still sent', () => {
+    const form = emptyWorkflowLimitsForm();
+    form.monthly_instances = { value: '500', unlimited: false };
+    form.storage_bytes = { value: ' 2.5 ', unlimited: false };
+    expect(buildWorkflowLimits(form)).toEqual({
+      monthly_instances: 500,
+      storage_bytes: Math.round(2.5 * 1024 ** 3),
+    });
+  });
+
+  it('a field emptied or filled with text that is not a number is left out', () => {
+    const form = emptyWorkflowLimitsForm();
+    form.monthly_instances = { value: '', unlimited: false };
+    form.monthly_http_calls = { value: 'abc', unlimited: false };
+    form.storage_bytes = { value: '-3', unlimited: false };
+    expect(buildWorkflowLimits(form)).toBeNull();
+  });
+
   it('a negative or non-finite number is left out', () => {
     const form = emptyWorkflowLimitsForm();
     form.monthly_instances = { value: -1, unlimited: false };

@@ -562,13 +562,13 @@ export class PlanFormComponent {
       WORKFLOW_LIMIT_KEYS.map((key) => [
         key,
         new FormGroup({
-          value: new FormControl<number | null>(null),
+          value: new FormControl<number | string | null>(null),
           unlimited: new FormControl(false, { nonNullable: true }),
         }),
       ]),
     ) as Record<
       WorkflowLimitKey,
-      FormGroup<{ value: FormControl<number | null>; unlimited: FormControl<boolean> }>
+      FormGroup<{ value: FormControl<number | string | null>; unlimited: FormControl<boolean> }>
     >,
   );
 
