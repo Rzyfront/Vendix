@@ -484,7 +484,7 @@ export class InsightsPageComponent implements OnInit {
     this.usageLoading.set(true);
     this.usageError.set('');
     // The current month is requested without a parameter: the API resolves it
-    // with the store's timezone.
+    // as the current UTC month (the plan counter's), the first one of the list.
     const current = this.month() === this.months[0].value;
     this.api
       .getAiUsage(current ? undefined : this.month())

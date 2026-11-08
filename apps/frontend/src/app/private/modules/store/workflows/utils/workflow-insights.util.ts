@@ -73,11 +73,15 @@ export interface MonthOption {
   label: string;
 }
 
-/** The last `count` months, newest first, as `YYYY-MM` plus a Spanish label. */
+/**
+ * The last `count` months, newest first, as `YYYY-MM` plus a Spanish label.
+ * UTC months, like the plan counter and the usage API: on the last evening
+ * of a month in Colombia the API is already in the next one.
+ */
 export function lastMonths(count: number, now: Date = new Date()): MonthOption[] {
   const options: MonthOption[] = [];
   for (let i = 0; i < count; i++) {
-    const date = new Date(Date.UTC(now.getFullYear(), now.getMonth() - i, 1));
+    const date = new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth() - i, 1));
     const month = String(date.getUTCMonth() + 1).padStart(2, '0');
     options.push({
       value: `${date.getUTCFullYear()}-${month}`,

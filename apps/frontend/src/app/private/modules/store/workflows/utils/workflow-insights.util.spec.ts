@@ -48,6 +48,13 @@ describe('workflow-insights.util', () => {
     expect(months[0].label).toBe('febrero de 2026');
   });
 
+  it('usa el mes UTC del contador: el 31 a las 23:30 en Bogotá ya es el mes siguiente (r1)', () => {
+    const months = lastMonths(2, new Date('2026-10-31T23:30:00-05:00'));
+    expect(months[0].value).toBe('2026-11');
+    expect(months[1].value).toBe('2026-10');
+    expect(months[0].label).toBe('noviembre de 2026');
+  });
+
   it('toma el párrafo del flujo del último resumen listo', () => {
     const failed = summary({ id: 3, status: 'failed', content: null, error: 'x' });
     const ready = summary({
