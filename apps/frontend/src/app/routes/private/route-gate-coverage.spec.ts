@@ -6,6 +6,9 @@ import { AccessGateService } from '../../core/services/access-gate.service';
 import { SubscriptionAccessService } from '../../core/services/subscription-access.service';
 import { AuthFacade } from '../../core/store/auth/auth.facade';
 import { MODULE_INDUSTRIES } from '../../shared/constants/module-industries';
+import { STORE_ADMIN_MENU_ITEMS } from '../../private/layouts/store-admin/store-admin-menu-items';
+import { workflowsRoutes } from '../../private/modules/store/workflows/routes/workflows.routes';
+import { documentsRoutes } from '../../private/modules/store/documents/routes/documents.routes';
 import { storeAdminRoutes } from './store_admin.routes';
 import { orgAdminRoutes } from './org_admin.routes';
 
@@ -134,6 +137,47 @@ describe('apps-f4 S3: cobertura de rutas del panel con key', () => {
     expect(service.resolveGateKeysForRoute('/admin/workflows/inbox', 'STORE_ADMIN')).toContain('flows');
     expect(service.resolveGateKeysForRoute('/admin/workflows/integrations', 'STORE_ADMIN')).toContain('flows');
     expect(service.resolveGateKeysForRoute('/admin/workflows/12/board', 'STORE_ADMIN')).toContain('flows');
+  });
+
+  // P5.7: each sidebar child of Flujos and Documentos is a registered route of
+  // its lazy module (no 404) and resolves its own key plus the parent key.
+  const ADMINISTRATION_CHILDREN = STORE_ADMIN_MENU_ITEMS.filter(
+    (item) => item.label === 'Flujos' || item.label === 'Documentos',
+  ).flatMap((group) =>
+    (group.children ?? []).map((child) => ({
+      parent: group.panelUiKey!,
+      route: child.route!,
+      key: child.panelUiKey!,
+    })),
+  );
+
+  it('P5.7: Flujos y Documentos tienen 13 hijos en el Sidebar', () => {
+    expect(ADMINISTRATION_CHILDREN.length).toBe(13);
+  });
+
+  for (const child of [
+    '/admin/workflows', '/admin/workflows/inbox', '/admin/workflows/board', '/admin/workflows/templates',
+    '/admin/workflows/records', '/admin/workflows/connectors', '/admin/workflows/integrations',
+    '/admin/documents', '/admin/documents/search', '/admin/documents/folders', '/admin/documents/expiring',
+    '/admin/documents/retention', '/admin/documents/templates',
+  ]) {
+    it(`P5.7: ${child} está registrada y resuelve la key del hijo y la del padre`, () => {
+      const entry = ADMINISTRATION_CHILDREN.find((c) => c.route === child);
+      expect(entry).withContext('hijo del Sidebar').toBeDefined();
+      const [, , module, ...rest] = child.split('/');
+      const lazy = module === 'workflows' ? workflowsRoutes : documentsRoutes;
+      const path = rest.join('/');
+      const route = lazy.find((r) => r.path === path);
+      expect(route?.loadComponent).withContext(`ruta '${path}' del módulo ${module}`).toBeDefined();
+      const keys = service.resolveGateKeysForRoute(child, 'STORE_ADMIN');
+      expect(keys).toContain(entry!.key);
+      expect(keys).toContain(entry!.parent);
+      expect(service.resolveKeysForRoute(child)).toContain(entry!.parent);
+    });
+  }
+
+  it('P5.7: la solicitud abierta desde «Mis tareas» solo la gobierna el padre', () => {
+    expect(service.resolveGateKeysForRoute('/admin/workflows/instances/12', 'STORE_ADMIN')).toEqual(['flows']);
   });
 
   it('una ruta inventada no resuelve key (el test detecta huecos)', () => {

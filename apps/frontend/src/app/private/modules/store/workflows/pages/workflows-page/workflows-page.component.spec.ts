@@ -2,7 +2,7 @@ import { provideZonelessChangeDetection } from '@angular/core';
 import { ComponentFixture, TestBed } from '@angular/core/testing';
 import { HttpErrorResponse, provideHttpClient } from '@angular/common/http';
 import { provideHttpClientTesting } from '@angular/common/http/testing';
-import { provideRouter } from '@angular/router';
+import { Router, provideRouter } from '@angular/router';
 import { provideMockStore } from '@ngrx/store/testing';
 import { NEVER, Observable, of, throwError } from 'rxjs';
 import { ToastService } from '../../../../../../shared/components/index';
@@ -31,6 +31,7 @@ describe('WorkflowsPageComponent', () => {
       'listInstances',
       'publishDefinition',
       'setDefinitionEnabled',
+      'createDefinition',
     ]);
     api.listDefinitions.and.returnValue(of(list([row])) as never);
     api.listInstances.and.returnValue(of(list([])) as never);
@@ -166,5 +167,27 @@ describe('WorkflowsPageComponent', () => {
     api.listDefinitions.and.returnValue(of(list([{ ...row, is_enabled: false }])) as never);
     await render();
     expect(text()).toContain('Apagado');
+  });
+
+  it('"Nuevo flujo" pide solo el nombre y abre el editor del flujo creado', async () => {
+    await render();
+    const c = fixture.componentInstance;
+    const router = TestBed.inject(Router);
+    spyOn(router, 'navigate').and.resolveTo(true);
+    c.onHeaderAction('new');
+    expect(c.newOpen()).toBeTrue();
+    c.onNewCreated({ ...row, id: 9 } as never);
+    expect(router.navigate).toHaveBeenCalledWith(['/admin/workflows', 9, 'edit']);
+  });
+
+  it('P5.7: el encabezado solo trae las acciones de la pantalla; los submódulos están en el Sidebar', async () => {
+    await render();
+    const router = TestBed.inject(Router);
+    spyOn(router, 'navigate').and.resolveTo(true);
+    expect(fixture.componentInstance.headerActions.map((a) => a.id)).toEqual(['import', 'new']);
+    for (const id of ['inbox', 'board', 'templates', 'records', 'connectors', 'integrations']) {
+      fixture.componentInstance.onHeaderAction(id);
+    }
+    expect(router.navigate).not.toHaveBeenCalled();
   });
 });

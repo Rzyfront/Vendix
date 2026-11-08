@@ -17,7 +17,7 @@ import {
   WorkflowConditionRule,
   WorkflowFieldDef,
 } from '../../../../../../shared/workflows/contract/workflow-contract';
-import { OP_TEXT, groupChildren, groupMode } from '../workflow-editor.utils';
+import { OP_TEXT, conditionFieldOptions, groupChildren, groupMode } from '../workflow-editor.utils';
 
 type RuleValue = WorkflowConditionRule['value'];
 
@@ -168,9 +168,7 @@ export class ConditionGroupComponent {
   readonly maxDepth = WORKFLOW_LIMITS.maxConditionDepth;
   readonly mode = computed(() => groupMode(this.group()));
   readonly children = computed(() => groupChildren(this.group()));
-  readonly fieldOptions = computed(() =>
-    this.fields().map((f) => ({ value: f.key, label: f.label || f.key })),
-  );
+  readonly fieldOptions = computed(() => conditionFieldOptions(this.fields()));
 
   isGroup(node: WorkflowConditionNode): boolean {
     return 'all' in node || 'any' in node;

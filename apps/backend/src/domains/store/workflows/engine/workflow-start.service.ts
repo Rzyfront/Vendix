@@ -134,6 +134,10 @@ export class WorkflowStartService {
       await this.assertSubjectInStore(tx, ctx, subject, definition.subject?.collection);
     }
 
+    const locationId = input.locationId
+      ? await this.storeLocationId(tx, ctx.store_id, input.locationId, true)
+      : null;
+
     const created = (await tx.workflow_instances.create({
       data: {
         organization_id: ctx.organization_id,
@@ -145,6 +149,7 @@ export class WorkflowStartService {
         data: await this.stages.computeFields(definition, enter.data, ctx.store_id),
         subject_type: subject?.type ?? null,
         subject_id: subject?.id ?? null,
+        location_id: locationId,
         started_by_type: actor.type,
         started_by_id: actor.id,
         row_version: 0,
@@ -419,6 +424,12 @@ export class WorkflowStartService {
       stage,
       initial: this.mapInitial(definition, trigger.map, input.eventContext, allowed),
       subject,
+      locationId: await this.storeLocationId(
+        tx,
+        ctx.store_id,
+        Number(input.eventContext.location_id),
+        false,
+      ),
       idempotencyKey: input.idempotencyKey,
       started: { via: 'event', event: input.event },
     });
@@ -754,6 +765,27 @@ export class WorkflowStartService {
     return initial;
   }
 
+  /**
+   * A branch of this very store. `strict` (manual start) rejects a foreign or
+   * unknown id; otherwise (event context) it quietly yields `null`.
+   */
+  private async storeLocationId(
+    tx: WorkflowTx,
+    storeId: number,
+    id: number,
+    strict: boolean,
+  ): Promise<number | null> {
+    if (Number.isInteger(id) && id > 0) {
+      const row = await tx.inventory_locations.findFirst({
+        where: { id, store_id: storeId },
+        select: { id: true },
+      });
+      if (row) return row.id as number;
+    }
+    if (strict) throw new VendixHttpException(ErrorCodes.WORKFLOW_NOT_FOUND);
+    return null;
+  }
+
   /** Shared tail of the system starts (event and approval gate). */
   private async createSystemInstance(
     tx: WorkflowTx,
@@ -764,6 +796,8 @@ export class WorkflowStartService {
       stage: WorkflowStageDef;
       initial: Record<string, unknown>;
       subject: { type: string; id: number } | null;
+      /** P5.5: branch of the request (already checked against the store). */
+      locationId?: number | null;
       idempotencyKey: string;
       started: Record<string, unknown>;
       /** P3: title given by the caller (default: the flow name). */
@@ -795,6 +829,7 @@ export class WorkflowStartService {
         data: await this.stages.computeFields(a.definition, enter.data, ctx.store_id),
         subject_type: a.subject?.type ?? null,
         subject_id: a.subject?.id ?? null,
+        location_id: a.locationId ?? null,
         started_by_type: a.startedBy?.type ?? actor.type,
         started_by_id: a.startedBy?.id ?? null,
         ...(a.parent

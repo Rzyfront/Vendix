@@ -15,7 +15,6 @@ import {
   ToastService,
 } from '../../../../../../shared/components/index';
 import { AuthFacade } from '../../../../../../core/store/auth/auth.facade';
-import { DocumentsTabsComponent } from '../../components/documents-tabs.component';
 import { FileProfileModalComponent } from '../../components/file-profile-modal.component';
 import {
   ExpiringRow,
@@ -52,7 +51,6 @@ const WINDOW_OPTIONS = [
     SelectorComponent,
     PaginationComponent,
     EmptyStateComponent,
-    DocumentsTabsComponent,
     FileProfileModalComponent,
   ],
   template: `
@@ -63,7 +61,6 @@ const WINDOW_OPTIONS = [
         icon="folder-open"
         variant="glass"
       />
-      <app-documents-tabs active="expiring" />
 
       <app-card [responsive]="true" [padding]="false" overflow="visible">
         <div class="flex items-center justify-between gap-3 border-b border-border px-2 py-3 md:px-6 md:py-4">

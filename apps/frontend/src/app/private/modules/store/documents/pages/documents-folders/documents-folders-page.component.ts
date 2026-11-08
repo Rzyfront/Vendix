@@ -13,7 +13,6 @@ import {
 } from '../../../../../../shared/components/index';
 import { AuthFacade } from '../../../../../../core/store/auth/auth.facade';
 import { DocumentFileListComponent } from '../../components/document-file-list.component';
-import { DocumentsTabsComponent } from '../../components/documents-tabs.component';
 import { FileProfileModalComponent } from '../../components/file-profile-modal.component';
 import {
   FolderEntity,
@@ -47,7 +46,6 @@ const LIMIT = 20;
     IconComponent,
     EmptyStateComponent,
     PaginationComponent,
-    DocumentsTabsComponent,
     DocumentFileListComponent,
     FileProfileModalComponent,
   ],
@@ -59,7 +57,6 @@ const LIMIT = 20;
         icon="folder-open"
         variant="glass"
       />
-      <app-documents-tabs active="folders" />
 
       @if (level() !== 'groups') {
         <div class="px-2 pb-2 md:px-0">

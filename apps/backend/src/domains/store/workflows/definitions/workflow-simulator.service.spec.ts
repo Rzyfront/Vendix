@@ -327,3 +327,113 @@ describe('simulateWorkflow · acciones Vendix', () => {
     expect((await invalid.simulate(1, { definition: def() as any })).actions).toEqual([]);
   });
 });
+
+describe('simulateWorkflow: parallel stages and variables per step', () => {
+  const parallelDef = (join: 'all' | 'any' | 'n_of_m', required?: number) =>
+    ({
+      schema: 'vendix.workflow/v1',
+      key: 'par',
+      name: 'Paralelo',
+      fields: [
+        { key: 'monto', type: 'money', label: 'Monto' },
+        { key: 'revisado', type: 'text', label: 'Revisado' },
+      ],
+      stages: [
+        {
+          key: 'solicitud',
+          name: 'Solicitud',
+          type: 'form',
+          start: true,
+          assignee: { kind: 'initiator' },
+          form: { fields: ['monto'] },
+          transitions: [{ to: 'revision', on: 'submit' }],
+        },
+        {
+          key: 'revision',
+          name: 'Revisión',
+          type: 'parallel',
+          parallel: {
+            join,
+            ...(required ? { required } : {}),
+            branches: [
+              { key: 'a', name: 'Jefe', assignee: { kind: 'role', role_key: 'manager' } },
+              { key: 'b', name: 'Contador', assignee: { kind: 'group', group_key: 'conta' } },
+              { key: 'c', name: 'Legal', assignee: { kind: 'user', user_id: 4 } },
+            ],
+          },
+          on_enter: [{ action: 'set_field', field: 'revisado', value: 'entrada' }],
+          on_submit: [{ action: 'notify', to: { kind: 'initiator' }, message: 'Una rama terminó' }],
+          on_complete: [{ action: 'set_field', field: 'revisado', value: 'completo' }],
+          on_exit: [{ action: 'notify', to: { kind: 'initiator' }, message: 'Salida' }],
+          transitions: [{ to: 'fin', on: 'joined' }],
+        },
+        { key: 'fin', name: 'Fin', type: 'end', outcome: 'completed' },
+      ],
+      triggers: [{ kind: 'manual' }],
+    }) as unknown as WorkflowDefinitionV1;
+
+  it('lists one task per branch and resolves the join through to the end', () => {
+    const r = simulateWorkflow(parallelDef('all'), {
+      state: { stage_key: 'solicitud', data: {} },
+      outcome: 'submit',
+      values: { monto: 3_000_000 },
+    });
+    expect(r.path).toEqual(['solicitud', 'revision', 'fin']);
+    expect(r.ended).toEqual({ outcome: 'completed' });
+    expect(r.tasks.map((t) => t.assignee?.label)).toEqual([
+      'Rol: manager',
+      'Grupo: conta',
+      'Usuario #4',
+    ]);
+    const step = r.steps.find((s) => s.stage_key === 'revision');
+    expect(step?.parallel).toMatchObject({
+      join: 'all',
+      needed: 3,
+      total: 3,
+      outcome: 'joined',
+    });
+    expect(step?.parallel?.branches.map((b) => b.name)).toEqual(['Jefe', 'Contador', 'Legal']);
+  });
+
+  it('applies the join rule: any needs 1, n_of_m needs `required`', () => {
+    const run = (def: WorkflowDefinitionV1) =>
+      simulateWorkflow(def, { state: { stage_key: 'solicitud', data: {} }, outcome: 'submit', values: { monto: 1 } })
+        .steps.find((s) => s.stage_key === 'revision')?.parallel;
+    expect(run(parallelDef('any'))).toMatchObject({ needed: 1, total: 3 });
+    expect(run(parallelDef('n_of_m', 2))).toMatchObject({ needed: 2, total: 3 });
+  });
+
+  it('runs on_submit once per needed branch, then on_complete and on_exit', () => {
+    const r = simulateWorkflow(parallelDef('n_of_m', 2), {
+      state: { stage_key: 'solicitud', data: {} },
+      outcome: 'submit',
+      values: { monto: 1 },
+    });
+    expect(r.notifications.map((n) => n.message)).toEqual([
+      'Una rama terminó',
+      'Una rama terminó',
+      'Salida',
+    ]);
+    expect(r.data.revisado).toBe('completo');
+  });
+
+  it('records variables per step and the keys each step changed', () => {
+    const r = simulateWorkflow(parallelDef('all'), {
+      state: { stage_key: 'solicitud', data: { monto: 5 } },
+      outcome: 'submit',
+      values: { monto: 3_000_000 },
+    });
+    expect(r.steps.map((s) => s.stage_key)).toEqual(['solicitud', 'revision', 'fin']);
+    expect(r.steps[0]).toMatchObject({ data: { monto: 3_000_000 }, changed: ['monto'] });
+    // on_enter sets it, the join's on_complete overrides it.
+    expect(r.steps[1].data).toMatchObject({ monto: 3_000_000, revisado: 'completo' });
+    expect(r.steps[1].changed).toEqual(['revisado']);
+    expect(r.steps[2].changed).toEqual([]);
+  });
+
+  it('a start run records the first stage as the only step', () => {
+    const r = simulateWorkflow(EX);
+    expect(r.steps).toHaveLength(1);
+    expect(r.steps[0]).toMatchObject({ stage_key: 'solicitud', type: 'form', data: {} });
+  });
+});

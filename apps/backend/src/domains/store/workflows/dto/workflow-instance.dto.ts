@@ -32,6 +32,8 @@ export class StartWorkflowDto {
   @IsOptional() @IsString() @MaxLength(200) title?: string;
   @IsOptional() @IsObject() data?: Record<string, unknown>;
   @IsOptional() @ValidateNested() @Type(() => WorkflowSubjectDto) subject?: WorkflowSubjectDto;
+  /** P5.5: branch (`inventory_locations`) of the store. */
+  @IsOptional() @Type(() => Number) @IsInt() @Min(1) location_id?: number;
 }
 
 export class WorkflowInstancesQueryDto {

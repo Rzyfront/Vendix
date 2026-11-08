@@ -23,6 +23,8 @@ import { removeAt, replaceAt, toWholeNumber } from '../../workflow-editor.utils'
 import { vendixActionOptions } from '../../workflow-editor-triggers.utils';
 import { ActionMapEditorComponent } from '../action-map-editor.component';
 import { AssigneeEditorComponent } from '../assignee-editor.component';
+import { VariablePickerComponent } from '../variable-picker/variable-picker.component';
+import { buildVariableGroups } from '../variable-picker/variable-picker.utils';
 
 type Hook = WorkflowHookPoint;
 
@@ -40,6 +42,7 @@ const THEN_OPTIONS = [
   { value: 'fail', label: 'Terminar la solicitud' },
 ];
 
+import { ActionTestButtonComponent } from '../action-test/action-test-button.component';
 /** Acciones tab: notify, set_field and Vendix actions for on_enter / on_exit. */
 @Component({
   selector: 'app-stage-actions-tab',
@@ -54,6 +57,8 @@ const THEN_OPTIONS = [
     ToggleComponent,
     AssigneeEditorComponent,
     ActionMapEditorComponent,
+    VariablePickerComponent,
+    ActionTestButtonComponent,
   ],
   template: `
     <div class="flex flex-col gap-6">
@@ -86,7 +91,17 @@ const THEN_OPTIONS = [
                   [fields]="fields()"
                   (valueChange)="patch(hook.id, i, { to: $event })"
                 />
-                <app-textarea label="Mensaje" [rows]="2" [ngModel]="action.message" (ngModelChange)="patch(hook.id, i, { message: $event })" />
+                <div class="flex flex-col gap-1" #messageBox>
+                  <app-textarea label="Mensaje" [rows]="2" [ngModel]="action.message" (ngModelChange)="patch(hook.id, i, { message: $event })" />
+                  <div>
+                    <app-variable-picker
+                      [groups]="variableGroups()"
+                      [container]="messageBox"
+                      [text]="action.message"
+                      (textChange)="patch(hook.id, i, { message: $event })"
+                    />
+                  </div>
+                </div>
               } @else if (action.action === 'set_field') {
                 <app-selector
                   label="Campo a cambiar"
@@ -119,6 +134,10 @@ const THEN_OPTIONS = [
                   (mapChange)="patch(hook.id, i, { map: $event })"
                   (outputMapChange)="patch(hook.id, i, { output: $event })"
                 />
+                @if (action.action !== 'vendix.http.request') {
+                  <!-- P5.2: HTTP has its own real test inside its editor. -->
+                  <div><app-action-test-button [action]="action" [definition]="store.draft()" /></div>
+                }
                 <div class="flex flex-col gap-3 rounded-lg border border-border p-3" data-testid="on-error">
                   <p class="text-xs font-semibold text-text-primary">Si falla</p>
                   <app-input
@@ -184,6 +203,8 @@ export class StageActionsTabComponent {
     ...vendixActionOptions(),
   ];
   readonly fields = computed<WorkflowFieldDef[]>(() => this.store.draft()?.fields ?? []);
+  /** Hooks resolve `{{fields.*}}` and `{{instance.*}}`; the trigger event is not available there. */
+  readonly variableGroups = computed(() => buildVariableGroups(this.fields()));
   readonly fieldOptions = computed(() => this.fields().map((f) => ({ value: f.key, label: f.label })));
 
   list(hook: Hook): WorkflowActionDef[] {

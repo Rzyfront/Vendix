@@ -1,7 +1,7 @@
 import { Injectable } from '@nestjs/common';
 import { RequestContextService } from '@common/context/request-context.service';
 import { ErrorCodes, VendixHttpException } from '@common/errors';
-import { WorkflowDefinitionV1, findStage } from '@common/workflows/contract';
+import { WorkflowDefinitionV1, WorkflowStageDef, findStage } from '@common/workflows/contract';
 import { StorePrismaService } from '../../../../prisma/services/store-prisma.service';
 import { quickOutcomes } from '../engine/workflow-move-rules';
 
@@ -116,6 +116,8 @@ export class WorkflowInboxService {
       if (!instance) return [];
       const definition = versionDef.get(instance.version_id);
       const stage = definition ? findStage(definition, t.stage_key) : undefined;
+      const quick =
+        definition && stage ? quickOutcomes(definition, stage, instance.data ?? {}) : [];
       return [
         {
           task_id: t.id,
@@ -141,12 +143,30 @@ export class WorkflowInboxService {
             name: defName.get(instance.definition_id) ?? null,
           },
           assignee: this.assignee(t, names),
-          quick_outcomes:
-            definition && stage ? quickOutcomes(definition, stage, instance.data ?? {}) : [],
+          // P5.5: what the mobile list needs to act without opening the detail.
+          stage_type: stage?.type ?? null,
+          has_form: (stage?.form?.fields.length ?? 0) > 0,
+          quick_outcomes: quick,
+          comment_outcomes:
+            definition && stage ? this.commentOutcomes(definition, stage, instance.data ?? {}, quick) : [],
         },
       ];
     });
     return { data, total, page, limit };
+  }
+
+  /** Outcomes that would be quick if only the mandatory comment were given. */
+  private commentOutcomes(
+    definition: WorkflowDefinitionV1,
+    stage: WorkflowStageDef,
+    data: Record<string, unknown>,
+    quick: string[],
+  ): string[] {
+    const withoutComment: WorkflowStageDef = {
+      ...stage,
+      transitions: (stage.transitions ?? []).map((t) => ({ ...t, require_comment: false })),
+    };
+    return quickOutcomes(definition, withoutComment, data).filter((o) => !quick.includes(o));
   }
 
   private assignee(t: any, names: { users: Map<number, string>; roles: Map<number, string>; groups: Map<number, string> }) {

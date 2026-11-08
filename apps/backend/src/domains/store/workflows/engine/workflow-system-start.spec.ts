@@ -64,6 +64,25 @@ describe('WorkflowEngineService.startSystem', () => {
   });
   afterEach(() => jest.restoreAllMocks());
 
+  it('P5.5: la sede sale del location_id del contexto si es de la tienda; si no, queda nula', async () => {
+    const { definitionId } = seedDefinition(kit.db, eventDefinition());
+    kit.db.table('inventory_locations').push(
+      { id: 3, store_id: 1, name: 'Bodega', is_active: true },
+      { id: 4, store_id: 2, name: 'Ajena', is_active: true },
+    );
+    kit.as({ user_id: undefined });
+    const own = await kit.engine.startSystem(
+      input(definitionId, { idempotencyKey: 'loc-a', eventContext: { ...input(definitionId).eventContext, location_id: 3 } }),
+    );
+    expect(own.instance.location_id).toBe(3);
+    const foreign = await kit.engine.startSystem(
+      input(definitionId, { idempotencyKey: 'loc-b', eventContext: { ...input(definitionId).eventContext, location_id: 4 } }),
+    );
+    expect(foreign.instance.location_id).toBeNull();
+    const none = await kit.engine.startSystem(input(definitionId, { idempotencyKey: 'loc-c' }));
+    expect(none.instance.location_id).toBeNull();
+  });
+
   it('arranca como actor system, queda EN la etapa inicial con su tarea (el formulario no se envía solo)', async () => {
     const { definitionId } = seedDefinition(kit.db, eventDefinition());
     kit.as({ user_id: undefined });

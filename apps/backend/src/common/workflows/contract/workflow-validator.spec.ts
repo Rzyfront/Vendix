@@ -79,6 +79,22 @@ describe('validateWorkflowDefinition — example and basics', () => {
     expect(has(run((d) => (d.fields[0].type = 'blob')), 'SHAPE_INVALID')).toBe(true);
     expect(has(run((d) => (d.stages[1].type = 'weird')), 'SHAPE_INVALID')).toBe(true);
   });
+
+  it('accepts the optional canvas position ui {x, y} and rejects bad ones', () => {
+    const ok = run((d) => (d.stages[0].ui = { x: 120, y: 48.5 }));
+    expect(ok.errors).toEqual([]);
+    for (const ui of [
+      { x: -1, y: 0 },
+      { x: 0, y: 20001 },
+      { x: 'a', y: 0 },
+      { x: 1 },
+      { x: 1, y: 2, z: 3 },
+      [1, 2],
+    ]) {
+      const r = run((d) => (d.stages[0].ui = ui));
+      expect(r.errors.some((e) => e.path.startsWith('stages[0].ui'))).toBe(true);
+    }
+  });
 });
 
 describe('validateWorkflowDefinition — totality over garbage', () => {

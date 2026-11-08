@@ -45,6 +45,34 @@ export interface SimulatedTask {
   assignee: { kind: string; label: string } | null;
 }
 
+export interface SimulatedBranch {
+  key: string;
+  name: string;
+  assignee: { kind: string; label: string } | null;
+}
+
+/** A parallel stage the run passed through, resolved as `joined`. */
+export interface SimulatedParallel {
+  join: string;
+  /** Branches that must finish for the join rule to hold. */
+  needed: number;
+  total: number;
+  branches: SimulatedBranch[];
+  outcome: 'joined';
+}
+
+/** One stage of the path with the variables once it was done. */
+export interface SimulatedStep {
+  stage_key: string;
+  stage_name: string;
+  type: string;
+  /** Variables after the stage's hooks (and computed fields). */
+  data: Record<string, unknown>;
+  /** Keys that differ from the previous step (or the starting data). */
+  changed: string[];
+  parallel?: SimulatedParallel;
+}
+
 export interface SimulationResult {
   valid: boolean;
   issues: WorkflowIssue[];
@@ -56,6 +84,8 @@ export interface SimulationResult {
   to_stage: { key: string; name: string; type: string } | null;
   transition: { on: string; label?: string; when_text?: string } | null;
   path: string[];
+  /** Variables per path step, to show what each stage changed. */
+  steps: SimulatedStep[];
   data: Record<string, unknown>;
   tasks: SimulatedTask[];
   notifications: Array<{ to: string; message: string }>;
@@ -99,6 +129,7 @@ function emptyResult(): SimulationResult {
     to_stage: null,
     transition: null,
     path: [],
+    steps: [],
     data: {},
     tasks: [],
     notifications: [],
@@ -126,6 +157,35 @@ export function simulateWorkflow(
   exprOptions: WorkflowExprOptions = {},
 ): SimulationResult {
   const def = normalizeDefinition(rawDefinition);
+  const res = runSimulation(def, input, exprOptions);
+  return finalizeSteps(res, def, input.state?.data ?? {}, exprOptions);
+}
+
+/** Computed fields and the "what changed" diff of every recorded step. */
+function finalizeSteps(
+  res: SimulationResult,
+  def: WorkflowDefinitionV1,
+  startData: Record<string, unknown>,
+  exprOptions: WorkflowExprOptions,
+): SimulationResult {
+  let previous = startData;
+  res.steps = res.steps.map((step) => {
+    const data = applyComputedFields(def, step.data, exprOptions);
+    const keys = new Set([...Object.keys(previous), ...Object.keys(data)]);
+    const changed = [...keys]
+      .filter((k) => JSON.stringify(previous[k] ?? null) !== JSON.stringify(data[k] ?? null))
+      .sort();
+    previous = data;
+    return { ...step, data, changed };
+  });
+  return res;
+}
+
+function runSimulation(
+  def: WorkflowDefinitionV1,
+  input: SimulateInput,
+  exprOptions: WorkflowExprOptions,
+): SimulationResult {
   const res = emptyResult();
   const instanceRef = { reference: SIM_REFERENCE, title: def.name };
 
@@ -146,6 +206,7 @@ export function simulateWorkflow(
     res.path = [current.key];
     collectEntry(res, current, enter.notifies);
     res.actions.push(...enter.vendix);
+    recordStep(res, current, data);
   } else {
     current = findStage(def, input.state.stage_key);
     if (!current) {
@@ -218,6 +279,7 @@ export function simulateWorkflow(
     const exit = leaveStage(res, current, data, instanceRef, submitted);
     res.path = [current.key];
     data = exit;
+    recordStep(res, current, data);
     current = enterStage(res, def, transition.to, data, instanceRef);
     if (!current) return res;
     data = res.data;
@@ -232,12 +294,26 @@ export function simulateWorkflow(
   };
   const laps: Record<string, number> = {};
   let hops = 0;
-  while (current && (SYSTEM_OUTCOME[current.type] || current.type === 'loop')) {
+  while (
+    current &&
+    (SYSTEM_OUTCOME[current.type] || current.type === 'loop' || current.type === 'parallel')
+  ) {
     if (hops++ >= MAX_AUTOMATIC_HOPS) {
       res.loop_guard = true;
       break;
     }
     let outcome = SYSTEM_OUTCOME[current.type];
+    if (current.type === 'parallel') {
+      // Every needed branch submits (its `on_submit` runs once each) and the
+      // join rule holds: the stage resolves `joined`.
+      outcome = 'joined';
+      for (let i = 0; i < parallelNeeded(current); i++) {
+        const applied = applyActionList(current.on_submit, data, instanceRef);
+        res.notifications.push(...notifyList(applied.notifies));
+        res.actions.push(...applied.vendix);
+        data = applied.data;
+      }
+    }
     if (current.type === 'loop' && current.loop) {
       const n = laps[current.key] ?? 0;
       const again = evaluateCondition(current.loop.while, data, def.fields) && n < current.loop.max_iterations;
@@ -257,12 +333,57 @@ export function simulateWorkflow(
       break;
     }
     const exit = leaveStage(res, current, data, instanceRef, false);
+    patchLastStep(res, exit);
     current = enterStage(res, def, t.to, exit, instanceRef);
     if (!current) break;
     data = res.data;
   }
   res.data = applyComputedFields(def, data, exprOptions);
   return res;
+}
+
+/** Branches that must finish for the stage's join rule to hold. */
+function parallelNeeded(stage: WorkflowStageDef): number {
+  const p = stage.parallel;
+  if (!p) return 0;
+  const total = p.branches.length;
+  return p.join === 'any' ? 1 : p.join === 'n_of_m' ? (p.required ?? total) : total;
+}
+
+function recordStep(
+  res: SimulationResult,
+  stage: WorkflowStageDef,
+  data: Record<string, unknown>,
+): void {
+  const p = stage.parallel;
+  res.steps.push({
+    stage_key: stage.key,
+    stage_name: stage.name,
+    type: stage.type,
+    data,
+    changed: [],
+    ...(stage.type === 'parallel' && p
+      ? {
+          parallel: {
+            join: p.join,
+            needed: parallelNeeded(stage),
+            total: p.branches.length,
+            branches: p.branches.map((b) => ({
+              key: b.key,
+              name: b.name,
+              assignee: describeAssignee(b.assignee),
+            })),
+            outcome: 'joined' as const,
+          },
+        }
+      : {}),
+  });
+}
+
+/** An automatic stage's variables are the ones left after its exit hooks. */
+function patchLastStep(res: SimulationResult, data: Record<string, unknown>): void {
+  const last = res.steps[res.steps.length - 1];
+  if (last) last.data = data;
 }
 
 /** P2.6: on_submit (when a person submitted) → on_complete → on_exit. */
@@ -335,6 +456,7 @@ function enterStage(
   res.path.push(stage.key);
   res.to_stage = { key: stage.key, name: stage.name, type: stage.type };
   collectEntry(res, stage, enter.notifies);
+  recordStep(res, stage, enter.data);
   return stage;
 }
 

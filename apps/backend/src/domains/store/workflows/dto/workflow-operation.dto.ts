@@ -34,6 +34,20 @@ export class WorkflowBoardQueryDto {
   @IsOptional() @IsDateString() to?: string;
 }
 
+export const BOARD_ALL_COLUMNS = ['pending', 'in_progress', 'system', 'closed'] as const;
+
+/** P5.5: board across every flow of the store. */
+export class WorkflowBoardAllQueryDto {
+  @IsOptional() @IsIn(BOARD_ALL_COLUMNS) column?: (typeof BOARD_ALL_COLUMNS)[number];
+  @IsOptional() @Type(() => Number) @IsInt() @Min(1) cursor?: number;
+  @IsOptional() @Type(() => Number) @IsInt() @Min(1) @Max(50) limit?: number = 20;
+  @IsOptional() @Type(() => Number) @IsInt() @Min(1) definition_id?: number;
+  @IsOptional() @Type(() => Number) @IsInt() @Min(1) role_id?: number;
+  @IsOptional() @Type(() => Number) @IsInt() @Min(1) location_id?: number;
+  @IsOptional() @Type(() => Number) @IsInt() @Min(1) assignee_user_id?: number;
+  @IsOptional() @Transform(toBool) @IsBoolean() overdue?: boolean;
+}
+
 export class WorkflowCommentsQueryDto {
   @IsOptional() @Type(() => Number) @IsInt() @Min(1) @Max(100) limit?: number = 50;
   @IsOptional() @Type(() => Number) @IsInt() @Min(1) before_id?: number;

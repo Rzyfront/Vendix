@@ -69,4 +69,31 @@ describe('module-industries — parity and map invariants', () => {
       expect(Object.keys(MODULE_INDUSTRIES)).toContain(key);
     }
   });
+
+  it('P5.7: every sidebar child key of Flujos and Documentos is administration-only and always enforced', () => {
+    const children = Object.keys(MODULE_INDUSTRIES).filter(
+      (key) => key.startsWith('flows_') || key.startsWith('documents_'),
+    );
+    expect(children).toEqual([
+      'flows_list',
+      'flows_inbox',
+      'flows_board',
+      'flows_templates',
+      'flows_records',
+      'flows_connectors',
+      'flows_integrations',
+      'documents_dossiers',
+      'documents_search',
+      'documents_folders',
+      'documents_expiring',
+      'documents_retention',
+      'documents_templates',
+    ]);
+    for (const key of children) {
+      expect(MODULE_INDUSTRIES[key]).toEqual(['administration']);
+      expect(VERTICAL_MODULE_KEYS).toContain(key);
+      expect(isIndustryAlwaysEnforced(key)).toBe(true);
+      expect(industryAllowsKey(key, ['retail'])).toBe(false);
+    }
+  });
 });

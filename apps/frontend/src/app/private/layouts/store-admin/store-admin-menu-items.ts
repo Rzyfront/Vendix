@@ -176,18 +176,104 @@ export const STORE_ADMIN_MENU_ITEMS: readonly MenuItem[] = [
   },
   {
     // Administración (flujos-documental S6). Industry `administration`,
-    // always enforced: stores without it keep these two entries visible with
-    // a lock (`_planLocked` rendering) and the URL opens the industry paywall.
+    // always enforced: stores without it keep both groups visible with a lock
+    // (`_planLocked` rendering) and the URL opens the industry paywall.
+    // P5.7: every screen of the module is a child with its own panel_ui key
+    // (opt-out, `DEFAULT_ON_PANEL_KEYS`) and permission prefilter
+    // (`ADMINISTRATION_PERMISSION_ROUTES`); the sticky header no longer
+    // navigates between them.
     label: 'Flujos',
     icon: 'git-branch',
-    route: '/admin/workflows',
     panelUiKey: 'flows',
+    children: [
+      {
+        label: 'Todos los flujos',
+        icon: 'git-branch',
+        route: '/admin/workflows',
+        panelUiKey: 'flows_list',
+        exactActive: true,
+      },
+      {
+        label: 'Mis tareas',
+        icon: 'inbox',
+        route: '/admin/workflows/inbox',
+        panelUiKey: 'flows_inbox',
+      },
+      {
+        label: 'Tablero general',
+        icon: 'layout-dashboard',
+        route: '/admin/workflows/board',
+        panelUiKey: 'flows_board',
+      },
+      {
+        label: 'Galería de plantillas',
+        icon: 'layout-template',
+        route: '/admin/workflows/templates',
+        panelUiKey: 'flows_templates',
+      },
+      {
+        label: 'Registros',
+        icon: 'database',
+        route: '/admin/workflows/records',
+        panelUiKey: 'flows_records',
+      },
+      {
+        label: 'Conectores',
+        icon: 'zap',
+        route: '/admin/workflows/connectors',
+        panelUiKey: 'flows_connectors',
+      },
+      {
+        label: 'Integraciones',
+        icon: 'plug',
+        route: '/admin/workflows/integrations',
+        panelUiKey: 'flows_integrations',
+      },
+    ],
   },
   {
     label: 'Documentos',
     icon: 'folder-open',
-    route: '/admin/documents',
     panelUiKey: 'documents',
+    children: [
+      {
+        label: 'Expedientes',
+        icon: 'folder-open',
+        route: '/admin/documents',
+        panelUiKey: 'documents_dossiers',
+        exactActive: true,
+      },
+      {
+        label: 'Búsqueda',
+        icon: 'search',
+        route: '/admin/documents/search',
+        panelUiKey: 'documents_search',
+      },
+      {
+        label: 'Carpetas',
+        icon: 'folder',
+        route: '/admin/documents/folders',
+        panelUiKey: 'documents_folders',
+      },
+      {
+        label: 'Por vencer',
+        icon: 'calendar-clock',
+        route: '/admin/documents/expiring',
+        panelUiKey: 'documents_expiring',
+      },
+      {
+        label: 'Retención',
+        icon: 'archive',
+        route: '/admin/documents/retention',
+        panelUiKey: 'documents_retention',
+      },
+      {
+        label: 'Plantillas',
+        icon: 'file-text',
+        route: '/admin/documents/templates',
+        panelUiKey: 'documents_templates',
+      },
+    ],
   },
   {
     label: 'Órdenes',

@@ -224,6 +224,8 @@ export interface FailedActionView {
 
 export interface WorkflowInstanceDetail {
   id: number;
+  /** P5.5: branch (store location) of the request. */
+  location?: { id: number; name: string } | null;
   reference: string;
   title: string;
   status: WorkflowInstanceStatus;

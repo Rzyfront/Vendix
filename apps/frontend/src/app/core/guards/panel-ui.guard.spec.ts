@@ -71,7 +71,9 @@ describe('panelUiGuard', () => {
       'fiscalStageBlockForUrl',
       'planLockForKeys',
       'isIndustryLocked',
+      'administrationPermissionBlockForUrl',
     ]);
+    menuFilter.administrationPermissionBlockForUrl.and.returnValue(null);
     // Por defecto las claves no son de un módulo siempre-compuerta
     // (`flows`, `documents`); el test del paywall de industria lo sobreescribe.
     menuFilter.isIndustryLocked.and.returnValue(false);
@@ -313,6 +315,36 @@ describe('panelUiGuard', () => {
 
     expect(result).toBeFalse();
     expect(industryPaywall.show).toHaveBeenCalledWith('flows');
+    expect(toast.info).not.toHaveBeenCalled();
+  });
+
+  it('P5.7: un hijo de Flujos sin el permiso del rol avisa y redirige al primer módulo activo', async () => {
+    menuFilter.resolveGateKeysForRoute.and.returnValue(['flows_connectors', 'flows']);
+    menuFilter.applyAccessGate.and.returnValue(true);
+    menuFilter.administrationPermissionBlockForUrl.and.returnValue({
+      visible: false,
+      blockedBy: 'permission',
+      detail: 'Tu usuario no tiene el permiso que esta sección requiere.',
+      fixPath: null,
+    });
+
+    const result = await runGuard('/admin/workflows/connectors');
+
+    expect(result).toBeFalse();
+    expect(menuFilter.administrationPermissionBlockForUrl).toHaveBeenCalledWith('/admin/workflows/connectors');
+    expect(toast.info).toHaveBeenCalledWith('Tu usuario no tiene el permiso que esta sección requiere.');
+    expect(router.navigateByUrl).toHaveBeenCalledWith('/admin/dashboard');
+  });
+
+  it('P5.7: la industria gana al permiso (paywall de industria, sin aviso de permiso)', async () => {
+    menuFilter.resolveGateKeysForRoute.and.returnValue(['flows_connectors', 'flows']);
+    menuFilter.applyAccessGate.and.returnValue(false);
+    menuFilter.isIndustryLocked.and.returnValue(true);
+
+    await runGuard('/admin/workflows/connectors');
+
+    expect(industryPaywall.show).toHaveBeenCalledWith('flows_connectors');
+    expect(menuFilter.administrationPermissionBlockForUrl).not.toHaveBeenCalled();
     expect(toast.info).not.toHaveBeenCalled();
   });
 

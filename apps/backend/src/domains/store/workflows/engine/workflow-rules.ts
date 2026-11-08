@@ -72,7 +72,12 @@ export function applyActionList(
   const vendix: AppliedVendixAction[] = [];
   for (const a of actions ?? []) {
     if (a.action === 'set_field') next[a.field] = a.value;
-    else if (a.action === 'notify') notifies.push({ message: a.message, to: a.to });
+    else if (a.action === 'notify')
+      notifies.push({
+        // P5.3: the editor inserts {{fields.*}} / {{instance.*}} here.
+        message: resolveTokens(a.message, { fields: next, instance }),
+        to: a.to,
+      });
     else if ((WORKFLOW_VENDIX_ACTIONS as readonly string[]).includes(a.action)) {
       const v = a as Extract<WorkflowActionDef, { map: unknown }>;
       vendix.push({

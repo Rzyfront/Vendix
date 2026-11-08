@@ -63,6 +63,7 @@ export class WorkflowInstancesController {
       title: dto.title,
       data: dto.data,
       subject: dto.subject ?? null,
+      locationId: dto.location_id ?? null,
       idempotencyKey: key,
     });
     return this.responseService.created(result, 'Solicitud iniciada');

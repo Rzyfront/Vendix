@@ -1,6 +1,10 @@
 import { TestBed } from '@angular/core/testing';
 import { signal, type WritableSignal } from '@angular/core';
-import { MenuFilterService, DEFAULT_ON_PANEL_KEYS } from './menu-filter.service';
+import {
+  MenuFilterService,
+  DEFAULT_ON_PANEL_KEYS,
+  ADMINISTRATION_PERMISSION_ROUTES,
+} from './menu-filter.service';
 import { AuthFacade } from '../store/auth/auth.facade';
 import { SubscriptionAccessService } from './subscription-access.service';
 import { MenuItem } from '../../shared/components/sidebar/sidebar.component';
@@ -13,6 +17,8 @@ import { APP_MODULES } from '../../shared/constants/app-modules.constant';
 import { getModulesHiddenByIndustries } from '../../shared/constants/industry-modules.constant';
 import { BehaviorSubject, firstValueFrom, of, take } from 'rxjs';
 import { AccessGateService } from './access-gate.service';
+import { STORE_ADMIN_MENU_ITEMS } from '../../private/layouts/store-admin/store-admin-menu-items';
+import { MODULE_INDUSTRIES, isIndustryAlwaysEnforced } from '../../shared/constants/module-industries';
 
 /** Access gate stub (apps-f4): audit mode, industries from the session. */
 function accessGateStub() {
@@ -1128,5 +1134,170 @@ describe('MenuFilterService — capa plan (planes-matriz-accesos)', () => {
     gate.planMode.set('enforce');
     expect(service.canSeeKey('dashboard').allowed).toBeTrue();
     expect(service.planLockForKeys(['dashboard'])).toBeNull();
+  });
+});
+
+/**
+ * P5.7: Flujos and Documentos are sidebar parents; every screen is a child
+ * with its own panel_ui key (opt-out), permission prefilter and the
+ * always-enforced `administration` industry. Runs the real sidebar tree.
+ */
+describe('MenuFilterService — hijos de Flujos y Documentos (P5.7)', () => {
+  let service: MenuFilterService;
+  let panelUiState: WritableSignal<Record<string, boolean>>;
+  let panelUi$: BehaviorSubject<Record<string, boolean>>;
+  let settingsState: WritableSignal<Record<string, any>>;
+  let settings$: BehaviorSubject<Record<string, any>>;
+  let industries: WritableSignal<string[]>;
+  let permissions: string[];
+  let owner: boolean;
+
+  const EXPECTED: Record<string, { label: string; route: string; key: string }[]> = {
+    Flujos: [
+      { label: 'Todos los flujos', route: '/admin/workflows', key: 'flows_list' },
+      { label: 'Mis tareas', route: '/admin/workflows/inbox', key: 'flows_inbox' },
+      { label: 'Tablero general', route: '/admin/workflows/board', key: 'flows_board' },
+      { label: 'Galería de plantillas', route: '/admin/workflows/templates', key: 'flows_templates' },
+      { label: 'Registros', route: '/admin/workflows/records', key: 'flows_records' },
+      { label: 'Conectores', route: '/admin/workflows/connectors', key: 'flows_connectors' },
+      { label: 'Integraciones', route: '/admin/workflows/integrations', key: 'flows_integrations' },
+    ],
+    Documentos: [
+      { label: 'Expedientes', route: '/admin/documents', key: 'documents_dossiers' },
+      { label: 'Búsqueda', route: '/admin/documents/search', key: 'documents_search' },
+      { label: 'Carpetas', route: '/admin/documents/folders', key: 'documents_folders' },
+      { label: 'Por vencer', route: '/admin/documents/expiring', key: 'documents_expiring' },
+      { label: 'Retención', route: '/admin/documents/retention', key: 'documents_retention' },
+      { label: 'Plantillas', route: '/admin/documents/templates', key: 'documents_templates' },
+    ],
+  };
+  const ALL_CHILDREN = [...EXPECTED['Flujos'], ...EXPECTED['Documentos']];
+
+  /** The two real groups of the STORE_ADMIN sidebar. */
+  const adminTree = (): MenuItem[] =>
+    STORE_ADMIN_MENU_ITEMS.filter((item) => item.label === 'Flujos' || item.label === 'Documentos').map(
+      (item) => ({ ...item, children: item.children?.map((child) => ({ ...child })) }),
+    );
+  const childItem = (route: string): MenuItem =>
+    adminTree().flatMap((group) => group.children ?? []).find((child) => child.route === route)!;
+  const filtered = async () => firstValueFrom(service.filterMenuItems(adminTree()).pipe(take(1)));
+  const childRoutes = async () => (await filtered()).flatMap((group) => (group.children ?? []).map((c) => c.route));
+  const setUserPanel = (value: Record<string, boolean>) => {
+    panelUi$.next(value);
+    panelUiState.set(value);
+  };
+  const setSettings = (value: Record<string, any>) => {
+    settings$.next(value);
+    settingsState.set(value);
+  };
+
+  beforeEach(() => {
+    // A user whose stored panel_ui predates the child keys.
+    panelUiState = signal<Record<string, boolean>>({ flows: true, documents: true });
+    panelUi$ = new BehaviorSubject<Record<string, boolean>>({ flows: true, documents: true });
+    settingsState = signal<Record<string, any>>({ general: { store_type: 'hybrid' } });
+    settings$ = new BehaviorSubject<Record<string, any>>({ general: { store_type: 'hybrid' } });
+    industries = signal<string[]>(['administration']);
+    permissions = [];
+    owner = true;
+    const visibleModules$ = new BehaviorSubject<string[]>(['flows', 'documents']);
+    const authFacade = {
+      getVisibleModules$: () => visibleModules$.asObservable(),
+      userStoreType$: of('hybrid'), userIndustries$: of(['administration']), storeSettings$: settings$.asObservable(),
+      userOrganization$: of({ operating_scope: 'STORE', fiscal_scope: 'STORE' }), activeFiscalAreas$: of([]),
+      currentAppPanelUi$: panelUi$.asObservable(), userPermissions$: of([]),
+      fiscalScope: signal('STORE'), operatingScope: signal('STORE'), activeFiscalAreas: signal<string[]>([]),
+      storeSettings: settingsState, userIndustries: industries, userStoreType: signal<string | null>('hybrid'),
+      currentAppPanelUi: panelUiState,
+      isModuleVisible: (key: string) => panelUiState()[key] === true,
+      hasPermission: (permission: string) => permissions.includes(permission),
+      hasAnyRole: () => false, hasAnyPermission: () => false,
+      isOwner: () => owner, isAdmin: () => false,
+    };
+    TestBed.configureTestingModule({ providers: [
+      MenuFilterService,
+      { provide: AuthFacade, useValue: authFacade },
+      { provide: AccessGateService, useValue: accessGateStub() },
+      { provide: SubscriptionAccessService, useValue: { canUseAI: () => () => true } },
+    ] });
+    service = TestBed.inject(MenuFilterService);
+  });
+
+  it('el Sidebar real tiene Flujos y Documentos como padres con todos sus hijos, en orden', () => {
+    for (const [label, children] of Object.entries(EXPECTED)) {
+      const group = STORE_ADMIN_MENU_ITEMS.find((item) => item.label === label)!;
+      expect(group.route).withContext(label).toBeUndefined();
+      expect(group.children?.map((c) => ({ label: c.label, route: c.route, key: c.panelUiKey })))
+        .withContext(label)
+        .toEqual(children);
+    }
+  });
+
+  it('cada hijo tiene key en APP_MODULES, ruta, industria siempre aplicada, default opt-out y permiso', () => {
+    const known = new Set(allStoreAdminKeys());
+    for (const child of ALL_CHILDREN) {
+      expect(known.has(child.key)).withContext(child.key).toBe(true);
+      expect(MODULE_ROUTES[child.key]).withContext(child.key).toBe(child.route);
+      expect(MODULE_INDUSTRIES[child.key]).withContext(child.key).toEqual(['administration']);
+      expect(isIndustryAlwaysEnforced(child.key)).withContext(child.key).toBe(true);
+      expect(DEFAULT_ON_PANEL_KEYS).withContext(child.key).toContain(child.key);
+      expect(ADMINISTRATION_PERMISSION_ROUTES[child.route]?.length).withContext(child.route).toBeGreaterThan(0);
+    }
+  });
+
+  it('el owner de una tienda Administración ve todos los hijos, sin candado, con un panel_ui previo a las keys', async () => {
+    const groups = await filtered();
+    expect(groups.map((g) => g.label)).toEqual(['Flujos', 'Documentos']);
+    expect(await childRoutes()).toEqual(ALL_CHILDREN.map((c) => c.route));
+    expect(groups.flatMap((g) => [g, ...(g.children ?? [])]).some((i) => i._planLocked)).toBe(false);
+  });
+
+  for (const child of ALL_CHILDREN) {
+    it(`${child.label} (${child.route}): un rol sin su permiso no lo ve; con el permiso, sí`, async () => {
+      owner = false;
+      permissions = [];
+      expect(await childRoutes()).not.toContain(child.route);
+      expect(service.diagnose(childItem(child.route)).blockedBy).toBe('permission');
+      expect(service.administrationPermissionBlockForUrl(child.route)?.blockedBy).toBe('permission');
+
+      permissions = [ADMINISTRATION_PERMISSION_ROUTES[child.route][0]];
+      expect(await childRoutes()).toContain(child.route);
+      expect(service.diagnose(childItem(child.route)).visible).toBe(true);
+      expect(service.administrationPermissionBlockForUrl(`${child.route}?tab=1`)).toBeNull();
+    });
+  }
+
+  it('un rol con solo tareas ve «Mis tareas» y abre por URL la solicitud de una tarea', async () => {
+    owner = false;
+    permissions = ['store:workflows:task'];
+    expect(await childRoutes()).toEqual(['/admin/workflows/inbox']);
+    expect(service.administrationPermissionBlockForUrl('/admin/workflows/instances/12')).toBeNull();
+    expect(service.administrationPermissionBlockForUrl('/admin/workflows/connectors')).not.toBeNull();
+  });
+
+  it('una tienda sin la industria conserva ambos grupos con candado en el padre y en cada hijo', async () => {
+    industries.set(['retail']);
+    const groups = await filtered();
+    expect(groups.map((g) => g.label)).toEqual(['Flujos', 'Documentos']);
+    for (const item of groups.flatMap((g) => [g, ...(g.children ?? [])])) {
+      expect(item._planLocked).withContext(item.label).toBe(true);
+    }
+    expect(service.isIndustryLocked(service.resolveGateKeysForRoute('/admin/workflows/board'))).toBe(true);
+  });
+
+  it('apagar un hijo en el panel del usuario oculta solo ese hijo', async () => {
+    owner = false;
+    permissions = ['store:workflows:read', 'store:workflows:task', 'store:documents:read'];
+    setUserPanel({ flows: true, documents: true, flows_board: false });
+    const routes = await childRoutes();
+    expect(routes).not.toContain('/admin/workflows/board');
+    expect(routes).toContain('/admin/workflows/inbox');
+    expect(service.diagnose(childItem('/admin/workflows/board')).blockedBy).toBe('user_panel_ui');
+  });
+
+  it('apagar el padre en la tienda cierra el grupo entero, también por URL', async () => {
+    setSettings({ general: { store_type: 'hybrid' }, panel_ui: { STORE_ADMIN: { documents: false } } });
+    expect((await filtered()).map((g) => g.label)).toEqual(['Flujos']);
+    expect(service.resolveKeysForRoute('/admin/documents/search')).toContain('documents');
   });
 });

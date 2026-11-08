@@ -4,6 +4,7 @@ import { FormsModule } from '@angular/forms';
 import { Router } from '@angular/router';
 import { forkJoin } from 'rxjs';
 import {
+  ButtonComponent,
   CardComponent,
   EmptyStateComponent,
   ItemListCardConfig,
@@ -19,11 +20,15 @@ import {
 } from '../../../../../../shared/components/index';
 import { WorkflowCommentOutcomeModalComponent } from '../../components/comment-outcome-modal.component';
 import { InboxTaskRow } from '../../interfaces/workflow-ops.interfaces';
+import { WorkflowLiveService } from '../../services/workflow-live.service';
 import { WorkflowsApiService } from '../../services/workflows-api.service';
 import { isStaleCode, toWorkflowError } from '../../utils/workflow-errors.util';
 import { dueText, outcomeLabel } from '../../utils/workflow-labels.util';
 
-interface InboxRowView extends InboxTaskRow {
+/** The inbox payload plus what the mobile quick actions need (P5.5). */
+type InboxTask = InboxTaskRow;
+
+interface InboxRowView extends InboxTask {
   reference: string;
   title: string;
   definition_label: string;
@@ -31,6 +36,9 @@ interface InboxRowView extends InboxTaskRow {
   assignee_text: string;
   /** Stage name plus the branch of a parallel stage: "Alistamiento · Rama: TI". */
   stage_label: string;
+  /** Mobile: large "Aprobar" / "Rechazar" buttons, only for tasks with no form. */
+  can_approve: boolean;
+  can_reject: boolean;
 }
 
 /** Outcomes that must carry a comment (the backend requires it too). */
@@ -61,6 +69,7 @@ const STATUS_OPTIONS = [
     FormsModule,
     StickyHeaderComponent,
     StatsComponent,
+    ButtonComponent,
     CardComponent,
     SelectorComponent,
     ToggleComponent,
@@ -76,8 +85,6 @@ const STATUS_OPTIONS = [
         subtitle="Lo que está esperando tu atención en los flujos"
         icon="inbox"
         variant="glass"
-        [showBackButton]="true"
-        backRoute="/admin/workflows"
       />
 
       <div class="stats-container sticky top-[52px] z-20 bg-background md:static md:bg-transparent">
@@ -153,15 +160,68 @@ const STATUS_OPTIONS = [
           />
         } @else {
           <div class="px-2 pb-2 pt-3 md:p-4">
-            <app-responsive-data-view
-              [data]="rows()"
-              [columns]="columns"
-              [actions]="actions"
-              [cardConfig]="card"
-              [sortable]="false"
-              emptyMessage="No hay tareas"
-              emptyIcon="inbox"
-            />
+            <!-- Desktop: table. Mobile: large-button cards below. -->
+            <div class="hidden md:block">
+              <app-responsive-data-view
+                [data]="rows()"
+                [columns]="columns"
+                [actions]="actions"
+                [cardConfig]="card"
+                [sortable]="false"
+                emptyMessage="No hay tareas"
+                emptyIcon="inbox"
+              />
+            </div>
+            <ul class="flex flex-col gap-3 md:hidden" data-testid="mobile-tasks">
+              @for (row of rows(); track row.task_id) {
+                <li
+                  class="rounded-xl border border-border bg-surface p-3 shadow-sm"
+                  [attr.data-testid]="'task-' + row.task_id"
+                >
+                  <p class="break-words text-sm font-semibold text-text-primary">{{ row.title }}</p>
+                  <p class="text-xs text-text-secondary">{{ row.reference }} · {{ row.definition_label }}</p>
+                  <p class="mt-1 text-xs text-text-secondary">Etapa: {{ row.stage_label }}</p>
+                  <p class="text-xs" [class]="row.overdue ? 'font-medium text-error' : 'text-text-secondary'">
+                    {{ row.due_text }}
+                  </p>
+                  @if (row.can_approve || row.can_reject) {
+                    <div class="mt-3 grid grid-cols-2 gap-2">
+                      @if (row.can_reject) {
+                        <app-button
+                          variant="danger"
+                          size="lg"
+                          [fullWidth]="true"
+                          [disabled]="busyTaskId() === row.task_id"
+                          (clicked)="quick(row, 'reject')"
+                          >Rechazar</app-button
+                        >
+                      }
+                      @if (row.can_approve) {
+                        <app-button
+                          variant="success"
+                          size="lg"
+                          [fullWidth]="true"
+                          [disabled]="busyTaskId() === row.task_id"
+                          (clicked)="quick(row, 'approve')"
+                          >Aprobar</app-button
+                        >
+                      }
+                    </div>
+                    <div class="mt-2">
+                      <app-button variant="ghost" size="md" [fullWidth]="true" (clicked)="open(row)"
+                        >Abrir</app-button
+                      >
+                    </div>
+                  } @else {
+                    <div class="mt-3">
+                      <app-button variant="primary" size="lg" [fullWidth]="true" (clicked)="open(row)"
+                        >Abrir</app-button
+                      >
+                    </div>
+                  }
+                </li>
+              }
+            </ul>
             <div class="mt-4 flex justify-center">
               <app-pagination
                 [currentPage]="page()"
@@ -192,6 +252,7 @@ export class InboxPageComponent implements OnInit {
   private readonly toast = inject(ToastService);
   private readonly router = inject(Router);
   private readonly destroyRef = inject(DestroyRef);
+  private readonly live = inject(WorkflowLiveService);
 
   readonly limit = 10;
   readonly statusOptions = STATUS_OPTIONS;
@@ -199,7 +260,9 @@ export class InboxPageComponent implements OnInit {
   readonly page = signal(1);
   readonly totalItems = signal(0);
   readonly loading = signal(false);
-  readonly tasks = signal<InboxTaskRow[]>([]);
+  readonly tasks = signal<InboxTask[]>([]);
+  /** Task being completed from a mobile button (disables its buttons). */
+  readonly busyTaskId = signal<number | null>(null);
   readonly stats = signal({ total: 0, overdue: 0, open: 0 });
   readonly statsLoading = signal(true);
   readonly totalPages = computed(() => Math.ceil(this.totalItems() / this.limit) || 1);
@@ -212,7 +275,7 @@ export class InboxPageComponent implements OnInit {
   ]);
 
   readonly commentOpen = signal(false);
-  readonly commentTarget = signal<InboxTaskRow | null>(null);
+  readonly commentTarget = signal<InboxTask | null>(null);
   readonly commentOutcome = signal('reject');
   readonly commentBusy = signal(false);
   readonly commentError = signal('');
@@ -232,6 +295,8 @@ export class InboxPageComponent implements OnInit {
       due_text: dueText(t.due_at),
       assignee_text: t.assignee?.name ?? 'Sin responsable',
       stage_label: t.branch_name ? `${t.stage_name} · Rama: ${t.branch_name}` : t.stage_name,
+      can_approve: this.mobileAction(t, 'approve'),
+      can_reject: this.mobileAction(t, 'reject'),
     })),
   );
 
@@ -267,7 +332,8 @@ export class InboxPageComponent implements OnInit {
         label: outcomeLabel(outcome),
         icon: ICONS[outcome],
         variant: outcome === 'reject' ? 'danger' : outcome === 'approve' ? 'success' : 'primary',
-        show: (row: InboxRowView) => row.quick_outcomes.includes(outcome),
+        show: (row: InboxRowView) =>
+          row.quick_outcomes.includes(outcome) || !!row.comment_outcomes?.includes(outcome),
         action: (row: InboxRowView) => this.quick(row, outcome),
       }),
     ),
@@ -294,6 +360,14 @@ export class InboxPageComponent implements OnInit {
       });
     this.load();
     this.loadStats();
+    // P5.6: a new or changed task shows up without reloading.
+    this.live
+      .changes()
+      .pipe(takeUntilDestroyed(this.destroyRef))
+      .subscribe(() => {
+        this.load(true);
+        this.loadStats();
+      });
   }
 
   onDefinition(value: unknown): void {
@@ -316,12 +390,12 @@ export class InboxPageComponent implements OnInit {
     this.load();
   }
 
-  open(row: InboxTaskRow): void {
+  open(row: InboxTask): void {
     this.router.navigate(['/admin/workflows/instances', row.instance.id]);
   }
 
-  quick(row: InboxTaskRow, outcome: string): void {
-    if (COMMENT_OUTCOMES.includes(outcome)) {
+  quick(row: InboxTask, outcome: string): void {
+    if (COMMENT_OUTCOMES.includes(outcome) || row.comment_outcomes?.includes(outcome)) {
       this.commentTarget.set(row);
       this.commentOutcome.set(outcome);
       this.commentError.set('');
@@ -336,9 +410,16 @@ export class InboxPageComponent implements OnInit {
     if (row) this.complete(row, this.commentOutcome(), comment);
   }
 
-  private complete(row: InboxTaskRow, outcome: string, comment?: string): void {
+  /** Large buttons only on approval-like tasks that need no form. */
+  private mobileAction(task: InboxTask, outcome: 'approve' | 'reject'): boolean {
+    if (task.has_form) return false;
+    return task.quick_outcomes.includes(outcome) || !!task.comment_outcomes?.includes(outcome);
+  }
+
+  private complete(row: InboxTask, outcome: string, comment?: string): void {
     if (this.inFlight.has(row.task_id)) return;
     this.inFlight.add(row.task_id);
+    this.busyTaskId.set(row.task_id);
     const slot = `${row.task_id}:${outcome}`;
     const key = this.keys.get(slot) ?? crypto.randomUUID();
     this.keys.set(slot, key);
@@ -357,6 +438,7 @@ export class InboxPageComponent implements OnInit {
       .subscribe({
         next: () => {
           this.inFlight.delete(row.task_id);
+          this.busyTaskId.set(null);
           this.keys.delete(slot);
           this.commentBusy.set(false);
           this.commentOpen.set(false);
@@ -368,6 +450,7 @@ export class InboxPageComponent implements OnInit {
         },
         error: (error) => {
           this.inFlight.delete(row.task_id);
+          this.busyTaskId.set(null);
           this.commentBusy.set(false);
           const parsed = toWorkflowError(error);
           if (parsed.status !== null && parsed.status >= 400 && parsed.status < 500) {
@@ -392,8 +475,9 @@ export class InboxPageComponent implements OnInit {
     this.load();
   }
 
-  private load(): void {
-    this.loading.set(true);
+  /** `background`: a live refresh keeps the list on screen instead of the spinner. */
+  private load(background = false): void {
+    if (!background) this.loading.set(true);
     const status = this.statusFilter();
     const definition = this.definitionFilter();
     this.api
