@@ -5,7 +5,8 @@ import {
   Logger,
   NestInterceptor,
 } from '@nestjs/common';
-import { Observable, defer, from, mergeMap } from 'rxjs';
+import { AsyncResource } from 'async_hooks';
+import { Observable, from, mergeMap } from 'rxjs';
 import { RequestContextService } from '@common/context/request-context.service';
 import { extractClientIpOptional } from '@common/utils/client-ip.util';
 import { StorePrismaService } from '../../../../prisma/services/store-prisma.service';
@@ -83,20 +84,28 @@ export class WorkflowAuditInterceptor implements NestInterceptor {
       user_agent: typeof req.headers?.['user-agent'] === 'string' ? req.headers['user-agent'] : null,
     };
     const secret = classifySecretMutation(String(req.method ?? '').toUpperCase(), path);
-    // `next.handle()` binds the async context when it is called, so it must
-    // be called inside `run` for the handler to see the origin.
-    return new Observable<unknown>((subscriber) =>
-      WorkflowAuditRequestContext.run(origin, () =>
-        (secret ? this.withSecretAudit(req, secret, next) : next.handle()).subscribe(subscriber),
-      ),
+    // `next.handle()` binds the async context at the moment it is called. Call
+    // it here, synchronously: `intercept` runs inside the store context that
+    // RequestContextInterceptor opened, while Nest subscribes to the chain
+    // from a promise callback outside it. Calling it later (in a subscriber
+    // or a `defer`) gives the handler no store at all.
+    return WorkflowAuditRequestContext.run(origin, () =>
+      secret ? this.withSecretAudit(req, secret, next.handle()) : next.handle(),
     );
   }
 
+  /**
+   * `handled` is the handler, already bound to the store and origin context
+   * and still cold: it only runs once the name of the secret is known.
+   */
   private withSecretAudit(
     req: { body?: unknown },
     secret: SecretMutation,
-    next: CallHandler,
+    handled: Observable<unknown>,
   ): Observable<unknown> {
+    // The row is written after the handler, from a callback that no longer
+    // carries the request: bind the write to the store and origin now.
+    const recordHere = AsyncResource.bind((name: string | null) => this.record(secret, name));
     // A deleted secret is gone after the handler: read its name first.
     const knownName: Promise<string | null> =
       secret.action === 'secret.deleted' && secret.id
@@ -106,11 +115,11 @@ export class WorkflowAuditInterceptor implements NestInterceptor {
         : Promise.resolve(nameOf(req.body));
     return from(knownName).pipe(
       mergeMap((preName) =>
-        defer(() => next.handle()).pipe(
+        handled.pipe(
           mergeMap(async (response: unknown) => {
             const name =
               preName ?? nameOf((response as { data?: unknown } | null)?.data) ?? nameOf(response);
-            await this.record(secret, name);
+            await recordHere(name);
             return response;
           }),
         ),

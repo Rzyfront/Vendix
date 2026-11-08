@@ -1,5 +1,7 @@
-import type { CallHandler, ExecutionContext } from '@nestjs/common';
+import { AsyncResource } from 'async_hooks';
+import type { CallHandler, ExecutionContext, NestInterceptor } from '@nestjs/common';
 import { Logger } from '@nestjs/common';
+import { InterceptorsConsumer } from '@nestjs/core/interceptors/interceptors-consumer';
 import { Observable, defer, lastValueFrom, throwError } from 'rxjs';
 import { RequestContextService } from '@common/context/request-context.service';
 import { StorePrismaService } from '../../../../prisma/services/store-prisma.service';
@@ -21,15 +23,16 @@ function setup() {
       getType: () => 'http',
       switchToHttp: () => ({ getRequest: () => req }),
     } as unknown as ExecutionContext;
+    // Like Nest's own CallHandler: `handle()` binds the async context it is called in.
     const next: CallHandler = {
       handle: () =>
-        defer(async () => {
+        defer(AsyncResource.bind(async () => {
           seen.push({ origin: WorkflowAuditRequestContext.current() });
           await Promise.resolve();
           seen.push({ origin: WorkflowAuditRequestContext.current() });
           const out = handler();
           return out instanceof Observable ? lastValueFrom(out) : out;
-        }),
+        })),
     };
     return RequestContextService.runIsolated(
       { store_id: 10, organization_id: 1, user_id: 7, email: 'ana@tienda.co', is_super_admin: false, is_owner: false },
@@ -37,7 +40,7 @@ function setup() {
     );
   };
   const rows = () => db.table('workflow_audit_log');
-  return { db, run, rows, seen, audit };
+  return { db, run, rows, seen, audit, interceptor };
 }
 
 const dump = (row: unknown) => JSON.stringify(row, (_k, v) => (typeof v === 'bigint' ? v.toString() : v));
@@ -169,5 +172,79 @@ describe('WorkflowAuditInterceptor', () => {
       data: { name: 'X' },
     });
     expect(errorLog).toHaveBeenCalledWith(expect.stringContaining('secret.created'));
+  });
+});
+
+/**
+ * Through Nest's own interceptor chain: the store context is opened around
+ * `next.handle()` only (as RequestContextInterceptor does) and the chain is
+ * subscribed outside it, so the handler keeps the store only when every
+ * interceptor calls `next.handle()` while that context is still open.
+ */
+describe('WorkflowAuditInterceptor in the real Nest interceptor chain', () => {
+  const storeContext: NestInterceptor = {
+    intercept: (_ctx, next) =>
+      RequestContextService.asyncLocalStorage.run(
+        { store_id: 10, organization_id: 1, user_id: 7, email: 'ana@tienda.co', is_super_admin: false, is_owner: false },
+        () => next.handle(),
+      ),
+  };
+
+  async function through(req: Req, handler: () => Promise<unknown>) {
+    const ctx = setup();
+    const out$ = await new InterceptorsConsumer().intercept(
+      [storeContext, ctx.interceptor],
+      [req, {}, () => undefined],
+      {},
+      () => undefined,
+      handler,
+      'http',
+    );
+    return { ...ctx, result: await lastValueFrom(out$ as Observable<unknown>) };
+  }
+
+  const seenByHandler = async () => {
+    const before = RequestContextService.getStoreId();
+    await Promise.resolve();
+    return { before, after: RequestContextService.getStoreId(), origin: WorkflowAuditRequestContext.current() };
+  };
+
+  it.each(['/api/store/workflows/usage', '/api/store/workflows/definitions', '/api/store/documents/files'])(
+    'the handler of GET %s still sees the store of the request',
+    async (originalUrl) => {
+      const { result } = await through(
+        { method: 'GET', originalUrl, ip: '181.50.1.2', headers: { 'user-agent': 'Mozilla/5.0' } },
+        seenByHandler,
+      );
+      expect(result).toEqual({
+        before: 10,
+        after: 10,
+        origin: { ip_address: '181.50.1.2', user_agent: 'Mozilla/5.0' },
+      });
+    },
+  );
+
+  it('a secret change keeps the store in the handler and records the row for that store', async () => {
+    const { result, rows } = await through(secretReq('POST', '', { name: 'API_ERP' }), async () => ({
+      data: { name: 'API_ERP', store: RequestContextService.getStoreId() },
+    }));
+    expect(result).toEqual({ data: { name: 'API_ERP', store: 10 } });
+    expect(rows()).toHaveLength(1);
+    expect(rows()[0]).toMatchObject({ store_id: 10, action: 'secret.created' });
+  });
+
+  it('a deleted secret is named from its own store before the handler, which still sees the store', async () => {
+    const ctx = setup();
+    ctx.db.insert('workflow_secrets', { id: 4, store_id: 10, name: 'TOKEN_BANCO', value_enc: 'x' });
+    const out$ = await new InterceptorsConsumer().intercept(
+      [storeContext, ctx.interceptor],
+      [secretReq('DELETE', '/4'), {}, () => undefined],
+      {},
+      () => undefined,
+      async () => ({ data: null, store: RequestContextService.getStoreId() }),
+      'http',
+    );
+    await expect(lastValueFrom(out$ as Observable<unknown>)).resolves.toEqual({ data: null, store: 10 });
+    expect(ctx.rows()[0]).toMatchObject({ store_id: 10, action: 'secret.deleted', details: { name: 'TOKEN_BANCO' } });
   });
 });
