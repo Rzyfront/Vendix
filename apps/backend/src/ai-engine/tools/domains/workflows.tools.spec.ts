@@ -1178,6 +1178,98 @@ describe('workflows_complete_task', () => {
     );
   });
 
+  it('r1: the card shows every field the decision writes, with its current and new value', async () => {
+    const { tool, engine, instances } = build();
+    instances.get.mockResolvedValue(
+      taskDetail({
+        stage: { key: 'revision', name: 'Aprobación del jefe' },
+        data: { monto: 1200000, prioridad: 'baja', motivo: 'Compra de sillas' },
+        tasks: [
+          {
+            id: 31,
+            status: 'open',
+            stage_key: 'revision',
+            can_act: true,
+            form_fields: [
+              { key: 'monto', type: 'money', label: 'Monto' },
+              {
+                key: 'prioridad',
+                type: 'select',
+                label: 'Prioridad',
+                options: [
+                  { value: 'baja', label: 'Baja' },
+                  { value: 'alta', label: 'Alta' },
+                ],
+              },
+              { key: 'motivo', type: 'text', label: 'Motivo' },
+            ],
+          },
+        ],
+      }),
+    );
+    const preview = await tool('workflows_complete_task').preview!(
+      {
+        reference: 'FLU-000009',
+        outcome: 'approve',
+        values: { monto: 9000000, prioridad: 'alta', motivo: 'Compra de sillas' },
+      },
+      CTX,
+    );
+    expect(preview.status).toBe('ok');
+    expect(preview.changes.map((c) => [c.field, c.label, c.from, c.to])).toEqual([
+      ['request', 'Solicitud', null, 'FLU-000009 · Vacaciones de Ana'],
+      ['stage', 'Etapa', null, 'Aprobación del jefe'],
+      ['outcome', 'Decisión', null, 'Aprobar'],
+      ['data:monto', 'Monto', '1200000', '9000000'],
+      ['data:prioridad', 'Prioridad', 'Baja', 'Alta'],
+    ]);
+    expect(preview.message).toMatch(/cambia 2 campos/);
+    expect(engine.completeTask).not.toHaveBeenCalled();
+  });
+
+  it('r1: a key the stage does not ask for is refused on the card and on execution, never dropped', async () => {
+    const { tool, engine, instances } = build();
+    instances.get.mockResolvedValue(
+      taskDetail({
+        data: { respuesta: 'Revisaremos su caso.' },
+        tasks: [
+          {
+            id: 31,
+            status: 'open',
+            stage_key: 'revision',
+            can_act: true,
+            form_fields: [{ key: 'nota', type: 'text', label: 'Nota' }],
+          },
+        ],
+      }),
+    );
+    const args = {
+      task_id: 31,
+      outcome: 'approve',
+      values: { respuesta: 'Le devolvemos el 100 %' },
+    };
+    const preview = await tool('workflows_complete_task').preview!(args, CTX);
+    expect(preview.status).toBe('error');
+    expect(preview.message).toMatch(/no pide el campo respuesta/);
+    expect(preview.message).toMatch(/nota \(Nota\)/);
+    const out = await call(tool('workflows_complete_task'), args);
+    expect(out.error).toMatch(/no pide el campo respuesta/);
+    expect(engine.completeTask).not.toHaveBeenCalled();
+  });
+
+  it('r1: values on a task without fields are refused', async () => {
+    const { tool, engine, instances } = build();
+    instances.get.mockResolvedValue(taskDetail());
+    const out = await call(tool('workflows_complete_task'), {
+      task_id: 31,
+      outcome: 'approve',
+      values: { monto: 1 },
+    });
+    expect(out.error).toMatch(/no pide el campo monto/);
+    expect(out.next_step).toMatch(/no pide campos/);
+    expect(engine.completeTask).not.toHaveBeenCalled();
+  });
+
   it('P6: a task without a form sends no values', async () => {
     const { tool, engine, instances } = build();
     instances.get.mockResolvedValue(taskDetail({ data: { motivo: 'Viaje' } }));

@@ -497,13 +497,29 @@ interface DefinitionSummary {
   has_unpublished_changes?: boolean;
 }
 
+/** A field the task fills, as the instance detail returns it. */
+interface TaskFormField {
+  key: string;
+  label?: string;
+  type?: string;
+  options?: Array<{ value: unknown; label?: string }>;
+}
+
 interface TaskRow {
   id: number;
   status: string;
   stage_key: string;
   can_act: boolean;
   /** Fields this task fills (stage form or branch form). */
-  form_fields?: Array<{ key: string }>;
+  form_fields?: TaskFormField[];
+}
+
+/** One request field a task decision writes, shown on the confirmation card. */
+interface TaskValueEdit {
+  key: string;
+  field: TaskFormField;
+  from: unknown;
+  to: unknown;
 }
 
 interface InstanceDetail {
@@ -546,10 +562,17 @@ function taskFormValues(
  * Block 11 — AI tools for Flujos (design §7.1–§7.5).
  *
  * The validator, the timeline and the SQL-derived metrics are deterministic;
- * the model only proposes JSON and narrates. Nothing here publishes, forces a
- * transition, cancels, deletes, or touches public links / API keys. The only
- * write (`workflows_draft_from_description`) goes through propose → confirm →
- * execute and creates a DRAFT.
+ * the model only proposes JSON and narrates. Every write goes through
+ * propose → confirm → execute, its card shows what it writes, and it calls
+ * the same service as the screen with the user's own permissions:
+ * - `workflows_draft_from_description` creates a DRAFT;
+ * - `workflows_update_draft` edits a draft (diff of stages and fields);
+ * - `workflows_publish_definition` publishes the draft as a new version;
+ * - `workflows_start_instance` starts a request (each field with its label);
+ * - `workflows_complete_task` decides a task the user is assigned to (each
+ *   field it changes, current and new value; foreign keys are refused).
+ * Nothing here forces a transition outside a task, cancels, deletes, or
+ * touches public links / API keys.
  *
  * Industry gate: the tool registry has no per-industry visibility, so every
  * handler/preview refuses with a clear Spanish message when the store does not
@@ -941,6 +964,7 @@ export function createWorkflowsTools(
       task: TaskRow;
       outcome: string;
       comment: string | null;
+      edits: TaskValueEdit[];
     }>
   > {
     const outcome = typeof args.outcome === 'string' ? args.outcome.trim() : '';
@@ -959,7 +983,7 @@ export function createWorkflowsTools(
     }
     const found = await resolveTask(args);
     if (!found.ok) return found;
-    const { detail } = found.value;
+    const { detail, task } = found.value;
     if (!detail.allowed_outcomes.includes(outcome)) {
       return {
         ok: false,
@@ -969,7 +993,50 @@ export function createWorkflowsTools(
           : 'Esta etapa no admite decisiones manuales.',
       };
     }
-    return { ok: true, value: { ...found.value, outcome, comment } };
+    const planned = plannedEdits(detail, task, args.values);
+    if (!planned.ok) return planned;
+    return { ok: true, value: { ...found.value, outcome, comment, edits: planned.value } };
+  }
+
+  /**
+   * The request fields this decision writes: only the task's own fields are
+   * accepted (anything else is refused, never dropped in silence) and only the
+   * ones whose value changes are listed, so the card shows every write.
+   */
+  function plannedEdits(
+    detail: InstanceDetail,
+    task: TaskRow,
+    given: unknown,
+  ): Planned<TaskValueEdit[]> {
+    const values = isObj(given) ? given : {};
+    const fields = new Map((task.form_fields ?? []).map((f) => [f.key, f]));
+    const foreign = Object.keys(values).filter((k) => !fields.has(k));
+    if (foreign.length > 0) {
+      const stageName = detail.stage?.key === task.stage_key ? detail.stage.name : task.stage_key;
+      return {
+        ok: false,
+        error: `La etapa «${stageName}» no pide ${foreign.length === 1 ? 'el campo' : 'los campos'} ${foreign.join(', ')}.`,
+        next_step: fields.size
+          ? `Campos que pide esta etapa: ${[...fields.values()].map((f) => `${f.key} (${f.label ?? f.key})`).join(', ')}.`
+          : 'Esta etapa no pide campos: atiéndela sin values.',
+      };
+    }
+    const data = detail.data ?? {};
+    return {
+      ok: true,
+      value: Object.entries(values)
+        .filter(([key, to]) => canonical(to) !== canonical(data[key] ?? null))
+        .map(([key, to]) => ({ key, field: fields.get(key)!, from: data[key] ?? null, to })),
+    };
+  }
+
+  /** A field value as the person reads it: option labels for lists, Sí/No, empty as null. */
+  function shownValue(field: TaskFormField, value: unknown): unknown {
+    if (value === null || value === undefined || value === '') return null;
+    const optionLabel = (v: unknown) =>
+      field.options?.find((o) => o.value === v)?.label ?? formatValue(v);
+    if (Array.isArray(value)) return value.map(optionLabel).join(', ');
+    return field.options?.length ? optionLabel(value) : formatValue(value);
   }
 
   return [
@@ -1693,7 +1760,7 @@ export function createWorkflowsTools(
       version: '1',
       domain: DOMAIN,
       description:
-        'Atiende la tarea pendiente de una solicitud con una decisión (mismo servicio que el botón de la bandeja). Recibe task_id, o la referencia de la solicitud (reference, por ejemplo FLU-000123) y opcionalmente stage. outcome: approve, reject, submit o return; comment y values (campos de la etapa) son opcionales: el formulario parte de los datos actuales de la solicitud, como en pantalla, y values los reemplaza. Solo puede hacerlo quien es responsable de la tarea; si no, se niega igual que en pantalla. La persona ve la solicitud, la etapa, la decisión y el comentario y confirma.',
+        'Atiende la tarea pendiente de una solicitud con una decisión (mismo servicio que el botón de la bandeja). Recibe task_id, o la referencia de la solicitud (reference, por ejemplo FLU-000123) y opcionalmente stage. outcome: approve, reject, submit o return; comment y values son opcionales: values solo admite las claves de los campos que pide la etapa (otra clave se rechaza); el formulario parte de los datos actuales de la solicitud, como en pantalla, y values los reemplaza. Solo puede hacerlo quien es responsable de la tarea; si no, se niega igual que en pantalla. La persona ve la solicitud, la etapa, la decisión, el comentario y cada campo que cambia con su valor actual y el nuevo, y confirma.',
       parameters: {
         type: 'object',
         properties: {
@@ -1742,7 +1809,7 @@ export function createWorkflowsTools(
       preview: guardedPreview('Tarea de flujo', async (args, context) => {
         const plan = await planComplete(args);
         if (!plan.ok) return errorPreview('Tarea de flujo', plan);
-        const { detail, task, outcome, comment } = plan.value;
+        const { detail, task, outcome, comment, edits } = plan.value;
         capture(proposalKey('workflows_complete_task', context, args), detail.row_version);
         const stageName = detail.stage?.name ?? task.stage_key;
         return {
@@ -1752,12 +1819,23 @@ export function createWorkflowsTools(
             { field: 'request', label: 'Solicitud', from: null, to: `${detail.reference}${detail.title ? ` · ${detail.title}` : ''}` },
             { field: 'stage', label: 'Etapa', from: null, to: stageName },
             { field: 'outcome', label: 'Decisión', from: null, to: OUTCOME_LABEL(outcome) },
+            ...edits.map((e) => ({
+              field: `data:${e.key}`,
+              label: e.field.label ?? e.key,
+              from: shownValue(e.field, e.from),
+              to: shownValue(e.field, e.to),
+            })),
             ...(comment ? [{ field: 'comment', label: 'Comentario', from: null, to: comment }] : []),
           ],
           domain: DOMAIN,
-          message: task.can_act
-            ? 'La decisión mueve la solicitud según el flujo y no se puede deshacer desde aquí.'
-            : 'Aviso: no figuras como responsable de esta tarea; si no puedes atenderla, se negará igual que en pantalla.',
+          message: [
+            task.can_act
+              ? 'La decisión mueve la solicitud según el flujo y no se puede deshacer desde aquí.'
+              : 'Aviso: no figuras como responsable de esta tarea; si no puedes atenderla, se negará igual que en pantalla.',
+            ...(edits.length
+              ? [`También cambia ${edits.length === 1 ? 'un campo' : `${edits.length} campos`} de la solicitud: revisa el valor actual y el nuevo.`]
+              : []),
+          ].join(' '),
         };
       }),
       handler: gated(async (args, context) => {
