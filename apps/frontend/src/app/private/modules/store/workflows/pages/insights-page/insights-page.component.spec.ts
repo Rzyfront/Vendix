@@ -146,6 +146,8 @@ describe('InsightsPageComponent', () => {
     usageResult = () => of(usage(quota({ state: 'warning', used: 80000, percent: 80 })));
     await render();
     expect(text()).toContain('Tus flujos llevan el 80 % del cupo de IA del plan');
+    // The fill uses a theme color class (bg-warning-500 does not exist).
+    expect(q('[role="progressbar"] > div')?.classList.contains('bg-warning')).toBeTrue();
   });
 
   it('al 100 % muestra la franja de cupo agotado', async () => {
@@ -154,6 +156,7 @@ describe('InsightsPageComponent', () => {
     expect(text()).toContain(
       'Cupo de IA agotado: los pasos de IA pasan a revisión manual hasta el próximo mes',
     );
+    expect(q('[role="progressbar"] > div')?.classList.contains('bg-error')).toBeTrue();
   });
 
   it('sin IA en el plan lo dice', async () => {

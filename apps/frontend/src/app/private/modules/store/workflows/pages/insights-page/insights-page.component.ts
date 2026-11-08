@@ -141,8 +141,8 @@ const MONTHS_BACK = 12;
                 <div
                   class="h-full rounded-full"
                   [class.bg-primary]="q.state === 'ok'"
-                  [class.bg-warning-500]="q.state === 'warning'"
-                  [class.bg-error-500]="q.state === 'blocked'"
+                  [class.bg-warning]="q.state === 'warning'"
+                  [class.bg-error]="q.state === 'blocked'"
                   [style.width.%]="barWidth()"
                 ></div>
               </div>
