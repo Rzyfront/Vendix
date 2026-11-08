@@ -1146,6 +1146,45 @@ describe('workflows_complete_task', () => {
     expect(out.message).toMatch(/Aprobar/);
   });
 
+  it('P6: a form task starts from the request data, like the screen; given values win', async () => {
+    const { tool, engine, instances } = build();
+    instances.get.mockResolvedValue(
+      taskDetail({
+        stage: { key: 'solicitud', name: 'Solicitud' },
+        allowed_outcomes: ['submit'],
+        data: { fecha_inicio: '2026-12-01', motivo: 'Viaje', otro: 'x', vacio: null },
+        tasks: [
+          {
+            id: 31,
+            status: 'open',
+            stage_key: 'solicitud',
+            can_act: true,
+            form_fields: [{ key: 'fecha_inicio' }, { key: 'motivo' }, { key: 'vacio' }],
+          },
+        ],
+      }),
+    );
+    await call(tool('workflows_complete_task'), {
+      reference: 'FLU-000009',
+      outcome: 'submit',
+      values: { motivo: 'Viaje familiar' },
+    });
+    expect(engine.completeTask).toHaveBeenCalledWith(
+      expect.objectContaining({
+        taskId: 31,
+        outcome: 'submit',
+        values: { fecha_inicio: '2026-12-01', motivo: 'Viaje familiar' },
+      }),
+    );
+  });
+
+  it('P6: a task without a form sends no values', async () => {
+    const { tool, engine, instances } = build();
+    instances.get.mockResolvedValue(taskDetail({ data: { motivo: 'Viaje' } }));
+    await call(tool('workflows_complete_task'), { task_id: 31, outcome: 'approve' });
+    expect(engine.completeTask.mock.calls[0][0]).not.toHaveProperty('values');
+  });
+
   it('a user who is not the assignee gets the engine refusal, and the card warns up front', async () => {
     const { tool, engine, instances } = build();
     instances.get.mockResolvedValue(

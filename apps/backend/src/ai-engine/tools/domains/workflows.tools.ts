@@ -502,6 +502,8 @@ interface TaskRow {
   status: string;
   stage_key: string;
   can_act: boolean;
+  /** Fields this task fills (stage form or branch form). */
+  form_fields?: Array<{ key: string }>;
 }
 
 interface InstanceDetail {
@@ -510,6 +512,7 @@ interface InstanceDetail {
   title: string | null;
   status: string;
   row_version: number;
+  data?: Record<string, unknown>;
   stage: { key: string; name: string } | null;
   tasks: TaskRow[];
   allowed_outcomes: string[];
@@ -517,6 +520,25 @@ interface InstanceDetail {
 
 const OUTCOME_LABEL = (o: string) => OUTCOME_ES[o] ?? o;
 const PENDING_TASK = ['open', 'claimed'];
+
+/**
+ * Like the screen, the task form starts from the request's current data; the
+ * values Vex sends win. The engine validates only the submitted values.
+ */
+function taskFormValues(
+  detail: InstanceDetail,
+  task: TaskRow,
+  given: unknown,
+): Record<string, unknown> {
+  const data = detail.data ?? {};
+  const seeded = Object.fromEntries(
+    (task.form_fields ?? [])
+      .map((f) => f.key)
+      .filter((key) => data[key] !== undefined && data[key] !== null)
+      .map((key) => [key, data[key]]),
+  );
+  return { ...seeded, ...(isObj(given) ? given : {}) };
+}
 
 // ─── Tools ───────────────────────────────────────────────────────────────
 
@@ -1671,7 +1693,7 @@ export function createWorkflowsTools(
       version: '1',
       domain: DOMAIN,
       description:
-        'Atiende la tarea pendiente de una solicitud con una decisión (mismo servicio que el botón de la bandeja). Recibe task_id, o la referencia de la solicitud (reference, por ejemplo FLU-000123) y opcionalmente stage. outcome: approve, reject, submit o return; comment y values (campos de la etapa) son opcionales. Solo puede hacerlo quien es responsable de la tarea; si no, se niega igual que en pantalla. La persona ve la solicitud, la etapa, la decisión y el comentario y confirma.',
+        'Atiende la tarea pendiente de una solicitud con una decisión (mismo servicio que el botón de la bandeja). Recibe task_id, o la referencia de la solicitud (reference, por ejemplo FLU-000123) y opcionalmente stage. outcome: approve, reject, submit o return; comment y values (campos de la etapa) son opcionales: el formulario parte de los datos actuales de la solicitud, como en pantalla, y values los reemplaza. Solo puede hacerlo quien es responsable de la tarea; si no, se niega igual que en pantalla. La persona ve la solicitud, la etapa, la decisión y el comentario y confirma.',
       parameters: {
         type: 'object',
         properties: {
@@ -1751,10 +1773,11 @@ export function createWorkflowsTools(
         const seen = recall(proposalKey('workflows_complete_task', context, args));
         const expectedRowVersion =
           explicit ?? (typeof seen?.value === 'number' ? seen.value : detail.row_version);
+        const values = taskFormValues(detail, task, args.values);
         const res = await deps.engine.completeTask({
           taskId: task.id,
           outcome,
-          ...(isObj(args.values) ? { values: args.values } : {}),
+          ...(Object.keys(values).length ? { values } : {}),
           comment,
           expectedRowVersion,
           idempotencyKey: `vex-task-${task.id}-${outcome}-${expectedRowVersion}`,
