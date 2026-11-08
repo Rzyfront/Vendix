@@ -65,6 +65,7 @@ import { WorkflowTrackingLinksService } from './tracking/workflow-tracking-links
 import { WorkflowTrackingPublicService } from './tracking/workflow-tracking-public.service';
 import { WorkflowMetricsService } from './metrics/workflow-metrics.service';
 import { WorkflowAnalyticsService } from './metrics/workflow-analytics.service';
+import { WorkflowAiService } from './ai/workflow-ai.service';
 import { WorkflowAnalyticsController } from './metrics/workflow-analytics.controller';
 import { WorkflowTasksController } from './tasks/workflow-tasks.controller';
 import { WorkflowPeopleActions } from './engine/actions/people.actions';
@@ -186,6 +187,8 @@ import { WorkflowLiveListener } from './live/workflow-live.listener';
     WorkflowInstancesService,
     WorkflowMetricsService,
     WorkflowAnalyticsService,
+    // P6.3: single gateway for every AI call of Flows (quota, ledger, alerts).
+    WorkflowAiService,
     WorkflowFilesService,
     WorkflowCommentsService,
     WorkflowInboxService,
@@ -267,6 +270,8 @@ import { WorkflowLiveListener } from './live/workflow-live.listener';
     WorkflowPublicUploadsService,
     WorkflowTrackingLinksService,
     WorkflowTrackingPublicService,
+    // P6.3: the document read (DocumentChecksModule) records its tokens here.
+    WorkflowAiService,
   ],
 })
 export class WorkflowsModule implements OnModuleInit {

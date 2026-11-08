@@ -77,6 +77,7 @@ describe('DocumentChecksService · Leer con IA', () => {
   let ai: { run: jest.Mock; assertVisionModelLinked: jest.Mock };
   let pages: { prepare: jest.Mock };
   let s3: { downloadFile: jest.Mock };
+  let workflowAi: { recordUsage: jest.Mock; warnIfThresholdReached: jest.Mock };
   let instanceId: number;
   let fileId: number;
   const FIELDS = ['proveedor', 'nit', 'fecha', 'total'];
@@ -102,6 +103,7 @@ describe('DocumentChecksService · Leer con IA', () => {
       })),
     };
     s3 = { downloadFile: jest.fn(async () => PDF) };
+    workflowAi = { recordUsage: jest.fn(async () => undefined), warnIfThresholdReached: jest.fn(async () => undefined) };
     service = new DocumentChecksService(
       kit.prisma,
       kit.storedFiles,
@@ -110,6 +112,7 @@ describe('DocumentChecksService · Leer con IA', () => {
       ai as any,
       pages as any,
       s3 as any,
+      workflowAi as any,
     );
     kit.as({ user_id: 4, permissions: ['store:workflows:task'] });
     instanceId = (await kit.engine.start({ definitionKey: 'facturas' })).instance.id;
@@ -155,6 +158,35 @@ describe('DocumentChecksService · Leer con IA', () => {
     });
     expect(row.input_sha256).toMatch(/^[0-9a-f]{64}$/);
     expect(row.result.text).toContain('FACTURA');
+  });
+
+  it('atribuye los tokens de la lectura a la solicitud y a su flujo (P6.3)', async () => {
+    answer(aiJson());
+    await read();
+    const definitionId = kit.db.table('workflow_instances').find((i) => i.id === instanceId)!.definition_id;
+    expect(workflowAi.recordUsage).toHaveBeenCalledWith({
+      purpose: 'document_read',
+      status: 'success',
+      appKey: DOCUMENT_EXTRACT_APP_KEY,
+      model: 'vision-x',
+      tokens: { prompt: 100, completion: 50, total: 150 },
+      instanceId,
+      definitionId,
+    });
+    expect(workflowAi.warnIfThresholdReached).toHaveBeenCalledTimes(1);
+
+    // A cached reading spends nothing: no new ledger row.
+    await read();
+    expect(workflowAi.recordUsage).toHaveBeenCalledTimes(1);
+  });
+
+  it('una lectura fallida también deja su consumo, sin aviso de umbral', async () => {
+    ai.run.mockResolvedValueOnce({ success: false, error: 'boom', usage: { promptTokens: 7, completionTokens: 0, totalTokens: 7 } });
+    await expect(read()).rejects.toBeInstanceOf(VendixHttpException);
+    expect(workflowAi.recordUsage).toHaveBeenCalledWith(
+      expect.objectContaining({ purpose: 'document_read', status: 'failed', tokens: { prompt: 7, completion: 0, total: 7 } }),
+    );
+    expect(workflowAi.warnIfThresholdReached).not.toHaveBeenCalled();
   });
 
   it('un segundo pedido igual sale del caché y no llama a la IA', async () => {
