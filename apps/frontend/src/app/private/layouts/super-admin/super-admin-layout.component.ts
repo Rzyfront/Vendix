@@ -225,6 +225,7 @@ export class SuperAdminLayoutComponent {
   private readonly routeTitles: Record<string, string> = {
     '/super-admin/dashboard': 'Panel Principal',
     '/super-admin/monitoring': 'Monitoreo del Servidor',
+    '/super-admin/workflows-ops': 'Operación de Flujos',
     '/super-admin/organizations': 'Organizaciones',
     '/super-admin/stores': 'Tiendas',
     '/super-admin/stores/activity': 'Actividad de Tiendas',
@@ -290,6 +291,11 @@ export class SuperAdminLayoutComponent {
             label: 'Monitoreo',
             icon: 'circle',
             route: '/super-admin/monitoring',
+          },
+          {
+            label: 'Operación de Flujos',
+            icon: 'circle',
+            route: '/super-admin/workflows-ops',
           },
           {
             label: 'Auditoría',

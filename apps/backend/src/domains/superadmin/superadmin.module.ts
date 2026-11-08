@@ -29,6 +29,7 @@ import { SuperadminFiscalOperationsModule } from './fiscal-operations/superadmin
 import { SuperadminInvoicingModule } from './invoicing/superadmin-invoicing.module';
 import { SuperadminTenantConfigModule } from './tenant-config/superadmin-tenant-config.module';
 import { VideoLibraryAdminModule } from './video-library/video-library-admin.module';
+import { WorkflowsOpsModule } from './workflows-ops/workflows-ops.module';
 
 @Module({
   imports: [
@@ -62,6 +63,7 @@ import { VideoLibraryAdminModule } from './video-library/video-library-admin.mod
     SuperadminFiscalOperationsModule,
     SuperadminInvoicingModule,
     SuperadminTenantConfigModule,
+    WorkflowsOpsModule,
   ],
 })
 export class SuperadminDomainModule {}
