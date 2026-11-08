@@ -115,4 +115,22 @@ describe('PlanFormComponent: Límites de Flujos (P7.1)', () => {
     cmp.onSubmit();
     expect(service.updatePlan.calls.mostRecent().args[1].workflow_limits).toBeNull();
   });
+
+  it('a negative or out-of-range line is shown instead of saved as the platform value', () => {
+    const cmp = setup('7', stored({ workflow_limits: { monthly_instances: 500 } }));
+    const toast = TestBed.inject(ToastService) as unknown as { error: jasmine.Spy };
+    cmp.limitsForm.controls.monthly_instances.setValue({ value: '-5', unlimited: false });
+    cmp.limitsForm.controls.monthly_http_calls.setValue({ value: 3_000_000_000, unlimited: false });
+    cmp.onSubmit();
+    expect(service.updatePlan).not.toHaveBeenCalled();
+    expect(cmp.activeTab()).toBe('workflows');
+    expect(toast.error.calls.mostRecent().args[0]).toContain('«Solicitudes por mes», «Llamadas HTTP por mes»');
+  });
+
+  it('a small storage cap is saved back with its exact bytes', () => {
+    const limits = { storage_bytes: 100 * 1024 ** 2 };
+    const cmp = setup('7', stored({ workflow_limits: limits }));
+    cmp.onSubmit();
+    expect(service.updatePlan.calls.mostRecent().args[1].workflow_limits).toEqual(limits);
+  });
 });

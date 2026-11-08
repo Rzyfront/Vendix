@@ -38,6 +38,7 @@ import {
   WORKFLOW_LIMIT_KEYS,
   WorkflowLimitKey,
   buildWorkflowLimits,
+  invalidWorkflowLimitLines,
   workflowLimitsToForm,
 } from './workflow-limits.util';
 import {
@@ -862,6 +863,22 @@ export class PlanFormComponent {
   onSubmit(): void {
     if (this.form.invalid) {
       this.form.markAllAsTouched();
+      return;
+    }
+
+    // A line with a negative or out-of-range number would silently fall back to
+    // the platform value: it is shown instead of saved.
+    const badLimits = invalidWorkflowLimitLines(this.limitsForm.getRawValue());
+    if (badLimits.length > 0) {
+      const labels = this.limitLines
+        .filter((line) => badLimits.includes(line.key))
+        .map((line) => `«${line.label}»`)
+        .join(', ');
+      this.activeTab.set('workflows');
+      this.toast.error(
+        `Revisa ${labels}: usa un número desde 0 (las solicitudes y llamadas, hasta 2.147.483.647), «Sin límite» o déjalo vacío para usar el valor de la plataforma.`,
+        'Límites de Flujos',
+      );
       return;
     }
 

@@ -1,6 +1,7 @@
 import {
   buildWorkflowLimits,
   emptyWorkflowLimitsForm,
+  invalidWorkflowLimitLines,
   workflowLimitsToForm,
 } from './workflow-limits.util';
 
@@ -73,5 +74,24 @@ describe('workflow limits of a plan (P7.1)', () => {
   it('save then load keeps the same limits', () => {
     const stored = { monthly_instances: 20, storage_bytes: 3 * 1024 ** 3, monthly_http_calls: null };
     expect(buildWorkflowLimits(workflowLimitsToForm(stored))).toEqual(stored);
+  });
+
+  it('flags a typed line that cannot be saved; empty lines and "Sin límite" are fine', () => {
+    const form = emptyWorkflowLimitsForm();
+    expect(invalidWorkflowLimitLines(form)).toEqual([]);
+    form.monthly_instances = { value: '-1', unlimited: false };
+    form.monthly_http_calls = { value: 2_147_483_648, unlimited: false };
+    form.storage_bytes = { value: 'abc', unlimited: false };
+    expect(invalidWorkflowLimitLines(form)).toEqual(['monthly_instances', 'monthly_http_calls', 'storage_bytes']);
+    form.monthly_instances = { value: -1, unlimited: true };
+    form.monthly_http_calls = { value: 2_147_483_647, unlimited: false };
+    form.storage_bytes = { value: 4096, unlimited: false };
+    expect(invalidWorkflowLimitLines(form)).toEqual([]);
+  });
+
+  it('a storage cap that two decimals of GB cannot hold round-trips with its exact bytes', () => {
+    const small = { storage_bytes: 100 * 1024 ** 2 };
+    expect(buildWorkflowLimits(workflowLimitsToForm(small))).toEqual(small);
+    expect(workflowLimitsToForm({ storage_bytes: 5 * 1024 ** 3 }).storage_bytes.value).toBe(5);
   });
 });

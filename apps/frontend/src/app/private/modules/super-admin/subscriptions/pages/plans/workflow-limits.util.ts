@@ -35,8 +35,20 @@ export const emptyWorkflowLimitsForm = (): WorkflowLimitsFormValue => ({
 const toStored = (key: WorkflowLimitKey, value: number): number =>
   key === 'storage_bytes' ? Math.round(value * GIB) : Math.round(value);
 
-const toShown = (key: WorkflowLimitKey, stored: number): number =>
-  key === 'storage_bytes' ? Math.round((stored / GIB) * 100) / 100 : stored;
+/**
+ * Storage shows in GB with two decimals when that still saves the same bytes;
+ * otherwise the exact value (GIB is a power of two, so the division is exact),
+ * so saving the plan for another reason never rewrites a small cap.
+ */
+const toShown = (key: WorkflowLimitKey, stored: number): number => {
+  if (key !== 'storage_bytes') return stored;
+  const exact = stored / GIB;
+  const rounded = Math.round(exact * 100) / 100;
+  return Math.round(rounded * GIB) === stored ? rounded : exact;
+};
+
+/** The monthly counters are INTEGER columns: the largest cap they can reach (as the API checks). */
+export const MAX_MONTHLY_CAP = 2_147_483_647;
 
 /** The number of a line, typed (text) or loaded (number); empty, negative or not a number is `null`. */
 const typedNumber = (value: number | string | null): number | null => {
@@ -45,6 +57,23 @@ const typedNumber = (value: number | string | null): number | null => {
   const n = Number(text);
   return Number.isFinite(n) && n >= 0 ? n : null;
 };
+
+/**
+ * Lines with something typed that cannot be saved: a negative number, text
+ * that is not a number, or a monthly cap past `MAX_MONTHLY_CAP`. Without this
+ * check such a line would be left out and silently fall back to the platform
+ * value. "Sin límite" ignores what was typed.
+ */
+export function invalidWorkflowLimitLines(form: WorkflowLimitsFormValue): WorkflowLimitKey[] {
+  return WORKFLOW_LIMIT_KEYS.filter((key) => {
+    const line = form[key];
+    if (line.unlimited) return false;
+    const text = typeof line.value === 'string' ? line.value.trim() : line.value;
+    if (text === null || text === '') return false;
+    const n = typedNumber(line.value);
+    return n === null || (key !== 'storage_bytes' && n > MAX_MONTHLY_CAP);
+  });
+}
 
 /**
  * What the form sends: an empty section (nothing typed, no toggle) is `null`,
