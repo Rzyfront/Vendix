@@ -9,6 +9,7 @@ import {
   WorkflowStageDef,
 } from '../../../../../../../../shared/workflows/contract/workflow-contract';
 import { AiStepTestResult } from '../../../../interfaces/workflow.interfaces';
+import { SubscriptionAccessService } from '../../../../../../../../core/services/subscription-access.service';
 import { WorkflowsApiService } from '../../../../services/workflows-api.service';
 import { WorkflowEditorStore } from '../../../workflow-editor.store';
 import { StageAiTestComponent } from './stage-ai-test.component';
@@ -43,12 +44,14 @@ const success: AiStepTestResult = {
 describe('StageAiTestComponent', () => {
   let fixture: ComponentFixture<StageAiTestComponent>;
   const api = { testAiStep: jasmine.createSpy('testAiStep') };
+  const openPaywall = jasmine.createSpy('openPaywall');
   const dirty = signal(false);
   const el = () => fixture.nativeElement as HTMLElement;
   const button = () => el().querySelector('app-button button') as HTMLButtonElement;
 
   function setup(result: Observable<AiStepTestResult>, current: WorkflowStageDef = stage) {
     api.testAiStep.calls.reset();
+    openPaywall.calls.reset();
     api.testAiStep.and.returnValue(result);
     dirty.set(false);
     TestBed.configureTestingModule({
@@ -59,6 +62,7 @@ describe('StageAiTestComponent', () => {
         provideHttpClientTesting(),
         provideMockStore({ initialState: { tenant: { domainConfig: null } } }),
         { provide: WorkflowsApiService, useValue: api },
+        { provide: SubscriptionAccessService, useValue: { openPaywall } },
         {
           provide: WorkflowEditorStore,
           useValue: { draft: signal(draft), dirty, savingNow: signal(false), definitionId: signal(7) },
@@ -104,11 +108,21 @@ describe('StageAiTestComponent', () => {
     expect(text).toContain('120 tokens');
   });
 
-  it('muestra el mensaje en español cuando no hay cupo', () => {
+  it('sin cupo de IA abre el paywall de IA (SUBSCRIPTION_006) y no muestra un error en línea', () => {
     setup(of({ status: 'skipped_quota', message: 'El plan no tiene cupo de IA' }));
     fixture.componentInstance.run();
     fixture.detectChanges();
-    expect(el().querySelector('[data-testid="ai-test-message"]')?.textContent).toContain('El plan no tiene cupo de IA');
+    expect(openPaywall).toHaveBeenCalledOnceWith('SUBSCRIPTION_006', 'El plan no tiene cupo de IA');
+    expect(el().querySelector('[data-testid="ai-test-message"]')).toBeNull();
+    expect(el().querySelector('app-alert-banner[ng-reflect-variant="danger"]')).toBeNull();
+  });
+
+  it('otros resultados sin éxito siguen mostrando su mensaje y no abren el paywall', () => {
+    setup(of({ status: 'invalid_output', message: 'La IA no respondió con un valor válido' }));
+    fixture.componentInstance.run();
+    fixture.detectChanges();
+    expect(openPaywall).not.toHaveBeenCalled();
+    expect(el().querySelector('[data-testid="ai-test-message"]')?.textContent).toContain('no respondió');
   });
 
   it('un paso sin configurar no se puede probar', () => {

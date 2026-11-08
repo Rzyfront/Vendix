@@ -1,4 +1,4 @@
-import { Injectable } from '@nestjs/common';
+import { Injectable, Optional } from '@nestjs/common';
 import { ErrorCodes, VendixHttpException } from '@common/errors';
 import {
   WORKFLOW_EVENT_CATALOG,
@@ -37,6 +37,9 @@ import {
   WorkflowCallContext,
   WorkflowLoaderService,
 } from './workflow-loader.service';
+import { heldRoleNames, seesFlow } from '../access/workflow-access.policy';
+import { readWorkflowAccess } from '../access/workflow-access.types';
+import { WorkflowLimitsService } from '../limits/workflow-limits.service';
 import { WorkflowReferenceService } from './workflow-reference.service';
 import { WorkflowStageService } from './workflow-stage.service';
 
@@ -75,6 +78,15 @@ function coerceMapped(type: WorkflowFieldType, raw: string): unknown {
   }
 }
 
+/**
+ * P7.1: how a start counts against the plan's monthly requests. `person` (a
+ * user, 402 with the plan details) and `outsider` (public form or inbound
+ * webhook, neutral refusal) are refused over the cap; `system` (event,
+ * schedule, email, record date) is refused and the owners are told once a
+ * month; `exempt` (approval gates, subflow children) counts and never stops.
+ */
+type StartLimitMode = 'person' | 'outsider' | 'system' | 'exempt';
+
 /** `start` inside the engine transaction. */
 @Injectable()
 export class WorkflowStartService {
@@ -85,7 +97,29 @@ export class WorkflowStartService {
     private readonly references: WorkflowReferenceService,
     private readonly dossiers: DossiersService,
     private readonly advancer: WorkflowAdvanceService,
+    // Optional so the engine specs that wire the starter by hand keep working;
+    // Nest always provides it (WorkflowsModule).
+    @Optional() private readonly limits?: WorkflowLimitsService,
   ) {}
+
+  /**
+   * P7.1: counts this request in the month, inside the start transaction and
+   * right before the instance insert (after every check), so the counter row
+   * stays locked as short as possible and rolls back with a failed start.
+   * Replays never get here: they return before any write.
+   */
+  private async countStart(tx: WorkflowTx, ctx: WorkflowCallContext, mode: StartLimitMode): Promise<void> {
+    if (!this.limits) return;
+    const use = await this.limits.consume(ctx.store_id, 'monthly_instances', {
+      tx,
+      enforce: mode !== 'exempt',
+    });
+    if (use.allowed) return;
+    if (mode !== 'person') {
+      await this.limits.noticeOnce(ctx.store_id, use, mode === 'outsider');
+    }
+    throw this.limits.refusal(use, mode === 'outsider' ? 'outsider' : 'staff');
+  }
 
   async execute(
     tx: WorkflowTx,
@@ -108,12 +142,16 @@ export class WorkflowStartService {
     if (!def) {
       throw new VendixHttpException(ErrorCodes.WORKFLOW_DEFINITION_NOT_FOUND);
     }
-    if (def.status !== 'active' || !def.published_version_id) {
+    const definition = def.published_version_id
+      ? await this.loader.loadDefinition(tx, def.published_version_id)
+      : null;
+    // P7.3: before any other answer, so a hidden flow reads as a missing one.
+    await this.assertSeesFlow(tx, ctx, def.access, definition?.start_roles ?? []);
+    if (def.status !== 'active' || !definition) {
       throw new VendixHttpException(ErrorCodes.WORKFLOW_NOT_ACTIVE);
     }
     // P2.11: a switched-off flow starts nothing new.
     if (def.is_enabled === false) throw new VendixHttpException(ErrorCodes.WORKFLOW_DISABLED);
-    const definition = await this.loader.loadDefinition(tx, def.published_version_id);
     await this.assertMayStart(tx, ctx, definition);
     const stage = startStage(definition);
     if (!stage) throw new VendixHttpException(ErrorCodes.WORKFLOW_STAGE_NOT_FOUND);
@@ -138,6 +176,7 @@ export class WorkflowStartService {
       ? await this.storeLocationId(tx, ctx.store_id, input.locationId, true)
       : null;
 
+    await this.countStart(tx, ctx, 'person');
     const created = (await tx.workflow_instances.create({
       data: {
         organization_id: ctx.organization_id,
@@ -288,6 +327,7 @@ export class WorkflowStartService {
     }
     const actor: WorkflowActor = { type: 'public', id: null };
     const patch = this.stages.stagePatch(stage, now, 0);
+    await this.countStart(tx, ctx, 'outsider');
     const created = (await tx.workflow_instances.create({
       data: {
         organization_id: ctx.organization_id,
@@ -524,6 +564,7 @@ export class WorkflowStartService {
       idempotencyKey: input.idempotencyKey,
       started: { ...(input.started ?? {}), via: input.kind },
       title: input.title,
+      limit: input.kind === 'webhook' ? 'outsider' : 'system',
     });
   }
 
@@ -587,6 +628,7 @@ export class WorkflowStartService {
       subject,
       idempotencyKey: input.idempotencyKey,
       started: { via: 'approval_gate', operation, gate_id: gate.id },
+      limit: 'exempt',
     });
     const linked = await tx.workflow_approval_gates.updateMany({
       where: { id: gate.id, status: 'pending', instance_id: null },
@@ -626,15 +668,22 @@ export class WorkflowStartService {
       (t) => t.kind === 'schedule' && t.cron === input.cron,
     );
     if (!declared || !stage || stage.assignee?.kind === 'initiator') return null;
-    return this.createSystemInstance(tx, ctx, {
-      def,
-      definition,
-      stage,
-      initial: {},
-      subject: null,
-      idempotencyKey,
-      started: { via: 'schedule', cron: input.cron, fire_at: input.fireAt },
-    });
+    try {
+      return await this.createSystemInstance(tx, ctx, {
+        def,
+        definition,
+        stage,
+        initial: {},
+        subject: null,
+        idempotencyKey,
+        started: { via: 'schedule', cron: input.cron, fire_at: input.fireAt },
+      });
+    } catch (e) {
+      // P7.1: over the plan's monthly requests the fire simply does not start
+      // (the owners were told); nothing was written yet.
+      if (e instanceof VendixHttpException && e.errorCode === 'WORKFLOW_PLAN_LIMIT_REACHED') return null;
+      throw e;
+    }
   }
 
   /**
@@ -743,6 +792,7 @@ export class WorkflowStartService {
       },
       startedBy: { type: parent.started_by_type, id: parent.started_by_id },
       parent: { id: parent.id, stage_key: input.stageKey, entry_seq: input.entrySeq },
+      limit: 'exempt',
     });
     return { started, flowKey: child.flow_key };
   }
@@ -805,6 +855,8 @@ export class WorkflowStartService {
       /** P2.2: a child keeps the parent's starter, so `initiator` still means someone. */
       startedBy?: { type: WorkflowActor['type']; id: number | null };
       parent?: { id: number; stage_key: string; entry_seq: number };
+      /** P7.1: how the start counts against the plan (default `system`). */
+      limit?: StartLimitMode;
     },
   ): Promise<WorkflowCommandResult> {
     const actor: WorkflowActor = { type: 'system', id: null };
@@ -818,6 +870,7 @@ export class WorkflowStartService {
     });
     const patch = this.stages.stagePatch(a.stage, now, 0);
 
+    await this.countStart(tx, ctx, a.limit ?? 'system');
     const created = (await tx.workflow_instances.create({
       data: {
         organization_id: ctx.organization_id,
@@ -953,6 +1006,29 @@ export class WorkflowStartService {
     }
     if (!found) {
       throw new VendixHttpException(ErrorCodes.WORKFLOW_SUBJECT_NOT_FOUND);
+    }
+  }
+
+  /**
+   * "Quién ve" of the flow (P7.3) for a person starting it: the same rule as
+   * `WorkflowAccessPolicy`, read inside the start transaction. Owner,
+   * superadmin and `store:workflows:manage` pass; calls without a user are
+   * not restricted.
+   */
+  private async assertSeesFlow(
+    tx: WorkflowTx,
+    ctx: WorkflowCallContext,
+    rawAccess: unknown,
+    startRoles: readonly string[],
+  ) {
+    const access = readWorkflowAccess(rawAccess);
+    if (!access || ctx.user_id === null) return;
+    if (ctx.is_owner || ctx.is_super_admin || ctx.permissions.includes('store:workflows:manage')) {
+      return;
+    }
+    const roles = await heldRoleNames(tx, ctx.user_id, ctx.store_id, ctx.organization_id);
+    if (!seesFlow(access, startRoles, ctx.user_id, roles)) {
+      throw new VendixHttpException(ErrorCodes.WORKFLOW_DEFINITION_NOT_FOUND);
     }
   }
 

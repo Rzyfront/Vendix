@@ -3,6 +3,7 @@ import { RequestContextService } from '@common/context/request-context.service';
 import { ErrorCodes, VendixHttpException } from '@common/errors';
 import { WorkflowDefinitionV1 } from '@common/workflows/contract';
 import { StorePrismaService } from '../../../../prisma/services/store-prisma.service';
+import { WorkflowAccessPolicy } from '../access/workflow-access.policy';
 
 /** Below this many finished instances in the window, p90 means nothing. */
 export const INSUFFICIENT_DATA_THRESHOLD = 20;
@@ -83,7 +84,11 @@ const round2 = (n: number) => Math.round(n * 100) / 100;
  */
 @Injectable()
 export class WorkflowMetricsService {
-  constructor(private readonly prisma: StorePrismaService) {}
+  private readonly access: WorkflowAccessPolicy;
+
+  constructor(private readonly prisma: StorePrismaService) {
+    this.access = new WorkflowAccessPolicy(prisma);
+  }
 
   private storeId(): number {
     const id = RequestContextService.getContext()?.store_id;
@@ -98,6 +103,8 @@ export class WorkflowMetricsService {
   ): Promise<StageMetricsResult> {
     const store_id = this.storeId();
     const { from, to } = range;
+    // P7.3: a flow the caller may not see has no metrics.
+    await this.access.assertCanView(definitionId);
 
     const definitionRow = await this.prisma.workflow_definitions.findFirst({
       where: { id: definitionId, store_id },

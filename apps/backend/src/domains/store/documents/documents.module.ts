@@ -26,6 +26,8 @@ import { SignaturePublicService } from './signatures/signature-public.service';
 import { SignatureRequestsService } from './signatures/signature-requests.service';
 import { SignatureSealService } from './signatures/signature-seal.service';
 import { NotificationsModule } from '../notifications/notifications.module';
+import { WorkflowAuditModule } from '../workflows/audit/workflow-audit.module';
+import { WorkflowLimitsModule } from '../workflows/limits/workflow-limits.module';
 import { DocumentExpiryController } from './profiles/document-expiry.controller';
 import { DocumentExpiryCron } from './profiles/document-expiry.cron';
 import { DocumentExpiryService } from './profiles/document-expiry.service';
@@ -44,7 +46,16 @@ import { DocumentSearchService } from './search/document-search.service';
  * `S3PathHelper` y `AuditService` llegan por módulos globales.
  */
 @Module({
-  imports: [PrismaModule, S3Module, ResponseModule, NotificationsModule, EmailModule],
+  imports: [
+    PrismaModule,
+    S3Module,
+    ResponseModule,
+    NotificationsModule,
+    EmailModule,
+    // P7: storage limit on upload and fail-closed audit of document accesses.
+    WorkflowAuditModule,
+    WorkflowLimitsModule,
+  ],
   controllers: [
     DossiersController,
     DocumentFileProfilesController,

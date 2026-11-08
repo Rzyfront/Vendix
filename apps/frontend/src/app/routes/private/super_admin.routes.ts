@@ -165,6 +165,13 @@ export const superAdminRoutes: Routes = [
           ).then((m) => m.MONITORING_ROUTES),
       },
       {
+        path: 'workflows-ops',
+        loadChildren: () =>
+          import(
+            '../../private/modules/super-admin/workflows-ops/workflows-ops.routes'
+          ).then((m) => m.WORKFLOWS_OPS_ROUTES),
+      },
+      {
         path: 'billing',
         redirectTo: 'subscriptions',
         pathMatch: 'full',

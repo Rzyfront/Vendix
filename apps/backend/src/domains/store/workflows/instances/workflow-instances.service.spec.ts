@@ -240,4 +240,27 @@ describe('WorkflowInstancesService', () => {
       expect(kit.db.table('workflow_instances')).toHaveLength(before);
     });
   });
+
+  describe('permisos del flujo (P7.3)', () => {
+    const restrict = () =>
+      Object.assign(kit.db.table('workflow_definitions')[0], {
+        access: { view: { roles: ['owner'], user_ids: [] } },
+      });
+
+    it('un participante sigue viendo su propia solicitud aunque el flujo esté restringido', async () => {
+      restrict();
+      kit.as({ user_id: 4, permissions: ['store:workflows:read'] });
+      expect(await ids()).toEqual([A]);
+      expect((await svc.get(A) as any).id).toBe(A);
+    });
+
+    it('quien no participó sigue sin ver la solicitud (404 por URL), con o sin restricción', async () => {
+      kit.as({ user_id: 4, permissions: ['store:workflows:read'] });
+      expect(await codeOf(svc.get(B))).toBe('WORKFLOW_NOT_FOUND');
+      restrict();
+      expect(await codeOf(svc.get(B))).toBe('WORKFLOW_NOT_FOUND');
+      expect(await ids()).toEqual([A]);
+    });
+  });
 });
+

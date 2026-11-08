@@ -1,4 +1,4 @@
-import { VendixHttpException } from '@common/errors';
+import { ErrorCodes, VendixHttpException } from '@common/errors';
 import { WorkflowDefinitionV1 } from '@common/workflows/contract';
 import {
   buildWorkflowKit,
@@ -6,6 +6,8 @@ import {
   seedDefinition,
   seedPeople,
 } from '../../../../testing/workflows/workflow-test-kit';
+import { WorkflowAccessPolicy } from '../access/workflow-access.policy';
+import { WorkflowAuditRow, WorkflowAuditService } from '../audit/workflow-audit.service';
 import { WorkflowCollectionsService } from './workflow-collections.service';
 import { WorkflowRecordsService } from './workflow-records.service';
 import {
@@ -59,7 +61,16 @@ describe('WorkflowRecordsService (P3.6)', () => {
       return [{ n: row.next_number - 1 }];
     });
     collections = new WorkflowCollectionsService(kit.prisma);
-    svc = new WorkflowRecordsService(kit.prisma, collections, kit.dossiers, kit.storedFiles, kit.engine);
+    svc = new WorkflowRecordsService(
+      kit.prisma,
+      collections,
+      kit.dossiers,
+      kit.storedFiles,
+      kit.engine,
+      kit.workflowAudit,
+      kit.instances,
+      new WorkflowAccessPolicy(kit.prisma),
+    );
     kit.as({ is_owner: true, permissions: [] });
     collectionId = (
       await collections.create({
@@ -239,6 +250,73 @@ describe('WorkflowRecordsService (P3.6)', () => {
       expect((await failure(svc.downloadFile(a.id, fb.file_id)))?.code).toBe('DOCUMENT_NOT_FOUND');
       expect((await failure(svc.downloadFile(a.id, 9999)))?.code).toBe('DOCUMENT_NOT_FOUND');
     });
+
+    describe('download audit (P7.2)', () => {
+      let audit: WorkflowAuditService;
+      let audited: WorkflowRecordsService;
+      const rows = () => kit.db.table('workflow_audit_log') as WorkflowAuditRow[];
+
+      beforeEach(() => {
+        audit = new WorkflowAuditService(kit.prisma);
+        audited = new WorkflowRecordsService(
+          kit.prisma,
+          collections,
+          kit.dossiers,
+          kit.storedFiles,
+          kit.engine,
+          audit,
+          kit.instances,
+          new WorkflowAccessPolicy(kit.prisma),
+        );
+      });
+
+      it('writes document.file_downloaded before the signed URL exists', async () => {
+        const r = await audited.create({ collection_id: collectionId, values: { cliente: 'A' } });
+        const f = await audited.uploadFile(r.id, pdf('contrato.pdf'));
+        const order: string[] = [];
+        const record = audit.recordNow.bind(audit);
+        jest.spyOn(audit, 'recordNow').mockImplementation(async (input) => {
+          order.push('audit');
+          return record(input);
+        });
+        kit.s3.getPresignedUrl.mockImplementation(async (key: string) => {
+          order.push('url');
+          return `https://signed.example/${key}`;
+        });
+
+        await audited.downloadFile(r.id, f.file_id);
+
+        expect(order).toEqual(['audit', 'url']);
+        expect(rows()).toHaveLength(1);
+        expect(rows()[0]).toMatchObject({
+          action: 'document.file_downloaded',
+          category: 'document',
+          target_type: 'file',
+          target_id: String(f.file_id),
+          summary: `Descargó el archivo «contrato.pdf» del expediente del registro ${r.id}`,
+        });
+        expect(rows()[0].details).toMatchObject({ record_id: r.id, file_name: 'contrato.pdf' });
+        expect(JSON.stringify(rows()[0].details)).not.toContain('signed.example');
+      });
+
+      it('returns no URL when the access cannot be audited', async () => {
+        const r = await audited.create({ collection_id: collectionId, values: { cliente: 'A' } });
+        const f = await audited.uploadFile(r.id, pdf());
+        kit.s3.getPresignedUrl.mockClear();
+        jest.spyOn(audit, 'recordNow').mockRejectedValue(new VendixHttpException(ErrorCodes.WORKFLOW_AUDIT_UNAVAILABLE));
+
+        expect((await failure(audited.downloadFile(r.id, f.file_id)))?.code).toBe('WORKFLOW_AUDIT_UNAVAILABLE');
+        expect(kit.s3.getPresignedUrl).not.toHaveBeenCalled();
+      });
+
+      it('a file outside the record dossier is a 404 with no audit row', async () => {
+        const a = await audited.create({ collection_id: collectionId, values: { cliente: 'A' } });
+        const b = await audited.create({ collection_id: collectionId, values: { cliente: 'B' } });
+        const fb = await audited.uploadFile(b.id, pdf());
+        expect((await failure(audited.downloadFile(a.id, fb.file_id)))?.code).toBe('DOCUMENT_NOT_FOUND');
+        expect(rows()).toHaveLength(0);
+      });
+    });
   });
 
   describe('flows on a record', () => {
@@ -329,6 +407,38 @@ describe('WorkflowRecordsService (P3.6)', () => {
       expect((await svc.get(r.id)).flows).toEqual([
         expect.objectContaining({ id: definitionId, key: 'renovacion' }),
       ]);
+    });
+
+    it('P7.3: the detail leaves out requests and flows the caller may not see', async () => {
+      const r = await svc.create({ collection_id: collectionId, values: { cliente: 'Acme' } });
+      seedRelation();
+      const restricted = seedDefinition(kit.db, flow('contratos', 'nomina')).definitionId;
+      const open = seedDefinition(kit.db, flow('contratos', 'abierto')).definitionId;
+      const restrictedRow = kit.db.table('workflow_definitions').find((d) => d.id === restricted)!;
+      restrictedRow.name = 'Nómina';
+      // The owner starts one request per flow; u6 starts one of the open flow.
+      const ownersHidden = await svc.startFlow(r.id, restricted, 'k3');
+      const ownersOpen = await svc.startFlow(r.id, open, 'k4');
+      const employee = { is_owner: false, user_id: 6, permissions: ['store:workflows:read', 'store:workflows:start'] };
+      kit.as(employee);
+      const mine = await svc.startFlow(r.id, open, 'k5');
+      restrictedRow.access = { view: { roles: ['manager'], user_ids: [] } };
+
+      const seen = await svc.get(r.id);
+      // Participation: only the request u6 started; the hidden flow is not even named.
+      expect(seen.instances.map((i) => i.id)).toEqual([mine.instance.id]);
+      expect(seen.flows.map((f) => f.id)).toEqual([open]);
+      expect(JSON.stringify(seen)).not.toContain('Nómina');
+      expect(JSON.stringify(seen)).not.toContain(ownersHidden.instance.reference);
+
+      kit.as({ is_owner: true, user_id: 1, permissions: [] });
+      const all = await svc.get(r.id);
+      expect(all.instances.map((i) => i.id)).toEqual([
+        mine.instance.id,
+        ownersOpen.instance.id,
+        ownersHidden.instance.id,
+      ]);
+      expect(all.flows.map((f) => f.id).sort()).toEqual([restricted, open].sort());
     });
   });
 });

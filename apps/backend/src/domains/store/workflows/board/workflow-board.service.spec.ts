@@ -308,3 +308,62 @@ describe('WorkflowBoardService', () => {
     });
   });
 });
+
+describe('WorkflowBoardService flow permissions (P7.3)', () => {
+  let kit: ReturnType<typeof buildWorkflowKit>;
+  let defId: number;
+  let mine: number;
+
+  const as = (user_id: number, extra: Parameters<typeof kit.as>[0] = {}) =>
+    kit.as({
+      user_id,
+      is_owner: false,
+      is_super_admin: false,
+      permissions: ['store:workflows:read'],
+      ...extra,
+    });
+  const restrict = (access: unknown) =>
+    Object.assign(kit.db.table('workflow_definitions').find((d) => d.id === defId)!, { access });
+
+  beforeEach(async () => {
+    kit = buildWorkflowKit();
+    seedPeople(kit.db);
+    seedWorkGroup(kit.db, 'board', [4, 5]);
+    defId = seedDefinition(kit.db, purchaseDefinition()).definitionId;
+    as(6, { permissions: ['store:workflows:task'] });
+    mine = (await kit.engine.start({ definitionKey: 'purchase', idempotencyKey: 'own' })).instance.id;
+  });
+  afterEach(() => jest.restoreAllMocks());
+
+  it('without access the open flow keeps its board, filters and general board', async () => {
+    as(6);
+    expect((await kit.board.board(defId)).definition.id).toBe(defId);
+    expect((await kit.board.filters()).definitions).toEqual([{ id: defId, name: 'Compra' }]);
+    expect((await kit.board.boardAll({ definition_id: defId })).columns.length).toBeGreaterThan(0);
+  });
+
+  it('a restricted flow has no board, no filter option and no definition filter for people outside', async () => {
+    restrict({ view: { roles: ['manager'], user_ids: [] } });
+    as(6);
+    expect(await codeOf(kit.board.board(defId))).toBe('WORKFLOW_DEFINITION_NOT_FOUND');
+    expect(await codeOf(kit.board.boardAll({ definition_id: defId }))).toBe('WORKFLOW_DEFINITION_NOT_FOUND');
+    expect((await kit.board.filters()).definitions).toEqual([]);
+  });
+
+  it('whoever is in `view` or holds the bypass sees the board and the filter option', async () => {
+    restrict({ view: { roles: ['manager'], user_ids: [] } });
+    as(2);
+    expect((await kit.board.board(defId)).definition.id).toBe(defId);
+    expect((await kit.board.filters()).definitions).toHaveLength(1);
+    as(6, { permissions: ['store:workflows:manage'] });
+    expect((await kit.board.board(defId)).definition.id).toBe(defId);
+  });
+
+  it('a participant keeps seeing their own request on the general board', async () => {
+    restrict({ view: { roles: ['manager'], user_ids: [] } });
+    as(6);
+    const r = await kit.board.boardAll({});
+    const ids = r.columns.flatMap((c: any) => c.cards.map((x: any) => x.id));
+    expect(ids).toContain(mine);
+  });
+});

@@ -284,6 +284,10 @@ export class StorePrismaService extends BasePrismaService {
     // IA dentro de Flujos (flujos-adm P6): store_id propio NOT NULL.
     'workflow_ai_usage',
     'workflow_ai_summaries',
+    // Operación de producción (flujos-adm P7): store_id propio NOT NULL.
+    'workflow_usage_counters',
+    'workflow_audit_log',
+    'workflow_exports',
     // ===== CRM (PLAN-CRM §2.3) =====
     // Todas llevan `store_id` propio NOT NULL → scoping directo por tienda.
     'crm_conversations',
@@ -2092,6 +2096,18 @@ export class StorePrismaService extends BasePrismaService {
 
   get workflow_ai_summaries() {
     return this.scoped_client.workflow_ai_summaries;
+  }
+
+  get workflow_usage_counters() {
+    return this.scoped_client.workflow_usage_counters;
+  }
+
+  get workflow_audit_log() {
+    return this.scoped_client.workflow_audit_log;
+  }
+
+  get workflow_exports() {
+    return this.scoped_client.workflow_exports;
   }
 
   get stored_files() {

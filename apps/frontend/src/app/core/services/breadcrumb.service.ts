@@ -429,6 +429,12 @@ export class BreadcrumbService {
       icon: 'eye',
     },
     {
+      path: '/super-admin/workflows-ops',
+      title: 'Operación de Flujos',
+      parent: 'Super Admin',
+      icon: 'chart-line',
+    },
+    {
       path: '/super-admin/video-library',
       title: 'Biblioteca de Videos',
       parent: 'Super Admin',
@@ -1127,6 +1133,30 @@ export class BreadcrumbService {
       title: 'Integraciones',
       parent: 'Flujos',
       icon: 'plug',
+    },
+    {
+      path: '/admin/workflows/usage',
+      title: 'Uso del plan',
+      parent: 'Flujos',
+      icon: 'gauge',
+    },
+    {
+      path: '/admin/workflows/audit',
+      title: 'Auditoría',
+      parent: 'Flujos',
+      icon: 'shield-check',
+    },
+    {
+      path: '/admin/workflows/exports',
+      title: 'Exportación',
+      parent: 'Flujos',
+      icon: 'download',
+    },
+    {
+      path: '/admin/workflows/help',
+      title: 'Ayuda',
+      parent: 'Flujos',
+      icon: 'help-circle',
     },
     {
       path: '/admin/workflows/connectors',

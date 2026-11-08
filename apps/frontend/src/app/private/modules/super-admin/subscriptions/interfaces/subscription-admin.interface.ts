@@ -138,6 +138,8 @@ export interface SubscriptionPlan {
   // Lectura: forma canonica de arreglo + forma de objeto legada (compat).
   feature_matrix: PlanIncludedItem[] | Record<string, unknown>;
   ai_feature_flags: AIFeatureFlags;
+  /** P7.1 — Flujos limits (`null` = platform defaults; a `null` key = unlimited). */
+  workflow_limits?: WorkflowLimitsValue | null;
 
   // Partner
   resellable: boolean;
@@ -430,6 +432,8 @@ export interface CreatePlanDto {
   is_default?: boolean;
   // Feature matrices
   ai_feature_flags?: AIFeatureFlags;
+  /** P7.1 — `null` clears the limits (defaults apply). */
+  workflow_limits?: WorkflowLimitsValue | null;
   // Escritura: siempre arreglo (el backend rechaza el objeto con 400).
   feature_matrix?: PlanIncludedItem[];
 }
@@ -640,3 +644,8 @@ export interface ActivatePlanPreview {
   change_kind: 'initial' | 'trial_conversion' | 'resubscribe';
   warnings: ActivatePlanWarning[];
 }
+
+/** P7.1 — `workflow_limits` of a plan; a missing key keeps the platform default, `null` is unlimited. */
+export type WorkflowLimitsValue = Partial<
+  Record<'monthly_instances' | 'monthly_http_calls' | 'storage_bytes', number | null>
+>;

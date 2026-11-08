@@ -12,6 +12,7 @@ import {
   XLSX_MIME,
 } from './documents.constants';
 import { sanitizeFileName } from './stored-files.service';
+import { buildLimits } from '../workflows/limits/workflow-limits.testkit';
 
 const PNG = Buffer.concat([
   Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]),
@@ -284,6 +285,44 @@ describe('StoredFilesService', () => {
       expect(await codeOf(kit.storedFiles.signedDownloadUrl(gone.id))).toBe('DOCUMENT_NOT_FOUND');
       expect(kit.s3.getPresignedUrl).not.toHaveBeenCalled();
       expect(kit.audit.log).not.toHaveBeenCalled();
+    });
+  });
+
+  describe('P7.1 storage limit', () => {
+    const GB = 1024 ** 3;
+    const wire = (cap: number | null) => {
+      const l = buildLimits(kit.db, { limits: { storage_bytes: cap } });
+      (kit.storedFiles as any).limits = l.service;
+      return l;
+    };
+    const putS3Calls = () => kit.s3.uploadFile.mock.calls.length;
+
+    it('a staff upload over the plan storage is refused with the plan details before S3', async () => {
+      wire(PDF.length + 10);
+      kit.db.insert('stored_files', { store_id: 1, organization_id: 1, size_bytes: 20, s3_key: 'x/1' });
+      const err = await upload().catch((e) => e);
+      expect(err.errorCode).toBe('WORKFLOW_PLAN_LIMIT_REACHED');
+      const details = err.getResponse?.()?.details ?? err.details;
+      expect(details).toMatchObject({ limit: 'storage_bytes', cap: PDF.length + 10 });
+      expect(putS3Calls()).toBe(0);
+    });
+
+    it('a public_form upload over the limit answers the neutral intake error', async () => {
+      wire(1);
+      expect(await codeOf(upload({ source: 'public_form' } as never))).toBe('WORKFLOW_INTAKE_UNAVAILABLE');
+      expect(putS3Calls()).toBe(0);
+    });
+
+    it('generated files are exempt from the storage check', async () => {
+      wire(1);
+      expect(await codeOf(upload({ source: 'generated' } as never))).toBeUndefined();
+    });
+
+    it('with room left (or no cap) the upload behaves as before', async () => {
+      wire(GB);
+      expect(await codeOf(upload())).toBeUndefined();
+      wire(null);
+      expect(await codeOf(upload())).toBeUndefined();
     });
   });
 });

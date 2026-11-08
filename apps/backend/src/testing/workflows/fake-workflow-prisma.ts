@@ -38,6 +38,9 @@ const SCOPED = new Set([
   'document_retention_policies',
   'document_purge_runs',
   'document_purge_items',
+  'workflow_audit_log',
+  'workflow_usage_counters',
+  'workflow_exports',
 ]);
 
 const UNIQUES: Record<string, string[][]> = {
@@ -50,6 +53,8 @@ const UNIQUES: Record<string, string[][]> = {
   workflow_public_links: [['token_hash']],
   signature_signers: [['token_hash']],
   signature_evidence_events: [['request_id', 'seq']],
+  workflow_audit_log: [['store_id', 'seq']],
+  workflow_usage_counters: [['store_id', 'period', 'metric']],
   document_file_profiles: [['file_id']],
   document_retention_policies: [['store_id', 'key']],
   workflow_instances: [['store_id', 'reference']],
@@ -207,6 +212,30 @@ const DEFAULTS: Record<string, Row> = {
     declined_reason: null,
   },
   signature_evidence_events: { signer_id: null, ip_address: null, user_agent: null, payload: {}, prev_hash: null },
+  workflow_audit_log: {
+    actor_id: null,
+    actor_label: null,
+    target_id: null,
+    definition_id: null,
+    instance_id: null,
+    details: {},
+    ip_address: null,
+    user_agent: null,
+    prev_hash: null,
+  },
+  workflow_usage_counters: { count: 0 },
+  workflow_exports: {
+    status: 'pending',
+    requested_by_user_id: null,
+    s3_key: null,
+    size_bytes: null,
+    file_count: 0,
+    counts: {},
+    error: null,
+    started_at: null,
+    completed_at: null,
+    expires_at: null,
+  },
 };
 
 /** Columns Prisma fills with `now()` when the caller omits them. */
@@ -230,6 +259,9 @@ const TIMESTAMPS: Record<string, string[]> = {
   signature_requests: ['created_at', 'updated_at'],
   signature_signers: ['created_at', 'updated_at'],
   signature_evidence_events: ['occurred_at'],
+  workflow_audit_log: ['created_at'],
+  workflow_usage_counters: ['updated_at'],
+  workflow_exports: ['created_at'],
 };
 
 function eq(a: any, b: any): boolean {
@@ -538,7 +570,7 @@ export class FakeWorkflowDb {
       {},
       {
         get(_t, prop: string) {
-          if (prop === '$queryRaw') {
+          if (prop === '$queryRaw' || prop === '$executeRaw') {
             return (strings: any, ...values: any[]) => {
               const text = Array.isArray(strings)
                 ? strings.join('?')
@@ -561,6 +593,8 @@ export class FakeWorkflowDb {
       if (out !== undefined) return out;
     }
     if (text.includes('FOR NO KEY UPDATE')) return [{ id: values[0] }];
+    // P7.2 audit chain: the fake serializes nothing, so the lock is a no-op.
+    if (text.includes('pg_advisory_xact_lock')) return 0;
     if (text.includes('FROM dossiers') && text.includes('MAX(CAST(SUBSTRING(reference')) {
       const store = values[0];
       const nums = this.table('dossiers')

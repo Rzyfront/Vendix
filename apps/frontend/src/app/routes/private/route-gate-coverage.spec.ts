@@ -151,13 +151,14 @@ describe('apps-f4 S3: cobertura de rutas del panel con key', () => {
     })),
   );
 
-  it('P5.7: Flujos y Documentos tienen 14 hijos en el Sidebar', () => {
-    expect(ADMINISTRATION_CHILDREN.length).toBe(14);
+  it('P7: Flujos y Documentos tienen 18 hijos en el Sidebar', () => {
+    expect(ADMINISTRATION_CHILDREN.length).toBe(18);
   });
 
   for (const child of [
     '/admin/workflows', '/admin/workflows/inbox', '/admin/workflows/board', '/admin/workflows/insights', '/admin/workflows/templates',
     '/admin/workflows/records', '/admin/workflows/connectors', '/admin/workflows/integrations',
+    '/admin/workflows/usage', '/admin/workflows/audit', '/admin/workflows/exports', '/admin/workflows/help',
     '/admin/documents', '/admin/documents/search', '/admin/documents/folders', '/admin/documents/expiring',
     '/admin/documents/retention', '/admin/documents/templates',
   ]) {

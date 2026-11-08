@@ -113,6 +113,15 @@ export class CreatePlanDto {
   @IsObject()
   ai_feature_flags?: Record<string, any>;
 
+  /**
+   * P7.1: Flows limits of the plan. Omitted = untouched, `null` = platform
+   * defaults, object = keys `monthly_instances`, `monthly_http_calls`,
+   * `storage_bytes` (non-negative integer, or `null` for unlimited). Shape and
+   * values are validated by `parseWorkflowLimits` (WORKFLOW_LIMITS_INVALID).
+   */
+  @IsOptional()
+  workflow_limits?: Record<string, number | null> | null;
+
   @IsOptional()
   @IsBoolean()
   resellable?: boolean;

@@ -235,6 +235,30 @@ export const STORE_ADMIN_MENU_ITEMS: readonly MenuItem[] = [
         route: '/admin/workflows/integrations',
         panelUiKey: 'flows_integrations',
       },
+      {
+        label: 'Uso del plan',
+        icon: 'gauge',
+        route: '/admin/workflows/usage',
+        panelUiKey: 'flows_usage',
+      },
+      {
+        label: 'Auditoría',
+        icon: 'shield-check',
+        route: '/admin/workflows/audit',
+        panelUiKey: 'flows_audit',
+      },
+      {
+        label: 'Exportación',
+        icon: 'download',
+        route: '/admin/workflows/exports',
+        panelUiKey: 'flows_exports',
+      },
+      {
+        label: 'Ayuda',
+        icon: 'help-circle',
+        route: '/admin/workflows/help',
+        panelUiKey: 'flows_help',
+      },
     ],
   },
   {

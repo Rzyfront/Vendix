@@ -56,6 +56,10 @@ const WORKFLOW_MODELS = [
   // IA dentro de Flujos (flujos-adm P6)
   'workflow_ai_usage',
   'workflow_ai_summaries',
+  // Operación de producción (flujos-adm P7)
+  'workflow_usage_counters',
+  'workflow_audit_log',
+  'workflow_exports',
 ] as const;
 
 describe('StorePrismaService · aislamiento de Flujos', () => {

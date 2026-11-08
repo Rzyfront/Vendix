@@ -4,6 +4,8 @@ jest.mock('../../../../messaging/messaging.service', () => ({ MessagingService: 
 jest.mock('../../../../email/email.service', () => ({ EmailService: class {} }));
 
 import { createHash } from 'crypto';
+import { ErrorCodes, VendixHttpException } from '@common/errors';
+import { WorkflowAuditRow, WorkflowAuditService } from '../../workflows/audit/workflow-audit.service';
 import { CONSENT_TEXT, CONSENT_TEXT_VERSION } from './signature.constants';
 import { buildSignatureKit, codeOfError, SignatureKit, DOC_SHA } from './signatures.testkit';
 
@@ -162,5 +164,67 @@ describe('Signature requests (P4.2)', () => {
     expect(list[0].requests[0].events.map((e: any) => e.type)).toEqual(['created', 'sent']);
     k.asAdmin(2);
     expect(await k.requests.listByInstance(1)).toEqual([]);
+  });
+
+  describe('sealed download audit (P7.2)', () => {
+    let audit: WorkflowAuditService;
+    let requestId: number;
+    const rows = () => table('workflow_audit_log') as WorkflowAuditRow[];
+
+    beforeEach(async () => {
+      k.seedDocument();
+      requestId = (await create()).id;
+      const sealed = k.kit.db.insert('stored_files', {
+        organization_id: 1, store_id: 1, s3_key: 'k/sealed.pdf', original_name: 'DOC-000001-firmado.pdf',
+        mime_type: 'application/pdf', size_bytes: 10, sha256: DOC_SHA, source: 'generated', uploaded_by_type: 'system',
+      });
+      table('signature_requests')[0].sealed_file_id = sealed.id;
+      audit = new WorkflowAuditService(k.kit.prisma);
+      Object.assign(k.requests, { audit });
+      k.kit.s3.getPresignedUrl.mockClear();
+    });
+
+    it('writes document.sealed_downloaded before the signed URL exists', async () => {
+      const order: string[] = [];
+      const record = audit.recordNow.bind(audit);
+      jest.spyOn(audit, 'recordNow').mockImplementation(async (input) => {
+        order.push('audit');
+        return record(input);
+      });
+      k.kit.s3.getPresignedUrl.mockImplementation(async (key: string) => {
+        order.push('url');
+        return `https://signed.example/${key}`;
+      });
+
+      const out = await k.requests.sealedDownload(requestId);
+
+      expect(order).toEqual(['audit', 'url']);
+      expect(out.url).toContain('https://signed.example/');
+      expect(rows()).toHaveLength(1);
+      expect(rows()[0]).toMatchObject({
+        action: 'document.sealed_downloaded',
+        category: 'document',
+        actor_id: 1,
+        target_type: 'signature_request',
+        target_id: String(requestId),
+        instance_id: 1,
+        summary: 'Descargó el documento firmado DOC-000001',
+      });
+      expect(JSON.stringify(rows()[0].details)).not.toContain('signed.example');
+    });
+
+    it('returns no URL when the access cannot be audited', async () => {
+      jest.spyOn(audit, 'recordNow').mockRejectedValue(new VendixHttpException(ErrorCodes.WORKFLOW_AUDIT_UNAVAILABLE));
+      expect(await codeOfError(k.requests.sealedDownload(requestId))).toBe('WORKFLOW_AUDIT_UNAVAILABLE');
+      expect(k.kit.s3.getPresignedUrl).not.toHaveBeenCalled();
+    });
+
+    it('a request that is not sealed or not this store is refused with no audit row', async () => {
+      table('signature_requests')[0].sealed_file_id = null;
+      expect(await codeOfError(k.requests.sealedDownload(requestId))).toBe('DOCUMENT_NOT_FOUND');
+      k.asAdmin(2);
+      expect(await codeOfError(k.requests.sealedDownload(requestId))).toBe('SIGNATURE_REQUEST_NOT_FOUND');
+      expect(rows()).toHaveLength(0);
+    });
   });
 });

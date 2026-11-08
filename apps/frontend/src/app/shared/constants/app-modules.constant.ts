@@ -613,6 +613,26 @@ export const APP_MODULES: {
           label: 'Integraciones',
           description: 'Llaves de API, webhooks y secretos',
         },
+        {
+          key: 'flows_usage',
+          label: 'Uso del plan',
+          description: 'Consumo del mes frente a los límites del plan',
+        },
+        {
+          key: 'flows_audit',
+          label: 'Auditoría',
+          description: 'Registro inmutable de definiciones, decisiones, documentos y secretos',
+        },
+        {
+          key: 'flows_exports',
+          label: 'Exportación',
+          description: 'Descarga completa de flujos, solicitudes y expedientes en ZIP',
+        },
+        {
+          key: 'flows_help',
+          label: 'Ayuda',
+          description: 'Preguntas frecuentes y guías del módulo',
+        },
       ],
     },
     {

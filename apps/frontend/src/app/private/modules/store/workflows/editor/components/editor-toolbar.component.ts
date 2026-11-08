@@ -35,6 +35,9 @@ import { WorkflowEditorStore } from '../workflow-editor.store';
       <app-button variant="outline" size="sm" (clicked)="history.emit()">
         <app-icon name="history" [size]="14" slot="icon" />Historial
       </app-button>
+      <app-button variant="outline" size="sm" (clicked)="permissions.emit()">
+        <app-icon name="lock" [size]="14" slot="icon" />Permisos
+      </app-button>
       <app-button variant="outline" size="sm" (clicked)="json.emit()">
         <app-icon name="code" [size]="14" slot="icon" />JSON avanzado
       </app-button>
@@ -52,6 +55,7 @@ export class EditorToolbarComponent {
   readonly publish = output<void>();
   readonly exportJson = output<void>();
   readonly history = output<void>();
+  readonly permissions = output<void>();
   readonly json = output<void>();
 
   readonly errorCount = computed(() => this.store.issues().length);

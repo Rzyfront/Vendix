@@ -4,6 +4,7 @@ import { ErrorCodes, VendixHttpException } from '@common/errors';
 import { WorkflowDefinitionV1 } from '@common/workflows/contract';
 import { EncryptionService } from '../../../../common/services/encryption.service';
 import { StorePrismaService } from '../../../../prisma/services/store-prisma.service';
+import { WorkflowAccessPolicy } from '../access/workflow-access.policy';
 import {
   INBOUND_DEFAULT_RATE_PER_MINUTE,
   INBOUND_PUBLIC_PATH,
@@ -22,12 +23,16 @@ const STATE_SELECT = {
   created_at: true,
 } as const;
 
-/** Admin side of the per-flow inbound webhook (`store:workflows:design`). */
+/**
+ * Admin side of the per-flow inbound webhook (`store:workflows:design`). The
+ * state follows "Quién ve" and every change follows "Quién diseña" (P7.3).
+ */
 @Injectable()
 export class WorkflowInboundHooksService {
   constructor(
     private readonly prisma: StorePrismaService,
     private readonly encryption: EncryptionService,
+    private readonly access: WorkflowAccessPolicy,
   ) {}
 
   private ctx() {
@@ -39,12 +44,14 @@ export class WorkflowInboundHooksService {
   }
 
   /** Foreign or unknown definition → 404. */
-  private async loadDefinition(storeId: number, id: number) {
+  private async loadDefinition(storeId: number, id: number, use: 'view' | 'design') {
     const def = await this.prisma.workflow_definitions.findFirst({
       where: { id, store_id: storeId },
       select: { id: true, status: true, published_version_id: true },
     });
     if (!def) throw new VendixHttpException(ErrorCodes.WORKFLOW_DEFINITION_NOT_FOUND);
+    if (use === 'view') await this.access.assertCanView(id);
+    else await this.access.assertCanDesign(id);
     return def;
   }
 
@@ -115,7 +122,7 @@ export class WorkflowInboundHooksService {
   /** State of the hook, or null when never activated. The secret is never recoverable. */
   async state(definitionId: number) {
     const c = this.ctx();
-    await this.loadDefinition(c.store_id, definitionId);
+    await this.loadDefinition(c.store_id, definitionId, 'view');
     const hook = await this.prisma.workflow_inbound_hooks.findFirst({
       where: { store_id: c.store_id, definition_id: definitionId },
       select: STATE_SELECT,
@@ -126,7 +133,7 @@ export class WorkflowInboundHooksService {
   /** Creates the hook or reactivates a deactivated one with a fresh secret (returned once). */
   async create(definitionId: number) {
     const c = this.ctx();
-    const def = await this.loadDefinition(c.store_id, definitionId);
+    const def = await this.loadDefinition(c.store_id, definitionId, 'design');
     await this.assertDeclaresWebhook(c.store_id, def);
     const existing = await this.prisma.workflow_inbound_hooks.findFirst({
       where: { store_id: c.store_id, definition_id: definitionId },
@@ -158,7 +165,7 @@ export class WorkflowInboundHooksService {
   /** New secret (returned once); the previous one stops working immediately. */
   async rotate(definitionId: number) {
     const c = this.ctx();
-    await this.loadDefinition(c.store_id, definitionId);
+    await this.loadDefinition(c.store_id, definitionId, 'design');
     const existing = await this.prisma.workflow_inbound_hooks.findFirst({
       where: { store_id: c.store_id, definition_id: definitionId },
       select: { id: true },
@@ -176,7 +183,7 @@ export class WorkflowInboundHooksService {
     patch: { is_active?: boolean; rate_limit_per_minute?: number },
   ) {
     const c = this.ctx();
-    const def = await this.loadDefinition(c.store_id, definitionId);
+    const def = await this.loadDefinition(c.store_id, definitionId, 'design');
     const existing = await this.prisma.workflow_inbound_hooks.findFirst({
       where: { store_id: c.store_id, definition_id: definitionId },
       select: { id: true, is_active: true },

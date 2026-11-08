@@ -1,5 +1,6 @@
-import { VendixHttpException } from '@common/errors';
+import { ErrorCodes, VendixHttpException } from '@common/errors';
 import { WorkflowDefinitionV1 } from '@common/workflows/contract';
+import { WorkflowAuditRow, WorkflowAuditService } from '../audit/workflow-audit.service';
 import {
   buildWorkflowKit,
   seedDefinition,
@@ -337,6 +338,88 @@ describe.each([
       const loose = kit.db.insert('stored_files', { store_id: 1, organization_id: 1, s3_key: 'k/loose' });
       kit.as({ user_id: 4, permissions: ['store:workflows:read'] });
       expect(await codeOf(kit.workflowFiles.download(loose.id))).toBe('DOCUMENT_NOT_FOUND');
+    });
+  });
+
+  describe('GET files/:id/download · auditoría (P7.2)', () => {
+    let fileId: number;
+    let audit: WorkflowAuditService;
+    const rows = () => kit.db.table('workflow_audit_log') as WorkflowAuditRow[];
+
+    beforeEach(async () => {
+      fileId = (await kit.workflowFiles.upload(instanceId, pdf(), req())).file_id;
+      audit = new WorkflowAuditService(kit.prisma);
+      Object.assign(kit.workflowFiles, { audit });
+    });
+
+    it('registra document.file_downloaded antes de entregar la URL firmada', async () => {
+      kit.as({ user_id: 4, permissions: ['store:workflows:read'] });
+      const order: string[] = [];
+      jest.spyOn(audit, 'recordNow').mockImplementation(async (input) => {
+        order.push('audit');
+        return { action: input.action } as WorkflowAuditRow;
+      });
+      kit.s3.getPresignedUrl.mockImplementation(async (key: string) => {
+        order.push('url');
+        return `https://signed.example/${key}`;
+      });
+
+      await kit.workflowFiles.download(fileId);
+
+      expect(order).toEqual(['audit', 'url']);
+    });
+
+    it('guarda quién, qué archivo y de qué solicitud, sin la URL firmada', async () => {
+      kit.as({ user_id: 4, permissions: ['store:workflows:read'] });
+      await kit.workflowFiles.download(fileId);
+
+      expect(rows()).toHaveLength(1);
+      expect(rows()[0]).toMatchObject({
+        action: 'document.file_downloaded',
+        category: 'document',
+        actor_type: 'user',
+        actor_id: 4,
+        target_type: 'file',
+        target_id: String(fileId),
+        instance_id: instanceId,
+        summary: 'Descargó el archivo «a.pdf»',
+      });
+      expect(JSON.stringify(rows()[0].details)).not.toContain('signed.example');
+    });
+
+    it('un documento emitido se registra como document.issued_downloaded', async () => {
+      const issued = kit.db.insert('issued_documents', {
+        store_id: 1,
+        organization_id: 1,
+        reference: 'DOC-000001',
+        title: 'Contrato',
+        file_id: fileId,
+        workflow_instance_id: instanceId,
+      });
+      kit.as({ user_id: 4, permissions: ['store:workflows:read'] });
+      await kit.workflowFiles.download(fileId);
+
+      expect(rows()[0]).toMatchObject({
+        action: 'document.issued_downloaded',
+        target_type: 'issued_document',
+        target_id: String(issued.id),
+        instance_id: instanceId,
+        summary: 'Descargó el documento emitido DOC-000001 «Contrato»',
+      });
+    });
+
+    it('si no se puede auditar, no entrega la URL', async () => {
+      jest.spyOn(audit, 'recordNow').mockRejectedValue(new VendixHttpException(ErrorCodes.WORKFLOW_AUDIT_UNAVAILABLE));
+      kit.as({ user_id: 4, permissions: ['store:workflows:read'] });
+
+      expect(await codeOf(kit.workflowFiles.download(fileId))).toBe('WORKFLOW_AUDIT_UNAVAILABLE');
+      expect(kit.s3.getPresignedUrl).not.toHaveBeenCalled();
+    });
+
+    it('un acceso rechazado (404) no deja registro', async () => {
+      kit.as({ user_id: 6, permissions: ['store:workflows:read'] });
+      expect(await codeOf(kit.workflowFiles.download(fileId))).toBe('DOCUMENT_NOT_FOUND');
+      expect(rows()).toHaveLength(0);
     });
   });
 });

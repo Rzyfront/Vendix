@@ -1,5 +1,6 @@
 import { RequestContextService } from '@common/context/request-context.service';
 import { VendixHttpException } from '@common/errors';
+import { WorkflowAccessPolicy } from '../access/workflow-access.policy';
 import { WorkflowInboundHooksService } from './workflow-inbound-hooks.service';
 import { WorkflowMailboxService } from './workflow-mailbox.service';
 
@@ -12,7 +13,11 @@ const code = async (p: Promise<unknown>) => {
   }
 };
 
-function world(triggers: Array<{ kind: string }> = [{ kind: 'webhook' }, { kind: 'email' }]) {
+function world(
+  triggers: Array<{ kind: string }> = [{ kind: 'webhook' }, { kind: 'email' }],
+  /** `access` document of definition 11 (P7.3); user 9 holds no role. */
+  access: unknown = null,
+) {
   const hooks: any[] = [];
   const boxes: any[] = [];
   const pick = (rows: any[], where: any) =>
@@ -36,11 +41,15 @@ function world(triggers: Array<{ kind: string }> = [{ kind: 'webhook' }, { kind:
       // definition 11 belongs to store 3; any other id is foreign.
       findFirst: jest.fn(async ({ where }: any) =>
         where.id === 11 && where.store_id === 3
-          ? { id: 11, status: 'active', published_version_id: 21 }
+          ? { id: 11, status: 'active', published_version_id: 21, access }
           : null,
       ),
     },
-    workflow_versions: { findFirst: jest.fn(async () => ({ definition: { triggers } })) },
+    workflow_versions: {
+      findFirst: jest.fn(async () => ({ definition: { triggers } })),
+      findMany: jest.fn(async () => [{ id: 21, definition: { triggers } }]),
+    },
+    user_roles: { findMany: jest.fn(async () => []) },
     workflow_inbound_hooks: table(hooks),
     workflow_inbound_requests: { count: jest.fn(async () => 4) },
     workflow_mailboxes: table(boxes),
@@ -55,8 +64,8 @@ function world(triggers: Array<{ kind: string }> = [{ kind: 'webhook' }, { kind:
     hooks,
     boxes,
     prisma,
-    hookService: new WorkflowInboundHooksService(prisma, encryption as any),
-    mailService: new WorkflowMailboxService(prisma, config as any),
+    hookService: new WorkflowInboundHooksService(prisma, encryption as any, new WorkflowAccessPolicy(prisma)),
+    mailService: new WorkflowMailboxService(prisma, config as any, new WorkflowAccessPolicy(prisma)),
   };
 }
 
@@ -155,5 +164,42 @@ describe('Mailbox admin (P3.3 correo entrante)', () => {
 
   it('is null before activation', async () => {
     expect(await asStore(() => world().mailService.state(11))).toBeNull();
+  });
+});
+
+describe('flow permissions on the inbound connections (P7.3)', () => {
+  const ADMINS_ONLY = { roles: ['owner'], user_ids: [] };
+
+  it('a designer outside "Quién diseña" cannot activate, rotate or edit the webhook or the mailbox', async () => {
+    const w = world(undefined, { design: ADMINS_ONLY });
+    const writes: Array<() => Promise<unknown>> = [
+      () => w.hookService.create(11),
+      () => w.hookService.rotate(11),
+      () => w.hookService.update(11, { is_active: false }),
+      () => w.mailService.activate(11),
+      () => w.mailService.update(11, { is_active: false }),
+    ];
+    for (const call of writes) {
+      expect(await code(asStore(call))).toBe('WORKFLOW_DESIGN_FORBIDDEN');
+    }
+    expect(w.hooks).toHaveLength(0);
+    expect(w.boxes).toHaveLength(0);
+    // Reading the state only needs "Quién ve", which is open here.
+    expect(await code(asStore(() => w.hookService.state(11)))).toBe('OK');
+    expect(await code(asStore(() => w.mailService.state(11)))).toBe('OK');
+  });
+
+  it('the person in "Quién diseña" still manages them', async () => {
+    const w = world(undefined, { design: { roles: [], user_ids: [9] } });
+    expect(((await asStore(() => w.hookService.create(11))) as any).secret).toMatch(/^whin_/);
+    expect(((await asStore(() => w.mailService.activate(11))) as any).is_active).toBe(true);
+  });
+
+  it('a flow hidden by "Quién ve" answers 404, as if it did not exist', async () => {
+    const w = world(undefined, { view: ADMINS_ONLY });
+    const reads: Array<() => Promise<unknown>> = [() => w.hookService.state(11), () => w.mailService.state(11)];
+    for (const call of reads) {
+      expect(await code(asStore(call))).toBe('WORKFLOW_DEFINITION_NOT_FOUND');
+    }
   });
 });

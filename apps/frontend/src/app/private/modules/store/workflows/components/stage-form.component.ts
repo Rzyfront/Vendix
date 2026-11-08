@@ -24,7 +24,7 @@ import { WorkflowFieldDef } from '../../../../../shared/workflows/contract/workf
 import { applyComputedFields } from '../../../../../shared/workflows/contract/workflow-expression';
 import { evaluateCondition } from '../../../../../shared/workflows/contract/workflow-runtime';
 import { WorkflowsApiService } from '../services/workflows-api.service';
-import { toWorkflowError } from '../utils/workflow-errors.util';
+import { isPlanLimit, toWorkflowError } from '../utils/workflow-errors.util';
 import { DocumentAiReadComponent } from './document-ai-read.component';
 import { AiFieldNoteComponent } from './document-ai-read-note.component';
 import { AiAppliedResult, AiFieldHints } from './document-ai-read.util';
@@ -421,7 +421,8 @@ export class WorkflowStageFormComponent {
             ...current,
             [field.key]: false,
           }));
-          this.fail(field.key, toWorkflowError(error).message);
+          const failure = toWorkflowError(error);
+          if (!isPlanLimit(failure)) this.fail(field.key, failure.message);
         },
       });
   }

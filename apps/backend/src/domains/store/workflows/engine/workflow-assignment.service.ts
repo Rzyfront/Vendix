@@ -1,8 +1,10 @@
 import { Injectable } from '@nestjs/common';
+import { ErrorCodes, VendixHttpException } from '@common/errors';
 import {
   WorkflowAssigneeDef,
   WorkflowStageDef,
 } from '@common/workflows/contract';
+import { evaluateStageAct } from '../access/workflow-access.policy';
 import { WorkGroupsService } from '../work-groups.service';
 import {
   AssigneeFields,
@@ -145,8 +147,40 @@ export class WorkflowAssignmentService {
     return [...ids];
   }
 
-  /** Assignee, member of the assignee group or holder of the assignee role. */
+  /**
+   * Assignee, member of the assignee group or holder of the assignee role,
+   * and allowed by the stage's `access.stages[key].act` (P7.3). Someone who is
+   * assigned but not allowed gets `WORKFLOW_STAGE_ACT_FORBIDDEN` naming who can
+   * decide, so complete, vote and claim all explain the refusal.
+   */
   async canAct(
+    tx: WorkflowTx,
+    task: WorkflowTaskRow,
+    userId: number,
+    storeId: number,
+    organizationId: number,
+  ): Promise<boolean> {
+    if (!(await this.isAssignedTo(tx, task, userId, storeId, organizationId))) return false;
+    const stage = await evaluateStageAct(tx, { task, userId, storeId, organizationId });
+    if (!stage.allowed) {
+      throw new VendixHttpException(ErrorCodes.WORKFLOW_STAGE_ACT_FORBIDDEN, stage.message);
+    }
+    return true;
+  }
+
+  /** Same decision as {@link canAct} as a flag, for screens that only show or hide a button. */
+  async canActQuietly(
+    tx: WorkflowTx,
+    task: WorkflowTaskRow,
+    userId: number,
+    storeId: number,
+    organizationId: number,
+  ): Promise<boolean> {
+    if (!(await this.isAssignedTo(tx, task, userId, storeId, organizationId))) return false;
+    return (await evaluateStageAct(tx, { task, userId, storeId, organizationId })).allowed;
+  }
+
+  private async isAssignedTo(
     tx: WorkflowTx,
     task: WorkflowTaskRow,
     userId: number,

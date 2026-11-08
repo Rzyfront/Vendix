@@ -27,6 +27,7 @@ import { StagePropertiesComponent } from './components/stage-properties.componen
 import { TransitionMatrixComponent } from './components/transition-matrix.component';
 import { WorkflowCanvasComponent } from './components/canvas/workflow-canvas.component';
 import { ValidationPanelComponent } from './components/validation-panel.component';
+import { WorkflowAccessPanelComponent } from '../components/workflow-access-panel/workflow-access-panel.component';
 import { WorkflowConnectionsComponent } from '../inbound/workflow-connections.component';
 import { WorkflowEditorLookups } from './workflow-editor-lookups.service';
 import { WorkflowEditorStore } from './workflow-editor.store';
@@ -47,6 +48,7 @@ type CenterView = 'canvas' | 'map' | 'matrix';
     ScrollableTabsComponent,
     EditorToolbarComponent,
     HistoryModalComponent,
+    WorkflowAccessPanelComponent,
     JsonPanelComponent,
     PublishIssuesModalComponent,
     RouteMapComponent,
@@ -84,6 +86,7 @@ type CenterView = 'canvas' | 'map' | 'matrix';
           (publish)="publish()"
           (exportJson)="exportJson()"
           (history)="historyOpen.set(true)"
+          (permissions)="permissionsOpen.set(true)"
           (json)="jsonOpen.set(true)"
         />
 
@@ -140,6 +143,7 @@ type CenterView = 'canvas' | 'map' | 'matrix';
         <app-simulator-panel [(isOpen)]="simulateOpen" [definitionId]="id()" />
         <app-json-panel [(isOpen)]="jsonOpen" />
         <app-history-modal [(isOpen)]="historyOpen" [definitionId]="id()" />
+        <app-workflow-access-panel [(isOpen)]="permissionsOpen" [definitionId]="id()" [flowName]="store.row()?.name ?? ''" />
         <app-publish-issues-modal [(isOpen)]="issuesOpen" [flowName]="store.row()?.name ?? ''" [issues]="issues()" />
       }
     </div>
@@ -170,6 +174,7 @@ export class WorkflowEditorPageComponent implements OnInit {
   readonly simulateOpen = signal(false);
   readonly jsonOpen = signal(false);
   readonly historyOpen = signal(false);
+  readonly permissionsOpen = signal(false);
   readonly issuesOpen = signal(false);
   readonly issues = signal<string[]>([]);
   readonly validationOpen = signal(false);

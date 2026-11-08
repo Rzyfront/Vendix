@@ -2,6 +2,7 @@ import 'reflect-metadata';
 import { VendixHttpException } from '@common/errors';
 import { seedPeople } from '../../../../testing/workflows/workflow-test-kit';
 import { buildPublicKit, pngOf } from '../../../ecommerce/workflows-public/workflow-public.testkit';
+import { buildLimits } from '../limits/workflow-limits.testkit';
 import {
   MAX_OPEN_UPLOADS_PER_LINK,
   UploadScope,
@@ -147,5 +148,29 @@ describe('WorkflowPublicUploadsService: cap, sweep and idempotent complete', () 
       kit.s3Multipart.objects.clear();
       expect(await codeOf(kit.uploads.complete(scopeOf(1), id))).toBe('WORKFLOW_UPLOAD_INVALID');
     });
+  });
+});
+
+describe('WorkflowPublicUploadsService: P7.1 storage limit', () => {
+  it('init is refused with the neutral intake error before any S3 call or session', async () => {
+    const kit = buildPublicKit();
+    seedPeople(kit.db);
+    kit.db.insert('organizations', { id: 1, slug: 'org' });
+    kit.as({ store_id: 1, user_id: undefined, permissions: [], is_owner: false });
+    const l = buildLimits(kit.db, { limits: { storage_bytes: 10 } });
+    (kit.uploads as any).limits = l.service;
+    const scope: UploadScope = {
+      store_id: 1,
+      organization_id: 1,
+      public_link_id: 1,
+      folder: 'workflows/public',
+      field_key: 'adjunto',
+    };
+    const err = await kit.uploads
+      .init(scope, {}, { file_name: 'foto.png', mime_type: 'image/png', size_bytes: 40 })
+      .catch((e) => e);
+    expect(err.errorCode).toBe('WORKFLOW_INTAKE_UNAVAILABLE');
+    expect(kit.s3Multipart.createMultipartUpload).not.toHaveBeenCalled();
+    expect(kit.db.table('workflow_upload_sessions')).toHaveLength(0);
   });
 });

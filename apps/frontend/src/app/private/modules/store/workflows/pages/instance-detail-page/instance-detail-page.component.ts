@@ -42,7 +42,7 @@ import { WorkflowLiveService } from '../../services/workflow-live.service';
 import { WorkflowsApiService } from '../../services/workflows-api.service';
 import { CurrencyPipe } from '../../../../../../shared/pipes/currency/currency.pipe';
 import { AuthFacade } from '../../../../../../core/store/auth/auth.facade';
-import { apiErrorMessage, isStaleCode, toWorkflowError } from '../../utils/workflow-errors.util';
+import { apiErrorMessage, isPlanLimit, isStaleCode, toWorkflowError } from '../../utils/workflow-errors.util';
 import {
   countdownText,
   dueText,
@@ -903,7 +903,8 @@ export class InstanceDetailPageComponent implements OnInit {
       },
       error: (error) => {
         this.uploadingKey.set(null);
-        this.requirementErrors.set([toWorkflowError(error).message]);
+        const failure = toWorkflowError(error);
+        this.requirementErrors.set(isPlanLimit(failure) ? [] : [failure.message]);
       },
     });
   }
