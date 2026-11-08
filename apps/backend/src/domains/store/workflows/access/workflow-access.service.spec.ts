@@ -145,6 +145,30 @@ describe('flow permissions (P7.3)', () => {
     });
   });
 
+  describe('flows left out of store-wide content (AI summary)', () => {
+    const policy = () => new WorkflowAccessPolicy(kit.prisma);
+
+    it('lists the flows some staff member may not see, whoever asks', async () => {
+      const startOnly = seedDefinition(kit.db, purchaseDefinition({ key: 'start', name: 'Inicio', start_roles: ['manager'] }));
+      const designOnly = seedDefinition(kit.db, purchaseDefinition({ key: 'design', name: 'Diseño' })).definitionId;
+      const openStart = seedDefinition(kit.db, purchaseDefinition({ key: 'open', name: 'Abierto', start_roles: ['manager'] })).definitionId;
+      flow({ access: { view: { roles: ['manager'], user_ids: [] } } });
+      Object.assign(kit.db.table('workflow_definitions').find((d) => d.id === startOnly.definitionId)!, {
+        access: { design: { roles: ['owner'], user_ids: [] } },
+      });
+      Object.assign(kit.db.table('workflow_definitions').find((d) => d.id === designOnly)!, {
+        access: { design: { roles: ['manager'], user_ids: [] } },
+      });
+      as(1, { is_owner: true });
+      const asOwner = await policy().restrictedDefinitionIds();
+      expect([...asOwner].sort()).toEqual([defId, startOnly.definitionId].sort());
+      as(6);
+      expect([...(await policy().restrictedDefinitionIds())].sort()).toEqual([...asOwner].sort());
+      expect(asOwner).not.toContain(designOnly);
+      expect(asOwner).not.toContain(openStart);
+    });
+  });
+
   describe('who designs a flow', () => {
     const writes: Array<[string, () => Promise<unknown>]> = [
       ['saveDraft', () => defs.saveDraft(defId, { definition: purchaseDefinition() as any })],
@@ -212,6 +236,22 @@ describe('flow permissions (P7.3)', () => {
       expect(r.options.roles).toEqual(expect.arrayContaining(['manager', 'owner']));
       expect(r.options.users.map((u: any) => u.id).sort()).toEqual([1, 2, 3, 4, 5, 6]);
       expect(r.options.users.find((u: any) => u.id === 2)!.name).toBe('Ana Pérez');
+    });
+
+    it('someone who can only read the flow gets its rules and the names in them, not the whole staff', async () => {
+      flow({ access: { view: { roles: ['manager'], user_ids: [6] } } });
+      as(6, { permissions: ['store:workflows:read'] });
+      const r = await access.get(defId);
+      expect(r.access).toEqual({ view: { roles: ['manager'], user_ids: [6] } });
+      expect(r.options).toEqual({ roles: ['manager'], users: [{ id: 6, name: 'Eli Pérez' }] });
+    });
+
+    it('someone outside the `design` group gets only the names in the rules too', async () => {
+      flow({ access: { design: { roles: ['manager'], user_ids: [] } } });
+      as(6);
+      expect((await access.get(defId)).options).toEqual({ roles: ['manager'], users: [] });
+      as(2);
+      expect((await access.get(defId)).options.users.map((u: any) => u.id).sort()).toEqual([1, 2, 3, 4, 5, 6]);
     });
 
     it('offers staff only: no customer-only member and no customer or super_admin role', async () => {

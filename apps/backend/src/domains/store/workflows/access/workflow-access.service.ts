@@ -29,6 +29,22 @@ const CUSTOMER_ROLE = 'customer';
 const NON_STAFF_ROLES = [CUSTOMER_ROLE, 'super_admin'];
 
 /** Reads and changes the permissions of one flow (flujos-adm P7.3). */
+/** The options limited to the roles and people the access document already names. */
+function namedOptions(
+  all: { roles: string[]; users: Array<{ id: number; name: string }> },
+  access: WorkflowAccess | null,
+) {
+  const groups = access
+    ? [access.design, access.view, ...Object.values(access.stages ?? {}).map((s) => s.act)]
+    : [];
+  const roles = new Set(groups.flatMap((g) => g?.roles ?? []));
+  const users = new Set(groups.flatMap((g) => g?.user_ids ?? []));
+  return {
+    roles: all.roles.filter((r) => roles.has(r)),
+    users: all.users.filter((u) => users.has(u.id)),
+  };
+}
+
 @Injectable()
 export class WorkflowAccessService {
   constructor(
@@ -139,12 +155,17 @@ export class WorkflowAccessService {
     const { store_id, organization_id } = this.ctx();
     await this.policy.assertCanView(id);
     const row = await this.load(this.prisma, store_id, id);
-    const [shape, options] = await Promise.all([
+    const access = readWorkflowAccess(row.access);
+    const [shape, all, canEdit] = await Promise.all([
       this.shape(this.prisma, store_id, row),
       this.options(store_id, organization_id),
+      this.policy.canEditAccess(id),
     ]);
+    // The whole staff list (names, email as a fallback) only goes to whoever
+    // can edit these permissions; a reader gets the names already in the rules.
+    const options = canEdit ? all : namedOptions(all, access);
     return {
-      access: readWorkflowAccess(row.access),
+      access,
       start_roles: shape.start_roles,
       stages: shape.stages,
       options,

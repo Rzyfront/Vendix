@@ -117,6 +117,11 @@ export async function evaluateStageAct(
   };
 }
 
+/** A flow with `access` that every staff member still sees: no `view` group and no `start_roles`. */
+function openToEveryone(access: WorkflowAccess, startRoles: string[]): boolean {
+  return !access.view && startRoles.length === 0;
+}
+
 /**
  * Who sees and designs a flow (flujos-adm P7.3). A flow without `access` is
  * open. With it: visible to whoever is in `design` or `view`, to whoever can
@@ -162,39 +167,52 @@ export class WorkflowAccessPolicy {
   ): boolean {
     if (isInGroup(access.design, userId, roles) || isInGroup(access.view, userId, roles)) return true;
     if (startRoles.some((r) => roles.includes(r))) return true;
-    return !access.view && startRoles.length === 0;
+    return openToEveryone(access, startRoles);
+  }
+
+  /** This store's flows with an `access` document, each with its published `start_roles`. */
+  private async withAccess(storeId: number) {
+    const rows: Array<{ id: number; access: unknown; published_version_id: number | null }> =
+      await this.prisma.workflow_definitions.findMany({
+        where: { store_id: storeId },
+        select: { id: true, access: true, published_version_id: true },
+      });
+    const restricted = rows.flatMap((r) => {
+      const parsed = readWorkflowAccess(r.access);
+      return parsed ? [{ id: r.id, access: parsed, published_version_id: r.published_version_id }] : [];
+    });
+    const starts = await this.startRoles(
+      storeId,
+      restricted.map((r) => r.published_version_id).filter((v): v is number => !!v),
+    );
+    return restricted.map((r) => ({
+      id: r.id,
+      access: r.access,
+      startRoles: r.published_version_id ? (starts.get(r.published_version_id) ?? []) : [],
+    }));
   }
 
   /** Ids of this store's flows the caller may NOT see. */
   async hiddenDefinitionIds(): Promise<number[]> {
     const c = this.caller();
     if (c.free || c.user_id === null) return [];
-    const rows: Array<{ id: number; access: unknown; published_version_id: number | null }> =
-      await this.prisma.workflow_definitions.findMany({
-        where: { store_id: c.store_id },
-        select: { id: true, access: true, published_version_id: true },
-      });
-    const restricted = rows
-      .map((r) => ({ ...r, parsed: readWorkflowAccess(r.access) }))
-      .filter((r) => r.parsed !== null);
+    const restricted = await this.withAccess(c.store_id);
     if (!restricted.length) return [];
-    const [roles, starts] = await Promise.all([
-      heldRoleNames(this.prisma, c.user_id, c.store_id, c.organization_id),
-      this.startRoles(
-        c.store_id,
-        restricted.map((r) => r.published_version_id).filter((v): v is number => !!v),
-      ),
-    ]);
+    const roles = await heldRoleNames(this.prisma, c.user_id, c.store_id, c.organization_id);
     return restricted
-      .filter(
-        (r) =>
-          !this.visible(
-            r.parsed as WorkflowAccess,
-            r.published_version_id ? (starts.get(r.published_version_id) ?? []) : [],
-            c.user_id as number,
-            roles,
-          ),
-      )
+      .filter((r) => !this.visible(r.access, r.startRoles, c.user_id as number, roles))
+      .map((r) => r.id);
+  }
+
+  /**
+   * Ids of this store's flows that some staff member may not see, whoever
+   * asks (cron included). Store-wide content that every reader gets, like the
+   * AI summary, leaves them out.
+   */
+  async restrictedDefinitionIds(): Promise<number[]> {
+    const c = this.caller();
+    return (await this.withAccess(c.store_id))
+      .filter((r) => !openToEveryone(r.access, r.startRoles))
       .map((r) => r.id);
   }
 
@@ -239,6 +257,24 @@ export class WorkflowAccessPolicy {
    * when `access.design` is set and the caller is not in it. The
    * `store:workflows:design` permission itself is checked by the controller.
    */
+  /**
+   * Whether the caller may edit the flow's permissions: the
+   * `store:workflows:design` permission (or a bypass) and a place in `design`
+   * when the flow has one. Never throws for a flow the caller cannot design.
+   */
+  async canEditAccess(definitionId: number): Promise<boolean> {
+    if (accessBypass()) return true;
+    const permissions = RequestContextService.getContext()?.permissions ?? [];
+    if (!permissions.includes('store:workflows:design')) return false;
+    try {
+      await this.assertCanDesign(definitionId);
+      return true;
+    } catch (e) {
+      if (e instanceof VendixHttpException) return false;
+      throw e;
+    }
+  }
+
   async assertCanDesign(definitionId: number): Promise<void> {
     await this.assertCanView(definitionId);
     const c = this.caller();
