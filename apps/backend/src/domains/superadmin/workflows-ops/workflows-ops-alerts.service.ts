@@ -161,7 +161,7 @@ export class WorkflowsOpsAlertsService {
         await this.raise(candidate);
         raised.push(candidate.rule);
       } catch (e) {
-        // Let the next cycle try again instead of staying silent for an hour.
+        // Nothing reached anyone: let the next cycle try again instead of staying silent for an hour.
         await this.redis.del(key);
         this.logger.error(`Alert ${candidate.rule} not raised: ${(e as Error)?.message}`);
       }
@@ -172,15 +172,24 @@ export class WorkflowsOpsAlertsService {
   private async raise(c: AlertCandidate): Promise<void> {
     const recipients = await this.resolveRecipients();
     const sent = await this.send(c, recipients);
-    await this.prisma.withoutScope().workflow_ops_alerts.create({
-      data: {
-        rule: c.rule,
-        severity: c.severity,
-        title: c.title,
-        details: c.details,
-        recipients: sent,
-      },
-    });
+    try {
+      await this.prisma.withoutScope().workflow_ops_alerts.create({
+        data: {
+          rule: c.rule,
+          severity: c.severity,
+          title: c.title,
+          details: c.details,
+          recipients: sent,
+        },
+      });
+    } catch (e) {
+      // Nobody heard of it yet: let the caller release the dedupe key so the next cycle retries.
+      if (sent === 0) throw e;
+      // The e-mail already went out: keep the key, or every cycle of the next hour mails it again.
+      this.logger.error(
+        `Alert ${c.rule} e-mailed to ${sent} recipient(s) but not stored in the history: ${(e as Error)?.message}`,
+      );
+    }
   }
 
   /** `WORKFLOW_OPS_ALERT_EMAILS` (comma separated) or, if unset, the active super admins. */

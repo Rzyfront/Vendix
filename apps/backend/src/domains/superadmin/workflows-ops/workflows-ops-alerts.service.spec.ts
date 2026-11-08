@@ -164,7 +164,7 @@ describe('WorkflowsOpsAlertsService', () => {
     expect(created[0].recipients).toBe(0);
   });
 
-  it('releases the dedupe key when the row cannot be written so the next cycle retries', async () => {
+  const withBrokenHistory = () => {
     const service = build();
     (service as unknown as { prisma: unknown }).prisma = {
       withoutScope: () => ({
@@ -172,6 +172,23 @@ describe('WorkflowsOpsAlertsService', () => {
         users: { findMany: findUsers },
       }),
     };
+    return service;
+  };
+
+  it('keeps the dedupe key when the e-mail went out but the row cannot be written, so nobody is mailed again next cycle', async () => {
+    const service = withBrokenHistory();
+    expect(await service.evaluate()).toEqual(['dispatcher_stalled']);
+    expect(store.has('workflows:ops:alert:dispatcher_stalled')).toBe(true);
+    const mailed = sendEmail.mock.calls.length;
+    expect(mailed).toBeGreaterThan(0);
+
+    expect(await service.evaluate()).toEqual([]);
+    expect(sendEmail.mock.calls.length).toBe(mailed);
+  });
+
+  it('releases the dedupe key when nobody got the e-mail and the row cannot be written, so the next cycle retries', async () => {
+    sendEmail.mockResolvedValue({ success: false, error: 'down' });
+    const service = withBrokenHistory();
     expect(await service.evaluate()).toEqual([]);
     expect(store.has('workflows:ops:alert:dispatcher_stalled')).toBe(false);
   });
