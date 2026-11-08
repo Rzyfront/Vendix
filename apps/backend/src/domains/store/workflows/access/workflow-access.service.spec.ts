@@ -153,6 +153,45 @@ describe('flow permissions (P7.3)', () => {
     });
   });
 
+  describe('who starts a flow (same rule as reading it)', () => {
+    const instances = () => kit.db.table('workflow_instances');
+    const start = () => kit.engine.start({ definitionId: defId });
+    const starter = (user_id: number, extra: Parameters<typeof kit.as>[0] = {}) =>
+      as(user_id, { permissions: ['store:workflows:read', 'store:workflows:start'], ...extra });
+
+    it('a flow hidden by `view` cannot be started by API: 404 and no request', async () => {
+      flow({ access: { view: { roles: ['manager'], user_ids: [] } } });
+      starter(6);
+      expect(await codeOf(start())).toBe('WORKFLOW_DEFINITION_NOT_FOUND');
+      expect(await codeOf(kit.engine.start({ definitionKey: 'purchase' }))).toBe(
+        'WORKFLOW_DEFINITION_NOT_FOUND',
+      );
+      expect(instances()).toHaveLength(0);
+    });
+
+    it('a hidden flow reads as missing even when it is switched off', async () => {
+      flow({ access: { view: { roles: ['manager'], user_ids: [] } }, is_enabled: false });
+      starter(6);
+      expect(await codeOf(start())).toBe('WORKFLOW_DEFINITION_NOT_FOUND');
+      starter(2);
+      expect(await codeOf(start())).toBe('WORKFLOW_DISABLED');
+    });
+
+    it('whoever sees it still starts it: a role in `view` and the owner', async () => {
+      flow({ access: { view: { roles: ['manager'], user_ids: [] } } });
+      starter(2);
+      expect((await start()).instance.id).toBeGreaterThan(0);
+      starter(6, { is_owner: true });
+      expect((await start()).instance.id).toBeGreaterThan(0);
+      expect(instances()).toHaveLength(2);
+    });
+
+    it('a flow without permissions starts as before', async () => {
+      starter(6);
+      expect((await start()).instance.id).toBeGreaterThan(0);
+    });
+  });
+
   describe('flows left out of store-wide content (AI summary)', () => {
     const policy = () => new WorkflowAccessPolicy(kit.prisma);
 

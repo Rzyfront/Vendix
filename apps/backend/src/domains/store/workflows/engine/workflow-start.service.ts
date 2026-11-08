@@ -37,6 +37,8 @@ import {
   WorkflowCallContext,
   WorkflowLoaderService,
 } from './workflow-loader.service';
+import { heldRoleNames, seesFlow } from '../access/workflow-access.policy';
+import { readWorkflowAccess } from '../access/workflow-access.types';
 import { WorkflowLimitsService } from '../limits/workflow-limits.service';
 import { WorkflowReferenceService } from './workflow-reference.service';
 import { WorkflowStageService } from './workflow-stage.service';
@@ -140,12 +142,16 @@ export class WorkflowStartService {
     if (!def) {
       throw new VendixHttpException(ErrorCodes.WORKFLOW_DEFINITION_NOT_FOUND);
     }
-    if (def.status !== 'active' || !def.published_version_id) {
+    const definition = def.published_version_id
+      ? await this.loader.loadDefinition(tx, def.published_version_id)
+      : null;
+    // P7.3: before any other answer, so a hidden flow reads as a missing one.
+    await this.assertSeesFlow(tx, ctx, def.access, definition?.start_roles ?? []);
+    if (def.status !== 'active' || !definition) {
       throw new VendixHttpException(ErrorCodes.WORKFLOW_NOT_ACTIVE);
     }
     // P2.11: a switched-off flow starts nothing new.
     if (def.is_enabled === false) throw new VendixHttpException(ErrorCodes.WORKFLOW_DISABLED);
-    const definition = await this.loader.loadDefinition(tx, def.published_version_id);
     await this.assertMayStart(tx, ctx, definition);
     const stage = startStage(definition);
     if (!stage) throw new VendixHttpException(ErrorCodes.WORKFLOW_STAGE_NOT_FOUND);
@@ -1000,6 +1006,29 @@ export class WorkflowStartService {
     }
     if (!found) {
       throw new VendixHttpException(ErrorCodes.WORKFLOW_SUBJECT_NOT_FOUND);
+    }
+  }
+
+  /**
+   * "Quién ve" of the flow (P7.3) for a person starting it: the same rule as
+   * `WorkflowAccessPolicy`, read inside the start transaction. Owner,
+   * superadmin and `store:workflows:manage` pass; calls without a user are
+   * not restricted.
+   */
+  private async assertSeesFlow(
+    tx: WorkflowTx,
+    ctx: WorkflowCallContext,
+    rawAccess: unknown,
+    startRoles: readonly string[],
+  ) {
+    const access = readWorkflowAccess(rawAccess);
+    if (!access || ctx.user_id === null) return;
+    if (ctx.is_owner || ctx.is_super_admin || ctx.permissions.includes('store:workflows:manage')) {
+      return;
+    }
+    const roles = await heldRoleNames(tx, ctx.user_id, ctx.store_id, ctx.organization_id);
+    if (!seesFlow(access, startRoles, ctx.user_id, roles)) {
+      throw new VendixHttpException(ErrorCodes.WORKFLOW_DEFINITION_NOT_FOUND);
     }
   }
 
