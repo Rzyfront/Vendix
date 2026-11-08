@@ -1,9 +1,10 @@
 import { HttpErrorResponse } from '@angular/common/http';
-import { provideZonelessChangeDetection } from '@angular/core';
+import { provideZonelessChangeDetection, signal } from '@angular/core';
 import { ComponentFixture, TestBed } from '@angular/core/testing';
 import { provideRouter } from '@angular/router';
 import { Observable, Subject, of, throwError } from 'rxjs';
 import { ToastService } from '../../../../../../shared/components/toast/toast.service';
+import { StoreSettingsFacade } from '../../../../../../core/store/store-settings/store-settings.facade';
 import { ReportExportService } from '../../../reports/services/report-export.service';
 import {
   WorkflowAuditApiService,
@@ -101,6 +102,7 @@ describe('AuditPageComponent', () => {
           provide: ReportExportService,
           useValue: { downloadBlob: (blob: Blob, name: string) => downloads.push({ blob, name }) },
         },
+        { provide: StoreSettingsFacade, useValue: { timezone: signal('America/Bogota') } },
       ],
     });
   });
@@ -211,6 +213,20 @@ describe('AuditPageComponent', () => {
     expect(exportFilters[0].category).toBe('export');
     expect(downloads.length).toBe(1);
     expect(downloads[0].name).toMatch(/^auditoria-flujos-\d{4}-\d{2}-\d{2}$/);
+  });
+
+  it('names the workbook with the store day, not the UTC day', async () => {
+    await render();
+    // 21:30 in Bogotá is already the next day in UTC.
+    jasmine.clock().install();
+    jasmine.clock().mockDate(new Date('2026-11-09T02:30:00Z'));
+    try {
+      button('Exportar')?.click();
+    } finally {
+      jasmine.clock().uninstall();
+    }
+    await settle();
+    expect(downloads.map((d) => d.name)).toEqual(['auditoria-flujos-2026-11-08']);
   });
 
   it('a failed export says why, with the message the API sent inside the blob', async () => {

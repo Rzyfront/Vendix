@@ -13,6 +13,8 @@ import {
   DateRange,
   DateRangePickerComponent,
 } from '../../../../../../shared/components/date-range-picker/date-range-picker.component';
+import { StoreSettingsFacade } from '../../../../../../core/store/store-settings/store-settings.facade';
+import { storeToday } from '../../../../../../shared/utils/date.util';
 import { ReportExportService } from '../../../reports/services/report-export.service';
 import {
   WorkflowAuditApiService,
@@ -191,6 +193,7 @@ export class AuditPageComponent implements OnInit {
   private readonly api = inject(WorkflowAuditApiService);
   private readonly toast = inject(ToastService);
   private readonly exporter = inject(ReportExportService);
+  private readonly settings = inject(StoreSettingsFacade);
   private readonly destroyRef = inject(DestroyRef);
 
   readonly categoryOptions = AUDIT_CATEGORY_OPTIONS.map((o) => ({ ...o }));
@@ -340,7 +343,8 @@ export class AuditPageComponent implements OnInit {
       .pipe(takeUntilDestroyed(this.destroyRef))
       .subscribe({
         next: (blob) => {
-          this.exporter.downloadBlob(blob, `auditoria-flujos-${new Date().toISOString().slice(0, 10)}`);
+          // The store's business day, not UTC: after 19:00 in Bogotá UTC is already tomorrow.
+          this.exporter.downloadBlob(blob, `auditoria-flujos-${storeToday(this.settings.timezone())}`);
           this.exporting.set(false);
         },
         error: (err) => {
