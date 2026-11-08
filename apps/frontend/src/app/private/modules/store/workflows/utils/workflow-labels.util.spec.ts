@@ -42,3 +42,27 @@ describe('workflow-labels.util — motor avanzado (P2)', () => {
     expect(countdownText('2025-12-31T23:59:00Z', now)).toBe('Ya venció');
   });
 });
+
+describe('workflow-labels.util — paso de IA (P6)', () => {
+  it('rotula los dos eventos del paso de IA', () => {
+    expect(eventLabel('ai_step_completed')).toBe('Paso de IA completado');
+    expect(eventLabel('ai_step_failed')).toBe('Paso de IA fallido');
+  });
+
+  it('un paso completado dice la tarea y la confianza en porcentaje', () => {
+    expect(eventDescription('ai_step_completed', { task: 'classify', confidence: 0.824 })).toBe(
+      'Paso de IA completado: clasificó (confianza 82 %)',
+    );
+    expect(eventDescription('ai_step_completed', { task: 'draft', confidence: null })).toBe(
+      'Paso de IA completado: redactó',
+    );
+    expect(eventDescription('ai_step_completed', null)).toBe('Paso de IA completado');
+  });
+
+  it('un paso fallido dice el motivo', () => {
+    expect(
+      eventDescription('ai_step_failed', { task: 'classify', reason_code: 'quota', reason: 'La IA no se ejecutó: el plan no tiene cupo de IA' }),
+    ).toBe('Paso de IA fallido: La IA no se ejecutó: el plan no tiene cupo de IA');
+    expect(eventDescription('ai_step_failed', {})).toBe('Paso de IA fallido');
+  });
+});

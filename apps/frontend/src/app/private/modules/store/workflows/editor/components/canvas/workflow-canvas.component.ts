@@ -364,7 +364,7 @@ export class WorkflowCanvasComponent {
   }
 
   hasOutput(node: CanvasNode): boolean {
-    return outcomesOf(node.type).length > 0;
+    return node.type !== 'end';
   }
 
   popoverLeft(choice: PendingConnection): number {
@@ -527,7 +527,7 @@ export class WorkflowCanvasComponent {
     const source = stages.find((s) => s.key === from);
     const target = stages.find((s) => s.key === to);
     if (!source || !target) return;
-    const outcomes = outcomesOf(source.type);
+    const outcomes = outcomesOf(source);
     if (outcomes.length === 1) {
       this.connect(source, outcomes[0], to);
     } else if (outcomes.length > 1) {

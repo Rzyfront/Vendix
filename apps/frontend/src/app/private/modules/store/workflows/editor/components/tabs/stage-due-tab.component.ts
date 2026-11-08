@@ -2,11 +2,11 @@ import { Component, computed, inject, input } from '@angular/core';
 import { FormsModule } from '@angular/forms';
 import { InputComponent, ToggleComponent } from '../../../../../../../shared/components/index';
 import {
-  HUMAN_STAGE_TYPES,
   WorkflowAssigneeDef,
   WorkflowDueDef,
   WorkflowStageDef,
 } from '../../../../../../../shared/workflows/contract/workflow-contract';
+import { isHumanStage } from '../../../../../../../shared/workflows/contract/workflow-runtime';
 import { WorkflowEditorStore } from '../../workflow-editor.store';
 import { AssigneeEditorComponent } from '../assignee-editor.component';
 
@@ -63,7 +63,7 @@ import { AssigneeEditorComponent } from '../assignee-editor.component';
 export class StageDueTabComponent {
   protected readonly store = inject(WorkflowEditorStore);
   readonly stage = input.required<WorkflowStageDef>();
-  readonly isHuman = computed(() => HUMAN_STAGE_TYPES.includes(this.stage().type));
+  readonly isHuman = computed(() => isHumanStage(this.stage()));
 
   private setDue(due: WorkflowDueDef | undefined): void {
     this.store.updateStage(this.stage().key, (s) => {

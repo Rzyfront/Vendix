@@ -360,6 +360,8 @@ export interface SimulationResult {
   ended: { outcome: string } | null;
   loop_guard: boolean;
   watermark: string;
+  /** Plain-language remarks of the run (e.g. the simulator does not call the AI). */
+  notes?: string[];
 }
 
 // ─── Migration of live requests between versions (P2.8) ────────────────
@@ -395,3 +397,28 @@ export interface MigrationResult {
   migrated: number;
   failed: { instance_id: number; reference: string; error: string }[];
 }
+
+// ─── "Probar paso de IA" (P6.1) ────────────────────────────────────────
+
+export type AiStepSampleValue = string | number | boolean | null;
+
+export interface AiStepTestBody {
+  stage_key: string;
+  /** Only the declared inputs of the step, scalar values. */
+  data: Record<string, AiStepSampleValue>;
+}
+
+export type AiStepTestResult =
+  | {
+      status: 'success';
+      values: Record<string, unknown>;
+      confidence: number | null;
+      reason: string | null;
+      model: string | null;
+      tokens: number;
+    }
+  | {
+      status: 'skipped_quota' | 'invalid_output' | 'failed';
+      message: string;
+      tokens?: number;
+    };

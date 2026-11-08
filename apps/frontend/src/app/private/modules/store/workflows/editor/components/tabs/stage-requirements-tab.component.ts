@@ -10,11 +10,11 @@ import {
   ToggleComponent,
 } from '../../../../../../../shared/components/index';
 import {
-  HUMAN_STAGE_TYPES,
   WORKFLOW_LIMITS,
   WorkflowRequirementDef,
   WorkflowStageDef,
 } from '../../../../../../../shared/workflows/contract/workflow-contract';
+import { isHumanStage } from '../../../../../../../shared/workflows/contract/workflow-runtime';
 import { DocumentTemplatesApiService } from '../../../../documents/services/document-templates-api.service';
 import { WorkflowEditorStore } from '../../workflow-editor.store';
 import { removeAt, replaceAt, uniqueKey } from '../../workflow-editor.utils';
@@ -174,7 +174,7 @@ export class StageRequirementsTabComponent {
 
   readonly signatureHint = SIGNATURE_HINT;
   readonly noTemplatesHint = NO_TEMPLATES_HINT;
-  readonly isHuman = computed(() => HUMAN_STAGE_TYPES.includes(this.stage().type));
+  readonly isHuman = computed(() => isHumanStage(this.stage()));
   readonly requirements = computed(() => this.stage().requirements ?? []);
   readonly atLimit = computed(
     () => this.requirements().length >= WORKFLOW_LIMITS.maxRequirementsPerStage,

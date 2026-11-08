@@ -3,6 +3,8 @@ import { Injectable, inject } from '@angular/core';
 import { Observable, map } from 'rxjs';
 import { environment } from '../../../../../../environments/environment';
 import {
+  AiStepTestBody,
+  AiStepTestResult,
   ApiResponse,
   CompleteTaskBody,
   CreateDefinitionBody,
@@ -183,6 +185,13 @@ export class WorkflowsApiService {
         `${this.base}/definitions/${id}/simulate`,
         body,
       )
+      .pipe(map((res) => res.data));
+  }
+
+  /** `POST ai-step-test`: a real AI call over the SAVED draft; it spends plan quota. */
+  testAiStep(id: number, body: AiStepTestBody): Observable<AiStepTestResult> {
+    return this.http
+      .post<ApiResponse<AiStepTestResult>>(`${this.base}/definitions/${id}/ai-step-test`, body)
       .pipe(map((res) => res.data));
   }
 

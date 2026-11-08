@@ -9,12 +9,12 @@ import {
   ToggleComponent,
 } from '../../../../../../../shared/components/index';
 import {
-  HUMAN_STAGE_TYPES,
   WORKFLOW_LIMITS,
   WorkflowFieldDef,
   WorkflowFormStepDef,
   WorkflowStageDef,
 } from '../../../../../../../shared/workflows/contract/workflow-contract';
+import { isHumanStage } from '../../../../../../../shared/workflows/contract/workflow-runtime';
 import { WorkflowEditorStore } from '../../workflow-editor.store';
 import { FIELD_TYPE_TEXT, moveItem, uniqueKey } from '../../workflow-editor.utils';
 import { FieldBuilderComponent } from '../field-builder.component';
@@ -211,7 +211,7 @@ export class StageFormTabComponent {
   readonly stage = input.required<WorkflowStageDef>();
 
   readonly editing = signal<string | null>(null);
-  readonly isHuman = computed(() => HUMAN_STAGE_TYPES.includes(this.stage().type));
+  readonly isHuman = computed(() => isHumanStage(this.stage()));
   readonly allFields = computed(() => this.store.draft()?.fields ?? []);
   readonly stageFields = computed<WorkflowFieldDef[]>(() =>
     (this.stage().form?.fields ?? [])

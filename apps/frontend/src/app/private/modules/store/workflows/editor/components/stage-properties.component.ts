@@ -78,7 +78,7 @@ export class StagePropertiesComponent {
   protected readonly store = inject(WorkflowEditorStore);
   readonly tabs = computed<ScrollableTab[]>(() => {
     const stage = this.store.selectedStage();
-    return stage ? tabsForStage(stage.type) : tabsForStage('form');
+    return stage ? tabsForStage(stage.type, stage.ai?.review === true) : tabsForStage('form');
   });
   /** The "Configuración" tab only exists for some types; fall back to General elsewhere. */
   readonly activeTab = computed<EditorTab>(() => {
