@@ -280,12 +280,14 @@ export class WorkflowsModule implements OnModuleInit {
     private readonly definitions: WorkflowDefinitionsService,
     private readonly instances: WorkflowInstancesService,
     private readonly metrics: WorkflowMetricsService,
+    private readonly engine: WorkflowEngineService,
     private readonly prisma: StorePrismaService,
     private readonly globalPrisma: GlobalPrismaService,
   ) {}
 
   /**
-   * Block 11 — AI tools (propose → confirm → execute; they never publish).
+   * Block 11 — AI tools (propose → confirm → execute; every write, publishing
+   * included, runs only after the user confirms its card).
    * Decentralized registration in the owning module, like the other domains.
    */
   onModuleInit(): void {
@@ -294,6 +296,16 @@ export class WorkflowsModule implements OnModuleInit {
         definitions: this.definitions,
         instances: this.instances,
         metrics: this.metrics,
+        engine: this.engine,
+        findInstanceIdByTaskId: async (taskId) => {
+          const store_id = RequestContextService.getContext()?.store_id;
+          if (!store_id) return null;
+          const row = await this.prisma.workflow_tasks.findFirst({
+            where: { id: taskId, store_id },
+            select: { instance_id: true },
+          });
+          return row?.instance_id ?? null;
+        },
         findInstanceIdByReference: async (reference) => {
           const store_id = RequestContextService.getContext()?.store_id;
           if (!store_id) return null;
