@@ -458,6 +458,23 @@ jobs:
           src/domains/store/workflows/templates/workflow-templates.catalog.spec.ts
           src/domains/store/workflows/templates/workflow-templates.service.spec.ts
           src/domains/store/workflows/workflows.controllers.spec.ts
+      # IA dentro de Flujos (Flujos P6): paso de IA en el motor y su prueba,
+      # herramientas de Vex con confirmación, consumo de IA por tienda y flujo
+      # con aviso al 80 % y bloqueo suave al 100 %, y resumen semanal.
+      - name: Jest — IA dentro de Flujos (Flujos P6)
+        working-directory: apps/backend
+        run: >-
+          npx jest --ci --runInBand --config jest.isolated.config.js --runTestsByPath
+          src/ai-engine/tools/domains/workflows.tools.spec.ts
+          src/common/access/module-industries.parity.spec.ts
+          src/common/workflows/contract/workflow-validator.p6.spec.ts
+          src/domains/store/workflows/ai/workflow-ai.service.spec.ts
+          src/domains/store/workflows/ai/workflow-ai-usage.service.spec.ts
+          src/domains/store/workflows/ai/workflow-insights.controller.spec.ts
+          src/domains/store/workflows/ai/workflow-insights.cron.spec.ts
+          src/domains/store/workflows/ai/workflow-insights.service.spec.ts
+          src/domains/store/workflows/definitions/workflow-ai-step-test.service.spec.ts
+          src/domains/store/workflows/engine/workflow-ai-step.spec.ts
       # Specs que toca la fase P1 de Flujos (acciones, productores y servicios
       # de dominio gobernados): con más de 25 specs cambiados el job de
       # regresiones los omite, así que corren aquí, de forma explícita.
@@ -598,6 +615,13 @@ jobs:
           --include='**/workflows/services/workflow-debug-api.service.spec.ts'
           --include='**/workflows/services/workflow-live.service.spec.ts'
           --include='**/workflows/services/workflow-templates-api.service.spec.ts'
+          --include='**/workflows/editor/components/tabs/config/stage-ai-config.utils.spec.ts'
+          --include='**/workflows/editor/components/tabs/config/stage-ai-test.component.spec.ts'
+          --include='**/workflows/utils/workflow-labels.util.spec.ts'
+          --include='**/workflows/utils/workflow-insights.util.spec.ts'
+          --include='**/workflows/services/workflow-insights-api.service.spec.ts'
+          --include='**/workflows/pages/insights-page/insights-page.component.spec.ts'
+          --include='**/workflows/pages/analytics-page/analytics-page.component.spec.ts'
           --include='**/integrations-page/integrations-page.component.spec.ts'
           --include='**/ecommerce/services/checkout-payment-receipt.spec.ts'
           --include='**/ecommerce/pages/account/order-detail/order-detail.component.spec.ts'
