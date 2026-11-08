@@ -212,3 +212,76 @@ describe('SubscriptionAccessService — state-driven paywall with a retired plan
     expect(service.paywallState()?.code).toBe('STATE_SUSPENDED');
   });
 });
+
+describe('SubscriptionAccessService — WORKFLOW_PLAN_LIMIT_REACHED (P7.1)', () => {
+  let service: SubscriptionAccessService;
+  let navigateByUrl: jasmine.Spy;
+
+  beforeEach(() => {
+    navigateByUrl = jasmine.createSpy('navigateByUrl').and.resolveTo(true);
+    TestBed.configureTestingModule({
+      providers: [
+        SubscriptionAccessService,
+        {
+          provide: SubscriptionFacade,
+          useValue: {
+            featureMatrix: signal<Record<string, { enabled: boolean }>>({}),
+            status: signal('active'),
+          },
+        },
+        { provide: Router, useValue: { url: '/admin/workflows', navigateByUrl } },
+      ],
+    });
+    service = TestBed.inject(SubscriptionAccessService);
+  });
+
+  const open = (details: Record<string, unknown>) => {
+    service.openPaywall('WORKFLOW_PLAN_LIMIT_REACHED', 'mensaje del servidor', details as never);
+    return service.paywallState()!;
+  };
+
+  it('has its own variant with the "Mejorar plan" CTA, not the generic fallback', () => {
+    const state = open({ limit: 'monthly_instances', used: 3, cap: 3, period: '2026-11' });
+    expect(state.code).toBe('WORKFLOW_PLAN_LIMIT_REACHED');
+    expect(state.variant.ctaLabel).toBe('Mejorar plan');
+  });
+
+  it('words the requests limit with used and cap of the month', () => {
+    const state = open({ limit: 'monthly_instances', used: 3, cap: 3, period: '2026-11' });
+    expect(state.variant.description).toBe(
+      'Llegaste al límite de solicitudes de tu plan (3 de 3 este mes).',
+    );
+  });
+
+  it('words the HTTP calls limit', () => {
+    const state = open({ limit: 'monthly_http_calls', used: 50, cap: 50 });
+    expect(state.variant.description).toContain('llamadas HTTP');
+    expect(state.variant.description).toContain('(50 de 50 este mes)');
+  });
+
+  it('words the storage limit in GB', () => {
+    const gb = 1024 ** 3;
+    const state = open({ limit: 'storage_bytes', used: 10 * gb, cap: 10 * gb });
+    expect(state.variant.description).toBe(
+      'Llegaste al límite de almacenamiento de tu plan (10 de 10 GB).',
+    );
+  });
+
+  it('never invents numbers when the details are missing', () => {
+    const state = open({ limit: 'monthly_instances' });
+    expect(state.variant.description).toBe('Llegaste al límite de solicitudes de tu plan este mes.');
+    expect(state.variant.description).not.toMatch(/\d/);
+  });
+
+  it('the server message does not override the sentence built from the numbers', () => {
+    expect(open({ limit: 'monthly_instances', used: 1, cap: 1 }).message).toBeUndefined();
+  });
+
+  it('the CTA navigates to the store plans and closes', () => {
+    open({ limit: 'monthly_instances', used: 1, cap: 1 });
+    service.triggerCta();
+    expect(navigateByUrl).toHaveBeenCalledWith('/admin/subscription/plans');
+    expect(service.isPaywallOpen()).toBeFalse();
+  });
+});
+

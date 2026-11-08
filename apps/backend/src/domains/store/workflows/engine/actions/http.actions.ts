@@ -1,4 +1,5 @@
-import { Injectable } from '@nestjs/common';
+import { Injectable, Optional } from '@nestjs/common';
+import { ErrorCodes, VendixHttpException } from '@common/errors';
 import { WORKFLOW_HTTP_OUTPUT_PATH } from '@common/workflows/contract';
 import {
   DnsResolver,
@@ -17,6 +18,8 @@ import {
   WorkflowSecretsService,
   secretNamesIn,
 } from '../../secrets/workflow-secrets.service';
+import { WorkflowAuditService } from '../../audit/workflow-audit.service';
+import { WorkflowLimitsService } from '../../limits/workflow-limits.service';
 import {
   WorkflowActionContext,
   WorkflowActionGroup,
@@ -184,7 +187,13 @@ export class WorkflowHttpActions implements WorkflowActionGroup {
   transport: OutboundHttpTransport = outboundHttpTransport;
   resolver?: DnsResolver;
 
-  constructor(private readonly secrets: WorkflowSecretsService) {}
+  // Limits and audit are optional so the specs that wire this class by hand
+  // keep working; Nest always provides both (WorkflowsModule).
+  constructor(
+    private readonly secrets: WorkflowSecretsService,
+    @Optional() private readonly limits?: WorkflowLimitsService,
+    @Optional() private readonly audit?: WorkflowAuditService,
+  ) {}
 
   readonly handlers: WorkflowActionHandlerMap = {
     'vendix.http.request': (ctx) => this.request(ctx),
@@ -200,6 +209,13 @@ export class WorkflowHttpActions implements WorkflowActionGroup {
       if (e instanceof HttpCallError) {
         if (e.retryable) throw new Error(e.message);
         throw new WorkflowActionInputError(e.message);
+      }
+      // P7.1: out of calls for the month is permanent for this run: the step
+      // goes to its error path / dead-letter instead of retrying into the cap.
+      if (e instanceof VendixHttpException && e.errorCode === ErrorCodes.WORKFLOW_PLAN_LIMIT_REACHED.code) {
+        throw new WorkflowActionInputError(
+          `${e.message} Las llamadas HTTP se reanudan el próximo mes o al mejorar el plan.`,
+        );
       }
       throw e;
     }
@@ -326,6 +342,24 @@ export class WorkflowHttpActions implements WorkflowActionGroup {
     } catch (e) {
       if (e instanceof WebhookUrlError) throw blockedError(e);
       throw new HttpCallError('network', 'No se pudo resolver el destino.', true);
+    }
+
+    // P7.1: one count per real outbound call (the editor's test counts too).
+    if (this.limits) {
+      const use = await this.limits.consume(storeId, 'monthly_http_calls');
+      if (!use.allowed) throw this.limits.refusal(use);
+    }
+    // P7.2: a call that uses secrets leaves a trail (names only, never values
+    // or the URL); when it cannot be written the call is not made.
+    if (this.audit && names.size > 0) {
+      const used = [...names];
+      await this.audit.recordNow({
+        action: 'secret.used',
+        target_type: 'secret',
+        target_id: used.join(','),
+        summary: `Usó ${used.length === 1 ? 'el secreto' : 'los secretos'} ${used.join(', ')} en una llamada HTTP`,
+        details: { names: used, method, host: target.hostname },
+      });
     }
 
     const started = Date.now();

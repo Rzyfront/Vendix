@@ -14,6 +14,7 @@ import {
   PlanQueryDto,
   PlanPricingDto,
 } from '../dto';
+import { parseWorkflowLimits } from '../../../store/workflows/limits/workflow-limits.validation';
 
 @Injectable()
 export class PlansService {
@@ -313,6 +314,7 @@ export class PlansService {
    * base_price, currency) and the group/identity fields handled by the caller.
    */
   private buildSharedCreateData(dto: CreatePlanDto, isPromotional: boolean) {
+    const workflowLimits = parseWorkflowLimits(dto.workflow_limits);
     return {
       name: dto.name,
       description: dto.description || null,
@@ -325,6 +327,8 @@ export class PlansService {
       cancellation_day: dto.cancellation_day ?? 45,
       feature_matrix: this.toPlainFeatureMatrix(dto.feature_matrix) as any,
       ai_feature_flags: (dto.ai_feature_flags ?? {}) as any,
+      // P7.1: omitted/null = platform defaults (the column stays NULL).
+      ...(workflowLimits ? { workflow_limits: workflowLimits as Prisma.InputJsonValue } : {}),
       resellable: dto.resellable ?? !isPromotional,
       max_partner_margin_pct: dto.max_partner_margin_pct || null,
       is_promotional: isPromotional,
@@ -342,6 +346,8 @@ export class PlansService {
     // F6 — el plan no se persiste si declara categorías, agentes o tools que
     // no existen en el catálogo vivo (400, antes de cualquier write).
     await this.assertAIFlagsLinked(dto.ai_feature_flags);
+    // P7.1: WORKFLOW_LIMITS_INVALID before any write.
+    parseWorkflowLimits(dto.workflow_limits);
 
     if (Array.isArray(dto.pricings) && dto.pricings.length > 0) {
       return this.createMultiCycle(dto);
@@ -689,6 +695,15 @@ export class PlansService {
       );
     }
 
+    // P7.1: `undefined` keeps the stored limits, `null` clears them.
+    const workflowLimits = parseWorkflowLimits(dto.workflow_limits);
+    const workflowLimitsData =
+      workflowLimits === undefined
+        ? undefined
+        : workflowLimits === null
+          ? Prisma.DbNull
+          : (workflowLimits as Prisma.InputJsonValue);
+
     if (dto.code && dto.code !== existing.code) {
       const conflict = await this.prisma.subscription_plans.findUnique({
         where: { code: dto.code },
@@ -743,6 +758,7 @@ export class PlansService {
       ...(dto.ai_feature_flags !== undefined && {
         ai_feature_flags: dto.ai_feature_flags as any,
       }),
+      ...(workflowLimitsData !== undefined && { workflow_limits: workflowLimitsData }),
       ...(isLeavingPromotional
         ? { resellable: true }
         : dto.resellable !== undefined
@@ -859,6 +875,10 @@ export class PlansService {
                   ) as any,
                   ai_feature_flags: (dto.ai_feature_flags ??
                     existing.ai_feature_flags) as any,
+                  workflow_limits:
+                    workflowLimitsData ??
+                    (existing.workflow_limits as Prisma.InputJsonValue | null) ??
+                    Prisma.DbNull,
                   resellable: dto.resellable ?? existing.resellable,
                   max_partner_margin_pct:
                     dto.max_partner_margin_pct ??

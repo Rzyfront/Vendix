@@ -194,7 +194,11 @@ export class HttpActionTestComponent {
         },
         error: (error) => {
           this.busy.set(false);
-          this.failure.set(toWorkflowError(error).message);
+          const failure = toWorkflowError(error);
+          // A plan limit (402) is explained by the paywall the interceptor
+          // already opened: no inline error on top of it.
+          if (failure.status === 402 || failure.code === 'WORKFLOW_PLAN_LIMIT_REACHED') return;
+          this.failure.set(failure.message);
         },
       });
   }

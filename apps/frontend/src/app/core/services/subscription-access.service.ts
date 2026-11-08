@@ -28,6 +28,8 @@ export type PaywallCode =
   | 'SUBSCRIPTION_011'
   | 'PLAN_001'
   | 'TRIAL_001'
+  // P7.1 — a Flows plan limit (requests, HTTP calls or storage of the month).
+  | 'WORKFLOW_PLAN_LIMIT_REACHED'
   // Synthetic variants driven by the local subscription state (not by an
   // HTTP error). Used by `openPaywallForState()` so the panel can display
   // the same modal at-rest, before the user has triggered a blocked write.
@@ -126,6 +128,47 @@ export interface PaywallDetails {
    * suggestion lookup — never hardcoded per plan.
    */
   feature?: string | null;
+  /** P7.1 — which Flows limit was hit (`WORKFLOW_PLAN_LIMIT_REACHED`). */
+  limit?: 'monthly_instances' | 'monthly_http_calls' | 'storage_bytes' | string;
+  /** P7.1 — used / cap in the limit's unit (requests, calls or bytes). */
+  used?: number;
+  cap?: number | null;
+  /** P7.1 — `YYYY-MM` for the monthly limits. */
+  period?: string;
+}
+
+const GB_BYTES = 1024 ** 3;
+
+function formatCount(value: number): string {
+  return new Intl.NumberFormat('es-CO', { maximumFractionDigits: 1 }).format(value);
+}
+
+/**
+ * P7.1 — the paywall sentence of a Flows limit, from the refusal `details`
+ * ("Llegaste al límite de solicitudes de tu plan (3 de 3 este mes)"). Falls
+ * back to a generic sentence when the details are missing, never invents a
+ * number.
+ */
+export function workflowLimitCopy(details?: PaywallDetails): string {
+  const used = details?.used;
+  const cap = details?.cap;
+  const known = typeof used === 'number' && typeof cap === 'number';
+  switch (details?.limit) {
+    case 'monthly_instances':
+      return known
+        ? `Llegaste al límite de solicitudes de tu plan (${formatCount(used)} de ${formatCount(cap)} este mes).`
+        : 'Llegaste al límite de solicitudes de tu plan este mes.';
+    case 'monthly_http_calls':
+      return known
+        ? `Llegaste al límite de llamadas HTTP de tu plan (${formatCount(used)} de ${formatCount(cap)} este mes).`
+        : 'Llegaste al límite de llamadas HTTP de tu plan este mes.';
+    case 'storage_bytes':
+      return known
+        ? `Llegaste al límite de almacenamiento de tu plan (${formatCount(used / GB_BYTES)} de ${formatCount(cap / GB_BYTES)} GB).`
+        : 'Llegaste al límite de almacenamiento de tu plan.';
+    default:
+      return 'Llegaste a un límite de Flujos de tu plan.';
+  }
 }
 
 /**
@@ -407,6 +450,16 @@ const PAYWALL_VARIANTS: Record<PaywallCode, PaywallVariant> = {
       'Plan flexible: cambia o cancela cuando quieras',
       'Atención humana para acompañarte',
     ],
+  },
+  WORKFLOW_PLAN_LIMIT_REACHED: {
+    title: 'Límite de Flujos alcanzado',
+    description: 'Llegaste a un límite de Flujos de tu plan.',
+    ctaLabel: 'Mejorar plan',
+    ctaRoute: '/admin/subscription/plans',
+    severity: 'warning',
+    category: 'quota-exhausted',
+    iconName: 'zap',
+    badgeLabel: 'Límite del plan',
   },
   PLAN_001: {
     title: 'Explora nuestros planes',
@@ -697,10 +750,16 @@ export class SubscriptionAccessService {
       ? (variantKey as PaywallCode)
       : 'PLAN_001';
     const baseVariant = PAYWALL_VARIANTS[knownCode];
+    const variant =
+      knownCode === 'WORKFLOW_PLAN_LIMIT_REACHED'
+        ? { ...baseVariant, description: workflowLimitCopy(details) }
+        : this.interpolateVariant(baseVariant, details);
     this.state.set({
       code: knownCode,
-      variant: this.interpolateVariant(baseVariant, details),
-      message,
+      variant,
+      // The sentence of the limit is built here from the numbers, so the
+      // backend message never overrides it.
+      message: knownCode === 'WORKFLOW_PLAN_LIMIT_REACHED' ? undefined : message,
       details,
     });
     this.isOpen.set(true);

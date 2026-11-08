@@ -214,3 +214,43 @@ describe('subscriptionPaywallInterceptor — 008/009 behavior is unchanged', () 
     expect(openPaywall).not.toHaveBeenCalled();
   });
 });
+
+describe('subscriptionPaywallInterceptor — WORKFLOW_PLAN_LIMIT_REACHED (P7.1)', () => {
+  let httpMock: HttpTestingController;
+  let http: HttpClient;
+  let openPaywall: jasmine.Spy;
+
+  beforeEach(() => {
+    openPaywall = jasmine.createSpy('openPaywall');
+    TestBed.configureTestingModule({
+      providers: [
+        provideHttpClient(withInterceptors([subscriptionPaywallInterceptor])),
+        provideHttpClientTesting(),
+        { provide: SubscriptionAccessService, useValue: { openPaywall } },
+        { provide: StoreAvailabilityService, useValue: { reopen: jasmine.createSpy('reopen') } },
+        { provide: Router, useValue: { url: '/admin/workflows' } },
+      ],
+    });
+    httpMock = TestBed.inject(HttpTestingController);
+    http = TestBed.inject(HttpClient);
+  });
+
+  afterEach(() => httpMock.verify());
+
+  it('opens the paywall with the limit details and rethrows the error', () => {
+    const details = { limit: 'monthly_instances', used: 3, cap: 3, period: '2026-11' };
+    let caught: unknown = null;
+    http.post(`${environment.apiUrl}/store/workflows/start`, {}).subscribe({
+      error: (e: unknown) => (caught = e),
+    });
+    httpMock
+      .expectOne(`${environment.apiUrl}/store/workflows/start`)
+      .flush(
+        { statusCode: 402, error_code: 'WORKFLOW_PLAN_LIMIT_REACHED', message: 'm', details },
+        { status: 402, statusText: 'Payment Required' },
+      );
+    expect(openPaywall).toHaveBeenCalledOnceWith('WORKFLOW_PLAN_LIMIT_REACHED', 'm', details);
+    expect(caught).toBeTruthy();
+  });
+});
+

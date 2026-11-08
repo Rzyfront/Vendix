@@ -35,6 +35,12 @@ import {
   StickyHeaderTab,
 } from '../../../../../../shared/components/sticky-header/sticky-header.component';
 import {
+  WORKFLOW_LIMIT_KEYS,
+  WorkflowLimitKey,
+  buildWorkflowLimits,
+  workflowLimitsToForm,
+} from './workflow-limits.util';
+import {
   defaultAIFeatureFlags,
   normalizeAIFeatureFlags,
 } from '../../utils/ai-feature-flags.util';
@@ -359,6 +365,36 @@ interface PlanFormControls {
           </div>
         }
 
+        @if (activeTab() === 'workflows') {
+          <div
+            class="bg-surface rounded-card border border-border p-4 md:p-6 space-y-4"
+            [formGroup]="limitsForm"
+            data-testid="workflow-limits-section"
+          >
+            <h2 class="text-sm font-semibold text-text-primary uppercase tracking-wide">
+              Límites de Flujos
+            </h2>
+            <p class="text-sm text-text-secondary">
+              Lo que este plan permite cada mes. Déjalo vacío para usar los valores de la
+              plataforma (20.000 solicitudes, 50.000 llamadas HTTP y 10 GB), o marca «Sin
+              límite». Los tokens de IA siguen el cupo de IA del plan.
+            </p>
+            @for (line of limitLines; track line.key) {
+              <div class="grid grid-cols-1 md:grid-cols-[1fr_auto] gap-4 items-end" [formGroupName]="line.key">
+                <app-input
+                  [label]="line.label"
+                  type="number"
+                  [min]="0"
+                  formControlName="value"
+                  [control]="limitControl(line.key, 'value')"
+                  [helperText]="line.help"
+                ></app-input>
+                <app-toggle formControlName="unlimited" label="Sin límite"></app-toggle>
+              </div>
+            }
+          </div>
+        }
+
         @if (activeTab() === 'grace') {
           <div class="bg-surface rounded-card border border-border p-4 md:p-6 space-y-6">
             <!-- Período de gracia -->
@@ -480,6 +516,7 @@ export class PlanFormComponent {
     { id: 'incluye', label: 'Incluye', icon: 'list-checks' },
     { id: 'ai-matrix', label: 'Matriz IA', icon: 'bot' },
     { id: 'pricing', label: 'Precios', icon: 'credit-card' },
+    { id: 'workflows', label: 'Límites de Flujos', icon: 'gauge' },
     { id: 'grace', label: 'Gracia y cobranza', icon: 'clock' },
   ];
 
@@ -512,6 +549,32 @@ export class PlanFormComponent {
     { value: 'active', label: 'Activo' },
     { value: 'archived', label: 'Archivado' },
   ];
+
+  /** P7.1 — "Límites de Flujos": a number (storage in GB) and a "Sin límite" toggle per line. */
+  readonly limitLines: { key: WorkflowLimitKey; label: string; help: string }[] = [
+    { key: 'monthly_instances', label: 'Solicitudes por mes', help: 'Vacío = valor de la plataforma.' },
+    { key: 'monthly_http_calls', label: 'Llamadas HTTP por mes', help: 'Vacío = valor de la plataforma.' },
+    { key: 'storage_bytes', label: 'Almacenamiento (GB)', help: 'Vacío = valor de la plataforma.' },
+  ];
+
+  readonly limitsForm = new FormGroup(
+    Object.fromEntries(
+      WORKFLOW_LIMIT_KEYS.map((key) => [
+        key,
+        new FormGroup({
+          value: new FormControl<number | null>(null),
+          unlimited: new FormControl(false, { nonNullable: true }),
+        }),
+      ]),
+    ) as Record<
+      WorkflowLimitKey,
+      FormGroup<{ value: FormControl<number | null>; unlimited: FormControl<boolean> }>
+    >,
+  );
+
+  limitControl(key: WorkflowLimitKey, part: 'value' | 'unlimited') {
+    return this.limitsForm.controls[key].controls[part];
+  }
 
   form: FormGroup<PlanFormControls> = this.fb.group<PlanFormControls>({
     // Identity
@@ -739,6 +802,7 @@ export class PlanFormComponent {
           { emitEvent: false },
         );
         this.aiFeatures.set(this.normalizeAiFeatures(plan.ai_feature_flags));
+        this.limitsForm.setValue(workflowLimitsToForm(plan.workflow_limits));
         this.isFreePlan.set(plan.is_free);
         if (plan.is_free) {
           this.form.controls.setup_fee.disable({ emitEvent: false });
@@ -853,6 +917,8 @@ export class PlanFormComponent {
       is_free: isFree,
       redemption_code: raw.redemption_code.trim() || null,
       ai_feature_flags: this.aiFeatures(),
+      // Empty section = null: clears the limits so the platform defaults apply.
+      workflow_limits: buildWorkflowLimits(this.limitsForm.getRawValue()),
       feature_matrix: includedItems,
     };
 

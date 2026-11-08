@@ -1,5 +1,5 @@
 import { randomBytes, randomUUID } from 'crypto';
-import { Injectable, Logger } from '@nestjs/common';
+import { Injectable, Logger, Optional } from '@nestjs/common';
 import { ErrorCodes, VendixHttpException } from '@common/errors';
 import { S3PathHelper } from '@common/helpers/s3-path.helper';
 import { S3Service } from '@common/services/s3.service';
@@ -12,6 +12,7 @@ import {
 } from '../../documents/documents.constants';
 import { bytesMatchMime } from '../../documents/file-signature';
 import { sanitizeFileName } from '../../documents/stored-files.service';
+import { WorkflowLimitsService } from '../limits/workflow-limits.service';
 
 /** Every part but the last has exactly this size (S3 minimum is 5 MiB). */
 export const UPLOAD_CHUNK_BYTES = 5 * MB;
@@ -98,6 +99,9 @@ export class WorkflowPublicUploadsService {
     private readonly prisma: StorePrismaService,
     private readonly s3: S3Service,
     private readonly paths: S3PathHelper,
+    // P7.1: optional so specs that wire the service by hand keep working;
+    // Nest always provides it.
+    @Optional() private readonly limits?: WorkflowLimitsService,
   ) {}
 
   private owner(scope: UploadScope) {
@@ -144,6 +148,10 @@ export class WorkflowPublicUploadsService {
         { max_bytes: maxBytes, size_bytes: input.size_bytes },
       );
     }
+
+    // P7.1: refused before any S3 call when the file would pass the plan's
+    // storage cap; the outsider only sees the neutral message.
+    await this.limits?.assertStorage(scope.store_id, input.size_bytes, 'outsider');
 
     const db = this.prisma.withoutScope();
     const [store, organization] = await Promise.all([

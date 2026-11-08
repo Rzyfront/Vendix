@@ -1,4 +1,4 @@
-import { Injectable } from '@nestjs/common';
+import { Injectable, Optional } from '@nestjs/common';
 import { ErrorCodes, VendixHttpException } from '@common/errors';
 import {
   WORKFLOW_EVENT_CATALOG,
@@ -37,6 +37,7 @@ import {
   WorkflowCallContext,
   WorkflowLoaderService,
 } from './workflow-loader.service';
+import { WorkflowLimitsService } from '../limits/workflow-limits.service';
 import { WorkflowReferenceService } from './workflow-reference.service';
 import { WorkflowStageService } from './workflow-stage.service';
 
@@ -75,6 +76,15 @@ function coerceMapped(type: WorkflowFieldType, raw: string): unknown {
   }
 }
 
+/**
+ * P7.1: how a start counts against the plan's monthly requests. `person` (a
+ * user, 402 with the plan details) and `outsider` (public form or inbound
+ * webhook, neutral refusal) are refused over the cap; `system` (event,
+ * schedule, email, record date) is refused and the owners are told once a
+ * month; `exempt` (approval gates, subflow children) counts and never stops.
+ */
+type StartLimitMode = 'person' | 'outsider' | 'system' | 'exempt';
+
 /** `start` inside the engine transaction. */
 @Injectable()
 export class WorkflowStartService {
@@ -85,7 +95,29 @@ export class WorkflowStartService {
     private readonly references: WorkflowReferenceService,
     private readonly dossiers: DossiersService,
     private readonly advancer: WorkflowAdvanceService,
+    // Optional so the engine specs that wire the starter by hand keep working;
+    // Nest always provides it (WorkflowsModule).
+    @Optional() private readonly limits?: WorkflowLimitsService,
   ) {}
+
+  /**
+   * P7.1: counts this request in the month, inside the start transaction and
+   * right before the instance insert (after every check), so the counter row
+   * stays locked as short as possible and rolls back with a failed start.
+   * Replays never get here: they return before any write.
+   */
+  private async countStart(tx: WorkflowTx, ctx: WorkflowCallContext, mode: StartLimitMode): Promise<void> {
+    if (!this.limits) return;
+    const use = await this.limits.consume(ctx.store_id, 'monthly_instances', {
+      tx,
+      enforce: mode !== 'exempt',
+    });
+    if (use.allowed) return;
+    if (mode !== 'person') {
+      await this.limits.noticeOnce(ctx.store_id, use, mode === 'outsider');
+    }
+    throw this.limits.refusal(use, mode === 'outsider' ? 'outsider' : 'staff');
+  }
 
   async execute(
     tx: WorkflowTx,
@@ -138,6 +170,7 @@ export class WorkflowStartService {
       ? await this.storeLocationId(tx, ctx.store_id, input.locationId, true)
       : null;
 
+    await this.countStart(tx, ctx, 'person');
     const created = (await tx.workflow_instances.create({
       data: {
         organization_id: ctx.organization_id,
@@ -288,6 +321,7 @@ export class WorkflowStartService {
     }
     const actor: WorkflowActor = { type: 'public', id: null };
     const patch = this.stages.stagePatch(stage, now, 0);
+    await this.countStart(tx, ctx, 'outsider');
     const created = (await tx.workflow_instances.create({
       data: {
         organization_id: ctx.organization_id,
@@ -524,6 +558,7 @@ export class WorkflowStartService {
       idempotencyKey: input.idempotencyKey,
       started: { ...(input.started ?? {}), via: input.kind },
       title: input.title,
+      limit: input.kind === 'webhook' ? 'outsider' : 'system',
     });
   }
 
@@ -587,6 +622,7 @@ export class WorkflowStartService {
       subject,
       idempotencyKey: input.idempotencyKey,
       started: { via: 'approval_gate', operation, gate_id: gate.id },
+      limit: 'exempt',
     });
     const linked = await tx.workflow_approval_gates.updateMany({
       where: { id: gate.id, status: 'pending', instance_id: null },
@@ -626,15 +662,22 @@ export class WorkflowStartService {
       (t) => t.kind === 'schedule' && t.cron === input.cron,
     );
     if (!declared || !stage || stage.assignee?.kind === 'initiator') return null;
-    return this.createSystemInstance(tx, ctx, {
-      def,
-      definition,
-      stage,
-      initial: {},
-      subject: null,
-      idempotencyKey,
-      started: { via: 'schedule', cron: input.cron, fire_at: input.fireAt },
-    });
+    try {
+      return await this.createSystemInstance(tx, ctx, {
+        def,
+        definition,
+        stage,
+        initial: {},
+        subject: null,
+        idempotencyKey,
+        started: { via: 'schedule', cron: input.cron, fire_at: input.fireAt },
+      });
+    } catch (e) {
+      // P7.1: over the plan's monthly requests the fire simply does not start
+      // (the owners were told); nothing was written yet.
+      if (e instanceof VendixHttpException && e.errorCode === 'WORKFLOW_PLAN_LIMIT_REACHED') return null;
+      throw e;
+    }
   }
 
   /**
@@ -743,6 +786,7 @@ export class WorkflowStartService {
       },
       startedBy: { type: parent.started_by_type, id: parent.started_by_id },
       parent: { id: parent.id, stage_key: input.stageKey, entry_seq: input.entrySeq },
+      limit: 'exempt',
     });
     return { started, flowKey: child.flow_key };
   }
@@ -805,6 +849,8 @@ export class WorkflowStartService {
       /** P2.2: a child keeps the parent's starter, so `initiator` still means someone. */
       startedBy?: { type: WorkflowActor['type']; id: number | null };
       parent?: { id: number; stage_key: string; entry_seq: number };
+      /** P7.1: how the start counts against the plan (default `system`). */
+      limit?: StartLimitMode;
     },
   ): Promise<WorkflowCommandResult> {
     const actor: WorkflowActor = { type: 'system', id: null };
@@ -818,6 +864,7 @@ export class WorkflowStartService {
     });
     const patch = this.stages.stagePatch(a.stage, now, 0);
 
+    await this.countStart(tx, ctx, a.limit ?? 'system');
     const created = (await tx.workflow_instances.create({
       data: {
         organization_id: ctx.organization_id,

@@ -44,6 +44,9 @@ const BLOCKING_CODES = new Set<string>([
   'SUBSCRIPTION_011',
   'PLAN_001',
   'TRIAL_001',
+  // P7.1 — a Flows plan limit (402). Paywall with "Mejorar plan"; the screen
+  // or action that failed shows no error of its own.
+  'WORKFLOW_PLAN_LIMIT_REACHED',
 ]);
 
 const DUNNING_ROUTE = '/admin/subscription/dunning';
