@@ -10,6 +10,7 @@ import {
   localCivil,
 } from '../../../common/utils/store-timezone.util';
 import { RecipesService } from '../recipes/recipes.service';
+import { BatchClaimPool, probeSellableStock, resolveBatchLines } from '../recipes/batch-bom-resolver';
 import { StockLevelManager } from '../inventory/shared/services/stock-level-manager.service';
 import { StockValidatorService } from '../inventory/shared/services/stock-validator.service';
 import { KitchenFireService } from '../kitchen-fire/kitchen-fire.service';
@@ -135,8 +136,25 @@ export class ScheduledOrderProductionService implements OnModuleInit {
     };
   }
 
-  private exploder(client?: Tx): Explode {
-    return (recipe_id, units) => this.recipes.explodeBom(recipe_id, { [recipe_id]: units }, client);
+  /**
+   * QUI-990: batch-produced preparations consume their own stock first and only
+   * the shortfall is exploded into ingredients. `pool` is shared by every line
+   * of one `start()`, so two lines cannot take the same batch stock. Without a
+   * pool (read-only consolidated list) the full, stock-independent explosion is
+   * kept, as before.
+   */
+  private exploder(client: Tx | undefined, pool?: BatchClaimPool): Explode {
+    if (!pool) {
+      return (recipe_id, units) => this.recipes.explodeBom(recipe_id, { [recipe_id]: units }, client);
+    }
+    const explodeBatchAware = (recipe_id: number, units: number) =>
+      this.recipes.explodeBom(recipe_id, { [recipe_id]: units }, client, { stopAtBatchProduced: true });
+    const deps = {
+      getAvailable: (product_id: number) => probeSellableStock(this.stockValidator as any, product_id, client),
+      explode: explodeBatchAware,
+    };
+    return async (recipe_id, units) =>
+      resolveBatchLines(await explodeBatchAware(recipe_id, units), 1, pool, deps);
   }
 
   private async loadLines(client: Tx, store_id: number, order_id: number): Promise<ProductionLineInput[]> {
@@ -219,7 +237,7 @@ export class ScheduledOrderProductionService implements OnModuleInit {
     const { consumption, consumed_line_ids } = await expandProduction(
       lines,
       this.finder(tx),
-      this.exploder(tx),
+      this.exploder(tx, new Map()),
     );
     if (!consumption.length && !consumed_line_ids.length) return;
 

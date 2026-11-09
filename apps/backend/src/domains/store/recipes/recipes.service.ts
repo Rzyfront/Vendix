@@ -35,6 +35,12 @@ export interface BomExplosionLine {
   depth: number;
   /** ids of the recipes traversed to reach this line, root-first. */
   path_recipe_ids: number[];
+  /**
+   * QUI-990 — only set when `explodeBom` ran with `stopAtBatchProduced`: the
+   * component is a batch-produced product (`is_batch_produced`) and this is the
+   * id of its active base recipe, so a shortfall can be exploded later.
+   */
+  batch_recipe_id?: number;
 }
 
 /**
@@ -1118,6 +1124,14 @@ export class RecipesService {
      * transaction open (CP-POLLO-ARABE-727 A.7 — avoids the pool leak).
      */
     tx?: Prisma.TransactionClient,
+    /**
+     * QUI-990 — `stopAtBatchProduced`: a component whose product is
+     * `is_batch_produced` and owns an active base recipe is emitted as a leaf
+     * (marked with `batch_recipe_id`) instead of being exploded, so the caller
+     * can consume its own stock first (`resolveBatchLines`). The explosion
+     * stays stock-independent. Default (off): output identical to before.
+     */
+    options: { stopAtBatchProduced?: boolean } = {},
   ): Promise<BomExplosionLine[]> {
     const MAX_DEPTH = 32;
     return this.explodeBomRecursive(
@@ -1127,6 +1141,7 @@ export class RecipesService {
       0,
       MAX_DEPTH,
       tx,
+      options.stopAtBatchProduced === true,
     );
   }
 
@@ -1137,6 +1152,7 @@ export class RecipesService {
     depth: number,
     maxDepth: number,
     tx?: Prisma.TransactionClient,
+    stopAtBatchProduced = false,
   ): Promise<BomExplosionLine[]> {
     if (depth >= maxDepth) {
       return [];
@@ -1148,7 +1164,7 @@ export class RecipesService {
         items: {
           include: {
             component_product: {
-              select: { id: true },
+              select: { id: true, is_batch_produced: true },
             },
           },
         },
@@ -1212,7 +1228,22 @@ export class RecipesService {
         select: { id: true },
       });
 
-      if (childRecipe) {
+      if (
+        childRecipe &&
+        stopAtBatchProduced &&
+        item.component_product?.is_batch_produced === true
+      ) {
+        // QUI-990 — batch-produced preparation: leaf, not recursion. The
+        // consumer decides how much comes from its own stock and explodes
+        // only the shortfall.
+        lines.push({
+          component_product_id: item.component_product_id,
+          quantity: Number(scaled.toFixed(6)),
+          depth: depth + 1,
+          path_recipe_ids: [...pathRecipeIds, recipeId],
+          batch_recipe_id: childRecipe.id,
+        });
+      } else if (childRecipe) {
         // It's a sub-recipe: don't emit a leaf line, recurse with the scaled
         // quantity as the multiplier for the child recipe.
         const childMultipliers: Record<number, number> = {
@@ -1226,6 +1257,7 @@ export class RecipesService {
           depth + 1,
           maxDepth,
           tx,
+          stopAtBatchProduced,
         );
         lines.push(...childLines);
       } else {

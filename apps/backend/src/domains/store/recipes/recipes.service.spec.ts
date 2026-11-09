@@ -696,6 +696,8 @@ describe('RecipesService — resolución determinista de receta (recetas-por-var
       component_product_id: number;
       quantity: number;
       waste_percent: number;
+      /** QUI-990 — flag of the component product (`products.is_batch_produced`). */
+      is_batch_produced?: boolean;
     }>;
   };
 
@@ -759,7 +761,10 @@ describe('RecipesService — resolución determinista de receta (recetas-por-var
       id: i + 1,
       ...it,
       is_optional: false,
-      component_product: { id: it.component_product_id },
+      component_product: {
+        id: it.component_product_id,
+        is_batch_produced: it.is_batch_produced ?? false,
+      },
     })),
   });
 
@@ -932,6 +937,62 @@ describe('RecipesService — resolución determinista de receta (recetas-por-var
       expect(lines).toHaveLength(1);
       expect(lines[0].component_product_id).toBe(42);
       expect(lines.map((l) => l.component_product_id)).not.toContain(99);
+    });
+
+    describe('QUI-990 — stopAtBatchProduced', () => {
+      // Torta (receta 10) usa 1 Bizcocho (producto 2, de lote, receta base 20)
+      // y 50 de crema (producto 5, sin receta). El Bizcocho usa 200 de harina (42).
+      const rows = (batch: boolean): any[] => [
+        {
+          id: 10,
+          product_id: 1,
+          product_variant_id: null,
+          is_active: true,
+          items: [
+            { component_product_id: 2, quantity: 1, waste_percent: 0, is_batch_produced: batch },
+            { component_product_id: 5, quantity: 50, waste_percent: 0 },
+          ],
+        },
+        {
+          id: 20,
+          product_id: 2,
+          product_variant_id: null,
+          is_active: true,
+          items: [{ component_product_id: 42, quantity: 200, waste_percent: 0 }],
+        },
+      ];
+
+      it('sin la opcion explota el insumo de lote igual que siempre (formulas y vistas previas no cambian)', async () => {
+        const { service } = await buildService(rows(true));
+        const lines = await service.explodeBom(10, { 10: 1 });
+        expect(lines.map((l) => [l.component_product_id, l.quantity])).toEqual([
+          [42, 200],
+          [5, 50],
+        ]);
+        expect(lines.every((l) => l.batch_recipe_id === undefined)).toBe(true);
+      });
+
+      it('con la opcion deja el producto de lote como hoja marcada con su receta base', async () => {
+        const { service } = await buildService(rows(true));
+        const lines = await service.explodeBom(10, { 10: 1 }, undefined, {
+          stopAtBatchProduced: true,
+        });
+        expect(lines.map((l) => [l.component_product_id, l.quantity, l.batch_recipe_id])).toEqual([
+          [2, 1, 20],
+          [5, 50, undefined],
+        ]);
+      });
+
+      it('con la opcion, una preparacion que NO es de lote se sigue explotando', async () => {
+        const { service } = await buildService(rows(false));
+        const lines = await service.explodeBom(10, { 10: 1 }, undefined, {
+          stopAtBatchProduced: true,
+        });
+        expect(lines.map((l) => [l.component_product_id, l.quantity])).toEqual([
+          [42, 200],
+          [5, 50],
+        ]);
+      });
     });
 
     it('el anticiclos camina la BASE del insumo y detecta el ciclo que ella cierra', async () => {

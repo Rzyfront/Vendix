@@ -171,6 +171,82 @@ describe('ScheduledOrderProductionService.start', () => {
     expect(stockLevelManager.updateStock.mock.calls.some(([p]) => p.product_id === 700)).toBe(true);
   });
 
+  describe('QUI-990 — preparaciones por lote', () => {
+    // Torta (receta 1) lleva 1 Bizcocho (producto 900, de lote, receta 90: 200 g harina #901 por unidad).
+    const BIZCOCHO = 900;
+    const tortaRow = { ...row, quantity: 2, order_item_options: [] };
+
+    function buildBatch(batchStock: number) {
+      const base = build([tortaRow]);
+      const recipes = {
+        explodeBom: jest.fn(
+          async (id: number, mult: Record<number, number>, _tx?: unknown, options?: { stopAtBatchProduced?: boolean }) => {
+            if (id === 90) {
+              return [{ component_product_id: 901, quantity: 200 * mult[90], depth: 1, path_recipe_ids: [90] }];
+            }
+            if (options?.stopAtBatchProduced) {
+              return [
+                { component_product_id: BIZCOCHO, quantity: 1 * mult[1], batch_recipe_id: 90, depth: 1, path_recipe_ids: [1] },
+                { component_product_id: 502, quantity: 2 * mult[1], depth: 1, path_recipe_ids: [1] },
+              ];
+            }
+            return explode(id, mult[id]);
+          },
+        ),
+      };
+      const stockValidator = {
+        resolveInventoryPolicy: jest.fn().mockResolvedValue({ allowIngredientOveruse: true }),
+        findInsufficientLines: jest.fn(async (lines: Array<{ product_id: number; quantity: number }>) =>
+          lines
+            .filter((l) => l.product_id === BIZCOCHO && l.quantity > batchStock)
+            .map((l) => ({ product_id: l.product_id, available: batchStock })),
+        ),
+      };
+      const service = new ScheduledOrderProductionService(
+        {} as any,
+        { registerProductionStartHook: jest.fn() } as any,
+        recipes as any,
+        base.stockLevelManager as any,
+        stockValidator as any,
+        base.eventEmitter as any,
+        {} as any,
+      );
+      base.stockLevelManager.getDefaultLocationForProduct.mockImplementation(async (pid: number) => 1000 + pid);
+      return { ...base, service };
+    }
+
+    const moves = (m: { updateStock: jest.Mock }) =>
+      m.updateStock.mock.calls.map(([p]) => [p.product_id, p.quantity_change, p.location_id]);
+
+    it('con stock de lote lo consume y no toca los insumos del Bizcocho', async () => {
+      const { service, tx, stockLevelManager } = buildBatch(4);
+      await service.start(tx as any, { id: 7, store_id: 3, order_id: 40 });
+      expect(moves(stockLevelManager)).toEqual([
+        [BIZCOCHO, -2, 1000 + BIZCOCHO],
+        [502, -4, 1502],
+      ]);
+    });
+
+    it('sin stock de lote consume los insumos de su receta', async () => {
+      const { service, tx, stockLevelManager } = buildBatch(0);
+      await service.start(tx as any, { id: 7, store_id: 3, order_id: 40 });
+      expect(moves(stockLevelManager)).toEqual([
+        [901, -400, 1901],
+        [502, -4, 1502],
+      ]);
+    });
+
+    it('con stock parcial usa lo que hay y produce lo que falta', async () => {
+      const { service, tx, stockLevelManager } = buildBatch(1);
+      await service.start(tx as any, { id: 7, store_id: 3, order_id: 40 });
+      expect(moves(stockLevelManager)).toEqual([
+        [BIZCOCHO, -1, 1000 + BIZCOCHO],
+        [901, -200, 1901],
+        [502, -4, 1502],
+      ]);
+    });
+  });
+
   it('segundo inicio sobre líneas ya consumidas y sin adiciones no mueve stock', async () => {
     const { service, tx, stockLevelManager } = build([
       { ...row, inventory_consumed_at_fire: true, order_item_options: [] },
