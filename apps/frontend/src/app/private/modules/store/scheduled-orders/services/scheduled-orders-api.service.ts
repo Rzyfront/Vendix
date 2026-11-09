@@ -50,6 +50,11 @@ export class ScheduledOrdersApiService {
     return this.http.patch(`${this.baseUrl}/${id}/status`, { status, ...(note ? { note } : {}) });
   }
 
+  /** QUI-989: manda a KDS los platos no producibles del pedido y pasa a producción. */
+  sendToKitchen(id: number): Observable<unknown> {
+    return this.http.post(`${this.baseUrl}/${id}/send-to-kitchen`, {});
+  }
+
   reschedule(id: number, start: string, end: string): Observable<unknown> {
     return this.http.patch(`${this.baseUrl}/${id}/reschedule`, { start, end });
   }

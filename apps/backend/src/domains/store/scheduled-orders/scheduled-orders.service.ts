@@ -59,6 +59,27 @@ export type ProductionStartHook = (
   schedule: { id: number; store_id: number; order_id: number },
 ) => Promise<void | (() => void)>;
 
+/**
+ * Platos del pedido que "Enviar a cocina" puede mandar a KDS (QUI-989):
+ * preparados, no de lote, no cancelados y aún sin disparar ni comprometer.
+ * Fuente única para el detalle (visibilidad del botón) y el envío.
+ */
+export function kitchenPendingItemsWhere(
+  order_id: number,
+  store_id: number,
+): Prisma.order_itemsWhereInput {
+  return {
+    order_id,
+    orders: { store_id },
+    cancelled_at: null,
+    skip_kds: false,
+    product_id: { not: null },
+    inventory_consumed_at_fire: false,
+    inventory_committed: false,
+    products: { product_type: 'prepared', is_batch_produced: false },
+  };
+}
+
 function toDate(value: string | Date): Date {
   const date = value instanceof Date ? value : new Date(value);
   if (Number.isNaN(date.getTime())) {
@@ -401,17 +422,24 @@ export class ScheduledOrdersService {
   /** Detalle con historial ("Reprogramado de … a … por …"). */
   async findOne(id: number) {
     const { store_id } = this.context();
-    await this.findOwned(store_id, id);
-    return this.prisma.order_fulfillment_schedules.findFirst({
-      where: { id },
-      include: {
-        changes: {
-          orderBy: { created_at: 'asc' },
-          include: { changed_by: { select: { id: true, first_name: true, last_name: true } } },
+    const schedule = await this.findOwned(store_id, id);
+    const [row, pending_kitchen_item_count] = await Promise.all([
+      this.prisma.order_fulfillment_schedules.findFirst({
+        where: { id },
+        include: {
+          changes: {
+            orderBy: { created_at: 'asc' },
+            include: { changed_by: { select: { id: true, first_name: true, last_name: true } } },
+          },
+          order: { select: { id: true, order_number: true, grand_total: true, state: true } },
         },
-        order: { select: { id: true, order_number: true, grand_total: true, state: true } },
-      },
-    });
+      }),
+      // Aditivo: cuántos platos puede mandar hoy "Enviar a cocina".
+      (this.prisma.withoutScope() as unknown as Tx).order_items.count({
+        where: kitchenPendingItemsWhere(schedule.order_id, store_id),
+      }),
+    ]);
+    return row ? { ...row, pending_kitchen_item_count } : row;
   }
 
 }

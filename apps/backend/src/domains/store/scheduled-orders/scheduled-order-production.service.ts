@@ -12,7 +12,8 @@ import {
 import { RecipesService } from '../recipes/recipes.service';
 import { StockLevelManager } from '../inventory/shared/services/stock-level-manager.service';
 import { StockValidatorService } from '../inventory/shared/services/stock-validator.service';
-import { ScheduledOrdersService } from './scheduled-orders.service';
+import { KitchenFireService } from '../kitchen-fire/kitchen-fire.service';
+import { ScheduledOrdersService, kitchenPendingItemsWhere } from './scheduled-orders.service';
 
 type Tx = Prisma.TransactionClient;
 
@@ -116,6 +117,7 @@ export class ScheduledOrderProductionService implements OnModuleInit {
     private readonly stockLevelManager: StockLevelManager,
     private readonly stockValidator: StockValidatorService,
     private readonly eventEmitter: EventEmitter2,
+    private readonly kitchenFire: KitchenFireService,
   ) {}
 
   onModuleInit() {
@@ -168,6 +170,46 @@ export class ScheduledOrderProductionService implements OnModuleInit {
       inventory_consumed: !!item.inventory_consumed_at_fire || !!item.inventory_committed,
       options: item.order_item_options.map((o) => ({ ...o, quantity: Number(o.quantity) })),
     }));
+  }
+
+  /**
+   * "Enviar a cocina" desde la agenda (QUI-989): manda a KDS los platos
+   * preparados del pedido que NO son de lote y aún no se enviaron, con el
+   * mismo disparo de la venta normal (receta descontada, ticket de cocina).
+   * Luego pasa el agendamiento a `in_production`, cuyo gancho descuenta las
+   * adiciones. Idempotente: el flag `inventory_consumed_at_fire` deja sin
+   * candidatos al segundo intento. Solo tiendas restaurante (lo valida el
+   * disparo con RESTAURANT_NOT_ENABLED).
+   */
+  async sendToKitchen(schedule_id: number) {
+    const store_id = RequestContextService.getContext()?.store_id;
+    if (!store_id) throw new VendixHttpException(ErrorCodes.STORE_CONTEXT_001);
+
+    const schedule = await this.prisma.order_fulfillment_schedules.findFirst({
+      where: { id: schedule_id, store_id },
+    });
+    if (!schedule) throw new VendixHttpException(ErrorCodes.SCHED_NOT_FOUND);
+    if (!['scheduled', 'in_production', 'ready'].includes(schedule.status)) {
+      throw new VendixHttpException(ErrorCodes.SCHED_KITCHEN_NOT_ALLOWED);
+    }
+
+    const client = this.prisma.withoutScope() as unknown as Tx;
+    const items = await client.order_items.findMany({
+      where: kitchenPendingItemsWhere(schedule.order_id, store_id),
+      select: { id: true },
+    });
+    if (!items.length) throw new VendixHttpException(ErrorCodes.SCHED_NOTHING_TO_SEND);
+
+    const fired = await this.kitchenFire.fireOrderItems({
+      order_id: schedule.order_id,
+      order_item_ids: items.map((i) => i.id),
+    });
+
+    const updated =
+      schedule.status === 'scheduled'
+        ? await this.scheduledOrders.transition(schedule.id, 'in_production', 'Enviado a cocina')
+        : schedule;
+    return { schedule: updated, fired };
   }
 
   /** Gancho de `ScheduledOrdersService` al pasar a `in_production`. */

@@ -5,6 +5,7 @@ import {
   Param,
   ParseIntPipe,
   Patch,
+  Post,
   Query,
   UseGuards,
 } from '@nestjs/common';
@@ -61,6 +62,14 @@ export class ScheduledOrdersController {
   async transition(@Param('id', ParseIntPipe) id: number, @Body() dto: TransitionScheduleDto) {
     const row = await this.scheduledOrders.transition(id, dto.status, dto.note);
     return this.responseService.success(row, 'Estado actualizado');
+  }
+
+  /** QUI-989: manda a KDS los platos no producibles del pedido el día de la producción. */
+  @Post(':id/send-to-kitchen')
+  @Permissions('store:scheduled_orders:update')
+  async sendToKitchen(@Param('id', ParseIntPipe) id: number) {
+    const result = await this.production.sendToKitchen(id);
+    return this.responseService.success(result, 'Pedido enviado a cocina');
   }
 
   @Patch(':id/reschedule')

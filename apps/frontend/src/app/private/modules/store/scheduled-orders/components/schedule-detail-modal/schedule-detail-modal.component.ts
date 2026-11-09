@@ -146,6 +146,11 @@ const ACTION_LABELS: Record<Exclude<ScheduledOrderStatus, 'scheduled'>, string> 
       }
 
       <div slot="footer" class="flex flex-wrap justify-end gap-2 w-full">
+        @if (canSendToKitchen() && !confirmingCancel()) {
+          <app-button variant="outline" [loading]="sendingToKitchen()" [disabled]="acting()" (clicked)="sendToKitchen()">
+            Enviar a cocina
+          </app-button>
+        }
         @for (action of actions(); track action) {
           @if (action === 'cancelled') {
             @if (confirmingCancel()) {
@@ -188,6 +193,18 @@ export class ScheduleDetailModalComponent {
   readonly loading = signal(false);
   readonly acting = signal(false);
   readonly confirmingCancel = signal(false);
+  readonly sendingToKitchen = signal(false);
+
+  /** Hay platos preparados (no de lote) sin enviar y el pedido sigue vigente. */
+  readonly canSendToKitchen = computed(() => {
+    const d = this.detail();
+    return (
+      !!d &&
+      this.auth.hasPermission('store:scheduled_orders:update') &&
+      ['scheduled', 'in_production', 'ready'].includes(d.status) &&
+      (d.pending_kitchen_item_count ?? 0) > 0
+    );
+  });
 
   readonly actions = computed<Exclude<ScheduledOrderStatus, 'scheduled'>[]>(() => {
     const d = this.detail();
@@ -223,6 +240,27 @@ export class ScheduleDetailModalComponent {
         error: (err) => {
           this.detail.set(null);
           this.loading.set(false);
+          this.toast.error(extractApiErrorMessage(err));
+        },
+      });
+  }
+
+  sendToKitchen(): void {
+    const d = this.detail();
+    if (!d || this.acting() || this.sendingToKitchen()) return;
+    this.sendingToKitchen.set(true);
+    this.api
+      .sendToKitchen(d.id)
+      .pipe(takeUntilDestroyed(this.destroyRef))
+      .subscribe({
+        next: () => {
+          this.sendingToKitchen.set(false);
+          this.toast.success('Pedido enviado a cocina');
+          this.changed.emit();
+          this.load(d.id);
+        },
+        error: (err) => {
+          this.sendingToKitchen.set(false);
           this.toast.error(extractApiErrorMessage(err));
         },
       });

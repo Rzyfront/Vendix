@@ -1748,6 +1748,10 @@ export class PaymentsService {
                 product_id: { not: null },
                 inventory_consumed_at_fire: false,
                 products: { product_type: 'prepared' },
+                // QUI-989 — un pedido programado no va a cocina ni gasta la
+                // receta al cobrar: se envía desde la agenda (send-to-kitchen)
+                // el día del pedido.
+                orders: { fulfillment_schedule: { is: null } },
                 // [resid-fiscal] — No re-disparar ítems cancelados (D2). Si
                 // entra al fire, KDS recibe un plato fantasma que el cliente
                 // no pidió y el cocinero cobraría como desperdicio.
@@ -5493,6 +5497,8 @@ export class PaymentsService {
           product_id: { not: null },
           inventory_consumed_at_fire: false,
           products: { product_type: 'prepared' },
+          // QUI-989 — los pedidos programados no se disparan a cocina al cobrar.
+          orders: { fulfillment_schedule: { is: null } },
         },
         select: { id: true },
       });

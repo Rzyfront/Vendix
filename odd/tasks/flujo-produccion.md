@@ -181,8 +181,8 @@ Ticket: https://linear.app/quickss/issue/QUI-1002 · copia: `/private/tmp/claude
 
 | ID | Spec | Ticket | Ruta | Estado | Commit / evidencia |
 | -- | -- | -- | -- | -- | -- |
-| T1 | S1 | QUI-988 | delegado (sonnet) | hecho | kitchen-fire.service.spec 101/101 (RED 720≠520 → GREEN) |
-| T2 | S2 | QUI-989 | delegado (sonnet) | pendiente | |
+| T1 | S1 | QUI-988 | delegado (sonnet) | hecho · 6be9edcb3 | kitchen-fire.service.spec 101/101 (RED 720≠520 → GREEN) |
+| T2 | S2 | QUI-989 | delegado (sonnet) | hecho | payments.scheduled-fire 2/2, scheduled-order-production 12/12 (RED 5), payments.service 194/194; audit singleton OK |
 | T3 | S3 | QUI-990 | delegado (sonnet) | pendiente | |
 | T4 | S4 | QUI-1001 | delegado (sonnet) | pendiente | |
 | T5 | S5 | QUI-992 | delegado (sonnet) | pendiente | |
@@ -203,3 +203,5 @@ Ruta: un escritor Sonnet por ticket, en serie (Writer trigger: backstop de conte
 
 - L1 (2026-11-09, Rafael, literal): "QUIERO QUE EJECUTES TODOS LOS TICKET CON TODOS SUS PLANES 1 A 1 TODOS A UNA SOLA RAMA COMIT POR COMIT CADA UNO AVANZANDO HACIA LA CONSOLIDACION DE EL FLUJO DE PRODUCCION HASTA LOGRAR EL 100% DE LOS TICKETS QUE ACABAMOS DE CONSOLIDAR SU ANALISIS"
 - L2 (2026-11-09): L1 autoriza la ejecución sin aprobación adicional del plan. Orden por dependencia: fixes de consumo (988, 989, 990), visibilidad (1001), fixes de UI/POS (992, 998, 991, 997), adiciones (993, 994), KDS (1000), matriz (999), producción ligada (995), agenda (996), producción activa (1002). Las decisiones de producto ya están cerradas en los tickets (matriz QUI-999, tarjeta por pedido, reserva al producir, cancelar → preguntar stock o merma).
+- L3 (2026-11-09, T1): assess medium · under_budget (slice abierto desde 5ba3d56c6). Jest en el worktree: `npx jest --runInBand -c jest.isolated.config.js --rootDir src <spec>` (el config por defecto se queda sin heap).
+- L4 (2026-11-09, T2): pagos excluyen órdenes con agendamiento del disparo a cocina (POS y cierre de mesa). Nuevo `POST store/scheduled-orders/:id/send-to-kitchen` → `ScheduledOrderProductionService.sendToKitchen()` (dispara solo platos preparados no de lote vía `KitchenFireService.fireOrderItems`, pasa a `in_production`). Pendiente para T11/T12: al pasar a `in_production` el gancho `start()` descuenta adiciones y la receta de los ítems no disparados; cuando QUI-1000 haga que el disparo descuente adiciones, hay que evitar doble descuento, y la matriz (T12) debe sacar de `start()` los ítems que van a Producción/KDS.
