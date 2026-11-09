@@ -964,6 +964,88 @@ describe('KitchenFireService — fireOrderItems() (Fase D smoke)', () => {
     );
   });
 
+  describe('QUI-988 — insumo repetido en la receta', () => {
+    const arrangeFire = (bom: Array<{ component_product_id: number; quantity: number }>) => {
+      prismaMock.orders.findFirst.mockResolvedValue({
+        id: 100,
+        store_id: 1,
+        order_number: 'ORD-1',
+        order_items: [makeOrderItem(10, 50, 'prepared', false)],
+      });
+      prismaMock.recipes.findMany.mockResolvedValue([
+        { id: 7, product_id: 50, is_active: true },
+      ]);
+      recipesService.explodeBom.mockResolvedValue(
+        bom.map((l) => ({ ...l, depth: 1, path_recipe_ids: [] })) as any,
+      );
+      stockLevelManager.getDefaultLocationForProduct.mockResolvedValue(200);
+      prismaMock.$transaction.mockImplementation(async (cb: any) =>
+        cb({
+          $queryRaw: jest.fn().mockResolvedValue([{ id: 100, state: 'processing' }]),
+          orders: { findFirst: jest.fn().mockResolvedValue({ id: 100, state: 'processing' }) },
+          kds: { findFirst: jest.fn().mockResolvedValue({ id: 1 }) },
+          kds_sessions: { findFirst: jest.fn().mockResolvedValue(null) },
+          order_items: {
+            updateMany: jest.fn().mockResolvedValue({ count: 1 }),
+            findMany: jest.fn().mockResolvedValue([]),
+          },
+          store_settings: { findFirst: jest.fn().mockResolvedValue(null) },
+          kitchen_tickets: {
+            create: jest.fn().mockResolvedValue({ id: 555, items: [] }),
+            count: jest.fn().mockResolvedValue(0),
+          },
+          kitchen_ticket_items: { update: jest.fn().mockResolvedValue({}) },
+          kitchen_ticket_item_exclusions: {
+            createMany: jest.fn().mockResolvedValue({ count: 0 }),
+          },
+          $executeRaw: jest.fn().mockResolvedValue(undefined),
+        }),
+      );
+      // Fake stock_levels: read-then-write with a yield in between, like the
+      // real updateStock. Concurrent calls on the same row lose an update.
+      const stock = new Map<number, number>([[1, 1000], [2, 1000]]);
+      stockLevelManager.updateStock.mockImplementation(async (params: any) => {
+        const before = stock.get(params.product_id) ?? 0;
+        await new Promise((r) => setImmediate(r));
+        stock.set(params.product_id, before + params.quantity_change);
+        return {} as any;
+      });
+      return stock;
+    };
+
+    it('baja el stock la suma de todos los movimientos del insumo repetido', async () => {
+      // Azucar (1): 100 g en la sub-receta y 140 g en la padre; el item pide 2 unidades.
+      const stock = arrangeFire([
+        { component_product_id: 1, quantity: 100 },
+        { component_product_id: 2, quantity: 200 },
+        { component_product_id: 1, quantity: 140 },
+      ]);
+
+      await service.fireOrderItems({ order_id: 100, order_item_ids: [10] });
+
+      const movedByProduct = new Map<number, number>();
+      for (const [p] of stockLevelManager.updateStock.mock.calls) {
+        movedByProduct.set(p.product_id, (movedByProduct.get(p.product_id) ?? 0) + p.quantity_change);
+      }
+      expect(movedByProduct.get(1)).toBe(-240 * 2);
+      expect(stock.get(1)).toBe(1000 - 240 * 2);
+      expect(stock.get(2)).toBe(1000 - 200 * 2);
+    });
+
+    it('un plato sin insumos repetidos descuenta igual que antes', async () => {
+      const stock = arrangeFire([
+        { component_product_id: 1, quantity: 100 },
+        { component_product_id: 2, quantity: 200 },
+      ]);
+
+      await service.fireOrderItems({ order_id: 100, order_item_ids: [10] });
+
+      expect(stockLevelManager.updateStock).toHaveBeenCalledTimes(2);
+      expect(stock.get(1)).toBe(800);
+      expect(stock.get(2)).toBe(600);
+    });
+  });
+
   it('is idempotent: re-firing the same already-consumed item is a no-op (no stock movement, no event)', async () => {
     // Order has the only target item already flagged
     prismaMock.orders.findFirst.mockResolvedValue({

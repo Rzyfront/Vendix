@@ -1170,16 +1170,16 @@ export class KitchenFireService {
         : bomLines;
 
       // Per-leaf consumption: stock × orderQty × bomMultiplier.
-      // CP-POS-SVC-PERF-001 / A.3 — per-leaf updateStock calls are
-      // independent (each touches its own stock_levels row), so we
-      // collect them and run in parallel via Promise.all. Cuts N
-      // sequential round-trips to a single burst per order_item while
-      // preserving the kds_session_id mapping (per item, not per leaf).
+      // QUI-988 — per-leaf updateStock calls run SEQUENTIALLY. A recipe can
+      // repeat an ingredient (e.g. sugar in a sub-recipe and in the parent):
+      // two lines then hit the same stock_levels row, and in parallel both
+      // read the same quantity so one write overwrote the other (lost
+      // update) while both movements were inserted. One movement per leaf is
+      // kept for traceability/costing. kds_session_id is per item, not per leaf.
       const itemKdsSessionId =
         openSessionByKds.get(
           kdsByProduct.get(orderItem.product_id!) ?? defaultKds.id,
         ) ?? null;
-      const updateStockPromises: Promise<any>[] = [];
       const validLines: Array<{
         line: (typeof effectiveBomLines)[number];
         consumedQty: number;
@@ -1197,9 +1197,10 @@ export class KitchenFireService {
         if (!locationId) continue;
         validLines.push({ line, consumedQty, locationId });
       }
+      const results: Array<Awaited<ReturnType<StockLevelManager['updateStock']>>> = [];
       for (const { line, consumedQty, locationId } of validLines) {
-        updateStockPromises.push(
-          this.stockLevelManager.updateStock(
+        results.push(
+          await this.stockLevelManager.updateStock(
             {
               product_id: line.component_product_id,
               location_id: locationId,
@@ -1229,7 +1230,6 @@ export class KitchenFireService {
           ),
         );
       }
-      const results = await Promise.all(updateStockPromises);
       for (const result of results) {
         if (result?.cost_snapshot) {
           cogsTotal += Number(result.cost_snapshot.total_cost || 0);
