@@ -2299,6 +2299,16 @@ export class KitchenFireService {
           where: { id: { in: fireIds } },
           data: { inventory_consumed_at_fire: false },
         });
+        // QUI-1000: a wasted dish lost its add-ons too, so the remake claims
+        // and deducts them again (`planAddonConsumption` claims by this marker).
+        const wasteIdSet = new Set(wasteItems.map((it) => it.id));
+        const wasteFireIds = fireIds.filter((id) => wasteIdSet.has(id));
+        if (wasteFireIds.length > 0) {
+          await tx.order_items.updateMany({
+            where: { id: { in: wasteFireIds } },
+            data: { addons_consumed_at: null },
+          });
+        }
         const ctx = await this.prepareFireContext(dto.order_id, fireIds, tx);
         if (!ctx) {
           await tx.order_items.updateMany({
