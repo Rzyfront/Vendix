@@ -71,4 +71,35 @@ describe('ScheduledOrdersSettingsForm', () => {
     expect(text).toContain('8:00–18:00 · 4 franjas');
     expect(text).toContain('Cerrado');
   });
+
+  it('un recordatorio no puede tomar la anticipación de otro: dos reglas iguales avisarían dos veces', () => {
+    const { fixture, component, emitted } = build();
+    fixture.componentRef.setInput('settings', {
+      ...stored,
+      reminders: [
+        { minutes_before: 1440, enabled: true, notify_staff: true, notify_customer: true },
+        { minutes_before: 120, enabled: true, notify_staff: true, notify_customer: false },
+      ],
+    });
+    fixture.detectChanges();
+
+    const firstOptions = component.leadOptions(1440, 0).map((o) => o.value);
+    expect(firstOptions).toContain(1440);
+    expect(firstOptions).not.toContain(120);
+    expect(component.leadOptions(120, 1).map((o) => o.value)).not.toContain(1440);
+
+    component.onReminderLeadChange(0, 120);
+    expect(emitted.length).toBe(0);
+
+    component.onReminderLeadChange(0, 60);
+    expect(emitted.length).toBe(1);
+    expect(emitted[0].reminders.map((r) => r.minutes_before)).toEqual([60, 120]);
+  });
+
+  it('una anticipación fuera de 5..10080 minutos (límites del backend) no se emite', () => {
+    const { component, emitted } = build();
+    component.onReminderLeadChange(0, 4);
+    component.onReminderLeadChange(0, 10081);
+    expect(emitted.length).toBe(0);
+  });
 });

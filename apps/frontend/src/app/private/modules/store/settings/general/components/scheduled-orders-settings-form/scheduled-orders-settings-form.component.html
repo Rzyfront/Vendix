@@ -247,7 +247,7 @@
               <app-selector
                 label="Anticipación"
                 size="sm"
-                [options]="leadOptions(r.minutes_before)"
+                [options]="leadOptions(r.minutes_before, i)"
                 [value]="r.minutes_before"
                 [disabled]="!r.enabled"
                 (valueChange)="onReminderLeadChange(i, $event)"

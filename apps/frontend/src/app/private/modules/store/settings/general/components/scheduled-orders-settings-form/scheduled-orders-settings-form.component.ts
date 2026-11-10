@@ -75,6 +75,10 @@ const REMINDER_LEAD_OPTIONS: ReadonlyArray<number> = [
   30, 60, 120, 240, 720, 1440, 2880,
 ];
 
+/** Límites de `minutes_before`: los mismos `@Min(5)` / `@Max(10080)` del DTO del backend. */
+const REMINDER_LEAD_MIN = 5;
+const REMINDER_LEAD_MAX = 10080;
+
 /** `HH:mm` a minutos desde medianoche; `null` si el formato no es válido. */
 export function timeToMinutes(time: string): number | null {
   const m = /^(\d{2}):(\d{2})$/.exec(String(time ?? ''));
@@ -278,17 +282,33 @@ export class ScheduledOrdersSettingsForm {
     return `${minutes} minutos antes`;
   }
 
-  /** Opciones del selector de anticipación, incluida la actual si es atípica. */
-  leadOptions(current: number): Array<{ value: number; label: string }> {
+  /** Anticipaciones que ya usan los otros recordatorios: dos reglas iguales avisarían dos veces. */
+  private leadsTakenByOthers(index: number): Set<number> {
+    return new Set(
+      this.value()
+        .reminders.filter((_, i) => i !== index)
+        .map((r) => r.minutes_before),
+    );
+  }
+
+  /**
+   * Opciones del selector de anticipación del recordatorio `index`: incluye la
+   * actual si es atípica y excluye las que ya usa otro recordatorio.
+   */
+  leadOptions(current: number, index: number): Array<{ value: number; label: string }> {
+    const taken = this.leadsTakenByOthers(index);
     const values = REMINDER_LEAD_OPTIONS.includes(current)
       ? [...REMINDER_LEAD_OPTIONS]
       : [...REMINDER_LEAD_OPTIONS, current].sort((a, b) => a - b);
-    return values.map((v) => ({ value: v, label: this.reminderLabel(v) }));
+    return values
+      .filter((v) => v === current || !taken.has(v))
+      .map((v) => ({ value: v, label: this.reminderLabel(v) }));
   }
 
   onReminderLeadChange(index: number, raw: unknown): void {
     const n = Number(raw);
-    if (!Number.isInteger(n) || n < 5 || n > 10080) return;
+    if (!Number.isInteger(n) || n < REMINDER_LEAD_MIN || n > REMINDER_LEAD_MAX) return;
+    if (this.leadsTakenByOthers(index).has(n)) return;
     this.emit({
       reminders: this.value().reminders.map((r, i) =>
         i === index ? { ...r, minutes_before: n } : r,
