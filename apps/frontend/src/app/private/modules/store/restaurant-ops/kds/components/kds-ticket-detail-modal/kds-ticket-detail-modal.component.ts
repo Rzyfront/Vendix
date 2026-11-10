@@ -20,6 +20,7 @@ import {
   itemHasActiveRecipe,
   itemInactiveRecipeId,
   KitchenTicket,
+  KitchenTicketAddon,
   KitchenTicketItem,
 } from '../../interfaces';
 import { KitchenTicketsService } from '../../services/kitchen-tickets.service';
@@ -166,6 +167,14 @@ export class KdsTicketDetailModalComponent {
    */
   private readonly recipeCache = new Map<string, RecipeLoadState>();
   readonly recipeStates = signal<Record<string, RecipeLoadState>>({});
+
+  /**
+   * QUI-1000 — recetas de las preparaciones de las adiciones, por id de receta
+   * (el backend ya resolvió la receta activa de cada adición). Mismo estado de
+   * carga que el plato: así el ticket muestra lo que Producción muestra.
+   */
+  private readonly addonRecipeCache = new Map<number, RecipeLoadState>();
+  readonly addonRecipeStates = signal<Record<number, RecipeLoadState>>({});
 
   /**
    * Ficha del plato abierta desde el ticket (pedido de Rafael, 2026-10-29).
@@ -402,9 +411,43 @@ export class KdsTicketDetailModalComponent {
         }
         this.loadRecipe(pid, item.product_variant_id ?? null);
       }
+      for (const item of t.items ?? []) {
+        for (const addon of item.addons ?? []) {
+          if (addon.recipe_id != null) this.loadAddonRecipe(addon.recipe_id);
+        }
+      }
       // Sync the local signal with the cache.
       this.publishCache();
     });
+  }
+
+  /** Receta de una adición-preparación; una sola carga por id de receta. */
+  private loadAddonRecipe(recipeId: number): void {
+    if (this.addonRecipeCache.has(recipeId)) return;
+    this.addonRecipeCache.set(recipeId, { status: 'loading' });
+    this.recipesService
+      .getById(recipeId)
+      .pipe(takeUntilDestroyed(this.destroyRef))
+      .subscribe({
+        next: (recipe) => {
+          this.addonRecipeCache.set(recipeId, { status: 'ok', recipe });
+          this.publishAddonRecipes();
+        },
+        error: () => {
+          this.addonRecipeCache.set(recipeId, { status: 'error' });
+          this.publishAddonRecipes();
+        },
+      });
+  }
+
+  private publishAddonRecipes(): void {
+    this.addonRecipeStates.set(Object.fromEntries(this.addonRecipeCache));
+  }
+
+  /** Estado de la receta de una adición (idle si no es preparación). */
+  addonRecipeStateFor(addon: KitchenTicketAddon): RecipeLoadState {
+    if (addon.recipe_id == null) return { status: 'idle' };
+    return this.addonRecipeStates()[addon.recipe_id] ?? { status: 'loading' };
   }
 
   /**

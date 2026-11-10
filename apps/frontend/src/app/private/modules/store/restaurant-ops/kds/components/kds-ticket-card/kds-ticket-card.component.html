@@ -151,6 +151,24 @@
             </app-button>
           </div>
         }
+        @if (item.addons?.length) {
+          <!-- QUI-1000 — adiciones del plato: cantidad, imagen y nota. -->
+          <ul class="kds-card__addons" aria-label="Adiciones">
+            @for (addon of item.addons; track addon.id) {
+              <li class="kds-card__addon">
+                @if (addon.image_url) {
+                  <img [src]="addon.image_url" [alt]="'Foto de ' + addon.name" class="kds-card__addon-img" loading="lazy" />
+                }
+                <span class="kds-card__addon-text">
+                  <span class="kds-card__addon-name">+ {{ addon.name }} ×{{ addon.quantity }}@if (addon.uom) { {{ addon.uom }}}</span>
+                  @if (addon.note) {
+                    <span class="kds-card__addon-note">“{{ addon.note }}”</span>
+                  }
+                </span>
+              </li>
+            }
+          </ul>
+        }
         @if (item.notes) {
           <!-- C3 — bloque destacado con borde izquierdo amber + icono + label
                "Nota" para que el cocinero NO se la pierda. -->

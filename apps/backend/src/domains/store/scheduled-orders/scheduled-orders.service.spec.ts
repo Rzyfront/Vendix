@@ -266,6 +266,19 @@ describe('ScheduledOrdersService', () => {
       expect(rows[0].status).toBe('no_show');
     });
 
+    it('QUI-1000: transitionInTx usa la transacción del llamador, corre el gancho y valida igual', async () => {
+      const harness = await seeded();
+      const { service, rows } = harness;
+      const hook = jest.fn(async () => undefined);
+      service.registerProductionStartHook(hook);
+      await expect(
+        harness.runInTx((tx) => service.transitionInTx(tx, 1, 'delivered', [])),
+      ).rejects.toMatchObject({ errorCode: 'SCHED_INVALID_TRANSITION' });
+      await harness.runInTx((tx) => service.transitionInTx(tx, 1, 'in_production', []));
+      expect(hook).toHaveBeenCalledWith(expect.anything(), expect.objectContaining({ id: 1, order_id: 50 }));
+      expect(rows[0].status).toBe('in_production');
+    });
+
     it('in_production ejecuta el gancho de producción dentro de la transacción', async () => {
       const { service } = await seeded();
       const hook = jest.fn(async () => undefined);

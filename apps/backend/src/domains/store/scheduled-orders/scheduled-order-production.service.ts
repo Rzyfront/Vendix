@@ -11,6 +11,13 @@ import {
 } from '../../../common/utils/store-timezone.util';
 import { RecipesService } from '../recipes/recipes.service';
 import { BatchClaimPool, probeSellableStock, resolveBatchLines } from '../recipes/batch-bom-resolver';
+import {
+  createBatchAwareExploders,
+  expandProduction,
+  type Explode,
+  type FindRecipe,
+  type ProductionLineInput,
+} from '../kitchen-fire/addon-consumption';
 import { StockLevelManager } from '../inventory/shared/services/stock-level-manager.service';
 import { StockValidatorService } from '../inventory/shared/services/stock-validator.service';
 import { KitchenFireService } from '../kitchen-fire/kitchen-fire.service';
@@ -18,88 +25,8 @@ import { ScheduledOrdersService, kitchenPendingItemsWhere } from './scheduled-or
 
 type Tx = Prisma.TransactionClient;
 
-/** Una línea de consumo: componente hoja × cantidad en su unidad de stock. */
-export interface ConsumptionLine {
-  product_id: number;
-  variant_id: number | null;
-  quantity: number;
-}
-
-/** Línea de orden con lo que la expansión necesita. */
-export interface ProductionLineInput {
-  id: number;
-  product_id: number | null;
-  product_variant_id: number | null;
-  quantity: number;
-  product_type: string | null;
-  inventory_consumed: boolean;
-  options: Array<{
-    scope: 'per_unit' | 'per_line';
-    component_type: 'ingredient' | 'recipe' | 'product';
-    component_product_id: number;
-    component_variant_id: number | null;
-    quantity: number;
-  }>;
-}
-
-/** Explota una receta (id) para N unidades de su producto. */
-type Explode = (recipe_id: number, units: number) => Promise<Array<{ component_product_id: number; quantity: number }>>;
-/** Receta activa del producto (variante exacta o la base). */
-type FindRecipe = (product_id: number, variant_id: number | null) => Promise<number | null>;
-
-/**
- * Expansión única (S4): receta base de la línea (si es `prepared` con receta
- * y aún no se consumió) + adiciones (insumo × cantidad; preparación vía su
- * receta; producto vendible tal cual). `per_unit` × cantidad de la línea,
- * `per_line` × 1. Devuelve el consumo consolidado y las líneas cuyo plato
- * queda consumido (se marcan para que la entrega no lo descuente otra vez).
- */
-export async function expandProduction(
-  lines: ProductionLineInput[],
-  findRecipe: FindRecipe,
-  explode: Explode,
-): Promise<{ consumption: ConsumptionLine[]; consumed_line_ids: number[] }> {
-  const totals = new Map<string, ConsumptionLine>();
-  const add = (product_id: number, variant_id: number | null, quantity: number) => {
-    if (!Number.isFinite(quantity) || quantity <= 0) return;
-    const key = `${product_id}:${variant_id ?? 'base'}`;
-    const current = totals.get(key);
-    if (current) current.quantity += quantity;
-    else totals.set(key, { product_id, variant_id, quantity });
-  };
-  const consumed_line_ids: number[] = [];
-
-  for (const line of lines) {
-    const qty = Number(line.quantity) || 0;
-    if (qty <= 0) continue;
-
-    if (line.product_id && line.product_type === 'prepared' && !line.inventory_consumed) {
-      const recipe_id = await findRecipe(line.product_id, line.product_variant_id);
-      if (recipe_id) {
-        for (const leaf of await explode(recipe_id, qty)) add(leaf.component_product_id, null, leaf.quantity);
-        consumed_line_ids.push(line.id);
-      }
-    }
-
-    for (const option of line.options) {
-      const units = option.quantity * (option.scope === 'per_unit' ? qty : 1);
-      if (option.component_type === 'recipe') {
-        const recipe_id = await findRecipe(option.component_product_id, option.component_variant_id);
-        if (recipe_id) {
-          for (const leaf of await explode(recipe_id, units)) add(leaf.component_product_id, null, leaf.quantity);
-          continue;
-        }
-      }
-      add(option.component_product_id, option.component_variant_id, units);
-    }
-  }
-
-  // Stock en unidades enteras de la unidad mínima, igual que el disparo a cocina.
-  const consumption = [...totals.values()]
-    .map((c) => ({ ...c, quantity: Math.round(c.quantity) }))
-    .filter((c) => c.quantity > 0);
-  return { consumption, consumed_line_ids };
-}
+export type { ConsumptionLine, ProductionLineInput } from '../kitchen-fire/addon-consumption';
+export { expandProduction } from '../kitchen-fire/addon-consumption';
 
 /**
  * Producción de pedidos programados. Al pasar a `in_production` consume en la
@@ -186,6 +113,8 @@ export class ScheduledOrderProductionService implements OnModuleInit {
       quantity: Number(item.quantity),
       product_type: item.products?.product_type ?? null,
       inventory_consumed: !!item.inventory_consumed_at_fire || !!item.inventory_committed,
+      // A fired line already consumed its add-ons together with the dish (QUI-1000).
+      addons_consumed: !!item.inventory_consumed_at_fire,
       options: item.order_item_options.map((o) => ({ ...o, quantity: Number(o.quantity) })),
     }));
   }
@@ -194,8 +123,9 @@ export class ScheduledOrderProductionService implements OnModuleInit {
    * "Enviar a cocina" desde la agenda (QUI-989): manda a KDS los platos
    * preparados del pedido que NO son de lote y aún no se enviaron, con el
    * mismo disparo de la venta normal (receta descontada, ticket de cocina).
-   * Luego pasa el agendamiento a `in_production`, cuyo gancho descuenta las
-   * adiciones. Idempotente: el flag `inventory_consumed_at_fire` deja sin
+   * El disparo descuenta también las adiciones de esos platos (QUI-1000) y el
+   * agendamiento pasa a `in_production` en la MISMA transacción; el gancho de
+   * inicio salta las líneas ya disparadas. Idempotente: el flag `inventory_consumed_at_fire` deja sin
    * candidatos al segundo intento. Solo tiendas restaurante (lo valida el
    * disparo con RESTAURANT_NOT_ENABLED).
    */
@@ -218,15 +148,26 @@ export class ScheduledOrderProductionService implements OnModuleInit {
     });
     if (!items.length) throw new VendixHttpException(ErrorCodes.SCHED_NOTHING_TO_SEND);
 
-    const fired = await this.kitchenFire.fireOrderItems({
-      order_id: schedule.order_id,
-      order_item_ids: items.map((i) => i.id),
-    });
-
-    const updated =
-      schedule.status === 'scheduled'
-        ? await this.scheduledOrders.transition(schedule.id, 'in_production', 'Enviado a cocina')
-        : schedule;
+    // One transaction: the fire (ticket, dish recipe, add-ons) and the move to
+    // `in_production` commit together. A failure in either leaves neither, so a
+    // retry sees the same pending items instead of SCHED_NOTHING_TO_SEND.
+    let updated: Awaited<ReturnType<ScheduledOrdersService['transitionInTx']>> | typeof schedule = schedule;
+    const fired = await this.kitchenFire.fireOrderItems(
+      { order_id: schedule.order_id, order_item_ids: items.map((i) => i.id) },
+      {
+        withinTx: async (tx, afterCommit) => {
+          if (schedule.status === 'scheduled') {
+            updated = await this.scheduledOrders.transitionInTx(
+              tx,
+              schedule.id,
+              'in_production',
+              afterCommit,
+              'Enviado a cocina',
+            );
+          }
+        },
+      },
+    );
     return { schedule: updated, fired };
   }
 
@@ -234,10 +175,17 @@ export class ScheduledOrderProductionService implements OnModuleInit {
   async start(tx: Tx, schedule: { id: number; store_id: number; order_id: number }) {
     const ctx = RequestContextService.getContext();
     const lines = await this.loadLines(tx, schedule.store_id, schedule.order_id);
+    const resolvers = createBatchAwareExploders({
+      recipes: this.recipes,
+      stockValidator: this.stockValidator,
+      client: tx,
+      pool: new Map(),
+    });
     const { consumption, consumed_line_ids } = await expandProduction(
       lines,
-      this.finder(tx),
-      this.exploder(tx, new Map()),
+      resolvers.findRecipe,
+      resolvers.explode,
+      resolvers.explodeComponent,
     );
     if (!consumption.length && !consumed_line_ids.length) return;
 
