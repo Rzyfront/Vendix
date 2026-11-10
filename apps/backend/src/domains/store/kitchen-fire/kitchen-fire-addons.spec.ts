@@ -355,5 +355,12 @@ describe('KitchenFireService — add-ons (QUI-1000)', () => {
         expect.objectContaining({ data: { addons_consumed_at: null } }),
       );
     });
+
+    it('un reenvío por merma que no se puede disparar no limpia el marcador de adiciones', async () => {
+      const { service, state, run } = resendHarness([item(10, 'after_fire_waste')], 'remake_dish');
+      jest.spyOn(service, 'prepareFireContext').mockResolvedValue(null as any);
+      await expect(run()).rejects.toMatchObject({ errorCode: 'KITCHEN_FIRE_NOT_RESENDABLE' });
+      expect(state.reset).toBe(false);
+    });
   });
 });
