@@ -8,6 +8,9 @@ import {
 } from '@angular/core';
 import { ActivatedRoute, Router } from '@angular/router';
 import { takeUntilDestroyed } from '@angular/core/rxjs-interop';
+import { EMPTY, Subject, Subscription } from 'rxjs';
+import { catchError, switchMap, tap } from 'rxjs/operators';
+import { AuthFacade } from '../../../../../../../core/store/auth/auth.facade';
 
 import {
   BadgeComponent,
@@ -65,6 +68,14 @@ export class OrderDetailPageComponent implements OnInit {
   private readonly router = inject(Router);
   private readonly destroyRef = inject(DestroyRef);
   private readonly sse = inject(ProductionSseService);
+  private readonly auth = inject(AuthFacade);
+
+  /** Id of the order on screen; SSE events and silent reloads follow it. */
+  private currentId: number | null = null;
+  /** Loads of the order itself: a newer request cancels the one in flight (S27). */
+  private readonly orderRequests = new Subject<{ id: number; silent: boolean }>();
+  private shortagesSub: Subscription | null = null;
+  private saleDetailSub: Subscription | null = null;
 
   readonly order = signal<ManufacturingOrder | null>(null);
   readonly shortages = signal<ManufacturingShortage[]>([]);
@@ -73,7 +84,7 @@ export class OrderDetailPageComponent implements OnInit {
   readonly lotRequired = signal(false);
   readonly completeModalOpen = signal(false);
   /** Same production order read through the shared detail: sale link, lines and add-ons (T13). */
-  readonly saleDetail = signal<ProductionOrder | null>(null);
+  readonly saleDetail = signal<Pick<ProductionOrder, 'sale_order' | 'order_lines'> | null>(null);
 
   readonly lines = computed<ManufacturingOrderLine[]>(() => this.order()?.lines ?? []);
   readonly hasShortages = computed(() => this.shortages().some((s) => s.missing > 0));
@@ -147,19 +158,59 @@ export class OrderDetailPageComponent implements OnInit {
   });
 
   ngOnInit(): void {
-    const id = Number(this.route.snapshot.paramMap.get('id'));
-    if (!Number.isFinite(id) || id < 1) {
-      this.router.navigate([LIST_ROUTE]);
-      return;
-    }
-    this.loadOrder(id);
+    this.orderRequests
+      .pipe(
+        // A new request (another `:id`, or a reload) drops the previous one,
+        // so a slow older response never overwrites the current order.
+        switchMap(({ id, silent }) =>
+          this.ordersService.getById(id).pipe(
+            tap((order) => {
+              this.order.set(order);
+              this.isLoading.set(false);
+              this.loadShortages(order);
+              this.loadSaleDetail(order);
+            }),
+            catchError((error) => {
+              this.isLoading.set(false);
+              if (silent) return EMPTY;
+              this.toastService.error(
+                typeof error === 'string' ? error : 'No se pudo cargar la orden',
+              );
+              this.router.navigate([LIST_ROUTE]);
+              return EMPTY;
+            }),
+          ),
+        ),
+        takeUntilDestroyed(this.destroyRef),
+      )
+      .subscribe();
+
+    // The same instance can be reused with another `:id`: follow the param, not the snapshot.
+    this.route.paramMap.pipe(takeUntilDestroyed(this.destroyRef)).subscribe((params) => {
+      const id = Number(params.get('id'));
+      if (!Number.isFinite(id) || id < 1) {
+        this.router.navigate([LIST_ROUTE]);
+        return;
+      }
+      if (this.currentId !== id) {
+        this.currentId = id;
+        this.order.set(null);
+        this.shortages.set([]);
+        this.saleDetail.set(null);
+        this.shortagesSub?.unsubscribe();
+        this.saleDetailSub?.unsubscribe();
+      }
+      this.loadOrder(id);
+    });
+
     // Only events of this order reload it, silently and never navigating away.
     this.sse.listen(
       this.destroyRef,
       () => {
-        if (!this.isBusy()) this.loadOrder(id, true);
+        const id = this.currentId;
+        if (id != null && !this.isBusy()) this.loadOrder(id, true);
       },
-      (event) => event.id === id,
+      (event) => event.id === this.currentId,
       'manufacturing',
     );
     this.settingsService
@@ -175,34 +226,29 @@ export class OrderDetailPageComponent implements OnInit {
     const orderId = id ?? this.order()?.id;
     if (orderId == null) return;
     if (!silent) this.isLoading.set(true);
-    this.ordersService
-      .getById(orderId)
-      .pipe(takeUntilDestroyed(this.destroyRef))
-      .subscribe({
-        next: (order) => {
-          this.order.set(order);
-          this.isLoading.set(false);
-          this.loadShortages(order);
-          this.loadSaleDetail(order);
-        },
-        error: (error) => {
-          this.isLoading.set(false);
-          if (silent) return;
-          this.toastService.error(
-            typeof error === 'string' ? error : 'No se pudo cargar la orden',
-          );
-          this.router.navigate([LIST_ROUTE]);
-        },
-      });
+    this.orderRequests.next({ id: orderId, silent });
   }
 
   /** Only orders born from a sale have the "Pedido de venta" section. */
   private loadSaleDetail(order: ManufacturingOrder): void {
+    this.saleDetailSub?.unsubscribe();
     if (order.order_id == null) {
       this.saleDetail.set(null);
       return;
     }
-    this.productionOrdersService
+    if (!this.auth.isRestaurant()) {
+      // Planta-only store: the restaurant endpoint (`store/production-orders/:id`)
+      // fails its industry guard. The manufacturing order already carries the
+      // sale link; the lines and add-ons need a manufacturing detail endpoint.
+      this.saleDetail.set({
+        sale_order: order.sale_order
+          ? { ...order.sale_order, customer_name: null, due_at: null }
+          : null,
+        order_lines: [],
+      });
+      return;
+    }
+    this.saleDetailSub = this.productionOrdersService
       .getById(order.id)
       .pipe(takeUntilDestroyed(this.destroyRef))
       .subscribe({
@@ -213,6 +259,7 @@ export class OrderDetailPageComponent implements OnInit {
   }
 
   private loadShortages(order: ManufacturingOrder): void {
+    this.shortagesSub?.unsubscribe();
     if (
       order.status === 'completed' ||
       order.status === 'cancelled'
@@ -220,7 +267,7 @@ export class OrderDetailPageComponent implements OnInit {
       this.shortages.set([]);
       return;
     }
-    this.ordersService
+    this.shortagesSub = this.ordersService
       .getShortages(order.id)
       .pipe(takeUntilDestroyed(this.destroyRef))
       .subscribe({

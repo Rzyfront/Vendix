@@ -778,13 +778,13 @@ export class BreadcrumbService {
       icon: 'calendar-days',
     },
     {
-      path: '/admin/scheduled-orders/production',
+      path: '/admin/scheduled-orders/day',
       title: 'Lista de producción',
       parent: 'Tienda',
       icon: 'clipboard-list',
     },
     {
-      path: '/admin/scheduled-orders/production/insumos',
+      path: '/admin/scheduled-orders/production',
       title: 'Insumos consolidados',
       parent: 'Lista de producción',
       icon: 'clipboard-list',

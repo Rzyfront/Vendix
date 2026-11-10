@@ -355,7 +355,15 @@ type StatusFilter = ScheduledOrderDisplayStatus | 'all';
       </div>
 
       @if (errorMessage(); as msg) {
-        <div class="empty">{{ msg }}</div>
+        <div class="empty" role="alert">
+          <p>{{ msg }}</p>
+          <app-button variant="outline" size="sm" (clicked)="refresh()">Reintentar</app-button>
+        </div>
+      } @else if (refreshFailed()) {
+        <div class="empty" role="alert">
+          <p>No se pudo actualizar la agenda. Lo que ves puede estar desactualizado.</p>
+          <app-button variant="outline" size="sm" (clicked)="refresh()">Reintentar</app-button>
+        </div>
       }
 
       @if (loading() && rows().length === 0) {
@@ -493,6 +501,8 @@ export class AgendaPageComponent {
   });
   readonly loading = signal(false);
   readonly errorMessage = signal<string | null>(null);
+  /** A silent (live) reload failed: the list already on screen is kept, with a retry notice. */
+  readonly refreshFailed = signal(false);
 
   readonly draggingId = signal<number | null>(null);
   readonly dragOverKey = signal<string | null>(null);
@@ -580,7 +590,10 @@ export class AgendaPageComponent {
     });
 
     // Production state changed elsewhere: refresh the agenda silently.
-    this.sse.listen(this.destroyRef, () => this.refresh(true));
+    // Without production read permission the stream would answer 403: do not open it.
+    if (this.sse.canStream()) {
+      this.sse.listen(this.destroyRef, () => this.refresh(true));
+    }
   }
 
   // --- carga ------------------------------------------------------------
@@ -602,7 +615,10 @@ export class AgendaPageComponent {
     if (!silent) this.refreshPending = false;
     this.loadInFlightVisible = !silent;
     this.loading.set(true);
-    if (!silent) this.errorMessage.set(null);
+    if (!silent) {
+      this.errorMessage.set(null);
+      this.refreshFailed.set(false);
+    }
     this.loadSub = forkJoin({
       availability: this.api.getAvailability(from, to),
       agenda: this.api.getAgenda(from, to),
@@ -611,6 +627,7 @@ export class AgendaPageComponent {
         this.availability.set(availability);
         this.allSchedules.set(agenda);
         this.errorMessage.set(null);
+        this.refreshFailed.set(false);
         this.loading.set(false);
         this.loadInFlightVisible = false;
         this.flushPendingRefresh();
@@ -620,7 +637,10 @@ export class AgendaPageComponent {
         this.loadInFlightVisible = false;
         this.flushPendingRefresh();
         // A failed background refresh never clears what is on screen.
-        if (silent) return;
+        if (silent) {
+          this.refreshFailed.set(true);
+          return;
+        }
         this.availability.set([]);
         this.allSchedules.set([]);
         this.errorMessage.set(extractApiErrorMessage(err));
@@ -660,7 +680,7 @@ export class AgendaPageComponent {
   }
 
   onHeaderAction(id: string): void {
-    if (id === 'production') void this.router.navigate(['/admin/scheduled-orders/production']);
+    if (id === 'production') void this.router.navigate(['/admin/scheduled-orders/day']);
   }
 
   countByStatus(status: ScheduledOrderDisplayStatus): number {

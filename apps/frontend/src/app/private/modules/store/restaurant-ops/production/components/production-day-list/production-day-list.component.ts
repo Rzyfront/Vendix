@@ -432,8 +432,11 @@ export class ProductionDayListComponent {
       const date = this.date();
       untracked(() => this.load(date, true));
     });
-    // Another screen (or device) moved an order: reload silently.
-    this.sse.listen(this.destroyRef, () => this.reload(), undefined, this.apiScope);
+    // Another screen (or device) moved an order: reload silently. Without read
+    // permission on this scope the stream would answer 403: do not open it.
+    if (this.sse.canStream(this.apiScope)) {
+      this.sse.listen(this.destroyRef, () => this.reload(), undefined, this.apiScope);
+    }
   }
 
   // --- loading ----------------------------------------------------------
