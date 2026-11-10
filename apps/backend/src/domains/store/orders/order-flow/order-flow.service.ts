@@ -6333,6 +6333,14 @@ export class OrderFlowService {
       await kds?.emitTicketUpdatedEvent(effects.updatedTicketId);
     }
 
+    // QUI-995: the cancelled line shrinks the sale; the linked production order
+    // (still a draft) follows its new quantity. Shared by every caller of this
+    // seam (controller and table sessions), post-commit and never blocking.
+    await requestProductionSaleSync(this.eventEmitter as any, this.logger, {
+      order_id: orderId,
+      store_id: storeId,
+    });
+
     this.logger.log(
       `Order item cancelled: order=${orderId} item=${orderItemId} type=${effects.resolvedType} fired=${effects.wasFired} ticketCancelled=${effects.cancelledTicketId != null}`,
     );
