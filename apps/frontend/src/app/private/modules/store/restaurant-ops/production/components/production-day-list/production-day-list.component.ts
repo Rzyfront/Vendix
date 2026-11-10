@@ -360,7 +360,7 @@ export class ProductionDayListComponent {
             id: 'consolidated',
             label: 'Insumos consolidados',
             icon: 'clipboard-list',
-            variant: 'outline',
+            variant: 'outline' as const,
           },
         ]
       : []),
@@ -370,7 +370,7 @@ export class ProductionDayListComponent {
             id: 'active',
             label: 'Iniciar producción del día',
             icon: 'play',
-            variant: 'primary',
+            variant: 'primary' as const,
           },
         ]
       : []),
