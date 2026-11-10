@@ -2145,6 +2145,42 @@ describe('OrderFlowService.cancelOrderItem — seam compartido', () => {
     expect(txMock.order_items.update).toHaveBeenCalled();
   });
 
+  it('QUI-995 F3: cancelar una línea pide UNA vez el sync de producción con el id de la orden, después del commit', async () => {
+    const { service, txMock, prismaMock } = buildService({
+      order: { id: ORDER_ID, store_id: 4, state: 'created' },
+    });
+    const emitAsync = jest.fn().mockResolvedValue([]);
+    (service as any).eventEmitter = { emitAsync, emit: jest.fn() };
+    let committed = false;
+    prismaMock.$transaction.mockImplementation(async (cb: any) => {
+      const out = await cb(txMock);
+      committed = true;
+      return out;
+    });
+    emitAsync.mockImplementation(async () => {
+      expect(committed).toBe(true);
+      return [];
+    });
+
+    await service.cancelOrderItem(ORDER_ID, ITEM_ID, 'cliente se arrepintió');
+
+    expect(emitAsync).toHaveBeenCalledTimes(1);
+    expect(emitAsync).toHaveBeenCalledWith('production.sale_sync', {
+      order_id: ORDER_ID,
+      store_id: 4,
+    });
+  });
+
+  it('QUI-995 F3: una línea ya cancelada no pide el sync (idempotente, sin cambios)', async () => {
+    const { service } = buildService({
+      item: { id: ITEM_ID, product_name: 'Bandeja paisa', cancelled_at: new Date(), kitchen_ticket_items: [] },
+    });
+    const emitAsync = jest.fn().mockResolvedValue([]);
+    (service as any).eventEmitter = { emitAsync, emit: jest.fn() };
+    await service.cancelOrderItem(ORDER_ID, ITEM_ID, 'cliente se arrepintió');
+    expect(emitAsync).not.toHaveBeenCalled();
+  });
+
   it('si el split aparece tras la prelectura, el lock lo detecta antes del soft cancel', async () => {
     const { service, txMock } = buildService({
       order: { id: ORDER_ID, store_id: 4, state: 'draft', active_financial_split_id: null },

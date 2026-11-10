@@ -147,12 +147,16 @@ describe('buildFulfillmentDays', () => {
 });
 
 describe('FulfillmentAvailabilityService', () => {
-  function makeService(settings: unknown, taken: Array<{ scheduled_start: Date }> = []) {
+  function makeService(
+    settings: unknown,
+    taken: Array<{ scheduled_start: Date }> = [],
+    industries: string[] = ['restaurant'],
+  ) {
     const prisma = {
       store_settings: {
         findFirst: jest.fn().mockResolvedValue({
           settings,
-          stores: { timezone: TZ },
+          stores: { timezone: TZ, industries },
         }),
       },
       fulfillment_schedule_exceptions: { findMany: jest.fn().mockResolvedValue([]) },
@@ -169,6 +173,16 @@ describe('FulfillmentAvailabilityService', () => {
     await expect(
       service.getAvailability(1, '2026-11-03', '2026-11-04', { now }),
     ).rejects.toMatchObject({ errorCode: 'SCHED_DISABLED' });
+  });
+
+  it('QUI-1001: con el ajuste encendido, una tienda que no es restaurante responde SCHED_DISABLED', async () => {
+    const { service } = makeService(enabled, [], ['retail']);
+    await expect(
+      service.getAvailability(1, '2026-11-03', '2026-11-04', { now }),
+    ).rejects.toMatchObject({ errorCode: 'SCHED_DISABLED' });
+    await expect(service.getEnabledConfig(1)).rejects.toMatchObject({ errorCode: 'SCHED_DISABLED' });
+    const restaurant = makeService(enabled, [], ['retail', 'restaurant']);
+    await expect(restaurant.service.getEnabledConfig(1)).resolves.toMatchObject({ enabled: true });
   });
 
   it('rechaza rangos invertidos o demasiado largos', async () => {

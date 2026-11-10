@@ -1,8 +1,10 @@
 import type { Prisma } from '@prisma/client';
 import type { RecipesService } from '../recipes/recipes.service';
+import type { StockLevelManager } from '../inventory/shared/services/stock-level-manager.service';
 import {
   type BatchClaimPool,
-  probeSellableStock,
+  type SellableStockValidator,
+  probeConsumableStock,
   resolveBatchComponent,
   resolveBatchLines,
 } from '../recipes/batch-bom-resolver';
@@ -129,13 +131,16 @@ export async function expandProduction(
  */
 export function createBatchAwareExploders(args: {
   recipes: Pick<RecipesService, 'explodeBom'>;
-  stockValidator: unknown;
+  stockValidator: SellableStockValidator;
+  /** Picks the location the line consumes from (caps the batch stock taken). */
+  stockLevelManager: Pick<StockLevelManager, 'getDefaultLocationForProduct'>;
   client: Prisma.TransactionClient;
   pool: BatchClaimPool;
 }): { findRecipe: FindRecipe; explode: Explode; explodeComponent: ExplodeComponent } {
   const { recipes, client, pool } = args;
   const deps = {
-    getAvailable: (product_id: number) => probeSellableStock(args.stockValidator as any, product_id, client),
+    getAvailable: (product_id: number) =>
+      probeConsumableStock(args.stockValidator, args.stockLevelManager, product_id, client),
     explode: (recipe_id: number, units: number) =>
       recipes.explodeBom(recipe_id, { [recipe_id]: units }, client, { stopAtBatchProduced: true }),
   };

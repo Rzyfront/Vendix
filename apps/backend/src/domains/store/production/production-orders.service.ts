@@ -21,6 +21,7 @@ import {
   type ProductionOrderEventRow,
 } from './production-order-events';
 import { RequestContextService } from '../../../common/context/request-context.service';
+import { lockOrderLifecycle } from '../orders/order-flow/order-lifecycle-lock.util';
 import {
   VendixHttpException,
   ErrorCodes,
@@ -578,6 +579,11 @@ export class ProductionOrdersService {
     }
     // QUI-995: a sale-linked order produces what was sold, not whole batches.
     const linkedOrderId = (order as { order_id?: number | null }).order_id ?? null;
+    // QUI-995 F4: a sale-linked order makes ONE variant of the product (NULL for
+    // base products and manual orders). Read through a narrow cast: the column is
+    // new in `production_orders` and this read must not depend on a regenerated client.
+    const variantId =
+      (order as { product_variant_id?: number | null }).product_variant_id ?? null;
     if (!options?.allowPartialBatch && linkedOrderId == null) {
       this.assertWholeBatches(
         producedQty,
@@ -592,9 +598,14 @@ export class ProductionOrdersService {
     // operators with arbitrary location selection.
     const location_id =
       options?.outputLocationId ??
-      (await this.stockLevelManager.getDefaultLocationForProduct(
-        order.product_id,
-      ));
+      (await (variantId != null
+        ? this.stockLevelManager.getDefaultLocationForProduct(
+            order.product_id,
+            variantId,
+          )
+        : this.stockLevelManager.getDefaultLocationForProduct(
+            order.product_id,
+          )));
 
     // No-overselling guard (docs/plans/no-overselling-stock-guard-plan.md,
     // step 6) — validate every tracked ingredient BEFORE opening the
@@ -644,6 +655,23 @@ export class ProductionOrdersService {
 
     // 1. ATOMIC TRANSACTION — consume each recipe item + produce the batch
     const updated = await this.prisma.$transaction(async (tx) => {
+      // 0a. Sale-linked order (QUI-995 F1): lock the sale FIRST, in the same
+      // order every lifecycle writer uses (sale -> payments -> inventory), so
+      // finishing or cancelling the sale waits for this completion instead of
+      // racing (or deadlocking with) its stock credit and settlement.
+      let serveAllVariants = false;
+      if (linkedOrderId != null) {
+        await lockOrderLifecycle(tx, linkedOrderId, store_id);
+        // Legacy shape (R3): an order created before `product_variant_id` has a
+        // NULL variant and served EVERY line of its product. Counted once here
+        // and passed down to the add-on claim and the settlement.
+        serveAllVariants = await this.servesAllVariants(tx, {
+          order_id: linkedOrderId,
+          product_id: order.product_id,
+          variant_id: variantId,
+        });
+      }
+
       // 0. Atomic state guard (QUI-995): the conditional UPDATE serializes two
       // screens completing the same order. The loser re-evaluates the WHERE
       // after the winner commits (status / produced_qty changed), gets count 0
@@ -735,6 +763,8 @@ export class ProductionOrdersService {
           store_id,
           order_id: linkedOrderId,
           product_id: order.product_id,
+          variant_id: variantId,
+          serve_all_variants: serveAllVariants,
           production_order_id: order.id,
           sourceModule,
           allowOveruse: inventoryPolicy.allowIngredientOveruse,
@@ -752,6 +782,7 @@ export class ProductionOrdersService {
       await this.stockLevelManager.updateStock(
         {
           product_id: order.product_id,
+          ...(variantId != null ? { variant_id: variantId } : {}),
           location_id,
           quantity_change: Math.abs(producedQty),
           movement_type: 'production',
@@ -802,11 +833,14 @@ export class ProductionOrdersService {
 
       // 1d. Sale-linked order: reserve (or, if the sale is already delivered,
       // sell) what was produced.
+      let saleCogs = 0;
       if (linkedOrderId != null) {
-        await this.settleProducedForSale(tx, {
+        saleCogs = await this.settleProducedForSale(tx, {
           store_id,
           order_id: linkedOrderId,
           product_id: order.product_id,
+          variant_id: variantId,
+          serve_all_variants: serveAllVariants,
           location_id,
           produced_qty: producedQty,
           planned_qty: Number(order.planned_qty),
@@ -814,8 +848,10 @@ export class ProductionOrdersService {
         });
       }
 
-      return { order: final, producedUnitCost };
-    });
+      return { order: final, producedUnitCost, saleCogs };
+      // The sale lock may be held by `finish` (20 s budget); Prisma's 5 s default
+      // would abort a completion that is merely waiting its turn.
+    }, { timeout: 20000 });
 
     // 2. Emit the production.completed event AFTER the transaction
     // commits. The AccountingEventsListener handles the auto-entry. A
@@ -850,6 +886,31 @@ export class ProductionOrdersService {
 
     this.emitUpdated({ store_id, ...updated.order });
 
+    // QUI-995 F1: the sale was finished BEFORE this production completed, so its
+    // `order.completed` COGS entry did not include these units (the commit skips
+    // a production line until its order is completed). The cost of the delivery
+    // commit made here is posted now, once, keyed by the production order.
+    if (updated.saleCogs > 0 && linkedOrderId != null) {
+      try {
+        const context = RequestContextService.getContext();
+        this.eventEmitter.emit('production.sale_cogs', {
+          organization_id: context?.organization_id,
+          store_id,
+          order_id: linkedOrderId,
+          production_order_id: updated.order.id,
+          total_cost: updated.saleCogs,
+          user_id: context?.user_id,
+        });
+      } catch (err) {
+        this.logger.error(
+          `Failed to emit production.sale_cogs for order #${order.id}: ${
+            (err as Error).message
+          }`,
+          (err as Error).stack,
+        );
+      }
+    }
+
     // docs/plans/no-overselling-stock-guard-plan.md step 9 — additive: only
     // present when overuse was actually accepted, never an empty array.
     return stockWarnings.length > 0
@@ -869,6 +930,8 @@ export class ProductionOrdersService {
       store_id: number;
       order_id: number;
       product_id: number;
+      variant_id: number | null;
+      serve_all_variants: boolean;
       production_order_id: number;
       sourceModule: string;
       allowOveruse: boolean;
@@ -878,6 +941,10 @@ export class ProductionOrdersService {
       where: {
         order_id: p.order_id,
         product_id: p.product_id,
+        // Only the lines of the variant this order makes (QUI-995 F4); NULL
+        // matches the base-product lines, never a sibling variant's. A legacy
+        // NULL-variant order (R3) serves every line of the product.
+        ...(p.serve_all_variants ? {} : { product_variant_id: p.variant_id }),
         cancelled_at: null,
         fulfillment_destination: 'production',
         orders: { store_id: p.store_id },
@@ -964,6 +1031,28 @@ export class ProductionOrdersService {
   }
 
   /**
+   * Legacy shape (R3): a NULL-variant order of a sale that has no variant order
+   * for the product serves every line of the product, variant lines included,
+   * exactly as it did before `product_variant_id` existed. With any (non
+   * cancelled) variant order in the sale, a NULL order serves only base lines.
+   */
+  private async servesAllVariants(
+    client: { production_orders: { count: (args: any) => Promise<number> } },
+    p: { order_id: number; product_id: number; variant_id: number | null },
+  ): Promise<boolean> {
+    if (p.variant_id != null) return false;
+    const variantOrders = await client.production_orders.count({
+      where: {
+        order_id: p.order_id,
+        product_id: p.product_id,
+        product_variant_id: { not: null },
+        status: { not: 'cancelled' },
+      },
+    });
+    return variantOrders === 0;
+  }
+
+  /**
    * What happens to the produced units once the order completes:
    * - active sale: reserve min(produced, planned) for ('order', sale), without
    *   availability validation (the units were just credited, so `available`
@@ -978,23 +1067,28 @@ export class ProductionOrdersService {
       store_id: number;
       order_id: number;
       product_id: number;
+      variant_id: number | null;
+      serve_all_variants: boolean;
       location_id: number;
       produced_qty: number;
       planned_qty: number;
       production_order_id: number;
     },
-  ): Promise<void> {
+  ): Promise<number> {
+    // The caller (`complete()`) already holds the sale's lifecycle lock, taken at
+    // the start of its transaction, so the state read below cannot go stale.
     const sale = await tx.orders.findFirst({
       where: { id: p.order_id, store_id: p.store_id },
       select: { id: true, state: true },
     });
-    if (!sale || ['cancelled', 'refunded'].includes(sale.state as string)) return;
+    if (!sale || ['cancelled', 'refunded'].includes(sale.state as string)) return 0;
 
     if (['delivered', 'finished'].includes(sale.state as string)) {
       const pending = await tx.order_items.findMany({
         where: {
           order_id: p.order_id,
           product_id: p.product_id,
+          ...(p.serve_all_variants ? {} : { product_variant_id: p.variant_id }),
           cancelled_at: null,
           fulfillment_destination: 'production',
           inventory_committed: false,
@@ -1002,7 +1096,7 @@ export class ProductionOrdersService {
         select: { id: true },
       });
       if (pending.length > 0) {
-        await this.orderStockCommit!.commitOrderLines(
+        const committed = await this.orderStockCommit!.commitOrderLines(
           p.order_id,
           pending.map((l) => l.id),
           {
@@ -1012,15 +1106,17 @@ export class ProductionOrdersService {
             reason: `Producción #${p.production_order_id} completada tras la entrega`,
           },
         );
+        // Returned so `complete()` can post this COGS after the commit.
+        return Number(committed?.totalCost ?? 0);
       }
-      return;
+      return 0;
     }
 
     const quantity = Math.min(p.produced_qty, Math.round(p.planned_qty));
-    if (quantity <= 0) return;
+    if (quantity <= 0) return 0;
     await this.stockLevelManager.reserveStock(
       p.product_id,
-      undefined,
+      p.variant_id ?? undefined,
       p.location_id,
       quantity,
       'order',
@@ -1029,6 +1125,7 @@ export class ProductionOrdersService {
       false,
       tx,
     );
+    return 0;
   }
 
   /** Signed main-image URL per product id (S3 keys are signed on read). */
@@ -1094,11 +1191,26 @@ export class ProductionOrdersService {
           },
         })
       : null;
+    const serveAllVariants =
+      sale_order_id != null &&
+      (await this.servesAllVariants(this.prisma, {
+        order_id: sale_order_id,
+        product_id: order.product_id,
+        variant_id: (order as { product_variant_id?: number | null }).product_variant_id ?? null,
+      }));
     const lines = sale_order_id
       ? await this.prisma.order_items.findMany({
           where: {
             order_id: sale_order_id,
             product_id: order.product_id,
+            // One order per product+variant (QUI-995): only the lines of THIS
+            // variant (NULL = base lines). Narrow cast: the column is new.
+            ...(serveAllVariants
+              ? {}
+              : {
+                  product_variant_id:
+                    (order as { product_variant_id?: number | null }).product_variant_id ?? null,
+                }),
             cancelled_at: null,
             fulfillment_destination: 'production',
           },

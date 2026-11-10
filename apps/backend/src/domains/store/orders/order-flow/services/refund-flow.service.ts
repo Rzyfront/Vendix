@@ -1146,10 +1146,13 @@ export class RefundFlowService {
             continue;
           }
 
-          // QUI-999: a `production` line never deducted its own stock (no
-          // linked production order exists yet; QUI-995 adds it), so there is
-          // nothing to restore, write off or serialize.
-          if (!lineConsumesOwnStock(orderItem)) continue;
+          // QUI-999: a `production` line does not deduct its own stock while its
+          // production order is pending, so there is nothing to restore, write
+          // off or serialize. QUI-995 F2: once the production completed and the
+          // delivery commit deducted the units (`inventory_committed`), the line
+          // DID move stock and a refund restocks it like any retail line.
+          if (!lineConsumesOwnStock(orderItem) && orderItem.inventory_committed !== true)
+            continue;
 
           const stockUnits =
             stockUnitsByOrderItem.get(item.order_item_id) ?? item.quantity;

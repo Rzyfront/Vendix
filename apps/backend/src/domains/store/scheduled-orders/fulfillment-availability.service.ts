@@ -7,6 +7,7 @@ import {
   zonedWallClockToUtc,
 } from '../../../common/utils/store-timezone.util';
 import { mergeStoreSettingsWithDefaults } from '../settings/defaults/default-store-settings';
+import { industryAllowsKey } from '../../../common/access/module-industries';
 import { ScheduledOrdersSettings } from '../settings/interfaces/store-settings.interface';
 
 /** Estados que ocupan cupo. `cancelled` libera la franja. */
@@ -217,10 +218,22 @@ export class FulfillmentAvailabilityService {
     return mergeStoreSettingsWithDefaults(row?.settings).scheduled_orders as ScheduledOrdersSettings;
   }
 
-  /** Lanza `SCHED_DISABLED` si la tienda no activó los pedidos programados. */
+  /**
+   * Lanza `SCHED_DISABLED` si la tienda no activó los pedidos programados o si
+   * no es restaurante (QUI-1001: módulo solo de restaurante, oculto siempre en
+   * las demás industrias; los datos guardados no se tocan).
+   */
   async getEnabledConfig(store_id: number): Promise<ScheduledOrdersSettings> {
-    const config = await this.getConfig(store_id);
+    const row = await this.prisma.store_settings.findFirst({
+      where: { store_id },
+      select: { settings: true, stores: { select: { industries: true } } },
+    });
+    const config = mergeStoreSettingsWithDefaults(row?.settings)
+      .scheduled_orders as ScheduledOrdersSettings;
     if (!config?.enabled) throw new VendixHttpException(ErrorCodes.SCHED_DISABLED);
+    if (!industryAllowsKey('orders_scheduled', row?.stores?.industries ?? [])) {
+      throw new VendixHttpException(ErrorCodes.SCHED_DISABLED);
+    }
     return config;
   }
 

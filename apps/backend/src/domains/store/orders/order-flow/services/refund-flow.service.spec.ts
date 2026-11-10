@@ -455,6 +455,19 @@ describe('RefundFlowService — refund overhaul invariants', () => {
       expect(mockStockLevelManager.updateStock).not.toHaveBeenCalled();
     });
 
+    it('QUI-995 F2: una línea de producción con stock YA descontado (inventory_committed) sí repone stock', async () => {
+      await refundWithLine({ fulfillment_destination: 'production', inventory_committed: true });
+      expect(mockStockLevelManager.updateStock).toHaveBeenCalledWith(
+        expect.objectContaining({ product_id: 77, location_id: 5, quantity_change: 1, movement_type: 'return' }),
+        expect.anything(),
+      );
+    });
+
+    it('QUI-995 F2: una línea de producción sin descontar (inventory_committed=false) no repone stock', async () => {
+      await refundWithLine({ fulfillment_destination: 'production', inventory_committed: false });
+      expect(mockStockLevelManager.updateStock).not.toHaveBeenCalled();
+    });
+
     it('una línea stock repone stock como venta retail (sin regresión)', async () => {
       await refundWithLine({ fulfillment_destination: 'stock' });
       expect(mockStockLevelManager.updateStock).toHaveBeenCalledWith(

@@ -90,6 +90,9 @@ const REQUIRED_COLUMNS = [
   // QUI-1000 (migración 20261124100000): Prisma selecciona la columna en toda
   // lectura de order_items; sin ella cualquier pedido revienta con ColumnNotFound.
   'order_items.addons_consumed_at',
+  // QUI-994 (migración 20261124090000): nota por adición vendida. Prisma la
+  // selecciona en toda lectura de order_item_options (carrito, recibo, KDS).
+  'order_item_options.note',
   // QUI-999 (migración 20261125090000): destino de cada línea de venta de
   // restaurante; Prisma la selecciona en toda lectura de order_items.
   'order_items.fulfillment_destination',
@@ -99,6 +102,8 @@ const REQUIRED_COLUMNS = [
   // QUI-1002 (migración 20261127090000): tiempo estimado editable por orden;
   // Prisma la selecciona en toda lectura de production_orders.
   'production_orders.estimated_minutes',
+  // QUI-995 (migración 20261128090000): variante vendida que fabrica la orden.
+  'production_orders.product_variant_id',
 
   // --- Unidad suelta en la vitrina (migración 20260818180000) -------------
   // Prisma selecciona TODOS los escalares del modelo cuando la consulta no

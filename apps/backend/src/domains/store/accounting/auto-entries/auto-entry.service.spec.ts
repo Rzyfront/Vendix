@@ -40,6 +40,48 @@ describe('QUI-995 production sale waste', () => {
   });
 });
 
+describe('QUI-995 F1 production sale COGS (sale finished before production)', () => {
+  const build = () => {
+    const service = new AutoEntryService({} as any, {} as any, {} as any, {} as any, {} as any);
+    const resolve = jest.spyOn(service as any, 'resolveAccountLine').mockImplementation(
+      async (_org: number, key: string, description: string, debit: number, credit: number) => ({
+        account_code: ({ 'order.completed.cogs': '6135', 'order.completed.inventory': '1435' } as Record<string, string>)[key],
+        description, debit_amount: debit, credit_amount: credit,
+      }),
+    );
+    const create = jest.spyOn(service, 'createAutoEntry').mockResolvedValue({ id: 1 } as any);
+    return { service, resolve, create };
+  };
+  const event = { production_order_id: 100, order_id: 77, organization_id: 2, store_id: 4, total_cost: 120, user_id: 9 };
+
+  it('posts ONE balanced DR COGS / CR inventory entry with the order.completed mapping keys, keyed by the production order', async () => {
+    const { service, resolve, create } = build();
+    await service.onProductionSaleCogs(event);
+    expect(resolve.mock.calls.map((call) => call[1])).toEqual(['order.completed.cogs', 'order.completed.inventory']);
+    expect(create).toHaveBeenCalledTimes(1);
+    const arg: any = create.mock.calls[0][0];
+    expect(arg).toEqual(expect.objectContaining({ source_type: 'production.sale_cogs', source_id: 100, organization_id: 2, store_id: 4 }));
+    const [debit, credit] = arg.lines;
+    expect([debit.account_code, debit.debit_amount, debit.credit_amount]).toEqual(['6135', 120, 0]);
+    expect([credit.account_code, credit.debit_amount, credit.credit_amount]).toEqual(['1435', 0, 120]);
+    expect(debit.debit_amount).toBe(credit.credit_amount);
+  });
+
+  it('a replay of the same production order carries the same idempotency key (createAutoEntry skips the duplicate)', async () => {
+    const { service, create } = build();
+    await service.onProductionSaleCogs(event);
+    await service.onProductionSaleCogs(event);
+    const keys = create.mock.calls.map((c: any) => [c[0].source_type, c[0].source_id]);
+    expect(keys).toEqual([['production.sale_cogs', 100], ['production.sale_cogs', 100]]);
+  });
+
+  it('does not create a zero-cost journal', async () => {
+    const { service, create } = build();
+    expect(await service.onProductionSaleCogs({ ...event, total_cost: 0 })).toBeNull();
+    expect(create).not.toHaveBeenCalled();
+  });
+});
+
 describe('D.2 prepared dish disposition reclassification', () => {
   it.each([
     ['waste', 'order_item.prepared_waste.shrinkage', '5295'],

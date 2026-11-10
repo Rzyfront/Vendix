@@ -822,3 +822,33 @@ describe('AccountingEventsListener station consumable deposit', () => {
     expect(auto_entry_service.onServiceDepositReceived).not.toHaveBeenCalled();
   });
 });
+
+describe('AccountingEventsListener production.sale_cogs (QUI-995 F1)', () => {
+  const build = (flowEnabled = true) => {
+    const auto_entry_service = { onProductionSaleCogs: jest.fn().mockResolvedValue({ id: 5 }) };
+    const listener = new AccountingEventsListener(
+      auto_entry_service as any,
+      { getMapping: jest.fn() } as any,
+      { isSubflowEnabled: jest.fn().mockResolvedValue(flowEnabled) } as any,
+      { getPlatformContext: jest.fn() } as any,
+      { recordSkip: jest.fn(), recordFailure: jest.fn() } as any,
+    );
+    return { listener, auto_entry_service };
+  };
+  const event = { production_order_id: 100, order_id: 77, organization_id: 1, store_id: 2, total_cost: '120', user_id: 9 };
+
+  it('routes the event to exactly one onProductionSaleCogs call with a numeric cost', async () => {
+    const { listener, auto_entry_service } = build();
+    await listener.handleProductionSaleCogs(event);
+    expect(auto_entry_service.onProductionSaleCogs).toHaveBeenCalledTimes(1);
+    expect(auto_entry_service.onProductionSaleCogs).toHaveBeenCalledWith({
+      production_order_id: 100, order_id: 77, organization_id: 1, store_id: 2, total_cost: 120, user_id: 9,
+    });
+  });
+
+  it('posts nothing when the inventory accounting flow is disabled', async () => {
+    const { listener, auto_entry_service } = build(false);
+    await listener.handleProductionSaleCogs(event);
+    expect(auto_entry_service.onProductionSaleCogs).not.toHaveBeenCalled();
+  });
+});

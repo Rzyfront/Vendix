@@ -1337,6 +1337,52 @@ describe('OrdersService', () => {
       expect(result.production_cancel_suggestion).toBe('release');
     });
 
+    it('QUI-995 B2: two variants of one product link to THEIR OWN order, and the sale is not ready until both are completed', async () => {
+      mockPrismaService.orders.findFirst.mockResolvedValue(
+        base(
+          [
+            line(1, 50, { product_variant_id: 10 }),
+            line(2, 50, { product_variant_id: 11, order_item_options: [{ option_name: 'Crema' }] }),
+          ],
+          [
+            { id: 100, product_id: 50, product_variant_id: 10, order_number: 'OP-1', status: 'completed' },
+            { id: 101, product_id: 50, product_variant_id: 11, order_number: 'OP-2', status: 'draft' },
+          ],
+        ),
+      );
+      const result: any = await service.findOne(5);
+      expect(result.order_items[0].production_order).toEqual({ id: 100, order_number: 'OP-1', status: 'completed' });
+      expect(result.order_items[1].production_order).toEqual({ id: 101, order_number: 'OP-2', status: 'draft' });
+      expect(result.production_status).toBe('in_progress');
+      // only the completed Chocolate line (plain) counts: release, not the Vainilla add-ons' waste
+      expect(result.production_cancel_suggestion).toBe('release');
+    });
+
+    it('QUI-995 R3: a legacy order (NULL variant) links to the variant line it served and reports completed', async () => {
+      mockPrismaService.orders.findFirst.mockResolvedValue(
+        base([line(1, 50, { product_variant_id: 10 })], [
+          { id: 100, product_id: 50, product_variant_id: null, order_number: 'OP-1', status: 'completed' },
+        ]),
+      );
+      const result: any = await service.findOne(5);
+      expect(result.order_items[0].production_order).toEqual({ id: 100, order_number: 'OP-1', status: 'completed' });
+      expect(result.production_status).toBe('completed');
+    });
+
+    it('QUI-995 B2: all variant orders completed reports completed', async () => {
+      mockPrismaService.orders.findFirst.mockResolvedValue(
+        base(
+          [line(1, 50, { product_variant_id: 10 }), line(2, 50, { product_variant_id: 11 })],
+          [
+            { id: 100, product_id: 50, product_variant_id: 10, order_number: 'OP-1', status: 'completed' },
+            { id: 101, product_id: 50, product_variant_id: 11, order_number: 'OP-2', status: 'completed' },
+          ],
+        ),
+      );
+      const result: any = await service.findOne(5);
+      expect(result.production_status).toBe('completed');
+    });
+
     it('an order without production lines reports production_status none', async () => {
       mockPrismaService.orders.findFirst.mockResolvedValue(base([], []));
       const result: any = await service.findOne(5);

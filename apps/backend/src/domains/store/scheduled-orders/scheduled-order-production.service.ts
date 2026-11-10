@@ -10,7 +10,7 @@ import {
   localCivil,
 } from '../../../common/utils/store-timezone.util';
 import { RecipesService } from '../recipes/recipes.service';
-import { BatchClaimPool, probeSellableStock, resolveBatchLines } from '../recipes/batch-bom-resolver';
+import { BatchClaimPool, probeConsumableStock, resolveBatchLines } from '../recipes/batch-bom-resolver';
 import {
   createBatchAwareExploders,
   expandProduction,
@@ -22,6 +22,7 @@ import { StockLevelManager } from '../inventory/shared/services/stock-level-mana
 import { StockValidatorService } from '../inventory/shared/services/stock-validator.service';
 import { KitchenFireService } from '../kitchen-fire/kitchen-fire.service';
 import { ScheduledOrdersService, kitchenPendingItemsWhere } from './scheduled-orders.service';
+import { findProductionOrderForLine } from '../production/production-order-pairing.util';
 
 type Tx = Prisma.TransactionClient;
 
@@ -77,7 +78,8 @@ export class ScheduledOrderProductionService implements OnModuleInit {
     const explodeBatchAware = (recipe_id: number, units: number) =>
       this.recipes.explodeBom(recipe_id, { [recipe_id]: units }, client, { stopAtBatchProduced: true });
     const deps = {
-      getAvailable: (product_id: number) => probeSellableStock(this.stockValidator as any, product_id, client),
+      getAvailable: (product_id: number) =>
+        probeConsumableStock(this.stockValidator, this.stockLevelManager, product_id, client),
       explode: explodeBatchAware,
     };
     return async (recipe_id, units) =>
@@ -110,7 +112,7 @@ export class ScheduledOrderProductionService implements OnModuleInit {
           select: {
             production_orders: {
               where: { status: { not: 'cancelled' } },
-              select: { id: true, product_id: true, status: true },
+              select: { id: true, product_id: true, product_variant_id: true, status: true },
             },
           },
         },
@@ -128,7 +130,8 @@ export class ScheduledOrderProductionService implements OnModuleInit {
     const linkedOrders = new Map<number, { id: number; status: string }>();
     const isLinked = (item: (typeof items)[number]) => {
       if (item.fulfillment_destination !== 'production') return false;
-      const match = item.orders?.production_orders?.find((o) => o.product_id === item.product_id);
+      // One production order per product+variant: pair the line with ITS variant's order.
+      const match = findProductionOrderForLine(item.orders?.production_orders ?? [], item);
       if (match) linkedOrders.set(match.id, { id: match.id, status: match.status as string });
       return !!match;
     };
@@ -230,6 +233,7 @@ export class ScheduledOrderProductionService implements OnModuleInit {
     const resolvers = createBatchAwareExploders({
       recipes: this.recipes,
       stockValidator: this.stockValidator,
+      stockLevelManager: this.stockLevelManager,
       client: tx,
       pool: new Map(),
     });
@@ -331,12 +335,13 @@ export class ScheduledOrderProductionService implements OnModuleInit {
             users: { select: { first_name: true, last_name: true } },
             production_orders: {
               where: { status: { not: 'cancelled' } },
-              select: { id: true, product_id: true, order_number: true, status: true },
+              select: { id: true, product_id: true, product_variant_id: true, order_number: true, status: true },
             },
             order_items: {
               where: { cancelled_at: null },
               select: {
                 product_id: true,
+                product_variant_id: true,
                 fulfillment_destination: true,
                 product_name: true,
                 variant_attributes: true,
@@ -381,7 +386,7 @@ export class ScheduledOrderProductionService implements OnModuleInit {
         items: s.order.order_items.map((item) => {
           const linked =
             item.fulfillment_destination === 'production'
-              ? (s.order.production_orders ?? []).find((o) => o.product_id === item.product_id)
+              ? findProductionOrderForLine(s.order.production_orders ?? [], item)
               : undefined;
           return {
           production_order: linked
