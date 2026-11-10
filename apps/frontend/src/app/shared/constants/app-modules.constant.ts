@@ -156,6 +156,11 @@ export const APP_MODULES: {
           description: 'Gestionar marcas de productos',
         },
         {
+          key: 'products_option_groups',
+          label: 'Adiciones',
+          description: 'Grupos de adiciones de productos',
+        },
+        {
           key: 'settings_price_tiers',
           label: 'Precios y Tarifas',
           description:
