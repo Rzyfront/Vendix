@@ -977,12 +977,12 @@ describe('OrderStockCommitService — add-ons of a stock line (QUI-999 B1)', () 
     expect(addonStockCalls()).toHaveLength(0);
   });
 
-  it.each([
+  it.each<[string | null, string]>([
     ['kds', 'fire consumes them'],
     ['production', 'production completion consumes them'],
     [null, 'scheduled start consumes them'],
   ])('destination %s leaves the add-ons alone (%s)', async (destination) => {
-    setup(destination as string | null);
+    setup(destination);
     await service.commitOrderLines(1, [10], { ...OPTS, tx: txMock });
     expect(addonStockCalls()).toHaveLength(0);
     expect(txMock.order_items.updateMany).not.toHaveBeenCalledWith(
