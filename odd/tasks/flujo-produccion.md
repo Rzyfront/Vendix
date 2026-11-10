@@ -285,6 +285,54 @@ Contrato técnico de T15 (decisión del orquestador, ver L23):
   - Se edita el tiempo estimado por orden, e iniciar y finalizar funcionan por orden y por tarjeta.
   - Una orden multi-día sigue visible hasta finalizarse. El selector de día cambia de fecha.
 
+### S16 — Planta: una orden parcialmente finalizada sigue en curso (#1131 F1)
+- Historia: Como jefe de producción en Planta y en Producción activa, quiero que una orden parcialmente finalizada siga "en curso", con su temporizador, y siga en la lista los días siguientes, para terminarla sin perderla.
+- Pasos: iniciar una orden, completar solo una parte, recargar Planta y Producción activa; al día siguiente volver a abrirlas.
+- Criterios: la orden se ve en curso (badge "Parcialmente finalizada"), con temporizador y botón Finalizar; sigue apareciendo los días siguientes hasta completarse o cancelarse; su detalle permite completarla.
+- Notas: `production-orders.service.ts:1409-1411` (el arrastre de días anteriores incluye `partially_completed`) y `:1453` (`bucket()`); `production-active.component.ts:299, :374, :560`; `production-day-list.component.ts:226-279`; `production-order-detail.component.ts:167-172` (`canComplete`).
+
+### S17 — Agenda: un aviso en vivo durante el cambio de semana no se pierde (#1131 F2)
+- Historia: Como encargado en la agenda, quiero que un cambio que llega mientras cargo otra semana se refleje al terminar la carga, para no ver datos viejos.
+- Criterio: si llega una actualización en vivo durante una carga visible, al terminar esa carga la agenda se refresca en silencio con el rango actual.
+- Notas: `agenda-page.component.ts:594` (bandera `refreshPending`).
+
+### S18 — Modal de cancelación con producción parcial (#1130 N1)
+- Criterio: con producción parcial el título dice "Producción parcial"; "Producción ya finalizada" solo cuando toda la producción está completa.
+- Notas: `order-details-page.component.html:3787-3796`, con `production_status === 'completed'`.
+
+### S19 — Nombres de variante en producción (#1130 M2, #1131 N3)
+- Criterio: las listas de producción, las tarjetas de Producción activa y de Planta y el detalle de la orden muestran "Producto · Variante" cuando la orden tiene variante.
+- Notas: incluir `product_variants { id, name }` en las lecturas de `production-orders.service.ts` (`:375`, `:411`, `:819`, día `:1402+` y Producción activa) y mostrarlo en el frontend (patrón de la agenda: `variant(item.variant_attributes)`).
+
+### S20 — Reenvío a cocina por merma y rehacer tras cancelar (defecto previo en develop y main)
+- Rafael (L34): "Eso no esta fallando en prod, pero si analizas y realmente encuentras algun error si hay que solucionarlo."
+- Historia: Como cocinero en el KDS, quiero volver a cocinar un plato dado de baja por merma, o rehacer el plato de una orden cancelada, para entregar el pedido.
+- Pasos: en el KDS, un plato con merma → "Reenviar" por merma; en una orden cancelada con plato reusado → "Rehacer". Control: reenviar por comanda perdida sin merma.
+- Criterios: aparece el ticket nuevo en el KDS; la receta y las adiciones se descuentan otra vez (merma) o vuelven a salir (reuso); el reenvío por comanda perdida sin merma sigue igual.
+- Notas: hoy falla siempre con `KITCHEN_FIRE_ITEM_NOT_FOUND`: los ítems que se disparan están cancelados (`kitchen-fire.service.ts:2273`) y `prepareFireContext` filtra `cancelled_at: null` (`:3033`). Primero un test RED que no simula `prepareFireContext`. Arreglo: opción `includeCancelled` solo para `resendOrderItems` (`:2312`). Adiciones: el rehacer tras cancelar reinicia `addons_consumed_at` de todos los `firedItemIds`, y el corte por `schedule.produced_at` (`:1141-1145`) no aplica a los ids recién reiniciados.
+
+### S21 — Cancelar la producción no cancela la venta; "Volver a iniciar"
+- Rafael (L34): "Ojo cancelar la produccion no es lo mismo que cancelar la orden de venta, puedo cancelar la produccion y luego volverla a iniciar siempre que la orden de venta este activa aun." Opción elegida: "Botón en la orden, sin revivir sola".
+- Historia: Como jefe de producción, quiero cancelar una orden de producción ligada a una venta y volver a iniciarla después mientras la venta siga activa, para reprogramar sin tocar la venta.
+- Pasos: venta con una línea a producción → cancelar su orden en Planta o en Producción → editar la venta → la orden sigue cancelada → abrir la orden → "Volver a iniciar" → queda en borrador, lista para iniciar.
+- Criterios: la venta sigue activa; editar la venta no revive la orden; el botón aparece solo si la venta no está cancelada, reembolsada ni finalizada y su línea a producción sigue viva; la orden reiniciada usa la cantidad y la entrega vigentes de la línea.
+- Notas: `production-sale-link.service.ts:372-380` deja de pasar a `draft` (actualiza cantidad y entrega y la deja `cancelled`); nuevo `ProductionOrdersService.restart` y `POST production-orders/:id/restart` con `@Permissions('store:production_orders:update')`; botón en `production-order-detail` (restaurante) y en el detalle de Planta; `sale_order` expone el estado de la venta.
+
+### S22 — Venta POS con líneas a Producción queda abierta hasta entregar
+- Rafael (L34): "Abierta hasta entregar (Recomendado)".
+- Historia: Como cajero en el POS, quiero que una venta con productos por producir quede abierta al cobrarla y se cierre al entregarla, para saber qué falta entregar.
+- Pasos: en el POS, un producto que va "A producción", cobrar de contado → la orden queda en preparación; completar la producción → el detalle muestra la producción finalizada; "Confirmar entrega" → la orden se finaliza.
+- Criterios: tras cobrar no queda "Finalizada"; se cierra al confirmar la entrega; las ventas sin líneas a producción se cierran como antes.
+- Notas: `payments.service.ts` `updateOrderPaymentStatus` (~`:7596-7652`) y su llamada (~`:1900-1935`): si hay líneas vivas con `fulfillment_destination = 'production'` → `processing`. `confirmDelivery` ya acepta `processing` (`order-flow.service.ts:340`). Riesgo ítem 1.
+
+### S23 — Agenda de solo lectura
+- Rafael (L34): "En la agenda no debe existir esa opcion, puede ir a la orden de venta, a la orden de produccion, pero los cambios a dichas ordenes deben hacerse en la orden." Opción elegida: "Agenda solo lectura (Recomendado)".
+- Historia: Como encargado en la agenda, quiero ver los pedidos e ir a su orden de venta y a su orden de producción, para hacer los cambios en esas órdenes.
+- Criterios: el detalle del pedido en la agenda no tiene botones de estado ("Enviar a cocina", "En producción", "Listo", "Entregado", "No asistió", "Cancelar"); tiene "Ver orden de venta" y "Ver orden de producción", que navegan a esas páginas.
+- Decisiones (L35): "Enviar a cocina": "En la orden de venta (Recomendado)". Estado de la agenda: "Derivado de las órdenes (Recomendado)". Reprogramar: "Mantener reprogramar (Recomendado)".
+- Criterios adicionales: el detalle de la orden de venta muestra "Enviar a cocina" cuando es un pedido programado con platos pendientes de cocina (mismo envío de hoy: `POST scheduled-orders/:id/send-to-kitchen`); la agenda calcula el estado al leer (cancelado si la venta se canceló, entregado si se finalizó, listo si la producción terminó, en producción si empezó o fue a cocina, programado si no; "Vencido" cuando pasa la franja sin entrega, en lugar de "No asistió"); arrastrar sigue reprogramando fecha y franja.
+- Notas: `schedule-detail-modal.component.ts:193-218` y sus handlers. Hoy el estado del pedido programado solo lo cambian esos botones (`scheduled-orders.service.ts:335, :447`) y "Enviar a cocina" del programado solo existe ahí.
+
 ## Tasks
 
 | ID | Spec | Ticket | Ruta | Estado | Commit / evidencia |
@@ -313,6 +361,13 @@ Contrato técnico de T15 (decisión del orquestador, ver L23):
 | T22 | S12 | gate #1130 ronda 2 | inline | hecho · 69da7e871 · RDD: high, aprobada y acusada (review-92e1976bf2554f25) | orders.service 208/208 (RED 1: producción parcial sin sugerencia ni estado en curso) |
 | T23 | S14, S15 | gate #1131 ronda 2 | delegado (escritor sonnet, paralelo con T21) | hecho · 67c7f1cf0 · RDD: high, aprobada y acusada (review-854eda58977d4616) | scheduled-order-production 37/37 (RED 2: arranque sin emisión en vivo), scheduled-orders.service 19/19; agenda sin karma (prohibido) |
 | T24 | S1, S3 | gate #1128 re-revisión: MEDIA introducida por T20 | inline | hecho · 69764fe59, 50ee457d0 · RDD: high (escalado ítem 1), aprobada y acusada (review-a230a5621798838e); 50ee457d0 medium, under_budget | payments.scheduled-fire 7/7 (RED 2 contra 5b3ea7fb9: pedido con solo platos por lote quedaba en preparación), payments.service 194/194 en base y 201/201 en feat |
+| T25 | S16, S19 | ajustes · producción (Planta parcial, variantes) | delegado (escritor A, sonnet; paralelo con T27 y T28) | pendiente | |
+| T26 | S21 | ajustes · reiniciar producción | delegado (escritor A, tras T25) | pendiente | |
+| T27 | S17, S18, S23 | ajustes · agenda de solo lectura y detalle de la orden | delegado (escritor B, sonnet; paralelo) | pendiente | |
+| T28 | S20 | ajustes · reenvío por merma y rehacer | delegado (escritor C, sonnet; paralelo) | pendiente | |
+| T29 | S22 | ajustes · venta POS abierta hasta entregar | delegado (escritor C, tras T28) | pendiente | |
+| T30 | S20-S22 | verificación independiente de alto riesgo | verificador (Opus) | pendiente | |
+| T31 | S16-S23 | gate pr-code-review del PR 5 y merge en orden de los 5 PR | inline | pendiente | |
 
 Ruta: un escritor Sonnet por ticket, en serie (Writer trigger: backstop de contexto, 15 unidades en una sesión). El orquestador (Opus) audita el diff, corre el spec del cambio y commitea. Verificador independiente en unidades de alto riesgo (stock, migraciones).
 
@@ -502,3 +557,13 @@ Ruta: un escritor Sonnet por ticket, en serie (Writer trigger: backstop de conte
     - Siguen abiertos los nombres de variante en las órdenes de producción (#1130 M2, #1131 N3).
   - Defecto previo en develop (fuera del alcance): el reenvío por merma o remake siempre falla con `KITCHEN_FIRE_ITEM_NOT_FOUND`, porque `prepareFireContext` filtra `cancelled_at: null` y esos ítems siempre están cancelados (origen `91da934c4`). El paso de QA de merma de QUI-1000 fallará hasta que se arregle; conviene un ticket aparte.
   - Siguiente: merge solo a pedido de Rafael.
+- L34 (2026-11-10, decisiones de Rafael tras el gate, respuestas literales):
+  - Merge: "Fusionar en orden ahora (Recomendado)". Pendientes no bloqueantes: "Ahora, antes del merge". Se corrigen antes de fusionar.
+  - Reenvío por merma: "Eso no esta fallando en prod, pero si analizas y realmente encuentras algun error si hay que solucionarlo." Análisis: el reenvío por comanda perdida sin merma funciona (no dispara nada); volver a cocinar una merma y rehacer tras cancelar fallan siempre, también en main (S20).
+  - QUI-1001: "Autorizo consulta solo lectura (Recomendado)". Resultado en prod: 0 tiendas no restaurante usan adiciones, pedidos programados o sus ajustes; 0 órdenes abiertas con adiciones en esas tiendas; `access_gate:enforce:all` sin definir (modo audit en todas las tiendas).
+  - Cancelar producción: "Ojo cancelar la produccion no es lo mismo que cancelar la orden de venta, puedo cancelar la produccion y luego volverla a iniciar siempre que la orden de venta este activa aun." Luego: "Botón en la orden, sin revivir sola (Recomendado)" (S21).
+  - Venta POS con producción: "Abierta hasta entregar (Recomendado)" (S22).
+  - Agenda: "En la agenda no debe existir esa opcion, puede ir a la orden de venta, a la orden de produccion, pero los cambios a dichas ordenes deben hacerse en la orden." Luego: "Agenda solo lectura (Recomendado)" (S23).
+  - Duplicados sin variante: "Nada, solo es desarrollo (Recomendado)". Scratch: "Borrar ambas (Recomendado)" (hecho).
+  - Entrega propuesta: un PR 5 encadenado (`feat/produccion-ajustes` → `feat/flujo-produccion`) para no reabrir los gates aprobados de #1128-#1131; después, merge en orden de los 5. Pendiente de aprobación de Rafael.
+- L35 (2026-11-10, aprobación de Rafael, respuestas literales): plan: "Aprobar, PR 5 encadenado (Recomendado)"; "Enviar a cocina": "En la orden de venta (Recomendado)"; estado de la agenda: "Derivado de las órdenes (Recomendado)"; arrastrar: "Mantener reprogramar (Recomendado)". Rama `feat/produccion-ajustes` (worktree `../Vendix-prod-fe`) sobre `feat/flujo-produccion` 8304a3a70. Ruta: escritores A (T25-T26), B (T27) y C (T28-T29) en paralelo con superficies separadas (Writer trigger a: tres unidades independientes de varias centenas de líneas); el padre hace los commits; jest serializado con candado; verificador Opus al final (T30).
