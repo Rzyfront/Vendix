@@ -93,6 +93,37 @@ describe('IndustryModuleGuard', () => {
     );
   });
 
+  it.each(['orders_scheduled', 'products_option_groups'])(
+    'QUI-1001 %s: denied for retail (enforce), allowed for restaurant',
+    async (key) => {
+      build(key);
+      mode.modeForStore.mockResolvedValue('enforce');
+      prisma.stores.findUnique.mockResolvedValue({ industries: ['retail'] });
+      await expect(guard.canActivate(makeCtx(user))).rejects.toMatchObject({
+        errorCode: 'MODULE_INDUSTRY_001',
+      });
+      prisma.stores.findUnique.mockResolvedValue({ industries: ['restaurant'] });
+      await expect(guard.canActivate(makeCtx(user))).resolves.toBe(true);
+    },
+  );
+
+  it.each(['orders_scheduled', 'products_option_groups'])(
+    'QUI-1001 %s: blocks retail even in audit mode (always enforced)',
+    async (key) => {
+      build(key);
+      mode.modeForStore.mockResolvedValue('audit');
+      prisma.stores.findUnique.mockResolvedValue({ industries: ['retail'] });
+      await expect(guard.canActivate(makeCtx(user))).rejects.toMatchObject({
+        errorCode: 'MODULE_INDUSTRY_001',
+      });
+      expect(audit.record).toHaveBeenCalledWith(
+        expect.objectContaining({ decision: 'blocked', mode: 'audit', key }),
+      );
+      prisma.stores.findUnique.mockResolvedValue({ industries: ['restaurant'] });
+      await expect(guard.canActivate(makeCtx(user))).resolves.toBe(true);
+    },
+  );
+
   it('flows: blocks a non-administration store even in audit mode', async () => {
     build('flows');
     prisma.stores.findUnique.mockResolvedValue({ industries: ['retail'] });

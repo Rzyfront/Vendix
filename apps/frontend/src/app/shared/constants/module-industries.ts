@@ -65,6 +65,8 @@ export const MODULE_INDUSTRIES: Readonly<Record<string, ModuleIndustryRule>> = {
   products_list: 'all',
   products_categories: 'all',
   products_brands: 'all',
+  // Adiciones (option groups): restaurant only (QUI-1001).
+  products_option_groups: RESTAURANT,
   settings_price_tiers: 'all',
   ecommerce: 'all',
   apps: 'all',
@@ -76,7 +78,7 @@ export const MODULE_INDUSTRIES: Readonly<Record<string, ModuleIndustryRule>> = {
   purchase_orders: 'all',
   orders_quotations: 'all',
   orders_layaway: 'all',
-  orders_scheduled: 'all',
+  orders_scheduled: RESTAURANT,
   orders_contracts: ['construction'],
   orders_reservations: ['service'],
   orders_service_stations: ['service', 'hospitality'],
@@ -272,6 +274,8 @@ export const MODULE_INDUSTRIES: Readonly<Record<string, ModuleIndustryRule>> = {
  * guards them per controller (`@IndustryModule`).
  */
 export const VERTICAL_MODULE_KEYS: readonly string[] = [
+  'products_option_groups',
+  'orders_scheduled',
   'orders_contracts',
   'orders_reservations',
   'orders_service_stations',
@@ -371,6 +375,10 @@ export const ENFORCED_INDUSTRY_KEYS: readonly string[] = [
   'documents_expiring',
   'documents_retention',
   'documents_templates',
+  // QUI-1001: Adiciones and scheduled orders are restaurant-only, hidden
+  // outside restaurant whatever the gate mode. Hiding never deletes data.
+  'orders_scheduled',
+  'products_option_groups',
 ];
 
 /** `true` when the industry rule of `key` ignores the audit mode. */

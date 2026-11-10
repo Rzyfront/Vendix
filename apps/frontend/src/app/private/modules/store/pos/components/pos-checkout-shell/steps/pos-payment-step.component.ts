@@ -52,6 +52,7 @@ import type { BusinessHours } from '../../../../../../../core/models/store-setti
 import { ERROR_MESSAGES } from '../../../../../../../core/utils/error-messages';
 import { PosSerialSelectionModalComponent } from '../../pos-serial-selection-modal/pos-serial-selection-modal.component';
 import { SerialNumbersService } from '../../../../serial-numbers/services/serial-numbers.service';
+import { PosRegisterConfigModalComponent } from '../../pos-register-config-modal.component';
 import { PosCashRegisterService } from '../../../services/pos-cash-register.service';
 import { CartItem } from '../../../models/cart.model';
 import { resolveStockUnitsConsumed } from '../../../utils/line-units.util';
@@ -123,6 +124,7 @@ const MULTI_TENDER_ERROR_COPY: Record<string, string> = {
     ButtonComponent,
     PaymentCollectorComponent,
     PosSerialSelectionModalComponent,
+    PosRegisterConfigModalComponent,
   ],
   templateUrl: './pos-payment-step.component.html',
   styleUrl: './pos-payment-step.component.scss',
@@ -773,6 +775,46 @@ export class PosPaymentStepComponent implements OnInit {
     }
   }
 
+  // ── QUI-992 — missing register recovery ─────────────────────────────────
+  readonly registerModalOpen = signal(false);
+  private resolvingRegister = false;
+  private pendingAfterRegister: (() => void) | null = null;
+
+  /**
+   * Called only when no register is stored (e.g. a re-login cleared
+   * localStorage). Recovers it from the open cash session and retries the
+   * charge; with no session either, opens the register picker instead of
+   * dead-ending with a toast, and saving it resumes the charge.
+   */
+  private recoverMissingRegister(retry: () => void): void {
+    if (this.resolvingRegister) return;
+    this.resolvingRegister = true;
+    void this.cashRegisterService
+      .resolveRegisterId()
+      .catch(() => null)
+      .then((registerId) => {
+        this.resolvingRegister = false;
+        if (registerId && localStorage.getItem('pos_register_id')) {
+          retry();
+          return;
+        }
+        this.pendingAfterRegister = retry;
+        this.registerModalOpen.set(true);
+      });
+  }
+
+  onRegisterSaved(): void {
+    const pending = this.pendingAfterRegister;
+    this.pendingAfterRegister = null;
+    this.registerModalOpen.set(false);
+    pending?.();
+  }
+
+  onRegisterModalClosed(): void {
+    this.pendingAfterRegister = null;
+    this.registerModalOpen.set(false);
+  }
+
   // ── The single collector submit handler (all POS gates preserved) ────────
   //
   onCollectorSubmit(submit: PaymentSubmit): void {
@@ -849,7 +891,7 @@ export class PosPaymentStepComponent implements OnInit {
       localStorage.setItem('pos_register_id', register_id);
     }
     if (!register_id) {
-      this.toastService.info('Configure la caja para continuar');
+      this.recoverMissingRegister(() => this.onCollectorSubmit(submit));
       return;
     }
 
@@ -1121,7 +1163,7 @@ export class PosPaymentStepComponent implements OnInit {
     }
 
     if (!register_id) {
-      this.toastService.info('Configure la caja para continuar');
+      this.recoverMissingRegister(() => this.runCreditSale(terms));
       return;
     }
 

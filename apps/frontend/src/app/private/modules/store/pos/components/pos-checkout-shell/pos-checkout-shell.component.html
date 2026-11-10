@@ -69,7 +69,7 @@
                  Activo, el método de entrega se elige en el paso Envío, así que
                  mesa / para llevar / domicilio se ocultan (siguen montados para
                  que el shell lea checkoutTableId()/needsTable()). -->
-            @if (effectiveMode() !== 'create-draft' && tableId() == null) {
+            @if (scheduledOrdersAvailable() && effectiveMode() !== 'create-draft' && tableId() == null) {
               <app-pos-scheduled-order-picker section="toggle"></app-pos-scheduled-order-picker>
             }
             <div [hidden]="scheduledActive()">

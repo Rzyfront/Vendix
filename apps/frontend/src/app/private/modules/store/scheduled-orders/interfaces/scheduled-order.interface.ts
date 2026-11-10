@@ -129,6 +129,8 @@ export interface ScheduledOrderChange {
 
 export interface ScheduledOrderDetail extends ScheduledOrder {
   changes: ScheduledOrderChange[];
+  /** Platos preparados no-lote aún sin enviar a cocina (botón "Enviar a cocina"). */
+  pending_kitchen_item_count?: number;
 }
 
 export interface ProductionOption {

@@ -47,6 +47,7 @@ export const MODULE_ROUTES: Record<string, string> = {
   products_list: '/admin/products',
   products_categories: '/admin/products/categories',
   products_brands: '/admin/products/brands',
+  products_option_groups: '/admin/products/option-groups',
   settings_price_tiers: '/admin/price-tiers',
 
   ecommerce: '/admin/ecommerce',

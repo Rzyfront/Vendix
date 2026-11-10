@@ -1,3 +1,4 @@
+import { RequestContextService } from '@common/context/request-context.service';
 import {
   expandProduction,
   ProductionLineInput,
@@ -118,6 +119,7 @@ describe('ScheduledOrderProductionService.start', () => {
       stockLevelManager as any,
       { resolveInventoryPolicy: jest.fn().mockResolvedValue({ allowIngredientOveruse: true }) } as any,
       eventEmitter as any,
+      {} as any,
     );
     return { service, tx, stockLevelManager, eventEmitter };
   }
@@ -160,6 +162,91 @@ describe('ScheduledOrderProductionService.start', () => {
     );
   });
 
+  it('QUI-989: si al cobrar no se disparó nada, iniciar descuenta la receta base una sola vez, más las adiciones', async () => {
+    const { service, tx, stockLevelManager } = build([row]);
+    await service.start(tx as any, { id: 7, store_id: 3, order_id: 40 });
+    const harina = stockLevelManager.updateStock.mock.calls.filter(([p]) => p.product_id === 501);
+    expect(harina).toHaveLength(1);
+    expect(harina[0][0].quantity_change).toBe(-600);
+    expect(stockLevelManager.updateStock.mock.calls.some(([p]) => p.product_id === 700)).toBe(true);
+  });
+
+  describe('QUI-990 — preparaciones por lote', () => {
+    // Torta (receta 1) lleva 1 Bizcocho (producto 900, de lote, receta 90: 200 g harina #901 por unidad).
+    const BIZCOCHO = 900;
+    const tortaRow = { ...row, quantity: 2, order_item_options: [] };
+
+    function buildBatch(batchStock: number) {
+      const base = build([tortaRow]);
+      const recipes = {
+        explodeBom: jest.fn(
+          async (id: number, mult: Record<number, number>, _tx?: unknown, options?: { stopAtBatchProduced?: boolean }) => {
+            if (id === 90) {
+              return [{ component_product_id: 901, quantity: 200 * mult[90], depth: 1, path_recipe_ids: [90] }];
+            }
+            if (options?.stopAtBatchProduced) {
+              return [
+                { component_product_id: BIZCOCHO, quantity: 1 * mult[1], batch_recipe_id: 90, depth: 1, path_recipe_ids: [1] },
+                { component_product_id: 502, quantity: 2 * mult[1], depth: 1, path_recipe_ids: [1] },
+              ];
+            }
+            return explode(id, mult[id]);
+          },
+        ),
+      };
+      const stockValidator = {
+        resolveInventoryPolicy: jest.fn().mockResolvedValue({ allowIngredientOveruse: true }),
+        findInsufficientLines: jest.fn(async (lines: Array<{ product_id: number; quantity: number }>) =>
+          lines
+            .filter((l) => l.product_id === BIZCOCHO && l.quantity > batchStock)
+            .map((l) => ({ product_id: l.product_id, available: batchStock })),
+        ),
+      };
+      const service = new ScheduledOrderProductionService(
+        {} as any,
+        { registerProductionStartHook: jest.fn() } as any,
+        recipes as any,
+        base.stockLevelManager as any,
+        stockValidator as any,
+        base.eventEmitter as any,
+        {} as any,
+      );
+      base.stockLevelManager.getDefaultLocationForProduct.mockImplementation(async (pid: number) => 1000 + pid);
+      return { ...base, service };
+    }
+
+    const moves = (m: { updateStock: jest.Mock }) =>
+      m.updateStock.mock.calls.map(([p]) => [p.product_id, p.quantity_change, p.location_id]);
+
+    it('con stock de lote lo consume y no toca los insumos del Bizcocho', async () => {
+      const { service, tx, stockLevelManager } = buildBatch(4);
+      await service.start(tx as any, { id: 7, store_id: 3, order_id: 40 });
+      expect(moves(stockLevelManager)).toEqual([
+        [BIZCOCHO, -2, 1000 + BIZCOCHO],
+        [502, -4, 1502],
+      ]);
+    });
+
+    it('sin stock de lote consume los insumos de su receta', async () => {
+      const { service, tx, stockLevelManager } = buildBatch(0);
+      await service.start(tx as any, { id: 7, store_id: 3, order_id: 40 });
+      expect(moves(stockLevelManager)).toEqual([
+        [901, -400, 1901],
+        [502, -4, 1502],
+      ]);
+    });
+
+    it('con stock parcial usa lo que hay y produce lo que falta', async () => {
+      const { service, tx, stockLevelManager } = buildBatch(1);
+      await service.start(tx as any, { id: 7, store_id: 3, order_id: 40 });
+      expect(moves(stockLevelManager)).toEqual([
+        [BIZCOCHO, -1, 1000 + BIZCOCHO],
+        [901, -200, 1901],
+        [502, -4, 1502],
+      ]);
+    });
+  });
+
   it('segundo inicio sobre líneas ya consumidas y sin adiciones no mueve stock', async () => {
     const { service, tx, stockLevelManager } = build([
       { ...row, inventory_consumed_at_fire: true, order_item_options: [] },
@@ -167,5 +254,84 @@ describe('ScheduledOrderProductionService.start', () => {
     await service.start(tx as any, { id: 7, store_id: 3, order_id: 40 });
     expect(stockLevelManager.updateStock).not.toHaveBeenCalled();
     expect(tx.order_items.updateMany).not.toHaveBeenCalled();
+  });
+});
+
+
+describe('ScheduledOrderProductionService.sendToKitchen (QUI-989)', () => {
+  function build(opts: { status?: string; items?: Array<{ id: number }> } = {}) {
+    const schedule = { id: 7, store_id: 3, order_id: 40, status: opts.status ?? 'scheduled' };
+    const client = {
+      order_items: { findMany: jest.fn().mockResolvedValue(opts.items ?? [{ id: 11 }, { id: 12 }]) },
+    };
+    const prisma = {
+      order_fulfillment_schedules: {
+        findFirst: jest.fn().mockResolvedValue(schedule),
+      },
+      withoutScope: jest.fn().mockReturnValue(client),
+    };
+    const scheduledOrders = {
+      registerProductionStartHook: jest.fn(),
+      transition: jest.fn().mockResolvedValue({ ...schedule, status: 'in_production' }),
+    };
+    const kitchenFire = { fireOrderItems: jest.fn().mockResolvedValue({ ticketId: 1 }) };
+    const service = new ScheduledOrderProductionService(
+      prisma as any,
+      scheduledOrders as any,
+      {} as any,
+      {} as any,
+      {} as any,
+      { emit: jest.fn() } as any,
+      kitchenFire as any,
+    );
+    return { service, client, scheduledOrders, kitchenFire };
+  }
+
+  let ctx: jest.SpyInstance;
+  beforeEach(() => {
+    ctx = jest.spyOn(RequestContextService, 'getContext').mockReturnValue({ store_id: 3 } as any);
+  });
+  afterEach(() => ctx.mockRestore());
+
+  it('dispara a cocina solo los platos preparados que no son de lote ni están ya enviados, y pasa el pedido a producción', async () => {
+    const { service, client, scheduledOrders, kitchenFire } = build();
+    await service.sendToKitchen(7);
+
+    expect(client.order_items.findMany).toHaveBeenCalledWith(
+      expect.objectContaining({
+        where: expect.objectContaining({
+          order_id: 40,
+          cancelled_at: null,
+          skip_kds: false,
+          inventory_consumed_at_fire: false,
+          products: { product_type: 'prepared', is_batch_produced: false },
+        }),
+      }),
+    );
+    expect(kitchenFire.fireOrderItems).toHaveBeenCalledWith({ order_id: 40, order_item_ids: [11, 12] });
+    expect(scheduledOrders.transition).toHaveBeenCalledWith(7, 'in_production', expect.any(String));
+  });
+
+  it('no repite el estado si el pedido ya está en producción', async () => {
+    const { service, scheduledOrders, kitchenFire } = build({ status: 'in_production' });
+    await service.sendToKitchen(7);
+    expect(kitchenFire.fireOrderItems).toHaveBeenCalledTimes(1);
+    expect(scheduledOrders.transition).not.toHaveBeenCalled();
+  });
+
+  it('es idempotente: sin platos pendientes no dispara y rechaza con SCHED_NOTHING_TO_SEND', async () => {
+    const { service, kitchenFire } = build({ items: [] });
+    await expect(service.sendToKitchen(7)).rejects.toMatchObject({
+      errorCode: 'SCHED_NOTHING_TO_SEND',
+    });
+    expect(kitchenFire.fireOrderItems).not.toHaveBeenCalled();
+  });
+
+  it.each(['cancelled', 'delivered'])('rechaza un pedido %s con SCHED_KITCHEN_NOT_ALLOWED', async (status) => {
+    const { service, kitchenFire } = build({ status });
+    await expect(service.sendToKitchen(7)).rejects.toMatchObject({
+      errorCode: 'SCHED_KITCHEN_NOT_ALLOWED',
+    });
+    expect(kitchenFire.fireOrderItems).not.toHaveBeenCalled();
   });
 });

@@ -1,6 +1,6 @@
 import { Injectable } from '@angular/core';
 import { HttpClient } from '@angular/common/http';
-import { Observable, of } from 'rxjs';
+import { Observable, firstValueFrom, of } from 'rxjs';
 import { map, tap, catchError } from 'rxjs/operators';
 import { signal } from '@angular/core';
 import { toObservable } from '@angular/core/rxjs-interop';
@@ -328,6 +328,30 @@ export class PosCashRegisterService {
       return session?.status === 'open' ? session.register?.code || null : null;
     }
     return localStorage.getItem('pos_register_id');
+  }
+
+  /**
+   * Single resolver for the register used by POS payments (QUI-992).
+   * Order: open cash session's register > stored `pos_register_id` > null.
+   * When derived from the session it is written to storage so later reads agree.
+   */
+  async resolveRegisterId(): Promise<string | null> {
+    let session = this.activeSession();
+    if (session?.status !== 'open') {
+      session = await firstValueFrom(this.fetchActiveSession());
+    }
+    if (session?.status === 'open') {
+      const fromSession =
+        session.register?.code ||
+        (session.cash_register_id != null
+          ? String(session.cash_register_id)
+          : null);
+      if (fromSession) {
+        localStorage.setItem('pos_register_id', fromSession);
+        return fromSession;
+      }
+    }
+    return localStorage.getItem('pos_register_id') || null;
   }
 
   /** Check if the user has an active session (for sales validation) */

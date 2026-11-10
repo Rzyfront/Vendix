@@ -8,6 +8,7 @@ import { ScheduledOrdersSettingsForm } from '../components/scheduled-orders-sett
 import { CreditRemindersSettingsForm } from '../components/credit-reminders-settings-form/credit-reminders-settings-form.component';
 import { PromotionsSettingsForm } from '../components/promotions-settings-form/promotions-settings-form.component';
 import { SettingsSectionComponent } from '../components/settings-section/settings-section.component';
+import { AuthFacade } from '../../../../../../core/store/auth/auth.facade';
 import { GeneralSettingsStore } from '../services/general-settings.store';
 
 /**
@@ -75,19 +76,21 @@ import { GeneralSettingsStore } from '../services/general-settings.store';
           (settingsChange)="store.onSectionChange('credit_reminders', $event)" />
       </app-settings-section>
 
-      <!-- Pedidos programados y Adiciones -->
-      <app-settings-section
-        anchorId="section-scheduled-orders"
-        icon="calendar-clock"
-        iconTone="pink"
-        title="Pedidos programados"
-        hint="Define cuándo puedes cumplir encargos: días, franjas, cupos y recordatorios.">
-        <app-scheduled-orders-settings-form
-          [settings]="store.settings().scheduled_orders"
-          [productOptions]="store.settings().product_options"
-          (settingsChange)="store.onSectionChange('scheduled_orders', $event)"
-          (productOptionsChange)="store.onSectionChange('product_options', $event)" />
-      </app-settings-section>
+      @if (authFacade.isRestaurant()) {
+        <!-- Pedidos programados y Adiciones -->
+        <app-settings-section
+          anchorId="section-scheduled-orders"
+          icon="calendar-clock"
+          iconTone="pink"
+          title="Pedidos programados"
+          hint="Define cuándo puedes cumplir encargos: días, franjas, cupos y recordatorios.">
+          <app-scheduled-orders-settings-form
+            [settings]="store.settings().scheduled_orders"
+            [productOptions]="store.settings().product_options"
+            (settingsChange)="store.onSectionChange('scheduled_orders', $event)"
+            (productOptionsChange)="store.onSectionChange('product_options', $event)" />
+        </app-settings-section>
+      }
 
       <!-- Recibos y Facturación — el título depende del estado real de emisión
            (GET dian-config/emission-status), no de que el wizard fiscal esté
@@ -143,4 +146,6 @@ import { GeneralSettingsStore } from '../services/general-settings.store';
 })
 export class SalesSettingsPage {
   protected readonly store = inject(GeneralSettingsStore);
+  /** QUI-1001: Pedidos programados y Adiciones are restaurant-only. */
+  protected readonly authFacade = inject(AuthFacade);
 }

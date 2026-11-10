@@ -841,6 +841,20 @@ describe('MenuFilterService.canSeeKey / applyAccessGate (apps-f4 S4)', () => {
     expect(service.canSeeKey('restaurant_ops_recipes').allowed).toBeTrue();
   });
 
+  it('QUI-1001: pedidos programados y adiciones quedan negados por industria en retail y se ven en restaurante', () => {
+    userKeys = ['orders_scheduled', 'products_option_groups'];
+    for (const key of ['orders_scheduled', 'products_option_groups']) {
+      expect(service.canSeeKey(key))
+        .withContext(key)
+        .toEqual(jasmine.objectContaining({ allowed: false, layer: 'industry' }));
+      // "Ocultar siempre": the industry rule ignores the audit mode.
+      expect(isIndustryAlwaysEnforced(key)).withContext(key).toBeTrue();
+    }
+    industries.set(['restaurant']);
+    expect(service.canSeeKey('orders_scheduled').allowed).toBeTrue();
+    expect(service.canSeeKey('products_option_groups').allowed).toBeTrue();
+  });
+
   it('capa usuario: un no-owner sin la key en su panel queda negado por usuario', () => {
     userKeys = [];
     expect(service.canSeeKey('pos').layer).toBe('user');

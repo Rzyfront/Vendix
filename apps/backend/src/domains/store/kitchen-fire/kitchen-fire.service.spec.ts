@@ -104,6 +104,23 @@ describe('KitchenFireService.cancelTicket — stock disposition by KDS stage', (
     }));
   });
 
+  it('QUI-990 — cancelar con reuso devuelve el movimiento del producto de lote, no sus insumos', async () => {
+    const { service, tx, stock } = harness('pending');
+    // The fire consumed 1 Bizcocho (batch product 900) and 50 of cream (300);
+    // the ingredients of the Bizcocho (901) never moved.
+    tx.inventory_transactions.findMany.mockResolvedValue([
+      { organization_id: 3, product_id: 900, product_variant_id: null, quantity_change: -1, unit_cost: 40, total_cost: 40 },
+      { organization_id: 3, product_id: 300, product_variant_id: null, quantity_change: -50, unit_cost: 1, total_cost: 50 },
+    ]);
+    stock.getDefaultLocationForProduct.mockImplementation(async (pid: number) => 1000 + pid);
+    await service.cancelTicket(55, 'waste');
+    const calls = stock.updateStock.mock.calls.map(([p]: any) => [p.product_id, p.quantity_change, p.location_id, p.movement_type]);
+    expect(calls).toEqual([
+      [900, 1, 1900, 'return'],
+      [300, 50, 1300, 'return'],
+    ]);
+  });
+
   it('R1 — cancelar ticket con orden sin pagar cancela las líneas vivas de la orden y omite las ya canceladas', async () => {
     const { service, tx, orderSync } = harness('ready');
     tx.order_items.findMany.mockResolvedValue([{ id: 77 }]);
@@ -962,6 +979,316 @@ describe('KitchenFireService — fireOrderItems() (Fase D smoke)', () => {
         user_id: 42,
       }),
     );
+  });
+
+  describe('QUI-988 — insumo repetido en la receta', () => {
+    const arrangeFire = (bom: Array<{ component_product_id: number; quantity: number }>) => {
+      prismaMock.orders.findFirst.mockResolvedValue({
+        id: 100,
+        store_id: 1,
+        order_number: 'ORD-1',
+        order_items: [makeOrderItem(10, 50, 'prepared', false)],
+      });
+      prismaMock.recipes.findMany.mockResolvedValue([
+        { id: 7, product_id: 50, is_active: true },
+      ]);
+      recipesService.explodeBom.mockResolvedValue(
+        bom.map((l) => ({ ...l, depth: 1, path_recipe_ids: [] })) as any,
+      );
+      stockLevelManager.getDefaultLocationForProduct.mockResolvedValue(200);
+      prismaMock.$transaction.mockImplementation(async (cb: any) =>
+        cb({
+          $queryRaw: jest.fn().mockResolvedValue([{ id: 100, state: 'processing' }]),
+          orders: { findFirst: jest.fn().mockResolvedValue({ id: 100, state: 'processing' }) },
+          kds: { findFirst: jest.fn().mockResolvedValue({ id: 1 }) },
+          kds_sessions: { findFirst: jest.fn().mockResolvedValue(null) },
+          order_items: {
+            updateMany: jest.fn().mockResolvedValue({ count: 1 }),
+            findMany: jest.fn().mockResolvedValue([]),
+          },
+          store_settings: { findFirst: jest.fn().mockResolvedValue(null) },
+          kitchen_tickets: {
+            create: jest.fn().mockResolvedValue({ id: 555, items: [] }),
+            count: jest.fn().mockResolvedValue(0),
+          },
+          kitchen_ticket_items: { update: jest.fn().mockResolvedValue({}) },
+          kitchen_ticket_item_exclusions: {
+            createMany: jest.fn().mockResolvedValue({ count: 0 }),
+          },
+          $executeRaw: jest.fn().mockResolvedValue(undefined),
+        }),
+      );
+      // Fake stock_levels: read-then-write with a yield in between, like the
+      // real updateStock. Concurrent calls on the same row lose an update.
+      const stock = new Map<number, number>([[1, 1000], [2, 1000]]);
+      stockLevelManager.updateStock.mockImplementation(async (params: any) => {
+        const before = stock.get(params.product_id) ?? 0;
+        await new Promise((r) => setImmediate(r));
+        stock.set(params.product_id, before + params.quantity_change);
+        return {} as any;
+      });
+      return stock;
+    };
+
+    it('baja el stock la suma de todos los movimientos del insumo repetido', async () => {
+      // Azucar (1): 100 g en la sub-receta y 140 g en la padre; el item pide 2 unidades.
+      const stock = arrangeFire([
+        { component_product_id: 1, quantity: 100 },
+        { component_product_id: 2, quantity: 200 },
+        { component_product_id: 1, quantity: 140 },
+      ]);
+
+      await service.fireOrderItems({ order_id: 100, order_item_ids: [10] });
+
+      const movedByProduct = new Map<number, number>();
+      for (const [p] of stockLevelManager.updateStock.mock.calls) {
+        movedByProduct.set(p.product_id, (movedByProduct.get(p.product_id) ?? 0) + p.quantity_change);
+      }
+      expect(movedByProduct.get(1)).toBe(-240 * 2);
+      expect(stock.get(1)).toBe(1000 - 240 * 2);
+      expect(stock.get(2)).toBe(1000 - 200 * 2);
+    });
+
+    it('un plato sin insumos repetidos descuenta igual que antes', async () => {
+      const stock = arrangeFire([
+        { component_product_id: 1, quantity: 100 },
+        { component_product_id: 2, quantity: 200 },
+      ]);
+
+      await service.fireOrderItems({ order_id: 100, order_item_ids: [10] });
+
+      expect(stockLevelManager.updateStock).toHaveBeenCalledTimes(2);
+      expect(stock.get(1)).toBe(800);
+      expect(stock.get(2)).toBe(600);
+    });
+  });
+
+  describe('QUI-990 — la venta usa el stock de preparaciones hechas por lote', () => {
+    // Torta (producto 50, receta 7): 1 Bizcocho (900, de lote, receta 70) + 50 de crema (300).
+    // Bizcocho (receta 70): 200 de harina (901) por unidad.
+    const BIZCOCHO = 900;
+    const HARINA = 901;
+    const CREMA = 300;
+
+    const arrange = (opts: {
+      batchStock: number;
+      quantities?: number[];
+      batchBom?: boolean;
+    }) => {
+      const quantities = opts.quantities ?? [1];
+      const items = quantities.map((q, i) =>
+        makeVariantOrderItem(10 + i, 50, { quantity: q }),
+      );
+      prismaMock.orders.findFirst.mockResolvedValue({
+        id: 100,
+        store_id: 1,
+        order_number: 'ORD-990',
+        order_items: items,
+      });
+      prismaMock.recipes.findMany.mockResolvedValue([
+        { id: 7, product_id: 50, is_active: true },
+      ]);
+      const batchAware = opts.batchBom !== false;
+      recipesService.explodeBom.mockImplementation(
+        async (
+          recipeId: number,
+          multipliers: Record<number, number>,
+          _tx?: unknown,
+          options?: { stopAtBatchProduced?: boolean },
+        ) => {
+          if (recipeId === 70) {
+            return [
+              {
+                component_product_id: HARINA,
+                quantity: 200 * (multipliers[70] ?? 1),
+                depth: 1,
+                path_recipe_ids: [70],
+              },
+            ];
+          }
+          if (batchAware && options?.stopAtBatchProduced) {
+            return [
+              {
+                component_product_id: BIZCOCHO,
+                quantity: 1,
+                batch_recipe_id: 70,
+                depth: 1,
+                path_recipe_ids: [7],
+              },
+              { component_product_id: CREMA, quantity: 50, depth: 1, path_recipe_ids: [7] },
+            ];
+          }
+          return [
+            { component_product_id: HARINA, quantity: 200, depth: 2, path_recipe_ids: [7, 70] },
+            { component_product_id: CREMA, quantity: 50, depth: 1, path_recipe_ids: [7] },
+          ];
+        },
+      );
+      // Same read the guard uses: `findInsufficientLines` reports `available`
+      // for a tracked product when the demand exceeds it.
+      (stockValidatorService as any).findInsufficientLines = jest.fn(
+        async (lines: Array<{ product_id: number; quantity: number }>) =>
+          lines
+            .filter((l) => l.product_id === BIZCOCHO && l.quantity > opts.batchStock)
+            .map((l) => ({ product_id: l.product_id, available: opts.batchStock })),
+      );
+      stockLevelManager.getDefaultLocationForProduct.mockImplementation(
+        async (pid: number) => 1000 + pid,
+      );
+      stockLevelManager.updateStock.mockResolvedValue({} as any);
+      prismaMock.$transaction.mockImplementation(async (cb: any) =>
+        cb({
+          $queryRaw: jest.fn().mockResolvedValue([{ id: 100, state: 'processing' }]),
+          orders: { findFirst: jest.fn().mockResolvedValue({ id: 100, state: 'processing' }) },
+          kds: { findFirst: jest.fn().mockResolvedValue({ id: 1 }) },
+          kds_sessions: { findFirst: jest.fn().mockResolvedValue(null) },
+          order_items: {
+            updateMany: jest.fn().mockResolvedValue({ count: items.length }),
+            findMany: jest.fn().mockResolvedValue([]),
+          },
+          store_settings: { findFirst: jest.fn().mockResolvedValue(null) },
+          kitchen_tickets: {
+            create: jest.fn().mockResolvedValue({ id: 555, items: [] }),
+            count: jest.fn().mockResolvedValue(0),
+          },
+          kitchen_ticket_items: { update: jest.fn().mockResolvedValue({}) },
+          kitchen_ticket_item_exclusions: {
+            createMany: jest.fn().mockResolvedValue({ count: 0 }),
+          },
+          $executeRaw: jest.fn().mockResolvedValue(undefined),
+        }),
+      );
+      return items.map((i) => i.id);
+    };
+
+    const movements = () =>
+      stockLevelManager.updateStock.mock.calls.map(([p]: any) => [
+        p.product_id,
+        p.quantity_change,
+        p.location_id,
+      ]);
+    const movedBy = (pid: number) =>
+      movements()
+        .filter(([p]) => p === pid)
+        .reduce((sum, [, q]) => sum + (q as number), 0);
+
+    it('excluir un insumo de la preparacion de lote no rechaza el disparo: usa la explosion completa', async () => {
+      const ids = arrange({ batchStock: 4 });
+      await expect(
+        service.fireOrderItems({
+          order_id: 100,
+          order_item_ids: ids,
+          exclusions: [{ order_item_id: ids[0], component_product_ids: [HARINA] }],
+        } as any),
+      ).resolves.toBeDefined();
+
+      // "Sin harina" cannot come from a ready Bizcocho: no batch stock is taken,
+      // the excluded flour is not consumed and the rest of the recipe is.
+      expect(movedBy(BIZCOCHO)).toBe(0);
+      expect(movedBy(HARINA)).toBe(0);
+      expect(movements()).toEqual([[CREMA, -50, 1000 + CREMA]]);
+    });
+
+    it('con stock de lote, el Bizcocho baja 1 y sus insumos no se mueven', async () => {
+      const ids = arrange({ batchStock: 4 });
+      await service.fireOrderItems({ order_id: 100, order_item_ids: ids });
+
+      expect(movements()).toEqual(
+        expect.arrayContaining([
+          [BIZCOCHO, -1, 1000 + BIZCOCHO],
+          [CREMA, -50, 1000 + CREMA],
+        ]),
+      );
+      expect(movements()).toHaveLength(2);
+      expect(movedBy(HARINA)).toBe(0);
+      // The no-overselling guard sees the batch product, not its ingredients.
+      const demands = (stockValidatorService.assertIngredientsAvailable as jest.Mock).mock
+        .calls[0][0];
+      expect(demands.map((d: any) => [d.product_id, d.quantity])).toEqual(
+        expect.arrayContaining([[BIZCOCHO, 1], [CREMA, 50]]),
+      );
+      expect(demands.some((d: any) => d.product_id === HARINA)).toBe(false);
+    });
+
+    it('sin stock de lote, la venta genera su produccion: descuenta los insumos del Bizcocho', async () => {
+      const ids = arrange({ batchStock: 0 });
+      await service.fireOrderItems({ order_id: 100, order_item_ids: ids });
+
+      expect(movedBy(BIZCOCHO)).toBe(0);
+      expect(movements()).toEqual(
+        expect.arrayContaining([
+          [HARINA, -200, 1000 + HARINA],
+          [CREMA, -50, 1000 + CREMA],
+        ]),
+      );
+      const demands = (stockValidatorService.assertIngredientsAvailable as jest.Mock).mock
+        .calls[0][0];
+      expect(demands.some((d: any) => d.product_id === HARINA && d.quantity === 200)).toBe(true);
+    });
+
+    it('con stock parcial usa lo que hay y produce lo que falta', async () => {
+      const ids = arrange({ batchStock: 1, quantities: [2] });
+      await service.fireOrderItems({ order_id: 100, order_item_ids: ids });
+
+      expect(movedBy(BIZCOCHO)).toBe(-1);
+      expect(movedBy(HARINA)).toBe(-200);
+      expect(movedBy(CREMA)).toBe(-100);
+    });
+
+    it('dos lineas del mismo disparo comparten el stock de lote', async () => {
+      const ids = arrange({ batchStock: 1, quantities: [1, 1] });
+      await service.fireOrderItems({ order_id: 100, order_item_ids: ids });
+
+      expect(movedBy(BIZCOCHO)).toBe(-1);
+      expect(movedBy(HARINA)).toBe(-200);
+      expect(movedBy(CREMA)).toBe(-100);
+    });
+
+    it('una preparacion que no es de lote sigue descontando su receta', async () => {
+      const ids = arrange({ batchStock: 4, batchBom: false });
+      await service.fireOrderItems({ order_id: 100, order_item_ids: ids });
+
+      expect(movements()).toEqual(
+        expect.arrayContaining([
+          [HARINA, -200, 1000 + HARINA],
+          [CREMA, -50, 1000 + CREMA],
+        ]),
+      );
+      expect(movements()).toHaveLength(2);
+      expect((stockValidatorService as any).findInsufficientLines).not.toHaveBeenCalled();
+    });
+
+    it('previewIngredientShortfall no bloquea de mas cuando hay stock de lote', async () => {
+      arrange({ batchStock: 4 });
+      (stockValidatorService as any).resolveInventoryPolicy.mockResolvedValue({
+        allowIngredientOveruse: false,
+      });
+      jest.spyOn(RequestContextService, 'getContext').mockReturnValue(ctx as any);
+      await service.previewIngredientShortfall([
+        { product_id: 50, product_variant_id: null, quantity: 1, product_name: 'Torta' },
+      ]);
+      const calls = (stockValidatorService as any).findInsufficientLines.mock.calls;
+      const finalDemands = calls[calls.length - 1][0];
+      expect(finalDemands.map((d: any) => [d.product_id, d.quantity])).toEqual(
+        expect.arrayContaining([[BIZCOCHO, 1], [CREMA, 50]]),
+      );
+      expect(finalDemands.some((d: any) => d.product_id === HARINA)).toBe(false);
+    });
+
+    it('previewIngredientShortfall exige los insumos del Bizcocho cuando no hay lote', async () => {
+      arrange({ batchStock: 0 });
+      (stockValidatorService as any).resolveInventoryPolicy.mockResolvedValue({
+        allowIngredientOveruse: false,
+      });
+      jest.spyOn(RequestContextService, 'getContext').mockReturnValue(ctx as any);
+      await service.previewIngredientShortfall([
+        { product_id: 50, product_variant_id: null, quantity: 1, product_name: 'Torta' },
+      ]);
+      const calls = (stockValidatorService as any).findInsufficientLines.mock.calls;
+      const finalDemands = calls[calls.length - 1][0];
+      expect(finalDemands.some((d: any) => d.product_id === HARINA && d.quantity === 200)).toBe(true);
+      expect(finalDemands.some((d: any) => d.product_id === BIZCOCHO)).toBe(false);
+    });
   });
 
   it('is idempotent: re-firing the same already-consumed item is a no-op (no stock movement, no event)', async () => {

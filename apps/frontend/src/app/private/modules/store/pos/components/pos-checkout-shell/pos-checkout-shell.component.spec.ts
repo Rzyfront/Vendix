@@ -355,7 +355,7 @@ describe('PosCheckoutShellComponent — matriz de teclado (CP-POS-CHECKOUT-KEYBO
       providers: [
         {
           provide: AuthFacade,
-          useValue: { activeFiscalAreas: signal([]), isHospitality: signal(false), userPermissions: signal([]) },
+          useValue: { activeFiscalAreas: signal([]), isHospitality: signal(false), isRestaurant: signal(true), userPermissions: signal([]) },
         },
         { provide: StoreSettingsFacade, useValue: settingsMock },
         { provide: PosCartService, useValue: {} },

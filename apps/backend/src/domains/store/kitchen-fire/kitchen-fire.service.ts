@@ -4,6 +4,13 @@ import { Prisma } from '@prisma/client';
 import { EventEmitter2 } from '@nestjs/event-emitter';
 import { StorePrismaService } from '../../../prisma/services/store-prisma.service';
 import { RecipesService, BomExplosionLine } from '../recipes/recipes.service';
+import {
+  BatchClaimPool,
+  ResolvedBomLine,
+  hasBatchLines,
+  probeConsumableStock,
+  resolveBatchLines,
+} from '../recipes/batch-bom-resolver';
 import { StockLevelManager } from '../inventory/shared/services/stock-level-manager.service';
 import {
   StockValidatorService,
@@ -425,6 +432,77 @@ export class KitchenFireService {
   }
 
   /**
+   * QUI-990 — an exclusion confirmed in the modal may name an ingredient that
+   * lives INSIDE a batch-produced preparation (the modal shows the full
+   * explosion). The batch-aware BOM holds that preparation as a single leaf, so
+   * the exclusion would not belong to it. For such an item the batch stock
+   * cannot be used as-is ("sin harina" cannot come from a ready Bizcocho): it
+   * falls back to the full explosion, exactly as before QUI-990, so the
+   * exclusion is honored and the fire is not rejected. Items are updated in
+   * place; items without such exclusions keep the batch-aware BOM.
+   */
+  private async applyBatchExclusionFallback(
+    items: Array<{ orderItem: { id: number }; recipeId: number; bomLines: BomExplosionLine[] }>,
+    exclusionsByOrderItem: Map<number, number[]>,
+    tx: Prisma.TransactionClient | undefined,
+  ): Promise<void> {
+    for (const item of items) {
+      if (!item.bomLines.some((l) => l.batch_recipe_id != null)) continue;
+      const excluded = exclusionsByOrderItem.get(item.orderItem.id) ?? [];
+      const leafIds = new Set(item.bomLines.map((l) => l.component_product_id));
+      if (!excluded.some((id) => !leafIds.has(id))) continue;
+      item.bomLines = await this.recipesService.explodeBom(
+        item.recipeId,
+        { [item.recipeId]: 1 },
+        tx,
+      );
+    }
+  }
+
+  /**
+   * QUI-990 — resolves batch-produced leaves for the items about to be consumed
+   * or checked. Items whose effective BOM has no batch leaf are left out of the
+   * result, so they keep the exact pre-QUI-990 path. Items are resolved one
+   * after another against the shared `pool`, so two lines of the same fire
+   * cannot both take the same batch stock. Stock is read through the guard's own
+   * source, capped at the location the line consumes from (`probeConsumableStock`).
+   */
+  private async resolveBatchForItems(
+    items: Array<{
+      orderItem: { id: number; quantity: any };
+      bomLines: BomExplosionLine[];
+    }>,
+    exclusionsByOrderItem: Map<number, number[]>,
+    tx: Prisma.TransactionClient | undefined,
+    pool: BatchClaimPool,
+  ): Promise<Map<number, ResolvedBomLine[]>> {
+    const resolvedByItem = new Map<number, ResolvedBomLine[]>();
+    const deps = {
+      getAvailable: (productId: number) =>
+        probeConsumableStock(this.stockValidatorService, this.stockLevelManager, productId, tx),
+      explode: (recipeId: number, units: number) =>
+        this.recipesService.explodeBom(recipeId, { [recipeId]: units }, tx, {
+          stopAtBatchProduced: true,
+        }),
+    };
+    for (const { orderItem, bomLines } of items) {
+      const orderQty = Number(orderItem.quantity || 0);
+      if (!Number.isFinite(orderQty) || orderQty <= 0) continue;
+      const excluded = exclusionsByOrderItem.get(orderItem.id);
+      const excludedSet = excluded && excluded.length > 0 ? new Set(excluded) : null;
+      const effective = excludedSet
+        ? bomLines.filter((l) => !excludedSet.has(l.component_product_id))
+        : bomLines;
+      if (!hasBatchLines(effective)) continue;
+      resolvedByItem.set(
+        orderItem.id,
+        await resolveBatchLines(effective, orderQty, pool, deps),
+      );
+    }
+    return resolvedByItem;
+  }
+
+  /**
    * No-overselling guard (docs/plans/no-overselling-stock-guard-plan.md,
    * step 6) — flattens the ALREADY-EXPLODED BOM of every prepared item being
    * fired into ingredient demand lines, net of confirmed exclusions
@@ -442,11 +520,26 @@ export class KitchenFireService {
       bomLines: BomExplosionLine[];
     }>,
     exclusionsByOrderItem: Map<number, number[]>,
+    /** QUI-990 — lines already resolved against batch stock (absolute quantities). */
+    resolvedByItem?: Map<number, ResolvedBomLine[]>,
   ): StockDemandLine[] {
     const demands: StockDemandLine[] = [];
     for (const { orderItem, bomLines } of items) {
       const orderQty = Number(orderItem.quantity || 0);
       if (!Number.isFinite(orderQty) || orderQty <= 0) continue;
+      const resolved = resolvedByItem?.get(orderItem.id);
+      if (resolved) {
+        for (const line of resolved) {
+          const consumedQty = Math.round(line.quantity);
+          if (!Number.isFinite(consumedQty) || consumedQty <= 0) continue;
+          demands.push({
+            product_id: line.component_product_id,
+            quantity: consumedQty,
+            used_by: orderItem.product_name,
+          });
+        }
+        continue;
+      }
       const excluded = exclusionsByOrderItem.get(orderItem.id);
       const excludedSet = excluded && excluded.length > 0 ? new Set(excluded) : null;
       const effectiveBomLines = excludedSet
@@ -704,9 +797,12 @@ export class KitchenFireService {
       }
       let bomLines = bomCache.get(recipe.id);
       if (!bomLines) {
-        bomLines = await this.recipesService.explodeBom(recipe.id, {
-          [recipe.id]: 1,
-        });
+        bomLines = await this.recipesService.explodeBom(
+          recipe.id,
+          { [recipe.id]: 1 },
+          undefined,
+          { stopAtBatchProduced: true },
+        );
         bomCache.set(recipe.id, bomLines);
       }
       preparedItems.push({ orderItem: item, recipeId: recipe.id, bomLines });
@@ -730,10 +826,22 @@ export class KitchenFireService {
     const inventoryPolicy =
       await this.stockValidatorService.resolveInventoryPolicy(store_id);
     let preCheckedStockWarnings: InsufficientStockItem[] = [];
+    await this.applyBatchExclusionFallback(
+      preparedItems,
+      exclusionsByOrderItem,
+      undefined,
+    );
     if (preparedItems.length > 0) {
+      const resolvedForCheck = await this.resolveBatchForItems(
+        preparedItems,
+        exclusionsByOrderItem,
+        undefined,
+        new Map(),
+      );
       const ingredientDemands = this.buildIngredientDemandLines(
         preparedItems,
         exclusionsByOrderItem,
+        resolvedForCheck,
       );
       preCheckedStockWarnings =
         await this.stockValidatorService.assertIngredientsAvailable(
@@ -1117,12 +1225,49 @@ export class KitchenFireService {
     // without going through the public `fireOrderItems` pre-check. When the
     // public method already validated the identical demand moments earlier
     // (`preComputed.skipIngredientCheck`), this re-query is skipped.
+    // QUI-990 — batch-produced preparations: consume their own stock first,
+    // explode only the shortfall. One claim pool for every line of this fire.
+    await this.applyBatchExclusionFallback(preparedItems, exclusionsByOrderItem, tx);
+    const resolvedByItem = await this.resolveBatchForItems(
+      preparedItems,
+      exclusionsByOrderItem,
+      tx,
+      new Map(),
+    );
+    // Ingredients that only appear after resolving a shortfall have no
+    // pre-resolved location yet.
+    // Leaves of an exclusion fallback (full explosion) are not in the
+    // pre-resolved map either, so they are looked up here as well.
+    const consumptionLocations = new Map(locationByProduct);
+    const extraLeafSources: Array<Array<{ component_product_id: number }>> = [
+      ...resolvedByItem.values(),
+      ...preparedItems.map((p) => p.bomLines),
+    ];
+    for (const lines of extraLeafSources) {
+      for (const l of lines) {
+        if (consumptionLocations.has(l.component_product_id)) continue;
+        try {
+          consumptionLocations.set(
+            l.component_product_id,
+            await this.stockLevelManager.getDefaultLocationForProduct(
+              l.component_product_id,
+              undefined,
+              tx,
+            ),
+          );
+        } catch {
+          // Same as the pre-resolution: no location, no movement for this leaf.
+        }
+      }
+    }
+
     let stockWarnings: InsufficientStockItem[] =
       preComputed.preCheckedStockWarnings ?? [];
     if (!preComputed.skipIngredientCheck && preparedItems.length > 0) {
       const ingredientDemands = this.buildIngredientDemandLines(
         preparedItems,
         exclusionsByOrderItem,
+        resolvedByItem,
       );
       stockWarnings = await this.stockValidatorService.assertIngredientsAvailable(
         ingredientDemands,
@@ -1170,36 +1315,45 @@ export class KitchenFireService {
         : bomLines;
 
       // Per-leaf consumption: stock × orderQty × bomMultiplier.
-      // CP-POS-SVC-PERF-001 / A.3 — per-leaf updateStock calls are
-      // independent (each touches its own stock_levels row), so we
-      // collect them and run in parallel via Promise.all. Cuts N
-      // sequential round-trips to a single burst per order_item while
-      // preserving the kds_session_id mapping (per item, not per leaf).
+      // QUI-988 — per-leaf updateStock calls run SEQUENTIALLY. A recipe can
+      // repeat an ingredient (e.g. sugar in a sub-recipe and in the parent):
+      // two lines then hit the same stock_levels row, and in parallel both
+      // read the same quantity so one write overwrote the other (lost
+      // update) while both movements were inserted. One movement per leaf is
+      // kept for traceability/costing. kds_session_id is per item, not per leaf.
       const itemKdsSessionId =
         openSessionByKds.get(
           kdsByProduct.get(orderItem.product_id!) ?? defaultKds.id,
         ) ?? null;
-      const updateStockPromises: Promise<any>[] = [];
       const validLines: Array<{
-        line: (typeof effectiveBomLines)[number];
+        line: { component_product_id: number; quantity: number };
         consumedQty: number;
         locationId: number;
       }> = [];
-      for (const line of effectiveBomLines) {
-        const consumedQty = Math.round(line.quantity * orderQty);
+      // QUI-990 — a resolved item carries ABSOLUTE quantities (stock + shortfall).
+      const resolvedLines = resolvedByItem.get(orderItem.id);
+      const consumableLines: Array<{ component_product_id: number; quantity: number }> =
+        resolvedLines ??
+        effectiveBomLines.map((l) => ({
+          component_product_id: l.component_product_id,
+          quantity: l.quantity * orderQty,
+        }));
+      for (const line of consumableLines) {
+        const consumedQty = Math.round(line.quantity);
         if (!Number.isFinite(consumedQty) || consumedQty <= 0) {
           this.logger.warn(
             `Skipping zero/invalid BOM line in recipe for order item ${orderItem.id}: component=${line.component_product_id} qty=${line.quantity}`,
           );
           continue;
         }
-        const locationId = locationByProduct.get(line.component_product_id);
+        const locationId = consumptionLocations.get(line.component_product_id);
         if (!locationId) continue;
         validLines.push({ line, consumedQty, locationId });
       }
+      const results: Array<Awaited<ReturnType<StockLevelManager['updateStock']>>> = [];
       for (const { line, consumedQty, locationId } of validLines) {
-        updateStockPromises.push(
-          this.stockLevelManager.updateStock(
+        results.push(
+          await this.stockLevelManager.updateStock(
             {
               product_id: line.component_product_id,
               location_id: locationId,
@@ -1229,7 +1383,6 @@ export class KitchenFireService {
           ),
         );
       }
-      const results = await Promise.all(updateStockPromises);
       for (const result of results) {
         if (result?.cost_snapshot) {
           cogsTotal += Number(result.cost_snapshot.total_cost || 0);
@@ -2176,9 +2329,12 @@ export class KitchenFireService {
       if (!recipe) continue; // sin receta activa: no consume insumos al disparar
       let bom = bomCache.get(recipe.id);
       if (!bom) {
-        bom = await this.recipesService.explodeBom(recipe.id, {
-          [recipe.id]: 1,
-        });
+        bom = await this.recipesService.explodeBom(
+          recipe.id,
+          { [recipe.id]: 1 },
+          undefined,
+          { stopAtBatchProduced: true },
+        );
         bomCache.set(recipe.id, bom);
       }
       items.push({
@@ -2190,7 +2346,17 @@ export class KitchenFireService {
         bomLines: bom,
       });
     }
-    const demands = this.buildIngredientDemandLines(items, new Map());
+    const resolvedByItem = await this.resolveBatchForItems(
+      items,
+      new Map(),
+      opts.tx,
+      new Map(),
+    );
+    const demands = this.buildIngredientDemandLines(
+      items,
+      new Map(),
+      resolvedByItem,
+    );
     const shortages = await this.stockValidatorService.findInsufficientLines(
       demands,
       { tx: opts.tx, kind: 'ingredient' },
@@ -2666,6 +2832,7 @@ export class KitchenFireService {
           recipe.id,
           { [recipe.id]: 1 },
           client,
+          { stopAtBatchProduced: true },
         );
         bomCache.set(recipe.id, bomLines);
       }

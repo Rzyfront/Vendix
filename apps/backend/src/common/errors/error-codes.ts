@@ -28,6 +28,8 @@ export const ErrorCodes = {
   SCHED_ALREADY_SCHEDULED: { code: 'SCHED_ALREADY_SCHEDULED', httpStatus: 409, devMessage: 'Esta orden ya tiene un agendamiento.' },
   SCHED_INVALID_TRANSITION: { code: 'SCHED_INVALID_TRANSITION', httpStatus: 409, devMessage: 'Ese cambio de estado no está permitido para el pedido.' },
   SCHED_EXCEPTION_NOT_FOUND: { code: 'SCHED_EXCEPTION_NOT_FOUND', httpStatus: 404, devMessage: 'Excepción de agenda no encontrada.' },
+  SCHED_KITCHEN_NOT_ALLOWED: { code: 'SCHED_KITCHEN_NOT_ALLOWED', httpStatus: 409, devMessage: 'Un pedido cancelado, entregado o no recogido no se puede enviar a cocina.' },
+  SCHED_NOTHING_TO_SEND: { code: 'SCHED_NOTHING_TO_SEND', httpStatus: 409, devMessage: 'Este pedido no tiene platos pendientes por enviar a cocina.' },
 
   // Adiciones de producto
   OPT_DISABLED: { code: 'OPT_DISABLED', httpStatus: 400, devMessage: 'Las adiciones no están activas en esta tienda.' },

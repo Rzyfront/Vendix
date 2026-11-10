@@ -138,6 +138,7 @@ import { OrderHistoryService } from '../orders/order-history/order-history.servi
 import { ProcessReservedPosPaymentDto } from './dto/create-payment.dto';
 import { WalletBalanceService } from '../wallet/services/wallet-balance.service';
 import { assertNoActiveFinancialSplit } from '../orders/shared/financial-split-policy';
+import { kitchenPendingItemsWhere } from '../scheduled-orders/scheduled-orders.service';
 import {
   GATE_RETRY_BY_REQUESTER,
   GateDecision,
@@ -1748,6 +1749,10 @@ export class PaymentsService {
                 product_id: { not: null },
                 inventory_consumed_at_fire: false,
                 products: { product_type: 'prepared' },
+                // QUI-989 — un pedido programado no va a cocina ni gasta la
+                // receta al cobrar: se envía desde la agenda (send-to-kitchen)
+                // el día del pedido.
+                orders: { fulfillment_schedule: { is: null } },
                 // [resid-fiscal] — No re-disparar ítems cancelados (D2). Si
                 // entra al fire, KDS recibe un plato fantasma que el cliente
                 // no pidió y el cocinero cobraría como desperdicio.
@@ -1788,6 +1793,30 @@ export class PaymentsService {
                     createPosPaymentDto.store_id,
                     ctx,
                   );
+              }
+            } else {
+              // QUI-989 — los platos de un pedido programado no van a cocina
+              // al cobrar: esperan "Enviar a cocina" desde la agenda. Cobrado
+              // con la cocina pendiente, el pedido debe quedar `processing`
+              // en vez de cerrarse ahora: un pedido `finished` es terminal y
+              // el envío manual posterior se rechazaría
+              // (KITCHEN_FIRE_NOT_ELIGIBLE_001). Sin platos de cocina, el
+              // pedido programado se cierra al cobrar como antes. Cuenta las
+              // mismas líneas que la agenda envía a cocina: los platos
+              // producidos en lote nunca pasan por ahí y dejarían el pedido
+              // abierto para siempre.
+              const pendingScheduledKitchenLines = await tx.order_items.count(
+                {
+                  where: {
+                    AND: [
+                      kitchenPendingItemsWhere(order.id, order.store_id),
+                      { orders: { fulfillment_schedule: { isNot: null } } },
+                    ],
+                  },
+                },
+              );
+              if (pendingScheduledKitchenLines > 0) {
+                hasKitchenItems = true;
               }
             }
           }
@@ -5493,6 +5522,8 @@ export class PaymentsService {
           product_id: { not: null },
           inventory_consumed_at_fire: false,
           products: { product_type: 'prepared' },
+          // QUI-989 — los pedidos programados no se disparan a cocina al cobrar.
+          orders: { fulfillment_schedule: { is: null } },
         },
         select: { id: true },
       });

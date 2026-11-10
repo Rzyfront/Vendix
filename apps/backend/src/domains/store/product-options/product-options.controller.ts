@@ -14,11 +14,14 @@ import { Permissions } from '../../auth/decorators/permissions.decorator';
 import { ResponseService } from '@common/responses/response.service';
 import { RequestContextService } from '@common/context/request-context.service';
 import { VendixHttpException, ErrorCodes } from '../../../common/errors';
+import { IndustryModuleGuard } from '../../../common/guards/industry-module.guard';
+import { IndustryModule } from '../../../common/decorators/industry-module.decorator';
 import { ProductOptionsService } from './product-options.service';
 import { ProductOptionGroupInputDto } from './dto/product-options.dto';
 
 @Controller('store/product-option-groups')
-@UseGuards(PermissionsGuard)
+@UseGuards(PermissionsGuard, IndustryModuleGuard)
+@IndustryModule('products_option_groups')
 export class ProductOptionsController {
   constructor(
     private readonly productOptions: ProductOptionsService,
