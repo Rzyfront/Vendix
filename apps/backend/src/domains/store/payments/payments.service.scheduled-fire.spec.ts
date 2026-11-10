@@ -464,13 +464,19 @@ describe('PaymentsService fire-to-kitchen vs pedidos programados (QUI-989)', () 
    * filtro que excluye ordenes con agendamiento, como lo haria la base real.
    */
   let lastCount: jest.Mock | undefined;
-  const makeTx = (scheduled: boolean, preparedLines = true): any => {
+  const makeTx = (
+    scheduled: boolean,
+    preparedLines = true,
+    batchOnly = false,
+  ): any => {
     // Kitchen lines of a scheduled order that wait for the agenda's
     // "Enviar a cocina" (the query asks for orders WITH a schedule).
     const count = (lastCount = jest.fn(async ({ where }: any) => {
       const asked = JSON.stringify(where ?? {});
       const asksScheduled = asked.includes('isNot');
       if (!asked.includes('"product_type":"prepared"')) return 0;
+      // Batch-produced dishes only match a filter that does not exclude them.
+      if (batchOnly && asked.includes('"is_batch_produced":false')) return 0;
       return scheduled && asksScheduled && preparedLines ? 1 : 0;
     }));
     const findMany = jest.fn(async ({ where }: any) => {
@@ -507,12 +513,16 @@ describe('PaymentsService fire-to-kitchen vs pedidos programados (QUI-989)', () 
     );
   };
 
-  const arrange = (scheduled: boolean, preparedLines = true) => {
+  const arrange = (
+    scheduled: boolean,
+    preparedLines = true,
+    batchOnly = false,
+  ) => {
     contextSpy = jest
       .spyOn(RequestContextService, 'getContext')
       .mockReturnValue({ store_id: 1, organization_id: 55 } as any);
     (prisma as any).$transaction = jest.fn(async (cb: any) =>
-      cb(makeTx(scheduled, preparedLines)),
+      cb(makeTx(scheduled, preparedLines, batchOnly)),
     );
     jest.spyOn(service as any, 'createOrUpdateOrderFromPos').mockResolvedValue({
       order: restaurantOrder,
@@ -594,6 +604,15 @@ describe('PaymentsService fire-to-kitchen vs pedidos programados (QUI-989)', () 
       .mockResolvedValue(undefined as any);
     await service.processPosPayment(dto(), posUser);
     expect(kitchenPendingArg(statusSpy)).toBe(true);
+  });
+
+  it('un pedido programado con solo platos por lote se cierra al cobrarlo', async () => {
+    arrange(true, true, true);
+    const statusSpy = jest
+      .spyOn(service, 'updateOrderPaymentStatus')
+      .mockResolvedValue(undefined as any);
+    await service.processPosPayment(dto(), posUser);
+    expect(kitchenPendingArg(statusSpy)).toBe(false);
   });
 
   it('el pedido programado cuenta las mismas líneas pendientes que "Enviar a cocina" de la agenda', async () => {
