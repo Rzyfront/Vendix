@@ -1638,16 +1638,23 @@ export class OrdersService {
    * count from the single source `kitchenPendingItemsWhere`. Null otherwise
    * (no count is read). The raw relation is not exposed.
    */
-  private async attachScheduledKitchenInfo(order: any): Promise<void> {
+  private async attachScheduledKitchenInfo(order: {
+    id: number;
+    store_id?: number | null;
+    fulfillment_schedule?: { id: number; status: string } | null;
+    scheduled_kitchen?: { schedule_id: number; pending_item_count: number } | null;
+  }): Promise<void> {
     const schedule = order.fulfillment_schedule ?? null;
     delete order.fulfillment_schedule;
     order.scheduled_kitchen = null;
     if (!schedule || !['scheduled', 'in_production', 'ready'].includes(schedule.status)) {
       return;
     }
-    const store_id: number | undefined = order.store_id;
+    const store_id = order.store_id;
     if (!store_id) return;
-    const pending_item_count = await (this.prisma.withoutScope() as any).order_items.count({
+    const pending_item_count = await (
+      this.prisma.withoutScope() as unknown as Prisma.TransactionClient
+    ).order_items.count({
       where: kitchenPendingItemsWhere(order.id, store_id),
     });
     order.scheduled_kitchen = { schedule_id: schedule.id, pending_item_count };
