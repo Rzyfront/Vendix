@@ -34,6 +34,7 @@ import {
   DISPLAY_STATUS_LABELS,
   DISPLAY_STATUS_ORDER,
   RESCHEDULABLE_STATUSES,
+  RESCHEDULABLE_STORED_STATUSES,
   ScheduledOrder,
   ScheduledOrderDisplayStatus,
   customerName,
@@ -674,7 +675,12 @@ export class AgendaPageComponent {
 
   // --- arrastrar y soltar (reprogramar) --------------------------------
   canDrag(o: ScheduledOrder): boolean {
-    return this.canReschedule() && !this.isMobile() && RESCHEDULABLE_STATUSES.includes(o.display_status);
+    return (
+      this.canReschedule() &&
+      !this.isMobile() &&
+      RESCHEDULABLE_STATUSES.includes(o.display_status) &&
+      RESCHEDULABLE_STORED_STATUSES.includes(o.status)
+    );
   }
 
   onDragStart(ev: DragEvent, o: ScheduledOrder): void {

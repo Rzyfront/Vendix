@@ -55,8 +55,19 @@ export const DISPLAY_STATUS_ORDER: ScheduledOrderDisplayStatus[] = [
   'cancelled',
 ];
 
-/** Estados desde los que aún se puede reprogramar (arrastrar). */
+/**
+ * Estados mostrados desde los que aún se puede reprogramar (arrastrar): un
+ * pedido vencido (franja pasada sin entrega) se puede mover a otra franja.
+ */
 export const RESCHEDULABLE_STATUSES: ScheduledOrderDisplayStatus[] = [
+  'scheduled',
+  'in_production',
+  'ready',
+  'expired',
+];
+
+/** Estados guardados que el backend acepta al reprogramar. */
+export const RESCHEDULABLE_STORED_STATUSES: ScheduledOrderStatus[] = [
   'scheduled',
   'in_production',
   'ready',
