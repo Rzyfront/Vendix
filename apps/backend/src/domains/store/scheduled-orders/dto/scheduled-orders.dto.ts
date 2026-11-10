@@ -43,7 +43,7 @@ export class AgendaQueryDto {
 
   @ApiProperty({ required: false, example: 'scheduled,ready', description: 'Estados separados por coma' })
   @IsOptional()
-  @Matches(/^(scheduled|in_production|ready|delivered|no_show|cancelled)(,(scheduled|in_production|ready|delivered|no_show|cancelled))*$/, {
+  @Matches(/^(scheduled|in_production|ready|delivered|expired|cancelled)(,(scheduled|in_production|ready|delivered|expired|cancelled))*$/, {
     message: 'Estado de pedido programado no válido.',
   })
   status?: string;

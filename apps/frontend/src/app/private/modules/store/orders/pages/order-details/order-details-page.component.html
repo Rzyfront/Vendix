@@ -825,6 +825,19 @@
                 <span>{{ productionLabel }}</span>
               </p>
             }
+            @if (canSendScheduledToKitchen()) {
+              <div class="mb-2 flex justify-end">
+                <app-button
+                  variant="outline"
+                  size="sm"
+                  [loading]="sendingScheduledToKitchen()"
+                  (clicked)="sendScheduledToKitchen()"
+                  data-testid="send-scheduled-to-kitchen"
+                >
+                  Enviar a cocina
+                </app-button>
+              </div>
+            }
             <div class="space-y-1 items-compact">
               @for (item of orderData.order_items; track item.id) {
                 <div
@@ -3787,7 +3800,7 @@
           <div class="border border-border rounded-xl p-3 space-y-3">
             <div>
               <p class="text-sm font-bold text-text-primary">
-                Producción ya finalizada
+                {{ order()?.production_status === "completed" ? "Producción ya finalizada" : "Producción parcial" }}
               </p>
               <p class="text-xs text-text-secondary mt-0.5">
                 Lo producido para este pedido estaba reservado. Elige qué

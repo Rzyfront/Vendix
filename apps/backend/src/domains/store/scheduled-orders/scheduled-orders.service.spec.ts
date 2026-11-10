@@ -1,6 +1,10 @@
 import { RequestContextService } from '@common/context/request-context.service';
 import { FulfillmentAvailabilityService } from './fulfillment-availability.service';
-import { ScheduledOrdersService } from './scheduled-orders.service';
+import {
+  ScheduledOrdersService,
+  deriveFulfillmentDisplayStatus,
+  kitchenPendingItemsWhere,
+} from './scheduled-orders.service';
 
 const TZ = 'America/Bogota';
 const NOW = new Date('2026-11-02T13:00:00.000Z'); // lunes 08:00 local
@@ -472,6 +476,162 @@ describe('ScheduledOrdersService', () => {
       const detail: any = await service.findOne(1);
 
       expect(detail.order.order_items.map((l: any) => l.production_order?.id)).toEqual([900, 901]);
+    });
+  });
+
+  describe('deriveFulfillmentDisplayStatus (S23)', () => {
+    const NOW_D = new Date('2026-11-03T12:00:00.000Z');
+    const FUTURE_END = new Date('2026-11-03T17:00:00.000Z');
+    const PAST_END = new Date('2026-11-03T10:00:00.000Z');
+    const base = {
+      stored_status: 'scheduled',
+      produced_at: null as Date | null,
+      scheduled_end: FUTURE_END,
+      order_state: 'processing',
+      production_statuses: [] as string[],
+      pending_kitchen_count: 0,
+    };
+    const derive = (over: Partial<typeof base>) =>
+      deriveFulfillmentDisplayStatus({ ...base, ...over }, NOW_D);
+
+    it('cancelled when the sale is cancelled, even with finished production', () => {
+      expect(derive({ order_state: 'cancelled', production_statuses: ['completed'] })).toBe('cancelled');
+    });
+    it('cancelled when the sale is refunded', () => {
+      expect(derive({ order_state: 'refunded', production_statuses: ['in_progress'] })).toBe('cancelled');
+    });
+    it('cancelled when the stored schedule was cancelled (cancelForOrder)', () => {
+      expect(derive({ stored_status: 'cancelled' })).toBe('cancelled');
+    });
+    it('delivered when the sale is finished or delivered', () => {
+      expect(derive({ order_state: 'finished', scheduled_end: PAST_END })).toBe('delivered');
+      expect(derive({ order_state: 'delivered' })).toBe('delivered');
+    });
+    it('ready when every linked production order is completed and nothing is pending for the kitchen', () => {
+      expect(derive({ production_statuses: ['completed', 'completed'] })).toBe('ready');
+    });
+    it('production completed but dishes still pending for the kitchen is in_production, not ready', () => {
+      expect(derive({ production_statuses: ['completed'], pending_kitchen_count: 2 })).toBe('in_production');
+    });
+    it('in_production when production started (in_progress / partially_completed / partly completed)', () => {
+      expect(derive({ production_statuses: ['in_progress'] })).toBe('in_production');
+      expect(derive({ production_statuses: ['partially_completed'] })).toBe('in_production');
+      expect(derive({ production_statuses: ['completed', 'draft'] })).toBe('in_production');
+    });
+    it('in_production when the order was sent to the kitchen (produced_at set)', () => {
+      expect(derive({ produced_at: new Date('2026-11-03T09:00:00.000Z') })).toBe('in_production');
+    });
+    it('scheduled when nothing started, nothing was sent and production is only draft', () => {
+      expect(derive({})).toBe('scheduled');
+      expect(derive({ production_statuses: ['draft'] })).toBe('scheduled');
+    });
+    it('expired (not no_show) when the slot passed without delivery and the sale is open', () => {
+      expect(derive({ scheduled_end: PAST_END })).toBe('expired');
+      expect(derive({ scheduled_end: PAST_END, stored_status: 'no_show' })).toBe('expired');
+      expect(derive({ scheduled_end: PAST_END, production_statuses: ['completed'] })).toBe('expired');
+    });
+    it('a cancelled sale past its slot stays cancelled, not expired', () => {
+      expect(derive({ scheduled_end: PAST_END, order_state: 'cancelled' })).toBe('cancelled');
+    });
+  });
+
+  describe('kitchenPendingItemsWhere', () => {
+    it('keeps the single-order predicate', () => {
+      expect(kitchenPendingItemsWhere(5, 1)).toMatchObject({
+        order_id: 5,
+        orders: { store_id: 1 },
+        cancelled_at: null,
+        skip_kds: false,
+        inventory_consumed_at_fire: false,
+        inventory_committed: false,
+      });
+    });
+    it('accepts many orders for one batched read', () => {
+      expect(kitchenPendingItemsWhere([5, 6], 1)).toMatchObject({
+        order_id: { in: [5, 6] },
+        orders: { store_id: 1 },
+        products: { product_type: 'prepared', is_batch_produced: false },
+      });
+    });
+  });
+
+  describe('getAgenda / findOne derived display_status (S23)', () => {
+    const row = (id: number, order_id: number, extra: Record<string, unknown> = {}) => ({
+      id,
+      store_id: 1,
+      order_id,
+      scheduled_start: new Date('2999-11-03T15:00:00.000Z'),
+      scheduled_end: new Date('2999-11-03T17:00:00.000Z'),
+      status: 'scheduled',
+      produced_at: null,
+      order: { ...FULL_ORDER, id: order_id, state: 'processing', production_orders: [] },
+      ...extra,
+    });
+
+    function agendaHarness(rows: any[], pendingByOrder: Record<number, number>) {
+      const { service } = makeHarness();
+      const prisma: any = (service as any).prisma;
+      prisma.order_fulfillment_schedules.findMany = jest.fn(async () => rows);
+      prisma.order_items = {
+        groupBy: jest.fn(async () =>
+          Object.entries(pendingByOrder).map(([order_id, n]) => ({ order_id: Number(order_id), _count: { _all: n } })),
+        ),
+      };
+      prisma.store_settings.findFirst = jest.fn(async () => ({ settings: {}, stores: { timezone: TZ } }));
+      return { service, prisma };
+    }
+
+    it('adds display_status per row from the sale, its production and the kitchen, with ONE batched pending read', async () => {
+      const rows = [
+        row(1, 50, { order: { ...row(1, 50).order, state: 'cancelled' } }),
+        row(2, 51, { order: { ...row(2, 51).order, state: 'finished' } }),
+        row(3, 52, { order: { ...row(3, 52).order, production_orders: [{ id: 9, product_id: 77, product_variant_id: null, order_number: 'OP-9', status: 'completed' }] } }),
+        row(4, 53, { produced_at: new Date() }),
+        row(5, 54),
+        row(6, 55, { scheduled_end: new Date('2000-01-01T00:00:00.000Z') }),
+      ];
+      const { service, prisma } = agendaHarness(rows, { 53: 1 });
+
+      const agenda: any[] = await service.getAgenda({ from: '2999-11-03', to: '2999-11-03' });
+
+      expect(agenda.map((r) => r.display_status)).toEqual([
+        'cancelled', 'delivered', 'ready', 'in_production', 'scheduled', 'expired',
+      ]);
+      expect(prisma.order_items.groupBy).toHaveBeenCalledTimes(1);
+      expect(agenda[0].status).toBe('scheduled'); // stored status untouched
+    });
+
+    it('filters by the derived status, not by the stored one', async () => {
+      const rows = [row(1, 50), row(2, 51, { order: { ...row(2, 51).order, state: 'finished' } })];
+      const { service, prisma } = agendaHarness(rows, {});
+
+      const agenda: any[] = await service.getAgenda({ from: '2999-11-03', to: '2999-11-03', status: 'delivered' });
+
+      expect(agenda.map((r) => r.id)).toEqual([2]);
+      // the status filter is applied after deriving, so the DB read does not narrow by stored status
+      expect(prisma.order_fulfillment_schedules.findMany.mock.calls[0][0].where.status).toBeUndefined();
+    });
+
+    it('findOne exposes display_status and keeps pending_kitchen_item_count', async () => {
+      const { service, rows } = makeHarness();
+      rows.push({
+        id: 1, store_id: 1, order_id: 50,
+        scheduled_start: new Date(SLOT.start), scheduled_end: new Date('2999-01-01T00:00:00.000Z'),
+        status: 'scheduled', hold_expires_at: null,
+      });
+      const prisma: any = (service as any).prisma;
+      const original = prisma.order_fulfillment_schedules.findFirst;
+      prisma.order_fulfillment_schedules.findFirst = jest.fn(async (args: any) => {
+        const base = await original(args);
+        if (!base || !args.include) return base;
+        return { ...base, changes: [], order: applySelect({ ...FULL_ORDER, production_orders: [] }, args.include.order.select) };
+      });
+      prisma.order_items = { count: jest.fn(async () => 2) };
+
+      const detail: any = await service.findOne(1);
+
+      expect(detail.pending_kitchen_item_count).toBe(2);
+      expect(detail.display_status).toBe('scheduled');
     });
   });
 });

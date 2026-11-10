@@ -1,6 +1,7 @@
 import { requestProductionSaleSync } from '../production/production-sale-sync';
 import { findProductionOrderForLine } from '../production/production-order-pairing.util';
 import { suggestProductionDisposition } from '../production/production-disposition.util';
+import { kitchenPendingItemsWhere } from '../scheduled-orders/scheduled-orders.service';
 import { loadSessionIntakeAnswers } from '../service-sessions/utils/session-intake-answers.util';
 import { assertNoActiveFinancialSplit } from './shared/financial-split-policy';
 import { resolveKitchenMode } from '../kitchen-fire/kitchen-mode.util';
@@ -1631,6 +1632,27 @@ export class OrdersService {
       completedLines.length > 0 ? suggestProductionDisposition(completedLines) : null;
   }
 
+  /**
+   * S23 — for a scheduled order whose schedule still accepts "Enviar a
+   * cocina": `scheduled_kitchen` = { schedule_id, pending_item_count } with the
+   * count from the single source `kitchenPendingItemsWhere`. Null otherwise
+   * (no count is read). The raw relation is not exposed.
+   */
+  private async attachScheduledKitchenInfo(order: any): Promise<void> {
+    const schedule = order.fulfillment_schedule ?? null;
+    delete order.fulfillment_schedule;
+    order.scheduled_kitchen = null;
+    if (!schedule || !['scheduled', 'in_production', 'ready'].includes(schedule.status)) {
+      return;
+    }
+    const store_id: number | undefined = order.store_id;
+    if (!store_id) return;
+    const pending_item_count = await (this.prisma.withoutScope() as any).order_items.count({
+      where: kitchenPendingItemsWhere(order.id, store_id),
+    });
+    order.scheduled_kitchen = { schedule_id: schedule.id, pending_item_count };
+  }
+
   async findOne(id: number) {
     // Auto-scoped by StorePrismaService
     //
@@ -1919,6 +1941,8 @@ export class OrdersService {
             status: true,
           },
         },
+        // S23 — scheduled order: "Enviar a cocina" is offered on this page.
+        fulfillment_schedule: { select: { id: true, status: true } },
         table_sessions: {
           select: {
             id: true,
@@ -1957,6 +1981,7 @@ export class OrdersService {
     await this.signOrderItemImages(order);
 
     this.attachProductionInfo(order);
+    await this.attachScheduledKitchenInfo(order);
 
     // Final con impuesto por línea (display-only, aditivo): `unit_price`
     // persistido resuelto con las tasas del producto (UN batch, no N+1) +

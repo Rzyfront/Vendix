@@ -83,6 +83,12 @@ export interface Order {
   /** T13 — suggested disposition when cancelling with finished production; null = no question. */
   production_cancel_suggestion?: ProductionDisposition | null;
   /**
+   * S23 — scheduled order whose schedule still accepts "Enviar a cocina":
+   * the schedule id and how many dishes are still pending for the kitchen.
+   * Null when the order is not scheduled or can no longer be sent.
+   */
+  scheduled_kitchen?: { schedule_id: number; pending_item_count: number } | null;
+  /**
    * order-truth-and-invoice-tz plan (Objetivos 3/11/12) — verdad única de
    * botones de orden. `orders.service.ts` `findOne` la arma con
    * `buildOrderAvailableActions` (predicados puros de

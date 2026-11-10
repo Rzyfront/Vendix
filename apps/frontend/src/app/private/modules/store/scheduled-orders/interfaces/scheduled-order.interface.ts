@@ -24,27 +24,39 @@ export const STATUS_LABELS: Record<ScheduledOrderStatus, string> = {
   cancelled: 'Cancelada',
 };
 
-export const STATUS_ORDER: ScheduledOrderStatus[] = [
+/**
+ * Status the agenda shows (S23). The backend derives it at read time from the
+ * sale, its production and the kitchen (`display_status`); the stored
+ * `status` is only the history. "Vencido" replaces the old manual "No recogida".
+ */
+export type ScheduledOrderDisplayStatus =
+  | 'scheduled'
+  | 'in_production'
+  | 'ready'
+  | 'delivered'
+  | 'expired'
+  | 'cancelled';
+
+export const DISPLAY_STATUS_LABELS: Record<ScheduledOrderDisplayStatus, string> = {
+  scheduled: 'Programada',
+  in_production: 'En producción',
+  ready: 'Lista',
+  delivered: 'Entregada',
+  expired: 'Vencido',
+  cancelled: 'Cancelada',
+};
+
+export const DISPLAY_STATUS_ORDER: ScheduledOrderDisplayStatus[] = [
   'scheduled',
   'in_production',
   'ready',
   'delivered',
-  'no_show',
+  'expired',
   'cancelled',
 ];
 
-/** Transiciones válidas (espejo de `FULFILLMENT_TRANSITIONS` del backend). */
-export const STATUS_TRANSITIONS: Record<ScheduledOrderStatus, ScheduledOrderStatus[]> = {
-  scheduled: ['in_production', 'cancelled'],
-  in_production: ['ready', 'cancelled'],
-  ready: ['delivered', 'no_show', 'cancelled'],
-  delivered: [],
-  no_show: [],
-  cancelled: [],
-};
-
 /** Estados desde los que aún se puede reprogramar (arrastrar). */
-export const RESCHEDULABLE_STATUSES: ScheduledOrderStatus[] = [
+export const RESCHEDULABLE_STATUSES: ScheduledOrderDisplayStatus[] = [
   'scheduled',
   'in_production',
   'ready',
@@ -123,7 +135,10 @@ export interface ScheduledOrder {
   scheduled_start: string;
   scheduled_end: string;
   fulfillment_type: 'pickup' | 'delivery';
+  /** Stored status (history only). The agenda reads `display_status`. */
   status: ScheduledOrderStatus;
+  /** Derived at read time from the sale, its production and the kitchen. */
+  display_status: ScheduledOrderDisplayStatus;
   produced_at: string | null;
   ready_at: string | null;
   delivered_at: string | null;
@@ -207,7 +222,7 @@ export interface ProductionList {
 
 export interface AgendaPreference {
   view: AgendaViewMode;
-  status: ScheduledOrderStatus | 'all';
+  status: ScheduledOrderDisplayStatus | 'all';
 }
 
 /** Describe un `variant_attributes` (texto u objeto) como texto legible. */
@@ -247,11 +262,11 @@ export function uomLabel(uom: string | null | undefined): string {
 }
 
 /** Color de acento por estado (tokens del tema, un color distinto por estado). */
-export const STATUS_COLORS: Record<ScheduledOrderStatus, string> = {
+export const DISPLAY_STATUS_COLORS: Record<ScheduledOrderDisplayStatus, string> = {
   scheduled: 'var(--color-info, #3b82f6)',
   in_production: 'var(--color-warning, #f59e0b)',
   ready: 'var(--color-success, #16a34a)',
   delivered: 'var(--color-primary, #7ed7a5)',
-  no_show: 'var(--color-error, #dc2626)',
+  expired: 'var(--color-error, #dc2626)',
   cancelled: 'var(--color-text-muted, #94a3b8)',
 };

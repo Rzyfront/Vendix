@@ -1389,6 +1389,43 @@ export class OrderDetailsPageComponent {
     }
   });
 
+  /**
+   * S23 — "Enviar a cocina" of a scheduled order lives here (the agenda is
+   * read-only). Same endpoint the agenda used; the pending count comes from the
+   * backend (`kitchenPendingItemsWhere`), never recomputed here.
+   */
+  readonly sendingScheduledToKitchen = signal(false);
+  readonly canSendScheduledToKitchen = computed(() => {
+    const o = this.order();
+    const kitchen = o?.scheduled_kitchen;
+    return (
+      !!kitchen &&
+      kitchen.pending_item_count > 0 &&
+      !['cancelled', 'refunded', 'finished'].includes(String(o?.state)) &&
+      this.hasNamedPermission('store:scheduled_orders:update')
+    );
+  });
+
+  sendScheduledToKitchen(): void {
+    const kitchen = this.order()?.scheduled_kitchen;
+    if (!kitchen || this.sendingScheduledToKitchen()) return;
+    this.sendingScheduledToKitchen.set(true);
+    this.http
+      .post(`${environment.apiUrl}/store/scheduled-orders/${kitchen.schedule_id}/send-to-kitchen`, {})
+      .pipe(takeUntilDestroyed(this.destroyRef))
+      .subscribe({
+        next: () => {
+          this.sendingScheduledToKitchen.set(false);
+          this.toastService.success('Pedido enviado a cocina');
+          this.refreshOrder();
+        },
+        error: (err: unknown) => {
+          this.sendingScheduledToKitchen.set(false);
+          this.toastService.error(extractApiErrorMessage(err));
+        },
+      });
+  }
+
   /** Suggestion for finished production on cancel; null = no question. */
   readonly cancelProductionSuggestion = computed<ProductionDisposition | null>(
     () => this.order()?.production_cancel_suggestion ?? null,
