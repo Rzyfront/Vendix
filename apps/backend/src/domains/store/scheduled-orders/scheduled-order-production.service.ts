@@ -327,6 +327,7 @@ export class ScheduledOrderProductionService implements OnModuleInit {
           select: {
             id: true,
             order_number: true,
+            customer_alias: true,
             users: { select: { first_name: true, last_name: true } },
             order_items: {
               where: { cancelled_at: null },
@@ -334,6 +335,7 @@ export class ScheduledOrderProductionService implements OnModuleInit {
                 product_name: true,
                 variant_attributes: true,
                 quantity: true,
+                notes: true,
                 order_item_options: {
                   select: { group_name: true, option_name: true, quantity: true, uom: true },
                 },
@@ -366,11 +368,15 @@ export class ScheduledOrderProductionService implements OnModuleInit {
         order_id: s.order.id,
         order_number: s.order.order_number,
         status: s.status,
-        customer_name: customer ? `${customer.first_name ?? ''} ${customer.last_name ?? ''}`.trim() : null,
+        customer_name:
+          (customer ? `${customer.first_name ?? ''} ${customer.last_name ?? ''}`.trim() : '') ||
+          s.order.customer_alias?.trim() ||
+          null,
         items: s.order.order_items.map((item) => ({
           product_name: item.product_name,
           variant_attributes: item.variant_attributes,
           quantity: Number(item.quantity),
+          notes: item.notes ?? null,
           options: item.order_item_options.map((o) => ({ ...o, quantity: Number(o.quantity) })),
         })),
       });

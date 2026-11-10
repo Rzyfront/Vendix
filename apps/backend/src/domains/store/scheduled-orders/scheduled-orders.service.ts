@@ -80,6 +80,33 @@ export function kitchenPendingItemsWhere(
   };
 }
 
+/**
+ * Order projection shared by the agenda and the detail: customer (user or
+ * anonymous alias) and every line with its add-ons and note (QUI-991).
+ */
+const SCHEDULED_ORDER_SELECT = {
+  id: true,
+  order_number: true,
+  grand_total: true,
+  state: true,
+  customer_id: true,
+  customer_alias: true,
+  users: { select: { first_name: true, last_name: true, phone: true, email: true } },
+  order_items: {
+    where: { cancelled_at: null },
+    select: {
+      id: true,
+      product_name: true,
+      variant_attributes: true,
+      quantity: true,
+      notes: true,
+      order_item_options: {
+        select: { group_name: true, option_name: true, quantity: true, uom: true, scope: true },
+      },
+    },
+  },
+} satisfies Prisma.ordersSelect;
+
 function toDate(value: string | Date): Date {
   const date = value instanceof Date ? value : new Date(value);
   if (Number.isNaN(date.getTime())) {
@@ -393,28 +420,7 @@ export class ScheduledOrdersService {
       },
       orderBy: { scheduled_start: 'asc' },
       include: {
-        order: {
-          select: {
-            id: true,
-            order_number: true,
-            grand_total: true,
-            state: true,
-            customer_id: true,
-            users: { select: { first_name: true, last_name: true, phone: true, email: true } },
-            order_items: {
-              select: {
-                id: true,
-                product_name: true,
-                variant_attributes: true,
-                quantity: true,
-                notes: true,
-                order_item_options: {
-                  select: { group_name: true, option_name: true, quantity: true, uom: true, scope: true },
-                },
-              },
-            },
-          },
-        },
+        order: { select: SCHEDULED_ORDER_SELECT },
       },
     });
   }
@@ -431,7 +437,7 @@ export class ScheduledOrdersService {
             orderBy: { created_at: 'asc' },
             include: { changed_by: { select: { id: true, first_name: true, last_name: true } } },
           },
-          order: { select: { id: true, order_number: true, grand_total: true, state: true } },
+          order: { select: SCHEDULED_ORDER_SELECT },
         },
       }),
       // Aditivo: cuántos platos puede mandar hoy "Enviar a cocina".

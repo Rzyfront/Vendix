@@ -335,3 +335,66 @@ describe('ScheduledOrderProductionService.sendToKitchen (QUI-989)', () => {
     expect(kitchenFire.fireOrderItems).not.toHaveBeenCalled();
   });
 });
+
+describe('ScheduledOrderProductionService.productionList (QUI-991)', () => {
+  it('incluye la nota (dedicatoria) de cada línea y el alias cuando no hay usuario', async () => {
+    const pick = (value: any, select: any): any => {
+      if (Array.isArray(value)) return value.map((v) => pick(v, select));
+      if (!select || value === null || typeof value !== 'object') return value;
+      return Object.fromEntries(
+        Object.entries(select)
+          .filter(([, sel]) => sel)
+          .map(([k, sel]) => [k, sel === true ? value[k] : pick(value[k], (sel as any).select)]),
+      );
+    };
+    const order = {
+      id: 50,
+      order_number: 'ORD-50',
+      customer_alias: 'Valentina Ríos',
+      users: null,
+      order_items: [
+        {
+          product_name: 'Torta mediana',
+          variant_attributes: null,
+          quantity: 1,
+          notes: 'Dedicatoria: Feliz cumpleaños, Sofía',
+          order_item_options: [{ group_name: 'Relleno', option_name: 'Ganache', quantity: 1, uom: 'unit' }],
+        },
+      ],
+    };
+    const schedule = {
+      id: 1,
+      status: 'in_production',
+      order_id: 50,
+      scheduled_start: new Date('2026-11-11T15:00:00.000Z'),
+      scheduled_end: new Date('2026-11-11T17:00:00.000Z'),
+    };
+    const prisma: any = {
+      store_settings: { findFirst: jest.fn(async () => ({ settings: {}, stores: { timezone: 'America/Bogota' } })) },
+      order_fulfillment_schedules: {
+        findMany: jest.fn(async (args: any) => [
+          { ...schedule, order: pick(order, args.include.order.select) },
+        ]),
+      },
+      withoutScope: () => prisma,
+    };
+    jest.spyOn(RequestContextService, 'getContext').mockReturnValue({ store_id: 1 } as any);
+    const service = new ScheduledOrderProductionService(
+      prisma,
+      { registerProductionStartHook: jest.fn() } as any,
+      {} as any,
+      {} as any,
+      {} as any,
+      { emit: jest.fn() } as any,
+      {} as any,
+    );
+
+    const result: any = await service.productionList('2026-11-11');
+
+    const entry = result.slots[0].orders[0];
+    expect(entry.customer_name).toBe('Valentina Ríos');
+    expect(entry.items[0].notes).toBe('Dedicatoria: Feliz cumpleaños, Sofía');
+    expect(entry.items[0].options[0].option_name).toBe('Ganache');
+    jest.restoreAllMocks();
+  });
+});

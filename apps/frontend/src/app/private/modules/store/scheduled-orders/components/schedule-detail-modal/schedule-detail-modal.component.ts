@@ -32,6 +32,7 @@ import {
   ScheduledOrderStatus,
   customerName,
   describeVariant,
+  uomLabel,
 } from '../../interfaces/scheduled-order.interface';
 
 const ACTION_LABELS: Record<Exclude<ScheduledOrderStatus, 'scheduled'>, string> = {
@@ -115,7 +116,9 @@ const ACTION_LABELS: Record<Exclude<ScheduledOrderStatus, 'scheduled'>, string> 
                   @for (opt of item.order_item_options ?? []; track $index) {
                     <div class="muted">
                       + {{ opt.option_name }}
-                      @if (+opt.quantity !== 1) { × {{ opt.quantity }} }
+                      @if (+opt.quantity !== 1 || opt.uom) {
+                        × {{ opt.quantity }}{{ uom(opt.uom) ? ' ' + uom(opt.uom) : '' }}
+                      }
                       <span class="text-xs">({{ opt.group_name }})</span>
                     </div>
                   }
@@ -298,9 +301,10 @@ export class ScheduleDetailModalComponent {
     return ACTION_LABELS[s];
   }
   customer(d: ScheduledOrderDetail): string {
-    return customerName(d.order.users);
+    return customerName(d.order.users, d.order.customer_alias);
   }
   variant = describeVariant;
+  uom = uomLabel;
   toNumber(v: number | string): number {
     return Number(v);
   }
