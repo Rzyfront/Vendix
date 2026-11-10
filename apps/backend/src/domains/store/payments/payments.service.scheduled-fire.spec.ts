@@ -562,6 +562,41 @@ describe('PaymentsService fire-to-kitchen vs pedidos programados (QUI-989)', () 
     is_draft: false,
   });
 
+  describe('pedido programado en el POS (pedidos-programados-ux S1, S2)', () => {
+    const SLOT = { start: '2026-11-20T15:00:00.000Z', end: '2026-11-20T17:00:00.000Z' };
+
+    it('S1: sin cliente se rechaza con SCHED_CUSTOMER_REQUIRED antes de crear la venta', async () => {
+      arrange(true);
+      const createForOrder = jest.fn();
+      (service as any).scheduledOrdersService = { createForOrder };
+      await expect(
+        service.processPosPayment({ ...dto(), schedule: SLOT }, posUser),
+      ).rejects.toMatchObject({ errorCode: 'SCHED_CUSTOMER_REQUIRED' });
+      expect((prisma as any).$transaction).not.toHaveBeenCalled();
+      expect(createForOrder).not.toHaveBeenCalled();
+    });
+
+    it('S2: con cliente agenda con el delivery_type de la orden (método de envío)', async () => {
+      arrange(true);
+      const createForOrder = jest.fn().mockResolvedValue({});
+      (service as any).scheduledOrdersService = { createForOrder };
+      jest.spyOn(service as any, 'createOrUpdateOrderFromPos').mockResolvedValue({
+        order: { ...restaurantOrder, customer_id: 77, delivery_type: 'pickup', order_items: [] },
+        hasSerialized: false,
+        promotionsSnapshot: [],
+        appliedPromotions: [],
+        couponInfo: { coupon_id: null, coupon_code: null, discount_amount: 0 },
+        kitchenFire: null,
+        closedSessionId: null,
+      });
+      await service.processPosPayment({ ...dto(), customer_id: 77, schedule: SLOT }, posUser);
+      expect(createForOrder).toHaveBeenCalledWith(
+        expect.anything(),
+        expect.objectContaining({ order_id: 10, schedule: SLOT, delivery_type: 'pickup' }),
+      );
+    });
+  });
+
   it('cobrar un pedido programado NO lo manda a cocina', async () => {
     arrange(true);
     await service.processPosPayment(dto(), posUser);

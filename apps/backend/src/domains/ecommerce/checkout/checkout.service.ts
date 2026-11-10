@@ -2754,6 +2754,7 @@ export class CheckoutService {
             store_id: order.store_id,
             order_id: order.id,
             schedule: dto.schedule!,
+            delivery_type: order.delivery_type,
             user_id: user_id ?? null,
           }),
         );

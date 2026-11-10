@@ -368,6 +368,8 @@
               @if (scheduledActive()) {
                 <app-pos-scheduled-order-picker
                   section="slot"
+                  [methodName]="scheduledMethodName()"
+                  [hasCustomer]="!!cartState()?.customer"
                   [cartItems]="scheduledOrdersAvailable() ? (cartState()?.items ?? []) : []"
                 ></app-pos-scheduled-order-picker>
               }
@@ -400,16 +402,16 @@
              para que el footer lea shippingCost/canConfirm/isProcessing. -->
         @if (stepKeys().includes('envio')) {
           <div class="step-panel" tabindex="-1" [class.step-hidden]="currentStepKey() !== 'envio'">
-            <!-- Pedido programado: domicilio o recogida en tienda (solo los
-                 tipos habilitados). Con domicilio, el envío se configura debajo
-                 con su propio Método → Dirección → Costo. -->
+            <!-- Pedido programado: resumen de la entrega y, debajo, los métodos
+                 de envío de la tienda (domicilio y, si existe, recogida) con su
+                 Método → Dirección → Costo, igual que un domicilio. -->
             @if (scheduledActive()) {
               <app-pos-scheduled-order-picker
-                section="fulfillment"
-                [deliveryDisabled]="isAnonymousSale()"
+                section="summary"
+                [methodName]="scheduledMethodName()"
               ></app-pos-scheduled-order-picker>
             }
-            @if (!scheduledActive() || effectiveIntent() === 'delivery') {
+            @if (effectiveIntent() === 'delivery') {
               <app-pos-shipping-step
                 [cartState]="cartState()"
                 [customerAlias]="saleMode() === 'alias' ? customerAlias().trim() : ''"

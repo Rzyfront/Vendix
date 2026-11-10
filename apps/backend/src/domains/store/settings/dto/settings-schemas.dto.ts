@@ -2410,7 +2410,10 @@ export class ScheduledOrdersSettingsDto {
   @Max(365)
   max_days_ahead?: number;
 
-  @ApiProperty({ example: ['pickup'], required: false })
+  // Obsoleto e ignorado: la entrega usa los métodos de envío de la tienda.
+  // Se sigue aceptando porque `forbidNonWhitelisted` rechazaría el guardado de
+  // un cliente en caché que aún lo envía.
+  @ApiProperty({ example: ['pickup'], required: false, deprecated: true })
   @IsOptional()
   @IsArray()
   @ArrayMinSize(1)
