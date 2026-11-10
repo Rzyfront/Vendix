@@ -90,6 +90,19 @@ export class ManufacturingOrdersService {
     return this.transition(id, 'cancel');
   }
 
+  /** S21: "Volver a iniciar" — a cancelled order of an active sale goes back to draft. */
+  restart(id: number): Observable<ManufacturingOrder> {
+    return this.http
+      .post<ApiResponse<ManufacturingOrder>>(
+        `${this.apiUrl}${this.basePath}/${id}/restart`,
+        {},
+      )
+      .pipe(
+        map((res) => res.data),
+        catchError((e) => handleManufacturingError(e)),
+      );
+  }
+
   complete(
     id: number,
     dto: CompleteManufacturingOrderDto,

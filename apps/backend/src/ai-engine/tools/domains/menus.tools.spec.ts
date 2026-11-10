@@ -571,6 +571,27 @@ describe('menus.tools · K-12 recipe / K-13 menu / K-14 BCG / K-15 production', 
       expect(complete).not.toHaveBeenCalled();
     });
 
+    it('(a) sad: una orden parcialmente finalizada (Planta) se finaliza en Planta, no aquí', async () => {
+      const complete = jest.fn();
+      const tools = productionTools({
+        findOne: jest.fn().mockResolvedValue({
+          id: 31,
+          status: 'partially_completed',
+          product: { name: 'Salsa madre' },
+        }),
+        complete,
+      });
+
+      const answer = await run(tools, 'manage_production_order', {
+        action: 'complete',
+        order_id: 31,
+        produced_qty: 9,
+      });
+
+      expect(answer.error).toMatch(/orden de Planta parcialmente finalizada/);
+      expect(complete).not.toHaveBeenCalled();
+    });
+
     it('(b) happy start/cancel respetan la máquina de estados', async () => {
       const start = jest.fn().mockResolvedValue({ id: 31 });
       const cancel = jest.fn().mockResolvedValue({ id: 31 });

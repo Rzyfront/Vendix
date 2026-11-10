@@ -11,8 +11,24 @@ import type { InsufficientStockItem } from '../../../../../../core/utils/parse-a
 export type ProductionOrderStatus =
   | 'draft'
   | 'in_progress'
+  /** Planta only: part of the planned quantity is already produced; the order stays running. */
+  | 'partially_completed'
   | 'completed'
   | 'cancelled';
+
+/** An order the cook is still working on: drives the timer, "Finalizar" and carry-over. */
+export const isProductionRunning = (status: string): boolean =>
+  status === 'in_progress' || status === 'partially_completed';
+
+/**
+ * A partially finished order only exists in Planta, whose detail knows what is
+ * left to produce, the lot and the locations. The restaurant `complete`
+ * endpoint rejects it, so "Finalizar" opens the Planta detail instead.
+ */
+export const finishesInPlanta = (status: string): boolean =>
+  status === 'partially_completed';
+
+export const PLANTA_ORDER_DETAIL_BASE = '/admin/manufacturing/orders';
 
 export interface ProductionOrderProduct {
   id: number;
@@ -94,6 +110,10 @@ export interface ProductionOrder {
 
   // Populated by GET list/detail.
   product?: ProductionOrderProduct;
+  /** S19: sold variant this order makes (null for base products and manual orders). */
+  product_variant?: { id: number; name: string } | null;
+  /** S21: detail only; true when "Volver a iniciar" applies (cancelled order, active sale, live line). */
+  can_restart?: boolean;
   recipe?: ProductionOrderRecipe;
 
   // T13 (QUI-995): link with the sale. `source` is 'manual' for orders
@@ -185,6 +205,8 @@ export interface ProductionDayOrder {
   source: string | null;
   product_id: number;
   product_name: string;
+  /** S19: variant name when the order makes a variant (null otherwise). */
+  variant_name?: string | null;
   planned_qty: number;
   produced_qty: number | null;
   started_at: string | null;

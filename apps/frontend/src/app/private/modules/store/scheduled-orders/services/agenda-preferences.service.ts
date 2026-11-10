@@ -3,8 +3,8 @@ import { AuthFacade } from '../../../../../core/store/auth/auth.facade';
 import {
   AgendaPreference,
   AgendaViewMode,
-  ScheduledOrderStatus,
-  STATUS_ORDER,
+  DISPLAY_STATUS_ORDER,
+  ScheduledOrderDisplayStatus,
 } from '../interfaces/scheduled-order.interface';
 
 const CACHE_KEY = 'vendix_scheduled_orders_agenda';
@@ -46,8 +46,8 @@ export class AgendaPreferencesService {
     const view: AgendaViewMode = r['view'] === 'day' ? 'day' : 'week';
     const status =
       typeof r['status'] === 'string' &&
-      STATUS_ORDER.includes(r['status'] as ScheduledOrderStatus)
-        ? (r['status'] as ScheduledOrderStatus)
+      DISPLAY_STATUS_ORDER.includes(r['status'] as ScheduledOrderDisplayStatus)
+        ? (r['status'] as ScheduledOrderDisplayStatus)
         : 'all';
     return { view, status };
   }

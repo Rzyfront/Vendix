@@ -7083,6 +7083,24 @@ export const ErrorCodes = {
     devMessage:
       'La orden de producción cambió en otra operación; recarga e intenta de nuevo',
   },
+  PRODUCTION_ORDER_RESTART_NOT_LINKED: {
+    code: 'PRODUCTION_ORDER_RESTART_NOT_LINKED',
+    httpStatus: 409,
+    devMessage:
+      'Solo se puede volver a iniciar una orden de producción cancelada que esté ligada a una venta',
+  },
+  PRODUCTION_ORDER_RESTART_SALE_CLOSED: {
+    code: 'PRODUCTION_ORDER_RESTART_SALE_CLOSED',
+    httpStatus: 409,
+    devMessage:
+      'La venta de esta orden de producción está cancelada, reembolsada o finalizada; no se puede volver a iniciar',
+  },
+  PRODUCTION_ORDER_RESTART_NO_LIVE_LINE: {
+    code: 'PRODUCTION_ORDER_RESTART_NO_LIVE_LINE',
+    httpStatus: 409,
+    devMessage:
+      'La venta ya no tiene una línea a producción vigente para esta orden; no se puede volver a iniciar',
+  },
   MFG_ORDER_CONCURRENT_UPDATE: {
     code: 'MFG_ORDER_CONCURRENT_UPDATE',
     httpStatus: 409,

@@ -173,6 +173,21 @@ export class ProductionOrdersService {
       );
   }
 
+  /** S21: "Volver a iniciar" — a cancelled order of an active sale goes back to draft. */
+  restart(id: number): Observable<ProductionOrder> {
+    return this.http
+      .post<ApiResponse<ProductionOrder>>(`${this.apiUrl}${this.basePath}/${id}/restart`, {})
+      .pipe(
+        map((res) => res.data),
+        catchError(this.handleError),
+      );
+  }
+
+  /** "Producto · Variante" when the order makes a variant (S19). */
+  static displayName(productName: string, variantName?: string | null): string {
+    return variantName ? `${productName} · ${variantName}` : productName;
+  }
+
   /** QUI-1002: per-order estimated minutes override (null clears it). */
   updateEstimatedMinutes(
     id: number,
@@ -260,6 +275,8 @@ export class ProductionOrdersService {
         return 'Finalizada';
       case 'cancelled':
         return 'Cancelada';
+      case 'partially_completed':
+        return 'Parcialmente finalizada';
     }
   }
 
@@ -286,6 +303,7 @@ export class ProductionOrdersService {
   ): 'neutral' | 'primary' | 'success' | 'error' {
     switch (status) {
       case 'in_progress':
+      case 'partially_completed':
         return 'primary';
       case 'completed':
         return 'success';

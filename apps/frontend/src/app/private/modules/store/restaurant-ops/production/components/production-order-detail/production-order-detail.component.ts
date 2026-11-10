@@ -10,6 +10,7 @@ import {
   signal,
   untracked,
 } from '@angular/core';
+import { Router } from '@angular/router';
 import { takeUntilDestroyed } from '@angular/core/rxjs-interop';
 import {
   BadgeComponent,
@@ -20,7 +21,13 @@ import {
   ToastService,
 } from '../../../../../../../shared/components';
 import { formatStockWarningSummary } from '../../../../../../../core/utils/stock-shortage.util';
-import { ProductionOrder, ProductionOrderComponent } from '../../interfaces';
+import {
+  ProductionOrder,
+  PLANTA_ORDER_DETAIL_BASE,
+  ProductionOrderComponent,
+  finishesInPlanta,
+  isProductionRunning,
+} from '../../interfaces';
 import { ProductionOrdersService, ProductionSseService } from '../../services';
 import { formatYieldQuantity } from '../../services/yield-unit.util';
 import { ProductionSaleLinesComponent } from '../production-sale-lines/production-sale-lines.component';
@@ -64,7 +71,7 @@ import { ProductionSaleLinesComponent } from '../production-sale-lines/productio
           }
           <div class="min-w-0 flex-1">
             <p class="truncate text-base font-semibold text-text-primary">
-              {{ o.product?.name || 'Producción #' + o.id }}
+              {{ displayName() || 'Producción #' + o.id }}
             </p>
             <p class="text-sm text-text-secondary">
               {{ o.order_number || '#' + o.id }} · Planeado:
@@ -114,13 +121,18 @@ import { ProductionSaleLinesComponent } from '../production-sale-lines/productio
             <app-production-sale-lines
               [saleOrder]="o.sale_order ?? null"
               [lines]="o.order_lines ?? []"
-              [productName]="o.product?.name ?? ''"
+              [productName]="displayName()"
             />
           </section>
         }
 
-        @if (canStart() || canComplete() || canCancel()) {
+        @if (canStart() || canComplete() || canCancel() || canRestart()) {
           <div class="flex flex-wrap justify-end gap-2">
+            @if (canRestart()) {
+              <app-button variant="primary" [loading]="busy()" (clicked)="restart()">
+                Volver a iniciar
+              </app-button>
+            }
             @if (canCancel()) {
               <app-button variant="outline-danger" [disabled]="busy()" (clicked)="cancel()">
                 Cancelar
@@ -152,6 +164,7 @@ export class ProductionOrderDetailComponent {
   private readonly dialog = inject(DialogService);
   private readonly destroyRef = inject(DestroyRef);
   private readonly sse = inject(ProductionSseService);
+  private readonly router = inject(Router);
 
   readonly orderId = input<number | null>(null);
   /** Emitted after start / complete / cancel so hosts refresh their lists. */
@@ -167,9 +180,25 @@ export class ProductionOrderDetailComponent {
   readonly canStart = computed(() => this.order()?.status === 'draft');
   readonly canComplete = computed(() => {
     const s = this.order()?.status;
+    // A partially finished order (Planta) stays running until it is completed.
+    return s === 'draft' || (s != null && isProductionRunning(s));
+  });
+  readonly canCancel = computed(() => {
+    const s = this.order()?.status;
     return s === 'draft' || s === 'in_progress';
   });
-  readonly canCancel = this.canComplete;
+  /** S21: the backend decides (cancelled order, active sale, live production line). */
+  readonly canRestart = computed(() => {
+    const o = this.order();
+    return o?.status === 'cancelled' && o.can_restart === true;
+  });
+  /** S19: "Producto · Variante". */
+  readonly displayName = computed(() => {
+    const o = this.order();
+    return o?.product?.name
+      ? ProductionOrdersService.displayName(o.product.name, o.product_variant?.name)
+      : '';
+  });
 
   constructor() {
     effect(() => {
@@ -233,7 +262,11 @@ export class ProductionOrderDetailComponent {
   async complete(): Promise<void> {
     const o = this.order();
     if (!o || this.busy()) return;
-    const name = o.product?.name ?? `#${o.id}`;
+    if (finishesInPlanta(o.status)) {
+      void this.router.navigate([PLANTA_ORDER_DETAIL_BASE, o.id]);
+      return;
+    }
+    const name = this.displayName() || `#${o.id}`;
 
     if (o.source === 'order') {
       // Linked to a sale: the quantity is the purchased one, no batch rounding.
@@ -269,6 +302,19 @@ export class ProductionOrderDetailComponent {
       return;
     }
     this.doComplete(o, batches * yieldQty);
+  }
+
+  async restart(): Promise<void> {
+    const o = this.order();
+    if (!o || this.busy()) return;
+    const ok = await this.dialog.confirm({
+      title: 'Volver a iniciar',
+      message: `La orden de "${this.displayName() || `#${o.id}`}" volverá a quedar en espera con la cantidad y la entrega vigentes de la venta.`,
+      confirmText: 'Volver a iniciar',
+      cancelText: 'Cancelar',
+    });
+    if (!ok) return;
+    this.run(this.service.restart(o.id), 'Producción reiniciada', 'Error al volver a iniciar la producción');
   }
 
   async cancel(): Promise<void> {

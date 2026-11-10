@@ -2,7 +2,7 @@
   @if (order(); as o) {
     <app-sticky-header
       [title]="o.order_number || 'Orden #' + o.id"
-      [subtitle]="o.product?.name || 'Producto #' + o.product_id"
+      [subtitle]="displayName(o)"
       icon="factory"
       variant="glass"
       [showBackButton]="true"
@@ -97,7 +97,7 @@
           <app-production-sale-lines
             [saleOrder]="sd.sale_order ?? null"
             [lines]="sd.order_lines ?? []"
-            [productName]="o.product?.name ?? ''"
+            [productName]="displayName(o)"
           />
         </app-card>
       }

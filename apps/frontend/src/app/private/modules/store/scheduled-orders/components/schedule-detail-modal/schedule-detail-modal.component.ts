@@ -7,11 +7,10 @@ import {
   inject,
   input,
   model,
-  output,
   signal,
 } from '@angular/core';
 import { takeUntilDestroyed } from '@angular/core/rxjs-interop';
-import { AuthFacade } from '../../../../../../core/store/auth/auth.facade';
+import { Router } from '@angular/router';
 import { StoreSettingsFacade } from '../../../../../../core/store/store-settings/store-settings.facade';
 import { extractApiErrorMessage } from '../../../../../../core/utils/api-error-handler';
 import { formatStoreDateTime } from '../../../../../../shared/utils/date.util';
@@ -22,7 +21,6 @@ import {
   ToastService,
 } from '../../../../../../shared/components';
 import { CurrencyPipe } from '../../../../../../shared/pipes/currency/currency.pipe';
-import { ProductionOrderDetailModalComponent } from '../../../restaurant-ops/production/components/production-order-detail/production-order-detail-modal.component';
 import { ProductionOrdersService } from '../../../restaurant-ops/production/services/production-orders.service';
 import { ProductionSseService } from '../../../restaurant-ops/production/services/production-sse.service';
 import { ProductionOrderRef } from '../../../restaurant-ops/production/interfaces/production-order.interface';
@@ -31,24 +29,16 @@ import { ScheduledOrdersApiService } from '../../services/scheduled-orders-api.s
 import {
   DESTINATION_LABELS,
   ScheduledOrderItem,
-  STATUS_COLORS,
+  DISPLAY_STATUS_COLORS,
+  DISPLAY_STATUS_LABELS,
   STATUS_LABELS,
-  STATUS_TRANSITIONS,
   ScheduledOrderChange,
   ScheduledOrderDetail,
-  ScheduledOrderStatus,
+  ScheduledOrderDisplayStatus,
   customerName,
   describeVariant,
   uomLabel,
 } from '../../interfaces/scheduled-order.interface';
-
-const ACTION_LABELS: Record<Exclude<ScheduledOrderStatus, 'scheduled'>, string> = {
-  in_production: 'Iniciar producción',
-  ready: 'Marcar lista',
-  delivered: 'Entregada',
-  no_show: 'No recogida',
-  cancelled: 'Cancelar',
-};
 
 @Component({
   selector: 'app-schedule-detail-modal',
@@ -60,7 +50,6 @@ const ACTION_LABELS: Record<Exclude<ScheduledOrderStatus, 'scheduled'>, string> 
     SpinnerComponent,
     CurrencyPipe,
     NonProducibleNoticeComponent,
-    ProductionOrderDetailModalComponent,
   ],
   styles: [
     `
@@ -95,14 +84,13 @@ const ACTION_LABELS: Record<Exclude<ScheduledOrderStatus, 'scheduled'>, string> 
       [(isOpen)]="isOpen"
       [title]="detail() ? 'Pedido ' + detail()!.order.order_number : 'Pedido programado'"
       size="lg"
-      (cancel)="confirmingCancel.set(false)"
     >
       @if (loading()) {
         <div class="flex justify-center py-10"><app-spinner /></div>
       } @else if (detail(); as d) {
         <div class="flex flex-col gap-4">
           <div class="flex flex-wrap items-center justify-between gap-2">
-            <span class="st-badge" [style.--st]="color(d.status)">{{ label(d.status) }}</span>
+            <span class="st-badge" [style.--st]="color(d.display_status)">{{ label(d.display_status) }}</span>
             <span class="muted text-sm">
               {{ fulfillmentLabel(d) }} · {{ formatDateTime(d.scheduled_start) }}
             </span>
@@ -136,7 +124,7 @@ const ACTION_LABELS: Record<Exclude<ScheduledOrderStatus, 'scheduled'>, string> 
                           class="st-badge cursor-pointer"
                           [style.--st]="'var(--color-text-primary)'"
                           [attr.title]="'Ver la orden de producción'"
-                          (click)="openProduction(po)"
+                          (click)="goToProduction(po.id)"
                         >
                           {{ po.order_number || '#' + po.id }} · {{ productionStatus(po) }}
                         </button>
@@ -190,91 +178,56 @@ const ACTION_LABELS: Record<Exclude<ScheduledOrderStatus, 'scheduled'>, string> 
       }
 
       <div slot="footer" class="flex flex-wrap justify-end gap-2 w-full">
-        @if (canSendToKitchen() && !confirmingCancel()) {
-          <app-button variant="outline" [loading]="sendingToKitchen()" [disabled]="acting()" (clicked)="sendToKitchen()">
-            Enviar a cocina
-          </app-button>
-        }
-        @for (action of actions(); track action) {
-          @if (action === 'cancelled') {
-            @if (confirmingCancel()) {
-              <app-button variant="danger" [loading]="acting()" (clicked)="run('cancelled')">
-                Confirmar cancelación
-              </app-button>
-              <app-button variant="ghost" (clicked)="confirmingCancel.set(false)">Volver</app-button>
-            } @else {
-              <app-button variant="outline-danger" [disabled]="acting()" (clicked)="confirmingCancel.set(true)">
-                {{ actionLabel(action) }}
-              </app-button>
-            }
-          } @else if (!confirmingCancel()) {
-            <app-button
-              [variant]="action === 'no_show' ? 'outline-warning' : 'primary'"
-              [disabled]="acting()"
-              (clicked)="run(action)"
-            >
-              {{ actionLabel(action) }}
+        @if (detail(); as d) {
+          <app-button variant="outline" (clicked)="goToSaleOrder(d.order_id)">Ver orden de venta</app-button>
+          @for (po of productionOrders(); track po.id) {
+            <app-button variant="outline" (clicked)="goToProduction(po.id)">
+              {{ productionOrders().length > 1 ? 'Ver orden de producción ' + (po.order_number || '#' + po.id) : 'Ver orden de producción' }}
             </app-button>
           }
         }
       </div>
     </app-modal>
-
-    <app-production-order-detail-modal
-      [(isOpen)]="showProduction"
-      [orderId]="productionOrderId()"
-      (changed)="onProductionChanged()"
-    />
   `,
 })
 export class ScheduleDetailModalComponent {
   private readonly api = inject(ScheduledOrdersApiService);
   private readonly toast = inject(ToastService);
-  private readonly auth = inject(AuthFacade);
+  private readonly router = inject(Router);
   private readonly settings = inject(StoreSettingsFacade);
   private readonly destroyRef = inject(DestroyRef);
   private readonly sse = inject(ProductionSseService);
 
   readonly scheduleId = input<number | null>(null);
   readonly isOpen = model<boolean>(false);
-  /** Se emite tras cambiar el estado, para que la agenda recargue. */
-  readonly changed = output<void>();
-
   readonly detail = signal<ScheduledOrderDetail | null>(null);
   readonly loading = signal(false);
-  readonly acting = signal(false);
-  readonly confirmingCancel = signal(false);
-  readonly sendingToKitchen = signal(false);
-  /** Shared production order detail (T13) opened from a `production` line. */
-  readonly productionOrderId = signal<number | null>(null);
-  readonly showProduction = signal(false);
 
-  openProduction(po: ProductionOrderRef): void {
-    this.productionOrderId.set(po.id);
-    this.showProduction.set(true);
+  /** Distinct production orders linked to the sale's lines ("Ver orden de producción"). */
+  readonly productionOrders = computed<ProductionOrderRef[]>(() => {
+    const seen = new Map<number, ProductionOrderRef>();
+    for (const item of this.detail()?.order.order_items ?? []) {
+      if (item.production_order && !seen.has(item.production_order.id)) {
+        seen.set(item.production_order.id, item.production_order);
+      }
+    }
+    return [...seen.values()];
+  });
+
+  /** The agenda is read-only (S23): changes are made on the sale / production order. */
+  goToSaleOrder(orderId: number): void {
+    this.isOpen.set(false);
+    void this.router.navigate(['/admin/orders', orderId]);
+  }
+
+  goToProduction(productionOrderId: number): void {
+    this.isOpen.set(false);
+    void this.router.navigate(['/admin/restaurant-ops/production/orders', productionOrderId]);
   }
 
   productionStatus(po: ProductionOrderRef): string {
     return ProductionOrdersService.statusLabelSafe(po.status);
   }
-
-  /** Start / complete / cancel in the shared detail: refresh this order and the agenda. */
-  onProductionChanged(): void {
-    const d = this.detail();
-    this.changed.emit();
-    if (d) this.load(d.id);
-  }
-
-  /** Hay platos preparados (no de lote) sin enviar y el pedido sigue vigente. */
-  readonly canSendToKitchen = computed(() => {
-    const d = this.detail();
-    return (
-      !!d &&
-      this.auth.hasPermission('store:scheduled_orders:update') &&
-      ['scheduled', 'in_production', 'ready'].includes(d.status) &&
-      (d.pending_kitchen_item_count ?? 0) > 0
-    );
-  });
 
   /**
    * Destination state of one line (QUI-999). A line KDS does not manage
@@ -302,21 +255,10 @@ export class ScheduleDetailModalComponent {
     }
   }
 
-  readonly actions = computed<Exclude<ScheduledOrderStatus, 'scheduled'>[]>(() => {
-    const d = this.detail();
-    if (!d || !this.auth.hasPermission('store:scheduled_orders:update')) return [];
-    const now = Date.now();
-    return STATUS_TRANSITIONS[d.status].filter(
-      (s): s is Exclude<ScheduledOrderStatus, 'scheduled'> =>
-        s !== 'scheduled' && !(s === 'no_show' && now < new Date(d.scheduled_end).getTime()),
-    );
-  });
-
   constructor() {
     effect(() => {
       const id = this.scheduleId();
       if (this.isOpen() && id !== null) {
-        this.confirmingCancel.set(false);
         this.detail.set(null);
         this.load(id);
       }
@@ -324,7 +266,7 @@ export class ScheduleDetailModalComponent {
     // Production state changed elsewhere: refresh the open detail silently.
     this.sse.listen(this.destroyRef, () => {
       const id = this.scheduleId();
-      if (this.isOpen() && id !== null && !this.acting()) this.load(id, true);
+      if (this.isOpen() && id !== null) this.load(id, true);
     });
   }
 
@@ -347,57 +289,11 @@ export class ScheduleDetailModalComponent {
       });
   }
 
-  sendToKitchen(): void {
-    const d = this.detail();
-    if (!d || this.acting() || this.sendingToKitchen()) return;
-    this.sendingToKitchen.set(true);
-    this.api
-      .sendToKitchen(d.id)
-      .pipe(takeUntilDestroyed(this.destroyRef))
-      .subscribe({
-        next: () => {
-          this.sendingToKitchen.set(false);
-          this.toast.success('Pedido enviado a cocina');
-          this.changed.emit();
-          this.load(d.id);
-        },
-        error: (err) => {
-          this.sendingToKitchen.set(false);
-          this.toast.error(extractApiErrorMessage(err));
-        },
-      });
+  label(s: ScheduledOrderDisplayStatus): string {
+    return DISPLAY_STATUS_LABELS[s];
   }
-
-  run(status: ScheduledOrderStatus): void {
-    const d = this.detail();
-    if (!d || this.acting()) return;
-    this.acting.set(true);
-    this.api
-      .updateStatus(d.id, status)
-      .pipe(takeUntilDestroyed(this.destroyRef))
-      .subscribe({
-        next: () => {
-          this.acting.set(false);
-          this.confirmingCancel.set(false);
-          this.toast.success(`Pedido: ${STATUS_LABELS[status].toLowerCase()}`);
-          this.changed.emit();
-          this.load(d.id);
-        },
-        error: (err) => {
-          this.acting.set(false);
-          this.toast.error(extractApiErrorMessage(err));
-        },
-      });
-  }
-
-  label(s: ScheduledOrderStatus): string {
-    return STATUS_LABELS[s];
-  }
-  color(s: ScheduledOrderStatus): string {
-    return STATUS_COLORS[s];
-  }
-  actionLabel(s: Exclude<ScheduledOrderStatus, 'scheduled'>): string {
-    return ACTION_LABELS[s];
+  color(s: ScheduledOrderDisplayStatus): string {
+    return DISPLAY_STATUS_COLORS[s];
   }
   customer(d: ScheduledOrderDetail): string {
     return customerName(d.order.users, d.order.customer_alias);

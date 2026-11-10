@@ -9231,3 +9231,67 @@ describe('OrderFlowService.collectDraftReservationDemand — QUI-999 destinos', 
     expect(demand([line(4, { skip_kds: false, fulfillment_destination: 'kds' })])).toEqual([]);
   });
 });
+
+// S22 (T30 blocker 1) — a direct POS sale already posted `order.completed`
+// (keyed by the order) for its stock lines at the till; the production lines
+// it commits at delivery are posted as `production.sale_cogs` (keyed by the
+// production order), so the second posting is not dropped as a duplicate.
+describe('OrderFlowService.emitDeliveryCogs — costo de producción al entregar (S22)', () => {
+  const build = () => {
+    const emitter = { emit: jest.fn() };
+    const service = new OrderFlowService(
+      {} as unknown as StorePrismaService,
+      emitter as any,
+      {} as any, {} as any, {} as any, {} as any, {} as any,
+      {} as any,
+      { logCustom: jest.fn().mockResolvedValue(undefined) } as any,
+    );
+    const emit = (commit: { totalCost: number; productionCogs?: Array<{ production_order_id: number; total_cost: number }> }) =>
+      (service as any).emitDeliveryCogs({
+        order_id: 10,
+        order_number: 'ORD-10',
+        organization_id: 2,
+        store_id: 3,
+        user_id: 4,
+        commit,
+      });
+    return { emitter, emit };
+  };
+
+  it('venta mixta: order.completed sin la producción y production.sale_cogs por orden de producción', () => {
+    const { emitter, emit } = build();
+    emit({ totalCost: 8000, productionCogs: [{ production_order_id: 77, total_cost: 3000 }] });
+
+    expect(emitter.emit).toHaveBeenCalledTimes(2);
+    expect(emitter.emit).toHaveBeenCalledWith('order.completed', {
+      order_id: 10, order_number: 'ORD-10', organization_id: 2, store_id: 3, total_cost: 5000, user_id: 4,
+    });
+    expect(emitter.emit).toHaveBeenCalledWith('production.sale_cogs', {
+      organization_id: 2, store_id: 3, order_id: 10, production_order_id: 77, total_cost: 3000, user_id: 4,
+    });
+  });
+
+  it('solo producción: no emite order.completed', () => {
+    const { emitter, emit } = build();
+    emit({ totalCost: 3000, productionCogs: [{ production_order_id: 77, total_cost: 3000 }] });
+
+    expect(emitter.emit).toHaveBeenCalledTimes(1);
+    expect(emitter.emit).toHaveBeenCalledWith('production.sale_cogs', expect.objectContaining({ production_order_id: 77, total_cost: 3000 }));
+  });
+
+  it('sin producción: un solo order.completed con todo el costo, como antes', () => {
+    const { emitter, emit } = build();
+    emit({ totalCost: 5000 });
+
+    expect(emitter.emit).toHaveBeenCalledTimes(1);
+    expect(emitter.emit).toHaveBeenCalledWith('order.completed', {
+      order_id: 10, order_number: 'ORD-10', organization_id: 2, store_id: 3, total_cost: 5000, user_id: 4,
+    });
+  });
+
+  it('sin costo: no emite nada', () => {
+    const { emitter, emit } = build();
+    emit({ totalCost: 0 });
+    expect(emitter.emit).not.toHaveBeenCalled();
+  });
+});

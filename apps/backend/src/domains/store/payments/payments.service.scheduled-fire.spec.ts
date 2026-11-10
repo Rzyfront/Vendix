@@ -517,6 +517,7 @@ describe('PaymentsService fire-to-kitchen vs pedidos programados (QUI-989)', () 
     scheduled: boolean,
     preparedLines = true,
     batchOnly = false,
+    lines: Array<Record<string, unknown>> = [],
   ) => {
     contextSpy = jest
       .spyOn(RequestContextService, 'getContext')
@@ -525,7 +526,7 @@ describe('PaymentsService fire-to-kitchen vs pedidos programados (QUI-989)', () 
       cb(makeTx(scheduled, preparedLines, batchOnly)),
     );
     jest.spyOn(service as any, 'createOrUpdateOrderFromPos').mockResolvedValue({
-      order: restaurantOrder,
+      order: { ...restaurantOrder, order_items: lines },
       hasSerialized: false,
       promotionsSnapshot: [],
       appliedPromotions: [],
@@ -630,6 +631,44 @@ describe('PaymentsService fire-to-kitchen vs pedidos programados (QUI-989)', () 
           { orders: { fulfillment_schedule: { isNot: null } } },
         ],
       },
+    });
+  });
+
+  // S22 — the 4th argument (`deferToFulfillment`) of `updateOrderPaymentStatus`
+  // keeps a paid sale in `processing`; the same call receives it in all three
+  // payment branches.
+  describe('venta con líneas a Producción (S22)', () => {
+    const deferArg = (spy: jest.SpyInstance) => spy.mock.calls[0]?.[3];
+    const run = async (lines: Array<Record<string, unknown>>) => {
+      arrange(false, false, false, lines);
+      const statusSpy = jest
+        .spyOn(service, 'updateOrderPaymentStatus')
+        .mockResolvedValue(undefined as any);
+      await service.processPosPayment(dto(), posUser);
+      return statusSpy;
+    };
+
+    it('una línea viva a producción difiere el cierre: la venta queda abierta', async () => {
+      const spy = await run([{ id: 1, fulfillment_destination: 'production', cancelled_at: null }]);
+      expect(deferArg(spy)).toBe(true);
+    });
+
+    it('sin líneas a producción se cierra como antes', async () => {
+      const spy = await run([{ id: 1, fulfillment_destination: 'stock', cancelled_at: null }]);
+      expect(deferArg(spy)).toBe(false);
+    });
+
+    it('una línea a producción cancelada no la deja abierta', async () => {
+      const spy = await run([{ id: 1, fulfillment_destination: 'production', cancelled_at: new Date() }]);
+      expect(deferArg(spy)).toBe(false);
+    });
+
+    it('updateOrderPaymentStatus: diferido sin cocina queda en processing sin completed_at', async () => {
+      const tx: any = { orders: { update: jest.fn().mockResolvedValue({}) } };
+      await service.updateOrderPaymentStatus(tx, 10, 'succeeded', true, false);
+      const data = tx.orders.update.mock.calls[0][0].data;
+      expect(data.state).toBe('processing');
+      expect(data.completed_at).toBeUndefined();
     });
   });
 });

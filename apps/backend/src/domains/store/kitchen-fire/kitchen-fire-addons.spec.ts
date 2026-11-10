@@ -300,13 +300,14 @@ describe('KitchenFireService — add-ons (QUI-1000)', () => {
     });
 
     function resendHarness(items: any[], reason: 'remake_dish' | 'lost_command') {
+      const orderState = reason === 'lost_command' ? 'processing' : 'cancelled';
       const { service, tx, stockLevelManager } = build();
       // Stateful claim: the marker is already set from the first fire, and a
       // reset by the resend clears it.
       let addonsMarked = true;
       const state = { reset: false };
       (tx as any).$queryRaw = jest.fn().mockResolvedValue([{ id: 100 }]);
-      tx.orders.findFirst.mockResolvedValue({ id: 100, state: 'cancelled' });
+      tx.orders.findFirst.mockResolvedValue({ id: 100, state: orderState });
       (tx as any).kitchen_ticket_items = { ...tx.kitchen_ticket_items, findFirst: jest.fn().mockResolvedValue(null) };
       tx.order_items.updateMany.mockImplementation(({ where, data }: any) => {
         if (data?.addons_consumed_at === null) {
@@ -324,7 +325,7 @@ describe('KitchenFireService — add-ons (QUI-1000)', () => {
       const order = { id: 100, store_id: 1, order_number: 'ORD-100', table_sessions: [], order_items: items };
       const prisma: any = {
         stores: { findUnique: jest.fn().mockResolvedValue({ industries: ['restaurant'] }) },
-        orders: { findFirst: jest.fn().mockResolvedValue(order), findUnique: jest.fn().mockResolvedValue({ state: 'cancelled' }) },
+        orders: { findFirst: jest.fn().mockResolvedValue(order), findUnique: jest.fn().mockResolvedValue({ state: orderState }) },
         kds: { findFirst: jest.fn().mockResolvedValue({ id: 5 }) },
         store_settings: { findFirst: jest.fn().mockResolvedValue(null) },
         kitchen_tickets: { findMany: jest.fn().mockResolvedValue([]) },
@@ -348,13 +349,23 @@ describe('KitchenFireService — add-ons (QUI-1000)', () => {
       expect(moves(stockLevelManager)).toContainEqual([700, -160, 10]);
     });
 
-    it('un plato reusado (no merma) no reinicia el marcador de adiciones', async () => {
-      const { tx, state, run } = resendHarness([item(10, 'after_fire_reused')], 'remake_dish');
+    it('lost_command: un plato reusado (no merma) no reinicia el marcador de adiciones', async () => {
+      const { tx, state, run } = resendHarness([item(10, 'after_fire_reused')], 'lost_command');
       await run();
       expect(state.reset).toBe(false);
       expect(tx.order_items.updateMany).not.toHaveBeenCalledWith(
         expect.objectContaining({ data: { addons_consumed_at: null } }),
       );
+    });
+
+    it('rehacer tras cancelar un plato reusado también reinicia el marcador y vuelve a descontar sus adiciones', async () => {
+      const { tx, stockLevelManager, run } = resendHarness([item(10, 'after_fire_reused')], 'remake_dish');
+      await run();
+      expect(tx.order_items.updateMany).toHaveBeenCalledWith({
+        where: { id: { in: [10] } },
+        data: { addons_consumed_at: null },
+      });
+      expect(moves(stockLevelManager)).toContainEqual([700, -160, 10]);
     });
 
     it('un reenvío por merma que no se puede disparar no limpia el marcador de adiciones', async () => {

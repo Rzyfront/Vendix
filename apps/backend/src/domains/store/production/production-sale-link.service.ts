@@ -12,8 +12,22 @@ import {
 } from './production-sale-sync';
 import { emitProductionOrderUpdated } from './production-order-events';
 import { suggestProductionDisposition } from './production-disposition.util';
+import { findProductionOrderForLine } from './production-order-pairing.util';
 
 const CLOSED_SALE_STATES = ['cancelled', 'refunded'];
+/** Live production lines of a sale: the ones that drive its production orders. */
+const LIVE_PRODUCTION_LINES = {
+  cancelled_at: null,
+  fulfillment_destination: 'production',
+  product_id: { not: null },
+} as const;
+
+/** Delivery instant a sale's production orders anchor on (shared by sync and restart). */
+const saleDueDate = (sale: {
+  created_at: Date | null;
+  fulfillment_schedule: { scheduled_start: Date } | null;
+}): Date => sale.fulfillment_schedule?.scheduled_start ?? sale.created_at ?? new Date();
+
 /** Production states with nothing produced yet: cancelled as is with the sale. */
 const OPEN_PRODUCTION_STATES = ['draft', 'in_progress', 'released'] as const;
 
@@ -243,6 +257,42 @@ export class ProductionSaleLinkService {
     await this.ensureForOrder(payload.order_id);
   }
 
+  /**
+   * S21 — what a cancelled production order would restart with: the state of
+   * its sale and the quantity (sum of the live production lines paired with it,
+   * through `findProductionOrderForLine`) and delivery instant the sync uses.
+   * `null` when the sale does not exist; `qty` 0 when no live line pairs.
+   */
+  async planRestart(
+    order_id: number,
+    production_order_id: number,
+  ): Promise<{ sale_state: string; qty: number; due_date: Date } | null> {
+    const client = this.prisma.withoutScope();
+    const sale = await client.orders.findFirst({
+      where: { id: order_id },
+      select: {
+        id: true,
+        store_id: true,
+        state: true,
+        created_at: true,
+        fulfillment_schedule: { select: { scheduled_start: true } },
+        order_items: {
+          where: LIVE_PRODUCTION_LINES,
+          select: { id: true, product_id: true, product_variant_id: true, quantity: true },
+        },
+      },
+    });
+    if (!sale) return null;
+    const orders = await client.production_orders.findMany({
+      where: { store_id: sale.store_id, order_id: sale.id },
+      select: { id: true, product_id: true, product_variant_id: true },
+    });
+    const qty = sale.order_items
+      .filter((item) => findProductionOrderForLine(orders, item)?.id === production_order_id)
+      .reduce((sum, item) => sum + Number(item.quantity), 0);
+    return { sale_state: sale.state as string, qty, due_date: saleDueDate(sale) };
+  }
+
   async ensureForOrder(order_id: number, attempt = 0): Promise<{ id: number }[]> {
     const client = this.prisma.withoutScope();
     const sale = await client.orders.findFirst({
@@ -254,11 +304,7 @@ export class ProductionSaleLinkService {
         created_at: true,
         fulfillment_schedule: { select: { scheduled_start: true } },
         order_items: {
-          where: {
-            cancelled_at: null,
-            fulfillment_destination: 'production',
-            product_id: { not: null },
-          },
+          where: LIVE_PRODUCTION_LINES,
           select: { id: true, product_id: true, product_variant_id: true, quantity: true },
         },
       },
@@ -283,7 +329,7 @@ export class ProductionSaleLinkService {
         qty: (current?.qty ?? 0) + Number(item.quantity),
       });
     }
-    const due_date = sale.fulfillment_schedule?.scheduled_start ?? sale.created_at ?? new Date();
+    const due_date = saleDueDate(sale);
 
     const recipesByProduct = new Map<
       number,
@@ -369,22 +415,25 @@ export class ProductionSaleLinkService {
             continue;
           }
           result.push({ id: current.id });
-          // The line came back after its order was cancelled (removed and
-          // re-added, or cancelled from Planta): the unique (order_id,
-          // product_id, product_variant_id) forbids a new row, so the cancelled
-          // one returns to draft.
+          // A cancelled order stays cancelled: cancelling production is not
+          // cancelling the sale, and only "Volver a iniciar" (restart) brings it
+          // back. It still follows the sale's current quantity and delivery so
+          // that the restart starts from what the sale says today.
           if (current.status === 'cancelled') {
-            await tx.production_orders.updateMany({
-              where: { id: current.id, status: 'cancelled' },
-              data: {
-                status: 'draft',
-                planned_qty: new Prisma.Decimal(qty),
-                due_date,
-                started_at: null,
-                updated_at: new Date(),
-              },
-            });
-            touched.add(current.id);
+            if (
+              Number(current.planned_qty) !== qty ||
+              current.due_date?.getTime() !== due_date.getTime()
+            ) {
+              await tx.production_orders.updateMany({
+                where: { id: current.id, status: 'cancelled' },
+                data: {
+                  planned_qty: new Prisma.Decimal(qty),
+                  due_date,
+                  updated_at: new Date(),
+                },
+              });
+              touched.add(current.id);
+            }
             continue;
           }
           if (

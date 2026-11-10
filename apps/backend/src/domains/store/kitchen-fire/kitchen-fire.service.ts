@@ -249,6 +249,17 @@ export interface PreExplodedFireContext {
   };
   firedItemIds: number[];
   skippedItemIds: number[];
+  /**
+   * Resend only (waste re-cook, post-cancel remake): the fired lines are
+   * cancelled by design, so the claim must not filter on `cancelled_at`.
+   */
+  includeCancelled?: boolean;
+  /**
+   * Resend only: lines whose add-on marker the resend has just reset. Their
+   * add-ons are consumed even when the scheduled production already ran
+   * (`schedule.produced_at`), which otherwise short-circuits the plan.
+   */
+  reconsumeAddonItemIds?: number[];
   preparedItems: Array<{
     orderItem: {
       id: number;
@@ -1137,6 +1148,7 @@ export class KitchenFireService {
       order_item_options?: FireAddonOption[];
     }>,
     pool: BatchClaimPool,
+    reconsumeItemIds: ReadonlySet<number> = new Set(),
   ): Promise<
     Array<{
       order_item_id: number;
@@ -1152,13 +1164,18 @@ export class KitchenFireService {
       where: { order_id },
       select: { produced_at: true },
     });
-    if (schedule?.produced_at) return [];
+    // The production start consumed every add-on of a scheduled order, so the
+    // fire skips them — except for lines a resend just reset on purpose.
+    const planned = schedule?.produced_at
+      ? withAddons.filter((i) => reconsumeItemIds.has(i.id))
+      : withAddons;
+    if (planned.length === 0) return [];
 
     // `addons_consumed_at` is the one marker shared with the production start:
     // each line claims its add-ons before they are planned, so a line that
     // already gave them up (or loses a race) never deducts them twice.
     const claimed: typeof withAddons = [];
-    for (const item of withAddons) {
+    for (const item of planned) {
       const { count } = await tx.order_items.updateMany({
         where: { id: item.id, addons_consumed_at: null },
         data: { addons_consumed_at: new Date() },
@@ -1408,7 +1425,8 @@ export class KitchenFireService {
         id: { in: claimItemIds },
         order_id: order.id,
         inventory_consumed_at_fire: false,
-        cancelled_at: null,
+        // A resend re-cooks lines that are cancelled by design.
+        ...(preComputed.includeCancelled ? {} : { cancelled_at: null }),
       },
       data: { inventory_consumed_at_fire: true },
     });
@@ -1542,6 +1560,7 @@ export class KitchenFireService {
       order.id,
       [...preparedItems.map((p) => p.orderItem), ...recipeLessItems],
       batchPool,
+      new Set(preComputed.reconsumeAddonItemIds ?? []),
     );
     if (addonPlan.length > 0) {
       // Dish ingredients and add-on components can be the same stock row, so
@@ -2309,7 +2328,9 @@ export class KitchenFireService {
           where: { id: { in: fireIds } },
           data: { inventory_consumed_at_fire: false },
         });
-        const ctx = await this.prepareFireContext(dto.order_id, fireIds, tx);
+        const ctx = await this.prepareFireContext(dto.order_id, fireIds, tx, {
+          includeCancelled: true,
+        });
         if (!ctx) {
           await tx.order_items.updateMany({
             where: { id: { in: fireIds } },
@@ -2344,19 +2365,25 @@ export class KitchenFireService {
         }
         // QUI-1000: a wasted dish lost its add-ons too, so the remake claims
         // and deducts them again (`planAddonConsumption`, inside the fire,
-        // claims by this marker). Only items that really fire are reset: a
-        // resend that aborts or skips an item keeps its marker, so a later
-        // fire never deducts those add-ons twice.
+        // claims by this marker). A post-cancel remake resets every fired
+        // line: the reuse disposal also gave its add-ons back to stock. Only
+        // items that really fire are reset: a resend that aborts or skips an
+        // item keeps its marker, so a later fire never deducts those add-ons
+        // twice.
         const wasteIdSet = new Set(wasteItems.map((it) => it.id));
-        const wasteFireIds = ctx.firedItemIds.filter((id) => wasteIdSet.has(id));
-        if (wasteFireIds.length > 0) {
+        const addonResetIds = remakeIds
+          ? ctx.firedItemIds
+          : ctx.firedItemIds.filter((id) => wasteIdSet.has(id));
+        if (addonResetIds.length > 0) {
           await tx.order_items.updateMany({
-            where: { id: { in: wasteFireIds } },
+            where: { id: { in: addonResetIds } },
             data: { addons_consumed_at: null },
           });
         }
         return this.fireOrderItemsInTx(tx, store_id, {
           ...ctx,
+          includeCancelled: true,
+          reconsumeAddonItemIds: addonResetIds,
           historyExtras: { resend: true, reason: dto.reason },
         });
       });
@@ -3004,6 +3031,12 @@ export class KitchenFireService {
      (the public fireOrderItems path).
      */
     tx?: Prisma.TransactionClient,
+    /**
+     * `includeCancelled` is for `resendOrderItems` only: a waste re-cook and a
+     * post-cancel remake fire lines that are cancelled by design. The normal
+     * fire path keeps skipping cancelled lines.
+     */
+    options: { includeCancelled?: boolean } = {},
   ): Promise<PreExplodedFireContext | null> {
     const context = RequestContextService.getContext();
     const store_id = context?.store_id;
@@ -3030,7 +3063,10 @@ export class KitchenFireService {
         order_items: {
           // Ver nota en `fireOrderItems`: las lineas canceladas no se disparan
           // ni se previsualizan.
-          where: { id: { in: candidateOrderItemIds }, cancelled_at: null },
+          where: {
+            id: { in: candidateOrderItemIds },
+            ...(options.includeCancelled ? {} : { cancelled_at: null }),
+          },
           include: {
             products: {
               select: {
@@ -3211,6 +3247,7 @@ export class KitchenFireService {
       },
       firedItemIds,
       skippedItemIds,
+      ...(options.includeCancelled ? { includeCancelled: true } : {}),
       preparedItems,
       recipeLessItems,
       locationByProduct,

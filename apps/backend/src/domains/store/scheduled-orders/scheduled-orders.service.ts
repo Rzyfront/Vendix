@@ -22,6 +22,19 @@ export type FulfillmentStatus =
   | 'no_show'
   | 'cancelled';
 
+/**
+ * Status the agenda shows (S23). Derived at read time from the sale, its
+ * production and the kitchen; the stored `status` is no longer what the UI
+ * reads. `expired` replaces the old manual `no_show`.
+ */
+export type FulfillmentDisplayStatus =
+  | 'scheduled'
+  | 'in_production'
+  | 'ready'
+  | 'delivered'
+  | 'expired'
+  | 'cancelled';
+
 export type FulfillmentType = 'pickup' | 'delivery';
 
 /** Bloque opcional `schedule` que reciben POS y checkout. */
@@ -45,6 +58,64 @@ export const FULFILLMENT_TRANSITIONS: Record<FulfillmentStatus, FulfillmentStatu
   cancelled: [],
 };
 
+/**
+ * Derives the agenda status from the sale and its production (S23):
+ * cancelled (sale cancelled or refunded) > delivered (sale finished/delivered) > expired
+ * (slot passed without delivery) > ready (all linked production completed and
+ * nothing pending for the kitchen) > in_production (production started or sent
+ * to the kitchen) > scheduled. Pure: callers batch the inputs.
+ */
+export function deriveFulfillmentDisplayStatus(
+  input: {
+    stored_status: string;
+    produced_at: Date | null;
+    scheduled_end: Date;
+    order_state: string | null | undefined;
+    /** Statuses of the non-cancelled production orders linked to the sale. */
+    production_statuses: string[];
+    /** Dishes still pending for "Enviar a cocina" (`kitchenPendingItemsWhere`). */
+    pending_kitchen_count: number;
+  },
+  now = new Date(),
+): FulfillmentDisplayStatus {
+  if (
+    input.order_state === 'cancelled' ||
+    input.order_state === 'refunded' ||
+    input.stored_status === 'cancelled'
+  ) {
+    return 'cancelled';
+  }
+  if (
+    input.order_state === 'finished' ||
+    input.order_state === 'delivered' ||
+    input.stored_status === 'delivered'
+  ) {
+    return 'delivered';
+  }
+  if (input.scheduled_end.getTime() < now.getTime()) return 'expired';
+
+  const statuses = input.production_statuses;
+  if (
+    statuses.length > 0 &&
+    statuses.every((st) => st === 'completed') &&
+    input.pending_kitchen_count === 0
+  ) {
+    return 'ready';
+  }
+  const productionStarted = statuses.some(
+    (st) => st === 'in_progress' || st === 'partially_completed' || st === 'completed',
+  );
+  if (
+    productionStarted ||
+    input.produced_at !== null ||
+    input.stored_status === 'in_production' ||
+    input.stored_status === 'ready'
+  ) {
+    return 'in_production';
+  }
+  return 'scheduled';
+}
+
 /** Espacio de nombres del advisory lock (primer int4) para el cupo por tienda. */
 const SCHEDULE_LOCK_NAMESPACE = 734_210;
 
@@ -66,11 +137,12 @@ export type ProductionStartHook = (
  * Fuente única para el detalle (visibilidad del botón) y el envío.
  */
 export function kitchenPendingItemsWhere(
-  order_id: number,
+  order_id: number | number[],
   store_id: number,
 ): Prisma.order_itemsWhereInput {
   return {
-    order_id,
+    // An array reads many orders in one query (agenda); a number is one order.
+    order_id: Array.isArray(order_id) ? { in: order_id } : order_id,
     orders: { store_id },
     cancelled_at: null,
     skip_kds: false,
@@ -495,20 +567,64 @@ export class ScheduledOrdersService {
     const rangeStart = zonedWallClockToUtc(fy, fm, fd, 0, 0, 0, 0, timezone);
     const rangeEnd = zonedWallClockToUtc(ty, tm, td + 1, 0, 0, 0, 0, timezone);
     const statuses = query.status
-      ? (query.status.split(',') as FulfillmentStatus[])
+      ? (query.status.split(',') as FulfillmentDisplayStatus[])
       : undefined;
 
+    // The status filter applies to the DERIVED status, so the read is not
+    // narrowed by the stored one.
     const rows = await this.prisma.order_fulfillment_schedules.findMany({
       where: {
         scheduled_start: { gte: rangeStart, lt: rangeEnd },
-        ...(statuses ? { status: { in: statuses } } : {}),
       },
       orderBy: { scheduled_start: 'asc' },
       include: {
         order: { select: SCHEDULED_ORDER_SELECT },
       },
     });
-    return rows.map((row) => shapeScheduledOrderLines(row));
+
+    // ONE grouped read for the dishes still pending for the kitchen.
+    const pendingByOrder = new Map<number, number>();
+    if (rows.length > 0) {
+      const grouped = await (this.prisma.withoutScope() as unknown as Tx).order_items.groupBy({
+        by: ['order_id'],
+        where: kitchenPendingItemsWhere(
+          rows.map((r) => r.order_id),
+          store_id,
+        ),
+        _count: { _all: true },
+      });
+      for (const g of grouped) pendingByOrder.set(g.order_id, g._count._all);
+    }
+
+    const now = new Date();
+    const withStatus = rows.map((row) => ({
+      ...shapeScheduledOrderLines(row),
+      display_status: this.displayStatusOf(row, pendingByOrder.get(row.order_id) ?? 0, now),
+    }));
+    return statuses ? withStatus.filter((r) => statuses.includes(r.display_status)) : withStatus;
+  }
+
+  private displayStatusOf(
+    row: {
+      status: string;
+      produced_at: Date | null;
+      scheduled_end: Date;
+      order?: { state?: string | null; production_orders?: Array<{ status: string }> } | null;
+    },
+    pending_kitchen_count: number,
+    now: Date,
+  ): FulfillmentDisplayStatus {
+    return deriveFulfillmentDisplayStatus(
+      {
+        stored_status: row.status,
+        produced_at: row.produced_at ?? null,
+        scheduled_end: row.scheduled_end,
+        order_state: row.order?.state,
+        production_statuses: (row.order?.production_orders ?? []).map((o) => o.status),
+        pending_kitchen_count,
+      },
+      now,
+    );
   }
 
   /** Detalle con historial ("Reprogramado de … a … por …"). */
@@ -532,7 +648,11 @@ export class ScheduledOrdersService {
       }),
     ]);
     return row
-      ? { ...shapeScheduledOrderLines(row), pending_kitchen_item_count }
+      ? {
+          ...shapeScheduledOrderLines(row),
+          pending_kitchen_item_count,
+          display_status: this.displayStatusOf(row, pending_kitchen_item_count, new Date()),
+        }
       : row;
   }
 

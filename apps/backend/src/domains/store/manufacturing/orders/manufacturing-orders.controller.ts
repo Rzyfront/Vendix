@@ -154,6 +154,13 @@ export class ManufacturingOrdersController {
     return this.responseService.updated(result, 'Orden de producción cancelada');
   }
 
+  @Post(':id/restart')
+  @Permissions('store:manufacturing:orders:update')
+  async restart(@Param('id', ParseIntPipe) id: number) {
+    const result = await this.ordersService.restart(id);
+    return this.responseService.updated(result, 'Orden de producción reiniciada');
+  }
+
   @Get(':id/shortages')
   @Permissions('store:manufacturing:orders:read')
   async shortages(@Param('id', ParseIntPipe) id: number) {

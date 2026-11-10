@@ -1,6 +1,7 @@
 import { Test, TestingModule } from '@nestjs/testing';
 import { OrdersService } from './orders.service';
 import { StorePrismaService } from '../../../prisma/services/store-prisma.service';
+import { kitchenPendingItemsWhere } from '../scheduled-orders/scheduled-orders.service';
 import { RequestContextService } from '@common/context/request-context.service';
 import { S3Service } from '@common/services/s3.service';
 import { EventEmitter2 } from '@nestjs/event-emitter';
@@ -192,6 +193,9 @@ describe('OrdersService', () => {
     // ninguna spec preexistente declara categoría, así que `create` sigue sin
     // consultar nada (el servicio corta antes con la lista vacía).
     tax_categories: { findMany: jest.fn() },
+    // S23 — `findOne` counts the dishes "Enviar a cocina" can still send
+    // (`kitchenPendingItemsWhere`) for a scheduled order.
+    order_items: { count: jest.fn() },
   };
 
   const mockS3Service = {
@@ -1398,6 +1402,42 @@ describe('OrdersService', () => {
       mockPrismaService.orders.findFirst.mockResolvedValue(base([], []));
       const result: any = await service.findOne(5);
       expect(result.production_status).toBe('none');
+    });
+
+    // S23 — "Enviar a cocina" lives on the sale order detail.
+    describe('scheduled kitchen (S23)', () => {
+      it('a scheduled order with pending dishes exposes the schedule id and the pending count', async () => {
+        mockPrismaService.orders.findFirst.mockResolvedValue({
+          ...base([line(1, 50)], []),
+          store_id: 1,
+          fulfillment_schedule: { id: 31, status: 'scheduled' },
+        });
+        mockUnscopedPrismaService.order_items.count.mockResolvedValue(2);
+        const result: any = await service.findOne(5);
+        expect(result.scheduled_kitchen).toEqual({ schedule_id: 31, pending_item_count: 2 });
+        expect(mockUnscopedPrismaService.order_items.count).toHaveBeenCalledWith({
+          where: kitchenPendingItemsWhere(5, 1),
+        });
+      });
+
+      it('is null for an order that was not scheduled and does not count anything', async () => {
+        mockUnscopedPrismaService.order_items.count.mockClear();
+        mockPrismaService.orders.findFirst.mockResolvedValue(base([line(1, 50)], []));
+        const result: any = await service.findOne(5);
+        expect(result.scheduled_kitchen).toBeNull();
+        expect(mockUnscopedPrismaService.order_items.count).not.toHaveBeenCalled();
+      });
+
+      it('is null once the schedule is no longer sendable (cancelled / delivered)', async () => {
+        mockUnscopedPrismaService.order_items.count.mockClear();
+        mockPrismaService.orders.findFirst.mockResolvedValue({
+          ...base([line(1, 50)], []),
+          fulfillment_schedule: { id: 31, status: 'cancelled' },
+        });
+        const result: any = await service.findOne(5);
+        expect(result.scheduled_kitchen).toBeNull();
+        expect(mockUnscopedPrismaService.order_items.count).not.toHaveBeenCalled();
+      });
     });
   });
 

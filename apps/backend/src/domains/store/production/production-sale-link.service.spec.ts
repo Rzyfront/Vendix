@@ -127,19 +127,73 @@ describe('ProductionSaleLinkService (QUI-995)', () => {
     expect(client.$transaction).toHaveBeenCalledTimes(2);
   });
 
-  it('revives a cancelled order when its product comes back to the sale (QUI-995 B1)', async () => {
+  it('S21: a cancelled order is NOT revived when its sale is edited: it refreshes quantity and delivery and stays cancelled (replaces QUI-995 B1)', async () => {
+    const later = new Date('2026-11-12T15:00:00Z');
     setup(
-      sale([{ id: 3, product_id: 50, quantity: 2 }]),
+      sale([{ id: 3, product_id: 50, quantity: 2 }], { fulfillment_schedule: { scheduled_start: later } }),
       [{ id: 100, product_id: 50, status: 'cancelled', planned_qty: new Prisma.Decimal(1), due_date: start }],
     );
     const result = await service.ensureForOrder(77);
     expect(result).toEqual([{ id: 100 }]);
     expect(tx.production_orders.create).not.toHaveBeenCalled();
-    expect(tx.production_orders.updateMany).toHaveBeenCalledWith({
-      where: { id: 100, status: 'cancelled' },
-      data: expect.objectContaining({ status: 'draft', due_date: start, started_at: null }),
+    expect(tx.production_orders.updateMany).toHaveBeenCalledTimes(1);
+    const call = tx.production_orders.updateMany.mock.calls[0][0];
+    expect(call.where).toEqual({ id: 100, status: 'cancelled' });
+    expect(call.data).toEqual(expect.objectContaining({ due_date: later }));
+    expect(call.data.status).toBeUndefined();
+    expect(call.data.started_at).toBeUndefined();
+    expect(Number(call.data.planned_qty)).toBe(2);
+  });
+
+  it('S21: a cancelled order whose quantity and delivery already match is not rewritten', async () => {
+    setup(
+      sale([{ id: 3, product_id: 50, quantity: 2 }]),
+      [{ id: 100, product_id: 50, status: 'cancelled', planned_qty: new Prisma.Decimal(2), due_date: start }],
+    );
+    await service.ensureForOrder(77);
+    expect(tx.production_orders.updateMany).not.toHaveBeenCalled();
+  });
+
+  describe('planRestart (S21)', () => {
+    const plan = (s: any, orders: any[]) => {
+      client = {
+        orders: { findFirst: jest.fn().mockResolvedValue(s) },
+        production_orders: { findMany: jest.fn().mockResolvedValue(orders) },
+      };
+      service = new ProductionSaleLinkService({ withoutScope: () => client } as any, {} as any);
+    };
+
+    it('returns the sale state, the summed quantity of the live lines paired with the order and the delivery instant', async () => {
+      plan(
+        sale([
+          { id: 1, product_id: 50, product_variant_id: 10, quantity: 2 },
+          { id: 2, product_id: 50, product_variant_id: 10, quantity: 3 },
+          { id: 3, product_id: 50, product_variant_id: 11, quantity: 9 },
+        ]),
+        [
+          { id: 100, product_id: 50, product_variant_id: 10 },
+          { id: 101, product_id: 50, product_variant_id: 11 },
+        ],
+      );
+      await expect(service.planRestart(77, 100)).resolves.toEqual({
+        sale_state: 'processing',
+        qty: 5,
+        due_date: start,
+      });
+      // Only live production lines are read (same filter ensureForOrder uses).
+      expect(client.orders.findFirst.mock.calls[0][0].select.order_items.where).toEqual({
+        cancelled_at: null,
+        fulfillment_destination: 'production',
+        product_id: { not: null },
+      });
     });
-    expect(Number(tx.production_orders.updateMany.mock.calls[0][0].data.planned_qty)).toBe(2);
+
+    it('reports quantity 0 when no live line pairs with the order, and null when the sale is gone', async () => {
+      plan(sale([{ id: 1, product_id: 51, quantity: 4 }]), [{ id: 100, product_id: 50, product_variant_id: null }]);
+      await expect(service.planRestart(77, 100)).resolves.toMatchObject({ qty: 0 });
+      plan(null, []);
+      await expect(service.planRestart(77, 100)).resolves.toBeNull();
+    });
   });
 
   it('leaves a cancelled order alone while its product is not in the sale', async () => {
@@ -436,7 +490,7 @@ describe('ProductionSaleLinkService — live-sync events (QUI-1002)', () => {
     ]);
   });
 
-  it('draft update, revive and draft cancellation are each emitted', async () => {
+  it('draft update, cancelled refresh and draft cancellation are each emitted', async () => {
     const draft = { id: 100, product_id: 50, status: 'draft', planned_qty: new Prisma.Decimal(5), due_date: start };
     setup([{ id: 1, product_id: 50, quantity: 8 }], [draft], [stored({ id: 100 })]);
     await service.ensureForOrder(77);

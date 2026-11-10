@@ -72,7 +72,7 @@ describe('ProductionOrdersService.findDay (QUI-996)', () => {
     );
   });
 
-  it('carries over in-progress orders from earlier days (multi-day production)', async () => {
+  it('S16: carries over in-progress and partially completed orders from earlier days (multi-day production)', async () => {
     await service.findDay({ date: '2026-11-10' });
 
     const where = prisma.production_orders.findMany.mock.calls[0][0].where;
@@ -80,11 +80,46 @@ describe('ProductionOrdersService.findDay (QUI-996)', () => {
     const naiveStart = new Date('2026-11-10T00:00:00.000Z');
     expect(where.OR).toEqual(
       expect.arrayContaining([
-        { status: 'in_progress', order_id: { not: null }, due_date: { lt: localStart } },
-        { status: 'in_progress', order_id: null, due_date: { lt: naiveStart } },
-        { status: 'in_progress', due_date: null, created_at: { lt: localStart } },
+        { status: { in: ['in_progress', 'partially_completed'] }, order_id: { not: null }, due_date: { lt: localStart } },
+        { status: { in: ['in_progress', 'partially_completed'] }, order_id: null, due_date: { lt: naiveStart } },
+        { status: { in: ['in_progress', 'partially_completed'] }, due_date: null, created_at: { lt: localStart } },
       ]),
     );
+  });
+
+  it('S16: a partially completed order counts as in progress in the card and the summary', async () => {
+    prisma.production_orders.findMany.mockResolvedValue([
+      row({
+        id: 1,
+        status: 'partially_completed',
+        source: 'manual',
+        order_id: null,
+        sale_order: null,
+        started_at: new Date('2026-11-10T15:00:00Z'),
+      }),
+    ]);
+
+    const day = await service.findDay({ date: '2026-11-10' });
+
+    expect(day.cards[0].status).toBe('in_progress');
+    expect(day.summary).toEqual({ waiting: 0, in_progress: 1, completed: 0 });
+    expect(day.cards[0].production_orders[0].status).toBe('partially_completed');
+  });
+
+  it('S19: exposes the variant name of an order (null without variant) and selects it', async () => {
+    prisma.production_orders.findMany.mockResolvedValue([
+      row({ id: 1, product_variant_id: 7, product_variant: { name: 'Chocolate' } }),
+      row({ id: 2, product_id: 51, product_variant_id: null, product_variant: null }),
+    ]);
+
+    const day = await service.findDay({ date: '2026-11-10' });
+
+    const [a, b] = day.cards[0].production_orders;
+    expect(a.variant_name).toBe('Chocolate');
+    expect(b.variant_name).toBeNull();
+    expect(prisma.production_orders.findMany.mock.calls[0][0].select.product_variant).toEqual({
+      select: { name: true },
+    });
   });
 
   it('groups the orders of one sale into ONE card and gives each manual order its own card', async () => {
@@ -134,6 +169,7 @@ describe('ProductionOrdersService.findDay (QUI-996)', () => {
       source: 'order',
       product_id: 50,
       product_name: 'Torta',
+      variant_name: null,
       planned_qty: 2,
       produced_qty: null,
       started_at: null,

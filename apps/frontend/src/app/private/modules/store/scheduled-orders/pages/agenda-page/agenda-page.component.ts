@@ -30,12 +30,13 @@ import {
   AgendaViewMode,
   FulfillmentDay,
   FulfillmentSlot,
+  DISPLAY_STATUS_COLORS,
+  DISPLAY_STATUS_LABELS,
+  DISPLAY_STATUS_ORDER,
   RESCHEDULABLE_STATUSES,
-  STATUS_COLORS,
-  STATUS_LABELS,
-  STATUS_ORDER,
+  RESCHEDULABLE_STORED_STATUSES,
   ScheduledOrder,
-  ScheduledOrderStatus,
+  ScheduledOrderDisplayStatus,
   customerName,
 } from '../../interfaces/scheduled-order.interface';
 import { AgendaPreferencesService } from '../../services/agenda-preferences.service';
@@ -54,7 +55,7 @@ interface AgendaRow {
   cells: AgendaCell[];
 }
 
-type StatusFilter = ScheduledOrderStatus | 'all';
+type StatusFilter = ScheduledOrderDisplayStatus | 'all';
 
 @Component({
   selector: 'app-scheduled-orders-agenda-page',
@@ -402,8 +403,8 @@ type StatusFilter = ScheduledOrderStatus | 'all';
                         tabindex="0"
                         [class.draggable]="canDrag(o)"
                         [class.dragging]="draggingId() === o.id"
-                        [class.cancelled]="o.status === 'cancelled'"
-                        [style.--st]="colorOf(o.status)"
+                        [class.cancelled]="o.display_status === 'cancelled'"
+                        [style.--st]="colorOf(o.display_status)"
                         [attr.draggable]="canDrag(o) ? 'true' : null"
                         (dragstart)="onDragStart($event, o)"
                         (dragend)="onDragEnd()"
@@ -412,7 +413,7 @@ type StatusFilter = ScheduledOrderStatus | 'all';
                       >
                         <span class="num">{{ o.order.order_number }}</span>
                         <span class="sub">{{ customer(o) }}</span>
-                        <span class="sub">{{ labelOf(o.status) }}</span>
+                        <span class="sub">{{ labelOf(o.display_status) }}</span>
                       </div>
                     }
                   </div>
@@ -433,7 +434,7 @@ type StatusFilter = ScheduledOrderStatus | 'all';
                   class="card"
                   role="button"
                   tabindex="0"
-                  [style.--st]="colorOf(o.status)"
+                  [style.--st]="colorOf(o.display_status)"
                   (click)="openDetail(o)"
                   (keydown.enter)="openDetail(o)"
                 >
@@ -452,7 +453,6 @@ type StatusFilter = ScheduledOrderStatus | 'all';
     <app-schedule-detail-modal
       [(isOpen)]="detailOpen"
       [scheduleId]="selectedId()"
-      (changed)="refresh()"
     />
   `,
 })
@@ -466,7 +466,7 @@ export class AgendaPageComponent {
   private readonly destroyRef = inject(DestroyRef);
   private readonly sse = inject(ProductionSseService);
 
-  readonly statuses = STATUS_ORDER;
+  readonly statuses = DISPLAY_STATUS_ORDER;
   readonly headerActions = [
     {
       id: 'production',
@@ -489,7 +489,7 @@ export class AgendaPageComponent {
   readonly schedules = computed(() => {
     const status = this.statusFilter();
     const all = this.allSchedules();
-    return status === 'all' ? all : all.filter((o) => o.status === status);
+    return status === 'all' ? all : all.filter((o) => o.display_status === status);
   });
   readonly loading = signal(false);
   readonly errorMessage = signal<string | null>(null);
@@ -503,6 +503,8 @@ export class AgendaPageComponent {
   private loadSub: Subscription | null = null;
   /** True while the load in flight is a user-driven (non-silent) one. */
   private loadInFlightVisible = false;
+  /** A live (SSE) refresh arrived during a visible load; runs once it ends (S17). */
+  private refreshPending = false;
 
   // --- derivados --------------------------------------------------------
   readonly today = computed(() => storeToday(this.settings.timezone()));
@@ -591,8 +593,13 @@ export class AgendaPageComponent {
   private load(from: string, to: string, silent = false): void {
     // A background refresh never cancels a user-driven load already in flight
     // (e.g. a week change): that load brings the newest data for the new range.
-    if (silent && this.loadInFlightVisible && this.loadSub && !this.loadSub.closed) return;
+    if (silent && this.loadInFlightVisible && this.loadSub && !this.loadSub.closed) {
+      // Do not lose it: re-run once the visible load finishes (S17).
+      this.refreshPending = true;
+      return;
+    }
     this.loadSub?.unsubscribe();
+    if (!silent) this.refreshPending = false;
     this.loadInFlightVisible = !silent;
     this.loading.set(true);
     if (!silent) this.errorMessage.set(null);
@@ -606,10 +613,12 @@ export class AgendaPageComponent {
         this.errorMessage.set(null);
         this.loading.set(false);
         this.loadInFlightVisible = false;
+        this.flushPendingRefresh();
       },
       error: (err) => {
         this.loading.set(false);
         this.loadInFlightVisible = false;
+        this.flushPendingRefresh();
         // A failed background refresh never clears what is on screen.
         if (silent) return;
         this.availability.set([]);
@@ -617,6 +626,13 @@ export class AgendaPageComponent {
         this.errorMessage.set(extractApiErrorMessage(err));
       },
     });
+  }
+
+  /** Runs the one silent refresh that arrived during a visible load, with the current range. */
+  private flushPendingRefresh(): void {
+    if (!this.refreshPending) return;
+    this.refreshPending = false;
+    this.refresh(true);
   }
 
   // --- navegación y preferencias ---------------------------------------
@@ -635,7 +651,7 @@ export class AgendaPageComponent {
   }
 
   onStatusChange(value: string): void {
-    this.statusFilter.set(value === 'all' ? 'all' : (value as ScheduledOrderStatus));
+    this.statusFilter.set(value === 'all' ? 'all' : (value as ScheduledOrderDisplayStatus));
     this.persist();
   }
 
@@ -647,8 +663,8 @@ export class AgendaPageComponent {
     if (id === 'production') void this.router.navigate(['/admin/scheduled-orders/production']);
   }
 
-  countByStatus(status: ScheduledOrderStatus): number {
-    return this.allSchedules().filter((o) => o.status === status).length;
+  countByStatus(status: ScheduledOrderDisplayStatus): number {
+    return this.allSchedules().filter((o) => o.display_status === status).length;
   }
 
   // --- detalle -----------------------------------------------------------
@@ -659,7 +675,12 @@ export class AgendaPageComponent {
 
   // --- arrastrar y soltar (reprogramar) --------------------------------
   canDrag(o: ScheduledOrder): boolean {
-    return this.canReschedule() && !this.isMobile() && RESCHEDULABLE_STATUSES.includes(o.status);
+    return (
+      this.canReschedule() &&
+      !this.isMobile() &&
+      RESCHEDULABLE_STATUSES.includes(o.display_status) &&
+      RESCHEDULABLE_STORED_STATUSES.includes(o.status)
+    );
   }
 
   onDragStart(ev: DragEvent, o: ScheduledOrder): void {
@@ -717,11 +738,11 @@ export class AgendaPageComponent {
   }
 
   // --- helpers de plantilla ---------------------------------------------
-  labelOf(s: ScheduledOrderStatus): string {
-    return STATUS_LABELS[s];
+  labelOf(s: ScheduledOrderDisplayStatus): string {
+    return DISPLAY_STATUS_LABELS[s];
   }
-  colorOf(s: ScheduledOrderStatus): string {
-    return STATUS_COLORS[s];
+  colorOf(s: ScheduledOrderDisplayStatus): string {
+    return DISPLAY_STATUS_COLORS[s];
   }
   customer(o: ScheduledOrder): string {
     return customerName(o.order.users, o.order.customer_alias);

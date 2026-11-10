@@ -124,7 +124,9 @@ export class ProductionOrdersListPageComponent implements OnInit {
       sortable: false,
       priority: 1,
       transform: (_: unknown, row: ProductionOrder) =>
-        row.product?.name ? row.product.name : `Producción #${row.id}`,
+        row.product?.name
+        ? ProductionOrdersService.displayName(row.product.name, row.product_variant?.name)
+        : `Producción #${row.id}`,
     },
     {
       key: 'sale_order_number',
@@ -217,7 +219,9 @@ export class ProductionOrdersListPageComponent implements OnInit {
   readonly cardConfig: ItemListCardConfig = {
     titleKey: 'product',
     titleTransform: (row: ProductionOrder) =>
-      row.product?.name ? row.product.name : `Producción #${row.id}`,
+      row.product?.name
+        ? ProductionOrdersService.displayName(row.product.name, row.product_variant?.name)
+        : `Producción #${row.id}`,
     subtitleKey: 'planned_qty',
     subtitleTransform: (row: ProductionOrder) =>
       formatYieldQuantity(row.planned_qty, row.recipe?.yield_unit, this.formatNumber(row.planned_qty)),

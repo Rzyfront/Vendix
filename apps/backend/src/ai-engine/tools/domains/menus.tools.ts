@@ -1667,6 +1667,13 @@ export function createProductionTools(
                 'Revisa la orden en el módulo de producción.',
               );
             }
+            if (status === 'partially_completed') {
+              // Only Planta knows what is left to produce of a partial order.
+              return guidedError(
+                'Es una orden de Planta parcialmente finalizada: no hice nada.',
+                'Finalízala en Manufactura › Órdenes, que registra solo lo que falta.',
+              );
+            }
             const checked = toValidatedDto(CompleteProductionOrderDto, {
               ...(args.produced_qty !== undefined
                 ? { produced_qty: Number(args.produced_qty) }

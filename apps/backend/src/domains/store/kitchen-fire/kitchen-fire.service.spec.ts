@@ -365,7 +365,7 @@ describe('KitchenFireService — remake consumption after D2 reuse', () => {
   it('reconsumes a reused dish via canonical fire and emits one COGS event', async () => {
     const { service, tx, events, prepare, fire } = harness();
     const result = await service.resendOrderItems({ order_id: 100, order_item_ids: [7], reason: 'remake_dish' });
-    expect(prepare).toHaveBeenCalledWith(100, [7], tx);
+    expect(prepare).toHaveBeenCalledWith(100, [7], tx, { includeCancelled: true });
     expect(fire).toHaveBeenCalledTimes(1);
     expect(fire).toHaveBeenCalledWith(tx, 1, expect.any(Object));
     expect(tx.kitchen_tickets.create).not.toHaveBeenCalled();
@@ -381,7 +381,7 @@ describe('KitchenFireService — remake consumption after D2 reuse', () => {
       orderItem(7, 'after_fire_reused'), orderItem(8, 'after_fire_waste'),
     ]);
     await service.resendOrderItems({ order_id: 100, order_item_ids: [7, 8], reason: 'remake_dish' });
-    expect(prepare).toHaveBeenCalledWith(100, [7, 8], tx);
+    expect(prepare).toHaveBeenCalledWith(100, [7, 8], tx, { includeCancelled: true });
     expect(fire).toHaveBeenCalledTimes(1);
     expect(events.emit).toHaveBeenCalledTimes(1);
   });

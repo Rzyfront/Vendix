@@ -21,6 +21,7 @@ import {
   type ProductionOrderEventRow,
 } from './production-order-events';
 import { RequestContextService } from '../../../common/context/request-context.service';
+import { ProductionSaleLinkService } from './production-sale-link.service';
 import { lockOrderLifecycle } from '../orders/order-flow/order-lifecycle-lock.util';
 import {
   VendixHttpException,
@@ -92,6 +93,9 @@ export interface CompleteProductionOptions {
   ) => Promise<Prisma.production_ordersUncheckedUpdateInput | void>;
 }
 
+/** Sale states in which a cancelled production order can no longer be restarted. */
+const RESTART_BLOCKED_SALE_STATES = ['cancelled', 'refunded', 'finished'];
+
 /**
  * ProductionOrdersService
  *
@@ -136,6 +140,8 @@ export class ProductionOrdersService {
     private readonly recipes?: RecipesService,
     private readonly orderStockCommit?: OrderStockCommitService,
     private readonly s3Service?: S3Service,
+    // S21: quantity / delivery a cancelled linked order restarts with.
+    private readonly saleLink?: ProductionSaleLinkService,
   ) {}
 
   /**
@@ -384,6 +390,7 @@ export class ProductionOrdersService {
               waste_percent: true,
             },
           },
+          product_variant: { select: { id: true, name: true } },
           sale_order: { select: { order_number: true } },
         },
       }),
@@ -419,6 +426,7 @@ export class ProductionOrdersService {
             preparation_time_minutes: true,
           },
         },
+        product_variant: { select: { id: true, name: true } },
         recipe: {
           select: {
             id: true,
@@ -546,7 +554,14 @@ export class ProductionOrdersService {
     // `store_id` (not just the request context) so the resolved policy is
     // always tied to the store that owns the recipe/stock being consumed.
     const store_id = (order as { store_id: number }).store_id;
-    if (order.status === 'completed' || order.status === 'cancelled') {
+    // `partially_completed` is a Planta state: only ManufacturingOrdersService
+    // knows what is left (it caps at planned − produced and accumulates the
+    // real cost). From the restaurant endpoint the full planned quantity would
+    // be produced and consumed again, so that order finishes in Planta.
+    const plantaOnly =
+      order.status === 'partially_completed' &&
+      options?.sourceModule !== 'manufacturing';
+    if (order.status === 'completed' || order.status === 'cancelled' || plantaOnly) {
       throw new VendixHttpException(
         ErrorCodes.PRODUCTION_ORDER_INVALID_STATE,
         undefined,
@@ -820,6 +835,7 @@ export class ProductionOrdersService {
           product: {
             select: { id: true, name: true, sku: true, stock_unit: true },
           },
+          product_variant: { select: { id: true, name: true } },
           recipe: {
             select: {
               id: true,
@@ -1280,8 +1296,13 @@ export class ProductionOrdersService {
     };
 
     const customer = sale?.users;
+    // S21: the "Volver a iniciar" button follows the same rule restart() enforces.
+    const can_restart = await this.canRestart(
+      order as { id: number; status: string; order_id?: number | null },
+    );
     return {
       ...order,
+      can_restart,
       product: { ...order.product, image_url: images.get(order.product_id) ?? null },
       base_recipe: order.recipe
         ? { id: order.recipe.id, components: recipeItems.map(component) }
@@ -1342,6 +1363,83 @@ export class ProductionOrdersService {
     });
     this.emitUpdated(cancelled);
     return cancelled;
+  }
+
+  // ----------------------------------------------------------------- restart
+  /**
+   * S21 — decides whether a cancelled order can restart. Pure read: returns the
+   * quantity and delivery it would restart with, or the error to reject with.
+   * Only orders linked to a sale restart (a manual / Planta order has no sale
+   * line to follow); the sale must not be cancelled, refunded or finished and a
+   * live production line must still pair with the order.
+   */
+  private async evaluateRestart(order: {
+    id: number;
+    status: string;
+    order_id?: number | null;
+  }): Promise<
+    | { ok: true; qty: number; due_date: Date }
+    | { ok: false; code: keyof typeof ErrorCodes }
+  > {
+    if (order.order_id == null || !this.saleLink) {
+      return { ok: false, code: 'PRODUCTION_ORDER_RESTART_NOT_LINKED' };
+    }
+    const plan = await this.saleLink.planRestart(order.order_id, order.id);
+    if (plan && RESTART_BLOCKED_SALE_STATES.includes(plan.sale_state)) {
+      return { ok: false, code: 'PRODUCTION_ORDER_RESTART_SALE_CLOSED' };
+    }
+    if (!plan || plan.qty <= 0) {
+      return { ok: false, code: 'PRODUCTION_ORDER_RESTART_NO_LIVE_LINE' };
+    }
+    return { ok: true, qty: plan.qty, due_date: plan.due_date };
+  }
+
+  /** S21 — the rule behind the "Volver a iniciar" button (Planta and restaurant detail). */
+  async canRestart(order: {
+    id: number;
+    status: string;
+    order_id?: number | null;
+  }): Promise<boolean> {
+    return order.status === 'cancelled' && (await this.evaluateRestart(order)).ok;
+  }
+
+  /**
+   * S21 — "Volver a iniciar": cancelling production is not cancelling the sale,
+   * so a cancelled order whose sale is still active goes back to `draft` (ready
+   * to start) with the quantity and delivery of the sale line as it is today.
+   */
+  async restart(id: number) {
+    const order = await this.findOne(id);
+    if (order.status !== 'cancelled') {
+      throw new VendixHttpException(
+        ErrorCodes.PRODUCTION_ORDER_INVALID_STATE,
+        undefined,
+        { from: order.status, to: 'draft' },
+      );
+    }
+    const verdict = await this.evaluateRestart(
+      order as { id: number; status: string; order_id?: number | null },
+    );
+    if (!verdict.ok) {
+      throw new VendixHttpException(ErrorCodes[verdict.code]);
+    }
+    // Atomic claim: two screens restarting the same order cannot both win.
+    const claimed = await this.prisma.production_orders.updateMany({
+      where: { id, status: 'cancelled' },
+      data: {
+        status: 'draft',
+        started_at: null,
+        planned_qty: new Prisma.Decimal(verdict.qty),
+        due_date: verdict.due_date,
+        updated_at: new Date(),
+      },
+    });
+    if (claimed.count !== 1) {
+      throw new VendixHttpException(ErrorCodes.PRODUCTION_ORDER_CONCURRENT_UPDATE);
+    }
+    const restarted = await this.findOne(id);
+    this.emitUpdated(restarted);
+    return restarted;
   }
 
   // ------------------------------------------------------------------- patch
@@ -1407,9 +1505,9 @@ export class ProductionOrdersService {
           { order_id: { not: null }, due_date: { gte: local.startDate, lte: local.endDate } },
           { order_id: null, due_date: { gte: naive.startDate, lte: naive.endDate } },
           { due_date: null, created_at: { gte: local.startDate, lte: local.endDate } },
-          { status: 'in_progress', order_id: { not: null }, due_date: { lt: local.startDate } },
-          { status: 'in_progress', order_id: null, due_date: { lt: naive.startDate } },
-          { status: 'in_progress', due_date: null, created_at: { lt: local.startDate } },
+          { status: { in: ['in_progress', 'partially_completed'] }, order_id: { not: null }, due_date: { lt: local.startDate } },
+          { status: { in: ['in_progress', 'partially_completed'] }, order_id: null, due_date: { lt: naive.startDate } },
+          { status: { in: ['in_progress', 'partially_completed'] }, due_date: null, created_at: { lt: local.startDate } },
         ],
       },
       select: {
@@ -1427,6 +1525,7 @@ export class ProductionOrdersService {
         order_id: true,
         estimated_minutes: true,
         product: { select: { name: true, preparation_time_minutes: true } },
+        product_variant: { select: { name: true } },
         sale_order: {
           select: {
             order_number: true,
@@ -1452,7 +1551,11 @@ export class ProductionOrdersService {
     const anchorOf = (r: Row): Date =>
       r.order_id != null && r.due_date ? r.due_date : r.created_at;
     const bucket = (status: string): 'waiting' | 'in_progress' | 'completed' =>
-      status === 'completed' ? 'completed' : status === 'in_progress' ? 'in_progress' : 'waiting';
+      status === 'completed'
+        ? 'completed'
+        : status === 'in_progress' || status === 'partially_completed'
+          ? 'in_progress'
+          : 'waiting';
 
     const groups = new Map<string, Row[]>();
     for (const r of rows) {
@@ -1496,6 +1599,7 @@ export class ProductionOrdersService {
           source: r.source ?? null,
           product_id: r.product_id,
           product_name: r.product?.name ?? `#${r.product_id}`,
+          variant_name: r.product_variant?.name ?? null,
           planned_qty: Number(r.planned_qty),
           produced_qty: r.produced_qty == null ? null : Number(r.produced_qty),
           started_at: iso(r.started_at),

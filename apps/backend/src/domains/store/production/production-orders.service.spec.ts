@@ -997,6 +997,24 @@ describe('ProductionOrdersService — sale-linked orders (QUI-995)', () => {
     expect(stock.reserveStock).toHaveBeenCalledWith(50, undefined, 1, 3, 'order', 77, 42, false, tx);
   });
 
+  it('gate #1132: a partially completed order (Planta) cannot be finished from the restaurant endpoint -> PRODUCTION_ORDER_INVALID_STATE and nothing moves', async () => {
+    setup({ order: linkedOrder({ status: 'partially_completed', produced_qty: new Prisma.Decimal(2) }) });
+    await expect(service.complete(100, { produced_qty: 3 })).rejects.toMatchObject({
+      errorCode: 'PRODUCTION_ORDER_INVALID_STATE',
+    });
+    expect(prismaMock.$transaction).not.toHaveBeenCalled();
+    expect(stock.updateStock).not.toHaveBeenCalled();
+    expect(stock.reserveStock).not.toHaveBeenCalled();
+    expect(eventEmitter.emit).not.toHaveBeenCalled();
+  });
+
+  it('gate #1132: Planta still finishes its partially completed order through complete() (sourceModule manufacturing)', async () => {
+    setup({ order: linkedOrder({ status: 'partially_completed', produced_qty: new Prisma.Decimal(2) }) });
+    const result = await service.complete(100, { produced_qty: 1 }, { sourceModule: 'manufacturing' });
+    expect(result.status).toBe('completed');
+    expect(stock.updateStock).toHaveBeenCalled();
+  });
+
   it('sale already delivered: sells what was produced through the delivery commit and reserves nothing', async () => {
     setup({ sale: { id: 77, state: 'delivered' }, pendingLines: [{ id: 501 }, { id: 502 }] });
     await service.complete(100, { produced_qty: 3 });
@@ -1169,6 +1187,23 @@ describe('ProductionOrdersService — sale-linked orders (QUI-995)', () => {
     expect((result.data[0] as any).sale_order).toBeUndefined();
   });
 
+  it('S19: findAll and findOne (hence getDetail) read the variant name of the order', async () => {
+    prismaMock.production_orders.findMany.mockResolvedValue([]);
+    prismaMock.production_orders.count.mockResolvedValue(0);
+    await service.findAll({} as any);
+    expect(prismaMock.production_orders.findMany.mock.calls[0][0].include.product_variant).toEqual({
+      select: { id: true, name: true },
+    });
+    prismaMock.production_orders.findFirst.mockResolvedValue(
+      linkedOrder({ order_id: null, product_variant: { id: 7, name: 'Chocolate' } }),
+    );
+    const detail: any = await service.getDetail(100);
+    expect(prismaMock.production_orders.findFirst.mock.calls[0][0].include.product_variant).toEqual({
+      select: { id: true, name: true },
+    });
+    expect(detail.product_variant).toEqual({ id: 7, name: 'Chocolate' });
+  });
+
   it('getDetail exposes base_recipe, sale_order and order_lines with add-ons', async () => {
     prismaMock.production_orders.findFirst.mockResolvedValue(
       linkedOrder({ due_date: new Date('2026-11-10T10:00:00Z') }),
@@ -1301,5 +1336,158 @@ describe('ProductionOrdersService — sale-linked orders (QUI-995)', () => {
       { product_id: 99, name: 'Harina', quantity: 10, unit: 'g', image_url: null },
     ]);
     expect(detail.sale_order).toBeNull();
+  });
+});
+
+/**
+ * S21 — cancelling production is not cancelling the sale: a cancelled order
+ * linked to a LIVE sale line goes back to draft with "Volver a iniciar".
+ */
+describe('ProductionOrdersService.restart (S21)', () => {
+  const ctx = { store_id: 1, organization_id: 1, user_id: 42, is_super_admin: false };
+  const due = new Date('2026-11-12T15:00:00Z');
+  let service: ProductionOrdersService;
+  let prismaMock: any;
+  let saleLink: { planRestart: jest.Mock };
+  let eventEmitter: { emit: jest.Mock };
+
+  const cancelledOrder = (over: Record<string, unknown> = {}) => ({
+    id: 100,
+    store_id: 1,
+    product_id: 50,
+    recipe_id: 7,
+    order_id: 77,
+    product_variant_id: null,
+    planned_qty: new Prisma.Decimal(1),
+    status: 'cancelled',
+    started_at: new Date('2026-11-10T10:00:00Z'),
+    product: { id: 50, name: 'Torta', sku: 'T', stock_unit: 'u' },
+    recipe: { id: 7, items: [] },
+    ...over,
+  });
+
+  beforeEach(() => {
+    prismaMock = {
+      production_orders: {
+        findFirst: jest.fn().mockResolvedValue(cancelledOrder()),
+        updateMany: jest.fn().mockResolvedValue({ count: 1 }),
+      },
+    };
+    saleLink = {
+      planRestart: jest.fn().mockResolvedValue({ sale_state: 'processing', qty: 4, due_date: due }),
+    };
+    eventEmitter = { emit: jest.fn() };
+    jest.spyOn(RequestContextService, 'getContext').mockReturnValue(ctx as any);
+    service = new ProductionOrdersService(
+      prismaMock,
+      {} as any,
+      {} as any,
+      eventEmitter as any,
+      {} as any,
+      {} as any,
+      {} as any,
+      saleLink as any,
+    );
+  });
+
+  afterEach(() => jest.restoreAllMocks());
+
+  it('moves a cancelled linked order back to draft with the quantity and delivery of the live line, and emits the live update', async () => {
+    prismaMock.production_orders.findFirst
+      .mockResolvedValueOnce(cancelledOrder())
+      .mockResolvedValueOnce(cancelledOrder({ status: 'draft', started_at: null }));
+
+    const restarted: any = await service.restart(100);
+
+    expect(saleLink.planRestart).toHaveBeenCalledWith(77, 100);
+    expect(prismaMock.production_orders.updateMany).toHaveBeenCalledWith({
+      where: { id: 100, status: 'cancelled' },
+      data: expect.objectContaining({ status: 'draft', started_at: null, due_date: due }),
+    });
+    expect(Number(prismaMock.production_orders.updateMany.mock.calls[0][0].data.planned_qty)).toBe(4);
+    expect(restarted.status).toBe('draft');
+    expect(eventEmitter.emit).toHaveBeenCalledWith(
+      'production_order.updated',
+      expect.objectContaining({ id: 100, status: 'draft' }),
+    );
+  });
+
+  it.each(['draft', 'in_progress', 'completed'])('rejects a %s order with PRODUCTION_ORDER_INVALID_STATE', async (status) => {
+    prismaMock.production_orders.findFirst.mockResolvedValue(cancelledOrder({ status }));
+    await expect(service.restart(100)).rejects.toMatchObject({
+      errorCode: 'PRODUCTION_ORDER_INVALID_STATE',
+    });
+    expect(prismaMock.production_orders.updateMany).not.toHaveBeenCalled();
+  });
+
+  it('rejects a manual (unlinked) order with PRODUCTION_ORDER_RESTART_NOT_LINKED', async () => {
+    prismaMock.production_orders.findFirst.mockResolvedValue(cancelledOrder({ order_id: null }));
+    await expect(service.restart(100)).rejects.toMatchObject({
+      errorCode: 'PRODUCTION_ORDER_RESTART_NOT_LINKED',
+    });
+    expect(saleLink.planRestart).not.toHaveBeenCalled();
+    expect(prismaMock.production_orders.updateMany).not.toHaveBeenCalled();
+  });
+
+  it.each(['cancelled', 'refunded', 'finished'])(
+    'rejects with PRODUCTION_ORDER_RESTART_SALE_CLOSED when the sale is %s',
+    async (sale_state) => {
+      saleLink.planRestart.mockResolvedValue({ sale_state, qty: 4, due_date: due });
+      await expect(service.restart(100)).rejects.toMatchObject({
+        errorCode: 'PRODUCTION_ORDER_RESTART_SALE_CLOSED',
+      });
+      expect(prismaMock.production_orders.updateMany).not.toHaveBeenCalled();
+    },
+  );
+
+  it('rejects with PRODUCTION_ORDER_RESTART_NO_LIVE_LINE when no live production line pairs with the order or the sale is gone', async () => {
+    saleLink.planRestart.mockResolvedValue({ sale_state: 'processing', qty: 0, due_date: due });
+    await expect(service.restart(100)).rejects.toMatchObject({
+      errorCode: 'PRODUCTION_ORDER_RESTART_NO_LIVE_LINE',
+    });
+    saleLink.planRestart.mockResolvedValue(null);
+    await expect(service.restart(100)).rejects.toMatchObject({
+      errorCode: 'PRODUCTION_ORDER_RESTART_NO_LIVE_LINE',
+    });
+    expect(prismaMock.production_orders.updateMany).not.toHaveBeenCalled();
+  });
+
+  it('a lost status claim is PRODUCTION_ORDER_CONCURRENT_UPDATE and nothing is emitted', async () => {
+    prismaMock.production_orders.updateMany.mockResolvedValue({ count: 0 });
+    await expect(service.restart(100)).rejects.toMatchObject({
+      errorCode: 'PRODUCTION_ORDER_CONCURRENT_UPDATE',
+    });
+    expect(eventEmitter.emit).not.toHaveBeenCalled();
+  });
+
+  it('getDetail exposes can_restart only for a cancelled order whose sale is active and has a live line', async () => {
+    // Same service, detail path: cancelled + live line -> true.
+    prismaMock.orders = {
+      findFirst: jest.fn().mockResolvedValue({
+        id: 77, order_number: 'ORD-77', state: 'processing', customer_alias: null, users: null,
+        fulfillment_schedule: null,
+      }),
+    };
+    prismaMock.order_items = { findMany: jest.fn().mockResolvedValue([]) };
+    prismaMock.production_orders.count = jest.fn().mockResolvedValue(0);
+    prismaMock.recipes = { findMany: jest.fn().mockResolvedValue([]) };
+    prismaMock.products = { findMany: jest.fn().mockResolvedValue([]) };
+    expect(((await service.getDetail(100)) as any).can_restart).toBe(true);
+
+    saleLink.planRestart.mockResolvedValue({ sale_state: 'finished', qty: 4, due_date: due });
+    expect(((await service.getDetail(100)) as any).can_restart).toBe(false);
+
+    prismaMock.production_orders.findFirst.mockResolvedValue(cancelledOrder({ status: 'in_progress' }));
+    expect(((await service.getDetail(100)) as any).can_restart).toBe(false);
+  });
+
+  it('cancel() keeps its previous behavior: cancels an in-progress order and emits', async () => {
+    prismaMock.production_orders.findFirst.mockResolvedValue(cancelledOrder({ status: 'in_progress' }));
+    prismaMock.production_orders.update = jest.fn().mockResolvedValue({ id: 100, status: 'cancelled' });
+    await service.cancel(100);
+    expect(prismaMock.production_orders.update).toHaveBeenCalledWith({
+      where: { id: 100 },
+      data: expect.objectContaining({ status: 'cancelled' }),
+    });
   });
 });
