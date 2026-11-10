@@ -66,7 +66,24 @@ export const manufacturingRoutes: Routes = [
     data: {
       permission: 'store:manufacturing:orders:read',
       detailBase: '/admin/manufacturing/orders',
+      activeBase: '/admin/manufacturing/orders/active',
       manageInline: false,
+      apiScope: 'manufacturing',
+    },
+  },
+  {
+    // QUI-1002: shared "Producción activa". Static path, declared before `orders/:id`.
+    path: 'orders/active',
+    loadComponent: () =>
+      import(
+        '../../restaurant-ops/production/components/production-active/production-active.component'
+      ).then((c) => c.ProductionActiveComponent),
+    data: {
+      permission: 'store:manufacturing:orders:read',
+      detailBase: '/admin/manufacturing/orders',
+      listBase: '/admin/manufacturing/orders/day',
+      manageInline: false,
+      apiScope: 'manufacturing',
     },
   },
   {

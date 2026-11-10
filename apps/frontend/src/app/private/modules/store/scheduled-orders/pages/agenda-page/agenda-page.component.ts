@@ -9,6 +9,7 @@ import {
   untracked,
 } from '@angular/core';
 import { takeUntilDestroyed } from '@angular/core/rxjs-interop';
+import { ProductionSseService } from '../../../restaurant-ops/production/services/production-sse.service';
 import { Router } from '@angular/router';
 import { Subscription, forkJoin } from 'rxjs';
 import { AuthFacade } from '../../../../../../core/store/auth/auth.facade';
@@ -463,6 +464,7 @@ export class AgendaPageComponent {
   private readonly toast = inject(ToastService);
   private readonly router = inject(Router);
   private readonly destroyRef = inject(DestroyRef);
+  private readonly sse = inject(ProductionSseService);
 
   readonly statuses = STATUS_ORDER;
   readonly headerActions = [
@@ -566,6 +568,9 @@ export class AgendaPageComponent {
       const status = this.statusFilter();
       untracked(() => this.load(from, to, status));
     });
+
+    // Production state changed elsewhere: refresh the agenda silently.
+    this.sse.listen(this.destroyRef, () => this.refresh());
   }
 
   // --- carga ------------------------------------------------------------

@@ -16,6 +16,10 @@ import {
   StockDemandLine,
   type InsufficientStockItem,
 } from '../inventory/shared/services/stock-validator.service';
+import {
+  emitProductionOrderUpdated,
+  type ProductionOrderEventRow,
+} from './production-order-events';
 import { RequestContextService } from '../../../common/context/request-context.service';
 import {
   VendixHttpException,
@@ -232,6 +236,22 @@ export class ProductionOrdersService {
   }
 
   // ------------------------------------------------------------------ create
+  /** QUI-1002 — live-sync emission, always AFTER the DB write; never throws. */
+  private emitUpdated(row: unknown): void {
+    emitProductionOrderUpdated(this.eventEmitter, this.logger, row as ProductionOrderEventRow);
+  }
+
+  /** Effective estimated minutes: per-order override, else the product's preparation time. */
+  private withEstimate<T extends { estimated_minutes?: number | null; product?: unknown }>(row: T) {
+    const prep = (row.product as { preparation_time_minutes?: number | null } | null | undefined)
+      ?.preparation_time_minutes;
+    return {
+      ...row,
+      estimated_minutes: row.estimated_minutes ?? null,
+      effective_estimated_minutes: row.estimated_minutes ?? prep ?? null,
+    };
+  }
+
   async create(dto: CreateProductionOrderDto) {
     const context = RequestContextService.getContext();
     const store_id = context?.store_id;
@@ -307,6 +327,7 @@ export class ProductionOrdersService {
       // body lean. No-op here; the controller can call update() if needed.
     }
 
+    this.emitUpdated(created);
     return created;
   }
 
@@ -394,6 +415,7 @@ export class ProductionOrdersService {
             sku: true,
             stock_unit: true,
             is_batch_produced: true,
+            preparation_time_minutes: true,
           },
         },
         recipe: {
@@ -424,7 +446,7 @@ export class ProductionOrdersService {
       throw new VendixHttpException(ErrorCodes.PRODUCTION_ORDER_NOT_FOUND);
     }
 
-    return order;
+    return this.withEstimate(order);
   }
 
   // ------------------------------------------------------------------- start
@@ -440,10 +462,76 @@ export class ProductionOrdersService {
         },
       );
     }
-    return this.prisma.production_orders.update({
-      where: { id },
-      data: { status: 'in_progress', updated_at: new Date() },
+    // Atomic claim: two screens starting the same order cannot both win.
+    const now = new Date();
+    const claimed = await this.prisma.production_orders.updateMany({
+      where: { id, status: 'draft' },
+      data: { status: 'in_progress', started_at: now, updated_at: now },
     });
+    if (claimed.count !== 1) {
+      throw new VendixHttpException(
+        ErrorCodes.PRODUCTION_ORDER_INVALID_STATE,
+        undefined,
+        {
+          from: order.status,
+          to: 'in_progress',
+        },
+      );
+    }
+    const started = await this.findOne(id);
+    this.emitUpdated(started);
+    return started;
+  }
+
+  // ------------------------------------------------------- sale card (QUI-1002)
+  /** Moves every `from` order of one sale through the individual `move(id)`. */
+  private async moveSaleOrders(
+    sale_order_id: number,
+    from: 'draft' | 'in_progress',
+    move: (order: { id: number; planned_qty: unknown }) => Promise<unknown>,
+  ) {
+    const store_id = RequestContextService.getContext()?.store_id;
+    if (!store_id) {
+      throw new VendixHttpException(ErrorCodes.STORE_CONTEXT_001);
+    }
+    const orders = await this.prisma.production_orders.findMany({
+      where: { order_id: sale_order_id, store_id },
+      select: { id: true, status: true, planned_qty: true },
+      orderBy: { id: 'asc' },
+    });
+    const result = {
+      moved: [] as number[],
+      skipped: [] as number[],
+      failed: [] as { id: number; message: string }[],
+    };
+    for (const order of orders) {
+      if (order.status !== from) {
+        result.skipped.push(order.id);
+        continue;
+      }
+      try {
+        await move(order);
+        result.moved.push(order.id);
+      } catch (error) {
+        result.failed.push({
+          id: order.id,
+          message: error instanceof Error ? error.message : String(error),
+        });
+      }
+    }
+    return result;
+  }
+
+  /** Starts every draft production order of the sale (one card = one sale). */
+  startSale(sale_order_id: number) {
+    return this.moveSaleOrders(sale_order_id, 'draft', (o) => this.start(o.id));
+  }
+
+  /** Completes every in-progress order of the sale with produced_qty = planned_qty. */
+  completeSale(sale_order_id: number) {
+    return this.moveSaleOrders(sale_order_id, 'in_progress', (o) =>
+      this.complete(o.id, { produced_qty: Number(o.planned_qty) }),
+    );
   }
 
   // ----------------------------------------------------------------- complete
@@ -759,6 +847,8 @@ export class ProductionOrdersService {
         (err as Error).stack,
       );
     }
+
+    this.emitUpdated({ store_id, ...updated.order });
 
     // docs/plans/no-overselling-stock-guard-plan.md step 9 — additive: only
     // present when overuse was actually accepted, never an empty array.
@@ -1119,10 +1209,12 @@ export class ProductionOrdersService {
         },
       );
     }
-    return this.prisma.production_orders.update({
+    const cancelled = await this.prisma.production_orders.update({
       where: { id },
       data: { status: 'cancelled', updated_at: new Date() },
     });
+    this.emitUpdated(cancelled);
+    return cancelled;
   }
 
   // ------------------------------------------------------------------- patch
@@ -1139,10 +1231,17 @@ export class ProductionOrdersService {
         },
       );
     }
-    return this.prisma.production_orders.update({
+    const edited = await this.prisma.production_orders.update({
       where: { id },
-      data: { updated_at: new Date() },
+      data: {
+        ...(dto.estimated_minutes !== undefined && {
+          estimated_minutes: dto.estimated_minutes,
+        }),
+        updated_at: new Date(),
+      },
     });
+    this.emitUpdated(edited);
+    return edited;
   }
 
   // ------------------------------------------------------------------- stats
@@ -1199,7 +1298,8 @@ export class ProductionOrdersService {
         due_date: true,
         created_at: true,
         order_id: true,
-        product: { select: { name: true } },
+        estimated_minutes: true,
+        product: { select: { name: true, preparation_time_minutes: true } },
         sale_order: {
           select: {
             order_number: true,
@@ -1273,6 +1373,9 @@ export class ProductionOrdersService {
           produced_qty: r.produced_qty == null ? null : Number(r.produced_qty),
           started_at: iso(r.started_at),
           produced_at: iso(r.produced_at),
+          estimated_minutes: r.estimated_minutes ?? null,
+          effective_estimated_minutes:
+            r.estimated_minutes ?? r.product?.preparation_time_minutes ?? null,
           due_date: iso(r.due_date),
           created_at: r.created_at.toISOString(),
         })),

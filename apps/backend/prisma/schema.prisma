@@ -12958,6 +12958,8 @@ model production_orders {
   order_number String?                     @db.VarChar(30)
   due_date     DateTime?                   @db.Timestamp(6)
   started_at   DateTime?                   @db.Timestamp(6)
+  /// QUI-1002: minutes estimated for this order; NULL = product preparation_time_minutes.
+  estimated_minutes Int?
   /// Finished-goods destination location.
   location_id  Int?
   /// Finished-goods batch created on completion.

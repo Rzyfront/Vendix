@@ -24,6 +24,7 @@ import {
 import { CurrencyPipe } from '../../../../../../shared/pipes/currency/currency.pipe';
 import { ProductionOrderDetailModalComponent } from '../../../restaurant-ops/production/components/production-order-detail/production-order-detail-modal.component';
 import { ProductionOrdersService } from '../../../restaurant-ops/production/services/production-orders.service';
+import { ProductionSseService } from '../../../restaurant-ops/production/services/production-sse.service';
 import { ProductionOrderRef } from '../../../restaurant-ops/production/interfaces/production-order.interface';
 import { NonProducibleNoticeComponent } from '../non-producible-notice/non-producible-notice.component';
 import { ScheduledOrdersApiService } from '../../services/scheduled-orders-api.service';
@@ -232,6 +233,7 @@ export class ScheduleDetailModalComponent {
   private readonly auth = inject(AuthFacade);
   private readonly settings = inject(StoreSettingsFacade);
   private readonly destroyRef = inject(DestroyRef);
+  private readonly sse = inject(ProductionSseService);
 
   readonly scheduleId = input<number | null>(null);
   readonly isOpen = model<boolean>(false);
@@ -319,10 +321,15 @@ export class ScheduleDetailModalComponent {
         this.load(id);
       }
     });
+    // Production state changed elsewhere: refresh the open detail silently.
+    this.sse.listen(this.destroyRef, () => {
+      const id = this.scheduleId();
+      if (this.isOpen() && id !== null && !this.acting()) this.load(id, true);
+    });
   }
 
-  private load(id: number): void {
-    this.loading.set(true);
+  private load(id: number, silent = false): void {
+    if (!silent) this.loading.set(true);
     this.api
       .getDetail(id)
       .pipe(takeUntilDestroyed(this.destroyRef))
@@ -332,8 +339,9 @@ export class ScheduleDetailModalComponent {
           this.loading.set(false);
         },
         error: (err) => {
-          this.detail.set(null);
           this.loading.set(false);
+          if (silent) return;
+          this.detail.set(null);
           this.toast.error(extractApiErrorMessage(err));
         },
       });

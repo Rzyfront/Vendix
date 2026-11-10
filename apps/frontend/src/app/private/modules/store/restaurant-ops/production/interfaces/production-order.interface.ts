@@ -86,6 +86,9 @@ export interface ProductionOrder {
   produced_qty?: number | string | null;
   status: ProductionOrderStatus;
   produced_at?: string | Date | null;
+  started_at?: string | Date | null;
+  /** QUI-1002: per-order estimated minutes override. */
+  estimated_minutes?: number | null;
   created_at: string | Date;
   updated_at: string | Date;
 
@@ -188,6 +191,10 @@ export interface ProductionDayOrder {
   produced_at: string | null;
   due_date: string | null;
   created_at: string;
+  /** QUI-1002: per-order override of the estimated minutes (null = none). */
+  estimated_minutes: number | null;
+  /** `estimated_minutes ?? product preparation time`; null = count up. */
+  effective_estimated_minutes: number | null;
 }
 
 export interface ProductionDayCard {
@@ -211,4 +218,23 @@ export interface ProductionDayResponse {
   timezone: string;
   summary: { waiting: number; in_progress: number; completed: number };
   cards: ProductionDayCard[];
+}
+
+/** QUI-1002: result of moving every order of a sale card (start / complete). */
+export interface ProductionSaleMoveResult {
+  moved: number[];
+  skipped: number[];
+  failed: { id: number; message: string }[];
+}
+
+/** QUI-1002: message of `GET /store/production-orders/stream` (SSE). */
+export interface ProductionStreamEvent {
+  type: 'production_order.updated';
+  store_id: number;
+  id: number;
+  order_id: number | null;
+  status: string;
+  started_at: string | null;
+  produced_at: string | null;
+  estimated_minutes: number | null;
 }

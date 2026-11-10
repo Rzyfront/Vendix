@@ -35,6 +35,20 @@ export const productionOrdersRoutes: Routes = [
     data: {
       permission: 'store:production_orders:read',
       detailBase: '/admin/restaurant-ops/production/orders',
+      activeBase: '/admin/restaurant-ops/production/active',
+    },
+  },
+  {
+    // QUI-1002: shared "Producción activa". Static path, declared before any `:id` route.
+    path: 'active',
+    loadComponent: () =>
+      import(
+        '../components/production-active/production-active.component'
+      ).then((c) => c.ProductionActiveComponent),
+    data: {
+      permission: 'store:production_orders:read',
+      detailBase: '/admin/restaurant-ops/production/orders',
+      listBase: '/admin/restaurant-ops/production/day',
     },
   },
   {

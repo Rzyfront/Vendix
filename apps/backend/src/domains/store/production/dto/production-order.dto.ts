@@ -8,6 +8,7 @@ import {
   Max,
   MaxLength,
   Min,
+  ValidateIf,
 } from 'class-validator';
 import { Type, Transform } from 'class-transformer';
 
@@ -54,6 +55,16 @@ export class UpdateProductionOrderDto {
   @IsString()
   @MaxLength(500)
   notes?: string;
+
+  /**
+   * QUI-1002 — per-order estimated minutes (override of the product
+   * preparation time). `null` clears the override.
+   */
+  @IsOptional()
+  @ValidateIf((_, value) => value !== null)
+  @IsInt()
+  @Min(0)
+  estimated_minutes?: number | null;
 }
 
 /**

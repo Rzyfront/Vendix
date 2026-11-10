@@ -10,6 +10,7 @@ import {
   type ProductionSaleCancelledPayload,
   type ProductionSaleSyncPayload,
 } from './production-sale-sync';
+import { emitProductionOrderUpdated } from './production-order-events';
 import { suggestProductionDisposition } from './production-disposition.util';
 
 const CLOSED_SALE_STATES = ['cancelled', 'refunded'];
@@ -44,6 +45,38 @@ export class ProductionSaleLinkService {
    * (`release`) or are written off (`waste`). Never throws: the cancellation
    * has already committed, so a failure is logged for follow-up.
    */
+  /**
+   * QUI-1002 — live-sync emission AFTER the commit, from the committed rows.
+   * A reload or emission failure is logged and never breaks the sync.
+   */
+  private async emitCommitted(client: any, ids: number[]): Promise<void> {
+    if (!this.eventEmitter || ids.length === 0) return;
+    try {
+      const rows = await client.production_orders.findMany({
+        where: { id: { in: ids } },
+        select: {
+          id: true,
+          store_id: true,
+          order_id: true,
+          status: true,
+          started_at: true,
+          produced_at: true,
+          estimated_minutes: true,
+        },
+        orderBy: { id: 'asc' },
+      });
+      for (const row of rows) {
+        emitProductionOrderUpdated(this.eventEmitter, this.logger, row);
+      }
+    } catch (error) {
+      this.logger.warn(
+        `production_order.updated reload failed: ${
+          error instanceof Error ? error.message : String(error)
+        }`,
+      );
+    }
+  }
+
   @OnEvent(PRODUCTION_SALE_CANCELLED_EVENT)
   async onSaleCancelled(payload: ProductionSaleCancelledPayload): Promise<void> {
     try {
@@ -78,6 +111,7 @@ export class ProductionSaleLinkService {
         where: { id: { in: open.map((o) => o.id) }, status: { in: ['draft', 'in_progress'] } },
         data: { status: 'cancelled', updated_at: new Date() },
       });
+      await this.emitCommitted(client, open.map((o) => o.id));
     }
 
     const completed = linked.filter((o) => o.status === 'completed');
@@ -229,7 +263,8 @@ export class ProductionSaleLinkService {
     }
 
     try {
-      return await client.$transaction(async (tx) => {
+      const touched = new Set<number>();
+      const result = await client.$transaction(async (tx) => {
         const existing = await tx.production_orders.findMany({
           where: { store_id: sale.store_id, order_id: sale.id },
           select: { id: true, product_id: true, status: true, planned_qty: true, due_date: true },
@@ -264,6 +299,7 @@ export class ProductionSaleLinkService {
               select: { id: true },
             });
             result.push(created);
+            touched.add(created.id);
             continue;
           }
           result.push({ id: current.id });
@@ -281,6 +317,7 @@ export class ProductionSaleLinkService {
                 updated_at: new Date(),
               },
             });
+            touched.add(current.id);
             continue;
           }
           if (
@@ -296,6 +333,7 @@ export class ProductionSaleLinkService {
                 updated_at: new Date(),
               },
             });
+            touched.add(current.id);
           }
         }
 
@@ -306,9 +344,12 @@ export class ProductionSaleLinkService {
             where: { id: current.id, status: 'draft' },
             data: { status: 'cancelled', updated_at: new Date() },
           });
+          touched.add(current.id);
         }
         return result;
       });
+      await this.emitCommitted(client, [...touched]);
+      return result;
     } catch (error) {
       // Two concurrent ensures can race on the (order_id, product_id) unique:
       // the loser re-reads and finds the winner's row.

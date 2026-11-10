@@ -11,6 +11,7 @@ import { OrderSequenceService } from '../manufacturing/orders/order-sequence.ser
 import { ProductionSaleLinkService } from './production-sale-link.service';
 import { ProductionOrdersController } from './production-orders.controller';
 import { ProductionOrdersService } from './production-orders.service';
+import { ProductionSseService } from './production-sse.service';
 
 /**
  * ProductionOrdersModule — Restaurant Suite Fase C
@@ -38,8 +39,9 @@ import { ProductionOrdersService } from './production-orders.service';
     ProductionOrdersService,
     ProductionSaleLinkService,
     OrderSequenceService,
+    ProductionSseService,
   ],
-  exports: [ProductionOrdersService, ProductionSaleLinkService],
+  exports: [ProductionOrdersService, ProductionSaleLinkService, ProductionSseService],
 })
 export class ProductionOrdersModule implements OnModuleInit {
   constructor(

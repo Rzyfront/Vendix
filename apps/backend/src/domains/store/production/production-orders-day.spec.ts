@@ -138,6 +138,8 @@ describe('ProductionOrdersService.findDay (QUI-996)', () => {
       produced_qty: null,
       started_at: null,
       produced_at: null,
+      estimated_minutes: null,
+      effective_estimated_minutes: null,
       due_date: '2026-11-10T17:00:00.000Z',
       created_at: '2026-11-09T20:00:00.000Z',
     });

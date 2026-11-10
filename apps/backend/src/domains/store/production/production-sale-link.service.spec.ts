@@ -289,3 +289,122 @@ describe('ProductionSaleLinkService.handleSaleCancelled (QUI-995)', () => {
     await expect(service.onSaleCancelled({ order_id: 77, store_id: 1 })).resolves.toBeUndefined();
   });
 });
+
+describe('ProductionSaleLinkService — live-sync events (QUI-1002)', () => {
+  const start = new Date('2026-11-10T15:00:00Z');
+  let tx: any;
+  let client: any;
+  let emitter: { emit: jest.Mock };
+  let service: ProductionSaleLinkService;
+  const stored = (over: Record<string, unknown>) => ({
+    id: 100,
+    store_id: 1,
+    order_id: 77,
+    status: 'draft',
+    started_at: null,
+    produced_at: null,
+    estimated_minutes: null,
+    ...over,
+  });
+
+  const setup = (items: any[], existing: any[], afterCommit: any[]) => {
+    tx = {
+      production_orders: {
+        findMany: jest.fn().mockResolvedValue(existing),
+        create: jest.fn().mockResolvedValue({ id: 100 }),
+        updateMany: jest.fn().mockResolvedValue({ count: 1 }),
+      },
+    };
+    client = {
+      orders: {
+        findFirst: jest.fn().mockResolvedValue({
+          id: 77,
+          store_id: 1,
+          state: 'processing',
+          created_at: new Date('2026-11-09T10:00:00Z'),
+          fulfillment_schedule: { scheduled_start: start },
+          order_items: items,
+        }),
+      },
+      recipes: { findMany: jest.fn().mockResolvedValue([{ id: 7, product_id: 50, product_variant_id: null }]) },
+      production_orders: { findMany: jest.fn().mockResolvedValue(afterCommit) },
+      $transaction: jest.fn(async (cb: any) => cb(tx)),
+    };
+    emitter = { emit: jest.fn() };
+    service = new ProductionSaleLinkService(
+      { withoutScope: () => client } as any,
+      { next: jest.fn().mockResolvedValue('OP-000001') } as any,
+      undefined,
+      emitter as any,
+    );
+  };
+  const events = () => emitter.emit.mock.calls.filter((c) => c[0] === 'production_order.updated').map((c) => c[1]);
+
+  it('a created order is emitted after the transaction commits, from the committed row', async () => {
+    setup([{ id: 1, product_id: 50, quantity: 2 }], [], [stored({ id: 100 })]);
+    await service.ensureForOrder(77);
+    expect(client.production_orders.findMany).toHaveBeenCalledWith(
+      expect.objectContaining({ where: { id: { in: [100] } } }),
+    );
+    expect(events()).toEqual([
+      {
+        type: 'production_order.updated',
+        store_id: 1,
+        id: 100,
+        order_id: 77,
+        status: 'draft',
+        started_at: null,
+        produced_at: null,
+        estimated_minutes: null,
+      },
+    ]);
+  });
+
+  it('draft update, revive and draft cancellation are each emitted', async () => {
+    const draft = { id: 100, product_id: 50, status: 'draft', planned_qty: new Prisma.Decimal(5), due_date: start };
+    setup([{ id: 1, product_id: 50, quantity: 8 }], [draft], [stored({ id: 100 })]);
+    await service.ensureForOrder(77);
+    expect(events().map((e) => e.id)).toEqual([100]);
+
+    setup([{ id: 1, product_id: 50, quantity: 1 }], [{ ...draft, status: 'cancelled' }], [stored({ id: 100 })]);
+    await service.ensureForOrder(77);
+    expect(events().map((e) => e.id)).toEqual([100]);
+
+    setup([], [draft], [stored({ id: 100, status: 'cancelled' })]);
+    await service.ensureForOrder(77);
+    expect(events()).toEqual([expect.objectContaining({ id: 100, status: 'cancelled' })]);
+  });
+
+  it('an idempotent run changes nothing and emits nothing', async () => {
+    setup(
+      [{ id: 1, product_id: 50, quantity: 5 }],
+      [{ id: 100, product_id: 50, status: 'draft', planned_qty: new Prisma.Decimal(5), due_date: start }],
+      [],
+    );
+    await service.ensureForOrder(77);
+    expect(events()).toEqual([]);
+    expect(client.production_orders.findMany).not.toHaveBeenCalled();
+  });
+
+  it('an emission or reload failure never breaks the sync', async () => {
+    setup([{ id: 1, product_id: 50, quantity: 2 }], [], []);
+    client.production_orders.findMany.mockRejectedValue(new Error('reload failed'));
+    await expect(service.ensureForOrder(77)).resolves.toEqual([{ id: 100 }]);
+  });
+
+  it('a cancelled sale emits every order it cancelled', async () => {
+    setup([], [], []);
+    client.production_orders.findMany
+      .mockResolvedValueOnce([
+        { id: 1, product_id: 50, status: 'draft', planned_qty: 1, produced_qty: null, product: { name: 'A' } },
+        { id: 2, product_id: 51, status: 'in_progress', planned_qty: 1, produced_qty: null, product: { name: 'B' } },
+      ])
+      .mockResolvedValueOnce([stored({ id: 1, status: 'cancelled' }), stored({ id: 2, status: 'cancelled' })]);
+    client.production_orders.updateMany = jest.fn().mockResolvedValue({ count: 2 });
+    await service.handleSaleCancelled({ order_id: 77, store_id: 1 });
+    expect(events().map((e) => [e.id, e.status])).toEqual([
+      [1, 'cancelled'],
+      [2, 'cancelled'],
+    ]);
+  });
+});

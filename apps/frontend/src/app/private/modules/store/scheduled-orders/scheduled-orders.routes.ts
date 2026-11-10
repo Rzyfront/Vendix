@@ -16,6 +16,7 @@ export const SCHEDULED_ORDERS_ROUTES: Routes = [
       ).then((c) => c.ProductionDayListComponent),
     data: {
       detailBase: '/admin/restaurant-ops/production/orders',
+      activeBase: '/admin/restaurant-ops/production/active',
       consolidatedPath: '/admin/scheduled-orders/production/insumos',
     },
   },

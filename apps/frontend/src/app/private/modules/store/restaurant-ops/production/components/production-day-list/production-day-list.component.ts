@@ -36,7 +36,11 @@ import {
   ProductionDayResponse,
   ProductionOrder,
 } from '../../interfaces';
-import { ProductionOrdersService } from '../../services';
+import {
+  ProductionApiScope,
+  ProductionOrdersService,
+  ProductionSseService,
+} from '../../services';
 import { ProductionOrderDetailModalComponent } from '../production-order-detail/production-order-detail-modal.component';
 
 /** One hour block of the vertical timeline. */
@@ -320,6 +324,7 @@ export class ProductionDayListComponent {
   private readonly route = inject(ActivatedRoute);
   private readonly router = inject(Router);
   private readonly service = inject(ProductionOrdersService);
+  private readonly sse = inject(ProductionSseService);
   private readonly settings = inject(StoreSettingsFacade);
   private readonly toast = inject(ToastService);
   private readonly dialog = inject(DialogService);
@@ -342,6 +347,9 @@ export class ProductionDayListComponent {
   readonly activeBase: string | null =
     (this.routeData['activeBase'] as string | undefined) ?? null;
   readonly manageInline: boolean = this.routeData['manageInline'] !== false;
+  /** Planta routes read through the manufacturing API (its own industry guard). */
+  readonly apiScope: ProductionApiScope =
+    this.routeData['apiScope'] === 'manufacturing' ? 'manufacturing' : 'restaurant';
   readonly consolidatedPath: string | null =
     (this.routeData['consolidatedPath'] as string | undefined) ?? null;
 
@@ -421,6 +429,8 @@ export class ProductionDayListComponent {
       const date = this.date();
       untracked(() => this.load(date, true));
     });
+    // Another screen (or device) moved an order: reload silently.
+    this.sse.listen(this.destroyRef, () => this.reload(), undefined, this.apiScope);
   }
 
   // --- loading ----------------------------------------------------------
@@ -433,7 +443,7 @@ export class ProductionDayListComponent {
     if (resetView) this.data.set(null);
     this.loading.set(true);
     this.errorMessage.set(null);
-    this.loadSub = this.service.getDay(date).subscribe({
+    this.loadSub = this.service.getDay(date, this.apiScope).subscribe({
       next: (res) => {
         this.data.set(res);
         this.loading.set(false);
