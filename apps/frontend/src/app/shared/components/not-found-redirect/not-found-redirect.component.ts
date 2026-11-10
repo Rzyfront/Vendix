@@ -11,10 +11,14 @@ import { AppEnvironment } from '../../../core/models/domain-config.interface';
  * NotFoundRedirectComponent - catch-all route.
  *
  * Strategy:
- * - If NOT authenticated (visitors and crawlers) → render a "page not found"
- *   view marked `noindex, follow`, without redirecting (SEO-TECH-03). The
- *   previous redirect to "/" made every unknown URL look like a copy of the
- *   home page to Google (soft 404).
+ * - If NOT authenticated and the URL belongs to a private panel (/admin,
+ *   /super-admin, /repartos, /onboarding…) → go straight to the login page.
+ *   This is the usual case of an expired session on a deep link: the private
+ *   routes are only registered with a session, so the URL falls here.
+ * - If NOT authenticated and the URL is anything else (visitors and crawlers)
+ *   → render a "page not found" view marked `noindex, follow`, without
+ *   redirecting (SEO-TECH-03). The previous redirect to "/" made every
+ *   unknown URL look like a copy of the home page to Google (soft 404).
  * - If authenticated → redirect to the initial route of their current app
  *
  * App initial routes:
@@ -27,6 +31,25 @@ import { AppEnvironment } from '../../../core/models/domain-config.interface';
  * - STORE_LANDING → /
  * - STORE_DELIVERY → /repartos
  */
+/** Login page shared by every host (static auth routes). */
+export const LOGIN_URL = '/auth/login';
+
+/**
+ * Private panels that only exist with a session. Without one, their URLs fall
+ * into this catch-all; they are not "not found", the session ended.
+ */
+export const PRIVATE_PANEL_PREFIXES: readonly string[] = [
+  '/admin',
+  '/super-admin',
+  '/superadmin',
+  '/repartos',
+  '/onboarding',
+];
+
+export function isPrivatePanelPath(path: string): boolean {
+  return PRIVATE_PANEL_PREFIXES.some((prefix) => path === prefix || path.startsWith(prefix + '/'));
+}
+
 @Component({
   selector: 'app-not-found-redirect',
   standalone: true,
@@ -96,6 +119,11 @@ export class NotFoundRedirectComponent {
     const isAuthenticated = this.authFacade.isAuthenticated();
 
     if (!isAuthenticated) {
+      if (isPrivatePanelPath(this.requestedPath())) {
+        // Expired session on a panel URL: back to login, without a 404 screen.
+        this.router.navigateByUrl(LOGIN_URL, { replaceUrl: true });
+        return;
+      }
       this.showNotFound.set(true);
       this.applyNotFoundMetadata();
       return;
@@ -110,6 +138,13 @@ export class NotFoundRedirectComponent {
 
     const appType = this.authFacade.selectedAppType();
     this.router.navigate([this.getRedirectUrl(appType)]);
+  }
+
+  /** Path being opened (the one that fell into the catch-all), without query or fragment. */
+  private requestedPath(): string {
+    const finalUrl = this.router.getCurrentNavigation()?.finalUrl;
+    const url = finalUrl ? this.router.serializeUrl(finalUrl) : this.document.location?.pathname || this.router.url;
+    return url.split(/[?#]/)[0];
   }
 
   private getRedirectUrl(appType: string): string {
