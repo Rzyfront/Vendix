@@ -1337,6 +1337,17 @@ describe('OrdersService', () => {
       expect(result.production_cancel_suggestion).toBe('release');
     });
 
+    it('a partially completed order already produced stock: it suggests a disposition and reports in progress', async () => {
+      mockPrismaService.orders.findFirst.mockResolvedValue(
+        base([line(1, 50, { order_item_options: [{ option_name: 'Crema' }] })], [
+          { id: 100, product_id: 50, order_number: 'OP-1', status: 'partially_completed' },
+        ]),
+      );
+      const result: any = await service.findOne(5);
+      expect(result.production_status).toBe('in_progress');
+      expect(result.production_cancel_suggestion).toBe('waste');
+    });
+
     it('QUI-995 B2: two variants of one product link to THEIR OWN order, and the sale is not ready until both are completed', async () => {
       mockPrismaService.orders.findFirst.mockResolvedValue(
         base(

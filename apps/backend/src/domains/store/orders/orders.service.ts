@@ -1611,14 +1611,22 @@ export class OrdersService {
       order.production_status = 'none';
     } else if (states.every((st: string | null) => st === 'completed')) {
       order.production_status = 'completed';
-    } else if (states.some((st: string | null) => st === 'in_progress' || st === 'completed')) {
+    } else if (
+      states.some(
+        (st: string | null) =>
+          st === 'in_progress' || st === 'completed' || st === 'partially_completed',
+      )
+    ) {
       order.production_status = 'in_progress';
     } else {
       order.production_status = 'pending';
     }
-    const completedLines = lines.filter(
-      (i: any) => findProductionOrderForLine(linked, i)?.status === 'completed',
-    );
+    // A partially completed order already produced stock: cancelling the sale
+    // must also decide what happens to that output (same as completed).
+    const completedLines = lines.filter((i: any) => {
+      const status = findProductionOrderForLine(linked, i)?.status;
+      return status === 'completed' || status === 'partially_completed';
+    });
     order.production_cancel_suggestion =
       completedLines.length > 0 ? suggestProductionDisposition(completedLines) : null;
   }
