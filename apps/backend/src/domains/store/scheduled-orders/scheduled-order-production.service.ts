@@ -10,7 +10,7 @@ import {
   localCivil,
 } from '../../../common/utils/store-timezone.util';
 import { RecipesService } from '../recipes/recipes.service';
-import { BatchClaimPool, probeSellableStock, resolveBatchLines } from '../recipes/batch-bom-resolver';
+import { BatchClaimPool, probeConsumableStock, resolveBatchLines } from '../recipes/batch-bom-resolver';
 import { StockLevelManager } from '../inventory/shared/services/stock-level-manager.service';
 import { StockValidatorService } from '../inventory/shared/services/stock-validator.service';
 import { KitchenFireService } from '../kitchen-fire/kitchen-fire.service';
@@ -150,7 +150,8 @@ export class ScheduledOrderProductionService implements OnModuleInit {
     const explodeBatchAware = (recipe_id: number, units: number) =>
       this.recipes.explodeBom(recipe_id, { [recipe_id]: units }, client, { stopAtBatchProduced: true });
     const deps = {
-      getAvailable: (product_id: number) => probeSellableStock(this.stockValidator as any, product_id, client),
+      getAvailable: (product_id: number) =>
+        probeConsumableStock(this.stockValidator, this.stockLevelManager, product_id, client),
       explode: explodeBatchAware,
     };
     return async (recipe_id, units) =>

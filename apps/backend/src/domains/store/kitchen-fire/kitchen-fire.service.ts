@@ -8,7 +8,7 @@ import {
   BatchClaimPool,
   ResolvedBomLine,
   hasBatchLines,
-  probeSellableStock,
+  probeConsumableStock,
   resolveBatchLines,
 } from '../recipes/batch-bom-resolver';
 import { StockLevelManager } from '../inventory/shared/services/stock-level-manager.service';
@@ -465,7 +465,7 @@ export class KitchenFireService {
    * result, so they keep the exact pre-QUI-990 path. Items are resolved one
    * after another against the shared `pool`, so two lines of the same fire
    * cannot both take the same batch stock. Stock is read through the guard's own
-   * source (`probeSellableStock`).
+   * source, capped at the location the line consumes from (`probeConsumableStock`).
    */
   private async resolveBatchForItems(
     items: Array<{
@@ -479,7 +479,7 @@ export class KitchenFireService {
     const resolvedByItem = new Map<number, ResolvedBomLine[]>();
     const deps = {
       getAvailable: (productId: number) =>
-        probeSellableStock(this.stockValidatorService as any, productId, tx),
+        probeConsumableStock(this.stockValidatorService, this.stockLevelManager, productId, tx),
       explode: (recipeId: number, units: number) =>
         this.recipesService.explodeBom(recipeId, { [recipeId]: units }, tx, {
           stopAtBatchProduced: true,

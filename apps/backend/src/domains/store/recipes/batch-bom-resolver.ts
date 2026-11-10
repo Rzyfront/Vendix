@@ -1,5 +1,7 @@
 import type { Prisma } from '@prisma/client';
 import type { BomExplosionLine } from './recipes.service';
+import type { StockValidatorService } from '../inventory/shared/services/stock-validator.service';
+import type { StockLevelManager } from '../inventory/shared/services/stock-level-manager.service';
 
 /**
  * QUI-990 — turns the leaves of `explodeBom(..., { stopAtBatchProduced: true })`
@@ -75,25 +77,48 @@ export async function resolveBatchLines(
   return out;
 }
 
+/** The slice of `StockValidatorService` the stock probes read. */
+export type SellableStockValidator = Pick<StockValidatorService, 'findInsufficientLines'>;
+
+/**
+ * Stock a batch leaf can really take. The sale consumes from ONE location, the
+ * one `getDefaultLocationForProduct` picks (the sellable location with the most
+ * available), so the store-wide sellable total is capped at that location's
+ * available. Without a location to consume from there is no stock to take.
+ */
+export async function probeConsumableStock(
+  validator: SellableStockValidator,
+  locator: Pick<StockLevelManager, 'getDefaultLocationForProduct'>,
+  productId: number,
+  tx?: Prisma.TransactionClient,
+): Promise<number> {
+  const total = await probeSellableStock(validator, productId, tx);
+  if (!(total > 0)) return 0;
+  let locationId: number;
+  try {
+    locationId = await locator.getDefaultLocationForProduct(productId, undefined, tx);
+  } catch {
+    return 0;
+  }
+  return Math.min(total, await probeSellableStock(validator, productId, tx, locationId));
+}
+
 /**
  * Sellable stock of a product read through `StockValidatorService` (the guard's
  * own source): asking for an impossible quantity returns the real `available`.
  * An untracked product reports nothing, i.e. no stock of its own: the caller
- * falls back to exploding the recipe, as before QUI-990.
+ * falls back to exploding the recipe, as before QUI-990. With `locationId`,
+ * only that location counts.
  */
 export async function probeSellableStock(
-  validator: {
-    findInsufficientLines(
-      lines: Array<{ product_id: number; quantity: number }>,
-      opts: { tx?: Prisma.TransactionClient; kind: 'ingredient' },
-    ): Promise<Array<{ available: number }>>;
-  },
+  validator: SellableStockValidator,
   productId: number,
   tx?: Prisma.TransactionClient,
+  locationId?: number,
 ): Promise<number> {
   const [row] = await validator.findInsufficientLines(
     [{ product_id: productId, quantity: Number.MAX_SAFE_INTEGER }],
-    { tx, kind: 'ingredient' },
+    { tx, kind: 'ingredient', locationId },
   );
   return row ? Number(row.available) : 0;
 }
