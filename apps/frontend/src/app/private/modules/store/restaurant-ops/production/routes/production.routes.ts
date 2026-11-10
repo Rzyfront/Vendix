@@ -25,11 +25,47 @@ export const productionOrdersRoutes: Routes = [
     data: { permission: 'store:production_orders:read' },
   },
   {
+    // T14 (QUI-996): shared "Lista de producción" of one day. Static path,
+    // declared before any `:id` route.
+    path: 'day',
+    loadComponent: () =>
+      import(
+        '../components/production-day-list/production-day-list.component'
+      ).then((c) => c.ProductionDayListComponent),
+    data: {
+      permission: 'store:production_orders:read',
+      detailBase: '/admin/restaurant-ops/production/orders',
+      activeBase: '/admin/restaurant-ops/production/active',
+    },
+  },
+  {
+    // QUI-1002: shared "Producción activa". Static path, declared before any `:id` route.
+    path: 'active',
+    loadComponent: () =>
+      import(
+        '../components/production-active/production-active.component'
+      ).then((c) => c.ProductionActiveComponent),
+    data: {
+      permission: 'store:production_orders:read',
+      detailBase: '/admin/restaurant-ops/production/orders',
+      listBase: '/admin/restaurant-ops/production/day',
+    },
+  },
+  {
     path: 'new',
     loadComponent: () =>
       import(
         '../pages/production-order-form-page/production-order-form-page.component'
       ).then((c) => c.ProductionOrderFormPageComponent),
     data: { permission: 'store:production_orders:create' },
+  },
+  {
+    // T13 (QUI-995): shared detail of one production order (born from a sale or manual).
+    path: 'orders/:id',
+    loadComponent: () =>
+      import(
+        '../pages/production-order-detail-page/production-order-detail-page.component'
+      ).then((c) => c.ProductionOrderDetailPageComponent),
+    data: { permission: 'store:production_orders:read' },
   },
 ];

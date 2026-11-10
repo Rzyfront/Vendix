@@ -93,11 +93,13 @@ export class DefaultPanelUIService {
         products_list: true,
         products_categories: true,
         products_brands: true,
+        products_option_groups: true,
         ecommerce: true,
         orders: true,
         orders_sales: true,
         orders_purchase_orders: true,
         orders_quotations: true,
+        orders_scheduled: true,
         // Contratos de obra (A.2, ADR-02, FB-02).
         // Plan decisions: `default_visible_for_privileged_users=true`
         // (owner/admin de una constructora ven "Contratos" en el proximo

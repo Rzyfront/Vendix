@@ -4,9 +4,11 @@ import {
   IsOptional,
   IsPositive,
   IsString,
+  Matches,
   Max,
   MaxLength,
   Min,
+  ValidateIf,
 } from 'class-validator';
 import { Type, Transform } from 'class-transformer';
 
@@ -53,6 +55,18 @@ export class UpdateProductionOrderDto {
   @IsString()
   @MaxLength(500)
   notes?: string;
+
+  /**
+   * QUI-1002 — per-order estimated minutes (override of the product
+   * preparation time). `null` clears the override. Same range as the
+   * product's `preparation_time_minutes` (up to 7 days).
+   */
+  @IsOptional()
+  @ValidateIf((_, value) => value !== null)
+  @IsInt()
+  @Min(0)
+  @Max(10080)
+  estimated_minutes?: number | null;
 }
 
 /**
@@ -130,6 +144,13 @@ export class ProductionOrderQueryDto {
   @IsPositive()
   recipe_id?: number;
 
+  /** QUI-995: only the production orders of this sale. */
+  @IsOptional()
+  @Type(() => Number)
+  @IsInt()
+  @IsPositive()
+  order_id?: number;
+
   @IsOptional()
   @IsString()
   @Transform(({ value }) =>
@@ -143,4 +164,15 @@ export class ProductionOrderQueryDto {
     typeof value === 'string' ? value.toLowerCase() : value,
   )
   sort_order?: 'asc' | 'desc' = 'desc';
+}
+
+/**
+ * QUI-996 — query of the production list of ONE day. `date` is a calendar date
+ * in the store timezone (`YYYY-MM-DD`); omitted = today in the store timezone.
+ */
+export class ProductionDayQueryDto {
+  @IsOptional()
+  @IsString()
+  @Matches(/^\d{4}-\d{2}-\d{2}$/, { message: 'date debe tener el formato YYYY-MM-DD' })
+  date?: string;
 }

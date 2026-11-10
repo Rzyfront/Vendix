@@ -1,0 +1,11 @@
+-- QUI-1002 — estimated time of a production order, editable per order.
+-- NULL means "use the product's preparation_time_minutes" (computed on read);
+-- an explicit value overrides it for that order only.
+--
+-- DATA IMPACT:
+-- Tables affected: production_orders (new nullable column)
+-- Expected row changes: none (existing rows read NULL; no backfill)
+-- Destructive operations: none
+-- FK/cascade risk: none
+-- Idempotency: ADD COLUMN IF NOT EXISTS
+ALTER TABLE "production_orders" ADD COLUMN IF NOT EXISTS "estimated_minutes" INTEGER;

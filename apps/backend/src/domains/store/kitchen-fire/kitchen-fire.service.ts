@@ -4,6 +4,13 @@ import { Prisma } from '@prisma/client';
 import { EventEmitter2 } from '@nestjs/event-emitter';
 import { StorePrismaService } from '../../../prisma/services/store-prisma.service';
 import { RecipesService, BomExplosionLine } from '../recipes/recipes.service';
+import {
+  BatchClaimPool,
+  ResolvedBomLine,
+  hasBatchLines,
+  probeConsumableStock,
+  resolveBatchLines,
+} from '../recipes/batch-bom-resolver';
 import { StockLevelManager } from '../inventory/shared/services/stock-level-manager.service';
 import {
   StockValidatorService,
@@ -25,6 +32,11 @@ import { AuditResource } from '../../../common/audit/audit.service';
 import { lockOrderLifecycle } from '../orders/order-flow/order-lifecycle-lock.util';
 import { resolveKitchenMode } from './kitchen-mode.util';
 import { closeSupersededKitchenRows } from './kitchen-superseded-rows.util';
+import {
+  ConsumptionLine,
+  createBatchAwareExploders,
+  expandProduction,
+} from './addon-consumption';
 
 /**
  * Puerto mínimo de OrderFlowService que necesita cocina para mantener
@@ -74,6 +86,32 @@ export function isWasteRemakeType(type: string | null): boolean {
 }
 
 /**
+ * QUI-1000 — add-on columns the fire needs (consumption) and the KDS ticket
+ * shows (name, quantity, note). Add-ons are immutable once sold, so they are
+ * read together with the order items instead of inside the transaction.
+ */
+const ADDON_OPTION_SELECT = {
+  id: true,
+  group_name: true,
+  option_name: true,
+  scope: true,
+  component_type: true,
+  component_product_id: true,
+  component_variant_id: true,
+  quantity: true,
+  uom: true,
+  note: true,
+} satisfies Prisma.order_item_optionsSelect;
+
+export type FireAddonOption = {
+  scope: 'per_unit' | 'per_line';
+  component_type: 'ingredient' | 'recipe' | 'product';
+  component_product_id: number;
+  component_variant_id: number | null;
+  quantity: any;
+};
+
+/**
  * Single source of truth for the kitchen-ticket payload shape returned to
  * the KDS / POS. Exposes the parent order code (`order.order_number`) plus
  * the per-item product summary. Used by all four ticket read paths so the
@@ -110,7 +148,14 @@ const KITCHEN_TICKET_INCLUDE = {
       // cocina, no el mesero. El flag vivia en `order_items` y se mostraba en la
       // fila de la mesa, pero el KDS nunca lo veia: el plato se servia en loza y
       // el dato solo existia del lado que no lo ejecuta.
-      order_item: { select: { is_takeaway: true } },
+      order_item: {
+        select: {
+          is_takeaway: true,
+          // QUI-1000 — the add-ons of the dish travel with the ticket.
+          // `signTicketPayload` turns them into `addons` (image, recipe).
+          order_item_options: { select: ADDON_OPTION_SELECT, orderBy: { id: 'asc' } },
+        },
+      },
       product: {
         select: {
           id: true,
@@ -171,6 +216,15 @@ export interface FireOrderItemsResult {
 }
 
 /**
+ * QUI-1000 — extra work that must commit or roll back together with the fire
+ * (the agenda's "Enviar a cocina" moves the schedule to `in_production`).
+ * Callbacks pushed to `afterCommit` run once the transaction has committed.
+ */
+export interface FireOrderItemsOptions {
+  withinTx?: (tx: Prisma.TransactionClient, afterCommit: Array<() => void>) => Promise<void>;
+}
+
+/**
  * Plan KDS fire-flows (B2): the pre-exploded context the caller has already
  * resolved OUTSIDE the transaction (recipes, BOM, default locations,
  * business date, partition into prepared/recipe-less). The fire-in-tx
@@ -195,6 +249,17 @@ export interface PreExplodedFireContext {
   };
   firedItemIds: number[];
   skippedItemIds: number[];
+  /**
+   * Resend only (waste re-cook, post-cancel remake): the fired lines are
+   * cancelled by design, so the claim must not filter on `cancelled_at`.
+   */
+  includeCancelled?: boolean;
+  /**
+   * Resend only: lines whose add-on marker the resend has just reset. Their
+   * add-ons are consumed even when the scheduled production already ran
+   * (`schedule.produced_at`), which otherwise short-circuits the plan.
+   */
+  reconsumeAddonItemIds?: number[];
   preparedItems: Array<{
     orderItem: {
       id: number;
@@ -212,6 +277,8 @@ export interface PreExplodedFireContext {
       variant_attributes?: string | null;
       variant_sku?: string | null;
       product_variants?: { product_id: number; name: string | null } | null;
+      /** QUI-1000 — add-ons consumed together with the dish. */
+      order_item_options?: FireAddonOption[];
     };
     recipeId: number;
     bomLines: BomExplosionLine[];
@@ -227,6 +294,8 @@ export interface PreExplodedFireContext {
     variant_attributes?: string | null;
     variant_sku?: string | null;
     product_variants?: { product_id: number; name: string | null } | null;
+    /** QUI-1000 — add-ons consumed together with the dish. */
+    order_item_options?: FireAddonOption[];
   }>;
   locationByProduct: Map<number, number>;
   businessDate: string;
@@ -425,6 +494,77 @@ export class KitchenFireService {
   }
 
   /**
+   * QUI-990 — an exclusion confirmed in the modal may name an ingredient that
+   * lives INSIDE a batch-produced preparation (the modal shows the full
+   * explosion). The batch-aware BOM holds that preparation as a single leaf, so
+   * the exclusion would not belong to it. For such an item the batch stock
+   * cannot be used as-is ("sin harina" cannot come from a ready Bizcocho): it
+   * falls back to the full explosion, exactly as before QUI-990, so the
+   * exclusion is honored and the fire is not rejected. Items are updated in
+   * place; items without such exclusions keep the batch-aware BOM.
+   */
+  private async applyBatchExclusionFallback(
+    items: Array<{ orderItem: { id: number }; recipeId: number; bomLines: BomExplosionLine[] }>,
+    exclusionsByOrderItem: Map<number, number[]>,
+    tx: Prisma.TransactionClient | undefined,
+  ): Promise<void> {
+    for (const item of items) {
+      if (!item.bomLines.some((l) => l.batch_recipe_id != null)) continue;
+      const excluded = exclusionsByOrderItem.get(item.orderItem.id) ?? [];
+      const leafIds = new Set(item.bomLines.map((l) => l.component_product_id));
+      if (!excluded.some((id) => !leafIds.has(id))) continue;
+      item.bomLines = await this.recipesService.explodeBom(
+        item.recipeId,
+        { [item.recipeId]: 1 },
+        tx,
+      );
+    }
+  }
+
+  /**
+   * QUI-990 — resolves batch-produced leaves for the items about to be consumed
+   * or checked. Items whose effective BOM has no batch leaf are left out of the
+   * result, so they keep the exact pre-QUI-990 path. Items are resolved one
+   * after another against the shared `pool`, so two lines of the same fire
+   * cannot both take the same batch stock. Stock is read through the guard's own
+   * source, capped at the location the line consumes from (`probeConsumableStock`).
+   */
+  private async resolveBatchForItems(
+    items: Array<{
+      orderItem: { id: number; quantity: any };
+      bomLines: BomExplosionLine[];
+    }>,
+    exclusionsByOrderItem: Map<number, number[]>,
+    tx: Prisma.TransactionClient | undefined,
+    pool: BatchClaimPool,
+  ): Promise<Map<number, ResolvedBomLine[]>> {
+    const resolvedByItem = new Map<number, ResolvedBomLine[]>();
+    const deps = {
+      getAvailable: (productId: number) =>
+        probeConsumableStock(this.stockValidatorService, this.stockLevelManager, productId, tx),
+      explode: (recipeId: number, units: number) =>
+        this.recipesService.explodeBom(recipeId, { [recipeId]: units }, tx, {
+          stopAtBatchProduced: true,
+        }),
+    };
+    for (const { orderItem, bomLines } of items) {
+      const orderQty = Number(orderItem.quantity || 0);
+      if (!Number.isFinite(orderQty) || orderQty <= 0) continue;
+      const excluded = exclusionsByOrderItem.get(orderItem.id);
+      const excludedSet = excluded && excluded.length > 0 ? new Set(excluded) : null;
+      const effective = excludedSet
+        ? bomLines.filter((l) => !excludedSet.has(l.component_product_id))
+        : bomLines;
+      if (!hasBatchLines(effective)) continue;
+      resolvedByItem.set(
+        orderItem.id,
+        await resolveBatchLines(effective, orderQty, pool, deps),
+      );
+    }
+    return resolvedByItem;
+  }
+
+  /**
    * No-overselling guard (docs/plans/no-overselling-stock-guard-plan.md,
    * step 6) — flattens the ALREADY-EXPLODED BOM of every prepared item being
    * fired into ingredient demand lines, net of confirmed exclusions
@@ -442,11 +582,26 @@ export class KitchenFireService {
       bomLines: BomExplosionLine[];
     }>,
     exclusionsByOrderItem: Map<number, number[]>,
+    /** QUI-990 — lines already resolved against batch stock (absolute quantities). */
+    resolvedByItem?: Map<number, ResolvedBomLine[]>,
   ): StockDemandLine[] {
     const demands: StockDemandLine[] = [];
     for (const { orderItem, bomLines } of items) {
       const orderQty = Number(orderItem.quantity || 0);
       if (!Number.isFinite(orderQty) || orderQty <= 0) continue;
+      const resolved = resolvedByItem?.get(orderItem.id);
+      if (resolved) {
+        for (const line of resolved) {
+          const consumedQty = Math.round(line.quantity);
+          if (!Number.isFinite(consumedQty) || consumedQty <= 0) continue;
+          demands.push({
+            product_id: line.component_product_id,
+            quantity: consumedQty,
+            used_by: orderItem.product_name,
+          });
+        }
+        continue;
+      }
       const excluded = exclusionsByOrderItem.get(orderItem.id);
       const excludedSet = excluded && excluded.length > 0 ? new Set(excluded) : null;
       const effectiveBomLines = excludedSet
@@ -468,6 +623,7 @@ export class KitchenFireService {
   // ---------------------------------------------------------------- fire
   async fireOrderItems(
     dto: FireOrderItemsDto,
+    opts?: FireOrderItemsOptions,
   ): Promise<FireOrderItemsResult> {
     const context = RequestContextService.getContext();
     const store_id = context?.store_id;
@@ -553,6 +709,8 @@ export class KitchenFireService {
             product_variants: {
               select: { id: true, name: true, product_id: true },
             },
+            // QUI-1000 — add-ons are consumed together with the dish.
+            order_item_options: { select: ADDON_OPTION_SELECT },
           },
         },
       },
@@ -578,6 +736,16 @@ export class KitchenFireService {
     const firedItemIds: number[] = [];
     const skippedItemIds: number[] = [];
     for (const item of order.order_items) {
+      // QUI-999: a line the matrix sends to stock or to production is not a
+      // kitchen line at all; like any non-prepared line it is omitted silently
+      // so a mixed table (dish + soda) still fires the dish. Legacy lines
+      // (destination NULL) keep rejecting an explicit `skip_kds`.
+      const destination = (item as { fulfillment_destination?: string | null })
+        .fulfillment_destination;
+      if (destination === 'stock' || destination === 'production') {
+        skippedItemIds.push(item.id);
+        continue;
+      }
       if (item.skip_kds) {
         throw new VendixHttpException(
           ErrorCodes.KITCHEN_FIRE_NOT_ELIGIBLE_001,
@@ -704,9 +872,12 @@ export class KitchenFireService {
       }
       let bomLines = bomCache.get(recipe.id);
       if (!bomLines) {
-        bomLines = await this.recipesService.explodeBom(recipe.id, {
-          [recipe.id]: 1,
-        });
+        bomLines = await this.recipesService.explodeBom(
+          recipe.id,
+          { [recipe.id]: 1 },
+          undefined,
+          { stopAtBatchProduced: true },
+        );
         bomCache.set(recipe.id, bomLines);
       }
       preparedItems.push({ orderItem: item, recipeId: recipe.id, bomLines });
@@ -730,10 +901,22 @@ export class KitchenFireService {
     const inventoryPolicy =
       await this.stockValidatorService.resolveInventoryPolicy(store_id);
     let preCheckedStockWarnings: InsufficientStockItem[] = [];
+    await this.applyBatchExclusionFallback(
+      preparedItems,
+      exclusionsByOrderItem,
+      undefined,
+    );
     if (preparedItems.length > 0) {
+      const resolvedForCheck = await this.resolveBatchForItems(
+        preparedItems,
+        exclusionsByOrderItem,
+        undefined,
+        new Map(),
+      );
       const ingredientDemands = this.buildIngredientDemandLines(
         preparedItems,
         exclusionsByOrderItem,
+        resolvedForCheck,
       );
       preCheckedStockWarnings =
         await this.stockValidatorService.assertIngredientsAvailable(
@@ -830,9 +1013,27 @@ export class KitchenFireService {
         return notesMap;
       })(),
     };
-    const result = await this.prisma.$transaction(async (tx) =>
-      this.fireOrderItemsInTx(tx, store_id, preComputed),
-    );
+    const afterCommit: Array<() => void> = [];
+    const result = opts?.withinTx
+      ? await this.prisma.$transaction(
+          async (tx) => {
+            const fired = await this.fireOrderItemsInTx(tx, store_id, preComputed);
+            // QUI-1000 — same transaction: a failure here rolls the fire back.
+            await opts.withinTx!(tx, afterCommit);
+            return fired;
+          },
+          { timeout: 30000 },
+        )
+      : await this.prisma.$transaction(async (tx) =>
+          this.fireOrderItemsInTx(tx, store_id, preComputed),
+        );
+    for (const run of afterCommit) {
+      try {
+        run();
+      } catch (err) {
+        this.logger.error(`Post-commit callback after fire failed: ${(err as Error).message}`);
+      }
+    }
 
     // 5. Emit `kitchen.fired` AFTER the transaction commits. A failure
     //    here MUST NOT roll back the fire.
@@ -869,7 +1070,7 @@ export class KitchenFireService {
         include: KITCHEN_TICKET_INCLUDE,
       });
       if (fullTicket) {
-        await signProductImageUrls(this.s3Service, fullTicket);
+        await this.signTicketPayload(fullTicket);
         this.pushKitchenEvent(store_id, {
           type: 'ticket.created',
           ticket: fullTicket,
@@ -889,7 +1090,7 @@ export class KitchenFireService {
           where: { id: { in: secondaryTicketIds }, store_id },
           include: KITCHEN_TICKET_INCLUDE,
         });
-        await signProductImageUrls(this.s3Service, others);
+        await this.signTicketPayload(others);
         for (const other of others) {
           this.pushKitchenEvent(store_id, {
             type: 'ticket.created',
@@ -923,6 +1124,188 @@ export class KitchenFireService {
         ? { stock_warnings: result.stockWarnings }
         : {}),
     };
+  }
+
+  /**
+   * QUI-1000 — consumption of the add-ons of the items being fired, one entry
+   * per order item (so every movement carries its `order_item_id`). Reuses the
+   * single expansion of the scheduled-order production (`expandProduction`)
+   * with the batch rule: an add-on that is a batch preparation takes its own
+   * stock first and explodes only the shortfall. Items without add-ons add no
+   * query at all, so a dish without add-ons fires exactly as before.
+   *
+   * Returns nothing when the order's schedule already started production: that
+   * hook consumed every add-on of the order.
+   */
+  private async planAddonConsumption(
+    tx: Prisma.TransactionClient,
+    order_id: number,
+    items: Array<{
+      id: number;
+      product_id: number | null;
+      product_name: string;
+      quantity: any;
+      order_item_options?: FireAddonOption[];
+    }>,
+    pool: BatchClaimPool,
+    reconsumeItemIds: ReadonlySet<number> = new Set(),
+  ): Promise<
+    Array<{
+      order_item_id: number;
+      product_id: number;
+      product_name: string;
+      lines: ConsumptionLine[];
+    }>
+  > {
+    const withAddons = items.filter((i) => i.order_item_options && i.order_item_options.length > 0);
+    if (withAddons.length === 0) return [];
+
+    const schedule = await tx.order_fulfillment_schedules.findFirst({
+      where: { order_id },
+      select: { produced_at: true },
+    });
+    // The production start consumed every add-on of a scheduled order, so the
+    // fire skips them — except for lines a resend just reset on purpose.
+    const planned = schedule?.produced_at
+      ? withAddons.filter((i) => reconsumeItemIds.has(i.id))
+      : withAddons;
+    if (planned.length === 0) return [];
+
+    // `addons_consumed_at` is the one marker shared with the production start:
+    // each line claims its add-ons before they are planned, so a line that
+    // already gave them up (or loses a race) never deducts them twice.
+    const claimed: typeof withAddons = [];
+    for (const item of planned) {
+      const { count } = await tx.order_items.updateMany({
+        where: { id: item.id, addons_consumed_at: null },
+        data: { addons_consumed_at: new Date() },
+      });
+      if (count > 0) claimed.push(item);
+    }
+    if (claimed.length === 0) return [];
+
+    // Same claim pool as the dishes of this fire: a batch preparation used by
+    // a dish and by an add-on cannot take the same shelf stock twice.
+    const resolvers = createBatchAwareExploders({
+      recipes: this.recipesService,
+      stockValidator: this.stockValidatorService,
+      stockLevelManager: this.stockLevelManager,
+      client: tx,
+      pool,
+    });
+    const plan: Array<{
+      order_item_id: number;
+      product_id: number;
+      product_name: string;
+      lines: ConsumptionLine[];
+    }> = [];
+    for (const item of claimed) {
+      const { consumption } = await expandProduction(
+        [
+          {
+            id: item.id,
+            product_id: null,
+            product_variant_id: null,
+            quantity: Number(item.quantity) || 0,
+            product_type: null,
+            inventory_consumed: true,
+            options: item.order_item_options!.map((o) => ({ ...o, quantity: Number(o.quantity) })),
+          },
+        ],
+        resolvers.findRecipe,
+        resolvers.explode,
+        resolvers.explodeComponent,
+      );
+      if (consumption.length > 0) {
+        plan.push({
+          order_item_id: item.id,
+          product_id: item.product_id!,
+          product_name: item.product_name,
+          lines: consumption,
+        });
+      }
+    }
+    return plan;
+  }
+
+  /**
+   * Signs the product images of a ticket payload (snapshot, REST, SSE) and
+   * turns each item's raw add-ons into the `addons` the KDS shows (QUI-1000):
+   * quantity, signed image (or null), note and the active recipe id of
+   * preparation add-ons, so the ticket can open their recipe like Production.
+   * Existing ticket fields are left untouched; `addons` is additive.
+   */
+  private async signTicketPayload<T>(root: T): Promise<T> {
+    await this.decorateTicketAddons(root);
+    return signProductImageUrls(this.s3Service, root);
+  }
+
+  private async decorateTicketAddons(root: unknown): Promise<void> {
+    const tickets = (Array.isArray(root) ? root : [root]).filter(Boolean) as Array<any>;
+    const items = tickets.flatMap((t) => (Array.isArray(t.items) ? t.items : []));
+    const withOptions = items.filter((it: any) => Array.isArray(it?.order_item?.order_item_options));
+    if (withOptions.length === 0) return;
+
+    const productIds = [
+      ...new Set(
+        withOptions.flatMap((it: any) =>
+          it.order_item.order_item_options.map((o: any) => o.component_product_id as number),
+        ),
+      ),
+    ];
+    const [products, recipes] =
+      productIds.length > 0
+        ? await Promise.all([
+            this.prisma.products.findMany({
+              where: { id: { in: productIds } },
+              select: {
+                id: true,
+                product_images: {
+                  select: { image_url: true },
+                  orderBy: [{ is_main: 'desc' }, { sort_order: 'asc' }],
+                  take: 1,
+                },
+              },
+            }),
+            this.prisma.recipes.findMany({
+              where: { product_id: { in: productIds }, is_active: true },
+              select: { id: true, product_id: true, product_variant_id: true },
+            }),
+          ])
+        : [[], []];
+    const keyByProduct = new Map<number, string | null>(
+      products.map((p: any) => [p.id, p.product_images?.[0]?.image_url ?? null]),
+    );
+    const signed = new Map<number, string | null>();
+    await Promise.all(
+      [...keyByProduct.entries()].map(async ([id, key]) => {
+        signed.set(id, key && this.s3Service ? ((await this.s3Service.signUrl(key)) ?? null) : null);
+      }),
+    );
+    const recipeFor = (product_id: number, variant_id: number | null) => {
+      const rows = recipes.filter((r: any) => r.product_id === product_id);
+      const exact = variant_id != null ? rows.find((r: any) => r.product_variant_id === variant_id) : undefined;
+      return (exact ?? rows.find((r: any) => r.product_variant_id == null))?.id ?? null;
+    };
+
+    for (const item of withOptions) {
+      const lineQty = Number(item.quantity) || 0;
+      item.addons = item.order_item.order_item_options.map((o: any) => ({
+        id: o.id,
+        group_name: o.group_name,
+        name: o.option_name,
+        quantity: Number(o.quantity) * (o.scope === 'per_unit' ? lineQty : 1),
+        uom: o.uom ?? null,
+        note: o.note ?? null,
+        component_type: o.component_type,
+        component_product_id: o.component_product_id,
+        component_variant_id: o.component_variant_id ?? null,
+        image_url: signed.get(o.component_product_id) ?? null,
+        recipe_id:
+          o.component_type === 'recipe' ? recipeFor(o.component_product_id, o.component_variant_id ?? null) : null,
+      }));
+      delete item.order_item.order_item_options;
+    }
   }
 
   // ------------------------------------------------------- fire-in-tx core
@@ -1042,7 +1425,8 @@ export class KitchenFireService {
         id: { in: claimItemIds },
         order_id: order.id,
         inventory_consumed_at_fire: false,
-        cancelled_at: null,
+        // A resend re-cooks lines that are cancelled by design.
+        ...(preComputed.includeCancelled ? {} : { cancelled_at: null }),
       },
       data: { inventory_consumed_at_fire: true },
     });
@@ -1117,17 +1501,85 @@ export class KitchenFireService {
     // without going through the public `fireOrderItems` pre-check. When the
     // public method already validated the identical demand moments earlier
     // (`preComputed.skipIngredientCheck`), this re-query is skipped.
+    // QUI-990 — batch-produced preparations: consume their own stock first,
+    // explode only the shortfall. One claim pool for every line of this fire.
+    await this.applyBatchExclusionFallback(preparedItems, exclusionsByOrderItem, tx);
+    const batchPool: BatchClaimPool = new Map();
+    const resolvedByItem = await this.resolveBatchForItems(
+      preparedItems,
+      exclusionsByOrderItem,
+      tx,
+      batchPool,
+    );
+    // Ingredients that only appear after resolving a shortfall have no
+    // pre-resolved location yet.
+    // Leaves of an exclusion fallback (full explosion) are not in the
+    // pre-resolved map either, so they are looked up here as well.
+    const consumptionLocations = new Map(locationByProduct);
+    const extraLeafSources: Array<Array<{ component_product_id: number }>> = [
+      ...resolvedByItem.values(),
+      ...preparedItems.map((p) => p.bomLines),
+    ];
+    for (const lines of extraLeafSources) {
+      for (const l of lines) {
+        if (consumptionLocations.has(l.component_product_id)) continue;
+        try {
+          consumptionLocations.set(
+            l.component_product_id,
+            await this.stockLevelManager.getDefaultLocationForProduct(
+              l.component_product_id,
+              undefined,
+              tx,
+            ),
+          );
+        } catch {
+          // Same as the pre-resolution: no location, no movement for this leaf.
+        }
+      }
+    }
+
     let stockWarnings: InsufficientStockItem[] =
       preComputed.preCheckedStockWarnings ?? [];
     if (!preComputed.skipIngredientCheck && preparedItems.length > 0) {
       const ingredientDemands = this.buildIngredientDemandLines(
         preparedItems,
         exclusionsByOrderItem,
+        resolvedByItem,
       );
       stockWarnings = await this.stockValidatorService.assertIngredientsAvailable(
         ingredientDemands,
         { tx, allowIngredientOveruse },
       );
+    }
+
+    // QUI-1000 — add-ons of the fired dishes are consumed together with the
+    // dish, exactly once: each line claims `addons_consumed_at`, the same
+    // marker the production-start hook checks.
+    const addonPlan = await this.planAddonConsumption(
+      tx,
+      order.id,
+      [...preparedItems.map((p) => p.orderItem), ...recipeLessItems],
+      batchPool,
+      new Set(preComputed.reconsumeAddonItemIds ?? []),
+    );
+    if (addonPlan.length > 0) {
+      // Dish ingredients and add-on components can be the same stock row, so
+      // the guard sums both demands before deciding.
+      const demands = [
+        ...this.buildIngredientDemandLines(preparedItems, exclusionsByOrderItem, resolvedByItem),
+        ...addonPlan.flatMap((entry) =>
+          entry.lines.map((line) => ({
+            product_id: line.product_id,
+            product_variant_id: line.variant_id,
+            quantity: line.quantity,
+            used_by: entry.product_name,
+          })),
+        ),
+      ];
+      stockWarnings = await this.stockValidatorService.assertIngredientsAvailable(demands, {
+        tx,
+        allowIngredientOveruse,
+      });
     }
 
     for (const ctxItem of preparedItems) {
@@ -1170,36 +1622,45 @@ export class KitchenFireService {
         : bomLines;
 
       // Per-leaf consumption: stock × orderQty × bomMultiplier.
-      // CP-POS-SVC-PERF-001 / A.3 — per-leaf updateStock calls are
-      // independent (each touches its own stock_levels row), so we
-      // collect them and run in parallel via Promise.all. Cuts N
-      // sequential round-trips to a single burst per order_item while
-      // preserving the kds_session_id mapping (per item, not per leaf).
+      // QUI-988 — per-leaf updateStock calls run SEQUENTIALLY. A recipe can
+      // repeat an ingredient (e.g. sugar in a sub-recipe and in the parent):
+      // two lines then hit the same stock_levels row, and in parallel both
+      // read the same quantity so one write overwrote the other (lost
+      // update) while both movements were inserted. One movement per leaf is
+      // kept for traceability/costing. kds_session_id is per item, not per leaf.
       const itemKdsSessionId =
         openSessionByKds.get(
           kdsByProduct.get(orderItem.product_id!) ?? defaultKds.id,
         ) ?? null;
-      const updateStockPromises: Promise<any>[] = [];
       const validLines: Array<{
-        line: (typeof effectiveBomLines)[number];
+        line: { component_product_id: number; quantity: number };
         consumedQty: number;
         locationId: number;
       }> = [];
-      for (const line of effectiveBomLines) {
-        const consumedQty = Math.round(line.quantity * orderQty);
+      // QUI-990 — a resolved item carries ABSOLUTE quantities (stock + shortfall).
+      const resolvedLines = resolvedByItem.get(orderItem.id);
+      const consumableLines: Array<{ component_product_id: number; quantity: number }> =
+        resolvedLines ??
+        effectiveBomLines.map((l) => ({
+          component_product_id: l.component_product_id,
+          quantity: l.quantity * orderQty,
+        }));
+      for (const line of consumableLines) {
+        const consumedQty = Math.round(line.quantity);
         if (!Number.isFinite(consumedQty) || consumedQty <= 0) {
           this.logger.warn(
             `Skipping zero/invalid BOM line in recipe for order item ${orderItem.id}: component=${line.component_product_id} qty=${line.quantity}`,
           );
           continue;
         }
-        const locationId = locationByProduct.get(line.component_product_id);
+        const locationId = consumptionLocations.get(line.component_product_id);
         if (!locationId) continue;
         validLines.push({ line, consumedQty, locationId });
       }
+      const results: Array<Awaited<ReturnType<StockLevelManager['updateStock']>>> = [];
       for (const { line, consumedQty, locationId } of validLines) {
-        updateStockPromises.push(
-          this.stockLevelManager.updateStock(
+        results.push(
+          await this.stockLevelManager.updateStock(
             {
               product_id: line.component_product_id,
               location_id: locationId,
@@ -1229,7 +1690,6 @@ export class KitchenFireService {
           ),
         );
       }
-      const results = await Promise.all(updateStockPromises);
       for (const result of results) {
         if (result?.cost_snapshot) {
           cogsTotal += Number(result.cost_snapshot.total_cost || 0);
@@ -1245,6 +1705,40 @@ export class KitchenFireService {
         productVariantId: orderItem.product_variant_id ?? null,
         variantLabel: this.variantLabelFor(orderItem),
       });
+    }
+
+    for (const entry of addonPlan) {
+      const itemKdsSessionId =
+        openSessionByKds.get(kdsByProduct.get(entry.product_id) ?? defaultKds.id) ?? null;
+      for (const line of entry.lines) {
+        const locationId = await this.stockLevelManager.getDefaultLocationForProduct(
+          line.product_id,
+          line.variant_id ?? undefined,
+          tx,
+        );
+        const result = await this.stockLevelManager.updateStock(
+          {
+            product_id: line.product_id,
+            ...(line.variant_id ? { variant_id: line.variant_id } : {}),
+            location_id: locationId,
+            quantity_change: -Math.abs(line.quantity),
+            movement_type: 'consumption',
+            reason: `Fire-to-kitchen add-on (order #${order.id} – item #${entry.order_item_id})`,
+            source_module: 'kitchen_fire',
+            user_id,
+            order_item_id: entry.order_item_id,
+            create_movement: true,
+            validate_availability: !allowIngredientOveruse,
+            allow_negative: allowIngredientOveruse,
+            kds_session_id: itemKdsSessionId,
+          },
+          tx,
+        );
+        if (result?.cost_snapshot) {
+          cogsTotal += Number(result.cost_snapshot.total_cost || 0);
+          consumedLineCount += 1;
+        }
+      }
     }
 
     // Recipe-less items: same ticket, no stock movement, no COGS.
@@ -1834,7 +2328,9 @@ export class KitchenFireService {
           where: { id: { in: fireIds } },
           data: { inventory_consumed_at_fire: false },
         });
-        const ctx = await this.prepareFireContext(dto.order_id, fireIds, tx);
+        const ctx = await this.prepareFireContext(dto.order_id, fireIds, tx, {
+          includeCancelled: true,
+        });
         if (!ctx) {
           await tx.order_items.updateMany({
             where: { id: { in: fireIds } },
@@ -1867,8 +2363,27 @@ export class KitchenFireService {
           }
           fallbackReuseIds.push(...ctx.skippedItemIds);
         }
+        // QUI-1000: a wasted dish lost its add-ons too, so the remake claims
+        // and deducts them again (`planAddonConsumption`, inside the fire,
+        // claims by this marker). A post-cancel remake resets every fired
+        // line: the reuse disposal also gave its add-ons back to stock. Only
+        // items that really fire are reset: a resend that aborts or skips an
+        // item keeps its marker, so a later fire never deducts those add-ons
+        // twice.
+        const wasteIdSet = new Set(wasteItems.map((it) => it.id));
+        const addonResetIds = remakeIds
+          ? ctx.firedItemIds
+          : ctx.firedItemIds.filter((id) => wasteIdSet.has(id));
+        if (addonResetIds.length > 0) {
+          await tx.order_items.updateMany({
+            where: { id: { in: addonResetIds } },
+            data: { addons_consumed_at: null },
+          });
+        }
         return this.fireOrderItemsInTx(tx, store_id, {
           ...ctx,
+          includeCancelled: true,
+          reconsumeAddonItemIds: addonResetIds,
           historyExtras: { resend: true, reason: dto.reason },
         });
       });
@@ -2068,7 +2583,7 @@ export class KitchenFireService {
         where: { id: { in: ticketIds }, store_id },
         include: KITCHEN_TICKET_INCLUDE,
       });
-      await signProductImageUrls(this.s3Service, tickets);
+      await this.signTicketPayload(tickets);
       for (const ticket of tickets) {
         this.pushKitchenEvent(store_id, {
           type: 'ticket.created',
@@ -2176,9 +2691,12 @@ export class KitchenFireService {
       if (!recipe) continue; // sin receta activa: no consume insumos al disparar
       let bom = bomCache.get(recipe.id);
       if (!bom) {
-        bom = await this.recipesService.explodeBom(recipe.id, {
-          [recipe.id]: 1,
-        });
+        bom = await this.recipesService.explodeBom(
+          recipe.id,
+          { [recipe.id]: 1 },
+          undefined,
+          { stopAtBatchProduced: true },
+        );
         bomCache.set(recipe.id, bom);
       }
       items.push({
@@ -2190,7 +2708,17 @@ export class KitchenFireService {
         bomLines: bom,
       });
     }
-    const demands = this.buildIngredientDemandLines(items, new Map());
+    const resolvedByItem = await this.resolveBatchForItems(
+      items,
+      new Map(),
+      opts.tx,
+      new Map(),
+    );
+    const demands = this.buildIngredientDemandLines(
+      items,
+      new Map(),
+      resolvedByItem,
+    );
     const shortages = await this.stockValidatorService.findInsufficientLines(
       demands,
       { tx: opts.tx, kind: 'ingredient' },
@@ -2503,6 +3031,12 @@ export class KitchenFireService {
      (the public fireOrderItems path).
      */
     tx?: Prisma.TransactionClient,
+    /**
+     * `includeCancelled` is for `resendOrderItems` only: a waste re-cook and a
+     * post-cancel remake fire lines that are cancelled by design. The normal
+     * fire path keeps skipping cancelled lines.
+     */
+    options: { includeCancelled?: boolean } = {},
   ): Promise<PreExplodedFireContext | null> {
     const context = RequestContextService.getContext();
     const store_id = context?.store_id;
@@ -2529,7 +3063,10 @@ export class KitchenFireService {
         order_items: {
           // Ver nota en `fireOrderItems`: las lineas canceladas no se disparan
           // ni se previsualizan.
-          where: { id: { in: candidateOrderItemIds }, cancelled_at: null },
+          where: {
+            id: { in: candidateOrderItemIds },
+            ...(options.includeCancelled ? {} : { cancelled_at: null }),
+          },
           include: {
             products: {
               select: {
@@ -2550,6 +3087,8 @@ export class KitchenFireService {
             product_variants: {
               select: { id: true, name: true, product_id: true },
             },
+            // QUI-1000 — add-ons are consumed together with the dish.
+            order_item_options: { select: ADDON_OPTION_SELECT },
           },
         },
       },
@@ -2666,6 +3205,7 @@ export class KitchenFireService {
           recipe.id,
           { [recipe.id]: 1 },
           client,
+          { stopAtBatchProduced: true },
         );
         bomCache.set(recipe.id, bomLines);
       }
@@ -2707,6 +3247,7 @@ export class KitchenFireService {
       },
       firedItemIds,
       skippedItemIds,
+      ...(options.includeCancelled ? { includeCancelled: true } : {}),
       preparedItems,
       recipeLessItems,
       locationByProduct,
@@ -2789,7 +3330,7 @@ export class KitchenFireService {
         where: { id: { in: result.ticketIds }, store_id },
         include: KITCHEN_TICKET_INCLUDE,
       });
-      await signProductImageUrls(this.s3Service, allTickets);
+      await this.signTicketPayload(allTickets);
       for (const ticket of allTickets) {
         this.pushKitchenEvent(store_id, {
           type: 'ticket.created',
@@ -2854,7 +3395,7 @@ export class KitchenFireService {
     if (!ticket) {
       throw new VendixHttpException(ErrorCodes.KITCHEN_TICKET_NOT_FOUND);
     }
-    await signProductImageUrls(this.s3Service, ticket);
+    await this.signTicketPayload(ticket);
     return { ticket, store_id };
   }
 
@@ -4201,7 +4742,7 @@ export class KitchenFireService {
       orderBy: { fired_at: 'asc' },
       include: KITCHEN_TICKET_INCLUDE,
     });
-    await signProductImageUrls(this.s3Service, data);
+    await this.signTicketPayload(data);
 
     return { data, total: data.length, server_ts: now.getTime() };
   }
@@ -4230,7 +4771,7 @@ export class KitchenFireService {
       }),
       this.prisma.kitchen_tickets.count({ where }),
     ]);
-    await signProductImageUrls(this.s3Service, data);
+    await this.signTicketPayload(data);
 
     return { data, total };
   }
@@ -4375,6 +4916,8 @@ export class KitchenFireService {
             is_takeaway: original.is_takeaway,
             notes: original.notes,
             skip_kds: original.skip_kds,
+            // QUI-999: the split part keeps the destination of its original line.
+            fulfillment_destination: original.fulfillment_destination ?? null,
             // Puntero de agrupacion visual: la UI reagrupa las partes para que el
             // cliente siga viendo "3 pollos" y no dos filas sueltas.
             split_from_order_item_id:

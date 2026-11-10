@@ -16,6 +16,14 @@ import {
 import { SerialNumberEnforcementService } from '../../serial-numbers/serial-number-enforcement.service';
 import { InventorySerialNumbersService } from '../../serial-numbers/inventory-serial-numbers.service';
 import { resolveLineStockUnits } from '../../../products/services/packaging.util';
+import { findProductionOrderForLine } from '../../../production/production-order-pairing.util';
+import { lineConsumesOwnStock } from '../../../orders/utils/resolve-line-destination.util';
+import { RecipesService } from '../../../recipes/recipes.service';
+import {
+  createBatchAwareExploders,
+  expandProduction,
+} from '../../../kitchen-fire/addon-consumption';
+import { StockValidatorService } from './stock-validator.service';
 
 /**
  * Options that drive a single delivery-commit run. The same contract is shared
@@ -84,6 +92,14 @@ export interface CommitOpts {
 export interface CommitResult {
   totalCost: number;
   committedItemCount: number;
+  /**
+   * Cost of the `production` lines this run committed, per production order
+   * (already included in `totalCost`). The delivery posts it as
+   * `production.sale_cogs`, keyed by the production order: a direct POS sale
+   * already posted the till's `order.completed` (keyed by the order), so a
+   * second `order.completed` would be dropped as a duplicate (S22).
+   */
+  productionCogs?: Array<{ production_order_id: number; total_cost: number }>;
 }
 
 interface PosSelection {
@@ -112,6 +128,14 @@ interface CommitLine {
   /** Soft-cancel marker (`order_items.cancelled_at`) — a cancelled line never deducts. */
   cancelled_at?: Date | null;
   skip_kds?: boolean | null;
+  /** QUI-999: `production` lines never touch their own stock here. */
+  fulfillment_destination?: string | null;
+  /**
+   * QUI-995: a completed production order exists for this `production` line's
+   * product. Delivery then consumes the reservation that completion made and
+   * decrements once, exactly like a stocked line.
+   */
+  production_completed?: boolean;
   /** Location to deduct from when no active reservation is found (dispatch line). */
   location_id_override?: number | null;
   /** Resolved manual serial selection for this line (POS). */
@@ -159,6 +183,11 @@ export class OrderStockCommitService {
     private readonly allocator: SellableStockAllocator,
     private readonly serialEnforcement: SerialNumberEnforcementService,
     private readonly serialNumbers: InventorySerialNumbersService,
+    // QUI-999: add-ons of a `stock` line are consumed with the line's own
+    // commit. Optional in the signature so call sites that never sell add-ons
+    // (dispatch specs) keep constructing the service without them.
+    private readonly recipes?: RecipesService,
+    private readonly stockValidator?: StockValidatorService,
   ) {}
 
   /**
@@ -309,6 +338,15 @@ export class OrderStockCommitService {
             product_variants: {
               select: { id: true, track_inventory_override: true, name: true },
             },
+            order_item_options: {
+              select: {
+                scope: true,
+                component_type: true,
+                component_product_id: true,
+                component_variant_id: true,
+                quantity: true,
+              },
+            },
           },
         },
       },
@@ -357,8 +395,43 @@ export class OrderStockCommitService {
     let totalCost = 0;
     let committedItemCount = 0;
 
+    // QUI-995: the sale's production orders; a line is released once ITS order
+    // (exact variant, or the legacy NULL-variant order of the product) completed.
+    let productionOrders: Array<{
+      id: number;
+      product_id: number;
+      product_variant_id: number | null;
+      status: string;
+    }> = [];
+    if (
+      (order.order_items ?? []).some(
+        (i: any) => i.fulfillment_destination === 'production',
+      )
+    ) {
+      productionOrders =
+        (await db.production_orders.findMany({
+          where: { order_id: orderId, status: { not: 'cancelled' } },
+          select: { id: true, product_id: true, product_variant_id: true, status: true },
+        })) ?? [];
+    }
+
+    // One pool per commit run: two lines cannot take the same batch stock.
+    const addonPool = new Map();
+    const productionCogs = new Map<number, number>();
+
     for (const item of order.order_items || []) {
       if (!item.product_id) continue;
+
+      // QUI-999: a `stock` line consumes its add-ons where the line is
+      // consumed (here); `kds` lines at the kitchen fire, `production` lines
+      // at production completion, legacy (NULL) lines at the scheduled start.
+      totalCost += await this.consumeStockLineAddons(
+        item,
+        (order as any).store_id,
+        addonPool,
+        tx,
+        opts,
+      );
 
       const effectiveTracking =
         item.product_variants?.track_inventory_override ??
@@ -379,6 +452,9 @@ export class OrderStockCommitService {
         inventory_consumed_at_fire: item.inventory_consumed_at_fire,
         cancelled_at: (item as any).cancelled_at ?? null,
         skip_kds: item.skip_kds,
+        fulfillment_destination: (item as { fulfillment_destination?: string | null }).fulfillment_destination ?? null,
+        production_completed:
+          findProductionOrderForLine(productionOrders, item)?.status === 'completed',
         posSelection: opts.consumeSerials
           ? (serialSelectionByLine.get(item.id) ?? posMatcher(item))
           : undefined,
@@ -395,6 +471,15 @@ export class OrderStockCommitService {
       );
       totalCost += res.cost;
       if (res.committed) committedItemCount++;
+      if (res.committed && res.cost > 0 && line.fulfillment_destination === 'production') {
+        const productionOrder = findProductionOrderForLine(productionOrders, item);
+        if (productionOrder) {
+          productionCogs.set(
+            productionOrder.id,
+            (productionCogs.get(productionOrder.id) ?? 0) + res.cost,
+          );
+        }
+      }
     }
 
     // Defensive sweep: consume any residual active reservations for this order
@@ -414,7 +499,108 @@ export class OrderStockCommitService {
       );
     }
 
-    return { totalCost, committedItemCount };
+    return {
+      totalCost,
+      committedItemCount,
+      ...(productionCogs.size > 0
+        ? {
+            productionCogs: [...productionCogs].map(([production_order_id, total_cost]) => ({
+              production_order_id,
+              total_cost,
+            })),
+          }
+        : {}),
+    };
+  }
+
+  /**
+   * Consumes the add-ons of ONE `stock` line, once. Claims
+   * `order_items.addons_consumed_at` first (`updateMany where addons_consumed_at
+   * null`, the same claim the fire, the scheduled start and the production
+   * completion use), so a repeat commit or a concurrent path never deducts them
+   * twice. Returns the cost to add to the commit total.
+   */
+  private async consumeStockLineAddons(
+    item: any,
+    storeId: number,
+    pool: Map<any, any>,
+    tx: Prisma.TransactionClient,
+    opts: CommitOpts,
+  ): Promise<number> {
+    const options: any[] = item.order_item_options ?? [];
+    if (
+      item.fulfillment_destination !== 'stock' ||
+      item.cancelled_at != null ||
+      item.addons_consumed_at != null ||
+      options.length === 0 ||
+      !this.recipes ||
+      !this.stockValidator
+    ) {
+      return 0;
+    }
+    const db: any = tx;
+    const claimed = await db.order_items.updateMany({
+      where: { id: item.id, addons_consumed_at: null },
+      data: { addons_consumed_at: new Date() },
+    });
+    if (claimed.count === 0) return 0;
+
+    const resolvers = createBatchAwareExploders({
+      recipes: this.recipes,
+      stockValidator: this.stockValidator,
+      stockLevelManager: this.stockLevelManager,
+      client: tx,
+      pool,
+    });
+    // Add-ons only: the dish itself is not expanded here (`product_type: null`).
+    const { consumption } = await expandProduction(
+      [
+        {
+          id: item.id,
+          product_id: item.product_id,
+          product_variant_id: item.product_variant_id ?? null,
+          quantity: Number(item.quantity),
+          product_type: null,
+          inventory_consumed: true,
+          addons_consumed: false,
+          options: options.map((o) => ({ ...o, quantity: Number(o.quantity) })),
+        },
+      ],
+      resolvers.findRecipe,
+      resolvers.explode,
+      resolvers.explodeComponent,
+    );
+    if (!consumption.length) return 0;
+
+    const policy = await this.stockValidator.resolveInventoryPolicy(storeId, tx);
+    const allowOveruse = policy.allowIngredientOveruse;
+    const userId = opts.userId ?? RequestContextService.getContext()?.user_id;
+    let cost = 0;
+    for (const line of consumption) {
+      const location_id = await this.stockLevelManager.getDefaultLocationForProduct(
+        line.product_id,
+        line.variant_id ?? undefined,
+        tx,
+      );
+      const result = await this.stockLevelManager.updateStock(
+        {
+          product_id: line.product_id,
+          ...(line.variant_id ? { variant_id: line.variant_id } : {}),
+          location_id,
+          quantity_change: -line.quantity,
+          movement_type: 'consumption',
+          reason: `Adiciones de la línea ${item.id} (${opts.reason})`,
+          source_module: 'order_stock_commit_addons',
+          user_id: userId ?? undefined,
+          create_movement: true,
+          validate_availability: !allowOveruse,
+          allow_negative: allowOveruse,
+        },
+        tx,
+      );
+      cost += Number(result?.cost_snapshot?.total_cost ?? 0);
+    }
+    return cost;
   }
 
   /**
@@ -517,6 +703,7 @@ export class OrderStockCommitService {
               inventory_consumed_at_fire: true,
               cancelled_at: true,
               skip_kds: true,
+              fulfillment_destination: true,
             },
           },
         },
@@ -565,6 +752,7 @@ export class OrderStockCommitService {
         inventory_consumed_at_fire: matched?.inventory_consumed_at_fire,
         cancelled_at: matched?.cancelled_at ?? null,
         skip_kds: matched?.skip_kds,
+        fulfillment_destination: matched?.fulfillment_destination ?? null,
         location_id_override:
           item.location_id ?? dispatchNote.dispatch_location_id ?? null,
       };
@@ -630,6 +818,11 @@ export class OrderStockCommitService {
     // 3. Restaurant prepared items pending kitchen fire consume ingredients at
     //    fire, not the plate here.
     if (isRestaurant && line.product_type === 'prepared' && !line.skip_kds) {
+      return { cost: 0, committed: false };
+    }
+    // 3b. QUI-999: a `production` line never deducts its own stock here; its
+    //     production order (QUI-995) is what moves it.
+    if (!lineConsumesOwnStock(line) && !line.production_completed) {
       return { cost: 0, committed: false };
     }
 

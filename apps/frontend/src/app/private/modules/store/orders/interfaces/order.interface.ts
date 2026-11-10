@@ -78,6 +78,16 @@ export interface Order {
   order_number: string;
   state: OrderState;
   cancellation_policy?: OrderCancellationPolicy;
+  /** T13 (QUI-995) — derived production state of the sale. */
+  production_status?: OrderProductionStatus;
+  /** T13 — suggested disposition when cancelling with finished production; null = no question. */
+  production_cancel_suggestion?: ProductionDisposition | null;
+  /**
+   * S23 — scheduled order whose schedule still accepts "Enviar a cocina":
+   * the schedule id and how many dishes are still pending for the kitchen.
+   * Null when the order is not scheduled or can no longer be sent.
+   */
+  scheduled_kitchen?: { schedule_id: number; pending_item_count: number } | null;
   /**
    * order-truth-and-invoice-tz plan (Objetivos 3/11/12) — verdad única de
    * botones de orden. `orders.service.ts` `findOne` la arma con
@@ -387,6 +397,23 @@ export interface CouponUseSnapshot {
   } | null;
 }
 
+/** QUI-999 — where an order line goes; NULL/absent = line created before it. */
+export type OrderItemFulfillmentDestination = 'kds' | 'production' | 'stock';
+
+/** T13 (QUI-995) — production order linked to a `production` line. */
+export interface OrderItemProductionOrder {
+  id: number;
+  order_number: string | null;
+  /** draft | in_progress | completed | cancelled */
+  status: string;
+}
+
+/** T13 — derived in read: `completed` = every linked production order is completed. */
+export type OrderProductionStatus = 'none' | 'pending' | 'in_progress' | 'completed';
+
+/** T13 — what to do with finished production when the sale is cancelled. */
+export type ProductionDisposition = 'release' | 'waste';
+
 export interface OrderItem {
   id: number;
   order_id: number;
@@ -451,6 +478,10 @@ export interface OrderItem {
   /** Stock committed by the delivery seam (distinct from kitchen consumption). */
   inventory_committed?: boolean;
   skip_kds?: boolean;
+  /** QUI-999 — destination of the line (KDS, Production or stock). */
+  fulfillment_destination?: OrderItemFulfillmentDestination | null;
+  /** T13 — production order of a `production` line; null when not created yet. */
+  production_order?: OrderItemProductionOrder | null;
   /**
    * Restaurant Suite — Fase K Gap 2: KDS state for this order_item.
    * Populated by GET /store/orders/:id when the item has been fired

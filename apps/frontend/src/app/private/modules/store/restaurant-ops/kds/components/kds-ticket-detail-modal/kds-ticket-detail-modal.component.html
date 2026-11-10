@@ -120,6 +120,77 @@
               </app-button>
             </div>
 
+            <!-- QUI-1000 — adiciones del plato: cantidad, imagen, nota y la
+                 receta de las que son preparaciones, como en Producción. -->
+            @if (item.addons?.length) {
+              <div class="mt-2 pt-2 border-t border-dashed border-[var(--color-border)]">
+                <p class="text-[10px] uppercase tracking-wide text-[var(--color-text-secondary)] mb-1">
+                  Adiciones
+                </p>
+                <ul class="space-y-2">
+                  @for (addon of item.addons; track addon.id) {
+                    <li class="flex items-start gap-2">
+                      @if (addon.image_url) {
+                        <img
+                          [src]="addon.image_url"
+                          [alt]="'Foto de ' + addon.name"
+                          class="h-8 w-8 shrink-0 rounded-lg object-cover border border-border"
+                          loading="lazy"
+                        />
+                      } @else {
+                        <span
+                          class="h-8 w-8 shrink-0 rounded-lg border border-dashed border-border flex items-center justify-center text-text-secondary"
+                          aria-hidden="true"
+                        >
+                          <app-icon name="image-off" [size]="14" />
+                        </span>
+                      }
+                      <div class="flex-1 min-w-0">
+                        <p class="text-[13px] font-semibold text-[var(--color-text-primary)]">
+                          + {{ addon.name }} ×{{ addon.quantity }}@if (addon.uom) { {{ addon.uom }}}
+                        </p>
+                        @if (addon.note) {
+                          <p class="text-[12px] italic text-[var(--color-text-secondary)] break-words">
+                            “{{ addon.note }}”
+                          </p>
+                        }
+                        @if (addon.recipe_id != null) {
+                          @let addonState = addonRecipeStateFor(addon);
+                          @switch (addonState.status) {
+                            @case ('loading') {
+                              <p class="text-[11px] text-[var(--color-text-secondary)] flex items-center gap-1">
+                                <app-icon name="loader" [size]="11" class="animate-spin" /> Cargando receta…
+                              </p>
+                            }
+                            @case ('ok') {
+                              @if (addonState.recipe?.items?.length) {
+                                <ul class="mt-0.5 text-[11px] space-y-0.5">
+                                  @for (ri of addonState.recipe?.items; track ri.id) {
+                                    <li class="flex items-center gap-2">
+                                      <span class="font-mono text-[var(--color-text-tertiary)]">×{{ ri.quantity }}</span>
+                                      <span class="flex-1 truncate">{{ ri.component_product?.name || ('Producto #' + ri.component_product_id) }}</span>
+                                      @if (ri.component_product?.stock_unit) {
+                                        <span class="text-[10px] text-[var(--color-text-secondary)]">{{ ri.component_product?.stock_unit }}</span>
+                                      }
+                                    </li>
+                                  }
+                                </ul>
+                              } @else {
+                                <p class="text-[11px] italic text-[var(--color-text-secondary)]">Receta sin ingredientes.</p>
+                              }
+                            }
+                            @case ('error') {
+                              <p class="text-[11px] italic text-[var(--color-text-secondary)]">No se pudo cargar la receta.</p>
+                            }
+                          }
+                        }
+                      </div>
+                    </li>
+                  }
+                </ul>
+              </div>
+            }
+
             <!-- Receta + nota (30/70: insumos izquierda, nota derecha) -->
             <div class="mt-2 pt-2 border-t border-dashed border-[var(--color-border)]">
               <div class="kds-detail-body flex flex-col sm:flex-row gap-3">

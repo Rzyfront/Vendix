@@ -151,6 +151,8 @@ export const FISCAL_DOCUMENT_PRINT_INCLUDE = {
     select: {
       first_name: true,
       last_name: true,
+      // A NIT customer keeps its business name only here (`JuridicaNameRule`).
+      legal_name: true,
       document_number: true,
       phone: true,
       email: true,
@@ -470,12 +472,19 @@ export function mapFiscalDocumentToPrintData(
         : undefined,
     },
     customer: {
+      // The invoice acquirer snapshot is what the XML and the legal PDF use;
+      // the live customer record is only the fallback. A NIT customer has its
+      // name in `legal_name` with empty first/last names, so composing first +
+      // last alone printed "Consumidor Final" on a company invoice.
       name:
+        invoice.customer_name?.trim() ||
+        cust.legal_name?.trim() ||
         `${cust.first_name || ''} ${cust.last_name || ''}`.trim() ||
         'Consumidor Final',
-      tax_id: cust.document_number || '222222222222',
-      phone: cust.phone,
-      email: cust.email,
+      tax_id:
+        invoice.customer_tax_id || cust.document_number || '222222222222',
+      phone: invoice.customer_phone || cust.phone,
+      email: invoice.customer_email || cust.email,
       // CP-print-token-flow A.2 — dirección del adquirente desde
       // `users.addresses[0]` (los providers la incluyen). Sin direcciones
       // `mapUserAddress` devuelve `{}` y el compositor no emite la fila

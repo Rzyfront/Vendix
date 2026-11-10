@@ -21,6 +21,18 @@ import { table_status_enum } from '@prisma/client';
 import { PaymentLegDto } from './payment-leg.dto';
 import { ScheduleInputDto } from '../../scheduled-orders/dto/scheduled-orders.dto';
 
+/** Nota libre de una adición elegida (QUI-994). Mismo límite que la nota de línea. */
+export class PosOptionNoteDto {
+  @IsInt()
+  @Min(1)
+  @Type(() => Number)
+  option_id!: number;
+
+  @IsString()
+  @MaxLength(500)
+  note!: string;
+}
+
 export class PosOrderItemDto {
   @IsOptional()
   @IsString()
@@ -35,6 +47,16 @@ export class PosOrderItemDto {
   @IsInt({ each: true })
   @Type(() => Number)
   option_ids?: number[];
+
+  // Notas por adición, paralelas a `option_ids` (que sigue siendo un number[]
+  // para no romper a los clientes viejos). Una nota de una opción que no se
+  // eligió se ignora.
+  @IsOptional()
+  @IsArray()
+  @ArrayMaxSize(50)
+  @ValidateNested({ each: true })
+  @Type(() => PosOptionNoteDto)
+  option_notes?: PosOptionNoteDto[];
 
   @IsOptional()
   @IsInt()
@@ -220,6 +242,15 @@ export class PosOrderItemDto {
   @IsBoolean()
   @Type(() => Boolean)
   skip_kds?: boolean;
+
+  // QUI-999: the cashier's choice for a producible line with stock ("Cajero
+  // elige" in the matrix): `stock` (default) or `production`. The server only
+  // honors it where the matrix lets the cashier choose; anywhere else it is
+  // ignored and the matrix decides. Persisted in
+  // `order_items.fulfillment_destination`.
+  @IsOptional()
+  @IsIn(['stock', 'production'])
+  fulfillment_destination?: 'stock' | 'production';
 
   // QUI-653 — "Para llevar" del POS (paso Consumo en 'entrega'). El frontend
   // estampa la decisión de la orden en cada línea (ver `isTakeawayOrder` del

@@ -69,7 +69,7 @@
                  Activo, el método de entrega se elige en el paso Envío, así que
                  mesa / para llevar / domicilio se ocultan (siguen montados para
                  que el shell lea checkoutTableId()/needsTable()). -->
-            @if (effectiveMode() !== 'create-draft' && tableId() == null) {
+            @if (scheduledOrdersAvailable() && effectiveMode() !== 'create-draft' && tableId() == null) {
               <app-pos-scheduled-order-picker section="toggle"></app-pos-scheduled-order-picker>
             }
             <div [hidden]="scheduledActive()">
@@ -366,7 +366,10 @@
               }
               <!-- Pedido programado: fecha y franja de entrega junto al cliente. -->
               @if (scheduledActive()) {
-                <app-pos-scheduled-order-picker section="slot"></app-pos-scheduled-order-picker>
+                <app-pos-scheduled-order-picker
+                  section="slot"
+                  [cartItems]="scheduledOrdersAvailable() ? (cartState()?.items ?? []) : []"
+                ></app-pos-scheduled-order-picker>
               }
             </div>
 

@@ -1,3 +1,5 @@
+import type { ProductionOrderRef } from '../../restaurant-ops/production/interfaces/production-order.interface';
+
 /**
  * Tipos mínimos del módulo "Pedidos programados". Reflejan el contrato de la
  * API (`/store/scheduled-orders/*`) descrito en el documento de feature.
@@ -22,27 +24,50 @@ export const STATUS_LABELS: Record<ScheduledOrderStatus, string> = {
   cancelled: 'Cancelada',
 };
 
-export const STATUS_ORDER: ScheduledOrderStatus[] = [
+/**
+ * Status the agenda shows (S23). The backend derives it at read time from the
+ * sale, its production and the kitchen (`display_status`); the stored
+ * `status` is only the history. "Vencido" replaces the old manual "No recogida".
+ */
+export type ScheduledOrderDisplayStatus =
+  | 'scheduled'
+  | 'in_production'
+  | 'ready'
+  | 'delivered'
+  | 'expired'
+  | 'cancelled';
+
+export const DISPLAY_STATUS_LABELS: Record<ScheduledOrderDisplayStatus, string> = {
+  scheduled: 'Programada',
+  in_production: 'En producción',
+  ready: 'Lista',
+  delivered: 'Entregada',
+  expired: 'Vencido',
+  cancelled: 'Cancelada',
+};
+
+export const DISPLAY_STATUS_ORDER: ScheduledOrderDisplayStatus[] = [
   'scheduled',
   'in_production',
   'ready',
   'delivered',
-  'no_show',
+  'expired',
   'cancelled',
 ];
 
-/** Transiciones válidas (espejo de `FULFILLMENT_TRANSITIONS` del backend). */
-export const STATUS_TRANSITIONS: Record<ScheduledOrderStatus, ScheduledOrderStatus[]> = {
-  scheduled: ['in_production', 'cancelled'],
-  in_production: ['ready', 'cancelled'],
-  ready: ['delivered', 'no_show', 'cancelled'],
-  delivered: [],
-  no_show: [],
-  cancelled: [],
-};
+/**
+ * Estados mostrados desde los que aún se puede reprogramar (arrastrar): un
+ * pedido vencido (franja pasada sin entrega) se puede mover a otra franja.
+ */
+export const RESCHEDULABLE_STATUSES: ScheduledOrderDisplayStatus[] = [
+  'scheduled',
+  'in_production',
+  'ready',
+  'expired',
+];
 
-/** Estados desde los que aún se puede reprogramar (arrastrar). */
-export const RESCHEDULABLE_STATUSES: ScheduledOrderStatus[] = [
+/** Estados guardados que el backend acepta al reprogramar. */
+export const RESCHEDULABLE_STORED_STATUSES: ScheduledOrderStatus[] = [
   'scheduled',
   'in_production',
   'ready',
@@ -78,11 +103,29 @@ export interface ScheduledOrderOptionLine {
   quantity: number | string;
   uom?: string | null;
   scope?: 'per_unit' | 'per_line';
+  /** Nota del cajero para esta adición (QUI-994). */
+  note?: string | null;
 }
+
+/** Destino de una línea de venta de restaurante (QUI-999); NULL = línea anterior. */
+export type FulfillmentDestination = 'kds' | 'production' | 'stock';
+
+export const DESTINATION_LABELS: Record<FulfillmentDestination, string> = {
+  kds: 'KDS',
+  production: 'Producción',
+  stock: 'Del stock',
+};
 
 export interface ScheduledOrderItem {
   id: number;
   product_name: string;
+  /** Contrato T12: destino por línea, producto y si es producible. */
+  fulfillment_destination?: FulfillmentDestination | null;
+  product_id?: number | null;
+  product_type?: string | null;
+  is_producible?: boolean | null;
+  /** T13 (QUI-995): orden de producción ligada a una línea `production`; null si no existe. */
+  production_order?: ProductionOrderRef | null;
   variant_attributes?: string | Record<string, unknown> | null;
   quantity: number | string;
   notes?: string | null;
@@ -103,7 +146,10 @@ export interface ScheduledOrder {
   scheduled_start: string;
   scheduled_end: string;
   fulfillment_type: 'pickup' | 'delivery';
+  /** Stored status (history only). The agenda reads `display_status`. */
   status: ScheduledOrderStatus;
+  /** Derived at read time from the sale, its production and the kitchen. */
+  display_status: ScheduledOrderDisplayStatus;
   produced_at: string | null;
   ready_at: string | null;
   delivered_at: string | null;
@@ -112,6 +158,8 @@ export interface ScheduledOrder {
     order_number: string;
     grand_total: number | string;
     state: string;
+    /** Alias de cliente en venta anónima (excluyente con `users`). */
+    customer_alias?: string | null;
     users: ScheduledOrderCustomer | null;
     order_items: ScheduledOrderItem[];
   };
@@ -129,6 +177,8 @@ export interface ScheduledOrderChange {
 
 export interface ScheduledOrderDetail extends ScheduledOrder {
   changes: ScheduledOrderChange[];
+  /** Platos preparados no-lote aún sin enviar a cocina (botón "Enviar a cocina"). */
+  pending_kitchen_item_count?: number;
 }
 
 export interface ProductionOption {
@@ -136,12 +186,18 @@ export interface ProductionOption {
   option_name: string;
   quantity: number | string;
   uom?: string | null;
+  /** Nota del cajero para esta adición (QUI-994). */
+  note?: string | null;
 }
 
 export interface ProductionOrderItem {
   product_name: string;
   variant_attributes?: string | Record<string, unknown> | null;
   quantity: number | string;
+  /** Nota de la línea (dedicatoria). */
+  notes?: string | null;
+  /** T13: orden de producción ligada a la línea; null si no existe. */
+  production_order?: ProductionOrderRef | null;
   options: ProductionOption[];
 }
 
@@ -177,7 +233,7 @@ export interface ProductionList {
 
 export interface AgendaPreference {
   view: AgendaViewMode;
-  status: ScheduledOrderStatus | 'all';
+  status: ScheduledOrderDisplayStatus | 'all';
 }
 
 /** Describe un `variant_attributes` (texto u objeto) como texto legible. */
@@ -192,17 +248,36 @@ export function describeVariant(
     .join(' / ');
 }
 
-export function customerName(u: ScheduledOrderCustomer | null | undefined): string {
-  if (!u) return 'Cliente general';
-  return [u.first_name, u.last_name].filter(Boolean).join(' ') || 'Cliente general';
+export function customerName(
+  u: ScheduledOrderCustomer | null | undefined,
+  alias?: string | null,
+): string {
+  const full = u ? [u.first_name, u.last_name].filter(Boolean).join(' ') : '';
+  return full || alias?.trim() || 'Cliente general';
+}
+
+const UOM_LABELS: Record<string, string> = {
+  unit: 'und',
+  units: 'und',
+  piece: 'und',
+  pieces: 'und',
+  unidad: 'und',
+  unidades: 'und',
+};
+
+/** Unidad de medida en español ("unit" → "und"); las demás (g, ml, kg) pasan igual. */
+export function uomLabel(uom: string | null | undefined): string {
+  const key = (uom ?? '').trim();
+  if (!key) return '';
+  return UOM_LABELS[key.toLowerCase()] ?? key;
 }
 
 /** Color de acento por estado (tokens del tema, un color distinto por estado). */
-export const STATUS_COLORS: Record<ScheduledOrderStatus, string> = {
+export const DISPLAY_STATUS_COLORS: Record<ScheduledOrderDisplayStatus, string> = {
   scheduled: 'var(--color-info, #3b82f6)',
   in_production: 'var(--color-warning, #f59e0b)',
   ready: 'var(--color-success, #16a34a)',
   delivered: 'var(--color-primary, #7ed7a5)',
-  no_show: 'var(--color-error, #dc2626)',
+  expired: 'var(--color-error, #dc2626)',
   cancelled: 'var(--color-text-muted, #94a3b8)',
 };

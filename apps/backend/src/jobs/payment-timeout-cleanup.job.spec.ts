@@ -29,7 +29,10 @@ describe('PaymentTimeoutCleanupJob', () => {
       },
     } as any;
 
-    const eventEmitter = { emit: jest.fn() } as any;
+    const eventEmitter = {
+      emit: jest.fn(),
+      emitAsync: jest.fn().mockResolvedValue([]),
+    } as any;
 
     // Plan order-truth-and-invoice-tz (Step 6) — writer único de order_events.
     const orderHistory = { record: jest.fn().mockResolvedValue(null) } as any;
@@ -69,6 +72,37 @@ describe('PaymentTimeoutCleanupJob', () => {
           source: 'job',
         }),
       );
+    });
+
+    it('avisa a producción tras cancelar para que cancele sus borradores (QUI-995 B2)', async () => {
+      const { job, eventEmitter, prisma } = buildJob();
+
+      await (job as any).cancelStaleOrder({
+        id: 42,
+        order_number: 'ORD-42',
+        store_id: 7,
+        stores: { organization_id: 3 },
+      });
+
+      expect(eventEmitter.emitAsync).toHaveBeenCalledWith('production.sale_cancelled', {
+        order_id: 42,
+        store_id: 7,
+        disposition: 'release',
+        reason: 'Pago no completado - cancelación automática por timeout (2h)',
+      });
+      expect(eventEmitter.emitAsync.mock.invocationCallOrder[0]).toBeGreaterThan(
+        prisma.$transaction.mock.invocationCallOrder[0],
+      );
+    });
+
+    it('si el aviso a producción falla, la cancelación sigue en pie', async () => {
+      const { job, eventEmitter, tx } = buildJob();
+      eventEmitter.emitAsync.mockRejectedValueOnce(new Error('boom'));
+
+      await expect(
+        (job as any).cancelStaleOrder({ id: 42, order_number: 'ORD-42', store_id: 7, stores: null }),
+      ).resolves.toBeUndefined();
+      expect(tx.orders.update).toHaveBeenCalled();
     });
 
     it('sigue cancelando la orden aunque la tienda no tenga organization_id resuelto', async () => {

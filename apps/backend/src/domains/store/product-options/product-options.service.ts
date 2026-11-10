@@ -1,4 +1,5 @@
 import { Injectable } from '@nestjs/common';
+import { S3Service } from '@common/services/s3.service';
 import { Prisma } from '@prisma/client';
 import { StorePrismaService } from '../../../prisma/services/store-prisma.service';
 import { RequestContextService } from '@common/context/request-context.service';
@@ -10,7 +11,21 @@ const GROUP_INCLUDE = {
   options: {
     where: { is_active: true },
     orderBy: [{ sort_order: 'asc' }, { id: 'asc' }],
-    include: { component_product: { select: { id: true, name: true, cost_price: true } } },
+    include: {
+      component_product: {
+        select: {
+          id: true,
+          name: true,
+          cost_price: true,
+          // Imagen principal del componente (llave S3; se firma al leer).
+          product_images: {
+            orderBy: [{ is_main: 'desc' as const }, { sort_order: 'asc' as const }, { id: 'asc' as const }],
+            take: 1,
+            select: { image_url: true },
+          },
+        },
+      },
+    },
   },
   assignments: { orderBy: [{ sort_order: 'asc' }, { id: 'asc' }] },
 } satisfies Prisma.product_option_groupsInclude;
@@ -32,7 +47,10 @@ export function estimatedOptionCost(
  */
 @Injectable()
 export class ProductOptionsService {
-  constructor(private readonly prisma: StorePrismaService) {}
+  constructor(
+    private readonly prisma: StorePrismaService,
+    private readonly s3: S3Service,
+  ) {}
 
   private storeId(): number {
     const store_id = RequestContextService.getContext()?.store_id;
@@ -54,17 +72,24 @@ export class ProductOptionsService {
     return !!settings.product_options?.enabled && !!settings.scheduled_orders?.enabled;
   }
 
-  private present(group: GroupWithOptions, withCost = true) {
-    return {
-      ...group,
-      options: group.options.map(({ component_product, ...option }) => ({
-        ...option,
-        component_product: { id: component_product.id, name: component_product.name },
-        ...(withCost
-          ? { estimated_cost: estimatedOptionCost(component_product.cost_price, option.quantity) }
-          : {}),
-      })),
-    };
+  private async present(group: GroupWithOptions, withCost = true) {
+    const options = await Promise.all(
+      group.options.map(async ({ component_product, ...option }) => {
+        const key = component_product.product_images?.[0]?.image_url;
+        return {
+          ...option,
+          component_product: {
+            id: component_product.id,
+            name: component_product.name,
+            image_url: (await this.s3.signUrl(key)) ?? null,
+          },
+          ...(withCost
+            ? { estimated_cost: estimatedOptionCost(component_product.cost_price, option.quantity) }
+            : {}),
+        };
+      }),
+    );
+    return { ...group, options };
   }
 
   async list() {
@@ -72,7 +97,7 @@ export class ProductOptionsService {
       orderBy: [{ sort_order: 'asc' }, { id: 'asc' }],
       include: GROUP_INCLUDE,
     });
-    return groups.map((g) => this.present(g));
+    return Promise.all(groups.map((g) => this.present(g)));
   }
 
   async findOne(id: number) {
@@ -304,9 +329,11 @@ export class ProductOptionsService {
       include: GROUP_INCLUDE,
     });
     const byId = new Map(groups.map((g) => [g.id, g]));
-    return groupIds
-      .map((id) => byId.get(id))
-      .filter((g): g is GroupWithOptions => !!g && g.options.length > 0)
-      .map((g) => this.present(g, options.withCost ?? true));
+    return Promise.all(
+      groupIds
+        .map((id) => byId.get(id))
+        .filter((g): g is GroupWithOptions => !!g && g.options.length > 0)
+        .map((g) => this.present(g, options.withCost ?? true)),
+    );
   }
 }

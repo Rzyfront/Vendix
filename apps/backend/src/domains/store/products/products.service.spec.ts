@@ -1287,6 +1287,40 @@ describe('ProductsService', () => {
         }),
       );
     });
+
+    it('QUI-999: el listado POS marca is_producible (lote + receta activa) sin consultas extra', async () => {
+      const rows = [
+        { id: 1, name: 'Torta', stock_levels: [], is_batch_produced: true, _count: { recipes: 1 } },
+        { id: 2, name: 'Sopa', stock_levels: [], is_batch_produced: false, _count: { recipes: 1 } },
+        { id: 3, name: 'Lote sin receta', stock_levels: [], is_batch_produced: true, _count: { recipes: 0 } },
+        { id: 4, name: 'Gaseosa', stock_levels: [], is_batch_produced: false, _count: {} },
+      ];
+      mockPrismaService.products.findMany.mockResolvedValue(rows);
+      mockPrismaService.products.count.mockResolvedValue(rows.length);
+      mockPrismaService.stores.findUnique.mockResolvedValue({
+        default_location_id: 1,
+      });
+      mockPrismaService.products.findMany.mockClear();
+
+      const pos = await service.findAll({
+        page: 1,
+        limit: 10,
+        pos_optimized: true,
+      });
+
+      expect(pos.data.map((p: any) => p.is_producible)).toEqual([
+        true,
+        false,
+        false,
+        false,
+      ]);
+      // One batched query: the recipe flag rides on the listing `_count`.
+      expect(mockPrismaService.products.findMany).toHaveBeenCalledTimes(1);
+      const args = mockPrismaService.products.findMany.mock.calls[0][0];
+      expect(args.include._count.select.recipes).toEqual({
+        where: { is_active: true },
+      });
+    });
   });
 
   /**
@@ -2433,6 +2467,68 @@ describe('ProductsService', () => {
           total_stock_available: 20000,
         }),
       );
+    });
+  });
+
+  describe('findAll — buscador de adiciones (QUI-993)', () => {
+    it('trae is_ingredient y el código de la unidad de stock para precargar la adición', async () => {
+      const azucar = {
+        id: 501,
+        name: 'Azúcar',
+        state: ProductState.ACTIVE,
+        base_price: 0,
+        product_type: 'physical',
+        is_ingredient: true,
+        track_inventory: false,
+        stock_uom_id: 3,
+        stock_uom: { code: 'g' },
+        product_images: [],
+        product_variants: [],
+        product_categories: [],
+        stock_levels: [],
+      };
+      const sinUnidad = { ...azucar, id: 502, name: 'Servilleta', is_ingredient: false, stock_uom_id: null, stock_uom: null };
+      mockPrismaService.products.findMany.mockResolvedValue([azucar, sinUnidad]);
+      mockPrismaService.products.count.mockResolvedValue(2);
+
+      const result: any = await service.findAll({ page: 1, limit: 20, search: 'az' } as any);
+
+      expect(result.data[0]).toEqual(
+        expect.objectContaining({ id: 501, is_ingredient: true, stock_uom: { code: 'g' } }),
+      );
+      expect(result.data[1]).toEqual(
+        expect.objectContaining({ id: 502, is_ingredient: false, stock_uom: null }),
+      );
+      const args = mockPrismaService.products.findMany.mock.calls.at(-1)[0];
+      expect(args.include.stock_uom).toEqual({ select: { code: true } });
+    });
+
+    it('expone has_active_recipe: true solo si el producto tiene una receta activa', async () => {
+      const base = {
+        state: ProductState.ACTIVE,
+        base_price: 0,
+        product_type: 'prepared',
+        is_ingredient: false,
+        track_inventory: false,
+        stock_uom_id: null,
+        stock_uom: null,
+        product_images: [],
+        product_variants: [],
+        product_categories: [],
+        stock_levels: [],
+      };
+      mockPrismaService.products.findMany.mockResolvedValue([
+        { ...base, id: 601, name: 'Con receta', recipes: [{ id: 9 }] },
+        { ...base, id: 602, name: 'Sin receta', recipes: [] },
+      ]);
+      mockPrismaService.products.count.mockResolvedValue(2);
+
+      const result: any = await service.findAll({ page: 1, limit: 20 } as any);
+
+      expect(result.data[0]).toEqual(expect.objectContaining({ id: 601, has_active_recipe: true }));
+      expect(result.data[1]).toEqual(expect.objectContaining({ id: 602, has_active_recipe: false }));
+      const args = mockPrismaService.products.findMany.mock.calls.at(-1)[0];
+      expect(args.include.recipes).toEqual({ where: { is_active: true }, select: { id: true }, take: 1 });
     });
   });
 

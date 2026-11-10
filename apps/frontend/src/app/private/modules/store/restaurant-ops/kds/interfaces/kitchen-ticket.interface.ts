@@ -65,7 +65,30 @@ export interface KitchenTicketProductRef {
   }> | null;
 }
 
+/**
+ * QUI-1000 — an add-on of the dish as the KDS ticket shows it. The backend
+ * (`KitchenFireService.signTicketPayload`) derives it from `order_item_options`:
+ * `quantity` is already multiplied by the line quantity for `per_unit` add-ons,
+ * `image_url` is signed (or null) and `recipe_id` is the active recipe of a
+ * preparation add-on (null for ingredients and products).
+ */
+export interface KitchenTicketAddon {
+  id: number;
+  group_name: string;
+  name: string;
+  quantity: number;
+  uom: string | null;
+  note: string | null;
+  component_type: 'ingredient' | 'recipe' | 'product';
+  component_product_id: number;
+  component_variant_id: number | null;
+  image_url: string | null;
+  recipe_id: number | null;
+}
+
 export interface KitchenTicketItem {
+  /** QUI-1000 — add-ons of the dish; absent on tickets from older payloads. */
+  addons?: KitchenTicketAddon[];
   /**
    * QUI-655 — insumos que NO se van a usar en este plato, tal como los quito
    * quien tomo el pedido. El KDS los muestra TACHADOS en el modal de confirmacion

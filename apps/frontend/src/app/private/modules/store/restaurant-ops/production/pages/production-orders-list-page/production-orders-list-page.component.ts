@@ -34,7 +34,8 @@ import {
   ProductionOrderStatus,
   ProductionOrderStats,
 } from '../../interfaces';
-import { ProductionOrdersService } from '../../services';
+import { ProductionOrdersService, ProductionSseService } from '../../services';
+import { formatYieldQuantity } from '../../services/yield-unit.util';
 import { formatDateOnlyUTC } from '../../../../../../../shared/utils/date.util';
 import { formatStockWarningSummary } from '../../../../../../../core/utils/stock-shortage.util';
 
@@ -63,6 +64,7 @@ export class ProductionOrdersListPageComponent implements OnInit {
   private readonly dialogService = inject(DialogService);
   private readonly router = inject(Router);
   private readonly destroyRef = inject(DestroyRef);
+  private readonly sse = inject(ProductionSseService);
 
   readonly orders = signal<ProductionOrder[]>([]);
   readonly stats = signal<ProductionOrderStats>({
@@ -97,9 +99,9 @@ export class ProductionOrdersListPageComponent implements OnInit {
       type: 'select',
       options: [
         { value: '', label: 'Todos' },
-        { value: 'draft', label: 'Borrador' },
-        { value: 'in_progress', label: 'En progreso' },
-        { value: 'completed', label: 'Completada' },
+        { value: 'draft', label: 'En espera' },
+        { value: 'in_progress', label: 'En producción' },
+        { value: 'completed', label: 'Finalizada' },
         { value: 'cancelled', label: 'Cancelada' },
       ],
     },
@@ -122,7 +124,16 @@ export class ProductionOrdersListPageComponent implements OnInit {
       sortable: false,
       priority: 1,
       transform: (_: unknown, row: ProductionOrder) =>
-        row.product?.name ? row.product.name : `Producción #${row.id}`,
+        row.product?.name
+        ? ProductionOrdersService.displayName(row.product.name, row.product_variant?.name)
+        : `Producción #${row.id}`,
+    },
+    {
+      key: 'sale_order_number',
+      label: 'Origen',
+      sortable: false,
+      priority: 2,
+      transform: (_: unknown, row: ProductionOrder) => this.sourceLabel(row),
     },
     {
       key: 'planned_qty',
@@ -130,7 +141,7 @@ export class ProductionOrdersListPageComponent implements OnInit {
       sortable: true,
       priority: 2,
       transform: (value: number | string | null, row: ProductionOrder) =>
-        `${this.formatNumber(value)} ${row.recipe?.yield_unit ?? ''}`.trim(),
+        formatYieldQuantity(value, row.recipe?.yield_unit, this.formatNumber(value)),
     },
     {
       key: 'produced_qty',
@@ -139,7 +150,7 @@ export class ProductionOrdersListPageComponent implements OnInit {
       priority: 2,
       transform: (value: number | string | null | undefined, row: ProductionOrder) => {
         if (value == null) return '—';
-        return `${this.formatNumber(value)} ${row.recipe?.yield_unit ?? ''}`.trim();
+        return formatYieldQuantity(value, row.recipe?.yield_unit, this.formatNumber(value));
       },
     },
     {
@@ -208,10 +219,12 @@ export class ProductionOrdersListPageComponent implements OnInit {
   readonly cardConfig: ItemListCardConfig = {
     titleKey: 'product',
     titleTransform: (row: ProductionOrder) =>
-      row.product?.name ? row.product.name : `Producción #${row.id}`,
+      row.product?.name
+        ? ProductionOrdersService.displayName(row.product.name, row.product_variant?.name)
+        : `Producción #${row.id}`,
     subtitleKey: 'planned_qty',
     subtitleTransform: (row: ProductionOrder) =>
-      `${this.formatNumber(row.planned_qty)} ${row.recipe?.yield_unit ?? ''}`.trim(),
+      formatYieldQuantity(row.planned_qty, row.recipe?.yield_unit, this.formatNumber(row.planned_qty)),
     avatarFallbackIcon: 'flame',
     avatarShape: 'square',
     badgeKey: 'status',
@@ -220,13 +233,19 @@ export class ProductionOrdersListPageComponent implements OnInit {
       ProductionOrdersService.statusLabel(val),
     detailKeys: [
       {
+        key: 'sale_order_number',
+        label: 'Origen',
+        icon: 'shopping-bag',
+        transform: (_: unknown, row?: ProductionOrder) =>
+          row ? this.sourceLabel(row) : '—',
+      },
+      {
         key: 'produced_qty',
         label: 'Producido',
         icon: 'package',
         transform: (v: number | string | null | undefined, row?: ProductionOrder) => {
           if (v == null) return '—';
-          const unit = row?.recipe?.yield_unit ?? '';
-          return `${this.formatNumber(v)} ${unit}`.trim();
+          return formatYieldQuantity(v, row?.recipe?.yield_unit, this.formatNumber(v));
         },
       },
       {
@@ -242,10 +261,15 @@ export class ProductionOrdersListPageComponent implements OnInit {
   ngOnInit(): void {
     this.loadOrders();
     this.loadStats();
+    // Another screen (or device) moved an order: refresh without a spinner.
+    this.sse.listen(this.destroyRef, () => {
+      this.loadOrders(true);
+      this.loadStats();
+    });
   }
 
-  loadOrders(): void {
-    this.isLoading.set(true);
+  loadOrders(silent = false): void {
+    if (!silent) this.isLoading.set(true);
 
     const query: Record<string, unknown> = {
       page: this.filters().page,
@@ -330,6 +354,9 @@ export class ProductionOrdersListPageComponent implements OnInit {
       case 'create':
         this.createOrder();
         break;
+      case 'day':
+        this.router.navigate(['/admin/restaurant-ops/production/day']);
+        break;
       case 'refresh':
         this.loadOrders();
         this.loadStats();
@@ -338,8 +365,13 @@ export class ProductionOrdersListPageComponent implements OnInit {
   }
 
   onRowClick(order: ProductionOrder): void {
-    // Row click is intentionally a no-op for now; the only edits happen
-    // through the action menu (start / complete / cancel).
+    this.router.navigate(['/admin/restaurant-ops/production/orders', order.id]);
+  }
+
+  /** "Venta #123" for orders born from a sale, "Manual" otherwise. */
+  private sourceLabel(row: ProductionOrder): string {
+    if (row.source !== 'order') return 'Manual';
+    return row.sale_order_number ? `Venta ${row.sale_order_number}` : 'Venta';
   }
 
   createOrder(): void {
@@ -377,7 +409,19 @@ export class ProductionOrdersListPageComponent implements OnInit {
       });
   }
 
-  private completeOrder(order: ProductionOrder): void {
+  private async completeOrder(order: ProductionOrder): Promise<void> {
+    if (order.source === 'order') {
+      // Linked to a sale (T13): the quantity is the purchased one, no batch rounding.
+      const ok = await this.dialogService.confirm({
+        title: `Completar producción de ${order.product?.name ?? `#${order.id}`}`,
+        message: `Se registrará lo producido (${this.formatNumber(order.planned_qty)}) y quedará reservado para el pedido${order.sale_order_number ? ' ' + order.sale_order_number : ''}.`,
+        confirmText: 'Completar',
+        cancelText: 'Cancelar',
+      });
+      if (!ok) return;
+      this.submitComplete(order, Number(order.planned_qty));
+      return;
+    }
     // Production always runs whole recipe batches (QUI-965): the user types
     // how many times the recipe was made and the produced units are
     // batches × yield (a recipe that yields 10 run 3 times gives 30).
@@ -391,7 +435,7 @@ export class ProductionOrdersListPageComponent implements OnInit {
     this.dialogService
       .prompt({
         title: `Completar producción de ${order.product?.name ?? `#${order.id}`}`,
-        message: `Indica cuántas tandas de la receta se hicieron (cada tanda rinde ${this.formatNumber(yieldQty)} ${unit}; planeado: ${this.formatNumber(order.planned_qty)} ${unit}). Al confirmar, se descuentan los insumos de la receta multiplicados por las tandas y se suma el stock del producto terminado.`,
+        message: `Indica cuántas tandas de la receta se hicieron (cada tanda rinde ${formatYieldQuantity(yieldQty, unit, this.formatNumber(yieldQty))}; planeado: ${formatYieldQuantity(order.planned_qty, unit, this.formatNumber(order.planned_qty))}). Al confirmar, se descuentan los insumos de la receta multiplicados por las tandas y se suma el stock del producto terminado.`,
         placeholder: 'Número de tandas',
         defaultValue: String(plannedBatches),
         confirmText: 'Completar y registrar stock',
@@ -407,34 +451,37 @@ export class ProductionOrdersListPageComponent implements OnInit {
           );
           return;
         }
-        const produced = batches * yieldQty;
-        this.processingId.set(order.id);
-        this.productionService
-          .complete(order.id, { produced_qty: produced })
-          .pipe(takeUntilDestroyed(this.destroyRef))
-          .subscribe({
-            next: (completed) => {
-              this.toastService.success(
-                'Producción completada: stock generado y consumos registrados',
-              );
-              if (completed?.stock_warnings?.length) {
-                this.toastService.warning(
-                  formatStockWarningSummary(completed.stock_warnings),
-                );
-              }
-              this.processingId.set(null);
-              this.loadOrders();
-              this.loadStats();
-            },
-            error: (error) => {
-              this.processingId.set(null);
-              this.toastService.error(
-                typeof error === 'string'
-                  ? error
-                  : 'Error al completar la producción',
-              );
-            },
-          });
+        this.submitComplete(order, batches * yieldQty);
+      });
+  }
+
+  private submitComplete(order: ProductionOrder, produced: number): void {
+    this.processingId.set(order.id);
+    this.productionService
+      .complete(order.id, { produced_qty: produced })
+      .pipe(takeUntilDestroyed(this.destroyRef))
+      .subscribe({
+        next: (completed) => {
+          this.toastService.success(
+            'Producción completada: stock generado y consumos registrados',
+          );
+          if (completed?.stock_warnings?.length) {
+            this.toastService.warning(
+              formatStockWarningSummary(completed.stock_warnings),
+            );
+          }
+          this.processingId.set(null);
+          this.loadOrders();
+          this.loadStats();
+        },
+        error: (error) => {
+          this.processingId.set(null);
+          this.toastService.error(
+            typeof error === 'string'
+              ? error
+              : 'Error al completar la producción',
+          );
+        },
       });
   }
 

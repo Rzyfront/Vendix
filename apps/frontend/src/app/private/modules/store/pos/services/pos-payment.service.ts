@@ -10,7 +10,7 @@ import {
 } from '../../../../../core/utils/parse-api-error';
 import { PaymentMethodsCatalogService } from '../../../../../shared/services/payment-methods-catalog.service';
 import { PosCashRegisterService } from './pos-cash-register.service';
-import { CartItem, CartState } from '../models/cart.model';
+import { CartItem, CartState, fulfillmentModeForLine } from '../models/cart.model';
 import { findUnscheduledStationLine } from './pos-station-booking.service';
 import {
   resolveLineUnits,
@@ -322,7 +322,11 @@ export class PosPaymentService {
       // el precio desde `option_ids`, así que `unit_price` viaja SIN delta.
       unit_price: Number((item.unitPrice - (item.option_delta ?? 0)).toFixed(2)),
       ...(!isCustomItem && item.option_ids?.length
-        ? { option_ids: item.option_ids }
+        ? {
+            option_ids: item.option_ids,
+            // Solo si hay notas: el cobro sin notas viaja idéntico a hoy.
+            ...(item.option_notes?.length ? { option_notes: item.option_notes } : {}),
+          }
         : {}),
       // F-218 — `final_unit_price` es el único portador del bruto declarado y
       // declararlo arma el guard `store:pos:price_override` en el backend. Viaja
@@ -368,6 +372,13 @@ export class PosPaymentService {
       // instead of the kitchen fire. Only meaningful for `prepared`
       // products; ignored for everything else.
       skip_kds: item.skipKds === true,
+      // QUI-999 — the cashier's "Del stock / A producción" choice, only for
+      // lines where the matrix lets the cashier choose (producible with
+      // stock). Never sent for any other line: the server applies the matrix.
+      ...(!isCustomItem &&
+        fulfillmentModeForLine(item) === 'choose' && {
+          fulfillment_destination: item.fulfillmentChoice ?? 'stock',
+        }),
       // QUI-653 — "Para llevar" a nivel de orden (paso Consumo en 'entrega',
       // ver `isTakeawayOrder` del checkout-shell, que llega como
       // `forceTakeaway`) o marca per-línea del carrito. Solo se envía cuando

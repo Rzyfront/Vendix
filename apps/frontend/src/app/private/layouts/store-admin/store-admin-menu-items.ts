@@ -396,6 +396,14 @@ export const STORE_ADMIN_MENU_ITEMS: readonly MenuItem[] = [
       },
       { label: 'Marcas', icon: 'tag', route: '/admin/products/brands' },
       {
+        label: 'Adiciones',
+        icon: 'plus-circle',
+        route: '/admin/products/option-groups',
+        // Restaurant-only module (RESTAURANT in module-industries); the key
+        // makes the sidebar gate explicit instead of relying on the label map.
+        panelUiKey: 'products_option_groups',
+      },
+      {
         label: 'Precios y Tarifas',
         icon: 'circle',
         route: '/admin/price-tiers',

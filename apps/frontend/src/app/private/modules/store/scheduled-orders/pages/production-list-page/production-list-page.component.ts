@@ -27,8 +27,12 @@ import {
   ProductionOption,
   STATUS_LABELS,
   describeVariant,
+  uomLabel,
 } from '../../interfaces/scheduled-order.interface';
 import { ScheduledOrdersApiService } from '../../services/scheduled-orders-api.service';
+import { ProductionOrderDetailModalComponent } from '../../../restaurant-ops/production/components/production-order-detail/production-order-detail-modal.component';
+import { ProductionOrdersService } from '../../../restaurant-ops/production/services/production-orders.service';
+import { ProductionOrderRef } from '../../../restaurant-ops/production/interfaces/production-order.interface';
 import { fullDate } from '../../utils/ymd.util';
 
 /** Clase en <body> que activa las reglas de impresión de esta página. */
@@ -40,7 +44,13 @@ const PRINT_BODY_CLASS = 'production-list-printing';
   changeDetection: ChangeDetectionStrategy.OnPush,
   // Sin encapsulación: las reglas @media print deben alcanzar el <body>.
   encapsulation: ViewEncapsulation.None,
-  imports: [RouterLink, ButtonComponent, IconComponent, SpinnerComponent],
+  imports: [
+    RouterLink,
+    ButtonComponent,
+    IconComponent,
+    SpinnerComponent,
+    ProductionOrderDetailModalComponent,
+  ],
   styles: [
     `
       app-scheduled-orders-production-list-page {
@@ -105,6 +115,11 @@ const PRINT_BODY_CLASS = 'production-list-printing';
         padding-left: 1rem;
         color: var(--color-text-primary);
       }
+      .pl-note {
+        font-size: var(--fs-sm, 0.875rem);
+        font-style: italic;
+        color: var(--color-text-secondary, var(--color-text-muted));
+      }
       .pl-options {
         margin: 0;
         padding-left: 1rem;
@@ -125,6 +140,15 @@ const PRINT_BODY_CLASS = 'production-list-printing';
       }
       .pl-table .num {
         text-align: right;
+      }
+      .pl-prod-link {
+        font-size: var(--fs-sm, 0.875rem);
+        color: var(--color-primary);
+        text-decoration: underline;
+        background: none;
+        border: 0;
+        padding: 0;
+        cursor: pointer;
       }
       .pl-print-title {
         display: none;
@@ -168,13 +192,13 @@ const PRINT_BODY_CLASS = 'production-list-printing';
     <div class="p-2 md:p-4">
       <div class="pl-toolbar pl-no-print">
         <h1 class="text-xl font-semibold" style="color: var(--color-text-primary)">
-          Lista de producción
+          Insumos consolidados
         </h1>
         <div class="pl-toolbar-group">
-          <a routerLink="/admin/scheduled-orders">
+          <a routerLink="/admin/scheduled-orders/production">
             <app-button variant="ghost" size="sm">
               <app-icon slot="icon" name="arrow-left" [size]="16"></app-icon>
-              Agenda
+              Lista de producción
             </app-button>
           </a>
           <input
@@ -227,9 +251,26 @@ const PRINT_BODY_CLASS = 'production-list-printing';
                         @if (item.options.length > 0) {
                           <ul class="pl-options">
                             @for (opt of item.options; track $index) {
-                              <li>{{ optionText(opt) }}</li>
+                              <li>
+                                {{ optionText(opt) }}
+                                @if (opt.note) {
+                                  <span class="pl-note"> — Nota: {{ opt.note }}</span>
+                                }
+                              </li>
                             }
                           </ul>
+                        }
+                        @if (item.notes) {
+                          <div class="pl-note">Nota: {{ item.notes }}</div>
+                        }
+                        @if (item.production_order; as po) {
+                          <button
+                            type="button"
+                            class="pl-prod-link pl-no-print"
+                            (click)="openProduction(po)"
+                          >
+                            Producción {{ po.order_number || '#' + po.id }} · {{ productionStatus(po) }}
+                          </button>
                         }
                       </li>
                     }
@@ -255,7 +296,7 @@ const PRINT_BODY_CLASS = 'production-list-printing';
                     <tr>
                       <td>{{ ing.name }}</td>
                       <td class="num">{{ ing.quantity }}</td>
-                      <td>{{ ing.uom || '' }}</td>
+                      <td>{{ uom(ing.uom) }}</td>
                     </tr>
                   }
                 </tbody>
@@ -265,6 +306,12 @@ const PRINT_BODY_CLASS = 'production-list-printing';
         </div>
       }
     </div>
+
+    <app-production-order-detail-modal
+      [(isOpen)]="showProduction"
+      [orderId]="productionOrderId()"
+      (changed)="reload()"
+    />
   `,
 })
 export class ProductionListPageComponent {
@@ -296,6 +343,23 @@ export class ProductionListPageComponent {
     });
   }
 
+  /** Shared production order detail (T13) opened from a line. */
+  readonly productionOrderId = signal<number | null>(null);
+  readonly showProduction = signal(false);
+
+  openProduction(po: ProductionOrderRef): void {
+    this.productionOrderId.set(po.id);
+    this.showProduction.set(true);
+  }
+
+  productionStatus(po: ProductionOrderRef): string {
+    return ProductionOrdersService.statusLabelSafe(po.status);
+  }
+
+  reload(): void {
+    this.load(this.date());
+  }
+
   onDateChange(event: Event): void {
     const value = (event.target as HTMLInputElement).value;
     if (value) this.date.set(value);
@@ -309,13 +373,18 @@ export class ProductionListPageComponent {
     return STATUS_LABELS[status] ?? status;
   }
 
+  uom(value: string | null): string {
+    return uomLabel(value);
+  }
+
   variant(v: Parameters<typeof describeVariant>[0]): string {
     return describeVariant(v);
   }
 
   optionText(o: ProductionOption): string {
     const qty = Number(o.quantity);
-    const extra = qty > 1 || o.uom ? ` (${o.quantity}${o.uom ? ' ' + o.uom : ''})` : '';
+    const unit = uomLabel(o.uom);
+    const extra = qty > 1 || unit ? ` (${o.quantity}${unit ? ' ' + unit : ''})` : '';
     return `${o.group_name}: ${o.option_name}${extra}`;
   }
 

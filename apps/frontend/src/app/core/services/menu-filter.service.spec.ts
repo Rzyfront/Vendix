@@ -728,6 +728,12 @@ describe('MenuFilterService — apps-module (keys opt-out y catálogo Apps)', ()
     expect(MODULE_ROUTES['ecommerce']).toBe('/admin/ecommerce');
   });
 
+  it('QUI-993: la ruta de Adiciones resuelve a su key de submódulo, no a la de Productos', () => {
+    expect(service.resolveKeysForRoute('/admin/products/option-groups')).toContain(
+      'products_option_groups',
+    );
+  });
+
   it('T0: un panel_ui guardado sin las keys nuevas sigue viendo Bandeja, Pipeline, Tareas y Segmentos', async () => {
     expect(await routes(clientes())).toEqual([
       '/admin/customers/all', '/admin/customers/inbox', '/admin/customers/pipeline',
@@ -839,6 +845,20 @@ describe('MenuFilterService.canSeeKey / applyAccessGate (apps-f4 S4)', () => {
     );
     industries.set(['retail', 'restaurant']);
     expect(service.canSeeKey('restaurant_ops_recipes').allowed).toBeTrue();
+  });
+
+  it('QUI-1001: pedidos programados y adiciones quedan negados por industria en retail y se ven en restaurante', () => {
+    userKeys = ['orders_scheduled', 'products_option_groups'];
+    for (const key of ['orders_scheduled', 'products_option_groups']) {
+      expect(service.canSeeKey(key))
+        .withContext(key)
+        .toEqual(jasmine.objectContaining({ allowed: false, layer: 'industry' }));
+      // "Ocultar siempre": the industry rule ignores the audit mode.
+      expect(isIndustryAlwaysEnforced(key)).withContext(key).toBeTrue();
+    }
+    industries.set(['restaurant']);
+    expect(service.canSeeKey('orders_scheduled').allowed).toBeTrue();
+    expect(service.canSeeKey('products_option_groups').allowed).toBeTrue();
   });
 
   it('capa usuario: un no-owner sin la key en su panel queda negado por usuario', () => {

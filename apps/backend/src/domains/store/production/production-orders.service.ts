@@ -3,21 +3,45 @@ import { Prisma } from '@prisma/client';
 import { EventEmitter2 } from '@nestjs/event-emitter';
 import { StorePrismaService } from '../../../prisma/services/store-prisma.service';
 import { StockLevelManager } from '../inventory/shared/services/stock-level-manager.service';
+import { OrderStockCommitService } from '../inventory/shared/services/order-stock-commit.service';
+import { RecipesService } from '../recipes/recipes.service';
+import { S3Service } from '@common/services/s3.service';
+import {
+  createBatchAwareExploders,
+  expandProduction,
+  type ProductionLineInput,
+} from '../kitchen-fire/addon-consumption';
 import {
   StockValidatorService,
   StockDemandLine,
   type InsufficientStockItem,
 } from '../inventory/shared/services/stock-validator.service';
+import {
+  emitProductionOrderUpdated,
+  type ProductionOrderEventRow,
+} from './production-order-events';
 import { RequestContextService } from '../../../common/context/request-context.service';
+import { ProductionSaleLinkService } from './production-sale-link.service';
+import { lockOrderLifecycle } from '../orders/order-flow/order-lifecycle-lock.util';
 import {
   VendixHttpException,
   ErrorCodes,
 } from '../../../common/errors';
 import {
+  resolveStoreTimezone,
+  localCivil,
+  zonedWallClockToUtc,
+  localDateString,
+  dateOnlyString,
+  resolveLocalDateRange,
+  resolveLocalDateOnlyRange,
+} from '../../../common/utils/store-timezone.util';
+import {
   CreateProductionOrderDto,
   UpdateProductionOrderDto,
   CompleteProductionOrderDto,
   ProductionOrderQueryDto,
+  ProductionDayQueryDto,
 } from './dto';
 
 /**
@@ -69,6 +93,9 @@ export interface CompleteProductionOptions {
   ) => Promise<Prisma.production_ordersUncheckedUpdateInput | void>;
 }
 
+/** Sale states in which a cancelled production order can no longer be restarted. */
+const RESTART_BLOCKED_SALE_STATES = ['cancelled', 'refunded', 'finished'];
+
 /**
  * ProductionOrdersService
  *
@@ -108,6 +135,13 @@ export class ProductionOrdersService {
     // step 6) — tracked ingredients are validated BEFORE being consumed.
     private readonly stockValidatorService: StockValidatorService,
     private readonly eventEmitter: EventEmitter2,
+    // QUI-995: only used by orders linked to a sale (add-ons, reservation,
+    // detail). Manual and Planta orders never touch them.
+    private readonly recipes?: RecipesService,
+    private readonly orderStockCommit?: OrderStockCommitService,
+    private readonly s3Service?: S3Service,
+    // S21: quantity / delivery a cancelled linked order restarts with.
+    private readonly saleLink?: ProductionSaleLinkService,
   ) {}
 
   /**
@@ -209,6 +243,22 @@ export class ProductionOrdersService {
   }
 
   // ------------------------------------------------------------------ create
+  /** QUI-1002 — live-sync emission, always AFTER the DB write; never throws. */
+  private emitUpdated(row: unknown): void {
+    emitProductionOrderUpdated(this.eventEmitter, this.logger, row as ProductionOrderEventRow);
+  }
+
+  /** Effective estimated minutes: per-order override, else the product's preparation time. */
+  private withEstimate<T extends { estimated_minutes?: number | null; product?: unknown }>(row: T) {
+    const prep = (row.product as { preparation_time_minutes?: number | null } | null | undefined)
+      ?.preparation_time_minutes;
+    return {
+      ...row,
+      estimated_minutes: row.estimated_minutes ?? null,
+      effective_estimated_minutes: row.estimated_minutes ?? prep ?? null,
+    };
+  }
+
   async create(dto: CreateProductionOrderDto) {
     const context = RequestContextService.getContext();
     const store_id = context?.store_id;
@@ -284,6 +334,7 @@ export class ProductionOrdersService {
       // body lean. No-op here; the controller can call update() if needed.
     }
 
+    this.emitUpdated(created);
     return created;
   }
 
@@ -302,6 +353,7 @@ export class ProductionOrdersService {
       status,
       product_id,
       recipe_id,
+      order_id,
       sort_by = 'created_at',
       sort_order = 'desc',
     } = query ?? {};
@@ -312,6 +364,7 @@ export class ProductionOrdersService {
       ...(status && { status }),
       ...(product_id && { product_id }),
       ...(recipe_id && { recipe_id }),
+      ...(order_id && { order_id }),
       ...(search && {
         product: {
           name: { contains: search, mode: 'insensitive' },
@@ -337,12 +390,20 @@ export class ProductionOrdersService {
               waste_percent: true,
             },
           },
+          product_variant: { select: { id: true, name: true } },
+          sale_order: { select: { order_number: true } },
         },
       }),
       this.prisma.production_orders.count({ where }),
     ]);
 
-    return { data, total };
+    return {
+      data: data.map(({ sale_order, ...row }) => ({
+        ...row,
+        sale_order_number: sale_order?.order_number ?? null,
+      })),
+      total,
+    };
   }
 
   async findOne(id: number) {
@@ -362,8 +423,10 @@ export class ProductionOrdersService {
             sku: true,
             stock_unit: true,
             is_batch_produced: true,
+            preparation_time_minutes: true,
           },
         },
+        product_variant: { select: { id: true, name: true } },
         recipe: {
           select: {
             id: true,
@@ -392,7 +455,7 @@ export class ProductionOrdersService {
       throw new VendixHttpException(ErrorCodes.PRODUCTION_ORDER_NOT_FOUND);
     }
 
-    return order;
+    return this.withEstimate(order);
   }
 
   // ------------------------------------------------------------------- start
@@ -408,10 +471,76 @@ export class ProductionOrdersService {
         },
       );
     }
-    return this.prisma.production_orders.update({
-      where: { id },
-      data: { status: 'in_progress', updated_at: new Date() },
+    // Atomic claim: two screens starting the same order cannot both win.
+    const now = new Date();
+    const claimed = await this.prisma.production_orders.updateMany({
+      where: { id, status: 'draft' },
+      data: { status: 'in_progress', started_at: now, updated_at: now },
     });
+    if (claimed.count !== 1) {
+      throw new VendixHttpException(
+        ErrorCodes.PRODUCTION_ORDER_INVALID_STATE,
+        undefined,
+        {
+          from: order.status,
+          to: 'in_progress',
+        },
+      );
+    }
+    const started = await this.findOne(id);
+    this.emitUpdated(started);
+    return started;
+  }
+
+  // ------------------------------------------------------- sale card (QUI-1002)
+  /** Moves every `from` order of one sale through the individual `move(id)`. */
+  private async moveSaleOrders(
+    sale_order_id: number,
+    from: 'draft' | 'in_progress',
+    move: (order: { id: number; planned_qty: unknown }) => Promise<unknown>,
+  ) {
+    const store_id = RequestContextService.getContext()?.store_id;
+    if (!store_id) {
+      throw new VendixHttpException(ErrorCodes.STORE_CONTEXT_001);
+    }
+    const orders = await this.prisma.production_orders.findMany({
+      where: { order_id: sale_order_id, store_id },
+      select: { id: true, status: true, planned_qty: true },
+      orderBy: { id: 'asc' },
+    });
+    const result = {
+      moved: [] as number[],
+      skipped: [] as number[],
+      failed: [] as { id: number; message: string }[],
+    };
+    for (const order of orders) {
+      if (order.status !== from) {
+        result.skipped.push(order.id);
+        continue;
+      }
+      try {
+        await move(order);
+        result.moved.push(order.id);
+      } catch (error) {
+        result.failed.push({
+          id: order.id,
+          message: error instanceof Error ? error.message : String(error),
+        });
+      }
+    }
+    return result;
+  }
+
+  /** Starts every draft production order of the sale (one card = one sale). */
+  startSale(sale_order_id: number) {
+    return this.moveSaleOrders(sale_order_id, 'draft', (o) => this.start(o.id));
+  }
+
+  /** Completes every in-progress order of the sale with produced_qty = planned_qty. */
+  completeSale(sale_order_id: number) {
+    return this.moveSaleOrders(sale_order_id, 'in_progress', (o) =>
+      this.complete(o.id, { produced_qty: Number(o.planned_qty) }),
+    );
   }
 
   // ----------------------------------------------------------------- complete
@@ -425,7 +554,14 @@ export class ProductionOrdersService {
     // `store_id` (not just the request context) so the resolved policy is
     // always tied to the store that owns the recipe/stock being consumed.
     const store_id = (order as { store_id: number }).store_id;
-    if (order.status === 'completed' || order.status === 'cancelled') {
+    // `partially_completed` is a Planta state: only ManufacturingOrdersService
+    // knows what is left (it caps at planned − produced and accumulates the
+    // real cost). From the restaurant endpoint the full planned quantity would
+    // be produced and consumed again, so that order finishes in Planta.
+    const plantaOnly =
+      order.status === 'partially_completed' &&
+      options?.sourceModule !== 'manufacturing';
+    if (order.status === 'completed' || order.status === 'cancelled' || plantaOnly) {
       throw new VendixHttpException(
         ErrorCodes.PRODUCTION_ORDER_INVALID_STATE,
         undefined,
@@ -456,7 +592,14 @@ export class ProductionOrdersService {
         ErrorCodes.PRODUCTION_RECIPE_EMPTY,
       );
     }
-    if (!options?.allowPartialBatch) {
+    // QUI-995: a sale-linked order produces what was sold, not whole batches.
+    const linkedOrderId = (order as { order_id?: number | null }).order_id ?? null;
+    // QUI-995 F4: a sale-linked order makes ONE variant of the product (NULL for
+    // base products and manual orders). Read through a narrow cast: the column is
+    // new in `production_orders` and this read must not depend on a regenerated client.
+    const variantId =
+      (order as { product_variant_id?: number | null }).product_variant_id ?? null;
+    if (!options?.allowPartialBatch && linkedOrderId == null) {
       this.assertWholeBatches(
         producedQty,
         recipe.yield_quantity,
@@ -470,9 +613,14 @@ export class ProductionOrdersService {
     // operators with arbitrary location selection.
     const location_id =
       options?.outputLocationId ??
-      (await this.stockLevelManager.getDefaultLocationForProduct(
-        order.product_id,
-      ));
+      (await (variantId != null
+        ? this.stockLevelManager.getDefaultLocationForProduct(
+            order.product_id,
+            variantId,
+          )
+        : this.stockLevelManager.getDefaultLocationForProduct(
+            order.product_id,
+          )));
 
     // No-overselling guard (docs/plans/no-overselling-stock-guard-plan.md,
     // step 6) — validate every tracked ingredient BEFORE opening the
@@ -522,6 +670,41 @@ export class ProductionOrdersService {
 
     // 1. ATOMIC TRANSACTION — consume each recipe item + produce the batch
     const updated = await this.prisma.$transaction(async (tx) => {
+      // 0a. Sale-linked order (QUI-995 F1): lock the sale FIRST, in the same
+      // order every lifecycle writer uses (sale -> payments -> inventory), so
+      // finishing or cancelling the sale waits for this completion instead of
+      // racing (or deadlocking with) its stock credit and settlement.
+      let serveAllVariants = false;
+      if (linkedOrderId != null) {
+        await lockOrderLifecycle(tx, linkedOrderId, store_id);
+        // Legacy shape (R3): an order created before `product_variant_id` has a
+        // NULL variant and served EVERY line of its product. Counted once here
+        // and passed down to the add-on claim and the settlement.
+        serveAllVariants = await this.servesAllVariants(tx, {
+          order_id: linkedOrderId,
+          product_id: order.product_id,
+          variant_id: variantId,
+        });
+      }
+
+      // 0. Atomic state guard (QUI-995): the conditional UPDATE serializes two
+      // screens completing the same order. The loser re-evaluates the WHERE
+      // after the winner commits (status / produced_qty changed), gets count 0
+      // and rolls back before moving any stock.
+      const claimed = await tx.production_orders.updateMany({
+        where: {
+          id: order.id,
+          status: order.status,
+          produced_qty: order.produced_qty ?? null,
+        },
+        data: { updated_at: new Date() },
+      });
+      if (claimed.count !== 1) {
+        throw new VendixHttpException(
+          ErrorCodes.PRODUCTION_ORDER_CONCURRENT_UPDATE,
+        );
+      }
+
       // 1a. Consume each ingredient (sub-recipes are NOT exploded in Fase C;
       // they are consumed as their own batch stock via the same machinery).
       for (const item of recipe.items) {
@@ -586,6 +769,25 @@ export class ProductionOrdersService {
         });
       }
 
+      // 1a'. Sale-linked order: the add-ons of its lines are consumed here, once
+      // (each line claims `addons_consumed_at`, the same marker the kitchen fire
+      // and the scheduled start use). Their cost joins the order cost, so the
+      // `production.completed` entry is a single one.
+      if (linkedOrderId != null) {
+        const addons = await this.consumeLinkedAddons(tx, {
+          store_id,
+          order_id: linkedOrderId,
+          product_id: order.product_id,
+          variant_id: variantId,
+          serve_all_variants: serveAllVariants,
+          production_order_id: order.id,
+          sourceModule,
+          allowOveruse: inventoryPolicy.allowIngredientOveruse,
+        });
+        totalConsumedCost += addons.cost;
+        consumedLineCount += addons.lines;
+      }
+
       // 1b. Credit finished-goods stock with the derived unit_cost
       const producedUnitCost =
         totalConsumedCost > 0
@@ -595,6 +797,7 @@ export class ProductionOrdersService {
       await this.stockLevelManager.updateStock(
         {
           product_id: order.product_id,
+          ...(variantId != null ? { variant_id: variantId } : {}),
           location_id,
           quantity_change: Math.abs(producedQty),
           movement_type: 'production',
@@ -632,6 +835,7 @@ export class ProductionOrdersService {
           product: {
             select: { id: true, name: true, sku: true, stock_unit: true },
           },
+          product_variant: { select: { id: true, name: true } },
           recipe: {
             select: {
               id: true,
@@ -643,8 +847,27 @@ export class ProductionOrdersService {
         },
       });
 
-      return { order: final, producedUnitCost };
-    });
+      // 1d. Sale-linked order: reserve (or, if the sale is already delivered,
+      // sell) what was produced.
+      let saleCogs = 0;
+      if (linkedOrderId != null) {
+        saleCogs = await this.settleProducedForSale(tx, {
+          store_id,
+          order_id: linkedOrderId,
+          product_id: order.product_id,
+          variant_id: variantId,
+          serve_all_variants: serveAllVariants,
+          location_id,
+          produced_qty: producedQty,
+          planned_qty: Number(order.planned_qty),
+          production_order_id: order.id,
+        });
+      }
+
+      return { order: final, producedUnitCost, saleCogs };
+      // The sale lock may be held by `finish` (20 s budget); Prisma's 5 s default
+      // would abort a completion that is merely waiting its turn.
+    }, { timeout: 20000 });
 
     // 2. Emit the production.completed event AFTER the transaction
     // commits. The AccountingEventsListener handles the auto-entry. A
@@ -677,11 +900,444 @@ export class ProductionOrdersService {
       );
     }
 
+    this.emitUpdated({ store_id, ...updated.order });
+
+    // QUI-995 F1: the sale was finished BEFORE this production completed, so its
+    // `order.completed` COGS entry did not include these units (the commit skips
+    // a production line until its order is completed). The cost of the delivery
+    // commit made here is posted now, once, keyed by the production order.
+    if (updated.saleCogs > 0 && linkedOrderId != null) {
+      try {
+        const context = RequestContextService.getContext();
+        this.eventEmitter.emit('production.sale_cogs', {
+          organization_id: context?.organization_id,
+          store_id,
+          order_id: linkedOrderId,
+          production_order_id: updated.order.id,
+          total_cost: updated.saleCogs,
+          user_id: context?.user_id,
+        });
+      } catch (err) {
+        this.logger.error(
+          `Failed to emit production.sale_cogs for order #${order.id}: ${
+            (err as Error).message
+          }`,
+          (err as Error).stack,
+        );
+      }
+    }
+
     // docs/plans/no-overselling-stock-guard-plan.md step 9 — additive: only
     // present when overuse was actually accepted, never an empty array.
     return stockWarnings.length > 0
       ? { ...updated.order, stock_warnings: stockWarnings }
       : updated.order;
+  }
+
+  // ------------------------------------------------------- sale-linked (QUI-995)
+  /**
+   * Consumes the add-ons of the sale lines this order serves. Each line claims
+   * `addons_consumed_at` first (updateMany where null), so the kitchen fire, the
+   * scheduled start and this completion never deduct the same add-on twice.
+   */
+  private async consumeLinkedAddons(
+    tx: Prisma.TransactionClient,
+    p: {
+      store_id: number;
+      order_id: number;
+      product_id: number;
+      variant_id: number | null;
+      serve_all_variants: boolean;
+      production_order_id: number;
+      sourceModule: string;
+      allowOveruse: boolean;
+    },
+  ): Promise<{ cost: number; lines: number }> {
+    const lines = await tx.order_items.findMany({
+      where: {
+        order_id: p.order_id,
+        product_id: p.product_id,
+        // Only the lines of the variant this order makes (QUI-995 F4); NULL
+        // matches the base-product lines, never a sibling variant's. A legacy
+        // NULL-variant order (R3) serves every line of the product.
+        ...(p.serve_all_variants ? {} : { product_variant_id: p.variant_id }),
+        cancelled_at: null,
+        fulfillment_destination: 'production',
+        orders: { store_id: p.store_id },
+      },
+      select: {
+        id: true,
+        product_id: true,
+        product_variant_id: true,
+        quantity: true,
+        addons_consumed_at: true,
+        order_item_options: {
+          select: {
+            scope: true,
+            component_type: true,
+            component_product_id: true,
+            component_variant_id: true,
+            quantity: true,
+          },
+        },
+      },
+    });
+    const inputs: ProductionLineInput[] = [];
+    for (const line of lines) {
+      if (line.addons_consumed_at != null || line.order_item_options.length === 0) continue;
+      const { count } = await tx.order_items.updateMany({
+        where: { id: line.id, addons_consumed_at: null },
+        data: { addons_consumed_at: new Date() },
+      });
+      if (count === 0) continue;
+      inputs.push({
+        id: line.id,
+        product_id: line.product_id,
+        product_variant_id: line.product_variant_id,
+        quantity: Number(line.quantity),
+        // null: the base recipe is this order's own consumption, only add-ons here.
+        product_type: null,
+        inventory_consumed: true,
+        addons_consumed: false,
+        options: line.order_item_options.map((o) => ({
+          ...o,
+          quantity: Number(o.quantity),
+        })),
+      });
+    }
+    if (inputs.length === 0) return { cost: 0, lines: 0 };
+
+    const resolvers = createBatchAwareExploders({
+      recipes: this.recipes!,
+      stockValidator: this.stockValidatorService,
+      stockLevelManager: this.stockLevelManager,
+      client: tx,
+      pool: new Map(),
+    });
+    const { consumption } = await expandProduction(
+      inputs,
+      resolvers.findRecipe,
+      resolvers.explode,
+      resolvers.explodeComponent,
+    );
+    let cost = 0;
+    for (const line of consumption) {
+      const location_id = await this.stockLevelManager.getDefaultLocationForProduct(
+        line.product_id,
+        line.variant_id ?? undefined,
+        tx,
+      );
+      const result = await this.stockLevelManager.updateStock(
+        {
+          product_id: line.product_id,
+          ...(line.variant_id ? { variant_id: line.variant_id } : {}),
+          location_id,
+          quantity_change: -line.quantity,
+          movement_type: 'consumption',
+          reason: `Producción #${p.production_order_id} – adiciones (pedido #${p.order_id})`,
+          source_module: p.sourceModule,
+          create_movement: true,
+          validate_availability: !p.allowOveruse,
+          allow_negative: p.allowOveruse,
+        },
+        tx,
+      );
+      cost += Number(result?.cost_snapshot?.total_cost ?? 0);
+    }
+    return { cost, lines: consumption.length };
+  }
+
+  /**
+   * Legacy shape (R3): a NULL-variant order of a sale that has no variant order
+   * for the product serves every line of the product, variant lines included,
+   * exactly as it did before `product_variant_id` existed. With any (non
+   * cancelled) variant order in the sale, a NULL order serves only base lines.
+   */
+  private async servesAllVariants(
+    client: { production_orders: { count: (args: any) => Promise<number> } },
+    p: { order_id: number; product_id: number; variant_id: number | null },
+  ): Promise<boolean> {
+    if (p.variant_id != null) return false;
+    const variantOrders = await client.production_orders.count({
+      where: {
+        order_id: p.order_id,
+        product_id: p.product_id,
+        product_variant_id: { not: null },
+        status: { not: 'cancelled' },
+      },
+    });
+    return variantOrders === 0;
+  }
+
+  /**
+   * What happens to the produced units once the order completes:
+   * - active sale: reserve min(produced, planned) for ('order', sale), without
+   *   availability validation (the units were just credited, so `available`
+   *   is unchanged and no other sale can take them);
+   * - sale already delivered/finished: sell them now through the delivery
+   *   commit (marks the lines `inventory_committed`), no reservation;
+   * - sale cancelled/refunded: nothing is reserved, the stock stays sellable.
+   */
+  private async settleProducedForSale(
+    tx: Prisma.TransactionClient,
+    p: {
+      store_id: number;
+      order_id: number;
+      product_id: number;
+      variant_id: number | null;
+      serve_all_variants: boolean;
+      location_id: number;
+      produced_qty: number;
+      planned_qty: number;
+      production_order_id: number;
+    },
+  ): Promise<number> {
+    // The caller (`complete()`) already holds the sale's lifecycle lock, taken at
+    // the start of its transaction, so the state read below cannot go stale.
+    const sale = await tx.orders.findFirst({
+      where: { id: p.order_id, store_id: p.store_id },
+      select: { id: true, state: true },
+    });
+    if (!sale || ['cancelled', 'refunded'].includes(sale.state as string)) return 0;
+
+    if (['delivered', 'finished'].includes(sale.state as string)) {
+      const pending = await tx.order_items.findMany({
+        where: {
+          order_id: p.order_id,
+          product_id: p.product_id,
+          ...(p.serve_all_variants ? {} : { product_variant_id: p.variant_id }),
+          cancelled_at: null,
+          fulfillment_destination: 'production',
+          inventory_committed: false,
+        },
+        select: { id: true },
+      });
+      if (pending.length > 0) {
+        const committed = await this.orderStockCommit!.commitOrderLines(
+          p.order_id,
+          pending.map((l) => l.id),
+          {
+            blockOnInsufficient: false,
+            tx,
+            movementType: 'sale',
+            reason: `Producción #${p.production_order_id} completada tras la entrega`,
+          },
+        );
+        // Returned so `complete()` can post this COGS after the commit.
+        return Number(committed?.totalCost ?? 0);
+      }
+      return 0;
+    }
+
+    const quantity = Math.min(p.produced_qty, Math.round(p.planned_qty));
+    if (quantity <= 0) return 0;
+    await this.stockLevelManager.reserveStock(
+      p.product_id,
+      p.variant_id ?? undefined,
+      p.location_id,
+      quantity,
+      'order',
+      p.order_id,
+      RequestContextService.getContext()?.user_id ?? undefined,
+      false,
+      tx,
+    );
+    return 0;
+  }
+
+  /** Signed main-image URL per product id (S3 keys are signed on read). */
+  private async imagesByProduct(ids: number[]): Promise<Map<number, string | null>> {
+    const unique = [...new Set(ids)];
+    const out = new Map<number, string | null>();
+    if (unique.length === 0) return out;
+    const rows = await this.prisma.products.findMany({
+      where: { id: { in: unique } },
+      select: {
+        id: true,
+        product_images: {
+          select: { image_url: true },
+          orderBy: [{ is_main: 'desc' }, { sort_order: 'asc' }],
+          take: 1,
+        },
+      },
+    });
+    await Promise.all(
+      rows.map(async (row) => {
+        const key = row.product_images?.[0]?.image_url ?? null;
+        if (!key || !this.s3Service) {
+          out.set(row.id, null);
+          return;
+        }
+        // A thumbnail is decoration: a signing failure must not fail the detail.
+        try {
+          out.set(row.id, (await this.s3Service.signUrl(key)) ?? null);
+        } catch (error) {
+          this.logger.warn(
+            `Could not sign image of product #${row.id}: ${
+              error instanceof Error ? error.message : String(error)
+            }`,
+          );
+          out.set(row.id, null);
+        }
+      }),
+    );
+    return out;
+  }
+
+  /**
+   * Detail for the shared production-order view (QUI-995): the order plus the
+   * base recipe, the sale it serves and, per sale line, notes and add-ons with
+   * image and (for preparations) their recipe components.
+   */
+  async getDetail(id: number) {
+    const order = await this.findOne(id);
+    const store_id = (order as { store_id: number }).store_id;
+    const sale_order_id = (order as { order_id?: number | null }).order_id ?? null;
+
+    const recipeItems = order.recipe?.items ?? [];
+    const sale = sale_order_id
+      ? await this.prisma.orders.findFirst({
+          where: { id: sale_order_id, store_id },
+          select: {
+            id: true,
+            order_number: true,
+            state: true,
+            customer_alias: true,
+            users: { select: { first_name: true, last_name: true } },
+            fulfillment_schedule: { select: { scheduled_start: true } },
+          },
+        })
+      : null;
+    const serveAllVariants =
+      sale_order_id != null &&
+      (await this.servesAllVariants(this.prisma, {
+        order_id: sale_order_id,
+        product_id: order.product_id,
+        variant_id: (order as { product_variant_id?: number | null }).product_variant_id ?? null,
+      }));
+    const lines = sale_order_id
+      ? await this.prisma.order_items.findMany({
+          where: {
+            order_id: sale_order_id,
+            product_id: order.product_id,
+            // One order per product+variant (QUI-995): only the lines of THIS
+            // variant (NULL = base lines). Narrow cast: the column is new.
+            ...(serveAllVariants
+              ? {}
+              : {
+                  product_variant_id:
+                    (order as { product_variant_id?: number | null }).product_variant_id ?? null,
+                }),
+            cancelled_at: null,
+            fulfillment_destination: 'production',
+          },
+          orderBy: { id: 'asc' },
+          select: {
+            id: true,
+            quantity: true,
+            notes: true,
+            order_item_options: {
+              orderBy: { id: 'asc' },
+              select: {
+                group_name: true,
+                option_name: true,
+                note: true,
+                component_type: true,
+                component_product_id: true,
+                component_variant_id: true,
+              },
+            },
+          },
+        })
+      : [];
+
+    const addonProductIds = lines.flatMap((l) =>
+      l.order_item_options.map((o) => o.component_product_id),
+    );
+    const addonRecipes = addonProductIds.length
+      ? await this.prisma.recipes.findMany({
+          where: { product_id: { in: addonProductIds }, is_active: true },
+          select: {
+            product_id: true,
+            product_variant_id: true,
+            items: {
+              orderBy: { id: 'asc' },
+              select: {
+                quantity: true,
+                component_product: { select: { id: true, name: true, stock_unit: true } },
+              },
+            },
+          },
+        })
+      : [];
+    const images = await this.imagesByProduct([
+      order.product_id,
+      ...recipeItems.map((i) => i.component_product_id),
+      ...addonProductIds,
+      ...addonRecipes.flatMap((r) => r.items.map((i) => i.component_product.id)),
+    ]);
+    const component = (item: {
+      quantity: unknown;
+      component_product: { id: number; name: string; stock_unit?: string | null };
+    }) => ({
+      product_id: item.component_product.id,
+      name: item.component_product.name,
+      quantity: Number(item.quantity),
+      unit: item.component_product.stock_unit ?? null,
+      image_url: images.get(item.component_product.id) ?? null,
+    });
+    const recipeFor = (product_id: number, variant_id: number | null) => {
+      const rows = addonRecipes.filter((r) => r.product_id === product_id);
+      return (
+        (variant_id != null ? rows.find((r) => r.product_variant_id === variant_id) : undefined) ??
+        rows.find((r) => r.product_variant_id == null) ??
+        null
+      );
+    };
+
+    const customer = sale?.users;
+    // S21: the "Volver a iniciar" button follows the same rule restart() enforces.
+    const can_restart = await this.canRestart(
+      order as { id: number; status: string; order_id?: number | null },
+    );
+    return {
+      ...order,
+      can_restart,
+      product: { ...order.product, image_url: images.get(order.product_id) ?? null },
+      base_recipe: order.recipe
+        ? { id: order.recipe.id, components: recipeItems.map(component) }
+        : null,
+      sale_order: sale
+        ? {
+            id: sale.id,
+            order_number: sale.order_number,
+            state: sale.state,
+            customer_name:
+              (customer ? `${customer.first_name ?? ''} ${customer.last_name ?? ''}`.trim() : '') ||
+              sale.customer_alias?.trim() ||
+              null,
+            due_at: sale.fulfillment_schedule?.scheduled_start ?? order.due_date ?? null,
+          }
+        : null,
+      order_lines: lines.map((line) => ({
+        order_item_id: line.id,
+        quantity: Number(line.quantity),
+        notes: line.notes ?? null,
+        addons: line.order_item_options.map((o) => {
+          const recipe =
+            o.component_type === 'recipe'
+              ? recipeFor(o.component_product_id, o.component_variant_id ?? null)
+              : null;
+          return {
+            group_name: o.group_name,
+            option_name: o.option_name,
+            note: o.note ?? null,
+            image_url: images.get(o.component_product_id) ?? null,
+            recipe: recipe ? { components: recipe.items.map(component) } : null,
+          };
+        }),
+      })),
+    };
   }
 
   // ------------------------------------------------------------------- cancel
@@ -701,10 +1357,89 @@ export class ProductionOrdersService {
         },
       );
     }
-    return this.prisma.production_orders.update({
+    const cancelled = await this.prisma.production_orders.update({
       where: { id },
       data: { status: 'cancelled', updated_at: new Date() },
     });
+    this.emitUpdated(cancelled);
+    return cancelled;
+  }
+
+  // ----------------------------------------------------------------- restart
+  /**
+   * S21 — decides whether a cancelled order can restart. Pure read: returns the
+   * quantity and delivery it would restart with, or the error to reject with.
+   * Only orders linked to a sale restart (a manual / Planta order has no sale
+   * line to follow); the sale must not be cancelled, refunded or finished and a
+   * live production line must still pair with the order.
+   */
+  private async evaluateRestart(order: {
+    id: number;
+    status: string;
+    order_id?: number | null;
+  }): Promise<
+    | { ok: true; qty: number; due_date: Date }
+    | { ok: false; code: keyof typeof ErrorCodes }
+  > {
+    if (order.order_id == null || !this.saleLink) {
+      return { ok: false, code: 'PRODUCTION_ORDER_RESTART_NOT_LINKED' };
+    }
+    const plan = await this.saleLink.planRestart(order.order_id, order.id);
+    if (plan && RESTART_BLOCKED_SALE_STATES.includes(plan.sale_state)) {
+      return { ok: false, code: 'PRODUCTION_ORDER_RESTART_SALE_CLOSED' };
+    }
+    if (!plan || plan.qty <= 0) {
+      return { ok: false, code: 'PRODUCTION_ORDER_RESTART_NO_LIVE_LINE' };
+    }
+    return { ok: true, qty: plan.qty, due_date: plan.due_date };
+  }
+
+  /** S21 — the rule behind the "Volver a iniciar" button (Planta and restaurant detail). */
+  async canRestart(order: {
+    id: number;
+    status: string;
+    order_id?: number | null;
+  }): Promise<boolean> {
+    return order.status === 'cancelled' && (await this.evaluateRestart(order)).ok;
+  }
+
+  /**
+   * S21 — "Volver a iniciar": cancelling production is not cancelling the sale,
+   * so a cancelled order whose sale is still active goes back to `draft` (ready
+   * to start) with the quantity and delivery of the sale line as it is today.
+   */
+  async restart(id: number) {
+    const order = await this.findOne(id);
+    if (order.status !== 'cancelled') {
+      throw new VendixHttpException(
+        ErrorCodes.PRODUCTION_ORDER_INVALID_STATE,
+        undefined,
+        { from: order.status, to: 'draft' },
+      );
+    }
+    const verdict = await this.evaluateRestart(
+      order as { id: number; status: string; order_id?: number | null },
+    );
+    if (!verdict.ok) {
+      throw new VendixHttpException(ErrorCodes[verdict.code]);
+    }
+    // Atomic claim: two screens restarting the same order cannot both win.
+    const claimed = await this.prisma.production_orders.updateMany({
+      where: { id, status: 'cancelled' },
+      data: {
+        status: 'draft',
+        started_at: null,
+        planned_qty: new Prisma.Decimal(verdict.qty),
+        due_date: verdict.due_date,
+        updated_at: new Date(),
+      },
+    });
+    if (claimed.count !== 1) {
+      throw new VendixHttpException(ErrorCodes.PRODUCTION_ORDER_CONCURRENT_UPDATE);
+    }
+    const restarted = await this.findOne(id);
+    this.emitUpdated(restarted);
+    return restarted;
   }
 
   // ------------------------------------------------------------------- patch
@@ -721,13 +1456,176 @@ export class ProductionOrdersService {
         },
       );
     }
-    return this.prisma.production_orders.update({
+    const edited = await this.prisma.production_orders.update({
       where: { id },
-      data: { updated_at: new Date() },
+      data: {
+        ...(dto.estimated_minutes !== undefined && {
+          estimated_minutes: dto.estimated_minutes,
+        }),
+        updated_at: new Date(),
+      },
     });
+    this.emitUpdated(edited);
+    return edited;
   }
 
   // ------------------------------------------------------------------- stats
+  // ------------------------------------------------------------- day (QUI-996)
+  /**
+   * The production list of ONE day (store timezone), shared by Pedidos
+   * programados, Operaciones → Producción and Planta.
+   *
+   * Day membership: an order linked to a sale belongs to the day of its
+   * delivery instant (`due_date`, set by the sale link); a manual / Planta
+   * order to its planned date (`due_date` is a DATE-ONLY value there, stored
+   * as naive midnight) or, without one, to its creation day. An order still
+   * `in_progress` from an earlier day stays on every later day until it is
+   * finished (multi-day production). Cancelled orders never show.
+   *
+   * One card per sale (all its production orders) or per manual order; cards
+   * carried over from earlier days first, then by their timeline time
+   * (delivery for sales, creation for manual orders).
+   */
+  async findDay(query: ProductionDayQueryDto) {
+    const context = RequestContextService.getContext();
+    const store_id = context?.store_id;
+    if (!store_id) {
+      throw new VendixHttpException(ErrorCodes.STORE_CONTEXT_001);
+    }
+    const timezone = await resolveStoreTimezone(this.prisma, store_id);
+    const date = query?.date ?? localDateString(new Date(), timezone);
+    const range = { date_from: date, date_to: date };
+    const local = resolveLocalDateRange(range, timezone);
+    const naive = resolveLocalDateOnlyRange(range, timezone);
+
+    const rows = await this.prisma.production_orders.findMany({
+      where: {
+        status: { not: 'cancelled' },
+        OR: [
+          { order_id: { not: null }, due_date: { gte: local.startDate, lte: local.endDate } },
+          { order_id: null, due_date: { gte: naive.startDate, lte: naive.endDate } },
+          { due_date: null, created_at: { gte: local.startDate, lte: local.endDate } },
+          { status: { in: ['in_progress', 'partially_completed'] }, order_id: { not: null }, due_date: { lt: local.startDate } },
+          { status: { in: ['in_progress', 'partially_completed'] }, order_id: null, due_date: { lt: naive.startDate } },
+          { status: { in: ['in_progress', 'partially_completed'] }, due_date: null, created_at: { lt: local.startDate } },
+        ],
+      },
+      select: {
+        id: true,
+        order_number: true,
+        status: true,
+        source: true,
+        product_id: true,
+        planned_qty: true,
+        produced_qty: true,
+        started_at: true,
+        produced_at: true,
+        due_date: true,
+        created_at: true,
+        order_id: true,
+        estimated_minutes: true,
+        product: { select: { name: true, preparation_time_minutes: true } },
+        product_variant: { select: { name: true } },
+        sale_order: {
+          select: {
+            order_number: true,
+            customer_alias: true,
+            users: { select: { first_name: true, last_name: true } },
+          },
+        },
+      },
+      orderBy: [{ due_date: 'asc' }, { created_at: 'asc' }, { id: 'asc' }],
+      take: 500,
+    });
+
+    type Row = (typeof rows)[number];
+    const iso = (value: Date | null | undefined) => (value ? value.toISOString() : null);
+    // Calendar day an order belongs to (same rule as the filter above).
+    const dayOf = (r: Row): string => {
+      if (r.order_id != null && r.due_date) return localDateString(r.due_date, timezone);
+      if (r.order_id == null && r.due_date) return dateOnlyString(r.due_date);
+      return localDateString(r.created_at, timezone);
+    };
+    // Time the order anchors on the timeline: delivery for a sale, creation
+    // for a manual order (its planned date has no time of day).
+    const anchorOf = (r: Row): Date =>
+      r.order_id != null && r.due_date ? r.due_date : r.created_at;
+    const bucket = (status: string): 'waiting' | 'in_progress' | 'completed' =>
+      status === 'completed'
+        ? 'completed'
+        : status === 'in_progress' || status === 'partially_completed'
+          ? 'in_progress'
+          : 'waiting';
+
+    const groups = new Map<string, Row[]>();
+    for (const r of rows) {
+      const key = r.order_id != null ? `sale-${r.order_id}` : `po-${r.id}`;
+      const list = groups.get(key) ?? [];
+      list.push(r);
+      groups.set(key, list);
+    }
+
+    const summary = { waiting: 0, in_progress: 0, completed: 0 };
+    for (const r of rows) summary[bucket(r.status as string)] += 1;
+
+    const cards = [...groups.entries()].map(([key, list]) => {
+      const first = list[0];
+      const anchor = list.map(anchorOf).reduce((a, b) => (b < a ? b : a));
+      const buckets = list.map((r) => bucket(r.status as string));
+      const status: 'waiting' | 'in_progress' | 'completed' = buckets.every((b) => b === 'completed')
+        ? 'completed'
+        : buckets.some((b) => b === 'in_progress') || buckets.some((b) => b === 'completed')
+          ? 'in_progress'
+          : 'waiting';
+      const customer = first.sale_order?.users;
+      const customer_name = first.sale_order
+        ? (customer ? `${customer.first_name ?? ''} ${customer.last_name ?? ''}`.trim() : '') ||
+          first.sale_order.customer_alias?.trim() ||
+          null
+        : null;
+      return {
+        key,
+        kind: (first.order_id != null ? 'sale' : 'manual') as 'sale' | 'manual',
+        order_id: first.order_id ?? null,
+        sale_order_number: first.sale_order?.order_number ?? null,
+        customer_name,
+        due_at: anchor.toISOString(),
+        status,
+        carried_over: list.some((r) => dayOf(r) < date),
+        production_orders: list.map((r) => ({
+          id: r.id,
+          order_number: r.order_number,
+          status: r.status,
+          source: r.source ?? null,
+          product_id: r.product_id,
+          product_name: r.product?.name ?? `#${r.product_id}`,
+          variant_name: r.product_variant?.name ?? null,
+          planned_qty: Number(r.planned_qty),
+          produced_qty: r.produced_qty == null ? null : Number(r.produced_qty),
+          started_at: iso(r.started_at),
+          produced_at: iso(r.produced_at),
+          estimated_minutes: r.estimated_minutes ?? null,
+          effective_estimated_minutes:
+            r.estimated_minutes ?? r.product?.preparation_time_minutes ?? null,
+          due_date: iso(r.due_date),
+          created_at: r.created_at.toISOString(),
+        })),
+        _anchor: anchor.getTime(),
+      };
+    });
+
+    cards.sort((a, b) =>
+      a.carried_over !== b.carried_over ? (a.carried_over ? -1 : 1) : a._anchor - b._anchor,
+    );
+
+    return {
+      date,
+      timezone,
+      summary,
+      cards: cards.map(({ _anchor, ...card }) => card),
+    };
+  }
+
   async getStats() {
     const context = RequestContextService.getContext();
     const store_id = context?.store_id;
@@ -743,7 +1641,11 @@ export class ProductionOrdersService {
     );
     const startOfWeek = new Date(startOfDay);
     startOfWeek.setDate(startOfWeek.getDate() - startOfWeek.getDay());
-    const startOfMonth = new Date(now.getFullYear(), now.getMonth(), 1);
+    // "Completadas (mes)" and "Producido (mes)" share the store-timezone month
+    // window (QUI-997): the completed count used to include every past order.
+    const tz = await resolveStoreTimezone(this.prisma, store_id);
+    const civil = localCivil(now, tz);
+    const startOfMonth = zonedWallClockToUtc(civil.year, civil.month, 1, 0, 0, 0, 0, tz);
 
     const [
       draftCount,
@@ -761,7 +1663,11 @@ export class ProductionOrdersService {
         where: { store_id, status: 'in_progress' },
       }),
       this.prisma.production_orders.count({
-        where: { store_id, status: 'completed' },
+        where: {
+          store_id,
+          status: 'completed',
+          produced_at: { gte: startOfMonth },
+        },
       }),
       this.prisma.production_orders.count({
         where: { store_id, status: 'cancelled' },

@@ -5,6 +5,9 @@ import type { PosShippingMethod } from './shipping.model';
 import { WithholdingLine } from '../../withholding-tax/interfaces/withholding.interface';
 import type { OptionDeltaParts } from '../../../../../shared/utils/option-pricing.util';
 
+/** QUI-999 — destination the cashier can pick on a choosable line. */
+export type FulfillmentChoice = 'stock' | 'production';
+
 export interface CartItem {
   id: string;
   itemType?: 'product' | 'custom';
@@ -107,6 +110,11 @@ export interface CartItem {
   // para llevar y otra para la mesa, son líneas DISTINTAS; fusionarlas perdería
   // una de las dos decisiones en silencio.
   isTakeaway?: boolean;
+  // QUI-999 — cashier's choice for a producible restaurant line that has
+  // stock: 'stock' (default, when absent) or 'production'. Sent to the server
+  // as `fulfillment_destination` only for choosable lines (see
+  // `fulfillmentModeForLine`). Participates in the line identity.
+  fulfillmentChoice?: FulfillmentChoice;
   // QUI-431 — Serial numbers chosen by the cashier for a serialized
   // product (`requires_serial_numbers=true`). `serial_ids` are existing
   // pool rows picked from the selector; `serial_numbers` are free-text
@@ -122,6 +130,8 @@ export interface CartItem {
   // de visualización. Participan en la identidad de la línea.
   option_ids?: number[];
   option_labels?: string[];
+  /** Notas por adición (QUI-994); paralelas a `option_ids`. */
+  option_notes?: Array<{ option_id: number; note: string }>;
   /** Delta por unidad aplicado HOY a la línea (depende de la cantidad). */
   option_delta?: number;
   /** Partes per_unit/per_line: el delta se recalcula al cambiar la cantidad. */
@@ -347,6 +357,7 @@ export interface AddToCartRequest {
   /** Adiciones elegidas (ver `CartItem.option_ids`). */
   option_ids?: number[];
   option_labels?: string[];
+  option_notes?: Array<{ option_id: number; note: string }>;
   option_delta?: number;
   option_delta_parts?: OptionDeltaParts;
   notes?: string;
@@ -451,4 +462,66 @@ export interface CartValidationError {
   field: string;
   message: string;
   itemId?: string;
+}
+
+/**
+ * Adiciones de una línea listas para pintar (carrito y recibo): nombre y nota.
+ * `option_labels` es paralelo a `option_ids`; sin nombres devuelve [].
+ */
+export function cartOptionLines(
+  item: Pick<CartItem, 'option_ids' | 'option_labels' | 'option_notes'>,
+): Array<{ label: string; note: string | null }> {
+  const labels = item.option_labels ?? [];
+  const ids = item.option_ids ?? [];
+  const notes = new Map((item.option_notes ?? []).map((n) => [n.option_id, n.note]));
+  return labels.map((label, i) => ({
+    label,
+    note: notes.get(ids[i]) || null,
+  }));
+}
+
+/**
+ * QUI-999 — what the POS offers for a line, following the decision matrix:
+ *  - `choose`: producible with stock >= quantity -> selector "Del stock / A producción".
+ *  - `production`: producible without stock or without inventory -> fixed badge.
+ *  - `null`: not producible (the server decides: KDS or stock) or custom line.
+ * `is_producible` comes from the POS product payload (batch-produced with an
+ * active recipe). Restaurant gating is the caller's job.
+ */
+export type LineFulfillmentMode = 'choose' | 'production' | null;
+
+export function isProducibleProduct(product: Product | undefined | null): boolean {
+  return product?.is_producible === true;
+}
+
+export function fulfillmentModeForLine(
+  item: Pick<CartItem, 'itemType' | 'product' | 'booking' | 'quantity'>,
+): LineFulfillmentMode {
+  if (item.itemType === 'custom' || item.booking) return null;
+  if (!isProducibleProduct(item.product)) return null;
+  const tracksInventory =
+    item.product.effective_track_inventory !== false &&
+    item.product.track_inventory !== false;
+  const stock = Number(item.product.available_stock ?? item.product.stock ?? 0);
+  // Server rule (`resolveLineDestination`): stock covers the line only when
+  // `available >= quantity`. Offering the choice with less stock than the
+  // quantity would let the server override it to production behind the
+  // cashier's back, so the selector shows only when the whole line fits.
+  const quantity = Number(item.quantity ?? 0);
+  return tracksInventory && stock > 0 && stock >= quantity
+    ? 'choose'
+    : 'production';
+}
+
+/** Destination chip of the line: the cashier's choice or the fixed one. */
+export function cartLineDestination(
+  item: Pick<
+    CartItem,
+    'itemType' | 'product' | 'booking' | 'fulfillmentChoice' | 'quantity'
+  >,
+): FulfillmentChoice | null {
+  const mode = fulfillmentModeForLine(item);
+  if (mode === 'production') return 'production';
+  if (mode === 'choose') return item.fulfillmentChoice ?? 'stock';
+  return null;
 }

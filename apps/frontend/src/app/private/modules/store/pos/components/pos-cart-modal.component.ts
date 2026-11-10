@@ -22,7 +22,15 @@ import { showStockCapToast } from '../cart/utils/stock-toast';
 import { TooltipComponent } from '../../../../../shared/components/tooltip/tooltip.component';
 import { ModalComponent } from '../../../../../shared/components/modal/modal.component';
 import { ButtonComponent, BadgeComponent } from '../../../../../shared/components';
-import { CartState, CartItem } from '../models/cart.model';
+import {
+  CartState,
+  CartItem,
+  FulfillmentChoice,
+  LineFulfillmentMode,
+  cartLineDestination,
+  cartOptionLines,
+  fulfillmentModeForLine,
+} from '../models/cart.model';
 import { CurrencyFormatService } from '../../../../../shared/pipes/currency';
 import { AuthFacade } from '../../../../../core/store/auth/auth.facade';
 import { ToastService } from '../../../../../shared/components/toast/toast.service';
@@ -268,11 +276,6 @@ import {
                               {{ item.variant_display_name }}
                             </span>
                           }
-                          @if (item.option_labels?.length) {
-                            <span class="text-[10px] text-text-secondary leading-tight">
-                              {{ item.option_labels!.join(', ') }}
-                            </span>
-                          }
                           @if (item.itemType === 'custom') {
                             <span
                               class="text-[10px] font-medium text-slate-500 bg-slate-100 px-1.5 py-0.2 rounded shrink-0 leading-tight"
@@ -345,6 +348,52 @@ import {
                         </p>
                       }
 
+                      @if (optionLines(item).length) {
+                        <ul class="mt-0.5 flex flex-col gap-0.5" aria-label="Adiciones de la línea">
+                          @for (opt of optionLines(item); track $index) {
+                            <li class="text-[10px] leading-tight text-text-secondary">
+                              <span class="font-semibold text-text-primary">+ {{ opt.label }}</span>
+                              @if (opt.note) {
+                                <span class="italic"> — {{ opt.note }}</span>
+                              }
+                            </li>
+                          }
+                        </ul>
+                      }
+                      @if (fulfillmentMode(item); as mode) {
+                        <div class="mt-1 flex items-center gap-1">
+                          @if (mode === 'choose') {
+                            <div
+                              role="group"
+                              aria-label="Destino de la línea"
+                              class="inline-flex overflow-hidden rounded-md border border-border text-[10px] font-semibold"
+                            >
+                              <button
+                                type="button"
+                                class="px-2 py-0.5"
+                                [class.bg-primary]="lineDestination(item) === 'stock'"
+                                [class.text-white]="lineDestination(item) === 'stock'"
+                                [attr.aria-pressed]="lineDestination(item) === 'stock'"
+                                (click)="setFulfillment(item, 'stock')"
+                              >
+                                Del stock
+                              </button>
+                              <button
+                                type="button"
+                                class="px-2 py-0.5 border-l border-border"
+                                [class.bg-primary]="lineDestination(item) === 'production'"
+                                [class.text-white]="lineDestination(item) === 'production'"
+                                [attr.aria-pressed]="lineDestination(item) === 'production'"
+                                (click)="setFulfillment(item, 'production')"
+                              >
+                                A producción
+                              </button>
+                            </div>
+                          } @else {
+                            <app-badge variant="neutral" size="xsm" badgeStyle="outline">A producción</app-badge>
+                          }
+                        </div>
+                      }
                       <!-- Line 2: Base price, discount & badges (left), Note chip (if has notes) -->
                       <div class="flex items-center justify-between gap-1 mt-1 text-xs">
                         <div class="flex items-center gap-1.5 flex-wrap min-w-0">
@@ -2025,6 +2074,27 @@ export class PosCartModalComponent {
   }
 
   /** QUI-648 — sufijo de la escala de precio: "/m", "/kg", "/paquete". */
+  /** QUI-999 — selector / badge mode of the line (restaurant only). */
+  fulfillmentMode(item: CartItem): LineFulfillmentMode {
+    return this.authFacade.isRestaurant() ? fulfillmentModeForLine(item) : null;
+  }
+
+  lineDestination(item: CartItem): FulfillmentChoice | null {
+    return cartLineDestination(item);
+  }
+
+  setFulfillment(item: CartItem, choice: FulfillmentChoice): void {
+    this.cartService
+      .setFulfillmentChoice(item.id, choice)
+      .pipe(takeUntilDestroyed(this.destroyRef))
+      .subscribe();
+  }
+
+  /** Adiciones de la línea con su nota (QUI-994). */
+  optionLines(item: CartItem): Array<{ label: string; note: string | null }> {
+    return cartOptionLines(item);
+  }
+
   unitPriceSuffix(item: CartItem): string {
     if (item.is_weight_product) return '/' + (item.weight_unit || 'kg');
     if (this.isPackageLine(item)) return '/paquete';

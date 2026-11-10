@@ -28,6 +28,8 @@ export const ErrorCodes = {
   SCHED_ALREADY_SCHEDULED: { code: 'SCHED_ALREADY_SCHEDULED', httpStatus: 409, devMessage: 'Esta orden ya tiene un agendamiento.' },
   SCHED_INVALID_TRANSITION: { code: 'SCHED_INVALID_TRANSITION', httpStatus: 409, devMessage: 'Ese cambio de estado no está permitido para el pedido.' },
   SCHED_EXCEPTION_NOT_FOUND: { code: 'SCHED_EXCEPTION_NOT_FOUND', httpStatus: 404, devMessage: 'Excepción de agenda no encontrada.' },
+  SCHED_KITCHEN_NOT_ALLOWED: { code: 'SCHED_KITCHEN_NOT_ALLOWED', httpStatus: 409, devMessage: 'Un pedido cancelado, entregado o no recogido no se puede enviar a cocina.' },
+  SCHED_NOTHING_TO_SEND: { code: 'SCHED_NOTHING_TO_SEND', httpStatus: 409, devMessage: 'Este pedido no tiene platos pendientes por enviar a cocina.' },
 
   // Adiciones de producto
   OPT_DISABLED: { code: 'OPT_DISABLED', httpStatus: 400, devMessage: 'Las adiciones no están activas en esta tienda.' },
@@ -7074,6 +7076,30 @@ export const ErrorCodes = {
     code: 'PRODUCTION_ORDER_INVALID_STATE',
     httpStatus: 409,
     devMessage: 'Transición de estado inválida para la orden de producción',
+  },
+  PRODUCTION_ORDER_CONCURRENT_UPDATE: {
+    code: 'PRODUCTION_ORDER_CONCURRENT_UPDATE',
+    httpStatus: 409,
+    devMessage:
+      'La orden de producción cambió en otra operación; recarga e intenta de nuevo',
+  },
+  PRODUCTION_ORDER_RESTART_NOT_LINKED: {
+    code: 'PRODUCTION_ORDER_RESTART_NOT_LINKED',
+    httpStatus: 409,
+    devMessage:
+      'Solo se puede volver a iniciar una orden de producción cancelada que esté ligada a una venta',
+  },
+  PRODUCTION_ORDER_RESTART_SALE_CLOSED: {
+    code: 'PRODUCTION_ORDER_RESTART_SALE_CLOSED',
+    httpStatus: 409,
+    devMessage:
+      'La venta de esta orden de producción está cancelada, reembolsada o finalizada; no se puede volver a iniciar',
+  },
+  PRODUCTION_ORDER_RESTART_NO_LIVE_LINE: {
+    code: 'PRODUCTION_ORDER_RESTART_NO_LIVE_LINE',
+    httpStatus: 409,
+    devMessage:
+      'La venta ya no tiene una línea a producción vigente para esta orden; no se puede volver a iniciar',
   },
   MFG_ORDER_CONCURRENT_UPDATE: {
     code: 'MFG_ORDER_CONCURRENT_UPDATE',

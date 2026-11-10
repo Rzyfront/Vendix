@@ -296,6 +296,7 @@ export async function seedDefaultTemplates(prisma?: PrismaClient) {
             products_list: true,
             products_categories: true,
             products_brands: true,
+            products_option_groups: true,
             ecommerce: true,
             orders: true,
             orders_sales: true,

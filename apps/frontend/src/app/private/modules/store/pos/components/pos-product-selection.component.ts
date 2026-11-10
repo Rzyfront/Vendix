@@ -65,6 +65,7 @@ import {
 } from '../utils/manual-weigh.util';
 import { PosRestaurantIntegrationService } from '../services/pos-restaurant-integration.service';
 import { PosVariantSelectorComponent } from './pos-variant-selector/pos-variant-selector.component';
+import { AuthFacade } from '../../../../../core/store/auth/auth.facade';
 import { PosOptionSelectorComponent } from './pos-option-selector/pos-option-selector.component';
 import {
   PosOptionSelection,
@@ -72,10 +73,6 @@ import {
   PosProductOptionsService,
 } from '../services/pos-product-options.service';
 import { PosStockSourcingModalComponent } from './pos-stock-sourcing-modal.component';
-import {
-  PosPreparedChoiceModalComponent,
-  PreparedChoice,
-} from './pos-prepared-choice-modal/pos-prepared-choice-modal.component';
 import { PosSerialSelectionModalComponent } from './pos-serial-selection-modal/pos-serial-selection-modal.component';
 import { PosCategoryPillsComponent } from './pos-category-pills/pos-category-pills.component';
 import { MultiSelectorOption } from '../../../../../shared/components/multi-selector/multi-selector.component';
@@ -184,7 +181,6 @@ function isMultiTokenQuery(query: string): boolean {
     PosVariantSelectorComponent,
     PosOptionSelectorComponent,
     PosStockSourcingModalComponent,
-    PosPreparedChoiceModalComponent,
     PosSerialSelectionModalComponent,
     BadgeComponent,
     PosCategoryPillsComponent,
@@ -943,14 +939,6 @@ function isMultiTokenQuery(query: string): boolean {
       (closed)="onSourcingModalClosed()"
     ></app-pos-stock-sourcing-modal>
 
-    <!-- Restaurant Suite — Fase K Gap 1: choice modal for prepared
-         + track_inventory + stock greater than 0 products. -->
-    <app-pos-prepared-choice-modal
-      [isOpen]="preparedChoiceOpen()"
-      [product]="preparedChoiceProduct()"
-      (decided)="onPreparedChoice($event)"
-    ></app-pos-prepared-choice-modal>
-
     <!-- QUI-431: serial-number selection for serialized products -->
     <app-pos-serial-selection-modal
       [isOpen]="serialModalOpen()"
@@ -1315,6 +1303,7 @@ export class PosProductSelectionComponent {
   private dialogService = inject(DialogService);
   private router = inject(Router);
   private store = inject(Store);
+  private authFacade = inject(AuthFacade);
   private currencyService = inject(CurrencyFormatService);
   private scaleService = inject(PosScaleService);
   private saleUnitService = inject(PosSaleUnitService);
@@ -2228,6 +2217,8 @@ export class PosProductSelectionComponent {
     variant: PosProductVariant | null,
   ): Promise<boolean> {
     if (!this.productOptionsEnabled()) return false;
+    // QUI-1001: add-ons are restaurant-only; other industries add the plain product.
+    if (!this.authFacade.isRestaurant()) return false;
     if (this.restaurantIntegration.currentTableSession() != null) return false;
     if (product.pricing_type === 'weight' || this.requiresSerials(product)) {
       return false;
@@ -2283,6 +2274,7 @@ export class PosProductSelectionComponent {
         ...(variant ? { variant } : {}),
         option_ids: selection.option_ids,
         option_labels: selection.labels,
+        ...(selection.option_notes?.length ? { option_notes: selection.option_notes } : {}),
         option_delta: selection.delta,
         option_delta_parts: selection.delta_parts,
       })
@@ -2520,61 +2512,6 @@ export class PosProductSelectionComponent {
     this.sourcingVariantLabel.set('');
   }
 
-  // ─── Restaurant Suite — Fase K Gap 1: prepared/track_inventory/stock choice ──
-  /** True when the prepared-choice modal is visible. */
-  readonly preparedChoiceOpen = signal(false);
-  /** Product the cashier is currently deciding on. */
-  readonly preparedChoiceProduct = signal<{
-    id: number;
-    name: string;
-    stock?: number;
-    sku?: string | null;
-  } | null>(null);
-  /** Resolver captured at modal-open time; invoked with the cashier's choice. */
-  private preparedChoiceResolver:
-    | ((choice: PreparedChoice) => void)
-    | null = null;
-
-  /**
-   * Returns true if the product qualifies for the stock-vs-KDS
-   * decision modal: a `prepared` product_type that tracks inventory
-   * and has stock > 0. Only meaningful in a `restaurant` store
-   * industry (we don't prompt retail stores).
-   */
-  private shouldPromptPreparedChoice(product: any): boolean {
-    if (!this.restaurantIntegration.isRestaurantMode()) return false;
-    if (product?.product_type !== 'prepared') return false;
-    if (product?.track_inventory === false) return false;
-    const stock = Number(product?.stock ?? 0);
-    return stock > 0;
-  }
-
-  /** Opens the choice modal and returns a promise resolved with the cashier's pick. */
-  private askPreparedChoice(product: any): Promise<PreparedChoice> {
-    return new Promise<PreparedChoice>((resolve) => {
-      this.preparedChoiceProduct.set({
-        id: Number(product.id),
-        name: String(product.name ?? ''),
-        stock: Number(product.stock ?? 0),
-        sku: product.sku ?? null,
-      });
-      this.preparedChoiceResolver = resolve;
-      this.preparedChoiceOpen.set(true);
-    });
-  }
-
-  /** Modal callback — runs the resolver and closes the modal. */
-  onPreparedChoice(result: {
-    product: { id: number; name: string; stock?: number };
-    choice: PreparedChoice;
-  }): void {
-    const resolver = this.preparedChoiceResolver;
-    this.preparedChoiceResolver = null;
-    this.preparedChoiceOpen.set(false);
-    this.preparedChoiceProduct.set(null);
-    if (resolver) resolver(result.choice);
-  }
-
   // ─── QUI-431: serial-number selection for serialized products ───────────────
   /** True when the serial-selection modal is visible. */
   readonly serialModalOpen = signal(false);
@@ -2792,15 +2729,9 @@ export class PosProductSelectionComponent {
       return;
     }
 
-    // Restaurant Suite — Fase K Gap 1: prepared + track_inventory +
-    // stock>0 product → ask the cashier whether to use stock or
-    // produce via KDS before adding to cart.
-    let skipKds = false;
-    if (this.shouldPromptPreparedChoice(product)) {
-      const choice = await this.askPreparedChoice(product);
-      if (choice === 'cancel') return;
-      skipKds = choice === 'stock';
-    }
+    // QUI-999 — no stock-vs-KDS prompt anymore: a non-producible prepared
+    // dish always goes to KDS, and a producible line picks "Del stock / A
+    // producción" on the cart line (the cart service sets its skipKds).
 
     // E.1: add to cart without committing serials yet; Para llevar captures
     // them in the Cobro step immediately before the payment transaction.
@@ -2812,16 +2743,12 @@ export class PosProductSelectionComponent {
       .addToCart({
         product: product,
         quantity: 1,
-        skipKds,
       })
       .pipe(takeUntilDestroyed(this.destroyRef))
       .subscribe({
         next: () => {
           this.addingToCart.delete(product.id);
-          const tag = skipKds ? ' (usar stock)' : '';
-          this.toastService.success(
-            `${product.name} agregado al carrito${tag}`,
-          );
+          this.toastService.success(`${product.name} agregado al carrito`);
           this.warnIfOversold(product);
           this.productAddedToCart.emit({ product, quantity: 1 });
         },

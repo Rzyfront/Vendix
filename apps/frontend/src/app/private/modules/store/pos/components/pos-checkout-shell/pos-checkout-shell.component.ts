@@ -242,6 +242,11 @@ export class PosCheckoutShellComponent {
     () => this.effectiveIntent() === 'delivery',
   );
 
+  /** QUI-1001: scheduled orders are a restaurant-only module; hidden elsewhere. */
+  readonly scheduledOrdersAvailable = computed<boolean>(() =>
+    this.authFacade.isRestaurant(),
+  );
+
   /**
    * Pedido programado activo (paso Pedido). Con él, la entrega se decide en el
    * paso Envío (domicilio o recogida), la fecha/franja en Cliente, y el paso
@@ -249,17 +254,6 @@ export class PosCheckoutShellComponent {
    */
   readonly scheduledActive = computed<boolean>(
     () => this.effectiveMode() !== 'create-draft' && this.scheduledOrders.active(),
-  );
-
-  /**
-   * Adiciones en el carrito (elegidas ahora o repuestas de un borrador). Solo
-   * se venden en pedido programado: al cobrar, el bloque queda activo y fijo
-   * para que la venta no falle en el servidor con OPT_REQUIRES_SCHEDULE.
-   */
-  readonly cartHasOptions = computed<boolean>(() =>
-    (this.cartState()?.items ?? []).some(
-      (i) => (i.option_ids?.length ?? 0) > 0 || (i.option_labels?.length ?? 0) > 0,
-    ),
   );
 
   /**
@@ -921,20 +915,6 @@ export class PosCheckoutShellComponent {
     // Pedido programado: al cerrar el checkout se descarta la elección.
     effect(() => {
       if (!this.isOpen()) untracked(() => this.scheduledOrders.reset());
-    });
-
-    // Adiciones: el cobro (no el borrador ni la mesa) exige pedido programado.
-    effect(() => {
-      const required =
-        this.isOpen() &&
-        this.effectiveMode() !== 'create-draft' &&
-        this.tableId() == null &&
-        this.scheduledOrders.enabled() &&
-        this.cartHasOptions();
-      untracked(() => {
-        this.scheduledOrders.required.set(required);
-        if (required && !this.scheduledOrders.active()) this.scheduledOrders.activate();
-      });
     });
 
     // Pedido programado: el tipo elegido en el paso Envío gobierna el carril de

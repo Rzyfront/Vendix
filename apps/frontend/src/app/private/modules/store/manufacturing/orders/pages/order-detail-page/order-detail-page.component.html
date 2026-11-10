@@ -2,7 +2,7 @@
   @if (order(); as o) {
     <app-sticky-header
       [title]="o.order_number || 'Orden #' + o.id"
-      [subtitle]="o.product?.name || 'Producto #' + o.product_id"
+      [subtitle]="displayName(o)"
       icon="factory"
       variant="glass"
       [showBackButton]="true"
@@ -90,6 +90,17 @@
           <p class="mt-3 text-sm text-text-secondary whitespace-pre-wrap">{{ o.notes }}</p>
         }
       </app-card>
+
+      <!-- Pedido de venta (T13): only when the order was born from a sale -->
+      @if (o.order_id != null && saleDetail(); as sd) {
+        <app-card title="Pedido de venta" [responsive]="true">
+          <app-production-sale-lines
+            [saleOrder]="sd.sale_order ?? null"
+            [lines]="sd.order_lines ?? []"
+            [productName]="displayName(o)"
+          />
+        </app-card>
+      }
 
       <!-- Faltantes -->
       @if (showShortages()) {

@@ -192,5 +192,40 @@ describe('panel-ui-merge.util', () => {
       expect(result.panel_ui.STORE_ADMIN.pos).toBe(true);
       expect(result.new_keys.STORE_ADMIN).toEqual([]);
     });
+
+    // QUI-997: "178 módulos nuevos" — without panel_ui_seen_keys every default
+    // key was counted as new, even the ones the user already has in panel_ui.
+    it('without seen keys, keys already persisted in the user panel_ui are not new', () => {
+      const persisted = Object.fromEntries(
+        Object.keys(storeAdminDefaults)
+          .filter((k) => k !== 'payroll' && k !== 'restaurant_ops_recipes')
+          .map((k) => [k, k !== 'accounting']),
+      );
+      const result = mergeUserConfigPanelUi(
+        { panel_ui: { STORE_ADMIN: persisted, ORG_ADMIN: { dashboard: true, stores: true, users: true, accounting: false } } },
+        sampleDefaults,
+        ['owner'],
+      );
+      expect([...result.new_keys.STORE_ADMIN].sort()).toEqual(['payroll', 'restaurant_ops_recipes']);
+      expect(result.new_keys.ORG_ADMIN).toEqual([]);
+      expect(result.panel_ui_seen_keys).toEqual({});
+    });
+
+    it('without seen keys nor persisted panel_ui, every default key stays new (legacy)', () => {
+      const result = mergeUserConfigPanelUi({}, sampleDefaults, ['owner']);
+      expect(result.new_keys.STORE_ADMIN).toEqual(Object.keys(storeAdminDefaults));
+      expect(result.new_keys.ORG_ADMIN).toEqual(['dashboard', 'stores', 'users', 'accounting']);
+    });
+
+    it('seen keys still decide when present', () => {
+      const result = mergeUserConfigPanelUi(
+        { panel_ui: { STORE_ADMIN: { pos: true } }, panel_ui_seen_keys: { STORE_ADMIN: ['dashboard'] } },
+        sampleDefaults,
+        ['owner'],
+      );
+      expect(result.new_keys.STORE_ADMIN).not.toContain('dashboard');
+      expect(result.new_keys.STORE_ADMIN).not.toContain('pos');
+      expect(result.new_keys.STORE_ADMIN).toContain('orders');
+    });
   });
 });

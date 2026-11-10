@@ -91,7 +91,10 @@ export class PosElectronicInvoiceDataProvider implements IDocumentDataProvider {
       const order = await this.prisma.orders.findFirst({
         where: { id: invoice.order_id, store_id: storeId },
         include: {
-          users: { select: { first_name: true, last_name: true } },
+          // `users` is the order CUSTOMER; the cashier is whoever created it.
+          users_orders_created_by: {
+            select: { first_name: true, last_name: true },
+          },
           table_sessions: {
             where: { closed_at: null },
             orderBy: { opened_at: 'desc' },
@@ -104,8 +107,9 @@ export class PosElectronicInvoiceDataProvider implements IDocumentDataProvider {
       });
 
       if (order) {
-        if (order.users) {
-          printData.document.cashier_name = `${order.users.first_name || ''} ${order.users.last_name || ''}`.trim() || undefined;
+        const cashier = order.users_orders_created_by;
+        if (cashier) {
+          printData.document.cashier_name = `${cashier.first_name || ''} ${cashier.last_name || ''}`.trim() || undefined;
         }
         if (order.table_sessions && order.table_sessions.length > 0 && order.table_sessions[0].table) {
           printData.document.table_number = order.table_sessions[0].table.name;

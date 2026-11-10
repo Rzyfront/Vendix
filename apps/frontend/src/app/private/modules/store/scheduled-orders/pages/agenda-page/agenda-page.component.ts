@@ -9,15 +9,19 @@ import {
   untracked,
 } from '@angular/core';
 import { takeUntilDestroyed } from '@angular/core/rxjs-interop';
-import { RouterLink } from '@angular/router';
+import { ProductionSseService } from '../../../restaurant-ops/production/services/production-sse.service';
+import { Router } from '@angular/router';
 import { Subscription, forkJoin } from 'rxjs';
 import { AuthFacade } from '../../../../../../core/store/auth/auth.facade';
 import { StoreSettingsFacade } from '../../../../../../core/store/store-settings/store-settings.facade';
 import { extractApiErrorMessage } from '../../../../../../core/utils/api-error-handler';
 import {
   ButtonComponent,
+  CardComponent,
   IconComponent,
   SpinnerComponent,
+  StatsComponent,
+  StickyHeaderComponent,
   ToastService,
 } from '../../../../../../shared/components';
 import { formatStoreDateTime, storeToday } from '../../../../../../shared/utils/date.util';
@@ -26,12 +30,13 @@ import {
   AgendaViewMode,
   FulfillmentDay,
   FulfillmentSlot,
+  DISPLAY_STATUS_COLORS,
+  DISPLAY_STATUS_LABELS,
+  DISPLAY_STATUS_ORDER,
   RESCHEDULABLE_STATUSES,
-  STATUS_COLORS,
-  STATUS_LABELS,
-  STATUS_ORDER,
+  RESCHEDULABLE_STORED_STATUSES,
   ScheduledOrder,
-  ScheduledOrderStatus,
+  ScheduledOrderDisplayStatus,
   customerName,
 } from '../../interfaces/scheduled-order.interface';
 import { AgendaPreferencesService } from '../../services/agenda-preferences.service';
@@ -50,13 +55,21 @@ interface AgendaRow {
   cells: AgendaCell[];
 }
 
-type StatusFilter = ScheduledOrderStatus | 'all';
+type StatusFilter = ScheduledOrderDisplayStatus | 'all';
 
 @Component({
   selector: 'app-scheduled-orders-agenda-page',
   standalone: true,
   changeDetection: ChangeDetectionStrategy.OnPush,
-  imports: [RouterLink, ButtonComponent, IconComponent, SpinnerComponent, ScheduleDetailModalComponent],
+  imports: [
+    ButtonComponent,
+    CardComponent,
+    IconComponent,
+    SpinnerComponent,
+    StatsComponent,
+    StickyHeaderComponent,
+    ScheduleDetailModalComponent,
+  ],
   styles: [
     `
       :host {
@@ -236,19 +249,59 @@ type StatusFilter = ScheduledOrderStatus | 'all';
     `,
   ],
   template: `
-    <div class="p-2 md:p-4">
-      <div class="toolbar">
-        <h1 class="text-xl font-semibold" style="color: var(--color-text-primary)">
-          Pedidos programados
-        </h1>
-        <a routerLink="/admin/scheduled-orders/production">
-          <app-button variant="outline" size="sm">
-            <app-icon slot="icon" name="chef-hat" [size]="16"></app-icon>
-            Lista de producción
-          </app-button>
-        </a>
+    <div class="w-full overflow-x-hidden">
+      <app-sticky-header
+        title="Agenda de pedidos"
+        subtitle="Pedidos programados por franja de entrega"
+        icon="calendar-days"
+        variant="glass"
+        [actions]="headerActions"
+        (actionClicked)="onHeaderAction($event)"
+      />
+
+      <div
+        class="stats-container sticky top-[52px] z-20 bg-background md:static md:bg-transparent"
+      >
+        <app-stats
+          title="Pedidos"
+          [value]="allSchedules().length"
+          smallText="En el período"
+          iconName="calendar-days"
+          iconBgColor="bg-slate-100"
+          iconColor="text-slate-600"
+          [loading]="loading() && allSchedules().length === 0"
+        />
+        <app-stats
+          title="En producción"
+          [value]="countByStatus('in_production')"
+          smallText="Se están preparando"
+          iconName="flame"
+          iconBgColor="bg-amber-100"
+          iconColor="text-amber-600"
+          [loading]="loading() && allSchedules().length === 0"
+        />
+        <app-stats
+          title="Listos"
+          [value]="countByStatus('ready')"
+          smallText="Esperan entrega"
+          iconName="check-circle"
+          iconBgColor="bg-green-100"
+          iconColor="text-green-600"
+          [loading]="loading() && allSchedules().length === 0"
+        />
+        <app-stats
+          title="Entregados"
+          [value]="countByStatus('delivered')"
+          smallText="Ya salieron"
+          iconName="package"
+          iconBgColor="bg-blue-100"
+          iconColor="text-blue-600"
+          [loading]="loading() && allSchedules().length === 0"
+        />
       </div>
 
+      <app-card [responsive]="true" [padding]="false" overflow="visible">
+      <div class="p-2 md:p-4">
       <div class="toolbar">
         <div class="toolbar-group">
           <app-button variant="ghost" size="sm" (clicked)="goToday()">Hoy</app-button>
@@ -350,8 +403,8 @@ type StatusFilter = ScheduledOrderStatus | 'all';
                         tabindex="0"
                         [class.draggable]="canDrag(o)"
                         [class.dragging]="draggingId() === o.id"
-                        [class.cancelled]="o.status === 'cancelled'"
-                        [style.--st]="colorOf(o.status)"
+                        [class.cancelled]="o.display_status === 'cancelled'"
+                        [style.--st]="colorOf(o.display_status)"
                         [attr.draggable]="canDrag(o) ? 'true' : null"
                         (dragstart)="onDragStart($event, o)"
                         (dragend)="onDragEnd()"
@@ -360,7 +413,7 @@ type StatusFilter = ScheduledOrderStatus | 'all';
                       >
                         <span class="num">{{ o.order.order_number }}</span>
                         <span class="sub">{{ customer(o) }}</span>
-                        <span class="sub">{{ labelOf(o.status) }}</span>
+                        <span class="sub">{{ labelOf(o.display_status) }}</span>
                       </div>
                     }
                   </div>
@@ -381,7 +434,7 @@ type StatusFilter = ScheduledOrderStatus | 'all';
                   class="card"
                   role="button"
                   tabindex="0"
-                  [style.--st]="colorOf(o.status)"
+                  [style.--st]="colorOf(o.display_status)"
                   (click)="openDetail(o)"
                   (keydown.enter)="openDetail(o)"
                 >
@@ -393,12 +446,13 @@ type StatusFilter = ScheduledOrderStatus | 'all';
           </div>
         }
       }
+      </div>
+      </app-card>
     </div>
 
     <app-schedule-detail-modal
       [(isOpen)]="detailOpen"
       [scheduleId]="selectedId()"
-      (changed)="refresh()"
     />
   `,
 })
@@ -408,9 +462,19 @@ export class AgendaPageComponent {
   private readonly auth = inject(AuthFacade);
   private readonly settings = inject(StoreSettingsFacade);
   private readonly toast = inject(ToastService);
+  private readonly router = inject(Router);
   private readonly destroyRef = inject(DestroyRef);
+  private readonly sse = inject(ProductionSseService);
 
-  readonly statuses = STATUS_ORDER;
+  readonly statuses = DISPLAY_STATUS_ORDER;
+  readonly headerActions = [
+    {
+      id: 'production',
+      label: 'Lista de producción',
+      icon: 'chef-hat',
+      variant: 'outline' as const,
+    },
+  ];
 
   // --- estado ---------------------------------------------------------
   readonly view = signal<AgendaViewMode>(this.prefs.preference().view);
@@ -419,7 +483,14 @@ export class AgendaPageComponent {
   readonly isMobile = signal(false);
 
   readonly availability = signal<FulfillmentDay[]>([]);
-  readonly schedules = signal<ScheduledOrder[]>([]);
+  /** Every order in the period. The status filter narrows it on the client, so the stats always cover the whole period. */
+  readonly allSchedules = signal<ScheduledOrder[]>([]);
+  /** Orders shown in the grid, narrowed by the status filter. */
+  readonly schedules = computed(() => {
+    const status = this.statusFilter();
+    const all = this.allSchedules();
+    return status === 'all' ? all : all.filter((o) => o.display_status === status);
+  });
   readonly loading = signal(false);
   readonly errorMessage = signal<string | null>(null);
 
@@ -430,6 +501,10 @@ export class AgendaPageComponent {
   readonly detailOpen = signal(false);
 
   private loadSub: Subscription | null = null;
+  /** True while the load in flight is a user-driven (non-silent) one. */
+  private loadInFlightVisible = false;
+  /** A live (SSE) refresh arrived during a visible load; runs once it ends (S17). */
+  private refreshPending = false;
 
   // --- derivados --------------------------------------------------------
   readonly today = computed(() => storeToday(this.settings.timezone()));
@@ -501,37 +576,63 @@ export class AgendaPageComponent {
 
     effect(() => {
       const { from, to } = this.range();
-      const status = this.statusFilter();
-      untracked(() => this.load(from, to, status));
+      untracked(() => this.load(from, to));
     });
+
+    // Production state changed elsewhere: refresh the agenda silently.
+    this.sse.listen(this.destroyRef, () => this.refresh(true));
   }
 
   // --- carga ------------------------------------------------------------
-  refresh(): void {
+  /** `silent`: background refresh (live updates); a failure keeps the agenda already on screen. */
+  refresh(silent = false): void {
     const { from, to } = this.range();
-    this.load(from, to, this.statusFilter());
+    this.load(from, to, silent);
   }
 
-  private load(from: string, to: string, status: StatusFilter): void {
+  private load(from: string, to: string, silent = false): void {
+    // A background refresh never cancels a user-driven load already in flight
+    // (e.g. a week change): that load brings the newest data for the new range.
+    if (silent && this.loadInFlightVisible && this.loadSub && !this.loadSub.closed) {
+      // Do not lose it: re-run once the visible load finishes (S17).
+      this.refreshPending = true;
+      return;
+    }
     this.loadSub?.unsubscribe();
+    if (!silent) this.refreshPending = false;
+    this.loadInFlightVisible = !silent;
     this.loading.set(true);
-    this.errorMessage.set(null);
+    if (!silent) this.errorMessage.set(null);
     this.loadSub = forkJoin({
       availability: this.api.getAvailability(from, to),
-      agenda: this.api.getAgenda(from, to, status === 'all' ? undefined : status),
+      agenda: this.api.getAgenda(from, to),
     }).subscribe({
       next: ({ availability, agenda }) => {
         this.availability.set(availability);
-        this.schedules.set(agenda);
+        this.allSchedules.set(agenda);
+        this.errorMessage.set(null);
         this.loading.set(false);
+        this.loadInFlightVisible = false;
+        this.flushPendingRefresh();
       },
       error: (err) => {
-        this.availability.set([]);
-        this.schedules.set([]);
-        this.errorMessage.set(extractApiErrorMessage(err));
         this.loading.set(false);
+        this.loadInFlightVisible = false;
+        this.flushPendingRefresh();
+        // A failed background refresh never clears what is on screen.
+        if (silent) return;
+        this.availability.set([]);
+        this.allSchedules.set([]);
+        this.errorMessage.set(extractApiErrorMessage(err));
       },
     });
+  }
+
+  /** Runs the one silent refresh that arrived during a visible load, with the current range. */
+  private flushPendingRefresh(): void {
+    if (!this.refreshPending) return;
+    this.refreshPending = false;
+    this.refresh(true);
   }
 
   // --- navegación y preferencias ---------------------------------------
@@ -550,12 +651,20 @@ export class AgendaPageComponent {
   }
 
   onStatusChange(value: string): void {
-    this.statusFilter.set(value === 'all' ? 'all' : (value as ScheduledOrderStatus));
+    this.statusFilter.set(value === 'all' ? 'all' : (value as ScheduledOrderDisplayStatus));
     this.persist();
   }
 
   private persist(): void {
     this.prefs.save({ view: this.view(), status: this.statusFilter() });
+  }
+
+  onHeaderAction(id: string): void {
+    if (id === 'production') void this.router.navigate(['/admin/scheduled-orders/production']);
+  }
+
+  countByStatus(status: ScheduledOrderDisplayStatus): number {
+    return this.allSchedules().filter((o) => o.display_status === status).length;
   }
 
   // --- detalle -----------------------------------------------------------
@@ -566,7 +675,12 @@ export class AgendaPageComponent {
 
   // --- arrastrar y soltar (reprogramar) --------------------------------
   canDrag(o: ScheduledOrder): boolean {
-    return this.canReschedule() && !this.isMobile() && RESCHEDULABLE_STATUSES.includes(o.status);
+    return (
+      this.canReschedule() &&
+      !this.isMobile() &&
+      RESCHEDULABLE_STATUSES.includes(o.display_status) &&
+      RESCHEDULABLE_STORED_STATUSES.includes(o.status)
+    );
   }
 
   onDragStart(ev: DragEvent, o: ScheduledOrder): void {
@@ -600,12 +714,12 @@ export class AgendaPageComponent {
     const slot = cell.slot;
     this.onDragEnd();
     if (id === null || !slot) return;
-    const previous = this.schedules();
+    const previous = this.allSchedules();
     const order = previous.find((o) => o.id === id);
     if (!order || cell.orders.some((o) => o.id === id)) return;
 
     // Mueve la tarjeta de inmediato; si el servidor rechaza, vuelve a su lugar.
-    this.schedules.set(
+    this.allSchedules.set(
       previous.map((o) => (o.id === id ? { ...o, scheduled_start: slot.start, scheduled_end: slot.end } : o)),
     );
     this.api
@@ -617,21 +731,21 @@ export class AgendaPageComponent {
           this.refresh();
         },
         error: (err) => {
-          this.schedules.set(previous);
+          this.allSchedules.set(previous);
           this.toast.error(extractApiErrorMessage(err));
         },
       });
   }
 
   // --- helpers de plantilla ---------------------------------------------
-  labelOf(s: ScheduledOrderStatus): string {
-    return STATUS_LABELS[s];
+  labelOf(s: ScheduledOrderDisplayStatus): string {
+    return DISPLAY_STATUS_LABELS[s];
   }
-  colorOf(s: ScheduledOrderStatus): string {
-    return STATUS_COLORS[s];
+  colorOf(s: ScheduledOrderDisplayStatus): string {
+    return DISPLAY_STATUS_COLORS[s];
   }
   customer(o: ScheduledOrder): string {
-    return customerName(o.order.users);
+    return customerName(o.order.users, o.order.customer_alias);
   }
   weekday(ymd: string): string {
     return weekdayShort(ymd);

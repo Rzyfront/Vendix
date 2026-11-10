@@ -1236,6 +1236,8 @@ export class AutoEntryService {
       'payroll.paid': 'auto_payroll',
       'order.completed': 'auto_inventory',
       'production.completed': 'auto_inventory',
+      'production.sale_waste': 'auto_inventory',
+      'production.sale_cogs': 'auto_inventory',
       'refund.completed': 'auto_return',
       'refund.reclassification': 'auto_return',
       'return_order.refund': 'auto_return',
@@ -4971,6 +4973,107 @@ export class AutoEntryService {
       source_id: data.production_order_id,
       organization_id: data.organization_id,
       store_id: data.store_id,      description: `Producción completada #${data.production_order_id} – ${data.product_name}`,
+      lines,
+      user_id: data.user_id,
+    });
+  }
+
+  /**
+   * production.sale_cogs (QUI-995)
+   *
+   * COGS of a sale's `production` line, keyed by its production order. Two
+   * paths post it: the sale was finished BEFORE its production order completed
+   * (the commit skips a production line until its order is completed, and the
+   * production completion deducts the units), or the delivery of a sale whose
+   * `order.completed` was already posted at the till (S22). Same keys as
+   * `onOrderCompleted` (DR COGS / CR inventory). Keyed by the production order: `createAutoEntry` skips a
+   * duplicate (source_type, source_id), so a re-delivered event never posts twice.
+   */
+  async onProductionSaleCogs(data: {
+    production_order_id: number;
+    order_id: number;
+    organization_id: number;
+    store_id?: number;
+    total_cost: number;
+    user_id?: number;
+  }) {
+    const amount = Number(data.total_cost || 0);
+    if (amount <= 0) return null;
+    const lines = await Promise.all([
+      this.resolveAccountLine(
+        data.organization_id,
+        'order.completed.cogs',
+        'Cost of Goods Sold',
+        amount,
+        0,
+        data.store_id,
+      ),
+      this.resolveAccountLine(
+        data.organization_id,
+        'order.completed.inventory',
+        'Inventory',
+        0,
+        amount,
+        data.store_id,
+      ),
+    ]);
+    return this.createAutoEntry({
+      source_type: 'production.sale_cogs',
+      source_id: data.production_order_id,
+      organization_id: data.organization_id,
+      store_id: data.store_id,
+      description: `COGS producción #${data.production_order_id} – orden #${data.order_id}`,
+      lines,
+      user_id: data.user_id,
+    });
+  }
+
+  /**
+   * production.sale_waste (QUI-995)
+   *
+   * A sale was cancelled after its production order completed and the
+   * cashier chose "Dar de baja como merma": the finished goods that entered
+   * inventory with `production.completed` (DR finished goods) leave it as
+   * shrinkage. DR shrinkage (same key as a negative inventory adjustment) /
+   * CR finished goods. Keyed by the production order, so a re-delivered
+   * event never posts twice.
+   */
+  async onProductionSaleWaste(data: {
+    production_order_id: number;
+    order_id: number;
+    organization_id: number;
+    store_id?: number;
+    product_name: string;
+    quantity: number;
+    total_cost: number;
+    user_id?: number;
+  }) {
+    const amount = Number(data.total_cost || 0);
+    if (amount <= 0) return null;
+    const lines = await Promise.all([
+      this.resolveAccountLine(
+        data.organization_id,
+        'inventory.adjusted.shrinkage',
+        `Merma producción – ${data.product_name} (${data.quantity}), orden #${data.order_id} cancelada`,
+        amount,
+        0,
+        data.store_id,
+      ),
+      this.resolveAccountLine(
+        data.organization_id,
+        'production.completed.finished_goods',
+        `Productos terminados – ${data.product_name} (${data.quantity})`,
+        0,
+        amount,
+        data.store_id,
+      ),
+    ]);
+    return this.createAutoEntry({
+      source_type: 'production.sale_waste',
+      source_id: data.production_order_id,
+      organization_id: data.organization_id,
+      store_id: data.store_id,
+      description: `Merma de producción #${data.production_order_id} – orden #${data.order_id} cancelada`,
       lines,
       user_id: data.user_id,
     });

@@ -33,6 +33,10 @@ import {
   ManufacturingOrdersService,
   ManufacturingSettingsService,
 } from '../../../services';
+import { ProductionSaleLinesComponent } from '../../../../restaurant-ops/production/components/production-sale-lines/production-sale-lines.component';
+import { ProductionOrdersService } from '../../../../restaurant-ops/production/services/production-orders.service';
+import { ProductionSseService } from '../../../../restaurant-ops/production/services/production-sse.service';
+import { ProductionOrder } from '../../../../restaurant-ops/production/interfaces/production-order.interface';
 import { CompleteOrderModalComponent } from '../../components/complete-order-modal/complete-order-modal.component';
 
 const LIST_ROUTE = '/admin/manufacturing/orders';
@@ -47,17 +51,20 @@ const LIST_ROUTE = '/admin/manufacturing/orders';
     IconComponent,
     CurrencyPipe,
     CompleteOrderModalComponent,
+    ProductionSaleLinesComponent,
   ],
   templateUrl: './order-detail-page.component.html',
 })
 export class OrderDetailPageComponent implements OnInit {
   private readonly ordersService = inject(ManufacturingOrdersService);
   private readonly settingsService = inject(ManufacturingSettingsService);
+  private readonly productionOrdersService = inject(ProductionOrdersService);
   private readonly toastService = inject(ToastService);
   private readonly dialogService = inject(DialogService);
   private readonly route = inject(ActivatedRoute);
   private readonly router = inject(Router);
   private readonly destroyRef = inject(DestroyRef);
+  private readonly sse = inject(ProductionSseService);
 
   readonly order = signal<ManufacturingOrder | null>(null);
   readonly shortages = signal<ManufacturingShortage[]>([]);
@@ -65,6 +72,8 @@ export class OrderDetailPageComponent implements OnInit {
   readonly isBusy = signal(false);
   readonly lotRequired = signal(false);
   readonly completeModalOpen = signal(false);
+  /** Same production order read through the shared detail: sale link, lines and add-ons (T13). */
+  readonly saleDetail = signal<ProductionOrder | null>(null);
 
   readonly lines = computed<ManufacturingOrderLine[]>(() => this.order()?.lines ?? []);
   readonly hasShortages = computed(() => this.shortages().some((s) => s.missing > 0));
@@ -118,6 +127,15 @@ export class OrderDetailPageComponent implements OnInit {
         disabled: busy,
       },
       {
+        id: 'restart',
+        label: 'Volver a iniciar',
+        icon: 'rotate-ccw',
+        variant: 'primary',
+        // The backend decides: cancelled order, active sale, live production line.
+        visible: status === 'cancelled' && this.order()?.can_restart === true,
+        disabled: busy,
+      },
+      {
         id: 'cancel',
         label: 'Cancelar orden',
         icon: 'x',
@@ -135,6 +153,15 @@ export class OrderDetailPageComponent implements OnInit {
       return;
     }
     this.loadOrder(id);
+    // Only events of this order reload it, silently and never navigating away.
+    this.sse.listen(
+      this.destroyRef,
+      () => {
+        if (!this.isBusy()) this.loadOrder(id, true);
+      },
+      (event) => event.id === id,
+      'manufacturing',
+    );
     this.settingsService
       .get()
       .pipe(takeUntilDestroyed(this.destroyRef))
@@ -144,10 +171,10 @@ export class OrderDetailPageComponent implements OnInit {
       });
   }
 
-  loadOrder(id?: number): void {
+  loadOrder(id?: number, silent = false): void {
     const orderId = id ?? this.order()?.id;
     if (orderId == null) return;
-    this.isLoading.set(true);
+    if (!silent) this.isLoading.set(true);
     this.ordersService
       .getById(orderId)
       .pipe(takeUntilDestroyed(this.destroyRef))
@@ -156,14 +183,32 @@ export class OrderDetailPageComponent implements OnInit {
           this.order.set(order);
           this.isLoading.set(false);
           this.loadShortages(order);
+          this.loadSaleDetail(order);
         },
         error: (error) => {
+          this.isLoading.set(false);
+          if (silent) return;
           this.toastService.error(
             typeof error === 'string' ? error : 'No se pudo cargar la orden',
           );
-          this.isLoading.set(false);
           this.router.navigate([LIST_ROUTE]);
         },
+      });
+  }
+
+  /** Only orders born from a sale have the "Pedido de venta" section. */
+  private loadSaleDetail(order: ManufacturingOrder): void {
+    if (order.order_id == null) {
+      this.saleDetail.set(null);
+      return;
+    }
+    this.productionOrdersService
+      .getById(order.id)
+      .pipe(takeUntilDestroyed(this.destroyRef))
+      .subscribe({
+        next: (detail) => this.saleDetail.set(detail),
+        // Optional context: Planta users may lack production_orders:read.
+        error: () => this.saleDetail.set(null),
       });
   }
 
@@ -200,6 +245,9 @@ export class OrderDetailPageComponent implements OnInit {
       case 'complete':
         this.completeModalOpen.set(true);
         break;
+      case 'restart':
+        this.confirmTransition(order, 'restart');
+        break;
       case 'cancel':
         this.confirmTransition(order, 'cancel');
         break;
@@ -212,7 +260,7 @@ export class OrderDetailPageComponent implements OnInit {
 
   private async confirmTransition(
     order: ManufacturingOrder,
-    action: 'release' | 'start' | 'cancel',
+    action: 'release' | 'start' | 'restart' | 'cancel',
   ): Promise<void> {
     const copy = {
       release: {
@@ -228,6 +276,13 @@ export class OrderDetailPageComponent implements OnInit {
         message: '¿Iniciar la producción de esta orden?',
         confirmText: 'Iniciar',
         success: 'Producción iniciada',
+      },
+      restart: {
+        title: 'Volver a iniciar',
+        message:
+          'La orden volverá a borrador con la cantidad y la entrega vigentes de la venta, lista para lanzarse.',
+        confirmText: 'Volver a iniciar',
+        success: 'Orden reiniciada',
       },
       cancel: {
         title: 'Cancelar orden',
@@ -286,6 +341,14 @@ export class OrderDetailPageComponent implements OnInit {
       default:
         return 'neutral';
     }
+  }
+
+  /** S19: "Producto · Variante". */
+  displayName(order: ManufacturingOrder): string {
+    return ProductionOrdersService.displayName(
+      order.product?.name || `Producto #${order.product_id}`,
+      order.product_variant?.name,
+    );
   }
 
   priorityLabel(order: ManufacturingOrder): string {

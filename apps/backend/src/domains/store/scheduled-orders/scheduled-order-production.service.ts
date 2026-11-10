@@ -10,94 +10,34 @@ import {
   localCivil,
 } from '../../../common/utils/store-timezone.util';
 import { RecipesService } from '../recipes/recipes.service';
+import { BatchClaimPool, probeConsumableStock, resolveBatchLines } from '../recipes/batch-bom-resolver';
+import {
+  createBatchAwareExploders,
+  expandProduction,
+  type Explode,
+  type FindRecipe,
+  type ProductionLineInput,
+} from '../kitchen-fire/addon-consumption';
 import { StockLevelManager } from '../inventory/shared/services/stock-level-manager.service';
 import { StockValidatorService } from '../inventory/shared/services/stock-validator.service';
-import { ScheduledOrdersService } from './scheduled-orders.service';
+import { KitchenFireService } from '../kitchen-fire/kitchen-fire.service';
+import { ScheduledOrdersService, kitchenPendingItemsWhere } from './scheduled-orders.service';
+import { findProductionOrderForLine } from '../production/production-order-pairing.util';
+import { emitProductionOrderUpdated } from '../production/production-order-events';
+
+/** Production order of a sale line, as the agenda query selects it. */
+type LinkedProductionOrder = {
+  id: number;
+  product_id: number;
+  product_variant_id: number | null;
+  order_number: string | null;
+  status: string;
+};
 
 type Tx = Prisma.TransactionClient;
 
-/** Una línea de consumo: componente hoja × cantidad en su unidad de stock. */
-export interface ConsumptionLine {
-  product_id: number;
-  variant_id: number | null;
-  quantity: number;
-}
-
-/** Línea de orden con lo que la expansión necesita. */
-export interface ProductionLineInput {
-  id: number;
-  product_id: number | null;
-  product_variant_id: number | null;
-  quantity: number;
-  product_type: string | null;
-  inventory_consumed: boolean;
-  options: Array<{
-    scope: 'per_unit' | 'per_line';
-    component_type: 'ingredient' | 'recipe' | 'product';
-    component_product_id: number;
-    component_variant_id: number | null;
-    quantity: number;
-  }>;
-}
-
-/** Explota una receta (id) para N unidades de su producto. */
-type Explode = (recipe_id: number, units: number) => Promise<Array<{ component_product_id: number; quantity: number }>>;
-/** Receta activa del producto (variante exacta o la base). */
-type FindRecipe = (product_id: number, variant_id: number | null) => Promise<number | null>;
-
-/**
- * Expansión única (S4): receta base de la línea (si es `prepared` con receta
- * y aún no se consumió) + adiciones (insumo × cantidad; preparación vía su
- * receta; producto vendible tal cual). `per_unit` × cantidad de la línea,
- * `per_line` × 1. Devuelve el consumo consolidado y las líneas cuyo plato
- * queda consumido (se marcan para que la entrega no lo descuente otra vez).
- */
-export async function expandProduction(
-  lines: ProductionLineInput[],
-  findRecipe: FindRecipe,
-  explode: Explode,
-): Promise<{ consumption: ConsumptionLine[]; consumed_line_ids: number[] }> {
-  const totals = new Map<string, ConsumptionLine>();
-  const add = (product_id: number, variant_id: number | null, quantity: number) => {
-    if (!Number.isFinite(quantity) || quantity <= 0) return;
-    const key = `${product_id}:${variant_id ?? 'base'}`;
-    const current = totals.get(key);
-    if (current) current.quantity += quantity;
-    else totals.set(key, { product_id, variant_id, quantity });
-  };
-  const consumed_line_ids: number[] = [];
-
-  for (const line of lines) {
-    const qty = Number(line.quantity) || 0;
-    if (qty <= 0) continue;
-
-    if (line.product_id && line.product_type === 'prepared' && !line.inventory_consumed) {
-      const recipe_id = await findRecipe(line.product_id, line.product_variant_id);
-      if (recipe_id) {
-        for (const leaf of await explode(recipe_id, qty)) add(leaf.component_product_id, null, leaf.quantity);
-        consumed_line_ids.push(line.id);
-      }
-    }
-
-    for (const option of line.options) {
-      const units = option.quantity * (option.scope === 'per_unit' ? qty : 1);
-      if (option.component_type === 'recipe') {
-        const recipe_id = await findRecipe(option.component_product_id, option.component_variant_id);
-        if (recipe_id) {
-          for (const leaf of await explode(recipe_id, units)) add(leaf.component_product_id, null, leaf.quantity);
-          continue;
-        }
-      }
-      add(option.component_product_id, option.component_variant_id, units);
-    }
-  }
-
-  // Stock en unidades enteras de la unidad mínima, igual que el disparo a cocina.
-  const consumption = [...totals.values()]
-    .map((c) => ({ ...c, quantity: Math.round(c.quantity) }))
-    .filter((c) => c.quantity > 0);
-  return { consumption, consumed_line_ids };
-}
+export type { ConsumptionLine, ProductionLineInput } from '../kitchen-fire/addon-consumption';
+export { expandProduction } from '../kitchen-fire/addon-consumption';
 
 /**
  * Producción de pedidos programados. Al pasar a `in_production` consume en la
@@ -116,6 +56,7 @@ export class ScheduledOrderProductionService implements OnModuleInit {
     private readonly stockLevelManager: StockLevelManager,
     private readonly stockValidator: StockValidatorService,
     private readonly eventEmitter: EventEmitter2,
+    private readonly kitchenFire: KitchenFireService,
   ) {}
 
   onModuleInit() {
@@ -133,11 +74,38 @@ export class ScheduledOrderProductionService implements OnModuleInit {
     };
   }
 
-  private exploder(client?: Tx): Explode {
-    return (recipe_id, units) => this.recipes.explodeBom(recipe_id, { [recipe_id]: units }, client);
+  /**
+   * QUI-990: batch-produced preparations consume their own stock first and only
+   * the shortfall is exploded into ingredients. `pool` is shared by every line
+   * of one `start()`, so two lines cannot take the same batch stock. Without a
+   * pool (read-only consolidated list) the full, stock-independent explosion is
+   * kept, as before.
+   */
+  private exploder(client: Tx | undefined, pool?: BatchClaimPool): Explode {
+    if (!pool) {
+      return (recipe_id, units) => this.recipes.explodeBom(recipe_id, { [recipe_id]: units }, client);
+    }
+    const explodeBatchAware = (recipe_id: number, units: number) =>
+      this.recipes.explodeBom(recipe_id, { [recipe_id]: units }, client, { stopAtBatchProduced: true });
+    const deps = {
+      getAvailable: (product_id: number) =>
+        probeConsumableStock(this.stockValidator, this.stockLevelManager, product_id, client),
+      explode: explodeBatchAware,
+    };
+    return async (recipe_id, units) =>
+      resolveBatchLines(await explodeBatchAware(recipe_id, units), 1, pool, deps);
   }
 
-  private async loadLines(client: Tx, store_id: number, order_id: number): Promise<ProductionLineInput[]> {
+  /**
+   * QUI-995: lines of a `production` product that already have a production
+   * order are produced by that order (Planta), never by this schedule hook, so
+   * they are excluded from `lines`; `linked` lists the orders to move along.
+   */
+  private async loadLines(
+    client: Tx,
+    store_id: number,
+    order_id: number,
+  ): Promise<{ lines: ProductionLineInput[]; linked: { id: number; status: string }[] }> {
     const items = await client.order_items.findMany({
       where: { order_id, cancelled_at: null, orders: { store_id } },
       select: {
@@ -147,7 +115,17 @@ export class ScheduledOrderProductionService implements OnModuleInit {
         quantity: true,
         inventory_consumed_at_fire: true,
         inventory_committed: true,
+        addons_consumed_at: true,
+        fulfillment_destination: true,
         products: { select: { product_type: true } },
+        orders: {
+          select: {
+            production_orders: {
+              where: { status: { not: 'cancelled' } },
+              select: { id: true, product_id: true, product_variant_id: true, status: true },
+            },
+          },
+        },
         order_item_options: {
           select: {
             scope: true,
@@ -159,27 +137,130 @@ export class ScheduledOrderProductionService implements OnModuleInit {
         },
       },
     });
-    return items.map((item) => ({
+    const linkedOrders = new Map<number, { id: number; status: string }>();
+    const isLinked = (item: (typeof items)[number]) => {
+      if (item.fulfillment_destination !== 'production') return false;
+      // One production order per product+variant: pair the line with ITS variant's order.
+      const match = findProductionOrderForLine(item.orders?.production_orders ?? [], item);
+      if (match) linkedOrders.set(match.id, { id: match.id, status: match.status as string });
+      return !!match;
+    };
+    // QUI-999: the start consumes ONLY legacy lines (destination NULL). `kds`
+    // lines were consumed at "Enviar a cocina", `stock` lines consume their
+    // add-ons with their own commit, and `production` lines belong to a
+    // production order. `isLinked` runs for every line to collect the orders.
+    const lines = items
+      .filter((item) => !isLinked(item) && item.fulfillment_destination == null)
+      .map((item) => ({
       id: item.id,
       product_id: item.product_id,
       product_variant_id: item.product_variant_id,
       quantity: Number(item.quantity),
       product_type: item.products?.product_type ?? null,
       inventory_consumed: !!item.inventory_consumed_at_fire || !!item.inventory_committed,
+      // Its own marker, not the fire flag (QUI-1000): a line fired before the
+      // add-ons moved to the fire still has them pending for this start.
+      addons_consumed: item.addons_consumed_at != null,
       options: item.order_item_options.map((o) => ({ ...o, quantity: Number(o.quantity) })),
     }));
+    return { lines, linked: [...linkedOrders.values()] };
+  }
+
+  /**
+   * "Enviar a cocina" desde la agenda (QUI-989): manda a KDS los platos
+   * preparados del pedido que NO son de lote y aún no se enviaron, con el
+   * mismo disparo de la venta normal (receta descontada, ticket de cocina).
+   * El disparo descuenta también las adiciones de esos platos (QUI-1000) y el
+   * agendamiento pasa a `in_production` en la MISMA transacción; el gancho de
+   * inicio salta las adiciones ya descontadas (`addons_consumed_at`). Idempotente: el flag `inventory_consumed_at_fire` deja sin
+   * candidatos al segundo intento. Solo tiendas restaurante (lo valida el
+   * disparo con RESTAURANT_NOT_ENABLED).
+   */
+  async sendToKitchen(schedule_id: number) {
+    const store_id = RequestContextService.getContext()?.store_id;
+    if (!store_id) throw new VendixHttpException(ErrorCodes.STORE_CONTEXT_001);
+
+    const schedule = await this.prisma.order_fulfillment_schedules.findFirst({
+      where: { id: schedule_id, store_id },
+    });
+    if (!schedule) throw new VendixHttpException(ErrorCodes.SCHED_NOT_FOUND);
+    if (!['scheduled', 'in_production', 'ready'].includes(schedule.status)) {
+      throw new VendixHttpException(ErrorCodes.SCHED_KITCHEN_NOT_ALLOWED);
+    }
+
+    const client = this.prisma.withoutScope() as unknown as Tx;
+    const items = await client.order_items.findMany({
+      where: kitchenPendingItemsWhere(schedule.order_id, store_id),
+      select: { id: true },
+    });
+    if (!items.length) throw new VendixHttpException(ErrorCodes.SCHED_NOTHING_TO_SEND);
+
+    // One transaction: the fire (ticket, dish recipe, add-ons) and the move to
+    // `in_production` commit together. A failure in either leaves neither, so a
+    // retry sees the same pending items instead of SCHED_NOTHING_TO_SEND.
+    let updated: Awaited<ReturnType<ScheduledOrdersService['transitionInTx']>> | typeof schedule = schedule;
+    const fired = await this.kitchenFire.fireOrderItems(
+      { order_id: schedule.order_id, order_item_ids: items.map((i) => i.id) },
+      {
+        withinTx: async (tx, afterCommit) => {
+          if (schedule.status === 'scheduled') {
+            updated = await this.scheduledOrders.transitionInTx(
+              tx,
+              schedule.id,
+              'in_production',
+              afterCommit,
+              'Enviado a cocina',
+            );
+          }
+        },
+      },
+    );
+    return { schedule: updated, fired };
   }
 
   /** Gancho de `ScheduledOrdersService` al pasar a `in_production`. */
   async start(tx: Tx, schedule: { id: number; store_id: number; order_id: number }) {
     const ctx = RequestContextService.getContext();
-    const lines = await this.loadLines(tx, schedule.store_id, schedule.order_id);
+    const { lines, linked } = await this.loadLines(tx, schedule.store_id, schedule.order_id);
+    // QUI-995: linked production orders start together with the schedule.
+    const drafts = linked.filter((o) => o.status === 'draft').map((o) => o.id);
+    let startedIds: number[] = [];
+    if (drafts.length) {
+      const { count } = await tx.production_orders.updateMany({
+        where: { id: { in: drafts }, status: 'draft' },
+        data: { status: 'in_progress', started_at: new Date(), updated_at: new Date() },
+      });
+      if (count > 0) startedIds = drafts;
+    }
+    // Live sync (QUI-1002): runs only after the commit, never breaks the start.
+    const emitStarted = () => {
+      if (!startedIds.length) return;
+      void this.emitStartedProductionOrders(startedIds);
+    };
+    // Same marker as the kitchen fire: each line claims its add-ons before they
+    // are deducted, so the fire and the start never both take them.
+    for (const line of lines) {
+      if (line.addons_consumed || line.options.length === 0) continue;
+      const { count } = await tx.order_items.updateMany({
+        where: { id: line.id, addons_consumed_at: null },
+        data: { addons_consumed_at: new Date() },
+      });
+      if (count === 0) line.addons_consumed = true;
+    }
+    const resolvers = createBatchAwareExploders({
+      recipes: this.recipes,
+      stockValidator: this.stockValidator,
+      stockLevelManager: this.stockLevelManager,
+      client: tx,
+      pool: new Map(),
+    });
     const { consumption, consumed_line_ids } = await expandProduction(
       lines,
-      this.finder(tx),
-      this.exploder(tx),
+      resolvers.findRecipe,
+      resolvers.explode,
+      resolvers.explodeComponent,
     );
-    if (!consumption.length && !consumed_line_ids.length) return;
+    if (!consumption.length && !consumed_line_ids.length) return startedIds.length ? emitStarted : undefined;
 
     const policy = await this.stockValidator.resolveInventoryPolicy(schedule.store_id, tx);
     const allowOveruse = policy.allowIngredientOveruse;
@@ -234,6 +315,7 @@ export class ScheduledOrderProductionService implements OnModuleInit {
 
     // El asiento se emite tras el commit (ver `ScheduledOrdersService.transition`).
     return () => {
+      emitStarted();
       if (total_cost <= 0) return;
       this.eventEmitter.emit('scheduled_order.produced', {
         schedule_id: schedule.id,
@@ -245,6 +327,34 @@ export class ScheduledOrderProductionService implements OnModuleInit {
         user_id: ctx?.user_id ?? undefined,
       });
     };
+  }
+
+  /** Reloads the started orders and emits `production_order.updated`; never throws. */
+  private async emitStartedProductionOrders(ids: number[]): Promise<void> {
+    try {
+      const rows = await this.prisma.withoutScope().production_orders.findMany({
+        where: { id: { in: ids } },
+        select: {
+          id: true,
+          store_id: true,
+          order_id: true,
+          status: true,
+          started_at: true,
+          produced_at: true,
+          estimated_minutes: true,
+        },
+        orderBy: { id: 'asc' },
+      });
+      for (const row of rows) {
+        emitProductionOrderUpdated(this.eventEmitter, this.logger, row);
+      }
+    } catch (error) {
+      this.logger.warn(
+        `production_order.updated reload failed: ${
+          error instanceof Error ? error.message : String(error)
+        }`,
+      );
+    }
   }
 
   /**
@@ -267,15 +377,24 @@ export class ScheduledOrderProductionService implements OnModuleInit {
           select: {
             id: true,
             order_number: true,
+            customer_alias: true,
             users: { select: { first_name: true, last_name: true } },
+            production_orders: {
+              where: { status: { not: 'cancelled' } },
+              select: { id: true, product_id: true, product_variant_id: true, order_number: true, status: true },
+            },
             order_items: {
               where: { cancelled_at: null },
               select: {
+                product_id: true,
+                product_variant_id: true,
+                fulfillment_destination: true,
                 product_name: true,
                 variant_attributes: true,
                 quantity: true,
+                notes: true,
                 order_item_options: {
-                  select: { group_name: true, option_name: true, quantity: true, uom: true },
+                  select: { group_name: true, option_name: true, quantity: true, uom: true, note: true },
                 },
               },
             },
@@ -306,13 +425,26 @@ export class ScheduledOrderProductionService implements OnModuleInit {
         order_id: s.order.id,
         order_number: s.order.order_number,
         status: s.status,
-        customer_name: customer ? `${customer.first_name ?? ''} ${customer.last_name ?? ''}`.trim() : null,
-        items: s.order.order_items.map((item) => ({
+        customer_name:
+          (customer ? `${customer.first_name ?? ''} ${customer.last_name ?? ''}`.trim() : '') ||
+          s.order.customer_alias?.trim() ||
+          null,
+        items: s.order.order_items.map((item) => {
+          const linked =
+            item.fulfillment_destination === 'production'
+              ? findProductionOrderForLine<LinkedProductionOrder>(s.order.production_orders ?? [], item)
+              : undefined;
+          return {
+          production_order: linked
+            ? { id: linked.id, order_number: linked.order_number, status: linked.status }
+            : null,
           product_name: item.product_name,
           variant_attributes: item.variant_attributes,
           quantity: Number(item.quantity),
+          notes: item.notes ?? null,
           options: item.order_item_options.map((o) => ({ ...o, quantity: Number(o.quantity) })),
-        })),
+          };
+        }),
       });
     }
 
@@ -320,7 +452,7 @@ export class ScheduledOrderProductionService implements OnModuleInit {
     const client = this.prisma.withoutScope() as unknown as Tx;
     const pending = schedules.filter((s) => s.status === 'scheduled');
     const lines: ProductionLineInput[] = [];
-    for (const s of pending) lines.push(...(await this.loadLines(client, store_id, s.order_id)));
+    for (const s of pending) lines.push(...(await this.loadLines(client, store_id, s.order_id)).lines);
     const { consumption } = await expandProduction(lines, this.finder(client), this.exploder(client));
     const products = consumption.length
       ? await client.products.findMany({

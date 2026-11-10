@@ -7,7 +7,12 @@ type Row = Record<string, any>;
 describe('ManufacturingOrdersService', () => {
   let prisma: any;
   let tx: any;
-  let production: { complete: jest.Mock; computeComponentRequirements: jest.Mock };
+  let production: {
+    complete: jest.Mock;
+    computeComponentRequirements: jest.Mock;
+    restart: jest.Mock;
+    canRestart: jest.Mock;
+  };
   let formulas: { calculateCost: jest.Mock };
   let settings: { get: jest.Mock };
   let sequences: { next: jest.Mock };
@@ -84,6 +89,8 @@ describe('ManufacturingOrdersService', () => {
     };
     production = {
       complete: jest.fn(),
+      restart: jest.fn().mockResolvedValue({ id: 1, status: 'draft' }),
+      canRestart: jest.fn().mockResolvedValue(true),
       computeComponentRequirements: jest.fn((_r: unknown, qty: number) => [
         { component_product_id: 99, quantity: qty * 2 },
       ]),
@@ -193,6 +200,61 @@ describe('ManufacturingOrdersService', () => {
       await expect(service.findOne(1)).rejects.toMatchObject({
         errorCode: 'MFG_ORDER_NOT_FOUND',
       });
+    });
+  });
+
+  describe('S19 / S21 — variante y "Volver a iniciar"', () => {
+    it('S19: las lecturas incluyen la variante y el estado de la venta ligada', async () => {
+      await service.findOne(1);
+      const include = prisma.production_orders.findFirst.mock.calls[0][0].include;
+      expect(include.product_variant).toEqual({ select: { id: true, name: true } });
+      expect(include.sale_order).toEqual({
+        select: { id: true, order_number: true, state: true },
+      });
+      await service.findAll({} as any);
+      expect(prisma.production_orders.findMany.mock.calls[0][0].include.product_variant).toEqual({
+        select: { id: true, name: true },
+      });
+    });
+
+    it('S21: findOne marca can_restart solo en una orden cancelada que la regla de reinicio acepta', async () => {
+      order = baseOrder({ status: 'cancelled', order_id: 77 });
+      expect(await service.findOne(1)).toMatchObject({ can_restart: true });
+      expect(production.canRestart).toHaveBeenCalledWith(
+        expect.objectContaining({ id: 1, order_id: 77 }),
+      );
+      production.canRestart.mockResolvedValue(false);
+      expect(await service.findOne(1)).toMatchObject({ can_restart: false });
+      order = baseOrder({ status: 'in_progress' });
+      production.canRestart.mockClear();
+      expect(await service.findOne(1)).toMatchObject({ can_restart: false });
+      expect(production.canRestart).not.toHaveBeenCalled();
+    });
+
+    it('S21: restart delega en el motor de producción y devuelve la orden recargada', async () => {
+      order = baseOrder({ status: 'cancelled', order_id: 77 });
+      const result = await service.restart(1);
+      expect(production.restart).toHaveBeenCalledWith(1);
+      expect(result).toMatchObject({ id: 1 });
+    });
+
+    it('S21: restart de una orden que no es de manufactura devuelve MFG_ORDER_NOT_FOUND y no delega', async () => {
+      prisma.production_orders.findFirst.mockResolvedValue(null);
+      await expect(service.restart(1)).rejects.toMatchObject({
+        errorCode: 'MFG_ORDER_NOT_FOUND',
+      });
+      expect(production.restart).not.toHaveBeenCalled();
+    });
+
+    it('S16: una orden parcialmente completada se puede completar de nuevo', async () => {
+      order = baseOrder({
+        status: 'partially_completed',
+        produced_qty: new Prisma.Decimal(4),
+      });
+      // The state gate accepts it (the engine call is what follows).
+      production.complete.mockResolvedValue({ id: 1 });
+      await service.complete(1, { produced_qty: 2 } as any).catch(() => undefined);
+      expect(production.complete).toHaveBeenCalled();
     });
   });
 
@@ -373,6 +435,76 @@ describe('ManufacturingOrdersService', () => {
       );
       expect(stockLevelManager.getDefaultLocationForProduct).not.toHaveBeenCalled();
       expect(result[0].missing).toBe(0);
+    });
+  });
+  describe('live-sync events (QUI-1002)', () => {
+    let emitter: { emit: jest.Mock };
+    let live: ManufacturingOrdersService;
+    const events = () =>
+      emitter.emit.mock.calls.filter((c) => c[0] === 'production_order.updated').map((c) => c[1]);
+
+    beforeEach(() => {
+      emitter = { emit: jest.fn() };
+      live = new ManufacturingOrdersService(
+        prisma,
+        production as any,
+        formulas as any,
+        settings as any,
+        sequences as any,
+        stockLevelManager as any,
+        emitter as any,
+      );
+    });
+
+    it('create emits the new draft after the transaction', async () => {
+      await live.create({ recipe_id: 7, planned_qty: 10 });
+      expect(events()).toEqual([
+        expect.objectContaining({ type: 'production_order.updated', store_id: 1, id: 1, status: 'draft' }),
+      ]);
+    });
+
+    it('release and start emit the new status; start carries started_at', async () => {
+      order = baseOrder({ status: 'draft' });
+      await live.release(1);
+      order = baseOrder({ status: 'released', started_at: new Date('2026-11-10T15:00:00Z') });
+      await live.start(1);
+      expect(events().map((e) => e.status)).toEqual(['draft', 'released']);
+      expect(events()[1].started_at).toBe('2026-11-10T15:00:00.000Z');
+    });
+
+    it('cancel and update emit the order', async () => {
+      order = baseOrder({ status: 'draft' });
+      await live.cancel(1);
+      await live.update(1, { notes: 'x' } as any);
+      expect(events()).toHaveLength(2);
+    });
+
+    it('a rejected transition emits nothing and an emission failure never breaks the operation', async () => {
+      order = baseOrder({ status: 'draft' });
+      await expect(live.start(1)).rejects.toBeDefined();
+      expect(events()).toEqual([]);
+
+      emitter.emit.mockImplementation(() => {
+        throw new Error('bus down');
+      });
+      await expect(live.release(1)).resolves.toBeDefined();
+    });
+
+    it('a partial completion emits the reloaded order after the engine commit', async () => {
+      order = baseOrder({ status: 'in_progress' });
+      production.complete.mockImplementation(async () => {
+        order = baseOrder({ status: 'partially_completed', produced_qty: new Prisma.Decimal(4) });
+        return {};
+      });
+      await live.complete(1, { produced_qty: 4 });
+      expect(events()).toEqual([
+        expect.objectContaining({ id: 1, status: 'partially_completed', store_id: 1 }),
+      ]);
+    });
+
+    it('works without an emitter (previous behavior)', async () => {
+      order = baseOrder({ status: 'draft' });
+      await expect(service.release(1)).resolves.toBeDefined();
     });
   });
 });

@@ -61,6 +61,9 @@ import {
   ruesIdentityToPrefill,
 } from '../../customers/components/rues-identity-card/rues-identity-card.component';
 
+/** Documento genérico DIAN de consumidor final (sin datos tributarios). */
+const CONSUMIDOR_FINAL_DOCUMENT = '222222222222';
+
 @Component({
   selector: 'app-pos-customer-modal',
   standalone: true,
@@ -483,7 +486,7 @@ import {
                     label="Régimen tributario"
                     [options]="taxRegimeOptions"
                     [size]="'md'"
-                    [required]="true"
+                    [required]="taxDataRequired()"
                     [placeholder]="'Seleccionar'"
                     [errorText]="getFieldError('taxRegime') ?? ''"
                     >
@@ -493,7 +496,7 @@ import {
                     label="Tipo de persona"
                     [options]="personTypeOptions"
                     [size]="'md'"
-                    [required]="true"
+                    [required]="taxDataRequired()"
                     [placeholder]="'Seleccionar'"
                     [errorText]="getFieldError('personType') ?? ''"
                     >
@@ -816,6 +819,16 @@ private searchSubject$ = new Subject<string>(); // LEGÍTIMO — debounceTime+di
   readonly documentRequirement = computed(() =>
     customerDocumentRequirement(this.documentTypeCode(), this.documentNumberValue()),
   );
+  /**
+   * QUI-997 — régimen tributario y tipo de persona sólo se exigen cuando el
+   * cliente trae un documento propio. Sin documento (o con el genérico
+   * 222222222222) es un consumidor final y no lleva datos tributarios; el
+   * backend ya los trata como opcionales.
+   */
+  readonly taxDataRequired = computed(() => {
+    const number = this.documentNumberValue().trim();
+    return number !== '' && number !== CONSUMIDOR_FINAL_DOCUMENT;
+  });
   /** Con emisión automática encendida se avisa que sin documento sale a Consumidor final. */
   readonly documentHint = computed(() =>
     customerDocumentHint(
@@ -846,6 +859,16 @@ private searchSubject$ = new Subject<string>(); // LEGÍTIMO — debounceTime+di
       const typeCtrl = this.customerForm.controls['documentType'];
       typeCtrl.setValidators(typeRequired ? [Validators.required] : []);
       typeCtrl.updateValueAndValidity({ emitEvent: false });
+    });
+
+    // Datos tributarios requeridos sólo con documento propio (consumidor final no).
+    effect(() => {
+      const required = this.taxDataRequired();
+      for (const name of ['taxRegime', 'personType']) {
+        const ctrl = this.customerForm.controls[name];
+        ctrl.setValidators(required ? [Validators.required] : []);
+        ctrl.updateValueAndValidity({ emitEvent: false });
+      }
     });
 
     // Validadores dinámicos del número de documento según el tipo elegido.
@@ -958,8 +981,9 @@ private searchSubject$ = new Subject<string>(); // LEGÍTIMO — debounceTime+di
       phone: ['', [Validators.required, Validators.pattern(/^\d{10}$/)]],
       documentType: [''],
       documentNumber: [''],
-      taxRegime: ['', [Validators.required]],
-      personType: ['', [Validators.required]],
+      // Requeridos sólo con documento propio: ver `taxDataRequired`.
+      taxRegime: [''],
+      personType: [''],
       // Razón social (JURIDICA). Validators reales los pone
       // `applyPersonTypeValidators()` según person_type — ver constructor.
       legalName: ['', [Validators.maxLength(255)]],

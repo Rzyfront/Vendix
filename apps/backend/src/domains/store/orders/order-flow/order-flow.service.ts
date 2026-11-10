@@ -1,3 +1,7 @@
+import {
+  PRODUCTION_SALE_CANCELLED_EVENT,
+  requestProductionSaleSync,
+} from '../../production/production-sale-sync';
 import { assertNotLodgingFolioOrder } from '../shared/lodging-folio-policy';
 import {
   assertNoActiveFinancialSplit,
@@ -5,6 +9,7 @@ import {
 } from '../shared/financial-split-policy';
 import { lockOrderLifecycle } from './order-lifecycle-lock.util';
 import { serviceBudgetBlocks } from '../utils/service-budget-cap.util';
+import { lineConsumesOwnStock } from '../utils/resolve-line-destination.util';
 import {
   getCancellationBlocker,
   SETTLED_PAYMENT_STATES,
@@ -966,6 +971,7 @@ export class OrderFlowService {
       old_state: string;
       organization_id: number | null;
       total_cost: number;
+      production_cogs?: Array<{ production_order_id: number; total_cost: number }>;
     }> = [];
 
     const result = await this.prisma.$transaction(async (tx) => {
@@ -1100,6 +1106,7 @@ export class OrderFlowService {
           old_state: previousState,
           organization_id: row.stores?.organization_id ?? null,
           total_cost: commit.totalCost,
+          production_cogs: commit.productionCogs,
         });
       }
       return { finished: rows.length, order_ids: ids, idempotent: false };
@@ -1120,16 +1127,14 @@ export class OrderFlowService {
           new_state: 'finished',
           source: 'cash_session_close',
         });
-        if (event.total_cost > 0) {
-          this.eventEmitter.emit('order.completed', {
-            order_id: event.order_id,
-            order_number: event.order_number,
-            organization_id: event.organization_id,
-            store_id: event.store_id,
-            total_cost: event.total_cost,
-            user_id: input.actorId,
-          });
-        }
+        this.emitDeliveryCogs({
+          order_id: event.order_id,
+          order_number: event.order_number,
+          organization_id: event.organization_id,
+          store_id: event.store_id,
+          user_id: input.actorId,
+          commit: { totalCost: event.total_cost, productionCogs: event.production_cogs },
+        });
       }
     }
     return result;
@@ -1185,6 +1190,51 @@ export class OrderFlowService {
           : {}),
       } as Prisma.ordersUpdateInput,
     });
+  }
+
+  /**
+   * COGS of a delivery commit. The stock lines go in `order.completed` (keyed
+   * by the order); the `production` lines go in `production.sale_cogs` (keyed
+   * by the production order). A direct POS sale with a production line already
+   * posted `order.completed` at the till (S22: it stays open until delivered),
+   * so folding the production cost into a second `order.completed` would be
+   * dropped as a duplicate and that cost would never reach the books.
+   */
+  private emitDeliveryCogs(input: {
+    order_id: number;
+    order_number: string;
+    organization_id: number | null | undefined;
+    store_id: number;
+    user_id: number | null | undefined;
+    commit: {
+      totalCost: number;
+      productionCogs?: Array<{ production_order_id: number; total_cost: number }>;
+    };
+  }): void {
+    const productionCogs = input.commit.productionCogs ?? [];
+    const productionTotal = productionCogs.reduce((sum, p) => sum + p.total_cost, 0);
+    const orderCost = Number((input.commit.totalCost - productionTotal).toFixed(4));
+    if (orderCost > 0) {
+      this.eventEmitter.emit('order.completed', {
+        order_id: input.order_id,
+        order_number: input.order_number,
+        organization_id: input.organization_id,
+        store_id: input.store_id,
+        total_cost: orderCost,
+        user_id: input.user_id,
+      });
+    }
+    for (const production of productionCogs) {
+      if (production.total_cost <= 0) continue;
+      this.eventEmitter.emit('production.sale_cogs', {
+        organization_id: input.organization_id,
+        store_id: input.store_id,
+        order_id: input.order_id,
+        production_order_id: production.production_order_id,
+        total_cost: production.total_cost,
+        user_id: input.user_id,
+      });
+    }
   }
 
   private async updateOrderState(
@@ -1436,16 +1486,14 @@ export class OrderFlowService {
           ...(opts?.source ? { source: opts.source } : {}),
         });
 
-        if (commit.totalCost > 0) {
-          this.eventEmitter.emit('order.completed', {
-            order_id: orderId,
-            order_number: previous_order?.order_number || '',
-            organization_id: updated_order.stores?.organization_id,
-            store_id: updated_order.store_id,
-            total_cost: commit.totalCost,
-            user_id: RequestContextService.getUserId(),
-          });
-        }
+        this.emitDeliveryCogs({
+          order_id: orderId,
+          order_number: previous_order?.order_number || '',
+          organization_id: updated_order.stores?.organization_id,
+          store_id: updated_order.store_id,
+          user_id: RequestContextService.getUserId(),
+          commit,
+        });
 
         return stockWarnings.length > 0
           ? { ...updated_order, stock_warnings: stockWarnings }
@@ -1557,6 +1605,10 @@ export class OrderFlowService {
       const isKitchenDish =
         isRestaurant && product.product_type === 'prepared' && !item.skip_kds;
       if (isKitchenDish) continue;
+
+      // QUI-999: a `production` line never demands its own stock; its
+      // production order moves it.
+      if (!lineConsumesOwnStock(item)) continue;
 
       const variantId = item.product_variant_id ?? undefined;
       const key = `${item.product_id}-${variantId ?? 'null'}`;
@@ -6324,6 +6376,14 @@ export class OrderFlowService {
       await kds?.emitTicketUpdatedEvent(effects.updatedTicketId);
     }
 
+    // QUI-995: the cancelled line shrinks the sale; the linked production order
+    // (still a draft) follows its new quantity. Shared by every caller of this
+    // seam (controller and table sessions), post-commit and never blocking.
+    await requestProductionSaleSync(this.eventEmitter as any, this.logger, {
+      order_id: orderId,
+      store_id: storeId,
+    });
+
     this.logger.log(
       `Order item cancelled: order=${orderId} item=${orderItemId} type=${effects.resolvedType} fired=${effects.wasFired} ticketCancelled=${effects.cancelledTicketId != null}`,
     );
@@ -8071,6 +8131,20 @@ export class OrderFlowService {
         }
       }
     }
+
+    // QUI-995: linked production orders follow the sale. Runs BEFORE the blanket
+    // release below so a `waste` decision consumes its reservation first.
+    await requestProductionSaleSync(
+      this.eventEmitter as any,
+      this.logger,
+      {
+        order_id: orderId,
+        store_id: order.store_id,
+        disposition: dto.productionDisposition,
+        reason: dto.reason,
+      },
+      PRODUCTION_SALE_CANCELLED_EVENT,
+    );
 
     // Release reserved stock by reference — kept OUTSIDE the transaction and
     // best-effort (exactly as before): a release failure must never abort a

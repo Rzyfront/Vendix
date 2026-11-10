@@ -26,6 +26,8 @@ import {
   CartValidationError,
   PendingBooking,
   ShippingContext,
+  FulfillmentChoice,
+  isProducibleProduct,
 } from '../models/cart.model';
 
 // Re-export types for component usage
@@ -487,6 +489,29 @@ export class PosCartService {
   updateCartItem(request: UpdateCartItemRequest): Observable<CartState> {
     return of(request).pipe(
       map((req) => this.processUpdateCartItem(req)),
+      tap((newState) => this.cartState.set(newState)),
+    );
+  }
+
+  /**
+   * QUI-999 — records the cashier's "Del stock / A producción" choice on a
+   * cart line. Sent per item as `fulfillment_destination` at payment.
+   */
+  setFulfillmentChoice(
+    itemId: string,
+    choice: FulfillmentChoice,
+  ): Observable<CartState> {
+    return of({ itemId, choice }).pipe(
+      map(({ itemId: id, choice: value }) => {
+        const currentState = this.cartState();
+        return {
+          ...currentState,
+          items: currentState.items.map((item) =>
+            item.id === id ? { ...item, fulfillmentChoice: value } : item,
+          ),
+          updatedAt: new Date(),
+        };
+      }),
       tap((newState) => this.cartState.set(newState)),
     );
   }
@@ -1289,6 +1314,13 @@ export class PosCartService {
       originalFinalPrice: Number(
         item.catalog_final_price ?? item.final_unit_price ?? finalUnitPrice,
       ),
+      // QUI-999 — an edited order keeps the destination the cashier chose; the
+      // server honors the client's choice over the persisted one, so a line
+      // saved "A producción" must not come back as the default "Del stock".
+      ...(item.fulfillment_destination === 'stock' ||
+      item.fulfillment_destination === 'production'
+        ? { fulfillmentChoice: item.fulfillment_destination }
+        : {}),
       ...this.mapOrderItemOptions(item, quantity),
     } as CartItem;
   }
@@ -1305,6 +1337,9 @@ export class PosCartService {
     return {
       option_ids: rows.map((r) => Number(r.option_id)).filter((id) => Number.isFinite(id) && id > 0),
       option_labels: rows.map((r) => String(r.option_name ?? '')),
+      option_notes: rows
+        .filter((r) => typeof r.note === 'string' && r.note.trim() && Number(r.option_id) > 0)
+        .map((r) => ({ option_id: Number(r.option_id), note: String(r.note).trim() })),
       option_delta: delta > 0 ? delta : undefined,
       option_delta_parts: parts,
     };
@@ -2662,6 +2697,11 @@ export class PosCartService {
     // una pieza distinta (dos bandejas de 2,35 kg y 1,80 kg no son "una línea
     // de 4,15 kg" para el cajero, que necesita poder corregir la que se
     // equivocó volviendo a pesarla).
+    // QUI-999: a producible product never goes to the KDS (stock or
+    // production, decided by the server), so its line is flagged `skipKds`
+    // to keep the cart's fire-to-kitchen filter coherent.
+    const effectiveSkipKds =
+      request.skipKds === true || isProducibleProduct(request.product);
     const hasSerials =
       (request.serial_ids?.length ?? 0) > 0 ||
       (request.serial_numbers?.length ?? 0) > 0;
@@ -2676,10 +2716,15 @@ export class PosCartService {
             (item) =>
               item.product.id === request.product.id &&
               (item.variant_id || null) === (request.variant?.id || null) &&
-              (item.skipKds ?? false) === (request.skipKds === true) &&
+              (item.skipKds ?? false) === effectiveSkipKds &&
+              // QUI-999: a new add (default 'stock') never merges into a line
+              // the cashier already sent to production.
+              (item.fulfillmentChoice ?? 'stock') === 'stock' &&
               (item.isTakeaway ?? false) === (request.isTakeaway === true) &&
               // Adiciones: otro conjunto de opciones es otra línea.
               this.optionKey(item.option_ids) === this.optionKey(request.option_ids) &&
+              // Otra nota en una adición es otra línea (producción la recibe tal cual).
+              this.optionNotesKey(item.option_notes) === this.optionNotesKey(request.option_notes) &&
               !(item.serial_ids?.length || item.serial_numbers?.length) &&
               !item.booking,
           );
@@ -2826,7 +2871,7 @@ export class PosCartService {
         // Restaurant Suite — Fase K Gap 1: persist the cashier's
         // "usar stock" choice on the cart item. Filtered out of the
         // kitchen-fire call by the POS component.
-        skipKds: request.skipKds === true,
+        skipKds: effectiveSkipKds,
         // QUI-653 — se persiste en la línea porque viaja a
         // `order_items.is_takeaway`: el ticket de cocina y el tiquete impreso lo
         // necesitan después del cobro, a diferencia de `skipKds`, que es
@@ -2844,6 +2889,7 @@ export class PosCartService {
         option_labels: request.option_labels?.length
           ? request.option_labels
           : undefined,
+        option_notes: request.option_notes?.length ? request.option_notes : undefined,
         option_delta: optionDelta > 0 ? optionDelta : undefined,
         option_delta_parts: request.option_ids?.length ? optionParts : undefined,
       };
@@ -3528,6 +3574,16 @@ export class PosCartService {
   /** Clave estable (ids ordenados) del conjunto de adiciones de una línea. */
   private optionKey(ids: number[] | undefined): string {
     return ids?.length ? [...ids].sort((a, b) => a - b).join(',') : '';
+  }
+
+  /** Clave estable de las notas por adición de una línea. */
+  private optionNotesKey(notes: Array<{ option_id: number; note: string }> | undefined): string {
+    return notes?.length
+      ? [...notes]
+          .sort((a, b) => a.option_id - b.option_id)
+          .map((n) => `${n.option_id}:${n.note}`)
+          .join('|')
+      : '';
   }
 
   private generateItemId(): string {

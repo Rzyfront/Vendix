@@ -7,7 +7,7 @@ import {
   ProductionList,
   ScheduledOrder,
   ScheduledOrderDetail,
-  ScheduledOrderStatus,
+  ScheduledOrderDisplayStatus,
 } from '../interfaces/scheduled-order.interface';
 
 interface ApiResponse<T> {
@@ -31,7 +31,7 @@ export class ScheduledOrdersApiService {
   getAgenda(
     from: string,
     to: string,
-    status?: ScheduledOrderStatus,
+    status?: ScheduledOrderDisplayStatus,
   ): Observable<ScheduledOrder[]> {
     let params = new HttpParams().set('from', from).set('to', to);
     if (status) params = params.set('status', status);
@@ -46,8 +46,9 @@ export class ScheduledOrdersApiService {
       .pipe(map((r) => r.data));
   }
 
-  updateStatus(id: number, status: ScheduledOrderStatus, note?: string): Observable<unknown> {
-    return this.http.patch(`${this.baseUrl}/${id}/status`, { status, ...(note ? { note } : {}) });
+  /** QUI-989: manda a KDS los platos no producibles del pedido y pasa a producción. */
+  sendToKitchen(id: number): Observable<unknown> {
+    return this.http.post(`${this.baseUrl}/${id}/send-to-kitchen`, {});
   }
 
   reschedule(id: number, start: string, end: string): Observable<unknown> {

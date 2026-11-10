@@ -11,6 +11,8 @@ import {
   UseGuards,
 } from '@nestjs/common';
 import { PermissionsGuard } from '../../auth/guards/permissions.guard';
+import { IndustryModuleGuard } from '../../../common/guards/industry-module.guard';
+import { IndustryModule } from '../../../common/decorators/industry-module.decorator';
 import { Permissions } from '../../auth/decorators/permissions.decorator';
 import { ResponseService } from '@common/responses/response.service';
 import { RequestContextService } from '@common/context/request-context.service';
@@ -24,7 +26,8 @@ import {
 } from './dto/fulfillment-exceptions.dto';
 
 @Controller('store/scheduled-orders')
-@UseGuards(PermissionsGuard)
+@UseGuards(PermissionsGuard, IndustryModuleGuard)
+@IndustryModule('orders_scheduled')
 export class FulfillmentExceptionsController {
   constructor(
     private readonly availability: FulfillmentAvailabilityService,

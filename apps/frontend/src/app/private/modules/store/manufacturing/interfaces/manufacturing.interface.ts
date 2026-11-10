@@ -107,6 +107,12 @@ export interface ManufacturingOrder {
   created_at: string | Date;
   updated_at: string | Date;
   product?: { id: number; name: string; sku?: string | null } | null;
+  /** S19: sold variant this order makes (null for base products and manual orders). */
+  product_variant?: { id: number; name: string } | null;
+  /** S21: sale linked to the order (state decides "Volver a iniciar"); null when manual. */
+  sale_order?: { id: number; order_number: string; state: string } | null;
+  /** S21: true when "Volver a iniciar" applies (cancelled order, active sale, live line). */
+  can_restart?: boolean;
   recipe?: {
     id: number;
     code?: string | null;
@@ -115,6 +121,9 @@ export interface ManufacturingOrder {
     yield_quantity?: number | string | null;
   } | null;
   lines?: ManufacturingOrderLine[];
+  /** T13 (QUI-995): sale that originated this production order; null when manual. */
+  order_id?: number | null;
+  source?: 'manual' | 'order' | null;
 }
 
 export interface ManufacturingOrderQuery {

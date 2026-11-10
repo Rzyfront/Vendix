@@ -5,10 +5,13 @@ import {
   Param,
   ParseIntPipe,
   Patch,
+  Post,
   Query,
   UseGuards,
 } from '@nestjs/common';
 import { PermissionsGuard } from '../../auth/guards/permissions.guard';
+import { IndustryModuleGuard } from '../../../common/guards/industry-module.guard';
+import { IndustryModule } from '../../../common/decorators/industry-module.decorator';
 import { Permissions } from '../../auth/decorators/permissions.decorator';
 import { ResponseService } from '@common/responses/response.service';
 import { ScheduledOrdersService } from './scheduled-orders.service';
@@ -26,7 +29,8 @@ import {
  * no caiga en `GET :id`.
  */
 @Controller('store/scheduled-orders')
-@UseGuards(PermissionsGuard)
+@UseGuards(PermissionsGuard, IndustryModuleGuard)
+@IndustryModule('orders_scheduled')
 export class ScheduledOrdersController {
   constructor(
     private readonly scheduledOrders: ScheduledOrdersService,
@@ -61,6 +65,14 @@ export class ScheduledOrdersController {
   async transition(@Param('id', ParseIntPipe) id: number, @Body() dto: TransitionScheduleDto) {
     const row = await this.scheduledOrders.transition(id, dto.status, dto.note);
     return this.responseService.success(row, 'Estado actualizado');
+  }
+
+  /** QUI-989: manda a KDS los platos no producibles del pedido el día de la producción. */
+  @Post(':id/send-to-kitchen')
+  @Permissions('store:scheduled_orders:update')
+  async sendToKitchen(@Param('id', ParseIntPipe) id: number) {
+    const result = await this.production.sendToKitchen(id);
+    return this.responseService.success(result, 'Pedido enviado a cocina');
   }
 
   @Patch(':id/reschedule')

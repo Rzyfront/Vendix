@@ -5,6 +5,7 @@ import { InventorySerialNumbersModule } from '../serial-numbers/inventory-serial
 import { StockLevelManager } from './services/stock-level-manager.service';
 import { StockValidatorService } from './services/stock-validator.service';
 import { SellableStockAllocator } from './services/sellable-stock-allocator.service';
+import { RecipesModule } from '../../recipes/recipes.module';
 import { OrderStockCommitService } from './services/order-stock-commit.service';
 
 /**
@@ -26,6 +27,8 @@ import { OrderStockCommitService } from './services/order-stock-commit.service';
     PrismaModule,
     InventoryTransactionsModule,
     InventorySerialNumbersModule,
+    // QUI-999: add-ons of `stock` lines are exploded through the recipes BOM.
+    RecipesModule,
   ],
   providers: [
     OrderStockCommitService,

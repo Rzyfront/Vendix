@@ -68,6 +68,11 @@ export interface StandardPrintItem {
   notes?: string;
   modifiers?: string[];
   /**
+   * QUI-994 — adiciones de la línea del recibo de venta. La nota de cada
+   * adición respeta `show_notes` del formato, igual que la nota de la línea.
+   */
+  addons?: { name: string; note?: string }[];
+  /**
    * Rótulo de empaque por plato de la comanda de cocina ("ENVÍO" /
    * "PARA LLEVAR"). Solo `kitchen_ticket` lo llena; vacío = consumo en mesa.
    */

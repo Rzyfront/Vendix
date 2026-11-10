@@ -44,6 +44,9 @@ interface FakeTransaction {
  * the test runs without a real DB. FIFO cost resolution is exercised via
  * a single ingredient with two `inventory_cost_layers` rows.
  */
+// Atomic state guard (QUI-995): the claim every completion makes first.
+const claimOk = jest.fn().mockResolvedValue({ count: 1 });
+
 describe('ProductionOrdersService — complete() (Fase C smoke)', () => {
   let service: ProductionOrdersService;
   let stockLevelManager: jest.Mocked<Pick<StockLevelManager, 'updateStock' | 'getDefaultLocationForProduct'>>;
@@ -58,6 +61,7 @@ describe('ProductionOrdersService — complete() (Fase C smoke)', () => {
       aggregate: jest.Mock;
       update: jest.Mock;
     };
+    store_settings: { findFirst: jest.Mock };
     $transaction: jest.Mock;
   };
 
@@ -97,6 +101,7 @@ describe('ProductionOrdersService — complete() (Fase C smoke)', () => {
         aggregate: jest.fn().mockResolvedValue({ _sum: { produced_qty: 0 } }),
         update: jest.fn(),
       },
+      store_settings: { findFirst: jest.fn().mockResolvedValue(null) },
       $transaction: jest.fn(),
     };
 
@@ -208,7 +213,7 @@ describe('ProductionOrdersService — complete() (Fase C smoke)', () => {
       },
     });
     prismaMock.$transaction.mockImplementation(async (cb: any) =>
-      cb({ production_orders: { update: txOrderUpdate } }),
+      cb({ production_orders: { update: txOrderUpdate, updateMany: claimOk } }),
     );
 
     // 4. The outer `production_orders.update` (post-transaction) is also
@@ -242,6 +247,17 @@ describe('ProductionOrdersService — complete() (Fase C smoke)', () => {
 
     // (e) result is the updated order
     expect(result.status).toBe('completed');
+
+    // (f0) QUI-1002: the live-sync event goes out after the commit
+    expect(eventEmitter.emit).toHaveBeenCalledWith(
+      'production_order.updated',
+      expect.objectContaining({
+        type: 'production_order.updated',
+        id: 100,
+        status: 'completed',
+        store_id: 1,
+      }),
+    );
 
     // (f) production.completed event was emitted once
     expect(eventEmitter.emit).toHaveBeenCalledWith(
@@ -312,7 +328,7 @@ describe('ProductionOrdersService — complete() (Fase C smoke)', () => {
       },
     });
     prismaMock.$transaction.mockImplementation(async (cb: any) =>
-      cb({ production_orders: { update: txOrderUpdateMerma } }),
+      cb({ production_orders: { update: txOrderUpdateMerma, updateMany: claimOk } }),
     );
     prismaMock.production_orders.update.mockResolvedValue({
       id: 200,
@@ -555,7 +571,7 @@ describe('ProductionOrdersService — complete() (Fase C smoke)', () => {
         recipe: { id: 7, yield_quantity: new Prisma.Decimal(10), yield_unit: 'g', waste_percent: new Prisma.Decimal(0) },
       });
       prismaMock.$transaction.mockImplementation(async (cb: any) =>
-        cb({ production_orders: { update: txOrderUpdate } }),
+        cb({ production_orders: { update: txOrderUpdate, updateMany: claimOk } }),
       );
 
       const result = await service.complete(600, { produced_qty: 10 });
@@ -667,7 +683,7 @@ describe('ProductionOrdersService — complete() (Fase C smoke)', () => {
         recipe: { id: 7, yield_quantity: new Prisma.Decimal(1), yield_unit: 'g', waste_percent: new Prisma.Decimal(0) },
       };
       prismaMock.$transaction.mockImplementation(async (cb: any) =>
-        cb({ production_orders: { update: jest.fn().mockResolvedValue(updated) } }),
+        cb({ production_orders: { update: jest.fn().mockResolvedValue(updated), updateMany: claimOk } }),
       );
       prismaMock.production_orders.update.mockResolvedValue(updated as any);
       await service.complete(900, { produced_qty: opts.produced });
@@ -775,6 +791,703 @@ describe('ProductionOrdersService — complete() (Fase C smoke)', () => {
         service.create({ product_id: 50, recipe_id: 7, planned_qty: 25 } as any),
       ).rejects.toMatchObject({ errorCode: 'PRODUCTION_QTY_NOT_YIELD_MULTIPLE' });
       expect((prismaMock.production_orders as any).create).not.toHaveBeenCalled();
+    });
+  });
+  describe('getStats() — "Completadas (mes)" counts only the current month (QUI-997)', () => {
+    afterEach(() => jest.useRealTimers());
+
+    it('limits the completed count to orders produced since the start of the month in the store timezone', async () => {
+      jest.useFakeTimers({ now: new Date('2026-11-15T12:00:00Z'), doNotFake: ['nextTick', 'setImmediate'] });
+
+      await service.getStats();
+
+      // America/Bogota (UTC-5) month start: 2026-11-01T00:00 local = 05:00 UTC.
+      const monthStart = new Date('2026-11-01T05:00:00.000Z');
+      expect(prismaMock.production_orders.count).toHaveBeenCalledWith({
+        where: { store_id: 1, status: 'completed', produced_at: { gte: monthStart } },
+      });
+    });
+  });
+});
+
+
+describe('ProductionOrdersService — sale-linked orders (QUI-995)', () => {
+  const ctx = { store_id: 1, organization_id: 1, user_id: 42, is_super_admin: false };
+  let service: ProductionOrdersService;
+  let stock: { updateStock: jest.Mock; getDefaultLocationForProduct: jest.Mock; reserveStock: jest.Mock };
+  let eventEmitter: { emit: jest.Mock };
+  let orderStockCommit: { commitOrderLines: jest.Mock };
+  let prismaMock: any;
+  let tx: any;
+
+  const linkedOrder = (over: Record<string, unknown> = {}) => ({
+    id: 100,
+    store_id: 1,
+    product_id: 50,
+    recipe_id: 7,
+    order_id: 77,
+    planned_qty: new Prisma.Decimal(3),
+    produced_qty: null,
+    status: 'in_progress',
+    product: { id: 50, name: 'Torta', sku: 'T', stock_unit: 'u', is_batch_produced: true },
+    recipe: {
+      id: 7,
+      yield_quantity: new Prisma.Decimal(10),
+      yield_unit: 'u',
+      waste_percent: new Prisma.Decimal(0),
+      items: [
+        {
+          component_product_id: 99,
+          quantity: new Prisma.Decimal(10),
+          waste_percent: new Prisma.Decimal(0),
+          component_product: { id: 99, name: 'Harina', sku: 'H', stock_unit: 'g' },
+        },
+      ],
+    },
+    ...over,
+  });
+
+  const line = (over: Record<string, unknown> = {}) => ({
+    id: 501,
+    product_id: 50,
+    product_variant_id: null,
+    quantity: 3,
+    addons_consumed_at: null,
+    order_item_options: [
+      {
+        scope: 'per_unit',
+        component_type: 'ingredient',
+        component_product_id: 200,
+        component_variant_id: null,
+        quantity: 2,
+      },
+    ],
+    ...over,
+  });
+
+  const setup = (opts: {
+    order?: any;
+    claimCount?: number;
+    addonClaimCount?: number;
+    sale?: { id: number; state: string } | null;
+    lines?: any[];
+    pendingLines?: any[];
+    // Non-cancelled variant orders of the same product in the sale (R3 legacy check).
+    variantOrderCount?: number;
+  }) => {
+    prismaMock.production_orders.findFirst.mockResolvedValue(opts.order ?? linkedOrder());
+    tx = {
+      production_orders: {
+        count: jest.fn().mockResolvedValue(opts.variantOrderCount ?? 0),
+        updateMany: jest.fn().mockResolvedValue({ count: opts.claimCount ?? 1 }),
+        update: jest.fn().mockImplementation(async ({ data }: any) => ({
+          id: 100,
+          status: 'completed',
+          ...data,
+        })),
+      },
+      order_items: {
+        findMany: jest
+          .fn()
+          .mockImplementation(async ({ where }: any) =>
+            where.inventory_committed === false ? (opts.pendingLines ?? []) : (opts.lines ?? [line()]),
+          ),
+        updateMany: jest.fn().mockResolvedValue({ count: opts.addonClaimCount ?? 1 }),
+      },
+      orders: {
+        findFirst: jest
+          .fn()
+          .mockResolvedValue(opts.sale === undefined ? { id: 77, state: 'processing' } : opts.sale),
+      },
+      // lockOrderLifecycle: SELECT ... FOR UPDATE on the sale, then its payments.
+      $queryRaw: jest.fn().mockResolvedValue([{ id: 77, state: 'processing' }]),
+    };
+    prismaMock.$transaction.mockImplementation(async (cb: any) => cb(tx));
+  };
+
+  beforeEach(() => {
+    stock = {
+      updateStock: jest.fn().mockResolvedValue({
+        cost_snapshot: { unit_cost: 1, total_cost: 5, stock_value: 0 },
+      }),
+      getDefaultLocationForProduct: jest.fn().mockResolvedValue(1),
+      reserveStock: jest.fn().mockResolvedValue(undefined),
+    };
+    eventEmitter = { emit: jest.fn() };
+    orderStockCommit = { commitOrderLines: jest.fn().mockResolvedValue({ totalCost: 0, committedItemCount: 1 }) };
+    prismaMock = {
+      production_orders: { findFirst: jest.fn(), findMany: jest.fn(), count: jest.fn().mockResolvedValue(0), aggregate: jest.fn() },
+      orders: { findFirst: jest.fn() },
+      order_items: { findMany: jest.fn() },
+      recipes: { findMany: jest.fn().mockResolvedValue([]) },
+      products: { findMany: jest.fn().mockResolvedValue([]) },
+      $transaction: jest.fn(),
+    };
+    jest.spyOn(RequestContextService, 'getContext').mockReturnValue(ctx as any);
+    service = new ProductionOrdersService(
+      prismaMock,
+      stock as any,
+      {
+        assertIngredientsAvailable: jest.fn().mockResolvedValue([]),
+        resolveInventoryPolicy: jest
+          .fn()
+          .mockResolvedValue({ allowOversell: false, allowIngredientOveruse: true }),
+      } as any,
+      eventEmitter as any,
+      {} as any,
+      orderStockCommit as any,
+      { signUrl: jest.fn(async (k: string) => `signed:${k}`) } as any,
+    );
+  });
+
+  afterEach(() => jest.restoreAllMocks());
+
+  it('concurrent completion: the state claim finds 0 rows -> PRODUCTION_ORDER_CONCURRENT_UPDATE and nothing moves or is reserved', async () => {
+    setup({ claimCount: 0 });
+    await expect(service.complete(100, { produced_qty: 3 })).rejects.toMatchObject({
+      errorCode: 'PRODUCTION_ORDER_CONCURRENT_UPDATE',
+    });
+    expect(tx.production_orders.updateMany).toHaveBeenCalledWith({
+      where: { id: 100, status: 'in_progress', produced_qty: null },
+      data: expect.objectContaining({ updated_at: expect.any(Date) }),
+    });
+    expect(stock.updateStock).not.toHaveBeenCalled();
+    expect(stock.reserveStock).not.toHaveBeenCalled();
+    expect(eventEmitter.emit).not.toHaveBeenCalled();
+  });
+
+  it('linked completion is not forced into whole recipe batches (yield 10, sold 3)', async () => {
+    setup({});
+    const result = await service.complete(100, { produced_qty: 3 });
+    expect(result.status).toBe('completed');
+  });
+
+  it('claims the add-ons of the sale lines once and adds their cost to the order cost', async () => {
+    setup({});
+    await service.complete(100, { produced_qty: 3 });
+    expect(tx.order_items.updateMany).toHaveBeenCalledWith({
+      where: { id: 501, addons_consumed_at: null },
+      data: { addons_consumed_at: expect.any(Date) },
+    });
+    const addonCall = stock.updateStock.mock.calls
+      .map((c) => c[0])
+      .find((c) => c.product_id === 200);
+    // 2 per unit x 3 units
+    expect(addonCall).toMatchObject({ movement_type: 'consumption', quantity_change: -6, location_id: 1 });
+    // recipe line (5) + add-on (5) = 10 -> one production.completed with the joint cost
+    expect(
+      eventEmitter.emit.mock.calls.filter((c: unknown[]) => c[0] === 'production.completed'),
+    ).toHaveLength(1);
+    expect(eventEmitter.emit).toHaveBeenCalledWith(
+      'production.completed',
+      expect.objectContaining({ production_order_id: 100, total_cost: 10, consumed_line_count: 2 }),
+    );
+  });
+
+  it('does not consume the add-ons again when another path already claimed the line (claim count 0)', async () => {
+    setup({ addonClaimCount: 0 });
+    await service.complete(100, { produced_qty: 3 });
+    expect(stock.updateStock.mock.calls.map((c) => c[0].product_id)).not.toContain(200);
+  });
+
+  it('reserves min(produced, planned) for the sale without availability validation', async () => {
+    setup({});
+    await service.complete(100, { produced_qty: 5 });
+    expect(stock.reserveStock).toHaveBeenCalledTimes(1);
+    expect(stock.reserveStock).toHaveBeenCalledWith(50, undefined, 1, 3, 'order', 77, 42, false, tx);
+  });
+
+  it('gate #1132: a partially completed order (Planta) cannot be finished from the restaurant endpoint -> PRODUCTION_ORDER_INVALID_STATE and nothing moves', async () => {
+    setup({ order: linkedOrder({ status: 'partially_completed', produced_qty: new Prisma.Decimal(2) }) });
+    await expect(service.complete(100, { produced_qty: 3 })).rejects.toMatchObject({
+      errorCode: 'PRODUCTION_ORDER_INVALID_STATE',
+    });
+    expect(prismaMock.$transaction).not.toHaveBeenCalled();
+    expect(stock.updateStock).not.toHaveBeenCalled();
+    expect(stock.reserveStock).not.toHaveBeenCalled();
+    expect(eventEmitter.emit).not.toHaveBeenCalled();
+  });
+
+  it('gate #1132: Planta still finishes its partially completed order through complete() (sourceModule manufacturing)', async () => {
+    setup({ order: linkedOrder({ status: 'partially_completed', produced_qty: new Prisma.Decimal(2) }) });
+    const result = await service.complete(100, { produced_qty: 1 }, { sourceModule: 'manufacturing' });
+    expect(result.status).toBe('completed');
+    expect(stock.updateStock).toHaveBeenCalled();
+  });
+
+  it('sale already delivered: sells what was produced through the delivery commit and reserves nothing', async () => {
+    setup({ sale: { id: 77, state: 'delivered' }, pendingLines: [{ id: 501 }, { id: 502 }] });
+    await service.complete(100, { produced_qty: 3 });
+    expect(orderStockCommit.commitOrderLines).toHaveBeenCalledWith(77, [501, 502], {
+      blockOnInsufficient: false,
+      tx,
+      movementType: 'sale',
+      reason: expect.stringContaining('Producción #100'),
+    });
+    expect(stock.reserveStock).not.toHaveBeenCalled();
+  });
+
+  it('QUI-995 F1: a sale delivered before production emits production.sale_cogs with the commit total cost, after the transaction', async () => {
+    setup({ sale: { id: 77, state: 'delivered' }, pendingLines: [{ id: 501 }] });
+    orderStockCommit.commitOrderLines.mockResolvedValue({ totalCost: 120, committedItemCount: 1 });
+    let committed = false;
+    prismaMock.$transaction.mockImplementation(async (cb: any) => {
+      const out = await cb(tx);
+      committed = true;
+      return out;
+    });
+    eventEmitter.emit.mockImplementation((name: string) => {
+      if (name === 'production.sale_cogs') expect(committed).toBe(true);
+    });
+    await service.complete(100, { produced_qty: 3 });
+    expect(eventEmitter.emit).toHaveBeenCalledWith('production.sale_cogs', {
+      organization_id: 1,
+      store_id: 1,
+      order_id: 77,
+      production_order_id: 100,
+      total_cost: 120,
+      user_id: 42,
+    });
+  });
+
+  it('QUI-995 F1: no sale_cogs when the commit cost is zero or the units are only reserved', async () => {
+    setup({ sale: { id: 77, state: 'delivered' }, pendingLines: [{ id: 501 }] });
+    await service.complete(100, { produced_qty: 3 });
+    setup({});
+    await service.complete(100, { produced_qty: 3 });
+    expect(eventEmitter.emit.mock.calls.map((c) => c[0])).not.toContain('production.sale_cogs');
+  });
+
+  it('QUI-995 F1: a sale-linked completion locks the sale before claiming the order and reading the sale state', async () => {
+    setup({});
+    await service.complete(100, { produced_qty: 3 });
+    expect(tx.$queryRaw).toHaveBeenCalled();
+    const lockAt = tx.$queryRaw.mock.invocationCallOrder[0];
+    expect(lockAt).toBeLessThan(tx.production_orders.updateMany.mock.invocationCallOrder[0]);
+    expect(lockAt).toBeLessThan(tx.orders.findFirst.mock.invocationCallOrder[0]);
+  });
+
+  it('QUI-995 F4: a variant order credits and reserves the SOLD variant', async () => {
+    setup({
+      order: linkedOrder({ product_variant_id: 10 }),
+      lines: [line({ product_variant_id: 10 })],
+    });
+    await service.complete(100, { produced_qty: 3 });
+    const credit = stock.updateStock.mock.calls
+      .map((c) => c[0])
+      .find((c) => c.movement_type === 'production');
+    expect(credit).toMatchObject({ product_id: 50, variant_id: 10, quantity_change: 3 });
+    expect(stock.getDefaultLocationForProduct).toHaveBeenCalledWith(50, 10);
+    expect(stock.reserveStock).toHaveBeenCalledWith(50, 10, 1, 3, 'order', 77, 42, false, tx);
+    // add-ons are claimed only from the lines of THIS variant
+    expect(tx.order_items.findMany.mock.calls[0][0].where).toMatchObject({
+      product_id: 50,
+      product_variant_id: 10,
+    });
+  });
+
+  it('QUI-995 F4: a variant order sells only the pending lines of its variant when the sale was delivered', async () => {
+    setup({
+      order: linkedOrder({ product_variant_id: 10 }),
+      sale: { id: 77, state: 'delivered' },
+      pendingLines: [{ id: 501 }],
+    });
+    await service.complete(100, { produced_qty: 3 });
+    const pendingWhere = tx.order_items.findMany.mock.calls
+      .map((c: any) => c[0].where)
+      .find((w: any) => w.inventory_committed === false);
+    expect(pendingWhere).toMatchObject({ product_id: 50, product_variant_id: 10 });
+  });
+
+  it('QUI-995 F4: a non-variant order credits the base product exactly as before', async () => {
+    setup({});
+    await service.complete(100, { produced_qty: 3 });
+    const credit = stock.updateStock.mock.calls
+      .map((c) => c[0])
+      .find((c) => c.movement_type === 'production');
+    expect(credit).not.toHaveProperty('variant_id');
+    expect(stock.getDefaultLocationForProduct).toHaveBeenCalledWith(50);
+    expect(stock.reserveStock).toHaveBeenCalledWith(50, undefined, 1, 3, 'order', 77, 42, false, tx);
+  });
+
+  it('QUI-995 F4: a base-product order claims add-ons only from base lines, never a variant line', async () => {
+    setup({ variantOrderCount: 1 });
+    await service.complete(100, { produced_qty: 3 });
+    expect(tx.order_items.findMany.mock.calls[0][0].where).toMatchObject({
+      product_id: 50,
+      product_variant_id: null,
+    });
+  });
+
+  it('QUI-995 R3: a legacy NULL-variant order serves the variant line: add-ons claimed and the delivered sale committed without a variant filter', async () => {
+    setup({ sale: { id: 77, state: 'delivered' }, pendingLines: [{ id: 501 }] });
+    await service.complete(100, { produced_qty: 3 });
+    expect(tx.production_orders.count).toHaveBeenCalledTimes(1);
+    expect(tx.production_orders.count).toHaveBeenCalledWith({
+      where: {
+        order_id: 77,
+        product_id: 50,
+        product_variant_id: { not: null },
+        status: { not: 'cancelled' },
+      },
+    });
+    const wheres = tx.order_items.findMany.mock.calls.map((c: any) => c[0].where);
+    expect(wheres).toHaveLength(2);
+    for (const w of wheres) expect(w).not.toHaveProperty('product_variant_id');
+    expect(orderStockCommit.commitOrderLines).toHaveBeenCalledWith(77, [501], expect.anything());
+  });
+
+  it('QUI-995 R3: getDetail of a legacy order lists the variant lines it served', async () => {
+    prismaMock.production_orders.findFirst.mockResolvedValue(linkedOrder());
+    prismaMock.orders.findFirst.mockResolvedValue({
+      id: 77, order_number: 'ORD-77', state: 'processing', customer_alias: null, users: null,
+      fulfillment_schedule: null,
+    });
+    prismaMock.order_items.findMany.mockResolvedValue([]);
+    await service.getDetail(100);
+    expect(prismaMock.order_items.findMany.mock.calls[0][0].where).not.toHaveProperty('product_variant_id');
+  });
+
+  it('sale cancelled: nothing is reserved nor sold', async () => {
+    setup({ sale: { id: 77, state: 'cancelled' } });
+    await service.complete(100, { produced_qty: 3 });
+    expect(stock.reserveStock).not.toHaveBeenCalled();
+    expect(orderStockCommit.commitOrderLines).not.toHaveBeenCalled();
+  });
+
+  it('manual order (no sale): no add-ons, no reservation, still one production.completed (behavior unchanged)', async () => {
+    setup({ order: linkedOrder({ order_id: null, planned_qty: new Prisma.Decimal(10) }) });
+    await service.complete(100, { produced_qty: 10 });
+    expect(tx.order_items.findMany).not.toHaveBeenCalled();
+    expect(tx.orders.findFirst).not.toHaveBeenCalled();
+    expect(stock.reserveStock).not.toHaveBeenCalled();
+    expect(
+      eventEmitter.emit.mock.calls.filter((c: unknown[]) => c[0] === 'production.completed'),
+    ).toHaveLength(1);
+  });
+
+  it('manual order still enforces whole recipe batches', async () => {
+    setup({ order: linkedOrder({ order_id: null }) });
+    await expect(service.complete(100, { produced_qty: 3 })).rejects.toMatchObject({
+      errorCode: 'PRODUCTION_QTY_NOT_YIELD_MULTIPLE',
+    });
+  });
+
+  it('findAll filters by order_id and returns sale_order_number', async () => {
+    prismaMock.production_orders.findMany.mockResolvedValue([
+      { id: 1, order_id: 77, source: 'order', sale_order: { order_number: 'ORD-9' } },
+      { id: 2, order_id: null, source: 'manual', sale_order: null },
+    ]);
+    prismaMock.production_orders.count.mockResolvedValue(2);
+    const result = await service.findAll({ order_id: 77 } as any);
+    expect(prismaMock.production_orders.findMany).toHaveBeenCalledWith(
+      expect.objectContaining({ where: expect.objectContaining({ order_id: 77 }) }),
+    );
+    expect(result.data.map((r: any) => r.sale_order_number)).toEqual(['ORD-9', null]);
+    expect((result.data[0] as any).sale_order).toBeUndefined();
+  });
+
+  it('S19: findAll and findOne (hence getDetail) read the variant name of the order', async () => {
+    prismaMock.production_orders.findMany.mockResolvedValue([]);
+    prismaMock.production_orders.count.mockResolvedValue(0);
+    await service.findAll({} as any);
+    expect(prismaMock.production_orders.findMany.mock.calls[0][0].include.product_variant).toEqual({
+      select: { id: true, name: true },
+    });
+    prismaMock.production_orders.findFirst.mockResolvedValue(
+      linkedOrder({ order_id: null, product_variant: { id: 7, name: 'Chocolate' } }),
+    );
+    const detail: any = await service.getDetail(100);
+    expect(prismaMock.production_orders.findFirst.mock.calls[0][0].include.product_variant).toEqual({
+      select: { id: true, name: true },
+    });
+    expect(detail.product_variant).toEqual({ id: 7, name: 'Chocolate' });
+  });
+
+  it('getDetail exposes base_recipe, sale_order and order_lines with add-ons', async () => {
+    prismaMock.production_orders.findFirst.mockResolvedValue(
+      linkedOrder({ due_date: new Date('2026-11-10T10:00:00Z') }),
+    );
+    prismaMock.orders.findFirst.mockResolvedValue({
+      id: 77,
+      order_number: 'ORD-77',
+      state: 'processing',
+      customer_alias: 'Mesa 4',
+      users: { first_name: 'Ana', last_name: 'Ruiz' },
+      fulfillment_schedule: { scheduled_start: new Date('2026-11-10T15:00:00Z') },
+    });
+    prismaMock.order_items.findMany.mockResolvedValue([
+      {
+        id: 501,
+        quantity: 3,
+        notes: 'sin nueces',
+        order_item_options: [
+          {
+            group_name: 'Relleno',
+            option_name: 'Crema',
+            note: 'poca',
+            component_type: 'recipe',
+            component_product_id: 300,
+            component_variant_id: null,
+          },
+        ],
+      },
+    ]);
+    prismaMock.recipes.findMany.mockResolvedValue([
+      {
+        product_id: 300,
+        product_variant_id: null,
+        items: [{ quantity: 2, component_product: { id: 301, name: 'Leche', stock_unit: 'ml' } }],
+      },
+    ]);
+    prismaMock.products.findMany.mockResolvedValue([
+      { id: 300, product_images: [{ image_url: 'k/crema.png' }] },
+    ]);
+
+    const detail: any = await service.getDetail(100);
+
+    expect(detail.base_recipe).toEqual({
+      id: 7,
+      components: [{ product_id: 99, name: 'Harina', quantity: 10, unit: 'g', image_url: null }],
+    });
+    expect(detail.sale_order).toEqual({
+      id: 77,
+      order_number: 'ORD-77',
+      state: 'processing',
+      customer_name: 'Ana Ruiz',
+      due_at: new Date('2026-11-10T15:00:00Z'),
+    });
+    expect(detail.order_lines).toEqual([
+      {
+        order_item_id: 501,
+        quantity: 3,
+        notes: 'sin nueces',
+        addons: [
+          {
+            group_name: 'Relleno',
+            option_name: 'Crema',
+            note: 'poca',
+            image_url: 'signed:k/crema.png',
+            recipe: {
+              components: [
+                { product_id: 301, name: 'Leche', quantity: 2, unit: 'ml', image_url: null },
+              ],
+            },
+          },
+        ],
+      },
+    ]);
+    expect(detail.order_id).toBe(77);
+  });
+
+  it('QUI-995 B2: getDetail of a variant order lists only the sale lines of THAT variant', async () => {
+    prismaMock.production_orders.findFirst.mockResolvedValue(linkedOrder({ product_variant_id: 10 }));
+    prismaMock.orders.findFirst.mockResolvedValue({
+      id: 77, order_number: 'ORD-77', state: 'processing', customer_alias: null, users: null,
+      fulfillment_schedule: null,
+    });
+    prismaMock.order_items.findMany.mockResolvedValue([]);
+    await service.getDetail(100);
+    expect(prismaMock.order_items.findMany.mock.calls[0][0].where).toMatchObject({
+      order_id: 77,
+      product_id: 50,
+      product_variant_id: 10,
+    });
+  });
+
+  it('QUI-995 B2: getDetail of a base-product order only reads lines WITHOUT a variant', async () => {
+    prismaMock.production_orders.findFirst.mockResolvedValue(linkedOrder());
+    prismaMock.production_orders.count.mockResolvedValue(1);
+    prismaMock.orders.findFirst.mockResolvedValue({
+      id: 77, order_number: 'ORD-77', state: 'processing', customer_alias: null, users: null,
+      fulfillment_schedule: null,
+    });
+    prismaMock.order_items.findMany.mockResolvedValue([]);
+    await service.getDetail(100);
+    expect(prismaMock.order_items.findMany.mock.calls[0][0].where).toMatchObject({
+      product_id: 50,
+      product_variant_id: null,
+    });
+  });
+
+  it('QUI-995 A1: complete() waits for the sale lock with a 20 s transaction timeout', async () => {
+    setup({});
+    await service.complete(100, { produced_qty: 3 });
+    expect(prismaMock.$transaction.mock.calls[0][1]).toEqual({ timeout: 20000 });
+  });
+
+  it('getDetail of a manual order returns sale_order null and no lines', async () => {
+    prismaMock.production_orders.findFirst.mockResolvedValue(linkedOrder({ order_id: null }));
+    const detail: any = await service.getDetail(100);
+    expect(detail.sale_order).toBeNull();
+    expect(detail.order_lines).toEqual([]);
+  });
+
+  it('getDetail survives an image signing failure: the detail loads and that image is null', async () => {
+    prismaMock.production_orders.findFirst.mockResolvedValue(linkedOrder({ order_id: null }));
+    prismaMock.products.findMany.mockResolvedValue([
+      { id: 99, product_images: [{ image_url: 'k/harina.png' }] },
+    ]);
+    (service as any).s3Service.signUrl = jest.fn().mockRejectedValue(new Error('S3 down'));
+
+    const detail: any = await service.getDetail(100);
+
+    expect(detail.base_recipe.components).toEqual([
+      { product_id: 99, name: 'Harina', quantity: 10, unit: 'g', image_url: null },
+    ]);
+    expect(detail.sale_order).toBeNull();
+  });
+});
+
+/**
+ * S21 — cancelling production is not cancelling the sale: a cancelled order
+ * linked to a LIVE sale line goes back to draft with "Volver a iniciar".
+ */
+describe('ProductionOrdersService.restart (S21)', () => {
+  const ctx = { store_id: 1, organization_id: 1, user_id: 42, is_super_admin: false };
+  const due = new Date('2026-11-12T15:00:00Z');
+  let service: ProductionOrdersService;
+  let prismaMock: any;
+  let saleLink: { planRestart: jest.Mock };
+  let eventEmitter: { emit: jest.Mock };
+
+  const cancelledOrder = (over: Record<string, unknown> = {}) => ({
+    id: 100,
+    store_id: 1,
+    product_id: 50,
+    recipe_id: 7,
+    order_id: 77,
+    product_variant_id: null,
+    planned_qty: new Prisma.Decimal(1),
+    status: 'cancelled',
+    started_at: new Date('2026-11-10T10:00:00Z'),
+    product: { id: 50, name: 'Torta', sku: 'T', stock_unit: 'u' },
+    recipe: { id: 7, items: [] },
+    ...over,
+  });
+
+  beforeEach(() => {
+    prismaMock = {
+      production_orders: {
+        findFirst: jest.fn().mockResolvedValue(cancelledOrder()),
+        updateMany: jest.fn().mockResolvedValue({ count: 1 }),
+      },
+    };
+    saleLink = {
+      planRestart: jest.fn().mockResolvedValue({ sale_state: 'processing', qty: 4, due_date: due }),
+    };
+    eventEmitter = { emit: jest.fn() };
+    jest.spyOn(RequestContextService, 'getContext').mockReturnValue(ctx as any);
+    service = new ProductionOrdersService(
+      prismaMock,
+      {} as any,
+      {} as any,
+      eventEmitter as any,
+      {} as any,
+      {} as any,
+      {} as any,
+      saleLink as any,
+    );
+  });
+
+  afterEach(() => jest.restoreAllMocks());
+
+  it('moves a cancelled linked order back to draft with the quantity and delivery of the live line, and emits the live update', async () => {
+    prismaMock.production_orders.findFirst
+      .mockResolvedValueOnce(cancelledOrder())
+      .mockResolvedValueOnce(cancelledOrder({ status: 'draft', started_at: null }));
+
+    const restarted: any = await service.restart(100);
+
+    expect(saleLink.planRestart).toHaveBeenCalledWith(77, 100);
+    expect(prismaMock.production_orders.updateMany).toHaveBeenCalledWith({
+      where: { id: 100, status: 'cancelled' },
+      data: expect.objectContaining({ status: 'draft', started_at: null, due_date: due }),
+    });
+    expect(Number(prismaMock.production_orders.updateMany.mock.calls[0][0].data.planned_qty)).toBe(4);
+    expect(restarted.status).toBe('draft');
+    expect(eventEmitter.emit).toHaveBeenCalledWith(
+      'production_order.updated',
+      expect.objectContaining({ id: 100, status: 'draft' }),
+    );
+  });
+
+  it.each(['draft', 'in_progress', 'completed'])('rejects a %s order with PRODUCTION_ORDER_INVALID_STATE', async (status) => {
+    prismaMock.production_orders.findFirst.mockResolvedValue(cancelledOrder({ status }));
+    await expect(service.restart(100)).rejects.toMatchObject({
+      errorCode: 'PRODUCTION_ORDER_INVALID_STATE',
+    });
+    expect(prismaMock.production_orders.updateMany).not.toHaveBeenCalled();
+  });
+
+  it('rejects a manual (unlinked) order with PRODUCTION_ORDER_RESTART_NOT_LINKED', async () => {
+    prismaMock.production_orders.findFirst.mockResolvedValue(cancelledOrder({ order_id: null }));
+    await expect(service.restart(100)).rejects.toMatchObject({
+      errorCode: 'PRODUCTION_ORDER_RESTART_NOT_LINKED',
+    });
+    expect(saleLink.planRestart).not.toHaveBeenCalled();
+    expect(prismaMock.production_orders.updateMany).not.toHaveBeenCalled();
+  });
+
+  it.each(['cancelled', 'refunded', 'finished'])(
+    'rejects with PRODUCTION_ORDER_RESTART_SALE_CLOSED when the sale is %s',
+    async (sale_state) => {
+      saleLink.planRestart.mockResolvedValue({ sale_state, qty: 4, due_date: due });
+      await expect(service.restart(100)).rejects.toMatchObject({
+        errorCode: 'PRODUCTION_ORDER_RESTART_SALE_CLOSED',
+      });
+      expect(prismaMock.production_orders.updateMany).not.toHaveBeenCalled();
+    },
+  );
+
+  it('rejects with PRODUCTION_ORDER_RESTART_NO_LIVE_LINE when no live production line pairs with the order or the sale is gone', async () => {
+    saleLink.planRestart.mockResolvedValue({ sale_state: 'processing', qty: 0, due_date: due });
+    await expect(service.restart(100)).rejects.toMatchObject({
+      errorCode: 'PRODUCTION_ORDER_RESTART_NO_LIVE_LINE',
+    });
+    saleLink.planRestart.mockResolvedValue(null);
+    await expect(service.restart(100)).rejects.toMatchObject({
+      errorCode: 'PRODUCTION_ORDER_RESTART_NO_LIVE_LINE',
+    });
+    expect(prismaMock.production_orders.updateMany).not.toHaveBeenCalled();
+  });
+
+  it('a lost status claim is PRODUCTION_ORDER_CONCURRENT_UPDATE and nothing is emitted', async () => {
+    prismaMock.production_orders.updateMany.mockResolvedValue({ count: 0 });
+    await expect(service.restart(100)).rejects.toMatchObject({
+      errorCode: 'PRODUCTION_ORDER_CONCURRENT_UPDATE',
+    });
+    expect(eventEmitter.emit).not.toHaveBeenCalled();
+  });
+
+  it('getDetail exposes can_restart only for a cancelled order whose sale is active and has a live line', async () => {
+    // Same service, detail path: cancelled + live line -> true.
+    prismaMock.orders = {
+      findFirst: jest.fn().mockResolvedValue({
+        id: 77, order_number: 'ORD-77', state: 'processing', customer_alias: null, users: null,
+        fulfillment_schedule: null,
+      }),
+    };
+    prismaMock.order_items = { findMany: jest.fn().mockResolvedValue([]) };
+    prismaMock.production_orders.count = jest.fn().mockResolvedValue(0);
+    prismaMock.recipes = { findMany: jest.fn().mockResolvedValue([]) };
+    prismaMock.products = { findMany: jest.fn().mockResolvedValue([]) };
+    expect(((await service.getDetail(100)) as any).can_restart).toBe(true);
+
+    saleLink.planRestart.mockResolvedValue({ sale_state: 'finished', qty: 4, due_date: due });
+    expect(((await service.getDetail(100)) as any).can_restart).toBe(false);
+
+    prismaMock.production_orders.findFirst.mockResolvedValue(cancelledOrder({ status: 'in_progress' }));
+    expect(((await service.getDetail(100)) as any).can_restart).toBe(false);
+  });
+
+  it('cancel() keeps its previous behavior: cancels an in-progress order and emits', async () => {
+    prismaMock.production_orders.findFirst.mockResolvedValue(cancelledOrder({ status: 'in_progress' }));
+    prismaMock.production_orders.update = jest.fn().mockResolvedValue({ id: 100, status: 'cancelled' });
+    await service.cancel(100);
+    expect(prismaMock.production_orders.update).toHaveBeenCalledWith({
+      where: { id: 100 },
+      data: expect.objectContaining({ status: 'cancelled' }),
     });
   });
 });

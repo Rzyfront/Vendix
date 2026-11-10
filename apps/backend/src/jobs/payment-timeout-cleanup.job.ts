@@ -4,6 +4,10 @@ import { EventEmitter2 } from '@nestjs/event-emitter';
 import { GlobalPrismaService } from '../prisma/services/global-prisma.service';
 import { syncDenormalizedProductStock } from '../domains/store/inventory/shared/helpers/sync-product-stock.helper';
 import { OrderHistoryService } from '../domains/store/orders/order-history/order-history.service';
+import {
+  PRODUCTION_SALE_CANCELLED_EVENT,
+  requestProductionSaleSync,
+} from '../domains/store/production/production-sale-sync';
 
 @Injectable()
 export class PaymentTimeoutCleanupJob {
@@ -247,6 +251,21 @@ export class PaymentTimeoutCleanupJob {
         },
       });
     });
+
+    // QUI-995: the sale's production orders follow it. After the commit and
+    // best-effort (a failure never undoes the cancellation). `release`: the
+    // reservations were already returned above, nothing is written off.
+    await requestProductionSaleSync(
+      this.eventEmitter as any,
+      this.logger,
+      {
+        order_id: order.id,
+        store_id: order.store_id,
+        disposition: 'release',
+        reason: 'Pago no completado - cancelación automática por timeout (2h)',
+      },
+      PRODUCTION_SALE_CANCELLED_EVENT,
+    );
   }
 
   /**

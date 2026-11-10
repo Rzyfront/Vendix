@@ -313,6 +313,7 @@ export class MenuFilterService {
     Lista: 'products_list',
     Categorías: 'products_categories',
     Marcas: 'products_brands',
+    Adiciones: 'products_option_groups',
     'Tienda en línea': 'ecommerce',
 
     // STORE_ADMIN - Órdenes (padre + submódulos)

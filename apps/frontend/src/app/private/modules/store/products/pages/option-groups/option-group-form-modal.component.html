@@ -3,7 +3,7 @@
   (cancel)="cancel.emit()"
   size="lg"
   [title]="group() ? 'Editar grupo de adiciones' : 'Nuevo grupo de adiciones'"
-  subtitle="Define qué adiciones puede elegir el cliente y qué componente descuenta cada una"
+  subtitle="Busca el insumo, producto o preparación de cada adición y ajusta solo lo que cambie"
 >
   <form [formGroup]="form" (ngSubmit)="submit()" class="space-y-4">
     <app-input
@@ -40,10 +40,12 @@
     <div class="space-y-3">
       <div class="flex items-center justify-between gap-3">
         <h4 class="text-sm font-semibold text-text-primary">Adiciones</h4>
-        <app-button variant="outline" size="sm" type="button" (clicked)="addOption()">
-          <app-icon slot="icon" name="plus" [size]="14" />
-          Agregar adición
-        </app-button>
+        @if (!adding()) {
+          <app-button variant="outline" size="sm" type="button" (clicked)="openAdd()">
+            <app-icon slot="icon" name="plus" [size]="14" />
+            Agregar adición
+          </app-button>
+        }
       </div>
 
       @if (optionsError()) {
@@ -51,28 +53,23 @@
       }
 
       @for (row of optionRows; track row; let i = $index) {
-        <div
-          class="rounded-lg border border-border p-3 grid grid-cols-1 md:grid-cols-12 gap-3 items-end"
-          [formGroup]="row"
-        >
-          <div class="md:col-span-4">
-            <app-input label="Nombre *" formControlName="name" placeholder="Ej: Fresas" />
-          </div>
-          <div class="md:col-span-3">
-            <app-input
-              label="Precio adicional"
-              formControlName="price_delta"
-              [currency]="true"
-            />
-          </div>
-          <div class="md:col-span-3">
-            <app-selector
-              label="Tipo de componente"
-              formControlName="component_type"
-              [options]="componentTypeOptions"
-            />
-          </div>
-          <div class="md:col-span-2 flex md:justify-end">
+        <div class="rounded-lg border border-border p-3 space-y-3" [formGroup]="row">
+          <div class="flex items-center gap-3">
+            <div
+              class="h-12 w-12 shrink-0 overflow-hidden rounded-lg bg-surface flex items-center justify-center text-text-secondary"
+            >
+              @if (imageOf(row); as src) {
+                <img [src]="src" [alt]="componentNameOf(row)" class="h-full w-full object-cover" />
+              } @else {
+                <app-icon name="image" [size]="20" />
+              }
+            </div>
+            <div class="min-w-0 flex-1">
+              <p class="truncate text-sm font-medium text-text-primary">
+                {{ componentNameOf(row) || row.controls.name.value }}
+              </p>
+              <p class="text-xs text-text-secondary">{{ typeLabelOf(row) }}</p>
+            </div>
             <app-button
               variant="outline-danger"
               size="sm"
@@ -84,33 +81,79 @@
             </app-button>
           </div>
 
-          <div class="md:col-span-6">
-            <app-selector
-              label="Componente *"
-              formControlName="component_product_id"
-              placeholder="Busca un insumo, preparación o producto"
-              [options]="productOptions()"
-              [searchable]="true"
-              (valueChange)="optionsError.set(null)"
-            />
-          </div>
-          <div class="md:col-span-3">
-            <app-input label="Cantidad" type="number" [min]="0" step="0.0001" formControlName="quantity" />
-          </div>
-          <div class="md:col-span-3">
-            <app-selector
-              label="Unidad"
-              formControlName="uom"
-              placeholder="Sin unidad"
-              [options]="uomOptions()"
-            />
+          <div class="grid grid-cols-1 md:grid-cols-12 gap-3 items-end">
+            <div class="md:col-span-4">
+              <app-input label="Nombre *" formControlName="name" placeholder="Ej: Fresas" />
+            </div>
+            <div class="md:col-span-3">
+              <app-input
+                label="Precio adicional"
+                formControlName="price_delta"
+                [currency]="true"
+              />
+            </div>
+            <div class="md:col-span-2">
+              <app-input label="Cantidad" type="number" [min]="0" step="0.0001" formControlName="quantity" />
+            </div>
+            <div class="md:col-span-3">
+              <app-selector
+                label="Unidad"
+                formControlName="uom"
+                placeholder="Sin unidad"
+                [options]="uomOptions()"
+              />
+            </div>
           </div>
 
           @if (row.controls.estimated_cost.value; as cost) {
-            <p class="md:col-span-12 text-xs text-text-secondary">
-              Costo estimado: {{ cost }}
-            </p>
+            <p class="text-xs text-text-secondary">Costo estimado: {{ cost }}</p>
           }
+        </div>
+      }
+
+      @if (adding()) {
+        <div class="rounded-lg border border-dashed border-border p-3 space-y-2">
+          <app-inputsearch
+            placeholder="Busca un insumo, producto o preparación"
+            [autofocus]="true"
+            (searchChange)="onSearch($event)"
+          />
+          @if (searchLoading()) {
+            <p class="text-xs text-text-secondary">Buscando...</p>
+          } @else if (searchResults().length === 0) {
+            <p class="text-xs text-text-secondary">Sin resultados.</p>
+          } @else {
+            <ul class="max-h-60 overflow-y-auto divide-y divide-border rounded-lg border border-border">
+              @for (product of searchResults(); track product.id) {
+                <li>
+                  <button
+                    type="button"
+                    class="flex w-full items-center gap-3 px-3 py-2 text-left hover:bg-surface"
+                    (click)="pickProduct(product)"
+                  >
+                    <span
+                      class="h-9 w-9 shrink-0 overflow-hidden rounded-md bg-surface flex items-center justify-center text-text-secondary"
+                    >
+                      @if (product.image_url) {
+                        <img [src]="product.image_url" [alt]="product.name" class="h-full w-full object-cover" />
+                      } @else {
+                        <app-icon name="image" [size]="16" />
+                      }
+                    </span>
+                    <span class="min-w-0 flex-1 truncate text-sm text-text-primary">
+                      {{ product.name }}
+                      @if (product.sku) {
+                        <span class="text-xs text-text-secondary">({{ product.sku }})</span>
+                      }
+                    </span>
+                  </button>
+                </li>
+              }
+            </ul>
+          }
+          <div class="flex justify-end">
+            <app-button variant="outline" size="sm" type="button" (clicked)="closeAdd()">Cancelar</app-button>
+          </div>
         </div>
       }
     </div>

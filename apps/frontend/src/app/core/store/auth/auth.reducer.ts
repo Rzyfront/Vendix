@@ -441,9 +441,17 @@ export const authReducer = createReducer(
   })),
 
   on(AuthActions.updateUserSettingsSuccess, (state, { user_settings }) => {
+    // The server row keeps the user's home app_type (e.g. ORG_ADMIN) and knows
+    // nothing about the environment the user switched to. Saving settings must
+    // never change the active environment, so keep the one already in the
+    // store (saveAuthState mirrors it into vendix_user_environment).
+    const activeAppType = state.user_settings?.app_type;
     const newState = {
       ...state,
-      user_settings,
+      user_settings:
+        activeAppType && user_settings
+          ? { ...user_settings, app_type: activeAppType }
+          : user_settings,
       loading: false,
       error: null,
     };
