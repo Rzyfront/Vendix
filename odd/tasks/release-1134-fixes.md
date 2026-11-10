@@ -337,3 +337,8 @@ Orden: este plan va antes que `pedidos-programados-ux`. Los dos tocan `payments.
     - A6: el consumo de KDS cambia cuando un plato se repite con receta fraccionada, como pidió S7.
     - A7: el rollback se prueba con un mock que registra commit o rollback.
     - A8: Planta no admite 6+6 de 10; el beneficio real está en `restart`.
+- L12 (2026-11-10, RDD nativa sobre 45b820c05..77e9bf61d, escalada por ítem 1, consentida por Rafael): aprobada con 3 lentes (riesgo, resiliencia y fiabilidad); acuse hecho y autoridad consumida (`review-895554f23b3bbce9`). Avisos no bloqueantes:
+  - R3-start-manual-source: refutado. Solo Planta escribe `source='manual'` (`manufacturing-orders.service.ts:242`); restaurante crea con `source` nulo (`production-orders.service.ts:322`) y la venta con `'order'`.
+  - R3-guard-vs-consume-rounding: refutado. La rama de líneas resueltas del guard redondea por línea, igual que el consumo (`kitchen-fire.service.ts:623-633`).
+  - R3-held-overreserve y R4-partial-release-unadjusted: solo en la rama de fallo de la merma; van al PR como bajos, junto a A1 y A3.
+  - R3-dispositions-duplicates: es A4; va al PR.
