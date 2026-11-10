@@ -17,6 +17,12 @@ import { SerialNumberEnforcementService } from '../../serial-numbers/serial-numb
 import { InventorySerialNumbersService } from '../../serial-numbers/inventory-serial-numbers.service';
 import { resolveLineStockUnits } from '../../../products/services/packaging.util';
 import { lineConsumesOwnStock } from '../../../orders/utils/resolve-line-destination.util';
+import { RecipesService } from '../../../recipes/recipes.service';
+import {
+  createBatchAwareExploders,
+  expandProduction,
+} from '../../../kitchen-fire/addon-consumption';
+import { StockValidatorService } from './stock-validator.service';
 
 /**
  * Options that drive a single delivery-commit run. The same contract is shared
@@ -168,6 +174,11 @@ export class OrderStockCommitService {
     private readonly allocator: SellableStockAllocator,
     private readonly serialEnforcement: SerialNumberEnforcementService,
     private readonly serialNumbers: InventorySerialNumbersService,
+    // QUI-999: add-ons of a `stock` line are consumed with the line's own
+    // commit. Optional in the signature so call sites that never sell add-ons
+    // (dispatch specs) keep constructing the service without them.
+    private readonly recipes?: RecipesService,
+    private readonly stockValidator?: StockValidatorService,
   ) {}
 
   /**
@@ -318,6 +329,15 @@ export class OrderStockCommitService {
             product_variants: {
               select: { id: true, track_inventory_override: true, name: true },
             },
+            order_item_options: {
+              select: {
+                scope: true,
+                component_type: true,
+                component_product_id: true,
+                component_variant_id: true,
+                quantity: true,
+              },
+            },
           },
         },
       },
@@ -380,8 +400,22 @@ export class OrderStockCommitService {
       for (const row of done ?? []) producedProductIds.add(row.product_id);
     }
 
+    // One pool per commit run: two lines cannot take the same batch stock.
+    const addonPool = new Map();
+
     for (const item of order.order_items || []) {
       if (!item.product_id) continue;
+
+      // QUI-999: a `stock` line consumes its add-ons where the line is
+      // consumed (here); `kds` lines at the kitchen fire, `production` lines
+      // at production completion, legacy (NULL) lines at the scheduled start.
+      totalCost += await this.consumeStockLineAddons(
+        item,
+        (order as any).store_id,
+        addonPool,
+        tx,
+        opts,
+      );
 
       const effectiveTracking =
         item.product_variants?.track_inventory_override ??
@@ -440,6 +474,95 @@ export class OrderStockCommitService {
     }
 
     return { totalCost, committedItemCount };
+  }
+
+  /**
+   * Consumes the add-ons of ONE `stock` line, once. Claims
+   * `order_items.addons_consumed_at` first (`updateMany where addons_consumed_at
+   * null`, the same claim the fire, the scheduled start and the production
+   * completion use), so a repeat commit or a concurrent path never deducts them
+   * twice. Returns the cost to add to the commit total.
+   */
+  private async consumeStockLineAddons(
+    item: any,
+    storeId: number,
+    pool: Map<any, any>,
+    tx: Prisma.TransactionClient,
+    opts: CommitOpts,
+  ): Promise<number> {
+    const options: any[] = item.order_item_options ?? [];
+    if (
+      item.fulfillment_destination !== 'stock' ||
+      item.cancelled_at != null ||
+      item.addons_consumed_at != null ||
+      options.length === 0 ||
+      !this.recipes ||
+      !this.stockValidator
+    ) {
+      return 0;
+    }
+    const db: any = tx;
+    const claimed = await db.order_items.updateMany({
+      where: { id: item.id, addons_consumed_at: null },
+      data: { addons_consumed_at: new Date() },
+    });
+    if (claimed.count === 0) return 0;
+
+    const resolvers = createBatchAwareExploders({
+      recipes: this.recipes,
+      stockValidator: this.stockValidator,
+      client: tx,
+      pool,
+    });
+    // Add-ons only: the dish itself is not expanded here (`product_type: null`).
+    const { consumption } = await expandProduction(
+      [
+        {
+          id: item.id,
+          product_id: item.product_id,
+          product_variant_id: item.product_variant_id ?? null,
+          quantity: Number(item.quantity),
+          product_type: null,
+          inventory_consumed: true,
+          addons_consumed: false,
+          options: options.map((o) => ({ ...o, quantity: Number(o.quantity) })),
+        },
+      ],
+      resolvers.findRecipe,
+      resolvers.explode,
+      resolvers.explodeComponent,
+    );
+    if (!consumption.length) return 0;
+
+    const policy = await this.stockValidator.resolveInventoryPolicy(storeId, tx);
+    const allowOveruse = policy.allowIngredientOveruse;
+    const userId = opts.userId ?? RequestContextService.getContext()?.user_id;
+    let cost = 0;
+    for (const line of consumption) {
+      const location_id = await this.stockLevelManager.getDefaultLocationForProduct(
+        line.product_id,
+        line.variant_id ?? undefined,
+        tx,
+      );
+      const result = await this.stockLevelManager.updateStock(
+        {
+          product_id: line.product_id,
+          ...(line.variant_id ? { variant_id: line.variant_id } : {}),
+          location_id,
+          quantity_change: -line.quantity,
+          movement_type: 'consumption',
+          reason: `Adiciones de la línea ${item.id} (${opts.reason})`,
+          source_module: 'order_stock_commit_addons',
+          user_id: userId ?? undefined,
+          create_movement: true,
+          validate_availability: !allowOveruse,
+          allow_negative: allowOveruse,
+        },
+        tx,
+      );
+      cost += Number(result?.cost_snapshot?.total_cost ?? 0);
+    }
+    return cost;
   }
 
   /**

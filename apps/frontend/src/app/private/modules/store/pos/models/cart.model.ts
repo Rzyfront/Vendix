@@ -482,7 +482,7 @@ export function cartOptionLines(
 
 /**
  * QUI-999 — what the POS offers for a line, following the decision matrix:
- *  - `choose`: producible with stock -> selector "Del stock / A producción".
+ *  - `choose`: producible with stock >= quantity -> selector "Del stock / A producción".
  *  - `production`: producible without stock or without inventory -> fixed badge.
  *  - `null`: not producible (the server decides: KDS or stock) or custom line.
  * `is_producible` comes from the POS product payload (batch-produced with an
@@ -495,7 +495,7 @@ export function isProducibleProduct(product: Product | undefined | null): boolea
 }
 
 export function fulfillmentModeForLine(
-  item: Pick<CartItem, 'itemType' | 'product' | 'booking'>,
+  item: Pick<CartItem, 'itemType' | 'product' | 'booking' | 'quantity'>,
 ): LineFulfillmentMode {
   if (item.itemType === 'custom' || item.booking) return null;
   if (!isProducibleProduct(item.product)) return null;
@@ -503,12 +503,22 @@ export function fulfillmentModeForLine(
     item.product.effective_track_inventory !== false &&
     item.product.track_inventory !== false;
   const stock = Number(item.product.available_stock ?? item.product.stock ?? 0);
-  return tracksInventory && stock > 0 ? 'choose' : 'production';
+  // Server rule (`resolveLineDestination`): stock covers the line only when
+  // `available >= quantity`. Offering the choice with less stock than the
+  // quantity would let the server override it to production behind the
+  // cashier's back, so the selector shows only when the whole line fits.
+  const quantity = Number(item.quantity ?? 0);
+  return tracksInventory && stock > 0 && stock >= quantity
+    ? 'choose'
+    : 'production';
 }
 
 /** Destination chip of the line: the cashier's choice or the fixed one. */
 export function cartLineDestination(
-  item: Pick<CartItem, 'itemType' | 'product' | 'booking' | 'fulfillmentChoice'>,
+  item: Pick<
+    CartItem,
+    'itemType' | 'product' | 'booking' | 'fulfillmentChoice' | 'quantity'
+  >,
 ): FulfillmentChoice | null {
   const mode = fulfillmentModeForLine(item);
   if (mode === 'production') return 'production';

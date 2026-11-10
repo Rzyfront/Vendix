@@ -1314,6 +1314,13 @@ export class PosCartService {
       originalFinalPrice: Number(
         item.catalog_final_price ?? item.final_unit_price ?? finalUnitPrice,
       ),
+      // QUI-999 — an edited order keeps the destination the cashier chose; the
+      // server honors the client's choice over the persisted one, so a line
+      // saved "A producción" must not come back as the default "Del stock".
+      ...(item.fulfillment_destination === 'stock' ||
+      item.fulfillment_destination === 'production'
+        ? { fulfillmentChoice: item.fulfillment_destination }
+        : {}),
       ...this.mapOrderItemOptions(item, quantity),
     } as CartItem;
   }

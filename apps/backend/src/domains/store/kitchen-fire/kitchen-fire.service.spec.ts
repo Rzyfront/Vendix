@@ -1326,6 +1326,53 @@ describe('KitchenFireService — fireOrderItems() (Fase D smoke)', () => {
     expect(eventEmitter.emit).not.toHaveBeenCalled();
   });
 
+  it.each(['stock', 'production'])(
+    'B6: a table with a dish and a `%s` line (skip_kds=true) fires the dish and skips the other line',
+    async (destination) => {
+      const items = [
+        makeOrderItem(10, 50, 'prepared'),
+        { ...makeOrderItem(12, 52, 'physical'), skip_kds: true, fulfillment_destination: destination },
+      ];
+      setupFireableContext(items);
+      const ticketCreate = setupFireTransaction(10);
+
+      const result = await service.fireOrderItems({ order_id: 100, order_item_ids: [10, 12] });
+
+      expect(result.fired_item_ids).toEqual([10]);
+      expect(result.skipped_item_ids).toEqual([12]);
+      const created = ticketCreate.mock.calls[0][0].data.items.create;
+      expect(created.map((c: any) => c.order_item_id)).toEqual([10]);
+    },
+  );
+
+  it('B6: a prepared `stock` line (skip_kds=true) alone is omitted, never rejected with KITCHEN_FIRE_NOT_ELIGIBLE_001', async () => {
+    setupFireableContext([
+      { ...makeOrderItem(11, 51, 'prepared'), skip_kds: true, fulfillment_destination: 'stock' },
+    ]);
+    await expect(
+      service.fireOrderItems({ order_id: 100, order_item_ids: [11] }),
+    ).rejects.toMatchObject({ errorCode: 'KITCHEN_FIRE_ALL_ALREADY_CONSUMED' });
+    expect(stockLevelManager.updateStock).not.toHaveBeenCalled();
+  });
+
+  it('B6 control: a legacy line (destination NULL) with skip_kds=true still rejects with KITCHEN_FIRE_NOT_ELIGIBLE_001', async () => {
+    setupFireableContext([
+      { ...makeOrderItem(11, 51, 'prepared'), skip_kds: true, fulfillment_destination: null },
+    ]);
+    await expect(
+      service.fireOrderItems({ order_id: 100, order_item_ids: [11] }),
+    ).rejects.toMatchObject({ errorCode: 'KITCHEN_FIRE_NOT_ELIGIBLE_001' });
+  });
+
+  it('B6 control: a `kds` line still fires', async () => {
+    setupFireableContext([
+      { ...makeOrderItem(10, 50, 'prepared'), skip_kds: false, fulfillment_destination: 'kds' },
+    ]);
+    setupFireTransaction(10);
+    const result = await service.fireOrderItems({ order_id: 100, order_item_ids: [10] });
+    expect(result.fired_item_ids).toEqual([10]);
+  });
+
   it('rejects a manual fire for skip_kds items before opening the transaction', async () => {
     const item = { ...makeOrderItem(11, 51, 'prepared'), skip_kds: true };
     setupFireableContext([item]);

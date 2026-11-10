@@ -1984,6 +1984,35 @@ describe('CheckoutService - promotions and coupons', () => {
       expect((service as any).stockLevelManager.reserveStock).not.toHaveBeenCalled();
     });
 
+    it('B3: a producible finished good (physical) with no stock goes to production, without reserving or INV_STOCK_001', async () => {
+      setupStore({
+        industries: ['restaurant'],
+        batch: true,
+        recipes: 1,
+        stock: 0,
+        productType: 'physical',
+      });
+      const line = await run();
+      expect(line).toMatchObject({
+        fulfillment_destination: 'production',
+        skip_kds: true,
+      });
+      expect((service as any).stockLevelManager.reserveStock).not.toHaveBeenCalled();
+    });
+
+    it('B3 control: a retail (non restaurant) physical line with stock still reserves', async () => {
+      setupStore({
+        industries: [],
+        batch: false,
+        recipes: 0,
+        stock: 5,
+        productType: 'physical',
+      });
+      const line = await run();
+      expect(line).not.toHaveProperty('fulfillment_destination');
+      expect((service as any).stockLevelManager.reserveStock).toHaveBeenCalledTimes(1);
+    });
+
     it('producible con stock sale del stock por defecto y reserva', async () => {
       setupStore({ industries: ['restaurant'], batch: true, recipes: 1, stock: 5 });
       const line = await run();

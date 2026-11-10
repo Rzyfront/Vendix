@@ -61,6 +61,7 @@ import {
   AddCustomItemRequest,
   CartSummary,
   deliveryTypeToEntregaChoice,
+  fulfillmentModeForLine,
 } from './models/cart.model';
 import { PosSplitBillModalComponent } from './components/pos-split-bill-modal.component';
 import {
@@ -2443,6 +2444,7 @@ export class PosComponent {
       product_variant_id?: number;
       is_takeaway?: boolean;
       notes?: string;
+      fulfillment_destination?: 'stock' | 'production';
     }> = [];
     for (const it of cart?.items ?? []) {
       if (it.itemType === 'custom') continue;
@@ -2459,6 +2461,7 @@ export class PosComponent {
         product_variant_id?: number;
         is_takeaway?: boolean;
         notes?: string;
+        fulfillment_destination?: 'stock' | 'production';
       } = {
         product_id: productId,
         quantity: it.quantity,
@@ -2468,6 +2471,11 @@ export class PosComponent {
       // backend ya tiene default false.
       if (it.isTakeaway) {
         line.is_takeaway = true;
+      }
+      // QUI-999 — the cashier's "Del stock / A producción" choice, only for
+      // lines the matrix lets them choose (same rule as the payment path).
+      if (fulfillmentModeForLine(it) === 'choose') {
+        line.fulfillment_destination = it.fulfillmentChoice ?? 'stock';
       }
       if (it.variant_id != null) {
         line.product_variant_id = it.variant_id;

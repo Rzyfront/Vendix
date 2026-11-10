@@ -1282,6 +1282,7 @@ export class OrderItemChangesService {
           product_id: a.product_id,
           product_variant_id: a.product_variant_id,
           quantity: a.quantity,
+          requested: a.fulfillment_destination ?? null,
         })),
       );
 

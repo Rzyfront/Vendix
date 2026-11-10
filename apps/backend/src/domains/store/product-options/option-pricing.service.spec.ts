@@ -115,10 +115,19 @@ describe('OptionPricingService.resolve', () => {
     await expect(service.resolve(1, 5, [21], 1, { scheduled: true })).rejects.toThrow();
   });
 
-  it('en una venta sin pedido programado rechaza adiciones: no habría quién las descuente', async () => {
+  it('fuera de restaurante, una venta sin pedido programado rechaza adiciones (compuerta de T4 sin cambios)', async () => {
     await expect(build(true, [frutas]).resolve(1, 5, [11], 1, { scheduled: false })).rejects.toMatchObject({
       errorCode: 'OPT_REQUIRES_SCHEDULE',
     });
+    await expect(
+      build(true, [frutas]).resolve(1, 5, [11], 1, { scheduled: false, restaurant: false }),
+    ).rejects.toMatchObject({ errorCode: 'OPT_REQUIRES_SCHEDULE' });
+  });
+
+  it('QUI-999 B1: en restaurante una venta para ya (sin pedido programado) acepta adiciones', async () => {
+    const result = await build(true, [frutas]).resolve(1, 5, [11], 2, { scheduled: false, restaurant: true });
+    expect(result.snapshots.map((x) => x.option_id)).toEqual([11]);
+    expect(result.unit_price_delta.toNumber()).toBe(5000);
   });
 
   it('en una venta sin pedido programado y sin ids vende el producto solo, aun con grupo obligatorio', async () => {

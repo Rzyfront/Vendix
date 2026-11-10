@@ -102,4 +102,63 @@ describe('resolveLineDestinations', () => {
     expect(out[1]?.destination).toBe('production');
     expect(out[2]?.destination).toBe('stock');
   });
+
+  describe('B2 — edit path counts the order own reservation as available', () => {
+    const previous = new Map([['1:null', { fulfillment_destination: 'stock' }]]);
+    const withReservations = (available: number, reserved: number) => ({
+      ...clientWith({
+        industries: ['restaurant'],
+        products: [productRow({ id: 1 })],
+        levels: available > 0 ? [{ product_id: 1, product_variant_id: null, quantity_available: available }] : [],
+      }),
+      stock_reservations: {
+        findMany: jest
+          .fn()
+          .mockResolvedValue(reserved > 0 ? [{ product_id: 1, product_variant_id: null, quantity: reserved }] : []),
+      },
+    });
+
+    it('2 on hand, 2 reserved by this order (available 0): a "stock" line stays stock', async () => {
+      const client = withReservations(0, 2);
+      const [r] = await resolveLineDestinations(
+        client,
+        5,
+        [{ product_id: 1, product_variant_id: null, quantity: 2 }],
+        { previous, orderId: 77 },
+      );
+      expect(r?.destination).toBe('stock');
+      expect(client.stock_reservations.findMany).toHaveBeenCalledWith(
+        expect.objectContaining({
+          where: expect.objectContaining({
+            reserved_for_type: 'order',
+            reserved_for_id: 77,
+            status: 'active',
+          }),
+        }),
+      );
+    });
+
+    it('without orderId the reservation is not read and the old behavior holds (production)', async () => {
+      const client = withReservations(0, 2);
+      const [r] = await resolveLineDestinations(
+        client,
+        5,
+        [{ product_id: 1, product_variant_id: null, quantity: 2 }],
+        { previous },
+      );
+      expect(client.stock_reservations.findMany).not.toHaveBeenCalled();
+      expect(r?.destination).toBe('production');
+    });
+
+    it('the client explicit choice wins over the persisted destination (B4)', async () => {
+      const client = withReservations(9, 0);
+      const [r] = await resolveLineDestinations(
+        client,
+        5,
+        [{ product_id: 1, product_variant_id: null, quantity: 1, requested: 'production' }],
+        { previous, orderId: 77 },
+      );
+      expect(r?.destination).toBe('production');
+    });
+  });
 });

@@ -4739,6 +4739,71 @@ describe('OrdersService', () => {
       } as any);
     };
 
+    describe('QUI-999 B2/B4 — destino al editar items', () => {
+      const dish = {
+        id: 51, price_unit_quantity: null, product_tax_assignments: [],
+        product_type: 'physical', is_batch_produced: true, track_inventory: true,
+        _count: { recipes: 1 },
+      };
+      const arrangeEdit = (prevDestination: string | null, available: number, reserved: number) => {
+        arrange();
+        mockPrismaService.orders.findFirst.mockResolvedValue({
+          id: 700, store_id: 1, state: 'draft', shipping_cost: '0.00',
+          order_items: [
+            { product_id: 51, product_variant_id: null, fulfillment_destination: prevDestination },
+          ],
+        } as any);
+        mockPrismaService.products.findMany.mockResolvedValue([dish] as any);
+        mockPrismaService.products.findUnique.mockResolvedValue({
+          id: 51, name: 'Torta', product_type: 'physical', product_variants: [],
+        } as any);
+        mockPrismaService.stores.findUnique.mockResolvedValue({ industries: ['restaurant'] } as any);
+        (mockPrismaService as any).stock_levels = {
+          findMany: jest.fn().mockResolvedValue(
+            available > 0 ? [{ product_id: 51, product_variant_id: null, quantity_available: available }] : [],
+          ),
+        };
+        (mockPrismaService as any).stock_reservations = {
+          findMany: jest.fn().mockResolvedValue(
+            reserved > 0 ? [{ product_id: 51, product_variant_id: null, quantity: reserved }] : [],
+          ),
+        };
+      };
+      const editDto = (extra: Record<string, unknown> = {}) => ({
+        items: [{ product_id: 51, product_name: 'Torta', quantity: 2, unit_price: 100, total_price: 200, ...extra }],
+      } as any);
+      const persisted = () => mockPrismaService.order_items.create.mock.calls[0][0].data;
+
+      afterEach(() => {
+        mockPrismaService.stores.findUnique.mockReset();
+        delete (mockPrismaService as any).stock_levels;
+        delete (mockPrismaService as any).stock_reservations;
+      });
+
+      it('B2: a "Del stock" line whose units are all held by this order stays stock after the edit', async () => {
+        arrangeEdit('stock', 0, 2);
+        await service.updateOrderItems(700, editDto());
+        expect(persisted()).toMatchObject({ fulfillment_destination: 'stock', skip_kds: true });
+        expect((mockPrismaService as any).stock_reservations.findMany).toHaveBeenCalledWith(
+          expect.objectContaining({
+            where: expect.objectContaining({ reserved_for_type: 'order', reserved_for_id: 700 }),
+          }),
+        );
+      });
+
+      it('B4: the cashier choice sent in the edit wins over the persisted destination', async () => {
+        arrangeEdit('stock', 5, 0);
+        await service.updateOrderItems(700, editDto({ fulfillment_destination: 'production' }));
+        expect(persisted()).toMatchObject({ fulfillment_destination: 'production', skip_kds: true });
+      });
+
+      it('control: a legacy line (NULL destination) stays without destination', async () => {
+        arrangeEdit(null, 0, 0);
+        await service.updateOrderItems(700, editDto());
+        expect(persisted()).not.toHaveProperty('fulfillment_destination');
+      });
+    });
+
     it('rejects a stock shortfall before releasing old reservations or replacing lines', async () => {
       arrange();
       const shortage = new VendixHttpException(

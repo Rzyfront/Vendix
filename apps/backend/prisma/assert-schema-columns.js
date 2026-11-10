@@ -223,7 +223,10 @@ const REQUIRED_TABLES = [
 ];
 
 /** Tipos enum que el schema referencia y la base debe conocer. */
-const REQUIRED_ENUM_TYPES = ['aiu_component_enum'];
+const REQUIRED_ENUM_TYPES = [
+  'aiu_component_enum',
+  'order_item_fulfillment_destination_enum',
+];
 
 /**
  * Valores concretos que un enum YA EXISTENTE debe tener.

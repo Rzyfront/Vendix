@@ -324,6 +324,39 @@ describe('order-action-policy — canDeliverItem (B1b)', () => {
     });
   });
 
+  describe('QUI-999 B7 — lines the KDS does not manage', () => {
+    it.each(['stock', 'production'])(
+      'a prepared-typed line sent to %s (skip_kds=true) is deliverable per item',
+      (fulfillment_destination) =>
+        expect(
+          canDeliverItem(item({ item_type: 'prepared', product_type: 'prepared', skip_kds: true, fulfillment_destination })),
+        ).toEqual({ enabled: true }),
+    );
+
+    it('a legacy prepared line with skip_kds=true is deliverable per item', () =>
+      expect(
+        canDeliverItem(item({ item_type: 'prepared', skip_kds: true, fulfillment_destination: null })),
+      ).toEqual({ enabled: true }));
+
+    it('control: a `kds` line still needs the kitchen to mark it ready', () =>
+      expect(
+        canDeliverItem(item({ item_type: 'prepared', skip_kds: false, fulfillment_destination: 'kds' })),
+      ).toEqual({ enabled: false, reason: ITEM_NOT_DELIVERABLE }));
+
+    it('control: a legacy prepared line with skip_kds=false still needs the kitchen', () =>
+      expect(canDeliverItem(item({ item_type: 'prepared', skip_kds: false }))).toEqual({
+        enabled: false,
+        reason: ITEM_NOT_DELIVERABLE,
+      }));
+
+    it('an existing kitchen ticket always wins, even on a stock line', () =>
+      expect(
+        canDeliverItem(
+          item({ item_type: 'prepared', skip_kds: true, fulfillment_destination: 'stock', latestKitchenStatus: 'firing' }),
+        ),
+      ).toEqual({ enabled: false, reason: ITEM_NOT_DELIVERABLE }));
+  });
+
   describe('kitchen_mode', () => {
     it.each(['pending', 'in_preparation'])(
       'physical + %s => enabled',

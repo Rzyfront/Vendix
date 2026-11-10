@@ -2082,6 +2082,7 @@ export class OrdersService {
         item_type: item.item_type,
         product_type: item.products?.product_type,
         skip_kds: item.skip_kds,
+        fulfillment_destination: item.fulfillment_destination ?? null,
         delivered_at: item.delivered_at,
         cancelled_at: item.cancelled_at,
         latestKitchenStatus: item.kitchen_ticket_items?.[0]?.status,
@@ -3582,8 +3583,11 @@ export class OrdersService {
       const updateLineDestinations = await resolveLineDestinations(
         tx,
         order.store_id,
-        dto.items,
-        { previous: previousSaleByKey },
+        dto.items.map((item) => ({
+          ...item,
+          requested: item.fulfillment_destination ?? null,
+        })),
+        { previous: previousSaleByKey, orderId: id },
       );
 
       const inventoryPolicy = await this.stockValidator!.resolveInventoryPolicy(order.store_id, tx);

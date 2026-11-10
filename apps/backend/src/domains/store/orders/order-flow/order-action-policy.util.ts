@@ -708,6 +708,9 @@ export interface OrderItemActionSnapshot {
   item_type?: string | null;
   product_type?: string | null;
   skip_kds?: boolean | null;
+  /** QUI-999: where the line is fulfilled (`kds` | `stock` | `production`);
+   * NULL for a legacy line. */
+  fulfillment_destination?: string | null;
   delivered_at?: Date | string | null;
   cancelled_at?: Date | string | null;
   /** Latest (most recent) kitchen-ticket-item status for this order item,
@@ -757,9 +760,17 @@ export function canDeliverItem(item: OrderItemActionSnapshot): OrderActionResult
   // to deliver them. A line that already has a real ticket keeps requiring
   // `ready` regardless of the store's current industry flag.
   const isRestaurant = item.isRestaurant ?? true;
+  // QUI-999: the KDS does not manage a line sent to stock or to production, nor
+  // a legacy line explicitly marked `skip_kds`; it follows the non-KDS rule
+  // even when it persists `item_type: 'prepared'` (tables, item changes).
+  const notKdsManaged =
+    item.fulfillment_destination === 'stock' ||
+    item.fulfillment_destination === 'production' ||
+    (item.fulfillment_destination == null && item.skip_kds === true);
   const requiresKitchen =
     item.latestKitchenStatus != null ||
     (isRestaurant &&
+      !notKdsManaged &&
       (item.item_type === 'prepared' || (item.product_type === 'prepared' && !item.skip_kds)));
   const physicalDeliverable =
     item.kitchen_mode === 'physical' &&

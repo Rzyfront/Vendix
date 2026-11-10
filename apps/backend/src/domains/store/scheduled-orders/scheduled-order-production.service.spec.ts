@@ -567,10 +567,36 @@ describe('ScheduledOrderProductionService — linked production orders (QUI-995)
     });
   });
 
-  it('start of an UNLINKED production line still consumes as before and touches no production order', async () => {
+  it('A1: an unlinked `production` line is never consumed by the start (it belongs to production orders)', async () => {
     const { service, tx, stockLevelManager } = build([linkedRow({ orders: { production_orders: [] } })]);
     await service.start(tx as any, { id: 7, store_id: 3, order_id: 40 });
-    expect(stockLevelManager.updateStock).toHaveBeenCalled();
+    expect(stockLevelManager.updateStock).not.toHaveBeenCalled();
+    expect(tx.order_items.updateMany).not.toHaveBeenCalled();
     expect(tx.production_orders.updateMany).not.toHaveBeenCalled();
+  });
+
+  it.each(['kds', 'stock'])(
+    'A1: a `%s` line is left alone by the start (kds is consumed at the fire, stock at its commit)',
+    async (destination) => {
+      const { service, tx, stockLevelManager } = build([
+        linkedRow({ fulfillment_destination: destination, orders: { production_orders: [] } }),
+      ]);
+      await service.start(tx as any, { id: 7, store_id: 3, order_id: 40 });
+      expect(stockLevelManager.updateStock).not.toHaveBeenCalled();
+      expect(tx.order_items.updateMany).not.toHaveBeenCalled();
+    },
+  );
+
+  it('A1 control: a legacy line (destination NULL) is still consumed at start, add-ons included', async () => {
+    const { service, tx, stockLevelManager } = build([
+      linkedRow({ fulfillment_destination: null, orders: { production_orders: [] } }),
+    ]);
+    await service.start(tx as any, { id: 7, store_id: 3, order_id: 40 });
+    const moved = stockLevelManager.updateStock.mock.calls.map(([p]: any[]) => p.product_id);
+    expect(moved).toEqual(expect.arrayContaining([501, 502, 700]));
+    expect(tx.order_items.updateMany).toHaveBeenCalledWith({
+      where: { id: 1, addons_consumed_at: null },
+      data: { addons_consumed_at: expect.any(Date) },
+    });
   });
 });

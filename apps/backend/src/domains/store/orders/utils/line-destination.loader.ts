@@ -31,6 +31,7 @@ export async function loadLineDestinationContext(
   client: any,
   storeId: number,
   lines: DestinationLineRef[],
+  opts: { orderId?: number } = {},
 ): Promise<LineDestinationContext> {
   const productIds = Array.from(
     new Set(lines.map((l) => l.product_id).filter((id): id is number => !!id)),
@@ -41,7 +42,7 @@ export async function loadLineDestinationContext(
   };
   if (productIds.length === 0) return ctx;
 
-  const [products, levels] = await Promise.all([
+  const [products, levels, ownReservations] = await Promise.all([
     client.products.findMany({
       where: { id: { in: productIds }, store_id: storeId },
       select: {
@@ -56,6 +57,19 @@ export async function loadLineDestinationContext(
       where: { product_id: { in: productIds }, ...sellableStockLevelsWhere(storeId) },
       select: { product_id: true, product_variant_id: true, quantity_available: true },
     }),
+    // Edit path: the order's OWN active reservation is still held while the
+    // resolver runs, so it must count as available for that order.
+    opts.orderId != null
+      ? client.stock_reservations.findMany({
+          where: {
+            reserved_for_type: 'order',
+            reserved_for_id: opts.orderId,
+            status: 'active',
+            product_id: { in: productIds },
+          },
+          select: { product_id: true, product_variant_id: true, quantity: true },
+        })
+      : Promise.resolve([]),
   ]);
 
   for (const row of products as Array<{
@@ -81,6 +95,17 @@ export async function loadLineDestinationContext(
     ctx.stockByKey.set(
       key,
       (ctx.stockByKey.get(key) ?? 0) + Math.max(0, Number(level.quantity_available ?? 0)),
+    );
+  }
+  for (const reservation of ownReservations as Array<{
+    product_id: number;
+    product_variant_id: number | null;
+    quantity: number | null;
+  }>) {
+    const key = stockKey(reservation.product_id, reservation.product_variant_id);
+    ctx.stockByKey.set(
+      key,
+      (ctx.stockByKey.get(key) ?? 0) + Math.max(0, Number(reservation.quantity ?? 0)),
     );
   }
   return ctx;
@@ -141,7 +166,12 @@ export async function resolveLineDestinations(
       skip_kds?: boolean | null;
     }
   >,
-  opts: { isScheduled?: boolean; previous?: PreviousLineDestinations } = {},
+  opts: {
+    isScheduled?: boolean;
+    previous?: PreviousLineDestinations;
+    /** Edit path: counts this order's own active reservations as available. */
+    orderId?: number;
+  } = {},
 ): Promise<Array<ResolvedLineDestination | null>> {
   const storeRow = await client.stores.findUnique({
     where: { id: storeId },
@@ -150,7 +180,9 @@ export async function resolveLineDestinations(
   if (!storeIsRestaurant(storeRow?.industries)) {
     return items.map(() => null);
   }
-  const ctx = await loadLineDestinationContext(client, storeId, items);
+  const ctx = await loadLineDestinationContext(client, storeId, items, {
+    orderId: opts.orderId,
+  });
   return items.map((item) => {
     const prev = opts.previous?.get(previousLineKey(item));
     if (prev && !prev.fulfillment_destination) return null;
@@ -159,7 +191,9 @@ export async function resolveLineDestinations(
       isScheduled: opts.isScheduled === true,
       line: {
         ...item,
-        requested: prev?.fulfillment_destination ?? item.requested ?? null,
+        // The client's explicit choice wins; otherwise an existing line keeps
+        // its persisted destination as the requested one.
+        requested: item.requested ?? prev?.fulfillment_destination ?? null,
       },
     });
   });

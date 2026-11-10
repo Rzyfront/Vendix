@@ -774,3 +774,164 @@ describe('OrderStockCommitService — no-overselling guard (commitOrderLines / c
     expect(reservationsStore.every((r) => r.status === 'active')).toBe(true);
   });
 });
+
+/**
+ * QUI-999 B1 — a restaurant sale with add-ons no longer needs a schedule, so a
+ * `stock` line must consume its add-ons with its own commit (claimed once with
+ * `order_items.addons_consumed_at`). `kds` lines consume them at the kitchen
+ * fire, `production` lines at production completion and legacy (NULL) lines at
+ * the scheduled start, so the commit must leave all of those alone.
+ */
+describe('OrderStockCommitService — add-ons of a stock line (QUI-999 B1)', () => {
+  const OPTS = {
+    movementType: 'sale' as const,
+    blockOnInsufficient: true,
+    consumeSerials: false,
+    reason: 'test',
+  };
+  const ADDON_PRODUCT = 300;
+
+  let service: OrderStockCommitService;
+  let txMock: any;
+  let stockLevelManagerMock: any;
+  let row: any;
+
+  const buildRow = (destination: string | null, over: Record<string, unknown> = {}) => ({
+    id: 1,
+    store_id: 7,
+    stores: { organization_id: 1, industries: ['restaurant'] },
+    order_items: [
+      {
+        id: 10,
+        product_id: 100,
+        product_variant_id: null,
+        quantity: 2,
+        stock_units_consumed: null,
+        products: { id: 100, track_inventory: true, product_type: 'physical' },
+        product_variants: null,
+        inventory_committed: false,
+        inventory_consumed_at_fire: false,
+        addons_consumed_at: null,
+        skip_kds: destination !== 'kds',
+        fulfillment_destination: destination,
+        order_item_options: [
+          {
+            scope: 'per_unit',
+            component_type: 'ingredient',
+            component_product_id: ADDON_PRODUCT,
+            component_variant_id: null,
+            quantity: 50,
+          },
+        ],
+        ...over,
+      },
+    ],
+  });
+
+  const addonStockCalls = () =>
+    stockLevelManagerMock.updateStock.mock.calls.filter(
+      ([args]: any[]) => args.product_id === ADDON_PRODUCT,
+    );
+
+  const setup = (destination: string | null, over: Record<string, unknown> = {}) => {
+    row = buildRow(destination, over);
+    txMock = {
+      orders: {
+        findUnique: jest.fn(async () => row),
+        findFirst: jest.fn(async () => row),
+      },
+      $queryRaw: jest.fn().mockResolvedValue([{ id: 1, state: 'processing' }]),
+      order_items: {
+        // Stateful claims, like Postgres: each marker flips once.
+        updateMany: jest.fn(async ({ where, data }: any) => {
+          const item = row.order_items.find((i: any) => i.id === where.id);
+          if (!item) return { count: 0 };
+          if ('addons_consumed_at' in where) {
+            if (item.addons_consumed_at !== null) return { count: 0 };
+            item.addons_consumed_at = data.addons_consumed_at;
+            return { count: 1 };
+          }
+          if (item.inventory_committed !== where.inventory_committed) return { count: 0 };
+          item.inventory_committed = data.inventory_committed;
+          return { count: 1 };
+        }),
+      },
+      production_orders: { findMany: jest.fn().mockResolvedValue([]) },
+      stock_reservations: { findMany: jest.fn().mockResolvedValue([]) },
+      recipes: { findMany: jest.fn().mockResolvedValue([]) },
+      products: { findFirst: jest.fn().mockResolvedValue({ is_batch_produced: false }) },
+    };
+    stockLevelManagerMock = {
+      getDefaultLocationForProduct: jest.fn().mockResolvedValue(3),
+      releaseReservation: jest.fn().mockResolvedValue(undefined),
+      releaseReservationsByReference: jest.fn().mockResolvedValue(undefined),
+      releaseReservationQuantity: jest.fn().mockResolvedValue(0),
+      updateStock: jest.fn().mockResolvedValue({ cost_snapshot: { total_cost: 5 } }),
+    };
+    const realAllocator = new SellableStockAllocator({} as any);
+    const allocatorMock: any = {
+      getSellableLevels: jest.fn().mockResolvedValue([{ location_id: 3, quantity_available: 10 }]),
+      allocate: realAllocator.allocate.bind(realAllocator),
+      absorbShortfall: realAllocator.absorbShortfall.bind(realAllocator),
+      allocateForLine: jest.fn(async (_s, _p, _v, qty, preferred = []) =>
+        realAllocator.allocate(qty, [{ location_id: 3, quantity_available: 10 }], preferred),
+      ),
+    };
+    service = new OrderStockCommitService(
+      { withoutScope: jest.fn(() => txMock) } as unknown as StorePrismaService,
+      stockLevelManagerMock as unknown as StockLevelManager,
+      allocatorMock as unknown as SellableStockAllocator,
+      { isSerialized: jest.fn().mockResolvedValue(false) } as any,
+      {} as unknown as InventorySerialNumbersService,
+      { explodeBom: jest.fn().mockResolvedValue([]) } as any,
+      { resolveInventoryPolicy: jest.fn().mockResolvedValue({ allowIngredientOveruse: true }) } as any,
+    );
+  };
+
+  it('a stock line consumes its add-ons (per_unit x quantity) at commit, claimed once', async () => {
+    setup('stock');
+    await service.commitOrderLines(1, [10], { ...OPTS, tx: txMock });
+
+    const calls = addonStockCalls();
+    expect(calls).toHaveLength(1);
+    expect(calls[0][0]).toMatchObject({
+      product_id: ADDON_PRODUCT,
+      quantity_change: -100,
+      movement_type: 'consumption',
+      location_id: 3,
+    });
+    expect(txMock.order_items.updateMany).toHaveBeenCalledWith({
+      where: { id: 10, addons_consumed_at: null },
+      data: { addons_consumed_at: expect.any(Date) },
+    });
+  });
+
+  it('a second commit of the same line never consumes the add-ons twice', async () => {
+    setup('stock');
+    await service.commitOrderLines(1, [10], { ...OPTS, tx: txMock });
+    await service.commitOrderDelivery(1, { ...OPTS, reason: 'Order completed' }, txMock);
+    expect(addonStockCalls()).toHaveLength(1);
+  });
+
+  it('losing the add-ons claim (already taken by another path) consumes nothing', async () => {
+    setup('stock', { addons_consumed_at: null });
+    txMock.order_items.updateMany.mockImplementation(async ({ where }: any) =>
+      'addons_consumed_at' in where ? { count: 0 } : { count: 1 },
+    );
+    await service.commitOrderLines(1, [10], { ...OPTS, tx: txMock });
+    expect(addonStockCalls()).toHaveLength(0);
+  });
+
+  it.each([
+    ['kds', 'fire consumes them'],
+    ['production', 'production completion consumes them'],
+    [null, 'scheduled start consumes them'],
+  ])('destination %s leaves the add-ons alone (%s)', async (destination) => {
+    setup(destination as string | null);
+    await service.commitOrderLines(1, [10], { ...OPTS, tx: txMock });
+    expect(addonStockCalls()).toHaveLength(0);
+    expect(txMock.order_items.updateMany).not.toHaveBeenCalledWith(
+      expect.objectContaining({ where: expect.objectContaining({ addons_consumed_at: null }) }),
+    );
+  });
+});

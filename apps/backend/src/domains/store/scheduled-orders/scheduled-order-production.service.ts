@@ -132,7 +132,13 @@ export class ScheduledOrderProductionService implements OnModuleInit {
       if (match) linkedOrders.set(match.id, { id: match.id, status: match.status as string });
       return !!match;
     };
-    const lines = items.filter((item) => !isLinked(item)).map((item) => ({
+    // QUI-999: the start consumes ONLY legacy lines (destination NULL). `kds`
+    // lines were consumed at "Enviar a cocina", `stock` lines consume their
+    // add-ons with their own commit, and `production` lines belong to a
+    // production order. `isLinked` runs for every line to collect the orders.
+    const lines = items
+      .filter((item) => !isLinked(item) && item.fulfillment_destination == null)
+      .map((item) => ({
       id: item.id,
       product_id: item.product_id,
       product_variant_id: item.product_variant_id,

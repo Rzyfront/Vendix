@@ -366,9 +366,8 @@ export class CheckoutService {
    * Adiciones de una línea del checkout. La línea armada desde `dto.items`
    * (invitado) trae sus `option_ids`; la del carrito de backend las toma del
    * `dto.items` que coincida por producto + variante + presentación (mismo
-   * emparejamiento que `notes`). Sin servicio (specs) → sin efecto. Solo se
-   * aceptan con pedido programado (`scheduled`), que las descuenta al
-   * pasar a producción.
+   * emparejamiento que `notes`). Sin servicio (specs) → sin efecto. Fuera de
+   * restaurante solo se aceptan con pedido programado (`scheduled`).
    */
   private async resolveCheckoutLineOptions(
     item: { product_id: number; product_variant_id?: number | null; applied_price_tier_id?: number | null; quantity: number; option_ids?: number[] },
@@ -389,8 +388,19 @@ export class CheckoutService {
       if (option_ids?.length) throw new VendixHttpException(ErrorCodes.OPT_DISABLED);
       return { unit_price_delta: new Prisma.Decimal(0), snapshots: [] };
     }
+    // QUI-999: a restaurant sells add-ons without a schedule (looked up only
+    // for add-ons on an unscheduled sale).
+    let restaurant = false;
+    if (!scheduled && option_ids?.length) {
+      const store = await this.prisma.stores.findFirst({
+        where: { id: store_id },
+        select: { industries: true },
+      });
+      restaurant = storeIsRestaurant(store?.industries);
+    }
     return this.optionPricingService.resolve(store_id, item.product_id, option_ids, Number(item.quantity) || 1, {
       scheduled,
+      restaurant,
     });
   }
 
@@ -2485,6 +2495,7 @@ export class CheckoutService {
       cart_items,
       stockUnitsByIndex,
       deferredPreparedProductIds,
+      cartLineDestinations,
     );
 
     // Recompute promotional + coupon discounts on the backend. Frontend
@@ -2867,7 +2878,14 @@ export class CheckoutService {
     // debe salir del inventario.
     for (let index = 0; index < cart_items.length; index++) {
       const item = cart_items[index];
-      if (!this.shouldReserveStock(item, deferredPreparedProductIds)) continue;
+      if (
+        !this.shouldReserveStock(
+          item,
+          deferredPreparedProductIds,
+          cartLineDestinations[index],
+        )
+      )
+        continue;
       try {
         // P3.4: Resolves to central warehouse when org scope = ORGANIZATION,
         // otherwise falls back to the legacy per-product default location.
@@ -3475,6 +3493,7 @@ export class CheckoutService {
       cart_items,
       stockUnitsByIndex,
       deferredPreparedProductIds,
+      cartLineDestinations,
     );
 
     // Resolve promotional + coupon discounts on the backend (same source of
@@ -3724,7 +3743,14 @@ export class CheckoutService {
     // debe salir del inventario.
     for (let index = 0; index < cart_items.length; index++) {
       const item = cart_items[index];
-      if (!this.shouldReserveStock(item, deferredPreparedProductIds)) continue;
+      if (
+        !this.shouldReserveStock(
+          item,
+          deferredPreparedProductIds,
+          cartLineDestinations[index],
+        )
+      )
+        continue;
       try {
         // P3.4: Resolves to central warehouse when org scope = ORGANIZATION,
         // otherwise falls back to the legacy per-product default location.
@@ -4445,6 +4471,7 @@ export class CheckoutService {
     cart_items: any[],
     stockUnitsByIndex: Array<number | null>,
     deferredPreparedProductIds: Set<number>,
+    lineDestinations: Array<ResolvedLineDestination | null> = [],
   ): Promise<void> {
     if (cart_items.length === 0) return;
 
@@ -4463,7 +4490,14 @@ export class CheckoutService {
 
     for (let index = 0; index < cart_items.length; index++) {
       const item = cart_items[index];
-      if (!this.shouldReserveStock(item, deferredPreparedProductIds)) continue;
+      if (
+        !this.shouldReserveStock(
+          item,
+          deferredPreparedProductIds,
+          lineDestinations[index],
+        )
+      )
+        continue;
 
       const units = stockUnitsByIndex[index] ?? item.quantity;
       if (!units || units <= 0) continue;
@@ -4517,7 +4551,17 @@ export class CheckoutService {
   private shouldReserveStock(
     item: any,
     deferredPreparedProductIds?: Set<number>,
+    lineDestination?: ResolvedLineDestination | null,
   ): boolean {
+    // QUI-999: a `production` line never reserves its own stock, whatever the
+    // product type (a producible finished good with no stock is `physical`).
+    if (
+      !lineConsumesOwnStock({
+        fulfillment_destination: lineDestination?.destination ?? null,
+      })
+    ) {
+      return false;
+    }
     // Restaurant fire-to-kitchen deferral: a `prepared` product with an active
     // recipe in a restaurant store must NOT reserve (nor consume) inventory at
     // checkout. Its ingredient stock is consumed at kitchen-fire. The set of

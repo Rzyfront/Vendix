@@ -725,6 +725,16 @@ export class KitchenFireService {
     const firedItemIds: number[] = [];
     const skippedItemIds: number[] = [];
     for (const item of order.order_items) {
+      // QUI-999: a line the matrix sends to stock or to production is not a
+      // kitchen line at all; like any non-prepared line it is omitted silently
+      // so a mixed table (dish + soda) still fires the dish. Legacy lines
+      // (destination NULL) keep rejecting an explicit `skip_kds`.
+      const destination = (item as { fulfillment_destination?: string | null })
+        .fulfillment_destination;
+      if (destination === 'stock' || destination === 'production') {
+        skippedItemIds.push(item.id);
+        continue;
+      }
       if (item.skip_kds) {
         throw new VendixHttpException(
           ErrorCodes.KITCHEN_FIRE_NOT_ELIGIBLE_001,

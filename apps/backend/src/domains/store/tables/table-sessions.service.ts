@@ -913,7 +913,10 @@ export class TableSessionsService {
       const lineDestinations = await resolveLineDestinations(
         tx,
         storeId,
-        dto.items,
+        dto.items.map((item) => ({
+          ...item,
+          requested: item.fulfillment_destination ?? null,
+        })),
       );
 
       const stockDemands: StockDemandLine[] = dto.items.flatMap((item, index) => {

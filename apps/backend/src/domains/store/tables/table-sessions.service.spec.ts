@@ -959,6 +959,44 @@ describe('TableSessionsService — open + addItems (Fase E smoke)', () => {
         expect((service as any).stockLevelManager.reserveStock).toHaveBeenCalledTimes(1);
       });
 
+      it('B4: the cashier choice "production" on a producible with stock is persisted and does not reserve', async () => {
+        restaurantStore();
+        prismaMock.stock_levels.findMany.mockResolvedValue([
+          { product_id: 52, product_variant_id: null, quantity_available: 9 },
+        ]);
+        prismaMock.table_sessions.findFirst.mockResolvedValue(openSession());
+        prismaMock.products.findMany.mockResolvedValue([producible()]);
+        prismaMock.order_items.create.mockResolvedValue({ id: 714 });
+        prismaMock.orders.update.mockResolvedValue({});
+
+        await service.addItems(1, {
+          items: [{ product_id: 52, quantity: 1, fulfillment_destination: 'production' }],
+        } as any);
+
+        expect(prismaMock.order_items.create.mock.calls[0][0].data).toEqual(
+          expect.objectContaining({ skip_kds: true, fulfillment_destination: 'production' }),
+        );
+        expect((service as any).stockLevelManager.reserveStock).not.toHaveBeenCalled();
+      });
+
+      it('B4: the server ignores the choice where the matrix does not allow one (non-producible dish stays kds)', async () => {
+        restaurantStore();
+        prismaMock.table_sessions.findFirst.mockResolvedValue(openSession());
+        prismaMock.products.findMany.mockResolvedValue([
+          { ...producible(), is_batch_produced: false },
+        ]);
+        prismaMock.order_items.create.mockResolvedValue({ id: 715 });
+        prismaMock.orders.update.mockResolvedValue({});
+
+        await service.addItems(1, {
+          items: [{ product_id: 52, quantity: 1, fulfillment_destination: 'production' }],
+        } as any);
+
+        expect(prismaMock.order_items.create.mock.calls[0][0].data).toEqual(
+          expect.objectContaining({ skip_kds: false, fulfillment_destination: 'kds' }),
+        );
+      });
+
       it('plato no producible: va a KDS (skip_kds=false) y no reserva su stock, como hoy', async () => {
         restaurantStore();
         prismaMock.table_sessions.findFirst.mockResolvedValue(openSession());

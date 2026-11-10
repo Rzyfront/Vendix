@@ -4157,8 +4157,9 @@ export class PaymentsService {
    * sin `option_ids` y sin grupos obligatorios → sin efecto. Solo se cobran
    * en una venta con pedido programado (`scheduled`), que es quien las
    * descuenta del inventario al pasar a producción. Un borrador (`draft`) las
-   * guarda sin agendamiento: no cobra, no aparta cupo ni descuenta; el
-   * agendamiento se exige al cobrarlo (`assertAdoptedOptionsScheduled`).
+   * guarda sin agendamiento: no cobra, no aparta cupo ni descuenta; fuera de
+   * restaurante el agendamiento se exige al cobrarlo
+   * (`assertAdoptedOptionsScheduled`).
    */
   private async resolvePosLineOptions(
     tx: any,
@@ -4171,12 +4172,18 @@ export class PaymentsService {
       if (optionIds?.length) throw new VendixHttpException(ErrorCodes.OPT_DISABLED);
       return { unit_price_delta: new Prisma.Decimal(0), snapshots: [] };
     }
+    // QUI-999: a restaurant sells add-ons without a schedule. Only looked up
+    // when it matters (add-ons on a plain, non-draft sale).
+    const restaurant =
+      !mode.scheduled && !mode.draft && !!optionIds?.length
+        ? await this.isRestaurantStore(tx, storeId)
+        : false;
     const resolved = await this.optionPricingService.resolve(
       storeId,
       item.product_id,
       optionIds,
       Number(item.quantity) || 1,
-      { scheduled: mode.scheduled, draft: mode.draft, client: tx },
+      { scheduled: mode.scheduled, draft: mode.draft, restaurant, client: tx },
     );
     return this.applyOptionNotes(resolved, item.option_notes);
   }
@@ -4215,9 +4222,19 @@ export class PaymentsService {
     const withOptions = await tx.order_item_options.count({
       where: { store_id: storeId, order_item: { order_id: orderId } },
     });
-    if (withOptions > 0) {
+    // QUI-999: restaurants consume add-ons where the line is consumed, so an
+    // unscheduled draft with add-ons is a valid sale for them.
+    if (withOptions > 0 && !(await this.isRestaurantStore(tx, storeId))) {
       throw new VendixHttpException(ErrorCodes.OPT_REQUIRES_SCHEDULE);
     }
+  }
+
+  private async isRestaurantStore(tx: any, storeId: number): Promise<boolean> {
+    const store = await tx.stores.findUnique({
+      where: { id: storeId },
+      select: { industries: true },
+    });
+    return storeIsRestaurant(store?.industries);
   }
 
   /** QUI-999: POS lines mapped to what the destination resolver reads. */

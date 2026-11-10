@@ -317,6 +317,21 @@ describe('OrderItemChangesService (QUI-650)', () => {
     expect(ctx.kitchen.fireOrderItemsInTx).not.toHaveBeenCalled();
   });
 
+  it('B4: add with the cashier choice "production" on a producible with stock persists production and skips reserve', async () => {
+    const ctx = build([mkLine(1)]);
+    ctx.db.products.findMany.mockResolvedValue([producibleRow]);
+    ctx.db.stock_levels.findMany.mockResolvedValue([
+      { product_id: 51, product_variant_id: null, quantity_available: 5 },
+    ]);
+    await applyV(ctx, {
+      add: [{ product_id: 51, quantity: 1, fulfillment_destination: 'production' }],
+    });
+    expect(ctx.db.order_items.create.mock.calls[0][0].data).toEqual(
+      expect.objectContaining({ skip_kds: true, fulfillment_destination: 'production' }),
+    );
+    expect(ctx.stockLevel.reserveStock).not.toHaveBeenCalled();
+  });
+
   it('QUI-999: tienda no restaurante conserva la línea de hoy (sin destino, skip_kds=false)', async () => {
     const ctx = build([mkLine(1)], { stores: { id: 4, organization_id: 1, industries: ['retail'] } });
     ctx.db.products.findMany.mockResolvedValue([{ ...producibleRow, product_type: 'physical' }]);

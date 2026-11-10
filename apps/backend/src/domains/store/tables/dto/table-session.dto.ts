@@ -3,6 +3,7 @@ import {
   ArrayMinSize,
   IsArray,
   IsBoolean,
+  IsIn,
   IsInt,
   IsOptional,
   IsString,
@@ -142,6 +143,15 @@ export class TableSessionAddItemDto {
   @IsString()
   @MaxLength(200)
   notes?: string;
+
+  /**
+   * QUI-999: the cashier's choice for a producible line with stock ("Cajero
+   * elige"): `stock` (default) or `production`. The server honors it only where
+   * the matrix lets the cashier pick; elsewhere it is ignored.
+   */
+  @IsOptional()
+  @IsIn(['stock', 'production'])
+  fulfillment_destination?: 'stock' | 'production';
 }
 
 /**
