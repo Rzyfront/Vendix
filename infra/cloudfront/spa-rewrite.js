@@ -105,6 +105,14 @@ function isMarketingAppRoute(uri) {
   return false;
 }
 
+// SEO-TECH-02 (aprobado por Adel el 10-nov): la portada de vendix.online se
+// sirve con su HTML comercial prerenderizado (texto, H1, enlaces, canonical y
+// OG en la respuesta HTTP). El objeto lo sube deploy-s3.yml desde el build
+// marketing-preview. Solo GET/HEAD de vendix.online/; las tiendas y los
+// dominios propios siguen con el index.html neutro. Debe coincidir con
+// apps/frontend/scripts/marketing-host-selector.cjs.
+var MARKETING_ROOT_OBJECT = '/marketing/index.html';
+
 var SPA_PREFIXES = [
   '/productos/',
   '/products/',
@@ -135,6 +143,11 @@ function handler(event) {
   }
   if (host.indexOf('www.') === 0 && host.length > 4 && !endsWith(host, '.' + MARKETING_HOST)) {
     return redirect('https://' + host.substring(4) + uri + queryString(request.querystring));
+  }
+
+  if (host === MARKETING_HOST && uri === '/' && (request.method === 'GET' || request.method === 'HEAD')) {
+    request.uri = MARKETING_ROOT_OBJECT;
+    return request;
   }
 
   for (var i = 0; i < SPA_PREFIXES.length; i++) {
