@@ -38,7 +38,11 @@ jobs:
       # Function en vendix.online/ (spa-rewrite.js → /marketing/index.html).
       # check-marketing-preview.cjs exige H1, enlaces, index/canonical/OG y que la
       # shell compartida dist/vendix/browser/index.html siga neutra.
+      # Si este build falla (p. ej. la API de planes no responde), el deploy sigue y
+      # en S3 queda el /marketing/index.html anterior (la sincronización no lo borra).
       - name: Build marketing HTML (SEO-TECH-02)
+        id: marketing_html
+        continue-on-error: true
         working-directory: apps/frontend
         run: |
           npm run build:marketing-preview
@@ -69,6 +73,7 @@ jobs:
 
           # SEO-TECH-02: assets del build comercial (con hash, sin borrar nada) y su HTML,
           # que solo se sirve en vendix.online/. Sube después de la shell neutra.
+          if [ "${{ steps.marketing_html.outcome }}" = "success" ]; then
           aws s3 sync apps/frontend/dist/marketing-preview/browser/ \
             s3://${{ env.S3_BUCKET }}/ \
             --cache-control "public,max-age=31536000,immutable" \
@@ -77,6 +82,9 @@ jobs:
             s3://${{ env.S3_BUCKET }}/marketing/index.html \
             --cache-control "public,max-age=0,must-revalidate" \
             --content-type "text/html"
+          else
+            echo "::warning::HTML comercial no generado; se conserva el /marketing/index.html anterior."
+          fi
 
       - name: Invalidate CloudFront cache
         run: |
