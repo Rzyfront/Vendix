@@ -249,11 +249,17 @@ export class PosCheckoutShellComponent {
 
   /**
    * Pedido programado activo (paso Pedido). Con él, la entrega se decide en el
-   * paso Envío (domicilio o recogida), la fecha/franja en Cliente, y el paso
-   * Envío aparece siempre. Nunca en borradores: el agendamiento viaja en el pago.
+   * paso Envío con los métodos de envío de la tienda (domicilio o recogida),
+   * la fecha/franja en Cliente, el cliente es obligatorio y el paso Envío
+   * aparece siempre. Nunca en borradores: el agendamiento viaja en el pago.
    */
   readonly scheduledActive = computed<boolean>(
     () => this.effectiveMode() !== 'create-draft' && this.scheduledOrders.active(),
+  );
+
+  /** Nombre del método de envío elegido en el paso Envío, para el resumen del pedido programado. */
+  readonly scheduledMethodName = computed<string | null>(
+    () => this.shippingStep()?.selectedShippingMethod?.()?.name ?? null,
   );
 
   /**
@@ -290,7 +296,9 @@ export class PosCheckoutShellComponent {
    * con alias se guarda como fila sin usuario y snapshot en la orden (ADR-05).
    */
   readonly customerRequiredByAddress = computed<boolean>(
-    () => this.requiresAddress() && this.saleMode() !== 'alias',
+    () =>
+      this.scheduledActive() ||
+      (this.requiresAddress() && this.saleMode() !== 'alias'),
   );
 
   /**
@@ -332,7 +340,9 @@ export class PosCheckoutShellComponent {
    * texto cambia, el markup no.
    */
   readonly customerErrorMessage = computed<string>(() =>
-    this.requiresAddress()
+    this.scheduledActive()
+      ? 'El pedido programado necesita un cliente para saber a quién entregar y a quién recordar.'
+      : this.requiresAddress()
       ? 'Indica un cliente o un nombre de referencia para continuar con el envío.'
       : 'Selecciona o crea un cliente para continuar.',
   );
@@ -480,9 +490,6 @@ export class PosCheckoutShellComponent {
         return `Cliente · ${sub}`;
       }
       case 'envio': {
-        if (this.scheduledActive() && this.effectiveIntent() !== 'delivery') {
-          return 'Entrega · Cómo lo recibirá';
-        }
         const ship = this.shippingStep();
         const subIndex = ship?.shipSubStep() ?? 0;
         const subSteps = ship?.shipSubSteps() ?? [];
@@ -562,6 +569,8 @@ export class PosCheckoutShellComponent {
   private initializedFlowKey: string | null | undefined = undefined;
   private initializedTableId: number | null | undefined = undefined;
   private lastCartWasEmpty: boolean | null = null;
+  /** Verdadero solo durante el avance que sigue a `resolveIfNeeded()` con éxito. */
+  private customerResolvedPending = false;
   private emptyCartBoundary = false;
 
   /**
@@ -634,6 +643,7 @@ export class PosCheckoutShellComponent {
   readonly canBeAnonymous = computed<boolean>(
     () =>
       this.allowAnonymousSales() &&
+      !this.scheduledActive() &&
       this.paymentStep()?.mode() !== 'credito',
   );
 
@@ -647,6 +657,7 @@ export class PosCheckoutShellComponent {
   readonly canBeAlias = computed<boolean>(
     () =>
       this.allowAliasSales() &&
+      !this.scheduledActive() &&
       this.paymentStep()?.mode() !== 'credito',
   );
 
@@ -912,20 +923,29 @@ export class PosCheckoutShellComponent {
       });
     });
 
-    // Pedido programado: al cerrar el checkout se descarta la elección.
-    effect(() => {
-      if (!this.isOpen()) untracked(() => this.scheduledOrders.reset());
-    });
+    // Pedido programado: cerrar el modal NO descarta fecha, franja, método ni
+    // dirección (S4). La elección se limpia solo al cobrar, al vaciar el carrito
+    // (ver el efecto de apertura) o con "Quitar programación".
 
-    // Pedido programado: el tipo elegido en el paso Envío gobierna el carril de
-    // entrega (domicilio → 'enviar'; recogida o aún sin elegir → 'llevar'), así
-    // pago, envío y dirección siguen la misma lógica que una venta normal.
+    // Pedido programado: la entrega usa los métodos de envío de la tienda (el
+    // paso Envío ofrece domicilio y, si existe, recogida), así que el carril es
+    // siempre 'enviar' y pago, envío y dirección siguen la lógica de domicilio.
     effect(() => {
       if (!this.scheduledActive()) return;
-      const choice: EntregaChoice =
-        this.scheduledOrders.fulfillmentType() === 'delivery' ? 'enviar' : 'llevar';
       untracked(() => {
-        if (this.entregaChoice() !== choice) this.entregaChoice.set(choice);
+        if (this.entregaChoice() !== 'enviar') this.entregaChoice.set('enviar');
+      });
+    });
+
+    // Pedido programado: siempre con cliente (S1). Sin venta anónima ni alias.
+    effect(() => {
+      if (!this.scheduledActive()) return;
+      const mode = this.saleMode();
+      if (mode === 'customer') return;
+      untracked(() => {
+        this.userOverrideAnonymous.set(false);
+        this.customerAlias.set('');
+        this.saleMode.set('customer');
       });
     });
 
@@ -948,6 +968,8 @@ export class PosCheckoutShellComponent {
           // legacy free cart keeps the same createdAt or has no timestamp.
           this.emptyCartBoundary = true;
           this.initializedFlowKey = undefined;
+          // Carrito vaciado (o venta cobrada): el pedido programado termina.
+          this.scheduledOrders.reset();
         }
 
         const promotionDuringOpenFlow = open && !opened && hadPreviousFlow &&
@@ -1140,6 +1162,7 @@ export class PosCheckoutShellComponent {
       // Pedido programado incompleto: no se pasa del paso que falta; se lleva
       // allí al cajero y se muestra qué falta.
       this.scheduledOrders.showValidation.set(true);
+      if (!this.scheduledHasCustomer()) this.showCustomerError.set(true);
       if (this.currentStep() < block) this.currentStep.set(block);
       return;
     }
@@ -1148,14 +1171,23 @@ export class PosCheckoutShellComponent {
 
   /**
    * Índice del primer paso que el pedido programado no deja abandonar: Cliente
-   * sin día/franja, o Envío sin tipo de entrega. -1 cuando no bloquea.
+   * sin cliente o sin día/franja. -1 cuando no bloquea.
    */
   private scheduledBlockIndex(): number {
     if (!this.scheduledActive()) return -1;
     const keys = this.stepKeys();
+    if (!this.scheduledHasCustomer()) return keys.indexOf('cliente');
     if (!this.scheduledOrders.hasSlot()) return keys.indexOf('cliente');
-    if (!this.scheduledOrders.fulfillmentType()) return keys.indexOf('envio');
     return -1;
+  }
+
+  /**
+   * Cliente del pedido programado (S1). Justo después de resolver el selector el
+   * cliente aún no llegó por el input `cartState`, así que ese avance puntual lo
+   * da por bueno.
+   */
+  private scheduledHasCustomer(): boolean {
+    return !!this.cartState()?.customer || this.customerResolvedPending;
   }
 
   /** Wizard: advance one top-level step (no-op past the last; state is preserved). */
@@ -1234,7 +1266,14 @@ export class PosCheckoutShellComponent {
             .pipe(takeUntilDestroyed(this.destroyRef))
             .subscribe((resolved) => {
               if (!resolved) return; // toast ya emitido por el selector.
-              if (!this.addressInCliente()) this.nextStep();
+              if (!this.addressInCliente()) {
+                this.customerResolvedPending = true;
+                try {
+                  this.nextStep();
+                } finally {
+                  this.customerResolvedPending = false;
+                }
+              }
             });
           return;
         }
@@ -1249,12 +1288,6 @@ export class PosCheckoutShellComponent {
 
     // ── Envío: sub-wizard de envío (Método → [Dirección] → Costo) ───────────
     if (key === 'envio') {
-      // Pedido programado con recogida (o sin tipo aún): no hay envío que
-      // configurar; goToStep() bloquea si falta el tipo de entrega.
-      if (this.scheduledActive() && this.effectiveIntent() !== 'delivery') {
-        this.nextStep();
-        return;
-      }
       const ship = this.shippingStep();
       if (!ship) {
         this.nextStep();

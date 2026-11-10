@@ -192,7 +192,8 @@ class AddressStub {
 @Component({ selector: 'app-pos-scheduled-order-picker', standalone: true, template: `` })
 class ScheduledOrderPickerStub {
   readonly section = input<string>('toggle');
-  readonly deliveryDisabled = input(false);
+  readonly methodName = input<string | null>(null);
+  readonly hasCustomer = input(true);
   readonly cartItems = input<readonly unknown[]>([]);
 }
 
@@ -233,10 +234,10 @@ describe('PosCheckoutShellComponent — matriz de teclado (CP-POS-CHECKOUT-KEYBO
     schedule: WritableSignal<unknown>;
     active: WritableSignal<boolean>;
     hasSlot: WritableSignal<boolean>;
-    fulfillmentType: WritableSignal<'pickup' | 'delivery' | null>;
     showValidation: WritableSignal<boolean>;
     clear: () => void;
     reset: () => void;
+    resetCalls: number;
     activate: () => void;
   };
 
@@ -339,12 +340,14 @@ describe('PosCheckoutShellComponent — matriz de teclado (CP-POS-CHECKOUT-KEYBO
       schedule: signal(null),
       active: signal(false),
       hasSlot: signal(false),
-      fulfillmentType: signal(null),
       showValidation: signal(false),
       clear: () => {},
       reset: () => {
         scheduledMock.active.set(false);
+        scheduledMock.hasSlot.set(false);
+        scheduledMock.resetCalls++;
       },
+      resetCalls: 0,
       activate: () => scheduledMock.active.set(true),
     };
 
@@ -1112,61 +1115,135 @@ describe('PosCheckoutShellComponent — matriz de teclado (CP-POS-CHECKOUT-KEYBO
         .query(By.directive(PaymentStub))
         .nativeElement.closest('.step-panel') as HTMLElement;
       expect(cobro.querySelector('app-pos-scheduled-order-picker')).toBeNull();
-      expect(pickerSections()).toEqual(['toggle', 'slot', 'fulfillment']);
+      expect(pickerSections()).toEqual(['toggle', 'slot', 'summary']);
     });
 
-    it('activo, el paso Entrega aparece aunque sea recogida y oculta mesa/llevar/domicilio', () => {
+    it('activo, el paso Entrega aparece, oculta mesa/llevar/domicilio y usa el carril de envío', () => {
       component.entregaChoice.set('mesa');
       activate();
       expect(component.stepKeys()).toEqual(['entrega', 'cliente', 'envio', 'cobro']);
       expect(component.steps().map((st) => st.label)).toEqual(['Pedido', 'Cliente', 'Entrega', 'Cobro']);
-      // Sin tipo elegido el carril queda en recogida (nunca mesa).
-      expect(component.entregaChoice()).toBe('llevar');
+      // La entrega usa los métodos de envío de la tienda: siempre carril 'enviar'.
+      expect(component.entregaChoice()).toBe('enviar');
+      expect(fixture.debugElement.query(By.directive(ShippingStub))).not.toBeNull();
       const entregaHost = fixture.debugElement.query(By.directive(EntregaStub))
         .nativeElement.parentElement as HTMLElement;
       expect(entregaHost.hidden).toBeTrue();
     });
 
-    it('el tipo elegido en Entrega gobierna el carril: domicilio → enviar, recogida → llevar', () => {
-      activate();
-      scheduledMock.fulfillmentType.set('delivery');
-      fixture.detectChanges();
-      expect(component.entregaChoice()).toBe('enviar');
-      expect(fixture.debugElement.query(By.directive(ShippingStub))).not.toBeNull();
+    describe('S1 · exige cliente', () => {
+      const withCustomer = (): void => {
+        fixture.componentRef.setInput('cartState', checkoutCart(new Date('2026-11-10T12:00:00.000Z')));
+        fixture.detectChanges();
+      };
 
-      scheduledMock.fulfillmentType.set('pickup');
-      fixture.detectChanges();
-      expect(component.entregaChoice()).toBe('llevar');
-      expect(fixture.debugElement.query(By.directive(ShippingStub))).toBeNull();
+      it('sin cliente no deja salir de Cliente aunque tenga día y franja, y lo pide', () => {
+        activate();
+        scheduledMock.hasSlot.set(true);
+        component.currentStep.set(1);
+        fixture.detectChanges();
+        component.nextStep();
+        expect(component.currentStepKey()).toBe('cliente');
+        expect(component.showCustomerError()).toBeTrue();
+        expect(scheduledMock.showValidation()).toBeTrue();
+        expect(component.customerMandatory()).toBeTrue();
+        expect(component.customerErrorMessage()).toContain('pedido programado');
+      });
+
+      it('sin cliente, el stepper tampoco salta a Entrega ni a Cobro', () => {
+        activate();
+        scheduledMock.hasSlot.set(true);
+        component.currentStep.set(1);
+        fixture.detectChanges();
+        component.goToStep(3);
+        expect(component.currentStepKey()).toBe('cliente');
+      });
+
+      it('con cliente pero sin día y franja sigue bloqueado en Cliente', () => {
+        withCustomer();
+        activate();
+        component.currentStep.set(1);
+        fixture.detectChanges();
+        component.nextStep();
+        expect(component.currentStepKey()).toBe('cliente');
+        expect(scheduledMock.showValidation()).toBeTrue();
+      });
+
+      it('con cliente, día y franja avanza a Entrega', () => {
+        withCustomer();
+        activate();
+        scheduledMock.hasSlot.set(true);
+        component.currentStep.set(1);
+        fixture.detectChanges();
+        component.nextStep();
+        expect(component.currentStepKey()).toBe('envio');
+      });
+
+      it('queda en "Con Cliente": no ofrece venta anónima ni alias y fuerza el modo cliente', () => {
+        posSettings.set({ allow_anonymous_sales: true, allow_alias_sales: true });
+        fixture.detectChanges();
+        expect(component.canBeAnonymous()).toBeTrue();
+        activate();
+        expect(component.canBeAnonymous()).toBeFalse();
+        expect(component.canBeAlias()).toBeFalse();
+        component.saleMode.set('anonymous');
+        fixture.detectChanges();
+        expect(component.saleMode()).toBe('customer');
+        component.saleMode.set('alias');
+        fixture.detectChanges();
+        expect(component.saleMode()).toBe('customer');
+      });
+
+      it('sin pedido programado nada cambia: la venta anónima sigue disponible', () => {
+        posSettings.set({ allow_anonymous_sales: true });
+        scheduledMock.enabled.set(true);
+        fixture.detectChanges();
+        expect(component.canBeAnonymous()).toBeTrue();
+        component.currentStep.set(1);
+        component.saleMode.set('anonymous');
+        component.attemptNextStep();
+        expect(component.currentStepKey()).toBe('cobro');
+      });
     });
 
-    it('no pasa de Cliente sin día y franja, y muestra el motivo', () => {
-      activate();
-      component.currentStep.set(1);
-      component.saleMode.set('anonymous');
-      fixture.detectChanges();
-      component.attemptNextStep();
-      expect(component.currentStepKey()).toBe('cliente');
-      expect(scheduledMock.showValidation()).toBeTrue();
+    describe('S4 · cerrar el modal conserva el pedido programado', () => {
+      it('cerrar y reabrir no limpia el estado programado', () => {
+        activate();
+        scheduledMock.hasSlot.set(true);
+        scheduledMock.resetCalls = 0;
+        fixture.componentRef.setInput('isOpen', false);
+        fixture.detectChanges();
+        expect(scheduledMock.resetCalls).toBe(0);
+        expect(scheduledMock.active()).toBeTrue();
+        expect(scheduledMock.hasSlot()).toBeTrue();
 
-      scheduledMock.hasSlot.set(true);
-      component.attemptNextStep();
-      expect(component.currentStepKey()).toBe('envio');
-    });
+        fixture.componentRef.setInput('isOpen', true);
+        fixture.detectChanges();
+        expect(scheduledMock.resetCalls).toBe(0);
+        expect(scheduledMock.active()).toBeTrue();
+        expect(component.scheduledActive()).toBeTrue();
+        expect(component.entregaChoice()).toBe('enviar');
+      });
 
-    it('no pasa de Entrega sin tipo elegido', () => {
-      activate();
-      scheduledMock.hasSlot.set(true);
-      component.currentStep.set(2);
-      fixture.detectChanges();
-      component.attemptNextStep();
-      expect(component.currentStepKey()).toBe('envio');
-      expect(scheduledMock.showValidation()).toBeTrue();
+      it('al cerrar con el botón del modal tampoco lo limpia', () => {
+        activate();
+        scheduledMock.resetCalls = 0;
+        component.onModalClosed();
+        fixture.detectChanges();
+        expect(scheduledMock.resetCalls).toBe(0);
+        expect(scheduledMock.active()).toBeTrue();
+      });
 
-      scheduledMock.fulfillmentType.set('pickup');
-      fixture.detectChanges();
-      component.attemptNextStep();
-      expect(component.currentStepKey()).toBe('cobro');
+      it('vaciar el carrito sí descarta el pedido programado', () => {
+        fixture.componentRef.setInput('cartState', checkoutCart(new Date('2026-11-10T12:00:00.000Z')));
+        fixture.detectChanges();
+        activate();
+        scheduledMock.resetCalls = 0;
+        fixture.componentRef.setInput('cartState', checkoutCart(new Date('2026-11-10T12:00:00.000Z'), { items: [] }));
+        fixture.detectChanges();
+        expect(scheduledMock.resetCalls).toBeGreaterThan(0);
+        expect(scheduledMock.active()).toBeFalse();
+      });
     });
 
     it('inactivo, el orden de pasos de siempre no cambia', () => {

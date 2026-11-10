@@ -597,6 +597,8 @@ jobs:
           --include='**/pos/utils/manual-weigh.util.spec.ts'
           --include='**/pos/utils/line-units.util.spec.ts'
           --include='**/pos/services/pos-payment.service.spec.ts'
+          --include='**/pos/services/pos-scheduled-order.service.spec.ts'
+          --include='**/pos/components/pos-scheduled-order-picker/pos-scheduled-order-picker.component.spec.ts'
           --include='**/pos/services/pos-cash-register.service.spec.ts'
           --include='**/pos/services/pos-ticket.service.spec.ts'
           --include='**/pos/components/pos-order-confirmation.component.spec.ts'
