@@ -4981,12 +4981,12 @@ export class AutoEntryService {
   /**
    * production.sale_cogs (QUI-995)
    *
-   * The sale was finished BEFORE its production order completed, so its
-   * `order.completed` entry did not carry the cost of that line (the commit
-   * skips a production line until its order is completed). When the
-   * production completes, the delivery commit deducts the units and this posts
-   * their COGS with the SAME keys `onOrderCompleted` uses (DR COGS / CR
-   * inventory). Keyed by the production order: `createAutoEntry` skips a
+   * COGS of a sale's `production` line, keyed by its production order. Two
+   * paths post it: the sale was finished BEFORE its production order completed
+   * (the commit skips a production line until its order is completed, and the
+   * production completion deducts the units), or the delivery of a sale whose
+   * `order.completed` was already posted at the till (S22). Same keys as
+   * `onOrderCompleted` (DR COGS / CR inventory). Keyed by the production order: `createAutoEntry` skips a
    * duplicate (source_type, source_id), so a re-delivered event never posts twice.
    */
   async onProductionSaleCogs(data: {
@@ -5022,7 +5022,7 @@ export class AutoEntryService {
       source_id: data.production_order_id,
       organization_id: data.organization_id,
       store_id: data.store_id,
-      description: `COGS producción #${data.production_order_id} – orden #${data.order_id} entregada antes de producir`,
+      description: `COGS producción #${data.production_order_id} – orden #${data.order_id}`,
       lines,
       user_id: data.user_id,
     });

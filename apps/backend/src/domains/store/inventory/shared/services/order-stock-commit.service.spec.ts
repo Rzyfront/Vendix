@@ -286,11 +286,41 @@ describe('OrderStockCommitService — claim atómico anti doble-descuento', () =
 
     expect(txMock.production_orders.findMany).toHaveBeenCalledWith({
       where: { order_id: 1, status: { not: 'cancelled' } },
-      select: { product_id: true, product_variant_id: true, status: true },
+      select: { id: true, product_id: true, product_variant_id: true, status: true },
     });
     expect(stockLevelManagerMock.releaseReservationQuantity).toHaveBeenCalledTimes(1);
     expect(stockLevelManagerMock.updateStock).toHaveBeenCalledTimes(1);
     expect(result.committedItemCount).toBe(1);
+  });
+
+  it('S22: el costo de una línea de producción entregada se devuelve por orden de producción', async () => {
+    const o: any = buildOrder();
+    o.stores.industries = ['restaurant'];
+    o.order_items[0].products.product_type = 'prepared';
+    o.order_items[0].skip_kds = true;
+    o.order_items[0].fulfillment_destination = 'production';
+    txMock.orders.findFirst.mockResolvedValue(o);
+    txMock.orders.findUnique.mockResolvedValue(o);
+    txMock.order_items.updateMany.mockResolvedValue({ count: 1 });
+    txMock.production_orders.findMany.mockResolvedValue([
+      { id: 77, product_id: 100, product_variant_id: null, status: 'completed' },
+    ]);
+    stockLevelManagerMock.updateStock.mockResolvedValue({ cost_snapshot: { total_cost: 3000 } });
+
+    const result = await service.commitOrderDelivery(1, OPTS, txMock);
+
+    expect(result.totalCost).toBe(3000);
+    expect(result.productionCogs).toEqual([{ production_order_id: 77, total_cost: 3000 }]);
+  });
+
+  it('S22: una venta sin líneas de producción no devuelve costo de producción', async () => {
+    txMock.order_items.updateMany.mockResolvedValue({ count: 1 });
+    stockLevelManagerMock.updateStock.mockResolvedValue({ cost_snapshot: { total_cost: 5000 } });
+
+    const result = await service.commitOrderDelivery(1, OPTS, txMock);
+
+    expect(result.totalCost).toBe(5000);
+    expect(result.productionCogs).toBeUndefined();
   });
 
   it('QUI-995 F4: la orden completada de OTRA variante no libera la línea de la variante vendida', async () => {

@@ -92,6 +92,14 @@ export interface CommitOpts {
 export interface CommitResult {
   totalCost: number;
   committedItemCount: number;
+  /**
+   * Cost of the `production` lines this run committed, per production order
+   * (already included in `totalCost`). The delivery posts it as
+   * `production.sale_cogs`, keyed by the production order: a direct POS sale
+   * already posted the till's `order.completed` (keyed by the order), so a
+   * second `order.completed` would be dropped as a duplicate (S22).
+   */
+  productionCogs?: Array<{ production_order_id: number; total_cost: number }>;
 }
 
 interface PosSelection {
@@ -390,6 +398,7 @@ export class OrderStockCommitService {
     // QUI-995: the sale's production orders; a line is released once ITS order
     // (exact variant, or the legacy NULL-variant order of the product) completed.
     let productionOrders: Array<{
+      id: number;
       product_id: number;
       product_variant_id: number | null;
       status: string;
@@ -402,12 +411,13 @@ export class OrderStockCommitService {
       productionOrders =
         (await db.production_orders.findMany({
           where: { order_id: orderId, status: { not: 'cancelled' } },
-          select: { product_id: true, product_variant_id: true, status: true },
+          select: { id: true, product_id: true, product_variant_id: true, status: true },
         })) ?? [];
     }
 
     // One pool per commit run: two lines cannot take the same batch stock.
     const addonPool = new Map();
+    const productionCogs = new Map<number, number>();
 
     for (const item of order.order_items || []) {
       if (!item.product_id) continue;
@@ -461,6 +471,15 @@ export class OrderStockCommitService {
       );
       totalCost += res.cost;
       if (res.committed) committedItemCount++;
+      if (res.committed && res.cost > 0 && line.fulfillment_destination === 'production') {
+        const productionOrder = findProductionOrderForLine(productionOrders, item);
+        if (productionOrder) {
+          productionCogs.set(
+            productionOrder.id,
+            (productionCogs.get(productionOrder.id) ?? 0) + res.cost,
+          );
+        }
+      }
     }
 
     // Defensive sweep: consume any residual active reservations for this order
@@ -480,7 +499,18 @@ export class OrderStockCommitService {
       );
     }
 
-    return { totalCost, committedItemCount };
+    return {
+      totalCost,
+      committedItemCount,
+      ...(productionCogs.size > 0
+        ? {
+            productionCogs: [...productionCogs].map(([production_order_id, total_cost]) => ({
+              production_order_id,
+              total_cost,
+            })),
+          }
+        : {}),
+    };
   }
 
   /**
