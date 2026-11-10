@@ -33,6 +33,17 @@ jobs:
         working-directory: apps/frontend
         run: npm run build:prod
 
+      # SEO-TECH-02: HTML comercial prerenderizado de la portada de vendix.online.
+      # Sale de un build aparte (dist/marketing-preview) y solo lo sirve la CloudFront
+      # Function en vendix.online/ (spa-rewrite.js → /marketing/index.html).
+      # check-marketing-preview.cjs exige H1, enlaces, index/canonical/OG y que la
+      # shell compartida dist/vendix/browser/index.html siga neutra.
+      - name: Build marketing HTML (SEO-TECH-02)
+        working-directory: apps/frontend
+        run: |
+          npm run build:marketing-preview
+          node scripts/check-marketing-preview.cjs
+
       - name: Configure AWS credentials
         uses: aws-actions/configure-aws-credentials@v4
         with:
@@ -47,11 +58,23 @@ jobs:
             s3://${{ env.S3_BUCKET }}/ \
             --delete \
             --cache-control "public,max-age=31536000,immutable" \
-            --exclude "index.html"
+            --exclude "index.html" \
+            --exclude "marketing/*"
           
           # Upload index.html with no-cache (for SPA routing)
           aws s3 cp apps/frontend/dist/vendix/browser/index.html \
             s3://${{ env.S3_BUCKET }}/index.html \
+            --cache-control "public,max-age=0,must-revalidate" \
+            --content-type "text/html"
+
+          # SEO-TECH-02: assets del build comercial (con hash, sin borrar nada) y su HTML,
+          # que solo se sirve en vendix.online/. Sube después de la shell neutra.
+          aws s3 sync apps/frontend/dist/marketing-preview/browser/ \
+            s3://${{ env.S3_BUCKET }}/ \
+            --cache-control "public,max-age=31536000,immutable" \
+            --exclude "*.html"
+          aws s3 cp apps/frontend/dist/marketing-preview/browser/index.html \
+            s3://${{ env.S3_BUCKET }}/marketing/index.html \
             --cache-control "public,max-age=0,must-revalidate" \
             --content-type "text/html"
 
