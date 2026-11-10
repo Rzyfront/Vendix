@@ -809,7 +809,8 @@ export class AccountingEventsListener {
     order_id: number;
     organization_id: number;
     store_id?: number;
-    total_cost: number;
+    /** Number, or a Decimal string: normalized with Number() below. */
+    total_cost: number | string;
     user_id?: number;
   }) {
     try {

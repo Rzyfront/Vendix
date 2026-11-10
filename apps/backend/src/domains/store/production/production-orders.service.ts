@@ -1010,6 +1010,7 @@ export class ProductionOrdersService {
     const resolvers = createBatchAwareExploders({
       recipes: this.recipes!,
       stockValidator: this.stockValidatorService,
+      stockLevelManager: this.stockLevelManager,
       client: tx,
       pool: new Map(),
     });
