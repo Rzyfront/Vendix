@@ -4855,6 +4855,8 @@ export class KitchenFireService {
             is_takeaway: original.is_takeaway,
             notes: original.notes,
             skip_kds: original.skip_kds,
+            // QUI-999: the split part keeps the destination of its original line.
+            fulfillment_destination: original.fulfillment_destination ?? null,
             // Puntero de agrupacion visual: la UI reagrupa las partes para que el
             // cliente siga viendo "3 pollos" y no dos filas sueltas.
             split_from_order_item_id:

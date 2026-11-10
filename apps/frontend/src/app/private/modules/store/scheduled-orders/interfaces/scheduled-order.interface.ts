@@ -82,9 +82,23 @@ export interface ScheduledOrderOptionLine {
   note?: string | null;
 }
 
+/** Destino de una línea de venta de restaurante (QUI-999); NULL = línea anterior. */
+export type FulfillmentDestination = 'kds' | 'production' | 'stock';
+
+export const DESTINATION_LABELS: Record<FulfillmentDestination, string> = {
+  kds: 'KDS',
+  production: 'Producción',
+  stock: 'Del stock',
+};
+
 export interface ScheduledOrderItem {
   id: number;
   product_name: string;
+  /** Contrato T12: destino por línea, producto y si es producible. */
+  fulfillment_destination?: FulfillmentDestination | null;
+  product_id?: number | null;
+  product_type?: string | null;
+  is_producible?: boolean | null;
   variant_attributes?: string | Record<string, unknown> | null;
   quantity: number | string;
   notes?: string | null;

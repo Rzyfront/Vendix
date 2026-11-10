@@ -22,8 +22,11 @@ import {
   ToastService,
 } from '../../../../../../shared/components';
 import { CurrencyPipe } from '../../../../../../shared/pipes/currency/currency.pipe';
+import { NonProducibleNoticeComponent } from '../non-producible-notice/non-producible-notice.component';
 import { ScheduledOrdersApiService } from '../../services/scheduled-orders-api.service';
 import {
+  DESTINATION_LABELS,
+  ScheduledOrderItem,
   STATUS_COLORS,
   STATUS_LABELS,
   STATUS_TRANSITIONS,
@@ -47,7 +50,13 @@ const ACTION_LABELS: Record<Exclude<ScheduledOrderStatus, 'scheduled'>, string> 
   selector: 'app-schedule-detail-modal',
   standalone: true,
   changeDetection: ChangeDetectionStrategy.OnPush,
-  imports: [ModalComponent, ButtonComponent, SpinnerComponent, CurrencyPipe],
+  imports: [
+    ModalComponent,
+    ButtonComponent,
+    SpinnerComponent,
+    CurrencyPipe,
+    NonProducibleNoticeComponent,
+  ],
   styles: [
     `
       .st-badge {
@@ -113,6 +122,11 @@ const ACTION_LABELS: Record<Exclude<ScheduledOrderStatus, 'scheduled'>, string> 
                       <span class="muted font-normal">({{ variant(item.variant_attributes) }})</span>
                     }
                   </div>
+                  @if (destinationState(d, item); as state) {
+                    <div class="mt-1">
+                      <span class="st-badge" [style.--st]="'var(--color-text-muted)'">{{ state }}</span>
+                    </div>
+                  }
                   @for (opt of item.order_item_options ?? []; track $index) {
                     <div class="muted">
                       + {{ opt.option_name }}
@@ -127,6 +141,14 @@ const ACTION_LABELS: Record<Exclude<ScheduledOrderStatus, 'scheduled'>, string> 
                   }
                   @if (item.notes) {
                     <div class="muted italic">Nota: {{ item.notes }}</div>
+                  }
+                  @if (item.is_producible === false && item.fulfillment_destination !== 'production') {
+                    <div class="mt-1">
+                      <app-non-producible-notice
+                        [productId]="item.product_id ?? null"
+                        [productType]="item.product_type ?? null"
+                      ></app-non-producible-notice>
+                    </div>
                   }
                 </div>
               }
@@ -211,6 +233,32 @@ export class ScheduleDetailModalComponent {
       (d.pending_kitchen_item_count ?? 0) > 0
     );
   });
+
+  /**
+   * Destination state of one line (QUI-999). A line KDS does not manage
+   * (production / stock) never shows KDS state. For `kds` lines the contract
+   * has no per-line sent flag, so the state comes from the order-level count of
+   * dishes still pending: none pending = all sent; all pending = none sent.
+   */
+  destinationState(d: ScheduledOrderDetail, item: ScheduledOrderItem): string | null {
+    switch (item.fulfillment_destination) {
+      case 'production':
+        return DESTINATION_LABELS.production;
+      case 'stock':
+        return DESTINATION_LABELS.stock;
+      case 'kds': {
+        const pending = d.pending_kitchen_item_count ?? 0;
+        const kdsLines = d.order.order_items.filter(
+          (i) => i.fulfillment_destination === 'kds',
+        ).length;
+        if (pending === 0) return `${DESTINATION_LABELS.kds} · enviado a cocina`;
+        if (pending >= kdsLines) return `${DESTINATION_LABELS.kds} · pendiente de enviar`;
+        return DESTINATION_LABELS.kds;
+      }
+      default:
+        return null;
+    }
+  }
 
   readonly actions = computed<Exclude<ScheduledOrderStatus, 'scheduled'>[]>(() => {
     const d = this.detail();

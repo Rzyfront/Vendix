@@ -16,6 +16,7 @@ import {
 import { SerialNumberEnforcementService } from '../../serial-numbers/serial-number-enforcement.service';
 import { InventorySerialNumbersService } from '../../serial-numbers/inventory-serial-numbers.service';
 import { resolveLineStockUnits } from '../../../products/services/packaging.util';
+import { lineConsumesOwnStock } from '../../../orders/utils/resolve-line-destination.util';
 
 /**
  * Options that drive a single delivery-commit run. The same contract is shared
@@ -112,6 +113,8 @@ interface CommitLine {
   /** Soft-cancel marker (`order_items.cancelled_at`) — a cancelled line never deducts. */
   cancelled_at?: Date | null;
   skip_kds?: boolean | null;
+  /** QUI-999: `production` lines never touch their own stock here. */
+  fulfillment_destination?: string | null;
   /** Location to deduct from when no active reservation is found (dispatch line). */
   location_id_override?: number | null;
   /** Resolved manual serial selection for this line (POS). */
@@ -379,6 +382,7 @@ export class OrderStockCommitService {
         inventory_consumed_at_fire: item.inventory_consumed_at_fire,
         cancelled_at: (item as any).cancelled_at ?? null,
         skip_kds: item.skip_kds,
+        fulfillment_destination: (item as { fulfillment_destination?: string | null }).fulfillment_destination ?? null,
         posSelection: opts.consumeSerials
           ? (serialSelectionByLine.get(item.id) ?? posMatcher(item))
           : undefined,
@@ -517,6 +521,7 @@ export class OrderStockCommitService {
               inventory_consumed_at_fire: true,
               cancelled_at: true,
               skip_kds: true,
+              fulfillment_destination: true,
             },
           },
         },
@@ -565,6 +570,7 @@ export class OrderStockCommitService {
         inventory_consumed_at_fire: matched?.inventory_consumed_at_fire,
         cancelled_at: matched?.cancelled_at ?? null,
         skip_kds: matched?.skip_kds,
+        fulfillment_destination: matched?.fulfillment_destination ?? null,
         location_id_override:
           item.location_id ?? dispatchNote.dispatch_location_id ?? null,
       };
@@ -630,6 +636,11 @@ export class OrderStockCommitService {
     // 3. Restaurant prepared items pending kitchen fire consume ingredients at
     //    fire, not the plate here.
     if (isRestaurant && line.product_type === 'prepared' && !line.skip_kds) {
+      return { cost: 0, committed: false };
+    }
+    // 3b. QUI-999: a `production` line never deducts its own stock here; its
+    //     production order (QUI-995) is what moves it.
+    if (!lineConsumesOwnStock(line)) {
       return { cost: 0, committed: false };
     }
 

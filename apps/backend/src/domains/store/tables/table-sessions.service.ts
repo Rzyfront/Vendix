@@ -41,6 +41,7 @@ import { OpenTableSessionDto, AddItemsToTableSessionDto } from './dto';
 import type { CancellationType } from './dto';
 import { ReassignTableSessionDto } from './dto/table-session.dto';
 import { OrderHistoryService } from '../orders/order-history/order-history.service';
+import { resolveLineDestinations } from '../orders/utils/line-destination.loader';
 
 // `FullTaxRow` y su resolver viven en orders/utils/catalog-line-pricing.util
 // (compartidos con las cuentas de estaciones de servicio y con
@@ -907,9 +908,22 @@ export class TableSessionsService {
         }
       }
 
-      const stockDemands: StockDemandLine[] = dto.items.flatMap((item) => {
+      // QUI-999: fulfillment destination per line (null outside restaurants).
+      const lineDestinations = await resolveLineDestinations(
+        tx,
+        storeId,
+        dto.items,
+      );
+
+      const stockDemands: StockDemandLine[] = dto.items.flatMap((item, index) => {
         const product = productMap.get(item.product_id)!;
-        return product.product_type === 'prepared'
+        const destination = lineDestinations[index]?.destination;
+        // Without a matrix decision a prepared dish never demands its plate
+        // (ingredients move at fire); with one only `stock` lines demand stock.
+        const demandsOwnStock = destination
+          ? destination === 'stock'
+          : product.product_type !== 'prepared';
+        return !demandsOwnStock
           ? []
           : [{
               product_id: item.product_id,
@@ -929,8 +943,9 @@ export class TableSessionsService {
       );
       if (shortages.length > 0) stockWarnings.push(...shortages);
 
-      for (const item of dto.items) {
+      for (const [itemIndex, item] of dto.items.entries()) {
         const product = productMap.get(item.product_id)!;
+        const lineDestination = lineDestinations[itemIndex];
         // La cuenta suma el valor de la VARIANTE (no el base): override de la
         // variante, oferta vigente, y base como último recurso — misma prioridad
         // que el POS (`vendix-product-variants`: variant sale/override first).
@@ -988,6 +1003,14 @@ export class TableSessionsService {
             cost_price: null,
             is_price_overridden: false,
             inventory_consumed_at_fire: false,
+            // QUI-999: the matrix decision owns `skip_kds`; without one
+            // (non-restaurant store) the column keeps its default.
+            ...(lineDestination?.destination
+              ? {
+                  skip_kds: lineDestination.skip_kds,
+                  fulfillment_destination: lineDestination.destination,
+                }
+              : {}),
             // QUI-653 — para llevar es una dimension por item. La orden sigue
             // siendo de la mesa y `orders.delivery_type` no se toca, para no
             // arrastrarla a los flujos de remision.
@@ -1037,7 +1060,9 @@ export class TableSessionsService {
           },
         });
 
-        if (product.product_type !== 'prepared' && product.product_type !== 'service' &&
+        if ((product.product_type !== 'prepared' || lineDestination?.destination === 'stock') &&
+          product.product_type !== 'service' &&
+          lineDestination?.destination !== 'production' &&
           this.stockValidator.resolveEffectiveTracking(product, variant)) {
           const allocation = await this.sellableStockAllocator.allocateForLine(
             storeId,

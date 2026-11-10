@@ -1742,6 +1742,8 @@ model order_items {
   //   decide al final segun product_type='prepared' y existencia de receta activa.
   // Default false preserva el comportamiento actual para ordenes existentes.
   skip_kds                         Boolean                  @default(false)
+  /// QUI-999: where this restaurant sale line is fulfilled (kds / production / stock). NULL = line created before this column or a non-restaurant store: behaves as before.
+  fulfillment_destination          order_item_fulfillment_destination_enum?
   // QUI-653 — el item se empaca y el cliente se lo lleva, aunque pertenezca al
   // pedido de una mesa. Es una dimension POR ITEM, deliberadamente separada de
   // `orders.delivery_type`, por dos razones:
@@ -14867,6 +14869,13 @@ enum order_fulfillment_status_enum {
   delivered
   no_show
   cancelled
+}
+
+/// QUI-999: fulfillment destination of a restaurant sale line.
+enum order_item_fulfillment_destination_enum {
+  kds
+  production
+  stock
 }
 
 enum order_fulfillment_type_enum {

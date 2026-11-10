@@ -79,6 +79,11 @@ import { CouponsService } from '../../store/coupons/coupons.service';
 import { CouponAppliesTo } from '../../store/coupons/dto';
 import { PromotionQuoteResult } from '../../store/promotions/dto/promotion-quote.interface';
 import { storeIsRestaurant } from '@common/helpers/industry-capabilities.helper';
+import { resolveLineDestinations } from '../../store/orders/utils/line-destination.loader';
+import {
+  lineConsumesOwnStock,
+  type ResolvedLineDestination,
+} from '../../store/orders/utils/resolve-line-destination.util';
 import { MenuAvailabilityCheckerService } from '../../store/menus/menu-availability-checker.service';
 import { assertCanChargeVat } from '@common/helpers/vat-responsibility.helper';
 import { CheckoutIdempotencyService } from './checkout-idempotency.service';
@@ -1960,7 +1965,11 @@ export class CheckoutService {
     // Strict carta schedule gate (same OR window semantics as the public menu).
     await this.assertCartItemsWithinMenuWindows(cart_items);
 
-    for (const item of cart_items) {
+    // QUI-999: ecommerce always takes the matrix default (no cashier choice).
+    const earlyLineDestinations =
+      await this.resolveCartLineDestinations(cart_items);
+
+    for (const [earlyIndex, item] of cart_items.entries()) {
       const productVariantCount = await this.prisma.product_variants.count({
         where: { product_id: item.product_id },
       });
@@ -1986,10 +1995,16 @@ export class CheckoutService {
       }
 
 
-      const shouldTrack = this.stockValidatorService.resolveEffectiveTracking(
-        item.product,
-        item.product_variant ?? undefined,
-      );
+      // Production lines never touch their own stock (QUI-999).
+      const shouldTrack =
+        lineConsumesOwnStock({
+          fulfillment_destination:
+            earlyLineDestinations[earlyIndex]?.destination ?? null,
+        }) &&
+        this.stockValidatorService.resolveEffectiveTracking(
+          item.product,
+          item.product_variant ?? undefined,
+        );
 
       if (shouldTrack) {
         const availability =
@@ -2458,8 +2473,10 @@ export class CheckoutService {
     // recipe are excluded from reservation (computed once for the whole cart).
     // Se resuelve ACÁ, antes de crear la orden, porque la validación de stock
     // por presentación tiene que usar el mismo predicado que la reserva.
+    const cartLineDestinations =
+      await this.resolveCartLineDestinations(cart_items);
     const deferredPreparedProductIds =
-      await this.getDeferredPreparedProductIds(cart_items);
+      await this.getDeferredPreparedProductIds(cart_items, cartLineDestinations);
 
     // Falta de stock medida en unidades de stock: si sobra, hay que fallar
     // ANTES de crear la orden y el pago.
@@ -2625,6 +2642,9 @@ export class CheckoutService {
                 is_takeaway:
                   markTakeawayForDelivery &&
                   (item as any).product?.product_type === 'prepared',
+                ...this.destinationCreateFields(
+                  cartLineDestinations[itemsWithTaxes.indexOf(item)],
+                ),
                 product_id: item.product_id,
                 product_variant_id: item.product_variant_id,
                 product_name: item.product.name,
@@ -3223,7 +3243,11 @@ export class CheckoutService {
     // Strict carta schedule gate (same OR window semantics as the public menu).
     await this.assertCartItemsWithinMenuWindows(cart_items);
 
-    for (const item of cart_items) {
+    // QUI-999: ecommerce always takes the matrix default (no cashier choice).
+    const earlyLineDestinations =
+      await this.resolveCartLineDestinations(cart_items);
+
+    for (const [earlyIndex, item] of cart_items.entries()) {
       const productVariantCount = await this.prisma.product_variants.count({
         where: { product_id: item.product_id },
       });
@@ -3248,10 +3272,16 @@ export class CheckoutService {
         );
       }
 
-      const shouldTrack = this.stockValidatorService.resolveEffectiveTracking(
-        item.product,
-        item.product_variant ?? undefined,
-      );
+      // Production lines never touch their own stock (QUI-999).
+      const shouldTrack =
+        lineConsumesOwnStock({
+          fulfillment_destination:
+            earlyLineDestinations[earlyIndex]?.destination ?? null,
+        }) &&
+        this.stockValidatorService.resolveEffectiveTracking(
+          item.product,
+          item.product_variant ?? undefined,
+        );
 
       if (shouldTrack) {
         const availability =
@@ -3428,8 +3458,10 @@ export class CheckoutService {
 
     // Mismo par que el checkout normal: predicado de diferimiento primero, y
     // validación de stock en unidades de stock antes de crear la orden.
+    const cartLineDestinations =
+      await this.resolveCartLineDestinations(cart_items);
     const deferredPreparedProductIds =
-      await this.getDeferredPreparedProductIds(cart_items);
+      await this.getDeferredPreparedProductIds(cart_items, cartLineDestinations);
 
     await this.assertPackagedStockAvailability(
       cart_items,
@@ -3592,6 +3624,9 @@ export class CheckoutService {
                 is_takeaway:
                   markTakeawayForDelivery &&
                   (item as any).product?.product_type === 'prepared',
+                ...this.destinationCreateFields(
+                  cartLineDestinations[itemsWithTaxes.indexOf(item)],
+                ),
                 product_id: item.product_id,
                 product_variant_id: item.product_variant_id,
                 product_name: item.product.name,
@@ -4505,8 +4540,43 @@ export class CheckoutService {
    * Prepared products WITHOUT an active recipe keep the normal reservation
    * behavior (only prepared + active recipe is deferred).
    */
+  /**
+   * QUI-999 — matrix destination per cart line (aligned by index). Ecommerce
+   * never carries a cashier choice, so every line takes the default. Non
+   * restaurant stores and custom lines resolve to `null` (legacy behavior).
+   */
+  private async resolveCartLineDestinations(
+    cart_items: Array<{ product_id: number }>,
+  ): Promise<Array<ResolvedLineDestination | null>> {
+    const store_id = RequestContextService.getStoreId();
+    if (!store_id || cart_items.length === 0) {
+      return cart_items.map(() => null);
+    }
+    return resolveLineDestinations(
+      this.prisma,
+      store_id,
+      cart_items.map((item: any) => ({
+        product_id: item.product_id,
+        product_variant_id: item.product_variant_id ?? null,
+        quantity: item.quantity,
+      })),
+    );
+  }
+
+  /** Persisted columns for a resolved destination; empty when none applies. */
+  private destinationCreateFields(
+    destination: ResolvedLineDestination | null | undefined,
+  ): { fulfillment_destination?: string; skip_kds?: boolean } {
+    if (!destination?.destination) return {};
+    return {
+      fulfillment_destination: destination.destination,
+      skip_kds: destination.skip_kds,
+    };
+  }
+
   private async getDeferredPreparedProductIds(
     cart_items: Array<{ product_id: number; product: any }>,
+    lineDestinations: Array<ResolvedLineDestination | null> = [],
   ): Promise<Set<number>> {
     const empty = new Set<number>();
 
@@ -4549,7 +4619,20 @@ export class CheckoutService {
       select: { product_id: true },
     });
 
-    return new Set(activeRecipes.map((r) => r.product_id));
+    // QUI-999: a producible dish resolved to `stock` is sold from its own
+    // finished-goods stock, so it must reserve like any other product.
+    const soldFromStock = new Set(
+      cart_items
+        .filter(
+          (_item, index) => lineDestinations[index]?.destination === 'stock',
+        )
+        .map((item) => item.product_id),
+    );
+    return new Set(
+      activeRecipes
+        .map((r) => r.product_id)
+        .filter((id) => !soldFromStock.has(id)),
+    );
   }
 
   /**

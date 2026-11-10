@@ -5,6 +5,7 @@ import {
 } from '../shared/financial-split-policy';
 import { lockOrderLifecycle } from './order-lifecycle-lock.util';
 import { serviceBudgetBlocks } from '../utils/service-budget-cap.util';
+import { lineConsumesOwnStock } from '../utils/resolve-line-destination.util';
 import {
   getCancellationBlocker,
   SETTLED_PAYMENT_STATES,
@@ -1557,6 +1558,10 @@ export class OrderFlowService {
       const isKitchenDish =
         isRestaurant && product.product_type === 'prepared' && !item.skip_kds;
       if (isKitchenDish) continue;
+
+      // QUI-999: a `production` line never demands its own stock; its
+      // production order moves it.
+      if (!lineConsumesOwnStock(item)) continue;
 
       const variantId = item.product_variant_id ?? undefined;
       const key = `${item.product_id}-${variantId ?? 'null'}`;

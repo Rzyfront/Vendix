@@ -150,6 +150,9 @@ const FULL_ORDER = {
       variant_attributes: null,
       quantity: 1,
       notes: 'Dedicatoria: Feliz cumpleaños, Sofía',
+      fulfillment_destination: 'production',
+      product_id: 77,
+      products: { product_type: 'prepared', is_batch_produced: true, _count: { recipes: 1 } },
       order_item_options: [
         { group_name: 'Relleno', option_name: 'Ganache', quantity: 1, uom: 'unit', scope: 'per_line' },
         { group_name: 'Fruta', option_name: 'Fresas', quantity: 1, uom: 'unit', scope: 'per_line', note: 'solo encima, en corona' },
@@ -376,6 +379,34 @@ describe('ScheduledOrdersService', () => {
       expect(detail.order.order_items[0].order_item_options[1].note).toBe('solo encima, en corona');
       expect(detail.order.customer_alias).toBeNull();
       expect(detail.pending_kitchen_item_count).toBe(0);
+    });
+
+    it('QUI-999: cada línea expone destino, product_id, product_type e is_producible', async () => {
+      const { service, rows } = makeHarness();
+      rows.push({
+        id: 1, store_id: 1, order_id: 50,
+        scheduled_start: new Date(SLOT.start), scheduled_end: new Date(SLOT.end),
+        status: 'scheduled', hold_expires_at: null,
+      });
+      const prisma: any = (service as any).prisma;
+      const original = prisma.order_fulfillment_schedules.findFirst;
+      prisma.order_fulfillment_schedules.findFirst = jest.fn(async (args: any) => {
+        const base = await original(args);
+        if (!base || !args.include) return base;
+        return { ...base, changes: [], order: applySelect(FULL_ORDER, args.include.order.select) };
+      });
+      prisma.order_items = { count: jest.fn(async () => 0) };
+
+      const detail: any = await service.findOne(1);
+      const line = detail.order.order_items[0];
+
+      expect(line).toMatchObject({
+        fulfillment_destination: 'production',
+        product_id: 77,
+        product_type: 'prepared',
+        is_producible: true,
+      });
+      expect(line).not.toHaveProperty('products');
     });
   });
 });

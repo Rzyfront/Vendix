@@ -5,6 +5,9 @@ import type { PosShippingMethod } from './shipping.model';
 import { WithholdingLine } from '../../withholding-tax/interfaces/withholding.interface';
 import type { OptionDeltaParts } from '../../../../../shared/utils/option-pricing.util';
 
+/** QUI-999 — destination the cashier can pick on a choosable line. */
+export type FulfillmentChoice = 'stock' | 'production';
+
 export interface CartItem {
   id: string;
   itemType?: 'product' | 'custom';
@@ -107,6 +110,11 @@ export interface CartItem {
   // para llevar y otra para la mesa, son líneas DISTINTAS; fusionarlas perdería
   // una de las dos decisiones en silencio.
   isTakeaway?: boolean;
+  // QUI-999 — cashier's choice for a producible restaurant line that has
+  // stock: 'stock' (default, when absent) or 'production'. Sent to the server
+  // as `fulfillment_destination` only for choosable lines (see
+  // `fulfillmentModeForLine`). Participates in the line identity.
+  fulfillmentChoice?: FulfillmentChoice;
   // QUI-431 — Serial numbers chosen by the cashier for a serialized
   // product (`requires_serial_numbers=true`). `serial_ids` are existing
   // pool rows picked from the selector; `serial_numbers` are free-text
@@ -470,4 +478,40 @@ export function cartOptionLines(
     label,
     note: notes.get(ids[i]) || null,
   }));
+}
+
+/**
+ * QUI-999 — what the POS offers for a line, following the decision matrix:
+ *  - `choose`: producible with stock -> selector "Del stock / A producción".
+ *  - `production`: producible without stock or without inventory -> fixed badge.
+ *  - `null`: not producible (the server decides: KDS or stock) or custom line.
+ * `is_producible` comes from the POS product payload (batch-produced with an
+ * active recipe). Restaurant gating is the caller's job.
+ */
+export type LineFulfillmentMode = 'choose' | 'production' | null;
+
+export function isProducibleProduct(product: Product | undefined | null): boolean {
+  return product?.is_producible === true;
+}
+
+export function fulfillmentModeForLine(
+  item: Pick<CartItem, 'itemType' | 'product' | 'booking'>,
+): LineFulfillmentMode {
+  if (item.itemType === 'custom' || item.booking) return null;
+  if (!isProducibleProduct(item.product)) return null;
+  const tracksInventory =
+    item.product.effective_track_inventory !== false &&
+    item.product.track_inventory !== false;
+  const stock = Number(item.product.available_stock ?? item.product.stock ?? 0);
+  return tracksInventory && stock > 0 ? 'choose' : 'production';
+}
+
+/** Destination chip of the line: the cashier's choice or the fixed one. */
+export function cartLineDestination(
+  item: Pick<CartItem, 'itemType' | 'product' | 'booking' | 'fulfillmentChoice'>,
+): FulfillmentChoice | null {
+  const mode = fulfillmentModeForLine(item);
+  if (mode === 'production') return 'production';
+  if (mode === 'choose') return item.fulfillmentChoice ?? 'stock';
+  return null;
 }

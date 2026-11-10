@@ -898,10 +898,21 @@
                           </span>
                         }
                       }
+                      <!-- QUI-999: destination chip of the line (KDS,
+                           Producción, Del stock). Legacy lines (NULL) have
+                           none. The Production link/status arrives with T13. -->
+                      @if (destinationLabel(item); as destination) {
+                        <span
+                          class="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-semibold mt-1 mr-1 bg-muted text-text-secondary border border-border"
+                          title="Destino de la línea"
+                        >
+                          {{ destination }}
+                        </span>
+                      }
                       <!-- Restaurant Suite — Fase K Gap 2: per-item KDS
                            state badge. Renders only for items that were
                            actually fired to the kitchen. -->
-                      @if (kitchenStateFor(item); as ks) {
+                      @if (managedByKitchen(item) && kitchenStateFor(item); as ks) {
                         @if (kitchenTicketPrint.isPhysicalKitchen()) {
                           <!-- Cocina fisica: no hay KDS al que navegar. -->
                           <span

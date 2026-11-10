@@ -59,6 +59,7 @@ import {
 } from './refund-channel.util';
 import { REFUNDABLE_ORDER_STATES } from '../order-action-policy.util';
 import { OrderHistoryService } from '../../order-history/order-history.service';
+import { lineConsumesOwnStock } from '../../utils/resolve-line-destination.util';
 
 // order-truth-and-invoice-tz plan (B1b) — was a hand-synced local copy of
 // `['delivered', 'finished']`; now reuses the single source of truth in
@@ -1144,6 +1145,11 @@ export class RefundFlowService {
             });
             continue;
           }
+
+          // QUI-999: a `production` line never deducted its own stock (no
+          // linked production order exists yet; QUI-995 adds it), so there is
+          // nothing to restore, write off or serialize.
+          if (!lineConsumesOwnStock(orderItem)) continue;
 
           const stockUnits =
             stockUnitsByOrderItem.get(item.order_item_id) ?? item.quantity;

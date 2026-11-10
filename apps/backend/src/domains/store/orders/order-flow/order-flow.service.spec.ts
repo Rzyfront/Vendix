@@ -9117,3 +9117,50 @@ describe('OrderFlowService.resumeFinishPendingAfterPayment (B07/B11)', () => {
     expect(spies.append).not.toHaveBeenCalled();
   });
 });
+
+
+describe('OrderFlowService.collectDraftReservationDemand — QUI-999 destinos', () => {
+  const service = new OrderFlowService(
+    {} as any, {} as any, {} as any, {} as any, {} as any,
+    {} as any, {} as any, {} as any, {} as any,
+  );
+  const line = (id: number, over: Record<string, unknown>) => ({
+    id,
+    product_id: id,
+    product_variant_id: null,
+    quantity: 2,
+    stock_units_consumed: null,
+    skip_kds: true,
+    inventory_consumed_at_fire: false,
+    inventory_committed: false,
+    cancelled_at: null,
+    products: { id, name: `P${id}`, track_inventory: true, product_type: 'prepared' },
+    product_variants: null,
+    ...over,
+  });
+  const demand = (items: any[]) =>
+    (service as any).collectDraftReservationDemand({ order_items: items }, true) as Array<{
+      product_id: number;
+      demand: number;
+    }>;
+
+  it('no reserva el stock propio de una línea de producción', () => {
+    expect(demand([line(1, { fulfillment_destination: 'production' })])).toEqual([]);
+  });
+
+  it('una línea stock reserva como hoy', () => {
+    expect(demand([line(2, { fulfillment_destination: 'stock' })])).toEqual([
+      expect.objectContaining({ product_id: 2, demand: 2 }),
+    ]);
+  });
+
+  it('una línea anterior (destino NULL, skip_kds) reserva como hoy', () => {
+    expect(demand([line(3, { fulfillment_destination: null })])).toEqual([
+      expect.objectContaining({ product_id: 3, demand: 2 }),
+    ]);
+  });
+
+  it('un plato de cocina (kds) sigue sin reservar su stock propio', () => {
+    expect(demand([line(4, { skip_kds: false, fulfillment_destination: 'kds' })])).toEqual([]);
+  });
+});

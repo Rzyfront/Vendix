@@ -78,6 +78,12 @@ describe('TableSessionsService — open + addItems (Fase E smoke)', () => {
       product_variants: {
         findMany: jest.fn().mockResolvedValue([]),
       },
+      stores: {
+        findUnique: jest.fn().mockResolvedValue({ industries: [] }),
+      },
+      stock_levels: {
+        findMany: jest.fn().mockResolvedValue([]),
+      },
       store_settings: {
         findFirst: jest.fn().mockResolvedValue({ currency: 'COP' }),
       },
@@ -904,6 +910,85 @@ describe('TableSessionsService — open + addItems (Fase E smoke)', () => {
         51, undefined, 1, 2, 'order', 100, USER_ID,
         true, prismaMock, undefined, false, undefined, false,
       );
+    });
+
+    describe('QUI-999 — destino de la línea', () => {
+      const producible = () => ({
+        id: 52, name: 'Torta', base_price: 100,
+        is_sellable: true, state: 'active', product_type: 'prepared', track_inventory: true,
+        is_batch_produced: true, _count: { recipes: 1 },
+        product_variants: [], price_unit_quantity: null,
+      });
+      const restaurantStore = () =>
+        prismaMock.stores.findUnique.mockResolvedValue({ industries: ['restaurant'] });
+
+      it('producible sin stock: línea a Producción, skip_kds=true, sin demanda ni reserva de stock propio', async () => {
+        restaurantStore();
+        prismaMock.table_sessions.findFirst.mockResolvedValue(openSession());
+        prismaMock.products.findMany.mockResolvedValue([producible()]);
+        prismaMock.order_items.create.mockResolvedValue({ id: 710 });
+        prismaMock.orders.update.mockResolvedValue({});
+
+        await service.addItems(1, { items: [{ product_id: 52, quantity: 1 }] } as any);
+
+        expect(prismaMock.order_items.create.mock.calls[0][0].data).toEqual(
+          expect.objectContaining({ skip_kds: true, fulfillment_destination: 'production' }),
+        );
+        expect((service as any).stockValidator.assertLinesAvailable).toHaveBeenCalledWith(
+          [],
+          expect.anything(),
+        );
+        expect((service as any).stockLevelManager.reserveStock).not.toHaveBeenCalled();
+      });
+
+      it('producible con stock: sale del stock (defecto) y reserva como retail', async () => {
+        restaurantStore();
+        prismaMock.stock_levels.findMany.mockResolvedValue([
+          { product_id: 52, product_variant_id: null, quantity_available: 9 },
+        ]);
+        prismaMock.table_sessions.findFirst.mockResolvedValue(openSession());
+        prismaMock.products.findMany.mockResolvedValue([producible()]);
+        prismaMock.order_items.create.mockResolvedValue({ id: 711 });
+        prismaMock.orders.update.mockResolvedValue({});
+
+        await service.addItems(1, { items: [{ product_id: 52, quantity: 1 }] } as any);
+
+        expect(prismaMock.order_items.create.mock.calls[0][0].data).toEqual(
+          expect.objectContaining({ skip_kds: true, fulfillment_destination: 'stock' }),
+        );
+        expect((service as any).stockLevelManager.reserveStock).toHaveBeenCalledTimes(1);
+      });
+
+      it('plato no producible: va a KDS (skip_kds=false) y no reserva su stock, como hoy', async () => {
+        restaurantStore();
+        prismaMock.table_sessions.findFirst.mockResolvedValue(openSession());
+        prismaMock.products.findMany.mockResolvedValue([
+          { ...producible(), is_batch_produced: false },
+        ]);
+        prismaMock.order_items.create.mockResolvedValue({ id: 712 });
+        prismaMock.orders.update.mockResolvedValue({});
+
+        await service.addItems(1, { items: [{ product_id: 52, quantity: 1 }] } as any);
+
+        expect(prismaMock.order_items.create.mock.calls[0][0].data).toEqual(
+          expect.objectContaining({ skip_kds: false, fulfillment_destination: 'kds' }),
+        );
+        expect((service as any).stockLevelManager.reserveStock).not.toHaveBeenCalled();
+      });
+
+      it('tienda no restaurante: sin destino ni skip_kds en la línea (comportamiento de hoy)', async () => {
+        prismaMock.table_sessions.findFirst.mockResolvedValue(openSession());
+        prismaMock.products.findMany.mockResolvedValue([trackedProduct()]);
+        prismaMock.order_items.create.mockResolvedValue({ id: 713 });
+        prismaMock.orders.update.mockResolvedValue({});
+
+        await service.addItems(1, { items: [{ product_id: 51, quantity: 1 }] } as any);
+
+        const data = prismaMock.order_items.create.mock.calls[0][0].data;
+        expect(data).not.toHaveProperty('fulfillment_destination');
+        expect(data).not.toHaveProperty('skip_kds');
+        expect(prismaMock.stock_levels.findMany).not.toHaveBeenCalled();
+      });
     });
 
     it('reserves a table item split across two locations without overselling either', async () => {

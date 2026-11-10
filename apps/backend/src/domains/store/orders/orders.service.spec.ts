@@ -137,7 +137,7 @@ describe('OrdersService', () => {
     shipping_rates: { findFirst: jest.fn() },
     addresses: { findFirst: jest.fn() },
     users: { findUnique: jest.fn() },
-    stores: { findFirst: jest.fn() },
+    stores: { findFirst: jest.fn(), findUnique: jest.fn() },
     payments: { findFirst: jest.fn(), findMany: jest.fn().mockResolvedValue([]) },
     refunds: { findMany: jest.fn().mockResolvedValue([]) },
     // Release-854 follow-up — `findOne` expone `active_sales_invoice` vía
@@ -1733,6 +1733,65 @@ describe('OrdersService', () => {
       );
       expect(mockPrismaService.orders.create).not.toHaveBeenCalled();
       expect(mockStockLevelManager.reserveStock).not.toHaveBeenCalled();
+    });
+
+    describe('QUI-999 — destino de la línea', () => {
+      const dish = (over: Record<string, unknown> = {}) => ({
+        id: 51, price_unit_quantity: null, product_tax_assignments: [],
+        product_type: 'prepared', is_batch_produced: true, track_inventory: true,
+        _count: { recipes: 1 }, ...over,
+      });
+      const dto = () => makeDto({
+        items: [{ product_id: 51, product_name: 'Torta', quantity: 1, unit_price: 100, total_price: 100 }],
+      });
+      const arrange = (industries: string[], stock: number, over: Record<string, unknown> = {}) => {
+        mockPrismaService.products.findMany.mockResolvedValue([dish(over)] as any);
+        mockPrismaService.products.findUnique.mockResolvedValue({
+          id: 51, name: 'Torta', product_type: 'prepared', product_variants: [],
+        } as any);
+        mockPrismaService.stores.findUnique.mockResolvedValue({ industries } as any);
+        (mockPrismaService as any).stock_levels = {
+          findMany: jest.fn().mockResolvedValue(
+            stock > 0 ? [{ product_id: 51, product_variant_id: null, quantity_available: stock }] : [],
+          ),
+        };
+      };
+      const lineData = () =>
+        mockPrismaService.orders.create.mock.calls[0][0].data.order_items.create[0];
+
+      afterEach(() => {
+        mockPrismaService.stores.findUnique.mockReset();
+        delete (mockPrismaService as any).stock_levels;
+      });
+
+      it('producible sin stock: persiste production, skip_kds=true y no exige ni reserva stock propio', async () => {
+        arrange(['restaurant'], 0);
+        await service.create(dto(), { id: 99 });
+        expect(lineData()).toMatchObject({ fulfillment_destination: 'production', skip_kds: true });
+        expect(mockStockLevelManager.reserveStock).not.toHaveBeenCalled();
+        expect(mockStockValidator.assertLinesAvailable).not.toHaveBeenCalledWith(
+          expect.arrayContaining([expect.objectContaining({ product_id: 51 })]),
+          expect.anything(),
+        );
+      });
+
+      it('producible con stock: persiste stock y skip_kds=true', async () => {
+        arrange(['restaurant'], 4);
+        await service.create(dto(), { id: 99 });
+        expect(lineData()).toMatchObject({ fulfillment_destination: 'stock', skip_kds: true });
+      });
+
+      it('plato no producible: persiste kds y skip_kds=false', async () => {
+        arrange(['restaurant'], 0, { is_batch_produced: false });
+        await service.create(dto(), { id: 99 });
+        expect(lineData()).toMatchObject({ fulfillment_destination: 'kds', skip_kds: false });
+      });
+
+      it('tienda no restaurante: no escribe destino (comportamiento previo)', async () => {
+        arrange([], 0);
+        await service.create(dto(), { id: 99 });
+        expect(lineData()).not.toHaveProperty('fulfillment_destination');
+      });
     });
 
     it('reserves a tracked line strictly in the same transaction as create', async () => {

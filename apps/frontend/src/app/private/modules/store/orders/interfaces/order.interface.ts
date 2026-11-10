@@ -387,6 +387,9 @@ export interface CouponUseSnapshot {
   } | null;
 }
 
+/** QUI-999 — where an order line goes; NULL/absent = line created before it. */
+export type OrderItemFulfillmentDestination = 'kds' | 'production' | 'stock';
+
 export interface OrderItem {
   id: number;
   order_id: number;
@@ -451,6 +454,8 @@ export interface OrderItem {
   /** Stock committed by the delivery seam (distinct from kitchen consumption). */
   inventory_committed?: boolean;
   skip_kds?: boolean;
+  /** QUI-999 — destination of the line (KDS, Production or stock). */
+  fulfillment_destination?: OrderItemFulfillmentDestination | null;
   /**
    * Restaurant Suite — Fase K Gap 2: KDS state for this order_item.
    * Populated by GET /store/orders/:id when the item has been fired

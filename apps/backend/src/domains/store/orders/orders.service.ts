@@ -103,6 +103,8 @@ import {
   OrderActionSnapshot,
 } from './order-flow/order-action-policy.util';
 import { storeIsRestaurant } from '@common/helpers/industry-capabilities.helper';
+import { resolveLineDestinations } from './utils/line-destination.loader';
+import { lineConsumesOwnStock } from './utils/resolve-line-destination.util';
 import { PromotionEngineService } from '../promotions/promotion-engine/promotion-engine.service';
 import { CouponsService } from '../coupons/coupons.service';
 import {
@@ -660,6 +662,20 @@ export class OrdersService {
 
   // === Fin listeners SSE ====================================================
 
+  /**
+   * QUI-999 — does this line demand its OWN stock when the order is
+   * created/edited? Without a matrix decision the historical rule holds
+   * (prepared dishes demand ingredients at fire, not the plate); with one,
+   * only `stock` lines demand their stock (`kds` and `production` never do).
+   */
+  private lineNeedsOwnStockDemand(
+    productType: string | null | undefined,
+    destination: string | null | undefined,
+  ): boolean {
+    if (destination) return destination === 'stock';
+    return productType !== 'prepared';
+  }
+
   async create(createOrderDto: CreateOrderDto, creatingUser: any) {
     // Enforce store context
     const context = RequestContextService.getContext();
@@ -709,6 +725,14 @@ export class OrdersService {
 
     const variantCheckProductById = await assertVariantRequiredForPrepared(
       this.prisma,
+      createOrderDto.items,
+    );
+
+    // QUI-999: fulfillment destination per line (null for non-restaurant
+    // stores, which keep today's behavior).
+    const createLineDestinations = await resolveLineDestinations(
+      this.prisma,
+      store_id,
       createOrderDto.items,
     );
 
@@ -945,7 +969,10 @@ export class OrdersService {
         // Use scoped client (creates are not scoped by extension but using correct service is good style)
         const order = await this.prisma.$transaction(async (tx) => {
           const demands: StockDemandLine[] = createOrderDto.items.flatMap((item, index) =>
-            item.product_id != null && variantCheckProductById.get(item.product_id)?.product_type !== 'prepared'
+            item.product_id != null && this.lineNeedsOwnStockDemand(
+              variantCheckProductById.get(item.product_id)?.product_type,
+              createLineDestinations[index]?.destination,
+            )
               ? [{
                   product_id: item.product_id,
                   product_variant_id: item.product_variant_id,
@@ -1090,6 +1117,13 @@ export class OrdersService {
                     price_unit_quantity:
                       priceUnits.priceUnitByIndex[index] ?? null,
                     notes: item.notes ?? null,
+                    ...(createLineDestinations[index]?.destination
+                      ? {
+                          fulfillment_destination:
+                            createLineDestinations[index]!.destination,
+                          skip_kds: createLineDestinations[index]!.skip_kds,
+                        }
+                      : {}),
                     updated_at: new Date(),
                   };
                 }),
@@ -1116,7 +1150,11 @@ export class OrdersService {
 
           // The order and its reservations must commit or roll back together.
           for (const item of createdOrder.order_items) {
-            if (!item.product_id || item.item_type === 'prepared' || item.item_type === 'service' ||
+            // QUI-999: `production` lines never reserve their own stock; `stock`
+            // lines of a prepared product do (the matrix sells them from stock).
+            if (!item.product_id || !lineConsumesOwnStock(item) ||
+              (item.item_type === 'prepared' && (item as { fulfillment_destination?: string | null }).fulfillment_destination !== 'stock') ||
+              item.item_type === 'service' ||
               !this.stockValidator!.resolveEffectiveTracking(
                 item.products ?? { track_inventory: false },
                 item.product_variants ?? undefined,
@@ -3471,11 +3509,34 @@ export class OrdersService {
         );
       }
 
+      // QUI-999: destinations for the replacement lines. A line that already
+      // existed keeps its legacy (NULL) or chosen destination; new lines get
+      // the matrix default.
+      const previousSaleByKey = new Map<
+        string,
+        { fulfillment_destination?: string | null }
+      >();
+      for (const prev of order.order_items ?? []) {
+        previousSaleByKey.set(
+          `${prev.product_id ?? 'null'}:${prev.product_variant_id ?? 'null'}`,
+          prev as { fulfillment_destination?: string | null },
+        );
+      }
+      const updateLineDestinations = await resolveLineDestinations(
+        tx,
+        order.store_id,
+        dto.items,
+        { previous: previousSaleByKey },
+      );
+
       const inventoryPolicy = await this.stockValidator!.resolveInventoryPolicy(order.store_id, tx);
       const allowOversell = inventoryPolicy.allowOversell === true;
       const shortages = await this.stockValidator!.assertLinesAvailable(
         dto.items.flatMap((item, index) =>
-          item.product_id != null && updateProductsById.get(item.product_id)?.product_type !== 'prepared'
+          item.product_id != null && this.lineNeedsOwnStockDemand(
+            updateProductsById.get(item.product_id)?.product_type,
+            updateLineDestinations[index]?.destination,
+          )
             ? [{
                 product_id: item.product_id,
                 product_variant_id: item.product_variant_id,
@@ -3585,6 +3646,13 @@ export class OrdersService {
             order_item_options: this.toKeptOrderItemOptionsCreate(
               keptByIndex.get(index),
             ),
+            ...(updateLineDestinations[index]?.destination
+              ? {
+                  fulfillment_destination:
+                    updateLineDestinations[index]!.destination,
+                  skip_kds: updateLineDestinations[index]!.skip_kds,
+                }
+              : {}),
             updated_at: new Date(),
           },
         });
@@ -3625,7 +3693,11 @@ export class OrdersService {
       });
 
       for (const item of updatedOrder?.order_items || []) {
-        if (!item.product_id || item.item_type === 'prepared' || item.item_type === 'service' ||
+        // QUI-999: `production` lines never reserve their own stock; `stock`
+            // lines of a prepared product do (the matrix sells them from stock).
+            if (!item.product_id || !lineConsumesOwnStock(item) ||
+              (item.item_type === 'prepared' && (item as { fulfillment_destination?: string | null }).fulfillment_destination !== 'stock') ||
+              item.item_type === 'service' ||
             !this.stockValidator!.resolveEffectiveTracking(
               item.products ?? { track_inventory: false },
               item.product_variants ?? undefined,
@@ -4785,6 +4857,7 @@ export class OrdersService {
         string,
         {
           skip_kds?: boolean | null;
+          fulfillment_destination?: string | null;
           serial_numbers?: unknown;
           serial_ids?: number[] | null;
           inventory_committed_at_fire?: boolean | null;
@@ -4855,6 +4928,15 @@ export class OrdersService {
         }
       }
 
+      // QUI-999: lines that already existed keep their destination (merge, like
+      // `skip_kds`); only lines new to the order get the matrix default.
+      const editorLineDestinations = await resolveLineDestinations(
+        tx,
+        storeId,
+        dto.items,
+        { previous: previousByKey },
+      );
+
       for (const [index, item] of dto.items.entries()) {
         const planned = plannedEditorLines[index];
         const itemData = (() => {
@@ -4868,8 +4950,15 @@ export class OrdersService {
           // enviados a cocina.
           const key = `${item.product_id ?? 'null'}:${item.product_variant_id ?? 'null'}`;
           const previous = previousByKey.get(key);
-          const mergedSkipKds =
-            previous?.skip_kds !== undefined ? previous.skip_kds : false;
+          // QUI-999: the matrix decision (new line, or an existing line with a
+          // destination) owns `skip_kds` + `fulfillment_destination`; a legacy
+          // line (NULL) keeps today's merge.
+          const lineDestination = editorLineDestinations[index];
+          const mergedSkipKds = lineDestination?.destination
+            ? lineDestination.skip_kds
+            : previous?.skip_kds !== undefined
+              ? previous.skip_kds
+              : false;
           const mergedInventoryCommitted =
             previous?.inventory_committed_at_fire !== undefined
               ? previous.inventory_committed_at_fire
@@ -4943,6 +5032,9 @@ export class OrdersService {
             sale_quantity_snapshot: mergedSaleQty as any,
             // Campos fusionados — KDS, seriales, inventario consumido.
             skip_kds: mergedSkipKds as any,
+            ...(lineDestination?.destination
+              ? { fulfillment_destination: lineDestination.destination }
+              : {}),
             serial_numbers_snapshot: mergedSerialNumbers as any,
             // `serial_ids` e `inventory_committed_at_fire` no son columnas
             // en order_items — la asociación con `inventory_serial_numbers`

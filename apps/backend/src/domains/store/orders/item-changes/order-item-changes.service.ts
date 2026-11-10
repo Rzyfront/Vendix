@@ -40,6 +40,8 @@ import { PriceResolverService } from '../../products/services/price-resolver.ser
 import { resolveTierSnapshotsForItems } from '../../products/services/tier-snapshot.util';
 import { TaxFiscalType } from '../../taxes/dto';
 import { OrderItemChangesDto } from './dto/order-item-changes.dto';
+import { resolveLineDestinations } from '../utils/line-destination.loader';
+import { ResolvedLineDestination } from '../utils/resolve-line-destination.util';
 
 type Client = Prisma.TransactionClient | StorePrismaService;
 
@@ -149,6 +151,8 @@ interface PlannedAdd {
   rows: FullTaxRow[];
   fire: boolean;
   reserve: boolean;
+  /** QUI-999: matrix decision for the new line (null = none, legacy behavior). */
+  destination: ResolvedLineDestination | null;
   /** Descuento de BASE que recibe la línea nueva (solo al redistribuir). */
   discount: number;
   /** Plan fiscal (impuesto ya sobre base descontada) con el que se persiste. */
@@ -455,7 +459,10 @@ export class OrderItemChangesService {
               cost_price: null,
               is_price_overridden: false,
               inventory_consumed_at_fire: false,
-              skip_kds: false,
+              skip_kds: a.destination ? a.destination.skip_kds : false,
+              ...(a.destination?.destination
+                ? { fulfillment_destination: a.destination.destination }
+                : {}),
               notes: a.notes,
               updated_at: new Date(),
               ...(a.discount > 0
@@ -1260,6 +1267,17 @@ export class OrderItemChangesService {
         productIds,
       );
 
+      // QUI-999: one batch resolution for every added line.
+      const addDestinations = await resolveLineDestinations(
+        db,
+        storeId,
+        addDtos.map((a) => ({
+          product_id: a.product_id,
+          product_variant_id: a.product_variant_id,
+          quantity: a.quantity,
+        })),
+      );
+
       for (const [index, a] of addDtos.entries()) {
         const p = productById.get(a.product_id);
         if (!p) {
@@ -1297,10 +1315,16 @@ export class OrderItemChangesService {
           priceUnitQuantityRaw: p.price_unit_quantity,
           rows,
         });
-        const fire = restaurant && p.product_type === 'prepared';
+        const destination = addDestinations[index] ?? null;
+        const fire = destination
+          ? destination.destination === 'kds'
+          : restaurant && p.product_type === 'prepared';
+        // A `production` line never reserves its own stock; a `stock` line of a
+        // prepared product is sold from stock like retail.
         const tracked =
-          p.product_type !== 'prepared' &&
+          (p.product_type !== 'prepared' || destination?.destination === 'stock') &&
           p.product_type !== 'service' &&
+          destination?.destination !== 'production' &&
           this.stockValidator.resolveEffectiveTracking(p, variant ?? undefined);
         const reserve = !fire && tracked && reservesStock;
         const line: ItemChangesPreviewLine = {
@@ -1348,6 +1372,7 @@ export class OrderItemChangesService {
           rows,
           fire,
           reserve,
+          destination,
           discount: 0,
           planned: this.plannedLineOfAdd(resolution),
         });

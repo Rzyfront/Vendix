@@ -254,6 +254,54 @@ describe('OrderStockCommitService — claim atómico anti doble-descuento', () =
     expect(result.committedItemCount).toBe(0);
   });
 
+  it('QUI-999: una línea de producción nunca descuenta ni reclama su stock propio', async () => {
+    const productionOrder: any = buildOrder();
+    productionOrder.stores.industries = ['restaurant'];
+    productionOrder.order_items[0].products.product_type = 'prepared';
+    productionOrder.order_items[0].skip_kds = true;
+    productionOrder.order_items[0].fulfillment_destination = 'production';
+    txMock.orders.findFirst.mockResolvedValue(productionOrder);
+    txMock.orders.findUnique.mockResolvedValue(productionOrder);
+
+    const result = await service.commitOrderDelivery(1, OPTS, txMock);
+
+    expect(txMock.order_items.updateMany).not.toHaveBeenCalled();
+    expect(stockLevelManagerMock.updateStock).not.toHaveBeenCalled();
+    expect(result.committedItemCount).toBe(0);
+  });
+
+  it('QUI-999: una línea "stock" de restaurante se descuenta como retail (sin regresión)', async () => {
+    const stockOrder: any = buildOrder();
+    stockOrder.stores.industries = ['restaurant'];
+    stockOrder.order_items[0].products.product_type = 'prepared';
+    stockOrder.order_items[0].skip_kds = true;
+    stockOrder.order_items[0].fulfillment_destination = 'stock';
+    txMock.orders.findFirst.mockResolvedValue(stockOrder);
+    txMock.orders.findUnique.mockResolvedValue(stockOrder);
+    txMock.order_items.updateMany.mockResolvedValue({ count: 1 });
+
+    const result = await service.commitOrderDelivery(1, OPTS, txMock);
+
+    expect(stockLevelManagerMock.updateStock).toHaveBeenCalledTimes(1);
+    expect(result.committedItemCount).toBe(1);
+  });
+
+  it('QUI-999: una línea anterior (destino NULL, skip_kds) se descuenta igual que hoy', async () => {
+    const legacyOrder: any = buildOrder();
+    legacyOrder.stores.industries = ['restaurant'];
+    legacyOrder.order_items[0].products.product_type = 'prepared';
+    legacyOrder.order_items[0].skip_kds = true;
+    legacyOrder.order_items[0].fulfillment_destination = null;
+    txMock.orders.findFirst.mockResolvedValue(legacyOrder);
+    txMock.orders.findUnique.mockResolvedValue(legacyOrder);
+    txMock.order_items.updateMany.mockResolvedValue({ count: 1 });
+
+    const result = await service.commitOrderDelivery(1, OPTS, txMock);
+
+    expect(stockLevelManagerMock.updateStock).toHaveBeenCalledTimes(1);
+    expect(result.committedItemCount).toBe(1);
+  });
+
   it('no consume una orden cancelada aunque el callback llegue tarde', async () => {
     txMock.$queryRaw.mockResolvedValue([{ id: 1, state: 'cancelled' }]);
     await expect(service.commitOrderDelivery(1, OPTS, txMock)).rejects

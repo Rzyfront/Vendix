@@ -1905,6 +1905,113 @@ describe('CheckoutService - promotions and coupons', () => {
     });
   });
 
+  describe('QUI-999 — destino de la línea en el checkout', () => {
+    const DISH_ID = 300;
+
+    function setupStore(opts: {
+      industries: string[];
+      batch: boolean;
+      recipes: number;
+      stock: number;
+      productType?: string;
+    }) {
+      const dish = buildProduct({
+        id: DISH_ID,
+        name: 'Plato',
+        product_type: opts.productType ?? 'prepared',
+        track_inventory: true,
+      } as any);
+      prisma.products.findUnique.mockImplementation(({ where }: any) =>
+        Promise.resolve(where.id === DISH_ID ? dish : null),
+      );
+      prisma.products.findMany = jest.fn().mockResolvedValue([
+        {
+          id: DISH_ID,
+          product_type: opts.productType ?? 'prepared',
+          is_batch_produced: opts.batch,
+          track_inventory: true,
+          _count: { recipes: opts.recipes },
+        },
+      ]);
+      prisma.stock_levels = {
+        findMany: jest.fn().mockResolvedValue(
+          opts.stock > 0
+            ? [
+                {
+                  product_id: DISH_ID,
+                  product_variant_id: null,
+                  quantity_available: opts.stock,
+                },
+              ]
+            : [],
+        ),
+      };
+      prisma.stores.findUnique.mockResolvedValue({
+        store_code: 'EC',
+        industries: opts.industries,
+      });
+      prisma.stores.findFirst = jest
+        .fn()
+        .mockResolvedValue({ industries: opts.industries });
+      storePrisma.recipes = {
+        findMany: jest
+          .fn()
+          .mockResolvedValue(opts.recipes > 0 ? [{ product_id: DISH_ID }] : []),
+      };
+      const validator = (service as any).stockValidatorService;
+      validator.resolveEffectiveTracking.mockReturnValue(true);
+      mockOrderCreate(10000);
+    }
+
+    async function run() {
+      await service.checkout({
+        payment_method_id: 7,
+        items: [{ product_id: DISH_ID, quantity: 1 }],
+      } as any);
+      return prisma.orders.create.mock.calls[0][0].data.order_items.create[0];
+    }
+
+    it('producible sin stock va a producción, sin validar ni reservar stock propio', async () => {
+      setupStore({ industries: ['restaurant'], batch: true, recipes: 1, stock: 0 });
+      const line = await run();
+      expect(line).toMatchObject({
+        fulfillment_destination: 'production',
+        skip_kds: true,
+      });
+      expect(
+        (service as any).stockValidatorService.validateAvailability,
+      ).not.toHaveBeenCalled();
+      expect((service as any).stockLevelManager.reserveStock).not.toHaveBeenCalled();
+    });
+
+    it('producible con stock sale del stock por defecto y reserva', async () => {
+      setupStore({ industries: ['restaurant'], batch: true, recipes: 1, stock: 5 });
+      const line = await run();
+      expect(line).toMatchObject({
+        fulfillment_destination: 'stock',
+        skip_kds: true,
+      });
+      expect((service as any).stockLevelManager.reserveStock).toHaveBeenCalledTimes(1);
+    });
+
+    it('plato preparado no producible va a cocina y no reserva', async () => {
+      setupStore({ industries: ['restaurant'], batch: false, recipes: 1, stock: 0 });
+      const line = await run();
+      expect(line).toMatchObject({
+        fulfillment_destination: 'kds',
+        skip_kds: false,
+      });
+      expect((service as any).stockLevelManager.reserveStock).not.toHaveBeenCalled();
+    });
+
+    it('tienda no restaurante no escribe destino (comportamiento previo)', async () => {
+      setupStore({ industries: [], batch: true, recipes: 1, stock: 0 });
+      const line = await run();
+      expect(line).not.toHaveProperty('fulfillment_destination');
+      expect(line).not.toHaveProperty('skip_kds');
+    });
+  });
+
   /**
    * Impuesto opcional por tarifa de envío: el checkout (núcleo unificado y el
    * endpoint WhatsApp antiguo) congela la copia de la tarifa en la orden sin

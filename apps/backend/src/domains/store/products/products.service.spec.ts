@@ -1287,6 +1287,40 @@ describe('ProductsService', () => {
         }),
       );
     });
+
+    it('QUI-999: el listado POS marca is_producible (lote + receta activa) sin consultas extra', async () => {
+      const rows = [
+        { id: 1, name: 'Torta', stock_levels: [], is_batch_produced: true, _count: { recipes: 1 } },
+        { id: 2, name: 'Sopa', stock_levels: [], is_batch_produced: false, _count: { recipes: 1 } },
+        { id: 3, name: 'Lote sin receta', stock_levels: [], is_batch_produced: true, _count: { recipes: 0 } },
+        { id: 4, name: 'Gaseosa', stock_levels: [], is_batch_produced: false, _count: {} },
+      ];
+      mockPrismaService.products.findMany.mockResolvedValue(rows);
+      mockPrismaService.products.count.mockResolvedValue(rows.length);
+      mockPrismaService.stores.findUnique.mockResolvedValue({
+        default_location_id: 1,
+      });
+      mockPrismaService.products.findMany.mockClear();
+
+      const pos = await service.findAll({
+        page: 1,
+        limit: 10,
+        pos_optimized: true,
+      });
+
+      expect(pos.data.map((p: any) => p.is_producible)).toEqual([
+        true,
+        false,
+        false,
+        false,
+      ]);
+      // One batched query: the recipe flag rides on the listing `_count`.
+      expect(mockPrismaService.products.findMany).toHaveBeenCalledTimes(1);
+      const args = mockPrismaService.products.findMany.mock.calls[0][0];
+      expect(args.include._count.select.recipes).toEqual({
+        where: { is_active: true },
+      });
+    });
   });
 
   /**

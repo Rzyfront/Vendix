@@ -5573,6 +5573,28 @@ export class OrderDetailsPageComponent {
    * then the most recent row (highest id). Returns `null` if the
    * item has never been fired to the kitchen.
    */
+  /**
+   * QUI-999 — label of the destination chip. NULL (legacy line) has no chip
+   * and keeps today's rendering.
+   */
+  destinationLabel(item: OrderItem): string | null {
+    switch (item.fulfillment_destination) {
+      case 'kds':
+        return 'KDS';
+      case 'production':
+        return 'Producción';
+      case 'stock':
+        return 'Del stock';
+      default:
+        return null;
+    }
+  }
+
+  /** KDS state only shows on `kds` lines; legacy (NULL) lines keep it. */
+  managedByKitchen(item: OrderItem): boolean {
+    return !item.fulfillment_destination || item.fulfillment_destination === 'kds';
+  }
+
   kitchenStateFor(
     item: OrderItem,
   ): { status: string; kitchen_ticket_id?: number } | null {

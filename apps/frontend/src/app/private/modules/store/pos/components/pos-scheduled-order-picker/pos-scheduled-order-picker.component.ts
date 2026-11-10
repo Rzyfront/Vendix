@@ -1,10 +1,12 @@
-import { ChangeDetectionStrategy, Component, inject, input } from '@angular/core';
+import { ChangeDetectionStrategy, Component, computed, inject, input } from '@angular/core';
 import {
   FulfillmentSlot,
   PosScheduledOrderService,
   ScheduledFulfillmentType,
 } from '../../services/pos-scheduled-order.service';
 import { IconComponent } from '../../../../../../shared/components/icon/icon.component';
+import { NonProducibleNoticeComponent } from '../../../scheduled-orders/components/non-producible-notice/non-producible-notice.component';
+import { CartItem, isProducibleProduct } from '../../models/cart.model';
 
 /**
  * Which part of the scheduled-order picker this instance renders. The checkout
@@ -26,7 +28,7 @@ const FULFILLMENT_LABELS: Record<ScheduledFulfillmentType, string> = {
   selector: 'app-pos-scheduled-order-picker',
   standalone: true,
   changeDetection: ChangeDetectionStrategy.OnPush,
-  imports: [IconComponent],
+  imports: [IconComponent, NonProducibleNoticeComponent],
   template: `
     @if (service.enabled()) {
       @switch (section()) {
@@ -37,17 +39,11 @@ const FULFILLMENT_LABELS: Record<ScheduledFulfillmentType, string> = {
                 type="checkbox"
                 class="h-4 w-4 accent-primary"
                 [checked]="service.active()"
-                [disabled]="service.required()"
                 (change)="toggle($any($event.target).checked)"
               />
               <app-icon name="calendar-clock" [size]="16"></app-icon>
               <span class="text-sm font-semibold text-text-primary">Pedido programado</span>
             </label>
-            @if (service.required()) {
-              <p class="mt-2 text-xs text-text-secondary">
-                Este pedido tiene adiciones: se entrega como pedido programado.
-              </p>
-            }
             @if (service.active()) {
               <p class="mt-2 text-xs text-text-secondary">
                 El método de entrega se elige más adelante.
@@ -125,6 +121,15 @@ const FULFILLMENT_LABELS: Record<ScheduledFulfillmentType, string> = {
                 }
               }
 
+              <!-- QUI-999: non-blocking notice for non-producible lines. -->
+              @for (line of nonProducibleLines(); track line.id) {
+                <app-non-producible-notice
+                  [productId]="line.productId"
+                  [productName]="line.name"
+                  [productType]="line.productType"
+                ></app-non-producible-notice>
+              }
+
               @if (service.loadError()) {
                 <p class="text-xs text-red-600">{{ service.loadError() }}</p>
               }
@@ -181,6 +186,27 @@ export class PosScheduledOrderPickerComponent {
   /** Venta anónima: el domicilio no aplica (requiere identidad). */
   readonly deliveryDisabled = input(false);
 
+  /** Cart lines (restaurant stores only; the checkout passes `[]` elsewhere). */
+  readonly cartItems = input<readonly CartItem[]>([]);
+
+  /** Physical / prepared lines that are not producible (QUI-999 notice). */
+  protected readonly nonProducibleLines = computed(() =>
+    this.cartItems()
+      .filter(
+        (i) =>
+          i.itemType !== 'custom' &&
+          !i.booking &&
+          i.product.product_type !== 'service' &&
+          !isProducibleProduct(i.product),
+      )
+      .map((i) => ({
+        id: i.id,
+        productId: Number(i.product.id),
+        name: i.product.name,
+        productType: i.product.product_type ?? null,
+      })),
+  );
+
   protected readonly dayBlockedMessage = 'La tienda no recibe pedidos para ese día.';
 
   protected labelFor(t: ScheduledFulfillmentType): string {
@@ -205,7 +231,6 @@ export class PosScheduledOrderPickerComponent {
   }
 
   protected toggle(checked: boolean): void {
-    if (this.service.required()) return;
     if (checked) this.service.activate();
     else this.service.reset();
   }
