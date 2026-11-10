@@ -90,6 +90,8 @@ export type KitchenDisposition = 'reuse' | 'waste';
  */
 export interface FlowCancelOrderDto extends CancelOrderDto {
   kitchenDisposition?: KitchenDisposition;
+  /** QUI-995 — finished sale production: release to stock or write off as waste. Omitted → server suggestion. */
+  productionDisposition?: 'release' | 'waste';
   /** cod-auto-invoicing S5 — emit the TOTAL credit note before cancelling. */
   issueCreditNote?: boolean;
 }

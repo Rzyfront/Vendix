@@ -13,7 +13,15 @@ import {
   CartItem,
   PromotionTierProgress } from '../services/pos-cart.service';
 import { PosStationBookingService } from '../services/pos-station-booking.service';
-import { AddCustomItemRequest, CartDiscount, cartOptionLines } from '../models/cart.model';
+import {
+  AddCustomItemRequest,
+  CartDiscount,
+  FulfillmentChoice,
+  LineFulfillmentMode,
+  cartLineDestination,
+  cartOptionLines,
+  fulfillmentModeForLine,
+} from '../models/cart.model';
 import { PosCustomItemModalComponent } from '../components/pos-custom-item-modal/pos-custom-item-modal.component';
 import { PosSessionStatusBarComponent } from '../components/pos-session-status-bar.component';
 import { PosCashRegisterService } from '../services/pos-cash-register.service';
@@ -451,6 +459,40 @@ import {
                           </li>
                         }
                       </ul>
+                    }
+                    @if (fulfillmentMode(item); as mode) {
+                      <div class="mt-1 flex items-center gap-1">
+                        @if (mode === 'choose') {
+                          <div
+                            role="group"
+                            aria-label="Destino de la línea"
+                            class="inline-flex overflow-hidden rounded-md border border-border text-[10px] font-semibold"
+                          >
+                            <button
+                              type="button"
+                              class="px-2 py-0.5"
+                              [class.bg-primary]="lineDestination(item) === 'stock'"
+                              [class.text-white]="lineDestination(item) === 'stock'"
+                              [attr.aria-pressed]="lineDestination(item) === 'stock'"
+                              (click)="setFulfillment(item, 'stock')"
+                            >
+                              Del stock
+                            </button>
+                            <button
+                              type="button"
+                              class="px-2 py-0.5 border-l border-border"
+                              [class.bg-primary]="lineDestination(item) === 'production'"
+                              [class.text-white]="lineDestination(item) === 'production'"
+                              [attr.aria-pressed]="lineDestination(item) === 'production'"
+                              (click)="setFulfillment(item, 'production')"
+                            >
+                              A producción
+                            </button>
+                          </div>
+                        } @else {
+                          <app-badge variant="neutral" size="xsm" badgeStyle="outline">A producción</app-badge>
+                        }
+                      </div>
                     }
                     <!-- Line 2: Base price, discount & badges (left), Note chip (if has notes) -->
                     <div class="flex items-center justify-between gap-1 mt-1 text-xs">
@@ -1997,6 +2039,22 @@ private stationBookingService = inject(PosStationBookingService);
    * QUI-648 — sufijo de la escala de precio: "/m", "/kg", "/paquete". Sin él,
    * un cable a $5.000 el metro se leería como $5.000 el milímetro.
    */
+  /** QUI-999 — selector / badge mode of the line (restaurant only). */
+  fulfillmentMode(item: CartItem): LineFulfillmentMode {
+    return this.authFacade.isRestaurant() ? fulfillmentModeForLine(item) : null;
+  }
+
+  lineDestination(item: CartItem): FulfillmentChoice | null {
+    return cartLineDestination(item);
+  }
+
+  setFulfillment(item: CartItem, choice: FulfillmentChoice): void {
+    this.cartService
+      .setFulfillmentChoice(item.id, choice)
+      .pipe(takeUntilDestroyed(this.destroyRef))
+      .subscribe();
+  }
+
   /** Adiciones de la línea con su nota (QUI-994). */
   optionLines(item: CartItem): Array<{ label: string; note: string | null }> {
     return cartOptionLines(item);

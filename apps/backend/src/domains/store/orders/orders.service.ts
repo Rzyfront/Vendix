@@ -1,3 +1,6 @@
+import { requestProductionSaleSync } from '../production/production-sale-sync';
+import { findProductionOrderForLine } from '../production/production-order-pairing.util';
+import { suggestProductionDisposition } from '../production/production-disposition.util';
 import { loadSessionIntakeAnswers } from '../service-sessions/utils/session-intake-answers.util';
 import { assertNoActiveFinancialSplit } from './shared/financial-split-policy';
 import { resolveKitchenMode } from '../kitchen-fire/kitchen-mode.util';
@@ -103,6 +106,8 @@ import {
   OrderActionSnapshot,
 } from './order-flow/order-action-policy.util';
 import { storeIsRestaurant } from '@common/helpers/industry-capabilities.helper';
+import { resolveLineDestinations } from './utils/line-destination.loader';
+import { lineConsumesOwnStock } from './utils/resolve-line-destination.util';
 import { PromotionEngineService } from '../promotions/promotion-engine/promotion-engine.service';
 import { CouponsService } from '../coupons/coupons.service';
 import {
@@ -660,6 +665,20 @@ export class OrdersService {
 
   // === Fin listeners SSE ====================================================
 
+  /**
+   * QUI-999 — does this line demand its OWN stock when the order is
+   * created/edited? Without a matrix decision the historical rule holds
+   * (prepared dishes demand ingredients at fire, not the plate); with one,
+   * only `stock` lines demand their stock (`kds` and `production` never do).
+   */
+  private lineNeedsOwnStockDemand(
+    productType: string | null | undefined,
+    destination: string | null | undefined,
+  ): boolean {
+    if (destination) return destination === 'stock';
+    return productType !== 'prepared';
+  }
+
   async create(createOrderDto: CreateOrderDto, creatingUser: any) {
     // Enforce store context
     const context = RequestContextService.getContext();
@@ -709,6 +728,14 @@ export class OrdersService {
 
     const variantCheckProductById = await assertVariantRequiredForPrepared(
       this.prisma,
+      createOrderDto.items,
+    );
+
+    // QUI-999: fulfillment destination per line (null for non-restaurant
+    // stores, which keep today's behavior).
+    const createLineDestinations = await resolveLineDestinations(
+      this.prisma,
+      store_id,
       createOrderDto.items,
     );
 
@@ -945,7 +972,10 @@ export class OrdersService {
         // Use scoped client (creates are not scoped by extension but using correct service is good style)
         const order = await this.prisma.$transaction(async (tx) => {
           const demands: StockDemandLine[] = createOrderDto.items.flatMap((item, index) =>
-            item.product_id != null && variantCheckProductById.get(item.product_id)?.product_type !== 'prepared'
+            item.product_id != null && this.lineNeedsOwnStockDemand(
+              variantCheckProductById.get(item.product_id)?.product_type,
+              createLineDestinations[index]?.destination,
+            )
               ? [{
                   product_id: item.product_id,
                   product_variant_id: item.product_variant_id,
@@ -1090,6 +1120,13 @@ export class OrdersService {
                     price_unit_quantity:
                       priceUnits.priceUnitByIndex[index] ?? null,
                     notes: item.notes ?? null,
+                    ...(createLineDestinations[index]?.destination
+                      ? {
+                          fulfillment_destination:
+                            createLineDestinations[index]!.destination,
+                          skip_kds: createLineDestinations[index]!.skip_kds,
+                        }
+                      : {}),
                     updated_at: new Date(),
                   };
                 }),
@@ -1116,7 +1153,11 @@ export class OrdersService {
 
           // The order and its reservations must commit or roll back together.
           for (const item of createdOrder.order_items) {
-            if (!item.product_id || item.item_type === 'prepared' || item.item_type === 'service' ||
+            // QUI-999: `production` lines never reserve their own stock; `stock`
+            // lines of a prepared product do (the matrix sells them from stock).
+            if (!item.product_id || !lineConsumesOwnStock(item) ||
+              (item.item_type === 'prepared' && (item as { fulfillment_destination?: string | null }).fulfillment_destination !== 'stock') ||
+              item.item_type === 'service' ||
               !this.stockValidator!.resolveEffectiveTracking(
                 item.products ?? { track_inventory: false },
                 item.product_variants ?? undefined,
@@ -1140,6 +1181,13 @@ export class OrdersService {
           grand_total: order.grand_total,
           currency: order.currency,
         });
+
+        // QUI-995: one production order per `production` product of the sale.
+        await requestProductionSaleSync(
+          this.eventEmitter as any,
+          this.logger,
+          { order_id: order.id },
+        );
 
         return stockWarnings.length > 0
           ? { ...order, stock_warnings: stockWarnings }
@@ -1527,6 +1575,62 @@ export class OrdersService {
     });
   }
 
+  /**
+   * QUI-995 — per production line: its linked production order; per order: an
+   * overall `production_status` and, once something was already produced, the
+   * suggested cancellation disposition (waste for made-to-order, else release).
+   */
+  private attachProductionInfo(order: any): void {
+    const linked: Array<{
+      id: number;
+      product_id: number;
+      product_variant_id?: number | null;
+      order_number: string | null;
+      status: string;
+    }> = order.production_orders ?? [];
+    const lines = (order.order_items ?? []).filter(
+      (i: any) => i.fulfillment_destination === 'production' && !i.cancelled_at,
+    );
+    // One production order per product+variant: a line pairs with the order of
+    // ITS variant (NULL matches only base lines), never with a sibling variant's.
+    for (const item of order.order_items ?? []) {
+      const match =
+        item.fulfillment_destination === 'production'
+          ? findProductionOrderForLine(linked, item)
+          : undefined;
+      item.production_order = match
+        ? { id: match.id, order_number: match.order_number, status: match.status }
+        : null;
+    }
+    // Every production line must have its own order completed: with one order
+    // per variant, a sale is ready only when ALL of them are.
+    const states = lines.map(
+      (i: any) => findProductionOrderForLine(linked, i)?.status ?? null,
+    );
+    if (lines.length === 0) {
+      order.production_status = 'none';
+    } else if (states.every((st: string | null) => st === 'completed')) {
+      order.production_status = 'completed';
+    } else if (
+      states.some(
+        (st: string | null) =>
+          st === 'in_progress' || st === 'completed' || st === 'partially_completed',
+      )
+    ) {
+      order.production_status = 'in_progress';
+    } else {
+      order.production_status = 'pending';
+    }
+    // A partially completed order already produced stock: cancelling the sale
+    // must also decide what happens to that output (same as completed).
+    const completedLines = lines.filter((i: any) => {
+      const status = findProductionOrderForLine(linked, i)?.status;
+      return status === 'completed' || status === 'partially_completed';
+    });
+    order.production_cancel_suggestion =
+      completedLines.length > 0 ? suggestProductionDisposition(completedLines) : null;
+  }
+
   async findOne(id: number) {
     // Auto-scoped by StorePrismaService
     //
@@ -1804,6 +1908,17 @@ export class OrdersService {
           },
           orderBy: { date: 'asc' },
         },
+        // QUI-995 — production orders linked to this sale (one per product).
+        production_orders: {
+          where: { status: { not: 'cancelled' } },
+          select: {
+            id: true,
+            product_id: true,
+            product_variant_id: true,
+            order_number: true,
+            status: true,
+          },
+        },
         table_sessions: {
           select: {
             id: true,
@@ -1840,6 +1955,8 @@ export class OrdersService {
 
     // Sign S3 image URLs for order items products
     await this.signOrderItemImages(order);
+
+    this.attachProductionInfo(order);
 
     // Final con impuesto por línea (display-only, aditivo): `unit_price`
     // persistido resuelto con las tasas del producto (UN batch, no N+1) +
@@ -1987,6 +2104,7 @@ export class OrdersService {
         item_type: item.item_type,
         product_type: item.products?.product_type,
         skip_kds: item.skip_kds,
+        fulfillment_destination: item.fulfillment_destination ?? null,
         delivered_at: item.delivered_at,
         cancelled_at: item.cancelled_at,
         latestKitchenStatus: item.kitchen_ticket_items?.[0]?.status,
@@ -3471,11 +3589,37 @@ export class OrdersService {
         );
       }
 
+      // QUI-999: destinations for the replacement lines. A line that already
+      // existed keeps its legacy (NULL) or chosen destination; new lines get
+      // the matrix default.
+      const previousSaleByKey = new Map<
+        string,
+        { fulfillment_destination?: string | null }
+      >();
+      for (const prev of order.order_items ?? []) {
+        previousSaleByKey.set(
+          `${prev.product_id ?? 'null'}:${prev.product_variant_id ?? 'null'}`,
+          prev as { fulfillment_destination?: string | null },
+        );
+      }
+      const updateLineDestinations = await resolveLineDestinations(
+        tx,
+        order.store_id,
+        dto.items.map((item) => ({
+          ...item,
+          requested: item.fulfillment_destination ?? null,
+        })),
+        { previous: previousSaleByKey, orderId: id },
+      );
+
       const inventoryPolicy = await this.stockValidator!.resolveInventoryPolicy(order.store_id, tx);
       const allowOversell = inventoryPolicy.allowOversell === true;
       const shortages = await this.stockValidator!.assertLinesAvailable(
         dto.items.flatMap((item, index) =>
-          item.product_id != null && updateProductsById.get(item.product_id)?.product_type !== 'prepared'
+          item.product_id != null && this.lineNeedsOwnStockDemand(
+            updateProductsById.get(item.product_id)?.product_type,
+            updateLineDestinations[index]?.destination,
+          )
             ? [{
                 product_id: item.product_id,
                 product_variant_id: item.product_variant_id,
@@ -3585,6 +3729,13 @@ export class OrdersService {
             order_item_options: this.toKeptOrderItemOptionsCreate(
               keptByIndex.get(index),
             ),
+            ...(updateLineDestinations[index]?.destination
+              ? {
+                  fulfillment_destination:
+                    updateLineDestinations[index]!.destination,
+                  skip_kds: updateLineDestinations[index]!.skip_kds,
+                }
+              : {}),
             updated_at: new Date(),
           },
         });
@@ -3625,7 +3776,11 @@ export class OrdersService {
       });
 
       for (const item of updatedOrder?.order_items || []) {
-        if (!item.product_id || item.item_type === 'prepared' || item.item_type === 'service' ||
+        // QUI-999: `production` lines never reserve their own stock; `stock`
+            // lines of a prepared product do (the matrix sells them from stock).
+            if (!item.product_id || !lineConsumesOwnStock(item) ||
+              (item.item_type === 'prepared' && (item as { fulfillment_destination?: string | null }).fulfillment_destination !== 'stock') ||
+              item.item_type === 'service' ||
             !this.stockValidator!.resolveEffectiveTracking(
               item.products ?? { track_inventory: false },
               item.product_variants ?? undefined,
@@ -3672,6 +3827,12 @@ export class OrdersService {
       }
       throw error;
     });
+    // QUI-995: lines added or removed -> re-sync the linked production orders.
+    await requestProductionSaleSync(
+      this.eventEmitter as any,
+      this.logger,
+      { order_id: id },
+    );
     return stockWarnings.length > 0
       ? { ...finalOrder, stock_warnings: stockWarnings }
       : finalOrder;
@@ -4785,6 +4946,7 @@ export class OrdersService {
         string,
         {
           skip_kds?: boolean | null;
+          fulfillment_destination?: string | null;
           serial_numbers?: unknown;
           serial_ids?: number[] | null;
           inventory_committed_at_fire?: boolean | null;
@@ -4855,6 +5017,15 @@ export class OrdersService {
         }
       }
 
+      // QUI-999: lines that already existed keep their destination (merge, like
+      // `skip_kds`); only lines new to the order get the matrix default.
+      const editorLineDestinations = await resolveLineDestinations(
+        tx,
+        storeId,
+        dto.items,
+        { previous: previousByKey },
+      );
+
       for (const [index, item] of dto.items.entries()) {
         const planned = plannedEditorLines[index];
         const itemData = (() => {
@@ -4868,8 +5039,15 @@ export class OrdersService {
           // enviados a cocina.
           const key = `${item.product_id ?? 'null'}:${item.product_variant_id ?? 'null'}`;
           const previous = previousByKey.get(key);
-          const mergedSkipKds =
-            previous?.skip_kds !== undefined ? previous.skip_kds : false;
+          // QUI-999: the matrix decision (new line, or an existing line with a
+          // destination) owns `skip_kds` + `fulfillment_destination`; a legacy
+          // line (NULL) keeps today's merge.
+          const lineDestination = editorLineDestinations[index];
+          const mergedSkipKds = lineDestination?.destination
+            ? lineDestination.skip_kds
+            : previous?.skip_kds !== undefined
+              ? previous.skip_kds
+              : false;
           const mergedInventoryCommitted =
             previous?.inventory_committed_at_fire !== undefined
               ? previous.inventory_committed_at_fire
@@ -4943,6 +5121,9 @@ export class OrdersService {
             sale_quantity_snapshot: mergedSaleQty as any,
             // Campos fusionados — KDS, seriales, inventario consumido.
             skip_kds: mergedSkipKds as any,
+            ...(lineDestination?.destination
+              ? { fulfillment_destination: lineDestination.destination }
+              : {}),
             serial_numbers_snapshot: mergedSerialNumbers as any,
             // `serial_ids` e `inventory_committed_at_fire` no son columnas
             // en order_items — la asociación con `inventory_serial_numbers`
@@ -5622,6 +5803,13 @@ export class OrdersService {
       }
       throw error;
     });
+
+    // QUI-995: the editor may add/remove production lines.
+    await requestProductionSaleSync(
+      this.eventEmitter as any,
+      this.logger,
+      { order_id: orderId },
+    );
 
     // 15) Firma las imágenes S3.
     await this.signOrderItemImages(result);

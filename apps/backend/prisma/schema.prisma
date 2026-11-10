@@ -1742,6 +1742,8 @@ model order_items {
   //   decide al final segun product_type='prepared' y existencia de receta activa.
   // Default false preserva el comportamiento actual para ordenes existentes.
   skip_kds                         Boolean                  @default(false)
+  /// QUI-999: where this restaurant sale line is fulfilled (kds / production / stock). NULL = line created before this column or a non-restaurant store: behaves as before.
+  fulfillment_destination          order_item_fulfillment_destination_enum?
   // QUI-653 — el item se empaca y el cliente se lo lleva, aunque pertenezca al
   // pedido de una mesa. Es una dimension POR ITEM, deliberadamente separada de
   // `orders.delivery_type`, por dos razones:
@@ -2019,6 +2021,8 @@ model orders {
   @@index([finish_pending_at])
   // Pedidos programados
   fulfillment_schedule order_fulfillment_schedules?
+  // QUI-995: production orders created for this sale's `production` lines.
+  production_orders production_orders[]
 }
 
 model order_installments {
@@ -2233,6 +2237,8 @@ model product_variants {
   /// Recipes owned by THIS variant (recetas-por-variante: the yield can be a
   /// variant; components in `recipe_items` still cannot — see ADR-1).
   recipes                       recipes[]
+  /// QUI-995: production orders that make THIS variant for a sale.
+  production_orders             production_orders[]
 
   // Multi-tarifa overrides (Phase 1: price tiers)
   price_tier_overrides product_price_tier_overrides[]
@@ -12967,13 +12973,28 @@ model production_orders {
   planned_cost Decimal?                    @db.Decimal(14, 4)
   actual_cost  Decimal?                    @db.Decimal(14, 4)
   unit_cost    Decimal?                    @db.Decimal(14, 4)
+  /// QUI-995: sale (orders.id) this production order was created for. NULL for manual/Planta orders.
+  order_id     Int?
+  /// QUI-995: sold variant this order makes (one order per product+variant of a sale). NULL for base products and manual orders.
+  product_variant_id Int?
 
-  store   stores   @relation(fields: [store_id], references: [id], onUpdate: NoAction)
-  product products @relation(fields: [product_id], references: [id], onUpdate: NoAction)
-  recipe  recipes  @relation(fields: [recipe_id], references: [id], onUpdate: NoAction)
-  lines   production_order_lines[]
+  store      stores   @relation(fields: [store_id], references: [id], onUpdate: NoAction)
+  product    products @relation(fields: [product_id], references: [id], onUpdate: NoAction)
+  recipe     recipes  @relation(fields: [recipe_id], references: [id], onUpdate: NoAction)
+  sale_order orders?  @relation(fields: [order_id], references: [id], onDelete: NoAction, onUpdate: NoAction)
+  product_variant product_variants? @relation(fields: [product_variant_id], references: [id], onDelete: NoAction, onUpdate: NoAction)
+  lines      production_order_lines[]
 
   @@unique([store_id, order_number])
+  /// OJO: la unicidad REAL la impone un indice PARCIAL (`WHERE order_id IS NOT NULL`)
+  /// `NULLS NOT DISTINCT` que Prisma no sabe expresar (ni lo parcial ni el
+  /// modificador) y que vive SOLO en la migracion
+  /// `20261128090000_production_order_variant`: los productos sin variante
+  /// guardan product_variant_id NULL (dos NULL nunca colisionan por defecto) y
+  /// las ordenes manuales/Planta guardan order_id NULL, que NO debe colisionar.
+  /// No regeneres este indice sin el modificador ni el WHERE.
+  @@unique([order_id, product_id, product_variant_id])
+  @@index([store_id, order_id])
   @@index([store_id, status])
   @@index([store_id, product_id])
   @@index([store_id, created_at])
@@ -14867,6 +14888,13 @@ enum order_fulfillment_status_enum {
   delivered
   no_show
   cancelled
+}
+
+/// QUI-999: fulfillment destination of a restaurant sale line.
+enum order_item_fulfillment_destination_enum {
+  kds
+  production
+  stock
 }
 
 enum order_fulfillment_type_enum {

@@ -1,3 +1,7 @@
+import {
+  PRODUCTION_SALE_CANCELLED_EVENT,
+  requestProductionSaleSync,
+} from '../../production/production-sale-sync';
 import { assertNotLodgingFolioOrder } from '../shared/lodging-folio-policy';
 import {
   assertNoActiveFinancialSplit,
@@ -5,6 +9,7 @@ import {
 } from '../shared/financial-split-policy';
 import { lockOrderLifecycle } from './order-lifecycle-lock.util';
 import { serviceBudgetBlocks } from '../utils/service-budget-cap.util';
+import { lineConsumesOwnStock } from '../utils/resolve-line-destination.util';
 import {
   getCancellationBlocker,
   SETTLED_PAYMENT_STATES,
@@ -1557,6 +1562,10 @@ export class OrderFlowService {
       const isKitchenDish =
         isRestaurant && product.product_type === 'prepared' && !item.skip_kds;
       if (isKitchenDish) continue;
+
+      // QUI-999: a `production` line never demands its own stock; its
+      // production order moves it.
+      if (!lineConsumesOwnStock(item)) continue;
 
       const variantId = item.product_variant_id ?? undefined;
       const key = `${item.product_id}-${variantId ?? 'null'}`;
@@ -6324,6 +6333,14 @@ export class OrderFlowService {
       await kds?.emitTicketUpdatedEvent(effects.updatedTicketId);
     }
 
+    // QUI-995: the cancelled line shrinks the sale; the linked production order
+    // (still a draft) follows its new quantity. Shared by every caller of this
+    // seam (controller and table sessions), post-commit and never blocking.
+    await requestProductionSaleSync(this.eventEmitter as any, this.logger, {
+      order_id: orderId,
+      store_id: storeId,
+    });
+
     this.logger.log(
       `Order item cancelled: order=${orderId} item=${orderItemId} type=${effects.resolvedType} fired=${effects.wasFired} ticketCancelled=${effects.cancelledTicketId != null}`,
     );
@@ -8071,6 +8088,20 @@ export class OrderFlowService {
         }
       }
     }
+
+    // QUI-995: linked production orders follow the sale. Runs BEFORE the blanket
+    // release below so a `waste` decision consumes its reservation first.
+    await requestProductionSaleSync(
+      this.eventEmitter as any,
+      this.logger,
+      {
+        order_id: orderId,
+        store_id: order.store_id,
+        disposition: dto.productionDisposition,
+        reason: dto.reason,
+      },
+      PRODUCTION_SALE_CANCELLED_EVENT,
+    );
 
     // Release reserved stock by reference — kept OUTSIDE the transaction and
     // best-effort (exactly as before): a release failure must never abort a

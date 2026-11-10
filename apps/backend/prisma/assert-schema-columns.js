@@ -93,6 +93,14 @@ const REQUIRED_COLUMNS = [
   // QUI-994 (migración 20261124090000): nota por adición vendida. Prisma la
   // selecciona en toda lectura de order_item_options (carrito, recibo, KDS).
   'order_item_options.note',
+  // QUI-999 (migración 20261125090000): destino de cada línea de venta de
+  // restaurante; Prisma la selecciona en toda lectura de order_items.
+  'order_items.fulfillment_destination',
+  // QUI-995 (migración 20261126090000): enlace de la orden de producción con
+  // su venta; Prisma la selecciona en toda lectura de production_orders.
+  'production_orders.order_id',
+  // QUI-995 (migración 20261128090000): variante vendida que fabrica la orden.
+  'production_orders.product_variant_id',
 
   // --- Unidad suelta en la vitrina (migración 20260818180000) -------------
   // Prisma selecciona TODOS los escalares del modelo cuando la consulta no
@@ -220,7 +228,10 @@ const REQUIRED_TABLES = [
 ];
 
 /** Tipos enum que el schema referencia y la base debe conocer. */
-const REQUIRED_ENUM_TYPES = ['aiu_component_enum'];
+const REQUIRED_ENUM_TYPES = [
+  'aiu_component_enum',
+  'order_item_fulfillment_destination_enum',
+];
 
 /**
  * Valores concretos que un enum YA EXISTENTE debe tener.

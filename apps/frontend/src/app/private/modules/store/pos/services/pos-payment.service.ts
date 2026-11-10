@@ -10,7 +10,7 @@ import {
 } from '../../../../../core/utils/parse-api-error';
 import { PaymentMethodsCatalogService } from '../../../../../shared/services/payment-methods-catalog.service';
 import { PosCashRegisterService } from './pos-cash-register.service';
-import { CartItem, CartState } from '../models/cart.model';
+import { CartItem, CartState, fulfillmentModeForLine } from '../models/cart.model';
 import { findUnscheduledStationLine } from './pos-station-booking.service';
 import {
   resolveLineUnits,
@@ -372,6 +372,13 @@ export class PosPaymentService {
       // instead of the kitchen fire. Only meaningful for `prepared`
       // products; ignored for everything else.
       skip_kds: item.skipKds === true,
+      // QUI-999 — the cashier's "Del stock / A producción" choice, only for
+      // lines where the matrix lets the cashier choose (producible with
+      // stock). Never sent for any other line: the server applies the matrix.
+      ...(!isCustomItem &&
+        fulfillmentModeForLine(item) === 'choose' && {
+          fulfillment_destination: item.fulfillmentChoice ?? 'stock',
+        }),
       // QUI-653 — "Para llevar" a nivel de orden (paso Consumo en 'entrega',
       // ver `isTakeawayOrder` del checkout-shell, que llega como
       // `forceTakeaway`) o marca per-línea del carrito. Solo se envía cuando

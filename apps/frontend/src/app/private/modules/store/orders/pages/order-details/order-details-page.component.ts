@@ -91,7 +91,11 @@ import {
   OrderEventType,
   OrderEventSource,
   ItemChangesDto,
+  OrderItemProductionOrder,
+  ProductionDisposition,
 } from '../../interfaces/order.interface';
+import { ProductionOrderDetailModalComponent } from '../../../restaurant-ops/production/components/production-order-detail/production-order-detail-modal.component';
+import { ProductionOrdersService } from '../../../restaurant-ops/production/services/production-orders.service';
 import { parseApiError } from '../../../../../../core/utils/parse-api-error';
 import {
   cancelCreditNoteConfirm,
@@ -1102,6 +1106,7 @@ export interface InvoiceCardView {
     ResendDishModalComponent,
     NgClass,
     SelectorComponent,
+    ProductionOrderDetailModalComponent,
   ],
   templateUrl: './order-details-page.component.html',
   styleUrls: ['./order-details-page.component.css'],
@@ -1363,6 +1368,68 @@ export class OrderDetailsPageComponent {
   showShipModal = signal(false);
   showDeliverModal = signal(false);
   showCancelModal = signal(false);
+
+  // ── T13 (QUI-995): production linked to the sale ──
+
+  /** Production order whose shared detail modal is open. */
+  readonly productionDetailId = signal<number | null>(null);
+  readonly showProductionDetail = signal(false);
+
+  /** Order-level production state; null when the sale has no production. */
+  readonly productionStatusLabel = computed<string | null>(() => {
+    switch (this.order()?.production_status) {
+      case 'completed':
+        return 'Producción finalizada, lista para entrega';
+      case 'in_progress':
+        return 'En producción';
+      case 'pending':
+        return 'Producción pendiente';
+      default:
+        return null;
+    }
+  });
+
+  /** Suggestion for finished production on cancel; null = no question. */
+  readonly cancelProductionSuggestion = computed<ProductionDisposition | null>(
+    () => this.order()?.production_cancel_suggestion ?? null,
+  );
+
+  /**
+   * Choice shown in the cancel modal. Non-blocking: it always holds a value
+   * (the suggestion, or release) so the cancel never waits on it.
+   */
+  readonly cancelProductionDisposition = signal<ProductionDisposition>('release');
+
+  readonly productionDispositionOptions: {
+    value: ProductionDisposition;
+    label: string;
+    description: string;
+  }[] = [
+    {
+      value: 'release',
+      label: 'Liberar al stock',
+      description: 'Lo producido queda disponible para otras ventas.',
+    },
+    {
+      value: 'waste',
+      label: 'Dar de baja como merma',
+      description: 'Lo producido sale del stock como merma.',
+    },
+  ];
+
+  productionStatusText(po: OrderItemProductionOrder): string {
+    return ProductionOrdersService.statusLabelSafe(po.status);
+  }
+
+  openProductionDetail(po: OrderItemProductionOrder): void {
+    this.productionDetailId.set(po.id);
+    this.showProductionDetail.set(true);
+  }
+
+  selectProductionDisposition(value: ProductionDisposition): void {
+    if (this.isProcessingAction()) return;
+    this.cancelProductionDisposition.set(value);
+  }
   /**
    * Plan refund-gateway-dispatch-fix (Step C.1): true while the manual
    * refund-resolution modal is open. The refund being resolved lives in
@@ -4333,6 +4400,7 @@ export class OrderDetailsPageComponent {
     }
     this.cancelForm.reset();
     this.cancelKitchenDisposition.set('reuse');
+    this.cancelProductionDisposition.set(this.cancelProductionSuggestion() ?? 'release');
     this.showCancelModal.set(true);
   }
 
@@ -4353,10 +4421,17 @@ export class OrderDetailsPageComponent {
     const disposition = this.cancelRequiresDisposition()
       ? this.cancelKitchenDisposition()
       : null;
+    // T13: the production choice never blocks; without a suggestion the
+    // server decides and the field is not sent.
+    const productionDisposition =
+      this.cancelProductionSuggestion() != null
+        ? this.cancelProductionDisposition()
+        : null;
     const payload: FlowCancelOrderDto = {
       ...this.cancelForm.value,
       ...(disposition != null ? { kitchenDisposition: disposition } : {}),
-    };
+      ...(productionDisposition != null ? { productionDisposition } : {}),
+    } as FlowCancelOrderDto;
 
     this.sendCancellation(payload);
   }
@@ -5573,6 +5648,28 @@ export class OrderDetailsPageComponent {
    * then the most recent row (highest id). Returns `null` if the
    * item has never been fired to the kitchen.
    */
+  /**
+   * QUI-999 — label of the destination chip. NULL (legacy line) has no chip
+   * and keeps today's rendering.
+   */
+  destinationLabel(item: OrderItem): string | null {
+    switch (item.fulfillment_destination) {
+      case 'kds':
+        return 'KDS';
+      case 'production':
+        return 'Producción';
+      case 'stock':
+        return 'Del stock';
+      default:
+        return null;
+    }
+  }
+
+  /** KDS state only shows on `kds` lines; legacy (NULL) lines keep it. */
+  managedByKitchen(item: OrderItem): boolean {
+    return !item.fulfillment_destination || item.fulfillment_destination === 'kds';
+  }
+
   kitchenStateFor(
     item: OrderItem,
   ): { status: string; kitchen_ticket_id?: number } | null {

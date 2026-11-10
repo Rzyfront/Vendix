@@ -1331,6 +1331,37 @@ describe('OrderFlowService.cancelOrder — kitchenDisposition y reversa de hojas
     expect(kds.cancelTicketItemInTx).not.toHaveBeenCalled();
   });
 
+  it('QUI-995: cancelar emite production.sale_cancelled con la decisión y ANTES de liberar las reservas', async () => {
+    const { service, stock, emitter } = buildKitchenHarness('pending');
+    const order: string[] = [];
+    emitter.emitAsync.mockImplementation(async (event: string) => {
+      order.push(event);
+      return [];
+    });
+    stock.releaseReservationsByReference.mockImplementation(async () => {
+      order.push('release');
+    });
+
+    await service.cancelOrder(ORDER_ID, { reason, productionDisposition: 'waste' } as any);
+
+    expect(emitter.emitAsync).toHaveBeenCalledWith('production.sale_cancelled', {
+      order_id: ORDER_ID,
+      store_id: 100,
+      disposition: 'waste',
+      reason,
+    });
+    expect(order).toEqual(['production.sale_cancelled', 'release']);
+  });
+
+  it('QUI-995: sin productionDisposition la cancelación no se bloquea (la sugerencia la calcula el listener)', async () => {
+    const { service, emitter } = buildKitchenHarness('pending');
+    await expect(service.cancelOrder(ORDER_ID, { reason })).resolves.toMatchObject({ state: 'cancelled' });
+    expect(emitter.emitAsync).toHaveBeenCalledWith(
+      'production.sale_cancelled',
+      expect.objectContaining({ disposition: undefined }),
+    );
+  });
+
   it('sin kitchenDisposition y ticket avanzado: error tipado antes del claim, sin efectos', async () => {
     const { service, prismaMock, stock } = buildKitchenHarness('in_preparation');
 
@@ -2112,6 +2143,42 @@ describe('OrderFlowService.cancelOrderItem — seam compartido', () => {
 
     await service.cancelOrderItem(ORDER_ID, ITEM_ID, 'cliente se arrepintió');
     expect(txMock.order_items.update).toHaveBeenCalled();
+  });
+
+  it('QUI-995 F3: cancelar una línea pide UNA vez el sync de producción con el id de la orden, después del commit', async () => {
+    const { service, txMock, prismaMock } = buildService({
+      order: { id: ORDER_ID, store_id: 4, state: 'created' },
+    });
+    const emitAsync = jest.fn().mockResolvedValue([]);
+    (service as any).eventEmitter = { emitAsync, emit: jest.fn() };
+    let committed = false;
+    prismaMock.$transaction.mockImplementation(async (cb: any) => {
+      const out = await cb(txMock);
+      committed = true;
+      return out;
+    });
+    emitAsync.mockImplementation(async () => {
+      expect(committed).toBe(true);
+      return [];
+    });
+
+    await service.cancelOrderItem(ORDER_ID, ITEM_ID, 'cliente se arrepintió');
+
+    expect(emitAsync).toHaveBeenCalledTimes(1);
+    expect(emitAsync).toHaveBeenCalledWith('production.sale_sync', {
+      order_id: ORDER_ID,
+      store_id: 4,
+    });
+  });
+
+  it('QUI-995 F3: una línea ya cancelada no pide el sync (idempotente, sin cambios)', async () => {
+    const { service } = buildService({
+      item: { id: ITEM_ID, product_name: 'Bandeja paisa', cancelled_at: new Date(), kitchen_ticket_items: [] },
+    });
+    const emitAsync = jest.fn().mockResolvedValue([]);
+    (service as any).eventEmitter = { emitAsync, emit: jest.fn() };
+    await service.cancelOrderItem(ORDER_ID, ITEM_ID, 'cliente se arrepintió');
+    expect(emitAsync).not.toHaveBeenCalled();
   });
 
   it('si el split aparece tras la prelectura, el lock lo detecta antes del soft cancel', async () => {
@@ -9115,5 +9182,52 @@ describe('OrderFlowService.resumeFinishPendingAfterPayment (B07/B11)', () => {
     await expect(service.resumeFinishPendingAfterPayment(7)).rejects.toThrow('still down');
 
     expect(spies.append).not.toHaveBeenCalled();
+  });
+});
+
+
+describe('OrderFlowService.collectDraftReservationDemand — QUI-999 destinos', () => {
+  const service = new OrderFlowService(
+    {} as any, {} as any, {} as any, {} as any, {} as any,
+    {} as any, {} as any, {} as any, {} as any,
+  );
+  const line = (id: number, over: Record<string, unknown>) => ({
+    id,
+    product_id: id,
+    product_variant_id: null,
+    quantity: 2,
+    stock_units_consumed: null,
+    skip_kds: true,
+    inventory_consumed_at_fire: false,
+    inventory_committed: false,
+    cancelled_at: null,
+    products: { id, name: `P${id}`, track_inventory: true, product_type: 'prepared' },
+    product_variants: null,
+    ...over,
+  });
+  const demand = (items: any[]) =>
+    (service as any).collectDraftReservationDemand({ order_items: items }, true) as Array<{
+      product_id: number;
+      demand: number;
+    }>;
+
+  it('no reserva el stock propio de una línea de producción', () => {
+    expect(demand([line(1, { fulfillment_destination: 'production' })])).toEqual([]);
+  });
+
+  it('una línea stock reserva como hoy', () => {
+    expect(demand([line(2, { fulfillment_destination: 'stock' })])).toEqual([
+      expect.objectContaining({ product_id: 2, demand: 2 }),
+    ]);
+  });
+
+  it('una línea anterior (destino NULL, skip_kds) reserva como hoy', () => {
+    expect(demand([line(3, { fulfillment_destination: null })])).toEqual([
+      expect.objectContaining({ product_id: 3, demand: 2 }),
+    ]);
+  });
+
+  it('un plato de cocina (kds) sigue sin reservar su stock propio', () => {
+    expect(demand([line(4, { skip_kds: false, fulfillment_destination: 'kds' })])).toEqual([]);
   });
 });

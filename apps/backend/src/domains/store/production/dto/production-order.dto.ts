@@ -130,6 +130,13 @@ export class ProductionOrderQueryDto {
   @IsPositive()
   recipe_id?: number;
 
+  /** QUI-995: only the production orders of this sale. */
+  @IsOptional()
+  @Type(() => Number)
+  @IsInt()
+  @IsPositive()
+  order_id?: number;
+
   @IsOptional()
   @IsString()
   @Transform(({ value }) =>

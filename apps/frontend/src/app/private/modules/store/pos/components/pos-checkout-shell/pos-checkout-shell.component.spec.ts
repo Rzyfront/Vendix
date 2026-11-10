@@ -193,6 +193,7 @@ class AddressStub {
 class ScheduledOrderPickerStub {
   readonly section = input<string>('toggle');
   readonly deliveryDisabled = input(false);
+  readonly cartItems = input<readonly unknown[]>([]);
 }
 
 /** CP-pos-checkout-enter-focus — stubs para montar el collector real aislado. */
@@ -234,7 +235,6 @@ describe('PosCheckoutShellComponent — matriz de teclado (CP-POS-CHECKOUT-KEYBO
     hasSlot: WritableSignal<boolean>;
     fulfillmentType: WritableSignal<'pickup' | 'delivery' | null>;
     showValidation: WritableSignal<boolean>;
-    required: WritableSignal<boolean>;
     clear: () => void;
     reset: () => void;
     activate: () => void;
@@ -341,11 +341,9 @@ describe('PosCheckoutShellComponent — matriz de teclado (CP-POS-CHECKOUT-KEYBO
       hasSlot: signal(false),
       fulfillmentType: signal(null),
       showValidation: signal(false),
-      required: signal(false),
       clear: () => {},
       reset: () => {
         scheduledMock.active.set(false);
-        scheduledMock.required.set(false);
       },
       activate: () => scheduledMock.active.set(true),
     };
@@ -1071,7 +1069,7 @@ describe('PosCheckoutShellComponent — matriz de teclado (CP-POS-CHECKOUT-KEYBO
     expect(component.currentStep()).toBe(1);
   });
 
-  describe('adiciones exigen pedido programado al cobrar (H2 PR #1003)', () => {
+  describe('adiciones ya no obligan a programar (QUI-999)', () => {
     const cartWithOptions = () =>
       checkoutCart(new Date(), {
         items: [{ product: { id: '7', name: 'Torta' }, quantity: 1, unitPrice: 6000,
@@ -1079,32 +1077,13 @@ describe('PosCheckoutShellComponent — matriz de teclado (CP-POS-CHECKOUT-KEYBO
           option_labels: ['Fresas'], option_delta: 5000 }],
       });
 
-    it('al cobrar, un carrito con adiciones activa y fija el pedido programado', () => {
+    it('al cobrar, un carrito con adiciones no activa el pedido programado', () => {
       scheduledMock.enabled.set(true);
       fixture.componentRef.setInput('mode', 'create-payment');
       fixture.componentRef.setInput('cartState', cartWithOptions());
       fixture.detectChanges();
-      expect(scheduledMock.required()).toBe(true);
-      expect(scheduledMock.active()).toBe(true);
-      expect(component.scheduledActive()).toBe(true);
-    });
-
-    it('el borrador con adiciones no exige agendamiento (se agenda al cobrarlo)', () => {
-      scheduledMock.enabled.set(true);
-      fixture.componentRef.setInput('mode', 'create-draft');
-      fixture.componentRef.setInput('cartState', cartWithOptions());
-      fixture.detectChanges();
-      expect(scheduledMock.required()).toBe(false);
       expect(scheduledMock.active()).toBe(false);
-    });
-
-    it('sin adiciones el pedido programado sigue siendo opcional', () => {
-      scheduledMock.enabled.set(true);
-      fixture.componentRef.setInput('mode', 'create-payment');
-      fixture.componentRef.setInput('cartState', checkoutCart(new Date()));
-      fixture.detectChanges();
-      expect(scheduledMock.required()).toBe(false);
-      expect(scheduledMock.active()).toBe(false);
+      expect(component.scheduledActive()).toBe(false);
     });
   });
 

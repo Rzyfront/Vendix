@@ -1,3 +1,4 @@
+import { findProductionOrderForLine } from '../production/production-order-pairing.util';
 import { Injectable, Logger } from '@nestjs/common';
 import { EventEmitter2 } from '@nestjs/event-emitter';
 import { Prisma } from '@prisma/client';
@@ -92,6 +93,11 @@ const SCHEDULED_ORDER_SELECT = {
   customer_id: true,
   customer_alias: true,
   users: { select: { first_name: true, last_name: true, phone: true, email: true } },
+  // QUI-995: the production order linked to each `production` line.
+  production_orders: {
+    where: { status: { not: 'cancelled' } },
+    select: { id: true, product_id: true, product_variant_id: true, order_number: true, status: true },
+  },
   order_items: {
     where: { cancelled_at: null },
     select: {
@@ -100,12 +106,63 @@ const SCHEDULED_ORDER_SELECT = {
       variant_attributes: true,
       quantity: true,
       notes: true,
+      // QUI-999: lets the schedule UI tell which lines go to production.
+      fulfillment_destination: true,
+      product_id: true,
+      product_variant_id: true,
+      products: {
+        select: {
+          product_type: true,
+          is_batch_produced: true,
+          _count: { select: { recipes: { where: { is_active: true } } } },
+        },
+      },
       order_item_options: {
         select: { group_name: true, option_name: true, quantity: true, uom: true, scope: true, note: true },
       },
     },
   },
 } satisfies Prisma.ordersSelect;
+
+/**
+ * Flattens the product facts of each scheduled-order line into
+ * `product_type` + `is_producible` (batch produced with an active recipe).
+ */
+function shapeScheduledOrderLines<T extends { order?: any }>(row: T): T {
+  const order = row?.order;
+  if (!order || !Array.isArray(order.order_items)) return row;
+  const { production_orders, ...orderRest } = order;
+  const linkedOrders: Array<{
+    id: number;
+    product_id: number;
+    product_variant_id?: number | null;
+    order_number: string | null;
+    status: string;
+  }> =
+    Array.isArray(production_orders) ? production_orders : [];
+  return {
+    ...row,
+    order: {
+      ...orderRest,
+      order_items: order.order_items.map(({ products, ...line }: any) => {
+        const linked =
+          line.fulfillment_destination === 'production'
+            ? findProductionOrderForLine(linkedOrders, line)
+            : undefined;
+        return {
+          ...line,
+          product_type: products?.product_type ?? null,
+          is_producible:
+            products?.is_batch_produced === true &&
+            Number(products?._count?.recipes ?? 0) > 0,
+          production_order: linked
+            ? { id: linked.id, order_number: linked.order_number, status: linked.status }
+            : null,
+        };
+      }),
+    },
+  };
+}
 
 function toDate(value: string | Date): Date {
   const date = value instanceof Date ? value : new Date(value);
@@ -441,7 +498,7 @@ export class ScheduledOrdersService {
       ? (query.status.split(',') as FulfillmentStatus[])
       : undefined;
 
-    return this.prisma.order_fulfillment_schedules.findMany({
+    const rows = await this.prisma.order_fulfillment_schedules.findMany({
       where: {
         scheduled_start: { gte: rangeStart, lt: rangeEnd },
         ...(statuses ? { status: { in: statuses } } : {}),
@@ -451,6 +508,7 @@ export class ScheduledOrdersService {
         order: { select: SCHEDULED_ORDER_SELECT },
       },
     });
+    return rows.map((row) => shapeScheduledOrderLines(row));
   }
 
   /** Detalle con historial ("Reprogramado de … a … por …"). */
@@ -473,7 +531,9 @@ export class ScheduledOrdersService {
         where: kitchenPendingItemsWhere(schedule.order_id, store_id),
       }),
     ]);
-    return row ? { ...row, pending_kitchen_item_count } : row;
+    return row
+      ? { ...shapeScheduledOrderLines(row), pending_kitchen_item_count }
+      : row;
   }
 
 }

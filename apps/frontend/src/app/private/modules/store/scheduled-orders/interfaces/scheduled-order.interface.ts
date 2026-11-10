@@ -1,3 +1,5 @@
+import type { ProductionOrderRef } from '../../restaurant-ops/production/interfaces/production-order.interface';
+
 /**
  * Tipos mínimos del módulo "Pedidos programados". Reflejan el contrato de la
  * API (`/store/scheduled-orders/*`) descrito en el documento de feature.
@@ -82,9 +84,25 @@ export interface ScheduledOrderOptionLine {
   note?: string | null;
 }
 
+/** Destino de una línea de venta de restaurante (QUI-999); NULL = línea anterior. */
+export type FulfillmentDestination = 'kds' | 'production' | 'stock';
+
+export const DESTINATION_LABELS: Record<FulfillmentDestination, string> = {
+  kds: 'KDS',
+  production: 'Producción',
+  stock: 'Del stock',
+};
+
 export interface ScheduledOrderItem {
   id: number;
   product_name: string;
+  /** Contrato T12: destino por línea, producto y si es producible. */
+  fulfillment_destination?: FulfillmentDestination | null;
+  product_id?: number | null;
+  product_type?: string | null;
+  is_producible?: boolean | null;
+  /** T13 (QUI-995): orden de producción ligada a una línea `production`; null si no existe. */
+  production_order?: ProductionOrderRef | null;
   variant_attributes?: string | Record<string, unknown> | null;
   quantity: number | string;
   notes?: string | null;
@@ -152,6 +170,8 @@ export interface ProductionOrderItem {
   quantity: number | string;
   /** Nota de la línea (dedicatoria). */
   notes?: string | null;
+  /** T13: orden de producción ligada a la línea; null si no existe. */
+  production_order?: ProductionOrderRef | null;
   options: ProductionOption[];
 }
 

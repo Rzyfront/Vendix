@@ -89,7 +89,7 @@ export class ProductionOrdersController {
   @Get(':id')
   @Permissions('store:production_orders:read')
   async findOne(@Param('id', ParseIntPipe) id: number) {
-    const result = await this.productionOrdersService.findOne(id);
+    const result = await this.productionOrdersService.getDetail(id);
     return this.responseService.success(
       result,
       'Orden de producción obtenida',

@@ -62,6 +62,8 @@ export interface Product {
   // QUI-431 — when true, each unit sold must carry a unique serial number.
   // The POS opens a serial-selection modal before adding the product to cart.
   requires_serial_numbers?: boolean;
+  /** QUI-999 — "Producido en lote" with an active recipe (server-computed). */
+  is_producible?: boolean;
   minStock: number;
   min_stock_level?: number | null;
   reorder_point?: number | null;
@@ -836,6 +838,7 @@ export class PosProductService {
         // QUI-431 — surfaced so the POS opens the serial-selection modal for
         // serialized products before adding them to the cart.
         requires_serial_numbers: product.requires_serial_numbers === true,
+        is_producible: product.is_producible === true,
         minStock: this.resolveLowStockThreshold(product),
         min_stock_level: product.min_stock_level ?? null,
         reorder_point: product.reorder_point ?? null,

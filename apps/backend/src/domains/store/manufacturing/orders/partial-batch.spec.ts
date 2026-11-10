@@ -50,6 +50,8 @@ describe('ProductionOrdersService.complete — allowPartialBatch', () => {
       $transaction: jest.fn(async (cb: any) =>
         cb({
           production_orders: {
+            // QUI-995: atomic completion claim (status guard) before the update.
+            updateMany: jest.fn().mockResolvedValue({ count: 1 }),
             update: jest.fn().mockImplementation(async ({ data }: any) => ({
               id: 5,
               ...data,

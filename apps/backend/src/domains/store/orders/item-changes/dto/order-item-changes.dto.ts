@@ -37,6 +37,12 @@ export class OrderItemChangeAddDto {
   @IsString()
   @MaxLength(500)
   notes?: string;
+
+  // QUI-999: the cashier's choice for a producible line with stock ("Cajero
+  // elige"). Ignored by the server where the matrix does not allow a choice.
+  @IsOptional()
+  @IsIn(['stock', 'production'])
+  fulfillment_destination?: 'stock' | 'production';
 }
 
 export class OrderItemChangeUpdateDto {

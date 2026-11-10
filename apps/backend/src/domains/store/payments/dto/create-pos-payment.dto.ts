@@ -243,6 +243,15 @@ export class PosOrderItemDto {
   @Type(() => Boolean)
   skip_kds?: boolean;
 
+  // QUI-999: the cashier's choice for a producible line with stock ("Cajero
+  // elige" in the matrix): `stock` (default) or `production`. The server only
+  // honors it where the matrix lets the cashier choose; anywhere else it is
+  // ignored and the matrix decides. Persisted in
+  // `order_items.fulfillment_destination`.
+  @IsOptional()
+  @IsIn(['stock', 'production'])
+  fulfillment_destination?: 'stock' | 'production';
+
   // QUI-653 — "Para llevar" del POS (paso Consumo en 'entrega'). El frontend
   // estampa la decisión de la orden en cada línea (ver `isTakeawayOrder` del
   // checkout-shell); también acepta la marca per-línea del carrito

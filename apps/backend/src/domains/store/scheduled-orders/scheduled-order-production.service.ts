@@ -22,6 +22,16 @@ import { StockLevelManager } from '../inventory/shared/services/stock-level-mana
 import { StockValidatorService } from '../inventory/shared/services/stock-validator.service';
 import { KitchenFireService } from '../kitchen-fire/kitchen-fire.service';
 import { ScheduledOrdersService, kitchenPendingItemsWhere } from './scheduled-orders.service';
+import { findProductionOrderForLine } from '../production/production-order-pairing.util';
+
+/** Production order of a sale line, as the agenda query selects it. */
+type LinkedProductionOrder = {
+  id: number;
+  product_id: number;
+  product_variant_id: number | null;
+  order_number: string | null;
+  status: string;
+};
 
 type Tx = Prisma.TransactionClient;
 
@@ -85,7 +95,16 @@ export class ScheduledOrderProductionService implements OnModuleInit {
       resolveBatchLines(await explodeBatchAware(recipe_id, units), 1, pool, deps);
   }
 
-  private async loadLines(client: Tx, store_id: number, order_id: number): Promise<ProductionLineInput[]> {
+  /**
+   * QUI-995: lines of a `production` product that already have a production
+   * order are produced by that order (Planta), never by this schedule hook, so
+   * they are excluded from `lines`; `linked` lists the orders to move along.
+   */
+  private async loadLines(
+    client: Tx,
+    store_id: number,
+    order_id: number,
+  ): Promise<{ lines: ProductionLineInput[]; linked: { id: number; status: string }[] }> {
     const items = await client.order_items.findMany({
       where: { order_id, cancelled_at: null, orders: { store_id } },
       select: {
@@ -96,7 +115,16 @@ export class ScheduledOrderProductionService implements OnModuleInit {
         inventory_consumed_at_fire: true,
         inventory_committed: true,
         addons_consumed_at: true,
+        fulfillment_destination: true,
         products: { select: { product_type: true } },
+        orders: {
+          select: {
+            production_orders: {
+              where: { status: { not: 'cancelled' } },
+              select: { id: true, product_id: true, product_variant_id: true, status: true },
+            },
+          },
+        },
         order_item_options: {
           select: {
             scope: true,
@@ -108,7 +136,21 @@ export class ScheduledOrderProductionService implements OnModuleInit {
         },
       },
     });
-    return items.map((item) => ({
+    const linkedOrders = new Map<number, { id: number; status: string }>();
+    const isLinked = (item: (typeof items)[number]) => {
+      if (item.fulfillment_destination !== 'production') return false;
+      // One production order per product+variant: pair the line with ITS variant's order.
+      const match = findProductionOrderForLine(item.orders?.production_orders ?? [], item);
+      if (match) linkedOrders.set(match.id, { id: match.id, status: match.status as string });
+      return !!match;
+    };
+    // QUI-999: the start consumes ONLY legacy lines (destination NULL). `kds`
+    // lines were consumed at "Enviar a cocina", `stock` lines consume their
+    // add-ons with their own commit, and `production` lines belong to a
+    // production order. `isLinked` runs for every line to collect the orders.
+    const lines = items
+      .filter((item) => !isLinked(item) && item.fulfillment_destination == null)
+      .map((item) => ({
       id: item.id,
       product_id: item.product_id,
       product_variant_id: item.product_variant_id,
@@ -120,6 +162,7 @@ export class ScheduledOrderProductionService implements OnModuleInit {
       addons_consumed: item.addons_consumed_at != null,
       options: item.order_item_options.map((o) => ({ ...o, quantity: Number(o.quantity) })),
     }));
+    return { lines, linked: [...linkedOrders.values()] };
   }
 
   /**
@@ -177,7 +220,15 @@ export class ScheduledOrderProductionService implements OnModuleInit {
   /** Gancho de `ScheduledOrdersService` al pasar a `in_production`. */
   async start(tx: Tx, schedule: { id: number; store_id: number; order_id: number }) {
     const ctx = RequestContextService.getContext();
-    const lines = await this.loadLines(tx, schedule.store_id, schedule.order_id);
+    const { lines, linked } = await this.loadLines(tx, schedule.store_id, schedule.order_id);
+    // QUI-995: linked production orders start together with the schedule.
+    const drafts = linked.filter((o) => o.status === 'draft').map((o) => o.id);
+    if (drafts.length) {
+      await tx.production_orders.updateMany({
+        where: { id: { in: drafts }, status: 'draft' },
+        data: { status: 'in_progress', started_at: new Date(), updated_at: new Date() },
+      });
+    }
     // Same marker as the kitchen fire: each line claims its add-ons before they
     // are deducted, so the fire and the start never both take them.
     for (const line of lines) {
@@ -291,9 +342,16 @@ export class ScheduledOrderProductionService implements OnModuleInit {
             order_number: true,
             customer_alias: true,
             users: { select: { first_name: true, last_name: true } },
+            production_orders: {
+              where: { status: { not: 'cancelled' } },
+              select: { id: true, product_id: true, product_variant_id: true, order_number: true, status: true },
+            },
             order_items: {
               where: { cancelled_at: null },
               select: {
+                product_id: true,
+                product_variant_id: true,
+                fulfillment_destination: true,
                 product_name: true,
                 variant_attributes: true,
                 quantity: true,
@@ -334,13 +392,22 @@ export class ScheduledOrderProductionService implements OnModuleInit {
           (customer ? `${customer.first_name ?? ''} ${customer.last_name ?? ''}`.trim() : '') ||
           s.order.customer_alias?.trim() ||
           null,
-        items: s.order.order_items.map((item) => ({
+        items: s.order.order_items.map((item) => {
+          const linked =
+            item.fulfillment_destination === 'production'
+              ? findProductionOrderForLine<LinkedProductionOrder>(s.order.production_orders ?? [], item)
+              : undefined;
+          return {
+          production_order: linked
+            ? { id: linked.id, order_number: linked.order_number, status: linked.status }
+            : null,
           product_name: item.product_name,
           variant_attributes: item.variant_attributes,
           quantity: Number(item.quantity),
           notes: item.notes ?? null,
           options: item.order_item_options.map((o) => ({ ...o, quantity: Number(o.quantity) })),
-        })),
+          };
+        }),
       });
     }
 
@@ -348,7 +415,7 @@ export class ScheduledOrderProductionService implements OnModuleInit {
     const client = this.prisma.withoutScope() as unknown as Tx;
     const pending = schedules.filter((s) => s.status === 'scheduled');
     const lines: ProductionLineInput[] = [];
-    for (const s of pending) lines.push(...(await this.loadLines(client, store_id, s.order_id)));
+    for (const s of pending) lines.push(...(await this.loadLines(client, store_id, s.order_id)).lines);
     const { consumption } = await expandProduction(lines, this.finder(client), this.exploder(client));
     const products = consumption.length
       ? await client.products.findMany({

@@ -2,6 +2,7 @@ import {
   IsArray,
   ArrayMinSize,
   ArrayMaxSize,
+  IsIn,
   IsInt,
   IsOptional,
   IsNumber,
@@ -23,6 +24,13 @@ export class UpdateOrderItemDto extends CreateOrderItemDto {
   @IsInt({ each: true })
   @Type(() => Number)
   option_ids?: number[];
+
+  // QUI-999: the cashier's choice for a producible line with stock ("Cajero
+  // elige"). Honored by the server only where the matrix lets the cashier pick;
+  // an existing line keeps its persisted destination when it is omitted.
+  @IsOptional()
+  @IsIn(['stock', 'production'])
+  fulfillment_destination?: 'stock' | 'production';
 }
 
 export class UpdateOrderItemsDto {

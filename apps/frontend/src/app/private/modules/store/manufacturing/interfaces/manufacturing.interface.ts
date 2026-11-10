@@ -115,6 +115,9 @@ export interface ManufacturingOrder {
     yield_quantity?: number | string | null;
   } | null;
   lines?: ManufacturingOrderLine[];
+  /** T13 (QUI-995): sale that originated this production order; null when manual. */
+  order_id?: number | null;
+  source?: 'manual' | 'order' | null;
 }
 
 export interface ManufacturingOrderQuery {

@@ -366,7 +366,10 @@
               }
               <!-- Pedido programado: fecha y franja de entrega junto al cliente. -->
               @if (scheduledActive()) {
-                <app-pos-scheduled-order-picker section="slot"></app-pos-scheduled-order-picker>
+                <app-pos-scheduled-order-picker
+                  section="slot"
+                  [cartItems]="scheduledOrdersAvailable() ? (cartState()?.items ?? []) : []"
+                ></app-pos-scheduled-order-picker>
               }
             </div>
 

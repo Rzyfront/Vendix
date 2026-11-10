@@ -137,7 +137,7 @@ describe('OrdersService', () => {
     shipping_rates: { findFirst: jest.fn() },
     addresses: { findFirst: jest.fn() },
     users: { findUnique: jest.fn() },
-    stores: { findFirst: jest.fn() },
+    stores: { findFirst: jest.fn(), findUnique: jest.fn() },
     payments: { findFirst: jest.fn(), findMany: jest.fn().mockResolvedValue([]) },
     refunds: { findMany: jest.fn().mockResolvedValue([]) },
     // Release-854 follow-up — `findOne` expone `active_sales_invoice` vía
@@ -1288,6 +1288,119 @@ describe('OrdersService', () => {
   // .getAvailableActions` calls — additive fields only, nothing existing
   // changes shape.
   // ----------------------------------------------------------------
+  describe('findOne — producción vinculada (QUI-995)', () => {
+    const base = (items: any[], production_orders: any[]) => ({
+      id: 5,
+      order_number: 'ORD5',
+      order_items: items,
+      order_promotions: [],
+      coupon_uses: [],
+      production_orders,
+    });
+    const line = (id: number, product_id: number, extra: Record<string, unknown> = {}) => ({
+      id,
+      product_id,
+      fulfillment_destination: 'production',
+      cancelled_at: null,
+      notes: null,
+      order_item_options: [],
+      ...extra,
+    });
+
+    it('adds production_order per production line, status and no suggestion while nothing is completed', async () => {
+      mockPrismaService.orders.findFirst.mockResolvedValue(
+        base([line(1, 50), { id: 2, product_id: 60, fulfillment_destination: 'stock' }], [
+          { id: 100, product_id: 50, order_number: 'OP-1', status: 'draft' },
+        ]),
+      );
+      const result: any = await service.findOne(5);
+      expect(result.order_items[0].production_order).toEqual({ id: 100, order_number: 'OP-1', status: 'draft' });
+      expect(result.order_items[1].production_order).toBeNull();
+      expect(result.production_status).toBe('pending');
+      expect(result.production_cancel_suggestion).toBeNull();
+    });
+
+    it('completed order with add-ons suggests waste; plain suggests release', async () => {
+      mockPrismaService.orders.findFirst.mockResolvedValue(
+        base([line(1, 50, { order_item_options: [{ option_name: 'Crema' }] })], [
+          { id: 100, product_id: 50, order_number: 'OP-1', status: 'completed' },
+        ]),
+      );
+      let result: any = await service.findOne(5);
+      expect(result.production_status).toBe('completed');
+      expect(result.production_cancel_suggestion).toBe('waste');
+
+      mockPrismaService.orders.findFirst.mockResolvedValue(
+        base([line(1, 50)], [{ id: 100, product_id: 50, order_number: 'OP-1', status: 'completed' }]),
+      );
+      result = await service.findOne(5);
+      expect(result.production_cancel_suggestion).toBe('release');
+    });
+
+    it('a partially completed order already produced stock: it suggests a disposition and reports in progress', async () => {
+      mockPrismaService.orders.findFirst.mockResolvedValue(
+        base([line(1, 50, { order_item_options: [{ option_name: 'Crema' }] })], [
+          { id: 100, product_id: 50, order_number: 'OP-1', status: 'partially_completed' },
+        ]),
+      );
+      const result: any = await service.findOne(5);
+      expect(result.production_status).toBe('in_progress');
+      expect(result.production_cancel_suggestion).toBe('waste');
+    });
+
+    it('QUI-995 B2: two variants of one product link to THEIR OWN order, and the sale is not ready until both are completed', async () => {
+      mockPrismaService.orders.findFirst.mockResolvedValue(
+        base(
+          [
+            line(1, 50, { product_variant_id: 10 }),
+            line(2, 50, { product_variant_id: 11, order_item_options: [{ option_name: 'Crema' }] }),
+          ],
+          [
+            { id: 100, product_id: 50, product_variant_id: 10, order_number: 'OP-1', status: 'completed' },
+            { id: 101, product_id: 50, product_variant_id: 11, order_number: 'OP-2', status: 'draft' },
+          ],
+        ),
+      );
+      const result: any = await service.findOne(5);
+      expect(result.order_items[0].production_order).toEqual({ id: 100, order_number: 'OP-1', status: 'completed' });
+      expect(result.order_items[1].production_order).toEqual({ id: 101, order_number: 'OP-2', status: 'draft' });
+      expect(result.production_status).toBe('in_progress');
+      // only the completed Chocolate line (plain) counts: release, not the Vainilla add-ons' waste
+      expect(result.production_cancel_suggestion).toBe('release');
+    });
+
+    it('QUI-995 R3: a legacy order (NULL variant) links to the variant line it served and reports completed', async () => {
+      mockPrismaService.orders.findFirst.mockResolvedValue(
+        base([line(1, 50, { product_variant_id: 10 })], [
+          { id: 100, product_id: 50, product_variant_id: null, order_number: 'OP-1', status: 'completed' },
+        ]),
+      );
+      const result: any = await service.findOne(5);
+      expect(result.order_items[0].production_order).toEqual({ id: 100, order_number: 'OP-1', status: 'completed' });
+      expect(result.production_status).toBe('completed');
+    });
+
+    it('QUI-995 B2: all variant orders completed reports completed', async () => {
+      mockPrismaService.orders.findFirst.mockResolvedValue(
+        base(
+          [line(1, 50, { product_variant_id: 10 }), line(2, 50, { product_variant_id: 11 })],
+          [
+            { id: 100, product_id: 50, product_variant_id: 10, order_number: 'OP-1', status: 'completed' },
+            { id: 101, product_id: 50, product_variant_id: 11, order_number: 'OP-2', status: 'completed' },
+          ],
+        ),
+      );
+      const result: any = await service.findOne(5);
+      expect(result.production_status).toBe('completed');
+    });
+
+    it('an order without production lines reports production_status none', async () => {
+      mockPrismaService.orders.findFirst.mockResolvedValue(base([], []));
+      const result: any = await service.findOne(5);
+      expect(result.production_status).toBe('none');
+    });
+  });
+
   describe('findOne — facturas y pagos por cuenta (división financiera)', () => {
     afterEach(() => jest.restoreAllMocks());
 
@@ -1733,6 +1846,65 @@ describe('OrdersService', () => {
       );
       expect(mockPrismaService.orders.create).not.toHaveBeenCalled();
       expect(mockStockLevelManager.reserveStock).not.toHaveBeenCalled();
+    });
+
+    describe('QUI-999 — destino de la línea', () => {
+      const dish = (over: Record<string, unknown> = {}) => ({
+        id: 51, price_unit_quantity: null, product_tax_assignments: [],
+        product_type: 'prepared', is_batch_produced: true, track_inventory: true,
+        _count: { recipes: 1 }, ...over,
+      });
+      const dto = () => makeDto({
+        items: [{ product_id: 51, product_name: 'Torta', quantity: 1, unit_price: 100, total_price: 100 }],
+      });
+      const arrange = (industries: string[], stock: number, over: Record<string, unknown> = {}) => {
+        mockPrismaService.products.findMany.mockResolvedValue([dish(over)] as any);
+        mockPrismaService.products.findUnique.mockResolvedValue({
+          id: 51, name: 'Torta', product_type: 'prepared', product_variants: [],
+        } as any);
+        mockPrismaService.stores.findUnique.mockResolvedValue({ industries } as any);
+        (mockPrismaService as any).stock_levels = {
+          findMany: jest.fn().mockResolvedValue(
+            stock > 0 ? [{ product_id: 51, product_variant_id: null, quantity_available: stock }] : [],
+          ),
+        };
+      };
+      const lineData = () =>
+        mockPrismaService.orders.create.mock.calls[0][0].data.order_items.create[0];
+
+      afterEach(() => {
+        mockPrismaService.stores.findUnique.mockReset();
+        delete (mockPrismaService as any).stock_levels;
+      });
+
+      it('producible sin stock: persiste production, skip_kds=true y no exige ni reserva stock propio', async () => {
+        arrange(['restaurant'], 0);
+        await service.create(dto(), { id: 99 });
+        expect(lineData()).toMatchObject({ fulfillment_destination: 'production', skip_kds: true });
+        expect(mockStockLevelManager.reserveStock).not.toHaveBeenCalled();
+        expect(mockStockValidator.assertLinesAvailable).not.toHaveBeenCalledWith(
+          expect.arrayContaining([expect.objectContaining({ product_id: 51 })]),
+          expect.anything(),
+        );
+      });
+
+      it('producible con stock: persiste stock y skip_kds=true', async () => {
+        arrange(['restaurant'], 4);
+        await service.create(dto(), { id: 99 });
+        expect(lineData()).toMatchObject({ fulfillment_destination: 'stock', skip_kds: true });
+      });
+
+      it('plato no producible: persiste kds y skip_kds=false', async () => {
+        arrange(['restaurant'], 0, { is_batch_produced: false });
+        await service.create(dto(), { id: 99 });
+        expect(lineData()).toMatchObject({ fulfillment_destination: 'kds', skip_kds: false });
+      });
+
+      it('tienda no restaurante: no escribe destino (comportamiento previo)', async () => {
+        arrange([], 0);
+        await service.create(dto(), { id: 99 });
+        expect(lineData()).not.toHaveProperty('fulfillment_destination');
+      });
     });
 
     it('reserves a tracked line strictly in the same transaction as create', async () => {
@@ -4623,6 +4795,71 @@ describe('OrdersService', () => {
         ],
       } as any);
     };
+
+    describe('QUI-999 B2/B4 — destino al editar items', () => {
+      const dish = {
+        id: 51, price_unit_quantity: null, product_tax_assignments: [],
+        product_type: 'physical', is_batch_produced: true, track_inventory: true,
+        _count: { recipes: 1 },
+      };
+      const arrangeEdit = (prevDestination: string | null, available: number, reserved: number) => {
+        arrange();
+        mockPrismaService.orders.findFirst.mockResolvedValue({
+          id: 700, store_id: 1, state: 'draft', shipping_cost: '0.00',
+          order_items: [
+            { product_id: 51, product_variant_id: null, fulfillment_destination: prevDestination },
+          ],
+        } as any);
+        mockPrismaService.products.findMany.mockResolvedValue([dish] as any);
+        mockPrismaService.products.findUnique.mockResolvedValue({
+          id: 51, name: 'Torta', product_type: 'physical', product_variants: [],
+        } as any);
+        mockPrismaService.stores.findUnique.mockResolvedValue({ industries: ['restaurant'] } as any);
+        (mockPrismaService as any).stock_levels = {
+          findMany: jest.fn().mockResolvedValue(
+            available > 0 ? [{ product_id: 51, product_variant_id: null, quantity_available: available }] : [],
+          ),
+        };
+        (mockPrismaService as any).stock_reservations = {
+          findMany: jest.fn().mockResolvedValue(
+            reserved > 0 ? [{ product_id: 51, product_variant_id: null, quantity: reserved }] : [],
+          ),
+        };
+      };
+      const editDto = (extra: Record<string, unknown> = {}) => ({
+        items: [{ product_id: 51, product_name: 'Torta', quantity: 2, unit_price: 100, total_price: 200, ...extra }],
+      } as any);
+      const persisted = () => mockPrismaService.order_items.create.mock.calls[0][0].data;
+
+      afterEach(() => {
+        mockPrismaService.stores.findUnique.mockReset();
+        delete (mockPrismaService as any).stock_levels;
+        delete (mockPrismaService as any).stock_reservations;
+      });
+
+      it('B2: a "Del stock" line whose units are all held by this order stays stock after the edit', async () => {
+        arrangeEdit('stock', 0, 2);
+        await service.updateOrderItems(700, editDto());
+        expect(persisted()).toMatchObject({ fulfillment_destination: 'stock', skip_kds: true });
+        expect((mockPrismaService as any).stock_reservations.findMany).toHaveBeenCalledWith(
+          expect.objectContaining({
+            where: expect.objectContaining({ reserved_for_type: 'order', reserved_for_id: 700 }),
+          }),
+        );
+      });
+
+      it('B4: the cashier choice sent in the edit wins over the persisted destination', async () => {
+        arrangeEdit('stock', 5, 0);
+        await service.updateOrderItems(700, editDto({ fulfillment_destination: 'production' }));
+        expect(persisted()).toMatchObject({ fulfillment_destination: 'production', skip_kds: true });
+      });
+
+      it('control: a legacy line (NULL destination) stays without destination', async () => {
+        arrangeEdit(null, 0, 0);
+        await service.updateOrderItems(700, editDto());
+        expect(persisted()).not.toHaveProperty('fulfillment_destination');
+      });
+    });
 
     it('rejects a stock shortfall before releasing old reservations or replacing lines', async () => {
       arrange();

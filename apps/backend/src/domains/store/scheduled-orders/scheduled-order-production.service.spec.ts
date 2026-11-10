@@ -507,3 +507,202 @@ describe('ScheduledOrderProductionService.productionList (QUI-991)', () => {
     jest.restoreAllMocks();
   });
 });
+
+describe('ScheduledOrderProductionService.productionList — variant orders (QUI-995 B2)', () => {
+  const pick = (value: any, select: any): any => {
+    if (Array.isArray(value)) return value.map((v) => pick(v, select));
+    if (!select || value === null || typeof value !== 'object') return value;
+    return Object.fromEntries(
+      Object.entries(select)
+        .filter(([, sel]) => sel)
+        .map(([k, sel]) => [k, sel === true ? value[k] : pick(value[k], (sel as any).select)]),
+    );
+  };
+  const run = async (items: any[], production_orders: any[]) => {
+    const order = {
+      id: 50, order_number: 'ORD-50', customer_alias: 'Ana', users: null, production_orders,
+      order_items: items.map((i) => ({
+        product_name: 'Torta', variant_attributes: null, quantity: 1, notes: null,
+        fulfillment_destination: 'production', product_id: 10, order_item_options: [], ...i,
+      })),
+    };
+    const schedule = {
+      id: 1, status: 'in_production', order_id: 50,
+      scheduled_start: new Date('2026-11-11T15:00:00.000Z'),
+      scheduled_end: new Date('2026-11-11T17:00:00.000Z'),
+    };
+    const prisma: any = {
+      store_settings: { findFirst: jest.fn(async () => ({ settings: {}, stores: { timezone: 'America/Bogota' } })) },
+      order_fulfillment_schedules: {
+        findMany: jest.fn(async (args: any) => [{ ...schedule, order: pick(order, args.include.order.select) }]),
+      },
+      withoutScope: () => prisma,
+    };
+    jest.spyOn(RequestContextService, 'getContext').mockReturnValue({ store_id: 1 } as any);
+    const service = new ScheduledOrderProductionService(
+      prisma, { registerProductionStartHook: jest.fn() } as any, {} as any, {} as any, {} as any,
+      { emit: jest.fn() } as any, {} as any,
+    );
+    const result: any = await service.productionList('2026-11-11');
+    jest.restoreAllMocks();
+    return result.slots[0].orders[0].items;
+  };
+
+  it('two variants of one product link to THEIR OWN production order', async () => {
+    const items = await run(
+      [{ product_variant_id: 20 }, { product_variant_id: 21 }],
+      [
+        { id: 100, product_id: 10, product_variant_id: 20, order_number: 'OP-1', status: 'completed' },
+        { id: 101, product_id: 10, product_variant_id: 21, order_number: 'OP-2', status: 'draft' },
+      ],
+    );
+    expect(items.map((i: any) => i.production_order?.id)).toEqual([100, 101]);
+  });
+
+  it('a base product (no variant) still links to its order', async () => {
+    const items = await run(
+      [{ product_variant_id: null }],
+      [{ id: 100, product_id: 10, product_variant_id: null, order_number: 'OP-1', status: 'draft' }],
+    );
+    expect(items[0].production_order).toEqual({ id: 100, order_number: 'OP-1', status: 'draft' });
+  });
+});
+
+describe('ScheduledOrderProductionService — linked production orders (QUI-995)', () => {
+  const linkedRow = (over: Record<string, unknown> = {}) => ({
+    id: 1,
+    product_id: 10,
+    product_variant_id: null,
+    quantity: 2,
+    inventory_consumed_at_fire: false,
+    inventory_committed: false,
+    addons_consumed_at: null,
+    fulfillment_destination: 'production',
+    products: { product_type: 'prepared' },
+    orders: { production_orders: [{ id: 100, product_id: 10, status: 'draft' }] },
+    order_item_options: [
+      { scope: 'per_unit', component_type: 'ingredient', component_product_id: 700, component_variant_id: null, quantity: '80' },
+    ],
+    ...over,
+  });
+
+  function build(lines: unknown[]) {
+    const tx = {
+      order_items: {
+        findMany: jest.fn().mockResolvedValue(lines),
+        updateMany: jest.fn().mockResolvedValue({ count: 1 }),
+      },
+      production_orders: { updateMany: jest.fn().mockResolvedValue({ count: 1 }) },
+      recipes: {
+        findMany: jest.fn(async ({ where }: any) =>
+          RECIPE_BY_PRODUCT[where.product_id] ? [{ id: RECIPE_BY_PRODUCT[where.product_id], product_variant_id: null }] : [],
+        ),
+      },
+    };
+    const stockLevelManager = {
+      getDefaultLocationForProduct: jest.fn().mockResolvedValue(9),
+      updateStock: jest.fn().mockResolvedValue({ cost_snapshot: { total_cost: 100 } }),
+      releaseReservationQuantity: jest.fn().mockResolvedValue(0),
+    };
+    const service = new ScheduledOrderProductionService(
+      {} as any,
+      { registerProductionStartHook: jest.fn() } as any,
+      { explodeBom: jest.fn(async (id: number, mult: Record<number, number>) => explode(id, mult[id])) } as any,
+      stockLevelManager as any,
+      { resolveInventoryPolicy: jest.fn().mockResolvedValue({ allowIngredientOveruse: true }) } as any,
+      { emit: jest.fn() } as any,
+      {} as any,
+    );
+    return { service, tx, stockLevelManager };
+  }
+
+  it('start skips a line that has a linked production order (no consumption, no add-on claim) and moves the draft to in_progress', async () => {
+    const { service, tx, stockLevelManager } = build([linkedRow()]);
+    await service.start(tx as any, { id: 7, store_id: 3, order_id: 40 });
+    expect(stockLevelManager.updateStock).not.toHaveBeenCalled();
+    expect(tx.order_items.updateMany).not.toHaveBeenCalled();
+    expect(tx.production_orders.updateMany).toHaveBeenCalledWith({
+      where: { id: { in: [100] }, status: 'draft' },
+      data: expect.objectContaining({ status: 'in_progress', started_at: expect.any(Date) }),
+    });
+  });
+
+  it('QUI-995 B2: starting moves EVERY linked variant order to in_progress, not only the first of the product', async () => {
+    const orders = [
+      { id: 100, product_id: 10, product_variant_id: 20, status: 'draft' },
+      { id: 101, product_id: 10, product_variant_id: 21, status: 'draft' },
+    ];
+    const { service, tx } = build([
+      linkedRow({ id: 1, product_variant_id: 20, orders: { production_orders: orders } }),
+      linkedRow({ id: 2, product_variant_id: 21, orders: { production_orders: orders } }),
+    ]);
+    await service.start(tx as any, { id: 7, store_id: 3, order_id: 40 });
+    expect(tx.production_orders.updateMany).toHaveBeenCalledWith({
+      where: { id: { in: [100, 101] }, status: 'draft' },
+      data: expect.objectContaining({ status: 'in_progress' }),
+    });
+  });
+
+  it('QUI-995 R3: a legacy NULL-variant order serves the variant line (links and starts) when the sale has no variant order', async () => {
+    const { service, tx } = build([
+      linkedRow({
+        product_variant_id: 20,
+        orders: { production_orders: [{ id: 100, product_id: 10, product_variant_id: null, status: 'draft' }] },
+      }),
+    ]);
+    await service.start(tx as any, { id: 7, store_id: 3, order_id: 40 });
+    expect(tx.production_orders.updateMany).toHaveBeenCalledWith({
+      where: { id: { in: [100] }, status: 'draft' },
+      data: expect.objectContaining({ status: 'in_progress' }),
+    });
+  });
+
+  it('QUI-995 B2: a variant line never falls back to the base order when another variant has its own order', async () => {
+    const { service, tx } = build([
+      linkedRow({
+        product_variant_id: 20,
+        orders: {
+          production_orders: [
+            { id: 100, product_id: 10, product_variant_id: null, status: 'draft' },
+            { id: 101, product_id: 10, product_variant_id: 21, status: 'draft' },
+          ],
+        },
+      }),
+    ]);
+    await service.start(tx as any, { id: 7, store_id: 3, order_id: 40 });
+    expect(tx.production_orders.updateMany).not.toHaveBeenCalled();
+  });
+
+  it('A1: an unlinked `production` line is never consumed by the start (it belongs to production orders)', async () => {
+    const { service, tx, stockLevelManager } = build([linkedRow({ orders: { production_orders: [] } })]);
+    await service.start(tx as any, { id: 7, store_id: 3, order_id: 40 });
+    expect(stockLevelManager.updateStock).not.toHaveBeenCalled();
+    expect(tx.order_items.updateMany).not.toHaveBeenCalled();
+    expect(tx.production_orders.updateMany).not.toHaveBeenCalled();
+  });
+
+  it.each(['kds', 'stock'])(
+    'A1: a `%s` line is left alone by the start (kds is consumed at the fire, stock at its commit)',
+    async (destination) => {
+      const { service, tx, stockLevelManager } = build([
+        linkedRow({ fulfillment_destination: destination, orders: { production_orders: [] } }),
+      ]);
+      await service.start(tx as any, { id: 7, store_id: 3, order_id: 40 });
+      expect(stockLevelManager.updateStock).not.toHaveBeenCalled();
+      expect(tx.order_items.updateMany).not.toHaveBeenCalled();
+    },
+  );
+
+  it('A1 control: a legacy line (destination NULL) is still consumed at start, add-ons included', async () => {
+    const { service, tx, stockLevelManager } = build([
+      linkedRow({ fulfillment_destination: null, orders: { production_orders: [] } }),
+    ]);
+    await service.start(tx as any, { id: 7, store_id: 3, order_id: 40 });
+    const moved = stockLevelManager.updateStock.mock.calls.map(([p]: any[]) => p.product_id);
+    expect(moved).toEqual(expect.arrayContaining([501, 502, 700]));
+    expect(tx.order_items.updateMany).toHaveBeenCalledWith({
+      where: { id: 1, addons_consumed_at: null },
+      data: { addons_consumed_at: expect.any(Date) },
+    });
+  });
+});

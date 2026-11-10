@@ -1726,6 +1726,8 @@ describe('PaymentsService', () => {
     };
     const tx = (found: any = order, paid: any = null) => ({
       $queryRaw: jest.fn().mockResolvedValue([]),
+      // QUI-999: non-restaurant store, so the resolver yields no decision.
+      stores: { findUnique: jest.fn().mockResolvedValue({ industries: [] }) },
       orders: {
         findFirst: jest.fn().mockResolvedValue(found),
         updateMany: jest.fn().mockResolvedValue({ count: 1 }),
@@ -3822,6 +3824,58 @@ describe('PaymentsService', () => {
           ([payload]) => (payload as any)?.event === 'pos.line_gross_mismatch',
         );
         expect(mismatchCalls).toHaveLength(0);
+      });
+    });
+
+    describe('buildOrderItemSnapshot — destino de la línea (QUI-999)', () => {
+      const params = (item: Record<string, unknown>, lineDestination?: unknown) => ({
+        item,
+        productName: 'Torta',
+        itemType: 'prepared',
+        quantity: 1,
+        lineUnits: 1,
+        catalogUnitPrice: 20000,
+        catalogFinalPrice: 20000,
+        costPrice: null,
+        unitBasePrice: 20000,
+        finalUnitPrice: 20000,
+        isPriceOverridden: false,
+        productId: 10,
+        storeId: 3,
+        userId: 42,
+        tierSnap: null,
+        taxInfo: { total_rate: 0, total_tax_amount: 0, taxes: [] },
+        ...(lineDestination !== undefined ? { lineDestination } : {}),
+      });
+
+      it('una línea a producción persiste el destino y skip_kds=true aunque el cliente diga false', () => {
+        const row = (service as any).buildOrderItemSnapshot(
+          params(
+            { skip_kds: false },
+            { destination: 'production', skip_kds: true, choosable: true },
+          ),
+        );
+        expect(row.fulfillment_destination).toBe('production');
+        expect(row.skip_kds).toBe(true);
+      });
+
+      it('una línea a cocina fuerza skip_kds=false aunque el cliente diga true', () => {
+        const row = (service as any).buildOrderItemSnapshot(
+          params(
+            { skip_kds: true },
+            { destination: 'kds', skip_kds: false, choosable: false },
+          ),
+        );
+        expect(row.fulfillment_destination).toBe('kds');
+        expect(row.skip_kds).toBe(false);
+      });
+
+      it('sin decisión de matriz (tienda no restaurante / legacy) conserva el skip_kds del cliente y no escribe destino', () => {
+        const row = (service as any).buildOrderItemSnapshot(
+          params({ skip_kds: true }),
+        );
+        expect(row.skip_kds).toBe(true);
+        expect(row).not.toHaveProperty('fulfillment_destination');
       });
     });
 

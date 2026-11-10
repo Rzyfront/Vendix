@@ -3086,6 +3086,8 @@ export class ProductsService {
               product_variants: true,
               product_images: true,
               reviews: true,
+              // QUI-999: active recipes, to derive `is_producible` in-query.
+              recipes: { where: { is_active: true } },
             },
           },
         },
@@ -3348,6 +3350,11 @@ export class ProductsService {
             // de seriales; sin exponerlo aquí, el modal nunca se dispara y la
             // venta de entrega directa procede sin verificar el serial.
             requires_serial_numbers: product.requires_serial_numbers,
+            // QUI-999: batch-produced dish with an active recipe; the POS
+            // uses it to offer the Stock / Producción choice.
+            is_producible:
+              product.is_batch_produced === true &&
+              Number((product as any)._count?.recipes ?? 0) > 0,
             available_for_ecommerce: product.available_for_ecommerce,
             is_featured: product.is_featured,
             allow_pos_price_override: product.allow_pos_price_override,

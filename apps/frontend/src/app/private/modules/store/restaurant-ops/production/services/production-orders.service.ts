@@ -62,6 +62,9 @@ export class ProductionOrdersService {
     if (query.recipe_id != null) {
       params = params.set('recipe_id', String(query.recipe_id));
     }
+    if (query.order_id != null) {
+      params = params.set('order_id', String(query.order_id));
+    }
     if (query.sort_by) params = params.set('sort_by', query.sort_by);
     if (query.sort_order) params = params.set('sort_order', query.sort_order);
 
@@ -184,13 +187,46 @@ export class ProductionOrdersService {
   static statusLabel(status: ProductionOrderStatus): string {
     switch (status) {
       case 'draft':
-        return 'Borrador';
+        return 'En espera';
       case 'in_progress':
-        return 'En progreso';
+        return 'En producción';
       case 'completed':
-        return 'Completada';
+        return 'Finalizada';
       case 'cancelled':
         return 'Cancelada';
+    }
+  }
+
+  /** Same as `statusLabel` but tolerant to statuses the restaurant flow does not know. */
+  static statusLabelSafe(status: string): string {
+    switch (status) {
+      case 'draft':
+      case 'in_progress':
+      case 'completed':
+      case 'cancelled':
+        return ProductionOrdersService.statusLabel(status);
+      case 'released':
+        return 'Liberada';
+      case 'partially_completed':
+        return 'Parcialmente finalizada';
+      default:
+        return status;
+    }
+  }
+
+  /** Badge variant by status; one neutral scale, no per-status palette. */
+  static statusBadgeVariant(
+    status: string,
+  ): 'neutral' | 'primary' | 'success' | 'error' {
+    switch (status) {
+      case 'in_progress':
+        return 'primary';
+      case 'completed':
+        return 'success';
+      case 'cancelled':
+        return 'error';
+      default:
+        return 'neutral';
     }
   }
 }

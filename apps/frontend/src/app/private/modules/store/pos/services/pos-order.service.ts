@@ -21,7 +21,12 @@ import {
 
 // Re-export types for component usage
 export type { ProcessPaymentRequest, PosOrder } from '../models/order.model';
-import { CartItem, CartState, CartDiscount } from '../models/cart.model';
+import {
+  CartItem,
+  CartState,
+  CartDiscount,
+  fulfillmentModeForLine,
+} from '../models/cart.model';
 import {
   resolveLineUnits,
   resolveSaleUnitSnapshot,
@@ -1095,6 +1100,12 @@ export class PosOrderService {
       unit_price: Number(item.unitPrice.toFixed(2)),
       final_unit_price: Number(item.finalPrice.toFixed(2)),
       total_price: Number((item.finalPrice * lineUnits).toFixed(2)),
+      // QUI-999 — keep the cashier's destination when editing an order, only
+      // for choosable lines; otherwise the server keeps the persisted one.
+      ...(!isCustomItem &&
+        fulfillmentModeForLine(item) === 'choose' && {
+          fulfillment_destination: item.fulfillmentChoice ?? 'stock',
+        }),
       tax_rate: item.taxRate ?? this.calculateItemTaxRate(item),
       tax_amount_item:
         item.taxAmount > 0 && lineUnits > 0

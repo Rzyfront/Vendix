@@ -1,3 +1,4 @@
+import { requestProductionSaleSync } from '../production/production-sale-sync';
 import { assertSaleNatureLines } from '../products/services/product-usage-nature.util';
 import {
   Injectable,
@@ -99,6 +100,11 @@ import { KitchenFireService } from '../kitchen-fire/kitchen-fire.service';
 import { findLinesAwaitingKitchenDelivery } from '../kitchen-fire/kitchen-superseded-rows.util';
 import { TableSessionsService } from '../tables/table-sessions.service';
 import { storeIsRestaurant } from '../../../common/helpers/industry-capabilities.helper';
+import { resolveLineDestinations } from '../orders/utils/line-destination.loader';
+import {
+  lineConsumesOwnStock,
+  ResolvedLineDestination,
+} from '../orders/utils/resolve-line-destination.util';
 import {
   assertTipAllowed,
   resolveTip,
@@ -1471,10 +1477,14 @@ export class PaymentsService {
           quantity: number;
           stock_units_consumed?: number | null;
           skip_kds?: boolean | null;
+          fulfillment_destination?: string | null;
           inventory_committed?: boolean | null;
           cancelled_at?: Date | string | null;
         }>) {
           if (!item.product_id) continue;
+          // QUI-999: a `production` line never touches its own stock; the
+          // production order moves it.
+          if (!lineConsumesOwnStock(item)) continue;
           if (isFiredToKitchenLine(item)) continue;
           if (isAlreadySettledLine(item)) continue;
 
@@ -1529,6 +1539,9 @@ export class PaymentsService {
           // Same exemption as §1.5 above: a prepared dish fired to the
           // kitchen reserves nothing against its OWN stock row — only its
           // ingredients move, at fire time.
+          // QUI-999: a `production` line never touches its own stock; the
+          // production order moves it.
+          if (!lineConsumesOwnStock(item)) continue;
           if (isFiredToKitchenLine(item)) continue;
           // BUG 1 — same exclusion as the demand loop above: a delivered or
           // cancelled line has nothing left to reserve (`demandByIdentity`
@@ -2774,6 +2787,16 @@ export class PaymentsService {
             (err as Error).stack,
           );
         }
+      }
+
+      // QUI-995: a POS sale created together with its payment also needs its
+      // production orders (idempotent; the listener ignores sales without lines).
+      if (result.success && result.order?.id) {
+        await requestProductionSaleSync(
+          this.eventEmitter as any,
+          this.logger,
+          { order_id: result.order.id },
+        );
       }
 
       // Plan KDS fire-flows (B5 / B9): AFTER the payment $transaction
@@ -4159,8 +4182,9 @@ export class PaymentsService {
    * sin `option_ids` y sin grupos obligatorios → sin efecto. Solo se cobran
    * en una venta con pedido programado (`scheduled`), que es quien las
    * descuenta del inventario al pasar a producción. Un borrador (`draft`) las
-   * guarda sin agendamiento: no cobra, no aparta cupo ni descuenta; el
-   * agendamiento se exige al cobrarlo (`assertAdoptedOptionsScheduled`).
+   * guarda sin agendamiento: no cobra, no aparta cupo ni descuenta; fuera de
+   * restaurante el agendamiento se exige al cobrarlo
+   * (`assertAdoptedOptionsScheduled`).
    */
   private async resolvePosLineOptions(
     tx: any,
@@ -4173,12 +4197,18 @@ export class PaymentsService {
       if (optionIds?.length) throw new VendixHttpException(ErrorCodes.OPT_DISABLED);
       return { unit_price_delta: new Prisma.Decimal(0), snapshots: [] };
     }
+    // QUI-999: a restaurant sells add-ons without a schedule. Only looked up
+    // when it matters (add-ons on a plain, non-draft sale).
+    const restaurant =
+      !mode.scheduled && !mode.draft && !!optionIds?.length
+        ? await this.isRestaurantStore(tx, storeId)
+        : false;
     const resolved = await this.optionPricingService.resolve(
       storeId,
       item.product_id,
       optionIds,
       Number(item.quantity) || 1,
-      { scheduled: mode.scheduled, draft: mode.draft, client: tx },
+      { scheduled: mode.scheduled, draft: mode.draft, restaurant, client: tx },
     );
     return this.applyOptionNotes(resolved, item.option_notes);
   }
@@ -4217,9 +4247,30 @@ export class PaymentsService {
     const withOptions = await tx.order_item_options.count({
       where: { store_id: storeId, order_item: { order_id: orderId } },
     });
-    if (withOptions > 0) {
+    // QUI-999: restaurants consume add-ons where the line is consumed, so an
+    // unscheduled draft with add-ons is a valid sale for them.
+    if (withOptions > 0 && !(await this.isRestaurantStore(tx, storeId))) {
       throw new VendixHttpException(ErrorCodes.OPT_REQUIRES_SCHEDULE);
     }
+  }
+
+  private async isRestaurantStore(tx: any, storeId: number): Promise<boolean> {
+    const store = await tx.stores.findUnique({
+      where: { id: storeId },
+      select: { industries: true },
+    });
+    return storeIsRestaurant(store?.industries);
+  }
+
+  /** QUI-999: POS lines mapped to what the destination resolver reads. */
+  private toDestinationLines(items: any[]) {
+    return items.map((item) => ({
+      product_id: item.product_id,
+      product_variant_id: item.product_variant_id,
+      quantity: this.getPosLineUnits(item),
+      requested: item.fulfillment_destination,
+      skip_kds: item.skip_kds,
+    }));
   }
 
   private async buildPosOrderItem(
@@ -4238,6 +4289,10 @@ export class PaymentsService {
     // Venta con pedido programado o borrador: únicos que aceptan adiciones
     // (ver `resolvePosLineOptions`). El cierre de mesa nunca agenda.
     optionsMode: PosLineOptionsMode = { scheduled: false, draft: false },
+    // QUI-999: destination resolved in batch by the caller (see
+    // `resolveLineDestinations`). `null` = no matrix decision (non
+    // restaurant store, custom line): the client `skip_kds` stays as today.
+    lineDestination: ResolvedLineDestination | null = null,
   ): Promise<any> {
     const isCustomItem = item.item_type === 'custom' || !item.product_id;
     const lineUnits = this.getPosLineUnits(item);
@@ -4345,6 +4400,7 @@ export class PaymentsService {
         tierSnap: tierSnap ?? null,
         storeId: dtoStoreId,
         userId: user?.id ?? null,
+        lineDestination,
       });
     }
 
@@ -4620,6 +4676,7 @@ export class PaymentsService {
       tierSnap: tierSnap ?? null,
       storeId: dtoStoreId,
       userId: user?.id ?? null,
+      lineDestination,
     });
     await this.applyWeightStockUnits(tx, snapshot, item, product.id, tierSnap);
     // Snapshot congelado de las adiciones en la línea (nested create). Solo
@@ -4859,6 +4916,8 @@ export class PaymentsService {
     // ellos la compuerta no podría localizar tienda/usuario.
     storeId?: number | null;
     userId?: number | null;
+    // QUI-999: matrix decision for restaurant lines (null = none).
+    lineDestination?: ResolvedLineDestination | null;
   }): any {
     const lineBaseTotal = this.roundMoney(
       params.unitBasePrice * params.lineUnits,
@@ -4929,7 +4988,14 @@ export class PaymentsService {
       // Plan KDS fire-flows: persistir la marca de "usar stock" del cajero.
       // Solo aplica a líneas `product_type='prepared'`; para el resto se
       // ignora. Default false para preservar el comportamiento retail.
-      skip_kds: !!params.item.skip_kds,
+      // QUI-999: where the matrix decides, the server owns `skip_kds` and
+      // persists the destination; the client value is ignored there.
+      skip_kds: params.lineDestination?.destination
+        ? params.lineDestination.skip_kds
+        : !!params.item.skip_kds,
+      ...(params.lineDestination?.destination
+        ? { fulfillment_destination: params.lineDestination.destination }
+        : {}),
       // QUI-653 — "Para llevar" del POS (cobro directo). El flag viaja en el
       // DTO (`PosOrderItemDto.is_takeaway`, estampado por el checkout-shell
       // cuando el paso Consumo está en 'entrega'). El fire a cocina ya lo
@@ -5316,6 +5382,14 @@ export class PaymentsService {
     }
 
     // Build the new order_items from the POS payload (if any).
+    const tableLineDestinations =
+      dto.items && dto.items.length > 0
+        ? await resolveLineDestinations(
+            tx,
+            dtoStoreId,
+            this.toDestinationLines(dto.items),
+          )
+        : [];
     const newItems =
       dto.items && dto.items.length > 0
         ? await Promise.all(
@@ -5327,6 +5401,8 @@ export class PaymentsService {
                 user,
                 tierSnapshots[index],
                 session.order_id,
+                undefined,
+                tableLineDestinations[index] ?? null,
               ),
             ),
           )
@@ -6427,6 +6503,14 @@ export class PaymentsService {
       context,
     );
 
+    // QUI-999: one batch load for the whole sale, outside the retry loop.
+    const saleLineDestinations = await resolveLineDestinations(
+      tx,
+      dtoStoreId,
+      this.toDestinationLines(items),
+      { isScheduled: !!dto.schedule },
+    );
+
     while (retries > 0) {
       try {
         // Generate order number for this store
@@ -6444,6 +6528,7 @@ export class PaymentsService {
               tierSnapshots[index],
               orderNumber,
               { scheduled: !!dto.schedule, draft: dto.is_draft === true },
+              saleLineDestinations[index] ?? null,
             ),
           ),
         );

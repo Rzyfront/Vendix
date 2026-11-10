@@ -406,6 +406,82 @@ describe('RefundFlowService — refund overhaul invariants', () => {
     });
   });
 
+  describe('QUI-999 — destino de la línea al devolver', () => {
+    const refundWithLine = async (orderItem: Record<string, unknown>) => {
+      const cash = { state: 'enabled', system_payment_method: { type: 'cash', is_active: true } };
+      mockPrisma.orders.findFirst.mockResolvedValue({
+        id: 8001,
+        store_id: 10,
+        state: 'finished',
+        payments: [{ id: 12, state: 'succeeded', amount: 1000, store_payment_method: cash }],
+        stores: { id: 10, organization_id: 1 },
+        order_items: [
+          {
+            id: 1,
+            quantity: 1,
+            skip_kds: true,
+            products: { id: 77, product_type: 'prepared', track_inventory: true },
+            product_variants: null,
+            ...orderItem,
+          },
+        ],
+      });
+      mockCalculationService.calculate.mockResolvedValue({
+        items: [
+          {
+            order_item_id: 1, product_name: 'Torta', quantity: 1,
+            inventory_action: 'restock', location_id: 5, refund_amount: 100,
+            tax_amount: 0, discount_amount: 0, unit_price: 100, gross_amount: 100, net_amount: 100,
+          },
+        ],
+        subtotal_refund: 100, tax_refund: 0, shipping_refund: 0, total_refund: 100,
+        is_full_refund: false, already_refunded: 0, max_refundable: 5000,
+      });
+      mockPrisma.stores.findUnique.mockResolvedValue({ default_location_id: 5, organization_id: 1 });
+      mockPrisma.refunds.create.mockResolvedValue({ id: 2002, state: 'processing' });
+      mockPrisma.refunds.update.mockResolvedValue({ id: 2002, state: 'completed', payment_id: 12, refund_items: [] });
+      mockPrisma.order_items.findMany.mockResolvedValue([]);
+      mockPrisma.$transaction.mockImplementation(async (cb: any) => cb(mockPrisma));
+      mockPrisma.refund_items.create.mockResolvedValue({ id: 1 });
+      mockPrisma.payments.update.mockResolvedValue({});
+      await service.createRefund(8001, {
+        items: [{ order_item_id: 1, quantity: 1, inventory_action: 'restock' }],
+        include_shipping: false, refund_method: 'original_payment', reason: 't',
+      } as any);
+    };
+
+    it('una línea de producción sin orden ligada no repone stock', async () => {
+      await refundWithLine({ fulfillment_destination: 'production' });
+      expect(mockStockLevelManager.updateStock).not.toHaveBeenCalled();
+    });
+
+    it('QUI-995 F2: una línea de producción con stock YA descontado (inventory_committed) sí repone stock', async () => {
+      await refundWithLine({ fulfillment_destination: 'production', inventory_committed: true });
+      expect(mockStockLevelManager.updateStock).toHaveBeenCalledWith(
+        expect.objectContaining({ product_id: 77, location_id: 5, quantity_change: 1, movement_type: 'return' }),
+        expect.anything(),
+      );
+    });
+
+    it('QUI-995 F2: una línea de producción sin descontar (inventory_committed=false) no repone stock', async () => {
+      await refundWithLine({ fulfillment_destination: 'production', inventory_committed: false });
+      expect(mockStockLevelManager.updateStock).not.toHaveBeenCalled();
+    });
+
+    it('una línea stock repone stock como venta retail (sin regresión)', async () => {
+      await refundWithLine({ fulfillment_destination: 'stock' });
+      expect(mockStockLevelManager.updateStock).toHaveBeenCalledWith(
+        expect.objectContaining({ product_id: 77, location_id: 5, quantity_change: 1, movement_type: 'return' }),
+        expect.anything(),
+      );
+    });
+
+    it('una línea anterior (destino NULL, skip_kds) repone stock igual que hoy', async () => {
+      await refundWithLine({ fulfillment_destination: null });
+      expect(mockStockLevelManager.updateStock).toHaveBeenCalledTimes(1);
+    });
+  });
+
   describe('default-location fallback', () => {
     it('throws a clear error when neither default_location nor any active warehouse exists', async () => {
       mockPrisma.orders.findFirst.mockResolvedValue({

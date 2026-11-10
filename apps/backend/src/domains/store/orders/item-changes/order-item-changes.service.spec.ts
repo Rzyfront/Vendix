@@ -38,7 +38,7 @@ const mkLine = (id: number, over: Record<string, any> = {}) => ({
   ...over,
 });
 
-const build = (lines: any[], orderOver: Record<string, any> = {}) => {
+const build = (lines: any[], orderOver: Record<string, any> = {}, emitter?: any) => {
   const order = {
     id: ORDER_ID,
     store_id: 4,
@@ -83,6 +83,8 @@ const build = (lines: any[], orderOver: Record<string, any> = {}) => {
     product_variants: { findMany: jest.fn().mockResolvedValue([]) },
     product_tax_assignments: { findMany: jest.fn().mockResolvedValue([]) },
     stock_reservations: { count: jest.fn().mockResolvedValue(0) },
+    stores: { findUnique: jest.fn().mockResolvedValue({ industries: order.stores.industries }) },
+    stock_levels: { findMany: jest.fn().mockResolvedValue([]) },
     inventory_transactions: { findMany: jest.fn().mockResolvedValue([]) },
     product_categories: { findMany: jest.fn().mockResolvedValue([]) },
     coupon_uses: { findFirst: jest.fn().mockResolvedValue(null), update: jest.fn().mockResolvedValue({}) },
@@ -159,7 +161,7 @@ const build = (lines: any[], orderOver: Record<string, any> = {}) => {
   const service = new OrderItemChangesService(
     db, orderFlow as any, ordersService as any, kitchen as any,
     stockLevel as any, validator as any, allocator as any, sse as any, audit as any,
-    promotionEngine as any, coupons as any, new PriceResolverService(),
+    promotionEngine as any, coupons as any, new PriceResolverService(), emitter,
   );
   return { service, db, orderFlow, kitchen, stockLevel, sse, validator, callOrder, order, promotionEngine, coupons, allocator, ordersService };
 };
@@ -176,6 +178,13 @@ describe('OrderItemChangesService (QUI-650)', () => {
     jest.spyOn(RequestContextService, 'getContext').mockReturnValue({ store_id: 4, user_id: 9 } as any);
   });
   afterEach(() => jest.restoreAllMocks());
+
+  it('QUI-995) tras aplicar re-sincroniza las órdenes de producción de la venta (post-commit)', async () => {
+    const emitter = { emitAsync: jest.fn().mockResolvedValue([]) };
+    const { service } = build([mkLine(1)], {}, emitter);
+    await applyV({ service }, { update: [{ order_item_id: 1, quantity: 3 }] });
+    expect(emitter.emitAsync).toHaveBeenCalledWith('production.sale_sync', { order_id: ORDER_ID });
+  });
 
   it('a/b) update toca solo la línea editada y solo sus campos permitidos', async () => {
     const lines = [mkLine(1), mkLine(2), mkLine(3)];
@@ -274,6 +283,63 @@ describe('OrderItemChangesService (QUI-650)', () => {
     expect(ctx.kitchen.prepareFireContext).toHaveBeenCalledWith(ORDER_ID, [900], ctx.db);
     expect(ctx.kitchen.fireOrderItemsInTx).toHaveBeenCalledWith(ctx.db, 4, expect.anything());
     expect(ctx.kitchen.emitKitchenFiredAfterCommit).toHaveBeenCalledTimes(1);
+  });
+
+  const producibleRow = {
+    id: 51, name: 'Torta', base_price: 10000, is_on_sale: false, sale_price: null,
+    is_sellable: true, state: 'active', product_type: 'prepared', track_inventory: true,
+    is_batch_produced: true, _count: { recipes: 1 },
+    price_unit_quantity: null, product_variants: [],
+  };
+
+  it('QUI-999: add de un producible sin stock va a Producción: sin fire, skip_kds=true y destino persistido', async () => {
+    const ctx = build([mkLine(1)]);
+    ctx.db.products.findMany.mockResolvedValue([producibleRow]);
+    await applyV(ctx, { add: [{ product_id: 51, quantity: 1 }] });
+    expect(ctx.db.order_items.create).toHaveBeenCalledTimes(1);
+    expect(ctx.db.order_items.create.mock.calls[0][0].data).toEqual(
+      expect.objectContaining({ skip_kds: true, fulfillment_destination: 'production' }),
+    );
+    expect(ctx.kitchen.fireOrderItemsInTx).not.toHaveBeenCalled();
+    expect(ctx.stockLevel.reserveStock).not.toHaveBeenCalled();
+  });
+
+  it('QUI-999: add de un producible con stock sale del stock (defecto) y no va a cocina', async () => {
+    const ctx = build([mkLine(1)]);
+    ctx.db.products.findMany.mockResolvedValue([producibleRow]);
+    ctx.db.stock_levels.findMany.mockResolvedValue([
+      { product_id: 51, product_variant_id: null, quantity_available: 5 },
+    ]);
+    await applyV(ctx, { add: [{ product_id: 51, quantity: 1 }] });
+    expect(ctx.db.order_items.create.mock.calls[0][0].data).toEqual(
+      expect.objectContaining({ skip_kds: true, fulfillment_destination: 'stock' }),
+    );
+    expect(ctx.kitchen.fireOrderItemsInTx).not.toHaveBeenCalled();
+  });
+
+  it('B4: add with the cashier choice "production" on a producible with stock persists production and skips reserve', async () => {
+    const ctx = build([mkLine(1)]);
+    ctx.db.products.findMany.mockResolvedValue([producibleRow]);
+    ctx.db.stock_levels.findMany.mockResolvedValue([
+      { product_id: 51, product_variant_id: null, quantity_available: 5 },
+    ]);
+    await applyV(ctx, {
+      add: [{ product_id: 51, quantity: 1, fulfillment_destination: 'production' }],
+    });
+    expect(ctx.db.order_items.create.mock.calls[0][0].data).toEqual(
+      expect.objectContaining({ skip_kds: true, fulfillment_destination: 'production' }),
+    );
+    expect(ctx.stockLevel.reserveStock).not.toHaveBeenCalled();
+  });
+
+  it('QUI-999: tienda no restaurante conserva la línea de hoy (sin destino, skip_kds=false)', async () => {
+    const ctx = build([mkLine(1)], { stores: { id: 4, organization_id: 1, industries: ['retail'] } });
+    ctx.db.products.findMany.mockResolvedValue([{ ...producibleRow, product_type: 'physical' }]);
+    await applyV(ctx, { add: [{ product_id: 51, quantity: 1 }] });
+    const data = ctx.db.order_items.create.mock.calls[0][0].data;
+    expect(data.skip_kds).toBe(false);
+    expect(data).not.toHaveProperty('fulfillment_destination');
+    expect(ctx.db.stock_levels.findMany).not.toHaveBeenCalled();
   });
 
   it('g) descuento line-driven: quitar una línea con descuento lo baja en ese monto', async () => {
