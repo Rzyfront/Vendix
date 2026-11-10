@@ -1793,6 +1793,30 @@ export class PaymentsService {
                     ctx,
                   );
               }
+            } else {
+              // QUI-989 — los platos de un pedido programado no van a cocina
+              // al cobrar: esperan "Enviar a cocina" desde la agenda. Cobrado
+              // con la cocina pendiente, el pedido debe quedar `processing`
+              // en vez de cerrarse ahora: un pedido `finished` es terminal y
+              // el envío manual posterior se rechazaría
+              // (KITCHEN_FIRE_NOT_ELIGIBLE_001). Sin platos de cocina, el
+              // pedido programado se cierra al cobrar como antes.
+              const pendingScheduledKitchenLines = await tx.order_items.count(
+                {
+                  where: {
+                    order_id: order.id,
+                    skip_kds: false,
+                    product_id: { not: null },
+                    inventory_consumed_at_fire: false,
+                    products: { product_type: 'prepared' },
+                    orders: { fulfillment_schedule: { isNot: null } },
+                    cancelled_at: null,
+                  },
+                },
+              );
+              if (pendingScheduledKitchenLines > 0) {
+                hasKitchenItems = true;
+              }
             }
           }
         }
