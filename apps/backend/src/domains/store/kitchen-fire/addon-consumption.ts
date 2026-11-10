@@ -30,9 +30,9 @@ export interface ProductionLineInput {
   product_type: string | null;
   inventory_consumed: boolean;
   /**
-   * The add-ons of this line were already consumed (the line was fired to the
-   * kitchen, which consumes them together with the dish). Skipped so the
-   * production start never deducts them twice.
+   * The add-ons of this line were already consumed (`order_items.addons_consumed_at`,
+   * claimed by the kitchen fire or by an earlier start). Skipped so they are
+   * never deducted twice.
    */
   addons_consumed?: boolean;
   options: Array<{

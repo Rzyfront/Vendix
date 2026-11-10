@@ -90,12 +90,15 @@ describe('KitchenFireService — add-ons (QUI-1000)', () => {
     return { service, tx, recipesService, stockLevelManager, stockValidator };
   }
 
-  function context(options: unknown[] | undefined) {
+  function context(
+    options: unknown[] | undefined,
+    dish: { quantity?: number; bomLines?: unknown[] } = {},
+  ) {
     const orderItem = {
       id: 10,
       product_id: DISH,
       product_name: 'Torta',
-      quantity: 2,
+      quantity: dish.quantity ?? 2,
       product_variant_id: null,
       ...(options ? { order_item_options: options } : {}),
     };
@@ -107,7 +110,7 @@ describe('KitchenFireService — add-ons (QUI-1000)', () => {
         {
           orderItem,
           recipeId: 7,
-          bomLines: [{ component_product_id: 201, quantity: 100, depth: 1, path_recipe_ids: [7] }],
+          bomLines: dish.bomLines ?? [{ component_product_id: 201, quantity: 100, depth: 1, path_recipe_ids: [7] }],
         },
       ],
       recipeLessItems: [],
@@ -197,6 +200,45 @@ describe('KitchenFireService — add-ons (QUI-1000)', () => {
         expect.objectContaining({ product_id: 700, quantity: 160, used_by: 'Torta' }),
       ]),
     );
+  });
+
+  it('el plato y su adición comparten la misma preparación de lote sin tomar dos veces el stock del estante', async () => {
+    // 1 Bizcocho on the shelf. The dish uses 1 and the add-on "Extra bizcocho"
+    // is the same preparation: the shelf unit goes to the dish, the add-on is
+    // produced from its recipe (200 g of flour).
+    const { service, tx, stockLevelManager } = build({ available: 1 });
+    await service.fireOrderItemsInTx(
+      tx as any,
+      1,
+      context([addon({ component_type: 'recipe', component_product_id: BIZCOCHO, quantity: '1' })], {
+        quantity: 1,
+        bomLines: [{ component_product_id: BIZCOCHO, quantity: 1, depth: 1, path_recipe_ids: [7], batch_recipe_id: 90 }],
+      }),
+    );
+    expect(moves(stockLevelManager)).toEqual([
+      [BIZCOCHO, -1, 10],
+      [901, -200, 10],
+    ]);
+  });
+
+  it('cada línea reclama sus adiciones con su propio marcador antes de descontarlas', async () => {
+    const { service, tx } = build();
+    await service.fireOrderItemsInTx(tx as any, 1, context([addon()]));
+    expect(tx.order_items.updateMany).toHaveBeenCalledWith({
+      where: { id: 10, addons_consumed_at: null },
+      data: { addons_consumed_at: expect.any(Date) },
+    });
+  });
+
+  it('una línea cuyas adiciones ya se descontaron no las vuelve a descontar', async () => {
+    const { service, tx, stockLevelManager } = build();
+    tx.order_items.updateMany.mockImplementation(({ where }: any) =>
+      Promise.resolve({
+        count: where?.addons_consumed_at === null ? 0 : Array.isArray(where?.id?.in) ? where.id.in.length : 1,
+      }),
+    );
+    await service.fireOrderItemsInTx(tx as any, 1, context([addon()]));
+    expect(moves(stockLevelManager)).toEqual([[201, -200, 10]]);
   });
 
   it('una sola vez: si la producción del pedido programado ya arrancó, el disparo no repite las adiciones', async () => {

@@ -1126,6 +1126,7 @@ export class KitchenFireService {
       quantity: any;
       order_item_options?: FireAddonOption[];
     }>,
+    pool: BatchClaimPool,
   ): Promise<
     Array<{
       order_item_id: number;
@@ -1143,11 +1144,26 @@ export class KitchenFireService {
     });
     if (schedule?.produced_at) return [];
 
+    // `addons_consumed_at` is the one marker shared with the production start:
+    // each line claims its add-ons before they are planned, so a line that
+    // already gave them up (or loses a race) never deducts them twice.
+    const claimed: typeof withAddons = [];
+    for (const item of withAddons) {
+      const { count } = await tx.order_items.updateMany({
+        where: { id: item.id, addons_consumed_at: null },
+        data: { addons_consumed_at: new Date() },
+      });
+      if (count > 0) claimed.push(item);
+    }
+    if (claimed.length === 0) return [];
+
+    // Same claim pool as the dishes of this fire: a batch preparation used by
+    // a dish and by an add-on cannot take the same shelf stock twice.
     const resolvers = createBatchAwareExploders({
       recipes: this.recipesService,
       stockValidator: this.stockValidatorService,
       client: tx,
-      pool: new Map(),
+      pool,
     });
     const plan: Array<{
       order_item_id: number;
@@ -1155,7 +1171,7 @@ export class KitchenFireService {
       product_name: string;
       lines: ConsumptionLine[];
     }> = [];
-    for (const item of withAddons) {
+    for (const item of claimed) {
       const { consumption } = await expandProduction(
         [
           {
@@ -1459,11 +1475,12 @@ export class KitchenFireService {
     // QUI-990 — batch-produced preparations: consume their own stock first,
     // explode only the shortfall. One claim pool for every line of this fire.
     await this.applyBatchExclusionFallback(preparedItems, exclusionsByOrderItem, tx);
+    const batchPool: BatchClaimPool = new Map();
     const resolvedByItem = await this.resolveBatchForItems(
       preparedItems,
       exclusionsByOrderItem,
       tx,
-      new Map(),
+      batchPool,
     );
     // Ingredients that only appear after resolving a shortfall have no
     // pre-resolved location yet.
@@ -1507,12 +1524,13 @@ export class KitchenFireService {
     }
 
     // QUI-1000 — add-ons of the fired dishes are consumed together with the
-    // dish, exactly once: the claim above already guarantees this fire owns
-    // these rows, and the production-start hook skips fired lines.
+    // dish, exactly once: each line claims `addons_consumed_at`, the same
+    // marker the production-start hook checks.
     const addonPlan = await this.planAddonConsumption(
       tx,
       order.id,
       [...preparedItems.map((p) => p.orderItem), ...recipeLessItems],
+      batchPool,
     );
     if (addonPlan.length > 0) {
       // Dish ingredients and add-on components can be the same stock row, so

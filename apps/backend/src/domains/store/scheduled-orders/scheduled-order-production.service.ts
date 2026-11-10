@@ -94,6 +94,7 @@ export class ScheduledOrderProductionService implements OnModuleInit {
         quantity: true,
         inventory_consumed_at_fire: true,
         inventory_committed: true,
+        addons_consumed_at: true,
         products: { select: { product_type: true } },
         order_item_options: {
           select: {
@@ -113,8 +114,9 @@ export class ScheduledOrderProductionService implements OnModuleInit {
       quantity: Number(item.quantity),
       product_type: item.products?.product_type ?? null,
       inventory_consumed: !!item.inventory_consumed_at_fire || !!item.inventory_committed,
-      // A fired line already consumed its add-ons together with the dish (QUI-1000).
-      addons_consumed: !!item.inventory_consumed_at_fire,
+      // Its own marker, not the fire flag (QUI-1000): a line fired before the
+      // add-ons moved to the fire still has them pending for this start.
+      addons_consumed: item.addons_consumed_at != null,
       options: item.order_item_options.map((o) => ({ ...o, quantity: Number(o.quantity) })),
     }));
   }
@@ -125,7 +127,7 @@ export class ScheduledOrderProductionService implements OnModuleInit {
    * mismo disparo de la venta normal (receta descontada, ticket de cocina).
    * El disparo descuenta también las adiciones de esos platos (QUI-1000) y el
    * agendamiento pasa a `in_production` en la MISMA transacción; el gancho de
-   * inicio salta las líneas ya disparadas. Idempotente: el flag `inventory_consumed_at_fire` deja sin
+   * inicio salta las adiciones ya descontadas (`addons_consumed_at`). Idempotente: el flag `inventory_consumed_at_fire` deja sin
    * candidatos al segundo intento. Solo tiendas restaurante (lo valida el
    * disparo con RESTAURANT_NOT_ENABLED).
    */
@@ -175,6 +177,16 @@ export class ScheduledOrderProductionService implements OnModuleInit {
   async start(tx: Tx, schedule: { id: number; store_id: number; order_id: number }) {
     const ctx = RequestContextService.getContext();
     const lines = await this.loadLines(tx, schedule.store_id, schedule.order_id);
+    // Same marker as the kitchen fire: each line claims its add-ons before they
+    // are deducted, so the fire and the start never both take them.
+    for (const line of lines) {
+      if (line.addons_consumed || line.options.length === 0) continue;
+      const { count } = await tx.order_items.updateMany({
+        where: { id: line.id, addons_consumed_at: null },
+        data: { addons_consumed_at: new Date() },
+      });
+      if (count === 0) line.addons_consumed = true;
+    }
     const resolvers = createBatchAwareExploders({
       recipes: this.recipes,
       stockValidator: this.stockValidator,

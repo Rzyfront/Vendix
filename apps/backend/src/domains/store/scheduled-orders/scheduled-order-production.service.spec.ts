@@ -248,8 +248,31 @@ describe('ScheduledOrderProductionService.start', () => {
   });
 
   it('QUI-1000: enviar a cocina y luego pasar a producción no descuenta las adiciones dos veces', async () => {
-    // The fire already consumed the dish AND its add-ons and flagged the line.
-    const { service, tx, stockLevelManager } = build([{ ...row, inventory_consumed_at_fire: true }]);
+    // The fire already consumed the dish AND its add-ons and marked both.
+    const { service, tx, stockLevelManager } = build([
+      { ...row, inventory_consumed_at_fire: true, addons_consumed_at: new Date('2026-11-09T15:00:00Z') },
+    ]);
+    await service.start(tx as any, { id: 7, store_id: 3, order_id: 40 });
+    expect(stockLevelManager.updateStock).not.toHaveBeenCalled();
+  });
+
+  it('QUI-1000: una línea disparada antes de este cambio (adiciones sin descontar) las descuenta al iniciar, como antes', async () => {
+    const { service, tx, stockLevelManager } = build([
+      { ...row, inventory_consumed_at_fire: true, addons_consumed_at: null },
+    ]);
+    await service.start(tx as any, { id: 7, store_id: 3, order_id: 40 });
+    expect(stockLevelManager.updateStock.mock.calls.map(([p]) => [p.product_id, p.quantity_change])).toEqual([[700, -160]]);
+    expect(tx.order_items.updateMany).toHaveBeenCalledWith({
+      where: { id: 1, addons_consumed_at: null },
+      data: { addons_consumed_at: expect.any(Date) },
+    });
+  });
+
+  it('QUI-1000: si otra operación ya reclamó las adiciones de la línea, el inicio no las descuenta', async () => {
+    const { service, tx, stockLevelManager } = build([{ ...row, products: { product_type: 'standard' } }]);
+    tx.order_items.updateMany.mockImplementation(async ({ where }: any) => ({
+      count: where?.addons_consumed_at === null ? 0 : 1,
+    }));
     await service.start(tx as any, { id: 7, store_id: 3, order_id: 40 });
     expect(stockLevelManager.updateStock).not.toHaveBeenCalled();
   });

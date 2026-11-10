@@ -1688,6 +1688,7 @@ model order_items {
   // el descuento NO se vuelva a aplicar al pagar. Default false → no afecta
   // el flujo retail existente.
   inventory_consumed_at_fire       Boolean                  @default(false)
+  addons_consumed_at               DateTime?                @db.Timestamp(6)
   // Refactor inventario (Ola 0) — commit unico de stock, anti-doble-descuento.
   // inventory_committed marca que el stock de este item YA fue descontado. El
   // servicio unificado de commit salta el item si esta en true, garantizando que
