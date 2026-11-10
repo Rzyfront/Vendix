@@ -973,10 +973,15 @@ export class PrintLayoutComposerService {
                     if (isKitchen && item.packaging_label) {
                       sublines += `<br><strong class="item-packaging">${this.compiler.escapeHtml(String(item.packaging_label).toUpperCase())}</strong>`;
                     }
-                    // Exclusiones de cocina y adiciones del recibo de venta (QUI-994):
-                    // solo esos dos providers llenan `modifiers`.
-                    for (const mod of item.modifiers || []) {
-                      sublines += `<br><small class="item-sub item-modifier">${this.compiler.escapeHtml(mod)}</small>`;
+                    if (isKitchen) {
+                      for (const mod of item.modifiers || []) {
+                        sublines += `<br><small class="item-sub item-modifier">${this.compiler.escapeHtml(mod)}</small>`;
+                      }
+                    }
+                    // QUI-994 — adiciones del recibo de venta; su nota sigue a `show_notes`.
+                    for (const addon of item.addons || []) {
+                      const addonNote = showNotes && addon.note ? ` — ${addon.note}` : '';
+                      sublines += `<br><small class="item-sub item-modifier">+ ${this.compiler.escapeHtml(`${addon.name}${addonNote}`)}</small>`;
                     }
                     if (showNotes && item.notes) {
                       sublines += `<br><small class="item-note">Nota: ${this.compiler.escapeHtml(item.notes)}</small>`;

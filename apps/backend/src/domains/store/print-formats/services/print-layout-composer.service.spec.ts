@@ -392,7 +392,12 @@ describe('PrintLayoutComposerService — adiciones por línea (QUI-994)', () => 
   it('el recibo de venta pinta cada adición y la nota de la línea', () => {
     const html = render({
       document: {},
-      items: [line({ modifiers: ['+ Arequipe — Bien cargado', '+ Velas'], notes: 'Escribir "Feliz"' })],
+      items: [
+        line({
+          addons: [{ name: 'Arequipe', note: 'Bien cargado' }, { name: 'Velas' }],
+          notes: 'Escribir "Feliz"',
+        }),
+      ],
     });
     expect(html).toContain('<small class="item-sub item-modifier">+ Arequipe — Bien cargado</small>');
     expect(html).toContain('<small class="item-sub item-modifier">+ Velas</small>');
@@ -402,6 +407,26 @@ describe('PrintLayoutComposerService — adiciones por línea (QUI-994)', () => 
   it('una línea sin adiciones no agrega sublíneas de adición', () => {
     const html = render({ document: {}, items: [line()] });
     expect(html).not.toContain('item-modifier');
+  });
+
+  it('con show_notes apagado la adición sale sin su nota, igual que la línea', () => {
+    const html = (service as any).renderItemsTableSection(
+      { id: 'sec_items', show_notes: false },
+      definition,
+      {
+        document: {},
+        items: [line({ addons: [{ name: 'Arequipe', note: 'Bien cargado' }], notes: 'Escribir "Feliz"' })],
+      },
+      'dummy',
+    );
+    expect(html).toContain('<small class="item-sub item-modifier">+ Arequipe</small>');
+    expect(html).not.toContain('Bien cargado');
+    expect(html).not.toContain('item-note');
+  });
+
+  it('fuera de la comanda de cocina, modifiers no se pinta (como antes)', () => {
+    const html = render({ document: {}, items: [line({ modifiers: ['Sin cebolla'] })] });
+    expect(html).not.toContain('Sin cebolla');
   });
 
   it('la comanda de cocina sigue pintando sus exclusiones', () => {

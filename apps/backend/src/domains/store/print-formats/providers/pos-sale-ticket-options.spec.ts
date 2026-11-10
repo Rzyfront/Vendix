@@ -59,7 +59,11 @@ describe('pos-sale-ticket — add-ons and notes per line (QUI-994)', () => {
     const data = await provider.fetchDocumentData(10, 21);
 
     expect(data.items[0].notes).toBe('Escribir "Feliz cumpleaños"');
-    expect(data.items[0].modifiers).toEqual(['+ Arequipe — Bien cargado', '+ Velas']);
+    expect(data.items[0].addons).toEqual([
+      { name: 'Arequipe', note: 'Bien cargado' },
+      { name: 'Velas' },
+    ]);
+    expect(data.items[0].modifiers).toBeUndefined();
   });
 
   it('a line without add-ons or notes prints as before', async () => {
@@ -71,7 +75,23 @@ describe('pos-sale-ticket — add-ons and notes per line (QUI-994)', () => {
     const data = await provider.fetchDocumentData(10, 21);
 
     expect(data.items[0].notes).toBeUndefined();
-    expect(data.items[0].modifiers).toBeUndefined();
+    expect(data.items[0].addons).toBeUndefined();
+  });
+
+  it('never prints the internal booking marker of a service line', async () => {
+    const marker = '[BOOKING:{"date":"2026-11-10","start_time":"09:00","notes":""}]';
+    const { provider } = makeProvider({
+      ...baseOrder,
+      order_items: [
+        item({ product_name: 'Corte', notes: marker, order_item_options: [] }),
+        item({ product_name: 'Manicure', notes: `Con gel ${marker}`, order_item_options: [] }),
+      ],
+    });
+
+    const data = await provider.fetchDocumentData(10, 21);
+
+    expect(data.items[0].notes).toBeUndefined();
+    expect(data.items[1].notes).toBe('Con gel');
   });
 
   it('reads the add-on snapshot (name and note) with the order lines', async () => {

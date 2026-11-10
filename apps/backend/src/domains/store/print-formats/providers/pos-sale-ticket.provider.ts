@@ -1151,10 +1151,10 @@ export class PosSaleTicketDataProvider implements IDocumentDataProvider {
       tax_amount: lineTax > 0 ? lineTax : undefined,
       total_price: gross_total_price,
       total_price_formatted: `$${gross_total_price.toLocaleString('es-CO')}`,
-      // QUI-994 — nota de la línea y cada adición con su nota ("+ Arequipe —
-      // Bien cargado"). Sin adiciones ni nota, la línea sale igual que antes.
-      notes: it.notes?.trim() || undefined,
-      modifiers: formatTicketLineAddOns(it.order_item_options),
+      // QUI-994 — nota de la línea (sin el marcador interno de reserva) y
+      // cada adición con su nota. Sin adiciones ni nota, la línea sale igual.
+      notes: stripBookingMarker(it.notes),
+      addons: formatTicketLineAddOns(it.order_item_options),
       };
     });
 
@@ -1432,17 +1432,25 @@ export class PosSaleTicketDataProvider implements IDocumentDataProvider {
 }
 
 /**
- * QUI-994 — sublíneas de adiciones del recibo: "+ <adición>" y, si la
- * escribieron, " — <nota>". `undefined` cuando la línea no tiene adiciones.
+ * QUI-994 — adiciones del recibo en orden de captura: nombre y, si la
+ * escribieron, su nota. `undefined` cuando la línea no tiene adiciones.
  */
 export function formatTicketLineAddOns(
   options: ReadonlyArray<{ option_name?: string | null; note?: string | null }> | null | undefined,
-): string[] | undefined {
-  const lines = (options ?? [])
-    .filter((o) => (o.option_name ?? '').trim() !== '')
-    .map((o) => {
-      const note = (o.note ?? '').trim();
-      return note ? `+ ${o.option_name!.trim()} — ${note}` : `+ ${o.option_name!.trim()}`;
-    });
-  return lines.length > 0 ? lines : undefined;
+): { name: string; note?: string }[] | undefined {
+  const addons = (options ?? [])
+    .map((o) => ({ name: (o.option_name ?? '').trim(), note: (o.note ?? '').trim() }))
+    .filter((o) => o.name !== '')
+    .map((o) => (o.note ? { name: o.name, note: o.note } : { name: o.name }));
+  return addons.length > 0 ? addons : undefined;
+}
+
+/**
+ * El POS guarda la reserva de un servicio como `[BOOKING:{...}]` dentro de
+ * `order_items.notes` (pos-payment.service). Es un dato interno: el recibo
+ * imprime solo el texto que escribió la persona.
+ */
+export function stripBookingMarker(notes: string | null | undefined): string | undefined {
+  const text = (notes ?? '').replace(/\[BOOKING:\{.*?\}\]/g, '').trim();
+  return text || undefined;
 }
