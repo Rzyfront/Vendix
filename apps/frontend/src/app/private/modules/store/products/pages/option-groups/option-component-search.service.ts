@@ -17,6 +17,8 @@ export interface OptionComponentProduct {
   is_ingredient?: boolean | null;
   base_price?: number | string | null;
   stock_uom?: { code: string } | null;
+  /** True when the product has an active recipe (only then it can be a `recipe` component). */
+  has_active_recipe?: boolean | null;
 }
 
 interface ApiResponse<T> {
@@ -44,11 +46,12 @@ export class OptionComponentSearchService {
 }
 
 /**
- * `component_type` is deduced from the chosen product: a prepared product is a
- * recipe, an ingredient flag means insumo, anything else is a plain product.
+ * `component_type` is deduced from the chosen product: a prepared product with
+ * an active recipe is a recipe (the backend rejects one without it), an
+ * ingredient flag means insumo, anything else is a plain product.
  */
 export function deduceComponentType(product: OptionComponentProduct): OptionComponentType {
-  if (product.product_type === 'prepared') return 'recipe';
+  if (product.product_type === 'prepared' && product.has_active_recipe === true) return 'recipe';
   if (product.is_ingredient) return 'ingredient';
   return 'product';
 }

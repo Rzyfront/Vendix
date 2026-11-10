@@ -670,10 +670,13 @@ export class StoreAdminLayoutComponent {
       }
     });
 
-    // Pedidos programados: la entrada solo aparece si el ajuste está activo.
+    // Pedidos programados: la entrada solo aparece si el ajuste está activo
+    // y la tienda es restaurante (QUI-1001: siempre oculto fuera de
+    // restaurante, aunque el ajuste haya quedado activo).
     effect(() => {
       this.menuFilterService.scheduledOrdersEnabled.set(
-        this.storeSettingsFacade.settings()?.scheduled_orders?.enabled === true,
+        this.storeSettingsFacade.settings()?.scheduled_orders?.enabled ===
+          true && this.authFacade.isRestaurant(),
       );
     });
 

@@ -3000,6 +3000,9 @@ export class ProductsService {
           },
           // QUI-993 — el buscador de adiciones precarga la unidad de stock.
           stock_uom: { select: { code: true } },
+          // QUI-993 — same "active recipe" notion the add-on save validates
+          // (`recipes` with `is_active`); one row is enough to know.
+          recipes: { where: { is_active: true }, select: { id: true }, take: 1 },
           // QUI-978 — UoMs de venta con detalle del catálogo (el POS
           // decide la captura al tocar la tarjeta, igual que QUI-648).
           product_sale_uoms: {
@@ -3640,6 +3643,8 @@ export class ProductsService {
           // QUI-993 — el buscador de adiciones precarga la unidad de stock;
           // sin ella la adición quedaba con la unidad vacía.
           stock_uom: product.stock_uom ? { code: product.stock_uom.code } : null,
+          // QUI-993 — a prepared add-on component needs an active recipe to save.
+          has_active_recipe: ((product as any).recipes?.length ?? 0) > 0,
           // QUI-978 — el POP precarga la UoM de compra al recomprar (idem).
           purchase_uom_id: (product as any).purchase_uom_id ?? null,
           price_unit_quantity: (product as any).price_unit_quantity ?? 1,

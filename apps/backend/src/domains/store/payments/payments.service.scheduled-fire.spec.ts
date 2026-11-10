@@ -462,7 +462,14 @@ describe('PaymentsService fire-to-kitchen vs pedidos programados (QUI-989)', () 
    * `tx` permisivo con una "base" minima: `order_items.findMany` respeta el
    * filtro que excluye ordenes con agendamiento, como lo haria la base real.
    */
-  const makeTx = (scheduled: boolean): any => {
+  const makeTx = (scheduled: boolean, preparedLines = true): any => {
+    // Kitchen lines of a scheduled order that wait for the agenda's
+    // "Enviar a cocina" (the query asks for orders WITH a schedule).
+    const count = jest.fn(async ({ where }: any) => {
+      const asksScheduled = JSON.stringify(where ?? {}).includes('isNot');
+      if (where?.products?.product_type !== 'prepared') return 0;
+      return scheduled && asksScheduled && preparedLines ? 1 : 0;
+    });
     const findMany = jest.fn(async ({ where }: any) => {
       const excludesScheduled = JSON.stringify(where ?? {}).includes(
         'fulfillment_schedule',
@@ -484,6 +491,9 @@ describe('PaymentsService fire-to-kitchen vs pedidos programados (QUI-989)', () 
                 if (model === 'order_items' && method === 'findMany') {
                   return findMany;
                 }
+                if (model === 'order_items' && method === 'count') {
+                  return count;
+                }
                 return jest
                   .fn()
                   .mockResolvedValue(method === 'findMany' ? [] : null);
@@ -494,12 +504,12 @@ describe('PaymentsService fire-to-kitchen vs pedidos programados (QUI-989)', () 
     );
   };
 
-  const arrange = (scheduled: boolean) => {
+  const arrange = (scheduled: boolean, preparedLines = true) => {
     contextSpy = jest
       .spyOn(RequestContextService, 'getContext')
       .mockReturnValue({ store_id: 1, organization_id: 55 } as any);
     (prisma as any).$transaction = jest.fn(async (cb: any) =>
-      cb(makeTx(scheduled)),
+      cb(makeTx(scheduled, preparedLines)),
     );
     jest.spyOn(service as any, 'createOrUpdateOrderFromPos').mockResolvedValue({
       order: restaurantOrder,
@@ -548,5 +558,38 @@ describe('PaymentsService fire-to-kitchen vs pedidos programados (QUI-989)', () 
       expect.anything(),
     );
     expect((kitchenFire as any).fireOrderItemsInTx).toHaveBeenCalledTimes(1);
+  });
+
+  // `updateOrderPaymentStatus(tx, orderId, paymentState, defer, hasKitchenItems, ctx)`:
+  // `hasKitchenItems` keeps a paid order in `processing` instead of `finished`.
+  const kitchenPendingArg = (spy: jest.SpyInstance) => spy.mock.calls[0]?.[4];
+
+  it('un pedido programado con platos de cocina queda abierto para "Enviar a cocina"', async () => {
+    arrange(true);
+    const statusSpy = jest
+      .spyOn(service, 'updateOrderPaymentStatus')
+      .mockResolvedValue(undefined as any);
+    await service.processPosPayment(dto(), posUser);
+    expect((kitchenFire as any).fireOrderItemsInTx).not.toHaveBeenCalled();
+    expect(statusSpy).toHaveBeenCalledTimes(1);
+    expect(kitchenPendingArg(statusSpy)).toBe(true);
+  });
+
+  it('un pedido programado sin platos de cocina se cierra como antes', async () => {
+    arrange(true, false);
+    const statusSpy = jest
+      .spyOn(service, 'updateOrderPaymentStatus')
+      .mockResolvedValue(undefined as any);
+    await service.processPosPayment(dto(), posUser);
+    expect(kitchenPendingArg(statusSpy)).toBe(false);
+  });
+
+  it('una venta no programada que dispara a cocina sigue quedando abierta', async () => {
+    arrange(false);
+    const statusSpy = jest
+      .spyOn(service, 'updateOrderPaymentStatus')
+      .mockResolvedValue(undefined as any);
+    await service.processPosPayment(dto(), posUser);
+    expect(kitchenPendingArg(statusSpy)).toBe(true);
   });
 });
