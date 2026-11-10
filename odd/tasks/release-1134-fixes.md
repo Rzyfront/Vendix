@@ -327,3 +327,13 @@ Orden: este plan va antes que `pedidos-programados-ux`. Los dos tocan `payments.
     - el aviso de S1 dura 10 s en lugar de 1,75 s;
     - el comentario del DTO volvió a su interfaz.
   - Se borraron los temporales del escritor.
+- L11 (2026-11-10, verificador Opus independiente sobre 6ff441ed2): 0 bloqueantes. S1, S2, S3, S4, S5, S6, S8, S9, S10, S11 y S22 PASAN; S7 queda en ADVERTENCIA por el redondeo entre disparos (L10).
+  - Corrección del padre por la advertencia A2: `onSaleCancelled` registraba lo no ajustado solo dentro del bucle. Ahora el registro es pesimista: toda orden con merma cuenta como no ajustada hasta que su merma confirma, y el catch devuelve lo acumulado. Una falla antes del bucle ya no libera lo elegido como merma. Hay 2 tests nuevos y production-sale-link da 49/49.
+  - Advertencias que van al PR sin cambio:
+    - A1: la retención resta por producto+variante, sin mirar ubicación.
+    - A3: si la liberación de la rama de fallo se corta a mitad, queda parcial.
+    - A4: un id de orden ajeno se ignora.
+    - A5: el `from` del error puede venir de una lectura vieja, y el `cancel()` de manufactura es preexistente.
+    - A6: el consumo de KDS cambia cuando un plato se repite con receta fraccionada, como pidió S7.
+    - A7: el rollback se prueba con un mock que registra commit o rollback.
+    - A8: Planta no admite 6+6 de 10; el beneficio real está en `restart`.

@@ -483,6 +483,30 @@ describe('ProductionSaleLinkService.handleSaleCancelled (QUI-995)', () => {
     expect(outcome.unadjusted).toEqual([]);
   });
 
+  it('S1: a failure BEFORE the loop keeps every waste order unadjusted (its goods stay reserved), a release order is not held', async () => {
+    setup([completedA, completedB]);
+    client.order_items.findMany.mockRejectedValue(new Error('db down'));
+    const outcome = await service.onSaleCancelled({
+      order_id: 77,
+      store_id: 1,
+      dispositions: [
+        { production_order_id: 100, disposition: 'release' },
+        { production_order_id: 101, disposition: 'waste' },
+      ],
+    });
+    expect(outcome.unadjusted).toEqual([
+      { production_order_id: 101, order_number: 'OP-2', product_id: 51, product_variant_id: null, reserved_qty: 2 },
+    ]);
+    expect(slm.updateStock).not.toHaveBeenCalled();
+  });
+
+  it('S1: a waste order whose goods already left with the delivery is settled (nothing to hold)', async () => {
+    setup([completedB], [{ product_id: 51, inventory_committed: true, notes: null, order_item_options: [] }]);
+    const outcome = await service.handleSaleCancelled({ order_id: 77, store_id: 1, disposition: 'waste' });
+    expect(outcome.unadjusted).toEqual([]);
+    expect(slm.releaseReservationQuantity).not.toHaveBeenCalled();
+  });
+
   it('onSaleCancelled never throws (the cancellation already committed)', async () => {
     setup([completed]);
     client.production_orders.findMany.mockRejectedValue(new Error('db down'));

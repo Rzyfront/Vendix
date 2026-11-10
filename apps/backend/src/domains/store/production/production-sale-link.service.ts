@@ -105,22 +105,24 @@ export class ProductionSaleLinkService {
   async onSaleCancelled(
     payload: ProductionSaleCancelledPayload,
   ): Promise<ProductionSaleCancelledOutcome> {
+    const outcome: ProductionSaleCancelledOutcome = { unadjusted: [] };
     try {
-      return await this.handleSaleCancelled(payload);
+      return await this.handleSaleCancelled(payload, outcome);
     } catch (error) {
       this.logger.error(
         `Production cleanup of cancelled sale #${payload.order_id} failed: ${
           error instanceof Error ? error.message : String(error)
         }`,
       );
-      return { unadjusted: [] };
+      // Whatever was registered as unadjusted stays held by the caller.
+      return outcome;
     }
   }
 
   async handleSaleCancelled(
     payload: ProductionSaleCancelledPayload,
+    outcome: ProductionSaleCancelledOutcome = { unadjusted: [] },
   ): Promise<ProductionSaleCancelledOutcome> {
-    const outcome: ProductionSaleCancelledOutcome = { unadjusted: [] };
     const client = this.prisma.withoutScope();
     const linked = await client.production_orders.findMany({
       where: { store_id: payload.store_id, order_id: payload.order_id },
@@ -136,6 +138,45 @@ export class ProductionSaleLinkService {
       },
     });
     if (linked.length === 0) return outcome;
+
+    const dispositionOf = (production_order_id: number): ProductionDisposition =>
+      payload.dispositions?.find((d) => d.production_order_id === production_order_id)
+        ?.disposition ??
+      payload.disposition ??
+      'release';
+    // A partially_completed order with no recorded output has nothing reserved.
+    const reservedOf = (order: (typeof linked)[number]): number => {
+      const produced =
+        order.status === 'partially_completed'
+          ? Number(order.produced_qty ?? 0)
+          : Number(order.produced_qty ?? order.planned_qty);
+      return Math.min(produced, Math.round(Number(order.planned_qty)));
+    };
+    const settle = (production_order_id: number) => {
+      const index = outcome.unadjusted.findIndex(
+        (u) => u.production_order_id === production_order_id,
+      );
+      if (index >= 0) outcome.unadjusted.splice(index, 1);
+    };
+    // S1 — pessimistic: every finished order chosen as waste counts as
+    // unadjusted until its write-off commits, so a failure ANYWHERE below
+    // (even before the loop) keeps its goods reserved instead of letting the
+    // caller's blanket release make them sellable.
+    if (this.stockLevelManager) {
+      for (const order of linked) {
+        if (order.status !== 'completed' && order.status !== 'partially_completed') continue;
+        if (dispositionOf(order.id) !== 'waste') continue;
+        const reserved = reservedOf(order);
+        if (reserved <= 0) continue;
+        outcome.unadjusted.push({
+          production_order_id: order.id,
+          order_number: order.order_number ?? null,
+          product_id: order.product_id,
+          product_variant_id: order.product_variant_id ?? null,
+          reserved_qty: reserved,
+        });
+      }
+    }
 
     // Nothing was produced yet (draft / in_progress / released): cancelled as is.
     const open = linked.filter((o) =>
@@ -180,11 +221,6 @@ export class ProductionSaleLinkService {
         order_item_options: { select: { id: true }, take: 1 },
       },
     });
-    const dispositionOf = (production_order_id: number): ProductionDisposition =>
-      payload.dispositions?.find((d) => d.production_order_id === production_order_id)
-        ?.disposition ??
-      payload.disposition ??
-      'release';
     const wasteEvents: Array<Record<string, unknown>> = [];
 
     for (const order of completed) {
@@ -195,13 +231,11 @@ export class ProductionSaleLinkService {
       const productLines = lines.filter(
         (l) => l.product_id === order.product_id && (l.product_variant_id ?? null) === variant_id,
       );
-      if (productLines.length > 0 && productLines.every((l) => l.inventory_committed)) continue;
-      // A partially_completed order with no recorded output has nothing to release.
-      const produced =
-        order.status === 'partially_completed'
-          ? Number(order.produced_qty ?? 0)
-          : Number(order.produced_qty ?? order.planned_qty);
-      const reserved = Math.min(produced, Math.round(Number(order.planned_qty)));
+      if (productLines.length > 0 && productLines.every((l) => l.inventory_committed)) {
+        settle(order.id);
+        continue;
+      }
+      const reserved = reservedOf(order);
       if (reserved <= 0) continue;
       const disposition = dispositionOf(order.id);
       try {
@@ -250,6 +284,8 @@ export class ProductionSaleLinkService {
             total_cost: Number(result?.cost_snapshot?.total_cost ?? 0),
           });
         });
+        // Committed (written off, or nothing was still reserved): settled.
+        settle(order.id);
       } catch (error) {
         this.logger.error(
           `Production order #${order.id} of cancelled sale #${payload.order_id}: ${disposition} failed: ${
@@ -257,17 +293,9 @@ export class ProductionSaleLinkService {
           }`,
         );
         // A failed release is harmless (the general release returns the units
-        // to sellable stock). A failed write-off must NOT fall through to it:
-        // the goods would look sellable although they were discarded.
-        if (disposition === 'waste') {
-          outcome.unadjusted.push({
-            production_order_id: order.id,
-            order_number: order.order_number ?? null,
-            product_id: order.product_id,
-            product_variant_id: variant_id,
-            reserved_qty: reserved,
-          });
-        }
+        // to sellable stock). A failed write-off stays registered as
+        // unadjusted (pessimistic entry above): the goods must not look
+        // sellable although they were discarded.
       }
     }
 
