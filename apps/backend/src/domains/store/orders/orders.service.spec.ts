@@ -1358,6 +1358,17 @@ describe('OrdersService', () => {
       expect(result.production_cancel_suggestion).toBe('release');
     });
 
+    it('QUI-995 R3: a legacy order (NULL variant) links to the variant line it served and reports completed', async () => {
+      mockPrismaService.orders.findFirst.mockResolvedValue(
+        base([line(1, 50, { product_variant_id: 10 })], [
+          { id: 100, product_id: 50, product_variant_id: null, order_number: 'OP-1', status: 'completed' },
+        ]),
+      );
+      const result: any = await service.findOne(5);
+      expect(result.order_items[0].production_order).toEqual({ id: 100, order_number: 'OP-1', status: 'completed' });
+      expect(result.production_status).toBe('completed');
+    });
+
     it('QUI-995 B2: all variant orders completed reports completed', async () => {
       mockPrismaService.orders.findFirst.mockResolvedValue(
         base(

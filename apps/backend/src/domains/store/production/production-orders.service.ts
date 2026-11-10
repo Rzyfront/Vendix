@@ -566,8 +566,17 @@ export class ProductionOrdersService {
       // order every lifecycle writer uses (sale -> payments -> inventory), so
       // finishing or cancelling the sale waits for this completion instead of
       // racing (or deadlocking with) its stock credit and settlement.
+      let serveAllVariants = false;
       if (linkedOrderId != null) {
         await lockOrderLifecycle(tx, linkedOrderId, store_id);
+        // Legacy shape (R3): an order created before `product_variant_id` has a
+        // NULL variant and served EVERY line of its product. Counted once here
+        // and passed down to the add-on claim and the settlement.
+        serveAllVariants = await this.servesAllVariants(tx, {
+          order_id: linkedOrderId,
+          product_id: order.product_id,
+          variant_id: variantId,
+        });
       }
 
       // 0. Atomic state guard (QUI-995): the conditional UPDATE serializes two
@@ -662,6 +671,7 @@ export class ProductionOrdersService {
           order_id: linkedOrderId,
           product_id: order.product_id,
           variant_id: variantId,
+          serve_all_variants: serveAllVariants,
           production_order_id: order.id,
           sourceModule,
           allowOveruse: inventoryPolicy.allowIngredientOveruse,
@@ -737,6 +747,7 @@ export class ProductionOrdersService {
           order_id: linkedOrderId,
           product_id: order.product_id,
           variant_id: variantId,
+          serve_all_variants: serveAllVariants,
           location_id,
           produced_qty: producedQty,
           planned_qty: Number(order.planned_qty),
@@ -825,6 +836,7 @@ export class ProductionOrdersService {
       order_id: number;
       product_id: number;
       variant_id: number | null;
+      serve_all_variants: boolean;
       production_order_id: number;
       sourceModule: string;
       allowOveruse: boolean;
@@ -835,8 +847,9 @@ export class ProductionOrdersService {
         order_id: p.order_id,
         product_id: p.product_id,
         // Only the lines of the variant this order makes (QUI-995 F4); NULL
-        // matches the base-product lines, never a sibling variant's.
-        product_variant_id: p.variant_id,
+        // matches the base-product lines, never a sibling variant's. A legacy
+        // NULL-variant order (R3) serves every line of the product.
+        ...(p.serve_all_variants ? {} : { product_variant_id: p.variant_id }),
         cancelled_at: null,
         fulfillment_destination: 'production',
         orders: { store_id: p.store_id },
@@ -923,6 +936,28 @@ export class ProductionOrdersService {
   }
 
   /**
+   * Legacy shape (R3): a NULL-variant order of a sale that has no variant order
+   * for the product serves every line of the product, variant lines included,
+   * exactly as it did before `product_variant_id` existed. With any (non
+   * cancelled) variant order in the sale, a NULL order serves only base lines.
+   */
+  private async servesAllVariants(
+    client: { production_orders: { count: (args: any) => Promise<number> } },
+    p: { order_id: number; product_id: number; variant_id: number | null },
+  ): Promise<boolean> {
+    if (p.variant_id != null) return false;
+    const variantOrders = await client.production_orders.count({
+      where: {
+        order_id: p.order_id,
+        product_id: p.product_id,
+        product_variant_id: { not: null },
+        status: { not: 'cancelled' },
+      },
+    });
+    return variantOrders === 0;
+  }
+
+  /**
    * What happens to the produced units once the order completes:
    * - active sale: reserve min(produced, planned) for ('order', sale), without
    *   availability validation (the units were just credited, so `available`
@@ -938,6 +973,7 @@ export class ProductionOrdersService {
       order_id: number;
       product_id: number;
       variant_id: number | null;
+      serve_all_variants: boolean;
       location_id: number;
       produced_qty: number;
       planned_qty: number;
@@ -957,7 +993,7 @@ export class ProductionOrdersService {
         where: {
           order_id: p.order_id,
           product_id: p.product_id,
-          product_variant_id: p.variant_id,
+          ...(p.serve_all_variants ? {} : { product_variant_id: p.variant_id }),
           cancelled_at: null,
           fulfillment_destination: 'production',
           inventory_committed: false,
@@ -1060,6 +1096,13 @@ export class ProductionOrdersService {
           },
         })
       : null;
+    const serveAllVariants =
+      sale_order_id != null &&
+      (await this.servesAllVariants(this.prisma, {
+        order_id: sale_order_id,
+        product_id: order.product_id,
+        variant_id: (order as { product_variant_id?: number | null }).product_variant_id ?? null,
+      }));
     const lines = sale_order_id
       ? await this.prisma.order_items.findMany({
           where: {
@@ -1067,8 +1110,12 @@ export class ProductionOrdersService {
             product_id: order.product_id,
             // One order per product+variant (QUI-995): only the lines of THIS
             // variant (NULL = base lines). Narrow cast: the column is new.
-            product_variant_id:
-              (order as { product_variant_id?: number | null }).product_variant_id ?? null,
+            ...(serveAllVariants
+              ? {}
+              : {
+                  product_variant_id:
+                    (order as { product_variant_id?: number | null }).product_variant_id ?? null,
+                }),
             cancelled_at: null,
             fulfillment_destination: 'production',
           },

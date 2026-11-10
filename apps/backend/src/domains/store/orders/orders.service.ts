@@ -1,4 +1,5 @@
 import { requestProductionSaleSync } from '../production/production-sale-sync';
+import { findProductionOrderForLine } from '../production/production-order-pairing.util';
 import { suggestProductionDisposition } from '../production/production-disposition.util';
 import { loadSessionIntakeAnswers } from '../service-sessions/utils/session-intake-answers.util';
 import { assertNoActiveFinancialSplit } from './shared/financial-split-policy';
@@ -1592,16 +1593,10 @@ export class OrdersService {
     );
     // One production order per product+variant: a line pairs with the order of
     // ITS variant (NULL matches only base lines), never with a sibling variant's.
-    const sameProduction = (
-      o: { product_id: number; product_variant_id?: number | null },
-      i: { product_id: number; product_variant_id?: number | null },
-    ) =>
-      o.product_id === i.product_id &&
-      (o.product_variant_id ?? null) === (i.product_variant_id ?? null);
     for (const item of order.order_items ?? []) {
       const match =
         item.fulfillment_destination === 'production'
-          ? linked.find((o) => sameProduction(o, item))
+          ? findProductionOrderForLine(linked, item)
           : undefined;
       item.production_order = match
         ? { id: match.id, order_number: match.order_number, status: match.status }
@@ -1610,7 +1605,7 @@ export class OrdersService {
     // Every production line must have its own order completed: with one order
     // per variant, a sale is ready only when ALL of them are.
     const states = lines.map(
-      (i: any) => linked.find((o) => sameProduction(o, i))?.status ?? null,
+      (i: any) => findProductionOrderForLine(linked, i)?.status ?? null,
     );
     if (lines.length === 0) {
       order.production_status = 'none';
@@ -1621,13 +1616,11 @@ export class OrdersService {
     } else {
       order.production_status = 'pending';
     }
-    const completedOrders = linked.filter((o) => o.status === 'completed');
+    const completedLines = lines.filter(
+      (i: any) => findProductionOrderForLine(linked, i)?.status === 'completed',
+    );
     order.production_cancel_suggestion =
-      completedOrders.length > 0
-        ? suggestProductionDisposition(
-            lines.filter((i: any) => completedOrders.some((o) => sameProduction(o, i))),
-          )
-        : null;
+      completedLines.length > 0 ? suggestProductionDisposition(completedLines) : null;
   }
 
   async findOne(id: number) {

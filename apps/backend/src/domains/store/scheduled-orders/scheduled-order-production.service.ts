@@ -22,6 +22,7 @@ import { StockLevelManager } from '../inventory/shared/services/stock-level-mana
 import { StockValidatorService } from '../inventory/shared/services/stock-validator.service';
 import { KitchenFireService } from '../kitchen-fire/kitchen-fire.service';
 import { ScheduledOrdersService, kitchenPendingItemsWhere } from './scheduled-orders.service';
+import { findProductionOrderForLine } from '../production/production-order-pairing.util';
 
 type Tx = Prisma.TransactionClient;
 
@@ -130,11 +131,7 @@ export class ScheduledOrderProductionService implements OnModuleInit {
     const isLinked = (item: (typeof items)[number]) => {
       if (item.fulfillment_destination !== 'production') return false;
       // One production order per product+variant: pair the line with ITS variant's order.
-      const match = item.orders?.production_orders?.find(
-        (o) =>
-          o.product_id === item.product_id &&
-          (o.product_variant_id ?? null) === (item.product_variant_id ?? null),
-      );
+      const match = findProductionOrderForLine(item.orders?.production_orders ?? [], item);
       if (match) linkedOrders.set(match.id, { id: match.id, status: match.status as string });
       return !!match;
     };
@@ -389,11 +386,7 @@ export class ScheduledOrderProductionService implements OnModuleInit {
         items: s.order.order_items.map((item) => {
           const linked =
             item.fulfillment_destination === 'production'
-              ? (s.order.production_orders ?? []).find(
-                  (o) =>
-                    o.product_id === item.product_id &&
-                    (o.product_variant_id ?? null) === (item.product_variant_id ?? null),
-                )
+              ? findProductionOrderForLine(s.order.production_orders ?? [], item)
               : undefined;
           return {
           production_order: linked

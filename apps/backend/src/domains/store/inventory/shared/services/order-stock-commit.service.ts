@@ -16,6 +16,7 @@ import {
 import { SerialNumberEnforcementService } from '../../serial-numbers/serial-number-enforcement.service';
 import { InventorySerialNumbersService } from '../../serial-numbers/inventory-serial-numbers.service';
 import { resolveLineStockUnits } from '../../../products/services/packaging.util';
+import { findProductionOrderForLine } from '../../../production/production-order-pairing.util';
 import { lineConsumesOwnStock } from '../../../orders/utils/resolve-line-destination.util';
 import { RecipesService } from '../../../recipes/recipes.service';
 import {
@@ -386,20 +387,23 @@ export class OrderStockCommitService {
     let totalCost = 0;
     let committedItemCount = 0;
 
-    // QUI-995: product+variant pairs of this sale whose production order is
-    // completed (one order per variant, so a sibling variant does not count).
-    const producedKeys = new Set<string>();
+    // QUI-995: the sale's production orders; a line is released once ITS order
+    // (exact variant, or the legacy NULL-variant order of the product) completed.
+    let productionOrders: Array<{
+      product_id: number;
+      product_variant_id: number | null;
+      status: string;
+    }> = [];
     if (
       (order.order_items ?? []).some(
         (i: any) => i.fulfillment_destination === 'production',
       )
     ) {
-      const done = await db.production_orders.findMany({
-        where: { order_id: orderId, status: 'completed' },
-        select: { product_id: true, product_variant_id: true },
-      });
-      for (const row of done ?? [])
-        producedKeys.add(`${row.product_id}:${row.product_variant_id ?? ''}`);
+      productionOrders =
+        (await db.production_orders.findMany({
+          where: { order_id: orderId, status: { not: 'cancelled' } },
+          select: { product_id: true, product_variant_id: true, status: true },
+        })) ?? [];
     }
 
     // One pool per commit run: two lines cannot take the same batch stock.
@@ -439,9 +443,8 @@ export class OrderStockCommitService {
         cancelled_at: (item as any).cancelled_at ?? null,
         skip_kds: item.skip_kds,
         fulfillment_destination: (item as { fulfillment_destination?: string | null }).fulfillment_destination ?? null,
-        production_completed: producedKeys.has(
-          `${item.product_id}:${item.product_variant_id ?? ''}`,
-        ),
+        production_completed:
+          findProductionOrderForLine(productionOrders, item)?.status === 'completed',
         posSelection: opts.consumeSerials
           ? (serialSelectionByLine.get(item.id) ?? posMatcher(item))
           : undefined,

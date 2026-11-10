@@ -861,10 +861,13 @@ describe('ProductionOrdersService — sale-linked orders (QUI-995)', () => {
     sale?: { id: number; state: string } | null;
     lines?: any[];
     pendingLines?: any[];
+    // Non-cancelled variant orders of the same product in the sale (R3 legacy check).
+    variantOrderCount?: number;
   }) => {
     prismaMock.production_orders.findFirst.mockResolvedValue(opts.order ?? linkedOrder());
     tx = {
       production_orders: {
+        count: jest.fn().mockResolvedValue(opts.variantOrderCount ?? 0),
         updateMany: jest.fn().mockResolvedValue({ count: opts.claimCount ?? 1 }),
         update: jest.fn().mockImplementation(async ({ data }: any) => ({
           id: 100,
@@ -902,7 +905,7 @@ describe('ProductionOrdersService — sale-linked orders (QUI-995)', () => {
     eventEmitter = { emit: jest.fn() };
     orderStockCommit = { commitOrderLines: jest.fn().mockResolvedValue({ totalCost: 0, committedItemCount: 1 }) };
     prismaMock = {
-      production_orders: { findFirst: jest.fn(), findMany: jest.fn(), count: jest.fn(), aggregate: jest.fn() },
+      production_orders: { findFirst: jest.fn(), findMany: jest.fn(), count: jest.fn().mockResolvedValue(0), aggregate: jest.fn() },
       orders: { findFirst: jest.fn() },
       order_items: { findMany: jest.fn() },
       recipes: { findMany: jest.fn().mockResolvedValue([]) },
@@ -1077,12 +1080,41 @@ describe('ProductionOrdersService — sale-linked orders (QUI-995)', () => {
   });
 
   it('QUI-995 F4: a base-product order claims add-ons only from base lines, never a variant line', async () => {
-    setup({});
+    setup({ variantOrderCount: 1 });
     await service.complete(100, { produced_qty: 3 });
     expect(tx.order_items.findMany.mock.calls[0][0].where).toMatchObject({
       product_id: 50,
       product_variant_id: null,
     });
+  });
+
+  it('QUI-995 R3: a legacy NULL-variant order serves the variant line: add-ons claimed and the delivered sale committed without a variant filter', async () => {
+    setup({ sale: { id: 77, state: 'delivered' }, pendingLines: [{ id: 501 }] });
+    await service.complete(100, { produced_qty: 3 });
+    expect(tx.production_orders.count).toHaveBeenCalledTimes(1);
+    expect(tx.production_orders.count).toHaveBeenCalledWith({
+      where: {
+        order_id: 77,
+        product_id: 50,
+        product_variant_id: { not: null },
+        status: { not: 'cancelled' },
+      },
+    });
+    const wheres = tx.order_items.findMany.mock.calls.map((c: any) => c[0].where);
+    expect(wheres).toHaveLength(2);
+    for (const w of wheres) expect(w).not.toHaveProperty('product_variant_id');
+    expect(orderStockCommit.commitOrderLines).toHaveBeenCalledWith(77, [501], expect.anything());
+  });
+
+  it('QUI-995 R3: getDetail of a legacy order lists the variant lines it served', async () => {
+    prismaMock.production_orders.findFirst.mockResolvedValue(linkedOrder());
+    prismaMock.orders.findFirst.mockResolvedValue({
+      id: 77, order_number: 'ORD-77', state: 'processing', customer_alias: null, users: null,
+      fulfillment_schedule: null,
+    });
+    prismaMock.order_items.findMany.mockResolvedValue([]);
+    await service.getDetail(100);
+    expect(prismaMock.order_items.findMany.mock.calls[0][0].where).not.toHaveProperty('product_variant_id');
   });
 
   it('sale cancelled: nothing is reserved nor sold', async () => {
@@ -1215,6 +1247,7 @@ describe('ProductionOrdersService — sale-linked orders (QUI-995)', () => {
 
   it('QUI-995 B2: getDetail of a base-product order only reads lines WITHOUT a variant', async () => {
     prismaMock.production_orders.findFirst.mockResolvedValue(linkedOrder());
+    prismaMock.production_orders.count.mockResolvedValue(1);
     prismaMock.orders.findFirst.mockResolvedValue({
       id: 77, order_number: 'ORD-77', state: 'processing', customer_alias: null, users: null,
       fulfillment_schedule: null,

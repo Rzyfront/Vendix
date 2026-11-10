@@ -1,3 +1,4 @@
+import { findProductionOrderForLine } from '../production/production-order-pairing.util';
 import { Injectable, Logger } from '@nestjs/common';
 import { EventEmitter2 } from '@nestjs/event-emitter';
 import { Prisma } from '@prisma/client';
@@ -146,11 +147,7 @@ function shapeScheduledOrderLines<T extends { order?: any }>(row: T): T {
       order_items: order.order_items.map(({ products, ...line }: any) => {
         const linked =
           line.fulfillment_destination === 'production'
-            ? linkedOrders.find(
-                (o) =>
-                  o.product_id === line.product_id &&
-                  (o.product_variant_id ?? null) === (line.product_variant_id ?? null),
-              )
+            ? findProductionOrderForLine(linkedOrders, line)
             : undefined;
         return {
           ...line,

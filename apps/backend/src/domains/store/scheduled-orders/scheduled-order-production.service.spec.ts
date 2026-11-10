@@ -643,11 +643,30 @@ describe('ScheduledOrderProductionService — linked production orders (QUI-995)
     });
   });
 
-  it('QUI-995 B2: a variant line does not link to the base-product order of the same product', async () => {
+  it('QUI-995 R3: a legacy NULL-variant order serves the variant line (links and starts) when the sale has no variant order', async () => {
     const { service, tx } = build([
       linkedRow({
         product_variant_id: 20,
         orders: { production_orders: [{ id: 100, product_id: 10, product_variant_id: null, status: 'draft' }] },
+      }),
+    ]);
+    await service.start(tx as any, { id: 7, store_id: 3, order_id: 40 });
+    expect(tx.production_orders.updateMany).toHaveBeenCalledWith({
+      where: { id: { in: [100] }, status: 'draft' },
+      data: expect.objectContaining({ status: 'in_progress' }),
+    });
+  });
+
+  it('QUI-995 B2: a variant line never falls back to the base order when another variant has its own order', async () => {
+    const { service, tx } = build([
+      linkedRow({
+        product_variant_id: 20,
+        orders: {
+          production_orders: [
+            { id: 100, product_id: 10, product_variant_id: null, status: 'draft' },
+            { id: 101, product_id: 10, product_variant_id: 21, status: 'draft' },
+          ],
+        },
       }),
     ]);
     await service.start(tx as any, { id: 7, store_id: 3, order_id: 40 });
