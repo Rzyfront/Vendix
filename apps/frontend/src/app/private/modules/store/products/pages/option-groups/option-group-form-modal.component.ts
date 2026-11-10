@@ -1,4 +1,4 @@
-import { Component, computed, effect, inject, input, output, signal } from '@angular/core';
+import { Component, DestroyRef, computed, effect, inject, input, output, signal } from '@angular/core';
 import {
   FormArray,
   FormControl,
@@ -6,13 +6,14 @@ import {
   ReactiveFormsModule,
   Validators,
 } from '@angular/forms';
-import { toSignal } from '@angular/core/rxjs-interop';
-import { catchError, of } from 'rxjs';
+import { takeUntilDestroyed, toSignal } from '@angular/core/rxjs-interop';
+import { Subject, catchError, of, switchMap } from 'rxjs';
 
 import {
   ButtonComponent,
   IconComponent,
   InputComponent,
+  InputsearchComponent,
   ModalComponent,
   MultiSelectorComponent,
   SelectorComponent,
@@ -25,6 +26,11 @@ import {
   ProductOptionGroup,
   SaveProductOptionGroupDto,
 } from '../../services/option-groups.service';
+import {
+  OptionComponentProduct,
+  OptionComponentSearchService,
+  deduceComponentType,
+} from './option-component-search.service';
 
 export const OPTION_COMPONENT_REQUIRED_MESSAGE =
   'Cada adición debe tener un insumo, una preparación o un producto asociado.';
@@ -45,15 +51,17 @@ const SCOPE_OPTIONS: SelectorOption[] = [
   { value: 'per_line', label: 'Por línea', description: 'Se aplica una sola vez a toda la línea.' },
 ];
 
-const COMPONENT_TYPE_OPTIONS: SelectorOption[] = [
-  { value: 'ingredient', label: 'Insumo' },
-  { value: 'recipe', label: 'Preparación' },
-  { value: 'product', label: 'Producto' },
-];
+const COMPONENT_TYPE_LABELS: Record<'ingredient' | 'recipe' | 'product', string> = {
+  ingredient: 'Insumo',
+  recipe: 'Preparación',
+  product: 'Producto',
+};
 
 /**
  * Crear / editar un grupo de adiciones. Cada adición exige un componente
  * (insumo, preparación o producto): no existe adición de texto libre.
+ * "Agregar adición" muestra solo un buscador; al elegir el producto la
+ * adición aparece con nombre, unidad, cantidad y precio precargados.
  */
 @Component({
   selector: 'app-option-group-form-modal',
@@ -64,6 +72,7 @@ const COMPONENT_TYPE_OPTIONS: SelectorOption[] = [
     ButtonComponent,
     IconComponent,
     InputComponent,
+    InputsearchComponent,
     SelectorComponent,
     MultiSelectorComponent,
     SettingToggleComponent,
@@ -73,6 +82,8 @@ const COMPONENT_TYPE_OPTIONS: SelectorOption[] = [
 export class OptionGroupFormModalComponent {
   private readonly groupsService = inject(OptionGroupsService);
   private readonly uomService = inject(UomService);
+  private readonly searchService = inject(OptionComponentSearchService);
+  private readonly destroyRef = inject(DestroyRef);
 
   readonly isOpen = input(false);
   readonly group = input<ProductOptionGroup | null>(null);
@@ -82,15 +93,30 @@ export class OptionGroupFormModalComponent {
   readonly save = output<SaveProductOptionGroupDto>();
 
   readonly scopeOptions = SCOPE_OPTIONS;
-  readonly componentTypeOptions = COMPONENT_TYPE_OPTIONS;
 
   /** Error de validación de las adiciones (cliente). */
   readonly optionsError = signal<string | null>(null);
 
+  /** Catalog used for the "Productos" selector and to resolve images of saved add-ons. */
   private readonly products = toSignal(
-    this.groupsService.listProducts().pipe(catchError(() => of([]))),
-    { initialValue: [] },
+    this.searchService.search('', 200).pipe(catchError(() => of([] as OptionComponentProduct[]))),
+    { initialValue: [] as OptionComponentProduct[] },
   );
+
+  /** True while the add-on search box is open (it replaces the new-row fields). */
+  readonly adding = signal(false);
+  readonly searchLoading = signal(false);
+  readonly searchResults = signal<OptionComponentProduct[]>([]);
+  /** Products picked during this session, kept so their image survives a later search. */
+  private readonly picked = signal<Map<number, OptionComponentProduct>>(new Map());
+  private readonly search$ = new Subject<string>();
+
+  private readonly productById = computed(() => {
+    const map = new Map<number, OptionComponentProduct>();
+    for (const p of this.products()) map.set(p.id, p);
+    for (const [id, p] of this.picked()) map.set(id, p);
+    return map;
+  });
   private readonly categories = toSignal(
     this.groupsService.listCategories().pipe(catchError(() => of([]))),
     { initialValue: [] },
@@ -139,8 +165,70 @@ export class OptionGroupFormModalComponent {
       const current = this.group();
       if (!open) return;
       this.optionsError.set(null);
+      this.adding.set(false);
       this.patch(current);
     });
+
+    this.search$
+      .pipe(
+        switchMap((term) => {
+          this.searchLoading.set(true);
+          return this.searchService
+            .search(term)
+            .pipe(catchError(() => of([] as OptionComponentProduct[])));
+        }),
+        takeUntilDestroyed(this.destroyRef),
+      )
+      .subscribe((rows) => {
+        this.searchResults.set(rows);
+        this.searchLoading.set(false);
+      });
+  }
+
+  imageOf(row: OptionRowForm): string | null {
+    const id = row.controls.component_product_id.value;
+    return id == null ? null : (this.productById().get(id)?.image_url ?? null);
+  }
+
+  componentNameOf(row: OptionRowForm): string {
+    const id = row.controls.component_product_id.value;
+    return (id != null ? this.productById().get(id)?.name : null) ?? '';
+  }
+
+  typeLabelOf(row: OptionRowForm): string {
+    return COMPONENT_TYPE_LABELS[row.controls.component_type.value];
+  }
+
+  openAdd(): void {
+    this.adding.set(true);
+    this.optionsError.set(null);
+    this.searchResults.set([]);
+    this.search$.next('');
+  }
+
+  closeAdd(): void {
+    this.adding.set(false);
+  }
+
+  onSearch(term: string): void {
+    this.search$.next(term ?? '');
+  }
+
+  /** Adds the add-on prefilled from the product; every field stays editable. */
+  pickProduct(product: OptionComponentProduct): void {
+    this.picked.update((m) => new Map(m).set(product.id, product));
+    const row = this.newRow();
+    row.patchValue({
+      name: product.name,
+      price_delta: String(Number(product.base_price) || 0),
+      component_type: deduceComponentType(product),
+      component_product_id: product.id,
+      quantity: '1',
+      uom: product.stock_uom?.code ?? '',
+    });
+    this.form.controls.options.push(row);
+    this.adding.set(false);
+    this.optionsError.set(null);
   }
 
   private newRow(
@@ -183,7 +271,6 @@ export class OptionGroupFormModalComponent {
         category_ids: group.assignments.filter((a) => a.category_id != null).map((a) => a.category_id as number),
       });
     } else {
-      options.push(this.newRow());
       this.form.reset({
         name: '',
         description: '',
@@ -196,10 +283,6 @@ export class OptionGroupFormModalComponent {
         category_ids: [],
       });
     }
-  }
-
-  addOption(): void {
-    this.form.controls.options.push(this.newRow());
   }
 
   removeOption(index: number): void {

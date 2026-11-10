@@ -396,6 +396,11 @@ export const STORE_ADMIN_MENU_ITEMS: readonly MenuItem[] = [
       },
       { label: 'Marcas', icon: 'tag', route: '/admin/products/brands' },
       {
+        label: 'Adiciones',
+        icon: 'plus-circle',
+        route: '/admin/products/option-groups',
+      },
+      {
         label: 'Precios y Tarifas',
         icon: 'circle',
         route: '/admin/price-tiers',

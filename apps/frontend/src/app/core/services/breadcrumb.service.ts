@@ -748,6 +748,13 @@ export class BreadcrumbService {
       parent: 'Productos',
       icon: 'list-checks',
     },
+    // QUI-993: without this entry the route falls into '/admin/products/:id'.
+    {
+      path: '/admin/products/option-groups',
+      title: 'Grupos de adiciones',
+      parent: 'Productos',
+      icon: 'plus-circle',
+    },
     {
       path: '/admin/products/:id',
       title: 'Detalles del Producto',
