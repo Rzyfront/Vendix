@@ -144,6 +144,7 @@ import { OrderHistoryService } from '../orders/order-history/order-history.servi
 import { ProcessReservedPosPaymentDto } from './dto/create-payment.dto';
 import { WalletBalanceService } from '../wallet/services/wallet-balance.service';
 import { assertNoActiveFinancialSplit } from '../orders/shared/financial-split-policy';
+import { kitchenPendingItemsWhere } from '../scheduled-orders/scheduled-orders.service';
 import {
   GATE_RETRY_BY_REQUESTER,
   GateDecision,
@@ -1813,17 +1814,17 @@ export class PaymentsService {
               // en vez de cerrarse ahora: un pedido `finished` es terminal y
               // el envío manual posterior se rechazaría
               // (KITCHEN_FIRE_NOT_ELIGIBLE_001). Sin platos de cocina, el
-              // pedido programado se cierra al cobrar como antes.
+              // pedido programado se cierra al cobrar como antes. Cuenta las
+              // mismas líneas que la agenda envía a cocina: los platos
+              // producidos en lote nunca pasan por ahí y dejarían el pedido
+              // abierto para siempre.
               const pendingScheduledKitchenLines = await tx.order_items.count(
                 {
                   where: {
-                    order_id: order.id,
-                    skip_kds: false,
-                    product_id: { not: null },
-                    inventory_consumed_at_fire: false,
-                    products: { product_type: 'prepared' },
-                    orders: { fulfillment_schedule: { isNot: null } },
-                    cancelled_at: null,
+                    AND: [
+                      kitchenPendingItemsWhere(order.id, order.store_id),
+                      { orders: { fulfillment_schedule: { isNot: null } } },
+                    ],
                   },
                 },
               );
