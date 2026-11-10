@@ -10,6 +10,37 @@
         </p>
       </div>
 
+      <!-- SEO-OPS-18: un ciclo de cobro a la vez -->
+      @if (availableCycles().length > 1) {
+        <div class="flex justify-center mb-4">
+          <div
+            class="inline-flex bg-surface border border-[var(--color-border)] rounded-full p-1 shadow-sm"
+            role="tablist"
+            aria-label="Ciclo de cobro"
+          >
+            @for (c of availableCycles(); track c.value) {
+              <button
+                type="button"
+                role="tab"
+                [attr.aria-selected]="cycle() === c.value"
+                class="px-4 py-2 text-sm font-medium rounded-full transition-colors"
+                [class.bg-primary-600]="cycle() === c.value"
+                [class.text-white]="cycle() === c.value"
+                [class.text-[var(--color-text-secondary)]]="cycle() !== c.value"
+                (click)="setCycle(c.value)"
+              >
+                {{ c.label }}
+              </button>
+            }
+          </div>
+        </div>
+      }
+      @if (hasPlans()) {
+        <p class="text-center text-sm text-[var(--color-text-secondary)] mb-6" data-testid="pricing-terms">
+          Precios en pesos colombianos (COP) por el ciclo elegido. Puedes probar el plan Empresarial Pro 14 días sin tarjeta.
+        </p>
+      }
+
       <!-- View toggle (cards / compare) -->
       @if (hasPlans()) {
         <div class="flex justify-center mb-8 md:mb-12">
@@ -57,7 +88,7 @@
       } @else if (hasPlans()) {
         @if (viewMode() === 'cards') {
           <div class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6 max-w-6xl mx-auto">
-            @for (plan of plans(); track plan.id) {
+            @for (plan of visiblePlans(); track plan.id) {
               <app-pricing-card
                 [plan]="plan"
                 [ctaLabel]="'Empezar ahora'"
@@ -68,7 +99,7 @@
         } @else {
           <div class="max-w-6xl mx-auto">
             <app-plan-comparison-table
-              [plans]="plans()"
+              [plans]="visiblePlans()"
               (select)="onSelectPlan($event)"
             />
           </div>
@@ -77,6 +108,43 @@
         <div class="text-center py-20">
           <p class="text-[var(--color-text-secondary)]">No hay planes disponibles en este momento.</p>
         </div>
+      }
+
+      <!-- SEO-OPS-18: condiciones que el cliente debe conocer antes de elegir (confirmadas por Adel el 10-nov
+           y por los Términos v2.2; la exclusión de IVA es la misma leyenda de la factura de suscripción). -->
+      @if (hasPlans()) {
+        <section
+          class="mt-12 md:mt-16 max-w-4xl mx-auto rounded-2xl border border-[var(--color-border)] bg-surface p-6 md:p-8"
+          aria-labelledby="pricing-conditions-title"
+          data-testid="pricing-conditions"
+        >
+          <h2 id="pricing-conditions-title" class="text-xl md:text-2xl font-bold text-[var(--color-text-primary)] mb-4">
+            Antes de elegir tu plan
+          </h2>
+          <ul class="space-y-3 text-sm md:text-base text-[var(--color-text-secondary)] list-disc pl-5">
+            <li>
+              <strong class="text-[var(--color-text-primary)]">Sin permanencia.</strong>
+              Cancelas cuando quieras desde la plataforma y conservas el acceso hasta el final del periodo pagado.
+              Lo ya pagado no se reembolsa, salvo un cobro originado en un error de Vendix
+              (<a routerLink="/legal/terminos" class="underline">Términos y condiciones</a>).
+            </li>
+            <li>
+              <strong class="text-[var(--color-text-primary)]">Sin IVA.</strong>
+              La suscripción es un servicio de computación en la nube, excluido del IVA por el artículo 476,
+              numeral 21, del Estatuto Tributario. Recibes factura electrónica por cada cobro.
+            </li>
+            <li>
+              <strong class="text-[var(--color-text-primary)]">Certificado digital para facturación electrónica.</strong>
+              Lo obsequiamos por un año en los planes Empresarial Pro e IA Business con pago anual. En los demás
+              planes y ciclos, el certificado lo adquiere tu negocio.
+            </li>
+            <li>
+              <strong class="text-[var(--color-text-primary)]">Pagos en línea de tu tienda.</strong>
+              Si cobras con Wompi, sus comisiones las pagas directamente a Wompi. Vendix no es intermediario
+              de esos pagos ni cobra un recargo por ellos.
+            </li>
+          </ul>
+        </section>
       }
 
       <!-- SEO-TECH-09: enlaces rastreables de salida (Google y lectores de pantalla siguen <a href>) -->

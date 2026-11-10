@@ -132,7 +132,7 @@ export interface PricingCardSelectEvent {
               [class.text-text-primary]="!isPopular()"
               [class.text-white]="isPopular()"
             >
-              {{ asNumber(plan().base_price) | currency:plan().currency:'symbol':'1.0-0' }}
+              {{ asNumber(plan().base_price) | currency:plan().currency:'symbol-narrow':'1.0-0':'es-CO' }}
             </span>
             <span
               class="text-xs md:text-sm shrink-0"

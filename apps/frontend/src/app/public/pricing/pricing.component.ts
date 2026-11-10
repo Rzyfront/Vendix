@@ -13,6 +13,21 @@ import { Meta, Title } from '@angular/platform-browser';
 import { applyMarketingPageMetadata, MARKETING_PAGES } from '../marketing-page-metadata';
 
 type PricingViewMode = 'cards' | 'compare';
+
+/** SEO-OPS-18: ciclos de cobro que se muestran por separado, en este orden. */
+export type PricingCycle = 'monthly' | 'quarterly' | 'annual';
+export const PRICING_CYCLES: readonly { value: PricingCycle; label: string }[] = [
+  { value: 'monthly', label: 'Mensual' },
+  { value: 'quarterly', label: 'Trimestral' },
+  { value: 'annual', label: 'Anual' },
+];
+
+/** `yearly` y `annual` son el mismo ciclo; cualquier otro valor queda fuera del selector. */
+export function normalizePricingCycle(cycle: string | null | undefined): PricingCycle | null {
+  if (cycle === 'monthly' || cycle === 'quarterly') return cycle;
+  if (cycle === 'annual' || cycle === 'yearly') return 'annual';
+  return null;
+}
 const VIEW_MODE_STORAGE_KEY = 'pricingViewMode';
 
 @Component({
@@ -43,6 +58,24 @@ export class PricingComponent {
   readonly hasPlans = computed(() => this.plans().length > 0);
 
   readonly viewMode = signal<PricingViewMode>(this.readStoredViewMode());
+
+  /**
+   * SEO-OPS-18: antes se mostraban los 12 planes (mensual, trimestral y anual)
+   * mezclados en una sola lista. Ahora se elige el ciclo y solo se ven sus planes.
+   */
+  readonly cycle = signal<PricingCycle>('monthly');
+  readonly availableCycles = computed(() =>
+    PRICING_CYCLES.filter((c) => this.plans().some((p) => normalizePricingCycle(p.billing_cycle) === c.value)),
+  );
+  readonly visiblePlans = computed<PublicPlan[]>(() => {
+    const all = this.plans();
+    const inCycle = all.filter((p) => normalizePricingCycle(p.billing_cycle) === this.cycle());
+    return inCycle.length > 0 ? inCycle : all;
+  });
+
+  setCycle(cycle: PricingCycle): void {
+    this.cycle.set(cycle);
+  }
 
   readonly dummyPlan = {
     id: 0,
