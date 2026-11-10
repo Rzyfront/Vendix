@@ -30,6 +30,9 @@ describe('ProductionSaleLinkService (QUI-995)', () => {
     client = {
       orders: { findFirst: jest.fn().mockResolvedValue(s) },
       recipes: { findMany: jest.fn().mockResolvedValue(recipes) },
+      production_orders: {
+        findFirst: jest.fn().mockResolvedValue(existing.length > 0 ? { id: existing[0].id } : null),
+      },
       $transaction: jest.fn(async (cb: any) => cb(tx)),
     };
     sequences = { next: jest.fn().mockResolvedValue('OP-000001') };
@@ -113,6 +116,26 @@ describe('ProductionSaleLinkService (QUI-995)', () => {
     expect(client.$transaction).not.toHaveBeenCalled();
   });
 
+  it('S5: a sale with no live production line and no linked order opens no transaction and reads no recipes', async () => {
+    setup(sale([]));
+    expect(await service.ensureForOrder(77)).toEqual([]);
+    expect(client.production_orders.findFirst).toHaveBeenCalledWith({
+      where: { store_id: 1, order_id: 77 },
+      select: { id: true },
+    });
+    expect(client.$transaction).not.toHaveBeenCalled();
+    expect(client.recipes.findMany).not.toHaveBeenCalled();
+    expect(tx.production_orders.findMany).not.toHaveBeenCalled();
+  });
+
+  it('S5: a sale with live production lines does not run the early-exit lookup and syncs as before', async () => {
+    setup(sale([{ id: 1, product_id: 50, quantity: 2 }]));
+    await service.ensureForOrder(77);
+    expect(client.production_orders.findFirst).not.toHaveBeenCalled();
+    expect(client.$transaction).toHaveBeenCalledTimes(1);
+    expect(tx.production_orders.create).toHaveBeenCalledTimes(1);
+  });
+
   it('skips a product without an active recipe', async () => {
     setup(sale([{ id: 1, product_id: 50, quantity: 1 }]), [], []);
     await service.ensureForOrder(77);
@@ -143,6 +166,20 @@ describe('ProductionSaleLinkService (QUI-995)', () => {
     expect(call.data.status).toBeUndefined();
     expect(call.data.started_at).toBeUndefined();
     expect(Number(call.data.planned_qty)).toBe(2);
+  });
+
+  it('S28: an order cancelled from Planta with produced_qty > 0 is not revived by the next sale sync (even when the sale quantity changed)', async () => {
+    setup(
+      sale([{ id: 3, product_id: 50, quantity: 4 }]),
+      [{ id: 100, product_id: 50, status: 'cancelled', produced_qty: new Prisma.Decimal(2), planned_qty: new Prisma.Decimal(1), due_date: start }],
+    );
+    const result = await service.ensureForOrder(77);
+    expect(result).toEqual([{ id: 100 }]);
+    expect(tx.production_orders.create).not.toHaveBeenCalled();
+    for (const [arg] of tx.production_orders.updateMany.mock.calls) {
+      expect(arg.where).toEqual({ id: 100, status: 'cancelled' });
+      expect(arg.data.status).toBeUndefined();
+    }
   });
 
   it('S21: a cancelled order whose quantity and delivery already match is not rewritten', async () => {
@@ -360,23 +397,96 @@ describe('ProductionSaleLinkService.handleSaleCancelled (QUI-995)', () => {
     expect(emitter.emit).not.toHaveBeenCalled();
   });
 
-  it('omitted disposition suggests waste when a linked line has add-ons (never throws)', async () => {
-    setup([completed], [{ notes: null, order_item_options: [{ id: 1 }] }]);
+  it('S6: an omitted disposition releases (reuse) even when a linked line has add-ons or a note (was: waste)', async () => {
+    setup([completed], [{ notes: 'Feliz cumple', order_item_options: [{ id: 1 }] }]);
     await service.handleSaleCancelled({ order_id: 77, store_id: 1 });
-    expect(slm.updateStock).toHaveBeenCalledWith(expect.objectContaining({ movement_type: 'damage' }), tx);
+    expect(slm.releaseReservationQuantity).toHaveBeenCalledWith('order', 77, 50, null, 3, 'cancelled', tx, { decrementOnHand: false });
+    expect(slm.updateStock).not.toHaveBeenCalled();
+    expect(emitter.emit).not.toHaveBeenCalled();
   });
 
-  it('omitted disposition suggests release when lines are plain', async () => {
+  it('omitted disposition releases when lines are plain', async () => {
     setup([completed], [{ notes: null, order_item_options: [] }]);
     await service.handleSaleCancelled({ order_id: 77, store_id: 1 });
     expect(slm.releaseReservationQuantity).toHaveBeenCalledWith('order', 77, 50, null, 3, 'cancelled', tx, { decrementOnHand: false });
     expect(slm.updateStock).not.toHaveBeenCalled();
   });
 
+  const completedB = { id: 101, product_id: 51, status: 'completed', planned_qty: 2, produced_qty: 2, order_number: 'OP-2', product: { name: 'Torta personalizada' } };
+  const completedA = { ...completed, order_number: 'OP-1', product: { name: 'Torta' } };
+
+  it('S6: each production order gets ITS own choice (A release, B waste)', async () => {
+    setup([completedA, completedB]);
+    await service.handleSaleCancelled({
+      order_id: 77,
+      store_id: 1,
+      dispositions: [
+        { production_order_id: 100, disposition: 'release' },
+        { production_order_id: 101, disposition: 'waste' },
+      ],
+    });
+    expect(slm.releaseReservationQuantity).toHaveBeenCalledWith('order', 77, 50, null, 3, 'cancelled', tx, { decrementOnHand: false });
+    expect(slm.releaseReservationQuantity).toHaveBeenCalledWith('order', 77, 51, null, 2, 'consumed', tx, { decrementOnHand: false });
+    expect(slm.updateStock).toHaveBeenCalledTimes(1);
+    expect(slm.updateStock).toHaveBeenCalledWith(
+      expect.objectContaining({ product_id: 51, quantity_change: -2, movement_type: 'damage' }),
+      tx,
+    );
+    expect(emitter.emit).toHaveBeenCalledTimes(1);
+    expect(emitter.emit).toHaveBeenCalledWith('production.sale_waste', expect.objectContaining({ production_order_id: 101, quantity: 2 }));
+  });
+
+  it('S6: with no choice at all every completed order is released (server default)', async () => {
+    setup([completedA, completedB], [{ product_id: 51, notes: 'sin gluten', order_item_options: [{ id: 1 }] }]);
+    await service.handleSaleCancelled({ order_id: 77, store_id: 1 });
+    expect(slm.releaseReservationQuantity).toHaveBeenCalledTimes(2);
+    for (const call of slm.releaseReservationQuantity.mock.calls) expect(call[5]).toBe('cancelled');
+    expect(slm.updateStock).not.toHaveBeenCalled();
+  });
+
+  it('S6: the single productionDisposition keeps working for every order without its own choice, and a per-order choice wins over it', async () => {
+    setup([completedA, completedB]);
+    await service.handleSaleCancelled({
+      order_id: 77,
+      store_id: 1,
+      disposition: 'waste',
+      dispositions: [{ production_order_id: 100, disposition: 'release' }],
+    });
+    expect(slm.releaseReservationQuantity).toHaveBeenCalledWith('order', 77, 50, null, 3, 'cancelled', tx, { decrementOnHand: false });
+    expect(slm.releaseReservationQuantity).toHaveBeenCalledWith('order', 77, 51, null, 2, 'consumed', tx, { decrementOnHand: false });
+  });
+
+  it('S1: a failed write-off is reported (not thrown), keeps the other orders going and emits no waste event for it', async () => {
+    setup([completedA, completedB]);
+    client.$transaction.mockImplementation(async (cb: any) => {
+      if (client.$transaction.mock.calls.length === 2) throw new Error('boom');
+      return cb(tx);
+    });
+    const outcome = await service.handleSaleCancelled({ order_id: 77, store_id: 1, disposition: 'waste' });
+    expect(outcome.unadjusted).toEqual([
+      { production_order_id: 101, order_number: 'OP-2', product_id: 51, product_variant_id: null, reserved_qty: 2 },
+    ]);
+    expect(emitter.emit).toHaveBeenCalledTimes(1);
+    expect(emitter.emit).toHaveBeenCalledWith('production.sale_waste', expect.objectContaining({ production_order_id: 100 }));
+  });
+
+  it('S1: when every adjustment works the outcome reports nothing unadjusted', async () => {
+    setup([completedA, completedB]);
+    const outcome = await service.handleSaleCancelled({ order_id: 77, store_id: 1, disposition: 'waste' });
+    expect(outcome.unadjusted).toEqual([]);
+  });
+
+  it('S1: a failed RELEASE is not reported as unadjusted (the general release returns it to sellable anyway)', async () => {
+    setup([completedA]);
+    client.$transaction.mockRejectedValue(new Error('boom'));
+    const outcome = await service.handleSaleCancelled({ order_id: 77, store_id: 1, disposition: 'release' });
+    expect(outcome.unadjusted).toEqual([]);
+  });
+
   it('onSaleCancelled never throws (the cancellation already committed)', async () => {
     setup([completed]);
     client.production_orders.findMany.mockRejectedValue(new Error('db down'));
-    await expect(service.onSaleCancelled({ order_id: 77, store_id: 1 })).resolves.toBeUndefined();
+    await expect(service.onSaleCancelled({ order_id: 77, store_id: 1 })).resolves.toEqual({ unadjusted: [] });
   });
   it('QUI-995 F5: a released order is cancelled with the sale like draft and in_progress', async () => {
     setup([{ id: 3, product_id: 50, status: 'released', planned_qty: 1, produced_qty: null }]);
@@ -457,7 +567,10 @@ describe('ProductionSaleLinkService — live-sync events (QUI-1002)', () => {
         }),
       },
       recipes: { findMany: jest.fn().mockResolvedValue([{ id: 7, product_id: 50, product_variant_id: null }]) },
-      production_orders: { findMany: jest.fn().mockResolvedValue(afterCommit) },
+      production_orders: {
+        findMany: jest.fn().mockResolvedValue(afterCommit),
+        findFirst: jest.fn().mockResolvedValue(existing.length > 0 ? { id: existing[0].id } : null),
+      },
       $transaction: jest.fn(async (cb: any) => cb(tx)),
     };
     emitter = { emit: jest.fn() };

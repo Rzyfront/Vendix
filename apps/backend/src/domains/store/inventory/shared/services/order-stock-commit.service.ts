@@ -574,6 +574,20 @@ export class OrderStockCommitService {
 
     const policy = await this.stockValidator.resolveInventoryPolicy(storeId, tx);
     const allowOveruse = policy.allowIngredientOveruse;
+    // With overuse OFF a shortfall blocks, naming each add-on like the
+    // no-overselling rule does (otherwise `updateStock` throws the generic
+    // "Insufficient stock available" with no product).
+    if (!allowOveruse) {
+      await this.stockValidator.assertIngredientsAvailable(
+        consumption.map((line) => ({
+          product_id: line.product_id,
+          product_variant_id: line.variant_id ?? null,
+          quantity: line.quantity,
+          used_by: item.products?.name,
+        })),
+        { tx, allowIngredientOveruse: false },
+      );
+    }
     const userId = opts.userId ?? RequestContextService.getContext()?.user_id;
     let cost = 0;
     for (const line of consumption) {

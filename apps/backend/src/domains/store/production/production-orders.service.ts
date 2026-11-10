@@ -471,6 +471,11 @@ export class ProductionOrdersService {
         },
       );
     }
+    // A Planta (manufacturing) draft stays "En espera" until it is released
+    // from its Planta detail: starting it here would skip that step.
+    if ((order as { source?: string | null }).source === 'manual') {
+      throw new VendixHttpException(ErrorCodes.PRODUCTION_ORDER_PLANT_START_001);
+    }
     // Atomic claim: two screens starting the same order cannot both win.
     const now = new Date();
     const claimed = await this.prisma.production_orders.updateMany({
@@ -859,6 +864,7 @@ export class ProductionOrdersService {
           serve_all_variants: serveAllVariants,
           location_id,
           produced_qty: producedQty,
+          prior_produced_qty: Number(order.produced_qty ?? 0),
           planned_qty: Number(order.planned_qty),
           production_order_id: order.id,
         });
@@ -1071,7 +1077,8 @@ export class ProductionOrdersService {
 
   /**
    * What happens to the produced units once the order completes:
-   * - active sale: reserve min(produced, planned) for ('order', sale), without
+   * - active sale: reserve min(accumulated, planned) minus what is already
+   *   reserved for ('order', sale), without
    *   availability validation (the units were just credited, so `available`
    *   is unchanged and no other sale can take them);
    * - sale already delivered/finished: sell them now through the delivery
@@ -1088,6 +1095,8 @@ export class ProductionOrdersService {
       serve_all_variants: boolean;
       location_id: number;
       produced_qty: number;
+      /** Accumulated output of the PREVIOUS deliveries of this order (Planta partials). */
+      prior_produced_qty?: number;
       planned_qty: number;
       production_order_id: number;
     },
@@ -1129,7 +1138,12 @@ export class ProductionOrdersService {
       return 0;
     }
 
-    const quantity = Math.min(p.produced_qty, Math.round(p.planned_qty));
+    // Incremental: the sale never holds more than round(planned) in total, so
+    // each delivery reserves min(accumulated, planned) minus what the previous
+    // ones already reserved (same cap `handleSaleCancelled` releases with).
+    const cap = Math.round(p.planned_qty);
+    const prior = Math.max(0, p.prior_produced_qty ?? 0);
+    const quantity = Math.min(prior + p.produced_qty, cap) - Math.min(prior, cap);
     if (quantity <= 0) return 0;
     await this.stockLevelManager.reserveStock(
       p.product_id,
@@ -1357,10 +1371,23 @@ export class ProductionOrdersService {
         },
       );
     }
-    const cancelled = await this.prisma.production_orders.update({
-      where: { id },
+    // Atomic claim (as `start()` does): two cancellations, or a cancellation
+    // racing a completion, leave ONE winner; the loser gets a state error.
+    const claimed = await this.prisma.production_orders.updateMany({
+      where: {
+        id,
+        status: { in: ['draft', 'released', 'in_progress', 'partially_completed'] },
+      },
       data: { status: 'cancelled', updated_at: new Date() },
     });
+    if (claimed.count !== 1) {
+      throw new VendixHttpException(
+        ErrorCodes.PRODUCTION_ORDER_INVALID_STATE,
+        undefined,
+        { from: order.status, to: 'cancelled' },
+      );
+    }
+    const cancelled = await this.findOne(id);
     this.emitUpdated(cancelled);
     return cancelled;
   }

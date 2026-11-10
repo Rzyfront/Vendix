@@ -379,17 +379,20 @@ describe('ScheduledOrderProductionService.sendToKitchen (QUI-989)', () => {
     const { service, client, scheduledOrders, kitchenFire } = build();
     await service.sendToKitchen(7);
 
-    expect(client.order_items.findMany).toHaveBeenCalledWith(
-      expect.objectContaining({
-        where: expect.objectContaining({
-          order_id: 40,
-          cancelled_at: null,
-          skip_kds: false,
-          inventory_consumed_at_fire: false,
-          products: { product_type: 'prepared', is_batch_produced: false },
-        }),
-      }),
-    );
+    // Exact filter (S28): no extra or missing predicate may slip in unnoticed.
+    expect(client.order_items.findMany).toHaveBeenCalledWith({
+      where: {
+        order_id: 40,
+        orders: { store_id: 3 },
+        cancelled_at: null,
+        skip_kds: false,
+        product_id: { not: null },
+        inventory_consumed_at_fire: false,
+        inventory_committed: false,
+        products: { product_type: 'prepared', is_batch_produced: false },
+      },
+      select: { id: true },
+    });
     expect(kitchenFire.fireOrderItems).toHaveBeenCalledWith(
       { order_id: 40, order_item_ids: [11, 12] },
       expect.objectContaining({ withinTx: expect.any(Function) }),

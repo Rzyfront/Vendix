@@ -4,6 +4,7 @@ import { StockLevelManager } from './stock-level-manager.service';
 import { SellableStockAllocator } from './sellable-stock-allocator.service';
 import { SerialNumberEnforcementService } from '../../serial-numbers/serial-number-enforcement.service';
 import { InventorySerialNumbersService } from '../../serial-numbers/inventory-serial-numbers.service';
+import { StockValidatorService } from './stock-validator.service';
 
 /**
  * Regresión del claim atómico de {@link OrderStockCommitService.processLine}.
@@ -918,7 +919,7 @@ describe('OrderStockCommitService — add-ons of a stock line (QUI-999 B1)', () 
       ([args]: any[]) => args.product_id === ADDON_PRODUCT,
     );
 
-  const setup = (destination: string | null, over: Record<string, unknown> = {}) => {
+  const setup = (destination: string | null, over: Record<string, unknown> = {}, stockValidator?: any) => {
     row = buildRow(destination, over);
     txMock = {
       orders: {
@@ -969,9 +970,47 @@ describe('OrderStockCommitService — add-ons of a stock line (QUI-999 B1)', () 
       { isSerialized: jest.fn().mockResolvedValue(false) } as any,
       {} as unknown as InventorySerialNumbersService,
       { explodeBom: jest.fn().mockResolvedValue([]) } as any,
-      { resolveInventoryPolicy: jest.fn().mockResolvedValue({ allowIngredientOveruse: true }) } as any,
+      (stockValidator ?? { resolveInventoryPolicy: jest.fn().mockResolvedValue({ allowIngredientOveruse: true }) }) as any,
     );
   };
+
+  /** Real validator over a catalog where the add-on product has `available` units sellable. */
+  const strictValidator = (available: number) => {
+    const real = new StockValidatorService(
+      {} as any,
+      {} as any,
+      { getSellableLevels: jest.fn().mockResolvedValue([{ location_id: 3, quantity_available: available }]) } as any,
+    );
+    jest.spyOn(real, 'resolveInventoryPolicy').mockResolvedValue({ allowOversell: false, allowIngredientOveruse: false } as any);
+    return real;
+  };
+  const withCatalog = () => {
+    txMock.products.findMany = jest.fn().mockResolvedValue([
+      { id: ADDON_PRODUCT, store_id: 7, track_inventory: true, product_type: 'physical', name: 'Salsa picante' },
+    ]);
+    txMock.product_variants = { findMany: jest.fn().mockResolvedValue([]) };
+  };
+
+  it('S3: with ingredient overuse OFF, an add-on without stock blocks the commit naming the add-on (same format as the no-overselling rule)', async () => {
+    setup('stock', {}, strictValidator(10));
+    withCatalog();
+    const failure = await service
+      .commitOrderLines(1, [10], { ...OPTS, tx: txMock })
+      .then(() => null, (error) => error);
+    expect(failure).toMatchObject({ errorCode: 'INV_STOCK_INSUFFICIENT_LINES' });
+    expect(failure.message).toContain('Insumo sin stock suficiente: Salsa picante (requerido 100, disponible 10');
+    expect(failure.message).not.toContain('Insufficient stock available');
+    expect(addonStockCalls()).toHaveLength(0);
+  });
+
+  it('S3: with ingredient overuse OFF and enough add-on stock the line still consumes its add-ons as before', async () => {
+    setup('stock', {}, strictValidator(500));
+    withCatalog();
+    await service.commitOrderLines(1, [10], { ...OPTS, tx: txMock });
+    const calls = addonStockCalls();
+    expect(calls).toHaveLength(1);
+    expect(calls[0][0]).toMatchObject({ quantity_change: -100, validate_availability: true, allow_negative: false });
+  });
 
   it('a stock line consumes its add-ons (per_unit x quantity) at commit, claimed once', async () => {
     setup('stock');

@@ -1362,6 +1362,68 @@ describe('OrderFlowService.cancelOrder — kitchenDisposition y reversa de hojas
     );
   });
 
+  it('S6: las elecciones por orden de producción viajan en el evento de cancelación', async () => {
+    const { service, emitter } = buildKitchenHarness('pending');
+    const productionDispositions = [
+      { production_order_id: 100, disposition: 'release' },
+      { production_order_id: 101, disposition: 'waste' },
+    ];
+    await service.cancelOrder(ORDER_ID, { reason, productionDispositions } as any);
+    expect(emitter.emitAsync).toHaveBeenCalledWith('production.sale_cancelled', {
+      order_id: ORDER_ID,
+      store_id: 100,
+      disposition: undefined,
+      dispositions: productionDispositions,
+      reason,
+    });
+  });
+
+  it('S1: si la merma de una orden falla, la venta se cancela, lo producido sigue reservado y la respuesta trae el aviso', async () => {
+    const { service, prismaMock, stock, emitter } = buildKitchenHarness('pending');
+    emitter.emitAsync.mockImplementation(async (event: string) =>
+      event === 'production.sale_cancelled'
+        ? [{
+            unadjusted: [
+              { production_order_id: 101, order_number: 'OP-2', product_id: 51, product_variant_id: null, reserved_qty: 2 },
+            ],
+          }]
+        : [],
+    );
+    // Reservas vivas de la venta: 4 de la línea de stock (50) y 2+3 del producto 51
+    // (2 producidos que se protegen, 3 de una línea de stock del mismo producto).
+    prismaMock.stock_reservations = {
+      findMany: jest.fn().mockResolvedValue([
+        { product_id: 50, product_variant_id: null, quantity: 4 },
+        { product_id: 51, product_variant_id: null, quantity: 2 },
+        { product_id: 51, product_variant_id: null, quantity: 3 },
+      ]),
+    };
+    stock.releaseReservationQuantity = jest.fn().mockResolvedValue(0);
+
+    const result: any = await service.cancelOrder(ORDER_ID, { reason, productionDispositions: [{ production_order_id: 101, disposition: 'waste' }] } as any);
+
+    expect(result.state).toBe('cancelled');
+    expect(result.warnings).toEqual([
+      'La venta se canceló, pero lo producido no se pudo ajustar. Ajústalo desde la orden de producción OP-2.',
+    ]);
+    expect(prismaMock.stock_reservations.findMany).toHaveBeenCalledWith({
+      where: { reserved_for_type: 'order', reserved_for_id: ORDER_ID, status: 'active' },
+      select: { product_id: true, product_variant_id: true, quantity: true },
+    });
+    expect(stock.releaseReservationsByReference).not.toHaveBeenCalled();
+    expect(stock.releaseReservationQuantity.mock.calls).toEqual([
+      ['order', ORDER_ID, 50, null, 4, 'cancelled'],
+      ['order', ORDER_ID, 51, null, 3, 'cancelled'],
+    ]);
+  });
+
+  it('S1: sin ajustes fallidos la cancelación libera todo por referencia y no agrega avisos (igual que antes)', async () => {
+    const { service, stock } = buildKitchenHarness('pending');
+    const result: any = await service.cancelOrder(ORDER_ID, { reason } as any);
+    expect(stock.releaseReservationsByReference).toHaveBeenCalledWith('order', ORDER_ID, 'cancelled');
+    expect(result).not.toHaveProperty('warnings');
+  });
+
   it('sin kitchenDisposition y ticket avanzado: error tipado antes del claim, sin efectos', async () => {
     const { service, prismaMock, stock } = buildKitchenHarness('in_preparation');
 
@@ -9293,5 +9355,20 @@ describe('OrderFlowService.emitDeliveryCogs — costo de producción al entregar
     const { emitter, emit } = build();
     emit({ totalCost: 0 });
     expect(emitter.emit).not.toHaveBeenCalled();
+  });
+
+  it('S4: sin producción order.completed lleva commit.totalCost tal cual, sin redondear a 4 decimales (idéntico a main)', () => {
+    const { emitter, emit } = build();
+    emit({ totalCost: 1234.56789012 });
+    expect(emitter.emit).toHaveBeenCalledTimes(1);
+    expect(emitter.emit).toHaveBeenCalledWith('order.completed', {
+      order_id: 10, order_number: 'ORD-10', organization_id: 2, store_id: 3, total_cost: 1234.56789012, user_id: 4,
+    });
+  });
+
+  it('S4: con producción la resta sigue igual (redondeada a 4 decimales)', () => {
+    const { emitter, emit } = build();
+    emit({ totalCost: 8000.1, productionCogs: [{ production_order_id: 77, total_cost: 3000 }] });
+    expect(emitter.emit).toHaveBeenCalledWith('order.completed', expect.objectContaining({ total_cost: 5000.1 }));
   });
 });

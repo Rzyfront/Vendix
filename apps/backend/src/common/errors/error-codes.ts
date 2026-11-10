@@ -7083,6 +7083,12 @@ export const ErrorCodes = {
     devMessage:
       'La orden de producción cambió en otra operación; recarga e intenta de nuevo',
   },
+  PRODUCTION_ORDER_PLANT_START_001: {
+    code: 'PRODUCTION_ORDER_PLANT_START_001',
+    httpStatus: 409,
+    devMessage:
+      'Esta orden es de Planta: libérala desde su detalle de Planta.',
+  },
   PRODUCTION_ORDER_RESTART_NOT_LINKED: {
     code: 'PRODUCTION_ORDER_RESTART_NOT_LINKED',
     httpStatus: 409,

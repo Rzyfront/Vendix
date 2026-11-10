@@ -1341,6 +1341,41 @@ describe('OrdersService', () => {
       expect(result.production_cancel_suggestion).toBe('release');
     });
 
+    it('S6: production_cancel_items lists each finished order with ITS own suggestion (plain: release, with add-ons or a note: waste)', async () => {
+      mockPrismaService.orders.findFirst.mockResolvedValue(
+        base(
+          [
+            line(1, 50, { products: { name: 'Torta simple' } }),
+            line(2, 51, { notes: 'Feliz cumple', products: { name: 'Torta personalizada' } }),
+            line(3, 52, { order_item_options: [{ option_name: 'Crema' }], products: { name: 'Torta con crema' } }),
+            line(4, 53, { products: { name: 'Pendiente' } }),
+          ],
+          [
+            { id: 100, product_id: 50, order_number: 'OP-1', status: 'completed' },
+            { id: 101, product_id: 51, order_number: 'OP-2', status: 'completed' },
+            { id: 102, product_id: 52, order_number: 'OP-3', status: 'partially_completed' },
+            { id: 103, product_id: 53, order_number: 'OP-4', status: 'draft' },
+          ],
+        ),
+      );
+      const result: any = await service.findOne(5);
+      expect(result.production_cancel_items).toEqual([
+        { production_order_id: 100, order_number: 'OP-1', product_name: 'Torta simple', suggestion: 'release' },
+        { production_order_id: 101, order_number: 'OP-2', product_name: 'Torta personalizada', suggestion: 'waste' },
+        { production_order_id: 102, order_number: 'OP-3', product_name: 'Torta con crema', suggestion: 'waste' },
+      ]);
+      // the previous sale-level field keeps working
+      expect(result.production_cancel_suggestion).toBe('waste');
+    });
+
+    it('S6: a sale with no finished production order has an empty production_cancel_items', async () => {
+      mockPrismaService.orders.findFirst.mockResolvedValue(
+        base([line(1, 50)], [{ id: 100, product_id: 50, order_number: 'OP-1', status: 'draft' }]),
+      );
+      const result: any = await service.findOne(5);
+      expect(result.production_cancel_items).toEqual([]);
+    });
+
     it('a partially completed order already produced stock: it suggests a disposition and reports in progress', async () => {
       mockPrismaService.orders.findFirst.mockResolvedValue(
         base([line(1, 50, { order_item_options: [{ option_name: 'Crema' }] })], [

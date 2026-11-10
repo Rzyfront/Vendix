@@ -3,7 +3,7 @@ import { FormControl, FormGroup, Validators } from '@angular/forms';
 import { of, throwError } from 'rxjs';
 import { OrderDetailsPageComponent, cancellationBody } from './order-details-page.component';
 import type { Order, ProductionDisposition } from '../../interfaces/order.interface';
-import type { KitchenDisposition } from '../../services/store-orders.service';
+import type { KitchenDisposition, ProductionCancelItem } from '../../services/store-orders.service';
 
 describe('OrderDetailsPageComponent — reusar en cancelación de varios platos', () => {
   function setup(advancedItems: number) {
@@ -15,6 +15,8 @@ describe('OrderDetailsPageComponent — reusar en cancelación de varios platos'
       cancelKitchenDisposition: signal<KitchenDisposition | null>(null),
       cancelProductionDisposition: signal<ProductionDisposition>('release'),
       cancelProductionSuggestion: signal<ProductionDisposition | null>(null),
+      cancelProductionItems: signal<ProductionCancelItem[]>([]),
+      cancelProductionChoices: signal<Record<number, ProductionDisposition>>({}),
       cancelRequiresDisposition: signal(advancedItems > 0),
       showCancelModal: signal(false),
       isProcessingAction: signal(false),
@@ -91,6 +93,8 @@ describe('OrderDetailsPageComponent — cod-auto-invoicing S5 nota crédito tota
       cancelKitchenDisposition: signal<KitchenDisposition | null>(null),
       cancelProductionDisposition: signal<ProductionDisposition>('release'),
       cancelProductionSuggestion: signal<ProductionDisposition | null>(null),
+      cancelProductionItems: signal<ProductionCancelItem[]>([]),
+      cancelProductionChoices: signal<Record<number, ProductionDisposition>>({}),
       cancelRequiresDisposition: signal(false),
       showCancelModal: signal(false),
       isProcessingAction: signal(false),
@@ -131,5 +135,66 @@ describe('OrderDetailsPageComponent — cod-auto-invoicing S5 nota crédito tota
 
     expect(confirm).toHaveBeenCalled();
     expect(cancel).toHaveBeenCalledTimes(1);
+  });
+});
+
+describe('OrderDetailsPageComponent — S6 disposición de producción por producto', () => {
+  const items: ProductionCancelItem[] = [
+    { production_order_id: 11, order_number: 'OP-11', product_name: 'Pan', suggestion: 'release' },
+    { production_order_id: 12, order_number: 'OP-12', product_name: 'Torta', suggestion: 'waste' },
+  ];
+
+  function setup(result: unknown = {}) {
+    const cancel = jasmine.createSpy('flowCancelOrder').and.returnValue(of(result));
+    const toast = { success: jasmine.createSpy('success'), warning: jasmine.createSpy('warning'), error: jasmine.createSpy('error') };
+    const component = Object.assign(Object.create(OrderDetailsPageComponent.prototype), {
+      order: signal({ cancellation_policy: { can_cancel: true } } as unknown as Order),
+      orderId: '42',
+      cancelForm: new FormGroup({ reason: new FormControl('', [Validators.required, Validators.minLength(3)]) }),
+      cancelKitchenDisposition: signal<KitchenDisposition | null>(null),
+      cancelProductionDisposition: signal<ProductionDisposition>('release'),
+      cancelProductionSuggestion: signal<ProductionDisposition | null>('waste'),
+      cancelProductionItems: signal<ProductionCancelItem[]>(items),
+      cancelProductionChoices: signal<Record<number, ProductionDisposition>>({}),
+      cancelRequiresDisposition: signal(false),
+      showCancelModal: signal(false),
+      isProcessingAction: signal(false),
+      ordersService: { flowCancelOrder: cancel },
+      toastService: toast,
+      destroyRef: { onDestroy: () => () => undefined },
+      loadData: jasmine.createSpy(),
+    }) as OrderDetailsPageComponent;
+    return { component, cancel, toast };
+  }
+
+  it('abre con Liberar preseleccionado en todos, aunque se sugiera Merma', () => {
+    const { component } = setup();
+    component.openCancelModal();
+    expect(component.productionChoiceFor(11)).toBe('release');
+    expect(component.productionChoiceFor(12)).toBe('release');
+  });
+
+  it('envía la elección de cada producto', () => {
+    const { component, cancel } = setup();
+    component.openCancelModal();
+    component.selectProductionChoice(12, 'waste');
+    component.cancelForm.patchValue({ reason: 'Cliente desistió' });
+    component.submitCancellation();
+    expect(cancel).toHaveBeenCalledWith('42', {
+      reason: 'Cliente desistió',
+      productionDispositions: [
+        { production_order_id: 11, disposition: 'release' },
+        { production_order_id: 12, disposition: 'waste' },
+      ],
+    });
+  });
+
+  it('muestra los avisos de la respuesta como advertencias', () => {
+    const { component, toast } = setup({ warnings: ['La venta se canceló, pero lo producido no se pudo ajustar.'] });
+    component.openCancelModal();
+    component.cancelForm.patchValue({ reason: 'Cliente desistió' });
+    component.submitCancellation();
+    expect(toast.success).toHaveBeenCalledWith('Orden cancelada');
+    expect(toast.warning).toHaveBeenCalledWith('La venta se canceló, pero lo producido no se pudo ajustar.', undefined, 10000);
   });
 });

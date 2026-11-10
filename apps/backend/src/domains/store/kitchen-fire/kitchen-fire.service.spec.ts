@@ -1003,7 +1003,12 @@ describe('KitchenFireService — fireOrderItems() (Fase D smoke)', () => {
           kds: { findFirst: jest.fn().mockResolvedValue({ id: 1 }) },
           kds_sessions: { findFirst: jest.fn().mockResolvedValue(null) },
           order_items: {
-            updateMany: jest.fn().mockResolvedValue({ count: 1 }),
+            // The claim wins every requested line (one or several).
+            updateMany: jest
+              .fn()
+              .mockImplementation(async (args: any) => ({
+                count: args?.where?.id?.in?.length ?? 1,
+              })),
             findMany: jest.fn().mockResolvedValue([]),
           },
           store_settings: { findFirst: jest.fn().mockResolvedValue(null) },
@@ -1047,6 +1052,151 @@ describe('KitchenFireService — fireOrderItems() (Fase D smoke)', () => {
       expect(movedByProduct.get(1)).toBe(-240 * 2);
       expect(stock.get(1)).toBe(1000 - 240 * 2);
       expect(stock.get(2)).toBe(1000 - 200 * 2);
+    });
+
+    it('S7 — suma y luego redondea el insumo repetido (2 x 0,25 x 2 unidades descuenta 1, no 2)', async () => {
+      const stock = arrangeFire([
+        { component_product_id: 1, quantity: 0.25 },
+        { component_product_id: 1, quantity: 0.25 },
+        { component_product_id: 2, quantity: 0.2 },
+      ]);
+
+      await service.fireOrderItems({ order_id: 100, order_item_ids: [10] });
+
+      const movedByProduct = new Map<number, number>();
+      for (const [p] of stockLevelManager.updateStock.mock.calls) {
+        movedByProduct.set(p.product_id, (movedByProduct.get(p.product_id) ?? 0) + p.quantity_change);
+      }
+      expect(movedByProduct.get(1)).toBe(-1);
+      expect(stock.get(1)).toBe(999);
+      // A single line below 0.5 keeps rounding to zero, as before.
+      expect(movedByProduct.has(2)).toBe(false);
+    });
+
+    const movedOf = () => {
+      const moved = new Map<number, number>();
+      for (const [p] of stockLevelManager.updateStock.mock.calls) {
+        moved.set(p.product_id, (moved.get(p.product_id) ?? 0) + p.quantity_change);
+      }
+      return moved;
+    };
+
+    it('S7 — dos lineas de 0,5 del mismo plato descuentan una receta, no dos', async () => {
+      const stock = arrangeFire([{ component_product_id: 1, quantity: 1 }]);
+      prismaMock.orders.findFirst.mockResolvedValue({
+        id: 100,
+        store_id: 1,
+        order_number: 'ORD-1',
+        order_items: [
+          { ...makeOrderItem(10, 50, 'prepared', false), quantity: 0.5 },
+          { ...makeOrderItem(11, 50, 'prepared', false), quantity: 0.5 },
+        ],
+      });
+
+      await service.fireOrderItems({ order_id: 100, order_item_ids: [10, 11] });
+
+      expect(movedOf().get(1)).toBe(-1);
+      expect(stock.get(1)).toBe(999);
+    });
+
+    it('S7 — platos distintos que comparten insumo redondean cada uno por su lado, como produccion', async () => {
+      const stock = arrangeFire([{ component_product_id: 1, quantity: 1 }]);
+      prismaMock.recipes.findMany.mockResolvedValue([
+        { id: 7, product_id: 50, is_active: true },
+        { id: 8, product_id: 51, is_active: true },
+      ]);
+      prismaMock.orders.findFirst.mockResolvedValue({
+        id: 100,
+        store_id: 1,
+        order_number: 'ORD-1',
+        order_items: [
+          { ...makeOrderItem(10, 50, 'prepared', false), quantity: 0.5 },
+          { ...makeOrderItem(11, 51, 'prepared', false), quantity: 0.5 },
+        ],
+      });
+
+      await service.fireOrderItems({ order_id: 100, order_item_ids: [10, 11] });
+
+      // Produccion abre una orden por plato: round(0,5) + round(0,5) = 2.
+      expect(movedOf().get(1)).toBe(-2);
+      expect(stock.get(1)).toBe(998);
+    });
+
+    it('S10 — la transaccion del disparo ordinario usa timeout 20 s y maxWait 5 s', async () => {
+      arrangeFire([{ component_product_id: 1, quantity: 100 }]);
+      const impl = prismaMock.$transaction.getMockImplementation()!;
+      prismaMock.$transaction.mockImplementation(async (cb: any, opts?: any) => impl(cb, opts));
+
+      await service.fireOrderItems({ order_id: 100, order_item_ids: [10] });
+
+      expect(prismaMock.$transaction).toHaveBeenCalledWith(
+        expect.any(Function),
+        { timeout: 20_000, maxWait: 5_000 },
+      );
+    });
+
+    describe('S28 — rama withinTx: rollback y orden de afterCommit', () => {
+      // `$transaction` con semantica real: confirma al resolver, descarta al rechazar.
+      const useCommitAwareTransaction = () => {
+        const order: string[] = [];
+        const impl = prismaMock.$transaction.getMockImplementation()!;
+        prismaMock.$transaction.mockImplementation(async (cb: any, opts?: any) => {
+          order.push('begin');
+          try {
+            const out = await impl(cb, opts);
+            order.push('commit');
+            return out;
+          } catch (err) {
+            order.push('rollback');
+            throw err;
+          }
+        });
+        eventEmitter.emit.mockImplementation((evt: string) => {
+          order.push(`emit:${evt}`);
+          return true;
+        });
+        return order;
+      };
+
+      it('si withinTx falla se revierte todo: sin afterCommit ni evento kitchen.fired', async () => {
+        arrangeFire([{ component_product_id: 1, quantity: 100 }]);
+        const order = useCommitAwareTransaction();
+        const after = jest.fn();
+
+        await expect(
+          service.fireOrderItems(
+            { order_id: 100, order_item_ids: [10] },
+            {
+              withinTx: async (_tx: any, afterCommit: Array<() => void>) => {
+                afterCommit.push(after);
+                throw new Error('start hook failed');
+              },
+            } as any,
+          ),
+        ).rejects.toThrow('start hook failed');
+
+        expect(order).toEqual(['begin', 'rollback']);
+        expect(after).not.toHaveBeenCalled();
+        expect(eventEmitter.emit).not.toHaveBeenCalled();
+      });
+
+      it('si todo sale bien, afterCommit corre despues del commit y antes de kitchen.fired', async () => {
+        arrangeFire([{ component_product_id: 1, quantity: 100 }]);
+        const order = useCommitAwareTransaction();
+
+        await service.fireOrderItems(
+          { order_id: 100, order_item_ids: [10] },
+          {
+            withinTx: async (_tx: any, afterCommit: Array<() => void>) => {
+              afterCommit.push(() => order.push('afterCommit'));
+              order.push('withinTx');
+            },
+          } as any,
+        );
+
+        expect(order.slice(0, 4)).toEqual(['begin', 'withinTx', 'commit', 'afterCommit']);
+        expect(order.indexOf('emit:kitchen.fired')).toBeGreaterThan(order.indexOf('afterCommit'));
+      });
     });
 
     it('un plato sin insumos repetidos descuenta igual que antes', async () => {
