@@ -17,8 +17,27 @@ export const PRODUCTION_SALE_CANCELLED_EVENT = 'production.sale_cancelled';
 export interface ProductionSaleCancelledPayload {
   order_id: number;
   store_id: number;
+  /** One choice for every completed production order without its own. */
   disposition?: 'release' | 'waste';
+  /** Choice per production order; wins over `disposition`. */
+  dispositions?: Array<{ production_order_id: number; disposition: 'release' | 'waste' }>;
   reason?: string;
+}
+
+/**
+ * What a cancellation could not settle: completed orders whose WASTE write-off
+ * failed. Their finished goods stay reserved for the sale (the caller must not
+ * release them with the blanket release) and the operator is warned.
+ */
+export interface ProductionSaleCancelledOutcome {
+  unadjusted: Array<{
+    production_order_id: number;
+    order_number: string | null;
+    product_id: number;
+    product_variant_id: number | null;
+    /** Units of the finished good the sale still holds reserved for that order. */
+    reserved_qty: number;
+  }>;
 }
 
 export interface ProductionSaleSyncPayload {
@@ -35,15 +54,16 @@ export async function requestProductionSaleSync(
   logger: Pick<Logger, 'warn'>,
   payload: ProductionSaleSyncPayload | ProductionSaleCancelledPayload,
   event: string = PRODUCTION_SALE_SYNC_EVENT,
-): Promise<void> {
-  if (!payload.order_id) return;
+): Promise<unknown[] | undefined> {
+  if (!payload.order_id) return undefined;
   try {
-    await emitter?.emitAsync?.(event, payload);
+    return await emitter?.emitAsync?.(event, payload);
   } catch (error) {
     logger.warn(
       `production sale sync failed for order #${payload.order_id}: ${
         error instanceof Error ? error.message : String(error)
       }`,
     );
+    return undefined;
   }
 }

@@ -3626,11 +3626,14 @@
     </app-modal>
 
     <!-- T13: shared production order detail, opened from a production line -->
-    <app-production-order-detail-modal
-      [(isOpen)]="showProductionDetail"
-      [orderId]="productionDetailId()"
-      (changed)="loadData()"
-    />
+    <!-- S22: the modal chunk loads the first time a production line is opened -->
+    @defer (when showProductionDetail()) {
+      <app-production-order-detail-modal
+        [(isOpen)]="showProductionDetail"
+        [orderId]="productionDetailId()"
+        (changed)="loadData()"
+      />
+    }
 
     <!-- CANCEL MODAL -->
     <app-modal
@@ -3796,7 +3799,56 @@
 
         <!-- T13: finished production of this sale. Non-blocking: a choice is
              always selected (the suggestion) and the server applies it anyway. -->
-        @if (cancelProductionSuggestion(); as suggestion) {
+        @if (cancelProductionItems().length > 0) {
+          <div class="border border-border rounded-xl p-3 space-y-3">
+            <div>
+              <p class="text-sm font-bold text-text-primary">
+                Producción de este pedido
+              </p>
+              <p class="text-xs text-text-secondary mt-0.5">
+                Elige qué hacer con lo producido en cada orden. Por defecto
+                se libera al stock para otras ventas.
+              </p>
+            </div>
+            @for (item of cancelProductionItems(); track item.production_order_id) {
+              <div class="rounded-lg border border-border p-3 space-y-2">
+                <div class="flex items-center justify-between gap-2">
+                  <p class="text-sm font-semibold text-text-primary">
+                    {{ item.product_name || "Producto" }}
+                    <span class="text-xs font-normal text-text-secondary"
+                      >{{ item.order_number }}</span
+                    >
+                  </p>
+                  @if (item.suggestion === "waste") {
+                    <span class="text-xs text-text-secondary">Sugerido: Merma</span>
+                  }
+                </div>
+                <div
+                  class="flex gap-2"
+                  role="radiogroup"
+                  [attr.aria-label]="'Destino de ' + (item.product_name || 'la producción')"
+                >
+                  @for (opt of productionDispositionOptions; track opt.value) {
+                    <button
+                      type="button"
+                      role="radio"
+                      [attr.aria-checked]="productionChoiceFor(item.production_order_id) === opt.value"
+                      (click)="selectProductionChoice(item.production_order_id, opt.value)"
+                      class="flex-1 text-left rounded-lg border px-3 py-2 text-sm transition-colors"
+                      [class.border-primary]="productionChoiceFor(item.production_order_id) === opt.value"
+                      [class.bg-primary]="productionChoiceFor(item.production_order_id) === opt.value"
+                      [class.bg-opacity-5]="productionChoiceFor(item.production_order_id) === opt.value"
+                      [class.border-border]="productionChoiceFor(item.production_order_id) !== opt.value"
+                      [disabled]="isProcessingAction()"
+                    >
+                      {{ opt.value === "waste" ? "Merma" : "Liberar" }}
+                    </button>
+                  }
+                </div>
+              </div>
+            }
+          </div>
+        } @else if (cancelProductionSuggestion(); as suggestion) {
           <div class="border border-border rounded-xl p-3 space-y-3">
             <div>
               <p class="text-sm font-bold text-text-primary">

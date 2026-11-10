@@ -997,6 +997,37 @@ describe('ProductionOrdersService — sale-linked orders (QUI-995)', () => {
     expect(stock.reserveStock).toHaveBeenCalledWith(50, undefined, 1, 3, 'order', 77, 42, false, tx);
   });
 
+  it('S2: a second partial delivery reserves only what is left of the planned quantity (6 + 6 of 10 -> 6 then 4)', async () => {
+    setup({ order: linkedOrder({ planned_qty: new Prisma.Decimal(10) }) });
+    await service.complete(100, { produced_qty: 6 }, { sourceModule: 'manufacturing', allowPartialBatch: true });
+    expect(stock.reserveStock).toHaveBeenCalledTimes(1);
+    expect(stock.reserveStock).toHaveBeenLastCalledWith(50, undefined, 1, 6, 'order', 77, 42, false, tx);
+
+    stock.reserveStock.mockClear();
+    setup({
+      order: linkedOrder({
+        planned_qty: new Prisma.Decimal(10),
+        status: 'partially_completed',
+        produced_qty: new Prisma.Decimal(6),
+      }),
+    });
+    await service.complete(100, { produced_qty: 6 }, { sourceModule: 'manufacturing', allowPartialBatch: true });
+    expect(stock.reserveStock).toHaveBeenCalledTimes(1);
+    expect(stock.reserveStock).toHaveBeenLastCalledWith(50, undefined, 1, 4, 'order', 77, 42, false, tx);
+  });
+
+  it('S2: a delivery after the planned quantity is fully reserved reserves nothing more', async () => {
+    setup({
+      order: linkedOrder({
+        planned_qty: new Prisma.Decimal(10),
+        status: 'partially_completed',
+        produced_qty: new Prisma.Decimal(10),
+      }),
+    });
+    await service.complete(100, { produced_qty: 3 }, { sourceModule: 'manufacturing', allowPartialBatch: true });
+    expect(stock.reserveStock).not.toHaveBeenCalled();
+  });
+
   it('gate #1132: a partially completed order (Planta) cannot be finished from the restaurant endpoint -> PRODUCTION_ORDER_INVALID_STATE and nothing moves', async () => {
     setup({ order: linkedOrder({ status: 'partially_completed', produced_qty: new Prisma.Decimal(2) }) });
     await expect(service.complete(100, { produced_qty: 3 })).rejects.toMatchObject({
@@ -1482,12 +1513,139 @@ describe('ProductionOrdersService.restart (S21)', () => {
   });
 
   it('cancel() keeps its previous behavior: cancels an in-progress order and emits', async () => {
-    prismaMock.production_orders.findFirst.mockResolvedValue(cancelledOrder({ status: 'in_progress' }));
-    prismaMock.production_orders.update = jest.fn().mockResolvedValue({ id: 100, status: 'cancelled' });
+    prismaMock.production_orders.findFirst
+      .mockResolvedValueOnce(cancelledOrder({ status: 'in_progress' }))
+      .mockResolvedValueOnce(cancelledOrder({ status: 'cancelled' }));
     await service.cancel(100);
-    expect(prismaMock.production_orders.update).toHaveBeenCalledWith({
-      where: { id: 100 },
+    expect(prismaMock.production_orders.updateMany).toHaveBeenCalledWith({
+      where: { id: 100, status: { in: ['draft', 'released', 'in_progress', 'partially_completed'] } },
       data: expect.objectContaining({ status: 'cancelled' }),
     });
+    expect(eventEmitter.emit).toHaveBeenCalledWith(
+      'production_order.updated',
+      expect.objectContaining({ id: 100, status: 'cancelled' }),
+    );
+  });
+});
+
+/**
+ * Release #1134 — S8 (restaurant start rejects Planta orders), S9 (atomic
+ * cancel) and the S28 checks over restart / revival.
+ */
+describe('ProductionOrdersService.start / cancel (release #1134)', () => {
+  const ctx = { store_id: 1, organization_id: 1, user_id: 42, is_super_admin: false };
+  let service: ProductionOrdersService;
+  let prismaMock: any;
+  let saleLink: { planRestart: jest.Mock };
+  let eventEmitter: { emit: jest.Mock };
+
+  const order = (over: Record<string, unknown> = {}) => ({
+    id: 100,
+    store_id: 1,
+    product_id: 50,
+    recipe_id: 7,
+    order_id: 77,
+    product_variant_id: null,
+    source: 'order',
+    planned_qty: new Prisma.Decimal(1),
+    produced_qty: null,
+    status: 'draft',
+    started_at: null,
+    product: { id: 50, name: 'Torta', sku: 'T', stock_unit: 'u' },
+    recipe: { id: 7, items: [] },
+    ...over,
+  });
+  const LIVE = ['draft', 'released', 'in_progress', 'partially_completed'];
+
+  beforeEach(() => {
+    prismaMock = {
+      production_orders: {
+        findFirst: jest.fn().mockResolvedValue(order()),
+        updateMany: jest.fn().mockResolvedValue({ count: 1 }),
+        update: jest.fn(),
+      },
+    };
+    saleLink = { planRestart: jest.fn() };
+    eventEmitter = { emit: jest.fn() };
+    jest.spyOn(RequestContextService, 'getContext').mockReturnValue(ctx as any);
+    service = new ProductionOrdersService(
+      prismaMock, {} as any, {} as any, eventEmitter as any, {} as any, {} as any, {} as any, saleLink as any,
+    );
+  });
+  afterEach(() => jest.restoreAllMocks());
+
+  it('S8: a Planta (manufacturing) draft cannot be started from the restaurant endpoint', async () => {
+    prismaMock.production_orders.findFirst.mockResolvedValue(order({ source: 'manual', order_id: null }));
+    await expect(service.start(100)).rejects.toMatchObject({
+      errorCode: 'PRODUCTION_ORDER_PLANT_START_001',
+      message: 'Esta orden es de Planta: libérala desde su detalle de Planta.',
+    });
+    expect(prismaMock.production_orders.updateMany).not.toHaveBeenCalled();
+    expect(eventEmitter.emit).not.toHaveBeenCalled();
+  });
+
+  it.each([['order'], [null]])('S8: a restaurant draft (source %s) still starts with its atomic claim', async (source) => {
+    prismaMock.production_orders.findFirst
+      .mockResolvedValueOnce(order({ source }))
+      .mockResolvedValueOnce(order({ source, status: 'in_progress' }));
+    const started: any = await service.start(100);
+    expect(prismaMock.production_orders.updateMany).toHaveBeenCalledWith({
+      where: { id: 100, status: 'draft' },
+      data: expect.objectContaining({ status: 'in_progress', started_at: expect.any(Date) }),
+    });
+    expect(started.status).toBe('in_progress');
+    expect(eventEmitter.emit).toHaveBeenCalledWith(
+      'production_order.updated',
+      expect.objectContaining({ id: 100, status: 'in_progress' }),
+    );
+  });
+
+  it('S9: cancel() claims the state atomically, then re-reads and emits once', async () => {
+    prismaMock.production_orders.findFirst
+      .mockResolvedValueOnce(order({ status: 'in_progress' }))
+      .mockResolvedValueOnce(order({ status: 'cancelled' }));
+    const result: any = await service.cancel(100);
+    expect(prismaMock.production_orders.updateMany).toHaveBeenCalledWith({
+      where: { id: 100, status: { in: LIVE } },
+      data: expect.objectContaining({ status: 'cancelled', updated_at: expect.any(Date) }),
+    });
+    expect(prismaMock.production_orders.update).not.toHaveBeenCalled();
+    expect(result.status).toBe('cancelled');
+    expect(eventEmitter.emit).toHaveBeenCalledTimes(1);
+    expect(eventEmitter.emit).toHaveBeenCalledWith(
+      'production_order.updated',
+      expect.objectContaining({ id: 100, status: 'cancelled' }),
+    );
+  });
+
+  it('S9: the loser of a concurrent cancel / completion gets PRODUCTION_ORDER_INVALID_STATE and emits nothing', async () => {
+    prismaMock.production_orders.findFirst.mockResolvedValue(order({ status: 'in_progress' }));
+    prismaMock.production_orders.updateMany.mockResolvedValue({ count: 0 });
+    await expect(service.cancel(100)).rejects.toMatchObject({
+      errorCode: 'PRODUCTION_ORDER_INVALID_STATE',
+    });
+    expect(eventEmitter.emit).not.toHaveBeenCalled();
+  });
+
+  it('S9: a completed order is still rejected and an already cancelled one is still idempotent', async () => {
+    prismaMock.production_orders.findFirst.mockResolvedValue(order({ status: 'completed' }));
+    await expect(service.cancel(100)).rejects.toMatchObject({ errorCode: 'PRODUCTION_ORDER_INVALID_STATE' });
+    prismaMock.production_orders.findFirst.mockResolvedValue(order({ status: 'cancelled' }));
+    const result: any = await service.cancel(100);
+    expect(result.status).toBe('cancelled');
+    expect(prismaMock.production_orders.updateMany).not.toHaveBeenCalled();
+    expect(eventEmitter.emit).not.toHaveBeenCalled();
+  });
+
+  it('S28: restart on a cancelled order with produced_qty > 0 whose sale was cancelled is rejected (SALE_CLOSED) and writes nothing', async () => {
+    prismaMock.production_orders.findFirst.mockResolvedValue(
+      order({ status: 'cancelled', produced_qty: new Prisma.Decimal(2) }),
+    );
+    saleLink.planRestart.mockResolvedValue({ sale_state: 'cancelled', qty: 4, due_date: new Date() });
+    await expect(service.restart(100)).rejects.toMatchObject({
+      errorCode: 'PRODUCTION_ORDER_RESTART_SALE_CLOSED',
+    });
+    expect(prismaMock.production_orders.updateMany).not.toHaveBeenCalled();
+    expect(eventEmitter.emit).not.toHaveBeenCalled();
   });
 });

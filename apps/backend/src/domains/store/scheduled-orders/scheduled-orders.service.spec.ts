@@ -6,6 +6,15 @@ import {
   kitchenPendingItemsWhere,
 } from './scheduled-orders.service';
 
+/**
+ * S28 — `order_items.count` answers only for the exact pending-kitchen filter of
+ * the order under test; any other filter reads as 0 and fails the assertion.
+ */
+const countFor = (n: number, order_id = 50, store_id = 1) =>
+  jest.fn(async ({ where }: any) =>
+    JSON.stringify(where) === JSON.stringify(kitchenPendingItemsWhere(order_id, store_id)) ? n : 0,
+  );
+
 const TZ = 'America/Bogota';
 const NOW = new Date('2026-11-02T13:00:00.000Z'); // lunes 08:00 local
 const SLOT = {
@@ -368,7 +377,7 @@ describe('ScheduledOrdersService', () => {
         if (!base || !args.include) return base;
         return { ...base, changes: [], order: applySelect(FULL_ORDER, args.include.order.select) };
       });
-      prisma.order_items = { count: jest.fn(async () => 0) };
+      prisma.order_items = { count: countFor(0) };
 
       const detail: any = await service.findOne(1);
 
@@ -399,7 +408,7 @@ describe('ScheduledOrdersService', () => {
         if (!base || !args.include) return base;
         return { ...base, changes: [], order: applySelect(FULL_ORDER, args.include.order.select) };
       });
-      prisma.order_items = { count: jest.fn(async () => 0) };
+      prisma.order_items = { count: countFor(0) };
 
       const detail: any = await service.findOne(1);
       const line = detail.order.order_items[0];
@@ -433,7 +442,7 @@ describe('ScheduledOrdersService', () => {
         if (!base || !args.include) return base;
         return { ...base, changes: [], order: applySelect(withLink, args.include.order.select) };
       });
-      prisma.order_items = { count: jest.fn(async () => 0) };
+      prisma.order_items = { count: countFor(0) };
 
       const detail: any = await service.findOne(1);
 
@@ -471,7 +480,7 @@ describe('ScheduledOrdersService', () => {
         if (!base || !args.include) return base;
         return { ...base, changes: [], order: applySelect(twoVariants, args.include.order.select) };
       });
-      prisma.order_items = { count: jest.fn(async () => 0) };
+      prisma.order_items = { count: countFor(0) };
 
       const detail: any = await service.findOne(1);
 
@@ -626,7 +635,7 @@ describe('ScheduledOrdersService', () => {
         if (!base || !args.include) return base;
         return { ...base, changes: [], order: applySelect({ ...FULL_ORDER, production_orders: [] }, args.include.order.select) };
       });
-      prisma.order_items = { count: jest.fn(async () => 2) };
+      prisma.order_items = { count: countFor(2) };
 
       const detail: any = await service.findOne(1);
 

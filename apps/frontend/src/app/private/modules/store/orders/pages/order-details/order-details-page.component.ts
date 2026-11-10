@@ -34,6 +34,8 @@ import {
   CreateAddressPayload,
   UpdateAddressPayload,
   FlowCancelOrderDto,
+  ProductionCancelItem,
+  ProductionDispositionChoice,
   KitchenDisposition,
   RepairShippingTaxAction,
 } from '../../services/store-orders.service';
@@ -1437,6 +1439,16 @@ export class OrderDetailsPageComponent {
    */
   readonly cancelProductionDisposition = signal<ProductionDisposition>('release');
 
+  /** S6 — one row per completed production order of the sale. */
+  readonly cancelProductionItems = computed<ProductionCancelItem[]>(
+    () =>
+      (this.order() as (Order & { production_cancel_items?: ProductionCancelItem[] }) | null)
+        ?.production_cancel_items ?? [],
+  );
+
+  /** S6 — choice per production order id; every row opens on "Liberar". */
+  readonly cancelProductionChoices = signal<Record<number, ProductionDisposition>>({});
+
   readonly productionDispositionOptions: {
     value: ProductionDisposition;
     label: string;
@@ -1466,6 +1478,15 @@ export class OrderDetailsPageComponent {
   selectProductionDisposition(value: ProductionDisposition): void {
     if (this.isProcessingAction()) return;
     this.cancelProductionDisposition.set(value);
+  }
+
+  selectProductionChoice(productionOrderId: number, value: ProductionDisposition): void {
+    if (this.isProcessingAction()) return;
+    this.cancelProductionChoices.update((c) => ({ ...c, [productionOrderId]: value }));
+  }
+
+  productionChoiceFor(productionOrderId: number): ProductionDisposition {
+    return this.cancelProductionChoices()[productionOrderId] ?? 'release';
   }
   /**
    * Plan refund-gateway-dispatch-fix (Step C.1): true while the manual
@@ -4437,7 +4458,13 @@ export class OrderDetailsPageComponent {
     }
     this.cancelForm.reset();
     this.cancelKitchenDisposition.set('reuse');
-    this.cancelProductionDisposition.set(this.cancelProductionSuggestion() ?? 'release');
+    // Liberar is always preselected; the suggestion is only shown as a hint.
+    this.cancelProductionDisposition.set('release');
+    this.cancelProductionChoices.set(
+      Object.fromEntries(
+        this.cancelProductionItems().map((i) => [i.production_order_id, 'release' as ProductionDisposition]),
+      ),
+    );
     this.showCancelModal.set(true);
   }
 
@@ -4458,15 +4485,21 @@ export class OrderDetailsPageComponent {
     const disposition = this.cancelRequiresDisposition()
       ? this.cancelKitchenDisposition()
       : null;
-    // T13: the production choice never blocks; without a suggestion the
-    // server decides and the field is not sent.
+    // The production choice never blocks. Per-product choices travel when the
+    // sale has completed production orders; otherwise the single legacy field.
+    const productionItems = this.cancelProductionItems();
+    const productionDispositions: ProductionDispositionChoice[] = productionItems.map((i) => ({
+      production_order_id: i.production_order_id,
+      disposition: this.productionChoiceFor(i.production_order_id),
+    }));
     const productionDisposition =
-      this.cancelProductionSuggestion() != null
+      productionItems.length === 0 && this.cancelProductionSuggestion() != null
         ? this.cancelProductionDisposition()
         : null;
     const payload: FlowCancelOrderDto = {
       ...this.cancelForm.value,
       ...(disposition != null ? { kitchenDisposition: disposition } : {}),
+      ...(productionDispositions.length > 0 ? { productionDispositions } : {}),
       ...(productionDisposition != null ? { productionDisposition } : {}),
     } as FlowCancelOrderDto;
 
@@ -4480,7 +4513,7 @@ export class OrderDetailsPageComponent {
       .flowCancelOrder(this.orderId, payload)
       .pipe(takeUntilDestroyed(this.destroyRef))
       .subscribe({
-        next: () => {
+        next: (result) => {
           this.showCancelModal.set(false);
           this.isProcessingAction.set(false);
           this.cancelKitchenDisposition.set('reuse');
@@ -4489,6 +4522,11 @@ export class OrderDetailsPageComponent {
               ? 'Nota crédito emitida y orden cancelada'
               : 'Orden cancelada',
           );
+          // S1 — the sale is cancelled but what was produced could not be adjusted.
+          // It names the production order to adjust: long enough to read it.
+          for (const warning of result?.warnings ?? []) {
+            this.toastService.warning(warning, undefined, 10000);
+          }
           this.loadData();
         },
         error: (err: unknown) => {

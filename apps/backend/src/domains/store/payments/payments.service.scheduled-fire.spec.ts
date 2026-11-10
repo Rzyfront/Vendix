@@ -471,13 +471,19 @@ describe('PaymentsService fire-to-kitchen vs pedidos programados (QUI-989)', () 
   ): any => {
     // Kitchen lines of a scheduled order that wait for the agenda's
     // "Enviar a cocina" (the query asks for orders WITH a schedule).
+    // S28 — the count only answers for the exact filter the service must send;
+    // any other shape reads as "no pending lines" and fails the dependent tests.
+    const expectedCountWhere = {
+      AND: [
+        kitchenPendingItemsWhere(restaurantOrder.id, restaurantOrder.store_id),
+        { orders: { fulfillment_schedule: { isNot: null } } },
+      ],
+    };
     const count = (lastCount = jest.fn(async ({ where }: any) => {
-      const asked = JSON.stringify(where ?? {});
-      const asksScheduled = asked.includes('isNot');
-      if (!asked.includes('"product_type":"prepared"')) return 0;
-      // Batch-produced dishes only match a filter that does not exclude them.
-      if (batchOnly && asked.includes('"is_batch_produced":false')) return 0;
-      return scheduled && asksScheduled && preparedLines ? 1 : 0;
+      if (JSON.stringify(where) !== JSON.stringify(expectedCountWhere)) return 0;
+      // Batch-produced dishes are excluded by the filter, so they never count.
+      if (batchOnly) return 0;
+      return scheduled && preparedLines ? 1 : 0;
     }));
     const findMany = jest.fn(async ({ where }: any) => {
       const excludesScheduled = JSON.stringify(where ?? {}).includes(
@@ -631,6 +637,83 @@ describe('PaymentsService fire-to-kitchen vs pedidos programados (QUI-989)', () 
           { orders: { fulfillment_schedule: { isNot: null } } },
         ],
       },
+    });
+  });
+
+  describe('cierre de mesa (S28, QUI-989)', () => {
+    // The table-close path asks for fireable items with its own filter; it must
+    // keep excluding scheduled orders, whose kitchen waits for the agenda.
+    const closeTable = async () => {
+      contextSpy = jest
+        .spyOn(RequestContextService, 'getContext')
+        .mockReturnValue({ store_id: 1, organization_id: 55 } as any);
+      const fireWhere: any[] = [];
+      const updated = { ...restaurantOrder, order_items: [] };
+      const model = (methods: Record<string, jest.Mock>) =>
+        new Proxy(methods, {
+          get: (t, m: string) => t[m] ?? jest.fn().mockResolvedValue(m === 'findMany' ? [] : null),
+        });
+      const tx: any = new Proxy(
+        {
+          table_sessions: model({
+            findUnique: jest.fn().mockResolvedValue({
+              id: 5,
+              store_id: 1,
+              closed_at: null,
+              order_id: 10,
+              order: { id: 10, store_id: 1, stores: { organization_id: 55 } },
+            }),
+          }),
+          payments: model({ findFirst: jest.fn().mockResolvedValue(null) }),
+          orders: model({ update: jest.fn().mockResolvedValue(updated) }),
+          order_items: model({
+            findMany: jest.fn(async (args: any) => {
+              if (args?.where?.products?.product_type === 'prepared') {
+                fireWhere.push(args.where);
+                return [{ id: 7 }];
+              }
+              return [];
+            }),
+          }),
+        },
+        {
+          get: (t: any, m: string) =>
+            t[m] ?? model({}),
+        },
+      );
+      jest.spyOn(service as any, 'assertPosTipPolicy').mockResolvedValue(undefined);
+      jest.spyOn(service as any, 'calculatePosPromotionQuote').mockResolvedValue({
+        total_discount: 0, order_promotions_snapshot: [], applied_promotions: [],
+      });
+      jest.spyOn(service as any, 'calculatePosCouponDiscount').mockResolvedValue({
+        coupon_id: null, coupon_code: null, discount_amount: 0,
+      });
+      (kitchenFire as any).prepareFireContext = jest.fn().mockResolvedValue({ firedItemIds: [7] });
+      (kitchenFire as any).fireOrderItemsInTx = jest.fn().mockResolvedValue({
+        ticketId: 1, ticketIds: [1], firedItemSnapshots: [], cogsTotal: 0, consumedLineCount: 0,
+      });
+      await (service as any).applyPosPaymentToTableSession(
+        tx,
+        { ...dto(), table_session_id: 5, items: [] },
+        posUser,
+        1,
+      );
+      return fireWhere;
+    };
+
+    it('busca los platos por disparar con el filtro exacto que excluye pedidos programados', async () => {
+      const fireWhere = await closeTable();
+      expect(fireWhere).toEqual([
+        {
+          order_id: 10,
+          skip_kds: false,
+          product_id: { not: null },
+          inventory_consumed_at_fire: false,
+          products: { product_type: 'prepared' },
+          orders: { fulfillment_schedule: { is: null } },
+        },
+      ]);
+      expect((kitchenFire as any).fireOrderItemsInTx).toHaveBeenCalledTimes(1);
     });
   });
 

@@ -1579,7 +1579,8 @@ export class OrdersService {
   /**
    * QUI-995 — per production line: its linked production order; per order: an
    * overall `production_status` and, once something was already produced, the
-   * suggested cancellation disposition (waste for made-to-order, else release).
+   * suggested cancellation disposition (waste for made-to-order, else release),
+   * also per finished production order in `production_cancel_items` (S6).
    */
   private attachProductionInfo(order: any): void {
     const linked: Array<{
@@ -1630,6 +1631,25 @@ export class OrdersService {
     });
     order.production_cancel_suggestion =
       completedLines.length > 0 ? suggestProductionDisposition(completedLines) : null;
+    // S6 — the same decision PER production order: the cancel modal lists each
+    // finished order with its own suggestion (made-to-order: waste, else release).
+    const finished = linked.filter(
+      (po) => po.status === 'completed' || po.status === 'partially_completed',
+    );
+    order.production_cancel_items = finished.flatMap((po) => {
+      const poLines = completedLines.filter(
+        (i: any) => findProductionOrderForLine(linked, i)?.id === po.id,
+      );
+      if (poLines.length === 0) return [];
+      return [
+        {
+          production_order_id: po.id,
+          order_number: po.order_number,
+          product_name: poLines[0].products?.name ?? poLines[0].product_name ?? null,
+          suggestion: suggestProductionDisposition(poLines),
+        },
+      ];
+    });
   }
 
   /**
