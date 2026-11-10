@@ -40,6 +40,7 @@ Ticket: https://linear.app/quickss/issue/QUI-1001
 - [ ] En tiendas restaurante todo sigue visible como hoy.
 - [ ] Esconder no borra datos.
 - [ ] Antes de desplegar se cuenta cuántas tiendas de otras industrias usan hoy adiciones o pedidos programados, y se avisa si hay alguna.
+- [ ] (L30) Fuera de restaurante, Adiciones y Pedidos programados se ocultan siempre (menú, URL directa, POS, ecommerce y backend), aunque el interruptor global de industria siga en modo auditoría. No borra datos.
 
 ### S5 — QUI-992 · FIX/ Cobro bloqueado con "Configure la caja para continuar" tras reingresar [admin]
 
@@ -215,6 +216,7 @@ Contrato técnico de T13 (decisión del orquestador con el mapa del explorador, 
 - **Fuera de alcance (anotado):**
   - Cancelar un ítem suelto con producción completada: la reserva sobrante la limpia el barrido de la entrega.
   - Líneas con variante: la orden es por producto y reserva a nivel base, como acredita el completado.
+- [ ] (L30) Orden por variante: la orden de producción guarda la variante vendida, acredita y reserva esa variante, y hay una orden por producto y variante de la venta.
 
 ### S14 — QUI-996 · FEAT/ Rediseño de Pedidos programados: agenda y producción en línea de tiempo [admin]
 
@@ -302,6 +304,10 @@ Contrato técnico de T15 (decisión del orquestador, ver L23):
 | T13 | S13 | QUI-995 | delegado (sonnet, 2 escritores paralelos: backend y frontend) + integración inline | hecho · 23e9ad0c6 + corrección c0904a51b + 47f76c025 · verificador: 3 bloqueos corregidos (L24), recomprobación OK (L26) · RDD aprobada en 3 partes (L28) | production-orders 31/31, production-sale-link 18/18 (RED 2 inline), order-stock-commit 27/27, scheduled-orders dir 62/62 + scheduled-orders.service 18/18, order-flow 352/352, orders 201/201, item-changes 74/74, table-sessions 105/105, payments 201/201, checkout 73/73, auto-entry 45/45 (RED 2 inline), partial-batch 2/2; audit singleton OK |
 | T14 | S14 | QUI-996 | backend inline (RED→GREEN) + frontend delegado (sonnet) + ajustes inline del padre | hecho · 1f4c4a458 · RDD aprobada (L28) | production-orders-day 7/7 (RED 7 → GREEN), production-orders.service 31/31; frontend sin karma (prohibido); sin cambios de módulo |
 | T15 | S15 | QUI-1002 | migración inline + 2 escritores sonnet en paralelo (backend y frontend) + corrección inline del padre | hecho · 6311b4ce1 + corrección bd0e037ab · RDD aprobada en 2 partes (L28) | production-orders-live 18/18 (RED 17), production-order-events 4/4 (RED), production-orders.controller 5/5 (RED 5), production-sale-link 27/27 (RED 3), manufacturing-orders.service 24/24 (RED 3), production-sse.service 3/3, production-orders.service 31/31, production-orders-day 7/7, partial-batch 2/2 (escritor); manufacturing-orders.controller 4/4 (RED 4 → GREEN, padre), production-orders.controller 5/5, production-sse.service 3/3, industry-module.controllers 45/45 (padre); audit singleton OK; frontend sin karma (prohibido) |
+| T16 | S1, S3, S4 | gate #1128 | inline | pendiente | H1 mock `isRestaurant` + clave `products_option_groups`; H3 QUI-1001 siempre oculto; H4 tope por ubicación en batch-bom; H5 tipado `probeSellableStock` |
+| T17 | S9 | gate #1129 | inline | pendiente | buscador de adiciones guarda insumos como Producto y sin unidad; `assert-schema-columns` sin `order_item_options.note` |
+| T18 | S12, S13 | gate #1130 | inline (+ verificador por alto riesgo: contabilidad, stock, migración) | pendiente | F1 costo de venta sin asiento; F2 devolución; F3 `cancelOrderItem` sin sync; F4 orden por variante + migración; F5 estados `released`/`partially_completed`; F6 firma de imágenes |
+| T19 | S14, S15 | gate #1131 | inline | pendiente | F1 agenda se vacía al fallar el refresco; F2 resumen sobre lista filtrada; F3 JSDoc y `any` en production-sale-link |
 
 Ruta: un escritor Sonnet por ticket, en serie (Writer trigger: backstop de contexto, 15 unidades en una sesión). El orquestador (Opus) audita el diff, corre el spec del cambio y commitea. Verificador independiente en unidades de alto riesgo (stock, migraciones).
 
@@ -460,4 +466,9 @@ Ruta: un escritor Sonnet por ticket, en serie (Writer trigger: backstop de conte
     - Probar en runtime el POS, Producción activa y Planta.
     - Compilar el frontend, que queda para CI.
   - Push y PR quedan a pedido de Rafael.
-
+- L30 (2026-11-09, gate pr-code-review de los 4 PRs encadenados #1128–#1131): #1128 67 (REQUEST CHANGES), #1129 87, #1130 66 (REQUEST CHANGES), #1131 86. Hallazgos verificados en T16–T19.
+  - Decisiones de Rafael (literal, respuestas a la pregunta):
+    - Gate: "Corregir y re-revisar (Recomendado)".
+    - QUI-1001: "Ocultar siempre (Recomendado)".
+    - Variantes en #1130: "Orden por variante (Recomendado)".
+  - Plan: cada arreglo va con su test en la rama donde vive el fallo y se propaga a las siguientes con merge, sin force-push. Después se repite el gate (máximo 2 rondas). Merge no autorizado.
