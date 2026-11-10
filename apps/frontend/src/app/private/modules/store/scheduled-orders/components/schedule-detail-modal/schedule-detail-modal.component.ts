@@ -264,10 +264,13 @@ export class ScheduleDetailModalComponent {
       }
     });
     // Production state changed elsewhere: refresh the open detail silently.
-    this.sse.listen(this.destroyRef, () => {
-      const id = this.scheduleId();
-      if (this.isOpen() && id !== null) this.load(id, true);
-    });
+    // Without production read permission the stream would answer 403: do not open it.
+    if (this.sse.canStream()) {
+      this.sse.listen(this.destroyRef, () => {
+        const id = this.scheduleId();
+        if (this.isOpen() && id !== null) this.load(id, true);
+      });
+    }
   }
 
   private load(id: number, silent = false): void {
