@@ -91,8 +91,12 @@ export function mergePanelUiSoft(
  * Reglas:
  *  - Solo se computa para roles privilegiados (los demás siempre devuelven
  *    arrays vacíos por app_type).
- *  - Si el usuario no tiene `panel_ui_seen_keys` (clientes legacy), todas
- *    las keys de los defaults se consideran "new" hasta el primer click.
+ *  - Las keys ya persistidas en `panel_ui[app_type]` del usuario cuentan como
+ *    vistas (QUI-997: sin esto un usuario sin `panel_ui_seen_keys` veía
+ *    "178 módulos nuevos" aunque ya tuviera esos módulos configurados).
+ *  - Si el usuario no tiene ni `panel_ui_seen_keys` ni `panel_ui` persistido
+ *    (clientes legacy), todas las keys de los defaults se consideran "new"
+ *    hasta el primer click.
  *  - El resultado siempre incluye TODAS las app_type claves de `defaults`
  *    con un array (posiblemente vacío) — facilita consumo en frontend.
  */
@@ -103,6 +107,7 @@ export function computeNewPanelUiKeys(
     | ReadonlyArray<string | { name?: string | null } | null | undefined>
     | null
     | undefined,
+  persistedPanelUi?: PanelUiNested | null,
 ): PanelUiNewKeys {
   const result: PanelUiNewKeys = {};
   if (!defaults || typeof defaults !== 'object') {
@@ -125,7 +130,14 @@ export function computeNewPanelUiKeys(
     const seenForApp = Array.isArray(safeSeen[appType])
       ? safeSeen[appType]
       : [];
-    const seenSet = new Set(seenForApp);
+    const persistedForApp =
+      persistedPanelUi &&
+      typeof persistedPanelUi === 'object' &&
+      persistedPanelUi[appType] &&
+      typeof persistedPanelUi[appType] === 'object'
+        ? Object.keys(persistedPanelUi[appType])
+        : [];
+    const seenSet = new Set([...seenForApp, ...persistedForApp]);
     result[appType] = Object.keys(defaultKeys).filter((k) => !seenSet.has(k));
   }
 
@@ -157,7 +169,12 @@ export function mergeUserConfigPanelUi(
     | PanelUiSeenKeys
     | null
     | undefined;
-  const newKeys = computeNewPanelUiKeys(defaults, seenKeys, userRoles);
+  const newKeys = computeNewPanelUiKeys(
+    defaults,
+    seenKeys,
+    userRoles,
+    safeConfig.panel_ui as PanelUiNested | null | undefined,
+  );
   return {
     ...safeConfig,
     panel_ui: merged,

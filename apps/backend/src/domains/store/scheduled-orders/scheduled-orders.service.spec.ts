@@ -123,6 +123,42 @@ function makeHarness(storeSettings: unknown = settings) {
   return { service, rows, changes, events, runInTx, schedulesDelegate };
 }
 
+/** Applies a Prisma-like `select` (recursively) so a missing field in the query is missing in the result. */
+function applySelect(value: any, select: any): any {
+  if (Array.isArray(value)) return value.map((v) => applySelect(v, select));
+  if (!select || value === null || typeof value !== 'object') return value;
+  const out: Record<string, unknown> = {};
+  for (const [key, sel] of Object.entries(select)) {
+    if (!sel) continue;
+    out[key] = sel === true ? value[key] : applySelect(value[key], (sel as any).select);
+  }
+  return out;
+}
+
+const FULL_ORDER = {
+  id: 50,
+  order_number: 'ORD-50',
+  grand_total: 120000,
+  state: 'processing',
+  customer_id: 7,
+  customer_alias: null,
+  users: { first_name: 'Valentina', last_name: 'Ríos', phone: '3001112233', email: 'v@x.co' },
+  order_items: [
+    {
+      id: 1,
+      product_name: 'Torta mediana',
+      variant_attributes: null,
+      quantity: 1,
+      notes: 'Dedicatoria: Feliz cumpleaños, Sofía',
+      order_item_options: [
+        { group_name: 'Relleno', option_name: 'Ganache', quantity: 1, uom: 'unit', scope: 'per_line' },
+        { group_name: 'Fruta', option_name: 'Fresas', quantity: 1, uom: 'unit', scope: 'per_line', note: 'solo encima, en corona' },
+        { group_name: 'Extras', option_name: 'Vela', quantity: 1, uom: 'unit', scope: 'per_line' },
+      ],
+    },
+  ],
+};
+
 describe('ScheduledOrdersService', () => {
   beforeEach(() => {
     jest.spyOn(RequestContextService, 'getContext').mockReturnValue({
@@ -230,6 +266,19 @@ describe('ScheduledOrdersService', () => {
       expect(rows[0].status).toBe('no_show');
     });
 
+    it('QUI-1000: transitionInTx usa la transacción del llamador, corre el gancho y valida igual', async () => {
+      const harness = await seeded();
+      const { service, rows } = harness;
+      const hook = jest.fn(async () => undefined);
+      service.registerProductionStartHook(hook);
+      await expect(
+        harness.runInTx((tx) => service.transitionInTx(tx, 1, 'delivered', [])),
+      ).rejects.toMatchObject({ errorCode: 'SCHED_INVALID_TRANSITION' });
+      await harness.runInTx((tx) => service.transitionInTx(tx, 1, 'in_production', []));
+      expect(hook).toHaveBeenCalledWith(expect.anything(), expect.objectContaining({ id: 1, order_id: 50 }));
+      expect(rows[0].status).toBe('in_production');
+    });
+
     it('in_production ejecuta el gancho de producción dentro de la transacción', async () => {
       const { service } = await seeded();
       const hook = jest.fn(async () => undefined);
@@ -295,6 +344,38 @@ describe('ScheduledOrdersService', () => {
       const { service, runInTx } = makeHarness();
       await runInTx((tx) => service.createForOrder(tx, { store_id: 1, order_id: 50, schedule: SLOT, now: NOW }));
       await expect(service.reschedule(1, SLOT, NOW)).resolves.toBeTruthy();
+    });
+  });
+  describe('findOne (QUI-991)', () => {
+    it('devuelve la clienta, los productos con adiciones y la nota de cada línea', async () => {
+      const { service, rows } = makeHarness();
+      rows.push({
+        id: 1, store_id: 1, order_id: 50,
+        scheduled_start: new Date(SLOT.start), scheduled_end: new Date(SLOT.end),
+        status: 'scheduled', hold_expires_at: null,
+      });
+      const prisma: any = (service as any).prisma;
+      const original = prisma.order_fulfillment_schedules.findFirst;
+      prisma.order_fulfillment_schedules.findFirst = jest.fn(async (args: any) => {
+        const base = await original(args);
+        if (!base || !args.include) return base;
+        return { ...base, changes: [], order: applySelect(FULL_ORDER, args.include.order.select) };
+      });
+      prisma.order_items = { count: jest.fn(async () => 0) };
+
+      const detail: any = await service.findOne(1);
+
+      expect(detail.order.users).toMatchObject({ first_name: 'Valentina', last_name: 'Ríos' });
+      expect(detail.order.order_items).toHaveLength(1);
+      expect(detail.order.order_items[0].notes).toBe('Dedicatoria: Feliz cumpleaños, Sofía');
+      expect(detail.order.order_items[0].order_item_options.map((o: any) => o.option_name)).toEqual([
+        'Ganache',
+        'Fresas',
+        'Vela',
+      ]);
+      expect(detail.order.order_items[0].order_item_options[1].note).toBe('solo encima, en corona');
+      expect(detail.order.customer_alias).toBeNull();
+      expect(detail.pending_kitchen_item_count).toBe(0);
     });
   });
 });

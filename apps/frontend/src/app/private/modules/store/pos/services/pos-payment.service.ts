@@ -322,7 +322,11 @@ export class PosPaymentService {
       // el precio desde `option_ids`, así que `unit_price` viaja SIN delta.
       unit_price: Number((item.unitPrice - (item.option_delta ?? 0)).toFixed(2)),
       ...(!isCustomItem && item.option_ids?.length
-        ? { option_ids: item.option_ids }
+        ? {
+            option_ids: item.option_ids,
+            // Solo si hay notas: el cobro sin notas viaja idéntico a hoy.
+            ...(item.option_notes?.length ? { option_notes: item.option_notes } : {}),
+          }
         : {}),
       // F-218 — `final_unit_price` es el único portador del bruto declarado y
       // declararlo arma el guard `store:pos:price_override` en el backend. Viaja

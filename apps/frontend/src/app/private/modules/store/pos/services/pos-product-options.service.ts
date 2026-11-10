@@ -10,6 +10,14 @@ export interface PosProductOption {
   name: string;
   /** Decimal string (or number) — display/preview only, the server recalculates. */
   price_delta: string | number | null;
+  /** Producto al que apunta la adición; `image_url` ya viene firmada. */
+  component_product?: { id: number; name: string; image_url?: string | null } | null;
+}
+
+/** Nota escrita por el cajero para una adición elegida. */
+export interface PosOptionNote {
+  option_id: number;
+  note: string;
 }
 
 export interface PosProductOptionGroup {
@@ -26,6 +34,8 @@ export interface PosProductOptionGroup {
 /** Result of the add-on selector: ids go to the server, the rest is display only. */
 export interface PosOptionSelection {
   option_ids: number[];
+  /** Notas por adición (solo las escritas); viajan al servidor junto a `option_ids`. */
+  option_notes?: PosOptionNote[];
   labels: string[];
   /** Σ price_delta for quantity 1 (preview only). */
   delta: number;

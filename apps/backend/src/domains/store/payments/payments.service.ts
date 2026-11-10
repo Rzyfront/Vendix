@@ -4173,13 +4173,35 @@ export class PaymentsService {
       if (optionIds?.length) throw new VendixHttpException(ErrorCodes.OPT_DISABLED);
       return { unit_price_delta: new Prisma.Decimal(0), snapshots: [] };
     }
-    return this.optionPricingService.resolve(
+    const resolved = await this.optionPricingService.resolve(
       storeId,
       item.product_id,
       optionIds,
       Number(item.quantity) || 1,
       { scheduled: mode.scheduled, draft: mode.draft, client: tx },
     );
+    return this.applyOptionNotes(resolved, item.option_notes);
+  }
+
+  /**
+   * QUI-994: copia la nota de cada adición elegida a su snapshot. Sin
+   * `option_notes` el resultado no cambia (los cobros viejos guardan lo mismo
+   * de siempre); una nota de una opción no elegida se ignora.
+   */
+  private applyOptionNotes(
+    resolved: ResolvedOptions,
+    notes: Array<{ option_id: number; note?: string | null }> | undefined,
+  ): ResolvedOptions {
+    if (!notes?.length || !resolved.snapshots.length) return resolved;
+    const byOption = new Map<number, string>();
+    for (const n of notes) {
+      const text = n.note?.trim();
+      if (text) byOption.set(Number(n.option_id), text);
+    }
+    return {
+      ...resolved,
+      snapshots: resolved.snapshots.map((s) => ({ ...s, note: byOption.get(s.option_id) ?? null })),
+    };
   }
 
   /**

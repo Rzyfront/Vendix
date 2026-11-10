@@ -78,6 +78,8 @@ export interface ScheduledOrderOptionLine {
   quantity: number | string;
   uom?: string | null;
   scope?: 'per_unit' | 'per_line';
+  /** Nota del cajero para esta adición (QUI-994). */
+  note?: string | null;
 }
 
 export interface ScheduledOrderItem {
@@ -112,6 +114,8 @@ export interface ScheduledOrder {
     order_number: string;
     grand_total: number | string;
     state: string;
+    /** Alias de cliente en venta anónima (excluyente con `users`). */
+    customer_alias?: string | null;
     users: ScheduledOrderCustomer | null;
     order_items: ScheduledOrderItem[];
   };
@@ -138,12 +142,16 @@ export interface ProductionOption {
   option_name: string;
   quantity: number | string;
   uom?: string | null;
+  /** Nota del cajero para esta adición (QUI-994). */
+  note?: string | null;
 }
 
 export interface ProductionOrderItem {
   product_name: string;
   variant_attributes?: string | Record<string, unknown> | null;
   quantity: number | string;
+  /** Nota de la línea (dedicatoria). */
+  notes?: string | null;
   options: ProductionOption[];
 }
 
@@ -194,9 +202,28 @@ export function describeVariant(
     .join(' / ');
 }
 
-export function customerName(u: ScheduledOrderCustomer | null | undefined): string {
-  if (!u) return 'Cliente general';
-  return [u.first_name, u.last_name].filter(Boolean).join(' ') || 'Cliente general';
+export function customerName(
+  u: ScheduledOrderCustomer | null | undefined,
+  alias?: string | null,
+): string {
+  const full = u ? [u.first_name, u.last_name].filter(Boolean).join(' ') : '';
+  return full || alias?.trim() || 'Cliente general';
+}
+
+const UOM_LABELS: Record<string, string> = {
+  unit: 'und',
+  units: 'und',
+  piece: 'und',
+  pieces: 'und',
+  unidad: 'und',
+  unidades: 'und',
+};
+
+/** Unidad de medida en español ("unit" → "und"); las demás (g, ml, kg) pasan igual. */
+export function uomLabel(uom: string | null | undefined): string {
+  const key = (uom ?? '').trim();
+  if (!key) return '';
+  return UOM_LABELS[key.toLowerCase()] ?? key;
 }
 
 /** Color de acento por estado (tokens del tema, un color distinto por estado). */

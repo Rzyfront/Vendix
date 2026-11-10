@@ -59,7 +59,12 @@ export class RecipeIngredientsService {
               // Ingredients feed regular recipes/sub-recipes; sellable
               // products are the components of a combo. Both are valid
               // recipe components and are exploded the same way at fire.
-              (p: any) => p.is_ingredient === true || p.is_sellable === true,
+              // Services have no stock to consume, so a recipe never accepts
+              // them as a component (QUI-997); every other product type
+              // (physical, prepared, manufactured, semi_finished) can be one.
+              (p: any) =>
+                p.product_type !== 'service' &&
+                (p.is_ingredient === true || p.is_sellable === true),
             )
             .map((p: any) => ({
               id: p.id,

@@ -14,6 +14,11 @@ import {
   ErrorCodes,
 } from '../../../common/errors';
 import {
+  resolveStoreTimezone,
+  localCivil,
+  zonedWallClockToUtc,
+} from '../../../common/utils/store-timezone.util';
+import {
   CreateProductionOrderDto,
   UpdateProductionOrderDto,
   CompleteProductionOrderDto,
@@ -743,7 +748,11 @@ export class ProductionOrdersService {
     );
     const startOfWeek = new Date(startOfDay);
     startOfWeek.setDate(startOfWeek.getDate() - startOfWeek.getDay());
-    const startOfMonth = new Date(now.getFullYear(), now.getMonth(), 1);
+    // "Completadas (mes)" and "Producido (mes)" share the store-timezone month
+    // window (QUI-997): the completed count used to include every past order.
+    const tz = await resolveStoreTimezone(this.prisma, store_id);
+    const civil = localCivil(now, tz);
+    const startOfMonth = zonedWallClockToUtc(civil.year, civil.month, 1, 0, 0, 0, 0, tz);
 
     const [
       draftCount,
@@ -761,7 +770,11 @@ export class ProductionOrdersService {
         where: { store_id, status: 'in_progress' },
       }),
       this.prisma.production_orders.count({
-        where: { store_id, status: 'completed' },
+        where: {
+          store_id,
+          status: 'completed',
+          produced_at: { gte: startOfMonth },
+        },
       }),
       this.prisma.production_orders.count({
         where: { store_id, status: 'cancelled' },

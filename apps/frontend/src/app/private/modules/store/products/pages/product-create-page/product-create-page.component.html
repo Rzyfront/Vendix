@@ -2581,11 +2581,18 @@
                   <button
                     type="button"
                     (click)="goToPurchase()"
-                    class="w-full text-xs font-bold text-primary-700 bg-primary-50 hover:bg-primary-100 border border-primary/20 px-3 py-2.5 rounded-lg flex items-center justify-center gap-2 transition-colors shadow-sm"
+                    [disabled]="!isEditMode()"
+                    [attr.title]="isEditMode() ? null : 'Guarda el producto para iniciar su inventario'"
+                    class="w-full text-xs font-bold text-primary-700 bg-primary-50 hover:bg-primary-100 border border-primary/20 px-3 py-2.5 rounded-lg flex items-center justify-center gap-2 transition-colors shadow-sm disabled:opacity-50 disabled:cursor-not-allowed disabled:hover:bg-primary-50"
                   >
                     <app-icon name="cart" size="14"></app-icon>
                     Iniciar Inventario
                   </button>
+                  @if (!isEditMode()) {
+                    <p class="text-[11px] text-text-muted text-center">
+                      Guarda el producto para poder iniciar su inventario.
+                    </p>
+                  }
                   @if (isEditMode()) {
                     <button
                       type="button"

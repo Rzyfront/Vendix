@@ -80,6 +80,33 @@ export function kitchenPendingItemsWhere(
   };
 }
 
+/**
+ * Order projection shared by the agenda and the detail: customer (user or
+ * anonymous alias) and every line with its add-ons and note (QUI-991).
+ */
+const SCHEDULED_ORDER_SELECT = {
+  id: true,
+  order_number: true,
+  grand_total: true,
+  state: true,
+  customer_id: true,
+  customer_alias: true,
+  users: { select: { first_name: true, last_name: true, phone: true, email: true } },
+  order_items: {
+    where: { cancelled_at: null },
+    select: {
+      id: true,
+      product_name: true,
+      variant_attributes: true,
+      quantity: true,
+      notes: true,
+      order_item_options: {
+        select: { group_name: true, option_name: true, quantity: true, uom: true, scope: true, note: true },
+      },
+    },
+  },
+} satisfies Prisma.ordersSelect;
+
 function toDate(value: string | Date): Date {
   const date = value instanceof Date ? value : new Date(value);
   if (Number.isNaN(date.getTime())) {
@@ -271,12 +298,13 @@ export class ScheduledOrdersService {
     return tx.order_fulfillment_schedules.findUnique({ where: { id: schedule.id } });
   }
 
-  /** Cambia el estado de cumplimiento validando la máquina de estados. */
-  async transition(id: number, to: FulfillmentStatus, note?: string, now = new Date()) {
-    const { store_id, user_id } = this.context();
-    const schedule = await this.findOwned(store_id, id);
+  /** Guard shared by `transition` and `transitionInTx`. */
+  private assertTransitionAllowed(
+    schedule: { status: string; scheduled_end: Date },
+    to: FulfillmentStatus,
+    now: Date,
+  ) {
     const from = schedule.status as FulfillmentStatus;
-
     if (!FULFILLMENT_TRANSITIONS[from].includes(to)) {
       throw new VendixHttpException(
         ErrorCodes.SCHED_INVALID_TRANSITION,
@@ -289,6 +317,33 @@ export class ScheduledOrdersService {
         'Solo se puede marcar "No recogida" cuando la franja ya pasó.',
       );
     }
+  }
+
+  /**
+   * Same transition inside the caller's transaction (QUI-1000: "Enviar a
+   * cocina" fires the dishes and moves the schedule in ONE transaction, so a
+   * failure in either leaves neither). The caller runs `afterCommit` once its
+   * transaction has committed.
+   */
+  async transitionInTx(
+    tx: Tx,
+    id: number,
+    to: FulfillmentStatus,
+    afterCommit: Array<() => void>,
+    note?: string,
+    now = new Date(),
+  ) {
+    const { store_id, user_id } = this.context();
+    const schedule = await this.findOwned(store_id, id);
+    this.assertTransitionAllowed(schedule, to, now);
+    return this.applyTransition(tx, schedule, to, user_id, note, afterCommit);
+  }
+
+  /** Cambia el estado de cumplimiento validando la máquina de estados. */
+  async transition(id: number, to: FulfillmentStatus, note?: string, now = new Date()) {
+    const { store_id, user_id } = this.context();
+    const schedule = await this.findOwned(store_id, id);
+    this.assertTransitionAllowed(schedule, to, now);
 
     const afterCommit: Array<() => void> = [];
     // Holgura de tiempo: iniciar producción puede escribir varios movimientos.
@@ -393,28 +448,7 @@ export class ScheduledOrdersService {
       },
       orderBy: { scheduled_start: 'asc' },
       include: {
-        order: {
-          select: {
-            id: true,
-            order_number: true,
-            grand_total: true,
-            state: true,
-            customer_id: true,
-            users: { select: { first_name: true, last_name: true, phone: true, email: true } },
-            order_items: {
-              select: {
-                id: true,
-                product_name: true,
-                variant_attributes: true,
-                quantity: true,
-                notes: true,
-                order_item_options: {
-                  select: { group_name: true, option_name: true, quantity: true, uom: true, scope: true },
-                },
-              },
-            },
-          },
-        },
+        order: { select: SCHEDULED_ORDER_SELECT },
       },
     });
   }
@@ -431,7 +465,7 @@ export class ScheduledOrdersService {
             orderBy: { created_at: 'asc' },
             include: { changed_by: { select: { id: true, first_name: true, last_name: true } } },
           },
-          order: { select: { id: true, order_number: true, grand_total: true, state: true } },
+          order: { select: SCHEDULED_ORDER_SELECT },
         },
       }),
       // Aditivo: cuántos platos puede mandar hoy "Enviar a cocina".

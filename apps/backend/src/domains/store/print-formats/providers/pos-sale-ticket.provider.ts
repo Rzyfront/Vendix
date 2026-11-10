@@ -89,6 +89,11 @@ export class PosSaleTicketDataProvider implements IDocumentDataProvider {
             products: {
               select: { stock_uom: { select: { code: true, dimension: true } } },
             },
+            // QUI-994 — adiciones vendidas (snapshot) y su nota para el recibo.
+            order_item_options: {
+              select: { option_name: true, note: true },
+              orderBy: { id: 'asc' },
+            },
           },
         },
         // CP-print-token-flow A.1 — dirección del cliente para el ticket.
@@ -1146,6 +1151,10 @@ export class PosSaleTicketDataProvider implements IDocumentDataProvider {
       tax_amount: lineTax > 0 ? lineTax : undefined,
       total_price: gross_total_price,
       total_price_formatted: `$${gross_total_price.toLocaleString('es-CO')}`,
+      // QUI-994 — nota de la línea (sin el marcador interno de reserva) y
+      // cada adición con su nota. Sin adiciones ni nota, la línea sale igual.
+      notes: stripBookingMarker(it.notes),
+      addons: formatTicketLineAddOns(it.order_item_options),
       };
     });
 
@@ -1420,4 +1429,28 @@ export class PosSaleTicketDataProvider implements IDocumentDataProvider {
       tax_formatted: `$${g.tax_amount.toLocaleString('es-CO')}`,
     }));
   }
+}
+
+/**
+ * QUI-994 — adiciones del recibo en orden de captura: nombre y, si la
+ * escribieron, su nota. `undefined` cuando la línea no tiene adiciones.
+ */
+export function formatTicketLineAddOns(
+  options: ReadonlyArray<{ option_name?: string | null; note?: string | null }> | null | undefined,
+): { name: string; note?: string }[] | undefined {
+  const addons = (options ?? [])
+    .map((o) => ({ name: (o.option_name ?? '').trim(), note: (o.note ?? '').trim() }))
+    .filter((o) => o.name !== '')
+    .map((o) => (o.note ? { name: o.name, note: o.note } : { name: o.name }));
+  return addons.length > 0 ? addons : undefined;
+}
+
+/**
+ * El POS guarda la reserva de un servicio como `[BOOKING:{...}]` dentro de
+ * `order_items.notes` (pos-payment.service). Es un dato interno: el recibo
+ * imprime solo el texto que escribió la persona.
+ */
+export function stripBookingMarker(notes: string | null | undefined): string | undefined {
+  const text = (notes ?? '').replace(/\[BOOKING:\{.*?\}\]/g, '').trim();
+  return text || undefined;
 }

@@ -247,6 +247,80 @@ describe('ScheduledOrderProductionService.start', () => {
     });
   });
 
+  it('QUI-1000: enviar a cocina y luego pasar a producción no descuenta las adiciones dos veces', async () => {
+    // The fire already consumed the dish AND its add-ons and marked both.
+    const { service, tx, stockLevelManager } = build([
+      { ...row, inventory_consumed_at_fire: true, addons_consumed_at: new Date('2026-11-09T15:00:00Z') },
+    ]);
+    await service.start(tx as any, { id: 7, store_id: 3, order_id: 40 });
+    expect(stockLevelManager.updateStock).not.toHaveBeenCalled();
+  });
+
+  it('QUI-1000: una línea disparada antes de este cambio (adiciones sin descontar) las descuenta al iniciar, como antes', async () => {
+    const { service, tx, stockLevelManager } = build([
+      { ...row, inventory_consumed_at_fire: true, addons_consumed_at: null },
+    ]);
+    await service.start(tx as any, { id: 7, store_id: 3, order_id: 40 });
+    expect(stockLevelManager.updateStock.mock.calls.map(([p]) => [p.product_id, p.quantity_change])).toEqual([[700, -160]]);
+    expect(tx.order_items.updateMany).toHaveBeenCalledWith({
+      where: { id: 1, addons_consumed_at: null },
+      data: { addons_consumed_at: expect.any(Date) },
+    });
+  });
+
+  it('QUI-1000: si otra operación ya reclamó las adiciones de la línea, el inicio no las descuenta', async () => {
+    const { service, tx, stockLevelManager } = build([{ ...row, products: { product_type: 'standard' } }]);
+    tx.order_items.updateMany.mockImplementation(async ({ where }: any) => ({
+      count: where?.addons_consumed_at === null ? 0 : 1,
+    }));
+    await service.start(tx as any, { id: 7, store_id: 3, order_id: 40 });
+    expect(stockLevelManager.updateStock).not.toHaveBeenCalled();
+  });
+
+  it('QUI-1000: una línea sin disparar sigue descontando sus adiciones al iniciar (como hoy)', async () => {
+    const { service, tx, stockLevelManager } = build([{ ...row, products: { product_type: 'standard' } }]);
+    await service.start(tx as any, { id: 7, store_id: 3, order_id: 40 });
+    expect(stockLevelManager.updateStock.mock.calls.map(([p]) => [p.product_id, p.quantity_change])).toEqual([[700, -160]]);
+  });
+
+  it('QUI-1000: una adición que es preparación de lote usa su propio stock antes de explotar su receta', async () => {
+    const BIZCOCHO = 900;
+    const addonRow = {
+      ...row,
+      products: { product_type: 'standard' },
+      order_item_options: [
+        { scope: 'per_unit', component_type: 'recipe', component_product_id: BIZCOCHO, component_variant_id: null, quantity: '1' },
+      ],
+    };
+    const base = build([addonRow]);
+    (base.tx as any).recipes.findMany = jest.fn(async ({ where }: any) =>
+      where.product_id === BIZCOCHO ? [{ id: 90, product_variant_id: null }] : [],
+    );
+    (base.tx as any).products = { findFirst: jest.fn().mockResolvedValue({ is_batch_produced: true }) };
+    const service = new ScheduledOrderProductionService(
+      {} as any,
+      { registerProductionStartHook: jest.fn() } as any,
+      {
+        explodeBom: jest.fn(async (id: number, mult: Record<number, number>) => [
+          { component_product_id: 901, quantity: 200 * mult[id], depth: 1, path_recipe_ids: [id] },
+        ]),
+      } as any,
+      base.stockLevelManager as any,
+      {
+        resolveInventoryPolicy: jest.fn().mockResolvedValue({ allowIngredientOveruse: true }),
+        // 1 Bizcocho in stock; 2 are needed (1 per unit x 2).
+        findInsufficientLines: jest.fn().mockResolvedValue([{ product_id: BIZCOCHO, available: 1 }]),
+      } as any,
+      base.eventEmitter as any,
+      {} as any,
+    );
+    await service.start(base.tx as any, { id: 7, store_id: 3, order_id: 40 });
+    expect(base.stockLevelManager.updateStock.mock.calls.map(([p]) => [p.product_id, p.quantity_change])).toEqual([
+      [BIZCOCHO, -1],
+      [901, -200],
+    ]);
+  });
+
   it('segundo inicio sobre líneas ya consumidas y sin adiciones no mueve stock', async () => {
     const { service, tx, stockLevelManager } = build([
       { ...row, inventory_consumed_at_fire: true, order_item_options: [] },
@@ -273,8 +347,16 @@ describe('ScheduledOrderProductionService.sendToKitchen (QUI-989)', () => {
     const scheduledOrders = {
       registerProductionStartHook: jest.fn(),
       transition: jest.fn().mockResolvedValue({ ...schedule, status: 'in_production' }),
+      transitionInTx: jest.fn().mockResolvedValue({ ...schedule, status: 'in_production' }),
     };
-    const kitchenFire = { fireOrderItems: jest.fn().mockResolvedValue({ ticketId: 1 }) };
+    const fireTx = { marker: 'fire-tx' };
+    // The real fire runs `withinTx` inside its own transaction, then commits.
+    const kitchenFire = {
+      fireOrderItems: jest.fn(async (_dto: unknown, opts?: { withinTx?: (tx: unknown, after: Array<() => void>) => Promise<void> }) => {
+        await opts?.withinTx?.(fireTx, []);
+        return { ticketId: 1 };
+      }),
+    };
     const service = new ScheduledOrderProductionService(
       prisma as any,
       scheduledOrders as any,
@@ -284,7 +366,7 @@ describe('ScheduledOrderProductionService.sendToKitchen (QUI-989)', () => {
       { emit: jest.fn() } as any,
       kitchenFire as any,
     );
-    return { service, client, scheduledOrders, kitchenFire };
+    return { service, client, scheduledOrders, kitchenFire, fireTx };
   }
 
   let ctx: jest.SpyInstance;
@@ -308,8 +390,31 @@ describe('ScheduledOrderProductionService.sendToKitchen (QUI-989)', () => {
         }),
       }),
     );
-    expect(kitchenFire.fireOrderItems).toHaveBeenCalledWith({ order_id: 40, order_item_ids: [11, 12] });
-    expect(scheduledOrders.transition).toHaveBeenCalledWith(7, 'in_production', expect.any(String));
+    expect(kitchenFire.fireOrderItems).toHaveBeenCalledWith(
+      { order_id: 40, order_item_ids: [11, 12] },
+      expect.objectContaining({ withinTx: expect.any(Function) }),
+    );
+  });
+
+  it('QUI-1000: el disparo y el paso a producción corren en la MISMA transacción', async () => {
+    const { service, scheduledOrders, fireTx } = build();
+    await service.sendToKitchen(7);
+    expect(scheduledOrders.transitionInTx).toHaveBeenCalledWith(
+      fireTx,
+      7,
+      'in_production',
+      expect.any(Array),
+      expect.any(String),
+    );
+    // The standalone (own-transaction) transition is never used.
+    expect(scheduledOrders.transition).not.toHaveBeenCalled();
+  });
+
+  it('QUI-1000: si el paso a producción falla, el disparo falla entero (no queda medio enviado)', async () => {
+    const { service, scheduledOrders } = build();
+    scheduledOrders.transitionInTx.mockRejectedValue(new Error('start hook failed'));
+    // fireOrderItems rethrows what withinTx throws, which rolls its transaction back.
+    await expect(service.sendToKitchen(7)).rejects.toThrow('start hook failed');
   });
 
   it('no repite el estado si el pedido ya está en producción', async () => {
@@ -317,6 +422,7 @@ describe('ScheduledOrderProductionService.sendToKitchen (QUI-989)', () => {
     await service.sendToKitchen(7);
     expect(kitchenFire.fireOrderItems).toHaveBeenCalledTimes(1);
     expect(scheduledOrders.transition).not.toHaveBeenCalled();
+    expect(scheduledOrders.transitionInTx).not.toHaveBeenCalled();
   });
 
   it('es idempotente: sin platos pendientes no dispara y rechaza con SCHED_NOTHING_TO_SEND', async () => {
@@ -333,5 +439,71 @@ describe('ScheduledOrderProductionService.sendToKitchen (QUI-989)', () => {
       errorCode: 'SCHED_KITCHEN_NOT_ALLOWED',
     });
     expect(kitchenFire.fireOrderItems).not.toHaveBeenCalled();
+  });
+});
+
+describe('ScheduledOrderProductionService.productionList (QUI-991)', () => {
+  it('incluye la nota (dedicatoria) de cada línea y el alias cuando no hay usuario', async () => {
+    const pick = (value: any, select: any): any => {
+      if (Array.isArray(value)) return value.map((v) => pick(v, select));
+      if (!select || value === null || typeof value !== 'object') return value;
+      return Object.fromEntries(
+        Object.entries(select)
+          .filter(([, sel]) => sel)
+          .map(([k, sel]) => [k, sel === true ? value[k] : pick(value[k], (sel as any).select)]),
+      );
+    };
+    const order = {
+      id: 50,
+      order_number: 'ORD-50',
+      customer_alias: 'Valentina Ríos',
+      users: null,
+      order_items: [
+        {
+          product_name: 'Torta mediana',
+          variant_attributes: null,
+          quantity: 1,
+          notes: 'Dedicatoria: Feliz cumpleaños, Sofía',
+          order_item_options: [
+            { group_name: 'Relleno', option_name: 'Ganache', quantity: 1, uom: 'unit', note: 'solo encima, en corona' },
+          ],
+        },
+      ],
+    };
+    const schedule = {
+      id: 1,
+      status: 'in_production',
+      order_id: 50,
+      scheduled_start: new Date('2026-11-11T15:00:00.000Z'),
+      scheduled_end: new Date('2026-11-11T17:00:00.000Z'),
+    };
+    const prisma: any = {
+      store_settings: { findFirst: jest.fn(async () => ({ settings: {}, stores: { timezone: 'America/Bogota' } })) },
+      order_fulfillment_schedules: {
+        findMany: jest.fn(async (args: any) => [
+          { ...schedule, order: pick(order, args.include.order.select) },
+        ]),
+      },
+      withoutScope: () => prisma,
+    };
+    jest.spyOn(RequestContextService, 'getContext').mockReturnValue({ store_id: 1 } as any);
+    const service = new ScheduledOrderProductionService(
+      prisma,
+      { registerProductionStartHook: jest.fn() } as any,
+      {} as any,
+      {} as any,
+      {} as any,
+      { emit: jest.fn() } as any,
+      {} as any,
+    );
+
+    const result: any = await service.productionList('2026-11-11');
+
+    const entry = result.slots[0].orders[0];
+    expect(entry.customer_name).toBe('Valentina Ríos');
+    expect(entry.items[0].notes).toBe('Dedicatoria: Feliz cumpleaños, Sofía');
+    expect(entry.items[0].options[0].option_name).toBe('Ganache');
+    expect(entry.items[0].options[0].note).toBe('solo encima, en corona');
+    jest.restoreAllMocks();
   });
 });

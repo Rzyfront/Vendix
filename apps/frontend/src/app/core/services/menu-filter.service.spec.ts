@@ -728,6 +728,12 @@ describe('MenuFilterService — apps-module (keys opt-out y catálogo Apps)', ()
     expect(MODULE_ROUTES['ecommerce']).toBe('/admin/ecommerce');
   });
 
+  it('QUI-993: la ruta de Adiciones resuelve a su key de submódulo, no a la de Productos', () => {
+    expect(service.resolveKeysForRoute('/admin/products/option-groups')).toContain(
+      'products_option_groups',
+    );
+  });
+
   it('T0: un panel_ui guardado sin las keys nuevas sigue viendo Bandeja, Pipeline, Tareas y Segmentos', async () => {
     expect(await routes(clientes())).toEqual([
       '/admin/customers/all', '/admin/customers/inbox', '/admin/customers/pipeline',

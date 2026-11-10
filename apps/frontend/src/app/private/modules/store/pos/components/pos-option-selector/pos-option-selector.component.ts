@@ -10,6 +10,7 @@ import { IconComponent } from '../../../../../../shared/components';
 import { CurrencyPipe } from '../../../../../../shared/pipes/currency';
 import { sumOptionDeltaParts } from '../../../../../../shared/utils/option-pricing.util';
 import {
+  PosOptionNote,
   PosOptionSelection,
   PosProductOption,
   PosProductOptionGroup,
@@ -48,9 +49,9 @@ import {
             type="button"
             (click)="onClose()"
             aria-label="Cerrar adiciones"
-            class="w-8 h-8 rounded-full bg-muted hover:bg-muted/80 flex items-center justify-center transition-colors"
+            class="w-8 h-8 rounded-full border border-border bg-surface hover:bg-muted flex items-center justify-center transition-colors"
           >
-            <app-icon name="x" [size]="18" class="text-text-secondary"></app-icon>
+            <app-icon name="x" [size]="16" class="text-text-primary"></app-icon>
           </button>
         </div>
 
@@ -63,14 +64,17 @@ import {
               </div>
               <div class="flex flex-col gap-2">
                 @for (option of group.options; track option.id) {
-                  <button
-                    type="button"
-                    class="w-full flex items-center gap-3 p-3 rounded-xl border text-left transition-all"
+                  <div
+                    class="rounded-xl border transition-all"
                     [class]="
                       isSelected(option.id)
                         ? 'border-primary bg-primary/5'
                         : 'border-border hover:border-primary'
                     "
+                  >
+                  <button
+                    type="button"
+                    class="w-full flex items-center gap-3 p-3 text-left"
                     [class.opacity-50]="isDisabled(group, option)"
                     [disabled]="isDisabled(group, option)"
                     [attr.aria-pressed]="isSelected(option.id)"
@@ -89,6 +93,24 @@ import {
                         <app-icon name="check" [size]="12"></app-icon>
                       }
                     </span>
+                    <span
+                      class="w-10 h-10 shrink-0 rounded-lg overflow-hidden bg-muted flex items-center justify-center"
+                    >
+                      @if (imageOf(option); as src) {
+                        <img
+                          [src]="src"
+                          [alt]="option.name"
+                          class="w-full h-full object-cover"
+                          loading="lazy"
+                        />
+                      } @else {
+                        <app-icon
+                          name="image"
+                          [size]="16"
+                          class="text-text-secondary"
+                        ></app-icon>
+                      }
+                    </span>
                     <span class="flex-1 text-sm font-medium text-text-primary">
                       {{ option.name }}
                     </span>
@@ -98,6 +120,20 @@ import {
                       </span>
                     }
                   </button>
+                  @if (isSelected(option.id)) {
+                    <div class="px-3 pb-3">
+                      <input
+                        type="text"
+                        maxlength="500"
+                        class="w-full h-9 rounded-lg border border-border bg-surface px-3 text-sm text-text-primary placeholder:text-text-secondary focus:outline-none focus:border-primary"
+                        placeholder="Nota para {{ option.name }} (opcional)"
+                        [attr.aria-label]="'Nota para ' + option.name"
+                        [value]="noteOf(option.id)"
+                        (input)="setNote(option.id, $any($event.target).value)"
+                      />
+                    </div>
+                  }
+                  </div>
                 }
               </div>
             </section>
@@ -146,6 +182,19 @@ export class PosOptionSelectorComponent {
   readonly closed = output<void>();
 
   private readonly selectedIds = signal<ReadonlySet<number>>(new Set());
+  private readonly notes = signal<Readonly<Record<number, string>>>({});
+
+  imageOf(option: PosProductOption): string | null {
+    return option.component_product?.image_url || null;
+  }
+
+  noteOf(optionId: number): string {
+    return this.notes()[optionId] ?? '';
+  }
+
+  setNote(optionId: number, value: string): void {
+    this.notes.update((current) => ({ ...current, [optionId]: value }));
+  }
 
   readonly totalDelta = computed(() => {
     const ids = this.selectedIds();
@@ -224,8 +273,12 @@ export class PosOptionSelectorComponent {
           .map((o) => ({ scope: g.scope, price_delta: this.delta(o) })),
       ),
     );
+    const option_notes: PosOptionNote[] = chosen
+      .map((o) => ({ option_id: o.id, note: (this.notes()[o.id] ?? '').trim() }))
+      .filter((n) => n.note.length > 0);
     this.confirmed.emit({
       option_ids: chosen.map((o) => o.id),
+      ...(option_notes.length ? { option_notes } : {}),
       labels: chosen.map((o) => o.name),
       delta: this.totalDelta(),
       delta_parts,

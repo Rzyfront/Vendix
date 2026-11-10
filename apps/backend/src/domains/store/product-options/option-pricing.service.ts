@@ -15,6 +15,8 @@ export interface OrderItemOptionSnapshot {
   component_variant_id: number | null;
   quantity: Prisma.Decimal;
   uom: string | null;
+  /** Nota de la adición elegida (POS); ausente si no se escribió. */
+  note?: string | null;
 }
 
 export interface ResolvedOptions {

@@ -1,0 +1,13 @@
+-- QUI-1000 — marker for "this line's add-ons were already deducted".
+-- The kitchen fire and the scheduled-order production start both deduct add-ons;
+-- each claims this column first, so a line never deducts them twice. Lines fired
+-- before this release keep NULL, so the production start still deducts their
+-- add-ons, as it did before.
+--
+-- DATA IMPACT:
+-- Tables affected: order_items (new nullable column, no default)
+-- Expected row changes: none (existing rows read NULL; no backfill)
+-- Destructive operations: none
+-- FK/cascade risk: none
+-- Idempotency: ADD COLUMN IF NOT EXISTS
+ALTER TABLE "order_items" ADD COLUMN IF NOT EXISTS "addons_consumed_at" TIMESTAMP(6);

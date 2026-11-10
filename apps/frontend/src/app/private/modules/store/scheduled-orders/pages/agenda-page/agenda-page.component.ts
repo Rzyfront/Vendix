@@ -631,7 +631,7 @@ export class AgendaPageComponent {
     return STATUS_COLORS[s];
   }
   customer(o: ScheduledOrder): string {
-    return customerName(o.order.users);
+    return customerName(o.order.users, o.order.customer_alias);
   }
   weekday(ymd: string): string {
     return weekdayShort(ymd);

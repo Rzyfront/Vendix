@@ -21,6 +21,18 @@ import { table_status_enum } from '@prisma/client';
 import { PaymentLegDto } from './payment-leg.dto';
 import { ScheduleInputDto } from '../../scheduled-orders/dto/scheduled-orders.dto';
 
+/** Nota libre de una adición elegida (QUI-994). Mismo límite que la nota de línea. */
+export class PosOptionNoteDto {
+  @IsInt()
+  @Min(1)
+  @Type(() => Number)
+  option_id!: number;
+
+  @IsString()
+  @MaxLength(500)
+  note!: string;
+}
+
 export class PosOrderItemDto {
   @IsOptional()
   @IsString()
@@ -35,6 +47,16 @@ export class PosOrderItemDto {
   @IsInt({ each: true })
   @Type(() => Number)
   option_ids?: number[];
+
+  // Notas por adición, paralelas a `option_ids` (que sigue siendo un number[]
+  // para no romper a los clientes viejos). Una nota de una opción que no se
+  // eligió se ignora.
+  @IsOptional()
+  @IsArray()
+  @ArrayMaxSize(50)
+  @ValidateNested({ each: true })
+  @Type(() => PosOptionNoteDto)
+  option_notes?: PosOptionNoteDto[];
 
   @IsOptional()
   @IsInt()

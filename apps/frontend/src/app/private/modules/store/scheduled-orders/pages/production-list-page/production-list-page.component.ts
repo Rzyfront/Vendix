@@ -27,6 +27,7 @@ import {
   ProductionOption,
   STATUS_LABELS,
   describeVariant,
+  uomLabel,
 } from '../../interfaces/scheduled-order.interface';
 import { ScheduledOrdersApiService } from '../../services/scheduled-orders-api.service';
 import { fullDate } from '../../utils/ymd.util';
@@ -104,6 +105,11 @@ const PRINT_BODY_CLASS = 'production-list-printing';
         margin: 0.25rem 0 0;
         padding-left: 1rem;
         color: var(--color-text-primary);
+      }
+      .pl-note {
+        font-size: var(--fs-sm, 0.875rem);
+        font-style: italic;
+        color: var(--color-text-secondary, var(--color-text-muted));
       }
       .pl-options {
         margin: 0;
@@ -227,9 +233,17 @@ const PRINT_BODY_CLASS = 'production-list-printing';
                         @if (item.options.length > 0) {
                           <ul class="pl-options">
                             @for (opt of item.options; track $index) {
-                              <li>{{ optionText(opt) }}</li>
+                              <li>
+                                {{ optionText(opt) }}
+                                @if (opt.note) {
+                                  <span class="pl-note"> — Nota: {{ opt.note }}</span>
+                                }
+                              </li>
                             }
                           </ul>
+                        }
+                        @if (item.notes) {
+                          <div class="pl-note">Nota: {{ item.notes }}</div>
                         }
                       </li>
                     }
@@ -255,7 +269,7 @@ const PRINT_BODY_CLASS = 'production-list-printing';
                     <tr>
                       <td>{{ ing.name }}</td>
                       <td class="num">{{ ing.quantity }}</td>
-                      <td>{{ ing.uom || '' }}</td>
+                      <td>{{ uom(ing.uom) }}</td>
                     </tr>
                   }
                 </tbody>
@@ -309,13 +323,18 @@ export class ProductionListPageComponent {
     return STATUS_LABELS[status] ?? status;
   }
 
+  uom(value: string | null): string {
+    return uomLabel(value);
+  }
+
   variant(v: Parameters<typeof describeVariant>[0]): string {
     return describeVariant(v);
   }
 
   optionText(o: ProductionOption): string {
     const qty = Number(o.quantity);
-    const extra = qty > 1 || o.uom ? ` (${o.quantity}${o.uom ? ' ' + o.uom : ''})` : '';
+    const unit = uomLabel(o.uom);
+    const extra = qty > 1 || unit ? ` (${o.quantity}${unit ? ' ' + unit : ''})` : '';
     return `${o.group_name}: ${o.option_name}${extra}`;
   }
 

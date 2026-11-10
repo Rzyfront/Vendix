@@ -58,6 +58,7 @@ describe('ProductionOrdersService — complete() (Fase C smoke)', () => {
       aggregate: jest.Mock;
       update: jest.Mock;
     };
+    store_settings: { findFirst: jest.Mock };
     $transaction: jest.Mock;
   };
 
@@ -97,6 +98,7 @@ describe('ProductionOrdersService — complete() (Fase C smoke)', () => {
         aggregate: jest.fn().mockResolvedValue({ _sum: { produced_qty: 0 } }),
         update: jest.fn(),
       },
+      store_settings: { findFirst: jest.fn().mockResolvedValue(null) },
       $transaction: jest.fn(),
     };
 
@@ -775,6 +777,21 @@ describe('ProductionOrdersService — complete() (Fase C smoke)', () => {
         service.create({ product_id: 50, recipe_id: 7, planned_qty: 25 } as any),
       ).rejects.toMatchObject({ errorCode: 'PRODUCTION_QTY_NOT_YIELD_MULTIPLE' });
       expect((prismaMock.production_orders as any).create).not.toHaveBeenCalled();
+    });
+  });
+  describe('getStats() — "Completadas (mes)" counts only the current month (QUI-997)', () => {
+    afterEach(() => jest.useRealTimers());
+
+    it('limits the completed count to orders produced since the start of the month in the store timezone', async () => {
+      jest.useFakeTimers({ now: new Date('2026-11-15T12:00:00Z'), doNotFake: ['nextTick', 'setImmediate'] });
+
+      await service.getStats();
+
+      // America/Bogota (UTC-5) month start: 2026-11-01T00:00 local = 05:00 UTC.
+      const monthStart = new Date('2026-11-01T05:00:00.000Z');
+      expect(prismaMock.production_orders.count).toHaveBeenCalledWith({
+        where: { store_id: 1, status: 'completed', produced_at: { gte: monthStart } },
+      });
     });
   });
 });

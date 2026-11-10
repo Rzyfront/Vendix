@@ -1305,6 +1305,9 @@ export class PosCartService {
     return {
       option_ids: rows.map((r) => Number(r.option_id)).filter((id) => Number.isFinite(id) && id > 0),
       option_labels: rows.map((r) => String(r.option_name ?? '')),
+      option_notes: rows
+        .filter((r) => typeof r.note === 'string' && r.note.trim() && Number(r.option_id) > 0)
+        .map((r) => ({ option_id: Number(r.option_id), note: String(r.note).trim() })),
       option_delta: delta > 0 ? delta : undefined,
       option_delta_parts: parts,
     };
@@ -2680,6 +2683,8 @@ export class PosCartService {
               (item.isTakeaway ?? false) === (request.isTakeaway === true) &&
               // Adiciones: otro conjunto de opciones es otra línea.
               this.optionKey(item.option_ids) === this.optionKey(request.option_ids) &&
+              // Otra nota en una adición es otra línea (producción la recibe tal cual).
+              this.optionNotesKey(item.option_notes) === this.optionNotesKey(request.option_notes) &&
               !(item.serial_ids?.length || item.serial_numbers?.length) &&
               !item.booking,
           );
@@ -2844,6 +2849,7 @@ export class PosCartService {
         option_labels: request.option_labels?.length
           ? request.option_labels
           : undefined,
+        option_notes: request.option_notes?.length ? request.option_notes : undefined,
         option_delta: optionDelta > 0 ? optionDelta : undefined,
         option_delta_parts: request.option_ids?.length ? optionParts : undefined,
       };
@@ -3528,6 +3534,16 @@ export class PosCartService {
   /** Clave estable (ids ordenados) del conjunto de adiciones de una línea. */
   private optionKey(ids: number[] | undefined): string {
     return ids?.length ? [...ids].sort((a, b) => a - b).join(',') : '';
+  }
+
+  /** Clave estable de las notas por adición de una línea. */
+  private optionNotesKey(notes: Array<{ option_id: number; note: string }> | undefined): string {
+    return notes?.length
+      ? [...notes]
+          .sort((a, b) => a.option_id - b.option_id)
+          .map((n) => `${n.option_id}:${n.note}`)
+          .join('|')
+      : '';
   }
 
   private generateItemId(): string {

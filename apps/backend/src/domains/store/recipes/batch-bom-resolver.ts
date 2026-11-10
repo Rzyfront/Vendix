@@ -122,3 +122,27 @@ export async function probeSellableStock(
   );
   return row ? Number(row.available) : 0;
 }
+
+/**
+ * QUI-1000 — an add-on whose component is a batch-produced preparation takes
+ * its own sellable stock first and explodes only the shortfall, the same rule
+ * `resolveBatchLines` applies to the leaves of a recipe. Returns ABSOLUTE
+ * quantities for `units` of the preparation: the stock part (the preparation
+ * itself) plus the exploded ingredients of the shortfall.
+ */
+export async function resolveBatchComponent(
+  productId: number,
+  recipeId: number,
+  units: number,
+  pool: BatchClaimPool,
+  deps: BatchResolverDeps,
+): Promise<ResolvedBomLine[]> {
+  const leaf: BomExplosionLine = {
+    component_product_id: productId,
+    quantity: 1,
+    depth: 1,
+    path_recipe_ids: [],
+    batch_recipe_id: recipeId,
+  };
+  return resolveBatchLines([leaf], units, pool, deps);
+}

@@ -220,6 +220,12 @@ interface ClientTicketCreditSection {
   pending_installments: ClientTicketCreditPending[];
 }
 
+/** Fecha corta + hora con a. m./p. m., sin segundos (QUI-997). */
+const TICKET_DATE_TIME_FORMAT: Intl.DateTimeFormatOptions = {
+  dateStyle: 'short',
+  timeStyle: 'short',
+};
+
 @Injectable({
   providedIn: 'root',
 })
@@ -629,7 +635,12 @@ export class PosTicketService {
     };
     const organization = overlay.organization ?? ticketData.organization;
 
-    const date = new Date(ticketData.date).toLocaleString();
+    // QUI-997: el toLocaleString() pelado imprimía "01:37:43" (segundos y sin
+    // a. m./p. m., según el navegador). Mismo formato que la pre-cuenta.
+    const date = new Date(ticketData.date).toLocaleString(
+      'es-CO',
+      TICKET_DATE_TIME_FORMAT,
+    );
 
     /**
      * ¿Este tiquete va a una térmica de rollo?
@@ -1073,7 +1084,7 @@ export class PosTicketService {
           <p style="margin: 5px 0; font-size: 11px;">¡Gracias por su compra!</p>
           <p style="margin: 5px 0; font-size: 10px;">Vuelva pronto</p>
           <p style="margin: 10px 0 0 0; font-size: 9px; color: ${ink('#666')};">
-            ${new Date().toLocaleString()}
+            ${new Date().toLocaleString('es-CO', TICKET_DATE_TIME_FORMAT)}
           </p>
         </div>
       `;
