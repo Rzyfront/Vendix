@@ -109,7 +109,7 @@ function makeHarness(storeSettings: unknown = settings) {
 
   const prisma: any = {
     store_settings: {
-      findFirst: jest.fn(async () => ({ settings: storeSettings, stores: { timezone: TZ } })),
+      findFirst: jest.fn(async () => ({ settings: storeSettings, stores: { timezone: TZ, industries: ['restaurant'] } })),
     },
     order_fulfillment_schedules: schedulesDelegate,
     fulfillment_schedule_exceptions: { findMany: jest.fn(async () => []) },

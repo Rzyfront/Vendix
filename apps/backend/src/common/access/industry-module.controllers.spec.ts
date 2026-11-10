@@ -44,6 +44,8 @@ import { MenusController } from '../../domains/store/menus/menus.controller';
 import { ProductionOrdersController } from '../../domains/store/production/production-orders.controller';
 import { ProductOptionsController } from '../../domains/store/product-options/product-options.controller';
 import { RecipesController } from '../../domains/store/recipes/recipes.controller';
+import { FulfillmentExceptionsController } from '../../domains/store/scheduled-orders/fulfillment-exceptions.controller';
+import { ScheduledOrdersController } from '../../domains/store/scheduled-orders/scheduled-orders.controller';
 import { SplitOrderController } from '../../domains/store/tables/split-order.controller';
 import { TableSessionsController } from '../../domains/store/tables/table-sessions.controller';
 import { TablesController } from '../../domains/store/tables/tables.controller';
@@ -92,6 +94,8 @@ const EXPECTED: Array<[string, new (...args: any[]) => unknown, string]> = [
   ['ProductionOrdersController', ProductionOrdersController, 'restaurant_ops_production'],
   ['ProductOptionsController', ProductOptionsController, 'products_option_groups'],
   ['RecipesController', RecipesController, 'restaurant_ops_recipes'],
+  ['ScheduledOrdersController', ScheduledOrdersController, 'orders_scheduled'],
+  ['FulfillmentExceptionsController', FulfillmentExceptionsController, 'orders_scheduled'],
   ['SplitOrderController', SplitOrderController, 'restaurant_ops_tables'],
   ['TableSessionsController', TableSessionsController, 'restaurant_ops_tables'],
   ['TablesController', TablesController, 'restaurant_ops_tables'],
