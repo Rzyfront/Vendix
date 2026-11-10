@@ -501,6 +501,8 @@ export class AgendaPageComponent {
   readonly detailOpen = signal(false);
 
   private loadSub: Subscription | null = null;
+  /** True while the load in flight is a user-driven (non-silent) one. */
+  private loadInFlightVisible = false;
 
   // --- derivados --------------------------------------------------------
   readonly today = computed(() => storeToday(this.settings.timezone()));
@@ -587,7 +589,11 @@ export class AgendaPageComponent {
   }
 
   private load(from: string, to: string, silent = false): void {
+    // A background refresh never cancels a user-driven load already in flight
+    // (e.g. a week change): that load brings the newest data for the new range.
+    if (silent && this.loadInFlightVisible && this.loadSub && !this.loadSub.closed) return;
     this.loadSub?.unsubscribe();
+    this.loadInFlightVisible = !silent;
     this.loading.set(true);
     if (!silent) this.errorMessage.set(null);
     this.loadSub = forkJoin({
@@ -599,10 +605,13 @@ export class AgendaPageComponent {
         this.allSchedules.set(agenda);
         this.errorMessage.set(null);
         this.loading.set(false);
+        this.loadInFlightVisible = false;
       },
       error: (err) => {
         this.loading.set(false);
-        if (silent && this.allSchedules().length > 0) return;
+        this.loadInFlightVisible = false;
+        // A failed background refresh never clears what is on screen.
+        if (silent) return;
         this.availability.set([]);
         this.allSchedules.set([]);
         this.errorMessage.set(extractApiErrorMessage(err));
