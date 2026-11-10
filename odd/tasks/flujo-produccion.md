@@ -312,6 +312,7 @@ Contrato técnico de T15 (decisión del orquestador, ver L23):
 | T21 | S9 | gate #1129 ronda 2 | delegado (escritor sonnet, paralelo con T23) | hecho · 71fe0139b, e916ef4d3 · RDD: high, aprobada y acusada (review-2926386a56607ec7); e916ef4d3 medium, under_budget | kitchen-fire-addons 12/12 (RED 1: merma no rehacía adiciones), products.service 159/159 (RED 1: has_active_recipe), kitchen-fire.service 110/110, product-options.service 8/8 |
 | T22 | S12 | gate #1130 ronda 2 | inline | hecho · 69da7e871 · RDD: high, aprobada y acusada (review-92e1976bf2554f25) | orders.service 208/208 (RED 1: producción parcial sin sugerencia ni estado en curso) |
 | T23 | S14, S15 | gate #1131 ronda 2 | delegado (escritor sonnet, paralelo con T21) | hecho · 67c7f1cf0 · RDD: high, aprobada y acusada (review-854eda58977d4616) | scheduled-order-production 37/37 (RED 2: arranque sin emisión en vivo), scheduled-orders.service 19/19; agenda sin karma (prohibido) |
+| T24 | S1, S3 | gate #1128 re-revisión: MEDIA introducida por T20 | inline | hecho · 69764fe59, 50ee457d0 · RDD: high (escalado ítem 1), aprobada y acusada (review-a230a5621798838e); 50ee457d0 medium, under_budget | payments.scheduled-fire 7/7 (RED 2 contra 5b3ea7fb9: pedido con solo platos por lote quedaba en preparación), payments.service 194/194 en base y 201/201 en feat |
 
 Ruta: un escritor Sonnet por ticket, en serie (Writer trigger: backstop de contexto, 15 unidades en una sesión). El orquestador (Opus) audita el diff, corre el spec del cambio y commitea. Verificador independiente en unidades de alto riesgo (stock, migraciones).
 
@@ -490,3 +491,14 @@ Ruta: un escritor Sonnet por ticket, en serie (Writer trigger: backstop de conte
   - RDD: las 4 revisiones (una por PR) aprobadas y acusadas. Los rangos de #1129–#1131 incluían lo traído por merge, por eso salieron `high`. Aviso repetido por 3 revisores: el reenvío por merma limpiaba el marcador de adiciones antes de saber si disparaba; corregido en `e916ef4d3` (kitchen-fire-addons 13/13 con RED 1, kitchen-fire.service 110/110), junto con `deduceComponentType` que respeta payloads sin `has_active_recipe`.
   - Avisos informativos que quedan: el menú restringido a restaurante no tiene spec; los mocks de `order_items.count` no fijan cada filtro; un refresco silencioso fallido con la agenda vacía no muestra error; un arranque concurrente puede emitir eventos redundantes.
   - Siguiente: repetir el gate en #1128–#1131 y reportar a Rafael. Merge no autorizado.
+- L33 (2026-11-10, re-revisión del gate tras la ronda 2): #1128 82, #1129 89, #1130 90, #1131 85. Los 4 pasan el gate (≥80).
+  - #1128: el revisor encontró una MEDIA introducida por T20. Un pedido programado con solo platos por lote (o líneas ya comprometidas) quedaba `processing` para siempre. Corregido en `69764fe59`: el conteo reutiliza `kitchenPendingItemsWhere`, el mismo filtro de "Enviar a cocina". RDD aprobada (`review-a230a5621798838e`). Su aviso R3-001 (el test solo fijaba el filtro) se cerró con un test de resultado en `50ee457d0`; R3-002 no aplica, porque el filtro sí excluye líneas canceladas y `skip_kds`.
+  - Merges en cadena sin conflictos (`75055c497`, `504f89000`, `8a102c09a`); scheduled-fire 7/7 en cada eslabón.
+  - Hallazgos nuevos no bloqueantes:
+    - #1131 F1 (MEDIA, previo en el PR): en Planta, una orden `partially_completed` se ve "En espera", sin temporizador, y sale de la lista al día siguiente.
+    - #1131 F2 (BAJA): un evento en vivo que llega durante un cambio de semana en la agenda se pierde.
+    - #1130 N1 (BAJA): el modal de cancelación dice "Producción ya finalizada" con producción parcial.
+    - #1129: el reinicio de `addons_consumed_at` no cubre el remake post-cancelación con plato reusado ni el pedido programado con `produced_at`.
+    - Siguen abiertos los nombres de variante en las órdenes de producción (#1130 M2, #1131 N3).
+  - Defecto previo en develop (fuera del alcance): el reenvío por merma o remake siempre falla con `KITCHEN_FIRE_ITEM_NOT_FOUND`, porque `prepareFireContext` filtra `cancelled_at: null` y esos ítems siempre están cancelados (origen `91da934c4`). El paso de QA de merma de QUI-1000 fallará hasta que se arregle; conviene un ticket aparte.
+  - Siguiente: merge solo a pedido de Rafael.
