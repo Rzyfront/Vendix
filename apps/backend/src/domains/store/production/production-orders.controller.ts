@@ -20,6 +20,7 @@ import {
   UpdateProductionOrderDto,
   CompleteProductionOrderDto,
   ProductionOrderQueryDto,
+  ProductionDayQueryDto,
 } from './dto';
 import { IndustryModuleGuard } from '../../../common/guards/industry-module.guard';
 import { IndustryModule } from '../../../common/decorators/industry-module.decorator';
@@ -84,6 +85,14 @@ export class ProductionOrdersController {
       result,
       'Estadísticas de producción obtenidas',
     );
+  }
+
+  /** QUI-996 — production list of one day (static path before `:id`). */
+  @Get('day')
+  @Permissions('store:production_orders:read', 'store:manufacturing:orders:read')
+  async findDay(@Query() query: ProductionDayQueryDto) {
+    const result = await this.productionOrdersService.findDay(query);
+    return this.responseService.success(result, 'Lista de producción del día obtenida');
   }
 
   @Get(':id')

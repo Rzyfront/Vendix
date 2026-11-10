@@ -302,6 +302,7 @@ export class OrdersListPageComponent implements OnInit {
 
   onActionClick(action: string): void {
     if (action === 'create') this.createOrder();
+    if (action === 'day') this.router.navigate(['/admin/manufacturing/orders/day']);
     if (action === 'refresh') this.loadOrders();
   }
 

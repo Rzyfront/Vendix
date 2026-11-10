@@ -4,6 +4,7 @@ import {
   IsOptional,
   IsPositive,
   IsString,
+  Matches,
   Max,
   MaxLength,
   Min,
@@ -150,4 +151,15 @@ export class ProductionOrderQueryDto {
     typeof value === 'string' ? value.toLowerCase() : value,
   )
   sort_order?: 'asc' | 'desc' = 'desc';
+}
+
+/**
+ * QUI-996 — query of the production list of ONE day. `date` is a calendar date
+ * in the store timezone (`YYYY-MM-DD`); omitted = today in the store timezone.
+ */
+export class ProductionDayQueryDto {
+  @IsOptional()
+  @IsString()
+  @Matches(/^\d{4}-\d{2}-\d{2}$/, { message: 'date debe tener el formato YYYY-MM-DD' })
+  date?: string;
 }

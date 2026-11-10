@@ -344,6 +344,9 @@ export class ProductionOrdersListPageComponent implements OnInit {
       case 'create':
         this.createOrder();
         break;
+      case 'day':
+        this.router.navigate(['/admin/restaurant-ops/production/day']);
+        break;
       case 'refresh':
         this.loadOrders();
         this.loadStats();

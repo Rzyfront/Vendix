@@ -9,15 +9,18 @@ import {
   untracked,
 } from '@angular/core';
 import { takeUntilDestroyed } from '@angular/core/rxjs-interop';
-import { RouterLink } from '@angular/router';
+import { Router } from '@angular/router';
 import { Subscription, forkJoin } from 'rxjs';
 import { AuthFacade } from '../../../../../../core/store/auth/auth.facade';
 import { StoreSettingsFacade } from '../../../../../../core/store/store-settings/store-settings.facade';
 import { extractApiErrorMessage } from '../../../../../../core/utils/api-error-handler';
 import {
   ButtonComponent,
+  CardComponent,
   IconComponent,
   SpinnerComponent,
+  StatsComponent,
+  StickyHeaderComponent,
   ToastService,
 } from '../../../../../../shared/components';
 import { formatStoreDateTime, storeToday } from '../../../../../../shared/utils/date.util';
@@ -56,7 +59,15 @@ type StatusFilter = ScheduledOrderStatus | 'all';
   selector: 'app-scheduled-orders-agenda-page',
   standalone: true,
   changeDetection: ChangeDetectionStrategy.OnPush,
-  imports: [RouterLink, ButtonComponent, IconComponent, SpinnerComponent, ScheduleDetailModalComponent],
+  imports: [
+    ButtonComponent,
+    CardComponent,
+    IconComponent,
+    SpinnerComponent,
+    StatsComponent,
+    StickyHeaderComponent,
+    ScheduleDetailModalComponent,
+  ],
   styles: [
     `
       :host {
@@ -236,19 +247,59 @@ type StatusFilter = ScheduledOrderStatus | 'all';
     `,
   ],
   template: `
-    <div class="p-2 md:p-4">
-      <div class="toolbar">
-        <h1 class="text-xl font-semibold" style="color: var(--color-text-primary)">
-          Pedidos programados
-        </h1>
-        <a routerLink="/admin/scheduled-orders/production">
-          <app-button variant="outline" size="sm">
-            <app-icon slot="icon" name="chef-hat" [size]="16"></app-icon>
-            Lista de producción
-          </app-button>
-        </a>
+    <div class="w-full overflow-x-hidden">
+      <app-sticky-header
+        title="Agenda de pedidos"
+        subtitle="Pedidos programados por franja de entrega"
+        icon="calendar-days"
+        variant="glass"
+        [actions]="headerActions"
+        (actionClicked)="onHeaderAction($event)"
+      />
+
+      <div
+        class="stats-container sticky top-[52px] z-20 bg-background md:static md:bg-transparent"
+      >
+        <app-stats
+          title="Pedidos"
+          [value]="schedules().length"
+          smallText="En el período"
+          iconName="calendar-days"
+          iconBgColor="bg-slate-100"
+          iconColor="text-slate-600"
+          [loading]="loading() && schedules().length === 0"
+        />
+        <app-stats
+          title="En producción"
+          [value]="countByStatus('in_production')"
+          smallText="Se están preparando"
+          iconName="flame"
+          iconBgColor="bg-amber-100"
+          iconColor="text-amber-600"
+          [loading]="loading() && schedules().length === 0"
+        />
+        <app-stats
+          title="Listos"
+          [value]="countByStatus('ready')"
+          smallText="Esperan entrega"
+          iconName="check-circle"
+          iconBgColor="bg-green-100"
+          iconColor="text-green-600"
+          [loading]="loading() && schedules().length === 0"
+        />
+        <app-stats
+          title="Entregados"
+          [value]="countByStatus('delivered')"
+          smallText="Ya salieron"
+          iconName="package"
+          iconBgColor="bg-blue-100"
+          iconColor="text-blue-600"
+          [loading]="loading() && schedules().length === 0"
+        />
       </div>
 
+      <app-card [responsive]="true" [padding]="false" overflow="visible">
+      <div class="p-2 md:p-4">
       <div class="toolbar">
         <div class="toolbar-group">
           <app-button variant="ghost" size="sm" (clicked)="goToday()">Hoy</app-button>
@@ -393,6 +444,8 @@ type StatusFilter = ScheduledOrderStatus | 'all';
           </div>
         }
       }
+      </div>
+      </app-card>
     </div>
 
     <app-schedule-detail-modal
@@ -408,9 +461,18 @@ export class AgendaPageComponent {
   private readonly auth = inject(AuthFacade);
   private readonly settings = inject(StoreSettingsFacade);
   private readonly toast = inject(ToastService);
+  private readonly router = inject(Router);
   private readonly destroyRef = inject(DestroyRef);
 
   readonly statuses = STATUS_ORDER;
+  readonly headerActions = [
+    {
+      id: 'production',
+      label: 'Lista de producción',
+      icon: 'chef-hat',
+      variant: 'outline' as const,
+    },
+  ];
 
   // --- estado ---------------------------------------------------------
   readonly view = signal<AgendaViewMode>(this.prefs.preference().view);
@@ -556,6 +618,14 @@ export class AgendaPageComponent {
 
   private persist(): void {
     this.prefs.save({ view: this.view(), status: this.statusFilter() });
+  }
+
+  onHeaderAction(id: string): void {
+    if (id === 'production') void this.router.navigate(['/admin/scheduled-orders/production']);
+  }
+
+  countByStatus(status: ScheduledOrderStatus): number {
+    return this.schedules().filter((o) => o.status === status).length;
   }
 
   // --- detalle -----------------------------------------------------------

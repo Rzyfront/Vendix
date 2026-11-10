@@ -10,6 +10,7 @@ import {
   ProductionOrderQuery,
   ProductionOrderStats,
   ProductionOrderStatus,
+  ProductionDayResponse,
 } from '../interfaces';
 
 interface ApiResponse<T> {
@@ -91,6 +92,20 @@ export class ProductionOrdersService {
     return this.http
       .get<ApiResponse<ProductionOrderStats>>(
         `${this.apiUrl}${this.basePath}/stats`,
+      )
+      .pipe(
+        map((res) => res.data),
+        catchError(this.handleError),
+      );
+  }
+
+  /** T14: production list of one day (YYYY-MM-DD in the store timezone). */
+  getDay(date: string): Observable<ProductionDayResponse> {
+    const params = new HttpParams().set('date', date);
+    return this.http
+      .get<ApiResponse<ProductionDayResponse>>(
+        `${this.apiUrl}${this.basePath}/day`,
+        { params },
       )
       .pipe(
         map((res) => res.data),

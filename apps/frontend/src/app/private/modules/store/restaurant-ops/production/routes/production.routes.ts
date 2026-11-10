@@ -25,6 +25,19 @@ export const productionOrdersRoutes: Routes = [
     data: { permission: 'store:production_orders:read' },
   },
   {
+    // T14 (QUI-996): shared "Lista de producción" of one day. Static path,
+    // declared before any `:id` route.
+    path: 'day',
+    loadComponent: () =>
+      import(
+        '../components/production-day-list/production-day-list.component'
+      ).then((c) => c.ProductionDayListComponent),
+    data: {
+      permission: 'store:production_orders:read',
+      detailBase: '/admin/restaurant-ops/production/orders',
+    },
+  },
+  {
     path: 'new',
     loadComponent: () =>
       import(

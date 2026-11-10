@@ -167,3 +167,48 @@ export interface ProductionProductOption {
   is_batch_produced?: boolean;
   product_type?: 'physical' | 'service' | 'prepared';
 }
+
+/**
+ * T14 (QUI-996): "Lista de producción" of one day. One card per sale or per
+ * manual production order; the card status is derived server-side.
+ */
+export type ProductionDayCardStatus = 'waiting' | 'in_progress' | 'completed';
+
+export interface ProductionDayOrder {
+  id: number;
+  order_number: string;
+  /** `released` only appears on manufacturing orders. */
+  status: ProductionOrderStatus | 'released';
+  source: string | null;
+  product_id: number;
+  product_name: string;
+  planned_qty: number;
+  produced_qty: number | null;
+  started_at: string | null;
+  produced_at: string | null;
+  due_date: string | null;
+  created_at: string;
+}
+
+export interface ProductionDayCard {
+  /** 'sale-<order_id>' | 'po-<id>' */
+  key: string;
+  kind: 'sale' | 'manual';
+  order_id: number | null;
+  sale_order_number: string | null;
+  customer_name: string | null;
+  /** ISO; the delivery / planned time of the card. */
+  due_at: string | null;
+  status: ProductionDayCardStatus;
+  /** In-progress order carried over from a previous day (multi-day). */
+  carried_over: boolean;
+  production_orders: ProductionDayOrder[];
+}
+
+export interface ProductionDayResponse {
+  /** YYYY-MM-DD in the store timezone. */
+  date: string;
+  timezone: string;
+  summary: { waiting: number; in_progress: number; completed: number };
+  cards: ProductionDayCard[];
+}

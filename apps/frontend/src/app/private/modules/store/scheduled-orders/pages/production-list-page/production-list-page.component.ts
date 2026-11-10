@@ -192,13 +192,13 @@ const PRINT_BODY_CLASS = 'production-list-printing';
     <div class="p-2 md:p-4">
       <div class="pl-toolbar pl-no-print">
         <h1 class="text-xl font-semibold" style="color: var(--color-text-primary)">
-          Lista de producción
+          Insumos consolidados
         </h1>
         <div class="pl-toolbar-group">
-          <a routerLink="/admin/scheduled-orders">
+          <a routerLink="/admin/scheduled-orders/production">
             <app-button variant="ghost" size="sm">
               <app-icon slot="icon" name="arrow-left" [size]="16"></app-icon>
-              Agenda
+              Lista de producción
             </app-button>
           </a>
           <input

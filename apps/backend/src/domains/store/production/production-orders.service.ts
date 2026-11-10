@@ -25,12 +25,17 @@ import {
   resolveStoreTimezone,
   localCivil,
   zonedWallClockToUtc,
+  localDateString,
+  dateOnlyString,
+  resolveLocalDateRange,
+  resolveLocalDateOnlyRange,
 } from '../../../common/utils/store-timezone.util';
 import {
   CreateProductionOrderDto,
   UpdateProductionOrderDto,
   CompleteProductionOrderDto,
   ProductionOrderQueryDto,
+  ProductionDayQueryDto,
 } from './dto';
 
 /**
@@ -1141,6 +1146,152 @@ export class ProductionOrdersService {
   }
 
   // ------------------------------------------------------------------- stats
+  // ------------------------------------------------------------- day (QUI-996)
+  /**
+   * The production list of ONE day (store timezone), shared by Pedidos
+   * programados, Operaciones → Producción and Planta.
+   *
+   * Day membership: an order linked to a sale belongs to the day of its
+   * delivery instant (`due_date`, set by the sale link); a manual / Planta
+   * order to its planned date (`due_date` is a DATE-ONLY value there, stored
+   * as naive midnight) or, without one, to its creation day. An order still
+   * `in_progress` from an earlier day stays on every later day until it is
+   * finished (multi-day production). Cancelled orders never show.
+   *
+   * One card per sale (all its production orders) or per manual order; cards
+   * carried over from earlier days first, then by their timeline time
+   * (delivery for sales, creation for manual orders).
+   */
+  async findDay(query: ProductionDayQueryDto) {
+    const context = RequestContextService.getContext();
+    const store_id = context?.store_id;
+    if (!store_id) {
+      throw new VendixHttpException(ErrorCodes.STORE_CONTEXT_001);
+    }
+    const timezone = await resolveStoreTimezone(this.prisma, store_id);
+    const date = query?.date ?? localDateString(new Date(), timezone);
+    const range = { date_from: date, date_to: date };
+    const local = resolveLocalDateRange(range, timezone);
+    const naive = resolveLocalDateOnlyRange(range, timezone);
+
+    const rows = await this.prisma.production_orders.findMany({
+      where: {
+        status: { not: 'cancelled' },
+        OR: [
+          { order_id: { not: null }, due_date: { gte: local.startDate, lte: local.endDate } },
+          { order_id: null, due_date: { gte: naive.startDate, lte: naive.endDate } },
+          { due_date: null, created_at: { gte: local.startDate, lte: local.endDate } },
+          { status: 'in_progress', order_id: { not: null }, due_date: { lt: local.startDate } },
+          { status: 'in_progress', order_id: null, due_date: { lt: naive.startDate } },
+          { status: 'in_progress', due_date: null, created_at: { lt: local.startDate } },
+        ],
+      },
+      select: {
+        id: true,
+        order_number: true,
+        status: true,
+        source: true,
+        product_id: true,
+        planned_qty: true,
+        produced_qty: true,
+        started_at: true,
+        produced_at: true,
+        due_date: true,
+        created_at: true,
+        order_id: true,
+        product: { select: { name: true } },
+        sale_order: {
+          select: {
+            order_number: true,
+            customer_alias: true,
+            users: { select: { first_name: true, last_name: true } },
+          },
+        },
+      },
+      orderBy: [{ due_date: 'asc' }, { created_at: 'asc' }, { id: 'asc' }],
+      take: 500,
+    });
+
+    type Row = (typeof rows)[number];
+    const iso = (value: Date | null | undefined) => (value ? value.toISOString() : null);
+    // Calendar day an order belongs to (same rule as the filter above).
+    const dayOf = (r: Row): string => {
+      if (r.order_id != null && r.due_date) return localDateString(r.due_date, timezone);
+      if (r.order_id == null && r.due_date) return dateOnlyString(r.due_date);
+      return localDateString(r.created_at, timezone);
+    };
+    // Time the order anchors on the timeline: delivery for a sale, creation
+    // for a manual order (its planned date has no time of day).
+    const anchorOf = (r: Row): Date =>
+      r.order_id != null && r.due_date ? r.due_date : r.created_at;
+    const bucket = (status: string): 'waiting' | 'in_progress' | 'completed' =>
+      status === 'completed' ? 'completed' : status === 'in_progress' ? 'in_progress' : 'waiting';
+
+    const groups = new Map<string, Row[]>();
+    for (const r of rows) {
+      const key = r.order_id != null ? `sale-${r.order_id}` : `po-${r.id}`;
+      const list = groups.get(key) ?? [];
+      list.push(r);
+      groups.set(key, list);
+    }
+
+    const summary = { waiting: 0, in_progress: 0, completed: 0 };
+    for (const r of rows) summary[bucket(r.status as string)] += 1;
+
+    const cards = [...groups.entries()].map(([key, list]) => {
+      const first = list[0];
+      const anchor = list.map(anchorOf).reduce((a, b) => (b < a ? b : a));
+      const buckets = list.map((r) => bucket(r.status as string));
+      const status: 'waiting' | 'in_progress' | 'completed' = buckets.every((b) => b === 'completed')
+        ? 'completed'
+        : buckets.some((b) => b === 'in_progress') || buckets.some((b) => b === 'completed')
+          ? 'in_progress'
+          : 'waiting';
+      const customer = first.sale_order?.users;
+      const customer_name = first.sale_order
+        ? (customer ? `${customer.first_name ?? ''} ${customer.last_name ?? ''}`.trim() : '') ||
+          first.sale_order.customer_alias?.trim() ||
+          null
+        : null;
+      return {
+        key,
+        kind: (first.order_id != null ? 'sale' : 'manual') as 'sale' | 'manual',
+        order_id: first.order_id ?? null,
+        sale_order_number: first.sale_order?.order_number ?? null,
+        customer_name,
+        due_at: anchor.toISOString(),
+        status,
+        carried_over: list.some((r) => dayOf(r) < date),
+        production_orders: list.map((r) => ({
+          id: r.id,
+          order_number: r.order_number,
+          status: r.status,
+          source: r.source ?? null,
+          product_id: r.product_id,
+          product_name: r.product?.name ?? `#${r.product_id}`,
+          planned_qty: Number(r.planned_qty),
+          produced_qty: r.produced_qty == null ? null : Number(r.produced_qty),
+          started_at: iso(r.started_at),
+          produced_at: iso(r.produced_at),
+          due_date: iso(r.due_date),
+          created_at: r.created_at.toISOString(),
+        })),
+        _anchor: anchor.getTime(),
+      };
+    });
+
+    cards.sort((a, b) =>
+      a.carried_over !== b.carried_over ? (a.carried_over ? -1 : 1) : a._anchor - b._anchor,
+    );
+
+    return {
+      date,
+      timezone,
+      summary,
+      cards: cards.map(({ _anchor, ...card }) => card),
+    };
+  }
+
   async getStats() {
     const context = RequestContextService.getContext();
     const store_id = context?.store_id;
