@@ -80,3 +80,10 @@
   (confirmed)="onSerialConfirmed($event)"
   (cancelled)="onSerialCancelled()"
 ></app-pos-serial-selection-modal>
+
+<app-pos-register-config-modal
+  [isOpen]="registerModalOpen()"
+  (isOpenChange)="registerModalOpen.set($event)"
+  (saved)="onRegisterSaved()"
+  (closed)="onRegisterModalClosed()"
+></app-pos-register-config-modal>
