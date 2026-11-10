@@ -1580,22 +1580,37 @@ export class OrdersService {
    * suggested cancellation disposition (waste for made-to-order, else release).
    */
   private attachProductionInfo(order: any): void {
-    const linked: Array<{ id: number; product_id: number; order_number: string | null; status: string }> =
-      order.production_orders ?? [];
+    const linked: Array<{
+      id: number;
+      product_id: number;
+      product_variant_id?: number | null;
+      order_number: string | null;
+      status: string;
+    }> = order.production_orders ?? [];
     const lines = (order.order_items ?? []).filter(
       (i: any) => i.fulfillment_destination === 'production' && !i.cancelled_at,
     );
+    // One production order per product+variant: a line pairs with the order of
+    // ITS variant (NULL matches only base lines), never with a sibling variant's.
+    const sameProduction = (
+      o: { product_id: number; product_variant_id?: number | null },
+      i: { product_id: number; product_variant_id?: number | null },
+    ) =>
+      o.product_id === i.product_id &&
+      (o.product_variant_id ?? null) === (i.product_variant_id ?? null);
     for (const item of order.order_items ?? []) {
       const match =
         item.fulfillment_destination === 'production'
-          ? linked.find((o) => o.product_id === item.product_id)
+          ? linked.find((o) => sameProduction(o, item))
           : undefined;
       item.production_order = match
         ? { id: match.id, order_number: match.order_number, status: match.status }
         : null;
     }
+    // Every production line must have its own order completed: with one order
+    // per variant, a sale is ready only when ALL of them are.
     const states = lines.map(
-      (i: any) => linked.find((o) => o.product_id === i.product_id)?.status ?? null,
+      (i: any) => linked.find((o) => sameProduction(o, i))?.status ?? null,
     );
     if (lines.length === 0) {
       order.production_status = 'none';
@@ -1606,12 +1621,12 @@ export class OrdersService {
     } else {
       order.production_status = 'pending';
     }
-    const completedProducts = new Set(
-      linked.filter((o) => o.status === 'completed').map((o) => o.product_id),
-    );
+    const completedOrders = linked.filter((o) => o.status === 'completed');
     order.production_cancel_suggestion =
-      completedProducts.size > 0
-        ? suggestProductionDisposition(lines.filter((i: any) => completedProducts.has(i.product_id)))
+      completedOrders.length > 0
+        ? suggestProductionDisposition(
+            lines.filter((i: any) => completedOrders.some((o) => sameProduction(o, i))),
+          )
         : null;
   }
 
@@ -1895,7 +1910,13 @@ export class OrdersService {
         // QUI-995 — production orders linked to this sale (one per product).
         production_orders: {
           where: { status: { not: 'cancelled' } },
-          select: { id: true, product_id: true, order_number: true, status: true },
+          select: {
+            id: true,
+            product_id: true,
+            product_variant_id: true,
+            order_number: true,
+            status: true,
+          },
         },
         table_sessions: {
           select: {

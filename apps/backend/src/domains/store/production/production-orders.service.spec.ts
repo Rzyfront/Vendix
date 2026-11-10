@@ -885,6 +885,8 @@ describe('ProductionOrdersService — sale-linked orders (QUI-995)', () => {
           .fn()
           .mockResolvedValue(opts.sale === undefined ? { id: 77, state: 'processing' } : opts.sale),
       },
+      // lockOrderLifecycle: SELECT ... FOR UPDATE on the sale, then its payments.
+      $queryRaw: jest.fn().mockResolvedValue([{ id: 77, state: 'processing' }]),
     };
     prismaMock.$transaction.mockImplementation(async (cb: any) => cb(tx));
   };
@@ -989,6 +991,98 @@ describe('ProductionOrdersService — sale-linked orders (QUI-995)', () => {
       reason: expect.stringContaining('Producción #100'),
     });
     expect(stock.reserveStock).not.toHaveBeenCalled();
+  });
+
+  it('QUI-995 F1: a sale delivered before production emits production.sale_cogs with the commit total cost, after the transaction', async () => {
+    setup({ sale: { id: 77, state: 'delivered' }, pendingLines: [{ id: 501 }] });
+    orderStockCommit.commitOrderLines.mockResolvedValue({ totalCost: 120, committedItemCount: 1 });
+    let committed = false;
+    prismaMock.$transaction.mockImplementation(async (cb: any) => {
+      const out = await cb(tx);
+      committed = true;
+      return out;
+    });
+    eventEmitter.emit.mockImplementation((name: string) => {
+      if (name === 'production.sale_cogs') expect(committed).toBe(true);
+    });
+    await service.complete(100, { produced_qty: 3 });
+    expect(eventEmitter.emit).toHaveBeenCalledWith('production.sale_cogs', {
+      organization_id: 1,
+      store_id: 1,
+      order_id: 77,
+      production_order_id: 100,
+      total_cost: 120,
+      user_id: 42,
+    });
+  });
+
+  it('QUI-995 F1: no sale_cogs when the commit cost is zero or the units are only reserved', async () => {
+    setup({ sale: { id: 77, state: 'delivered' }, pendingLines: [{ id: 501 }] });
+    await service.complete(100, { produced_qty: 3 });
+    setup({});
+    await service.complete(100, { produced_qty: 3 });
+    expect(eventEmitter.emit.mock.calls.map((c) => c[0])).not.toContain('production.sale_cogs');
+  });
+
+  it('QUI-995 F1: a sale-linked completion locks the sale before claiming the order and reading the sale state', async () => {
+    setup({});
+    await service.complete(100, { produced_qty: 3 });
+    expect(tx.$queryRaw).toHaveBeenCalled();
+    const lockAt = tx.$queryRaw.mock.invocationCallOrder[0];
+    expect(lockAt).toBeLessThan(tx.production_orders.updateMany.mock.invocationCallOrder[0]);
+    expect(lockAt).toBeLessThan(tx.orders.findFirst.mock.invocationCallOrder[0]);
+  });
+
+  it('QUI-995 F4: a variant order credits and reserves the SOLD variant', async () => {
+    setup({
+      order: linkedOrder({ product_variant_id: 10 }),
+      lines: [line({ product_variant_id: 10 })],
+    });
+    await service.complete(100, { produced_qty: 3 });
+    const credit = stock.updateStock.mock.calls
+      .map((c) => c[0])
+      .find((c) => c.movement_type === 'production');
+    expect(credit).toMatchObject({ product_id: 50, variant_id: 10, quantity_change: 3 });
+    expect(stock.getDefaultLocationForProduct).toHaveBeenCalledWith(50, 10);
+    expect(stock.reserveStock).toHaveBeenCalledWith(50, 10, 1, 3, 'order', 77, 42, false, tx);
+    // add-ons are claimed only from the lines of THIS variant
+    expect(tx.order_items.findMany.mock.calls[0][0].where).toMatchObject({
+      product_id: 50,
+      product_variant_id: 10,
+    });
+  });
+
+  it('QUI-995 F4: a variant order sells only the pending lines of its variant when the sale was delivered', async () => {
+    setup({
+      order: linkedOrder({ product_variant_id: 10 }),
+      sale: { id: 77, state: 'delivered' },
+      pendingLines: [{ id: 501 }],
+    });
+    await service.complete(100, { produced_qty: 3 });
+    const pendingWhere = tx.order_items.findMany.mock.calls
+      .map((c: any) => c[0].where)
+      .find((w: any) => w.inventory_committed === false);
+    expect(pendingWhere).toMatchObject({ product_id: 50, product_variant_id: 10 });
+  });
+
+  it('QUI-995 F4: a non-variant order credits the base product exactly as before', async () => {
+    setup({});
+    await service.complete(100, { produced_qty: 3 });
+    const credit = stock.updateStock.mock.calls
+      .map((c) => c[0])
+      .find((c) => c.movement_type === 'production');
+    expect(credit).not.toHaveProperty('variant_id');
+    expect(stock.getDefaultLocationForProduct).toHaveBeenCalledWith(50);
+    expect(stock.reserveStock).toHaveBeenCalledWith(50, undefined, 1, 3, 'order', 77, 42, false, tx);
+  });
+
+  it('QUI-995 F4: a base-product order claims add-ons only from base lines, never a variant line', async () => {
+    setup({});
+    await service.complete(100, { produced_qty: 3 });
+    expect(tx.order_items.findMany.mock.calls[0][0].where).toMatchObject({
+      product_id: 50,
+      product_variant_id: null,
+    });
   });
 
   it('sale cancelled: nothing is reserved nor sold', async () => {
@@ -1102,6 +1196,41 @@ describe('ProductionOrdersService — sale-linked orders (QUI-995)', () => {
       },
     ]);
     expect(detail.order_id).toBe(77);
+  });
+
+  it('QUI-995 B2: getDetail of a variant order lists only the sale lines of THAT variant', async () => {
+    prismaMock.production_orders.findFirst.mockResolvedValue(linkedOrder({ product_variant_id: 10 }));
+    prismaMock.orders.findFirst.mockResolvedValue({
+      id: 77, order_number: 'ORD-77', state: 'processing', customer_alias: null, users: null,
+      fulfillment_schedule: null,
+    });
+    prismaMock.order_items.findMany.mockResolvedValue([]);
+    await service.getDetail(100);
+    expect(prismaMock.order_items.findMany.mock.calls[0][0].where).toMatchObject({
+      order_id: 77,
+      product_id: 50,
+      product_variant_id: 10,
+    });
+  });
+
+  it('QUI-995 B2: getDetail of a base-product order only reads lines WITHOUT a variant', async () => {
+    prismaMock.production_orders.findFirst.mockResolvedValue(linkedOrder());
+    prismaMock.orders.findFirst.mockResolvedValue({
+      id: 77, order_number: 'ORD-77', state: 'processing', customer_alias: null, users: null,
+      fulfillment_schedule: null,
+    });
+    prismaMock.order_items.findMany.mockResolvedValue([]);
+    await service.getDetail(100);
+    expect(prismaMock.order_items.findMany.mock.calls[0][0].where).toMatchObject({
+      product_id: 50,
+      product_variant_id: null,
+    });
+  });
+
+  it('QUI-995 A1: complete() waits for the sale lock with a 20 s transaction timeout', async () => {
+    setup({});
+    await service.complete(100, { produced_qty: 3 });
+    expect(prismaMock.$transaction.mock.calls[0][1]).toEqual({ timeout: 20000 });
   });
 
   it('getDetail of a manual order returns sale_order null and no lines', async () => {

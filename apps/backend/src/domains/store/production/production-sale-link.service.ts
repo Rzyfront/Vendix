@@ -13,11 +13,13 @@ import {
 import { suggestProductionDisposition } from './production-disposition.util';
 
 const CLOSED_SALE_STATES = ['cancelled', 'refunded'];
+/** Production states with nothing produced yet: cancelled as is with the sale. */
+const OPEN_PRODUCTION_STATES = ['draft', 'in_progress', 'released'] as const;
 
 /**
  * QUI-995 — keeps the production orders of a sale in sync with its
- * `fulfillment_destination = 'production'` lines: ONE order per product,
- * `planned_qty` = sum of the line quantities, linked through
+ * `fulfillment_destination = 'production'` lines: ONE order per product
+ * (+ variant when the line sells one), `planned_qty` = sum of the line quantities, linked through
  * `production_orders.order_id`.
  *
  * Idempotent: running it twice changes nothing. While an order is `draft` it
@@ -64,6 +66,7 @@ export class ProductionSaleLinkService {
       select: {
         id: true,
         product_id: true,
+        product_variant_id: true,
         status: true,
         planned_qty: true,
         produced_qty: true,
@@ -72,15 +75,31 @@ export class ProductionSaleLinkService {
     });
     if (linked.length === 0) return;
 
-    const open = linked.filter((o) => o.status === 'draft' || o.status === 'in_progress');
+    // Nothing was produced yet (draft / in_progress / released): cancelled as is.
+    const open = linked.filter((o) =>
+      (OPEN_PRODUCTION_STATES as readonly string[]).includes(o.status as string),
+    );
     if (open.length > 0) {
       await client.production_orders.updateMany({
-        where: { id: { in: open.map((o) => o.id) }, status: { in: ['draft', 'in_progress'] } },
+        where: { id: { in: open.map((o) => o.id) }, status: { in: [...OPEN_PRODUCTION_STATES] } },
         data: { status: 'cancelled', updated_at: new Date() },
       });
     }
 
-    const completed = linked.filter((o) => o.status === 'completed');
+    // partially_completed: what WAS produced is credited and reserved like a
+    // completed order (same disposition below, over `produced_qty`), and the
+    // quantity still to produce is cancelled with the order itself.
+    const partial = linked.filter((o) => o.status === 'partially_completed');
+    if (partial.length > 0) {
+      await client.production_orders.updateMany({
+        where: { id: { in: partial.map((o) => o.id) }, status: 'partially_completed' },
+        data: { status: 'cancelled', updated_at: new Date() },
+      });
+    }
+
+    const completed = linked.filter(
+      (o) => o.status === 'completed' || o.status === 'partially_completed',
+    );
     if (completed.length === 0 || !this.stockLevelManager) return;
 
     const lines = await client.order_items.findMany({
@@ -91,6 +110,7 @@ export class ProductionSaleLinkService {
       },
       select: {
         product_id: true,
+        product_variant_id: true,
         notes: true,
         inventory_committed: true,
         order_item_options: { select: { id: true }, take: 1 },
@@ -103,12 +123,17 @@ export class ProductionSaleLinkService {
       // The goods already left with the delivery (the commit consumed the
       // reservation and decremented on_hand): nothing is reserved anymore, so
       // releasing or writing off again would double count.
-      const productLines = lines.filter((l) => l.product_id === order.product_id);
-      if (productLines.length > 0 && productLines.every((l) => l.inventory_committed)) continue;
-      const reserved = Math.min(
-        Number(order.produced_qty ?? order.planned_qty),
-        Math.round(Number(order.planned_qty)),
+      const variant_id = order.product_variant_id ?? null;
+      const productLines = lines.filter(
+        (l) => l.product_id === order.product_id && (l.product_variant_id ?? null) === variant_id,
       );
+      if (productLines.length > 0 && productLines.every((l) => l.inventory_committed)) continue;
+      // A partially_completed order with no recorded output has nothing to release.
+      const produced =
+        order.status === 'partially_completed'
+          ? Number(order.produced_qty ?? 0)
+          : Number(order.produced_qty ?? order.planned_qty);
+      const reserved = Math.min(produced, Math.round(Number(order.planned_qty)));
       if (reserved <= 0) continue;
       await client.$transaction(async (tx) => {
         // Only what is STILL reserved can be released or written off: a line
@@ -117,7 +142,7 @@ export class ProductionSaleLinkService {
           'order',
           payload.order_id,
           order.product_id,
-          null,
+          variant_id,
           reserved,
           disposition === 'waste' ? 'consumed' : 'cancelled',
           tx,
@@ -126,12 +151,13 @@ export class ProductionSaleLinkService {
         if (disposition !== 'waste' || !(quantity > 0)) return;
         const location_id = await this.stockLevelManager!.getDefaultLocationForProduct(
           order.product_id,
-          undefined,
+          variant_id ?? undefined,
           tx,
         );
         const result = await this.stockLevelManager!.updateStock(
           {
             product_id: order.product_id,
+            ...(variant_id != null ? { variant_id } : {}),
             location_id,
             quantity_change: -quantity,
             movement_type: 'damage',
@@ -193,54 +219,87 @@ export class ProductionSaleLinkService {
             fulfillment_destination: 'production',
             product_id: { not: null },
           },
-          select: { id: true, product_id: true, quantity: true },
+          select: { id: true, product_id: true, product_variant_id: true, quantity: true },
         },
       },
     });
     if (!sale || CLOSED_SALE_STATES.includes(sale.state as string)) return [];
 
-    const planned = new Map<number, number>();
+    // One order per product+variant: a variant sale must credit and reserve the
+    // SOLD variant, so lines of different variants never share an order.
+    const keyOf = (product_id: number, variant_id: number | null) =>
+      `${product_id}:${variant_id ?? ''}`;
+    const planned = new Map<
+      string,
+      { product_id: number; variant_id: number | null; qty: number }
+    >();
     for (const item of sale.order_items) {
-      planned.set(
-        item.product_id!,
-        (planned.get(item.product_id!) ?? 0) + Number(item.quantity),
-      );
+      const variant_id = item.product_variant_id ?? null;
+      const key = keyOf(item.product_id!, variant_id);
+      const current = planned.get(key);
+      planned.set(key, {
+        product_id: item.product_id!,
+        variant_id,
+        qty: (current?.qty ?? 0) + Number(item.quantity),
+      });
     }
     const due_date = sale.fulfillment_schedule?.scheduled_start ?? sale.created_at ?? new Date();
 
-    const recipeByProduct = new Map<number, number>();
+    const recipesByProduct = new Map<
+      number,
+      Array<{ id: number; product_variant_id: number | null }>
+    >();
     if (planned.size > 0) {
       const recipes = await client.recipes.findMany({
         where: {
           store_id: sale.store_id,
-          product_id: { in: [...planned.keys()] },
+          product_id: { in: [...new Set([...planned.values()].map((v) => v.product_id))] },
           is_active: true,
         },
         select: { id: true, product_id: true, product_variant_id: true },
         orderBy: { id: 'asc' },
       });
       for (const recipe of recipes) {
-        const current = recipeByProduct.get(recipe.product_id);
-        // The base recipe (no variant) wins: the order is per product.
-        if (current === undefined || recipe.product_variant_id == null) {
-          recipeByProduct.set(recipe.product_id, recipe.id);
-        }
+        const list = recipesByProduct.get(recipe.product_id) ?? [];
+        list.push({ id: recipe.id, product_variant_id: recipe.product_variant_id });
+        recipesByProduct.set(recipe.product_id, list);
       }
     }
+    const recipeFor = (product_id: number, variant_id: number | null): number | undefined => {
+      const list = recipesByProduct.get(product_id) ?? [];
+      // The variant's own recipe first, then the base recipe (no variant), then
+      // whatever active recipe the product has.
+      return (
+        (variant_id != null
+          ? list.find((r) => r.product_variant_id === variant_id)
+          : undefined) ??
+        list.find((r) => r.product_variant_id == null) ??
+        list[0]
+      )?.id;
+    };
 
     try {
       return await client.$transaction(async (tx) => {
         const existing = await tx.production_orders.findMany({
           where: { store_id: sale.store_id, order_id: sale.id },
-          select: { id: true, product_id: true, status: true, planned_qty: true, due_date: true },
+          select: {
+            id: true,
+            product_id: true,
+            product_variant_id: true,
+            status: true,
+            planned_qty: true,
+            due_date: true,
+          },
         });
-        const byProduct = new Map(existing.map((o) => [o.product_id, o]));
+        const byKey = new Map(
+          existing.map((o) => [keyOf(o.product_id, o.product_variant_id ?? null), o]),
+        );
         const result: { id: number }[] = [];
 
-        for (const [product_id, qty] of planned) {
-          const current = byProduct.get(product_id);
+        for (const [key, { product_id, variant_id, qty }] of planned) {
+          const current = byKey.get(key);
           if (!current) {
-            const recipe_id = recipeByProduct.get(product_id);
+            const recipe_id = recipeFor(product_id, variant_id);
             if (!recipe_id) {
               this.logger.warn(
                 `Sale #${sale.id}: product #${product_id} has no active recipe; no production order created`,
@@ -252,6 +311,7 @@ export class ProductionSaleLinkService {
               data: {
                 store_id: sale.store_id,
                 product_id,
+                product_variant_id: variant_id,
                 recipe_id,
                 order_id: sale.id,
                 planned_qty: new Prisma.Decimal(qty),
@@ -269,7 +329,8 @@ export class ProductionSaleLinkService {
           result.push({ id: current.id });
           // The line came back after its order was cancelled (removed and
           // re-added, or cancelled from Planta): the unique (order_id,
-          // product_id) forbids a new row, so the cancelled one returns to draft.
+          // product_id, product_variant_id) forbids a new row, so the cancelled
+          // one returns to draft.
           if (current.status === 'cancelled') {
             await tx.production_orders.updateMany({
               where: { id: current.id, status: 'cancelled' },
@@ -301,7 +362,11 @@ export class ProductionSaleLinkService {
 
         // A draft whose lines are gone follows the sale and is cancelled.
         for (const current of existing) {
-          if (planned.has(current.product_id) || current.status !== 'draft') continue;
+          if (
+            planned.has(keyOf(current.product_id, current.product_variant_id ?? null)) ||
+            current.status !== 'draft'
+          )
+            continue;
           await tx.production_orders.updateMany({
             where: { id: current.id, status: 'draft' },
             data: { status: 'cancelled', updated_at: new Date() },
@@ -310,7 +375,7 @@ export class ProductionSaleLinkService {
         return result;
       });
     } catch (error) {
-      // Two concurrent ensures can race on the (order_id, product_id) unique:
+      // Two concurrent ensures can race on the (order_id, product_id, product_variant_id) unique:
       // the loser re-reads and finds the winner's row.
       if (
         error instanceof Prisma.PrismaClientKnownRequestError &&

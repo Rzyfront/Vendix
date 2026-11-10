@@ -95,7 +95,7 @@ const SCHEDULED_ORDER_SELECT = {
   // QUI-995: the production order linked to each `production` line.
   production_orders: {
     where: { status: { not: 'cancelled' } },
-    select: { id: true, product_id: true, order_number: true, status: true },
+    select: { id: true, product_id: true, product_variant_id: true, order_number: true, status: true },
   },
   order_items: {
     where: { cancelled_at: null },
@@ -108,6 +108,7 @@ const SCHEDULED_ORDER_SELECT = {
       // QUI-999: lets the schedule UI tell which lines go to production.
       fulfillment_destination: true,
       product_id: true,
+      product_variant_id: true,
       products: {
         select: {
           product_type: true,
@@ -130,7 +131,13 @@ function shapeScheduledOrderLines<T extends { order?: any }>(row: T): T {
   const order = row?.order;
   if (!order || !Array.isArray(order.order_items)) return row;
   const { production_orders, ...orderRest } = order;
-  const linkedOrders: Array<{ id: number; product_id: number; order_number: string | null; status: string }> =
+  const linkedOrders: Array<{
+    id: number;
+    product_id: number;
+    product_variant_id?: number | null;
+    order_number: string | null;
+    status: string;
+  }> =
     Array.isArray(production_orders) ? production_orders : [];
   return {
     ...row,
@@ -139,7 +146,11 @@ function shapeScheduledOrderLines<T extends { order?: any }>(row: T): T {
       order_items: order.order_items.map(({ products, ...line }: any) => {
         const linked =
           line.fulfillment_destination === 'production'
-            ? linkedOrders.find((o) => o.product_id === line.product_id)
+            ? linkedOrders.find(
+                (o) =>
+                  o.product_id === line.product_id &&
+                  (o.product_variant_id ?? null) === (line.product_variant_id ?? null),
+              )
             : undefined;
         return {
           ...line,

@@ -386,8 +386,9 @@ export class OrderStockCommitService {
     let totalCost = 0;
     let committedItemCount = 0;
 
-    // QUI-995: products of this sale whose production order is completed.
-    const producedProductIds = new Set<number>();
+    // QUI-995: product+variant pairs of this sale whose production order is
+    // completed (one order per variant, so a sibling variant does not count).
+    const producedKeys = new Set<string>();
     if (
       (order.order_items ?? []).some(
         (i: any) => i.fulfillment_destination === 'production',
@@ -395,9 +396,10 @@ export class OrderStockCommitService {
     ) {
       const done = await db.production_orders.findMany({
         where: { order_id: orderId, status: 'completed' },
-        select: { product_id: true },
+        select: { product_id: true, product_variant_id: true },
       });
-      for (const row of done ?? []) producedProductIds.add(row.product_id);
+      for (const row of done ?? [])
+        producedKeys.add(`${row.product_id}:${row.product_variant_id ?? ''}`);
     }
 
     // One pool per commit run: two lines cannot take the same batch stock.
@@ -437,7 +439,9 @@ export class OrderStockCommitService {
         cancelled_at: (item as any).cancelled_at ?? null,
         skip_kds: item.skip_kds,
         fulfillment_destination: (item as { fulfillment_destination?: string | null }).fulfillment_destination ?? null,
-        production_completed: producedProductIds.has(item.product_id),
+        production_completed: producedKeys.has(
+          `${item.product_id}:${item.product_variant_id ?? ''}`,
+        ),
         posSelection: opts.consumeSerials
           ? (serialSelectionByLine.get(item.id) ?? posMatcher(item))
           : undefined,

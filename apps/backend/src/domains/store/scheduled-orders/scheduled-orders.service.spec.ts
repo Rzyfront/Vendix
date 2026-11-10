@@ -440,5 +440,38 @@ describe('ScheduledOrdersService', () => {
       });
       expect(detail.order).not.toHaveProperty('production_orders');
     });
+
+    it('QUI-995 B2: two variants of one product each expose THEIR OWN production order', async () => {
+      const { service, rows } = makeHarness();
+      rows.push({
+        id: 1, store_id: 1, order_id: 50,
+        scheduled_start: new Date(SLOT.start), scheduled_end: new Date(SLOT.end),
+        status: 'scheduled', hold_expires_at: null,
+      });
+      const [first] = FULL_ORDER.order_items;
+      const twoVariants = {
+        ...FULL_ORDER,
+        order_items: [
+          { ...first, id: 1, product_variant_id: 10 },
+          { ...first, id: 2, product_variant_id: 11 },
+        ],
+        production_orders: [
+          { id: 900, product_id: 77, product_variant_id: 10, order_number: 'OP-000900', status: 'completed' },
+          { id: 901, product_id: 77, product_variant_id: 11, order_number: 'OP-000901', status: 'draft' },
+        ],
+      };
+      const prisma: any = (service as any).prisma;
+      const original = prisma.order_fulfillment_schedules.findFirst;
+      prisma.order_fulfillment_schedules.findFirst = jest.fn(async (args: any) => {
+        const base = await original(args);
+        if (!base || !args.include) return base;
+        return { ...base, changes: [], order: applySelect(twoVariants, args.include.order.select) };
+      });
+      prisma.order_items = { count: jest.fn(async () => 0) };
+
+      const detail: any = await service.findOne(1);
+
+      expect(detail.order.order_items.map((l: any) => l.production_order?.id)).toEqual([900, 901]);
+    });
   });
 });

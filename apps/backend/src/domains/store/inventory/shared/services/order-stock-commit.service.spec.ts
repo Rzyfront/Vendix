@@ -286,11 +286,30 @@ describe('OrderStockCommitService — claim atómico anti doble-descuento', () =
 
     expect(txMock.production_orders.findMany).toHaveBeenCalledWith({
       where: { order_id: 1, status: 'completed' },
-      select: { product_id: true },
+      select: { product_id: true, product_variant_id: true },
     });
     expect(stockLevelManagerMock.releaseReservationQuantity).toHaveBeenCalledTimes(1);
     expect(stockLevelManagerMock.updateStock).toHaveBeenCalledTimes(1);
     expect(result.committedItemCount).toBe(1);
+  });
+
+  it('QUI-995 F4: la orden completada de OTRA variante no libera la línea de la variante vendida', async () => {
+    const o: any = buildOrder();
+    o.stores.industries = ['restaurant'];
+    o.order_items[0].products.product_type = 'prepared';
+    o.order_items[0].skip_kds = true;
+    o.order_items[0].fulfillment_destination = 'production';
+    o.order_items[0].product_variant_id = 6;
+    txMock.orders.findFirst.mockResolvedValue(o);
+    txMock.orders.findUnique.mockResolvedValue(o);
+    txMock.production_orders.findMany.mockResolvedValue([
+      { product_id: 100, product_variant_id: 5 },
+    ]);
+
+    const result = await service.commitOrderDelivery(1, OPTS, txMock);
+
+    expect(stockLevelManagerMock.updateStock).not.toHaveBeenCalled();
+    expect(result.committedItemCount).toBe(0);
   });
 
   it('QUI-995: una línea de producción sin orden completada se omite y no se marca committed', async () => {

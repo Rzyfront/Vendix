@@ -151,6 +151,42 @@ describe('ProductionSaleLinkService (QUI-995)', () => {
     expect(tx.production_orders.updateMany).not.toHaveBeenCalled();
   });
 
+  it('QUI-995 F4: creates ONE order per product+variant and stores the sold variant', async () => {
+    setup(sale([
+      { id: 1, product_id: 50, product_variant_id: 10, quantity: 2 },
+      { id: 2, product_id: 50, product_variant_id: 10, quantity: 1 },
+      { id: 3, product_id: 50, product_variant_id: 11, quantity: 4 },
+    ]));
+    tx.production_orders.create
+      .mockResolvedValueOnce({ id: 101 })
+      .mockResolvedValueOnce({ id: 102 });
+    const result = await service.ensureForOrder(77);
+    expect(result).toEqual([{ id: 101 }, { id: 102 }]);
+    expect(tx.production_orders.create).toHaveBeenCalledTimes(2);
+    const created = tx.production_orders.create.mock.calls.map((c: any) => c[0].data);
+    expect(created.map((d: any) => [d.product_variant_id, Number(d.planned_qty)])).toEqual([
+      [10, 3],
+      [11, 4],
+    ]);
+  });
+
+  it('QUI-995 F4: a variant order is matched by product AND variant (no duplicate on re-ensure)', async () => {
+    setup(
+      sale([{ id: 1, product_id: 50, product_variant_id: 10, quantity: 2 }]),
+      [{ id: 100, product_id: 50, product_variant_id: 10, status: 'draft', planned_qty: new Prisma.Decimal(2), due_date: start }],
+    );
+    const result = await service.ensureForOrder(77);
+    expect(result).toEqual([{ id: 100 }]);
+    expect(tx.production_orders.create).not.toHaveBeenCalled();
+    expect(tx.production_orders.updateMany).not.toHaveBeenCalled();
+  });
+
+  it('QUI-995 F4: a non-variant sale stores a NULL variant (previous behavior)', async () => {
+    setup(sale([{ id: 1, product_id: 50, product_variant_id: null, quantity: 2 }]));
+    await service.ensureForOrder(77);
+    expect(tx.production_orders.create.mock.calls[0][0].data.product_variant_id).toBeNull();
+  });
+
   it('requestProductionSaleSync swallows listener failures', async () => {
     const warn = jest.fn();
     await expect(
@@ -195,7 +231,7 @@ describe('ProductionSaleLinkService.handleSaleCancelled (QUI-995)', () => {
     ]);
     await service.handleSaleCancelled({ order_id: 77, store_id: 1 });
     expect(client.production_orders.updateMany).toHaveBeenCalledWith({
-      where: { id: { in: [1, 2] }, status: { in: ['draft', 'in_progress'] } },
+      where: { id: { in: [1, 2] }, status: { in: ['draft', 'in_progress', 'released'] } },
       data: expect.objectContaining({ status: 'cancelled' }),
     });
     expect(slm.releaseReservationQuantity).not.toHaveBeenCalled();
@@ -287,5 +323,45 @@ describe('ProductionSaleLinkService.handleSaleCancelled (QUI-995)', () => {
     setup([completed]);
     client.production_orders.findMany.mockRejectedValue(new Error('db down'));
     await expect(service.onSaleCancelled({ order_id: 77, store_id: 1 })).resolves.toBeUndefined();
+  });
+  it('QUI-995 F5: a released order is cancelled with the sale like draft and in_progress', async () => {
+    setup([{ id: 3, product_id: 50, status: 'released', planned_qty: 1, produced_qty: null }]);
+    await service.handleSaleCancelled({ order_id: 77, store_id: 1 });
+    expect(client.production_orders.updateMany).toHaveBeenCalledWith({
+      where: { id: { in: [3] }, status: { in: ['draft', 'in_progress', 'released'] } },
+      data: expect.objectContaining({ status: 'cancelled' }),
+    });
+    expect(slm.releaseReservationQuantity).not.toHaveBeenCalled();
+  });
+
+  it('QUI-995 F5: partially_completed applies the disposition to what was produced and cancels the rest', async () => {
+    setup([{ id: 4, product_id: 50, status: 'partially_completed', planned_qty: 5, produced_qty: 2 }]);
+    await service.handleSaleCancelled({ order_id: 77, store_id: 1, disposition: 'release' });
+    expect(slm.releaseReservationQuantity).toHaveBeenCalledWith('order', 77, 50, null, 2, 'cancelled', tx, { decrementOnHand: false });
+    expect(client.production_orders.updateMany).toHaveBeenCalledWith({
+      where: { id: { in: [4] }, status: 'partially_completed' },
+      data: expect.objectContaining({ status: 'cancelled' }),
+    });
+  });
+
+  it('QUI-995 F5: partially_completed with nothing produced releases nothing', async () => {
+    setup([{ id: 4, product_id: 50, status: 'partially_completed', planned_qty: 5, produced_qty: null }]);
+    await service.handleSaleCancelled({ order_id: 77, store_id: 1, disposition: 'waste' });
+    expect(slm.releaseReservationQuantity).not.toHaveBeenCalled();
+    expect(client.production_orders.updateMany).toHaveBeenCalled();
+  });
+
+  it('QUI-995 F4: a variant order releases and writes off ITS variant', async () => {
+    setup(
+      [{ ...completed, product_variant_id: 10, product: { name: 'Torta' } }],
+      [{ product_id: 50, product_variant_id: 10, notes: null, inventory_committed: false, order_item_options: [] }],
+    );
+    await service.handleSaleCancelled({ order_id: 77, store_id: 1, disposition: 'waste' });
+    expect(slm.releaseReservationQuantity).toHaveBeenCalledWith('order', 77, 50, 10, 3, 'consumed', tx, { decrementOnHand: false });
+    expect(slm.getDefaultLocationForProduct).toHaveBeenCalledWith(50, 10, tx);
+    expect(slm.updateStock).toHaveBeenCalledWith(
+      expect.objectContaining({ product_id: 50, variant_id: 10, quantity_change: -3, movement_type: 'damage' }),
+      tx,
+    );
   });
 });

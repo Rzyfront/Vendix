@@ -111,7 +111,7 @@ export class ScheduledOrderProductionService implements OnModuleInit {
           select: {
             production_orders: {
               where: { status: { not: 'cancelled' } },
-              select: { id: true, product_id: true, status: true },
+              select: { id: true, product_id: true, product_variant_id: true, status: true },
             },
           },
         },
@@ -129,7 +129,12 @@ export class ScheduledOrderProductionService implements OnModuleInit {
     const linkedOrders = new Map<number, { id: number; status: string }>();
     const isLinked = (item: (typeof items)[number]) => {
       if (item.fulfillment_destination !== 'production') return false;
-      const match = item.orders?.production_orders?.find((o) => o.product_id === item.product_id);
+      // One production order per product+variant: pair the line with ITS variant's order.
+      const match = item.orders?.production_orders?.find(
+        (o) =>
+          o.product_id === item.product_id &&
+          (o.product_variant_id ?? null) === (item.product_variant_id ?? null),
+      );
       if (match) linkedOrders.set(match.id, { id: match.id, status: match.status as string });
       return !!match;
     };
@@ -333,12 +338,13 @@ export class ScheduledOrderProductionService implements OnModuleInit {
             users: { select: { first_name: true, last_name: true } },
             production_orders: {
               where: { status: { not: 'cancelled' } },
-              select: { id: true, product_id: true, order_number: true, status: true },
+              select: { id: true, product_id: true, product_variant_id: true, order_number: true, status: true },
             },
             order_items: {
               where: { cancelled_at: null },
               select: {
                 product_id: true,
+                product_variant_id: true,
                 fulfillment_destination: true,
                 product_name: true,
                 variant_attributes: true,
@@ -383,7 +389,11 @@ export class ScheduledOrderProductionService implements OnModuleInit {
         items: s.order.order_items.map((item) => {
           const linked =
             item.fulfillment_destination === 'production'
-              ? (s.order.production_orders ?? []).find((o) => o.product_id === item.product_id)
+              ? (s.order.production_orders ?? []).find(
+                  (o) =>
+                    o.product_id === item.product_id &&
+                    (o.product_variant_id ?? null) === (item.product_variant_id ?? null),
+                )
               : undefined;
           return {
           production_order: linked
