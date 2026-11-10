@@ -457,6 +457,33 @@ describe('CheckoutService - promotions and coupons', () => {
       expect(orderArgs.remaining_balance).toBe(10000);
     });
 
+    it('QUI-995 B2 — si el pago no se registra, la venta cancelada cancela su producción', async () => {
+      jest.spyOn(RequestContextService, 'getUserId').mockReturnValue(undefined);
+      mockOrderCreate(10000);
+      prisma.orders.updateMany = jest.fn().mockResolvedValue({ count: 1 });
+      prisma.payments.create.mockRejectedValueOnce(new Error('db down'));
+      const emitter = (service as any).eventEmitter;
+      emitter.emitAsync = jest.fn().mockResolvedValue([]);
+
+      await expect(
+        service.checkout({
+          payment_method_id: 7,
+          items: [{ product_id: PRODUCT_BASE.id, quantity: 1 }],
+          guest_customer: { first_name: 'Invitado' },
+        } as any),
+      ).rejects.toThrow('db down');
+
+      expect(prisma.orders.updateMany).toHaveBeenCalledWith(
+        expect.objectContaining({ data: expect.objectContaining({ state: 'cancelled' }) }),
+      );
+      expect(emitter.emitAsync).toHaveBeenCalledWith('production.sale_cancelled', {
+        order_id: 1,
+        store_id: STORE_ID,
+        disposition: 'release',
+        reason: 'Pago no registrado',
+      });
+    });
+
     it('creates a guest checkout WITHOUT promotions (regression)', async () => {
       jest.spyOn(RequestContextService, 'getUserId').mockReturnValue(undefined);
       mockOrderCreate(10000);

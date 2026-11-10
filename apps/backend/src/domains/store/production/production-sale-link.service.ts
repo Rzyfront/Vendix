@@ -105,23 +105,25 @@ export class ProductionSaleLinkService {
       // releasing or writing off again would double count.
       const productLines = lines.filter((l) => l.product_id === order.product_id);
       if (productLines.length > 0 && productLines.every((l) => l.inventory_committed)) continue;
-      const quantity = Math.min(
+      const reserved = Math.min(
         Number(order.produced_qty ?? order.planned_qty),
         Math.round(Number(order.planned_qty)),
       );
-      if (quantity <= 0) continue;
+      if (reserved <= 0) continue;
       await client.$transaction(async (tx) => {
-        await this.stockLevelManager!.releaseReservationQuantity(
+        // Only what is STILL reserved can be released or written off: a line
+        // delivered on its own already consumed its share of the reservation.
+        const quantity = await this.stockLevelManager!.releaseReservationQuantity(
           'order',
           payload.order_id,
           order.product_id,
           null,
-          quantity,
+          reserved,
           disposition === 'waste' ? 'consumed' : 'cancelled',
           tx,
           { decrementOnHand: false },
         );
-        if (disposition !== 'waste') return;
+        if (disposition !== 'waste' || !(quantity > 0)) return;
         const location_id = await this.stockLevelManager!.getDefaultLocationForProduct(
           order.product_id,
           undefined,
@@ -265,6 +267,22 @@ export class ProductionSaleLinkService {
             continue;
           }
           result.push({ id: current.id });
+          // The line came back after its order was cancelled (removed and
+          // re-added, or cancelled from Planta): the unique (order_id,
+          // product_id) forbids a new row, so the cancelled one returns to draft.
+          if (current.status === 'cancelled') {
+            await tx.production_orders.updateMany({
+              where: { id: current.id, status: 'cancelled' },
+              data: {
+                status: 'draft',
+                planned_qty: new Prisma.Decimal(qty),
+                due_date,
+                started_at: null,
+                updated_at: new Date(),
+              },
+            });
+            continue;
+          }
           if (
             current.status === 'draft' &&
             (Number(current.planned_qty) !== qty ||

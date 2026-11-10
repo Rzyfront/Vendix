@@ -1,4 +1,7 @@
-import { requestProductionSaleSync } from '../../store/production/production-sale-sync';
+import {
+  PRODUCTION_SALE_CANCELLED_EVENT,
+  requestProductionSaleSync,
+} from '../../store/production/production-sale-sync';
 import { isSaleNature } from '../../store/products/services/product-usage-nature.util';
 import { Injectable, Optional } from '@nestjs/common';
 import { EcommercePrismaService } from '../../../prisma/services/ecommerce-prisma.service';
@@ -2867,6 +2870,19 @@ export class CheckoutService {
             ?.cancelForOrder(order.id, 'Pago no registrado')
             .catch(() => undefined);
         }
+        // QUI-995: the production orders created by the sync above follow the
+        // cancelled sale (nothing was produced yet: release).
+        await requestProductionSaleSync(
+          this.eventEmitter as any,
+          this.logger,
+          {
+            order_id: order.id,
+            store_id: order.store_id,
+            disposition: 'release',
+            reason: 'Pago no registrado',
+          },
+          PRODUCTION_SALE_CANCELLED_EVENT,
+        );
         throw error;
       });
     }

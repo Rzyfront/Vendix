@@ -127,6 +127,30 @@ describe('ProductionSaleLinkService (QUI-995)', () => {
     expect(client.$transaction).toHaveBeenCalledTimes(2);
   });
 
+  it('revives a cancelled order when its product comes back to the sale (QUI-995 B1)', async () => {
+    setup(
+      sale([{ id: 3, product_id: 50, quantity: 2 }]),
+      [{ id: 100, product_id: 50, status: 'cancelled', planned_qty: new Prisma.Decimal(1), due_date: start }],
+    );
+    const result = await service.ensureForOrder(77);
+    expect(result).toEqual([{ id: 100 }]);
+    expect(tx.production_orders.create).not.toHaveBeenCalled();
+    expect(tx.production_orders.updateMany).toHaveBeenCalledWith({
+      where: { id: 100, status: 'cancelled' },
+      data: expect.objectContaining({ status: 'draft', due_date: start, started_at: null }),
+    });
+    expect(Number(tx.production_orders.updateMany.mock.calls[0][0].data.planned_qty)).toBe(2);
+  });
+
+  it('leaves a cancelled order alone while its product is not in the sale', async () => {
+    setup(
+      sale([]),
+      [{ id: 100, product_id: 50, status: 'cancelled', planned_qty: new Prisma.Decimal(1), due_date: start }],
+    );
+    await service.ensureForOrder(77);
+    expect(tx.production_orders.updateMany).not.toHaveBeenCalled();
+  });
+
   it('requestProductionSaleSync swallows listener failures', async () => {
     const warn = jest.fn();
     await expect(
@@ -154,7 +178,7 @@ describe('ProductionSaleLinkService.handleSaleCancelled (QUI-995)', () => {
       $transaction: jest.fn(async (cb: any) => cb(tx)),
     };
     slm = {
-      releaseReservationQuantity: jest.fn().mockResolvedValue(0),
+      releaseReservationQuantity: jest.fn(async (...args: any[]) => args[4]),
       getDefaultLocationForProduct: jest.fn().mockResolvedValue(4),
       updateStock: jest.fn().mockResolvedValue({ cost_snapshot: { total_cost: 4500 } }),
     };
@@ -212,6 +236,29 @@ describe('ProductionSaleLinkService.handleSaleCancelled (QUI-995)', () => {
   it('completed + release: no accounting event (the goods stay in inventory)', async () => {
     setup([completed]);
     await service.handleSaleCancelled({ order_id: 77, store_id: 1, disposition: 'release' });
+    expect(emitter.emit).not.toHaveBeenCalled();
+  });
+
+  it('waste writes off only what was still reserved after a partial delivery (QUI-995 B3)', async () => {
+    setup([{ ...completed, planned_qty: 2, produced_qty: 2, product: { name: 'Torta' } }]);
+    slm.releaseReservationQuantity.mockResolvedValueOnce(1);
+    await service.handleSaleCancelled({ order_id: 77, store_id: 1, disposition: 'waste' });
+    expect(slm.updateStock).toHaveBeenCalledTimes(1);
+    expect(slm.updateStock).toHaveBeenCalledWith(
+      expect.objectContaining({ product_id: 50, quantity_change: -1, movement_type: 'damage' }),
+      tx,
+    );
+    expect(emitter.emit).toHaveBeenCalledWith(
+      'production.sale_waste',
+      expect.objectContaining({ production_order_id: 100, quantity: 1 }),
+    );
+  });
+
+  it('waste with nothing left reserved writes nothing off and emits nothing', async () => {
+    setup([completed]);
+    slm.releaseReservationQuantity.mockResolvedValueOnce(0);
+    await service.handleSaleCancelled({ order_id: 77, store_id: 1, disposition: 'waste' });
+    expect(slm.updateStock).not.toHaveBeenCalled();
     expect(emitter.emit).not.toHaveBeenCalled();
   });
 
