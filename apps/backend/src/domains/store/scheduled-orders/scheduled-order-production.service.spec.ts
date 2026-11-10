@@ -706,3 +706,117 @@ describe('ScheduledOrderProductionService — linked production orders (QUI-995)
     });
   });
 });
+
+describe('ScheduledOrderProductionService.start — live sync of started production orders', () => {
+  const linkedRow = {
+    id: 1,
+    product_id: 10,
+    product_variant_id: null,
+    quantity: 2,
+    inventory_consumed_at_fire: false,
+    inventory_committed: false,
+    addons_consumed_at: null,
+    fulfillment_destination: 'production',
+    products: { product_type: 'prepared' },
+    orders: {
+      production_orders: [
+        { id: 100, product_id: 10, product_variant_id: null, status: 'draft' },
+      ],
+    },
+    order_item_options: [],
+  };
+
+  function build(lines: unknown[], moved = 1, reload?: jest.Mock) {
+    const tx = {
+      order_items: {
+        findMany: jest.fn().mockResolvedValue(lines),
+        updateMany: jest.fn().mockResolvedValue({ count: 1 }),
+      },
+      production_orders: { updateMany: jest.fn().mockResolvedValue({ count: moved }) },
+      recipes: { findMany: jest.fn().mockResolvedValue([]) },
+    };
+    const findMany =
+      reload ??
+      jest.fn().mockResolvedValue([
+        {
+          id: 100,
+          store_id: 3,
+          order_id: 40,
+          status: 'in_progress',
+          started_at: new Date('2026-11-10T10:00:00Z'),
+          produced_at: null,
+          estimated_minutes: null,
+        },
+      ]);
+    const prisma = { withoutScope: jest.fn().mockReturnValue({ production_orders: { findMany } }) };
+    const eventEmitter = { emit: jest.fn() };
+    const service = new ScheduledOrderProductionService(
+      prisma as any,
+      { registerProductionStartHook: jest.fn() } as any,
+      { explodeBom: jest.fn() } as any,
+      { updateStock: jest.fn(), releaseReservationQuantity: jest.fn() } as any,
+      { resolveInventoryPolicy: jest.fn().mockResolvedValue({ allowIngredientOveruse: true }) } as any,
+      eventEmitter as any,
+      {} as any,
+    );
+    return { service, tx, eventEmitter, findMany };
+  }
+
+  const flush = () => new Promise((r) => setImmediate(r));
+
+  it('emits production_order.updated per moved order only after the commit callback runs', async () => {
+    const { service, tx, eventEmitter, findMany } = build([linkedRow]);
+    const after = await service.start(tx as any, { id: 7, store_id: 3, order_id: 40 });
+    await flush();
+    expect(eventEmitter.emit).not.toHaveBeenCalled();
+    expect(typeof after).toBe('function');
+    (after as () => void)();
+    await flush();
+    expect(findMany).toHaveBeenCalledWith(
+      expect.objectContaining({ where: { id: { in: [100] } } }),
+    );
+    expect(eventEmitter.emit).toHaveBeenCalledTimes(1);
+    expect(eventEmitter.emit).toHaveBeenCalledWith(
+      'production_order.updated',
+      expect.objectContaining({ id: 100, store_id: 3, order_id: 40, status: 'in_progress' }),
+    );
+  });
+
+  it('emits nothing when no draft moved', async () => {
+    const { service, tx, eventEmitter, findMany } = build([linkedRow], 0);
+    const after = await service.start(tx as any, { id: 7, store_id: 3, order_id: 40 });
+    if (typeof after === 'function') after();
+    await flush();
+    expect(findMany).not.toHaveBeenCalled();
+    expect(eventEmitter.emit).not.toHaveBeenCalled();
+  });
+
+  it('a failed reload never breaks the start nor the after callback', async () => {
+    const { service, tx, eventEmitter } = build([linkedRow], 1, jest.fn().mockRejectedValue(new Error('db down')));
+    const after = await service.start(tx as any, { id: 7, store_id: 3, order_id: 40 });
+    expect(() => (after as () => void)()).not.toThrow();
+    await flush();
+    expect(eventEmitter.emit).not.toHaveBeenCalled();
+  });
+
+  it('previous behaviour holds: scheduled_order.produced still fires from the same after callback', async () => {
+    const line = {
+      ...linkedRow,
+      fulfillment_destination: null,
+      orders: { production_orders: [] },
+      order_item_options: [
+        { scope: 'per_unit', component_type: 'ingredient', component_product_id: 700, component_variant_id: null, quantity: '80' },
+      ],
+    };
+    const { service, tx, eventEmitter } = build([line]);
+    const stock = (service as any).stockLevelManager;
+    stock.getDefaultLocationForProduct = jest.fn().mockResolvedValue(9);
+    stock.updateStock = jest.fn().mockResolvedValue({ cost_snapshot: { total_cost: 50 } });
+    const after = await service.start(tx as any, { id: 7, store_id: 3, order_id: 40 });
+    (after as () => void)();
+    expect(eventEmitter.emit).toHaveBeenCalledWith(
+      'scheduled_order.produced',
+      expect.objectContaining({ schedule_id: 7, total_cost: 50 }),
+    );
+  });
+});

@@ -35,6 +35,7 @@ import {
 } from '../../../services';
 import { ProductionSaleLinesComponent } from '../../../../restaurant-ops/production/components/production-sale-lines/production-sale-lines.component';
 import { ProductionOrdersService } from '../../../../restaurant-ops/production/services/production-orders.service';
+import { ProductionSseService } from '../../../../restaurant-ops/production/services/production-sse.service';
 import { ProductionOrder } from '../../../../restaurant-ops/production/interfaces/production-order.interface';
 import { CompleteOrderModalComponent } from '../../components/complete-order-modal/complete-order-modal.component';
 
@@ -63,6 +64,7 @@ export class OrderDetailPageComponent implements OnInit {
   private readonly route = inject(ActivatedRoute);
   private readonly router = inject(Router);
   private readonly destroyRef = inject(DestroyRef);
+  private readonly sse = inject(ProductionSseService);
 
   readonly order = signal<ManufacturingOrder | null>(null);
   readonly shortages = signal<ManufacturingShortage[]>([]);
@@ -142,6 +144,15 @@ export class OrderDetailPageComponent implements OnInit {
       return;
     }
     this.loadOrder(id);
+    // Only events of this order reload it, silently and never navigating away.
+    this.sse.listen(
+      this.destroyRef,
+      () => {
+        if (!this.isBusy()) this.loadOrder(id, true);
+      },
+      (event) => event.id === id,
+      'manufacturing',
+    );
     this.settingsService
       .get()
       .pipe(takeUntilDestroyed(this.destroyRef))
@@ -151,10 +162,10 @@ export class OrderDetailPageComponent implements OnInit {
       });
   }
 
-  loadOrder(id?: number): void {
+  loadOrder(id?: number, silent = false): void {
     const orderId = id ?? this.order()?.id;
     if (orderId == null) return;
-    this.isLoading.set(true);
+    if (!silent) this.isLoading.set(true);
     this.ordersService
       .getById(orderId)
       .pipe(takeUntilDestroyed(this.destroyRef))
@@ -166,10 +177,11 @@ export class OrderDetailPageComponent implements OnInit {
           this.loadSaleDetail(order);
         },
         error: (error) => {
+          this.isLoading.set(false);
+          if (silent) return;
           this.toastService.error(
             typeof error === 'string' ? error : 'No se pudo cargar la orden',
           );
-          this.isLoading.set(false);
           this.router.navigate([LIST_ROUTE]);
         },
       });

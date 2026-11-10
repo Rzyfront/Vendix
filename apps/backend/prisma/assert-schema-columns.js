@@ -99,6 +99,9 @@ const REQUIRED_COLUMNS = [
   // QUI-995 (migración 20261126090000): enlace de la orden de producción con
   // su venta; Prisma la selecciona en toda lectura de production_orders.
   'production_orders.order_id',
+  // QUI-1002 (migración 20261127090000): tiempo estimado editable por orden;
+  // Prisma la selecciona en toda lectura de production_orders.
+  'production_orders.estimated_minutes',
   // QUI-995 (migración 20261128090000): variante vendida que fabrica la orden.
   'production_orders.product_variant_id',
 

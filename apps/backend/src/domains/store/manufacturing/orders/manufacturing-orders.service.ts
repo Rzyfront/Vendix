@@ -1,9 +1,14 @@
-import { Injectable } from '@nestjs/common';
+import { Injectable, Logger } from '@nestjs/common';
+import { EventEmitter2 } from '@nestjs/event-emitter';
 import { Prisma } from '@prisma/client';
 import { RequestContextService } from '@common/context/request-context.service';
 import { StorePrismaService } from '../../../../prisma/services/store-prisma.service';
 import { VendixHttpException, ErrorCodes } from '../../../../common/errors';
 import { StockLevelManager } from '../../inventory/shared/services/stock-level-manager.service';
+import {
+  emitProductionOrderUpdated,
+  type ProductionOrderEventRow,
+} from '../../production/production-order-events';
 import { ProductionOrdersService } from '../../production/production-orders.service';
 import { FormulasService } from '../formulas/formulas.service';
 import { ManufacturingSettingsService } from '../settings/manufacturing-settings.service';
@@ -46,6 +51,8 @@ const EPS = 1e-9;
  */
 @Injectable()
 export class ManufacturingOrdersService {
+  private readonly logger = new Logger(ManufacturingOrdersService.name);
+
   constructor(
     private readonly prisma: StorePrismaService,
     private readonly productionOrders: ProductionOrdersService,
@@ -53,7 +60,20 @@ export class ManufacturingOrdersService {
     private readonly settingsService: ManufacturingSettingsService,
     private readonly sequences: OrderSequenceService,
     private readonly stockLevelManager: StockLevelManager,
+    // QUI-1002: live-sync emission after commit (optional: absent in unit setups).
+    private readonly eventEmitter?: EventEmitter2,
   ) {}
+
+  /** Reloads the committed order, emits `production_order.updated` and returns it. */
+  private async reloadAndEmit(id: number) {
+    const order = await this.loadOrder(id);
+    emitProductionOrderUpdated(
+      this.eventEmitter,
+      this.logger,
+      order as unknown as ProductionOrderEventRow,
+    );
+    return order;
+  }
 
   private requireStoreId(): number {
     const store_id = RequestContextService.getContext()?.store_id;
@@ -214,7 +234,7 @@ export class ManufacturingOrdersService {
         });
       },
     );
-    return this.loadOrder(created.id);
+    return this.reloadAndEmit(created.id);
   }
 
   // ----------------------------------------------------------------- update
@@ -265,7 +285,7 @@ export class ManufacturingOrdersService {
       }
       await tx.production_orders.update({ where: { id }, data });
     });
-    return this.loadOrder(id);
+    return this.reloadAndEmit(id);
   }
 
   // ------------------------------------------------------------- transitions
@@ -288,7 +308,7 @@ export class ManufacturingOrdersService {
       where: { id },
       data: { status: to, updated_at: new Date(), ...extra },
     });
-    return this.loadOrder(id);
+    return this.reloadAndEmit(id);
   }
 
   release(id: number) {
@@ -321,7 +341,7 @@ export class ManufacturingOrdersService {
       where: { id },
       data: { status: 'cancelled', updated_at: new Date() },
     });
-    return this.loadOrder(id);
+    return this.reloadAndEmit(id);
   }
 
   // --------------------------------------------------------------- shortages
@@ -457,7 +477,9 @@ export class ManufacturingOrdersService {
         },
       },
     );
-    return this.loadOrder(id);
+    // `ProductionOrdersService.complete` emits after its own commit; this one
+    // reloads the final row (status, produced_qty after onProduced) for the stream.
+    return this.reloadAndEmit(id);
   }
 
   /** Acumula consumo y costo por línea (planificado vs consumido). */

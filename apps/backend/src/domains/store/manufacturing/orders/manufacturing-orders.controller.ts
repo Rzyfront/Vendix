@@ -1,14 +1,20 @@
 import {
   Body,
   Controller,
+  ForbiddenException,
   Get,
   Param,
   ParseIntPipe,
   Patch,
   Post,
   Query,
+  Req,
+  Sse,
   UseGuards,
 } from '@nestjs/common';
+import { Request } from 'express';
+import { Observable } from 'rxjs';
+import { RequestContextService } from '@common/context/request-context.service';
 import { ResponseService } from '@common/responses/response.service';
 import { PermissionsGuard } from '../../../auth/guards/permissions.guard';
 import { Permissions } from '../../../auth/decorators/permissions.decorator';
@@ -21,6 +27,9 @@ import {
 } from '../dto';
 import { IndustryModuleGuard } from '../../../../common/guards/industry-module.guard';
 import { IndustryModule } from '../../../../common/decorators/industry-module.decorator';
+import { ProductionOrdersService } from '../../production/production-orders.service';
+import { ProductionSseService } from '../../production/production-sse.service';
+import { ProductionDayQueryDto } from '../../production/dto';
 
 /**
  * Órdenes de producción de manufactura.
@@ -34,7 +43,36 @@ export class ManufacturingOrdersController {
   constructor(
     private readonly ordersService: ManufacturingOrdersService,
     private readonly responseService: ResponseService,
+    private readonly productionOrders: ProductionOrdersService,
+    private readonly productionSse: ProductionSseService,
   ) {}
+
+  /**
+   * QUI-996 — the shared production list of one day, read from Planta. Same
+   * data as `store/production-orders/day`, but behind this controller's
+   * `manufacturing_orders` industry guard so a manufacturing store can use it.
+   */
+  @Get('day')
+  @Permissions('store:manufacturing:orders:read')
+  async findDay(@Query() query: ProductionDayQueryDto) {
+    const result = await this.productionOrders.findDay(query);
+    return this.responseService.success(result, 'Lista de producción del día obtenida');
+  }
+
+  /**
+   * QUI-1002 — live production stream for Planta (same events as
+   * `store/production-orders/stream`). Only `@Req()`: EventSource sends
+   * `?token=` and a query DTO would reject it.
+   */
+  @Sse('stream')
+  @Permissions('store:manufacturing:orders:read')
+  stream(@Req() req: Request): Observable<MessageEvent> {
+    const store_id = RequestContextService.getContext()?.store_id;
+    if (!store_id) {
+      throw new ForbiddenException('Store context required');
+    }
+    return this.productionSse.stream(store_id, req);
+  }
 
   @Get()
   @Permissions('store:manufacturing:orders:read')

@@ -16,6 +16,10 @@ import {
   StockDemandLine,
   type InsufficientStockItem,
 } from '../inventory/shared/services/stock-validator.service';
+import {
+  emitProductionOrderUpdated,
+  type ProductionOrderEventRow,
+} from './production-order-events';
 import { RequestContextService } from '../../../common/context/request-context.service';
 import { lockOrderLifecycle } from '../orders/order-flow/order-lifecycle-lock.util';
 import {
@@ -26,12 +30,17 @@ import {
   resolveStoreTimezone,
   localCivil,
   zonedWallClockToUtc,
+  localDateString,
+  dateOnlyString,
+  resolveLocalDateRange,
+  resolveLocalDateOnlyRange,
 } from '../../../common/utils/store-timezone.util';
 import {
   CreateProductionOrderDto,
   UpdateProductionOrderDto,
   CompleteProductionOrderDto,
   ProductionOrderQueryDto,
+  ProductionDayQueryDto,
 } from './dto';
 
 /**
@@ -228,6 +237,22 @@ export class ProductionOrdersService {
   }
 
   // ------------------------------------------------------------------ create
+  /** QUI-1002 — live-sync emission, always AFTER the DB write; never throws. */
+  private emitUpdated(row: unknown): void {
+    emitProductionOrderUpdated(this.eventEmitter, this.logger, row as ProductionOrderEventRow);
+  }
+
+  /** Effective estimated minutes: per-order override, else the product's preparation time. */
+  private withEstimate<T extends { estimated_minutes?: number | null; product?: unknown }>(row: T) {
+    const prep = (row.product as { preparation_time_minutes?: number | null } | null | undefined)
+      ?.preparation_time_minutes;
+    return {
+      ...row,
+      estimated_minutes: row.estimated_minutes ?? null,
+      effective_estimated_minutes: row.estimated_minutes ?? prep ?? null,
+    };
+  }
+
   async create(dto: CreateProductionOrderDto) {
     const context = RequestContextService.getContext();
     const store_id = context?.store_id;
@@ -303,6 +328,7 @@ export class ProductionOrdersService {
       // body lean. No-op here; the controller can call update() if needed.
     }
 
+    this.emitUpdated(created);
     return created;
   }
 
@@ -390,6 +416,7 @@ export class ProductionOrdersService {
             sku: true,
             stock_unit: true,
             is_batch_produced: true,
+            preparation_time_minutes: true,
           },
         },
         recipe: {
@@ -420,7 +447,7 @@ export class ProductionOrdersService {
       throw new VendixHttpException(ErrorCodes.PRODUCTION_ORDER_NOT_FOUND);
     }
 
-    return order;
+    return this.withEstimate(order);
   }
 
   // ------------------------------------------------------------------- start
@@ -436,10 +463,76 @@ export class ProductionOrdersService {
         },
       );
     }
-    return this.prisma.production_orders.update({
-      where: { id },
-      data: { status: 'in_progress', updated_at: new Date() },
+    // Atomic claim: two screens starting the same order cannot both win.
+    const now = new Date();
+    const claimed = await this.prisma.production_orders.updateMany({
+      where: { id, status: 'draft' },
+      data: { status: 'in_progress', started_at: now, updated_at: now },
     });
+    if (claimed.count !== 1) {
+      throw new VendixHttpException(
+        ErrorCodes.PRODUCTION_ORDER_INVALID_STATE,
+        undefined,
+        {
+          from: order.status,
+          to: 'in_progress',
+        },
+      );
+    }
+    const started = await this.findOne(id);
+    this.emitUpdated(started);
+    return started;
+  }
+
+  // ------------------------------------------------------- sale card (QUI-1002)
+  /** Moves every `from` order of one sale through the individual `move(id)`. */
+  private async moveSaleOrders(
+    sale_order_id: number,
+    from: 'draft' | 'in_progress',
+    move: (order: { id: number; planned_qty: unknown }) => Promise<unknown>,
+  ) {
+    const store_id = RequestContextService.getContext()?.store_id;
+    if (!store_id) {
+      throw new VendixHttpException(ErrorCodes.STORE_CONTEXT_001);
+    }
+    const orders = await this.prisma.production_orders.findMany({
+      where: { order_id: sale_order_id, store_id },
+      select: { id: true, status: true, planned_qty: true },
+      orderBy: { id: 'asc' },
+    });
+    const result = {
+      moved: [] as number[],
+      skipped: [] as number[],
+      failed: [] as { id: number; message: string }[],
+    };
+    for (const order of orders) {
+      if (order.status !== from) {
+        result.skipped.push(order.id);
+        continue;
+      }
+      try {
+        await move(order);
+        result.moved.push(order.id);
+      } catch (error) {
+        result.failed.push({
+          id: order.id,
+          message: error instanceof Error ? error.message : String(error),
+        });
+      }
+    }
+    return result;
+  }
+
+  /** Starts every draft production order of the sale (one card = one sale). */
+  startSale(sale_order_id: number) {
+    return this.moveSaleOrders(sale_order_id, 'draft', (o) => this.start(o.id));
+  }
+
+  /** Completes every in-progress order of the sale with produced_qty = planned_qty. */
+  completeSale(sale_order_id: number) {
+    return this.moveSaleOrders(sale_order_id, 'in_progress', (o) =>
+      this.complete(o.id, { produced_qty: Number(o.planned_qty) }),
+    );
   }
 
   // ----------------------------------------------------------------- complete
@@ -790,6 +883,8 @@ export class ProductionOrdersService {
         (err as Error).stack,
       );
     }
+
+    this.emitUpdated({ store_id, ...updated.order });
 
     // QUI-995 F1: the sale was finished BEFORE this production completed, so its
     // `order.completed` COGS entry did not include these units (the commit skips
@@ -1241,10 +1336,12 @@ export class ProductionOrdersService {
         },
       );
     }
-    return this.prisma.production_orders.update({
+    const cancelled = await this.prisma.production_orders.update({
       where: { id },
       data: { status: 'cancelled', updated_at: new Date() },
     });
+    this.emitUpdated(cancelled);
+    return cancelled;
   }
 
   // ------------------------------------------------------------------- patch
@@ -1261,13 +1358,170 @@ export class ProductionOrdersService {
         },
       );
     }
-    return this.prisma.production_orders.update({
+    const edited = await this.prisma.production_orders.update({
       where: { id },
-      data: { updated_at: new Date() },
+      data: {
+        ...(dto.estimated_minutes !== undefined && {
+          estimated_minutes: dto.estimated_minutes,
+        }),
+        updated_at: new Date(),
+      },
     });
+    this.emitUpdated(edited);
+    return edited;
   }
 
   // ------------------------------------------------------------------- stats
+  // ------------------------------------------------------------- day (QUI-996)
+  /**
+   * The production list of ONE day (store timezone), shared by Pedidos
+   * programados, Operaciones → Producción and Planta.
+   *
+   * Day membership: an order linked to a sale belongs to the day of its
+   * delivery instant (`due_date`, set by the sale link); a manual / Planta
+   * order to its planned date (`due_date` is a DATE-ONLY value there, stored
+   * as naive midnight) or, without one, to its creation day. An order still
+   * `in_progress` from an earlier day stays on every later day until it is
+   * finished (multi-day production). Cancelled orders never show.
+   *
+   * One card per sale (all its production orders) or per manual order; cards
+   * carried over from earlier days first, then by their timeline time
+   * (delivery for sales, creation for manual orders).
+   */
+  async findDay(query: ProductionDayQueryDto) {
+    const context = RequestContextService.getContext();
+    const store_id = context?.store_id;
+    if (!store_id) {
+      throw new VendixHttpException(ErrorCodes.STORE_CONTEXT_001);
+    }
+    const timezone = await resolveStoreTimezone(this.prisma, store_id);
+    const date = query?.date ?? localDateString(new Date(), timezone);
+    const range = { date_from: date, date_to: date };
+    const local = resolveLocalDateRange(range, timezone);
+    const naive = resolveLocalDateOnlyRange(range, timezone);
+
+    const rows = await this.prisma.production_orders.findMany({
+      where: {
+        status: { not: 'cancelled' },
+        OR: [
+          { order_id: { not: null }, due_date: { gte: local.startDate, lte: local.endDate } },
+          { order_id: null, due_date: { gte: naive.startDate, lte: naive.endDate } },
+          { due_date: null, created_at: { gte: local.startDate, lte: local.endDate } },
+          { status: 'in_progress', order_id: { not: null }, due_date: { lt: local.startDate } },
+          { status: 'in_progress', order_id: null, due_date: { lt: naive.startDate } },
+          { status: 'in_progress', due_date: null, created_at: { lt: local.startDate } },
+        ],
+      },
+      select: {
+        id: true,
+        order_number: true,
+        status: true,
+        source: true,
+        product_id: true,
+        planned_qty: true,
+        produced_qty: true,
+        started_at: true,
+        produced_at: true,
+        due_date: true,
+        created_at: true,
+        order_id: true,
+        estimated_minutes: true,
+        product: { select: { name: true, preparation_time_minutes: true } },
+        sale_order: {
+          select: {
+            order_number: true,
+            customer_alias: true,
+            users: { select: { first_name: true, last_name: true } },
+          },
+        },
+      },
+      orderBy: [{ due_date: 'asc' }, { created_at: 'asc' }, { id: 'asc' }],
+      take: 500,
+    });
+
+    type Row = (typeof rows)[number];
+    const iso = (value: Date | null | undefined) => (value ? value.toISOString() : null);
+    // Calendar day an order belongs to (same rule as the filter above).
+    const dayOf = (r: Row): string => {
+      if (r.order_id != null && r.due_date) return localDateString(r.due_date, timezone);
+      if (r.order_id == null && r.due_date) return dateOnlyString(r.due_date);
+      return localDateString(r.created_at, timezone);
+    };
+    // Time the order anchors on the timeline: delivery for a sale, creation
+    // for a manual order (its planned date has no time of day).
+    const anchorOf = (r: Row): Date =>
+      r.order_id != null && r.due_date ? r.due_date : r.created_at;
+    const bucket = (status: string): 'waiting' | 'in_progress' | 'completed' =>
+      status === 'completed' ? 'completed' : status === 'in_progress' ? 'in_progress' : 'waiting';
+
+    const groups = new Map<string, Row[]>();
+    for (const r of rows) {
+      const key = r.order_id != null ? `sale-${r.order_id}` : `po-${r.id}`;
+      const list = groups.get(key) ?? [];
+      list.push(r);
+      groups.set(key, list);
+    }
+
+    const summary = { waiting: 0, in_progress: 0, completed: 0 };
+    for (const r of rows) summary[bucket(r.status as string)] += 1;
+
+    const cards = [...groups.entries()].map(([key, list]) => {
+      const first = list[0];
+      const anchor = list.map(anchorOf).reduce((a, b) => (b < a ? b : a));
+      const buckets = list.map((r) => bucket(r.status as string));
+      const status: 'waiting' | 'in_progress' | 'completed' = buckets.every((b) => b === 'completed')
+        ? 'completed'
+        : buckets.some((b) => b === 'in_progress') || buckets.some((b) => b === 'completed')
+          ? 'in_progress'
+          : 'waiting';
+      const customer = first.sale_order?.users;
+      const customer_name = first.sale_order
+        ? (customer ? `${customer.first_name ?? ''} ${customer.last_name ?? ''}`.trim() : '') ||
+          first.sale_order.customer_alias?.trim() ||
+          null
+        : null;
+      return {
+        key,
+        kind: (first.order_id != null ? 'sale' : 'manual') as 'sale' | 'manual',
+        order_id: first.order_id ?? null,
+        sale_order_number: first.sale_order?.order_number ?? null,
+        customer_name,
+        due_at: anchor.toISOString(),
+        status,
+        carried_over: list.some((r) => dayOf(r) < date),
+        production_orders: list.map((r) => ({
+          id: r.id,
+          order_number: r.order_number,
+          status: r.status,
+          source: r.source ?? null,
+          product_id: r.product_id,
+          product_name: r.product?.name ?? `#${r.product_id}`,
+          planned_qty: Number(r.planned_qty),
+          produced_qty: r.produced_qty == null ? null : Number(r.produced_qty),
+          started_at: iso(r.started_at),
+          produced_at: iso(r.produced_at),
+          estimated_minutes: r.estimated_minutes ?? null,
+          effective_estimated_minutes:
+            r.estimated_minutes ?? r.product?.preparation_time_minutes ?? null,
+          due_date: iso(r.due_date),
+          created_at: r.created_at.toISOString(),
+        })),
+        _anchor: anchor.getTime(),
+      };
+    });
+
+    cards.sort((a, b) =>
+      a.carried_over !== b.carried_over ? (a.carried_over ? -1 : 1) : a._anchor - b._anchor,
+    );
+
+    return {
+      date,
+      timezone,
+      summary,
+      cards: cards.map(({ _anchor, ...card }) => card),
+    };
+  }
+
   async getStats() {
     const context = RequestContextService.getContext();
     const store_id = context?.store_id;

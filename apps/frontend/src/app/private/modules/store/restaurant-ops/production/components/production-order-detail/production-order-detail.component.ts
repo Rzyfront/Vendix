@@ -21,7 +21,7 @@ import {
 } from '../../../../../../../shared/components';
 import { formatStockWarningSummary } from '../../../../../../../core/utils/stock-shortage.util';
 import { ProductionOrder, ProductionOrderComponent } from '../../interfaces';
-import { ProductionOrdersService } from '../../services';
+import { ProductionOrdersService, ProductionSseService } from '../../services';
 import { formatYieldQuantity } from '../../services/yield-unit.util';
 import { ProductionSaleLinesComponent } from '../production-sale-lines/production-sale-lines.component';
 
@@ -151,6 +151,7 @@ export class ProductionOrderDetailComponent {
   private readonly toast = inject(ToastService);
   private readonly dialog = inject(DialogService);
   private readonly destroyRef = inject(DestroyRef);
+  private readonly sse = inject(ProductionSseService);
 
   readonly orderId = input<number | null>(null);
   /** Emitted after start / complete / cancel so hosts refresh their lists. */
@@ -178,6 +179,15 @@ export class ProductionOrderDetailComponent {
         if (id != null) this.load(id);
       });
     });
+    // Only events of the order on screen reload it (and silently).
+    this.sse.listen(
+      this.destroyRef,
+      () => {
+        const id = this.orderId();
+        if (id != null && !this.busy()) this.load(id);
+      },
+      (event) => event.id === this.orderId(),
+    );
   }
 
   statusLabel = ProductionOrdersService.statusLabelSafe;

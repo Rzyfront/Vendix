@@ -34,7 +34,7 @@ import {
   ProductionOrderStatus,
   ProductionOrderStats,
 } from '../../interfaces';
-import { ProductionOrdersService } from '../../services';
+import { ProductionOrdersService, ProductionSseService } from '../../services';
 import { formatYieldQuantity } from '../../services/yield-unit.util';
 import { formatDateOnlyUTC } from '../../../../../../../shared/utils/date.util';
 import { formatStockWarningSummary } from '../../../../../../../core/utils/stock-shortage.util';
@@ -64,6 +64,7 @@ export class ProductionOrdersListPageComponent implements OnInit {
   private readonly dialogService = inject(DialogService);
   private readonly router = inject(Router);
   private readonly destroyRef = inject(DestroyRef);
+  private readonly sse = inject(ProductionSseService);
 
   readonly orders = signal<ProductionOrder[]>([]);
   readonly stats = signal<ProductionOrderStats>({
@@ -256,10 +257,15 @@ export class ProductionOrdersListPageComponent implements OnInit {
   ngOnInit(): void {
     this.loadOrders();
     this.loadStats();
+    // Another screen (or device) moved an order: refresh without a spinner.
+    this.sse.listen(this.destroyRef, () => {
+      this.loadOrders(true);
+      this.loadStats();
+    });
   }
 
-  loadOrders(): void {
-    this.isLoading.set(true);
+  loadOrders(silent = false): void {
+    if (!silent) this.isLoading.set(true);
 
     const query: Record<string, unknown> = {
       page: this.filters().page,
@@ -343,6 +349,9 @@ export class ProductionOrdersListPageComponent implements OnInit {
     switch (action) {
       case 'create':
         this.createOrder();
+        break;
+      case 'day':
+        this.router.navigate(['/admin/restaurant-ops/production/day']);
         break;
       case 'refresh':
         this.loadOrders();

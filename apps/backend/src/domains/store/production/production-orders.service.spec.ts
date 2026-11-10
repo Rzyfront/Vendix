@@ -248,6 +248,17 @@ describe('ProductionOrdersService — complete() (Fase C smoke)', () => {
     // (e) result is the updated order
     expect(result.status).toBe('completed');
 
+    // (f0) QUI-1002: the live-sync event goes out after the commit
+    expect(eventEmitter.emit).toHaveBeenCalledWith(
+      'production_order.updated',
+      expect.objectContaining({
+        type: 'production_order.updated',
+        id: 100,
+        status: 'completed',
+        store_id: 1,
+      }),
+    );
+
     // (f) production.completed event was emitted once
     expect(eventEmitter.emit).toHaveBeenCalledWith(
       'production.completed',
@@ -964,7 +975,9 @@ describe('ProductionOrdersService — sale-linked orders (QUI-995)', () => {
     // 2 per unit x 3 units
     expect(addonCall).toMatchObject({ movement_type: 'consumption', quantity_change: -6, location_id: 1 });
     // recipe line (5) + add-on (5) = 10 -> one production.completed with the joint cost
-    expect(eventEmitter.emit).toHaveBeenCalledTimes(1);
+    expect(
+      eventEmitter.emit.mock.calls.filter((c: unknown[]) => c[0] === 'production.completed'),
+    ).toHaveLength(1);
     expect(eventEmitter.emit).toHaveBeenCalledWith(
       'production.completed',
       expect.objectContaining({ production_order_id: 100, total_cost: 10, consumed_line_count: 2 }),
@@ -1130,7 +1143,9 @@ describe('ProductionOrdersService — sale-linked orders (QUI-995)', () => {
     expect(tx.order_items.findMany).not.toHaveBeenCalled();
     expect(tx.orders.findFirst).not.toHaveBeenCalled();
     expect(stock.reserveStock).not.toHaveBeenCalled();
-    expect(eventEmitter.emit).toHaveBeenCalledTimes(1);
+    expect(
+      eventEmitter.emit.mock.calls.filter((c: unknown[]) => c[0] === 'production.completed'),
+    ).toHaveLength(1);
   });
 
   it('manual order still enforces whole recipe batches', async () => {

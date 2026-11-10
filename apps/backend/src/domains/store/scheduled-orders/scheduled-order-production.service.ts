@@ -23,6 +23,7 @@ import { StockValidatorService } from '../inventory/shared/services/stock-valida
 import { KitchenFireService } from '../kitchen-fire/kitchen-fire.service';
 import { ScheduledOrdersService, kitchenPendingItemsWhere } from './scheduled-orders.service';
 import { findProductionOrderForLine } from '../production/production-order-pairing.util';
+import { emitProductionOrderUpdated } from '../production/production-order-events';
 
 /** Production order of a sale line, as the agenda query selects it. */
 type LinkedProductionOrder = {
@@ -223,12 +224,19 @@ export class ScheduledOrderProductionService implements OnModuleInit {
     const { lines, linked } = await this.loadLines(tx, schedule.store_id, schedule.order_id);
     // QUI-995: linked production orders start together with the schedule.
     const drafts = linked.filter((o) => o.status === 'draft').map((o) => o.id);
+    let startedIds: number[] = [];
     if (drafts.length) {
-      await tx.production_orders.updateMany({
+      const { count } = await tx.production_orders.updateMany({
         where: { id: { in: drafts }, status: 'draft' },
         data: { status: 'in_progress', started_at: new Date(), updated_at: new Date() },
       });
+      if (count > 0) startedIds = drafts;
     }
+    // Live sync (QUI-1002): runs only after the commit, never breaks the start.
+    const emitStarted = () => {
+      if (!startedIds.length) return;
+      void this.emitStartedProductionOrders(startedIds);
+    };
     // Same marker as the kitchen fire: each line claims its add-ons before they
     // are deducted, so the fire and the start never both take them.
     for (const line of lines) {
@@ -252,7 +260,7 @@ export class ScheduledOrderProductionService implements OnModuleInit {
       resolvers.explode,
       resolvers.explodeComponent,
     );
-    if (!consumption.length && !consumed_line_ids.length) return;
+    if (!consumption.length && !consumed_line_ids.length) return startedIds.length ? emitStarted : undefined;
 
     const policy = await this.stockValidator.resolveInventoryPolicy(schedule.store_id, tx);
     const allowOveruse = policy.allowIngredientOveruse;
@@ -307,6 +315,7 @@ export class ScheduledOrderProductionService implements OnModuleInit {
 
     // El asiento se emite tras el commit (ver `ScheduledOrdersService.transition`).
     return () => {
+      emitStarted();
       if (total_cost <= 0) return;
       this.eventEmitter.emit('scheduled_order.produced', {
         schedule_id: schedule.id,
@@ -318,6 +327,34 @@ export class ScheduledOrderProductionService implements OnModuleInit {
         user_id: ctx?.user_id ?? undefined,
       });
     };
+  }
+
+  /** Reloads the started orders and emits `production_order.updated`; never throws. */
+  private async emitStartedProductionOrders(ids: number[]): Promise<void> {
+    try {
+      const rows = await this.prisma.withoutScope().production_orders.findMany({
+        where: { id: { in: ids } },
+        select: {
+          id: true,
+          store_id: true,
+          order_id: true,
+          status: true,
+          started_at: true,
+          produced_at: true,
+          estimated_minutes: true,
+        },
+        orderBy: { id: 'asc' },
+      });
+      for (const row of rows) {
+        emitProductionOrderUpdated(this.eventEmitter, this.logger, row);
+      }
+    } catch (error) {
+      this.logger.warn(
+        `production_order.updated reload failed: ${
+          error instanceof Error ? error.message : String(error)
+        }`,
+      );
+    }
   }
 
   /**

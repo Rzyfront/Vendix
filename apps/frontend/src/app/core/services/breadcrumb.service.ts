@@ -783,6 +783,12 @@ export class BreadcrumbService {
       parent: 'Tienda',
       icon: 'clipboard-list',
     },
+    {
+      path: '/admin/scheduled-orders/production/insumos',
+      title: 'Insumos consolidados',
+      parent: 'Lista de producción',
+      icon: 'clipboard-list',
+    },
 
     // Restaurante (QUI-997)
     {
@@ -802,6 +808,19 @@ export class BreadcrumbService {
       title: 'Producción',
       parent: 'Restaurante',
       icon: 'chef-hat',
+    },
+    // QUI-996: shared "Lista de producción" and "Producción activa" (QUI-1002).
+    {
+      path: '/admin/restaurant-ops/production/day',
+      title: 'Lista de producción',
+      parent: 'Producción',
+      icon: 'clipboard-list',
+    },
+    {
+      path: '/admin/restaurant-ops/production/active',
+      title: 'Producción activa',
+      parent: 'Producción',
+      icon: 'flame',
     },
     {
       path: '/admin/restaurant-ops/kds',
@@ -940,6 +959,19 @@ export class BreadcrumbService {
       title: 'Órdenes de producción',
       parent: 'Manufactura',
       icon: 'factory',
+    },
+    // QUI-996: static paths that would otherwise match '/admin/manufacturing/orders/:id'.
+    {
+      path: '/admin/manufacturing/orders/day',
+      title: 'Lista de producción',
+      parent: 'Órdenes de producción',
+      icon: 'clipboard-list',
+    },
+    {
+      path: '/admin/manufacturing/orders/active',
+      title: 'Producción activa',
+      parent: 'Órdenes de producción',
+      icon: 'flame',
     },
     {
       path: '/admin/manufacturing/orders/new',

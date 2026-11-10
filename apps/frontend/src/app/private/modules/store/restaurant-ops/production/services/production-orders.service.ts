@@ -3,6 +3,7 @@ import { HttpClient, HttpParams } from '@angular/common/http';
 import { Observable, throwError } from 'rxjs';
 import { catchError, map } from 'rxjs/operators';
 import { environment } from '../../../../../../../environments/environment';
+import type { ProductionApiScope } from './production-sse.service';
 import {
   ProductionOrder,
   CreateProductionOrderDto,
@@ -10,6 +11,8 @@ import {
   ProductionOrderQuery,
   ProductionOrderStats,
   ProductionOrderStatus,
+  ProductionDayResponse,
+  ProductionSaleMoveResult,
 } from '../interfaces';
 
 interface ApiResponse<T> {
@@ -98,6 +101,27 @@ export class ProductionOrdersService {
       );
   }
 
+  /**
+   * T14: production list of one day (YYYY-MM-DD in the store timezone).
+   * Planta reads it through its own controller (`manufacturing` scope).
+   */
+  getDay(
+    date: string,
+    scope: ProductionApiScope = 'restaurant',
+  ): Observable<ProductionDayResponse> {
+    const params = new HttpParams().set('date', date);
+    const base = scope === 'manufacturing' ? '/store/manufacturing/orders' : this.basePath;
+    return this.http
+      .get<ApiResponse<ProductionDayResponse>>(
+        `${this.apiUrl}${base}/day`,
+        { params },
+      )
+      .pipe(
+        map((res) => res.data),
+        catchError(this.handleError),
+      );
+  }
+
   create(dto: CreateProductionOrderDto): Observable<ProductionOrder> {
     return this.http
       .post<ApiResponse<ProductionOrder>>(
@@ -141,6 +165,48 @@ export class ProductionOrdersService {
     return this.http
       .post<ApiResponse<ProductionOrder>>(
         `${this.apiUrl}${this.basePath}/${id}/cancel`,
+        {},
+      )
+      .pipe(
+        map((res) => res.data),
+        catchError(this.handleError),
+      );
+  }
+
+  /** QUI-1002: per-order estimated minutes override (null clears it). */
+  updateEstimatedMinutes(
+    id: number,
+    minutes: number | null,
+  ): Observable<ProductionOrder> {
+    return this.http
+      .patch<ApiResponse<ProductionOrder>>(
+        `${this.apiUrl}${this.basePath}/${id}`,
+        { estimated_minutes: minutes },
+      )
+      .pipe(
+        map((res) => res.data),
+        catchError(this.handleError),
+      );
+  }
+
+  /** QUI-1002: starts every `draft` order of one sale card. */
+  startSale(orderId: number): Observable<ProductionSaleMoveResult> {
+    return this.http
+      .post<ApiResponse<ProductionSaleMoveResult>>(
+        `${this.apiUrl}${this.basePath}/sale/${orderId}/start`,
+        {},
+      )
+      .pipe(
+        map((res) => res.data),
+        catchError(this.handleError),
+      );
+  }
+
+  /** QUI-1002: finishes every `in_progress` order of one sale card. */
+  completeSale(orderId: number): Observable<ProductionSaleMoveResult> {
+    return this.http
+      .post<ApiResponse<ProductionSaleMoveResult>>(
+        `${this.apiUrl}${this.basePath}/sale/${orderId}/complete`,
         {},
       )
       .pipe(

@@ -375,4 +375,74 @@ describe('ManufacturingOrdersService', () => {
       expect(result[0].missing).toBe(0);
     });
   });
+  describe('live-sync events (QUI-1002)', () => {
+    let emitter: { emit: jest.Mock };
+    let live: ManufacturingOrdersService;
+    const events = () =>
+      emitter.emit.mock.calls.filter((c) => c[0] === 'production_order.updated').map((c) => c[1]);
+
+    beforeEach(() => {
+      emitter = { emit: jest.fn() };
+      live = new ManufacturingOrdersService(
+        prisma,
+        production as any,
+        formulas as any,
+        settings as any,
+        sequences as any,
+        stockLevelManager as any,
+        emitter as any,
+      );
+    });
+
+    it('create emits the new draft after the transaction', async () => {
+      await live.create({ recipe_id: 7, planned_qty: 10 });
+      expect(events()).toEqual([
+        expect.objectContaining({ type: 'production_order.updated', store_id: 1, id: 1, status: 'draft' }),
+      ]);
+    });
+
+    it('release and start emit the new status; start carries started_at', async () => {
+      order = baseOrder({ status: 'draft' });
+      await live.release(1);
+      order = baseOrder({ status: 'released', started_at: new Date('2026-11-10T15:00:00Z') });
+      await live.start(1);
+      expect(events().map((e) => e.status)).toEqual(['draft', 'released']);
+      expect(events()[1].started_at).toBe('2026-11-10T15:00:00.000Z');
+    });
+
+    it('cancel and update emit the order', async () => {
+      order = baseOrder({ status: 'draft' });
+      await live.cancel(1);
+      await live.update(1, { notes: 'x' } as any);
+      expect(events()).toHaveLength(2);
+    });
+
+    it('a rejected transition emits nothing and an emission failure never breaks the operation', async () => {
+      order = baseOrder({ status: 'draft' });
+      await expect(live.start(1)).rejects.toBeDefined();
+      expect(events()).toEqual([]);
+
+      emitter.emit.mockImplementation(() => {
+        throw new Error('bus down');
+      });
+      await expect(live.release(1)).resolves.toBeDefined();
+    });
+
+    it('a partial completion emits the reloaded order after the engine commit', async () => {
+      order = baseOrder({ status: 'in_progress' });
+      production.complete.mockImplementation(async () => {
+        order = baseOrder({ status: 'partially_completed', produced_qty: new Prisma.Decimal(4) });
+        return {};
+      });
+      await live.complete(1, { produced_qty: 4 });
+      expect(events()).toEqual([
+        expect.objectContaining({ id: 1, status: 'partially_completed', store_id: 1 }),
+      ]);
+    });
+
+    it('works without an emitter (previous behavior)', async () => {
+      order = baseOrder({ status: 'draft' });
+      await expect(service.release(1)).resolves.toBeDefined();
+    });
+  });
 });

@@ -10,7 +10,15 @@ import {
   ParseIntPipe,
   HttpCode,
   HttpStatus,
+  ForbiddenException,
+  Req,
+  Sse,
+  MessageEvent,
 } from '@nestjs/common';
+import { Request } from 'express';
+import { Observable } from 'rxjs';
+import { RequestContextService } from '@common/context/request-context.service';
+import { ProductionSseService } from './production-sse.service';
 import { ResponseService } from '@common/responses/response.service';
 import { PermissionsGuard } from '../../auth/guards/permissions.guard';
 import { Permissions } from '../../auth/decorators/permissions.decorator';
@@ -20,6 +28,7 @@ import {
   UpdateProductionOrderDto,
   CompleteProductionOrderDto,
   ProductionOrderQueryDto,
+  ProductionDayQueryDto,
 } from './dto';
 import { IndustryModuleGuard } from '../../../common/guards/industry-module.guard';
 import { IndustryModule } from '../../../common/decorators/industry-module.decorator';
@@ -44,6 +53,7 @@ export class ProductionOrdersController {
   constructor(
     private readonly productionOrdersService: ProductionOrdersService,
     private readonly responseService: ResponseService,
+    private readonly sseService: ProductionSseService,
   ) {}
 
   // NOTE: estos handlers NO usan try/catch a propósito. Las excepciones de
@@ -84,6 +94,46 @@ export class ProductionOrdersController {
       result,
       'Estadísticas de producción obtenidas',
     );
+  }
+
+  /** QUI-996 — production list of one day (static path before `:id`). */
+  @Get('day')
+  @Permissions('store:production_orders:read', 'store:manufacturing:orders:read')
+  async findDay(@Query() query: ProductionDayQueryDto) {
+    const result = await this.productionOrdersService.findDay(query);
+    return this.responseService.success(result, 'Lista de producción del día obtenida');
+  }
+
+  /**
+   * QUI-1002 — live production stream (static path before `:id`). Same pattern
+   * as the KDS stream: only `@Req()` and NO query DTO, because EventSource can
+   * only authenticate through `?token=` and the global ValidationPipe
+   * (`forbidNonWhitelisted`) would reject it and tear the stream down.
+   */
+  @Sse('stream')
+  @Permissions('store:production_orders:read', 'store:manufacturing:orders:read')
+  stream(@Req() req: Request): Observable<MessageEvent> {
+    const store_id = RequestContextService.getContext()?.store_id;
+    if (!store_id) {
+      throw new ForbiddenException('Store context required');
+    }
+    return this.sseService.stream(store_id, req);
+  }
+
+  /** QUI-1002 — start every draft production order of one sale (static path before `:id`). */
+  @Post('sale/:orderId/start')
+  @Permissions('store:production_orders:update')
+  async startSale(@Param('orderId', ParseIntPipe) orderId: number) {
+    const result = await this.productionOrdersService.startSale(orderId);
+    return this.responseService.success(result, 'Producción de la venta iniciada');
+  }
+
+  /** QUI-1002 — complete every in-progress production order of one sale. */
+  @Post('sale/:orderId/complete')
+  @Permissions('store:production_orders:update')
+  async completeSale(@Param('orderId', ParseIntPipe) orderId: number) {
+    const result = await this.productionOrdersService.completeSale(orderId);
+    return this.responseService.success(result, 'Producción de la venta finalizada');
   }
 
   @Get(':id')

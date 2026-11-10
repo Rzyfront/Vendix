@@ -86,6 +86,9 @@ export interface ProductionOrder {
   produced_qty?: number | string | null;
   status: ProductionOrderStatus;
   produced_at?: string | Date | null;
+  started_at?: string | Date | null;
+  /** QUI-1002: per-order estimated minutes override. */
+  estimated_minutes?: number | null;
   created_at: string | Date;
   updated_at: string | Date;
 
@@ -166,4 +169,72 @@ export interface ProductionProductOption {
   stock_unit?: string | null;
   is_batch_produced?: boolean;
   product_type?: 'physical' | 'service' | 'prepared';
+}
+
+/**
+ * T14 (QUI-996): "Lista de producción" of one day. One card per sale or per
+ * manual production order; the card status is derived server-side.
+ */
+export type ProductionDayCardStatus = 'waiting' | 'in_progress' | 'completed';
+
+export interface ProductionDayOrder {
+  id: number;
+  order_number: string;
+  /** `released` only appears on manufacturing orders. */
+  status: ProductionOrderStatus | 'released';
+  source: string | null;
+  product_id: number;
+  product_name: string;
+  planned_qty: number;
+  produced_qty: number | null;
+  started_at: string | null;
+  produced_at: string | null;
+  due_date: string | null;
+  created_at: string;
+  /** QUI-1002: per-order override of the estimated minutes (null = none). */
+  estimated_minutes: number | null;
+  /** `estimated_minutes ?? product preparation time`; null = count up. */
+  effective_estimated_minutes: number | null;
+}
+
+export interface ProductionDayCard {
+  /** 'sale-<order_id>' | 'po-<id>' */
+  key: string;
+  kind: 'sale' | 'manual';
+  order_id: number | null;
+  sale_order_number: string | null;
+  customer_name: string | null;
+  /** ISO; the delivery / planned time of the card. */
+  due_at: string | null;
+  status: ProductionDayCardStatus;
+  /** In-progress order carried over from a previous day (multi-day). */
+  carried_over: boolean;
+  production_orders: ProductionDayOrder[];
+}
+
+export interface ProductionDayResponse {
+  /** YYYY-MM-DD in the store timezone. */
+  date: string;
+  timezone: string;
+  summary: { waiting: number; in_progress: number; completed: number };
+  cards: ProductionDayCard[];
+}
+
+/** QUI-1002: result of moving every order of a sale card (start / complete). */
+export interface ProductionSaleMoveResult {
+  moved: number[];
+  skipped: number[];
+  failed: { id: number; message: string }[];
+}
+
+/** QUI-1002: message of `GET /store/production-orders/stream` (SSE). */
+export interface ProductionStreamEvent {
+  type: 'production_order.updated';
+  store_id: number;
+  id: number;
+  order_id: number | null;
+  status: string;
+  started_at: string | null;
+  produced_at: string | null;
+  estimated_minutes: number | null;
 }

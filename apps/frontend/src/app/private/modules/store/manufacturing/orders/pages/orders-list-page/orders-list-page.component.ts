@@ -40,6 +40,7 @@ import {
   ManufacturingFormulasService,
   ManufacturingOrdersService,
 } from '../../../services';
+import { ProductionSseService } from '../../../../restaurant-ops/production/services/production-sse.service';
 
 const STATUSES = Object.keys(ORDER_STATUS_LABELS) as ManufacturingOrderStatus[];
 
@@ -64,6 +65,7 @@ export class OrdersListPageComponent implements OnInit {
   private readonly toastService = inject(ToastService);
   private readonly router = inject(Router);
   private readonly destroyRef = inject(DestroyRef);
+  private readonly sse = inject(ProductionSseService);
 
   readonly orders = signal<ManufacturingOrder[]>([]);
   readonly filters = signal({ page: 1, limit: 10 });
@@ -210,6 +212,8 @@ export class OrdersListPageComponent implements OnInit {
   ngOnInit(): void {
     this.loadProductOptions();
     this.loadOrders();
+    // Another screen (or device) moved an order: refresh without a spinner.
+    this.sse.listen(this.destroyRef, () => this.loadOrders(true), undefined, 'manufacturing');
   }
 
   private loadProductOptions(): void {
@@ -229,8 +233,8 @@ export class OrdersListPageComponent implements OnInit {
       });
   }
 
-  loadOrders(): void {
-    this.isLoading.set(true);
+  loadOrders(silent = false): void {
+    if (!silent) this.isLoading.set(true);
     const query: ManufacturingOrderQuery = {
       page: this.filters().page,
       limit: this.filters().limit,
@@ -302,6 +306,7 @@ export class OrdersListPageComponent implements OnInit {
 
   onActionClick(action: string): void {
     if (action === 'create') this.createOrder();
+    if (action === 'day') this.router.navigate(['/admin/manufacturing/orders/day']);
     if (action === 'refresh') this.loadOrders();
   }
 

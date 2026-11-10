@@ -25,6 +25,33 @@ export const productionOrdersRoutes: Routes = [
     data: { permission: 'store:production_orders:read' },
   },
   {
+    // T14 (QUI-996): shared "Lista de producción" of one day. Static path,
+    // declared before any `:id` route.
+    path: 'day',
+    loadComponent: () =>
+      import(
+        '../components/production-day-list/production-day-list.component'
+      ).then((c) => c.ProductionDayListComponent),
+    data: {
+      permission: 'store:production_orders:read',
+      detailBase: '/admin/restaurant-ops/production/orders',
+      activeBase: '/admin/restaurant-ops/production/active',
+    },
+  },
+  {
+    // QUI-1002: shared "Producción activa". Static path, declared before any `:id` route.
+    path: 'active',
+    loadComponent: () =>
+      import(
+        '../components/production-active/production-active.component'
+      ).then((c) => c.ProductionActiveComponent),
+    data: {
+      permission: 'store:production_orders:read',
+      detailBase: '/admin/restaurant-ops/production/orders',
+      listBase: '/admin/restaurant-ops/production/day',
+    },
+  },
+  {
     path: 'new',
     loadComponent: () =>
       import(

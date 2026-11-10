@@ -10,6 +10,7 @@ import {
   type ProductionSaleCancelledPayload,
   type ProductionSaleSyncPayload,
 } from './production-sale-sync';
+import { emitProductionOrderUpdated } from './production-order-events';
 import { suggestProductionDisposition } from './production-disposition.util';
 
 const CLOSED_SALE_STATES = ['cancelled', 'refunded'];
@@ -41,10 +42,47 @@ export class ProductionSaleLinkService {
   ) {}
 
   /**
-   * The sale was cancelled: draft/in-progress orders are cancelled; a COMPLETED
-   * order keeps its finished goods, which either go back to sellable stock
-   * (`release`) or are written off (`waste`). Never throws: the cancellation
-   * has already committed, so a failure is logged for follow-up.
+   * QUI-1002 — live-sync emission AFTER the commit, from the committed rows.
+   * A reload or emission failure is logged and never breaks the sync.
+   */
+  private async emitCommitted(
+    client: ReturnType<StorePrismaService['withoutScope']>,
+    ids: number[],
+  ): Promise<void> {
+    if (!this.eventEmitter || ids.length === 0) return;
+    try {
+      const rows = await client.production_orders.findMany({
+        where: { id: { in: ids } },
+        select: {
+          id: true,
+          store_id: true,
+          order_id: true,
+          status: true,
+          started_at: true,
+          produced_at: true,
+          estimated_minutes: true,
+        },
+        orderBy: { id: 'asc' },
+      });
+      for (const row of rows) {
+        emitProductionOrderUpdated(this.eventEmitter, this.logger, row);
+      }
+    } catch (error) {
+      this.logger.warn(
+        `production_order.updated reload failed: ${
+          error instanceof Error ? error.message : String(error)
+        }`,
+      );
+    }
+  }
+
+  /**
+   * The sale was cancelled: orders with nothing produced (draft, in progress,
+   * released) are cancelled. A COMPLETED order keeps its finished goods, which
+   * either go back to sellable stock (`release`) or are written off (`waste`);
+   * a PARTIALLY completed one gets that disposition over what it produced and
+   * is cancelled. Never throws: the cancellation has already committed, so a
+   * failure is logged for follow-up.
    */
   @OnEvent(PRODUCTION_SALE_CANCELLED_EVENT)
   async onSaleCancelled(payload: ProductionSaleCancelledPayload): Promise<void> {
@@ -84,6 +122,7 @@ export class ProductionSaleLinkService {
         where: { id: { in: open.map((o) => o.id) }, status: { in: [...OPEN_PRODUCTION_STATES] } },
         data: { status: 'cancelled', updated_at: new Date() },
       });
+      await this.emitCommitted(client, open.map((o) => o.id));
     }
 
     // partially_completed: what WAS produced is credited and reserved like a
@@ -95,6 +134,7 @@ export class ProductionSaleLinkService {
         where: { id: { in: partial.map((o) => o.id) }, status: 'partially_completed' },
         data: { status: 'cancelled', updated_at: new Date() },
       });
+      await this.emitCommitted(client, partial.map((o) => o.id));
     }
 
     const completed = linked.filter(
@@ -279,7 +319,8 @@ export class ProductionSaleLinkService {
     };
 
     try {
-      return await client.$transaction(async (tx) => {
+      const touched = new Set<number>();
+      const result = await client.$transaction(async (tx) => {
         const existing = await tx.production_orders.findMany({
           where: { store_id: sale.store_id, order_id: sale.id },
           select: {
@@ -324,6 +365,7 @@ export class ProductionSaleLinkService {
               select: { id: true },
             });
             result.push(created);
+            touched.add(created.id);
             continue;
           }
           result.push({ id: current.id });
@@ -342,6 +384,7 @@ export class ProductionSaleLinkService {
                 updated_at: new Date(),
               },
             });
+            touched.add(current.id);
             continue;
           }
           if (
@@ -357,6 +400,7 @@ export class ProductionSaleLinkService {
                 updated_at: new Date(),
               },
             });
+            touched.add(current.id);
           }
         }
 
@@ -371,9 +415,12 @@ export class ProductionSaleLinkService {
             where: { id: current.id, status: 'draft' },
             data: { status: 'cancelled', updated_at: new Date() },
           });
+          touched.add(current.id);
         }
         return result;
       });
+      await this.emitCommitted(client, [...touched]);
+      return result;
     } catch (error) {
       // Two concurrent ensures can race on the (order_id, product_id, product_variant_id) unique:
       // the loser re-reads and finds the winner's row.

@@ -56,6 +56,37 @@ export const manufacturingRoutes: Routes = [
     data: { permission: 'store:manufacturing:orders:read' },
   },
   {
+    // T14 (QUI-996): shared "Lista de producción" of one day. Static path,
+    // declared before `orders/:id`.
+    path: 'orders/day',
+    loadComponent: () =>
+      import(
+        '../../restaurant-ops/production/components/production-day-list/production-day-list.component'
+      ).then((c) => c.ProductionDayListComponent),
+    data: {
+      permission: 'store:manufacturing:orders:read',
+      detailBase: '/admin/manufacturing/orders',
+      activeBase: '/admin/manufacturing/orders/active',
+      manageInline: false,
+      apiScope: 'manufacturing',
+    },
+  },
+  {
+    // QUI-1002: shared "Producción activa". Static path, declared before `orders/:id`.
+    path: 'orders/active',
+    loadComponent: () =>
+      import(
+        '../../restaurant-ops/production/components/production-active/production-active.component'
+      ).then((c) => c.ProductionActiveComponent),
+    data: {
+      permission: 'store:manufacturing:orders:read',
+      detailBase: '/admin/manufacturing/orders',
+      listBase: '/admin/manufacturing/orders/day',
+      manageInline: false,
+      apiScope: 'manufacturing',
+    },
+  },
+  {
     path: 'orders/new',
     loadComponent: () =>
       import('../orders/pages/order-form-page/order-form-page.component').then(
