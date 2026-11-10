@@ -997,6 +997,24 @@ describe('ProductionOrdersService — sale-linked orders (QUI-995)', () => {
     expect(stock.reserveStock).toHaveBeenCalledWith(50, undefined, 1, 3, 'order', 77, 42, false, tx);
   });
 
+  it('gate #1132: a partially completed order (Planta) cannot be finished from the restaurant endpoint -> PRODUCTION_ORDER_INVALID_STATE and nothing moves', async () => {
+    setup({ order: linkedOrder({ status: 'partially_completed', produced_qty: new Prisma.Decimal(2) }) });
+    await expect(service.complete(100, { produced_qty: 3 })).rejects.toMatchObject({
+      errorCode: 'PRODUCTION_ORDER_INVALID_STATE',
+    });
+    expect(prismaMock.$transaction).not.toHaveBeenCalled();
+    expect(stock.updateStock).not.toHaveBeenCalled();
+    expect(stock.reserveStock).not.toHaveBeenCalled();
+    expect(eventEmitter.emit).not.toHaveBeenCalled();
+  });
+
+  it('gate #1132: Planta still finishes its partially completed order through complete() (sourceModule manufacturing)', async () => {
+    setup({ order: linkedOrder({ status: 'partially_completed', produced_qty: new Prisma.Decimal(2) }) });
+    const result = await service.complete(100, { produced_qty: 1 }, { sourceModule: 'manufacturing' });
+    expect(result.status).toBe('completed');
+    expect(stock.updateStock).toHaveBeenCalled();
+  });
+
   it('sale already delivered: sells what was produced through the delivery commit and reserves nothing', async () => {
     setup({ sale: { id: 77, state: 'delivered' }, pendingLines: [{ id: 501 }, { id: 502 }] });
     await service.complete(100, { produced_qty: 3 });

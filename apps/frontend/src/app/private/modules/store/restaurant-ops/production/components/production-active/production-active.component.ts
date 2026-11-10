@@ -40,6 +40,8 @@ import {
   ProductionDayResponse,
   ProductionOrder,
   ProductionSaleMoveResult,
+  PLANTA_ORDER_DETAIL_BASE,
+  finishesInPlanta,
   isProductionRunning,
 } from '../../interfaces';
 import {
@@ -641,6 +643,10 @@ export class ProductionActiveComponent {
 
   async completeOrder(po: ProductionDayOrder): Promise<void> {
     if (this.busyKey() !== null) return;
+    if (finishesInPlanta(po.status)) {
+      void this.router.navigate([PLANTA_ORDER_DETAIL_BASE, po.id]);
+      return;
+    }
     if (!this.manageInline || po.source !== 'order') {
       // Planta finishes with lot and quantity on its detail page; restaurant
       // manual orders count whole batches in the shared detail modal.

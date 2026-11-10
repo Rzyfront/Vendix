@@ -10,6 +10,7 @@ import {
   signal,
   untracked,
 } from '@angular/core';
+import { Router } from '@angular/router';
 import { takeUntilDestroyed } from '@angular/core/rxjs-interop';
 import {
   BadgeComponent,
@@ -22,7 +23,9 @@ import {
 import { formatStockWarningSummary } from '../../../../../../../core/utils/stock-shortage.util';
 import {
   ProductionOrder,
+  PLANTA_ORDER_DETAIL_BASE,
   ProductionOrderComponent,
+  finishesInPlanta,
   isProductionRunning,
 } from '../../interfaces';
 import { ProductionOrdersService, ProductionSseService } from '../../services';
@@ -161,6 +164,7 @@ export class ProductionOrderDetailComponent {
   private readonly dialog = inject(DialogService);
   private readonly destroyRef = inject(DestroyRef);
   private readonly sse = inject(ProductionSseService);
+  private readonly router = inject(Router);
 
   readonly orderId = input<number | null>(null);
   /** Emitted after start / complete / cancel so hosts refresh their lists. */
@@ -258,6 +262,10 @@ export class ProductionOrderDetailComponent {
   async complete(): Promise<void> {
     const o = this.order();
     if (!o || this.busy()) return;
+    if (finishesInPlanta(o.status)) {
+      void this.router.navigate([PLANTA_ORDER_DETAIL_BASE, o.id]);
+      return;
+    }
     const name = this.displayName() || `#${o.id}`;
 
     if (o.source === 'order') {

@@ -20,6 +20,16 @@ export type ProductionOrderStatus =
 export const isProductionRunning = (status: string): boolean =>
   status === 'in_progress' || status === 'partially_completed';
 
+/**
+ * A partially finished order only exists in Planta, whose detail knows what is
+ * left to produce, the lot and the locations. The restaurant `complete`
+ * endpoint rejects it, so "Finalizar" opens the Planta detail instead.
+ */
+export const finishesInPlanta = (status: string): boolean =>
+  status === 'partially_completed';
+
+export const PLANTA_ORDER_DETAIL_BASE = '/admin/manufacturing/orders';
+
 export interface ProductionOrderProduct {
   id: number;
   name: string;

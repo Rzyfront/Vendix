@@ -35,6 +35,8 @@ import {
   ProductionDayOrder,
   ProductionDayResponse,
   ProductionOrder,
+  PLANTA_ORDER_DETAIL_BASE,
+  finishesInPlanta,
   isProductionRunning,
 } from '../../interfaces';
 import {
@@ -512,6 +514,10 @@ export class ProductionDayListComponent {
 
   async completeOrder(po: ProductionDayOrder): Promise<void> {
     if (this.processingId() !== null) return;
+    if (finishesInPlanta(po.status)) {
+      void this.router.navigate([PLANTA_ORDER_DETAIL_BASE, po.id]);
+      return;
+    }
     if (po.source !== 'order') {
       // Manual orders count whole batches of the recipe; that prompt lives in
       // the shared detail, so the action opens it instead of guessing.

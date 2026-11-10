@@ -554,7 +554,14 @@ export class ProductionOrdersService {
     // `store_id` (not just the request context) so the resolved policy is
     // always tied to the store that owns the recipe/stock being consumed.
     const store_id = (order as { store_id: number }).store_id;
-    if (order.status === 'completed' || order.status === 'cancelled') {
+    // `partially_completed` is a Planta state: only ManufacturingOrdersService
+    // knows what is left (it caps at planned − produced and accumulates the
+    // real cost). From the restaurant endpoint the full planned quantity would
+    // be produced and consumed again, so that order finishes in Planta.
+    const plantaOnly =
+      order.status === 'partially_completed' &&
+      options?.sourceModule !== 'manufacturing';
+    if (order.status === 'completed' || order.status === 'cancelled' || plantaOnly) {
       throw new VendixHttpException(
         ErrorCodes.PRODUCTION_ORDER_INVALID_STATE,
         undefined,
