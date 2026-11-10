@@ -1,4 +1,5 @@
 import { KitchenFireService } from './kitchen-fire.service';
+import { RequestContextService } from '../../../common/context/request-context.service';
 
 jest.mock('../orders/order-flow/order-flow.service', () => ({
   OrderFlowService: class OrderFlowService {},
@@ -287,6 +288,72 @@ describe('KitchenFireService — add-ons (QUI-1000)', () => {
       // A dish without add-ons keeps its payload and gets an empty list.
       expect(ticket.items[1].addons).toEqual([]);
       expect(ticket.items[1].order_item).toEqual({ is_takeaway: true });
+    });
+  });
+
+  describe('remake por merma', () => {
+    const item = (id: number, cancellation_type: string) => ({
+      id, product_id: DISH, product_name: 'Torta', quantity: 2, product_variant_id: null, notes: null,
+      inventory_consumed_at_fire: true, cancellation_type, cancelled_at: new Date('2026-09-23T10:00:00Z'),
+      products: { id: DISH, kds_id: null }, product_variants: null,
+    });
+
+    function resendHarness(items: any[], reason: 'remake_dish' | 'lost_command') {
+      const { service, tx, stockLevelManager } = build();
+      // Stateful claim: the marker is already set from the first fire, and a
+      // reset by the resend clears it.
+      let addonsMarked = true;
+      const state = { reset: false };
+      tx.$queryRaw = jest.fn().mockResolvedValue([{ id: 100 }]);
+      tx.orders.findFirst.mockResolvedValue({ id: 100, state: 'cancelled' });
+      (tx as any).kitchen_ticket_items = { ...tx.kitchen_ticket_items, findFirst: jest.fn().mockResolvedValue(null) };
+      tx.order_items.updateMany.mockImplementation(({ where, data }: any) => {
+        if (data?.addons_consumed_at === null) {
+          addonsMarked = false;
+          state.reset = true;
+          return Promise.resolve({ count: where.id.in.length });
+        }
+        if (where?.addons_consumed_at === null) {
+          if (addonsMarked) return Promise.resolve({ count: 0 });
+          addonsMarked = true;
+          return Promise.resolve({ count: 1 });
+        }
+        return Promise.resolve({ count: Array.isArray(where?.id?.in) ? where.id.in.length : 1 });
+      });
+      const order = { id: 100, store_id: 1, order_number: 'ORD-100', table_sessions: [], order_items: items };
+      const prisma: any = {
+        stores: { findUnique: jest.fn().mockResolvedValue({ industries: ['restaurant'] }) },
+        orders: { findFirst: jest.fn().mockResolvedValue(order), findUnique: jest.fn().mockResolvedValue({ state: 'cancelled' }) },
+        kds: { findFirst: jest.fn().mockResolvedValue({ id: 5 }) },
+        store_settings: { findFirst: jest.fn().mockResolvedValue(null) },
+        kitchen_tickets: { findMany: jest.fn().mockResolvedValue([]) },
+        kitchen_ticket_items: { findMany: jest.fn().mockResolvedValue([]) },
+        $transaction: jest.fn((fn: (t: any) => Promise<unknown>) => fn(tx)),
+      };
+      (service as any).prisma = prisma;
+      jest.spyOn(RequestContextService, 'getContext').mockReturnValue({ store_id: 1, organization_id: 2, user_id: 3 } as any);
+      jest.spyOn(service as any, 'getBusinessDate').mockResolvedValue('2026-09-23');
+      jest.spyOn(service, 'prepareFireContext').mockResolvedValue(context([addon()]) as any);
+      return { service, tx, stockLevelManager, state, run: () => service.resendOrderItems({ order_id: 100, order_item_ids: items.map((i) => i.id), reason }) };
+    }
+
+    it('rehacer un plato por merma vuelve a descontar sus adiciones', async () => {
+      const { tx, stockLevelManager, run } = resendHarness([item(10, 'after_fire_waste')], 'remake_dish');
+      await run();
+      expect(tx.order_items.updateMany).toHaveBeenCalledWith({
+        where: { id: { in: [10] } },
+        data: { addons_consumed_at: null },
+      });
+      expect(moves(stockLevelManager)).toContainEqual([700, -160, 10]);
+    });
+
+    it('un plato reusado (no merma) no reinicia el marcador de adiciones', async () => {
+      const { tx, state, run } = resendHarness([item(10, 'after_fire_reused')], 'remake_dish');
+      await run();
+      expect(state.reset).toBe(false);
+      expect(tx.order_items.updateMany).not.toHaveBeenCalledWith(
+        expect.objectContaining({ data: { addons_consumed_at: null } }),
+      );
     });
   });
 });
