@@ -1125,4 +1125,19 @@ describe('ProductionOrdersService — sale-linked orders (QUI-995)', () => {
     expect(detail.sale_order).toBeNull();
     expect(detail.order_lines).toEqual([]);
   });
+
+  it('getDetail survives an image signing failure: the detail loads and that image is null', async () => {
+    prismaMock.production_orders.findFirst.mockResolvedValue(linkedOrder({ order_id: null }));
+    prismaMock.products.findMany.mockResolvedValue([
+      { id: 99, product_images: [{ image_url: 'k/harina.png' }] },
+    ]);
+    (service as any).s3Service.signUrl = jest.fn().mockRejectedValue(new Error('S3 down'));
+
+    const detail: any = await service.getDetail(100);
+
+    expect(detail.base_recipe.components).toEqual([
+      { product_id: 99, name: 'Harina', quantity: 10, unit: 'g', image_url: null },
+    ]);
+    expect(detail.sale_order).toBeNull();
+  });
 });

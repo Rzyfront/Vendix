@@ -1050,7 +1050,21 @@ export class ProductionOrdersService {
     await Promise.all(
       rows.map(async (row) => {
         const key = row.product_images?.[0]?.image_url ?? null;
-        out.set(row.id, key && this.s3Service ? ((await this.s3Service.signUrl(key)) ?? null) : null);
+        if (!key || !this.s3Service) {
+          out.set(row.id, null);
+          return;
+        }
+        // A thumbnail is decoration: a signing failure must not fail the detail.
+        try {
+          out.set(row.id, (await this.s3Service.signUrl(key)) ?? null);
+        } catch (error) {
+          this.logger.warn(
+            `Could not sign image of product #${row.id}: ${
+              error instanceof Error ? error.message : String(error)
+            }`,
+          );
+          out.set(row.id, null);
+        }
       }),
     );
     return out;
