@@ -449,8 +449,11 @@ export class ProductionDayListComponent {
         this.loading.set(false);
       },
       error: (err: unknown) => {
-        this.errorMessage.set(typeof err === 'string' ? err : 'Error al cargar la lista de producción');
         this.loading.set(false);
+        // A background refresh (live event, polling tick, after an action) that
+        // fails keeps the list on screen: the next event or tick retries.
+        if (!resetView && this.data()) return;
+        this.errorMessage.set(typeof err === 'string' ? err : 'Error al cargar la lista de producción');
       },
     });
   }

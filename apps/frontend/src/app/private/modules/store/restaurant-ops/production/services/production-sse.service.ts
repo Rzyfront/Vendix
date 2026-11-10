@@ -55,8 +55,13 @@ export const PRODUCTION_RELOAD_DEBOUNCE_MS = 300;
 @Injectable({ providedIn: 'root' })
 export class ProductionSseService implements OnDestroy {
   private readonly apiUrl = environment.apiUrl;
-  /** Scope of the open connection; set by the first listener (both streams carry the same events). */
+  /** Scope of the open connection (both streams carry the same events). */
   private scope: ProductionApiScope = 'restaurant';
+  /** Listeners per scope, so the connection follows the scope that can pass its guard. */
+  private readonly scopeListeners: Record<ProductionApiScope, number> = {
+    restaurant: 0,
+    manufacturing: 0,
+  };
 
   private readonly signalsSubject = new Subject<ProductionStreamSignal>();
   /** Raw stream of events and refresh signals. */
@@ -104,15 +109,22 @@ export class ProductionSseService implements OnDestroy {
 
   /** Reference-counted connection. Returns the idempotent release function. */
   acquire(scope: ProductionApiScope = 'restaurant'): () => void {
-    if (this.listeners === 0) this.scope = scope;
+    this.scopeListeners[scope] += 1;
     this.listeners += 1;
-    if (this.listeners === 1) this.connect();
+    if (this.listeners === 1) {
+      this.scope = this.desiredScope();
+      this.connect();
+    } else {
+      this.syncScope();
+    }
     let released = false;
     return () => {
       if (released) return;
       released = true;
+      this.scopeListeners[scope] = Math.max(0, this.scopeListeners[scope] - 1);
       this.listeners = Math.max(0, this.listeners - 1);
       if (this.listeners === 0) this.disconnect();
+      else this.syncScope();
     };
   }
 
@@ -130,6 +142,26 @@ export class ProductionSseService implements OnDestroy {
   }
 
   // ─── private ─────────────────────────────────────────────────────────
+
+  /**
+   * Planta wins while any of its pages listens: a manufacturing listener only
+   * mounts in a store with Planta, whose stream passes its own industry guard
+   * (a manufacturing-only store fails the restaurant one) and carries the same
+   * events.
+   */
+  private desiredScope(): ProductionApiScope {
+    return this.scopeListeners.manufacturing > 0 ? 'manufacturing' : 'restaurant';
+  }
+
+  /** Reopens the shared stream on the desired scope; consumers reconcile once it opens. */
+  private syncScope(): void {
+    const desired = this.desiredScope();
+    if (desired === this.scope) return;
+    this.scope = desired;
+    this.disconnect();
+    this.hadGap = true;
+    this.connect();
+  }
 
   private connect(): void {
     if (this.destroyed) return;

@@ -539,10 +539,13 @@ export class ProductionActiveComponent {
         this.scrollToOldestRunning(date, res);
       },
       error: (err: unknown) => {
+        this.loading.set(false);
+        // A background refresh (live event, polling tick, after an action) that
+        // fails keeps the board on screen: the next event or tick retries.
+        if (!resetView && this.data()) return;
         this.errorMessage.set(
           typeof err === 'string' ? err : 'Error al cargar la producción activa',
         );
-        this.loading.set(false);
       },
     });
   }
@@ -699,8 +702,8 @@ export class ProductionActiveComponent {
     let minutes: number | null = null;
     if (text !== '') {
       minutes = Number(text);
-      if (!Number.isInteger(minutes) || minutes < 0) {
-        this.toast.error('El tiempo estimado debe ser un número entero de minutos, 0 o más');
+      if (!Number.isInteger(minutes) || minutes < 0 || minutes > 10080) {
+        this.toast.error('El tiempo estimado debe ser un número entero de minutos, entre 0 y 10080 (7 días)');
         return;
       }
     }

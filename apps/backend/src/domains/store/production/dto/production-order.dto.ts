@@ -58,12 +58,14 @@ export class UpdateProductionOrderDto {
 
   /**
    * QUI-1002 — per-order estimated minutes (override of the product
-   * preparation time). `null` clears the override.
+   * preparation time). `null` clears the override. Same range as the
+   * product's `preparation_time_minutes` (up to 7 days).
    */
   @IsOptional()
   @ValidateIf((_, value) => value !== null)
   @IsInt()
   @Min(0)
+  @Max(10080)
   estimated_minutes?: number | null;
 }
 
