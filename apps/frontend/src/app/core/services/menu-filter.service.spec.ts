@@ -853,6 +853,8 @@ describe('MenuFilterService.canSeeKey / applyAccessGate (apps-f4 S4)', () => {
       expect(service.canSeeKey(key))
         .withContext(key)
         .toEqual(jasmine.objectContaining({ allowed: false, layer: 'industry' }));
+      // "Ocultar siempre": the industry rule ignores the audit mode.
+      expect(isIndustryAlwaysEnforced(key)).withContext(key).toBeTrue();
     }
     industries.set(['restaurant']);
     expect(service.canSeeKey('orders_scheduled').allowed).toBeTrue();

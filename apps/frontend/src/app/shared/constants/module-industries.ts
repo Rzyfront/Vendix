@@ -375,6 +375,10 @@ export const ENFORCED_INDUSTRY_KEYS: readonly string[] = [
   'documents_expiring',
   'documents_retention',
   'documents_templates',
+  // QUI-1001: Adiciones and scheduled orders are restaurant-only, hidden
+  // outside restaurant whatever the gate mode. Hiding never deletes data.
+  'orders_scheduled',
+  'products_option_groups',
 ];
 
 /** `true` when the industry rule of `key` ignores the audit mode. */
