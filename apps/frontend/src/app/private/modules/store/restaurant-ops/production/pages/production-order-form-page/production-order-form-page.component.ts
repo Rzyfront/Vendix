@@ -35,6 +35,7 @@ import {
 } from '../../../../../../../shared/components/product-profile/index';
 
 import { ProductionOrdersService } from '../../services';
+import { formatYieldQuantity } from '../../services/yield-unit.util';
 import { CreateProductionOrderDto } from '../../interfaces';
 import { ProductsService } from '../../../../products/services/products.service';
 import {
@@ -163,10 +164,10 @@ export class ProductionOrderFormPageComponent implements OnInit {
     }
     const units = this.plannedUnits();
     const unit = recipe.yield_unit || 'unidades';
-    const perBatch = `La receta rinde ${this.recipeYield()} ${unit} por tanda`;
+    const perBatch = `La receta rinde ${formatYieldQuantity(this.recipeYield(), unit)} por tanda`;
     return units == null
       ? `${perBatch}.`
-      : `${perBatch} · se producirán ${units} ${unit}.`;
+      : `${perBatch} · se producirán ${formatYieldQuantity(units, unit)}.`;
   });
 
   readonly form: FormGroup<ProductionFormControls> = this.fb.group<ProductionFormControls>({

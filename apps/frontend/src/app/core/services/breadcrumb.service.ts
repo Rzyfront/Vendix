@@ -755,6 +755,72 @@ export class BreadcrumbService {
       parent: 'Productos',
       icon: 'plus-circle',
     },
+    // QUI-997: these routes fell into '/admin/products/:id' (or the default
+    // 'Panel Principal') and showed another page's title.
+    {
+      path: '/admin/products/brands',
+      title: 'Marcas',
+      parent: 'Productos',
+      icon: 'tags',
+    },
+    {
+      path: '/admin/products/categories',
+      title: 'Categorías de productos',
+      parent: 'Productos',
+      icon: 'tags',
+    },
+
+    // Pedidos programados (QUI-997)
+    {
+      path: '/admin/scheduled-orders',
+      title: 'Agenda de pedidos',
+      parent: 'Tienda',
+      icon: 'calendar-days',
+    },
+    {
+      path: '/admin/scheduled-orders/production',
+      title: 'Lista de producción',
+      parent: 'Tienda',
+      icon: 'clipboard-list',
+    },
+
+    // Restaurante (QUI-997)
+    {
+      path: '/admin/restaurant-ops',
+      title: 'Restaurante',
+      parent: 'Tienda',
+      icon: 'utensils',
+    },
+    {
+      path: '/admin/restaurant-ops/recipes',
+      title: 'Recetas',
+      parent: 'Restaurante',
+      icon: 'book-open',
+    },
+    {
+      path: '/admin/restaurant-ops/production',
+      title: 'Producción',
+      parent: 'Restaurante',
+      icon: 'chef-hat',
+    },
+    {
+      path: '/admin/restaurant-ops/kds',
+      title: 'Cocina (KDS)',
+      parent: 'Restaurante',
+      icon: 'utensils-crossed',
+    },
+    {
+      path: '/admin/restaurant-ops/tables',
+      title: 'Mesas',
+      parent: 'Restaurante',
+      icon: 'table',
+    },
+    {
+      path: '/admin/restaurant-ops/menus',
+      title: 'Cartas',
+      parent: 'Restaurante',
+      icon: 'book-open',
+    },
     {
       path: '/admin/products/:id',
       title: 'Detalles del Producto',

@@ -133,7 +133,8 @@
 > 4. `user_settings.config.new_keys[app_type]` = defaults.keys
 >    filtrados por los que el usuario ya marcó como vistos (sirve el
 >    badge "Nuevo" en el dropdown del usuario y en "Módulos del
->    Panel", nunca en el sidebar).
+>    Panel", nunca en el sidebar). Las claves ya persistidas en
+>    `panel_ui[app_type]` del usuario también cuentan como vistas.
 >
 > El resultado se envía en `user_settings.config.panel_ui` de la
 > respuesta de login / `getSettings()` / `environment-switch`.

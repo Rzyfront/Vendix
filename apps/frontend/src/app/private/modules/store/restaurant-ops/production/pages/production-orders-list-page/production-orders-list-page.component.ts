@@ -35,6 +35,7 @@ import {
   ProductionOrderStats,
 } from '../../interfaces';
 import { ProductionOrdersService } from '../../services';
+import { formatYieldQuantity } from '../../services/yield-unit.util';
 import { formatDateOnlyUTC } from '../../../../../../../shared/utils/date.util';
 import { formatStockWarningSummary } from '../../../../../../../core/utils/stock-shortage.util';
 
@@ -130,7 +131,7 @@ export class ProductionOrdersListPageComponent implements OnInit {
       sortable: true,
       priority: 2,
       transform: (value: number | string | null, row: ProductionOrder) =>
-        `${this.formatNumber(value)} ${row.recipe?.yield_unit ?? ''}`.trim(),
+        formatYieldQuantity(value, row.recipe?.yield_unit, this.formatNumber(value)),
     },
     {
       key: 'produced_qty',
@@ -139,7 +140,7 @@ export class ProductionOrdersListPageComponent implements OnInit {
       priority: 2,
       transform: (value: number | string | null | undefined, row: ProductionOrder) => {
         if (value == null) return '—';
-        return `${this.formatNumber(value)} ${row.recipe?.yield_unit ?? ''}`.trim();
+        return formatYieldQuantity(value, row.recipe?.yield_unit, this.formatNumber(value));
       },
     },
     {
@@ -211,7 +212,7 @@ export class ProductionOrdersListPageComponent implements OnInit {
       row.product?.name ? row.product.name : `Producción #${row.id}`,
     subtitleKey: 'planned_qty',
     subtitleTransform: (row: ProductionOrder) =>
-      `${this.formatNumber(row.planned_qty)} ${row.recipe?.yield_unit ?? ''}`.trim(),
+      formatYieldQuantity(row.planned_qty, row.recipe?.yield_unit, this.formatNumber(row.planned_qty)),
     avatarFallbackIcon: 'flame',
     avatarShape: 'square',
     badgeKey: 'status',
@@ -225,8 +226,7 @@ export class ProductionOrdersListPageComponent implements OnInit {
         icon: 'package',
         transform: (v: number | string | null | undefined, row?: ProductionOrder) => {
           if (v == null) return '—';
-          const unit = row?.recipe?.yield_unit ?? '';
-          return `${this.formatNumber(v)} ${unit}`.trim();
+          return formatYieldQuantity(v, row?.recipe?.yield_unit, this.formatNumber(v));
         },
       },
       {
@@ -391,7 +391,7 @@ export class ProductionOrdersListPageComponent implements OnInit {
     this.dialogService
       .prompt({
         title: `Completar producción de ${order.product?.name ?? `#${order.id}`}`,
-        message: `Indica cuántas tandas de la receta se hicieron (cada tanda rinde ${this.formatNumber(yieldQty)} ${unit}; planeado: ${this.formatNumber(order.planned_qty)} ${unit}). Al confirmar, se descuentan los insumos de la receta multiplicados por las tandas y se suma el stock del producto terminado.`,
+        message: `Indica cuántas tandas de la receta se hicieron (cada tanda rinde ${formatYieldQuantity(yieldQty, unit, this.formatNumber(yieldQty))}; planeado: ${formatYieldQuantity(order.planned_qty, unit, this.formatNumber(order.planned_qty))}). Al confirmar, se descuentan los insumos de la receta multiplicados por las tandas y se suma el stock del producto terminado.`,
         placeholder: 'Número de tandas',
         defaultValue: String(plannedBatches),
         confirmText: 'Completar y registrar stock',
