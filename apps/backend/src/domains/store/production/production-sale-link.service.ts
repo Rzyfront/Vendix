@@ -42,16 +42,13 @@ export class ProductionSaleLinkService {
   ) {}
 
   /**
-   * The sale was cancelled: draft/in-progress orders are cancelled; a COMPLETED
-   * order keeps its finished goods, which either go back to sellable stock
-   * (`release`) or are written off (`waste`). Never throws: the cancellation
-   * has already committed, so a failure is logged for follow-up.
-   */
-  /**
    * QUI-1002 — live-sync emission AFTER the commit, from the committed rows.
    * A reload or emission failure is logged and never breaks the sync.
    */
-  private async emitCommitted(client: any, ids: number[]): Promise<void> {
+  private async emitCommitted(
+    client: ReturnType<StorePrismaService['withoutScope']>,
+    ids: number[],
+  ): Promise<void> {
     if (!this.eventEmitter || ids.length === 0) return;
     try {
       const rows = await client.production_orders.findMany({
@@ -79,6 +76,14 @@ export class ProductionSaleLinkService {
     }
   }
 
+  /**
+   * The sale was cancelled: orders with nothing produced (draft, in progress,
+   * released) are cancelled. A COMPLETED order keeps its finished goods, which
+   * either go back to sellable stock (`release`) or are written off (`waste`);
+   * a PARTIALLY completed one gets that disposition over what it produced and
+   * is cancelled. Never throws: the cancellation has already committed, so a
+   * failure is logged for follow-up.
+   */
   @OnEvent(PRODUCTION_SALE_CANCELLED_EVENT)
   async onSaleCancelled(payload: ProductionSaleCancelledPayload): Promise<void> {
     try {
@@ -129,6 +134,7 @@ export class ProductionSaleLinkService {
         where: { id: { in: partial.map((o) => o.id) }, status: 'partially_completed' },
         data: { status: 'cancelled', updated_at: new Date() },
       });
+      await this.emitCommitted(client, partial.map((o) => o.id));
     }
 
     const completed = linked.filter(

@@ -483,4 +483,20 @@ describe('ProductionSaleLinkService — live-sync events (QUI-1002)', () => {
       [2, 'cancelled'],
     ]);
   });
+
+  it('a cancelled sale emits its partially completed order once it is cancelled', async () => {
+    setup([], [], []);
+    client.production_orders.findMany
+      .mockResolvedValueOnce([
+        { id: 4, product_id: 50, status: 'partially_completed', planned_qty: 5, produced_qty: 2, product: { name: 'A' } },
+      ])
+      .mockResolvedValueOnce([stored({ id: 4, status: 'cancelled' })]);
+    client.production_orders.updateMany = jest.fn().mockResolvedValue({ count: 1 });
+    await service.handleSaleCancelled({ order_id: 77, store_id: 1 });
+    expect(client.production_orders.updateMany).toHaveBeenCalledWith({
+      where: { id: { in: [4] }, status: 'partially_completed' },
+      data: { status: 'cancelled', updated_at: expect.any(Date) },
+    });
+    expect(events().map((e) => [e.id, e.status])).toEqual([[4, 'cancelled']]);
+  });
 });
