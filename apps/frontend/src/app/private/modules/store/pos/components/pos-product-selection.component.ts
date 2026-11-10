@@ -65,6 +65,7 @@ import {
 } from '../utils/manual-weigh.util';
 import { PosRestaurantIntegrationService } from '../services/pos-restaurant-integration.service';
 import { PosVariantSelectorComponent } from './pos-variant-selector/pos-variant-selector.component';
+import { AuthFacade } from '../../../../../core/store/auth/auth.facade';
 import { PosOptionSelectorComponent } from './pos-option-selector/pos-option-selector.component';
 import {
   PosOptionSelection,
@@ -1315,6 +1316,7 @@ export class PosProductSelectionComponent {
   private dialogService = inject(DialogService);
   private router = inject(Router);
   private store = inject(Store);
+  private authFacade = inject(AuthFacade);
   private currencyService = inject(CurrencyFormatService);
   private scaleService = inject(PosScaleService);
   private saleUnitService = inject(PosSaleUnitService);
@@ -2228,6 +2230,8 @@ export class PosProductSelectionComponent {
     variant: PosProductVariant | null,
   ): Promise<boolean> {
     if (!this.productOptionsEnabled()) return false;
+    // QUI-1001: add-ons are restaurant-only; other industries add the plain product.
+    if (!this.authFacade.isRestaurant()) return false;
     if (this.restaurantIntegration.currentTableSession() != null) return false;
     if (product.pricing_type === 'weight' || this.requiresSerials(product)) {
       return false;

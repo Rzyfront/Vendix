@@ -280,7 +280,11 @@ export class ProductListComponent {
         action: 'download-current-products',
       },
     ];
+    // QUI-1001: Adiciones are a restaurant-only module; hiding the action
+    // never touches the stored groups.
+    const isRestaurant = this.authFacade.isRestaurant();
     return all.filter((a) => {
+      if (a.action === 'option-groups') return isRestaurant;
       if (a.action === 'bulk-edit') return canBulkEdit;
       if (creationActions.has(a.action)) return canCreate;
       return true;

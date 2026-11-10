@@ -242,6 +242,11 @@ export class PosCheckoutShellComponent {
     () => this.effectiveIntent() === 'delivery',
   );
 
+  /** QUI-1001: scheduled orders are a restaurant-only module; hidden elsewhere. */
+  readonly scheduledOrdersAvailable = computed<boolean>(() =>
+    this.authFacade.isRestaurant(),
+  );
+
   /**
    * Pedido programado activo (paso Pedido). Con él, la entrega se decide en el
    * paso Envío (domicilio o recogida), la fecha/franja en Cliente, y el paso

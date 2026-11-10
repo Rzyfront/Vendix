@@ -42,6 +42,7 @@ import { MenuEngineeringController } from '../../domains/store/menus/menu-engine
 import { MenuSectionsController } from '../../domains/store/menus/menu-sections.controller';
 import { MenusController } from '../../domains/store/menus/menus.controller';
 import { ProductionOrdersController } from '../../domains/store/production/production-orders.controller';
+import { ProductOptionsController } from '../../domains/store/product-options/product-options.controller';
 import { RecipesController } from '../../domains/store/recipes/recipes.controller';
 import { SplitOrderController } from '../../domains/store/tables/split-order.controller';
 import { TableSessionsController } from '../../domains/store/tables/table-sessions.controller';
@@ -89,6 +90,7 @@ const EXPECTED: Array<[string, new (...args: any[]) => unknown, string]> = [
   ['MenuSectionsController', MenuSectionsController, 'restaurant_ops_menus'],
   ['MenusController', MenusController, 'restaurant_ops_menus'],
   ['ProductionOrdersController', ProductionOrdersController, 'restaurant_ops_production'],
+  ['ProductOptionsController', ProductOptionsController, 'products_option_groups'],
   ['RecipesController', RecipesController, 'restaurant_ops_recipes'],
   ['SplitOrderController', SplitOrderController, 'restaurant_ops_tables'],
   ['TableSessionsController', TableSessionsController, 'restaurant_ops_tables'],
