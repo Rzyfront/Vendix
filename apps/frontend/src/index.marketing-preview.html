@@ -5,16 +5,39 @@
     <title>Vendix — Plataforma de gestión y e-commerce para tu negocio</title>
     <base href="/" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
-    <meta name="robots" content="noindex, nofollow" />
-    <meta name="description" content="Vista previa técnica de la portada de Vendix, pendiente de publicación." />
-    <link rel="canonical" href="https://vendix.online/" />
-    <link rel="icon" href="/favicon.ico" />
+    <link rel="icon" type="image/x-icon" href="favicon.ico" />
+    <link rel="preconnect" href="https://api.vendix.online" crossorigin />
+    <link rel="manifest" href="/manifest.webmanifest" />
     <meta name="theme-color" content="#2F6F4E" />
+    <link rel="apple-touch-icon" href="/pwa/apple-touch-icon-180.png" />
+
+    <!-- SEO-TECH-02: HTML comercial de la portada de vendix.online, prerenderizado.
+         Solo se sirve en vendix.online/ (CloudFront: spa-rewrite.js lo reescribe a
+         /marketing/index.html). Las tiendas y los dominios propios siguen con el
+         index.html neutro. Mismos metadatos que src/index.html para la portada. -->
+    <meta name="description" content="Crea tu tienda online, gestiona inventario, punto de venta, envíos y clientes desde un solo lugar. Potenciado con inteligencia artificial. Comienza gratis." />
+    <meta name="robots" content="index, follow" />
+    <link rel="canonical" href="https://vendix.online/" />
+
+    <meta property="og:type" content="website" />
+    <meta property="og:title" content="Vendix — Tu negocio, simplificado" />
+    <meta property="og:description" content="Plataforma todo-en-uno para gestionar tu negocio: e-commerce, inventario, POS, envíos y más. Potenciado con IA." />
+    <meta property="og:image" content="https://vendix.online/og-image.png" />
+    <meta property="og:image:width" content="1200" />
+    <meta property="og:image:height" content="630" />
+    <meta property="og:image:alt" content="Vendix — Tu negocio, simplificado" />
+    <meta property="og:url" content="https://vendix.online/" />
+    <meta property="og:site_name" content="Vendix" />
+    <meta property="og:locale" content="es_CO" />
+    <meta name="twitter:card" content="summary_large_image" />
+    <meta name="twitter:title" content="Vendix — Tu negocio, simplificado" />
+    <meta name="twitter:description" content="Plataforma todo-en-uno para gestionar tu negocio: e-commerce, inventario, POS, envíos y más." />
+    <meta name="twitter:image" content="https://vendix.online/og-image.png" />
   </head>
   <body>
-    <!-- Preview only. The normal browser entry re-renders the resolved app;
-         this opt-in document deliberately skips hydration at its root.
-         Never replace the shared index.html with this document. -->
+    <!-- The normal browser entry re-renders the resolved app; this document
+         deliberately skips hydration at its root. Never replace the shared
+         index.html with this document: it is only served for vendix.online/. -->
     <app-root ngSkipHydration></app-root>
   </body>
 </html>
