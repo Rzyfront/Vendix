@@ -263,12 +263,12 @@ type StatusFilter = ScheduledOrderStatus | 'all';
       >
         <app-stats
           title="Pedidos"
-          [value]="schedules().length"
+          [value]="allSchedules().length"
           smallText="En el período"
           iconName="calendar-days"
           iconBgColor="bg-slate-100"
           iconColor="text-slate-600"
-          [loading]="loading() && schedules().length === 0"
+          [loading]="loading() && allSchedules().length === 0"
         />
         <app-stats
           title="En producción"
@@ -277,7 +277,7 @@ type StatusFilter = ScheduledOrderStatus | 'all';
           iconName="flame"
           iconBgColor="bg-amber-100"
           iconColor="text-amber-600"
-          [loading]="loading() && schedules().length === 0"
+          [loading]="loading() && allSchedules().length === 0"
         />
         <app-stats
           title="Listos"
@@ -286,7 +286,7 @@ type StatusFilter = ScheduledOrderStatus | 'all';
           iconName="check-circle"
           iconBgColor="bg-green-100"
           iconColor="text-green-600"
-          [loading]="loading() && schedules().length === 0"
+          [loading]="loading() && allSchedules().length === 0"
         />
         <app-stats
           title="Entregados"
@@ -295,7 +295,7 @@ type StatusFilter = ScheduledOrderStatus | 'all';
           iconName="package"
           iconBgColor="bg-blue-100"
           iconColor="text-blue-600"
-          [loading]="loading() && schedules().length === 0"
+          [loading]="loading() && allSchedules().length === 0"
         />
       </div>
 
@@ -483,7 +483,14 @@ export class AgendaPageComponent {
   readonly isMobile = signal(false);
 
   readonly availability = signal<FulfillmentDay[]>([]);
-  readonly schedules = signal<ScheduledOrder[]>([]);
+  /** Every order in the period. The status filter narrows it on the client, so the stats always cover the whole period. */
+  readonly allSchedules = signal<ScheduledOrder[]>([]);
+  /** Orders shown in the grid, narrowed by the status filter. */
+  readonly schedules = computed(() => {
+    const status = this.statusFilter();
+    const all = this.allSchedules();
+    return status === 'all' ? all : all.filter((o) => o.status === status);
+  });
   readonly loading = signal(false);
   readonly errorMessage = signal<string | null>(null);
 
@@ -565,38 +572,40 @@ export class AgendaPageComponent {
 
     effect(() => {
       const { from, to } = this.range();
-      const status = this.statusFilter();
-      untracked(() => this.load(from, to, status));
+      untracked(() => this.load(from, to));
     });
 
     // Production state changed elsewhere: refresh the agenda silently.
-    this.sse.listen(this.destroyRef, () => this.refresh());
+    this.sse.listen(this.destroyRef, () => this.refresh(true));
   }
 
   // --- carga ------------------------------------------------------------
-  refresh(): void {
+  /** `silent`: background refresh (live updates); a failure keeps the agenda already on screen. */
+  refresh(silent = false): void {
     const { from, to } = this.range();
-    this.load(from, to, this.statusFilter());
+    this.load(from, to, silent);
   }
 
-  private load(from: string, to: string, status: StatusFilter): void {
+  private load(from: string, to: string, silent = false): void {
     this.loadSub?.unsubscribe();
     this.loading.set(true);
-    this.errorMessage.set(null);
+    if (!silent) this.errorMessage.set(null);
     this.loadSub = forkJoin({
       availability: this.api.getAvailability(from, to),
-      agenda: this.api.getAgenda(from, to, status === 'all' ? undefined : status),
+      agenda: this.api.getAgenda(from, to),
     }).subscribe({
       next: ({ availability, agenda }) => {
         this.availability.set(availability);
-        this.schedules.set(agenda);
+        this.allSchedules.set(agenda);
+        this.errorMessage.set(null);
         this.loading.set(false);
       },
       error: (err) => {
-        this.availability.set([]);
-        this.schedules.set([]);
-        this.errorMessage.set(extractApiErrorMessage(err));
         this.loading.set(false);
+        if (silent && this.allSchedules().length > 0) return;
+        this.availability.set([]);
+        this.allSchedules.set([]);
+        this.errorMessage.set(extractApiErrorMessage(err));
       },
     });
   }
@@ -630,7 +639,7 @@ export class AgendaPageComponent {
   }
 
   countByStatus(status: ScheduledOrderStatus): number {
-    return this.schedules().filter((o) => o.status === status).length;
+    return this.allSchedules().filter((o) => o.status === status).length;
   }
 
   // --- detalle -----------------------------------------------------------
@@ -675,12 +684,12 @@ export class AgendaPageComponent {
     const slot = cell.slot;
     this.onDragEnd();
     if (id === null || !slot) return;
-    const previous = this.schedules();
+    const previous = this.allSchedules();
     const order = previous.find((o) => o.id === id);
     if (!order || cell.orders.some((o) => o.id === id)) return;
 
     // Mueve la tarjeta de inmediato; si el servidor rechaza, vuelve a su lugar.
-    this.schedules.set(
+    this.allSchedules.set(
       previous.map((o) => (o.id === id ? { ...o, scheduled_start: slot.start, scheduled_end: slot.end } : o)),
     );
     this.api
@@ -692,7 +701,7 @@ export class AgendaPageComponent {
           this.refresh();
         },
         error: (err) => {
-          this.schedules.set(previous);
+          this.allSchedules.set(previous);
           this.toast.error(extractApiErrorMessage(err));
         },
       });
