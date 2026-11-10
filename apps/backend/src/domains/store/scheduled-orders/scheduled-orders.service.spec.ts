@@ -152,7 +152,7 @@ const FULL_ORDER = {
       notes: 'Dedicatoria: Feliz cumpleaños, Sofía',
       order_item_options: [
         { group_name: 'Relleno', option_name: 'Ganache', quantity: 1, uom: 'unit', scope: 'per_line' },
-        { group_name: 'Fruta', option_name: 'Fresas', quantity: 1, uom: 'unit', scope: 'per_line' },
+        { group_name: 'Fruta', option_name: 'Fresas', quantity: 1, uom: 'unit', scope: 'per_line', note: 'solo encima, en corona' },
         { group_name: 'Extras', option_name: 'Vela', quantity: 1, uom: 'unit', scope: 'per_line' },
       ],
     },
@@ -360,6 +360,7 @@ describe('ScheduledOrdersService', () => {
         'Fresas',
         'Vela',
       ]);
+      expect(detail.order.order_items[0].order_item_options[1].note).toBe('solo encima, en corona');
       expect(detail.order.customer_alias).toBeNull();
       expect(detail.pending_kitchen_item_count).toBe(0);
     });

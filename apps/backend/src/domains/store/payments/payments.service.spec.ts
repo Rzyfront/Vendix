@@ -6363,3 +6363,70 @@ describe('PaymentsService — resolveDeclaredGrossUnitPrice (B.1/F-186)', () => 
     expect(read({ final_unit_price: 0 })).toBe(0);
   });
 });
+
+describe('PaymentsService — notas por adición (QUI-994)', () => {
+  const snap = (option_id: number, option_name: string) => ({
+    option_id,
+    group_name: 'G',
+    option_name,
+    scope: 'per_line',
+    price_delta: new Prisma.Decimal(0),
+    component_type: 'ingredient',
+    component_product_id: 1,
+    component_variant_id: null,
+    quantity: new Prisma.Decimal(1),
+    uom: null,
+  });
+  function build() {
+    const optionPricingService = {
+      resolve: jest.fn().mockResolvedValue({
+        unit_price_delta: new Prisma.Decimal(0),
+        snapshots: [snap(11, 'Ganache'), snap(12, 'Fresas')],
+      }),
+    };
+    const service = Object.create(PaymentsService.prototype) as any;
+    service.optionPricingService = optionPricingService;
+    return service;
+  }
+  const mode = { scheduled: true, draft: false };
+
+  it('la nota de una adición elegida llega a su snapshot', async () => {
+    const out = await build().resolvePosLineOptions(
+      {},
+      { product_id: 5, option_ids: [11, 12], option_notes: [{ option_id: 12, note: '  solo encima, en corona ' }], quantity: 1 },
+      1,
+      mode,
+    );
+    expect(out.snapshots.find((s: any) => s.option_id === 12).note).toBe('solo encima, en corona');
+    expect(out.snapshots.find((s: any) => s.option_id === 11).note).toBeNull();
+  });
+
+  it('una nota de una adición que no se eligió se ignora', async () => {
+    const out = await build().resolvePosLineOptions(
+      {},
+      { product_id: 5, option_ids: [11, 12], option_notes: [{ option_id: 99, note: 'x' }], quantity: 1 },
+      1,
+      mode,
+    );
+    expect(out.snapshots.every((s: any) => s.note === null)).toBe(true);
+  });
+
+  it('un cobro viejo con solo option_ids guarda los snapshots exactamente como hoy', async () => {
+    const out = await build().resolvePosLineOptions({}, { product_id: 5, option_ids: [11, 12], quantity: 1 }, 1, mode);
+    expect(out.snapshots).toEqual([snap(11, 'Ganache'), snap(12, 'Fresas')]);
+    expect(out.snapshots.every((s: any) => !('note' in s))).toBe(true);
+  });
+
+  it('el DTO acepta option_notes y limita la nota a 500 caracteres', async () => {
+    const { plainToInstance } = await import('class-transformer');
+    const { validate } = await import('class-validator');
+    const { PosOrderItemDto } = await import('./dto/create-pos-payment.dto');
+    const base = { product_id: 5, product_name: 'Torta', quantity: 1, unit_price: 10, total_price: 10 };
+    const ok = plainToInstance(PosOrderItemDto, { ...base, option_ids: [12], option_notes: [{ option_id: 12, note: 'a' }] });
+    expect(await validate(ok)).toHaveLength(0);
+    const long = plainToInstance(PosOrderItemDto, { ...base, option_ids: [12], option_notes: [{ option_id: 12, note: 'a'.repeat(501) }] });
+    expect((await validate(long)).length).toBeGreaterThan(0);
+    const legacy = plainToInstance(PosOrderItemDto, { ...base, option_ids: [12] });
+    expect(await validate(legacy)).toHaveLength(0);
+  });
+});

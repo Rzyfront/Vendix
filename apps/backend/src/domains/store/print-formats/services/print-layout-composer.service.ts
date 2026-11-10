@@ -915,7 +915,7 @@ export class PrintLayoutComposerService {
     const showNotes = section.show_notes !== false;
     const showItemDiscounts = section.show_item_discounts !== false;
     const showItemTaxes = section.show_item_taxes !== false;
-    // Solo la comanda de cocina pinta empaque y exclusiones por plato.
+    // Solo la comanda de cocina pinta el empaque por plato.
     const isKitchen = data.document?.is_kitchen_ticket === true;
 
     let tbodyRows = '';
@@ -973,10 +973,10 @@ export class PrintLayoutComposerService {
                     if (isKitchen && item.packaging_label) {
                       sublines += `<br><strong class="item-packaging">${this.compiler.escapeHtml(String(item.packaging_label).toUpperCase())}</strong>`;
                     }
-                    if (isKitchen) {
-                      for (const mod of item.modifiers || []) {
-                        sublines += `<br><small class="item-sub item-modifier">${this.compiler.escapeHtml(mod)}</small>`;
-                      }
+                    // Exclusiones de cocina y adiciones del recibo de venta (QUI-994):
+                    // solo esos dos providers llenan `modifiers`.
+                    for (const mod of item.modifiers || []) {
+                      sublines += `<br><small class="item-sub item-modifier">${this.compiler.escapeHtml(mod)}</small>`;
                     }
                     if (showNotes && item.notes) {
                       sublines += `<br><small class="item-note">Nota: ${this.compiler.escapeHtml(item.notes)}</small>`;

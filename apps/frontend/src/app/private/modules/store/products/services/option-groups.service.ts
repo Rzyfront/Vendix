@@ -18,7 +18,7 @@ export interface ProductOption {
   quantity: string | number;
   uom?: string | null;
   is_active?: boolean;
-  component_product?: { id: number; name: string } | null;
+  component_product?: { id: number; name: string; image_url?: string | null } | null;
   /** Solo lectura: costo estimado de la adición. */
   estimated_cost?: string | null;
 }

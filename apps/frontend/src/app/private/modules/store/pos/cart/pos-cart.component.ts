@@ -13,7 +13,7 @@ import {
   CartItem,
   PromotionTierProgress } from '../services/pos-cart.service';
 import { PosStationBookingService } from '../services/pos-station-booking.service';
-import { AddCustomItemRequest, CartDiscount } from '../models/cart.model';
+import { AddCustomItemRequest, CartDiscount, cartOptionLines } from '../models/cart.model';
 import { PosCustomItemModalComponent } from '../components/pos-custom-item-modal/pos-custom-item-modal.component';
 import { PosSessionStatusBarComponent } from '../components/pos-session-status-bar.component';
 import { PosCashRegisterService } from '../services/pos-cash-register.service';
@@ -440,6 +440,18 @@ import {
                       </p>
                     }
 
+                    @if (optionLines(item).length) {
+                      <ul class="mt-0.5 flex flex-col gap-0.5" aria-label="Adiciones de la línea">
+                        @for (opt of optionLines(item); track $index) {
+                          <li class="text-[10px] leading-tight text-text-secondary">
+                            <span class="font-semibold text-text-primary">+ {{ opt.label }}</span>
+                            @if (opt.note) {
+                              <span class="italic"> — {{ opt.note }}</span>
+                            }
+                          </li>
+                        }
+                      </ul>
+                    }
                     <!-- Line 2: Base price, discount & badges (left), Note chip (if has notes) -->
                     <div class="flex items-center justify-between gap-1 mt-1 text-xs">
                       <div class="flex items-center gap-1.5 flex-wrap min-w-0">
@@ -1985,6 +1997,11 @@ private stationBookingService = inject(PosStationBookingService);
    * QUI-648 — sufijo de la escala de precio: "/m", "/kg", "/paquete". Sin él,
    * un cable a $5.000 el metro se leería como $5.000 el milímetro.
    */
+  /** Adiciones de la línea con su nota (QUI-994). */
+  optionLines(item: CartItem): Array<{ label: string; note: string | null }> {
+    return cartOptionLines(item);
+  }
+
   unitPriceSuffix(item: CartItem): string {
     if (item.is_weight_product) return '/' + (item.weight_unit || 'kg');
     if (this.isPackageLine(item)) return '/paquete';

@@ -101,7 +101,7 @@ const SCHEDULED_ORDER_SELECT = {
       quantity: true,
       notes: true,
       order_item_options: {
-        select: { group_name: true, option_name: true, quantity: true, uom: true, scope: true },
+        select: { group_name: true, option_name: true, quantity: true, uom: true, scope: true, note: true },
       },
     },
   },

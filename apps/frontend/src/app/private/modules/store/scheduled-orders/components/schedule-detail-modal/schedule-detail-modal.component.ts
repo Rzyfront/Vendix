@@ -120,6 +120,9 @@ const ACTION_LABELS: Record<Exclude<ScheduledOrderStatus, 'scheduled'>, string> 
                         × {{ opt.quantity }}{{ uom(opt.uom) ? ' ' + uom(opt.uom) : '' }}
                       }
                       <span class="text-xs">({{ opt.group_name }})</span>
+                      @if (opt.note) {
+                        <span class="italic"> — Nota: {{ opt.note }}</span>
+                      }
                     </div>
                   }
                   @if (item.notes) {

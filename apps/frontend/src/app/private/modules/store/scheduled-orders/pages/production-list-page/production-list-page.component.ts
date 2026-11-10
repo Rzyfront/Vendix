@@ -233,7 +233,12 @@ const PRINT_BODY_CLASS = 'production-list-printing';
                         @if (item.options.length > 0) {
                           <ul class="pl-options">
                             @for (opt of item.options; track $index) {
-                              <li>{{ optionText(opt) }}</li>
+                              <li>
+                                {{ optionText(opt) }}
+                                @if (opt.note) {
+                                  <span class="pl-note"> — Nota: {{ opt.note }}</span>
+                                }
+                              </li>
                             }
                           </ul>
                         }

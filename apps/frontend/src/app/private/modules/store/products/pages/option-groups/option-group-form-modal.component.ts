@@ -110,6 +110,8 @@ export class OptionGroupFormModalComponent {
   /** Products picked during this session, kept so their image survives a later search. */
   private readonly picked = signal<Map<number, OptionComponentProduct>>(new Map());
   private readonly search$ = new Subject<string>();
+  /** Signed images the server sent with the saved add-ons (QUI-994). */
+  private readonly savedImages = new Map<number, string>();
 
   private readonly productById = computed(() => {
     const map = new Map<number, OptionComponentProduct>();
@@ -187,7 +189,8 @@ export class OptionGroupFormModalComponent {
 
   imageOf(row: OptionRowForm): string | null {
     const id = row.controls.component_product_id.value;
-    return id == null ? null : (this.productById().get(id)?.image_url ?? null);
+    if (id == null) return null;
+    return this.productById().get(id)?.image_url ?? this.savedImages.get(id) ?? null;
   }
 
   componentNameOf(row: OptionRowForm): string {
@@ -234,6 +237,9 @@ export class OptionGroupFormModalComponent {
   private newRow(
     option?: ProductOptionGroup['options'][number],
   ): OptionRowForm {
+    if (option?.component_product?.image_url && option.component_product_id != null) {
+      this.savedImages.set(option.component_product_id, option.component_product.image_url);
+    }
     return new FormGroup({
       id: new FormControl<number | null>(option?.id ?? null),
       name: new FormControl(option?.name ?? '', {

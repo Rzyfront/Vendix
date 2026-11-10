@@ -358,7 +358,9 @@ describe('ScheduledOrderProductionService.productionList (QUI-991)', () => {
           variant_attributes: null,
           quantity: 1,
           notes: 'Dedicatoria: Feliz cumpleaños, Sofía',
-          order_item_options: [{ group_name: 'Relleno', option_name: 'Ganache', quantity: 1, uom: 'unit' }],
+          order_item_options: [
+            { group_name: 'Relleno', option_name: 'Ganache', quantity: 1, uom: 'unit', note: 'solo encima, en corona' },
+          ],
         },
       ],
     };
@@ -395,6 +397,7 @@ describe('ScheduledOrderProductionService.productionList (QUI-991)', () => {
     expect(entry.customer_name).toBe('Valentina Ríos');
     expect(entry.items[0].notes).toBe('Dedicatoria: Feliz cumpleaños, Sofía');
     expect(entry.items[0].options[0].option_name).toBe('Ganache');
+    expect(entry.items[0].options[0].note).toBe('solo encima, en corona');
     jest.restoreAllMocks();
   });
 });

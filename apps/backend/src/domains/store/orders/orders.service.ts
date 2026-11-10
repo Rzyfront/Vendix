@@ -208,6 +208,7 @@ type PersistedOrderLineSnapshot = {
     component_variant_id: number | null;
     quantity: Prisma.Decimal | string | number;
     uom: string | null;
+    note?: string | null;
   }> | null;
 };
 
@@ -1572,7 +1573,7 @@ export class OrdersService {
             // Adiciones de la línea: el POS las repone al cargar un borrador
             // para exigir el pedido programado al cobrarlo.
             order_item_options: {
-              select: { option_id: true, group_name: true, option_name: true, scope: true, price_delta: true },
+              select: { option_id: true, group_name: true, option_name: true, scope: true, price_delta: true, note: true },
             },
             // Restaurant Suite — Fase K Gap 2: surface the KDS state
             // for every order_item so the order detail can show
@@ -6921,6 +6922,7 @@ export class OrdersService {
         component_variant_id: option.component_variant_id,
         quantity: option.quantity,
         uom: option.uom,
+        ...(option.note ? { note: option.note } : {}),
       })),
     };
   }

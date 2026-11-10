@@ -2287,6 +2287,7 @@ export class PosProductSelectionComponent {
         ...(variant ? { variant } : {}),
         option_ids: selection.option_ids,
         option_labels: selection.labels,
+        ...(selection.option_notes?.length ? { option_notes: selection.option_notes } : {}),
         option_delta: selection.delta,
         option_delta_parts: selection.delta_parts,
       })

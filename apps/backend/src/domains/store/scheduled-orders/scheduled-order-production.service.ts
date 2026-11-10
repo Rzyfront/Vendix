@@ -337,7 +337,7 @@ export class ScheduledOrderProductionService implements OnModuleInit {
                 quantity: true,
                 notes: true,
                 order_item_options: {
-                  select: { group_name: true, option_name: true, quantity: true, uom: true },
+                  select: { group_name: true, option_name: true, quantity: true, uom: true, note: true },
                 },
               },
             },

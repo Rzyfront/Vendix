@@ -122,6 +122,8 @@ export interface CartItem {
   // de visualización. Participan en la identidad de la línea.
   option_ids?: number[];
   option_labels?: string[];
+  /** Notas por adición (QUI-994); paralelas a `option_ids`. */
+  option_notes?: Array<{ option_id: number; note: string }>;
   /** Delta por unidad aplicado HOY a la línea (depende de la cantidad). */
   option_delta?: number;
   /** Partes per_unit/per_line: el delta se recalcula al cambiar la cantidad. */
@@ -347,6 +349,7 @@ export interface AddToCartRequest {
   /** Adiciones elegidas (ver `CartItem.option_ids`). */
   option_ids?: number[];
   option_labels?: string[];
+  option_notes?: Array<{ option_id: number; note: string }>;
   option_delta?: number;
   option_delta_parts?: OptionDeltaParts;
   notes?: string;
@@ -451,4 +454,20 @@ export interface CartValidationError {
   field: string;
   message: string;
   itemId?: string;
+}
+
+/**
+ * Adiciones de una línea listas para pintar (carrito y recibo): nombre y nota.
+ * `option_labels` es paralelo a `option_ids`; sin nombres devuelve [].
+ */
+export function cartOptionLines(
+  item: Pick<CartItem, 'option_ids' | 'option_labels' | 'option_notes'>,
+): Array<{ label: string; note: string | null }> {
+  const labels = item.option_labels ?? [];
+  const ids = item.option_ids ?? [];
+  const notes = new Map((item.option_notes ?? []).map((n) => [n.option_id, n.note]));
+  return labels.map((label, i) => ({
+    label,
+    note: notes.get(ids[i]) || null,
+  }));
 }

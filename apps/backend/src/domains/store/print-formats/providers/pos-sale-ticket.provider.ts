@@ -89,6 +89,11 @@ export class PosSaleTicketDataProvider implements IDocumentDataProvider {
             products: {
               select: { stock_uom: { select: { code: true, dimension: true } } },
             },
+            // QUI-994 — adiciones vendidas (snapshot) y su nota para el recibo.
+            order_item_options: {
+              select: { option_name: true, note: true },
+              orderBy: { id: 'asc' },
+            },
           },
         },
         // CP-print-token-flow A.1 — dirección del cliente para el ticket.
@@ -1146,6 +1151,10 @@ export class PosSaleTicketDataProvider implements IDocumentDataProvider {
       tax_amount: lineTax > 0 ? lineTax : undefined,
       total_price: gross_total_price,
       total_price_formatted: `$${gross_total_price.toLocaleString('es-CO')}`,
+      // QUI-994 — nota de la línea y cada adición con su nota ("+ Arequipe —
+      // Bien cargado"). Sin adiciones ni nota, la línea sale igual que antes.
+      notes: it.notes?.trim() || undefined,
+      modifiers: formatTicketLineAddOns(it.order_item_options),
       };
     });
 
@@ -1420,4 +1429,20 @@ export class PosSaleTicketDataProvider implements IDocumentDataProvider {
       tax_formatted: `$${g.tax_amount.toLocaleString('es-CO')}`,
     }));
   }
+}
+
+/**
+ * QUI-994 — sublíneas de adiciones del recibo: "+ <adición>" y, si la
+ * escribieron, " — <nota>". `undefined` cuando la línea no tiene adiciones.
+ */
+export function formatTicketLineAddOns(
+  options: ReadonlyArray<{ option_name?: string | null; note?: string | null }> | null | undefined,
+): string[] | undefined {
+  const lines = (options ?? [])
+    .filter((o) => (o.option_name ?? '').trim() !== '')
+    .map((o) => {
+      const note = (o.note ?? '').trim();
+      return note ? `+ ${o.option_name!.trim()} — ${note}` : `+ ${o.option_name!.trim()}`;
+    });
+  return lines.length > 0 ? lines : undefined;
 }

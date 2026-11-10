@@ -363,3 +363,52 @@ describe('PrintLayoutComposerService — propina fuera del TOTAL (tip_outside_to
     expect(html).not.toContain('f_total_paid');
   });
 });
+
+describe('PrintLayoutComposerService — adiciones por línea (QUI-994)', () => {
+  const service = new PrintLayoutComposerService({
+    escapeHtml: (v: any) => String(v ?? ''),
+  } as any);
+
+  const definition: any = {
+    columns: [
+      { id: 'c_name', key: 'product_name', label: 'Producto', enabled: true, width_percent: 70, align: 'left' },
+      { id: 'c_total', key: 'total_price', label: 'Total', enabled: true, width_percent: 30, align: 'right' },
+    ],
+  };
+
+  const line = (over: any = {}) => ({
+    index: 1,
+    product_name: 'Torta personalizada',
+    quantity: 1,
+    unit_price: 95000,
+    total_price: 95000,
+    ...over,
+  });
+
+  function render(data: any): string {
+    return (service as any).renderItemsTableSection({ id: 'sec_items' }, definition, data, 'dummy');
+  }
+
+  it('el recibo de venta pinta cada adición y la nota de la línea', () => {
+    const html = render({
+      document: {},
+      items: [line({ modifiers: ['+ Arequipe — Bien cargado', '+ Velas'], notes: 'Escribir "Feliz"' })],
+    });
+    expect(html).toContain('<small class="item-sub item-modifier">+ Arequipe — Bien cargado</small>');
+    expect(html).toContain('<small class="item-sub item-modifier">+ Velas</small>');
+    expect(html).toContain('<small class="item-note">Nota: Escribir "Feliz"</small>');
+  });
+
+  it('una línea sin adiciones no agrega sublíneas de adición', () => {
+    const html = render({ document: {}, items: [line()] });
+    expect(html).not.toContain('item-modifier');
+  });
+
+  it('la comanda de cocina sigue pintando sus exclusiones', () => {
+    const html = render({
+      document: { is_kitchen_ticket: true },
+      items: [line({ modifiers: ['Sin cebolla'] })],
+    });
+    expect(html).toContain('<small class="item-sub item-modifier">Sin cebolla</small>');
+  });
+});

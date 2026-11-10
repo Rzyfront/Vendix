@@ -78,6 +78,8 @@ export interface ScheduledOrderOptionLine {
   quantity: number | string;
   uom?: string | null;
   scope?: 'per_unit' | 'per_line';
+  /** Nota del cajero para esta adición (QUI-994). */
+  note?: string | null;
 }
 
 export interface ScheduledOrderItem {
@@ -140,6 +142,8 @@ export interface ProductionOption {
   option_name: string;
   quantity: number | string;
   uom?: string | null;
+  /** Nota del cajero para esta adición (QUI-994). */
+  note?: string | null;
 }
 
 export interface ProductionOrderItem {
