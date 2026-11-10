@@ -2998,6 +2998,8 @@ export class ProductsService {
           product_price_tier_assignments: {
             select: { price_tier_id: true, barcode: true },
           },
+          // QUI-993 — el buscador de adiciones precarga la unidad de stock.
+          stock_uom: { select: { code: true } },
           // QUI-978 — UoMs de venta con detalle del catálogo (el POS
           // decide la captura al tocar la tarjeta, igual que QUI-648).
           product_sale_uoms: {
@@ -3635,6 +3637,9 @@ export class ProductsService {
           // QUI-648: cómo se mide y cómo se cobra el producto (ver la rama
           // `pos_optimized` para el porqué de exponerlo en el listado).
           stock_uom_id: (product as any).stock_uom_id ?? null,
+          // QUI-993 — el buscador de adiciones precarga la unidad de stock;
+          // sin ella la adición quedaba con la unidad vacía.
+          stock_uom: product.stock_uom ? { code: product.stock_uom.code } : null,
           // QUI-978 — el POP precarga la UoM de compra al recomprar (idem).
           purchase_uom_id: (product as any).purchase_uom_id ?? null,
           price_unit_quantity: (product as any).price_unit_quantity ?? 1,

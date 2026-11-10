@@ -102,14 +102,15 @@ describe('module-industries — parity and map invariants', () => {
     }
   });
 
-  it('QUI-1001: scheduled orders and add-ons (option groups) are restaurant-only vertical keys, audit-gated', () => {
+  it('QUI-1001: scheduled orders and add-ons (option groups) are restaurant-only vertical keys, always enforced', () => {
     for (const key of ['orders_scheduled', 'products_option_groups']) {
       expect(MODULE_INDUSTRIES[key]).toEqual(['restaurant']);
       expect(VERTICAL_MODULE_KEYS).toContain(key);
       expect(industryAllowsKey(key, ['restaurant'])).toBe(true);
       expect(industryAllowsKey(key, ['retail', 'restaurant'])).toBe(true);
       expect(industryAllowsKey(key, ['retail'])).toBe(false);
-      expect(isIndustryAlwaysEnforced(key)).toBe(false);
+      expect(isIndustryAlwaysEnforced(key)).toBe(true);
+      expect(ENFORCED_INDUSTRY_KEYS).toContain(key);
     }
   });
 });
