@@ -1367,7 +1367,12 @@ export interface ScheduledOrdersSettings {
   day_capacity: number | null;
   min_lead_time_hours: number;
   max_days_ahead: number;
-  fulfillment_types: Array<'pickup' | 'delivery'>;
+  /**
+   * Obsoleto: la entrega la ofrecen los métodos de envío de la tienda. Se
+   * conserva opcional porque ajustes guardados y clientes en caché aún lo traen;
+   * nadie lo lee.
+   */
+  fulfillment_types?: Array<'pickup' | 'delivery'>;
   reminders: ScheduledOrderReminderRule[];
 }
 

@@ -1041,6 +1041,11 @@ export class PaymentsService {
         if (!this.scheduledOrdersService) {
           throw new VendixHttpException(ErrorCodes.SCHED_DISABLED);
         }
+        // En el POS el pedido programado siempre lleva cliente: a quién se
+        // entrega y a quién se recuerda (el ecommerce sigue su configuración).
+        if (createPosPaymentDto.customer_id == null) {
+          throw new VendixHttpException(ErrorCodes.SCHED_CUSTOMER_REQUIRED);
+        }
         const deliveryType = createPosPaymentDto.delivery_type;
         if (!deliveryType || deliveryType === 'direct_delivery' || deliveryType === 'dine_in') {
           createPosPaymentDto.delivery_type = 'pickup';
@@ -1242,6 +1247,7 @@ export class PaymentsService {
             store_id: order.store_id,
             order_id: order.id,
             schedule: createPosPaymentDto.schedule,
+            delivery_type: order.delivery_type,
             user_id: user?.id ?? null,
           });
         }
