@@ -1846,6 +1846,28 @@ export class PaymentsService {
 
         let inventoryCost = 0;
 
+        // The paid sale is not closed at the till when its delivery is deferred
+        // to a later stage: home delivery, a serialized line recorded in a
+        // dispatch note, or a live line sent to Production (S22: it stays open
+        // until the delivery is confirmed). Only `updateOrderPaymentStatus`
+        // reads this; the stock commit timing (`isDirectDeliveryFinished`) is
+        // independent, and `commitOrderDelivery` skips a production line until
+        // its production order completes.
+        const hasLiveProductionLines = (
+          (order.order_items ?? []) as Array<{
+            fulfillment_destination?: string | null;
+            cancelled_at?: Date | string | null;
+          }>
+        ).some(
+          (item) =>
+            item.fulfillment_destination === 'production' &&
+            item.cancelled_at == null,
+        );
+        const deferToFulfillment =
+          order.delivery_type === 'home_delivery' ||
+          (hasSerialized && !isImmediateHandover) ||
+          hasLiveProductionLines;
+
         // 2. Process payment if required
         let payment: any = null;
         let paidSessionId: number | null = null;
@@ -1897,8 +1919,7 @@ export class PaymentsService {
             isOnDelivery ? 'pending_payment' : 'succeeded',
             // Home delivery and non-immediate serialized flows defer stock;
             // serialized direct_delivery is committed before this tx finishes.
-            order.delivery_type === 'home_delivery' ||
-              (hasSerialized && !isImmediateHandover),
+            deferToFulfillment,
             hasKitchenItems,
             {
               fromState: order.state,
@@ -1913,8 +1934,7 @@ export class PaymentsService {
             order.id,
             'pending_payment',
             // Digital serialized direct_delivery is rejected above.
-            order.delivery_type === 'home_delivery' ||
-              (hasSerialized && !isImmediateHandover),
+            deferToFulfillment,
             hasKitchenItems,
             {
               fromState: order.state,
@@ -1930,8 +1950,7 @@ export class PaymentsService {
             order.id,
             'pending_payment',
             // Credit serialized direct_delivery is rejected above.
-            order.delivery_type === 'home_delivery' ||
-              (hasSerialized && !isImmediateHandover),
+            deferToFulfillment,
             hasKitchenItems,
             {
               fromState: order.state,
