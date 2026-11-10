@@ -1250,7 +1250,11 @@ export class PosSaleTicketDataProvider implements IDocumentDataProvider {
       // queda `undefined` (el compositor no emite fila: invariante 1).
       customer: user.id
         ? {
-            name: `${user.first_name || ''} ${user.last_name || ''}`.trim() || 'Cliente',
+            // A NIT customer keeps its name only in `legal_name` (`JuridicaNameRule`).
+            name:
+              user.legal_name?.trim() ||
+              `${user.first_name || ''} ${user.last_name || ''}`.trim() ||
+              'Cliente',
             tax_id: user.document_number,
             phone: user.phone,
             email: user.email,
