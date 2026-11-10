@@ -46,12 +46,13 @@ export class OptionComponentSearchService {
 }
 
 /**
- * `component_type` is deduced from the chosen product: a prepared product with
- * an active recipe is a recipe (the backend rejects one without it), an
+ * `component_type` is deduced from the chosen product: a prepared product is a
+ * recipe unless the listing says it has no active recipe (the backend rejects
+ * one without it); a payload without the flag keeps the previous behavior. An
  * ingredient flag means insumo, anything else is a plain product.
  */
 export function deduceComponentType(product: OptionComponentProduct): OptionComponentType {
-  if (product.product_type === 'prepared' && product.has_active_recipe === true) return 'recipe';
+  if (product.product_type === 'prepared' && product.has_active_recipe !== false) return 'recipe';
   if (product.is_ingredient) return 'ingredient';
   return 'product';
 }
