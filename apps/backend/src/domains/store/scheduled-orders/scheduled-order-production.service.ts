@@ -25,6 +25,15 @@ import { ScheduledOrdersService, kitchenPendingItemsWhere } from './scheduled-or
 import { findProductionOrderForLine } from '../production/production-order-pairing.util';
 import { emitProductionOrderUpdated } from '../production/production-order-events';
 
+/** Production order of a sale line, as the agenda query selects it. */
+type LinkedProductionOrder = {
+  id: number;
+  product_id: number;
+  product_variant_id: number | null;
+  order_number: string | null;
+  status: string;
+};
+
 type Tx = Prisma.TransactionClient;
 
 export type { ConsumptionLine, ProductionLineInput } from '../kitchen-fire/addon-consumption';
@@ -423,7 +432,7 @@ export class ScheduledOrderProductionService implements OnModuleInit {
         items: s.order.order_items.map((item) => {
           const linked =
             item.fulfillment_destination === 'production'
-              ? findProductionOrderForLine(s.order.production_orders ?? [], item)
+              ? findProductionOrderForLine<LinkedProductionOrder>(s.order.production_orders ?? [], item)
               : undefined;
           return {
           production_order: linked

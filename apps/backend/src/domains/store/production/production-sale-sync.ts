@@ -33,7 +33,7 @@ type AsyncEmitter = {
 export async function requestProductionSaleSync(
   emitter: AsyncEmitter | undefined,
   logger: Pick<Logger, 'warn'>,
-  payload: { order_id: number } & object,
+  payload: ProductionSaleSyncPayload | ProductionSaleCancelledPayload,
   event: string = PRODUCTION_SALE_SYNC_EVENT,
 ): Promise<void> {
   if (!payload.order_id) return;

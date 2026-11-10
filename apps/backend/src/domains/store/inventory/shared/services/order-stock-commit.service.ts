@@ -518,6 +518,7 @@ export class OrderStockCommitService {
     const resolvers = createBatchAwareExploders({
       recipes: this.recipes,
       stockValidator: this.stockValidator,
+      stockLevelManager: this.stockLevelManager,
       client: tx,
       pool,
     });

@@ -262,7 +262,8 @@ describe('KitchenFireService — add-ons (QUI-1000)', () => {
       };
       (service as any).prisma = prisma;
       (service as any).s3Service = { signUrl: jest.fn(async (k: string) => `signed:${k}`) };
-      const ticket = {
+      // The payload is mutated in place: `addons` is added by signTicketPayload.
+      const ticket: { id: number; items: Array<Record<string, unknown>> } = {
         id: 55,
         items: [
           {
@@ -304,7 +305,7 @@ describe('KitchenFireService — add-ons (QUI-1000)', () => {
       // reset by the resend clears it.
       let addonsMarked = true;
       const state = { reset: false };
-      tx.$queryRaw = jest.fn().mockResolvedValue([{ id: 100 }]);
+      (tx as any).$queryRaw = jest.fn().mockResolvedValue([{ id: 100 }]);
       tx.orders.findFirst.mockResolvedValue({ id: 100, state: 'cancelled' });
       (tx as any).kitchen_ticket_items = { ...tx.kitchen_ticket_items, findFirst: jest.fn().mockResolvedValue(null) };
       tx.order_items.updateMany.mockImplementation(({ where, data }: any) => {

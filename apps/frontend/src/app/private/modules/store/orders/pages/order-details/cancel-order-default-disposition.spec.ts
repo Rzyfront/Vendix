@@ -2,7 +2,7 @@ import { signal } from '@angular/core';
 import { FormControl, FormGroup, Validators } from '@angular/forms';
 import { of, throwError } from 'rxjs';
 import { OrderDetailsPageComponent, cancellationBody } from './order-details-page.component';
-import type { Order } from '../../interfaces/order.interface';
+import type { Order, ProductionDisposition } from '../../interfaces/order.interface';
 import type { KitchenDisposition } from '../../services/store-orders.service';
 
 describe('OrderDetailsPageComponent — reusar en cancelación de varios platos', () => {
@@ -13,6 +13,8 @@ describe('OrderDetailsPageComponent — reusar en cancelación de varios platos'
       orderId: '42',
       cancelForm: new FormGroup({ reason: new FormControl('', [Validators.required, Validators.minLength(3)]) }),
       cancelKitchenDisposition: signal<KitchenDisposition | null>(null),
+      cancelProductionDisposition: signal<ProductionDisposition>('release'),
+      cancelProductionSuggestion: signal<ProductionDisposition | null>(null),
       cancelRequiresDisposition: signal(advancedItems > 0),
       showCancelModal: signal(false),
       isProcessingAction: signal(false),
@@ -87,6 +89,8 @@ describe('OrderDetailsPageComponent — cod-auto-invoicing S5 nota crédito tota
       orderId: '42',
       cancelForm: new FormGroup({ reason: new FormControl('', [Validators.required, Validators.minLength(3)]) }),
       cancelKitchenDisposition: signal<KitchenDisposition | null>(null),
+      cancelProductionDisposition: signal<ProductionDisposition>('release'),
+      cancelProductionSuggestion: signal<ProductionDisposition | null>(null),
       cancelRequiresDisposition: signal(false),
       showCancelModal: signal(false),
       isProcessingAction: signal(false),
