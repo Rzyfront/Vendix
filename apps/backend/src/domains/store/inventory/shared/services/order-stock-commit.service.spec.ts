@@ -61,6 +61,7 @@ describe('OrderStockCommitService — claim atómico anti doble-descuento', () =
       orders: { findUnique: jest.fn().mockResolvedValue(buildOrder()), findFirst: jest.fn().mockResolvedValue(buildOrder()) },
       $queryRaw: jest.fn().mockResolvedValue([{ id: 1, state: 'processing' }]),
       order_items: { updateMany: jest.fn() },
+      production_orders: { findMany: jest.fn().mockResolvedValue([]) },
       // reservationReader = tx (tx presente) → sin reserva activa.
       stock_reservations: { findMany: jest.fn().mockResolvedValue([]) },
     };
@@ -262,6 +263,45 @@ describe('OrderStockCommitService — claim atómico anti doble-descuento', () =
     productionOrder.order_items[0].fulfillment_destination = 'production';
     txMock.orders.findFirst.mockResolvedValue(productionOrder);
     txMock.orders.findUnique.mockResolvedValue(productionOrder);
+
+    const result = await service.commitOrderDelivery(1, OPTS, txMock);
+
+    expect(txMock.order_items.updateMany).not.toHaveBeenCalled();
+    expect(stockLevelManagerMock.updateStock).not.toHaveBeenCalled();
+    expect(result.committedItemCount).toBe(0);
+  });
+
+  it('QUI-995: una línea de producción con orden completada consume la reserva y descuenta una vez', async () => {
+    const o: any = buildOrder();
+    o.stores.industries = ['restaurant'];
+    o.order_items[0].products.product_type = 'prepared';
+    o.order_items[0].skip_kds = true;
+    o.order_items[0].fulfillment_destination = 'production';
+    txMock.orders.findFirst.mockResolvedValue(o);
+    txMock.orders.findUnique.mockResolvedValue(o);
+    txMock.order_items.updateMany.mockResolvedValue({ count: 1 });
+    txMock.production_orders.findMany.mockResolvedValue([{ product_id: 100 }]);
+
+    const result = await service.commitOrderDelivery(1, OPTS, txMock);
+
+    expect(txMock.production_orders.findMany).toHaveBeenCalledWith({
+      where: { order_id: 1, status: 'completed' },
+      select: { product_id: true },
+    });
+    expect(stockLevelManagerMock.releaseReservationQuantity).toHaveBeenCalledTimes(1);
+    expect(stockLevelManagerMock.updateStock).toHaveBeenCalledTimes(1);
+    expect(result.committedItemCount).toBe(1);
+  });
+
+  it('QUI-995: una línea de producción sin orden completada se omite y no se marca committed', async () => {
+    const o: any = buildOrder();
+    o.stores.industries = ['restaurant'];
+    o.order_items[0].products.product_type = 'prepared';
+    o.order_items[0].skip_kds = true;
+    o.order_items[0].fulfillment_destination = 'production';
+    txMock.orders.findFirst.mockResolvedValue(o);
+    txMock.orders.findUnique.mockResolvedValue(o);
+    txMock.production_orders.findMany.mockResolvedValue([]);
 
     const result = await service.commitOrderDelivery(1, OPTS, txMock);
 

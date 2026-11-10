@@ -3,6 +3,14 @@ import { Prisma } from '@prisma/client';
 import { EventEmitter2 } from '@nestjs/event-emitter';
 import { StorePrismaService } from '../../../prisma/services/store-prisma.service';
 import { StockLevelManager } from '../inventory/shared/services/stock-level-manager.service';
+import { OrderStockCommitService } from '../inventory/shared/services/order-stock-commit.service';
+import { RecipesService } from '../recipes/recipes.service';
+import { S3Service } from '@common/services/s3.service';
+import {
+  createBatchAwareExploders,
+  expandProduction,
+  type ProductionLineInput,
+} from '../kitchen-fire/addon-consumption';
 import {
   StockValidatorService,
   StockDemandLine,
@@ -113,6 +121,11 @@ export class ProductionOrdersService {
     // step 6) — tracked ingredients are validated BEFORE being consumed.
     private readonly stockValidatorService: StockValidatorService,
     private readonly eventEmitter: EventEmitter2,
+    // QUI-995: only used by orders linked to a sale (add-ons, reservation,
+    // detail). Manual and Planta orders never touch them.
+    private readonly recipes?: RecipesService,
+    private readonly orderStockCommit?: OrderStockCommitService,
+    private readonly s3Service?: S3Service,
   ) {}
 
   /**
@@ -307,6 +320,7 @@ export class ProductionOrdersService {
       status,
       product_id,
       recipe_id,
+      order_id,
       sort_by = 'created_at',
       sort_order = 'desc',
     } = query ?? {};
@@ -317,6 +331,7 @@ export class ProductionOrdersService {
       ...(status && { status }),
       ...(product_id && { product_id }),
       ...(recipe_id && { recipe_id }),
+      ...(order_id && { order_id }),
       ...(search && {
         product: {
           name: { contains: search, mode: 'insensitive' },
@@ -342,12 +357,19 @@ export class ProductionOrdersService {
               waste_percent: true,
             },
           },
+          sale_order: { select: { order_number: true } },
         },
       }),
       this.prisma.production_orders.count({ where }),
     ]);
 
-    return { data, total };
+    return {
+      data: data.map(({ sale_order, ...row }) => ({
+        ...row,
+        sale_order_number: sale_order?.order_number ?? null,
+      })),
+      total,
+    };
   }
 
   async findOne(id: number) {
@@ -461,7 +483,9 @@ export class ProductionOrdersService {
         ErrorCodes.PRODUCTION_RECIPE_EMPTY,
       );
     }
-    if (!options?.allowPartialBatch) {
+    // QUI-995: a sale-linked order produces what was sold, not whole batches.
+    const linkedOrderId = (order as { order_id?: number | null }).order_id ?? null;
+    if (!options?.allowPartialBatch && linkedOrderId == null) {
       this.assertWholeBatches(
         producedQty,
         recipe.yield_quantity,
@@ -527,6 +551,24 @@ export class ProductionOrdersService {
 
     // 1. ATOMIC TRANSACTION — consume each recipe item + produce the batch
     const updated = await this.prisma.$transaction(async (tx) => {
+      // 0. Atomic state guard (QUI-995): the conditional UPDATE serializes two
+      // screens completing the same order. The loser re-evaluates the WHERE
+      // after the winner commits (status / produced_qty changed), gets count 0
+      // and rolls back before moving any stock.
+      const claimed = await tx.production_orders.updateMany({
+        where: {
+          id: order.id,
+          status: order.status,
+          produced_qty: order.produced_qty ?? null,
+        },
+        data: { updated_at: new Date() },
+      });
+      if (claimed.count !== 1) {
+        throw new VendixHttpException(
+          ErrorCodes.PRODUCTION_ORDER_CONCURRENT_UPDATE,
+        );
+      }
+
       // 1a. Consume each ingredient (sub-recipes are NOT exploded in Fase C;
       // they are consumed as their own batch stock via the same machinery).
       for (const item of recipe.items) {
@@ -591,6 +633,23 @@ export class ProductionOrdersService {
         });
       }
 
+      // 1a'. Sale-linked order: the add-ons of its lines are consumed here, once
+      // (each line claims `addons_consumed_at`, the same marker the kitchen fire
+      // and the scheduled start use). Their cost joins the order cost, so the
+      // `production.completed` entry is a single one.
+      if (linkedOrderId != null) {
+        const addons = await this.consumeLinkedAddons(tx, {
+          store_id,
+          order_id: linkedOrderId,
+          product_id: order.product_id,
+          production_order_id: order.id,
+          sourceModule,
+          allowOveruse: inventoryPolicy.allowIngredientOveruse,
+        });
+        totalConsumedCost += addons.cost;
+        consumedLineCount += addons.lines;
+      }
+
       // 1b. Credit finished-goods stock with the derived unit_cost
       const producedUnitCost =
         totalConsumedCost > 0
@@ -648,6 +707,20 @@ export class ProductionOrdersService {
         },
       });
 
+      // 1d. Sale-linked order: reserve (or, if the sale is already delivered,
+      // sell) what was produced.
+      if (linkedOrderId != null) {
+        await this.settleProducedForSale(tx, {
+          store_id,
+          order_id: linkedOrderId,
+          product_id: order.product_id,
+          location_id,
+          produced_qty: producedQty,
+          planned_qty: Number(order.planned_qty),
+          production_order_id: order.id,
+        });
+      }
+
       return { order: final, producedUnitCost };
     });
 
@@ -687,6 +760,341 @@ export class ProductionOrdersService {
     return stockWarnings.length > 0
       ? { ...updated.order, stock_warnings: stockWarnings }
       : updated.order;
+  }
+
+  // ------------------------------------------------------- sale-linked (QUI-995)
+  /**
+   * Consumes the add-ons of the sale lines this order serves. Each line claims
+   * `addons_consumed_at` first (updateMany where null), so the kitchen fire, the
+   * scheduled start and this completion never deduct the same add-on twice.
+   */
+  private async consumeLinkedAddons(
+    tx: Prisma.TransactionClient,
+    p: {
+      store_id: number;
+      order_id: number;
+      product_id: number;
+      production_order_id: number;
+      sourceModule: string;
+      allowOveruse: boolean;
+    },
+  ): Promise<{ cost: number; lines: number }> {
+    const lines = await tx.order_items.findMany({
+      where: {
+        order_id: p.order_id,
+        product_id: p.product_id,
+        cancelled_at: null,
+        fulfillment_destination: 'production',
+        orders: { store_id: p.store_id },
+      },
+      select: {
+        id: true,
+        product_id: true,
+        product_variant_id: true,
+        quantity: true,
+        addons_consumed_at: true,
+        order_item_options: {
+          select: {
+            scope: true,
+            component_type: true,
+            component_product_id: true,
+            component_variant_id: true,
+            quantity: true,
+          },
+        },
+      },
+    });
+    const inputs: ProductionLineInput[] = [];
+    for (const line of lines) {
+      if (line.addons_consumed_at != null || line.order_item_options.length === 0) continue;
+      const { count } = await tx.order_items.updateMany({
+        where: { id: line.id, addons_consumed_at: null },
+        data: { addons_consumed_at: new Date() },
+      });
+      if (count === 0) continue;
+      inputs.push({
+        id: line.id,
+        product_id: line.product_id,
+        product_variant_id: line.product_variant_id,
+        quantity: Number(line.quantity),
+        // null: the base recipe is this order's own consumption, only add-ons here.
+        product_type: null,
+        inventory_consumed: true,
+        addons_consumed: false,
+        options: line.order_item_options.map((o) => ({
+          ...o,
+          quantity: Number(o.quantity),
+        })),
+      });
+    }
+    if (inputs.length === 0) return { cost: 0, lines: 0 };
+
+    const resolvers = createBatchAwareExploders({
+      recipes: this.recipes!,
+      stockValidator: this.stockValidatorService,
+      client: tx,
+      pool: new Map(),
+    });
+    const { consumption } = await expandProduction(
+      inputs,
+      resolvers.findRecipe,
+      resolvers.explode,
+      resolvers.explodeComponent,
+    );
+    let cost = 0;
+    for (const line of consumption) {
+      const location_id = await this.stockLevelManager.getDefaultLocationForProduct(
+        line.product_id,
+        line.variant_id ?? undefined,
+        tx,
+      );
+      const result = await this.stockLevelManager.updateStock(
+        {
+          product_id: line.product_id,
+          ...(line.variant_id ? { variant_id: line.variant_id } : {}),
+          location_id,
+          quantity_change: -line.quantity,
+          movement_type: 'consumption',
+          reason: `Producción #${p.production_order_id} – adiciones (pedido #${p.order_id})`,
+          source_module: p.sourceModule,
+          create_movement: true,
+          validate_availability: !p.allowOveruse,
+          allow_negative: p.allowOveruse,
+        },
+        tx,
+      );
+      cost += Number(result?.cost_snapshot?.total_cost ?? 0);
+    }
+    return { cost, lines: consumption.length };
+  }
+
+  /**
+   * What happens to the produced units once the order completes:
+   * - active sale: reserve min(produced, planned) for ('order', sale), without
+   *   availability validation (the units were just credited, so `available`
+   *   is unchanged and no other sale can take them);
+   * - sale already delivered/finished: sell them now through the delivery
+   *   commit (marks the lines `inventory_committed`), no reservation;
+   * - sale cancelled/refunded: nothing is reserved, the stock stays sellable.
+   */
+  private async settleProducedForSale(
+    tx: Prisma.TransactionClient,
+    p: {
+      store_id: number;
+      order_id: number;
+      product_id: number;
+      location_id: number;
+      produced_qty: number;
+      planned_qty: number;
+      production_order_id: number;
+    },
+  ): Promise<void> {
+    const sale = await tx.orders.findFirst({
+      where: { id: p.order_id, store_id: p.store_id },
+      select: { id: true, state: true },
+    });
+    if (!sale || ['cancelled', 'refunded'].includes(sale.state as string)) return;
+
+    if (['delivered', 'finished'].includes(sale.state as string)) {
+      const pending = await tx.order_items.findMany({
+        where: {
+          order_id: p.order_id,
+          product_id: p.product_id,
+          cancelled_at: null,
+          fulfillment_destination: 'production',
+          inventory_committed: false,
+        },
+        select: { id: true },
+      });
+      if (pending.length > 0) {
+        await this.orderStockCommit!.commitOrderLines(
+          p.order_id,
+          pending.map((l) => l.id),
+          {
+            blockOnInsufficient: false,
+            tx,
+            movementType: 'sale',
+            reason: `Producción #${p.production_order_id} completada tras la entrega`,
+          },
+        );
+      }
+      return;
+    }
+
+    const quantity = Math.min(p.produced_qty, Math.round(p.planned_qty));
+    if (quantity <= 0) return;
+    await this.stockLevelManager.reserveStock(
+      p.product_id,
+      undefined,
+      p.location_id,
+      quantity,
+      'order',
+      p.order_id,
+      RequestContextService.getContext()?.user_id ?? undefined,
+      false,
+      tx,
+    );
+  }
+
+  /** Signed main-image URL per product id (S3 keys are signed on read). */
+  private async imagesByProduct(ids: number[]): Promise<Map<number, string | null>> {
+    const unique = [...new Set(ids)];
+    const out = new Map<number, string | null>();
+    if (unique.length === 0) return out;
+    const rows = await this.prisma.products.findMany({
+      where: { id: { in: unique } },
+      select: {
+        id: true,
+        product_images: {
+          select: { image_url: true },
+          orderBy: [{ is_main: 'desc' }, { sort_order: 'asc' }],
+          take: 1,
+        },
+      },
+    });
+    await Promise.all(
+      rows.map(async (row) => {
+        const key = row.product_images?.[0]?.image_url ?? null;
+        out.set(row.id, key && this.s3Service ? ((await this.s3Service.signUrl(key)) ?? null) : null);
+      }),
+    );
+    return out;
+  }
+
+  /**
+   * Detail for the shared production-order view (QUI-995): the order plus the
+   * base recipe, the sale it serves and, per sale line, notes and add-ons with
+   * image and (for preparations) their recipe components.
+   */
+  async getDetail(id: number) {
+    const order = await this.findOne(id);
+    const store_id = (order as { store_id: number }).store_id;
+    const sale_order_id = (order as { order_id?: number | null }).order_id ?? null;
+
+    const recipeItems = order.recipe?.items ?? [];
+    const sale = sale_order_id
+      ? await this.prisma.orders.findFirst({
+          where: { id: sale_order_id, store_id },
+          select: {
+            id: true,
+            order_number: true,
+            state: true,
+            customer_alias: true,
+            users: { select: { first_name: true, last_name: true } },
+            fulfillment_schedule: { select: { scheduled_start: true } },
+          },
+        })
+      : null;
+    const lines = sale_order_id
+      ? await this.prisma.order_items.findMany({
+          where: {
+            order_id: sale_order_id,
+            product_id: order.product_id,
+            cancelled_at: null,
+            fulfillment_destination: 'production',
+          },
+          orderBy: { id: 'asc' },
+          select: {
+            id: true,
+            quantity: true,
+            notes: true,
+            order_item_options: {
+              orderBy: { id: 'asc' },
+              select: {
+                group_name: true,
+                option_name: true,
+                note: true,
+                component_type: true,
+                component_product_id: true,
+                component_variant_id: true,
+              },
+            },
+          },
+        })
+      : [];
+
+    const addonProductIds = lines.flatMap((l) =>
+      l.order_item_options.map((o) => o.component_product_id),
+    );
+    const addonRecipes = addonProductIds.length
+      ? await this.prisma.recipes.findMany({
+          where: { product_id: { in: addonProductIds }, is_active: true },
+          select: {
+            product_id: true,
+            product_variant_id: true,
+            items: {
+              orderBy: { id: 'asc' },
+              select: {
+                quantity: true,
+                component_product: { select: { id: true, name: true, stock_unit: true } },
+              },
+            },
+          },
+        })
+      : [];
+    const images = await this.imagesByProduct([
+      order.product_id,
+      ...recipeItems.map((i) => i.component_product_id),
+      ...addonProductIds,
+      ...addonRecipes.flatMap((r) => r.items.map((i) => i.component_product.id)),
+    ]);
+    const component = (item: {
+      quantity: unknown;
+      component_product: { id: number; name: string; stock_unit?: string | null };
+    }) => ({
+      product_id: item.component_product.id,
+      name: item.component_product.name,
+      quantity: Number(item.quantity),
+      unit: item.component_product.stock_unit ?? null,
+      image_url: images.get(item.component_product.id) ?? null,
+    });
+    const recipeFor = (product_id: number, variant_id: number | null) => {
+      const rows = addonRecipes.filter((r) => r.product_id === product_id);
+      return (
+        (variant_id != null ? rows.find((r) => r.product_variant_id === variant_id) : undefined) ??
+        rows.find((r) => r.product_variant_id == null) ??
+        null
+      );
+    };
+
+    const customer = sale?.users;
+    return {
+      ...order,
+      product: { ...order.product, image_url: images.get(order.product_id) ?? null },
+      base_recipe: order.recipe
+        ? { id: order.recipe.id, components: recipeItems.map(component) }
+        : null,
+      sale_order: sale
+        ? {
+            id: sale.id,
+            order_number: sale.order_number,
+            state: sale.state,
+            customer_name:
+              (customer ? `${customer.first_name ?? ''} ${customer.last_name ?? ''}`.trim() : '') ||
+              sale.customer_alias?.trim() ||
+              null,
+            due_at: sale.fulfillment_schedule?.scheduled_start ?? order.due_date ?? null,
+          }
+        : null,
+      order_lines: lines.map((line) => ({
+        order_item_id: line.id,
+        quantity: Number(line.quantity),
+        notes: line.notes ?? null,
+        addons: line.order_item_options.map((o) => {
+          const recipe =
+            o.component_type === 'recipe'
+              ? recipeFor(o.component_product_id, o.component_variant_id ?? null)
+              : null;
+          return {
+            group_name: o.group_name,
+            option_name: o.option_name,
+            note: o.note ?? null,
+            image_url: images.get(o.component_product_id) ?? null,
+            recipe: recipe ? { components: recipe.items.map(component) } : null,
+          };
+        }),
+      })),
+    };
   }
 
   // ------------------------------------------------------------------- cancel

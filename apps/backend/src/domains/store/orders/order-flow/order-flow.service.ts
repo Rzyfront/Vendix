@@ -1,3 +1,7 @@
+import {
+  PRODUCTION_SALE_CANCELLED_EVENT,
+  requestProductionSaleSync,
+} from '../../production/production-sale-sync';
 import { assertNotLodgingFolioOrder } from '../shared/lodging-folio-policy';
 import {
   assertNoActiveFinancialSplit,
@@ -8076,6 +8080,20 @@ export class OrderFlowService {
         }
       }
     }
+
+    // QUI-995: linked production orders follow the sale. Runs BEFORE the blanket
+    // release below so a `waste` decision consumes its reservation first.
+    await requestProductionSaleSync(
+      this.eventEmitter as any,
+      this.logger,
+      {
+        order_id: orderId,
+        store_id: order.store_id,
+        disposition: dto.productionDisposition,
+        reason: dto.reason,
+      },
+      PRODUCTION_SALE_CANCELLED_EVENT,
+    );
 
     // Release reserved stock by reference — kept OUTSIDE the transaction and
     // best-effort (exactly as before): a release failure must never abort a

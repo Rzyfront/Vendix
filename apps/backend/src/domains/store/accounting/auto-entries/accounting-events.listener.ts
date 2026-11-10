@@ -762,6 +762,47 @@ export class AccountingEventsListener {
     }
   }
 
+  @OnEvent('production.sale_waste')
+  async handleProductionSaleWaste(event: {
+    production_order_id: number;
+    order_id: number;
+    organization_id: number;
+    store_id?: number;
+    product_name: string;
+    quantity: number;
+    total_cost: number;
+    user_id?: number;
+  }) {
+    try {
+      if (
+        !(await this.isFlowEnabled(
+          event.store_id,
+          'inventory',
+          event.organization_id,
+        ))
+      )
+        return;
+      await this.auto_entry_service.onProductionSaleWaste({
+        production_order_id: event.production_order_id,
+        order_id: event.order_id,
+        organization_id: event.organization_id,
+        store_id: event.store_id,
+        product_name: event.product_name,
+        quantity: Number(event.quantity),
+        total_cost: Number(event.total_cost),
+        user_id: event.user_id,
+      });
+      this.logger.log(
+        `Auto-entry created for production.sale_waste #${event.production_order_id}`,
+      );
+    } catch (error) {
+      this.logger.error(
+        `Failed to create auto-entry for production.sale_waste #${event.production_order_id}: ${error.message}`,
+        error.stack,
+      );
+    }
+  }
+
   @OnEvent('production.completed')
   async handleProductionCompleted(event: {
     production_order_id: number;

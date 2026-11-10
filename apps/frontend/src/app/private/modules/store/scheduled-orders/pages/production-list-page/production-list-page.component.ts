@@ -30,6 +30,9 @@ import {
   uomLabel,
 } from '../../interfaces/scheduled-order.interface';
 import { ScheduledOrdersApiService } from '../../services/scheduled-orders-api.service';
+import { ProductionOrderDetailModalComponent } from '../../../restaurant-ops/production/components/production-order-detail/production-order-detail-modal.component';
+import { ProductionOrdersService } from '../../../restaurant-ops/production/services/production-orders.service';
+import { ProductionOrderRef } from '../../../restaurant-ops/production/interfaces/production-order.interface';
 import { fullDate } from '../../utils/ymd.util';
 
 /** Clase en <body> que activa las reglas de impresión de esta página. */
@@ -41,7 +44,13 @@ const PRINT_BODY_CLASS = 'production-list-printing';
   changeDetection: ChangeDetectionStrategy.OnPush,
   // Sin encapsulación: las reglas @media print deben alcanzar el <body>.
   encapsulation: ViewEncapsulation.None,
-  imports: [RouterLink, ButtonComponent, IconComponent, SpinnerComponent],
+  imports: [
+    RouterLink,
+    ButtonComponent,
+    IconComponent,
+    SpinnerComponent,
+    ProductionOrderDetailModalComponent,
+  ],
   styles: [
     `
       app-scheduled-orders-production-list-page {
@@ -131,6 +140,15 @@ const PRINT_BODY_CLASS = 'production-list-printing';
       }
       .pl-table .num {
         text-align: right;
+      }
+      .pl-prod-link {
+        font-size: var(--fs-sm, 0.875rem);
+        color: var(--color-primary);
+        text-decoration: underline;
+        background: none;
+        border: 0;
+        padding: 0;
+        cursor: pointer;
       }
       .pl-print-title {
         display: none;
@@ -245,6 +263,15 @@ const PRINT_BODY_CLASS = 'production-list-printing';
                         @if (item.notes) {
                           <div class="pl-note">Nota: {{ item.notes }}</div>
                         }
+                        @if (item.production_order; as po) {
+                          <button
+                            type="button"
+                            class="pl-prod-link pl-no-print"
+                            (click)="openProduction(po)"
+                          >
+                            Producción {{ po.order_number || '#' + po.id }} · {{ productionStatus(po) }}
+                          </button>
+                        }
                       </li>
                     }
                   </ul>
@@ -279,6 +306,12 @@ const PRINT_BODY_CLASS = 'production-list-printing';
         </div>
       }
     </div>
+
+    <app-production-order-detail-modal
+      [(isOpen)]="showProduction"
+      [orderId]="productionOrderId()"
+      (changed)="reload()"
+    />
   `,
 })
 export class ProductionListPageComponent {
@@ -308,6 +341,23 @@ export class ProductionListPageComponent {
       this.doc.body.classList.remove(PRINT_BODY_CLASS);
       this.loadSub?.unsubscribe();
     });
+  }
+
+  /** Shared production order detail (T13) opened from a line. */
+  readonly productionOrderId = signal<number | null>(null);
+  readonly showProduction = signal(false);
+
+  openProduction(po: ProductionOrderRef): void {
+    this.productionOrderId.set(po.id);
+    this.showProduction.set(true);
+  }
+
+  productionStatus(po: ProductionOrderRef): string {
+    return ProductionOrdersService.statusLabelSafe(po.status);
+  }
+
+  reload(): void {
+    this.load(this.date());
   }
 
   onDateChange(event: Event): void {

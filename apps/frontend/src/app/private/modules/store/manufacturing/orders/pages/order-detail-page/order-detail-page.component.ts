@@ -33,6 +33,9 @@ import {
   ManufacturingOrdersService,
   ManufacturingSettingsService,
 } from '../../../services';
+import { ProductionSaleLinesComponent } from '../../../../restaurant-ops/production/components/production-sale-lines/production-sale-lines.component';
+import { ProductionOrdersService } from '../../../../restaurant-ops/production/services/production-orders.service';
+import { ProductionOrder } from '../../../../restaurant-ops/production/interfaces/production-order.interface';
 import { CompleteOrderModalComponent } from '../../components/complete-order-modal/complete-order-modal.component';
 
 const LIST_ROUTE = '/admin/manufacturing/orders';
@@ -47,12 +50,14 @@ const LIST_ROUTE = '/admin/manufacturing/orders';
     IconComponent,
     CurrencyPipe,
     CompleteOrderModalComponent,
+    ProductionSaleLinesComponent,
   ],
   templateUrl: './order-detail-page.component.html',
 })
 export class OrderDetailPageComponent implements OnInit {
   private readonly ordersService = inject(ManufacturingOrdersService);
   private readonly settingsService = inject(ManufacturingSettingsService);
+  private readonly productionOrdersService = inject(ProductionOrdersService);
   private readonly toastService = inject(ToastService);
   private readonly dialogService = inject(DialogService);
   private readonly route = inject(ActivatedRoute);
@@ -65,6 +70,8 @@ export class OrderDetailPageComponent implements OnInit {
   readonly isBusy = signal(false);
   readonly lotRequired = signal(false);
   readonly completeModalOpen = signal(false);
+  /** Same production order read through the shared detail: sale link, lines and add-ons (T13). */
+  readonly saleDetail = signal<ProductionOrder | null>(null);
 
   readonly lines = computed<ManufacturingOrderLine[]>(() => this.order()?.lines ?? []);
   readonly hasShortages = computed(() => this.shortages().some((s) => s.missing > 0));
@@ -156,6 +163,7 @@ export class OrderDetailPageComponent implements OnInit {
           this.order.set(order);
           this.isLoading.set(false);
           this.loadShortages(order);
+          this.loadSaleDetail(order);
         },
         error: (error) => {
           this.toastService.error(
@@ -164,6 +172,22 @@ export class OrderDetailPageComponent implements OnInit {
           this.isLoading.set(false);
           this.router.navigate([LIST_ROUTE]);
         },
+      });
+  }
+
+  /** Only orders born from a sale have the "Pedido de venta" section. */
+  private loadSaleDetail(order: ManufacturingOrder): void {
+    if (order.order_id == null) {
+      this.saleDetail.set(null);
+      return;
+    }
+    this.productionOrdersService
+      .getById(order.id)
+      .pipe(takeUntilDestroyed(this.destroyRef))
+      .subscribe({
+        next: (detail) => this.saleDetail.set(detail),
+        // Optional context: Planta users may lack production_orders:read.
+        error: () => this.saleDetail.set(null),
       });
   }
 

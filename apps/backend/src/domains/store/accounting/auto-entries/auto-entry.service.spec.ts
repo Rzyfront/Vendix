@@ -1,5 +1,45 @@
 import { AutoEntryService } from './auto-entry.service';
 
+describe('QUI-995 production sale waste', () => {
+  it('posts DR shrinkage / CR finished goods keyed by the production order', async () => {
+    const service = new AutoEntryService({} as any, {} as any, {} as any, {} as any, {} as any);
+    const resolve = jest.spyOn(service as any, 'resolveAccountLine').mockImplementation(
+      async (_org: number, key: string, description: string, debit: number, credit: number) => ({
+        account_code: ({
+          'inventory.adjusted.shrinkage': '5295',
+          'production.completed.finished_goods': '1435',
+        } as Record<string, string>)[key],
+        description, debit_amount: debit, credit_amount: credit,
+      }),
+    );
+    const create = jest.spyOn(service, 'createAutoEntry').mockResolvedValue({ id: 1 } as any);
+    await service.onProductionSaleWaste({
+      production_order_id: 100, order_id: 77, organization_id: 2, store_id: 4,
+      product_name: 'Torta', quantity: 3, total_cost: 4500, user_id: 9,
+    });
+    expect(resolve.mock.calls.map((call) => call[1])).toEqual([
+      'inventory.adjusted.shrinkage', 'production.completed.finished_goods',
+    ]);
+    expect(create).toHaveBeenCalledWith(expect.objectContaining({
+      source_type: 'production.sale_waste', source_id: 100, organization_id: 2, store_id: 4,
+      lines: [
+        expect.objectContaining({ account_code: '5295', debit_amount: 4500, credit_amount: 0 }),
+        expect.objectContaining({ account_code: '1435', debit_amount: 0, credit_amount: 4500 }),
+      ],
+    }));
+  });
+
+  it('does not create a zero-cost journal', async () => {
+    const service = new AutoEntryService({} as any, {} as any, {} as any, {} as any, {} as any);
+    const create = jest.spyOn(service, 'createAutoEntry').mockResolvedValue({ id: 1 } as any);
+    await service.onProductionSaleWaste({
+      production_order_id: 100, order_id: 77, organization_id: 2,
+      product_name: 'Torta', quantity: 3, total_cost: 0,
+    });
+    expect(create).not.toHaveBeenCalled();
+  });
+});
+
 describe('D.2 prepared dish disposition reclassification', () => {
   it.each([
     ['waste', 'order_item.prepared_waste.shrinkage', '5295'],

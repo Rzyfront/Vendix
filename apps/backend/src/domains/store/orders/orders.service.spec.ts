@@ -1288,6 +1288,62 @@ describe('OrdersService', () => {
   // .getAvailableActions` calls — additive fields only, nothing existing
   // changes shape.
   // ----------------------------------------------------------------
+  describe('findOne — producción vinculada (QUI-995)', () => {
+    const base = (items: any[], production_orders: any[]) => ({
+      id: 5,
+      order_number: 'ORD5',
+      order_items: items,
+      order_promotions: [],
+      coupon_uses: [],
+      production_orders,
+    });
+    const line = (id: number, product_id: number, extra: Record<string, unknown> = {}) => ({
+      id,
+      product_id,
+      fulfillment_destination: 'production',
+      cancelled_at: null,
+      notes: null,
+      order_item_options: [],
+      ...extra,
+    });
+
+    it('adds production_order per production line, status and no suggestion while nothing is completed', async () => {
+      mockPrismaService.orders.findFirst.mockResolvedValue(
+        base([line(1, 50), { id: 2, product_id: 60, fulfillment_destination: 'stock' }], [
+          { id: 100, product_id: 50, order_number: 'OP-1', status: 'draft' },
+        ]),
+      );
+      const result: any = await service.findOne(5);
+      expect(result.order_items[0].production_order).toEqual({ id: 100, order_number: 'OP-1', status: 'draft' });
+      expect(result.order_items[1].production_order).toBeNull();
+      expect(result.production_status).toBe('pending');
+      expect(result.production_cancel_suggestion).toBeNull();
+    });
+
+    it('completed order with add-ons suggests waste; plain suggests release', async () => {
+      mockPrismaService.orders.findFirst.mockResolvedValue(
+        base([line(1, 50, { order_item_options: [{ option_name: 'Crema' }] })], [
+          { id: 100, product_id: 50, order_number: 'OP-1', status: 'completed' },
+        ]),
+      );
+      let result: any = await service.findOne(5);
+      expect(result.production_status).toBe('completed');
+      expect(result.production_cancel_suggestion).toBe('waste');
+
+      mockPrismaService.orders.findFirst.mockResolvedValue(
+        base([line(1, 50)], [{ id: 100, product_id: 50, order_number: 'OP-1', status: 'completed' }]),
+      );
+      result = await service.findOne(5);
+      expect(result.production_cancel_suggestion).toBe('release');
+    });
+
+    it('an order without production lines reports production_status none', async () => {
+      mockPrismaService.orders.findFirst.mockResolvedValue(base([], []));
+      const result: any = await service.findOne(5);
+      expect(result.production_status).toBe('none');
+    });
+  });
+
   describe('findOne — facturas y pagos por cuenta (división financiera)', () => {
     afterEach(() => jest.restoreAllMocks());
 

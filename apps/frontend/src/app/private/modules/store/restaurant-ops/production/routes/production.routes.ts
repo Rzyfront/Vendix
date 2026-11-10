@@ -32,4 +32,13 @@ export const productionOrdersRoutes: Routes = [
       ).then((c) => c.ProductionOrderFormPageComponent),
     data: { permission: 'store:production_orders:create' },
   },
+  {
+    // T13 (QUI-995): shared detail of one production order (born from a sale or manual).
+    path: 'orders/:id',
+    loadComponent: () =>
+      import(
+        '../pages/production-order-detail-page/production-order-detail-page.component'
+      ).then((c) => c.ProductionOrderDetailPageComponent),
+    data: { permission: 'store:production_orders:read' },
+  },
 ];

@@ -1,5 +1,7 @@
 import { assertSaleNatureProducts } from '../../products/services/product-usage-nature.util';
 import { Injectable, Logger } from '@nestjs/common';
+import { EventEmitter2 } from '@nestjs/event-emitter';
+import { requestProductionSaleSync } from '../../production/production-sale-sync';
 import { Prisma } from '@prisma/client';
 import { StorePrismaService } from '../../../../prisma/services/store-prisma.service';
 import { RequestContextService } from '@common/context/request-context.service';
@@ -199,6 +201,7 @@ export class OrderItemChangesService {
     private readonly promotionEngine: PromotionEngineService,
     private readonly couponsService: CouponsService,
     private readonly priceResolver: PriceResolverService,
+    private readonly eventEmitter?: EventEmitter2,
   ) {}
 
   // ---------------------------------------------------------------------------
@@ -573,6 +576,10 @@ export class OrderItemChangesService {
       ...(fireResult?.stockWarnings ?? []),
       ...reserveWarnings,
     ];
+    // QUI-995: added/removed production lines -> re-sync the linked production orders.
+    await requestProductionSaleSync(this.eventEmitter as any, this.logger, {
+      order_id: orderId,
+    });
     this.orderSse.pushOrderEvent(storeId, orderId, 'order.items.updated', {
       order_number: plan.order.order_number,
       item_count:

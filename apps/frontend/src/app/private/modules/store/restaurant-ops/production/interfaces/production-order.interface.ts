@@ -17,6 +17,7 @@ export type ProductionOrderStatus =
 export interface ProductionOrderProduct {
   id: number;
   name: string;
+  image_url?: string | null;
   sku?: string | null;
   stock_unit?: string | null;
   is_batch_produced?: boolean;
@@ -30,8 +31,54 @@ export interface ProductionOrderRecipe {
   preparation_notes?: string | null;
 }
 
+export type ProductionOrderSource = 'manual' | 'order';
+
+/** Compact link from a production order (or a sale line) to its production order. */
+export interface ProductionOrderRef {
+  id: number;
+  order_number: string | null;
+  status: ProductionOrderStatus | string;
+}
+
+export interface ProductionOrderSaleOrder {
+  id: number;
+  order_number: string;
+  state: string;
+  customer_name: string | null;
+  /** ISO UTC; promised time of the sale. */
+  due_at: string | null;
+}
+
+export interface ProductionOrderComponent {
+  name: string;
+  quantity: number | string;
+  unit?: string | null;
+  image_url?: string | null;
+}
+
+export interface ProductionOrderBaseRecipe {
+  components: ProductionOrderComponent[];
+}
+
+export interface ProductionOrderLineAddon {
+  group_name: string;
+  option_name: string;
+  note: string | null;
+  image_url: string | null;
+  recipe: { components: ProductionOrderComponent[] } | null;
+}
+
+export interface ProductionOrderSaleLine {
+  order_item_id: number;
+  quantity: number | string;
+  notes: string | null;
+  addons: ProductionOrderLineAddon[];
+}
+
 export interface ProductionOrder {
   id: number;
+  /** Set by the production sequence; null on legacy rows. */
+  order_number?: string | null;
   store_id: number;
   product_id: number;
   recipe_id: number;
@@ -45,6 +92,17 @@ export interface ProductionOrder {
   // Populated by GET list/detail.
   product?: ProductionOrderProduct;
   recipe?: ProductionOrderRecipe;
+
+  // T13 (QUI-995): link with the sale. `source` is 'manual' for orders
+  // created by hand (order_id NULL) and 'order' for those born from a sale.
+  source?: ProductionOrderSource | null;
+  order_id?: number | null;
+  /** Only in the list response. */
+  sale_order_number?: string | null;
+  // Only in the detail response.
+  sale_order?: ProductionOrderSaleOrder | null;
+  base_recipe?: ProductionOrderBaseRecipe | null;
+  order_lines?: ProductionOrderSaleLine[];
 
   /**
    * Presente en la respuesta de `POST .../complete` cuando
@@ -80,6 +138,8 @@ export interface ProductionOrderQuery {
   status?: ProductionOrderStatus;
   product_id?: number;
   recipe_id?: number;
+  /** T13: only the production orders of one sale. */
+  order_id?: number;
   sort_by?: 'created_at' | 'produced_at' | 'planned_qty' | 'produced_qty' | 'status';
   sort_order?: 'asc' | 'desc';
 }

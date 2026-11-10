@@ -1,3 +1,5 @@
+import { requestProductionSaleSync } from '../production/production-sale-sync';
+import { suggestProductionDisposition } from '../production/production-disposition.util';
 import { loadSessionIntakeAnswers } from '../service-sessions/utils/session-intake-answers.util';
 import { assertNoActiveFinancialSplit } from './shared/financial-split-policy';
 import { resolveKitchenMode } from '../kitchen-fire/kitchen-mode.util';
@@ -1179,6 +1181,13 @@ export class OrdersService {
           currency: order.currency,
         });
 
+        // QUI-995: one production order per `production` product of the sale.
+        await requestProductionSaleSync(
+          this.eventEmitter as any,
+          this.logger,
+          { order_id: order.id },
+        );
+
         return stockWarnings.length > 0
           ? { ...order, stock_warnings: stockWarnings }
           : order;
@@ -1565,6 +1574,47 @@ export class OrdersService {
     });
   }
 
+  /**
+   * QUI-995 — per production line: its linked production order; per order: an
+   * overall `production_status` and, once something was already produced, the
+   * suggested cancellation disposition (waste for made-to-order, else release).
+   */
+  private attachProductionInfo(order: any): void {
+    const linked: Array<{ id: number; product_id: number; order_number: string | null; status: string }> =
+      order.production_orders ?? [];
+    const lines = (order.order_items ?? []).filter(
+      (i: any) => i.fulfillment_destination === 'production' && !i.cancelled_at,
+    );
+    for (const item of order.order_items ?? []) {
+      const match =
+        item.fulfillment_destination === 'production'
+          ? linked.find((o) => o.product_id === item.product_id)
+          : undefined;
+      item.production_order = match
+        ? { id: match.id, order_number: match.order_number, status: match.status }
+        : null;
+    }
+    const states = lines.map(
+      (i: any) => linked.find((o) => o.product_id === i.product_id)?.status ?? null,
+    );
+    if (lines.length === 0) {
+      order.production_status = 'none';
+    } else if (states.every((st: string | null) => st === 'completed')) {
+      order.production_status = 'completed';
+    } else if (states.some((st: string | null) => st === 'in_progress' || st === 'completed')) {
+      order.production_status = 'in_progress';
+    } else {
+      order.production_status = 'pending';
+    }
+    const completedProducts = new Set(
+      linked.filter((o) => o.status === 'completed').map((o) => o.product_id),
+    );
+    order.production_cancel_suggestion =
+      completedProducts.size > 0
+        ? suggestProductionDisposition(lines.filter((i: any) => completedProducts.has(i.product_id)))
+        : null;
+  }
+
   async findOne(id: number) {
     // Auto-scoped by StorePrismaService
     //
@@ -1842,6 +1892,11 @@ export class OrdersService {
           },
           orderBy: { date: 'asc' },
         },
+        // QUI-995 — production orders linked to this sale (one per product).
+        production_orders: {
+          where: { status: { not: 'cancelled' } },
+          select: { id: true, product_id: true, order_number: true, status: true },
+        },
         table_sessions: {
           select: {
             id: true,
@@ -1878,6 +1933,8 @@ export class OrdersService {
 
     // Sign S3 image URLs for order items products
     await this.signOrderItemImages(order);
+
+    this.attachProductionInfo(order);
 
     // Final con impuesto por línea (display-only, aditivo): `unit_price`
     // persistido resuelto con las tasas del producto (UN batch, no N+1) +
@@ -3744,6 +3801,12 @@ export class OrdersService {
       }
       throw error;
     });
+    // QUI-995: lines added or removed -> re-sync the linked production orders.
+    await requestProductionSaleSync(
+      this.eventEmitter as any,
+      this.logger,
+      { order_id: id },
+    );
     return stockWarnings.length > 0
       ? { ...finalOrder, stock_warnings: stockWarnings }
       : finalOrder;
@@ -5714,6 +5777,13 @@ export class OrdersService {
       }
       throw error;
     });
+
+    // QUI-995: the editor may add/remove production lines.
+    await requestProductionSaleSync(
+      this.eventEmitter as any,
+      this.logger,
+      { order_id: orderId },
+    );
 
     // 15) Firma las imágenes S3.
     await this.signOrderItemImages(result);

@@ -507,3 +507,70 @@ describe('ScheduledOrderProductionService.productionList (QUI-991)', () => {
     jest.restoreAllMocks();
   });
 });
+
+describe('ScheduledOrderProductionService — linked production orders (QUI-995)', () => {
+  const linkedRow = (over: Record<string, unknown> = {}) => ({
+    id: 1,
+    product_id: 10,
+    product_variant_id: null,
+    quantity: 2,
+    inventory_consumed_at_fire: false,
+    inventory_committed: false,
+    addons_consumed_at: null,
+    fulfillment_destination: 'production',
+    products: { product_type: 'prepared' },
+    orders: { production_orders: [{ id: 100, product_id: 10, status: 'draft' }] },
+    order_item_options: [
+      { scope: 'per_unit', component_type: 'ingredient', component_product_id: 700, component_variant_id: null, quantity: '80' },
+    ],
+    ...over,
+  });
+
+  function build(lines: unknown[]) {
+    const tx = {
+      order_items: {
+        findMany: jest.fn().mockResolvedValue(lines),
+        updateMany: jest.fn().mockResolvedValue({ count: 1 }),
+      },
+      production_orders: { updateMany: jest.fn().mockResolvedValue({ count: 1 }) },
+      recipes: {
+        findMany: jest.fn(async ({ where }: any) =>
+          RECIPE_BY_PRODUCT[where.product_id] ? [{ id: RECIPE_BY_PRODUCT[where.product_id], product_variant_id: null }] : [],
+        ),
+      },
+    };
+    const stockLevelManager = {
+      getDefaultLocationForProduct: jest.fn().mockResolvedValue(9),
+      updateStock: jest.fn().mockResolvedValue({ cost_snapshot: { total_cost: 100 } }),
+      releaseReservationQuantity: jest.fn().mockResolvedValue(0),
+    };
+    const service = new ScheduledOrderProductionService(
+      {} as any,
+      { registerProductionStartHook: jest.fn() } as any,
+      { explodeBom: jest.fn(async (id: number, mult: Record<number, number>) => explode(id, mult[id])) } as any,
+      stockLevelManager as any,
+      { resolveInventoryPolicy: jest.fn().mockResolvedValue({ allowIngredientOveruse: true }) } as any,
+      { emit: jest.fn() } as any,
+      {} as any,
+    );
+    return { service, tx, stockLevelManager };
+  }
+
+  it('start skips a line that has a linked production order (no consumption, no add-on claim) and moves the draft to in_progress', async () => {
+    const { service, tx, stockLevelManager } = build([linkedRow()]);
+    await service.start(tx as any, { id: 7, store_id: 3, order_id: 40 });
+    expect(stockLevelManager.updateStock).not.toHaveBeenCalled();
+    expect(tx.order_items.updateMany).not.toHaveBeenCalled();
+    expect(tx.production_orders.updateMany).toHaveBeenCalledWith({
+      where: { id: { in: [100] }, status: 'draft' },
+      data: expect.objectContaining({ status: 'in_progress', started_at: expect.any(Date) }),
+    });
+  });
+
+  it('start of an UNLINKED production line still consumes as before and touches no production order', async () => {
+    const { service, tx, stockLevelManager } = build([linkedRow({ orders: { production_orders: [] } })]);
+    await service.start(tx as any, { id: 7, store_id: 3, order_id: 40 });
+    expect(stockLevelManager.updateStock).toHaveBeenCalled();
+    expect(tx.production_orders.updateMany).not.toHaveBeenCalled();
+  });
+});

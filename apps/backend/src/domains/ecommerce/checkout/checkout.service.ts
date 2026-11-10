@@ -1,3 +1,4 @@
+import { requestProductionSaleSync } from '../../store/production/production-sale-sync';
 import { isSaleNature } from '../../store/products/services/product-usage-nature.util';
 import { Injectable, Optional } from '@nestjs/common';
 import { EcommercePrismaService } from '../../../prisma/services/ecommerce-prisma.service';
@@ -2773,6 +2774,13 @@ export class CheckoutService {
       channel: order.channel,
     });
 
+    // QUI-995: production orders for the sale's `production` lines.
+    await requestProductionSaleSync(
+      this.eventEmitter as any,
+      this.logger,
+      { order_id: order.id },
+    );
+
     // Upload payment receipt to S3 if the selected method is bank_transfer
     // or voucher and the customer attached a file. For any other method we
     // ignore the file silently (don't upload, don't fail) so generic
@@ -3703,6 +3711,13 @@ export class CheckoutService {
       currency: order.currency,
       channel: order.channel,
     });
+
+    // QUI-995: production orders for the sale's `production` lines.
+    await requestProductionSaleSync(
+      this.eventEmitter as any,
+      this.logger,
+      { order_id: order.id },
+    );
 
     // Bucle POR ÍNDICE: dos líneas del mismo producto en presentaciones
     // distintas son dos reservas independientes, y la suma de ambas es lo que

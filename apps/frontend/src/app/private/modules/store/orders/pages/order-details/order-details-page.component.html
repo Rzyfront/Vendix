@@ -809,6 +809,22 @@
                 <span>{{ splitLockedReason }}</span>
               </p>
             }
+            @if (productionStatusLabel(); as productionLabel) {
+              <p
+                class="mb-2 flex items-center gap-2 rounded-lg border px-3 py-2 text-xs font-semibold"
+                [class.border-primary]="orderData.production_status === 'completed'"
+                [class.text-primary]="orderData.production_status === 'completed'"
+                [class.border-border]="orderData.production_status !== 'completed'"
+                [class.text-text-secondary]="orderData.production_status !== 'completed'"
+                data-testid="production-status"
+              >
+                <app-icon
+                  [name]="orderData.production_status === 'completed' ? 'check-circle' : 'flame'"
+                  [size]="14"
+                />
+                <span>{{ productionLabel }}</span>
+              </p>
+            }
             <div class="space-y-1 items-compact">
               @for (item of orderData.order_items; track item.id) {
                 <div
@@ -900,7 +916,8 @@
                       }
                       <!-- QUI-999: destination chip of the line (KDS,
                            Producción, Del stock). Legacy lines (NULL) have
-                           none. The Production link/status arrives with T13. -->
+                           none. T13: a Producción line links to its
+                           production order and shows its status. -->
                       @if (destinationLabel(item); as destination) {
                         <span
                           class="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-semibold mt-1 mr-1 bg-muted text-text-secondary border border-border"
@@ -908,6 +925,18 @@
                         >
                           {{ destination }}
                         </span>
+                      }
+                      @if (item.fulfillment_destination === 'production' && item.production_order; as po) {
+                        <button
+                          type="button"
+                          class="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-semibold mt-1 mr-1 cursor-pointer bg-muted text-text-primary border border-border hover:border-primary transition-colors"
+                          [attr.title]="'Ver la orden de producción ' + (po.order_number || '#' + po.id)"
+                          (click)="openProductionDetail(po)"
+                        >
+                          <app-icon name="flame" [size]="10" />
+                          {{ po.order_number || "#" + po.id }} · {{ productionStatusText(po) }}
+                          <app-icon name="arrow-right" [size]="10" />
+                        </button>
                       }
                       <!-- Restaurant Suite — Fase K Gap 2: per-item KDS
                            state badge. Renders only for items that were
@@ -3583,6 +3612,13 @@
       </div>
     </app-modal>
 
+    <!-- T13: shared production order detail, opened from a production line -->
+    <app-production-order-detail-modal
+      [(isOpen)]="showProductionDetail"
+      [orderId]="productionDetailId()"
+      (changed)="loadData()"
+    />
+
     <!-- CANCEL MODAL -->
     <app-modal
       [isOpen]="showCancelModal()"
@@ -3742,6 +3778,64 @@
               {{ cancelPendingKdsItems().length }} comandas pendientes en
               cocina. No hace falta elegir ninguna decisión de insumos.
             </p>
+          </div>
+        }
+
+        <!-- T13: finished production of this sale. Non-blocking: a choice is
+             always selected (the suggestion) and the server applies it anyway. -->
+        @if (cancelProductionSuggestion(); as suggestion) {
+          <div class="border border-border rounded-xl p-3 space-y-3">
+            <div>
+              <p class="text-sm font-bold text-text-primary">
+                Producción ya finalizada
+              </p>
+              <p class="text-xs text-text-secondary mt-0.5">
+                Lo producido para este pedido estaba reservado. Elige qué
+                hacer con ello; sugerimos
+                {{ suggestion === "waste" ? "darlo de baja como merma" : "liberarlo al stock" }}.
+              </p>
+            </div>
+            <div
+              class="flex flex-col gap-2"
+              role="radiogroup"
+              aria-label="Destino de la producción finalizada"
+            >
+              @for (opt of productionDispositionOptions; track opt.value) {
+                <button
+                  type="button"
+                  role="radio"
+                  [attr.aria-checked]="cancelProductionDisposition() === opt.value"
+                  (click)="selectProductionDisposition(opt.value)"
+                  class="text-left rounded-lg border p-3 transition-colors"
+                  [class.border-primary]="cancelProductionDisposition() === opt.value"
+                  [class.bg-primary]="cancelProductionDisposition() === opt.value"
+                  [class.bg-opacity-5]="cancelProductionDisposition() === opt.value"
+                  [class.border-border]="cancelProductionDisposition() !== opt.value"
+                  [disabled]="isProcessingAction()"
+                >
+                  <div class="flex items-start gap-2">
+                    <span
+                      class="mt-0.5 inline-flex h-4 w-4 flex-shrink-0 items-center justify-center rounded-full border-2"
+                      [class.border-primary]="cancelProductionDisposition() === opt.value"
+                      [class.border-border]="cancelProductionDisposition() !== opt.value"
+                      aria-hidden="true"
+                    >
+                      @if (cancelProductionDisposition() === opt.value) {
+                        <span class="h-2 w-2 rounded-full bg-primary"></span>
+                      }
+                    </span>
+                    <div class="flex-1">
+                      <p class="text-sm font-semibold text-text-primary">
+                        {{ opt.label }}
+                      </p>
+                      <p class="text-xs text-text-secondary mt-1">
+                        {{ opt.description }}
+                      </p>
+                    </div>
+                  </div>
+                </button>
+              }
+            </div>
           </div>
         }
 

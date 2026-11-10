@@ -1331,6 +1331,37 @@ describe('OrderFlowService.cancelOrder — kitchenDisposition y reversa de hojas
     expect(kds.cancelTicketItemInTx).not.toHaveBeenCalled();
   });
 
+  it('QUI-995: cancelar emite production.sale_cancelled con la decisión y ANTES de liberar las reservas', async () => {
+    const { service, stock, emitter } = buildKitchenHarness('pending');
+    const order: string[] = [];
+    emitter.emitAsync.mockImplementation(async (event: string) => {
+      order.push(event);
+      return [];
+    });
+    stock.releaseReservationsByReference.mockImplementation(async () => {
+      order.push('release');
+    });
+
+    await service.cancelOrder(ORDER_ID, { reason, productionDisposition: 'waste' } as any);
+
+    expect(emitter.emitAsync).toHaveBeenCalledWith('production.sale_cancelled', {
+      order_id: ORDER_ID,
+      store_id: 100,
+      disposition: 'waste',
+      reason,
+    });
+    expect(order).toEqual(['production.sale_cancelled', 'release']);
+  });
+
+  it('QUI-995: sin productionDisposition la cancelación no se bloquea (la sugerencia la calcula el listener)', async () => {
+    const { service, emitter } = buildKitchenHarness('pending');
+    await expect(service.cancelOrder(ORDER_ID, { reason })).resolves.toMatchObject({ state: 'cancelled' });
+    expect(emitter.emitAsync).toHaveBeenCalledWith(
+      'production.sale_cancelled',
+      expect.objectContaining({ disposition: undefined }),
+    );
+  });
+
   it('sin kitchenDisposition y ticket avanzado: error tipado antes del claim, sin efectos', async () => {
     const { service, prismaMock, stock } = buildKitchenHarness('in_preparation');
 

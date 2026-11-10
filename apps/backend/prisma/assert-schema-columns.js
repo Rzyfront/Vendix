@@ -93,6 +93,9 @@ const REQUIRED_COLUMNS = [
   // QUI-999 (migración 20261125090000): destino de cada línea de venta de
   // restaurante; Prisma la selecciona en toda lectura de order_items.
   'order_items.fulfillment_destination',
+  // QUI-995 (migración 20261126090000): enlace de la orden de producción con
+  // su venta; Prisma la selecciona en toda lectura de production_orders.
+  'production_orders.order_id',
 
   // --- Unidad suelta en la vitrina (migración 20260818180000) -------------
   // Prisma selecciona TODOS los escalares del modelo cuando la consulta no

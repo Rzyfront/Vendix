@@ -407,6 +407,38 @@ describe('ScheduledOrdersService', () => {
         is_producible: true,
       });
       expect(line).not.toHaveProperty('products');
+      // No linked production order yet → explicit null.
+      expect(line.production_order).toBeNull();
+    });
+
+    it('QUI-995: a production line exposes its linked production order; the order hides the raw relation', async () => {
+      const { service, rows } = makeHarness();
+      rows.push({
+        id: 1, store_id: 1, order_id: 50,
+        scheduled_start: new Date(SLOT.start), scheduled_end: new Date(SLOT.end),
+        status: 'scheduled', hold_expires_at: null,
+      });
+      const withLink = {
+        ...FULL_ORDER,
+        production_orders: [{ id: 900, product_id: 77, order_number: 'OP-000900', status: 'in_progress' }],
+      };
+      const prisma: any = (service as any).prisma;
+      const original = prisma.order_fulfillment_schedules.findFirst;
+      prisma.order_fulfillment_schedules.findFirst = jest.fn(async (args: any) => {
+        const base = await original(args);
+        if (!base || !args.include) return base;
+        return { ...base, changes: [], order: applySelect(withLink, args.include.order.select) };
+      });
+      prisma.order_items = { count: jest.fn(async () => 0) };
+
+      const detail: any = await service.findOne(1);
+
+      expect(detail.order.order_items[0].production_order).toEqual({
+        id: 900,
+        order_number: 'OP-000900',
+        status: 'in_progress',
+      });
+      expect(detail.order).not.toHaveProperty('production_orders');
     });
   });
 });

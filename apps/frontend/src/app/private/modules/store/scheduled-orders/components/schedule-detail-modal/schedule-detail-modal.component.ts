@@ -22,6 +22,9 @@ import {
   ToastService,
 } from '../../../../../../shared/components';
 import { CurrencyPipe } from '../../../../../../shared/pipes/currency/currency.pipe';
+import { ProductionOrderDetailModalComponent } from '../../../restaurant-ops/production/components/production-order-detail/production-order-detail-modal.component';
+import { ProductionOrdersService } from '../../../restaurant-ops/production/services/production-orders.service';
+import { ProductionOrderRef } from '../../../restaurant-ops/production/interfaces/production-order.interface';
 import { NonProducibleNoticeComponent } from '../non-producible-notice/non-producible-notice.component';
 import { ScheduledOrdersApiService } from '../../services/scheduled-orders-api.service';
 import {
@@ -56,6 +59,7 @@ const ACTION_LABELS: Record<Exclude<ScheduledOrderStatus, 'scheduled'>, string> 
     SpinnerComponent,
     CurrencyPipe,
     NonProducibleNoticeComponent,
+    ProductionOrderDetailModalComponent,
   ],
   styles: [
     `
@@ -123,8 +127,19 @@ const ACTION_LABELS: Record<Exclude<ScheduledOrderStatus, 'scheduled'>, string> 
                     }
                   </div>
                   @if (destinationState(d, item); as state) {
-                    <div class="mt-1">
+                    <div class="mt-1 flex flex-wrap items-center gap-1">
                       <span class="st-badge" [style.--st]="'var(--color-text-muted)'">{{ state }}</span>
+                      @if (item.fulfillment_destination === 'production' && item.production_order; as po) {
+                        <button
+                          type="button"
+                          class="st-badge cursor-pointer"
+                          [style.--st]="'var(--color-text-primary)'"
+                          [attr.title]="'Ver la orden de producción'"
+                          (click)="openProduction(po)"
+                        >
+                          {{ po.order_number || '#' + po.id }} · {{ productionStatus(po) }}
+                        </button>
+                      }
                     </div>
                   }
                   @for (opt of item.order_item_options ?? []; track $index) {
@@ -203,6 +218,12 @@ const ACTION_LABELS: Record<Exclude<ScheduledOrderStatus, 'scheduled'>, string> 
         }
       </div>
     </app-modal>
+
+    <app-production-order-detail-modal
+      [(isOpen)]="showProduction"
+      [orderId]="productionOrderId()"
+      (changed)="onProductionChanged()"
+    />
   `,
 })
 export class ScheduleDetailModalComponent {
@@ -222,6 +243,25 @@ export class ScheduleDetailModalComponent {
   readonly acting = signal(false);
   readonly confirmingCancel = signal(false);
   readonly sendingToKitchen = signal(false);
+  /** Shared production order detail (T13) opened from a `production` line. */
+  readonly productionOrderId = signal<number | null>(null);
+  readonly showProduction = signal(false);
+
+  openProduction(po: ProductionOrderRef): void {
+    this.productionOrderId.set(po.id);
+    this.showProduction.set(true);
+  }
+
+  productionStatus(po: ProductionOrderRef): string {
+    return ProductionOrdersService.statusLabelSafe(po.status);
+  }
+
+  /** Start / complete / cancel in the shared detail: refresh this order and the agenda. */
+  onProductionChanged(): void {
+    const d = this.detail();
+    this.changed.emit();
+    if (d) this.load(d.id);
+  }
 
   /** Hay platos preparados (no de lote) sin enviar y el pedido sigue vigente. */
   readonly canSendToKitchen = computed(() => {

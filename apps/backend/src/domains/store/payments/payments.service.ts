@@ -1,3 +1,4 @@
+import { requestProductionSaleSync } from '../production/production-sale-sync';
 import { assertSaleNatureLines } from '../products/services/product-usage-nature.util';
 import {
   Injectable,
@@ -2761,6 +2762,16 @@ export class PaymentsService {
             (err as Error).stack,
           );
         }
+      }
+
+      // QUI-995: a POS sale created together with its payment also needs its
+      // production orders (idempotent; the listener ignores sales without lines).
+      if (result.success && result.order?.id) {
+        await requestProductionSaleSync(
+          this.eventEmitter as any,
+          this.logger,
+          { order_id: result.order.id },
+        );
       }
 
       // Plan KDS fire-flows (B5 / B9): AFTER the payment $transaction

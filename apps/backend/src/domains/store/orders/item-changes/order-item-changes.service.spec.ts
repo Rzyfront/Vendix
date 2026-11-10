@@ -38,7 +38,7 @@ const mkLine = (id: number, over: Record<string, any> = {}) => ({
   ...over,
 });
 
-const build = (lines: any[], orderOver: Record<string, any> = {}) => {
+const build = (lines: any[], orderOver: Record<string, any> = {}, emitter?: any) => {
   const order = {
     id: ORDER_ID,
     store_id: 4,
@@ -161,7 +161,7 @@ const build = (lines: any[], orderOver: Record<string, any> = {}) => {
   const service = new OrderItemChangesService(
     db, orderFlow as any, ordersService as any, kitchen as any,
     stockLevel as any, validator as any, allocator as any, sse as any, audit as any,
-    promotionEngine as any, coupons as any, new PriceResolverService(),
+    promotionEngine as any, coupons as any, new PriceResolverService(), emitter,
   );
   return { service, db, orderFlow, kitchen, stockLevel, sse, validator, callOrder, order, promotionEngine, coupons, allocator, ordersService };
 };
@@ -178,6 +178,13 @@ describe('OrderItemChangesService (QUI-650)', () => {
     jest.spyOn(RequestContextService, 'getContext').mockReturnValue({ store_id: 4, user_id: 9 } as any);
   });
   afterEach(() => jest.restoreAllMocks());
+
+  it('QUI-995) tras aplicar re-sincroniza las órdenes de producción de la venta (post-commit)', async () => {
+    const emitter = { emitAsync: jest.fn().mockResolvedValue([]) };
+    const { service } = build([mkLine(1)], {}, emitter);
+    await applyV({ service }, { update: [{ order_item_id: 1, quantity: 3 }] });
+    expect(emitter.emitAsync).toHaveBeenCalledWith('production.sale_sync', { order_id: ORDER_ID });
+  });
 
   it('a/b) update toca solo la línea editada y solo sus campos permitidos', async () => {
     const lines = [mkLine(1), mkLine(2), mkLine(3)];

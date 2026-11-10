@@ -92,6 +92,11 @@ const SCHEDULED_ORDER_SELECT = {
   customer_id: true,
   customer_alias: true,
   users: { select: { first_name: true, last_name: true, phone: true, email: true } },
+  // QUI-995: the production order linked to each `production` line.
+  production_orders: {
+    where: { status: { not: 'cancelled' } },
+    select: { id: true, product_id: true, order_number: true, status: true },
+  },
   order_items: {
     where: { cancelled_at: null },
     select: {
@@ -124,17 +129,29 @@ const SCHEDULED_ORDER_SELECT = {
 function shapeScheduledOrderLines<T extends { order?: any }>(row: T): T {
   const order = row?.order;
   if (!order || !Array.isArray(order.order_items)) return row;
+  const { production_orders, ...orderRest } = order;
+  const linkedOrders: Array<{ id: number; product_id: number; order_number: string | null; status: string }> =
+    Array.isArray(production_orders) ? production_orders : [];
   return {
     ...row,
     order: {
-      ...order,
-      order_items: order.order_items.map(({ products, ...line }: any) => ({
-        ...line,
-        product_type: products?.product_type ?? null,
-        is_producible:
-          products?.is_batch_produced === true &&
-          Number(products?._count?.recipes ?? 0) > 0,
-      })),
+      ...orderRest,
+      order_items: order.order_items.map(({ products, ...line }: any) => {
+        const linked =
+          line.fulfillment_destination === 'production'
+            ? linkedOrders.find((o) => o.product_id === line.product_id)
+            : undefined;
+        return {
+          ...line,
+          product_type: products?.product_type ?? null,
+          is_producible:
+            products?.is_batch_produced === true &&
+            Number(products?._count?.recipes ?? 0) > 0,
+          production_order: linked
+            ? { id: linked.id, order_number: linked.order_number, status: linked.status }
+            : null,
+        };
+      }),
     },
   };
 }

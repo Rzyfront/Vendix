@@ -91,6 +91,17 @@
         }
       </app-card>
 
+      <!-- Pedido de venta (T13): only when the order was born from a sale -->
+      @if (o.order_id != null && saleDetail(); as sd) {
+        <app-card title="Pedido de venta" [responsive]="true">
+          <app-production-sale-lines
+            [saleOrder]="sd.sale_order ?? null"
+            [lines]="sd.order_lines ?? []"
+            [productName]="o.product?.name ?? ''"
+          />
+        </app-card>
+      }
+
       <!-- Faltantes -->
       @if (showShortages()) {
         <app-card title="Faltantes de insumos" [responsive]="true">

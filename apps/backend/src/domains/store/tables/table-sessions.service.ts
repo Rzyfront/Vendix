@@ -1,3 +1,4 @@
+import { requestProductionSaleSync } from '../production/production-sale-sync';
 import { assertSaleNatureProducts } from '../products/services/product-usage-nature.util';
 import { Inject, Injectable, Logger, forwardRef } from '@nestjs/common';
 import { Prisma, table_status_enum } from '@prisma/client';
@@ -1239,6 +1240,13 @@ export class TableSessionsService {
         },
       });
     }, { timeout: 20_000, maxWait: 5_000 });
+
+    // QUI-995: appended production lines need their production order.
+    await requestProductionSaleSync(
+      this.eventEmitter as any,
+      this.logger,
+      { order_id: session.order_id },
+    );
 
     this.logger.log(
       `Items appended: session=${sessionId} order=${session.order_id} lines=${dto.items.length}`,

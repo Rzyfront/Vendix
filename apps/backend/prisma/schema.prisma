@@ -2021,6 +2021,8 @@ model orders {
   @@index([finish_pending_at])
   // Pedidos programados
   fulfillment_schedule order_fulfillment_schedules?
+  // QUI-995: production orders created for this sale's `production` lines.
+  production_orders production_orders[]
 }
 
 model order_installments {
@@ -12969,13 +12971,18 @@ model production_orders {
   planned_cost Decimal?                    @db.Decimal(14, 4)
   actual_cost  Decimal?                    @db.Decimal(14, 4)
   unit_cost    Decimal?                    @db.Decimal(14, 4)
+  /// QUI-995: sale (orders.id) this production order was created for. NULL for manual/Planta orders.
+  order_id     Int?
 
-  store   stores   @relation(fields: [store_id], references: [id], onUpdate: NoAction)
-  product products @relation(fields: [product_id], references: [id], onUpdate: NoAction)
-  recipe  recipes  @relation(fields: [recipe_id], references: [id], onUpdate: NoAction)
-  lines   production_order_lines[]
+  store      stores   @relation(fields: [store_id], references: [id], onUpdate: NoAction)
+  product    products @relation(fields: [product_id], references: [id], onUpdate: NoAction)
+  recipe     recipes  @relation(fields: [recipe_id], references: [id], onUpdate: NoAction)
+  sale_order orders?  @relation(fields: [order_id], references: [id], onDelete: NoAction, onUpdate: NoAction)
+  lines      production_order_lines[]
 
   @@unique([store_id, order_number])
+  @@unique([order_id, product_id])
+  @@index([store_id, order_id])
   @@index([store_id, status])
   @@index([store_id, product_id])
   @@index([store_id, created_at])
