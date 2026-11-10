@@ -1,0 +1,203 @@
+:host {
+  display: block;
+}
+
+// Solo tokens del tema: nada de colores propios.
+
+.so-form {
+  display: flex;
+  flex-direction: column;
+  gap: 1.5rem;
+}
+
+.so-section {
+  display: flex;
+  flex-direction: column;
+  gap: 0.75rem;
+}
+
+.so-stack {
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
+}
+
+.so-grid {
+  display: grid;
+  grid-template-columns: 1fr;
+  gap: 0.75rem;
+
+  @media (min-width: 640px) {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+}
+
+.so-kicker {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  margin: 0;
+  font-size: 12px;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  color: var(--color-text-muted);
+
+  app-icon {
+    color: var(--color-primary);
+  }
+
+  &--sub {
+    margin-top: 0.5rem;
+  }
+}
+
+.so-hint {
+  margin: 0;
+  font-size: 12px;
+  line-height: 1.45;
+  color: var(--color-text-secondary);
+
+  &--flush {
+    margin-top: 0.5rem;
+  }
+}
+
+// ─── Tarjeta de día ─────────────────────────────────────
+
+.so-card-head {
+  display: flex;
+  align-items: center;
+  min-width: 0;
+}
+
+.so-card-head__text {
+  display: flex;
+  flex-direction: column;
+  gap: 0.125rem;
+  min-width: 0;
+}
+
+.so-card-head__title {
+  font-size: 0.875rem;
+  font-weight: 600;
+  color: var(--color-text-primary);
+}
+
+.so-card-head__sub {
+  font-size: 0.75rem;
+  color: var(--color-text-secondary);
+
+  &--off {
+    color: var(--color-text-muted);
+  }
+}
+
+.so-card-body {
+  padding: 1rem;
+}
+
+// ─── Recordatorios ──────────────────────────────────────
+
+.so-reminder {
+  background: var(--color-surface);
+  border: 1px solid var(--color-border);
+  border-radius: 0.75rem;
+  overflow: hidden;
+
+  &--off .so-reminder__title {
+    color: var(--color-text-muted);
+  }
+}
+
+.so-reminder__head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.75rem;
+  padding: 0.75rem 1rem;
+}
+
+.so-reminder__title {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.5rem;
+  font-size: 0.875rem;
+  font-weight: 600;
+  color: var(--color-text-primary);
+
+  app-icon {
+    color: var(--color-primary);
+  }
+}
+
+.so-reminder__body {
+  display: flex;
+  flex-direction: column;
+  gap: 0.75rem;
+  padding: 0.75rem 1rem 1rem;
+  border-top: 1px solid var(--color-border);
+}
+
+.so-channels {
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
+}
+
+.so-channel {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.75rem;
+}
+
+.so-channel__label {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.5rem;
+  font-size: 0.8125rem;
+  color: var(--color-text-primary);
+
+  app-icon {
+    color: var(--color-text-secondary);
+  }
+}
+
+// ─── Referencia a Envíos ────────────────────────────────
+
+.so-cross-ref {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.5rem;
+  padding: 0.75rem 1rem;
+  font-size: 0.8125rem;
+  color: var(--color-text-secondary);
+  background: var(--color-surface);
+  border: 1px solid var(--color-border);
+  border-radius: 0.75rem;
+
+  app-icon {
+    color: var(--color-primary);
+  }
+}
+
+.so-link {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.25rem;
+  font-weight: 500;
+  color: var(--color-primary);
+  text-decoration: underline;
+  text-underline-offset: 2px;
+
+  &:hover {
+    opacity: 0.8;
+  }
+
+  &:focus-visible {
+    outline: 2px solid var(--color-primary);
+    outline-offset: 2px;
+  }
+}

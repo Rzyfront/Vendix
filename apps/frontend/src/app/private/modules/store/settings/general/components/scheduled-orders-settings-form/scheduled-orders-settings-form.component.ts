@@ -9,6 +9,7 @@ import {
   signal,
 } from '@angular/core';
 import { FormsModule } from '@angular/forms';
+import { RouterLink } from '@angular/router';
 import { takeUntilDestroyed } from '@angular/core/rxjs-interop';
 
 import {
@@ -18,6 +19,9 @@ import {
   SettingToggleComponent,
   ToastService,
 } from '../../../../../../../shared/components/index';
+import { ExpandableCardComponent } from '../../../../../../../shared/components/expandable-card/expandable-card.component';
+import { SelectorComponent } from '../../../../../../../shared/components/selector/selector.component';
+import { ToggleComponent } from '../../../../../../../shared/components/toggle/toggle.component';
 import {
   ProductOptionsSettings,
   ScheduledOrderReminderRule,
@@ -29,8 +33,18 @@ import {
   ScheduledOrderExceptionsService,
 } from '../../services/scheduled-order-exceptions.service';
 
+/**
+ * Lo que este formulario guarda: la sección sin `fulfillment_types`. La entrega
+ * usa los métodos de envío de la tienda (Configuración → Envíos); el backend
+ * aún acepta la clave como opcional solo para clientes con caché.
+ */
+export type ScheduledOrdersPayload = Omit<
+  ScheduledOrdersSettings,
+  'fulfillment_types'
+>;
+
 /** Ajuste apagado por defecto (igual que el backend). */
-const DEFAULT_SETTINGS: ScheduledOrdersSettings = {
+const DEFAULT_SETTINGS: ScheduledOrdersPayload = {
   enabled: false,
   weekly_schedule: [],
   slot_duration_minutes: 120,
@@ -38,7 +52,6 @@ const DEFAULT_SETTINGS: ScheduledOrdersSettings = {
   day_capacity: null,
   min_lead_time_hours: 24,
   max_days_ahead: 60,
-  fulfillment_types: ['pickup'],
   reminders: [],
 };
 
@@ -57,16 +70,27 @@ const DAYS: ReadonlyArray<{ day: number; label: string }> = [
   { day: 0, label: 'Domingo' },
 ];
 
-const FULFILLMENT_LABELS: ReadonlyArray<{
-  value: 'pickup' | 'delivery';
-  label: string;
-}> = [
-  { value: 'pickup', label: 'Recogida en tienda' },
-  { value: 'delivery', label: 'Domicilio' },
+/** Anticipaciones ofrecidas (minutos). Se agrega la actual si no está en la lista. */
+const REMINDER_LEAD_OPTIONS: ReadonlyArray<number> = [
+  30, 60, 120, 240, 720, 1440, 2880,
 ];
 
+/** `HH:mm` a minutos desde medianoche; `null` si el formato no es válido. */
+export function timeToMinutes(time: string): number | null {
+  const m = /^(\d{2}):(\d{2})$/.exec(String(time ?? ''));
+  return m ? Number(m[1]) * 60 + Number(m[2]) : null;
+}
+
+/** `08:00` se muestra como `8:00`. */
+export function shortTime(time: string): string {
+  const m = /^(\d{2}):(\d{2})$/.exec(String(time ?? ''));
+  return m ? `${Number(m[1])}:${m[2]}` : String(time ?? '');
+}
+
 /**
- * Sección «Pedidos programados» (S1) + toggle «Adiciones» (S3).
+ * Sección «Pedidos programados»: General, Horarios (tarjetas plegables por
+ * día), Recordatorios y enlace a Configuración → Envíos; más el toggle
+ * «Adiciones».
  *
  * Recibe las dos secciones como señales de entrada y emite la sección completa
  * en cada cambio; el store de ajustes la guarda como un todo con el resto.
@@ -82,8 +106,13 @@ const FULFILLMENT_LABELS: ReadonlyArray<{
     IconComponent,
     InputComponent,
     SettingToggleComponent,
+    ExpandableCardComponent,
+    SelectorComponent,
+    ToggleComponent,
+    RouterLink,
   ],
   templateUrl: './scheduled-orders-settings-form.component.html',
+  styleUrl: './scheduled-orders-settings-form.component.scss',
 })
 export class ScheduledOrdersSettingsForm {
   private readonly exceptionsService = inject(ScheduledOrderExceptionsService);
@@ -92,16 +121,23 @@ export class ScheduledOrdersSettingsForm {
 
   readonly settings = input<ScheduledOrdersSettings | undefined>();
   readonly productOptions = input<ProductOptionsSettings | undefined>();
-  readonly settingsChange = output<ScheduledOrdersSettings>();
+  readonly settingsChange = output<ScheduledOrdersPayload>();
   readonly productOptionsChange = output<ProductOptionsSettings>();
 
   readonly days = DAYS;
-  readonly fulfillmentOptions = FULFILLMENT_LABELS;
 
-  readonly value = computed<ScheduledOrdersSettings>(() => ({
-    ...DEFAULT_SETTINGS,
-    ...(this.settings() ?? {}),
-  }));
+  /** Valor en edición. Descarta la clave heredada `fulfillment_types`. */
+  readonly value = computed<ScheduledOrdersPayload>(() => {
+    const merged: Partial<ScheduledOrdersSettings> = {
+      ...DEFAULT_SETTINGS,
+      ...(this.settings() ?? {}),
+    };
+    delete merged.fulfillment_types;
+    return merged as ScheduledOrdersPayload;
+  });
+
+  /** Días con la tarjeta desplegada (por defecto todas plegadas). */
+  readonly openDays = signal<Readonly<Record<number, boolean>>>({});
   readonly optionsEnabled = computed(() => this.productOptions()?.enabled === true);
 
   // Excepciones por fecha
@@ -127,7 +163,7 @@ export class ScheduledOrdersSettingsForm {
 
   // ---- Ajustes ----------------------------------------------------------
 
-  private emit(patch: Partial<ScheduledOrdersSettings>): void {
+  private emit(patch: Partial<ScheduledOrdersPayload>): void {
     this.settingsChange.emit({ ...this.value(), ...patch });
   }
 
@@ -157,7 +193,7 @@ export class ScheduledOrdersSettingsForm {
   ): void {
     const n = Number(raw);
     if (!Number.isFinite(n) || n < 0) return;
-    this.emit({ [field]: n } as Partial<ScheduledOrdersSettings>);
+    this.emit({ [field]: n } as Partial<ScheduledOrdersPayload>);
   }
 
   onDayCapacityChange(raw: unknown): void {
@@ -177,6 +213,33 @@ export class ScheduledOrdersSettingsForm {
     return this.value().weekly_schedule.find((b) => b.day_of_week === day);
   }
 
+  isDayOpen(day: number): boolean {
+    return this.openDays()[day] === true;
+  }
+
+  setDayOpen(day: number, open: boolean): void {
+    this.openDays.update((m) => ({ ...m, [day]: open }));
+  }
+
+  /** Franjas que caben entre desde y hasta con la duración configurada. */
+  slotCount(day: number): number {
+    const block = this.dayBlock(day);
+    const duration = this.value().slot_duration_minutes;
+    if (!block || !(duration > 0)) return 0;
+    const start = timeToMinutes(block.start_time);
+    const end = timeToMinutes(block.end_time);
+    if (start === null || end === null || end <= start) return 0;
+    return Math.floor((end - start) / duration);
+  }
+
+  /** Resumen de la tarjeta plegada: «8:00–18:00 · 4 franjas» o «Cerrado». */
+  daySummary(day: number): string {
+    const block = this.dayBlock(day);
+    if (!block) return 'Cerrado';
+    const n = this.slotCount(day);
+    return `${shortTime(block.start_time)}–${shortTime(block.end_time)} · ${n} ${n === 1 ? 'franja' : 'franjas'}`;
+  }
+
   onDayToggle(day: number, enabled: boolean): void {
     const schedule = this.value().weekly_schedule;
     if (!enabled) {
@@ -190,6 +253,7 @@ export class ScheduledOrdersSettingsForm {
         { day_of_week: day, start_time: '08:00', end_time: '18:00' },
       ],
     });
+    this.setDayOpen(day, true);
   }
 
   onDayTimeChange(day: number, field: 'start_time' | 'end_time', time: unknown): void {
@@ -204,22 +268,6 @@ export class ScheduledOrdersSettingsForm {
     });
   }
 
-  // ---- Tipos de cumplimiento -------------------------------------------
-
-  hasFulfillment(type: 'pickup' | 'delivery'): boolean {
-    return this.value().fulfillment_types.includes(type);
-  }
-
-  onFulfillmentToggle(type: 'pickup' | 'delivery', enabled: boolean): void {
-    const current = this.value().fulfillment_types;
-    const next = enabled
-      ? current.includes(type)
-        ? current
-        : [...current, type]
-      : current.filter((t) => t !== type);
-    this.emit({ fulfillment_types: next });
-  }
-
   // ---- Recordatorios ----------------------------------------------------
 
   reminderLabel(minutes: number): string {
@@ -228,6 +276,24 @@ export class ScheduledOrdersSettingsForm {
       return `${h} ${h === 1 ? 'hora' : 'horas'} antes`;
     }
     return `${minutes} minutos antes`;
+  }
+
+  /** Opciones del selector de anticipación, incluida la actual si es atípica. */
+  leadOptions(current: number): Array<{ value: number; label: string }> {
+    const values = REMINDER_LEAD_OPTIONS.includes(current)
+      ? [...REMINDER_LEAD_OPTIONS]
+      : [...REMINDER_LEAD_OPTIONS, current].sort((a, b) => a - b);
+    return values.map((v) => ({ value: v, label: this.reminderLabel(v) }));
+  }
+
+  onReminderLeadChange(index: number, raw: unknown): void {
+    const n = Number(raw);
+    if (!Number.isInteger(n) || n < 5 || n > 10080) return;
+    this.emit({
+      reminders: this.value().reminders.map((r, i) =>
+        i === index ? { ...r, minutes_before: n } : r,
+      ),
+    });
   }
 
   onReminderChange(
