@@ -1221,6 +1221,7 @@ describe('OrderFlowService.cancelOrder — kitchenDisposition y reversa de hojas
       ),
       updateStock: jest.fn().mockResolvedValue({}),
       releaseReservationsByReference: jest.fn().mockResolvedValue(undefined),
+      releaseReservationQuantity: jest.fn().mockResolvedValue(0),
     };
     const kds = {
       cancelTicketItemInTx: jest.fn().mockResolvedValue('cancelled'),
@@ -1398,7 +1399,6 @@ describe('OrderFlowService.cancelOrder — kitchenDisposition y reversa de hojas
         { product_id: 51, product_variant_id: null, quantity: 3 },
       ]),
     };
-    stock.releaseReservationQuantity = jest.fn().mockResolvedValue(0);
 
     const result: any = await service.cancelOrder(ORDER_ID, { reason, productionDispositions: [{ production_order_id: 101, disposition: 'waste' }] } as any);
 
