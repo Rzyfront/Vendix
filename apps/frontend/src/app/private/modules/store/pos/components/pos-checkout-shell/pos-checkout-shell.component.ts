@@ -997,7 +997,12 @@ export class PosCheckoutShellComponent {
           identityChanged || this.emptyCartBoundary || tableChanged
         );
         if (shouldInitialize) {
-          if (hadPreviousFlow || this.emptyCartBoundary || tableChanged) this.resetState();
+          if (hadPreviousFlow || this.emptyCartBoundary || tableChanged) {
+            this.resetState();
+            // Otra venta u otra mesa: la programación era de la venta anterior.
+            // Reabrir la misma venta no pasa por aquí y la conserva (S4).
+            this.scheduledOrders.reset();
+          }
           this.initializeCheckoutFlow(flowKey, initialEntrega, tableId);
           this.emptyCartBoundary = false;
         }

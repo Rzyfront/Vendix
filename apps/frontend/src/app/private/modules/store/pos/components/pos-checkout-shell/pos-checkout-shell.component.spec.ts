@@ -1244,6 +1244,33 @@ describe('PosCheckoutShellComponent — matriz de teclado (CP-POS-CHECKOUT-KEYBO
         expect(scheduledMock.resetCalls).toBeGreaterThan(0);
         expect(scheduledMock.active()).toBeFalse();
       });
+
+      it('abrir otra venta descarta la programación de la anterior', () => {
+        fixture.componentRef.setInput('cartState', checkoutCart(new Date('2026-11-10T12:00:00.000Z')));
+        fixture.detectChanges();
+        activate();
+        scheduledMock.hasSlot.set(true);
+        scheduledMock.resetCalls = 0;
+        fixture.componentRef.setInput('isOpen', false);
+        fixture.detectChanges();
+        fixture.componentRef.setInput('cartState', checkoutCart(new Date('2026-11-10T15:00:00.000Z')));
+        fixture.componentRef.setInput('isOpen', true);
+        fixture.detectChanges();
+        expect(scheduledMock.resetCalls).toBeGreaterThan(0);
+        expect(scheduledMock.active()).toBeFalse();
+        expect(component.scheduledActive()).toBeFalse();
+      });
+
+      it('cambiar de mesa descarta la programación de la mesa anterior', () => {
+        fixture.componentRef.setInput('tableId', 42);
+        fixture.detectChanges();
+        activate();
+        scheduledMock.resetCalls = 0;
+        fixture.componentRef.setInput('tableId', 15);
+        fixture.detectChanges();
+        expect(scheduledMock.resetCalls).toBeGreaterThan(0);
+        expect(scheduledMock.active()).toBeFalse();
+      });
     });
 
     it('inactivo, el orden de pasos de siempre no cambia', () => {
