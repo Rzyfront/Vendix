@@ -188,4 +188,12 @@ export class ProductionOrdersController {
     const result = await this.productionOrdersService.cancel(id);
     return this.responseService.success(result, 'Orden de producción cancelada');
   }
+
+  /** S21 — "Volver a iniciar": a cancelled order of a still-active sale goes back to draft. */
+  @Post(':id/restart')
+  @Permissions('store:production_orders:update')
+  async restart(@Param('id', ParseIntPipe) id: number) {
+    const result = await this.productionOrdersService.restart(id);
+    return this.responseService.success(result, 'Orden de producción reiniciada');
+  }
 }

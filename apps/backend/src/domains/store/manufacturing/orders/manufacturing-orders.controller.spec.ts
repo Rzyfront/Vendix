@@ -73,6 +73,23 @@ describe('ManufacturingOrdersController — shared production day and stream', (
     expect(() => controller.stream(req() as any)).toThrow(ForbiddenException);
   });
 
+  it('S21: POST :id/restart delegates to the service under the Planta update permission', async () => {
+    const orders = { restart: jest.fn().mockResolvedValue({ id: 9, status: 'draft' }) };
+    responses = { ...responses, updated: jest.fn((data, message) => ({ data, message })) } as any;
+    controller = new ManufacturingOrdersController(
+      orders as any,
+      responses as any,
+      production as any,
+      sse,
+    );
+    const res: any = await controller.restart(9);
+    expect(orders.restart).toHaveBeenCalledWith(9);
+    expect(res.data).toEqual({ id: 9, status: 'draft' });
+    expect(
+      Reflect.getMetadata(PERMISSIONS_KEY, ManufacturingOrdersController.prototype.restart),
+    ).toEqual(['store:manufacturing:orders:update']);
+  });
+
   it('day and stream use the Planta read permission under the manufacturing industry guard', () => {
     const proto = ManufacturingOrdersController.prototype;
     expect(Reflect.getMetadata(PERMISSIONS_KEY, proto.findDay)).toEqual([

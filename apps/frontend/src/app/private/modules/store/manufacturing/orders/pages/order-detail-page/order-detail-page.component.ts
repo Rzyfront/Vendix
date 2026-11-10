@@ -127,6 +127,15 @@ export class OrderDetailPageComponent implements OnInit {
         disabled: busy,
       },
       {
+        id: 'restart',
+        label: 'Volver a iniciar',
+        icon: 'rotate-ccw',
+        variant: 'primary',
+        // The backend decides: cancelled order, active sale, live production line.
+        visible: status === 'cancelled' && this.order()?.can_restart === true,
+        disabled: busy,
+      },
+      {
         id: 'cancel',
         label: 'Cancelar orden',
         icon: 'x',
@@ -236,6 +245,9 @@ export class OrderDetailPageComponent implements OnInit {
       case 'complete':
         this.completeModalOpen.set(true);
         break;
+      case 'restart':
+        this.confirmTransition(order, 'restart');
+        break;
       case 'cancel':
         this.confirmTransition(order, 'cancel');
         break;
@@ -248,7 +260,7 @@ export class OrderDetailPageComponent implements OnInit {
 
   private async confirmTransition(
     order: ManufacturingOrder,
-    action: 'release' | 'start' | 'cancel',
+    action: 'release' | 'start' | 'restart' | 'cancel',
   ): Promise<void> {
     const copy = {
       release: {
@@ -264,6 +276,13 @@ export class OrderDetailPageComponent implements OnInit {
         message: '¿Iniciar la producción de esta orden?',
         confirmText: 'Iniciar',
         success: 'Producción iniciada',
+      },
+      restart: {
+        title: 'Volver a iniciar',
+        message:
+          'La orden volverá a borrador con la cantidad y la entrega vigentes de la venta, lista para lanzarse.',
+        confirmText: 'Volver a iniciar',
+        success: 'Orden reiniciada',
       },
       cancel: {
         title: 'Cancelar orden',
@@ -322,6 +341,14 @@ export class OrderDetailPageComponent implements OnInit {
       default:
         return 'neutral';
     }
+  }
+
+  /** S19: "Producto · Variante". */
+  displayName(order: ManufacturingOrder): string {
+    return ProductionOrdersService.displayName(
+      order.product?.name || `Producto #${order.product_id}`,
+      order.product_variant?.name,
+    );
   }
 
   priorityLabel(order: ManufacturingOrder): string {

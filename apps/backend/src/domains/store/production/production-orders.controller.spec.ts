@@ -5,13 +5,13 @@ import { ProductionSseService } from './production-sse.service';
 import { RequestContextService } from '../../../common/context/request-context.service';
 
 describe('ProductionOrdersController — card per sale and live stream (QUI-1002)', () => {
-  let service: { startSale: jest.Mock; completeSale: jest.Mock };
+  let service: { startSale: jest.Mock; completeSale: jest.Mock; restart: jest.Mock };
   let responses: { success: jest.Mock };
   let sse: ProductionSseService;
   let controller: ProductionOrdersController;
 
   beforeEach(() => {
-    service = { startSale: jest.fn(), completeSale: jest.fn() };
+    service = { startSale: jest.fn(), completeSale: jest.fn(), restart: jest.fn() };
     responses = { success: jest.fn((data, message) => ({ success: true, data, message })) };
     sse = new ProductionSseService();
     controller = new ProductionOrdersController(service as any, responses as any, sse);
@@ -37,6 +37,13 @@ describe('ProductionOrdersController — card per sale and live stream (QUI-1002
     const res = await controller.completeSale(77);
     expect(service.completeSale).toHaveBeenCalledWith(77);
     expect(res.data).toEqual(summary);
+  });
+
+  it('S21: POST :id/restart delegates to the service and returns the restarted order', async () => {
+    service.restart.mockResolvedValue({ id: 5, status: 'draft' });
+    const res = await controller.restart(5);
+    expect(service.restart).toHaveBeenCalledWith(5);
+    expect(res.data).toEqual({ id: 5, status: 'draft' });
   });
 
   describe('GET stream', () => {

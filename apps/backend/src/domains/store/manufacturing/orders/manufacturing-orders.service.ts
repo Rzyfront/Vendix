@@ -30,6 +30,10 @@ export interface ShortageLine {
 
 const ORDER_INCLUDE = {
   product: { select: { id: true, name: true } },
+  // S19: "Producto · Variante" in Planta lists and detail.
+  product_variant: { select: { id: true, name: true } },
+  // S21: the sale state decides whether "Volver a iniciar" is offered.
+  sale_order: { select: { id: true, order_number: true, state: true } },
   recipe: { select: { id: true, code: true, version: true } },
   lines: {
     orderBy: { sort_order: 'asc' },
@@ -176,8 +180,23 @@ export class ManufacturingOrdersService {
     return { data, total, page, limit };
   }
 
-  findOne(id: number) {
+  async findOne(id: number) {
     this.requireStoreId();
+    const order = await this.loadOrder(id);
+    // S21: same rule the restart endpoint enforces.
+    const can_restart =
+      order.status === 'cancelled' && (await this.productionOrders.canRestart(order));
+    return { ...order, can_restart };
+  }
+
+  /**
+   * S21 — "Volver a iniciar" from Planta: only manufacturing orders (with a
+   * consecutive); the rule and the write live in `ProductionOrdersService.restart`.
+   */
+  async restart(id: number) {
+    this.requireStoreId();
+    await this.loadOrder(id);
+    await this.productionOrders.restart(id);
     return this.loadOrder(id);
   }
 

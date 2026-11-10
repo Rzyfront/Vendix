@@ -40,6 +40,7 @@ import {
   ProductionDayResponse,
   ProductionOrder,
   ProductionSaleMoveResult,
+  isProductionRunning,
 } from '../../interfaces';
 import {
   ProductionApiScope,
@@ -285,7 +286,7 @@ const NO_TIME_KEY = 'no-time';
                                     (click)="openDetail(po)"
                                   >
                                     <span class="block truncate text-sm font-medium text-text-primary">
-                                      {{ qty(po.planned_qty) }} × {{ po.product_name }}
+                                      {{ qty(po.planned_qty) }} × {{ orderTitle(po) }}
                                     </span>
                                     <span class="block truncate text-xs text-text-secondary">
                                       {{ po.order_number }}
@@ -296,7 +297,7 @@ const NO_TIME_KEY = 'no-time';
                                   </app-badge>
                                 </div>
 
-                                @if (po.status === 'in_progress') {
+                                @if (isRunning(po.status)) {
                                   @if (timerOf(po); as t) {
                                     <div class="text-right" aria-live="off">
                                       <div
@@ -371,7 +372,7 @@ const NO_TIME_KEY = 'no-time';
                                     Iniciar
                                   </app-button>
                                 }
-                                @if (po.status === 'in_progress') {
+                                @if (isRunning(po.status)) {
                                   <app-button
                                     variant="primary"
                                     size="sm"
@@ -557,7 +558,7 @@ export class ProductionActiveComponent {
     let oldest: { key: string; at: number } | null = null;
     for (const card of res.cards) {
       for (const po of card.production_orders) {
-        if (po.status !== 'in_progress') continue;
+        if (!isProductionRunning(po.status)) continue;
         const at = po.started_at ? new Date(po.started_at).getTime() : Number.MAX_SAFE_INTEGER;
         if (!oldest || at < oldest.at) oldest = { key: card.key, at };
       }
@@ -617,7 +618,7 @@ export class ProductionActiveComponent {
     if (this.busyKey() !== null) return;
     const ok = await this.dialog.confirm({
       title: 'Iniciar producción',
-      message: `¿Iniciar la producción de "${po.product_name}"?`,
+      message: `¿Iniciar la producción de "${this.orderTitle(po)}"?`,
       confirmText: 'Iniciar',
       cancelText: 'Cancelar',
     });
@@ -630,7 +631,7 @@ export class ProductionActiveComponent {
     if (this.busyKey() !== null) return;
     const ok = await this.dialog.confirm({
       title: 'Iniciar producción',
-      message: `¿Iniciar la producción de "${po.product_name}"?`,
+      message: `¿Iniciar la producción de "${this.orderTitle(po)}"?`,
       confirmText: 'Iniciar',
       cancelText: 'Cancelar',
     });
@@ -647,7 +648,7 @@ export class ProductionActiveComponent {
       return;
     }
     const ok = await this.dialog.confirm({
-      title: `Finalizar producción de ${po.product_name}`,
+      title: `Finalizar producción de ${this.orderTitle(po)}`,
       message: `Se registrará lo producido (${this.qty(po.planned_qty)}) y quedará reservado para el pedido.`,
       confirmText: 'Finalizar',
       cancelText: 'Cancelar',
@@ -688,7 +689,7 @@ export class ProductionActiveComponent {
   async editEstimate(po: ProductionDayOrder): Promise<void> {
     if (this.busyKey() !== null) return;
     const value = await this.dialog.prompt({
-      title: `Tiempo estimado de ${po.product_name}`,
+      title: `Tiempo estimado de ${this.orderTitle(po)}`,
       message:
         'Minutos que debería tardar esta orden. Déjalo vacío para usar el tiempo de preparación del producto.',
       placeholder: 'Minutos',
@@ -784,6 +785,16 @@ export class ProductionActiveComponent {
 
   hasStatus(card: ProductionDayCard, status: string): boolean {
     return card.production_orders.some((po) => po.status === status);
+  }
+
+  /** S19: "Producto · Variante". */
+  orderTitle(po: ProductionDayOrder): string {
+    return ProductionOrdersService.displayName(po.product_name, po.variant_name);
+  }
+
+  /** S16: a partially finished order keeps its timer and its "Finalizar" button. */
+  isRunning(status: string): boolean {
+    return isProductionRunning(status);
   }
 
   /** Reads the shared ticker, so the template refreshes every second. */

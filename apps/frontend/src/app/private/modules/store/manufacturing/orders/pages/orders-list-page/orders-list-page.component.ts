@@ -40,6 +40,7 @@ import {
   ManufacturingFormulasService,
   ManufacturingOrdersService,
 } from '../../../services';
+import { ProductionOrdersService } from '../../../../restaurant-ops/production/services/production-orders.service';
 import { ProductionSseService } from '../../../../restaurant-ops/production/services/production-sse.service';
 
 const STATUSES = Object.keys(ORDER_STATUS_LABELS) as ManufacturingOrderStatus[];
@@ -134,7 +135,10 @@ export class OrdersListPageComponent implements OnInit {
       label: 'Producto',
       priority: 1,
       transform: (_: unknown, row: ManufacturingOrder) =>
+        ProductionOrdersService.displayName(
         row.product?.name ?? `Producto #${row.product_id}`,
+        row.product_variant?.name,
+      ),
     },
     {
       key: 'planned_qty',
@@ -182,7 +186,10 @@ export class OrdersListPageComponent implements OnInit {
     titleTransform: (row: ManufacturingOrder) => row.order_number || `#${row.id}`,
     subtitleKey: 'product',
     subtitleTransform: (row: ManufacturingOrder) =>
-      row.product?.name ?? `Producto #${row.product_id}`,
+      ProductionOrdersService.displayName(
+        row.product?.name ?? `Producto #${row.product_id}`,
+        row.product_variant?.name,
+      ),
     avatarFallbackIcon: 'factory',
     avatarShape: 'square',
     badgeKey: 'status',

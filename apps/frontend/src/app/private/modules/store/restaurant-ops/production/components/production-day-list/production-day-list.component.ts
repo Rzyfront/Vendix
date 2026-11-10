@@ -35,6 +35,7 @@ import {
   ProductionDayOrder,
   ProductionDayResponse,
   ProductionOrder,
+  isProductionRunning,
 } from '../../interfaces';
 import {
   ProductionApiScope,
@@ -243,7 +244,7 @@ const NO_TIME_KEY = 'no-time';
                                   (click)="openDetail(po)"
                                 >
                                   <span class="block truncate text-sm font-medium text-text-primary">
-                                    {{ qty(po.planned_qty) }} × {{ po.product_name }}
+                                    {{ qty(po.planned_qty) }} × {{ orderTitle(po) }}
                                   </span>
                                   <span class="block truncate text-xs text-text-secondary">
                                     {{ po.order_number }}
@@ -274,7 +275,7 @@ const NO_TIME_KEY = 'no-time';
                                     Iniciar
                                   </app-button>
                                 }
-                                @if (manageInline && po.status === 'in_progress') {
+                                @if (manageInline && isRunning(po.status)) {
                                   <app-button
                                     variant="primary"
                                     size="sm"
@@ -501,7 +502,7 @@ export class ProductionDayListComponent {
     if (this.processingId() !== null) return;
     const ok = await this.dialog.confirm({
       title: 'Iniciar producción',
-      message: `¿Iniciar la producción de "${po.product_name}"?`,
+      message: `¿Iniciar la producción de "${this.orderTitle(po)}"?`,
       confirmText: 'Iniciar',
       cancelText: 'Cancelar',
     });
@@ -518,7 +519,7 @@ export class ProductionDayListComponent {
       return;
     }
     const ok = await this.dialog.confirm({
-      title: `Finalizar producción de ${po.product_name}`,
+      title: `Finalizar producción de ${this.orderTitle(po)}`,
       message: `Se registrará lo producido (${this.qty(po.planned_qty)}) y quedará reservado para el pedido.`,
       confirmText: 'Finalizar',
       cancelText: 'Cancelar',
@@ -536,7 +537,7 @@ export class ProductionDayListComponent {
     if (this.processingId() !== null) return;
     const ok = await this.dialog.confirm({
       title: 'Cancelar producción',
-      message: `¿Cancelar la producción de "${po.product_name}"? Esta acción no se puede deshacer.`,
+      message: `¿Cancelar la producción de "${this.orderTitle(po)}"? Esta acción no se puede deshacer.`,
       confirmText: 'Cancelar producción',
       cancelText: 'Volver',
       confirmVariant: 'danger',
@@ -606,6 +607,16 @@ export class ProductionDayListComponent {
       default:
         return 'neutral';
     }
+  }
+
+  /** S19: "Producto · Variante". */
+  orderTitle(po: ProductionDayOrder): string {
+    return ProductionOrdersService.displayName(po.product_name, po.variant_name);
+  }
+
+  /** S16: a partially finished order is still running. */
+  isRunning(status: string): boolean {
+    return isProductionRunning(status);
   }
 
   orderStatusLabel(status: string): string {
