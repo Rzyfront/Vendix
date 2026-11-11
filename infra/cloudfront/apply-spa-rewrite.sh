@@ -39,7 +39,7 @@ create_or_update() {
 # HOSTS: dominios a revisar en baseline/verify (separados por espacio).
 # Por defecto, vendix.online. Para la distribución multi-tenant, pasar los dominios de sus tenants.
 HOSTS="${HOSTS:-vendix.online}"
-PATHS=(/legal/privacidad /legal/terminos / /favicon.ico /no-existe.js /robots.txt /sitemap.xml /manifest.webmanifest /pwa/no-existe /precios /ruta-que-no-existe-seo-smoke /auth/login)
+PATHS=(/legal/privacidad /legal/terminos / /ayuda /favicon.ico /no-existe.js /robots.txt /sitemap.xml /manifest.webmanifest /pwa/no-existe /precios /ruta-que-no-existe-seo-smoke /auth/login)
 URLS=()
 for h in $HOSTS; do for p in "${PATHS[@]}"; do URLS+=("https://$h$p"); done; done
 BASELINE="$WORK/baseline-$DIST_ID.txt"
@@ -68,7 +68,7 @@ print("%s:%s" % (r["statusCode"], r["headers"]["location"]["value"]) if r else o
   done <<'CASES'
 /legal/privacidad /index.html
 /legal/terminos /index.html
-/admin/ventas /index.html
+/admin/ventas /noindex/index.html
 /productos/aceite-1.5l /index.html
 /catalog/aceite-1.5l /index.html
 /products/aceite-1.5l /index.html
@@ -91,10 +91,15 @@ print("%s:%s" % (r["statusCode"], r["headers"]["location"]["value"]) if r else o
 / /index.html www.tienda.vendix.online
 /.well-known/acme-challenge/x /.well-known/acme-challenge/x www.mesura.beauty
 /ruta-que-no-existe-seo-smoke /ruta-que-no-existe-seo-smoke
-/auth/login /index.html
-/pqr/consultar/T-123 /index.html
-/super-admin/dashboard /index.html
+/auth/login /noindex/index.html
+/pqr/consultar/T-123 /noindex/index.html
+/super-admin/dashboard /noindex/index.html
 /ruta-que-no-existe-seo-smoke /index.html tienda-demo.vendix.online
+/cart /noindex/index.html tienda-demo.vendix.online
+/checkout /noindex/index.html mesura.beauty
+/pedido/0b6f5c1e-2d3a-4e5f-8a9b-1c2d3e4f5a6b /noindex/index.html tienda-demo.vendix.online
+/catalog /index.html tienda-demo.vendix.online
+/ayuda /noindex/index.html
 CASES
   return $fail
 }
@@ -114,6 +119,12 @@ case "${1:-test}" in
   apply)
     [ -f "$BASELINE" ] || { echo "✘ Falta la línea base. Corre primero: $0 baseline"; exit 1; }
     run_tests >/dev/null || { echo "✘ Las pruebas no pasan; corre 'test' primero."; exit 1; }
+    # SEO-TECH-02/04: la función apunta a objetos que sube el deploy del frontend. Si no existen,
+    # / o las rutas noindex responderían error: primero el deploy, después la función.
+    for obj in /marketing/index.html /noindex/index.html; do
+      code=$(curl -s -o /dev/null -w '%{http_code}' "https://vendix.online$obj")
+      [ "$code" = "200" ] || { echo "✘ https://vendix.online$obj responde $code. Despliega el frontend antes de aplicar la función."; exit 1; }
+    done
 
     # El ARN es el mismo en DEVELOPMENT y LIVE, así que se puede validar antes de publicar.
     FN_ARN=$(aws cloudfront describe-function --name "$FN_NAME" --stage DEVELOPMENT --query 'FunctionSummary.FunctionMetadata.FunctionARN' --output text)
