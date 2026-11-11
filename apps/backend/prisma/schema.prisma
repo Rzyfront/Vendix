@@ -1458,6 +1458,9 @@ model addresses {
   longitude                                    Decimal?              @db.Decimal(11, 8)
   organization_id                              Int?
   user_id                                      Int?
+  /// Nombre de la sede/establecimiento del cliente ("Sede Norte"). Nullable:
+  /// direcciones históricas y de tienda/organización no lo usan.
+  label                                        String?               @db.VarChar(120)
   organizations                                organizations?        @relation(fields: [organization_id], references: [id], onDelete: Restrict, onUpdate: NoAction)
   stores                                       stores?               @relation(fields: [store_id], references: [id], onDelete: Restrict, onUpdate: NoAction)
   users                                        users?                @relation("user_addresses", fields: [user_id], references: [id], onDelete: Restrict, onUpdate: NoAction)
@@ -1467,6 +1470,8 @@ model addresses {
   orders_orders_shipping_address_idToaddresses orders[]              @relation("orders_shipping_address_idToaddresses")
   sales_orders                                 sales_orders[]        @relation("sales_orders_shipping_address")
   bookings_service_address                     bookings[]            @relation("booking_service_address")
+  quotations_customer_address                  quotations[]          @relation("quotations_customer_address")
+  contracts_customer_address                   contracts[]           @relation("contracts_customer_address")
 }
 
 model brands {
@@ -9372,10 +9377,15 @@ model quotations {
   /// económica/fiscal aunque el perfil cambie o su cabeza avance.
   invoice_profile_id      Int?
   invoice_profile_version Int?
+  /// Ubicación/establecimiento del cliente elegida al cotizar. SetNull: si la
+  /// dirección se borra, el snapshot conserva la historia.
+  customer_address_id       Int?
+  customer_address_snapshot Json?
   created_at           DateTime?             @default(now()) @db.Timestamp(6)
   updated_at           DateTime?             @default(now()) @db.Timestamp(6)
 
   quotation_items quotation_items[]
+  customer_address addresses?       @relation("quotations_customer_address", fields: [customer_address_id], references: [id], onDelete: SetNull, onUpdate: NoAction)
   profile         quotation_profiles? @relation(fields: [profile_id], references: [id], onDelete: Restrict, onUpdate: NoAction)
   invoice_profile_snapshot invoice_profile_versions? @relation("quotation_invoice_profile_version", fields: [invoice_profile_id, invoice_profile_version], references: [profile_id, version], onDelete: Restrict, onUpdate: Restrict, map: "quotations_invoice_profile_id_invoice_profile_version_fkey")
   store           stores            @relation(fields: [store_id], references: [id], onUpdate: NoAction)
@@ -9392,6 +9402,7 @@ model quotations {
   @@index([store_id, status])
   @@index([invoice_profile_id, invoice_profile_version])
   @@index([customer_id])
+  @@index([customer_address_id])
 }
 
 model quotation_items {
@@ -9563,9 +9574,14 @@ model contracts {
 
   notes      String?   @db.Text
   created_by Int?
+  /// Ubicación del cliente heredada de la cotización (o editada). SetNull +
+  /// snapshot: borrar la dirección no reescribe el contrato.
+  customer_address_id       Int?
+  customer_address_snapshot Json?
   created_at DateTime? @default(now()) @db.Timestamp(6)
   updated_at DateTime? @default(now()) @db.Timestamp(6)
 
+  customer_address addresses? @relation("contracts_customer_address", fields: [customer_address_id], references: [id], onDelete: SetNull, onUpdate: NoAction)
   /// `Restrict` en toda la cadena: borrar tienda/org/cliente/cotizacion
   /// con contrato no arrastra historia fiscal.
   organization organizations @relation(fields: [organization_id], references: [id], onDelete: Restrict)
@@ -9585,6 +9601,7 @@ model contracts {
   @@index([store_id, contract_number])
   @@index([store_id, status])
   @@index([customer_id])
+  @@index([customer_address_id])
 }
 
 // ===== COUPONS SYSTEM =====

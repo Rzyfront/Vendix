@@ -39,6 +39,12 @@ const { Client } = require('pg');
  * Formato: 'tabla.columna'.
  */
 const REQUIRED_COLUMNS = [
+  // --- Clientes con múltiples ubicaciones (20261129090000) ---
+  'addresses.label',
+  'quotations.customer_address_id',
+  'quotations.customer_address_snapshot',
+  'contracts.customer_address_id',
+  'contracts.customer_address_snapshot',
   // --- Estaciones S10: estación preferida del proveedor (20261115090000) ---
   'service_providers.default_station_id',
   // --- Fase 1 · contrato de datos DIAN (migración 20260815120000) ---------
