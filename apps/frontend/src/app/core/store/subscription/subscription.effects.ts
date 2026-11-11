@@ -1,5 +1,5 @@
 import { Injectable, inject } from '@angular/core';
-import { Actions, createEffect, ofType, ROOT_EFFECTS_INIT } from '@ngrx/effects';
+import { Actions, createEffect, ofType } from '@ngrx/effects';
 import { of, Observable, EMPTY, interval, timer, race, defer, from } from 'rxjs';
 import {
   map,
@@ -608,68 +608,6 @@ export class SubscriptionEffects {
     ),
   );
 
-  sseSubscriptionUpdated$ = createEffect(() =>
-    this.actions$.pipe(
-      ofType(ROOT_EFFECTS_INIT),
-      switchMap(() => {
-        if (typeof window === 'undefined') {
-          return EMPTY;
-        }
-        return new Observable<Action>((observer) => {
-          // Repartos: la app carrier (STORE_DELIVERY) está confinada a
-          // /store/carrier/* por el DomainScopeGuard; /store/notifications/stream
-          // le responde 403. No abrimos el SSE de subscription-updated en ese
-          // shell (el carrier no consume el banner de suscripción).
-          if (
-            localStorage.getItem('vendix_user_environment') === 'STORE_DELIVERY'
-          ) {
-            return;
-          }
-
-          const authState = localStorage.getItem('vendix_auth_state');
-          if (!authState) {
-            return;
-          }
-
-          let token: string | null = null;
-          try {
-            token = JSON.parse(authState)?.tokens?.access_token ?? null;
-          } catch {
-            return;
-          }
-
-          if (!token) {
-            return;
-          }
-
-          const url = `${this.apiUrl}/store/notifications/stream?token=${token}`;
-          const eventSource = new EventSource(url);
-
-          eventSource.onmessage = (event: MessageEvent) => {
-            try {
-              const data = JSON.parse(event.data);
-              if (data?.type === 'subscription.updated') {
-                observer.next(
-                  SubscriptionActions.subscriptionUpdated({
-                    subscription: data.data ?? data.subscription ?? {},
-                  }),
-                );
-              }
-            } catch {
-              // Ignore malformed SSE messages
-            }
-          };
-
-          eventSource.onerror = () => {
-            eventSource.close();
-            observer.complete();
-          };
-
-          return () => {
-            eventSource.close();
-          };
-        });
-      }),
-    ),
-  );
+  // `subscription.updated` arrives through the shared notifications stream
+  // (notifications.effects connectSse$): one EventSource per tab.
 }
