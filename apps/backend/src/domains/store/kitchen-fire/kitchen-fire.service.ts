@@ -1272,7 +1272,7 @@ export class KitchenFireService {
    * turns each item's raw add-ons into the `addons` the KDS shows (QUI-1000):
    * quantity, signed image (or null), note and the active recipe id of
    * preparation add-ons, so the ticket can open their recipe like Production.
-   * Existing ticket fields are left untouched; `addons` is additive.
+   * Existing ticket fields (incl. the raw `order_item_options`) are left untouched; `addons` is additive.
    */
   private async signTicketPayload<T>(root: T): Promise<T> {
     await this.decorateTicketAddons(root);
@@ -1343,7 +1343,8 @@ export class KitchenFireService {
         recipe_id:
           o.component_type === 'recipe' ? recipeFor(o.component_product_id, o.component_variant_id ?? null) : null,
       }));
-      delete item.order_item.order_item_options;
+      // S15: `order_item_options` crudas se conservan (contrato previo del
+      // ticket); `addons` es la vista nueva y se suma, no las reemplaza.
     }
   }
 

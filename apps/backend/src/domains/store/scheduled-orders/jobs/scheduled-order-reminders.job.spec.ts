@@ -12,14 +12,14 @@ function schedule(id: number, start: Date, email: string | null = 'ana@example.c
   };
 }
 
-function build(opts: { enabled?: boolean; schedules: (where: any) => any[] }) {
+function build(opts: { enabled?: boolean; industries?: string[]; schedules: (where: any) => any[] }) {
   const logs = new Set<string>();
   const db = {
     store_settings: {
       findMany: jest.fn().mockResolvedValue([
         {
           store_id: 1,
-          stores: { name: 'Repostería demo', timezone: 'America/Bogota' },
+          stores: { name: 'Repostería demo', timezone: 'America/Bogota', industries: opts.industries ?? ['restaurant'] },
           settings: {
             scheduled_orders: {
               enabled: opts.enabled ?? true,
@@ -94,5 +94,19 @@ describe('ScheduledOrderRemindersJob', () => {
     const where = db.order_fulfillment_schedules.findMany.mock.calls[0][0].where;
     expect(where.status).toEqual({ in: ['scheduled', 'in_production', 'ready'] });
     expect(where.scheduled_start.lte).toEqual(new Date(NOW.getTime() + 1440 * 60 * 1000));
+  });
+
+  it('S14: solo los restaurantes se procesan; retail, sin industrias y otros ni consultan agendamientos', async () => {
+    for (const industries of [['retail'], [], ['service'], ['manufacturing']]) {
+      const { job, db, eventEmitter } = build({ industries, schedules: inWindow([in24h, in2h]) });
+      expect(await job.run(NOW)).toBe(0);
+      expect(db.order_fulfillment_schedules.findMany).not.toHaveBeenCalled();
+      expect(eventEmitter.emit).not.toHaveBeenCalled();
+    }
+  });
+
+  it('S14: una tienda multi-industria que incluye restaurante sigue recibiendo recordatorios', async () => {
+    const { job } = build({ industries: ['retail', 'restaurant'], schedules: inWindow([in24h, in2h]) });
+    expect(await job.run(NOW)).toBe(3);
   });
 });

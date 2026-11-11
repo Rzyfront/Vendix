@@ -3,6 +3,7 @@ import { Cron } from '@nestjs/schedule';
 import { EventEmitter2 } from '@nestjs/event-emitter';
 import { StorePrismaService } from '../../../../prisma/services/store-prisma.service';
 import { localCivil, resolveTimezoneCascade } from '../../../../common/utils/store-timezone.util';
+import { industryAllowsKey } from '../../../../common/access/module-industries';
 import { mergeStoreSettingsWithDefaults } from '../../settings/defaults/default-store-settings';
 
 /** Ventana de búsqueda: el cron corre cada 5 min; 10 min cubre un ciclo perdido. */
@@ -65,11 +66,15 @@ export class ScheduledOrderRemindersJob {
     const db = this.prisma.withoutScope();
     const rows = await db.store_settings.findMany({
       where: { stores: { is_active: true } },
-      select: { store_id: true, settings: true, stores: { select: { name: true, timezone: true } } },
+      select: { store_id: true, settings: true, stores: { select: { name: true, timezone: true, industries: true } } },
     });
 
     let sent = 0;
     for (const row of rows) {
+      // S14: misma regla de industria que el módulo `orders_scheduled`
+      // (`module-industries.ts`): solo los restaurantes tienen pedidos
+      // programados, así que el job no procesa ninguna otra tienda.
+      if (!industryAllowsKey('orders_scheduled', row.stores?.industries)) continue;
       const settings = mergeStoreSettingsWithDefaults(row.settings).scheduled_orders;
       if (!settings?.enabled) continue;
       const timezone = resolveTimezoneCascade(
