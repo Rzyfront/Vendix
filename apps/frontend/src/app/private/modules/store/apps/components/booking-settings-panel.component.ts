@@ -88,6 +88,7 @@ interface PickedItem {
               </ul>
             }
             @if (products().length < maxProducts) {
+              <p class="mt-2 text-xs text-[var(--color-text-secondary)]" data-testid="booking-product-search-hint">Aquí solo se muestran productos. Los servicios (masajes, tours) se reservan desde su propia página.</p>
               <input type="search" class="mt-2 w-full rounded-lg border border-[var(--color-border)] bg-[var(--color-surface)] px-3 py-2"
                      placeholder="Busca un producto por nombre o SKU" data-testid="booking-product-search"
                      [value]="query()" (input)="query.set($any($event.target).value)" />

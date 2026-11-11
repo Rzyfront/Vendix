@@ -69,13 +69,20 @@ import { APP_PAGE_VARIANTS, AppPageVariant, PageAppKind } from '../templates';
         <p class="mt-1 text-xs text-[var(--color-text-secondary)]">Cambian la portada, las secciones y el estilo. Tus datos de contacto, SEO y WhatsApp se quedan.</p>
         <div class="mt-3 grid gap-2 sm:grid-cols-3">
           @for (variant of variants(); track variant.id) {
-            <div class="rounded-lg border border-[var(--color-border)] p-3">
-              <p class="text-sm font-medium text-[var(--color-text-primary)]">{{ variant.name }}</p>
+            <div class="rounded-lg border border-[var(--color-border)] p-3"
+                 [attr.aria-current]="appliedId() === variant.id ? 'true' : null"
+                 [attr.data-testid]="'app-page-template-card-' + variant.id">
+              <p class="text-sm font-medium text-[var(--color-text-primary)]">{{ variant.name }}
+                @if (appliedId() === variant.id) {
+                  <span class="ml-1 rounded-full bg-[var(--color-primary)] px-2 py-0.5 text-[10px] font-semibold text-[var(--color-text-on-primary,#fff)]"
+                        [attr.data-testid]="'app-page-template-applied-' + variant.id">Aplicada</span>
+                }
+              </p>
               <p class="mt-0.5 text-xs text-[var(--color-text-secondary)]">{{ variant.description }}</p>
               @if (confirming() === variant.id) {
                 <div class="mt-2 flex flex-wrap gap-2" [attr.data-testid]="'app-page-template-confirm-' + variant.id">
                   <button type="button" class="rounded-lg bg-[var(--color-primary)] px-2.5 py-1 text-xs font-semibold text-[var(--color-text-on-primary,#fff)]"
-                          (click)="confirming.set(null); applyTemplate.emit(variant)">Reemplazar</button>
+                          (click)="confirming.set(null); appliedId.set(variant.id); applyTemplate.emit(variant)">Reemplazar</button>
                   <button type="button" class="rounded-lg px-2.5 py-1 text-xs text-[var(--color-text-secondary)]" (click)="confirming.set(null)">Cancelar</button>
                 </div>
               } @else {
@@ -104,6 +111,8 @@ export class AppPageGeneralPanelComponent {
   readonly applyTemplate = output<AppPageVariant>();
 
   readonly confirming = signal<string | null>(null);
+  /** Template applied in this session (local only, not persisted). */
+  readonly appliedId = signal<string | null>(null);
   readonly variants = computed(() => APP_PAGE_VARIANTS[this.kind()]);
 
   readonly isOff = computed(() => {

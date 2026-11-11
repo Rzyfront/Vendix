@@ -93,7 +93,7 @@ export class BookingPageLayoutComponent {
         const tenantConfig = (this.tenant.getCurrentTenantConfig() || {}) as any;
         const store = this.tenant.getCurrentStore();
 
-        const name = store?.name || domainConfig.store_slug || 'Hotel';
+        const name = store?.name || domainConfig.store_name || domainConfig.store_slug || 'Hotel';
         this.storeName.set(name);
         if (name !== 'Hotel') this.storeSeo.setStore(name, tenantConfig?.seo?.description);
 

@@ -12,7 +12,7 @@ import { APP_PAGE_SCHEMA_VERSION, AppPageVariant } from './app-page.types';
 export const BOOKING_COZY: AppPageVariant = {
   id: 'cozy',
   name: 'Cálido/acogedor',
-  description: 'Acogedora: reseñas y comodidades cerca del buscador, ubicación y tonos tierra.',
+  description: 'Acogedora: ubicación y normas de la casa cerca del buscador, con tonos tierra.',
   page: {
     schema_version: APP_PAGE_SCHEMA_VERSION,
     theme: {
@@ -32,7 +32,7 @@ export const BOOKING_COZY: AppPageVariant = {
     hero: {
       eyebrow: 'Bienvenido a casa',
       title: 'Un lugar para bajar el ritmo',
-      subtitle: 'Habitaciones cálidas, desayuno casero y atención de familia.',
+      subtitle: 'Habitaciones cálidas y atención cercana.',
       button_label: 'Ver disponibilidad',
     },
     blocks: [
@@ -40,21 +40,14 @@ export const BOOKING_COZY: AppPageVariant = {
       {
         id: 'testimonials',
         type: 'testimonials',
-        enabled: true,
-        props: {
-          title: 'Lo que cuentan nuestros huéspedes',
-          rating_summary: '4.9/5',
-          items: [
-            { name: 'Mariana', city: 'Medellín', quote: 'Nos sentimos en casa desde que llegamos.', rating: 5 },
-            { name: 'Felipe', city: 'Bogotá', quote: 'El desayuno y la atención, de diez.', rating: 5 },
-          ],
-        },
+        enabled: false,
+        props: { title: 'Lo que cuentan nuestros huéspedes', items: [] },
       },
       {
         id: 'amenities',
         type: 'amenities',
-        enabled: true,
-        props: { title: 'Comodidades', items: ['Desayuno casero', 'Wifi', 'Zona verde', 'Parqueadero', 'Admite mascotas'] },
+        enabled: false,
+        props: { title: 'Comodidades', items: [] },
       },
       { id: 'gallery', type: 'gallery', enabled: false, props: { title: 'Rincones' } },
       { id: 'location', type: 'location', enabled: true, props: { title: 'Cómo llegar' } },
@@ -64,10 +57,11 @@ export const BOOKING_COZY: AppPageVariant = {
         enabled: true,
         props: {
           title: 'Normas de la casa',
-          check_in: 'Desde las 2:00 p. m.',
-          check_out: 'Hasta las 11:00 a. m.',
-          cancellation: 'Cancelación gratuita hasta 72 horas antes.',
-          house_rules: 'Silencio después de las 10:00 p. m.',
+          // Empty on purpose: the public page fills them from the store settings.
+          check_in: '',
+          check_out: '',
+          cancellation: '',
+          house_rules: '',
         },
       },
       { id: 'checkin-info', type: 'checkin_info', enabled: true, props: {} },
@@ -75,10 +69,11 @@ export const BOOKING_COZY: AppPageVariant = {
       {
         id: 'faq',
         type: 'faq',
-        enabled: true,
+        // No invented answers: the owner turns it on with their own questions.
+        enabled: false,
         props: {
           title: 'Preguntas frecuentes',
-          items: [{ question: '¿Incluye desayuno?', answer: 'Sí, todas las tarifas incluyen desayuno.' }],
+          items: [],
         },
       },
     ],

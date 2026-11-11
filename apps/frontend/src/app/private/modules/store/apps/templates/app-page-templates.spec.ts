@@ -27,6 +27,23 @@ describe('Apps F2 · app page templates', () => {
     });
   }
 
+  it('the booking templates ship no invented reviews, breakfast promises or fixed policy texts', () => {
+    const pages = APP_PAGE_VARIANTS.booking.map((variant) => variant.page);
+    for (const page of pages) {
+      const json = JSON.stringify(page).toLowerCase();
+      expect(json).not.toContain('desayuno');
+      expect(json).not.toContain('rating_summary');
+      for (const block of page.blocks) {
+        if (block.type === 'testimonials') expect(block.enabled).toBeFalse();
+        if (block.type === 'policies') {
+          expect(block.props['check_in']).toBeFalsy();
+          expect(block.props['check_out']).toBeFalsy();
+          expect(block.props['cancellation']).toBeFalsy();
+        }
+      }
+    }
+  });
+
   it('no app starts as a copy of another one', () => {
     const signatures = PAGE_APP_KINDS.map((kind) =>
       APP_PAGE_TEMPLATES[kind].page.blocks.map((block) => block.type).join(','),
