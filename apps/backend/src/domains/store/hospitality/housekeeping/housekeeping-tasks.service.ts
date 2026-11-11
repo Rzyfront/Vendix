@@ -67,11 +67,13 @@ interface StayForTasks {
   arrival_date: Date;
   departure_date: Date;
   reservation: { status: string };
+  /** Store-local date the guest actually checked out (YYYY-MM-DD), when known. */
+  checked_out_on?: string | null;
 }
 
 /**
  * Daily tasks from the stays of `today` (YYYY-MM-DD): a room whose guest
- * leaves today needs a check-out clean, a room with a guest staying on needs
+ * leaves (or already left early) today needs a check-out clean, a room with a guest staying on needs
  * a stayover. Arrivals of today need nothing yet.
  */
 export function dailyHousekeepingTasks(
@@ -85,7 +87,12 @@ export function dailyHousekeepingTasks(
     const arrival = stay.arrival_date.getTime();
     const departure = stay.departure_date.getTime();
     let type: HousekeepingTaskType | null = null;
-    if (departure === day && ['checked_in', 'checked_out'].includes(stay.reservation.status)) {
+    // A guest who already left is cleaned on the day they actually checked
+    // out (early check-outs included); without that date, on the departure.
+    const checkedOutToday =
+      stay.reservation.status === 'checked_out' &&
+      (stay.checked_out_on ? stay.checked_out_on === today : departure === day);
+    if (checkedOutToday || (departure === day && stay.reservation.status === 'checked_in')) {
       type = 'checkout_clean';
     } else if (
       stay.reservation.status === 'checked_in' &&
@@ -365,10 +372,30 @@ export class HousekeepingTasksService {
         unit_id: true,
         arrival_date: true,
         departure_date: true,
-        reservation: { select: { status: true } },
+        reservation: {
+          select: {
+            status: true,
+            // The actual check-out moment: an early one is cleaned that day.
+            events: {
+              where: { to_status: 'checked_out' },
+              orderBy: { created_at: 'desc' },
+              take: 1,
+              select: { created_at: true },
+            },
+          },
+        },
       },
     });
-    const tasks = dailyHousekeepingTasks(stays, today);
+    const tasks = dailyHousekeepingTasks(
+      stays.map(({ reservation, ...stay }) => ({
+        ...stay,
+        reservation: { status: reservation.status },
+        checked_out_on: reservation.events?.[0]
+          ? localDateString(reservation.events[0].created_at, timezone)
+          : null,
+      })),
+      today,
+    );
     if (tasks.length > 0) {
       // No `notes` here: a null note marks a generated task (see HAND_MADE_NOTE).
       await this.prisma.lodging_housekeeping_tasks.createMany({
