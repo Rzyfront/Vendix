@@ -835,6 +835,18 @@ export class BreadcrumbService {
       icon: 'table',
     },
     {
+      path: '/admin/restaurant-ops/tables/manage',
+      title: 'Gestión de mesas',
+      parent: 'Mesas',
+      icon: 'settings',
+    },
+    {
+      path: '/admin/restaurant-ops/tables/session/:id',
+      title: 'Cuenta de mesa',
+      parent: 'Mesas',
+      icon: 'receipt',
+    },
+    {
       path: '/admin/restaurant-ops/menus',
       title: 'Cartas',
       parent: 'Restaurante',

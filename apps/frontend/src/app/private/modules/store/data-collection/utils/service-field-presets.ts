@@ -28,6 +28,7 @@ export const SERVICE_FIELD_PRESETS: Record<string, ServiceFieldPreset> = {
   estilo_deseado: { field_key: 'estilo_deseado', label: 'Estilo o corte deseado', field_type: 'text', hint: 'Texto · ej. fade medio' },
   alergias: { field_key: 'alergias', label: 'Alergias o sensibilidades', field_type: 'textarea', hint: 'Texto largo' },
   motivo_ingreso: { field_key: 'motivo_ingreso', label: 'Falla o motivo del ingreso', field_type: 'textarea', hint: 'Texto largo' },
+  observaciones_atencion: { field_key: 'observaciones_atencion', label: 'Observaciones de la atención', field_type: 'textarea', hint: 'Texto largo' },
   estado_recepcion: { field_key: 'estado_recepcion', label: 'Estado en que se recibe', field_type: 'textarea', hint: 'Golpes, rayones, faltantes…' },
   accesorios: { field_key: 'accesorios', label: 'Accesorios entregados', field_type: 'textarea', hint: 'Cargador, casco, llaves…' },
   autoriza_adicionales: { field_key: 'autoriza_adicionales', label: 'Autoriza trabajos adicionales', field_type: 'checkbox', hint: 'Casilla' },
@@ -43,7 +44,7 @@ export const SERVICE_FIELD_PRESETS: Record<string, ServiceFieldPreset> = {
 /** Grupos del panel "Campos sugeridos" del editor. */
 export const SERVICE_FIELD_GROUPS: Array<{ title: string; keys: string[] }> = [
   { title: 'Vehículo o equipo', keys: ['placa', 'marca_modelo', 'anio', 'color', 'kilometraje', 'serial_imei', 'nivel_combustible', 'clave_desbloqueo'] },
-  { title: 'Atención', keys: ['motivo_ingreso', 'estado_recepcion', 'accesorios', 'autoriza_adicionales', 'estilo_deseado', 'alergias'] },
+  { title: 'Atención', keys: ['motivo_ingreso', 'observaciones_atencion', 'estado_recepcion', 'accesorios', 'autoriza_adicionales', 'estilo_deseado', 'alergias'] },
   { title: 'Cliente (se guarda en su perfil)', keys: ['nombre_cliente', 'tipo_documento', 'numero_documento', 'correo', 'telefono', 'direccion', 'fecha_nacimiento'] },
 ];
 
@@ -57,7 +58,7 @@ export const DEFAULT_CUSTOMER_SECTION = {
   keys: ['nombre_cliente', 'tipo_documento', 'numero_documento', 'telefono', 'correo'],
 };
 
-export type StationTemplateType = 'carro' | 'moto' | 'celular' | 'barberia' | 'peluqueria' | 'salon_belleza' | 'general';
+export type StationTemplateType = 'carro' | 'moto' | 'celular' | 'barberia' | 'peluqueria' | 'salon_belleza' | 'cancha' | 'general';
 
 /** Tipos de estación al diseñar una plantilla: cada uno arranca con sus campos (editables). */
 export const STATION_TEMPLATE_TYPES: Array<{ value: StationTemplateType; label: string; icon: string; keys: string[]; required: string[] }> = [
@@ -67,6 +68,7 @@ export const STATION_TEMPLATE_TYPES: Array<{ value: StationTemplateType; label: 
   { value: 'barberia', label: 'Barbería', icon: 'scissors', keys: ['estilo_deseado', 'alergias'], required: [] },
   { value: 'peluqueria', label: 'Peluquería', icon: 'scissors', keys: ['estilo_deseado', 'alergias'], required: [] },
   { value: 'salon_belleza', label: 'Salón de belleza / Spa', icon: 'sparkles', keys: ['estilo_deseado', 'alergias'], required: [] },
+  { value: 'cancha', label: 'Cancha / Alquiler de espacio', icon: 'calendar-clock', keys: ['observaciones_atencion'], required: [] },
   { value: 'general', label: 'Otro / General', icon: 'clipboard-list', keys: ['motivo_ingreso'], required: [] },
 ];
 

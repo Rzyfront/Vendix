@@ -114,6 +114,8 @@ export class ReservationFormModalComponent {
   skipAvailabilityCheck = signal(false);
 
   // Provider schedule blocks (for validation)
+  /** S19: every slot the availability endpoint returned (free and booked), keyed by date. */
+  rawSlotsByDate = signal<Record<string, AvailabilitySlot[]>>({});
   providerScheduleBlocks = signal<Array<{ day_of_week: number; start_time: string; end_time: string }>>([]);
 
   // Customer
@@ -640,6 +642,7 @@ export class ReservationFormModalComponent {
     this.repeating.set(false);
     this.directBooking.set(false);
     this.providerScheduleBlocks.set([]);
+    this.rawSlotsByDate.set({});
     this.topCustomers.set([]);
     this.loadTopCustomers();
     if (this.initialProduct()) {
@@ -741,12 +744,24 @@ export class ReservationFormModalComponent {
 
   selectStation(stationId: number | string | null): void {
     const station = this.compatibleStations().find((item) => item.id === Number(stationId)) ?? null;
+    // S18: re-picking the station already selected must keep the chosen time.
+    if (station && station.id === this.selectedStation()?.id) return;
+
     this.selectedStation.set(station);
     this.availableSlots.set([]);
     this.freeSlotsByDate.set({});
+    this.rawSlotsByDate.set({});
     this.selectedSlot.set(null);
     this.startTime.set('');
     this.endTime.set('');
+
+    // S18: a different station invalidates the time. When the user is already past the
+    // time step, send them back to it with that station's slots instead of letting the
+    // confirmation fail on a missing time.
+    if (station && this.currentStep() > this.slotStep()) {
+      this.currentStep.set(this.slotStep());
+      this.loadAvailableSlots();
+    }
   }
 
   nextStep(): void {
@@ -1025,11 +1040,17 @@ export class ReservationFormModalComponent {
             (availability ?? []).filter(s => s.total_available > 0),
           );
           this.freeSlotsByDate.set(this.groupAvailabilityByDate(availability ?? []));
+          const raw: Record<string, AvailabilitySlot[]> = {};
+          for (const slot of availability ?? []) {
+            if (slot?.date) (raw[slot.date] ??= []).push(slot);
+          }
+          this.rawSlotsByDate.set(raw);
           this.bookingsByDate.set(byDate ?? {});
         },
         error: () => {
           this.availableSlots.set([]);
           this.freeSlotsByDate.set({});
+          this.rawSlotsByDate.set({});
           this.bookingsByDate.set({});
         },
       });
@@ -1162,6 +1183,15 @@ export class ReservationFormModalComponent {
   validateTimeAgainstProviderSchedule(date: string, startTime: string, endTime: string): string | null {
     const blocks = this.providerScheduleBlocks();
     if (!blocks.length) {
+      // S19: an hour inside a slot the backend returned as booked is "reservado", not closed.
+      const bookedStartMin = this.timeToMinutes(startTime);
+      const coveringBooked = (this.rawSlotsByDate()[date.split('T')[0]] ?? []).some(
+        (s) =>
+          (s.is_booked === true || s.total_available <= 0) &&
+          bookedStartMin >= this.timeToMinutes(String(s.start_time).substring(0, 5)) &&
+          bookedStartMin < this.timeToMinutes(String(s.end_time).substring(0, 5)),
+      );
+      if (coveringBooked) return 'Ese horario ya está reservado';
       // Fallback al catálogo de slots reales que devolvió el backend.
       const freeSlots = this.dayFreeSlots();
       if (freeSlots.length === 0) {

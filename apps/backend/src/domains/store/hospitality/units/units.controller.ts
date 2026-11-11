@@ -32,10 +32,21 @@ export class UnitsController {
   @ApiOperation({ summary: 'Listar las habitaciones del hotel' })
   @Get()
   @Permissions('store:lodging:inventory:read')
-  async findAll(@Query('unit_type_id') unitTypeId?: string) {
+  async findAll(
+    @Query('unit_type_id') unitTypeId?: string,
+    @Query('available_from') availableFrom?: string,
+    @Query('available_to') availableTo?: string,
+    @Query('exclude_reservation_room_id') excludeRoomId?: string,
+  ) {
     const parsed = unitTypeId ? Number(unitTypeId) : undefined;
+    const excluded = excludeRoomId ? Number(excludeRoomId) : undefined;
     const result = await this.unitsService.findAll(
       Number.isInteger(parsed) ? parsed : undefined,
+      {
+        from: availableFrom || undefined,
+        to: availableTo || undefined,
+        exclude_reservation_room_id: Number.isInteger(excluded) ? excluded : undefined,
+      },
     );
     return this.responseService.success(result);
   }

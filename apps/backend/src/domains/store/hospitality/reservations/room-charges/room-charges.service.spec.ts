@@ -40,6 +40,10 @@ function build(
     sessionPaid?: boolean;
     /** Charges blocked after the room was resolved (read again under the lock). */
     blockedUnderLock?: boolean;
+    /** Store industries (S5: only restaurants fire to the kitchen). */
+    industries?: string[];
+    /** Prepared lines of the source never sent to the kitchen (S5). */
+    unsent?: number[];
   } = {},
 ) {
   const orders = new Map<number, Order>();
@@ -95,7 +99,9 @@ function build(
       return row;
     }),
   };
+  const calls: string[] = [];
   const tx = {
+    stores: { findUnique: jest.fn(async () => ({ industries: options.industries ?? ['hospitality'] })) },
     $queryRaw: jest.fn(async (_strings: TemplateStringsArray, id: number) => (orders.has(id) ? [{ id }] : [])),
     orders: {
       findUnique: jest.fn(async ({ where }: any) => {
@@ -105,10 +111,16 @@ function build(
       update: jest.fn(async ({ where, data }: any) => Object.assign(orders.get(where.id)!, data)),
     },
     order_items: {
-      findMany: jest.fn(async ({ where }: any) =>
-        items.filter((it) => it.order_id === where.order_id && !it.cancelled_at).map((it) => ({ id: it.id })),
-      ),
+      findMany: jest.fn(async ({ where }: any) => {
+        // S5: the kitchen candidates query (prepared, not fired yet).
+        if (where.inventory_consumed_at_fire === false) {
+          calls.push('fire-candidates');
+          return (options.unsent ?? []).map((id) => ({ id }));
+        }
+        return items.filter((it) => it.order_id === where.order_id && !it.cancelled_at).map((it) => ({ id: it.id }));
+      }),
       updateMany: jest.fn(async ({ where, data }: any) => {
+        calls.push('move');
         const moved = items.filter((it) => where.id.in.includes(it.id) && it.order_id === where.order_id);
         moved.forEach((it) => (it.order_id = data.order_id));
         return { count: moved.length };
@@ -152,6 +164,7 @@ function build(
   };
   const orderStockCommit = {
     commitOrderDelivery: jest.fn(async (orderId: number) => {
+      calls.push('stock');
       items.filter((it) => it.order_id === orderId && !it.cancelled_at).forEach((it) => (it.inventory_committed = true));
       return { totalCost: 12000, committedItemCount: 2 };
     }),
@@ -160,6 +173,23 @@ function build(
   const tableSessions = { closeSession: jest.fn(async () => ({})) };
   const settings = { getSettings: jest.fn(async () => ({ hospitality: {} })) };
   const orderHistory = { record: jest.fn(async () => ({ id: 1 })) };
+  const kitchenFire = {
+    prepareFireContext: jest.fn(async (_orderId: number, ids: number[]) => ({ firedItemIds: ids })),
+    fireOrderItemsInTx: jest.fn(async () => {
+      calls.push('fire');
+      return {
+        ticketId: 77,
+        ticketIds: [77, 78],
+        firedItemSnapshots: [{ orderItemId: 21, productId: 5, productName: 'Bandeja', quantity: 1 }],
+        cogsTotal: 9000,
+        consumedLineCount: 2,
+      };
+    }),
+    emitKitchenFiredAfterCommit: jest.fn(async () => {
+      calls.push('emit');
+      return {};
+    }),
+  };
 
   const service = new LodgingRoomChargesService(
     prisma as any,
@@ -169,8 +199,11 @@ function build(
     tableSessions as any,
     settings as any,
     orderHistory as any,
+    kitchenFire as any,
   );
   return {
+    calls,
+    kitchenFire,
     service,
     prisma,
     tx,
@@ -331,6 +364,51 @@ describe('LodgingRoomChargesService (H3.6)', () => {
       expect(ctx.sessions[0].paid_at).toBeInstanceOf(Date);
       expect(ctx.charges[0]).toMatchObject({ table_session_id: 31, source_order_id: 910 });
       expect(ctx.tableSessions.closeSession).toHaveBeenCalledWith(31);
+    });
+
+    it('S5: a restaurant fires the unsent dishes to the kitchen before charging them, like the POS payment', async () => {
+      const ctx = build({ industries: ['hospitality', 'restaurant'], unsent: [21] });
+
+      const result = await ctx.service.chargeToRoom({ reservation_room_id: 8, table_session_id: 31 });
+
+      expect(result.amount).toBe(60000);
+      expect(ctx.kitchenFire.prepareFireContext).toHaveBeenCalledWith(910, [21], ctx.tx);
+      expect(ctx.kitchenFire.fireOrderItemsInTx).toHaveBeenCalledWith(ctx.tx, 3, { firedItemIds: [21] });
+      // Fired (stock leaves at fire) before the delivery commit skips those lines and before they move.
+      expect(ctx.calls).toEqual(['fire-candidates', 'fire', 'stock', 'move', 'emit']);
+      expect(ctx.tx.order_items.findMany).toHaveBeenCalledWith({
+        where: {
+          order_id: 910,
+          cancelled_at: null,
+          skip_kds: false,
+          product_id: { not: null },
+          inventory_consumed_at_fire: false,
+          products: { product_type: 'prepared' },
+          orders: { fulfillment_schedule: { is: null } },
+        },
+        select: { id: true },
+      });
+      // KDS push and the COGS event go out only after the commit, for the source order.
+      expect(ctx.kitchenFire.emitKitchenFiredAfterCommit).toHaveBeenCalledWith(
+        3,
+        undefined,
+        expect.objectContaining({ ticketId: 77, ticketIds: [77, 78], cogsTotal: 9000 }),
+        910,
+      );
+    });
+
+    it('S5: nothing to fire when every dish already went to the kitchen', async () => {
+      const ctx = build({ industries: ['restaurant'], unsent: [] });
+      await ctx.service.chargeToRoom({ reservation_room_id: 8, table_session_id: 31 });
+      expect(ctx.kitchenFire.fireOrderItemsInTx).not.toHaveBeenCalled();
+      expect(ctx.kitchenFire.emitKitchenFiredAfterCommit).not.toHaveBeenCalled();
+    });
+
+    it('S5: a store without the restaurant industry never fires', async () => {
+      const ctx = build({ industries: ['hospitality'], unsent: [21] });
+      await ctx.service.chargeToRoom({ reservation_room_id: 8, table_session_id: 31 });
+      expect(ctx.kitchenFire.prepareFireContext).not.toHaveBeenCalled();
+      expect(ctx.calls).toEqual(['stock', 'move']);
     });
 
     it('rejects a table already paid', async () => {

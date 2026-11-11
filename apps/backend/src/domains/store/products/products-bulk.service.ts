@@ -25,7 +25,7 @@ import {
   BulkValidationMessage,
   ProductState,
 } from './dto';
-import { generateSlug } from '@common/utils/slug.util';
+import { generateSlug, slugLookupCandidates } from '@common/utils/slug.util';
 import { toTitleCase } from '@common/utils/format.util';
 import { Prisma } from '@prisma/client';
 import { parseMoneyCell } from '@common/money-kernel';
@@ -1436,7 +1436,13 @@ export class ProductsBulkService {
       // (PROD_DUP_001). Se avisa aquí, no en el commit.
       if (item.action !== 'update' && item.name) {
         const effectiveSlug = product.slug || generateSlug(item.name);
-        const slugOwner = effectiveSlug ? slugMap.get(effectiveSlug) : undefined;
+        // Slug explícito: tal cual; derivado del nombre: también el legado
+        // (sin transliterar) que guardaban las cargas anteriores.
+        const slugOwner = product.slug
+          ? slugMap.get(product.slug)
+          : slugLookupCandidates(item.name)
+              .map((candidate) => slugMap.get(candidate))
+              .find(Boolean);
         if (slugOwner && slugOwner.id !== item.existing_product_id) {
           item.errors.push({
             code: 'DUPLICATE_SLUG',
@@ -3942,11 +3948,12 @@ export class ProductsBulkService {
 
     const slug = generateSlug(normalizedName);
 
-    // Category is unique by store_id + slug
+    // Category is unique by store_id + slug. Older imports saved accented
+    // names without their letters ("lcteos"): match those too (S23).
     const existing = await this.prisma.categories.findFirst({
       where: {
         store_id: storeId,
-        slug: slug,
+        slug: { in: slugLookupCandidates(normalizedName) },
       },
     });
 

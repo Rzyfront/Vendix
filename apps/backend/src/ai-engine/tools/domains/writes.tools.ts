@@ -2,7 +2,7 @@ import { HttpException } from '@nestjs/common';
 import { plainToInstance } from 'class-transformer';
 import { validateSync } from 'class-validator';
 import { order_state_enum } from '@prisma/client';
-import { generateSlug } from '@common/utils/slug.util';
+import { generateSlug, slugLookupCandidates } from '@common/utils/slug.util';
 import {
   DOCUMENT_TYPE_CODES,
   DOCUMENT_TYPE_RULES,
@@ -1143,6 +1143,7 @@ export function createProductWriteTools(
     const conflicts =
       await productsService.findProductUniquenessConflictsForAgent({
         slug,
+        slug_candidates: slugLookupCandidates(name),
         sku: sku ?? null,
         barcode: barcode ?? null,
       });

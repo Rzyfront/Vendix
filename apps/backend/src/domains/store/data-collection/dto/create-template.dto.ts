@@ -128,7 +128,7 @@ export class CreateTemplateDto {
 
   /** Tipo de estación para el que se diseñó; la estación creada con esta plantilla lo hereda. */
   @IsOptional()
-  @IsIn(['carro', 'moto', 'peluqueria', 'barberia', 'salon_belleza', 'general', 'celular'])
+  @IsIn(['carro', 'moto', 'peluqueria', 'barberia', 'salon_belleza', 'cancha', 'general', 'celular'])
   station_type?: string;
 
   @IsOptional()

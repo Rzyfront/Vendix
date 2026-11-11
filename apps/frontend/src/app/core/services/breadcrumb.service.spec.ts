@@ -103,6 +103,28 @@ describe('BreadcrumbService', () => {
     });
   });
 
+  describe('restaurant tables', () => {
+    for (const [url, label] of [
+      ['/admin/restaurant-ops/tables/session/42', 'Cuenta de mesa'],
+      ['/admin/restaurant-ops/tables/manage', 'Gestión de mesas'],
+    ]) {
+      it(`resolves ${url} → "Mesas / ${label}" instead of the default`, () => {
+        routerEvents$.next(new NavigationEnd(1, url, url));
+        const crumb = service.breadcrumb();
+        expect(crumb.current.label).toBe(label);
+        expect(crumb.parent?.label).toBe('Mesas');
+      });
+    }
+
+    it('keeps /admin/restaurant-ops/tables → "Restaurante / Mesas"', () => {
+      const url = '/admin/restaurant-ops/tables';
+      routerEvents$.next(new NavigationEnd(1, url, url));
+      const crumb = service.breadcrumb();
+      expect(crumb.current.label).toBe('Mesas');
+      expect(crumb.parent?.label).toBe('Restaurante');
+    });
+  });
+
   describe('Flujos children', () => {
     it('resolves /admin/workflows/insights → "Flujos / Analítica IA"', () => {
       routerEvents$.next(

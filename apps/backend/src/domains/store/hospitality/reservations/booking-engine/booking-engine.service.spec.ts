@@ -101,6 +101,7 @@ function build() {
     releaseHold: jest.fn(async () => true),
   };
   const paymentLinks = {
+    isConfigured: jest.fn(async () => true),
     create: jest.fn(async (): Promise<unknown> => ({
       data: { id: 900, checkout_url: 'https://checkout.wompi.co/l/abc' },
     })),
@@ -221,6 +222,23 @@ describe('LodgingBookingEngineService (H6.6)', () => {
       expect(error).toBeInstanceOf(VendixHttpException);
       expect(error.message).toBe('No pudimos iniciar el pago en línea. Intenta de nuevo o contacta al hotel.');
       expect(reservations.releaseHold).toHaveBeenCalledWith(40, 'No se pudo iniciar el pago en línea');
+      expect(payments).toHaveLength(0);
+    });
+
+    it('sin pago en línea activo no crea ni libera reservas y el huésped ve por qué (S8)', async () => {
+      const { service, prisma, reservations, paymentLinks, payments } = build();
+      paymentLinks.isConfigured.mockResolvedValueOnce(false);
+      prisma.lodging_reservations.findMany.mockResolvedValueOnce([{ id: 33 }]);
+
+      const error = await service.hold(272, HOLD).catch((e) => e);
+
+      expect(error).toBeInstanceOf(VendixHttpException);
+      expect(error.message).toBe(
+        'Esta reserva en línea no está disponible por ahora: el hotel aún no tiene el pago en línea activo.',
+      );
+      expect(reservations.create).not.toHaveBeenCalled();
+      expect(reservations.releaseHold).not.toHaveBeenCalled();
+      expect(paymentLinks.create).not.toHaveBeenCalled();
       expect(payments).toHaveLength(0);
     });
 

@@ -111,6 +111,12 @@ function newRequestId(): string {
           <app-icon name="receipt" [size]="16" />
           Cuenta · {{ statusLabel() }} · {{ money(folio()?.total ?? 0) }}
         </p>
+        @if (projection(); as p) {
+          <p class="w-full text-xs text-text-secondary" data-testid="folio-projection">
+            Estadía proyectada {{ money(p.projected) }} · cargado {{ money(p.charged) }} · por cargar
+            {{ p.toPost }} {{ p.toPost === 1 ? 'noche' : 'noches' }}
+          </p>
+        }
         @if (editable() && !action()) {
           <div class="flex flex-wrap gap-1">
             @if (canSplit()) {
@@ -610,6 +616,10 @@ export class FolioPanelComponent {
   readonly inHouse = input<boolean>(false);
   /** Reservation holder: default customer of the second split account. */
   readonly holder = input<{ id: number; name: string } | null>(null);
+  /** Reservation `total_amount`: the whole stay, before any night is posted. */
+  readonly projectedTotal = input<string | number | null>(null);
+  /** Sold nights of the reservation; the ones without a folio line are still to post. */
+  readonly totalNights = input<number>(0);
   /** Bump to re-fetch (e.g. after a deposit was collected). */
   readonly refreshKey = input<number>(0);
   /** Emitted after every change so the detail refreshes its summary. */
@@ -683,6 +693,18 @@ export class FolioPanelComponent {
   });
 
   readonly editable = computed(() => this.inHouse() && this.folio()?.status === 'open');
+  /** "Estadía proyectada $X · cargado $Y · por cargar N noches"; display only. */
+  readonly projection = computed(() => {
+    const total = this.projectedTotal();
+    const folio = this.folio();
+    if (total === null || !folio) return null;
+    const nights = folio.lines.filter((l) => l.kind === 'night' && !l.cancelled_at);
+    return {
+      projected: Number(total),
+      charged: nights.reduce((sum, l) => sum + Number(l.total), 0),
+      toPost: Math.max(0, this.totalNights() - nights.length),
+    };
+  });
   /** H6.6 — balance left after the online payment, which any desk payment applies first. */
   readonly due = computed(() => {
     const f = this.folio();

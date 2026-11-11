@@ -9,11 +9,35 @@
  */
 export function generateSlug(text: string): string {
   return text
+    .normalize('NFD')
+    .replace(/[\u0300-\u036f]/g, '') // Strip accents: 'fútbol' → 'futbol', 'ñ' → 'n'
     .toLowerCase()
     .trim()
     .replace(/[^\w\s-]/g, '') // Remove special characters
     .replace(/[\s_-]+/g, '-') // Replace spaces and underscores with hyphens
     .replace(/^-+|-+$/g, ''); // Remove leading/trailing hyphens
+}
+
+/**
+ * Slug the same text got before accents were transliterated (they were
+ * dropped: "Lácteos" → "lcteos"). Only for finding records saved back then.
+ */
+function legacySlug(text: string): string {
+  return text
+    .toLowerCase()
+    .trim()
+    .replace(/[^\w\s-]/g, '')
+    .replace(/[\s_-]+/g, '-')
+    .replace(/^-+|-+$/g, '');
+}
+
+/**
+ * Slugs to look a record up by when it is found by its name's slug: the
+ * current one and, for accented names, the one older imports saved (S23).
+ * New records are always created with `generateSlug`.
+ */
+export function slugLookupCandidates(text: string): string[] {
+  return [...new Set([generateSlug(text), legacySlug(text)])].filter(Boolean);
 }
 
 /**

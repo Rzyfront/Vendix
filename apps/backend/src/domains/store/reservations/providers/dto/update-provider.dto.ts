@@ -1,8 +1,13 @@
-import { IsBoolean, IsInt, IsOptional, IsString } from 'class-validator';
+import { Transform } from 'class-transformer';
+import { IsBoolean, IsInt, IsNotEmpty, IsOptional, IsString, MaxLength } from 'class-validator';
 
 export class UpdateProviderDto {
+  // The visible name is what the agenda shows: it can change, never be blank.
   @IsOptional()
+  @Transform(({ value }) => (typeof value === 'string' ? value.trim() : value))
   @IsString()
+  @IsNotEmpty()
+  @MaxLength(100)
   display_name?: string;
 
   @IsOptional()

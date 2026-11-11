@@ -925,6 +925,11 @@ export class GlobalPrismaService extends BasePrismaService {
     return this.baseClient.lodging_unit_types;
   }
 
+  // Apps: booking policies read the active rate plan by store_id.
+  get lodging_rate_plans() {
+    return this.baseClient.lodging_rate_plans;
+  }
+
   get lodging_room_nights() {
     return this.baseClient.lodging_room_nights;
   }

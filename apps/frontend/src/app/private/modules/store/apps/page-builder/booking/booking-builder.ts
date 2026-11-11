@@ -9,7 +9,7 @@ import type { BookingPageConfig, StoreAppDetail } from '../../interfaces/store-a
 import type { StoreAppsService } from '../../services/store-apps.service';
 import type { AppPageDocument } from '../../templates';
 import { PageBlockMeta, emptyPage, pageBuilderCatalog, storedPage } from '../page-builder-document';
-import type { AppPageBuilderAdapter, AppPagePreviewPayload } from '../page-builder.types';
+import type { AppPageBuilderAdapter, AppPagePreviewPayload, AppPageWarning } from '../page-builder.types';
 
 /** Same limit as the backend (`MAX_BOOKING_PRODUCTS`). */
 export const MAX_BOOKING_PRODUCTS = 8;
@@ -29,7 +29,48 @@ export interface BookingSettings {
 export interface BookingContext {
   room_types: BookingPreviewRoom[];
   products: { id: number; slug: string; name: string; image_url: string | null }[];
+  /** S9 — false when guests could not pay a booking (no online payment yet). */
+  online_payment_ready?: boolean;
+  /** S11 — the hotel's real rules; they fill the empty policy texts, like the public page. */
+  policy_defaults?: BookingPolicyDefaults;
 }
+
+export interface BookingPolicyDefaults {
+  check_in?: string | null;
+  check_out?: string | null;
+  cancellation?: string | null;
+}
+
+const POLICY_KEYS = ['check_in', 'check_out', 'cancellation'] as const;
+const isBlank = (value: unknown) => typeof value !== 'string' || value.trim() === '';
+
+/**
+ * Same rule as the public page (backend `fillPolicies`): an enabled policies
+ * section gets the hotel's real texts where the owner left them empty.
+ */
+export function fillPolicyDefaults(page: AppPageDocument, defaults?: BookingPolicyDefaults): AppPageDocument {
+  if (!defaults) return page;
+  let changed = false;
+  const blocks = page.blocks.map((block) => {
+    if (block.type !== 'policies' || !block.enabled) return block;
+    const props: Record<string, unknown> = { ...block.props };
+    for (const key of POLICY_KEYS) {
+      const value = defaults[key];
+      if (isBlank(props[key]) && value) {
+        props[key] = value;
+        changed = true;
+      }
+    }
+    return { ...block, props };
+  });
+  return changed ? { ...page, blocks } : page;
+}
+
+export const MISSING_ONLINE_PAYMENT_WARNING: AppPageWarning = {
+  id: 'online-payment',
+  text: 'Falta activar el pago en línea: los huéspedes no podrán completar reservas.',
+  link: { label: 'Configurar medios de pago', route: '/admin/settings/payments' },
+};
 
 export const EMPTY_BOOKING_CONTEXT: BookingContext = { room_types: [], products: [] };
 
@@ -95,7 +136,7 @@ export function bookingPreview(payload: AppPagePreviewPayload<BookingSettings | 
     image_url: context.products.find((k) => k.id === p.id)?.image_url ?? null,
   }));
   return {
-    page: payload.page,
+    page: fillPolicyDefaults(payload.page, context.policy_defaults),
     storeName: payload.storeName,
     storeLogoUrl: payload.storeLogoUrl,
     rooms: context.room_types,
@@ -122,6 +163,7 @@ export function bookingBuilderAdapter(
     saveSettings$: (settings) => apps.saveBookingConfig({ product_ids: settings.products.map((p) => p.id) }),
     context$: () => apps.bookingPreviewContext().pipe(map((res) => res.data ?? EMPTY_BOOKING_CONTEXT)),
     domains$: () => apps.bookingCustomDomains().pipe(map((res) => res.data ?? [])),
+    warnings: (context) => (context?.online_payment_ready === false ? [MISSING_ONLINE_PAYMENT_WARNING] : []),
     // The server refuses to publish a store with no active room type (STORE_APPS_009); it says so itself.
     publishBlocker: () => null,
     publish$: (customDomainId) => apps.publishBooking(customDomainId),

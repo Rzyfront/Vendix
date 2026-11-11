@@ -10,6 +10,8 @@ import { getSettledOrderAmount } from '../../../payments/services/payment-valida
 import { OrderStockCommitService } from '../../../inventory/shared/services/order-stock-commit.service';
 import { StockValidatorService } from '../../../inventory/shared/services/stock-validator.service';
 import { TableSessionsService } from '../../../tables/table-sessions.service';
+import { KitchenFireService } from '../../../kitchen-fire/kitchen-fire.service';
+import { storeIsRestaurant } from '@common/helpers/industry-capabilities.helper';
 import { SettingsService } from '../../../settings/settings.service';
 import { CreateRoomChargeDto, InHouseRoomsQueryDto } from './room-charges.dto';
 
@@ -71,6 +73,7 @@ export class LodgingRoomChargesService {
     private readonly tableSessions: TableSessionsService,
     private readonly settings: SettingsService,
     private readonly orderHistory: OrderHistoryService,
+    private readonly kitchenFire: KitchenFireService,
   ) {}
 
   /** Rooms with a guest in house and an open folio (the room picker). */
@@ -144,6 +147,7 @@ export class LodgingRoomChargesService {
     const origin = (source.table_name ? `${label} · ${source.table_name}` : label).slice(0, 80);
 
     const afterCommit: Array<() => void> = [];
+    let fired: Awaited<ReturnType<KitchenFireService['fireOrderItemsInTx']>> | null = null;
     const charge = await this.prisma.$transaction(
       async (tx) => {
         // Source first, then folio: the folio service only ever locks the folio.
@@ -178,6 +182,13 @@ export class LodgingRoomChargesService {
           orderBy: { id: 'asc' },
         });
         if (items.length === 0) throw fail('La cuenta no tiene consumos para cargar');
+
+        // S5: dishes never sent to the kitchen are fired now, like the POS
+        // payment of a table (payments.service B6): their stock leaves at
+        // fire and `inventory_consumed_at_fire` keeps the delivery commit
+        // below from taking it twice. The guest is only charged what the
+        // kitchen received.
+        fired = await this.fireUnsentDishes(tx, store_id, order.id);
 
         // Stock leaves now, exactly like a paid POS sale (same policy).
         const policy = await this.stockValidator.resolveInventoryPolicy(store_id, tx);
@@ -255,6 +266,14 @@ export class LodgingRoomChargesService {
         this.logger.warn(`Room charge saved; stock notification failed: ${(error as Error).message}`);
       }
     }
+    if (fired) {
+      // KDS push and the `kitchen.fired` COGS event, only after the commit.
+      await this.kitchenFire
+        .emitKitchenFiredAfterCommit(store_id, undefined, fired, source.order_id)
+        .catch((error: Error) => {
+          this.logger.error(`Room charge ${charge.id}: kitchen.fired not emitted: ${error.message}`);
+        });
+    }
     if (source.table_session_id) {
       // Frees the table with the same close (and staff notification) as a paid check.
       await this.tableSessions.closeSession(source.table_session_id).catch((error: Error) => {
@@ -265,6 +284,33 @@ export class LodgingRoomChargesService {
   }
 
   // --------------------------------------------------------------- helpers
+
+  /** Fires the source's prepared lines not yet sent to the kitchen (restaurants only). */
+  private async fireUnsentDishes(tx: Tx, store_id: number, order_id: number) {
+    const store = await tx.stores.findUnique({ where: { id: store_id }, select: { industries: true } });
+    if (!storeIsRestaurant(store?.industries)) return null;
+    const unsent = await tx.order_items.findMany({
+      where: {
+        order_id,
+        cancelled_at: null,
+        skip_kds: false,
+        product_id: { not: null },
+        inventory_consumed_at_fire: false,
+        products: { product_type: 'prepared' },
+        // QUI-989 — scheduled orders are not fired when charged.
+        orders: { fulfillment_schedule: { is: null } },
+      },
+      select: { id: true },
+    });
+    if (unsent.length === 0) return null;
+    const ctx = await this.kitchenFire.prepareFireContext(
+      order_id,
+      unsent.map((item) => item.id),
+      tx,
+    );
+    if (!ctx || ctx.firedItemIds.length === 0) return null;
+    return this.kitchenFire.fireOrderItemsInTx(tx, store_id, ctx);
+  }
 
   private async resolveTargetRoom(reservation_room_id: number): Promise<TargetRoom> {
     const room = await this.prisma.lodging_reservation_rooms.findFirst({

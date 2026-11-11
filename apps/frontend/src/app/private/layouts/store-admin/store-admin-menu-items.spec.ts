@@ -324,3 +324,26 @@ describe('Administración (flujos-documental S6): entradas del sidebar', () => {
     expect(documents?.children?.map((child) => child.route)).toContain('/admin/documents');
   });
 });
+
+describe('Órdenes: Equipo de Servicio (demo hotel/canchas S25)', () => {
+  const orders = () => STORE_ADMIN_MENU_ITEMS.find((item) => item.label === 'Órdenes');
+
+  it('lists "Equipo de Servicio" under Órdenes with the same panel_ui key as Reservas', () => {
+    const team = orders()?.children?.find((child) => child.label === 'Equipo de Servicio');
+    expect(team).toEqual(
+      jasmine.objectContaining({
+        route: '/admin/reservations/schedules',
+        panelUiKey: 'orders_reservations',
+      }),
+    );
+  });
+
+  it('keeps Reservas and Solicitudes de pago where they were', () => {
+    const routes = orders()?.children?.map((child) => child.route) ?? [];
+    expect(routes).toContain('/admin/reservations');
+    expect(routes).toContain('/admin/reservations/payment-requests');
+    expect(routes.indexOf('/admin/reservations/schedules')).toBe(
+      routes.indexOf('/admin/reservations/payment-requests') + 1,
+    );
+  });
+});
