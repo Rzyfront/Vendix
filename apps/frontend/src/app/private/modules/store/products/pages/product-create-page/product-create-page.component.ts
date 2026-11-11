@@ -5037,8 +5037,8 @@ export class ProductCreatePageComponent {
    * El motivo: `loadProduct()` normaliza el slug heredado para desbloquear el
    * formulario, pero esa normalización es presentacional. Si además se
    * enviara, editar cualquier campo cambiaría el slug persistido — y
-   * `generateSlug` no translitera los acentos, los **borra**
-   * (`Ñandú` → `and`, `café-especial` → `caf-especial`). Dos efectos, los dos
+   * `generateSlug` reescribe los acentos (`Ñandú` → `nandu`,
+   * `café-especial` → `cafe-especial`). Dos efectos, los dos
    * malos:
    *
    *  1. El detalle público resuelve por coincidencia exacta del slug

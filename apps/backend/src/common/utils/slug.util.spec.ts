@@ -1,4 +1,4 @@
-import { generateSlug, isValidSlug } from './slug.util';
+import { generateSlug, isValidSlug, slugLookupCandidates } from './slug.util';
 
 describe('generateSlug', () => {
   it('keeps accented letters as their base letter instead of dropping them', () => {
@@ -19,5 +19,16 @@ describe('generateSlug', () => {
       'hello-world-test-item',
     );
     expect(generateSlug('Product 123')).toBe('product-123');
+  });
+});
+
+describe('slugLookupCandidates', () => {
+  it('also matches records saved before accents were transliterated', () => {
+    expect(slugLookupCandidates('Lácteos')).toEqual(['lacteos', 'lcteos']);
+    expect(slugLookupCandidates('Nestlé')).toEqual(['nestle', 'nestl']);
+  });
+
+  it('is a single candidate for plain ASCII names', () => {
+    expect(slugLookupCandidates('Ropa')).toEqual(['ropa']);
   });
 });

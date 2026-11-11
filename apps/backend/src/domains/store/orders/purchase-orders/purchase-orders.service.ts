@@ -67,7 +67,7 @@ import {
   type ResolvedPurchaseLine,
 } from '@common/money-kernel';
 import { toTitleCase } from '@common/utils/format.util';
-import { generateSlug } from '@common/utils/slug.util';
+import { generateSlug, slugLookupCandidates } from '@common/utils/slug.util';
 import { StockLevelManager } from '../../inventory/shared/services/stock-level-manager.service';
 import {
   CostingService,
@@ -1578,8 +1578,16 @@ export class PurchaseOrdersService {
         if (cachedBrandId !== undefined) {
           brandId = cachedBrandId;
         } else {
+          // Also the slug older imports saved for accented names ("nestl")
+          // and the name itself, like the bulk product import (S23).
           const brand = await tx.brands.findFirst({
-            where: { slug: brandSlug, store_id: storeId },
+            where: {
+              store_id: storeId,
+              OR: [
+                { slug: { in: slugLookupCandidates(brandName) } },
+                { name: { equals: brandName, mode: 'insensitive' } },
+              ],
+            },
           });
           if (brand) {
             brandId = brand.id;

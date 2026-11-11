@@ -74,6 +74,7 @@ describe('ProductsBulkService', () => {
     categories: {
       findFirst: jest.fn(),
       findMany: jest.fn().mockResolvedValue([]),
+      create: jest.fn(),
     },
     tax_categories: {
       findMany: jest.fn(),
@@ -407,6 +408,36 @@ describe('ProductsBulkService', () => {
       expect(mockProductsService.create).toHaveBeenCalledWith(
         expect.objectContaining({ brand_id: undefined }),
       );
+    });
+
+    it('reuses an accented category saved with the old slug instead of duplicating it (S23)', async () => {
+      // "Lácteos" auto-created by an older import kept the slug "lcteos".
+      mockPrismaService.categories.findFirst.mockReset();
+      mockPrismaService.categories.create.mockReset();
+      mockPrismaService.categories.findFirst.mockImplementationOnce(async ({ where }: any) =>
+        where.slug?.in?.includes('lcteos') ? { id: 44, slug: 'lcteos' } : null,
+      );
+
+      const id = await (service as any).findOrCreateCategory('Lácteos', 1);
+
+      expect(id).toBe(44);
+      expect(mockPrismaService.categories.findFirst).toHaveBeenCalledWith({
+        where: { store_id: 1, slug: { in: ['lacteos', 'lcteos'] } },
+      });
+      expect(mockPrismaService.categories.create).not.toHaveBeenCalled();
+    });
+
+    it('creates a new accented category with the transliterated slug (S23)', async () => {
+      mockPrismaService.categories.findFirst.mockReset();
+      mockPrismaService.categories.create.mockReset();
+      mockPrismaService.categories.findFirst.mockResolvedValueOnce(null);
+      mockPrismaService.categories.create.mockResolvedValueOnce({ id: 45 });
+
+      await (service as any).findOrCreateCategory('Lácteos', 1);
+
+      expect(mockPrismaService.categories.create).toHaveBeenCalledWith({
+        data: expect.objectContaining({ name: 'Lácteos', slug: 'lacteos', store_id: 1 }),
+      });
     });
 
     it('forwards category ids untouched — existence is ProductsService\'s check', async () => {

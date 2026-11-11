@@ -25,7 +25,7 @@ import {
   BulkValidationMessage,
   ProductState,
 } from './dto';
-import { generateSlug } from '@common/utils/slug.util';
+import { generateSlug, slugLookupCandidates } from '@common/utils/slug.util';
 import { toTitleCase } from '@common/utils/format.util';
 import { Prisma } from '@prisma/client';
 import { parseMoneyCell } from '@common/money-kernel';
@@ -3942,11 +3942,12 @@ export class ProductsBulkService {
 
     const slug = generateSlug(normalizedName);
 
-    // Category is unique by store_id + slug
+    // Category is unique by store_id + slug. Older imports saved accented
+    // names without their letters ("lcteos"): match those too (S23).
     const existing = await this.prisma.categories.findFirst({
       where: {
         store_id: storeId,
-        slug: slug,
+        slug: { in: slugLookupCandidates(normalizedName) },
       },
     });
 
