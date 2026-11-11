@@ -415,6 +415,11 @@ export class TableSessionsService {
     const safeCurrency =
       args.currency || (await this.settingsService.getStoreCurrency()) || 'COP';
 
+    // S7: the store's POS numbering, readable in the KDS ("POS-2026-0042").
+    // Taken before the cash-session row lock: the POS payment takes the
+    // numbering lock first too, so both paths lock in the same order.
+    const orderNumber = await nextPosOrderNumber(tx, args.storeId);
+
     // A POS-opened table check belongs to the cashier session that was open
     // when the table was opened. Lock the same session row used by cash close
     // so the order cannot be created concurrently with a closing snapshot.
@@ -434,8 +439,6 @@ export class TableSessionsService {
       originCashSessionId = openCashSessions[0]?.id ?? null;
     }
 
-    // S7: the store's POS numbering, readable in the KDS ("POS-2026-0042").
-    const orderNumber = await nextPosOrderNumber(tx, args.storeId);
 
     const order = await tx.orders.create({
       data: {
