@@ -642,6 +642,7 @@ jobs:
           --include='**/workflows/editor/components/simulator-panel.component.spec.ts'
           --include='**/workflows/editor/components/variable-picker/variable-picker.utils.spec.ts'
           --include='**/workflows/editor/workflow-editor.utils.spec.ts'
+          --include='**/general/components/scheduled-orders-settings-form/scheduled-orders-settings-form.component.spec.ts'
           --include='**/workflows/pages/board-all-page/board-all-page.component.spec.ts'
           --include='**/workflows/pages/board-all-page/board-all.utils.spec.ts'
           --include='**/workflows/pages/templates-gallery-page/templates-gallery-page.component.spec.ts'
