@@ -760,7 +760,10 @@ describe('TableSessionsService — open + addItems (Fase E smoke)', () => {
         guest_count: 4,
       });
       prismaMock.tables.update.mockResolvedValue({});
-      prismaMock.$queryRaw.mockResolvedValueOnce([{ id: 515 }]);
+      prismaMock.$queryRaw
+        // S7: the POS numbering is read first, then the cashier session lock.
+        .mockResolvedValueOnce([{ seq: null }])
+        .mockResolvedValueOnce([{ id: 515 }]);
 
       prismaMock.table_sessions.findFirst.mockResolvedValue({
         id: 77,
@@ -1663,7 +1666,9 @@ describe('TableSessionsService — open + addItems (Fase E smoke)', () => {
       );
       expect(prismaMock.orders.create.mock.calls.at(-1)[0].data)
         .not.toHaveProperty('origin_cash_session_id');
-      expect(prismaMock.$queryRaw).not.toHaveBeenCalled();
+      // No cashier session is locked for an anonymous check (only the numbering is read).
+      const rawSql = prismaMock.$queryRaw.mock.calls.map((c: any[]) => (c[0] as string[]).join('?'));
+      expect(rawSql.some((sql: string) => sql.includes('cash_register_sessions'))).toBe(false);
       // Session created with opened_by null (anonymous opener).
       expect(prismaMock.table_sessions.create).toHaveBeenCalledWith(
         expect.objectContaining({

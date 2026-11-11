@@ -1,13 +1,7 @@
 /** The slice of a Prisma transaction client this numbering needs. */
 export interface PosOrderNumberClient {
   $executeRaw(query: TemplateStringsArray, ...values: unknown[]): Promise<unknown>;
-  orders: {
-    findFirst(args: {
-      where: { store_id: number; order_number: { startsWith: string } };
-      orderBy: { order_number: 'desc' };
-      select: { order_number: true };
-    }): Promise<{ order_number: string } | null>;
-  };
+  $queryRaw<T = unknown>(query: TemplateStringsArray, ...values: unknown[]): Promise<T>;
 }
 
 /**
@@ -18,6 +12,10 @@ export interface PosOrderNumberClient {
  * advisory lock serializes the store's numbering until that transaction
  * ends, so two checkouts or table openings cannot read the same last number
  * (a unique violation would abort the whole Postgres transaction).
+ *
+ * The highest sequence is read as a number: ordering the text would keep
+ * returning "9999" once "10000" exists and repeat it against the unique
+ * `(store_id, order_number)` index.
  */
 export async function nextPosOrderNumber(
   tx: PosOrderNumberClient,
@@ -26,11 +24,12 @@ export async function nextPosOrderNumber(
 ): Promise<string> {
   await tx.$executeRaw`SELECT pg_advisory_xact_lock(hashtext(${`orders:pos_number:${storeId}`}))`;
   const prefix = `POS-${now.getFullYear()}`;
-  const last = await tx.orders.findFirst({
-    where: { store_id: storeId, order_number: { startsWith: prefix } },
-    orderBy: { order_number: 'desc' },
-    select: { order_number: true },
-  });
-  const sequence = last ? parseInt(last.order_number.split('-')[2], 10) + 1 : 1;
+  const rows = await tx.$queryRaw<Array<{ seq: number | bigint | null }>>`
+    SELECT MAX(CAST(split_part(order_number, '-', 3) AS integer)) AS seq
+    FROM orders
+    WHERE store_id = ${storeId} AND order_number ~ ${`^${prefix}-[0-9]+$`}
+  `;
+  const last = rows[0]?.seq;
+  const sequence = last == null ? 1 : Number(last) + 1;
   return `${prefix}-${sequence.toString().padStart(4, '0')}`;
 }
