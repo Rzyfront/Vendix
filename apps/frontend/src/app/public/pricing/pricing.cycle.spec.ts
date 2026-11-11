@@ -64,9 +64,11 @@ describe('PricingComponent billing cycles (SEO-OPS-18)', () => {
     expect(terms?.textContent).toContain('14 días sin tarjeta');
   });
 
-  it('normaliza yearly como anual y deja fuera ciclos desconocidos', () => {
+  it('normaliza yearly como anual y soporta semestral y de por vida, y deja fuera ciclos desconocidos', () => {
     expect(normalizePricingCycle('yearly')).toBe('annual');
-    expect(normalizePricingCycle('lifetime')).toBeNull();
+    expect(normalizePricingCycle('semiannual')).toBe('semiannual');
+    expect(normalizePricingCycle('lifetime')).toBe('lifetime');
+    expect(normalizePricingCycle('weekly')).toBeNull();
   });
 
   it('explica permanencia, IVA, certificado digital y comisiones de Wompi sin prometer de más', () => {

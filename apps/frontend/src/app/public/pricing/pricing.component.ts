@@ -15,16 +15,20 @@ import { applyMarketingPageMetadata, MARKETING_PAGES } from '../marketing-page-m
 type PricingViewMode = 'cards' | 'compare';
 
 /** SEO-OPS-18: ciclos de cobro que se muestran por separado, en este orden. */
-export type PricingCycle = 'monthly' | 'quarterly' | 'annual';
+export type PricingCycle = 'monthly' | 'quarterly' | 'semiannual' | 'annual' | 'lifetime';
 export const PRICING_CYCLES: readonly { value: PricingCycle; label: string }[] = [
   { value: 'monthly', label: 'Mensual' },
   { value: 'quarterly', label: 'Trimestral' },
+  { value: 'semiannual', label: 'Semestral' },
   { value: 'annual', label: 'Anual' },
+  { value: 'lifetime', label: 'Pago único' },
 ];
 
-/** `yearly` y `annual` son el mismo ciclo; cualquier otro valor queda fuera del selector. */
+/** `yearly` y `annual` son el mismo ciclo; cualquier valor desconocido queda fuera del selector. */
 export function normalizePricingCycle(cycle: string | null | undefined): PricingCycle | null {
-  if (cycle === 'monthly' || cycle === 'quarterly') return cycle;
+  if (cycle === 'monthly' || cycle === 'quarterly' || cycle === 'semiannual' || cycle === 'lifetime') {
+    return cycle;
+  }
   if (cycle === 'annual' || cycle === 'yearly') return 'annual';
   return null;
 }
