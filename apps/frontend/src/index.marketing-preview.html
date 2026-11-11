@@ -7,6 +7,15 @@
     <meta name="viewport" content="width=device-width, initial-scale=1" />
     <link rel="icon" type="image/x-icon" href="favicon.ico" />
     <link rel="preconnect" href="https://api.vendix.online" crossorigin />
+    <!-- SEO-TECH-11 (CLS de escritorio 0,238): la fuente de la landing se pedía desde el
+         @import del SCSS del componente, es decir, solo después de ejecutar el JS. Al llegar,
+         la fila de botones del hero y el banner de cookies se movían. Aquí se pide desde el
+         head, en paralelo con el JS. La URL es idéntica a la del @import de
+         vendix-landing.component.scss para que el navegador la reutilice (lo exige
+         marketing-preview.test.cjs). -->
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+    <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@400;500;600;700;800;900&display=swap" />
     <link rel="manifest" href="/manifest.webmanifest" />
     <meta name="theme-color" content="#2F6F4E" />
     <link rel="apple-touch-icon" href="/pwa/apple-touch-icon-180.png" />
