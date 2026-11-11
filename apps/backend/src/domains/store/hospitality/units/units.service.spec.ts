@@ -18,7 +18,8 @@ describe('UnitsService', () => {
     update: jest.fn(),
   };
   const unitTypes = { findFirst: jest.fn() };
-  const roomNights = { findFirst: jest.fn() };
+  const roomNights = { findFirst: jest.fn(), findMany: jest.fn() };
+  const blocks = { findMany: jest.fn() };
   const storeSettings = { findFirst: jest.fn() };
   let service: UnitsService;
 
@@ -36,6 +37,7 @@ describe('UnitsService', () => {
       lodging_units: units,
       lodging_unit_types: unitTypes,
       lodging_room_nights: roomNights,
+      lodging_inventory_blocks: blocks,
       store_settings: storeSettings,
     } as any);
     jest
@@ -64,6 +66,89 @@ describe('UnitsService', () => {
     expect(units.findFirst).toHaveBeenCalledWith(
       expect.objectContaining({ omit: { ical_export_token: true } }),
     );
+  });
+
+  describe('available_from / available_to', () => {
+    const rooms = [
+      { id: 1, code: '101' },
+      { id: 2, code: '102' },
+      { id: 3, code: '103' },
+    ];
+
+    beforeEach(() => {
+      units.findMany.mockResolvedValue(rooms);
+      roomNights.findMany.mockResolvedValue([]);
+      blocks.findMany.mockResolvedValue([]);
+    });
+
+    it('sin fechas devuelve todas y no consulta noches ni bloqueos', async () => {
+      const result = await service.findAll(11);
+      expect(result).toHaveLength(3);
+      expect(roomNights.findMany).not.toHaveBeenCalled();
+      expect(blocks.findMany).not.toHaveBeenCalled();
+    });
+
+    it('con una sola fecha no filtra', async () => {
+      const result = await service.findAll(undefined, { from: '2026-11-10' });
+      expect(result).toHaveLength(3);
+      expect(roomNights.findMany).not.toHaveBeenCalled();
+    });
+
+    it('excluye la habitación ocupada una noche del rango', async () => {
+      roomNights.findMany.mockResolvedValue([{ unit_id: 1 }]);
+      const result = await service.findAll(undefined, { from: '2026-11-10', to: '2026-11-12' });
+      expect(result.map((u) => u.code)).toEqual(['102', '103']);
+      expect(roomNights.findMany).toHaveBeenCalledWith(
+        expect.objectContaining({
+          where: {
+            store_id: 5,
+            unit_id: { in: [1, 2, 3] },
+            is_active: true,
+            night_date: { in: [new Date('2026-11-10T00:00:00.000Z'), new Date('2026-11-11T00:00:00.000Z')] },
+          },
+        }),
+      );
+    });
+
+    it('excluye la habitación bloqueada por mantenimiento', async () => {
+      blocks.findMany.mockResolvedValue([{ unit_id: 2 }]);
+      const result = await service.findAll(undefined, { from: '2026-11-10', to: '2026-11-12' });
+      expect(result.map((u) => u.code)).toEqual(['101', '103']);
+      expect(blocks.findMany).toHaveBeenCalledWith(
+        expect.objectContaining({
+          where: expect.objectContaining({
+            unit_id: { in: [1, 2, 3] },
+            released_at: null,
+            from_date: { lt: new Date('2026-11-12T00:00:00.000Z') },
+            to_date: { gt: new Date('2026-11-10T00:00:00.000Z') },
+          }),
+        }),
+      );
+    });
+
+    it('las noches de la propia habitación de la reserva no cuentan como ocupadas', async () => {
+      await service.findAll(undefined, {
+        from: '2026-11-10',
+        to: '2026-11-12',
+        exclude_reservation_room_id: 77,
+      });
+      expect(roomNights.findMany).toHaveBeenCalledWith(
+        expect.objectContaining({
+          where: expect.objectContaining({ reservation_room_id: { not: 77 } }),
+        }),
+      );
+    });
+
+    it('rechaza fechas inválidas o una salida que no es posterior', async () => {
+      await expectCode(
+        service.findAll(undefined, { from: '2026-13-40', to: '2026-11-12' }),
+        'LODGING_RESERVATION_DATES_001',
+      );
+      await expectCode(
+        service.findAll(undefined, { from: '2026-11-12', to: '2026-11-12' }),
+        'LODGING_RESERVATION_DATES_001',
+      );
+    });
   });
 
   it('crea la 101 del tipo con piso y estado limpia por defecto', async () => {

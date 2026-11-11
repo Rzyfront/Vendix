@@ -22,9 +22,26 @@ export class LodgingUnitsService {
   private readonly http = inject(HttpClient);
   private readonly baseUrl = `${environment.apiUrl}/store/hospitality/units`;
 
-  list(): Observable<LodgingUnit[]> {
+  /**
+   * With `available_from`/`available_to` only rooms free on every night of
+   * the stay come back; `exclude_reservation_room_id` keeps the room's own
+   * nights from counting as occupied.
+   */
+  list(filter?: {
+    available_from?: string;
+    available_to?: string;
+    exclude_reservation_room_id?: number;
+  }): Observable<LodgingUnit[]> {
+    const params: Record<string, string> = {};
+    if (filter?.available_from && filter?.available_to) {
+      params['available_from'] = filter.available_from;
+      params['available_to'] = filter.available_to;
+      if (filter.exclude_reservation_room_id !== undefined) {
+        params['exclude_reservation_room_id'] = String(filter.exclude_reservation_room_id);
+      }
+    }
     return this.http
-      .get<ApiResponse<LodgingUnit[]>>(this.baseUrl)
+      .get<ApiResponse<LodgingUnit[]>>(this.baseUrl, { params })
       .pipe(map((res) => res.data), catchError(this.handleError));
   }
 
