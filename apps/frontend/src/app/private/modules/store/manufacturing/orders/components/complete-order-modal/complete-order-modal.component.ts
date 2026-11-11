@@ -26,6 +26,7 @@ import {
   ManufacturingOrder,
 } from '../../../interfaces';
 import { ManufacturingOrdersService } from '../../../services';
+import { formatProductionQty } from '../../../../restaurant-ops/production/components/production-day-supplies/production-day-supplies.util';
 
 /**
  * Modal "Completar orden": registra la cantidad realmente producida (total o
@@ -124,12 +125,15 @@ export class CompleteOrderModalComponent {
 
   readonly isSubmitting = signal(false);
 
-  readonly remaining = computed(() => {
+  /** What is left to produce, as a number rounded to 4 decimals (10 − 7.3 = 2.7): the form default reads it. */
+  readonly remainingQty = computed(() => {
     const o = this.order();
     const left = Number(o.planned_qty) - Number(o.produced_qty ?? 0);
-    const value = left > 0 ? left : 0;
-    return Number.isInteger(value) ? String(value) : value.toFixed(4).replace(/\.?0+$/, '');
+    return left > 0 ? Number(left.toFixed(4)) : 0;
   });
+
+  /** The same amount for the helper text, in es-CO ("2,5"): never parse it back. */
+  readonly remaining = computed(() => formatProductionQty(this.remainingQty()));
 
   readonly subtitle = computed(
     () =>
@@ -152,7 +156,7 @@ export class CompleteOrderModalComponent {
     // Al abrir, el valor por defecto es lo que falta por producir.
     effect(() => {
       if (!this.isOpen()) return;
-      const remaining = Number(this.remaining());
+      const remaining = this.remainingQty();
       untracked(() => {
         this.form.reset({
           produced_qty: remaining > 0 ? remaining : null,
