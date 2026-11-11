@@ -46,6 +46,40 @@ interface FakeTransaction {
  */
 // Atomic state guard (QUI-995): the claim every completion makes first.
 const claimOk = jest.fn().mockResolvedValue({ count: 1 });
+// Stateful stand-in of `tx.production_order_lines` (one test order's supplies).
+const makeLines = (initial: Array<Record<string, unknown>> = []) => {
+  const rows: any[] = initial.map((r, i) => ({
+    id: i + 1,
+    consumed_qty: new Prisma.Decimal(0),
+    unit_cost: null,
+    total_cost: null,
+    cost_snapshot: null,
+    ...r,
+  }));
+  let nextId = 100;
+  return {
+    rows,
+    findMany: jest.fn(async () => rows.map((r) => ({ ...r }))),
+    create: jest.fn(async ({ data }: any) => {
+      rows.push({ id: nextId++, ...data });
+      return data;
+    }),
+    createMany: jest.fn(async ({ data }: any) => {
+      for (const d of data) {
+        rows.push({ id: nextId++, consumed_qty: new Prisma.Decimal(0), total_cost: null, cost_snapshot: null, ...d });
+      }
+      return { count: data.length };
+    }),
+    update: jest.fn(async ({ where, data }: any) => Object.assign(rows.find((r) => r.id === where.id), data)),
+  };
+};
+// `complete()` persists planned vs consumed per supply through this table, for every order.
+const noLines = () => ({
+  findMany: jest.fn().mockResolvedValue([]),
+  createMany: jest.fn().mockResolvedValue({ count: 0 }),
+  create: jest.fn().mockResolvedValue({}),
+  update: jest.fn().mockResolvedValue({}),
+});
 
 describe('ProductionOrdersService — complete() (Fase C smoke)', () => {
   let service: ProductionOrdersService;
@@ -213,7 +247,7 @@ describe('ProductionOrdersService — complete() (Fase C smoke)', () => {
       },
     });
     prismaMock.$transaction.mockImplementation(async (cb: any) =>
-      cb({ production_orders: { update: txOrderUpdate, updateMany: claimOk } }),
+      cb({ production_orders: { update: txOrderUpdate, updateMany: claimOk }, production_order_lines: noLines() }),
     );
 
     // 4. The outer `production_orders.update` (post-transaction) is also
@@ -328,7 +362,7 @@ describe('ProductionOrdersService — complete() (Fase C smoke)', () => {
       },
     });
     prismaMock.$transaction.mockImplementation(async (cb: any) =>
-      cb({ production_orders: { update: txOrderUpdateMerma, updateMany: claimOk } }),
+      cb({ production_orders: { update: txOrderUpdateMerma, updateMany: claimOk }, production_order_lines: noLines() }),
     );
     prismaMock.production_orders.update.mockResolvedValue({
       id: 200,
@@ -571,7 +605,7 @@ describe('ProductionOrdersService — complete() (Fase C smoke)', () => {
         recipe: { id: 7, yield_quantity: new Prisma.Decimal(10), yield_unit: 'g', waste_percent: new Prisma.Decimal(0) },
       });
       prismaMock.$transaction.mockImplementation(async (cb: any) =>
-        cb({ production_orders: { update: txOrderUpdate, updateMany: claimOk } }),
+        cb({ production_orders: { update: txOrderUpdate, updateMany: claimOk }, production_order_lines: noLines() }),
       );
 
       const result = await service.complete(600, { produced_qty: 10 });
@@ -683,7 +717,7 @@ describe('ProductionOrdersService — complete() (Fase C smoke)', () => {
         recipe: { id: 7, yield_quantity: new Prisma.Decimal(1), yield_unit: 'g', waste_percent: new Prisma.Decimal(0) },
       };
       prismaMock.$transaction.mockImplementation(async (cb: any) =>
-        cb({ production_orders: { update: jest.fn().mockResolvedValue(updated), updateMany: claimOk } }),
+        cb({ production_orders: { update: jest.fn().mockResolvedValue(updated), updateMany: claimOk }, production_order_lines: noLines() }),
       );
       prismaMock.production_orders.update.mockResolvedValue(updated as any);
       await service.complete(900, { produced_qty: opts.produced });
@@ -768,6 +802,8 @@ describe('ProductionOrdersService — complete() (Fase C smoke)', () => {
           is_active: true,
           yield_quantity: new Prisma.Decimal(yieldQty),
           yield_unit: 'und',
+          waste_percent: new Prisma.Decimal(0),
+          items: [],
         }),
       };
       (prismaMock.production_orders as any).create = jest
@@ -819,6 +855,7 @@ describe('ProductionOrdersService — sale-linked orders (QUI-995)', () => {
   let orderStockCommit: { commitOrderLines: jest.Mock };
   let prismaMock: any;
   let tx: any;
+  let orderLines: ReturnType<typeof makeLines>;
 
   const linkedOrder = (over: Record<string, unknown> = {}) => ({
     id: 100,
@@ -874,9 +911,13 @@ describe('ProductionOrdersService — sale-linked orders (QUI-995)', () => {
     pendingLines?: any[];
     // Non-cancelled variant orders of the same product in the sale (R3 legacy check).
     variantOrderCount?: number;
+    // Supplies already planned for the order (`production_order_lines`).
+    orderLines?: Array<Record<string, unknown>>;
   }) => {
     prismaMock.production_orders.findFirst.mockResolvedValue(opts.order ?? linkedOrder());
+    orderLines = makeLines(opts.orderLines ?? []);
     tx = {
+      production_order_lines: orderLines,
       production_orders: {
         count: jest.fn().mockResolvedValue(opts.variantOrderCount ?? 0),
         updateMany: jest.fn().mockResolvedValue({ count: opts.claimCount ?? 1 }),
@@ -916,6 +957,7 @@ describe('ProductionOrdersService — sale-linked orders (QUI-995)', () => {
     eventEmitter = { emit: jest.fn() };
     orderStockCommit = { commitOrderLines: jest.fn().mockResolvedValue({ totalCost: 0, committedItemCount: 1 }) };
     prismaMock = {
+      production_order_lines: { findMany: jest.fn().mockResolvedValue([]) },
       production_orders: { findFirst: jest.fn(), findMany: jest.fn(), count: jest.fn().mockResolvedValue(0), aggregate: jest.fn() },
       orders: { findFirst: jest.fn() },
       order_items: { findMany: jest.fn() },
@@ -982,6 +1024,59 @@ describe('ProductionOrdersService — sale-linked orders (QUI-995)', () => {
       'production.completed',
       expect.objectContaining({ production_order_id: 100, total_cost: 10, consumed_line_count: 2 }),
     );
+  });
+
+  it('S2: a sale order completion writes the recipe AND add-on components to their lines with each cost snapshot; stock calls are unchanged', async () => {
+    const planned = (component_product_id: number, qty: number) => ({
+      order_id: 100,
+      component_product_id,
+      planned_qty: new Prisma.Decimal(qty),
+    });
+    setup({ orderLines: [planned(99, 3), planned(200, 6)] });
+    await service.complete(100, { produced_qty: 3 });
+
+    const byComponent = (id: number) => orderLines.rows.find((r) => r.component_product_id === id);
+    expect(Number(byComponent(99).consumed_qty)).toBe(3);
+    expect(Number(byComponent(99).total_cost)).toBe(5);
+    expect(Number(byComponent(200).consumed_qty)).toBe(6);
+    expect(Number(byComponent(200).total_cost)).toBe(5);
+    expect(Number(byComponent(200).unit_cost)).toBeCloseTo(5 / 6, 4);
+    expect(orderLines.create).not.toHaveBeenCalled();
+    // recipe consumption + add-on consumption + finished-goods credit, as before
+    expect(stock.updateStock).toHaveBeenCalledTimes(3);
+  });
+
+  it('S2: a component consumed by the recipe and by an add-on is one line with the summed quantity and cost', async () => {
+    const sameComponent = line({
+      order_item_options: [
+        { scope: 'per_unit', component_type: 'ingredient', component_product_id: 99, component_variant_id: null, quantity: 2 },
+      ],
+    });
+    setup({
+      lines: [sameComponent],
+      orderLines: [{ order_id: 100, component_product_id: 99, planned_qty: new Prisma.Decimal(9) }],
+    });
+    await service.complete(100, { produced_qty: 3 });
+
+    // recipe 3 + add-on 2 x 3 units = 9; cost 5 + 5
+    expect(orderLines.update).toHaveBeenCalledTimes(1);
+    expect(Number(orderLines.rows[0].consumed_qty)).toBe(9);
+    expect(Number(orderLines.rows[0].total_cost)).toBe(10);
+    expect(orderLines.rows[0].cost_snapshot.entries).toHaveLength(1);
+    expect(orderLines.create).not.toHaveBeenCalled();
+  });
+
+  it('S2: add-ons another path already claimed are not counted in the lines', async () => {
+    setup({
+      addonClaimCount: 0,
+      orderLines: [
+        { order_id: 100, component_product_id: 99, planned_qty: new Prisma.Decimal(3) },
+        { order_id: 100, component_product_id: 200, planned_qty: new Prisma.Decimal(6) },
+      ],
+    });
+    await service.complete(100, { produced_qty: 3 });
+    expect(Number(orderLines.rows[0].consumed_qty)).toBe(3);
+    expect(Number(orderLines.rows[1].consumed_qty)).toBe(0);
   });
 
   it('does not consume the add-ons again when another path already claimed the line (claim count 0)', async () => {
@@ -1379,7 +1474,8 @@ describe('ProductionOrdersService.restart (S21)', () => {
   const due = new Date('2026-11-12T15:00:00Z');
   let service: ProductionOrdersService;
   let prismaMock: any;
-  let saleLink: { planRestart: jest.Mock };
+  let saleLink: { planRestart: jest.Mock; plannedRequirements: jest.Mock };
+  let restartTx: any;
   let eventEmitter: { emit: jest.Mock };
 
   const cancelledOrder = (over: Record<string, unknown> = {}) => ({
@@ -1399,13 +1495,27 @@ describe('ProductionOrdersService.restart (S21)', () => {
 
   beforeEach(() => {
     prismaMock = {
+      production_order_lines: { findMany: jest.fn().mockResolvedValue([]) },
       production_orders: {
         findFirst: jest.fn().mockResolvedValue(cancelledOrder()),
         updateMany: jest.fn().mockResolvedValue({ count: 1 }),
       },
+      $transaction: jest.fn(async (cb: any) => cb(restartTx)),
+    };
+    // The restart claim and the planned lines share one transaction.
+    restartTx = {
+      production_orders: prismaMock.production_orders,
+      production_order_lines: {
+        count: jest.fn().mockResolvedValue(0),
+        deleteMany: jest.fn().mockResolvedValue({ count: 0 }),
+        createMany: jest.fn().mockResolvedValue({ count: 1 }),
+      },
     };
     saleLink = {
-      planRestart: jest.fn().mockResolvedValue({ sale_state: 'processing', qty: 4, due_date: due }),
+      planRestart: jest
+        .fn()
+        .mockResolvedValue({ sale_state: 'processing', qty: 4, due_date: due, items: [{ id: 1 }] }),
+      plannedRequirements: jest.fn().mockResolvedValue([{ component_product_id: 99, quantity: 8 }]),
     };
     eventEmitter = { emit: jest.fn() };
     jest.spyOn(RequestContextService, 'getContext').mockReturnValue(ctx as any);
@@ -1422,6 +1532,45 @@ describe('ProductionOrdersService.restart (S21)', () => {
   });
 
   afterEach(() => jest.restoreAllMocks());
+
+  it('S1: restart rebuilds the planned lines for the new quantity (add-ons of the paired lines included), unless something was consumed', async () => {
+    prismaMock.production_orders.findFirst
+      .mockResolvedValueOnce(cancelledOrder())
+      .mockResolvedValueOnce(cancelledOrder({ status: 'draft', started_at: null }));
+
+    await service.restart(100);
+
+    expect(saleLink.plannedRequirements).toHaveBeenCalledWith(restartTx, {
+      recipe: { id: 7, items: [] },
+      qty: 4,
+      items: [{ id: 1 }],
+    });
+    expect(restartTx.production_order_lines.deleteMany).toHaveBeenCalledWith({
+      where: { order_id: 100 },
+    });
+    expect(restartTx.production_order_lines.createMany).toHaveBeenCalledWith({
+      data: [
+        { order_id: 100, component_product_id: 99, planned_qty: new Prisma.Decimal(8), sort_order: 0 },
+      ],
+    });
+  });
+
+  it('S1: restart leaves lines that already consumed untouched, and a lost claim writes no lines', async () => {
+    restartTx.production_order_lines.count.mockResolvedValue(1);
+    prismaMock.production_orders.findFirst
+      .mockResolvedValueOnce(cancelledOrder())
+      .mockResolvedValueOnce(cancelledOrder({ status: 'draft' }));
+    await service.restart(100);
+    expect(restartTx.production_order_lines.deleteMany).not.toHaveBeenCalled();
+    expect(restartTx.production_order_lines.createMany).not.toHaveBeenCalled();
+
+    prismaMock.production_orders.updateMany.mockResolvedValue({ count: 0 });
+    prismaMock.production_orders.findFirst.mockResolvedValueOnce(cancelledOrder());
+    await expect(service.restart(100)).rejects.toMatchObject({
+      errorCode: 'PRODUCTION_ORDER_CONCURRENT_UPDATE',
+    });
+    expect(restartTx.production_order_lines.count).toHaveBeenCalledTimes(1);
+  });
 
   it('moves a cancelled linked order back to draft with the quantity and delivery of the live line, and emits the live update', async () => {
     prismaMock.production_orders.findFirst
@@ -1559,6 +1708,7 @@ describe('ProductionOrdersService.start / cancel (release #1134)', () => {
 
   beforeEach(() => {
     prismaMock = {
+      production_order_lines: { findMany: jest.fn().mockResolvedValue([]) },
       production_orders: {
         findFirst: jest.fn().mockResolvedValue(order()),
         updateMany: jest.fn().mockResolvedValue({ count: 1 }),

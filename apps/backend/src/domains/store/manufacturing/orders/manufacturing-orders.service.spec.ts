@@ -285,7 +285,7 @@ describe('ManufacturingOrdersService', () => {
       expect(production.complete).not.toHaveBeenCalled();
     });
 
-    it('completar 4 de 10 deja partially_completed y acumula costo y línea', async () => {
+    it('completar 4 de 10 deja partially_completed y acumula costo (las líneas las guarda complete())', async () => {
       order = baseOrder({
         status: 'in_progress',
         lines: [{ component_product_id: 99, component_product: { name: 'Madera' } }],
@@ -304,10 +304,11 @@ describe('ManufacturingOrdersService', () => {
         sourceModule: 'manufacturing',
         costingMethod: 'fifo',
       });
-      const line = tx.production_order_lines.update.mock.calls[0][0];
-      expect(Number(line.data.consumed_qty)).toBe(8);
-      expect(Number(line.data.total_cost)).toBe(40);
-      expect(Number(line.data.unit_cost)).toBe(5);
+      // S2: the lines are persisted by `ProductionOrdersService.complete()` (every
+      // source); the Planta hook no longer writes them, so nothing is counted twice.
+      expect(tx.production_order_lines.update).not.toHaveBeenCalled();
+      expect(tx.production_order_lines.create).not.toHaveBeenCalled();
+      expect(tx.production_order_lines.findMany).not.toHaveBeenCalled();
 
       const hookData = await production.complete.mock.results[0].value;
       expect(hookData.status).toBe('partially_completed');

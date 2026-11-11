@@ -22,6 +22,16 @@ import {
 } from './production-order-events';
 import { RequestContextService } from '../../../common/context/request-context.service';
 import { ProductionSaleLinkService } from './production-sale-link.service';
+import {
+  RECIPE_REQUIREMENT_SELECT,
+  computeComponentRequirements as computeRequirements,
+  computeConsumedQty as computeQty,
+  persistConsumptionLines,
+  plannedLinesCreate,
+  replacePlannedLines,
+  type LineConsumption,
+  type SaleLineForPlan,
+} from './production-order-lines.util';
 import { lockOrderLifecycle } from '../orders/order-flow/order-lifecycle-lock.util';
 import {
   VendixHttpException,
@@ -42,6 +52,7 @@ import {
   CompleteProductionOrderDto,
   ProductionOrderQueryDto,
   ProductionDayQueryDto,
+  ProductionSuppliesQueryDto,
 } from './dto';
 
 /**
@@ -233,23 +244,7 @@ export class ProductionOrdersService {
     producedQty: number,
     yieldQuantity?: any,
   ): number {
-    const baseQty = Number(item.quantity);
-    if (!Number.isFinite(baseQty) || baseQty <= 0) return 0;
-
-    const yieldQty = Number(yieldQuantity);
-    const safeYield = Number.isFinite(yieldQty) && yieldQty > 0 ? yieldQty : 1;
-    const factor = producedQty / safeYield;
-
-    const lineWastePct = Number(item.waste_percent || 0);
-    const wasteMode = (item as any).waste_mode ?? 'percent';
-    if (wasteMode === 'absolute') {
-      const wasteAbs = Number((item as any).waste_absolute ?? 0);
-      const safeWasteAbs = Number.isFinite(wasteAbs) ? wasteAbs : 0;
-      const withLine = baseQty + safeWasteAbs;
-      return Math.round(withLine * factor * (1 + recipeWastePct / 100));
-    }
-    const multiplier = (1 + lineWastePct / 100) * (1 + recipeWastePct / 100);
-    return Math.round(baseQty * factor * multiplier);
+    return computeQty(item, recipeWastePct, producedQty, yieldQuantity);
   }
 
   /**
@@ -271,16 +266,7 @@ export class ProductionOrdersService {
     },
     qty: number,
   ): Array<{ component_product_id: number; quantity: number }> {
-    const recipeWastePct = Number(recipe.waste_percent || 0);
-    return recipe.items.map((item) => ({
-      component_product_id: item.component_product_id,
-      quantity: this.computeConsumedQty(
-        item,
-        recipeWastePct,
-        qty,
-        recipe.yield_quantity,
-      ),
-    }));
+    return computeRequirements(recipe, qty);
   }
 
   /**
@@ -351,6 +337,8 @@ export class ProductionOrdersService {
           is_active: true,
           yield_quantity: true,
           yield_unit: true,
+          waste_percent: true,
+          items: RECIPE_REQUIREMENT_SELECT.items,
         },
       }),
     ]);
@@ -392,6 +380,12 @@ export class ProductionOrdersService {
         recipe_id: dto.recipe_id,
         planned_qty: new Prisma.Decimal(dto.planned_qty),
         status: 'draft',
+        // S1: the order is born knowing what it must consume (consumed_qty = 0).
+        lines: {
+          create: plannedLinesCreate(
+            computeRequirements(recipe, Number(dto.planned_qty)),
+          ),
+        },
       },
     });
 
@@ -753,6 +747,9 @@ export class ProductionOrdersService {
     let totalConsumedCost = 0;
     let consumedLineCount = 0;
     const consumptions: ProductionConsumption[] = [];
+    // Everything consumed for this order's lines: the recipe items plus the
+    // add-ons of its sale lines. `consumptions` (hook + event) stays recipe-only.
+    const lineConsumptions: LineConsumption[] = [];
 
     // 1. ATOMIC TRANSACTION — consume each recipe item + produce the batch
     const updated = await this.prisma.$transaction(async (tx) => {
@@ -848,11 +845,13 @@ export class ProductionOrdersService {
           totalConsumedCost += Number(result.cost_snapshot.total_cost || 0);
           consumedLineCount += 1;
         }
-        consumptions.push({
+        const consumption = {
           component_product_id: item.component_product_id,
           consumed_qty: consumedQty,
           cost_snapshot: result?.cost_snapshot ?? null,
-        });
+        };
+        consumptions.push(consumption);
+        lineConsumptions.push(consumption);
       }
 
       // 1a'. Sale-linked order: the add-ons of its lines are consumed here, once
@@ -872,6 +871,7 @@ export class ProductionOrdersService {
         });
         totalConsumedCost += addons.cost;
         consumedLineCount += addons.lines;
+        lineConsumptions.push(...addons.consumptions);
       }
 
       // 1b. Credit finished-goods stock with the derived unit_cost
@@ -906,6 +906,15 @@ export class ProductionOrdersService {
             consumptions,
           })
         : undefined;
+
+      // 1b''. Planned vs consumed per supply, for every source (restaurant,
+      // sale, Planta). An order with no lines yet is planned from its recipe.
+      await persistConsumptionLines(
+        tx,
+        order.id,
+        lineConsumptions,
+        computeRequirements(recipe, Number(order.planned_qty)),
+      );
 
       // 1c. Persist the order final state
       const final = await tx.production_orders.update({
@@ -1039,7 +1048,7 @@ export class ProductionOrdersService {
       sourceModule: string;
       allowOveruse: boolean;
     },
-  ): Promise<{ cost: number; lines: number }> {
+  ): Promise<{ cost: number; lines: number; consumptions: LineConsumption[] }> {
     const lines = await tx.order_items.findMany({
       where: {
         order_id: p.order_id,
@@ -1092,7 +1101,7 @@ export class ProductionOrdersService {
         })),
       });
     }
-    if (inputs.length === 0) return { cost: 0, lines: 0 };
+    if (inputs.length === 0) return { cost: 0, lines: 0, consumptions: [] };
 
     const resolvers = createBatchAwareExploders({
       recipes: this.recipes!,
@@ -1108,6 +1117,7 @@ export class ProductionOrdersService {
       resolvers.explodeComponent,
     );
     let cost = 0;
+    const consumptions: LineConsumption[] = [];
     for (const line of consumption) {
       const location_id = await this.stockLevelManager.getDefaultLocationForProduct(
         line.product_id,
@@ -1130,8 +1140,13 @@ export class ProductionOrdersService {
         tx,
       );
       cost += Number(result?.cost_snapshot?.total_cost ?? 0);
+      consumptions.push({
+        component_product_id: line.product_id,
+        consumed_qty: line.quantity,
+        cost_snapshot: result?.cost_snapshot ?? null,
+      });
     }
-    return { cost, lines: consumption.length };
+    return { cost, lines: consumption.length, consumptions };
   }
 
   /**
@@ -1290,6 +1305,16 @@ export class ProductionOrdersService {
     const sale_order_id = (order as { order_id?: number | null }).order_id ?? null;
 
     const recipeItems = order.recipe?.items ?? [];
+    // S3: planned vs consumed per supply; same shape as Planta's detail.
+    const supplyLines = await this.prisma.production_order_lines.findMany({
+      where: { order_id: id },
+      orderBy: { sort_order: 'asc' },
+      include: {
+        component_product: {
+          select: { id: true, name: true, sku: true, stock_unit: true },
+        },
+      },
+    });
     const sale = sale_order_id
       ? await this.prisma.orders.findFirst({
           where: { id: sale_order_id, store_id },
@@ -1397,6 +1422,7 @@ export class ProductionOrdersService {
     );
     return {
       ...order,
+      lines: supplyLines,
       can_restart,
       product: { ...order.product, image_url: images.get(order.product_id) ?? null },
       base_recipe: order.recipe
@@ -1486,7 +1512,7 @@ export class ProductionOrdersService {
     status: string;
     order_id?: number | null;
   }): Promise<
-    | { ok: true; qty: number; due_date: Date }
+    | { ok: true; qty: number; due_date: Date; items: SaleLineForPlan[] }
     | { ok: false; code: keyof typeof ErrorCodes }
   > {
     if (order.order_id == null || !this.saleLink) {
@@ -1499,7 +1525,7 @@ export class ProductionOrdersService {
     if (!plan || plan.qty <= 0) {
       return { ok: false, code: 'PRODUCTION_ORDER_RESTART_NO_LIVE_LINE' };
     }
-    return { ok: true, qty: plan.qty, due_date: plan.due_date };
+    return { ok: true, qty: plan.qty, due_date: plan.due_date, items: plan.items ?? [] };
   }
 
   /** S21 — the rule behind the "Volver a iniciar" button (Planta and restaurant detail). */
@@ -1532,15 +1558,30 @@ export class ProductionOrdersService {
       throw new VendixHttpException(ErrorCodes[verdict.code]);
     }
     // Atomic claim: two screens restarting the same order cannot both win.
-    const claimed = await this.prisma.production_orders.updateMany({
-      where: { id, status: 'cancelled' },
-      data: {
-        status: 'draft',
-        started_at: null,
-        planned_qty: new Prisma.Decimal(verdict.qty),
-        due_date: verdict.due_date,
-        updated_at: new Date(),
-      },
+    const claimed = await this.prisma.$transaction(async (tx) => {
+      const result = await tx.production_orders.updateMany({
+        where: { id, status: 'cancelled' },
+        data: {
+          status: 'draft',
+          started_at: null,
+          planned_qty: new Prisma.Decimal(verdict.qty),
+          due_date: verdict.due_date,
+          updated_at: new Date(),
+        },
+      });
+      if (result.count === 1 && order.recipe) {
+        // S1: the new quantity means new planned supplies (add-ons included);
+        // lines that already consumed are never rebuilt.
+        const requirements = this.saleLink
+          ? await this.saleLink.plannedRequirements(tx, {
+              recipe: order.recipe,
+              qty: verdict.qty,
+              items: verdict.items,
+            })
+          : computeRequirements(order.recipe, verdict.qty);
+        await replacePlannedLines(tx, id, requirements);
+      }
+      return result;
     });
     if (claimed.count !== 1) {
       throw new VendixHttpException(ErrorCodes.PRODUCTION_ORDER_CONCURRENT_UPDATE);
@@ -1580,6 +1621,42 @@ export class ProductionOrdersService {
   // ------------------------------------------------------------------- stats
   // ------------------------------------------------------------- day (QUI-996)
   /**
+   * Membership of the production day, shared by the list (`findDay`) and the
+   * supplies of the day (`findDaySupplies`) so both always cover the same
+   * orders: store timezone, sale-linked orders by the `due_date` instant in the
+   * local day, manual/Planta orders by their date-only `due_date`, none by
+   * `created_at`; in-progress orders from earlier days carry over; cancelled
+   * orders never count.
+   */
+  private async resolveDayWhere(
+    store_id: number,
+    queryDate?: string,
+  ): Promise<{
+    date: string;
+    timezone: string;
+    dayWhere: Prisma.production_ordersWhereInput;
+  }> {
+    const timezone = await resolveStoreTimezone(this.prisma, store_id);
+    const date = queryDate ?? localDateString(new Date(), timezone);
+    const range = { date_from: date, date_to: date };
+    const local = resolveLocalDateRange(range, timezone);
+    const naive = resolveLocalDateOnlyRange(range, timezone);
+
+    const dayWhere: Prisma.production_ordersWhereInput = {
+      status: { not: 'cancelled' },
+      OR: [
+        { order_id: { not: null }, due_date: { gte: local.startDate, lte: local.endDate } },
+        { order_id: null, due_date: { gte: naive.startDate, lte: naive.endDate } },
+        { due_date: null, created_at: { gte: local.startDate, lte: local.endDate } },
+        { status: { in: ['in_progress', 'partially_completed'] }, order_id: { not: null }, due_date: { lt: local.startDate } },
+        { status: { in: ['in_progress', 'partially_completed'] }, order_id: null, due_date: { lt: naive.startDate } },
+        { status: { in: ['in_progress', 'partially_completed'] }, due_date: null, created_at: { lt: local.startDate } },
+      ],
+    };
+    return { date, timezone, dayWhere };
+  }
+
+  /**
    * The production list of ONE day (store timezone), shared by Pedidos
    * programados, Operaciones → Producción and Planta.
    *
@@ -1600,23 +1677,7 @@ export class ProductionOrdersService {
     if (!store_id) {
       throw new VendixHttpException(ErrorCodes.STORE_CONTEXT_001);
     }
-    const timezone = await resolveStoreTimezone(this.prisma, store_id);
-    const date = query?.date ?? localDateString(new Date(), timezone);
-    const range = { date_from: date, date_to: date };
-    const local = resolveLocalDateRange(range, timezone);
-    const naive = resolveLocalDateOnlyRange(range, timezone);
-
-    const dayWhere: Prisma.production_ordersWhereInput = {
-      status: { not: 'cancelled' },
-      OR: [
-        { order_id: { not: null }, due_date: { gte: local.startDate, lte: local.endDate } },
-        { order_id: null, due_date: { gte: naive.startDate, lte: naive.endDate } },
-        { due_date: null, created_at: { gte: local.startDate, lte: local.endDate } },
-        { status: { in: ['in_progress', 'partially_completed'] }, order_id: { not: null }, due_date: { lt: local.startDate } },
-        { status: { in: ['in_progress', 'partially_completed'] }, order_id: null, due_date: { lt: naive.startDate } },
-        { status: { in: ['in_progress', 'partially_completed'] }, due_date: null, created_at: { lt: local.startDate } },
-      ],
-    };
+    const { date, timezone, dayWhere } = await this.resolveDayWhere(store_id, query?.date);
     const select = {
       id: true,
       order_number: true,
@@ -1773,6 +1834,99 @@ export class ProductionOrdersService {
       cards: cards.map(({ _anchor, ...card }) => card),
       next_cursor,
       server_now: new Date().toISOString(),
+    };
+  }
+
+  /**
+   * S4 — planned vs consumed per supply across ALL the orders of the day (the
+   * same membership as `findDay`, no pagination). Quantities only, no cost.
+   *
+   * - `planned` / `consumed`: sum over every order of the day.
+   * - `pending`: sum of max(planned - consumed, 0) over the orders not completed.
+   * - `difference`: sum of (consumed - planned) over the completed orders.
+   * - `orders_without_breakdown`: completed orders with no lines (before the deploy).
+   */
+  async findDaySupplies(query: ProductionSuppliesQueryDto) {
+    const store_id = RequestContextService.getContext()?.store_id;
+    if (!store_id) {
+      throw new VendixHttpException(ErrorCodes.STORE_CONTEXT_001);
+    }
+    const { date, timezone, dayWhere } = await this.resolveDayWhere(store_id, query?.date);
+
+    const orders = await this.prisma.production_orders.findMany({
+      where: dayWhere,
+      select: {
+        id: true,
+        status: true,
+        lines: {
+          select: {
+            component_product_id: true,
+            planned_qty: true,
+            consumed_qty: true,
+            component_product: {
+              select: { id: true, name: true, sku: true, stock_unit: true },
+            },
+          },
+        },
+      },
+    });
+
+    type Supply = {
+      product_id: number;
+      name: string;
+      sku: string | null;
+      unit: string | null;
+      planned: number;
+      consumed: number;
+      pending: number;
+      difference: number;
+    };
+    const supplies = new Map<number, Supply>();
+    let completed = 0;
+    let withoutBreakdown = 0;
+    for (const order of orders) {
+      const isCompleted = order.status === 'completed';
+      if (isCompleted) {
+        completed += 1;
+        if (order.lines.length === 0) withoutBreakdown += 1;
+      }
+      for (const line of order.lines) {
+        const planned = Number(line.planned_qty);
+        const consumed = Number(line.consumed_qty);
+        const supply = supplies.get(line.component_product_id) ?? {
+          product_id: line.component_product_id,
+          name: line.component_product.name,
+          sku: line.component_product.sku ?? null,
+          unit: line.component_product.stock_unit ?? null,
+          planned: 0,
+          consumed: 0,
+          pending: 0,
+          difference: 0,
+        };
+        supply.planned += planned;
+        supply.consumed += consumed;
+        if (isCompleted) supply.difference += consumed - planned;
+        else supply.pending += Math.max(planned - consumed, 0);
+        supplies.set(line.component_product_id, supply);
+      }
+    }
+    // Decimal columns summed as floats: round away the binary noise (4 dp, the column scale).
+    const round = (n: number) => Number(n.toFixed(4));
+    return {
+      date,
+      timezone,
+      orders_total: orders.length,
+      orders_completed: completed,
+      orders_without_breakdown: withoutBreakdown,
+      supplies: [...supplies.values()]
+        .map((s) => ({
+          ...s,
+          planned: round(s.planned),
+          consumed: round(s.consumed),
+          pending: round(s.pending),
+          difference: round(s.difference),
+        }))
+        .sort((a, b) => a.name.localeCompare(b.name, 'es')),
     };
   }
 

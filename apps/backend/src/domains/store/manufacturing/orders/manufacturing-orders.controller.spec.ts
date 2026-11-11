@@ -3,6 +3,7 @@ import { ManufacturingOrdersController } from './manufacturing-orders.controller
 import { ProductionSseService } from '../../production/production-sse.service';
 import { RequestContextService } from '../../../../common/context/request-context.service';
 import { PERMISSIONS_KEY } from '../../../auth/decorators/permissions.decorator';
+import { RequestMethod } from '@nestjs/common';
 import { INDUSTRY_MODULE_KEY } from '../../../../common/decorators/industry-module.decorator';
 
 /**
@@ -11,7 +12,7 @@ import { INDUSTRY_MODULE_KEY } from '../../../../common/decorators/industry-modu
  * `manufacturing_orders` industry guard instead of the restaurant one.
  */
 describe('ManufacturingOrdersController — shared production day and stream', () => {
-  let production: { findDay: jest.Mock };
+  let production: { findDay: jest.Mock; findDaySupplies: jest.Mock };
   let responses: { success: jest.Mock };
   let sse: ProductionSseService;
   let controller: ManufacturingOrdersController;
@@ -27,7 +28,10 @@ describe('ManufacturingOrdersController — shared production day and stream', (
   };
 
   beforeEach(() => {
-    production = { findDay: jest.fn().mockResolvedValue({ date: '2026-11-10', cards: [] }) };
+    production = {
+      findDay: jest.fn().mockResolvedValue({ date: '2026-11-10', cards: [] }),
+      findDaySupplies: jest.fn().mockResolvedValue({ date: '2026-11-10', supplies: [] }),
+    };
     responses = { success: jest.fn((data, message) => ({ success: true, data, message })) };
     sse = new ProductionSseService();
     controller = new ManufacturingOrdersController(
@@ -101,5 +105,24 @@ describe('ManufacturingOrdersController — shared production day and stream', (
     expect(Reflect.getMetadata(INDUSTRY_MODULE_KEY, ManufacturingOrdersController)).toBe(
       'manufacturing_orders',
     );
+  });
+
+  it('S4: GET day/supplies delegates to the shared supplies of the day, with the Planta read permission, before :id', async () => {
+    const result = await controller.findDaySupplies({ date: '2026-11-10' });
+
+    expect(production.findDaySupplies).toHaveBeenCalledWith({ date: '2026-11-10' });
+    expect(result).toEqual({
+      success: true,
+      data: { date: '2026-11-10', supplies: [] },
+      message: 'Consumo de insumos del día obtenido',
+    });
+    const proto = ManufacturingOrdersController.prototype;
+    expect(Reflect.getMetadata('path', proto.findDaySupplies)).toBe('day/supplies');
+    expect(Reflect.getMetadata('method', proto.findDaySupplies)).toBe(RequestMethod.GET);
+    expect(Reflect.getMetadata(PERMISSIONS_KEY, proto.findDaySupplies)).toEqual([
+      'store:manufacturing:orders:read',
+    ]);
+    const names = Object.getOwnPropertyNames(proto);
+    expect(names.indexOf('findDaySupplies')).toBeLessThan(names.indexOf('findOne'));
   });
 });
