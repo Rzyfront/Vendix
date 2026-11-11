@@ -28,6 +28,29 @@ describe('resolveLineDestinations', () => {
     expect(client.stock_levels.findMany).not.toHaveBeenCalled();
   });
 
+  it('S12: sin isRestaurant lee la industria una vez; con isRestaurant no la lee y resuelve igual', async () => {
+    const lines = [{ product_id: 1, quantity: 1 }];
+    const base = clientWith({
+      industries: ['restaurant'],
+      products: [productRow({ id: 1 })],
+      levels: [{ product_id: 1, product_variant_id: null, quantity_available: 9 }],
+    });
+    const viaRead = await resolveLineDestinations(base, 5, lines);
+    expect(base.stores.findUnique).toHaveBeenCalledTimes(1);
+
+    const given = clientWith({
+      industries: ['retail'], // ignorado: manda lo que pasó quien ya la leyó
+      products: [productRow({ id: 1 })],
+      levels: [{ product_id: 1, product_variant_id: null, quantity_available: 9 }],
+    });
+    const viaOpt = await resolveLineDestinations(given, 5, lines, { isRestaurant: true });
+    expect(given.stores.findUnique).not.toHaveBeenCalled();
+    expect(viaOpt).toEqual(viaRead);
+
+    const retail = await resolveLineDestinations(given, 5, lines, { isRestaurant: false });
+    expect(retail).toEqual([null]);
+  });
+
   it('restaurant: one products query and one stock query for many lines (no N+1)', async () => {
     const client = clientWith({
       industries: ['restaurant'],

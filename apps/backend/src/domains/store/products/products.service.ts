@@ -885,6 +885,28 @@ export class ProductsService {
     return dto;
   }
 
+  /**
+   * S13: las subconsultas de receta solo aportan algo si la tienda tiene al
+   * menos una receta activa. Se decide por el dato y no por la industria, así
+   * una tienda que cambió de industria conserva `is_producible` y
+   * `has_active_recipe`. Sin contexto de tienda o ante un fallo de lectura se
+   * mantiene el comportamiento anterior (incluir las recetas).
+   */
+  private async storeHasActiveRecipes(
+    storeId: number | null | undefined,
+  ): Promise<boolean> {
+    if (!storeId) return true;
+    try {
+      const recipe = await this.prisma.recipes.findFirst({
+        where: { store_id: storeId, is_active: true },
+        select: { id: true },
+      });
+      return !!recipe;
+    } catch {
+      return true;
+    }
+  }
+
   async updateProductPromotions(productId: number, promotionIds: number[]) {
     return this.prisma.$transaction(async (tx) => {
       await tx.promotion_products.deleteMany({
@@ -2819,6 +2841,10 @@ export class ProductsService {
     // denormalized cross-location aggregate.
     const includeStockEffective = pos_optimized ? true : include_stock;
 
+    // S13: las subconsultas de receta (is_producible, has_active_recipe) solo
+    // se ejecutan si la tienda tiene alguna receta activa.
+    const includeRecipes = await this.storeHasActiveRecipes(context?.store_id);
+
     // B.2 review fix (F-013) — tokens ANTES del gate: el rank exige lo mismo
     // que el where (`isSmartSearchActive`: cutover smart ∧ ≥1 token). Sin esto,
     // `search=e` o `de la` (0 tokens) entraban al rank con score degenerado
@@ -3002,7 +3028,9 @@ export class ProductsService {
           stock_uom: { select: { code: true } },
           // QUI-993 — same "active recipe" notion the add-on save validates
           // (`recipes` with `is_active`); one row is enough to know.
-          recipes: { where: { is_active: true }, select: { id: true }, take: 1 },
+          ...(includeRecipes && {
+            recipes: { where: { is_active: true }, select: { id: true }, take: 1 },
+          }),
           // QUI-978 — UoMs de venta con detalle del catálogo (el POS
           // decide la captura al tocar la tarjeta, igual que QUI-648).
           product_sale_uoms: {
@@ -3087,7 +3115,9 @@ export class ProductsService {
               product_images: true,
               reviews: true,
               // QUI-999: active recipes, to derive `is_producible` in-query.
-              recipes: { where: { is_active: true } },
+              // S13: una tienda sin recetas activas no paga la subconsulta;
+              // el listado carga como antes de QUI-999.
+              ...(includeRecipes && { recipes: { where: { is_active: true } } }),
             },
           },
         },
