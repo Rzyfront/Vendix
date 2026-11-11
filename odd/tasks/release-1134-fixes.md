@@ -263,17 +263,17 @@ Como operario, quiero que al pasar de una orden a otra en el detalle se muestre 
 | ID | S# | Tarea | Ruta | Estado |
 | --- | --- | --- | --- | --- |
 | T1 | S18 | Consulta de solo lectura en prod y registro del conteo | inline | hecho (L8: 0 difieren → rama spec guarda en A2) |
-| T2 | S4, S5 | `emitDeliveryCogs` legado y salida temprana de `ensureForOrder`, con tests | inline | pendiente |
-| T3 | S2, S9 | Reserva incremental con tope y `cancel()` atómico, con tests | inline | pendiente |
-| T4 | S1, S6 | Cancelación: aviso si falla la merma, y disposición por producto con Liberar por defecto (backend y modal), con tests | inline | pendiente |
-| T5 | S3, S7, S10, S11 | Adición sin existencias nombrada, sumar y luego redondear, timeout del disparo y `sendToKitchen` atómico, con tests | inline | pendiente |
-| T6 | S8 | El `start()` de restaurante rechaza órdenes de Planta, con test | inline | pendiente |
-| T7 | S1-S11 | PR 1 a develop, verificador independiente (ítems 1 y 4) y gate ≥85 | inline + verificador Opus | pendiente |
+| T2 | S4, S5 | `emitDeliveryCogs` legado y salida temprana de `ensureForOrder`, con tests | inline | hecho (#1137, a3a0850ce) |
+| T3 | S2, S9 | Reserva incremental con tope y `cancel()` atómico, con tests | inline | hecho (#1137, a3a0850ce) |
+| T4 | S1, S6 | Cancelación: aviso si falla la merma, y disposición por producto con Liberar por defecto (backend y modal), con tests | inline | hecho (#1137, a3a0850ce) |
+| T5 | S3, S7, S10, S11 | Adición sin existencias nombrada, sumar y luego redondear, timeout del disparo y `sendToKitchen` atómico, con tests | inline | hecho (#1137, a3a0850ce); S7 entre disparos queda como decisión (L10) |
+| T6 | S8 | El `start()` de restaurante rechaza órdenes de Planta, con test | inline | hecho (#1137, a3a0850ce) |
+| T7 | S1-S11 | PR 1 a develop, verificador independiente (ítems 1 y 4) y gate ≥85 | inline + verificador Opus | hecho (#1137, gate 88/100; L11, L12) |
 | T8 | S12-S17, S19, S20 | Bloque 2 con tests | escritor sonnet + auditoría del padre | hecho (3215e3774, 04eb76ef4, 580e9b8b7, 47e98cbf3; L15) |
-| T9 | S12-S20 | PR 2 encadenado y gate ≥85 | inline | pendiente |
-| T10 | S21-S27 | Bloque 3 frontend, specs en la lista de karma de CI y Playwright | escritor sonnet (frontend, superficie disjunta del backend) | pendiente |
-| T11 | S21-S28 | PR 3 encadenado y gate ≥85 | inline | pendiente |
-| T12 | S28 | Pruebas que faltan, en el PR de su código | inline | pendiente |
+| T9 | S12-S20 | PR 2 encadenado y gate ≥85 | inline | hecho (#1142, 5a3daad44, gate 90/100; L16) |
+| T10 | S21-S27 | Bloque 3 frontend, specs en la lista de karma de CI y Playwright | escritor sonnet (frontend, superficie disjunta del backend) | hecho en código (#1135, 0d5b765c5); Playwright en el demo de prod tras el deploy |
+| T11 | S21-S28 | PR 3 encadenado y gate ≥85 | inline | hecho (#1135, gate 92/100) |
+| T12 | S28 | Pruebas que faltan, en el PR de su código | inline | hecho (#1137, #1135 y #1142) |
 
 Estimación: unas 1.150 líneas de autor (PR 1 ~450, PR 2 ~300, PR 3 ~400).
 Riesgo: S1, S2, S6 y S11 tocan reservas y consumo de stock (ítem 1). S9 toca concurrencia (ítem 4). Todo eso va en el PR 1, con verificador independiente al final de T7.
@@ -362,3 +362,14 @@ Orden: este plan va antes que `pedidos-programados-ux`. Los dos tocan `payments.
   - Verde, una spec por corrida: products 164, day 17, live 20, shipping-tax 38, tip-policy 7, payments 201, scheduled-fire 14, assert-schema 4, checkout 78, kitchen-fire-addons 14, line-destination 10, reminders 6, dto 3, stores-industries 4, production-orders 68.
   - Fuera de alcance, preexistente: `organization/stores/stores.service.ts` ~337 `update()` puede pisar otras claves de `store_settings` al cambiar industrias sin `settings`.
   - Siguiente: push, PR A2, RDD (ítems 1 y 5), CI y gate ≥85.
+- L16 (2026-11-10, A2 cerrado): PR #1142 fusionado en develop (5a3daad44) con gate 90/100 y los 8 checks en verde en 4f43fbcaf.
+  - RDD nativa: dos transacciones aprobadas, con acuse y autoridad consumida. La de A2 usó las lentes de riesgo, resiliencia y fiabilidad. La del ajuste 4f43fbcaf cubrió el índice parcial y el cliente de larga vida.
+  - R3-groupby-scope queda refutado: `StorePrismaService` aplica el alcance a `groupBy` (`store-prisma.service.ts:431`).
+  - Avisos bajos que van al reporte final:
+    - el refresco de más de 500 filas recorta el tramo;
+    - el orden sub-milisegundo de `due_date` puede fallar;
+    - producción activa pide las páginas en serie;
+    - NULLS NOT DISTINCT exige PG15+ (prod y local cumplen);
+    - ningún test fija `PRODUCTION_DAY_MAX_LIMIT`.
+  - Preexistente: `stores.service.ts` ~337 `update()`.
+  - Siguiente: PR del release develop→main y release-code-review.
