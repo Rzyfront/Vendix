@@ -93,6 +93,7 @@ describe('AddressesService customer locations', () => {
             if (
               r.store_id === where.store_id &&
               r.user_id === where.user_id &&
+              (where.type === undefined || r.type === where.type) &&
               r.is_primary === where.is_primary
             ) {
               Object.assign(r, data);
@@ -170,6 +171,31 @@ describe('AddressesService customer locations', () => {
 
     expect(result.address.is_primary).toBe(true);
     expect(rows.find((r) => r.id === 1)!.is_primary).toBe(false);
+  });
+
+  it('keeps the fiscal (billing) primary when a new location becomes primary', async () => {
+    rows.push({
+      id: 2,
+      store_id: 10,
+      user_id: 101,
+      is_primary: true,
+      type: 'billing',
+      address_line1: 'Calle fiscal 1',
+      city: 'Bogotá',
+    });
+    await service.addCustomerLocation(101, dto({ is_primary: true }));
+
+    expect(rows.find((r) => r.id === 2)!.is_primary).toBe(true);
+    expect(rows.find((r) => r.id === 1)!.is_primary).toBe(false);
+  });
+
+  it('excludes archived customers from the lookup', async () => {
+    await service.addCustomerLocation(101, dto());
+    expect(prisma.users.findFirst).toHaveBeenCalledWith(
+      expect.objectContaining({
+        where: expect.objectContaining({ state: { not: 'archived' } }),
+      }),
+    );
   });
 
   it('rejects a customer from another organization', async () => {

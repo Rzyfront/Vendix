@@ -15,7 +15,11 @@ import {
   AddressQueryDto,
   UpdateGPSCoordinatesDto,
 } from './dto';
-import { Prisma, address_type_enum } from '@prisma/client';
+import {
+  Prisma,
+  address_type_enum,
+  user_state_enum,
+} from '@prisma/client';
 import { VendixHttpException, ErrorCodes } from 'src/common/errors';
 // Función pura del catálogo Divipola (sin DI): valida que el código exista de
 // verdad en la lista que la DIAN acepta, no solo que tenga 5 dígitos.
@@ -393,6 +397,7 @@ export class AddressesService {
       where: {
         id: customerId,
         organization_id,
+        state: { not: user_state_enum.archived },
         user_roles: { some: { roles: { name: 'customer' } } },
       },
       select: { id: true },
@@ -441,10 +446,13 @@ export class AddressesService {
 
       const makePrimary = existing.length === 0 || dto.is_primary === true;
       if (makePrimary && existing.length > 0) {
+        // Solo entre ubicaciones (shipping): la dirección fiscal (billing)
+        // conserva su propia marca de principal.
         await tx.addresses.updateMany({
           where: {
             store_id,
             user_id: customer.id,
+            type: address_type_enum.shipping,
             is_primary: true,
           },
           data: { is_primary: false },
