@@ -64,6 +64,29 @@ export interface CustomerAddress {
     municipality_code?: string | null;
     type?: string;
     is_primary?: boolean;
+    /** Nombre de la sede / establecimiento (`addresses.label`). */
+    label?: string | null;
+}
+
+/** Cliente existente que devuelve el conflicto por documento (`details.existing_customer`). */
+export interface ExistingCustomerSummary {
+    id: number;
+    first_name?: string | null;
+    last_name?: string | null;
+    legal_name?: string | null;
+    email?: string | null;
+    phone?: string | null;
+    document_type?: string | null;
+    document_number?: string | null;
+    person_type?: PersonType | null;
+    in_store?: boolean;
+}
+
+/** Respuesta de `POST /store/customers/:id/locations`. */
+export interface AddCustomerLocationResult {
+    address: CustomerAddress;
+    /** `false` ⇒ ya existía una dirección idéntica y no se creó otra. */
+    created: boolean;
 }
 
 export interface CreateCustomerRequest {

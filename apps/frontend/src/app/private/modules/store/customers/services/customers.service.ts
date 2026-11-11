@@ -5,6 +5,8 @@ import { tap, shareReplay } from 'rxjs/operators';
 import { environment } from '../../../../../../environments/environment';
 import {
     Customer,
+    CustomerAddress,
+    AddCustomerLocationResult,
     CreateCustomerRequest,
     UpdateCustomerRequest,
     CustomerStats,
@@ -38,6 +40,49 @@ export interface CustomerAddressPayload {
      * sin él el validador fiscal bloquea la emisión con `CITY_CODE_REQUIRED`.
      */
     municipality_code?: string;
+    /** Nombre de la sede / establecimiento. */
+    label?: string;
+    phone_number?: string;
+}
+
+/** Payload de `POST /store/customers/:id/locations`. */
+export type CustomerLocationPayload = Omit<
+    CustomerAddressPayload,
+    'type' | 'customer_id' | 'state'
+> & { state?: string };
+
+/** Estructural: evita importar el componente compartido en el servicio. */
+interface LocationAddressInput {
+    address_line1: string | null;
+    address_line2: string | null;
+    city: string | null;
+    state_province: string | null;
+    country_code: string | null;
+    postal_code: string | null;
+    phone_number: string | null;
+    latitude: number | null;
+    longitude: number | null;
+    municipality_code?: string | null;
+}
+
+/** Mapea el payload del formulario de dirección al DTO de ubicación del backend. */
+export function addressToLocationPayload(
+    addr: LocationAddressInput,
+    label?: string,
+): CustomerLocationPayload {
+    return {
+        address_line_1: addr.address_line1 ?? '',
+        address_line_2: addr.address_line2 || undefined,
+        city: addr.city ?? '',
+        state: addr.state_province ?? '',
+        country: addr.country_code ?? '',
+        postal_code: addr.postal_code || undefined,
+        municipality_code: addr.municipality_code || undefined,
+        phone_number: addr.phone_number || undefined,
+        latitude: addr.latitude != null ? String(addr.latitude) : undefined,
+        longitude: addr.longitude != null ? String(addr.longitude) : undefined,
+        label: label?.trim() || undefined,
+    };
 }
 
 export interface PaginatedResponse<T> {
@@ -308,5 +353,51 @@ export class CustomersService {
                 return throwError(() => error);
             }),
         );
+    }
+    // ── Ubicaciones (sedes) del cliente ───────────────────────
+
+    /** GET /store/addresses?customer_id=&type=shipping — ubicaciones del cliente. */
+    listCustomerLocations(customerId: number): Observable<CustomerAddress[]> {
+        const params = new HttpParams()
+            .set('customer_id', String(customerId))
+            .set('type', 'shipping')
+            .set('limit', '100');
+        return this.http
+            .get<any>(`${environment.apiUrl}/store/addresses`, { params })
+            .pipe(map((r) => (r?.data ?? r) as CustomerAddress[]));
+    }
+
+    /**
+     * POST /store/customers/:id/locations — agrega una ubicación; no duplica
+     * una dirección idéntica (`created: false`).
+     */
+    addCustomerLocation(
+        customerId: number,
+        payload: CustomerLocationPayload,
+    ): Observable<AddCustomerLocationResult> {
+        return this.http
+            .post<any>(`${this.apiUrl}/${customerId}/locations`, payload)
+            .pipe(map((r) => (r?.data ?? r) as AddCustomerLocationResult));
+    }
+
+    /** PATCH /store/addresses/:id — edita la ubicación (o la marca principal). */
+    updateCustomerLocation(
+        addressId: number,
+        payload: Partial<CustomerAddressPayload>,
+    ): Observable<CustomerAddress> {
+        return this.http
+            .patch<any>(`${environment.apiUrl}/store/addresses/${addressId}`, payload)
+            .pipe(map((r) => (r?.data ?? r) as CustomerAddress));
+    }
+
+    /** DELETE /store/addresses/:id — 400 si la ubicación está en uso. */
+    deleteCustomerLocation(addressId: number): Observable<void> {
+        return this.http
+            .delete<void>(`${environment.apiUrl}/store/addresses/${addressId}`);
+    }
+
+    /** Marca la ubicación como principal (el backend mueve la marca atómicamente). */
+    setPrimaryLocation(addressId: number): Observable<CustomerAddress> {
+        return this.updateCustomerLocation(addressId, { is_primary: true });
     }
 }

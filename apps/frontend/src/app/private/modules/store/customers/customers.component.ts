@@ -1,16 +1,18 @@
-import { Component, inject, signal, DestroyRef, viewChild } from '@angular/core';
+import { Component, inject, signal, computed, DestroyRef, viewChild } from '@angular/core';
 import { Router } from '@angular/router';
 import { takeUntilDestroyed } from '@angular/core/rxjs-interop';
 import { finalize } from 'rxjs';
 import { CustomerListComponent, CustomerModalComponent, CustomerBulkUploadModalComponent } from './components';
 import { CUSTOMER_MODAL_FILLABLE_FIELDS } from './components/customer-modal/customer-modal.component';
-import { translateCustomerError } from './utils/customer-error.translator';
+import { DuplicateCustomerDialogComponent } from './components/customer-modal/duplicate-customer-dialog.component';
+import { translateCustomerError, extractDocumentConflict } from './utils/customer-error.translator';
 import { StatsComponent } from '../../../../shared/components/stats/stats.component';
-import { CustomersService } from './services/customers.service';
+import { CustomersService, addressToLocationPayload } from './services/customers.service';
 import {
   Customer,
   CustomerStats,
   CreateCustomerRequest,
+  ExistingCustomerSummary,
   UpdateCustomerRequest,
 } from './models/customer.model';
 import { ToastService, DialogService, type AddressPayload } from '../../../../shared/components';
@@ -31,6 +33,7 @@ import { customerDisplayName } from '../../../../shared/utils/customer-display-n
     CustomerListComponent,
     CustomerModalComponent,
     CustomerBulkUploadModalComponent,
+    DuplicateCustomerDialogComponent,
   ],
   template: `
     <div class="w-full">
@@ -100,6 +103,17 @@ import { customerDisplayName } from '../../../../shared/utils/customer-display-n
         (addressData)="onAddressData($event)"
       ></app-customer-modal>
 
+      <!-- Documento ya registrado: editar / agregar ubicación / cancelar -->
+      <app-duplicate-customer-dialog
+        [isOpen]="duplicateExisting() !== null"
+        [existing]="duplicateExisting()"
+        [hasAddress]="hasPendingAddress()"
+        [loading]="addingLocation()"
+        (editExisting)="onDuplicateEdit()"
+        (addLocation)="onDuplicateAddLocation($event)"
+        (cancelled)="onDuplicateCancel()"
+      ></app-duplicate-customer-dialog>
+
       <!-- Bulk Upload Modal -->
       <app-customer-bulk-upload-modal
         [isOpen]="isBulkUploadModalOpen()"
@@ -146,6 +160,11 @@ export class CustomersComponent {
    * evitar reutilizar una dirección de una sesión anterior.
    */
   private pendingAddress = signal<AddressPayload | null>(null);
+  readonly hasPendingAddress = computed(() => this.pendingAddress() !== null);
+
+  /** Cliente existente cuando crear chocó por documento (abre el diálogo). */
+  readonly duplicateExisting = signal<ExistingCustomerSummary | null>(null);
+  readonly addingLocation = signal(false);
 
   // Bulk Upload Modal
   isBulkUploadModalOpen = signal(false);
@@ -496,6 +515,14 @@ export class CustomersComponent {
         },
         error: (error) => {
           console.error('Error saving customer:', error);
+          // Documento ya registrado: en vez del toast, preguntar qué hacer.
+          // La dirección pendiente se conserva para poder agregarla como
+          // ubicación del cliente existente.
+          const existing = isCreate ? extractDocumentConflict(error) : null;
+          if (existing) {
+            this.duplicateExisting.set(existing);
+            return;
+          }
           // Limpiar la dirección pendiente si la creación falló, para no
           // arrastrarla a una próxima alta.
           if (isCreate) this.pendingAddress.set(null);
@@ -507,6 +534,66 @@ export class CustomersComponent {
           );
         },
       });
+  }
+
+  /** «Editar cliente existente»: cierra el alta y abre la edición del existente. */
+  onDuplicateEdit(): void {
+    const existing = this.duplicateExisting();
+    if (!existing) return;
+    this.customersService
+      .getCustomer(existing.id)
+      .pipe(takeUntilDestroyed(this.destroyRef))
+      .subscribe({
+        next: (customer) => {
+          this.duplicateExisting.set(null);
+          this.pendingAddress.set(null);
+          this.openModal(customer);
+        },
+        error: (error) =>
+          this.toastService.error(
+            translateCustomerError(error, 'No se pudo cargar el cliente'),
+          ),
+      });
+  }
+
+  /** «Agregar como nueva ubicación»: guarda la dirección del formulario en el existente. */
+  onDuplicateAddLocation(siteName: string): void {
+    const existing = this.duplicateExisting();
+    const address = this.pendingAddress();
+    if (!existing || !address) return;
+    this.addingLocation.set(true);
+    this.customersService
+      .addCustomerLocation(existing.id, addressToLocationPayload(address, siteName))
+      .pipe(
+        takeUntilDestroyed(this.destroyRef),
+        finalize(() => this.addingLocation.set(false)),
+      )
+      .subscribe({
+        next: (result) => {
+          const name = customerDisplayName(existing, 'el cliente');
+          if (result.created) {
+            this.toastService.success(`Ubicación agregada a ${name}`);
+          } else {
+            this.toastService.info('La ubicación ya estaba registrada');
+          }
+          this.duplicateExisting.set(null);
+          this.pendingAddress.set(null);
+          this.closeModal();
+          this.router.navigate(['/admin/customers', existing.id], {
+            queryParams: { tab: 'ubicaciones' },
+          });
+        },
+        error: (error) =>
+          this.toastService.error(
+            translateCustomerError(error, 'No se pudo agregar la ubicación'),
+            'Error al agregar ubicación',
+          ),
+      });
+  }
+
+  /** «Cancelar»: cierra el diálogo y deja el formulario como estaba. */
+  onDuplicateCancel(): void {
+    this.duplicateExisting.set(null);
   }
 
   /**

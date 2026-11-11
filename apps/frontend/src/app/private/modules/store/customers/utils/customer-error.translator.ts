@@ -1,4 +1,5 @@
 import { HttpErrorResponse } from '@angular/common/http';
+import type { ExistingCustomerSummary } from '../models/customer.model';
 
 /**
  * Traductor centralizado de errores HTTP del módulo de clientes a mensajes
@@ -183,4 +184,27 @@ export function translateCustomerError(
   }
 
   return fallback;
+}
+
+/**
+ * Si el error es el conflicto por documento (409 `SYS_CONFLICT_001` con
+ * `details.kind === 'document'`) devuelve el cliente existente; si no, `null`
+ * y el llamador conserva su toast/traducción habitual.
+ */
+export function extractDocumentConflict(
+  err: AnyError,
+): ExistingCustomerSummary | null {
+  const e = err as {
+    status?: number;
+    error?: { error_code?: string; details?: Record<string, unknown> };
+  } | null;
+  if (!e || e.status !== 409 || e.error?.error_code !== 'SYS_CONFLICT_001') {
+    return null;
+  }
+  const details = e.error.details;
+  if (details?.['kind'] !== 'document') return null;
+  const existing = details['existing_customer'] as
+    | ExistingCustomerSummary
+    | undefined;
+  return existing && typeof existing.id === 'number' ? existing : null;
 }
