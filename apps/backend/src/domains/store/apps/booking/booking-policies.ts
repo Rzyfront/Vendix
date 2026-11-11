@@ -71,6 +71,11 @@ export class BookingPoliciesService {
 
   async fill(storeId: number, page: AppPageDocument): Promise<AppPageDocument> {
     if (!page.blocks.some(needsFill)) return page;
+    return fillPolicies(page, await this.defaults(storeId));
+  }
+
+  /** The hotel's real policy texts; the editor preview fills its draft with them too. */
+  async defaults(storeId: number): Promise<PolicyDefaults> {
     const row = await this.prisma.store_settings.findFirst({
       where: { store_id: storeId },
       select: { settings: true },
@@ -88,10 +93,10 @@ export class BookingPoliciesService {
       },
     });
     const policy = plan?.cancellation_policy?.is_active ? toPolicySnapshot(plan.cancellation_policy) : null;
-    return fillPolicies(page, {
+    return {
       check_in: formatCheckIn(hospitality.check_in_time || '15:00'),
       check_out: formatCheckOut(hospitality.check_out_time || '12:00'),
       cancellation: policyText(asPolicySnapshot(policy)),
-    });
+    };
   }
 }

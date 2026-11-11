@@ -17,6 +17,16 @@ import {
   parseBookingPageConfig,
 } from './booking-page.reader';
 import { BookingViewData, BookingViewService } from './booking-view.service';
+import { BookingPoliciesService, PolicyDefaults } from './booking-policies';
+import { PaymentLinksService } from '../../payment-links/payment-links.service';
+
+/** What the editor preview paints besides the draft page. */
+export interface BookingPreviewContext extends BookingViewData {
+  /** S9 — false while guests could not pay a booking (no online payment). */
+  online_payment_ready: boolean;
+  /** S11 — real policy texts that fill the empty ones, like the public page. */
+  policy_defaults: PolicyDefaults;
+}
 import { PublishBookingPageDto, UpdateBookingPageConfigDto } from './booking-page.dto';
 
 const APP_TYPE = 'STORE_BOOKING';
@@ -43,16 +53,23 @@ export class BookingAppService {
     private readonly prisma: StorePrismaService,
     private readonly domains: AppDomainService,
     private readonly view: BookingViewService,
+    private readonly paymentLinks: PaymentLinksService,
+    private readonly policies: BookingPoliciesService,
   ) {}
 
   /**
    * F6-B — the data the editor's preview paints besides the draft page: the
    * room types and secondary products, whatever the app's status.
    */
-  async previewContext(): Promise<BookingViewData> {
+  async previewContext(): Promise<BookingPreviewContext> {
     const storeId = this.requireStoreId();
     const row = await this.findRow(storeId);
-    return this.view.read(storeId, row?.config ?? null);
+    const [view, online_payment_ready, policy_defaults] = await Promise.all([
+      this.view.read(storeId, row?.config ?? null),
+      this.paymentLinks.isConfigured(),
+      this.policies.defaults(storeId),
+    ]);
+    return { ...view, online_payment_ready, policy_defaults };
   }
 
   async updateConfig(dto: UpdateBookingPageConfigDto): Promise<void> {

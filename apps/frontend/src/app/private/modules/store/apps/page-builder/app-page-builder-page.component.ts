@@ -181,6 +181,7 @@ function snapshot(value: unknown): string {
             [busy]="busy()"
             [domains]="domains()"
             [addressHint]="adapter().addressHint"
+            [warnings]="warnings()"
             [(customDomainId)]="customDomainId"
             (power)="switchApp($event)"
             (applyTemplate)="applyTemplate($event)"
@@ -322,6 +323,8 @@ export class AppPageBuilderPageComponent<S = unknown, C = unknown> implements On
     }
     return actions;
   });
+
+  readonly warnings = computed(() => this.adapter().warnings?.(this.context()) ?? []);
 
   readonly previewPayload = computed<AppPagePreviewPayload<S | null, C | null>>(() => {
     const logo = this.auth.userStore()?.logo_url;

@@ -1,6 +1,9 @@
 import { ChangeDetectionStrategy, Component, computed, input, model, output, signal } from '@angular/core';
 
+import { RouterLink } from '@angular/router';
+
 import { IconComponent } from '../../../../../shared/components/icon/icon.component';
+import type { AppPageWarning } from './page-builder.types';
 import type { ProductPageCustomDomain, StoreAppDetail } from '../interfaces/store-app.interface';
 import { APP_PAGE_VARIANTS, AppPageVariant, PageAppKind } from '../templates';
 
@@ -15,10 +18,22 @@ import { APP_PAGE_VARIANTS, AppPageVariant, PageAppKind } from '../templates';
 @Component({
   selector: 'app-app-page-general-panel',
   standalone: true,
-  imports: [IconComponent],
+  imports: [IconComponent, RouterLink],
   changeDetection: ChangeDetectionStrategy.OnPush,
   template: `
     <div class="space-y-4" data-testid="app-page-general-panel">
+      @for (warning of warnings(); track warning.id) {
+        <div class="flex items-start gap-2 rounded-xl border border-[var(--color-warning,#f59e0b)] bg-[var(--color-surface)] p-3 text-sm text-[var(--color-text-primary)]"
+             role="status" [attr.data-testid]="'app-page-warning-' + warning.id">
+          <app-icon name="alert-triangle" [size]="16" class="mt-0.5 shrink-0 text-[var(--color-warning,#f59e0b)]" />
+          <p>
+            {{ warning.text }}
+            @if (warning.link; as link) {
+              <a class="ml-1 font-semibold text-[var(--color-primary)] underline" [routerLink]="link.route">{{ link.label }}</a>
+            }
+          </p>
+        </div>
+      }
       <section class="rounded-xl border border-[var(--color-border)] bg-[var(--color-surface)] p-4">
         <div class="flex flex-wrap items-start justify-between gap-3">
           <div>
@@ -105,6 +120,8 @@ export class AppPageGeneralPanelComponent {
   /** The store's own domains; `null` when the app has a fixed address. */
   readonly domains = input<readonly ProductPageCustomDomain[] | null>(null);
   readonly addressHint = input('');
+  /** Non-blocking notices from the app's adapter (S9: online payment missing). */
+  readonly warnings = input<readonly AppPageWarning[]>([]);
   readonly customDomainId = model<number | null>(null);
 
   readonly power = output<'activate' | 'deactivate'>();

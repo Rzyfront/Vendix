@@ -15,6 +15,7 @@ import { ServicePageViewService } from './service-page/service-page-view.service
 import { AppDomainService } from './shared/app-domain.service';
 import { AppPageService } from './shared/app-page.service';
 import { LodgingReservationsModule } from '../hospitality/reservations/reservations.module';
+import { PaymentLinksModule } from '../payment-links/payment-links.module';
 import { BookingAppController } from './booking/booking-app.controller';
 import { BookingAppService } from './booking/booking-app.service';
 import { BookingCheckinService } from './booking/booking-checkin.service';
@@ -43,6 +44,7 @@ import { LandingLeadService } from './landing/landing-lead.service';
     LodgingReservationsModule,
     S3Module,
     CrmModule,
+    PaymentLinksModule,
   ],
   controllers: [
     ProductPageAppController,

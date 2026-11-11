@@ -69,6 +69,21 @@ describe('BookingPoliciesService', () => {
     },
   };
 
+  it('defaults() gives the texts the editor preview uses, scoped by store (S11)', async () => {
+    const { prisma, service } = build({ check_in_time: '14:00', check_out_time: '11:00' }, plan);
+    await expect(service.defaults(7)).resolves.toEqual({
+      check_in: 'Desde las 2:00 p. m.',
+      check_out: 'Hasta las 11:00 a. m.',
+      cancellation: 'Flexible: gratis hasta 48 h antes de la llegada; menos de 48 h: 1 noche',
+    });
+    expect(prisma.store_settings.findFirst).toHaveBeenCalledWith(
+      expect.objectContaining({ where: { store_id: 7 } }),
+    );
+    expect(prisma.lodging_rate_plans.findFirst).toHaveBeenCalledWith(
+      expect.objectContaining({ where: expect.objectContaining({ store_id: 7 }) }),
+    );
+  });
+
   it('fills from the store settings and the default rate plan, scoped by store', async () => {
     const { prisma, service } = build({ check_in_time: '15:00', check_out_time: '12:00' }, plan);
     const out = await service.fill(7, page({ title: 'Políticas' }));
