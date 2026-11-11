@@ -37,7 +37,7 @@
       }
       @if (hasPlans()) {
         <p class="text-center text-sm text-[var(--color-text-secondary)] mb-6" data-testid="pricing-terms">
-          Precios en pesos colombianos (COP) por el ciclo elegido. Puedes probar el plan Empresarial Pro 14 días sin tarjeta.
+          {{ currencyNote() }}{{ cycleNote() }}. Prueba gratis sin tarjeta.
         </p>
       }
 

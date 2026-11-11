@@ -61,7 +61,21 @@ describe('PricingComponent billing cycles (SEO-OPS-18)', () => {
   it('dice la moneda y la prueba sin tarjeta', () => {
     const terms = (fixture.nativeElement as HTMLElement).querySelector('[data-testid="pricing-terms"]');
     expect(terms?.textContent).toContain('pesos colombianos (COP)');
-    expect(terms?.textContent).toContain('14 días sin tarjeta');
+    expect(terms?.textContent).toContain('por el ciclo elegido');
+    expect(terms?.textContent).toContain('Prueba gratis sin tarjeta');
+    expect(terms?.textContent).not.toContain('14 días');
+  });
+
+  it('en Pago único la nota no habla de ciclo elegido', () => {
+    fixture.componentInstance.setCycle('lifetime');
+    expect(fixture.componentInstance.cycleNote()).toBe(' en un solo pago');
+  });
+
+  it('la nota de moneda sigue a los planes mostrados', () => {
+    const c = fixture.componentInstance;
+    expect(c.currencyNote()).toBe('Precios en pesos colombianos (COP)');
+    c.setCycle('quarterly');
+    expect(c.currencyNote()).toBe('Precios en pesos colombianos (COP)');
   });
 
   it('normaliza yearly como anual y soporta semestral y de por vida, y deja fuera ciclos desconocidos', () => {

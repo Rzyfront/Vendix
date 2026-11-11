@@ -71,6 +71,17 @@ export class PricingComponent {
   readonly availableCycles = computed(() =>
     PRICING_CYCLES.filter((c) => this.plans().some((p) => normalizePricingCycle(p.billing_cycle) === c.value)),
   );
+  /** Moneda de los planes mostrados: una sola se nombra, varias se explican. */
+  readonly currencyNote = computed(() => {
+    const codes = Array.from(
+      new Set(this.visiblePlans().map((p) => (p.currency || '').toUpperCase()).filter(Boolean)),
+    );
+    if (codes.length === 0) return 'Precios en la moneda de cada plan';
+    if (codes.length > 1) return 'Precios en la moneda de cada plan';
+    return codes[0] === 'COP' ? 'Precios en pesos colombianos (COP)' : `Precios en ${codes[0]}`;
+  });
+  readonly cycleNote = computed(() => (this.cycle() === 'lifetime' ? ' en un solo pago' : ' por el ciclo elegido'));
+
   readonly visiblePlans = computed<PublicPlan[]>(() => {
     const all = this.plans();
     const inCycle = all.filter((p) => normalizePricingCycle(p.billing_cycle) === this.cycle());
