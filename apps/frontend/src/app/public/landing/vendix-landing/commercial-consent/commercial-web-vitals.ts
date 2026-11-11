@@ -140,8 +140,18 @@ export function startVitalsCollector(win: VitalsWindow): VitalsCollector {
   };
 }
 
+/** Parámetros del evento de GA4 (sin datos personales). */
+export interface VitalEventParams {
+  send_to: string;
+  /** Entero, como pide GA: ms para LCP e INP; CLS × 1000. */
+  value: number;
+  metric_value: number;
+  metric_rating: VitalRating;
+  non_interaction: true;
+}
+
 /** Parámetros del evento de GA4. `value` va en ms (CLS × 1000) y entero, como pide GA. */
-export function vitalEventParams(sample: VitalSample, sendTo: string): Record<string, unknown> {
+export function vitalEventParams(sample: VitalSample, sendTo: string): VitalEventParams {
   return {
     send_to: sendTo,
     value: Math.round(sample.name === 'CLS' ? sample.value * 1000 : sample.value),
