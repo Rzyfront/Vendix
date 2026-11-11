@@ -16,14 +16,17 @@ import { Subscription } from 'rxjs';
 import {
   BadgeComponent,
   ButtonComponent,
+  CardComponent,
   DialogService,
   IconComponent,
   SpinnerComponent,
   ToastService,
 } from '../../../../../../../shared/components';
+import { CurrencyPipe } from '../../../../../../../shared/pipes/currency';
 import { formatStockWarningSummary } from '../../../../../../../core/utils/stock-shortage.util';
 import {
   ProductionOrder,
+  ProductionOrderLine,
   PLANTA_ORDER_DETAIL_BASE,
   ProductionOrderComponent,
   finishesInPlanta,
@@ -47,6 +50,8 @@ import { ProductionSaleLinesComponent } from '../production-sale-lines/productio
   imports: [
     BadgeComponent,
     ButtonComponent,
+    CardComponent,
+    CurrencyPipe,
     IconComponent,
     SpinnerComponent,
     ProductionSaleLinesComponent,
@@ -127,6 +132,54 @@ import { ProductionSaleLinesComponent } from '../production-sale-lines/productio
           </section>
         }
 
+        <app-card title="Insumos: planificado vs consumido" [responsive]="true">
+          @if (lines().length === 0) {
+            <p class="text-sm text-text-secondary">Sin desglose de consumo</p>
+          } @else {
+            <div class="overflow-x-auto">
+              <table class="w-full text-sm">
+                <thead>
+                  <tr class="text-left text-[11px] uppercase text-text-secondary">
+                    <th class="py-1 pr-2">Insumo</th>
+                    <th class="py-1 pr-2 text-right">Planificado</th>
+                    <th class="py-1 pr-2 text-right">Consumido</th>
+                    <th class="py-1 pr-2 text-right">Costo unit.</th>
+                    <th class="py-1 text-right">Costo total</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  @for (line of lines(); track line.id) {
+                    <tr class="border-t border-border">
+                      <td class="py-1 pr-2 text-text-primary">
+                        {{ lineName(line) }}
+                        @if (line.component_product?.stock_unit) {
+                          <span class="text-text-secondary"> ({{ line.component_product?.stock_unit }})</span>
+                        }
+                      </td>
+                      <td class="py-1 pr-2 text-right">{{ num(line.planned_qty) }}</td>
+                      <td class="py-1 pr-2 text-right">{{ num(line.consumed_qty ?? 0) }}</td>
+                      <td class="py-1 pr-2 text-right">
+                        @if (toNumber(line.unit_cost) != null) {
+                          {{ toNumber(line.unit_cost) | currency }}
+                        } @else {
+                          —
+                        }
+                      </td>
+                      <td class="py-1 text-right font-medium">
+                        @if (toNumber(line.total_cost) != null) {
+                          {{ toNumber(line.total_cost) | currency }}
+                        } @else {
+                          —
+                        }
+                      </td>
+                    </tr>
+                  }
+                </tbody>
+              </table>
+            </div>
+          }
+        </app-card>
+
         @if (canStart() || canComplete() || canCancel() || canRestart()) {
           <div class="flex flex-wrap justify-end gap-2">
             @if (canRestart()) {
@@ -178,6 +231,7 @@ export class ProductionOrderDetailComponent {
   readonly baseComponents = computed<ProductionOrderComponent[]>(
     () => this.order()?.base_recipe?.components ?? [],
   );
+  readonly lines = computed<ProductionOrderLine[]>(() => this.order()?.lines ?? []);
   readonly canStart = computed(() => this.order()?.status === 'draft');
   readonly canComplete = computed(() => {
     const s = this.order()?.status;
@@ -222,6 +276,24 @@ export class ProductionOrderDetailComponent {
 
   statusLabel = ProductionOrdersService.statusLabelSafe;
   statusVariant = ProductionOrdersService.statusBadgeVariant;
+
+  lineName(line: ProductionOrderLine): string {
+    return line.component_product?.name ?? `Producto #${line.component_product_id}`;
+  }
+
+  /** Plain quantity for the supplies table (no yield unit: each line has its own). */
+  num(value: number | string | null | undefined): string {
+    if (value == null || value === '') return '—';
+    const n = Number(value);
+    if (!Number.isFinite(n)) return String(value);
+    return Number.isInteger(n) ? n.toString() : n.toFixed(4).replace(/\.?0+$/, '');
+  }
+
+  toNumber(value: number | string | null | undefined): number | null {
+    if (value == null || value === '') return null;
+    const n = Number(value);
+    return Number.isFinite(n) ? n : null;
+  }
 
   qty(value: number | string | null | undefined): string {
     const o = this.order();

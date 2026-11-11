@@ -12,6 +12,7 @@ import {
   ProductionOrderStats,
   ProductionOrderStatus,
   ProductionDayResponse,
+  ProductionDaySupplies,
   ProductionSaleMoveResult,
 } from '../interfaces';
 import { ProductionClockService } from './production-clock.service';
@@ -132,6 +133,25 @@ export class ProductionOrdersService {
       .pipe(
         map((res) => res.data),
         tap((day) => this.clock.sync(day.server_now)),
+        catchError(this.handleError),
+      );
+  }
+
+  /**
+   * Supplies planned vs consumed by the orders of the day (same orders as the
+   * day list, canceled excluded). Quantities only; Planta reads its own twin.
+   */
+  getDaySupplies(
+    date: string,
+    scope: ProductionApiScope = 'restaurant',
+  ): Observable<ProductionDaySupplies> {
+    const base = scope === 'manufacturing' ? '/store/manufacturing/orders' : this.basePath;
+    return this.http
+      .get<ApiResponse<ProductionDaySupplies>>(`${this.apiUrl}${base}/day/supplies`, {
+        params: new HttpParams().set('date', date),
+      })
+      .pipe(
+        map((res) => res.data),
         catchError(this.handleError),
       );
   }

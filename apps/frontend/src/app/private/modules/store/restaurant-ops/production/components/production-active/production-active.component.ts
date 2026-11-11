@@ -51,6 +51,7 @@ import {
   ProductionSseService,
 } from '../../services';
 import { ProductionOrderDetailModalComponent } from '../production-order-detail/production-order-detail-modal.component';
+import { ProductionDaySuppliesComponent } from '../production-day-supplies/production-day-supplies.component';
 import {
   ProductionTimerView,
   buildTimerView,
@@ -89,6 +90,7 @@ const NO_TIME_KEY = 'no-time';
     SpinnerComponent,
     EmptyStateComponent,
     ProductionOrderDetailModalComponent,
+    ProductionDaySuppliesComponent,
   ],
   template: `
     <div class="w-full overflow-x-hidden">
@@ -132,6 +134,13 @@ const NO_TIME_KEY = 'no-time';
           [loading]="loading() && !data()"
         />
       </div>
+
+      <app-production-day-supplies
+        [date]="date()"
+        [apiScope]="apiScope"
+        [refreshToken]="data()"
+        [summary]="summary()"
+      />
 
       <app-card [responsive]="true" [padding]="false" overflow="visible">
         <!-- Day filter -->

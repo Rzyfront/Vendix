@@ -47,6 +47,7 @@ import {
 } from '../../services';
 import { ProductionDayPager } from '../../utils/production-day-pager';
 import { ProductionOrderDetailModalComponent } from '../production-order-detail/production-order-detail-modal.component';
+import { ProductionDaySuppliesComponent } from '../production-day-supplies/production-day-supplies.component';
 
 /** One hour block of the vertical timeline. */
 interface HourGroup {
@@ -80,6 +81,7 @@ const NO_TIME_KEY = 'no-time';
     SpinnerComponent,
     EmptyStateComponent,
     ProductionOrderDetailModalComponent,
+    ProductionDaySuppliesComponent,
   ],
   template: `
     <div class="w-full overflow-x-hidden">
@@ -123,6 +125,13 @@ const NO_TIME_KEY = 'no-time';
           [loading]="loading() && !data()"
         />
       </div>
+
+      <app-production-day-supplies
+        [date]="date()"
+        [apiScope]="apiScope"
+        [refreshToken]="data()"
+        [summary]="summary()"
+      />
 
       <app-card [responsive]="true" [padding]="false" overflow="visible">
         <!-- Day filter -->
