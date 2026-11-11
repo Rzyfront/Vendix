@@ -2,15 +2,17 @@ import {
   ChangeDetectionStrategy,
   Component,
   DestroyRef,
+  ElementRef,
   computed,
   effect,
   inject,
   signal,
   untracked,
+  viewChild,
 } from '@angular/core';
 import { toSignal } from '@angular/core/rxjs-interop';
 import { ActivatedRoute, Router, RouterLink } from '@angular/router';
-import { Observable, Subscription } from 'rxjs';
+import { Observable } from 'rxjs';
 import { map } from 'rxjs/operators';
 import { StoreSettingsFacade } from '../../../../../../../core/store/store-settings/store-settings.facade';
 import { formatStockWarningSummary } from '../../../../../../../core/utils/stock-shortage.util';
@@ -33,7 +35,6 @@ import {
   ProductionDayCard,
   ProductionDayCardStatus,
   ProductionDayOrder,
-  ProductionDayResponse,
   ProductionOrder,
   PLANTA_ORDER_DETAIL_BASE,
   finishesInPlanta,
@@ -44,6 +45,7 @@ import {
   ProductionOrdersService,
   ProductionSseService,
 } from '../../services';
+import { ProductionDayPager } from '../../utils/production-day-pager';
 import { ProductionOrderDetailModalComponent } from '../production-order-detail/production-order-detail-modal.component';
 
 /** One hour block of the vertical timeline. */
@@ -309,6 +311,18 @@ const NO_TIME_KEY = 'no-time';
                 </ol>
               </section>
             }
+
+            @if (data()?.next_cursor) {
+              <div #moreSentinel class="flex min-h-10 items-center justify-center py-2">
+                @if (loadingMore()) {
+                  <app-spinner />
+                } @else if (moreFailed()) {
+                  <app-button variant="outline" size="sm" (clicked)="loadMore()">
+                    Cargar más
+                  </app-button>
+                }
+              </div>
+            }
           </div>
         }
       </app-card>
@@ -393,9 +407,17 @@ export class ProductionDayListComponent {
   readonly dateLabel = computed(() => fullDate(this.date()));
 
   // --- data -------------------------------------------------------------
-  readonly data = signal<ProductionDayResponse | null>(null);
-  readonly loading = signal(false);
-  readonly errorMessage = signal<string | null>(null);
+  // S20: scroll infinito. El pager pide `limit=100` y sigue `next_cursor`.
+  private readonly pager = new ProductionDayPager(
+    (date, cursor, limit) => this.service.getDay(date, this.apiScope, { limit, cursor }),
+    'Error al cargar la lista de producción',
+  );
+  readonly data = this.pager.data;
+  readonly loading = this.pager.loading;
+  readonly loadingMore = this.pager.loadingMore;
+  readonly moreFailed = this.pager.moreFailed;
+  readonly errorMessage = this.pager.errorMessage;
+  private readonly moreSentinel = viewChild<ElementRef<HTMLElement>>('moreSentinel');
   /** Id of the production order whose action is in flight. */
   readonly processingId = signal<number | null>(null);
 
@@ -424,10 +446,8 @@ export class ProductionDayListComponent {
     return [...byHour.values()];
   });
 
-  private loadSub: Subscription | null = null;
-
   constructor() {
-    this.destroyRef.onDestroy(() => this.loadSub?.unsubscribe());
+    this.destroyRef.onDestroy(() => this.pager.cancel());
     effect(() => {
       const date = this.date();
       untracked(() => this.load(date, true));
@@ -437,6 +457,22 @@ export class ProductionDayListComponent {
     if (this.sse.canStream(this.apiScope)) {
       this.sse.listen(this.destroyRef, () => this.reload(), undefined, this.apiScope);
     }
+    // Pide la página siguiente cuando el centinela del final entra en pantalla.
+    // Lee `data()` para observar de nuevo tras cada página: si el centinela sigue
+    // visible (página corta), el observador vuelve a avisar.
+    effect((onCleanup) => {
+      const sentinel = this.moreSentinel()?.nativeElement;
+      this.data();
+      if (!sentinel || typeof IntersectionObserver === 'undefined') return;
+      const observer = new IntersectionObserver(
+        (entries) => {
+          if (entries.some((e) => e.isIntersecting)) this.loadMore();
+        },
+        { rootMargin: '200px' },
+      );
+      observer.observe(sentinel);
+      onCleanup(() => observer.disconnect());
+    });
   }
 
   // --- loading ----------------------------------------------------------
@@ -445,23 +481,11 @@ export class ProductionDayListComponent {
   }
 
   private load(date: string, resetView: boolean): void {
-    this.loadSub?.unsubscribe();
-    if (resetView) this.data.set(null);
-    this.loading.set(true);
-    this.errorMessage.set(null);
-    this.loadSub = this.service.getDay(date, this.apiScope).subscribe({
-      next: (res) => {
-        this.data.set(res);
-        this.loading.set(false);
-      },
-      error: (err: unknown) => {
-        this.loading.set(false);
-        // A background refresh (live event, polling tick, after an action) that
-        // fails keeps the list on screen: the next event or tick retries.
-        if (!resetView && this.data()) return;
-        this.errorMessage.set(typeof err === 'string' ? err : 'Error al cargar la lista de producción');
-      },
-    });
+    this.pager.load(date, resetView);
+  }
+
+  loadMore(): void {
+    this.pager.loadMore();
   }
 
   // --- navigation -------------------------------------------------------

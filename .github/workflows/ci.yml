@@ -623,6 +623,8 @@ jobs:
           --include='**/orders/components/orders-list/orders-list.kds.spec.ts'
           --include='**/orders/services/orders-list-sse.service.spec.ts'
           --include='**/restaurant-ops/production/services/production-sse.service.spec.ts'
+          --include='**/restaurant-ops/production/services/production-clock.service.spec.ts'
+          --include='**/restaurant-ops/production/utils/production-day-pager.spec.ts'
           --include='**/manufacturing/orders/pages/order-detail-page/order-detail-page.component.spec.ts'
           --include='**/orders/components/orders-list/order-kitchen-summary.util.spec.ts'
           --include='**/shared/components/item-list/item-list.component.spec.ts'

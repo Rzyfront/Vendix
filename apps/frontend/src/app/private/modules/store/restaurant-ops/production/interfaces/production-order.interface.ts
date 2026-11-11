@@ -238,8 +238,14 @@ export interface ProductionDayResponse {
   /** YYYY-MM-DD in the store timezone. */
   date: string;
   timezone: string;
+  /** Counts the WHOLE day, not the page of `cards`. */
   summary: { waiting: number; in_progress: number; completed: number };
+  /** One page of cards; a sale card may come back on a later page (same `key`). */
   cards: ProductionDayCard[];
+  /** Opaque cursor of the next page; `null`/absent on the last page. */
+  next_cursor?: string | null;
+  /** ISO server time at response; feeds the stopwatch clock offset. */
+  server_now?: string;
 }
 
 /** QUI-1002: result of moving every order of a sale card (start / complete). */

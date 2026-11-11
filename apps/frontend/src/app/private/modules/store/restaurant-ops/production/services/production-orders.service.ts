@@ -1,7 +1,7 @@
 import { Injectable, inject } from '@angular/core';
 import { HttpClient, HttpParams } from '@angular/common/http';
-import { Observable, throwError } from 'rxjs';
-import { catchError, map } from 'rxjs/operators';
+import { EMPTY, Observable, throwError } from 'rxjs';
+import { catchError, expand, map, reduce, tap } from 'rxjs/operators';
 import { environment } from '../../../../../../../environments/environment';
 import type { ProductionApiScope } from './production-sse.service';
 import {
@@ -14,6 +14,12 @@ import {
   ProductionDayResponse,
   ProductionSaleMoveResult,
 } from '../interfaces';
+import { ProductionClockService } from './production-clock.service';
+import {
+  PRODUCTION_DAY_PAGE_SIZE,
+  mergeDayPage,
+  sortDayCards,
+} from '../utils/production-day-pager';
 
 interface ApiResponse<T> {
   success: boolean;
@@ -50,6 +56,7 @@ export class ProductionOrdersService {
   private readonly apiUrl = environment.apiUrl;
   private readonly basePath = '/store/production-orders';
   private http = inject(HttpClient);
+  private clock = inject(ProductionClockService);
 
   listPaginated(
     query: ProductionOrderQuery = {},
@@ -104,12 +111,17 @@ export class ProductionOrdersService {
   /**
    * T14: production list of one day (YYYY-MM-DD in the store timezone).
    * Planta reads it through its own controller (`manufacturing` scope).
+   * S20: one page (`limit` + `cursor`); the response carries `next_cursor`.
+   * S25: the response's `server_now` updates the shared stopwatch clock.
    */
   getDay(
     date: string,
     scope: ProductionApiScope = 'restaurant',
+    page?: { limit?: number; cursor?: string | null },
   ): Observable<ProductionDayResponse> {
-    const params = new HttpParams().set('date', date);
+    let params = new HttpParams().set('date', date);
+    if (page?.limit != null) params = params.set('limit', String(page.limit));
+    if (page?.cursor) params = params.set('cursor', page.cursor);
     const base = scope === 'manufacturing' ? '/store/manufacturing/orders' : this.basePath;
     return this.http
       .get<ApiResponse<ProductionDayResponse>>(
@@ -118,8 +130,40 @@ export class ProductionOrdersService {
       )
       .pipe(
         map((res) => res.data),
+        tap((day) => this.clock.sync(day.server_now)),
         catchError(this.handleError),
       );
+  }
+
+  /** One page of the day at the standard page size (`limit=100`). */
+  getDayPage(
+    date: string,
+    scope: ProductionApiScope,
+    cursor: string | null,
+  ): Observable<ProductionDayResponse> {
+    return this.getDay(date, scope, { limit: PRODUCTION_DAY_PAGE_SIZE, cursor });
+  }
+
+  /**
+   * The whole day: follows `next_cursor` until it is `null` and merges the
+   * pages by card `key`. For screens that need every order at once (Producción
+   * activa: the timeline must show every in-progress order). Unsubscribing
+   * cancels the page in flight.
+   */
+  getDayAllPages(
+    date: string,
+    scope: ProductionApiScope = 'restaurant',
+  ): Observable<ProductionDayResponse> {
+    return this.getDayPage(date, scope, null).pipe(
+      expand((res) =>
+        res.next_cursor ? this.getDayPage(date, scope, res.next_cursor) : EMPTY,
+      ),
+      reduce<ProductionDayResponse, ProductionDayResponse | null>(
+        (acc, page) => (acc ? mergeDayPage(acc, page) : { ...page, cards: sortDayCards(page.cards) }),
+        null,
+      ),
+      map((res) => res as ProductionDayResponse),
+    );
   }
 
   create(dto: CreateProductionOrderDto): Observable<ProductionOrder> {
