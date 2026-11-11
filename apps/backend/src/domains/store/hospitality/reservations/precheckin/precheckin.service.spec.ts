@@ -36,6 +36,8 @@ function build(
     departure?: string;
     token?: string | null;
     domain?: string | null;
+    /** Active STORE_BOOKING domain (S10): the fallback when there is no storefront. */
+    bookingDomain?: string | null;
     existing?: { id: number; document_number: string }[];
     holder?: boolean;
     /** Guests of the reservation after the submit (default: the full party of 3). */
@@ -101,9 +103,12 @@ function build(
       findMany: jest.fn(async () => [{ first_name: 'Ana', last_name: 'Pérez', is_primary: true }]),
     },
     domain_settings: {
-      findFirst: jest.fn(async () =>
-        options.domain === null ? null : { hostname: options.domain ?? 'roku.vendix.com' },
-      ),
+      findFirst: jest.fn(async (args: any) => {
+        if (args?.where?.app_type === 'STORE_BOOKING') {
+          return options.bookingDomain ? { hostname: options.bookingDomain } : null;
+        }
+        return options.domain === null ? null : { hostname: options.domain ?? 'roku.vendix.com' };
+      }),
     },
     stores: { findFirst: jest.fn(async () => ({ name: 'Hotel Roku' })) },
     store_settings: {
@@ -188,6 +193,24 @@ describe('LodgingPrecheckinService (H8.1)', () => {
   it('asks to turn on the online store when there is no storefront domain', async () => {
     const { service } = build({ domain: null });
     expect((await errorOf(service.getLink(1))).errorCode).toBe('LODGING_PRECHECKIN_DOMAIN_001');
+  });
+
+  it('uses the booking page domain when the store only has a Booking page (S10)', async () => {
+    const { service, prisma } = build({ domain: null, bookingDomain: 'roku-booking.vendix.online' });
+    const link = await service.getLink(1);
+    expect(link.url).toBe(`https://roku-booking.vendix.online/pre-registro/${TOKEN}`);
+    expect(prisma.domain_settings.findFirst).toHaveBeenCalledWith(
+      expect.objectContaining({
+        where: expect.objectContaining({ store_id: expect.any(Number), app_type: 'STORE_BOOKING', status: 'active' }),
+      }),
+    );
+    expect(await service.hasGuestDomain()).toBe(true);
+  });
+
+  it('prefers the storefront domain when both exist (S10)', async () => {
+    const { service } = build({ bookingDomain: 'roku-booking.vendix.online' });
+    const link = await service.getLink(1);
+    expect(link.url).toBe(`https://roku.vendix.com/pre-registro/${TOKEN}`);
   });
 
   it('opens the form without login and without the party documents', async () => {

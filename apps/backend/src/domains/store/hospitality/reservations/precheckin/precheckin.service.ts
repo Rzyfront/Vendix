@@ -71,16 +71,27 @@ export class LodgingPrecheckinService {
     return `${base.replace(/\/+$/, '')}/${path}/${token}`;
   }
 
-  /** H9.4 — whether guest links can be built: the store has an active online domain. */
+  /** H9.4 — whether guest links can be built: an active storefront or booking domain. */
   async hasGuestDomain(): Promise<boolean> {
     return !!(await this.guestDomain());
   }
 
-  private guestDomain() {
+  /**
+   * The online store's primary domain or, for a hotel with only a Booking
+   * page, its active booking domain (S10). Only those two apps serve the
+   * guest pages (`/pre-registro`, `/calificar-estadia`).
+   */
+  private async guestDomain() {
     const store_id = this.requireStoreId();
-    return this.prisma.domain_settings.findFirst({
+    const storefront = await this.prisma.domain_settings.findFirst({
       where: { store_id, domain_type: 'ecommerce', status: 'active', is_primary: true },
       orderBy: { updated_at: 'desc' },
+      select: { hostname: true },
+    });
+    if (storefront) return storefront;
+    return this.prisma.domain_settings.findFirst({
+      where: { store_id, app_type: 'STORE_BOOKING', status: 'active' },
+      orderBy: [{ is_primary: 'desc' }, { updated_at: 'desc' }],
       select: { hostname: true },
     });
   }
