@@ -45,9 +45,12 @@ export interface MRREvolutionPoint {
 /**
  * SaaS metrics for superadmin dashboard.
  *
- * MRR: sum of paid invoice totals in period / months in period.
+ * MRR: paid invoice revenue recognized in the period / months in period. Each
+ *      invoice counts only for the share of its service period that overlaps the
+ *      window (an annual invoice adds 1/12 per month), so quarterly and annual
+ *      subscriptions are not dropped because their period ends after the window.
  * Churn: cancellations in period / active subs at period start.
- * ARPU: MRR / active subs at period start.
+ * ARPU: MRR (monthly) / active subs at period start.
  * LTV: ARPU / churn_rate (null when churn=0).
  *
  * All money math via Prisma.Decimal (vendix-saas-billing skill).
@@ -61,18 +64,29 @@ export class SubscriptionMetricsService {
 
   // ─── MRR ───────────────────────────────────────────────────────────
   async getMRR(periodStart: Date, periodEnd: Date): Promise<MRRResult> {
-    const agg = await this.prisma.subscription_invoices.aggregate({
+    // Overlap, not containment: an invoice whose service period runs past the
+    // window (every annual and quarterly one, and most monthly ones) used to be
+    // excluded, which left MRR, ARPU and LTV at $0 with paid invoices on file.
+    const invoices = await this.prisma.subscription_invoices.findMany({
       where: {
         state: 'paid',
-        period_start: { gte: periodStart },
-        period_end: { lte: periodEnd },
+        period_start: { lt: periodEnd },
+        period_end: { gt: periodStart },
       },
-      _sum: { total: true },
+      select: { total: true, period_start: true, period_end: true },
     });
 
-    const total = agg._sum.total ?? new Prisma.Decimal(0);
+    const total = invoices
+      .reduce(
+        (sum, inv) =>
+          sum.add(this.recognizedShare(inv, periodStart.getTime(), periodEnd.getTime())),
+        new Prisma.Decimal(0),
+      )
+      .toDecimalPlaces(2);
     const months = this.monthsBetween(periodStart, periodEnd);
-    const monthlyAvg = total.div(new Prisma.Decimal(Math.max(1, months)));
+    const monthlyAvg = total
+      .div(new Prisma.Decimal(Math.max(1, months)))
+      .toDecimalPlaces(2);
 
     return {
       value: total,
@@ -145,7 +159,7 @@ export class SubscriptionMetricsService {
     ]);
 
     const denom = new Prisma.Decimal(Math.max(1, activeSubs));
-    const arpu = mrr.value.div(denom);
+    const arpu = mrr.monthly_avg.div(denom).toDecimalPlaces(2);
 
     return {
       value: arpu,
@@ -267,21 +281,24 @@ export class SubscriptionMetricsService {
     const invoices = await this.prisma.subscription_invoices.findMany({
       where: {
         state: 'paid',
-        period_start: { gte: overallStart, lt: overallEnd },
+        period_start: { lt: overallEnd },
+        period_end: { gt: overallStart },
       },
-      select: { total: true, period_start: true },
+      select: { total: true, period_start: true, period_end: true },
     });
 
+    // Each month gets the share of every invoice whose service period overlaps
+    // it, instead of the whole invoice landing on its first month.
     const totals = new Map<string, Prisma.Decimal>();
-    for (const b of buckets) totals.set(b.key, new Prisma.Decimal(0));
-
-    for (const inv of invoices) {
-      const d = inv.period_start;
-      const key = `${d.getUTCFullYear()}-${String(d.getUTCMonth() + 1).padStart(2, '0')}`;
-      const existing = totals.get(key);
-      if (existing) {
-        totals.set(key, existing.add(inv.total));
-      }
+    for (const b of buckets) {
+      totals.set(
+        b.key,
+        invoices.reduce(
+          (sum, inv) =>
+            sum.add(this.recognizedShare(inv, b.start.getTime(), b.end.getTime())),
+          new Prisma.Decimal(0),
+        ).toDecimalPlaces(2),
+      );
     }
 
     return buckets.map((b) => ({
@@ -291,6 +308,27 @@ export class SubscriptionMetricsService {
   }
 
   // ─── helpers ───────────────────────────────────────────────────────
+  /**
+   * Part of an invoice total that belongs to [from, to): total × overlap / service
+   * period. A degenerate period (end <= start) counts whole if it starts inside.
+   */
+  private recognizedShare(
+    inv: { total: Prisma.Decimal; period_start: Date; period_end: Date },
+    from: number,
+    to: number,
+  ): Prisma.Decimal {
+    const start = inv.period_start.getTime();
+    const end = inv.period_end.getTime();
+    const total = new Prisma.Decimal(inv.total);
+    if (end <= start) {
+      return start >= from && start < to ? total : new Prisma.Decimal(0);
+    }
+    const overlap = Math.min(end, to) - Math.max(start, from);
+    if (overlap <= 0) return new Prisma.Decimal(0);
+    if (overlap >= end - start) return total;
+    return total.mul(overlap).div(end - start);
+  }
+
   private monthsBetween(start: Date, end: Date): number {
     if (end.getTime() <= start.getTime()) return 1;
     const ms = end.getTime() - start.getTime();
