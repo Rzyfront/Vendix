@@ -123,9 +123,9 @@
 
 | ID | S# | Tarea | Ruta | Estado |
 | --- | --- | --- | --- | --- |
-| T1 | S1, S2, S4, S7 | Backend: líneas planificadas al crear y recalcular, `persistLines` genérico en `complete()` con adiciones, `lines` en el detalle, endpoints `day/supplies`, con tests | escritor sonnet A (superficie backend) | escrito y auditado (L7), verificado S1-S7 PASS (L8), commits 33109053d + corrección |
-| T2 | S3, S5, S6 | Frontend: tabla en el detalle de restaurante, panel "Consumo del día", modal de cierre con impresión, con specs en `ci.yml` | escritor sonnet B (superficie frontend, en paralelo, sobre el contrato de L3) | escrito y auditado (L6), commit 2fb42c029; karma pendiente en CI |
-| T3 | S1-S7 | Auditoría del padre, verificador Opus independiente (ítem 1), RDD, PRs, gate ≥85 y verificación en el demo de prod tras el deploy | inline + verificador Opus | en curso (verificador lanzado, L7) |
+| T1 | S1, S2, S4, S7 | Backend: líneas planificadas al crear y recalcular, `persistLines` genérico en `complete()` con adiciones, `lines` en el detalle, endpoints `day/supplies`, con tests | escritor sonnet A (superficie backend) | hecho: verificado S1-S7 PASS (L8), RDD aprobada, PR #1146 mergeado 896450e4e (gate 92/100) (L9) |
+| T2 | S3, S5, S6 | Frontend: tabla en el detalle de restaurante, panel "Consumo del día", modal de cierre con impresión, con specs en `ci.yml` | escritor sonnet B (superficie frontend, en paralelo, sobre el contrato de L3) | hecho: RDD aprobada, karma en CI con 25 tests nuevos, PR #1147 mergeado 3826aecc8 (gate 92/100) (L9) |
+| T3 | S1-S7 | Auditoría del padre, verificador Opus independiente (ítem 1), RDD, PRs, gate ≥85 y verificación en el demo de prod tras el deploy | inline + verificador Opus | hecho: release #1148 a96496316 (91/100, GO), deploys OK; en prod verificado el panel y `day/supplies`, sin datos para el planificado/consumido (L9) |
 
 **Estimación.** Unas 1.000 líneas de autor: backend ~450 y frontend ~550.
 
@@ -177,3 +177,15 @@
     - Si la receta propia está inactiva, el replan usa la receta que elegiría una orden nueva.
   - Regresión committeada: `manufacturing/orders/planta-consumption-lines-parity.spec.ts` (5/5) y `production/sale-completion-lines-parity.spec.ts` (1/1).
   - Specs re-corridos: `production-sale-link.service` 57/57 y `production-orders.service` 73/73.
+- L9 (2026-11-11, entrega y verificación en prod):
+  - Revisión nativa (RDD) aprobada y acusada: backend `review-e32cc142eb0d30bf`; frontend `review-8e02c6701595192d`. En el frontend, el hallazgo de auto-apertura con resumen rancio no se reprodujo: los hosts vacían `data` al cambiar de fecha.
+  - PR #1146 (backend), gate 92/100, mergeado 896450e4e. `Backend Guard Specs` falló por `ECONNRESET` de npm (red); el re-run pasó.
+  - PR #1147 (frontend), gate 92/100, mergeado 3826aecc8. Karma en CI: 2215 tests contra 2190 en develop, los 25 nuevos corren.
+  - Release #1148 (develop → main), revisión de release 91/100, GO sin P0 ni P1, mergeada a96496316. Deploy Backend to EC2 y Deploy Frontend to AWS en verde.
+  - Prod, demo Vendix Pit & Grill, sin escrituras:
+    - Lista del día y Producción activa muestran el panel "Consumo del día" con su estado vacío.
+    - `GET store/production-orders/day/supplies` responde 200 en 122 ms con la forma de L3.
+    - El planificado/consumido por orden y el resumen de cierre no se pudieron ejercitar: las tiendas demo no tienen órdenes de producción ni productos por lote, y prepararlas exigía escrituras de catálogo y borrados duros, fuera de las reglas de prod.
+  - Advertencias P2 de la release (seguimiento, sin bloqueo):
+    - Backend: el `catch` del plan de adiciones no recupera un error de Postgres dentro de la transacción; el re-sync del borrador suma trabajo a la transacción de `ensureForOrder` (timeout por defecto); `day/supplies` es una lectura sin límite (por diseño); las adiciones ya consumidas por otro flujo quedan planificadas sin consumir; el replan con receta propia inactiva usa otra receta.
+    - Frontend: el copy "antes de este cambio" (texto del plan aprobado, decisión de Rafael); formatos de cantidad distintos (detalle con 4 decimales y punto, panel es-CO con 3); ruta de error sin test; tabla del modal duplicada; la clase de impresión se quita de forma síncrona; doble pedido de insumos en la primera carga (el primero se aborta).
