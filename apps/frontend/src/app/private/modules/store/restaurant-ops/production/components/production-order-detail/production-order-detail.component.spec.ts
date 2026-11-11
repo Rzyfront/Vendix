@@ -83,6 +83,18 @@ describe('ProductionOrderDetailComponent — S3 supplies table', () => {
     expect(text()).not.toContain('Sin desglose de consumo');
   });
 
+  it('shows planned and consumed like the day panel: es-CO, up to 4 decimals', async () => {
+    await render(
+      orderOf({
+        status: 'completed',
+        lines: [line({ planned_qty: '1234.5000', consumed_qty: 0.0025 })],
+      }),
+    );
+
+    expect(text()).toContain('1.234,5');
+    expect(text()).toContain('0,0025');
+  });
+
   it('says "Sin desglose de consumo" when the order has no lines', async () => {
     await render(orderOf({ status: 'completed', lines: [] }));
 

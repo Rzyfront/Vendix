@@ -1,4 +1,4 @@
-import { ChangeDetectionStrategy, Component, DestroyRef, computed, inject } from '@angular/core';
+import { ChangeDetectionStrategy, Component, computed, effect, inject } from '@angular/core';
 import { DOCUMENT } from '@angular/common';
 import { ActivatedRoute, RouterLink } from '@angular/router';
 import { Meta, Title } from '@angular/platform-browser';
@@ -29,10 +29,14 @@ export class SectorPageComponent {
   });
 
   constructor() {
-    const page = sectorPageByPath(String(this.route.snapshot.data['sectorPath'] ?? ''));
-    if (page) {
-      const restore = applyMarketingPageMetadata(inject(DOCUMENT), inject(Title), inject(Meta), page.metadata);
-      inject(DestroyRef).onDestroy(restore);
-    }
+    const doc = inject(DOCUMENT);
+    const title = inject(Title);
+    const meta = inject(Meta);
+    // Una sola fuente (`page()`): reaplica los metadatos si cambia la data de la ruta y restaura al salir.
+    effect((onCleanup) => {
+      const page = this.page();
+      if (!page) return;
+      onCleanup(applyMarketingPageMetadata(doc, title, meta, page.metadata));
+    });
   }
 }

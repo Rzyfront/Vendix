@@ -1,3 +1,4 @@
+import { SECTOR_PAGE_PATHS } from './sector-pages.config';
 import { SECTOR_PAGES, sectorPageByPath, sectorWhatsappUrl } from './sector-pages.content';
 
 /** Reglas del registro editorial (SEO-TECH-08) y del claims-register para la plantilla de sector. */
@@ -19,6 +20,10 @@ describe('SECTOR_PAGES (SEO-TECH-08 / SEO-OPS-17)', () => {
       expect(page.metadata.robots).withContext(page.path).toBe('noindex, follow');
       expect(page.metadata.canonicalPath).withContext(page.path).toBeNull();
     }
+  });
+
+  it('mantiene la config de rutas alineada con el contenido', () => {
+    expect([...SECTOR_PAGE_PATHS].sort()).toEqual(SECTOR_PAGES.map((p) => p.path).sort());
   });
 
   it('no repite rutas y usa minúsculas y guiones', () => {

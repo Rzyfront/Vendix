@@ -152,4 +152,12 @@ export const MARKETING_PAGES = {
     robots: 'noindex, follow',
     canonicalPath: null,
   },
+  implementation: {
+    title: 'Implementación de Vendix: cómo empezamos con tu negocio',
+    description:
+      'Conoce las etapas para empezar con Vendix: diagnóstico, configuración, carga de datos, capacitación y soporte. Qué aportas tú y qué hace el equipo.',
+    // SEO-OPS-19: noindex y sin canonical hasta la aprobación de Ventas y Producto (G4).
+    robots: 'noindex, follow',
+    canonicalPath: null,
+  },
 } satisfies Record<string, MarketingPageMetadata>;

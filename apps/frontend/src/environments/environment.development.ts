@@ -7,6 +7,8 @@ export const environment = {
   commercialAnalyticsId: '',
   sectorGuidesEnabled: true,
   sectorPagesEnabled: true,
+  // SEO-OPS-19: página /implementacion, apagada en producción hasta la aprobación de Ventas y Producto.
+  implementationPageEnabled: true,
 
   // Configuración para desarrollo
   debugDomainDetection: true,

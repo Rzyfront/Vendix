@@ -22,8 +22,9 @@ import { ProductionDaySupplies } from '../../interfaces';
 import { ProductionApiScope, ProductionOrdersService } from '../../services';
 import {
   ProductionDaySummaryCounts,
-  formatSupplyQty,
+  formatProductionQty,
   shouldAutoOpenDaySummary,
+  withoutBreakdownNote,
 } from './production-day-supplies.util';
 
 const PRINT_BODY_CLASS = 'production-supplies-printing';
@@ -136,7 +137,7 @@ const EMPTY_SUMMARY: ProductionDaySummaryCounts = { waiting: 0, in_progress: 0, 
             }
             @if (s.orders_without_breakdown > 0) {
               <p class="mt-2 text-xs text-text-secondary">
-                {{ s.orders_without_breakdown }} órdenes finalizadas antes de este cambio no tienen desglose de consumo.
+                {{ breakdownNote(s.orders_without_breakdown) }}
               </p>
             }
           }
@@ -206,7 +207,11 @@ export class ProductionDaySuppliesComponent {
   /** YYYY-MM-DD of the day the host shows. */
   readonly date = input.required<string>();
   readonly apiScope = input<ProductionApiScope>('restaurant');
-  /** Any value that changes whenever the host reloads its day (its data signal works). */
+  /**
+   * Any value that changes whenever the host reloads its day (its data signal
+   * works). While it is null the host has not loaded the day yet, so the panel
+   * waits: the first load is one request instead of one aborted plus another.
+   */
   readonly refreshToken = input<unknown>(null);
   /** The host's day summary: drives the "Resumen del día" button and its auto-open. */
   readonly summary = input<ProductionDaySummaryCounts>(EMPTY_SUMMARY);
@@ -231,8 +236,8 @@ export class ProductionDaySuppliesComponent {
     effect(() => {
       const date = this.date();
       const scope = this.apiScope();
-      this.refreshToken();
-      untracked(() => this.load(date, scope));
+      const hostLoaded = this.refreshToken() != null;
+      untracked(() => this.load(date, scope, hostLoaded));
     });
 
     effect(() => {
@@ -255,7 +260,11 @@ export class ProductionDaySuppliesComponent {
   }
 
   qty(value: number | null | undefined): string {
-    return formatSupplyQty(value);
+    return formatProductionQty(value);
+  }
+
+  breakdownNote(count: number): string {
+    return withoutBreakdownNote(count);
   }
 
   /** Same print pattern as the production list page: body class + @media print rules. */
@@ -269,11 +278,16 @@ export class ProductionDaySuppliesComponent {
     }
   }
 
-  private load(date: string, scope: ProductionApiScope): void {
+  private load(date: string, scope: ProductionApiScope, hostLoaded: boolean): void {
     this.loadSub?.unsubscribe();
     const key = `${date}|${scope}`;
     if (this.loadedKey !== key) this.supplies.set(null);
     this.loadedKey = key;
+    if (!hostLoaded) {
+      this.loading.set(false);
+      this.errorMessage.set(null);
+      return;
+    }
     this.loading.set(true);
     this.errorMessage.set(null);
     this.loadSub = this.service.getDaySupplies(date, scope).subscribe({

@@ -1,4 +1,3 @@
-import { environment } from '../../../environments/environment';
 import { MarketingPageMetadata } from '../marketing-page-metadata';
 
 /**
@@ -9,10 +8,8 @@ import { MarketingPageMetadata } from '../marketing-page-metadata';
  * - Solo se escribe lo que tiene evidencia (`evidence`): demo en pantalla o código.
  *   Lo que todavía no tiene demo no entra (propina, QR de mesa, comanda impresa…).
  * - Todas van en `noindex` y sin canonical hasta la firma de Producto y Ventas (G4).
- * - Las rutas solo existen con el interruptor `sectorPagesEnabled` (apagado en producción).
+ * - Las rutas y el interruptor viven en `sector-pages.config.ts` (apagado en producción).
  */
-export const SECTOR_PAGES_ENABLED = environment.sectorPagesEnabled;
-
 export interface EvidencedText {
   text: string;
   /** De dónde sale la afirmación: demo (fecha y archivo) o código (ruta). No se muestra. */

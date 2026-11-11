@@ -1,7 +1,8 @@
 import { Routes } from '@angular/router';
 import { pricingRoutes } from '../../public/pricing/pricing.routes';
 import { SECTOR_GUIDES_ENABLED } from '../../public/landing/guides/sector-guides.config';
-import { SECTOR_PAGES, SECTOR_PAGES_ENABLED } from '../../public/sectors/sector-pages.content';
+import { SECTOR_PAGES_ENABLED, SECTOR_PAGE_PATHS } from '../../public/sectors/sector-pages.config';
+import { IMPLEMENTATION_PAGE_ENABLED } from '../../public/implementation/implementation-page.config';
 
 const sectorGuideRoutes: Routes = SECTOR_GUIDES_ENABLED
   ? [
@@ -26,17 +27,31 @@ const sectorGuideRoutes: Routes = SECTOR_GUIDES_ENABLED
 // interruptor encendido (apagado en producción). Al publicar una, agregarla a MARKETING_PAGES
 // de infra/cloudfront/spa-rewrite.js, al sitemap del backend y al smoke SEO.
 const sectorPageRoutes: Routes = SECTOR_PAGES_ENABLED
-  ? SECTOR_PAGES.map((page) => ({
-      path: page.path,
+  ? SECTOR_PAGE_PATHS.map((path) => ({
+      path,
       loadComponent: () =>
         import('../../public/sectors/sector-page.component').then((c) => c.SectorPageComponent),
-      data: { sectorPath: page.path },
+      data: { sectorPath: path },
     }))
+  : [];
+
+// SEO-OPS-19: la ruta solo existe con el interruptor encendido (apagado en producción).
+const implementationRoutes: Routes = IMPLEMENTATION_PAGE_ENABLED
+  ? [
+      {
+        path: 'implementacion',
+        loadComponent: () =>
+          import('../../public/implementation/implementation-page.component').then(
+            (c) => c.ImplementationPageComponent,
+          ),
+      },
+    ]
   : [];
 
 export const vendixLandingPublicRoutes: Routes = [
   ...sectorGuideRoutes,
   ...sectorPageRoutes,
+  ...implementationRoutes,
   {
     path: '',
     loadComponent: () =>

@@ -8,6 +8,8 @@ export const environment = {
   sectorGuidesEnabled: false,
   // SEO-OPS-17: páginas de sector (/sectores/*); apagadas hasta la firma de Producto y Ventas.
   sectorPagesEnabled: false,
+  // SEO-OPS-19: página /implementacion, apagada en producción hasta la aprobación de Ventas y Producto.
+  implementationPageEnabled: false,
 
   // Configuración para producción
   debugDomainDetection: false,
