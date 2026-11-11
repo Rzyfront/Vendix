@@ -57,6 +57,13 @@ describe('ProductionOrdersService.complete — allowPartialBatch', () => {
               ...data,
             })),
           },
+          // `complete()` persists planned vs consumed per supply for every order.
+          production_order_lines: {
+            findMany: jest.fn().mockResolvedValue([]),
+            createMany: jest.fn().mockResolvedValue({ count: 1 }),
+            create: jest.fn().mockResolvedValue({}),
+            update: jest.fn().mockResolvedValue({}),
+          },
         }),
       ),
     };

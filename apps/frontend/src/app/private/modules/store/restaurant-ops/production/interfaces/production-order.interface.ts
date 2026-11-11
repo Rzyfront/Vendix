@@ -76,6 +76,27 @@ export interface ProductionOrderBaseRecipe {
   components: ProductionOrderComponent[];
 }
 
+/**
+ * One supply line of an order: planned vs consumed, with the cost captured when
+ * the order was finished. Same shape as Planta's `ManufacturingOrderLine`.
+ */
+export interface ProductionOrderLine {
+  id: number;
+  component_product_id: number;
+  component_variant_id?: number | null;
+  uom_id?: number | null;
+  planned_qty: number | string;
+  consumed_qty?: number | string | null;
+  unit_cost?: number | string | null;
+  total_cost?: number | string | null;
+  component_product?: {
+    id: number;
+    name: string;
+    sku?: string | null;
+    stock_unit?: string | null;
+  } | null;
+}
+
 export interface ProductionOrderLineAddon {
   group_name: string;
   option_name: string;
@@ -126,6 +147,8 @@ export interface ProductionOrder {
   sale_order?: ProductionOrderSaleOrder | null;
   base_recipe?: ProductionOrderBaseRecipe | null;
   order_lines?: ProductionOrderSaleLine[];
+  /** Detail only: supplies planned vs consumed (empty for orders finished before the breakdown existed). */
+  lines?: ProductionOrderLine[];
 
   /**
    * Presente en la respuesta de `POST .../complete` cuando
@@ -265,4 +288,30 @@ export interface ProductionStreamEvent {
   started_at: string | null;
   produced_at: string | null;
   estimated_minutes: number | null;
+}
+
+/** One supply of `GET .../day/supplies`: quantities only, never cost. */
+export interface ProductionDaySupply {
+  product_id: number;
+  name: string;
+  sku: string | null;
+  unit: string | null;
+  planned: number;
+  consumed: number;
+  /** Σ max(planned - consumed, 0) of the orders not finished yet. */
+  pending: number;
+  /** Σ (consumed - planned) of the finished orders. */
+  difference: number;
+}
+
+/** Response of `GET store/production-orders/day/supplies` and the Planta twin. */
+export interface ProductionDaySupplies {
+  /** YYYY-MM-DD in the store timezone. */
+  date: string;
+  timezone: string;
+  orders_total: number;
+  orders_completed: number;
+  /** Finished orders without lines (finished before the breakdown existed). */
+  orders_without_breakdown: number;
+  supplies: ProductionDaySupply[];
 }

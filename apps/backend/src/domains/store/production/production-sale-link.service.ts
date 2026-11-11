@@ -4,6 +4,8 @@ import { Prisma } from '@prisma/client';
 import { StorePrismaService } from '../../../prisma/services/store-prisma.service';
 import { OrderSequenceService } from '../manufacturing/orders/order-sequence.service';
 import { StockLevelManager } from '../inventory/shared/services/stock-level-manager.service';
+import { StockValidatorService } from '../inventory/shared/services/stock-validator.service';
+import { RecipesService } from '../recipes/recipes.service';
 import {
   PRODUCTION_SALE_CANCELLED_EVENT,
   PRODUCTION_SALE_SYNC_EVENT,
@@ -14,6 +16,19 @@ import {
 import { emitProductionOrderUpdated } from './production-order-events';
 import type { ProductionDisposition } from './production-disposition.util';
 import { findProductionOrderForLine } from './production-order-pairing.util';
+import {
+  ADDON_OPTIONS_SELECT,
+  RECIPE_REQUIREMENT_SELECT,
+  computeComponentRequirements,
+  expandAddonRequirements,
+  mergeRequirements,
+  plannedLinesCreate,
+  plannedLinesMatch,
+  replacePlannedLines,
+  type ComponentRequirement,
+  type RecipeForRequirements,
+  type SaleLineForPlan,
+} from './production-order-lines.util';
 
 const CLOSED_SALE_STATES = ['cancelled', 'refunded'];
 /** Live production lines of a sale: the ones that drive its production orders. */
@@ -54,7 +69,44 @@ export class ProductionSaleLinkService {
     private readonly sequences: OrderSequenceService,
     private readonly stockLevelManager?: StockLevelManager,
     private readonly eventEmitter?: EventEmitter2,
+    // S1: the planned requirement of the add-ons uses the same expansion as
+    // their consumption. Without them only the base recipe is planned.
+    private readonly recipes?: RecipesService,
+    private readonly stockValidator?: StockValidatorService,
   ) {}
+
+  /**
+   * S1 — planned requirement per component of a sale-linked order: the base
+   * recipe scaled to `qty` (`computeComponentRequirements`) plus the add-ons of
+   * the sale lines it serves (`expandAddonRequirements`, the expansion
+   * `consumeLinkedAddons` consumes with), summed per component.
+   */
+  async plannedRequirements(
+    tx: Prisma.TransactionClient,
+    p: { recipe: RecipeForRequirements; qty: number; items: SaleLineForPlan[] },
+  ): Promise<ComponentRequirement[]> {
+    const base = computeComponentRequirements(p.recipe, p.qty);
+    if (!this.recipes || !this.stockValidator || !this.stockLevelManager) return base;
+    try {
+      const addons = await expandAddonRequirements(
+        {
+          recipes: this.recipes,
+          stockValidator: this.stockValidator,
+          stockLevelManager: this.stockLevelManager,
+          client: tx,
+        },
+        p.items,
+      );
+      return mergeRequirements(base, addons);
+    } catch (error) {
+      // The plan is informative: an add-on that cannot be expanded must never
+      // stop the sale from getting its production order. Plan the base recipe.
+      this.logger.warn(
+        `Add-on plan skipped (base recipe only): ${error instanceof Error ? error.message : String(error)}`,
+      );
+      return base;
+    }
+  }
 
   /**
    * QUI-1002 — live-sync emission AFTER the commit, from the committed rows.
@@ -330,7 +382,13 @@ export class ProductionSaleLinkService {
   async planRestart(
     order_id: number,
     production_order_id: number,
-  ): Promise<{ sale_state: string; qty: number; due_date: Date } | null> {
+  ): Promise<{
+    sale_state: string;
+    qty: number;
+    due_date: Date;
+    /** The live lines paired with the order, with their add-ons (S1 plan on restart). */
+    items: SaleLineForPlan[];
+  } | null> {
     const client = this.prisma.withoutScope();
     const sale = await client.orders.findFirst({
       where: { id: order_id },
@@ -342,7 +400,13 @@ export class ProductionSaleLinkService {
         fulfillment_schedule: { select: { scheduled_start: true } },
         order_items: {
           where: LIVE_PRODUCTION_LINES,
-          select: { id: true, product_id: true, product_variant_id: true, quantity: true },
+          select: {
+            id: true,
+            product_id: true,
+            product_variant_id: true,
+            quantity: true,
+            order_item_options: ADDON_OPTIONS_SELECT,
+          },
         },
       },
     });
@@ -351,10 +415,16 @@ export class ProductionSaleLinkService {
       where: { store_id: sale.store_id, order_id: sale.id },
       select: { id: true, product_id: true, product_variant_id: true },
     });
-    const qty = sale.order_items
-      .filter((item) => findProductionOrderForLine(orders, item)?.id === production_order_id)
-      .reduce((sum, item) => sum + Number(item.quantity), 0);
-    return { sale_state: sale.state as string, qty, due_date: saleDueDate(sale) };
+    const items = sale.order_items.filter(
+      (item) => findProductionOrderForLine(orders, item)?.id === production_order_id,
+    );
+    const qty = items.reduce((sum, item) => sum + Number(item.quantity), 0);
+    return {
+      sale_state: sale.state as string,
+      qty,
+      due_date: saleDueDate(sale),
+      items: items as SaleLineForPlan[],
+    };
   }
 
   async ensureForOrder(order_id: number, attempt = 0): Promise<{ id: number }[]> {
@@ -369,7 +439,13 @@ export class ProductionSaleLinkService {
         fulfillment_schedule: { select: { scheduled_start: true } },
         order_items: {
           where: LIVE_PRODUCTION_LINES,
-          select: { id: true, product_id: true, product_variant_id: true, quantity: true },
+          select: {
+            id: true,
+            product_id: true,
+            product_variant_id: true,
+            quantity: true,
+            order_item_options: ADDON_OPTIONS_SELECT,
+          },
         },
       },
     });
@@ -392,7 +468,12 @@ export class ProductionSaleLinkService {
       `${product_id}:${variant_id ?? ''}`;
     const planned = new Map<
       string,
-      { product_id: number; variant_id: number | null; qty: number }
+      {
+        product_id: number;
+        variant_id: number | null;
+        qty: number;
+        items: SaleLineForPlan[];
+      }
     >();
     for (const item of sale.order_items) {
       const variant_id = item.product_variant_id ?? null;
@@ -402,14 +483,13 @@ export class ProductionSaleLinkService {
         product_id: item.product_id!,
         variant_id,
         qty: (current?.qty ?? 0) + Number(item.quantity),
+        items: [...(current?.items ?? []), item as SaleLineForPlan],
       });
     }
     const due_date = saleDueDate(sale);
 
-    const recipesByProduct = new Map<
-      number,
-      Array<{ id: number; product_variant_id: number | null }>
-    >();
+    type PlanRecipe = RecipeForRequirements & { id: number; product_variant_id: number | null };
+    const recipesByProduct = new Map<number, PlanRecipe[]>();
     if (planned.size > 0) {
       const recipes = await client.recipes.findMany({
         where: {
@@ -417,16 +497,24 @@ export class ProductionSaleLinkService {
           product_id: { in: [...new Set([...planned.values()].map((v) => v.product_id))] },
           is_active: true,
         },
-        select: { id: true, product_id: true, product_variant_id: true },
+        select: {
+          id: true,
+          product_id: true,
+          product_variant_id: true,
+          waste_percent: RECIPE_REQUIREMENT_SELECT.waste_percent,
+          yield_quantity: RECIPE_REQUIREMENT_SELECT.yield_quantity,
+          items: RECIPE_REQUIREMENT_SELECT.items,
+        },
         orderBy: { id: 'asc' },
       });
       for (const recipe of recipes) {
         const list = recipesByProduct.get(recipe.product_id) ?? [];
-        list.push({ id: recipe.id, product_variant_id: recipe.product_variant_id });
+        // `items` is always an array for the plan (a bare mock row has none).
+        list.push({ ...recipe, items: recipe.items ?? [] });
         recipesByProduct.set(recipe.product_id, list);
       }
     }
-    const recipeFor = (product_id: number, variant_id: number | null): number | undefined => {
+    const recipeFor = (product_id: number, variant_id: number | null): PlanRecipe | undefined => {
       const list = recipesByProduct.get(product_id) ?? [];
       // The variant's own recipe first, then the base recipe (no variant), then
       // whatever active recipe the product has.
@@ -436,7 +524,7 @@ export class ProductionSaleLinkService {
           : undefined) ??
         list.find((r) => r.product_variant_id == null) ??
         list[0]
-      )?.id;
+      );
     };
 
     try {
@@ -448,6 +536,7 @@ export class ProductionSaleLinkService {
             id: true,
             product_id: true,
             product_variant_id: true,
+            recipe_id: true,
             status: true,
             planned_qty: true,
             due_date: true,
@@ -458,17 +547,19 @@ export class ProductionSaleLinkService {
         );
         const result: { id: number }[] = [];
 
-        for (const [key, { product_id, variant_id, qty }] of planned) {
+        for (const [key, { product_id, variant_id, qty, items }] of planned) {
           const current = byKey.get(key);
           if (!current) {
-            const recipe_id = recipeFor(product_id, variant_id);
-            if (!recipe_id) {
+            const recipe = recipeFor(product_id, variant_id);
+            const recipe_id = recipe?.id;
+            if (!recipe || !recipe_id) {
               this.logger.warn(
                 `Sale #${sale.id}: product #${product_id} has no active recipe; no production order created`,
               );
               continue;
             }
             const order_number = await this.sequences.next(tx, sale.store_id);
+            const requirements = await this.plannedRequirements(tx, { recipe, qty, items });
             const created = await tx.production_orders.create({
               data: {
                 store_id: sale.store_id,
@@ -482,6 +573,8 @@ export class ProductionSaleLinkService {
                 priority: 'normal',
                 order_number,
                 due_date,
+                // S1: born with its planned supplies (consumed_qty = 0).
+                lines: { create: plannedLinesCreate(requirements) },
               },
               select: { id: true },
             });
@@ -511,20 +604,39 @@ export class ProductionSaleLinkService {
             }
             continue;
           }
-          if (
-            current.status === 'draft' &&
-            (Number(current.planned_qty) !== qty ||
-              current.due_date?.getTime() !== due_date.getTime())
-          ) {
-            await tx.production_orders.updateMany({
-              where: { id: current.id, status: 'draft' },
-              data: {
-                planned_qty: new Prisma.Decimal(qty),
-                due_date,
-                updated_at: new Date(),
-              },
-            });
-            touched.add(current.id);
+          if (current.status === 'draft') {
+            const qtyChanged = Number(current.planned_qty) !== qty;
+            let claimed = true;
+            if (qtyChanged || current.due_date?.getTime() !== due_date.getTime()) {
+              const { count } = await tx.production_orders.updateMany({
+                where: { id: current.id, status: 'draft' },
+                data: {
+                  planned_qty: new Prisma.Decimal(qty),
+                  due_date,
+                  updated_at: new Date(),
+                },
+              });
+              claimed = count === 1;
+              touched.add(current.id);
+            }
+            // S1/A2: the plan follows the sale (quantity AND add-ons) while the
+            // order is a draft, and never over lines that already consumed. A
+            // draft from before the plan existed gets its lines here too.
+            if (claimed) {
+              // The order's own recipe, else the one a new order would pick.
+              const recipe =
+                recipesByProduct.get(product_id)?.find((r) => r.id === current.recipe_id) ??
+                recipeFor(product_id, variant_id);
+              if (recipe) {
+                const requirements = await this.plannedRequirements(tx, { recipe, qty, items });
+                if (
+                  (qtyChanged || !(await plannedLinesMatch(tx, current.id, requirements))) &&
+                  (await replacePlannedLines(tx, current.id, requirements))
+                ) {
+                  touched.add(current.id);
+                }
+              }
+            }
           }
         }
 

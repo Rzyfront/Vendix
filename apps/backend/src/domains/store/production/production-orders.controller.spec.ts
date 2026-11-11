@@ -1,17 +1,18 @@
-import { ForbiddenException } from '@nestjs/common';
+import { ForbiddenException, RequestMethod } from '@nestjs/common';
+import { PERMISSIONS_KEY } from '../../auth/decorators/permissions.decorator';
 import { Subject } from 'rxjs';
 import { ProductionOrdersController } from './production-orders.controller';
 import { ProductionSseService } from './production-sse.service';
 import { RequestContextService } from '../../../common/context/request-context.service';
 
 describe('ProductionOrdersController — card per sale and live stream (QUI-1002)', () => {
-  let service: { startSale: jest.Mock; completeSale: jest.Mock; restart: jest.Mock };
+  let service: { startSale: jest.Mock; completeSale: jest.Mock; restart: jest.Mock; findDaySupplies: jest.Mock };
   let responses: { success: jest.Mock };
   let sse: ProductionSseService;
   let controller: ProductionOrdersController;
 
   beforeEach(() => {
-    service = { startSale: jest.fn(), completeSale: jest.fn(), restart: jest.fn() };
+    service = { startSale: jest.fn(), completeSale: jest.fn(), restart: jest.fn(), findDaySupplies: jest.fn() };
     responses = { success: jest.fn((data, message) => ({ success: true, data, message })) };
     sse = new ProductionSseService();
     controller = new ProductionOrdersController(service as any, responses as any, sse);
@@ -44,6 +45,27 @@ describe('ProductionOrdersController — card per sale and live stream (QUI-1002
     const res = await controller.restart(5);
     expect(service.restart).toHaveBeenCalledWith(5);
     expect(res.data).toEqual({ id: 5, status: 'draft' });
+  });
+
+  it('S4: GET day/supplies delegates to the service with the day permissions (restaurant or Planta read), declared before :id', async () => {
+    const supplies = { date: '2026-11-10', orders_total: 0, supplies: [] };
+    service.findDaySupplies.mockResolvedValue(supplies);
+    const res: any = await controller.findDaySupplies({ date: '2026-11-10' });
+
+    expect(service.findDaySupplies).toHaveBeenCalledWith({ date: '2026-11-10' });
+    expect(res.data).toEqual(supplies);
+    const proto = ProductionOrdersController.prototype;
+    expect(Reflect.getMetadata('path', proto.findDaySupplies)).toBe('day/supplies');
+    expect(Reflect.getMetadata('method', proto.findDaySupplies)).toBe(RequestMethod.GET);
+    expect(Reflect.getMetadata(PERMISSIONS_KEY, proto.findDaySupplies)).toEqual(
+      Reflect.getMetadata(PERMISSIONS_KEY, proto.findDay),
+    );
+    expect(Reflect.getMetadata(PERMISSIONS_KEY, proto.findDaySupplies)).toEqual([
+      'store:production_orders:read',
+      'store:manufacturing:orders:read',
+    ]);
+    const names = Object.getOwnPropertyNames(proto);
+    expect(names.indexOf('findDaySupplies')).toBeLessThan(names.indexOf('findOne'));
   });
 
   describe('GET stream', () => {
