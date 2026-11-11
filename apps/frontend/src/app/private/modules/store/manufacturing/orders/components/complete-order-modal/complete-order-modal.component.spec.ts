@@ -1,5 +1,7 @@
+import { signal } from '@angular/core';
 import { TestBed, ComponentFixture } from '@angular/core/testing';
 import { ToastService } from '../../../../../../../shared/components/index';
+import { CurrencyFormatService } from '../../../../../../../shared/pipes/currency/currency.pipe';
 import { ManufacturingOrder } from '../../../interfaces';
 import { ManufacturingOrdersService } from '../../../services';
 import { CompleteOrderModalComponent } from './complete-order-modal.component';
@@ -35,6 +37,17 @@ describe('CompleteOrderModalComponent (Planta) — remaining quantity', () => {
       providers: [
         { provide: ManufacturingOrdersService, useValue: { complete: jasmine.createSpy('complete') } },
         { provide: ToastService, useValue: { success: () => undefined, error: () => undefined } },
+        // app-input reads the store currency; the modal itself never formats money.
+        {
+          provide: CurrencyFormatService,
+          useValue: {
+            currencySymbol: signal('$'),
+            currencyFormatStyle: () => 'comma_dot',
+            currencyDecimals: () => 0,
+            loadCurrency: () => undefined,
+            format: (v: number) => `$${v}`,
+          },
+        },
       ],
     });
   });
