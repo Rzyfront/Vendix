@@ -205,7 +205,13 @@ export interface Order {
    * factura de venta vigente. Aditivo: `invoices[0]` sigue mostrando la
    * última factura de cualquier tipo para la tarjeta.
    */
-  active_sales_invoice?: { id: number; status: string } | null;
+  // `fully_reversed`: factura aceptada revertida por completo con notas crédito
+  // ACEPTADAS; libera cambio de titular y re-facturación (no el bloqueo de ítems).
+  active_sales_invoice?: {
+    id: number;
+    status: string;
+    fully_reversed?: boolean;
+  } | null;
   /** Table session if order was placed at a restaurant table */
   table_sessions?: OrderTableSession[];
   /** Atención de estación (listado la trae con id de sesión + nombre de estación) */

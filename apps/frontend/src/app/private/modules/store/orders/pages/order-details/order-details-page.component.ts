@@ -5893,6 +5893,8 @@ export class OrderDetailsPageComponent {
   private hasActiveSalesInvoice(): boolean {
     const active = this.order()?.active_sales_invoice;
     if (!active) return false;
+    // Factura aceptada revertida por completo con NC aceptadas: ya no bloquea.
+    if (active.fully_reversed === true) return false;
     return active.status === 'sent' || active.status === 'accepted';
   }
 
@@ -7150,9 +7152,17 @@ export class OrderDetailsPageComponent {
    * como registro fiscal fijo.
    */
   acceptedInvoice = computed<OrderInvoiceSnapshot | null>(() => {
+    // Tras una NC total aceptada, `invoices[0]` es la NC (no «la factura de la
+    // orden»): sin factura vigente, la orden se puede facturar de nuevo.
+    if (this.activeInvoiceFullyReversed()) return null;
     const invoice = this.orderInvoice();
     return invoice?.dian_status === 'accepted' ? invoice : null;
   });
+
+  /** La factura vigente de la orden fue revertida por completo (NC aceptadas). */
+  private readonly activeInvoiceFullyReversed = computed(
+    () => this.order()?.active_sales_invoice?.fully_reversed === true,
+  );
 
   hasSalesInvoice = computed(() => this.acceptedInvoice() !== null);
 
@@ -7176,6 +7186,9 @@ export class OrderDetailsPageComponent {
    * sin salida a quien canceló una factura equivocada y necesita re-emitir.
    */
   private readonly reinvoiceable = computed(() => {
+    // Espejo de `assertNotAlreadyInvoiced`: una factura aceptada revertida por
+    // completo con NC aceptadas no bloquea la nueva emisión.
+    if (this.activeInvoiceFullyReversed()) return true;
     const invoice = this.orderInvoice();
     return (
       !invoice || invoice.status === 'cancelled' || invoice.status === 'voided'
@@ -8049,6 +8062,11 @@ export class OrderDetailsPageComponent {
   readonly creditBalance = signal(0);
   /** El modal de crédito se abrió sin deudor identificable: pide asignar cliente. */
   readonly creditCustomerRequired = signal(false);
+  /**
+   * El backend confirmó un titular completo en el 409 de saldo
+   * (`holder_identified`): la salida de contado factura a su nombre.
+   */
+  readonly creditHolderIdentified = signal(false);
   /** «Datos del cliente incompletos»: hallazgo del 409 y modal para completarlos. */
   readonly holderIssue = signal<HolderIssue | null>(null);
   readonly showHolderModal = signal(false);
@@ -8280,6 +8298,8 @@ export class OrderDetailsPageComponent {
         ? (parsed.details as Record<string, unknown>)
         : {};
     const blocker = details['credit_blocker'];
+    const holderIdentified = details['holder_identified'] === true;
+    this.creditHolderIdentified.set(holderIdentified);
     // Sin deudor identificable, el modal de crédito igual se abre: ahí se
     // asigna el cliente o se emite como Consumidor final de contado.
     if (details['credit_eligible'] === true || blocker === 'customer_required') {
@@ -8291,7 +8311,9 @@ export class OrderDetailsPageComponent {
     }
     const message =
       blocker === 'partial_payment'
-        ? 'La orden tiene abonos: no puede facturarse a crédito. Registra el saldo o emítela como Consumidor final de contado.'
+        ? holderIdentified
+          ? 'La orden tiene abonos: no puede facturarse a crédito. Registra el saldo o emítela de contado.'
+          : 'La orden tiene abonos: no puede facturarse a crédito. Registra el saldo o emítela como Consumidor final de contado.'
         : parsed.userMessage;
     this.setEmitError(key, message);
     // Sin crédito posible, la salida sin fricción es Consumidor final de
@@ -8302,9 +8324,9 @@ export class OrderDetailsPageComponent {
         variant: 'error',
         duration: 10000,
         action: {
-          label: 'Emitir como Consumidor final (contado)',
+          label: holderIdentified ? 'Emitir de contado' : 'Emitir como Consumidor final (contado)',
           onClick: () => {
-            void this.confirmFinalConsumerCash(true).then((ok) => {
+            void this.confirmFinalConsumerCash(true, holderIdentified).then((ok) => {
               if (ok) this.emitAsFinalConsumerCash(key);
             });
           },
@@ -8322,7 +8344,7 @@ export class OrderDetailsPageComponent {
    * modal de crédito abierto.
    */
   async onCreditUseFinalConsumer(): Promise<void> {
-    if (!(await this.confirmFinalConsumerCash(true))) return;
+    if (!(await this.confirmFinalConsumerCash(true, this.creditHolderIdentified()))) return;
     this.showCreditModal.set(false);
     this.emitAsFinalConsumerCash('order');
   }
@@ -8331,11 +8353,16 @@ export class OrderDetailsPageComponent {
    * Orden sin pagar → Consumidor final: avisa que se recomienda crédito y que
    * la factura sale de contado como ya pagada. `knownUnpaid`: el backend ya
    * rechazó por saldo (`INVOICING_ORDER_UNPAID_001`); si no, decide el saldo
-   * local. Una orden pagada no pregunta.
+   * local. Una orden pagada no pregunta. `nominative`: el backend confirmó un
+   * titular completo y la factura sale a su nombre, no a Consumidor final.
    */
-  private async confirmFinalConsumerCash(knownUnpaid: boolean): Promise<boolean> {
+  private async confirmFinalConsumerCash(
+    knownUnpaid: boolean,
+    nominative = false,
+  ): Promise<boolean> {
     if (!knownUnpaid && !this.hasUnpaidBalance()) return true;
-    return this.dialogService.confirm(unpaidFinalConsumerConfirm(), { size: 'md' });
+    const holderName = nominative ? this.customerDisplayName() || 'el cliente de la orden' : null;
+    return this.dialogService.confirm(unpaidFinalConsumerConfirm(1, holderName), { size: 'md' });
   }
 
   /**

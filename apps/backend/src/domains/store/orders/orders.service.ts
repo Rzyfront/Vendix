@@ -122,6 +122,7 @@ import { differsByAtLeastCents } from '@common/money-kernel';
 import { ShippingTaxService } from '../shipping/services/shipping-tax.service';
 // Release-853 paso 10 — propagación del titular al borrador de factura.
 import { InvoicingService } from '../invoicing/invoicing.service';
+import { CreditNoteBalanceService } from '../invoicing/credit-notes/credit-note-balance.service';
 import { OrderHistoryService } from './order-history/order-history.service';
 import { ServiceAllocationCoordinator } from '../reservations/service-allocation-coordinator.service';
 import {
@@ -375,6 +376,13 @@ export class OrdersService {
     @Optional() private readonly orderHistoryService?: OrderHistoryService,
     @Optional() private readonly stockValidator?: StockValidatorService,
     @Optional() private readonly allocationCoordinator?: ServiceAllocationCoordinator,
+    // S4 (factura-zzz-titular): una factura aceptada revertida por completo
+    // con notas crédito ACEPTADAS deja de bloquear el cambio de titular.
+    // `@Optional()` por el mismo motivo que el resto de dependencias tardías;
+    // sin él nunca se considera revertida (falla cerrado: sigue bloqueando).
+    @Optional()
+    @Inject(forwardRef(() => CreditNoteBalanceService))
+    private readonly creditNoteBalance?: CreditNoteBalanceService,
   ) {}
 
   /**
@@ -2184,8 +2192,17 @@ export class OrdersService {
       account_invoices,
       order_items: orderItemsWithActions,
       cancellation_policy: getOrderCancellationPolicy(order),
+      // `fully_reversed`: la factura aceptada fue revertida por completo por
+      // notas crédito aceptadas. La fila se conserva (el bloqueo de edición
+      // de ítems/envío sigue activo); solo libera titular y re-facturación.
       active_sales_invoice: activeTitularInvoice
-        ? { id: activeTitularInvoice.id, status: activeTitularInvoice.status }
+        ? {
+            id: activeTitularInvoice.id,
+            status: activeTitularInvoice.status,
+            fully_reversed: await this.isTitularInvoiceFullyReversed(
+              activeTitularInvoice,
+            ),
+          }
         : null,
       available_actions,
     };
@@ -2868,7 +2885,15 @@ export class OrdersService {
           { accounts_receivable_id: openReceivable.id },
         );
       }
-      const titularInvoice = await this.findActiveTitularInvoice(id);
+      const foundTitularInvoice = await this.findActiveTitularInvoice(id);
+      // S4: factura aceptada revertida por completo con NC aceptadas ya no
+      // bloquea (una NC parcial o aún no aceptada sí). Si la más reciente
+      // fuera otra factura viva, `findActiveTitularInvoice` ya la devuelve.
+      const titularInvoice =
+        foundTitularInvoice &&
+        (await this.isTitularInvoiceFullyReversed(foundTitularInvoice))
+          ? null
+          : foundTitularInvoice;
       if (titularInvoice && titularInvoice.status !== 'draft') {
         const isTransmitted =
           titularInvoice.status === 'sent' ||
@@ -3269,6 +3294,14 @@ export class OrdersService {
       select: { id: true, status: true, customer_id: true },
       orderBy: { id: 'desc' },
     });
+  }
+
+  private async isTitularInvoiceFullyReversed(invoice: {
+    id: number;
+    status: string;
+  }): Promise<boolean> {
+    if (invoice.status !== 'accepted' || !this.creditNoteBalance) return false;
+    return this.creditNoteBalance.isFullyReversedByAcceptedNotes(invoice.id);
   }
 
   private assertOrderNotInvoiceLocked(orderId: number): Promise<void> {

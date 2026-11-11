@@ -8,6 +8,11 @@ import {
 } from '@angular/core';
 import { DOCUMENT, isPlatformBrowser } from '@angular/common';
 import { environment } from '../../../../../environments/environment';
+import {
+  VitalsCollector,
+  startVitalsCollector,
+  vitalEventParams,
+} from './commercial-web-vitals';
 
 /**
  * Consentimiento de analítica de la web comercial (SEO-TECH-06 / OPS-06 1.1-1.5).
@@ -43,6 +48,9 @@ export type ConsentWindow = {
   localStorage: Storage;
   dataLayer?: unknown[];
   gtag?: (...args: unknown[]) => void;
+  addEventListener?: Window['addEventListener'];
+  removeEventListener?: Window['removeEventListener'];
+  PerformanceObserver?: typeof PerformanceObserver;
 } & Record<string, unknown>;
 
 export const COMMERCIAL_CONSENT_WINDOW = new InjectionToken<ConsentWindow | null>(
@@ -119,6 +127,13 @@ export class CommercialConsentService {
   readonly currentChoice = this.choice.asReadonly();
 
   private pageViewSent = false;
+  /** SEO-TECH-11: RUM de Core Web Vitals, solo con analítica aceptada. */
+  private vitals: VitalsCollector | null = null;
+  private vitalsSent = false;
+  private readonly onPageHidden = (): void => {
+    if (this.document.visibilityState === 'hidden') this.flushVitals();
+  };
+  private readonly onPageHide = (): void => this.flushVitals();
 
   /**
    * La portada comercial se registra al iniciar. Devuelve la función que la
@@ -135,6 +150,7 @@ export class CommercialConsentService {
     }
 
     this.pageViewSent = false;
+    this.vitalsSent = false;
     this.bannerRequested.set(false);
     this.choice.set(this.readChoice());
     this.attached.set(true);
@@ -170,6 +186,8 @@ export class CommercialConsentService {
 
   private detach(): void {
     if (!this.attached()) return;
+    // Al salir de la portada por la SPA, la visita a la portada terminó: se envían sus métricas.
+    this.flushVitals();
     this.attached.set(false);
     this.bannerRequested.set(false);
     // Fuera de la portada GA no debe medir nada, haya aceptado o no.
@@ -224,6 +242,7 @@ export class CommercialConsentService {
         page_title: 'Vendix — Web comercial',
       });
       this.pageViewSent = true;
+      this.startVitals(win);
     } catch {
       // Un bloqueador de etiquetas no puede impedir ver precios ni navegar.
     }
@@ -232,6 +251,7 @@ export class CommercialConsentService {
   private stopMeasurement(): void {
     const win = this.win;
     if (!win) return;
+    this.stopVitals();
     try {
       this.setDisabled(true);
       win.gtag?.('consent', 'update', { analytics_storage: 'denied' });
@@ -239,6 +259,38 @@ export class CommercialConsentService {
     } catch {
       // Igual que al cargar: fallar en silencio.
     }
+  }
+
+  private startVitals(win: ConsentWindow): void {
+    if (this.vitals || this.vitalsSent) return;
+    this.vitals = startVitalsCollector(win);
+    win.addEventListener?.('visibilitychange', this.onPageHidden, true);
+    win.addEventListener?.('pagehide', this.onPageHide, true);
+  }
+
+  /** Envía LCP, CLS e INP una sola vez por visita a la portada, y solo con consentimiento. */
+  private flushVitals(): void {
+    const win = this.win;
+    const vitals = this.vitals;
+    if (!win || !vitals || this.vitalsSent) return;
+    if (this.analyticsAllowed()) {
+      try {
+        for (const sample of vitals.samples()) {
+          win.gtag?.('event', sample.name, vitalEventParams(sample, this.measurementId));
+        }
+      } catch {
+        // La medición nunca puede romper la portada.
+      }
+    }
+    this.vitalsSent = true;
+    this.stopVitals();
+  }
+
+  private stopVitals(): void {
+    this.vitals?.stop();
+    this.vitals = null;
+    this.win?.removeEventListener?.('visibilitychange', this.onPageHidden, true);
+    this.win?.removeEventListener?.('pagehide', this.onPageHide, true);
   }
 
   private setDisabled(disabled: boolean): void {

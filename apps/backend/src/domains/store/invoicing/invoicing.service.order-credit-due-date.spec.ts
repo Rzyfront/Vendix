@@ -176,12 +176,33 @@ describe('InvoicingService.createFromOrder — crédito: due_date y medio de pag
     expect(prisma.accounts_receivable.findFirst).not.toHaveBeenCalled();
   });
 
-  it('«Acuerdo mutuo» sin force_final_consumer se ignora: la orden sin pagos sigue resolviéndose a crédito', async () => {
+  it('cliente completo sin cobrar: contado «Acuerdo mutuo» (ZZZ) a nombre del cliente, no a Consumidor final', async () => {
     const data = await create(
-      { payment_form: null, payments: [] },
+      {
+        payment_form: null,
+        payments: [],
+        customer_id: 3357,
+        users: {
+          email: 'contador@empresa.test',
+          phone: null,
+          document_type: 'NIT',
+          document_number: '800177119',
+          verification_digit: '1',
+          legal_name: 'EMPRESA DE PRUEBA S.A.',
+          first_name: '',
+          last_name: '',
+          person_type: 'JURIDICA',
+          fiscal_responsibilities: [],
+        },
+      },
       { cash_by_mutual_agreement: true },
     );
-    expect(data.payment_form).toBe('2');
-    expect(data.payment_means_code).not.toBe('ZZZ');
+    expect(data.payment_form).toBe('1');
+    expect(data.payment_means_code).toBe('ZZZ');
+    expect(data.customer_tax_id).toBe('800177119');
+    expect(data.customer_name).toBe('EMPRESA DE PRUEBA S.A.');
+    expect(data.customer_verification_digit).toBe('1');
+    expect(data).not.toHaveProperty('due_date');
+    expect(prisma.accounts_receivable.findFirst).not.toHaveBeenCalled();
   });
 });

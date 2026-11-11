@@ -90,6 +90,14 @@ describe('OrderDetailPageComponent (Planta) — S27 / S23', () => {
     expect(page.order()?.id).toBe(2);
   });
 
+  it('muestra las cantidades como el panel del día: es-CO con hasta 4 decimales', () => {
+    const page = create();
+    expect(page.num('1234.5000')).toBe('1.234,5');
+    expect(page.num(0.0025)).toBe('0,0025');
+    expect(page.num(10)).toBe('10');
+    expect(page.num(null)).toBe('—');
+  });
+
   it('un :id inválido vuelve a la lista sin pedir nada', () => {
     params$.next(convertToParamMap({ id: 'abc' }));
     create();

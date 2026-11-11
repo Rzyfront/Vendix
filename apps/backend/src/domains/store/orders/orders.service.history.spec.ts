@@ -36,6 +36,9 @@ describe('OrdersService.update — customer_changed', () => {
 
   const build = () => {
     const prisma: any = {
+      $transaction: jest.fn(async (arg: any) =>
+        typeof arg === 'function' ? arg(prisma) : Promise.all(arg),
+      ),
       orders: {
         findFirst: jest.fn().mockResolvedValue({ ...draftOrder }),
         update: jest.fn().mockResolvedValue({ ...draftOrder, customer_id: 217 }),

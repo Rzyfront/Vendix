@@ -3280,6 +3280,7 @@
       [balance]="creditBalance()"
       [busy]="isEmittingInvoice()"
       [customerRequired]="creditCustomerRequired()"
+      [holderIdentified]="creditHolderIdentified()"
       (confirmed)="onCreditInvoiceConfirmed($event)"
       (finalConsumer)="onCreditUseFinalConsumer()"
       (assignCustomer)="onAssignCustomerForInvoice()"

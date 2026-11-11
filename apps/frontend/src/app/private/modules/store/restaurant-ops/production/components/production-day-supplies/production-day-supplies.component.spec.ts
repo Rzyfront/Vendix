@@ -1,9 +1,13 @@
 import { TestBed, ComponentFixture } from '@angular/core/testing';
-import { of } from 'rxjs';
+import { of, throwError } from 'rxjs';
 import { ProductionDaySupplies } from '../../interfaces';
 import { ProductionOrdersService } from '../../services/production-orders.service';
 import { ProductionDaySuppliesComponent } from './production-day-supplies.component';
-import { shouldAutoOpenDaySummary } from './production-day-supplies.util';
+import {
+  formatProductionQty,
+  shouldAutoOpenDaySummary,
+  withoutBreakdownNote,
+} from './production-day-supplies.util';
 
 describe('ProductionDaySuppliesComponent — S5 / S6', () => {
   let fixture: ComponentFixture<ProductionDaySuppliesComponent>;
@@ -32,10 +36,12 @@ describe('ProductionDaySuppliesComponent — S5 / S6', () => {
       (b.textContent ?? '').includes('Resumen del día'),
     );
 
+  /** Mounts the panel as a host does once its day has loaded (non-null refresh token). */
   const render = async (supplies: ProductionDaySupplies = dayOf()) => {
     getDaySupplies.and.returnValue(of(supplies));
     fixture = TestBed.createComponent(ProductionDaySuppliesComponent);
     fixture.componentRef.setInput('date', '2026-11-11');
+    fixture.componentRef.setInput('refreshToken', { loaded: 1 });
     fixture.detectChanges();
     await fixture.whenStable();
     fixture.detectChanges();
@@ -60,9 +66,88 @@ describe('ProductionDaySuppliesComponent — S5 / S6', () => {
     fixture = TestBed.createComponent(ProductionDaySuppliesComponent);
     fixture.componentRef.setInput('date', '2026-11-11');
     fixture.componentRef.setInput('apiScope', 'manufacturing');
+    fixture.componentRef.setInput('refreshToken', { loaded: 1 });
     fixture.detectChanges();
     await fixture.whenStable();
     expect(getDaySupplies).toHaveBeenCalledOnceWith('2026-11-11', 'manufacturing');
+  });
+
+  it('waits for the host to load its day: the first load is a single request', async () => {
+    getDaySupplies.and.returnValue(of(dayOf()));
+    fixture = TestBed.createComponent(ProductionDaySuppliesComponent);
+    fixture.componentRef.setInput('date', '2026-11-11');
+    fixture.detectChanges();
+    await fixture.whenStable();
+    expect(getDaySupplies).not.toHaveBeenCalled();
+
+    fixture.componentRef.setInput('refreshToken', { loaded: 1 });
+    fixture.detectChanges();
+    await fixture.whenStable();
+    fixture.detectChanges();
+
+    expect(getDaySupplies).toHaveBeenCalledTimes(1);
+    expect(text()).toContain('Harina');
+  });
+
+  it('drops the previous day while the host reloads a new date', async () => {
+    await render();
+    expect(text()).toContain('Harina');
+
+    fixture.componentRef.setInput('date', '2026-11-12');
+    fixture.componentRef.setInput('refreshToken', null);
+    fixture.detectChanges();
+    await fixture.whenStable();
+    fixture.detectChanges();
+
+    expect(getDaySupplies).toHaveBeenCalledTimes(1);
+    expect(text()).not.toContain('Harina');
+  });
+
+  it('shows quantities in es-CO with up to 4 decimals', async () => {
+    await render(
+      dayOf({
+        supplies: [
+          { product_id: 1, name: 'Harina', sku: null, unit: 'kg', planned: 1234.5, consumed: 0.0025, pending: 0, difference: 0 },
+        ],
+      }),
+    );
+    expect(text()).toContain('1.234,5');
+    expect(text()).toContain('0,0025');
+  });
+
+  it('shows the error when the first load fails', async () => {
+    getDaySupplies.and.returnValue(throwError(() => 'boom'));
+    fixture = TestBed.createComponent(ProductionDaySuppliesComponent);
+    fixture.componentRef.setInput('date', '2026-11-11');
+    fixture.componentRef.setInput('refreshToken', { loaded: 1 });
+    fixture.detectChanges();
+    await fixture.whenStable();
+    fixture.detectChanges();
+
+    expect(text()).toContain('boom');
+    expect(fixture.componentInstance.loading()).toBeFalse();
+
+    getDaySupplies.and.returnValue(throwError(() => new Error('network')));
+    fixture.componentRef.setInput('refreshToken', { loaded: 2 });
+    fixture.detectChanges();
+    await fixture.whenStable();
+    fixture.detectChanges();
+
+    expect(text()).toContain('No se pudo cargar el consumo del día');
+  });
+
+  it('keeps the numbers on screen when a background refresh fails', async () => {
+    await render();
+    getDaySupplies.and.returnValue(throwError(() => new Error('network')));
+
+    fixture.componentRef.setInput('refreshToken', { reloaded: true });
+    fixture.detectChanges();
+    await fixture.whenStable();
+    fixture.detectChanges();
+
+    expect(getDaySupplies).toHaveBeenCalledTimes(2);
+    expect(text()).toContain('Harina');
+    expect(text()).not.toContain('No se pudo cargar el consumo del día');
   });
 
   it('renders the columns and one row per supply', async () => {
@@ -86,13 +171,20 @@ describe('ProductionDaySuppliesComponent — S5 / S6', () => {
   it('shows the without-breakdown note with the number of orders', async () => {
     await render(dayOf({ orders_without_breakdown: 3 }));
     expect(text().replace(/\s+/g, ' ')).toContain(
-      '3 órdenes finalizadas antes de este cambio no tienen desglose de consumo.',
+      '3 órdenes del día se finalizaron sin desglose de consumo.',
+    );
+  });
+
+  it('uses the singular for one order without breakdown', async () => {
+    await render(dayOf({ orders_without_breakdown: 1 }));
+    expect(text().replace(/\s+/g, ' ')).toContain(
+      '1 orden del día se finalizó sin desglose de consumo.',
     );
   });
 
   it('hides the note when every finished order has its breakdown', async () => {
     await render();
-    expect(text()).not.toContain('antes de este cambio');
+    expect(text()).not.toContain('sin desglose de consumo');
   });
 
   it('reloads when the refresh token changes', async () => {
@@ -187,6 +279,33 @@ describe('ProductionDaySuppliesComponent — S5 / S6', () => {
       expect(classDuringPrint).toBeTrue();
       expect(document.body.classList.contains('production-supplies-printing')).toBeFalse();
     });
+  });
+});
+
+describe('formatProductionQty', () => {
+  it('uses es-CO separators and keeps up to 4 decimals', () => {
+    expect(formatProductionQty(1234.5)).toBe('1.234,5');
+    expect(formatProductionQty(0.0025)).toBe('0,0025');
+    expect(formatProductionQty(10)).toBe('10');
+    expect(formatProductionQty(0)).toBe('0');
+  });
+
+  it('reads the Decimal strings the API returns', () => {
+    expect(formatProductionQty('2.5000')).toBe('2,5');
+  });
+
+  it('shows "—" when there is no value', () => {
+    expect(formatProductionQty(null)).toBe('—');
+    expect(formatProductionQty(undefined)).toBe('—');
+    expect(formatProductionQty('')).toBe('—');
+    expect(formatProductionQty('abc')).toBe('—');
+  });
+});
+
+describe('withoutBreakdownNote', () => {
+  it('uses the singular for one order and the plural otherwise', () => {
+    expect(withoutBreakdownNote(1)).toBe('1 orden del día se finalizó sin desglose de consumo.');
+    expect(withoutBreakdownNote(2)).toBe('2 órdenes del día se finalizaron sin desglose de consumo.');
   });
 });
 

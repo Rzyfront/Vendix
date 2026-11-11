@@ -196,6 +196,7 @@ import { StoreDocumentReceptionConnectionsController } from '../../received-docu
     InvoicingService,
     InvoiceFlowService,
     CreditNotesService,
+    CreditNoteBalanceService,
     InvoicePdfService,
     DianEventsService,
     InvoiceRetryQueueService,
