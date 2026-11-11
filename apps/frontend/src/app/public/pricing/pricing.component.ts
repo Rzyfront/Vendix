@@ -13,6 +13,25 @@ import { Meta, Title } from '@angular/platform-browser';
 import { applyMarketingPageMetadata, MARKETING_PAGES } from '../marketing-page-metadata';
 
 type PricingViewMode = 'cards' | 'compare';
+
+/** SEO-OPS-18: ciclos de cobro que se muestran por separado, en este orden. */
+export type PricingCycle = 'monthly' | 'quarterly' | 'semiannual' | 'annual' | 'lifetime';
+export const PRICING_CYCLES: readonly { value: PricingCycle; label: string }[] = [
+  { value: 'monthly', label: 'Mensual' },
+  { value: 'quarterly', label: 'Trimestral' },
+  { value: 'semiannual', label: 'Semestral' },
+  { value: 'annual', label: 'Anual' },
+  { value: 'lifetime', label: 'Pago único' },
+];
+
+/** `yearly` y `annual` son el mismo ciclo; cualquier valor desconocido queda fuera del selector. */
+export function normalizePricingCycle(cycle: string | null | undefined): PricingCycle | null {
+  if (cycle === 'monthly' || cycle === 'quarterly' || cycle === 'semiannual' || cycle === 'lifetime') {
+    return cycle;
+  }
+  if (cycle === 'annual' || cycle === 'yearly') return 'annual';
+  return null;
+}
 const VIEW_MODE_STORAGE_KEY = 'pricingViewMode';
 
 @Component({
@@ -43,6 +62,35 @@ export class PricingComponent {
   readonly hasPlans = computed(() => this.plans().length > 0);
 
   readonly viewMode = signal<PricingViewMode>(this.readStoredViewMode());
+
+  /**
+   * SEO-OPS-18: antes se mostraban los 12 planes (mensual, trimestral y anual)
+   * mezclados en una sola lista. Ahora se elige el ciclo y solo se ven sus planes.
+   */
+  readonly cycle = signal<PricingCycle>('monthly');
+  readonly availableCycles = computed(() =>
+    PRICING_CYCLES.filter((c) => this.plans().some((p) => normalizePricingCycle(p.billing_cycle) === c.value)),
+  );
+  /** Moneda de los planes mostrados: una sola se nombra, varias se explican. */
+  readonly currencyNote = computed(() => {
+    const codes = Array.from(
+      new Set(this.visiblePlans().map((p) => (p.currency || '').toUpperCase()).filter(Boolean)),
+    );
+    if (codes.length === 0) return 'Precios en la moneda de cada plan';
+    if (codes.length > 1) return 'Precios en la moneda de cada plan';
+    return codes[0] === 'COP' ? 'Precios en pesos colombianos (COP)' : `Precios en ${codes[0]}`;
+  });
+  readonly cycleNote = computed(() => (this.cycle() === 'lifetime' ? ' en un solo pago' : ' por el ciclo elegido'));
+
+  readonly visiblePlans = computed<PublicPlan[]>(() => {
+    const all = this.plans();
+    const inCycle = all.filter((p) => normalizePricingCycle(p.billing_cycle) === this.cycle());
+    return inCycle.length > 0 ? inCycle : all;
+  });
+
+  setCycle(cycle: PricingCycle): void {
+    this.cycle.set(cycle);
+  }
 
   readonly dummyPlan = {
     id: 0,
