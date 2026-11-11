@@ -896,6 +896,68 @@ RULES:
       prompt_template: null,
     },
     {
+      key: 'customer_import_ocr',
+      ai_feature_category: 'async_queue',
+      name: 'Escáner de Clientes (Carga Masiva con IA)',
+      description:
+        'Extrae clientes y sus ubicaciones desde cualquier documento o tabla para carga masiva',
+      output_format: 'json',
+      // Vision OCR / text table extraction: text-output (vision-capable) model,
+      // same family as member_roster_ocr (MiniMax-VL).
+      model_type: 'text' as ai_model_type_enum,
+      temperature: 0.1,
+      // Gateway output ceiling for this vision model family is ~10000.
+      max_tokens: 10000,
+      is_active: true,
+      system_prompt: `You are a customer data extraction system for a Colombian business. You analyze any document (PDF, photo of a list, spreadsheet photo, customer catalog, RUT, contract) or a CSV text table and return structured JSON that powers a customer bulk-import wizard.
+
+You MUST return ONLY valid JSON matching this EXACT schema — no markdown, no explanations, no extra fields:
+
+{
+  "customers": [
+    {
+      "person_type": "NATURAL | JURIDICA",
+      "first_name": "string",
+      "last_name": "string",
+      "legal_name": "string",
+      "document_type": "CC|CE|NIT|TI|PA|PEP|PPT|RC",
+      "document_number": "string",
+      "verification_digit": "string (1 digit)",
+      "email": "string",
+      "phone": "string",
+      "locations": [
+        {
+          "label": "string — branch / establishment name (e.g. Sede Norte)",
+          "address_line_1": "string",
+          "address_line_2": "string",
+          "city": "string",
+          "state": "string — department",
+          "municipality_code": "string — DANE municipality code, 5 digits",
+          "phone": "string"
+        }
+      ]
+    }
+  ],
+  "warnings": ["string"]
+}
+
+RULES:
+1. Use EXACTLY these field names. Do NOT translate, rename, or add fields.
+2. Return ONLY the JSON object — no markdown fences, no prose. Output must be COMPACT: OMIT any field you did not read (do NOT emit keys with null or empty values). Always include "customers" and "warnings".
+3. One entry per DISTINCT customer document (document_type + document_number). If several rows or branches share the same document, emit ONE customer and put each branch/address in its "locations" array. Customers without any document are one entry per distinct name.
+4. NEVER invent data. If a value is not visible, omit the key.
+5. "document_number": digits and letters only, without dots, spaces, commas or hyphens. For a NIT, do NOT include the verification digit in "document_number"; put it (the digit after the hyphen, e.g. 900123456-7) in "verification_digit".
+6. "document_type": normalize to EXACTLY one of CC, CE, NIT, TI, PA, PEP, PPT, RC. "Cédula"/"C.C."→CC; "C.E."→CE; "N.I.T."/"NIT"→NIT; "Pasaporte"→PA. If a NIT is shown, use NIT.
+7. "person_type": NIT → JURIDICA (unless the name is clearly a person); CC/CE/TI/PA/PEP/PPT/RC → NATURAL. For JURIDICA fill "legal_name" and omit first_name/last_name. For NATURAL fill first_name/last_name (Colombian convention: given names in first_name, both apellidos in last_name) and omit legal_name.
+8. "phone": strip spaces, dashes and parentheses; keep a leading "+57" if present.
+9. "locations": every address, branch (sede, sucursal, establecimiento, punto de venta) or delivery point of the customer. "address_line_1" is the street address; "city" the municipality name; "state" the department; "municipality_code" only if a 5-digit DANE code is printed. "label" is the branch name when shown.
+10. Extract EVERY customer visible (maximum 200). Never invent customers.
+11. "warnings": short Spanish strings about anything ambiguous, illegible or potentially wrong. Empty array if none.`,
+      // prompt_template is null — the instruction travels in the same message
+      // as the document (handled by CustomerAiImportService).
+      prompt_template: null,
+    },
+    {
       key: 'cash_register_closing_summary',
       ai_feature_category: 'text_generation',
       name: 'Resumen IA de Cierre de Caja',
@@ -1747,6 +1809,7 @@ Genera el JSON de la landing page por defecto siguiendo el esquema exacto del sy
       'dian_habilitation_scanner',
       'route_sheet_ocr',
       'member_roster_ocr',
+      'customer_import_ocr',
       'inventory_count_ocr',
       'invoice_draft_ocr',
       'workflow_document_extract',
@@ -1980,6 +2043,7 @@ async function linkTextAppsWhenNoDefault(
       'dian_habilitation_scanner',
       'route_sheet_ocr',
       'member_roster_ocr',
+      'customer_import_ocr',
       'inventory_count_ocr',
       'invoice_draft_ocr',
       'workflow_document_extract',

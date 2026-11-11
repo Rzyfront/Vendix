@@ -16,6 +16,8 @@ import { CustomersBulkController } from './customers-bulk.controller';
 import { CustomerHistoryController } from './history/customer-history.controller';
 import { CustomerHistoryService } from './history/customer-history.service';
 import { CustomerEmailListener } from './customer-email.listener';
+import { CustomerAiImportController } from './ai-import/customer-ai-import.controller';
+import { CustomerAiImportService } from './ai-import/customer-ai-import.service';
 import { ResponseModule } from '../../../common/responses/response.module';
 import { MetadataModule } from '../metadata/metadata.module';
 import { EmailModule } from '../../../email/email.module';
@@ -27,6 +29,7 @@ import { AddressesModule } from '../addresses/addresses.module';
     CustomersController,
     CustomersBulkController,
     CustomerHistoryController,
+    CustomerAiImportController,
   ],
   providers: [
     CustomersService,
@@ -40,6 +43,7 @@ import { AddressesModule } from '../addresses/addresses.module';
     CustomersBulkService,
     CustomerHistoryService,
     CustomerEmailListener,
+    CustomerAiImportService,
   ],
   exports: [
     CustomersService,

@@ -2,7 +2,7 @@ import { Component, inject, signal, computed, DestroyRef, viewChild } from '@ang
 import { Router } from '@angular/router';
 import { takeUntilDestroyed } from '@angular/core/rxjs-interop';
 import { finalize } from 'rxjs';
-import { CustomerListComponent, CustomerModalComponent, CustomerBulkUploadModalComponent } from './components';
+import { CustomerListComponent, CustomerModalComponent, CustomerBulkUploadModalComponent, CustomerAiImportModalComponent } from './components';
 import { CUSTOMER_MODAL_FILLABLE_FIELDS } from './components/customer-modal/customer-modal.component';
 import { DuplicateCustomerDialogComponent } from './components/customer-modal/duplicate-customer-dialog.component';
 import { translateCustomerError, extractDocumentConflict } from './utils/customer-error.translator';
@@ -33,6 +33,7 @@ import { customerDisplayName } from '../../../../shared/utils/customer-display-n
     CustomerListComponent,
     CustomerModalComponent,
     CustomerBulkUploadModalComponent,
+    CustomerAiImportModalComponent,
     DuplicateCustomerDialogComponent,
   ],
   template: `
@@ -90,6 +91,7 @@ import { customerDisplayName } from '../../../../shared/utils/customer-display-n
         (delete)="onDelete($event)"
         (viewDetail)="onViewDetail($event)"
         (bulkUpload)="openBulkUploadModal()"
+        (aiImport)="isAiImportModalOpen.set(true)"
       ></app-customer-list>
 
       <!-- Modal -->
@@ -120,6 +122,13 @@ import { customerDisplayName } from '../../../../shared/utils/customer-display-n
         (isOpenChange)="isBulkUploadModalOpen.set($event)"
         (uploadComplete)="onBulkUploadComplete()"
       ></app-customer-bulk-upload-modal>
+
+      <!-- Carga de clientes con IA -->
+      <app-customer-ai-import-modal
+        [isOpen]="isAiImportModalOpen()"
+        (close)="isAiImportModalOpen.set(false)"
+        (imported)="onBulkUploadComplete()"
+      ></app-customer-ai-import-modal>
     </div>
   `,
 })
@@ -168,6 +177,7 @@ export class CustomersComponent {
 
   // Bulk Upload Modal
   isBulkUploadModalOpen = signal(false);
+  isAiImportModalOpen = signal(false);
 
   // The customer form lives in the child modal, so fillForm reaches it
   // through the child's own fill method — never by writing the service.
