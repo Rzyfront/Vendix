@@ -58,6 +58,21 @@ describe('CreditInvoiceModalComponent — prefilled and Consumidor final option'
     expect(text).toContain('Emitir como Consumidor final (contado)');
   });
 
+  it('complete holder (holder_identified): offers «Emitir de contado» without mentioning Consumidor final', () => {
+    const fixture = setup();
+    fixture.componentRef.setInput('holderIdentified', true);
+    fixture.detectChanges();
+    const button = Array.from(
+      (fixture.nativeElement as HTMLElement).querySelectorAll('app-button'),
+    ).find((el) => (el.textContent ?? '').includes('contado'));
+    expect(button?.textContent?.trim()).toBe('Emitir de contado');
+    expect(fixture.nativeElement.textContent ?? '').not.toContain('Consumidor final');
+    let calls = 0;
+    fixture.componentInstance.finalConsumer.subscribe(() => calls++);
+    (fixture.componentInstance as unknown as { onUseFinalConsumer(): void }).onUseFinalConsumer();
+    expect(calls).toBe(1);
+  });
+
   it('«Emitir como Consumidor final (contado)» emits finalConsumer', () => {
     const fixture = setup();
     let calls = 0;
