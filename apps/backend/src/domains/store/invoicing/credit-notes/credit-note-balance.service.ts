@@ -250,6 +250,36 @@ export class CreditNoteBalanceService {
     return this.computeRemaining(source, notes, ledgers, excludeNoteId);
   }
 
+  /**
+   * true cuando las notas crédito con evidencia de aceptación revierten por
+   * completo la factura (total y cada línea). Una nota parcial o aún no
+   * aceptada (validated/sent/pending) NO cuenta: la orden sigue bloqueada.
+   * Reutiliza `computeRemaining` filtrando las notas a las aceptadas.
+   */
+  async isFullyReversedByAcceptedNotes(sourceId: number): Promise<boolean> {
+    const context = this.getTenantContext();
+    const source = await this.readVisibleInvoice(sourceId, context);
+    const notes = await this.readCreditNotes(source, context, undefined);
+    if (notes.length === 0) return false;
+    const ledgers = await this.readTransmissionRows(
+      source,
+      notes.map((note) => note.id),
+    );
+    const accepted = notes.filter((note) =>
+      this.hasAcceptedEvidence(
+        note,
+        ledgers.filter((ledger) => ledger.source_id === note.id),
+      ),
+    );
+    if (accepted.length === 0) return false;
+    const remaining = this.computeRemaining(source, accepted, ledgers);
+    if (!remaining.remaining_total.isZero()) return false;
+    for (const line of remaining.lines.values()) {
+      if (!line.remaining_total.isZero()) return false;
+    }
+    return true;
+  }
+
   async assertCanCreate(
     sourceId: number,
     candidate: CreditNoteCandidate,

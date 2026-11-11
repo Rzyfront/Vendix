@@ -770,3 +770,31 @@ describe('Facturar una orden de comprador no identificado nunca queda bloqueado'
     expect(self.runEmit).toHaveBeenCalledWith('order', null, credit, false);
   });
 });
+
+describe('S4 — factura revertida por completo libera el cambio de titular', () => {
+  const proto = OrderDetailsPageComponent.prototype as any;
+  const build = (active: unknown) => {
+    const self: any = {
+      order: () => ({ id: 7, active_sales_invoice: active }),
+      showTitularSearchModal: signal(false),
+      pendingChangeCustomerAddress: signal<unknown>('x'),
+      notifyTitularLocked: jasmine.createSpy('notifyTitularLocked').and.resolveTo(),
+    };
+    self.hasActiveSalesInvoice = proto.hasActiveSalesInvoice.bind(self);
+    return self;
+  };
+
+  it('accepted con fully_reversed: abre el buscador de titular', async () => {
+    const self = build({ id: 1, status: 'accepted', fully_reversed: true });
+    await proto.openChangeCustomer.call(self);
+    expect(self.showTitularSearchModal()).toBeTrue();
+    expect(self.notifyTitularLocked).not.toHaveBeenCalled();
+  });
+
+  it('NO-REGRESIÓN: accepted sin reversión total sigue bloqueando', async () => {
+    const self = build({ id: 1, status: 'accepted', fully_reversed: false });
+    await proto.openChangeCustomer.call(self);
+    expect(self.showTitularSearchModal()).toBeFalse();
+    expect(self.notifyTitularLocked).toHaveBeenCalledWith('ORD_TITULAR_INVOICED_001');
+  });
+});

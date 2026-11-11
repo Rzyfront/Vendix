@@ -237,8 +237,11 @@ export interface InvoiceDiscardRoute {
    * Es la única propiedad que le importa a quien llegó aquí por el 409 de
    * `INVOICING_CREATE_002`. `true` sólo para `cancel` y `void`, que son los dos
    * estados que `assertNotAlreadyInvoiced` excluye de «ya facturado»
-   * (`invoicing.service.ts`). La nota crédito NO libera la orden: la factura
-   * aceptada sigue existiendo y la orden sigue facturada.
+   * (`invoicing.service.ts`). Una nota crédito parcial o aún no aceptada NO
+   * libera la orden. Solo una nota crédito TOTAL ya aceptada por la DIAN
+   * (`CreditNoteBalanceService.isFullyReversedByAcceptedNotes`) la libera para
+   * cambiar el titular y re-facturar, pero eso no es una ruta de descarte: la
+   * factura original conserva su estado `accepted`.
    */
   releases_source_document: boolean;
 }

@@ -81,6 +81,11 @@ describe('PosFiscalEmissionService', () => {
       ...overrides.orderHistory,
     };
 
+    const creditNoteBalance = {
+      isFullyReversedByAcceptedNotes: jest.fn().mockResolvedValue(false),
+      ...overrides.creditNoteBalance,
+    };
+
     return {
       service: new PosFiscalEmissionService(
         prisma as any,
@@ -89,8 +94,10 @@ describe('PosFiscalEmissionService', () => {
         retry_queue as any,
         fiscal_scope as any,
         orderHistory as any,
+        creditNoteBalance as any,
       ),
       prisma,
+      creditNoteBalance,
       invoicing,
       invoice_flow,
       retry_queue,
@@ -478,6 +485,56 @@ describe('PosFiscalEmissionService', () => {
     expect(result.state).toBe('issued');
     expect(result.invoice_id).toBe(5);
     expect(prisma.fiscal_operation_events.create).not.toHaveBeenCalled();
+  });
+
+  describe('S4 — factura aceptada revertida por completo', () => {
+    const acceptedInvoice = {
+      id: 5,
+      invoice_number: 'FE-5',
+      status: 'accepted',
+      transmission_status: 'accepted',
+      cufe: 'CUFE-5',
+      pdf_url: null,
+      contingency_deadline: null,
+    };
+
+    it('crea una factura nueva en vez de devolver el estado de la vieja revertida', async () => {
+      mockRequestContext({ organization_id: 10, store_id: 20 });
+      const { service, prisma, invoicing, invoice_flow, creditNoteBalance } =
+        createService({
+          invoicing: { createFromOrder: jest.fn().mockResolvedValue({ invoice_number: 'FE-6' }) },
+        });
+      creditNoteBalance.isFullyReversedByAcceptedNotes.mockResolvedValue(true);
+      prisma.invoices.findFirst
+        .mockResolvedValueOnce(acceptedInvoice)
+        .mockResolvedValue({
+          ...acceptedInvoice,
+          id: 6,
+          invoice_number: 'FE-6',
+          status: 'validated',
+          transmission_status: null,
+          cufe: null,
+        });
+
+      await service.emitForOrder(1);
+
+      expect(creditNoteBalance.isFullyReversedByAcceptedNotes).toHaveBeenCalledWith(5);
+      expect(invoicing.createFromOrder).toHaveBeenCalledWith(1);
+      expect(invoice_flow.send).toHaveBeenCalledWith(6);
+    });
+
+    it('NO-REGRESIÓN: aceptada sin reversión total devuelve su estado y no crea otra', async () => {
+      mockRequestContext({ organization_id: 10, store_id: 20 });
+      const { service, prisma, invoicing, creditNoteBalance } = createService();
+      prisma.invoices.findFirst.mockResolvedValue(acceptedInvoice);
+
+      const result = await service.emitForOrder(1);
+
+      expect(creditNoteBalance.isFullyReversedByAcceptedNotes).toHaveBeenCalledWith(5);
+      expect(result.state).toBe('issued');
+      expect(result.invoice_id).toBe(5);
+      expect(invoicing.createFromOrder).not.toHaveBeenCalled();
+    });
   });
 
   it('registra invoice_issued en order_events la primera vez que la emisión queda `issued`', async () => {

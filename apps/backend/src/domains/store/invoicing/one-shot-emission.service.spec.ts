@@ -739,6 +739,84 @@ describe('OneShotEmissionService', () => {
     });
   });
 
+  describe('S4 — notas crédito y facturas revertidas no cuentan como «ya numerada»', () => {
+    /** findFirst que SÍ respeta invoice_type / status.in / id.notIn del where. */
+    const filtered = (rows: any[]) =>
+      jest.fn(async ({ where }: any) => {
+        const type = where?.invoice_type;
+        return (
+          rows.find(
+            (r) =>
+              (!type ||
+                (typeof type === 'string'
+                  ? type === r.invoice_type
+                  : type.in.includes(r.invoice_type))) &&
+              (!where?.status?.in || where.status.in.includes(r.status)) &&
+              !(where?.id?.notIn ?? []).includes(r.id),
+          ) ?? null
+        );
+      });
+    const acceptedNote = {
+      id: 90,
+      invoice_type: 'credit_note',
+      status: 'accepted',
+      invoice_number: 'NC-1',
+    };
+    const reversedInvoice = {
+      id: 50,
+      invoice_type: 'sales_invoice',
+      status: 'accepted',
+      invoice_number: 'FE-1',
+    };
+
+    it('una nota crédito aceptada de la orden NO salta la puerta de titular incompleto', async () => {
+      const { service, prisma, invoicing } = build({ order: incompleteOrder() });
+      prisma.invoices.findFirst = filtered([acceptedNote]);
+      await expect(service.emitOrder(1)).rejects.toMatchObject({
+        response: expect.objectContaining({
+          details: expect.objectContaining({ issue_code: 'missing_name' }),
+        }),
+      });
+      expect(invoicing.createFromOrder).not.toHaveBeenCalled();
+    });
+
+    it('una nota crédito aceptada de la orden NO salta la puerta de saldo sin cobrar', async () => {
+      const { service, prisma, invoicing } = build({
+        order: { id: 1, store_id: 1, state: 'draft', customer_id: 12, payment_form: null, grand_total: '1000.00', active_financial_split_id: null, payments: [] },
+      });
+      prisma.invoices.findFirst = filtered([acceptedNote]);
+      await expect(service.emitOrder(1)).rejects.toMatchObject({
+        response: expect.objectContaining({ error_code: 'INVOICING_ORDER_UNPAID_001' }),
+      });
+      expect(invoicing.createFromOrder).not.toHaveBeenCalled();
+    });
+
+    it('la factura aceptada revertida por completo no cuenta como numerada: la puerta de titular corre', async () => {
+      const { service, prisma, invoicing } = build({ order: incompleteOrder() });
+      prisma.invoices.findFirst = filtered([reversedInvoice]);
+      (service as any).creditNoteBalance = {
+        isFullyReversedByAcceptedNotes: jest.fn(async (id: number) => id === 50),
+      };
+      await expect(service.emitOrder(1)).rejects.toMatchObject({
+        response: expect.objectContaining({
+          details: expect.objectContaining({ issue_code: 'missing_name' }),
+        }),
+      });
+      expect(invoicing.createFromOrder).not.toHaveBeenCalled();
+    });
+
+    it('NO-REGRESIÓN: la factura aceptada con reversión parcial sigue contando como numerada', async () => {
+      const { service, prisma, invoicing } = build({ order: incompleteOrder() });
+      prisma.invoices.findFirst = filtered([reversedInvoice]);
+      (service as any).creditNoteBalance = {
+        isFullyReversedByAcceptedNotes: jest.fn().mockResolvedValue(false),
+      };
+      const r = await service.emitOrder(1);
+      expect(r.state).toBe('issued');
+      expect(invoicing.createFromOrder).not.toHaveBeenCalled();
+    });
+  });
+
   describe('lease por orden (S6b)', () => {
     it('emitOrder con la orden en proceso: ORDERS_BULK_LOCKED_001 y no emite nada', async () => {
       const { service, lease_keys, emitSpy, invoicing } = build();

@@ -5893,6 +5893,8 @@ export class OrderDetailsPageComponent {
   private hasActiveSalesInvoice(): boolean {
     const active = this.order()?.active_sales_invoice;
     if (!active) return false;
+    // Factura aceptada revertida por completo con NC aceptadas: ya no bloquea.
+    if (active.fully_reversed === true) return false;
     return active.status === 'sent' || active.status === 'accepted';
   }
 
@@ -7150,9 +7152,17 @@ export class OrderDetailsPageComponent {
    * como registro fiscal fijo.
    */
   acceptedInvoice = computed<OrderInvoiceSnapshot | null>(() => {
+    // Tras una NC total aceptada, `invoices[0]` es la NC (no «la factura de la
+    // orden»): sin factura vigente, la orden se puede facturar de nuevo.
+    if (this.activeInvoiceFullyReversed()) return null;
     const invoice = this.orderInvoice();
     return invoice?.dian_status === 'accepted' ? invoice : null;
   });
+
+  /** La factura vigente de la orden fue revertida por completo (NC aceptadas). */
+  private readonly activeInvoiceFullyReversed = computed(
+    () => this.order()?.active_sales_invoice?.fully_reversed === true,
+  );
 
   hasSalesInvoice = computed(() => this.acceptedInvoice() !== null);
 
@@ -7176,6 +7186,9 @@ export class OrderDetailsPageComponent {
    * sin salida a quien canceló una factura equivocada y necesita re-emitir.
    */
   private readonly reinvoiceable = computed(() => {
+    // Espejo de `assertNotAlreadyInvoiced`: una factura aceptada revertida por
+    // completo con NC aceptadas no bloquea la nueva emisión.
+    if (this.activeInvoiceFullyReversed()) return true;
     const invoice = this.orderInvoice();
     return (
       !invoice || invoice.status === 'cancelled' || invoice.status === 'voided'

@@ -244,6 +244,53 @@ describe('buildCreditNoteCandidate', () => {
 });
 
 describe('CreditNoteBalanceService', () => {
+  describe('isFullyReversedByAcceptedNotes', () => {
+    const fullNote = (overrides: Record<string, unknown> = {}) =>
+      note({
+        total_amount: decimal(45000),
+        subtotal_amount: decimal(45000),
+        invoice_items: [
+          item({
+            id: 172,
+            invoice_id: 91,
+            source_invoice_item_id: SOURCE_ITEM_ID,
+          }),
+        ],
+        ...overrides,
+      });
+
+    it('is true when accepted notes consume the whole total and every line', async () => {
+      const prior = fullNote({ status: 'accepted', transmission_status: 'accepted', dian_status: 'accepted', accepted_at: NOW });
+      const harness = createHarness({ notes: [prior] });
+      await expect(
+        runInStoreContext(() => harness.service.isFullyReversedByAcceptedNotes(PARENT_ID)),
+      ).resolves.toBe(true);
+    });
+
+    it('is false when the covering note is not accepted yet (validated/pending)', async () => {
+      const prior = fullNote();
+      const harness = createHarness({ notes: [prior] });
+      await expect(
+        runInStoreContext(() => harness.service.isFullyReversedByAcceptedNotes(PARENT_ID)),
+      ).resolves.toBe(false);
+    });
+
+    it('is false for a partial accepted note', async () => {
+      const prior = note({ status: 'accepted', transmission_status: 'accepted', dian_status: 'accepted', accepted_at: NOW });
+      const harness = createHarness({ notes: [prior] });
+      await expect(
+        runInStoreContext(() => harness.service.isFullyReversedByAcceptedNotes(PARENT_ID)),
+      ).resolves.toBe(false);
+    });
+
+    it('is false without credit notes', async () => {
+      const harness = createHarness();
+      await expect(
+        runInStoreContext(() => harness.service.isFullyReversedByAcceptedNotes(PARENT_ID)),
+      ).resolves.toBe(false);
+    });
+  });
+
   it('counts accepted projection, accepted ledger, marker, and legacy validated note once per note id', async () => {
     const prior = note({
       status: 'accepted',
