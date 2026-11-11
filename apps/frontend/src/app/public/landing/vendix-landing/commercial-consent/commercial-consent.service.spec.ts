@@ -244,6 +244,86 @@ describe('CommercialConsentService (SEO-TECH-06)', () => {
   });
 });
 
+describe('CommercialConsentService: RUM de Core Web Vitals (SEO-TECH-11)', () => {
+  let win: ConsentWindow;
+  let listeners: Map<string, () => void>;
+
+  function vitalsWindow(): ConsentWindow {
+    const w = fakeWindow();
+    listeners = new Map();
+    const buffer: Record<string, unknown[]> = {
+      'largest-contentful-paint': [{ startTime: 2100 }],
+      'layout-shift': [{ value: 0.05, startTime: 10, hadRecentInput: false }],
+      event: [],
+    };
+    class FakeObserver {
+      static supportedEntryTypes = Object.keys(buffer);
+      constructor(private readonly cb: (list: { getEntries: () => unknown[] }) => void) {}
+      observe(init: { type: string }): void {
+        this.cb({ getEntries: () => buffer[init.type] ?? [] });
+      }
+      disconnect(): void {}
+    }
+    w.PerformanceObserver = FakeObserver as unknown as typeof PerformanceObserver;
+    w.addEventListener = ((type: string, fn: () => void) => listeners.set(type, fn)) as unknown as Window['addEventListener'];
+    w.removeEventListener = ((type: string) => listeners.delete(type)) as unknown as Window['removeEventListener'];
+    return w;
+  }
+
+  function setup(): CommercialConsentService {
+    const doc = document.implementation.createHTMLDocument('Vendix');
+    Object.defineProperty(doc, 'cookie', { configurable: true, get: () => '', set: () => undefined });
+    TestBed.configureTestingModule({
+      providers: [
+        { provide: COMMERCIAL_CONSENT_WINDOW, useValue: win },
+        { provide: COMMERCIAL_ANALYTICS_ID, useValue: ID },
+        { provide: DOCUMENT, useValue: doc },
+      ],
+    });
+    return TestBed.inject(CommercialConsentService);
+  }
+
+  const vitalEvents = (): unknown[][] =>
+    gtagCalls(win).filter((c) => c[0] === 'event' && ['LCP', 'CLS', 'INP'].includes(c[1] as string));
+
+  beforeEach(() => (win = vitalsWindow()));
+
+  it('con analítica aceptada envía LCP y CLS una sola vez al ocultar la página', () => {
+    const service = setup();
+    service.attach();
+    service.accept();
+    expect(vitalEvents().length).toBe(0);
+
+    listeners.get('pagehide')!();
+    listeners.get('pagehide')?.();
+
+    expect(vitalEvents().map((c) => c[1])).toEqual(['LCP', 'CLS']);
+    const lcp = vitalEvents()[0][2] as Record<string, unknown>;
+    expect(lcp['value']).toBe(2100);
+    expect(lcp['metric_rating']).toBe('good');
+    expect(lcp['send_to']).toBe(ID);
+  });
+
+  it('al salir de la portada por la SPA envía las métricas antes de desactivar GA', () => {
+    const service = setup();
+    const detach = service.attach();
+    service.accept();
+    detach();
+    expect(vitalEvents().length).toBe(2);
+  });
+
+  it('sin aceptar, o después de revocar, no mide ni envía nada', () => {
+    const service = setup();
+    service.attach();
+    expect(listeners.size).toBe(0);
+    service.accept();
+    service.openPreferences();
+    service.reject();
+    expect(listeners.size).toBe(0);
+    expect(vitalEvents().length).toBe(0);
+  });
+});
+
 describe('parseStoredConsent', () => {
   const now = new Date('2026-10-28T12:00:00Z');
 
