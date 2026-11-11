@@ -22,6 +22,7 @@ import { ErrorCodes } from 'src/common/errors';
  */
 describe('OrdersService — contrato titular (BE-2)', () => {
   const prisma: any = {
+    $transaction: jest.fn(async (cb: any) => cb(prisma)),
     orders: {
       findMany: jest.fn(),
       findFirst: jest.fn(),
@@ -38,6 +39,7 @@ describe('OrdersService — contrato titular (BE-2)', () => {
   };
   const orderFlow = { forceOrderState: jest.fn(), cancelOrder: jest.fn() };
   const invoicing = { update: jest.fn() };
+  const creditBalance = { isFullyReversedByAcceptedNotes: jest.fn() };
 
   const service = new OrdersService(
     prisma,
@@ -55,6 +57,10 @@ describe('OrdersService — contrato titular (BE-2)', () => {
     {} as any,
     {} as any,
     invoicing as any,
+    undefined,
+    undefined,
+    undefined,
+    creditBalance as any,
   );
 
   beforeEach(() => {
@@ -63,6 +69,7 @@ describe('OrdersService — contrato titular (BE-2)', () => {
     prisma.invoices.findFirst.mockResolvedValue(null);
     prisma.accounts_receivable.findFirst.mockResolvedValue(null);
     prisma.invoices.findMany.mockResolvedValue([]);
+    creditBalance.isFullyReversedByAcceptedNotes.mockResolvedValue(false);
     prisma.order_financial_accounts.findMany.mockResolvedValue([]);
     prisma.store_settings.findFirst.mockResolvedValue(null);
   });
@@ -238,6 +245,42 @@ describe('OrdersService — contrato titular (BE-2)', () => {
         .catch((e: unknown) => e);
       expect(error.errorCode).toBe(ErrorCodes.ORD_TITULAR_INVOICED_001.code);
       expect(prisma.orders.update).not.toHaveBeenCalled();
+    });
+
+    it('sales_invoice accepted y revertida por completo con NC aceptadas → permite el cambio de titular', async () => {
+      prisma.orders.findFirst.mockResolvedValue({ ...draftOrder });
+      prisma.store_users.findFirst.mockResolvedValue({ id: 7 });
+      prisma.invoices.findFirst.mockResolvedValue({ id: 78, status: 'accepted' });
+      creditBalance.isFullyReversedByAcceptedNotes.mockResolvedValue(true);
+      prisma.orders.update.mockResolvedValue({ ...draftOrder, customer_id: 217 });
+      const result = await service.update(924, { customer_id: 217 } as any);
+      expect(creditBalance.isFullyReversedByAcceptedNotes).toHaveBeenCalledWith(78);
+      expect(result.customer_id).toBe(217);
+      expect(invoicing.update).not.toHaveBeenCalled();
+    });
+
+    it('sales_invoice accepted con NC parcial o no aceptada → sigue 409 ORD_TITULAR_INVOICED_001', async () => {
+      prisma.orders.findFirst.mockResolvedValue({ ...draftOrder });
+      prisma.store_users.findFirst.mockResolvedValue({ id: 7 });
+      prisma.invoices.findFirst.mockResolvedValue({ id: 78, status: 'accepted' });
+      creditBalance.isFullyReversedByAcceptedNotes.mockResolvedValue(false);
+      const error: any = await service
+        .update(924, { customer_id: 217 } as any)
+        .catch((e: unknown) => e);
+      expect(error.errorCode).toBe(ErrorCodes.ORD_TITULAR_INVOICED_001.code);
+      expect(prisma.orders.update).not.toHaveBeenCalled();
+    });
+
+    it('solo consulta la reversión para facturas accepted (una sent sigue bloqueando sin consultarla)', async () => {
+      prisma.orders.findFirst.mockResolvedValue({ ...draftOrder });
+      prisma.store_users.findFirst.mockResolvedValue({ id: 7 });
+      prisma.invoices.findFirst.mockResolvedValue({ id: 79, status: 'sent' });
+      creditBalance.isFullyReversedByAcceptedNotes.mockResolvedValue(true);
+      const error: any = await service
+        .update(924, { customer_id: 217 } as any)
+        .catch((e: unknown) => e);
+      expect(error.errorCode).toBe(ErrorCodes.ORD_TITULAR_INVOICED_001.code);
+      expect(creditBalance.isFullyReversedByAcceptedNotes).not.toHaveBeenCalled();
     });
 
     it('pos_equivalent_document sent → 409 ORD_TITULAR_INVOICED_001', async () => {
@@ -430,6 +473,7 @@ describe('OrdersService — contrato titular (BE-2)', () => {
       expect(result.active_sales_invoice).toEqual({
         id: 77,
         status: 'accepted',
+        fully_reversed: false,
       });
       // Dos lecturas separadas de `invoices.findFirst`: una acotada a
       // `sales_invoice` (alimenta `hasIssuedSalesInvoice`/
@@ -457,6 +501,22 @@ describe('OrdersService — contrato titular (BE-2)', () => {
           }),
         }),
       );
+    });
+
+    it('factura accepted revertida por completo → fully_reversed true (la fila se conserva)', async () => {
+      prisma.orders.findFirst.mockResolvedValue({ ...draftOrder });
+      prisma.invoices.findFirst.mockResolvedValue({
+        id: 77,
+        status: 'accepted',
+        customer_id: 12,
+      });
+      creditBalance.isFullyReversedByAcceptedNotes.mockResolvedValue(true);
+      const result = await service.findOne(924);
+      expect(result.active_sales_invoice).toEqual({
+        id: 77,
+        status: 'accepted',
+        fully_reversed: true,
+      });
     });
 
     it('sin factura vigente → active_sales_invoice es null', async () => {

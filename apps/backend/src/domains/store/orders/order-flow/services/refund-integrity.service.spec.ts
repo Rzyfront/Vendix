@@ -120,8 +120,11 @@ describe('Refund integrity — real flow + real calculation', () => {
       refund_items: ['create'],
       order_items: ['findMany'],
       payments: ['update'],
+      accounts_receivable: ['findMany'],
     });
     prisma.orders.findFirst.mockImplementation(async () => order);
+    // Orden de contado sin cartera: el total pagado sale solo de sus pagos.
+    prisma.accounts_receivable.findMany.mockResolvedValue([]);
     prisma.stores.findUnique.mockResolvedValue({ default_location_id: 7 });
     prisma.refunds.create.mockResolvedValue({ id: 90, state: 'processing' });
     prisma.refunds.update.mockResolvedValue({

@@ -231,6 +231,9 @@ export function buildCreditNoteCandidate(
   };
 }
 
+/** Órdenes cuya NC total es de devolución/cancelación: nunca se refacturan. */
+const RELEASE_BLOCKED_ORDER_STATES: ReadonlySet<string> = new Set(['refunded', 'cancelled']);
+
 @Injectable()
 export class CreditNoteBalanceService {
   constructor(private readonly prisma: StorePrismaService) {}
@@ -248,6 +251,57 @@ export class CreditNoteBalanceService {
     const noteIds = notes.map((note) => note.id);
     const ledgers = await this.readTransmissionRows(source, noteIds);
     return this.computeRemaining(source, notes, ledgers, excludeNoteId);
+  }
+
+  /**
+   * true cuando las notas crédito con evidencia de aceptación revierten por
+   * completo la factura (total y cada línea). Una nota parcial o aún no
+   * aceptada (validated/sent/pending) NO cuenta: la orden sigue bloqueada.
+   * Reutiliza `computeRemaining` filtrando las notas a las aceptadas.
+   *
+   * Falla CERRADO: si el saldo no se puede leer (documento de origen no
+   * corregible, nota heredada ambigua, sin contexto de tienda) devuelve false
+   * —la orden sigue bloqueada— en vez de romper el detalle de la orden o la
+   * emisión que sólo preguntan si quedó liberada.
+   */
+  async isFullyReversedByAcceptedNotes(sourceId: number): Promise<boolean> {
+    try {
+      return await this.readFullyReversedByAcceptedNotes(sourceId);
+    } catch {
+      return false;
+    }
+  }
+
+  private async readFullyReversedByAcceptedNotes(sourceId: number): Promise<boolean> {
+    const context = this.getTenantContext();
+    const source = await this.readVisibleInvoice(sourceId, context);
+    const notes = await this.readCreditNotes(source, context, undefined);
+    if (notes.length === 0) return false;
+    const ledgers = await this.readTransmissionRows(
+      source,
+      notes.map((note) => note.id),
+    );
+    const accepted = notes.filter((note) =>
+      this.hasAcceptedEvidence(
+        note,
+        ledgers.filter((ledger) => ledger.source_id === note.id),
+      ),
+    );
+    if (accepted.length === 0) return false;
+    const remaining = this.computeRemaining(source, accepted, ledgers);
+    if (!remaining.remaining_total.isZero()) return false;
+    for (const line of remaining.lines.values()) {
+      if (!line.remaining_total.isZero()) return false;
+    }
+    // Una venta devuelta o cancelada también lleva NC total (reembolso), pero
+    // no se vuelve a facturar: sólo libera la NC que corrige una venta viva.
+    const owner = await this.prisma.invoices.findFirst({
+      where: { id: sourceId },
+      select: { order: { select: { state: true } } },
+    });
+    const order_state = owner?.order?.state;
+    if (order_state && RELEASE_BLOCKED_ORDER_STATES.has(order_state)) return false;
+    return true;
   }
 
   async assertCanCreate(

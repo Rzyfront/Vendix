@@ -59,6 +59,11 @@ describe('PaymentGatewayService', () => {
       },
       orders: {
         findUnique: jest.fn(),
+        // processPayment lee la orden con findFirst (tienda + id): reutiliza
+        // el stub de findUnique de cada test.
+        findFirst: jest.fn((args: unknown) =>
+          mockPrismaService.orders.findUnique(args),
+        ),
         update: jest.fn(),
       },
       store_payment_methods: {
@@ -67,6 +72,11 @@ describe('PaymentGatewayService', () => {
       refunds: {
         create: jest.fn(),
       },
+      // Candado de ciclo de vida de la orden (SELECT … FOR UPDATE).
+      $queryRaw: jest.fn().mockResolvedValue([{ id: 1, state: 'created' }]),
+      $transaction: jest.fn(async (arg: any) =>
+        typeof arg === 'function' ? arg(mockPrismaService) : Promise.all(arg),
+      ),
     };
 
     const mockValidatorService = {
@@ -147,6 +157,17 @@ describe('PaymentGatewayService', () => {
         .spyOn(prisma.payments, 'create')
         .mockResolvedValue(mockCreatedPayment);
       jest.spyOn(prisma.payments, 'update').mockResolvedValue({});
+      // createPaymentRecord relee la orden dentro de la transacción.
+      jest.spyOn(prisma.orders, 'findUnique').mockResolvedValue({
+        ...mockOrder,
+        store_id: 1,
+        currency: 'COP',
+        tip_amount: 0,
+        service_session_id: null,
+        payments: [{ state: 'succeeded', amount: 100.0 }],
+        stores: { organization_id: 9 },
+      } as any);
+      jest.spyOn(prisma.orders, 'update').mockResolvedValue({} as any);
 
       // Mock processor
       const mockProcessor = {
@@ -505,7 +526,7 @@ describe('PaymentGatewayService', () => {
 
     beforeEach(async () => {
       prismaMock = createPrismaMock({
-        orders: ['findUnique', 'update'],
+        orders: ['findUnique', 'findFirst', 'update'],
         payments: ['create', 'update', 'findFirst'],
         store_payment_methods: ['findFirst', 'findUnique'],
         stores: ['findUnique'],
@@ -521,6 +542,12 @@ describe('PaymentGatewayService', () => {
         id: STORE_ID,
         organization_id: 1,
       });
+      // processPayment lee la orden con findFirst y la bloquea con
+      // `$queryRaw` (SELECT … FOR UPDATE): reutiliza el stub de findUnique.
+      prismaMock.orders.findFirst.mockImplementation((args: unknown) =>
+        prismaMock.orders.findUnique(args),
+      );
+      prismaMock.$queryRaw.mockResolvedValue([{ id: ORDER_ID, state: 'created' }]);
       prismaMock.payments.create.mockResolvedValue({
         id: 5001,
         transaction_id: 'txn-created',

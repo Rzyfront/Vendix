@@ -25,6 +25,9 @@ describe('OrdersService.assignShipping — impuesto del envío', () => {
       store_id: 1, organization_id: 1, user_id: 9,
     } as any);
     prisma = {
+      $transaction: jest.fn(async (arg: any) =>
+        typeof arg === 'function' ? arg(prisma) : Promise.all(arg),
+      ),
       invoices: { findFirst: jest.fn().mockResolvedValue(null) },
       orders: {
         findFirst: jest.fn().mockResolvedValue({
@@ -351,6 +354,9 @@ describe('OrdersService.update — PATCH de envío (paso 5 B1)', () => {
       store_id: 1, organization_id: 1, user_id: 9,
     } as any);
     prisma = {
+      $transaction: jest.fn(async (arg: any) =>
+        typeof arg === 'function' ? arg(prisma) : Promise.all(arg),
+      ),
       orders: {
         findFirst: jest.fn().mockResolvedValue({ ...baseOrder }),
         update: jest.fn().mockImplementation(({ data }: any) => Promise.resolve({ id: 10, ...data })),
@@ -491,6 +497,9 @@ describe('OrdersService.assignShipping — propina, intacta y split (paso 5 B2)'
       store_id: 1, organization_id: 1, user_id: 9,
     } as any);
     prisma = {
+      $transaction: jest.fn(async (arg: any) =>
+        typeof arg === 'function' ? arg(prisma) : Promise.all(arg),
+      ),
       invoices: { findFirst: jest.fn().mockResolvedValue(null) },
       orders: {
         findFirst: jest.fn().mockResolvedValue({
@@ -589,6 +598,9 @@ describe('OrdersService.assignShipping — bloqueo de cambio de costo con pagos 
       store_id: 1, organization_id: 1, user_id: 9,
     } as any);
     prisma = {
+      $transaction: jest.fn(async (arg: any) =>
+        typeof arg === 'function' ? arg(prisma) : Promise.all(arg),
+      ),
       invoices: { findFirst: jest.fn().mockResolvedValue(null) },
       orders: {
         findFirst: jest.fn().mockResolvedValue({

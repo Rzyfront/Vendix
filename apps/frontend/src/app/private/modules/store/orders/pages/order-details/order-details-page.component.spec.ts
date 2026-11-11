@@ -578,6 +578,8 @@ describe('Consumidor final de una orden sin pagar pide confirmación', () => {
       dialogService: { confirm: jasmine.createSpy('confirm').and.resolveTo(answer) },
       showCreditModal: signal(true),
       showHolderModal: signal(true),
+      creditHolderIdentified: signal(false),
+      customerDisplayName: () => 'ESPUMADOS DEL LITORAL S.A.',
       holderEmitKey: 'order',
       emitAllowFinalConsumer: false,
       runEmit: jasmine.createSpy('runEmit'),
@@ -586,6 +588,17 @@ describe('Consumidor final de una orden sin pagar pide confirmación', () => {
     self.emitAsFinalConsumerCash = proto.emitAsFinalConsumerCash.bind(self);
     return self;
   };
+
+  it('modal de crédito con titular completo: confirma a nombre del cliente, sin Consumidor final', async () => {
+    const self = build(true, true);
+    self.creditHolderIdentified.set(true);
+    await proto.onCreditUseFinalConsumer.call(self);
+    const data = self.dialogService.confirm.calls.mostRecent().args[0];
+    expect(data.message).toContain('a nombre de ESPUMADOS DEL LITORAL S.A.');
+    expect(data.message).not.toContain('Consumidor final');
+    expect(data.confirmText).toBe('Sí, emitir de contado');
+    expect(self.runEmit).toHaveBeenCalledWith('order', null, undefined, true);
+  });
 
   it('modal de crédito → «Volver» no emite y el modal sigue abierto', async () => {
     const self = build(true, false);
@@ -660,6 +673,7 @@ describe('Facturar una orden de comprador no identificado nunca queda bloqueado'
     const self: any = {
       showCreditModal: signal(false),
       creditCustomerRequired: signal(false),
+      creditHolderIdentified: signal(false),
       creditBalance: signal(0),
       showHolderModal: signal(false),
       holderIssue: signal(null),
@@ -696,6 +710,28 @@ describe('Facturar una orden de comprador no identificado nunca queda bloqueado'
     });
     expect(self.showCreditModal()).toBeTrue();
     expect(self.creditCustomerRequired()).toBeFalse();
+    expect(self.creditHolderIdentified()).toBeFalse();
+  });
+
+  it('sin pagar con titular completo (holder_identified): el modal ofrece contado a su nombre', () => {
+    const self = build();
+    proto.handleUnpaidEmitRejection.call(self, 'order', {
+      errorCode: 'INVOICING_ORDER_UNPAID_001',
+      details: { remaining_balance: '100', credit_eligible: true, credit_blocker: null, holder_identified: true },
+    });
+    expect(self.showCreditModal()).toBeTrue();
+    expect(self.creditHolderIdentified()).toBeTrue();
+  });
+
+  it('abonos con titular completo: la acción del aviso dice «Emitir de contado»', () => {
+    const self = build();
+    proto.handleUnpaidEmitRejection.call(self, 'order', {
+      errorCode: 'INVOICING_ORDER_UNPAID_001',
+      details: { remaining_balance: '100', credit_eligible: false, credit_blocker: 'partial_payment', holder_identified: true },
+    });
+    const toast = self.toastService.show.calls.mostRecent().args[0];
+    expect(toast.action.label).toBe('Emitir de contado');
+    expect(toast.description).not.toContain('Consumidor final');
   });
 
   it('409 de titular sin customer_id (invitado): abre el modal, no sólo un toast', () => {
@@ -732,5 +768,33 @@ describe('Facturar una orden de comprador no identificado nunca queda bloqueado'
     self.holderEmitCredit = credit;
     proto.onHolderCompleted.call(self);
     expect(self.runEmit).toHaveBeenCalledWith('order', null, credit, false);
+  });
+});
+
+describe('S4 — factura revertida por completo libera el cambio de titular', () => {
+  const proto = OrderDetailsPageComponent.prototype as any;
+  const build = (active: unknown) => {
+    const self: any = {
+      order: () => ({ id: 7, active_sales_invoice: active }),
+      showTitularSearchModal: signal(false),
+      pendingChangeCustomerAddress: signal<unknown>('x'),
+      notifyTitularLocked: jasmine.createSpy('notifyTitularLocked').and.resolveTo(),
+    };
+    self.hasActiveSalesInvoice = proto.hasActiveSalesInvoice.bind(self);
+    return self;
+  };
+
+  it('accepted con fully_reversed: abre el buscador de titular', async () => {
+    const self = build({ id: 1, status: 'accepted', fully_reversed: true });
+    await proto.openChangeCustomer.call(self);
+    expect(self.showTitularSearchModal()).toBeTrue();
+    expect(self.notifyTitularLocked).not.toHaveBeenCalled();
+  });
+
+  it('NO-REGRESIÓN: accepted sin reversión total sigue bloqueando', async () => {
+    const self = build({ id: 1, status: 'accepted', fully_reversed: false });
+    await proto.openChangeCustomer.call(self);
+    expect(self.showTitularSearchModal()).toBeFalse();
+    expect(self.notifyTitularLocked).toHaveBeenCalledWith('ORD_TITULAR_INVOICED_001');
   });
 });
