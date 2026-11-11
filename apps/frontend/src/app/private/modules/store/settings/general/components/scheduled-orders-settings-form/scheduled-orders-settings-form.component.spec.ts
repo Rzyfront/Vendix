@@ -2,6 +2,7 @@ import { TestBed } from '@angular/core/testing';
 import { provideHttpClient } from '@angular/common/http';
 import { provideHttpClientTesting } from '@angular/common/http/testing';
 import { provideRouter } from '@angular/router';
+import { provideMockStore } from '@ngrx/store/testing';
 
 import {
   ScheduledOrdersPayload,
@@ -27,7 +28,13 @@ describe('ScheduledOrdersSettingsForm', () => {
 
   function build() {
     TestBed.configureTestingModule({
-      providers: [provideHttpClient(), provideHttpClientTesting(), provideRouter([])],
+      providers: [
+        provideHttpClient(),
+        provideHttpClientTesting(),
+        provideRouter([]),
+        // Los inputs de moneda del formulario inyectan CurrencyFormatService → TenantFacade → Store.
+        provideMockStore({ initialState: {} }),
+      ],
     });
     const fixture = TestBed.createComponent(ScheduledOrdersSettingsForm);
     fixture.componentRef.setInput('settings', stored);
