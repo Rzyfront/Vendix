@@ -29,6 +29,7 @@ import {
   CompleteProductionOrderDto,
   ProductionOrderQueryDto,
   ProductionDayQueryDto,
+  ProductionSuppliesQueryDto,
 } from './dto';
 import { IndustryModuleGuard } from '../../../common/guards/industry-module.guard';
 import { IndustryModule } from '../../../common/decorators/industry-module.decorator';
@@ -102,6 +103,14 @@ export class ProductionOrdersController {
   async findDay(@Query() query: ProductionDayQueryDto) {
     const result = await this.productionOrdersService.findDay(query);
     return this.responseService.success(result, 'Lista de producción del día obtenida');
+  }
+
+  /** S4 — planned vs consumed supplies of one day (static path before `:id`). */
+  @Get('day/supplies')
+  @Permissions('store:production_orders:read', 'store:manufacturing:orders:read')
+  async findDaySupplies(@Query() query: ProductionSuppliesQueryDto) {
+    const result = await this.productionOrdersService.findDaySupplies(query);
+    return this.responseService.success(result, 'Consumo de insumos del día obtenido');
   }
 
   /**

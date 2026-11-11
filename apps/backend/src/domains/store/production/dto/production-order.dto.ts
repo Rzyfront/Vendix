@@ -193,3 +193,15 @@ export class ProductionDayQueryDto {
   @MaxLength(512)
   cursor?: string;
 }
+
+/**
+ * Query of the supplies (planned vs consumed) of ONE production day. Same
+ * `date` rule as the list, and nothing else: the aggregation covers the whole
+ * day, so there is no page or cursor.
+ */
+export class ProductionSuppliesQueryDto {
+  @IsOptional()
+  @IsString()
+  @Matches(/^\d{4}-\d{2}-\d{2}$/, { message: 'date debe tener el formato YYYY-MM-DD' })
+  date?: string;
+}

@@ -472,8 +472,8 @@ export class ManufacturingOrdersService {
           const actualCost = Number(order.actual_cost ?? 0) + info.totalCost;
           const finished = newProduced >= planned - EPS;
 
-          await this.persistLines(tx, id, info.consumptions);
-
+          // Planned vs consumed per line is persisted by `complete()` itself
+          // (all sources), so it is not counted again here.
           let batch_id = order.batch_id ?? undefined;
           if (settings.lot_required) {
             batch_id = await this.upsertBatch(tx, {
@@ -499,66 +499,6 @@ export class ManufacturingOrdersService {
     // `ProductionOrdersService.complete` emits after its own commit; this one
     // reloads the final row (status, produced_qty after onProduced) for the stream.
     return this.reloadAndEmit(id);
-  }
-
-  /** Acumula consumo y costo por línea (planificado vs consumido). */
-  private async persistLines(
-    tx: Prisma.TransactionClient,
-    order_id: number,
-    consumptions: Array<{
-      component_product_id: number;
-      consumed_qty: number;
-      cost_snapshot: { unit_cost: number; total_cost: number } | null;
-    }>,
-  ): Promise<void> {
-    const lines = await tx.production_order_lines.findMany({
-      where: { order_id },
-    });
-    const byComponent = new Map(lines.map((l) => [l.component_product_id, l]));
-
-    for (const c of consumptions) {
-      const total = Number(c.cost_snapshot?.total_cost ?? 0);
-      const existing = byComponent.get(c.component_product_id);
-      const entry = {
-        quantity: c.consumed_qty,
-        unit_cost: Number(c.cost_snapshot?.unit_cost ?? 0),
-        total_cost: total,
-        at: new Date().toISOString(),
-      };
-      if (!existing) {
-        await tx.production_order_lines.create({
-          data: {
-            order_id,
-            component_product_id: c.component_product_id,
-            planned_qty: new Prisma.Decimal(c.consumed_qty),
-            consumed_qty: new Prisma.Decimal(c.consumed_qty),
-            unit_cost: new Prisma.Decimal(
-              (c.consumed_qty > 0 ? total / c.consumed_qty : 0).toFixed(4),
-            ),
-            total_cost: new Prisma.Decimal(total.toFixed(4)),
-            cost_snapshot: { entries: [entry] },
-          },
-        });
-        continue;
-      }
-      const consumed = Number(existing.consumed_qty) + c.consumed_qty;
-      const totalCost = Number(existing.total_cost ?? 0) + total;
-      const previous: Prisma.InputJsonValue[] =
-        (existing.cost_snapshot as { entries?: Prisma.InputJsonValue[] } | null)
-          ?.entries ?? [];
-      await tx.production_order_lines.update({
-        where: { id: existing.id },
-        data: {
-          consumed_qty: new Prisma.Decimal(consumed),
-          total_cost: new Prisma.Decimal(totalCost.toFixed(4)),
-          unit_cost: new Prisma.Decimal(
-            (consumed > 0 ? totalCost / consumed : 0).toFixed(4),
-          ),
-          cost_snapshot: { entries: [...previous, entry] },
-          updated_at: new Date(),
-        },
-      });
-    }
   }
 
   /** Un lote por orden: se crea en la primera entrega y se incrementa después. */

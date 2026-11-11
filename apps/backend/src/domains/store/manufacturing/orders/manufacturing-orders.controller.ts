@@ -29,7 +29,7 @@ import { IndustryModuleGuard } from '../../../../common/guards/industry-module.g
 import { IndustryModule } from '../../../../common/decorators/industry-module.decorator';
 import { ProductionOrdersService } from '../../production/production-orders.service';
 import { ProductionSseService } from '../../production/production-sse.service';
-import { ProductionDayQueryDto } from '../../production/dto';
+import { ProductionDayQueryDto, ProductionSuppliesQueryDto } from '../../production/dto';
 
 /**
  * Órdenes de producción de manufactura.
@@ -57,6 +57,18 @@ export class ManufacturingOrdersController {
   async findDay(@Query() query: ProductionDayQueryDto) {
     const result = await this.productionOrders.findDay(query);
     return this.responseService.success(result, 'Lista de producción del día obtenida');
+  }
+
+  /**
+   * S4 — planned vs consumed supplies of one day, read from Planta (same data
+   * as `store/production-orders/day/supplies`, behind this controller's
+   * `manufacturing_orders` industry guard).
+   */
+  @Get('day/supplies')
+  @Permissions('store:manufacturing:orders:read')
+  async findDaySupplies(@Query() query: ProductionSuppliesQueryDto) {
+    const result = await this.productionOrders.findDaySupplies(query);
+    return this.responseService.success(result, 'Consumo de insumos del día obtenido');
   }
 
   /**

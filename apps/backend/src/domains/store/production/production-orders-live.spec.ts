@@ -39,6 +39,7 @@ describe('ProductionOrdersService — Producción activa (QUI-1002)', () => {
         update: jest.fn(),
         updateMany: jest.fn().mockResolvedValue({ count: 1 }),
       },
+      production_order_lines: { findMany: jest.fn().mockResolvedValue([]) },
       products: { findFirst: jest.fn(), findMany: jest.fn().mockResolvedValue([]) },
       recipes: { findFirst: jest.fn() },
       store_settings: {
@@ -145,7 +146,7 @@ describe('ProductionOrdersService — Producción activa (QUI-1002)', () => {
   describe('create() / cancel() emit', () => {
     it('create emits the new order after the insert', async () => {
       prisma.products.findFirst.mockResolvedValue({ id: 50, name: 'Salsa', product_type: 'physical', is_batch_produced: true, store_id: 1 });
-      prisma.recipes.findFirst.mockResolvedValue({ id: 7, product_id: 50, is_active: true, yield_quantity: 1, yield_unit: 'unit' });
+      prisma.recipes.findFirst.mockResolvedValue({ id: 7, product_id: 50, is_active: true, yield_quantity: 1, yield_unit: 'unit', waste_percent: 0, items: [] });
       prisma.production_orders.create.mockResolvedValue(order({ id: 8 }));
       await service.create({ product_id: 50, recipe_id: 7, planned_qty: 3 } as any);
       expect(updatedEvents()).toEqual([expect.objectContaining({ id: 8, status: 'draft', store_id: 1 })]);

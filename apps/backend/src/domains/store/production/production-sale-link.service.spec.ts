@@ -19,12 +19,36 @@ describe('ProductionSaleLinkService (QUI-995)', () => {
     ...over,
   });
 
-  const setup = (s: any, existing: any[] = [], recipes: any[] = [{ id: 7, product_id: 50, product_variant_id: null }]) => {
+  // Recipe 7 of product 50: yield 1, one item (component 99, 2 per unit, no waste).
+  const recipe7 = {
+    id: 7,
+    product_id: 50,
+    product_variant_id: null,
+    waste_percent: 0,
+    yield_quantity: 1,
+    items: [
+      { component_product_id: 99, quantity: 2, waste_percent: 0, waste_mode: 'percent', waste_absolute: null },
+    ],
+  };
+  let lineConsumed = 0;
+  // Planned lines a draft already has (default: the plan of recipe 7 for 5 units).
+  let currentLines: Array<{ component_product_id: number; planned_qty: Prisma.Decimal }> = [];
+  let recipesService: { explodeBom: jest.Mock };
+
+  const setup = (s: any, existing: any[] = [], recipes: any[] = [recipe7]) => {
+    lineConsumed = 0;
+    currentLines = [{ component_product_id: 99, planned_qty: new Prisma.Decimal(10) }];
     tx = {
       production_orders: {
         findMany: jest.fn().mockResolvedValue(existing),
         create: jest.fn().mockResolvedValue({ id: 100 }),
         updateMany: jest.fn().mockResolvedValue({ count: 1 }),
+      },
+      production_order_lines: {
+        count: jest.fn(async () => lineConsumed),
+        findMany: jest.fn(async () => currentLines),
+        deleteMany: jest.fn().mockResolvedValue({ count: 1 }),
+        createMany: jest.fn().mockResolvedValue({ count: 1 }),
       },
     };
     client = {
@@ -36,9 +60,14 @@ describe('ProductionSaleLinkService (QUI-995)', () => {
       $transaction: jest.fn(async (cb: any) => cb(tx)),
     };
     sequences = { next: jest.fn().mockResolvedValue('OP-000001') };
+    recipesService = { explodeBom: jest.fn().mockResolvedValue([]) };
     service = new ProductionSaleLinkService(
       { withoutScope: () => client } as any,
       sequences as any,
+      {} as any,
+      undefined,
+      recipesService as any,
+      {} as any,
     );
   };
 
@@ -63,6 +92,140 @@ describe('ProductionSaleLinkService (QUI-995)', () => {
       select: { id: true },
     });
     expect(Number(tx.production_orders.create.mock.calls[0][0].data.planned_qty)).toBe(5);
+  });
+
+  it('S1: a new sale order is created with one planned line per recipe item for the summed quantity, consumed 0', async () => {
+    setup(sale([
+      { id: 1, product_id: 50, quantity: 2 },
+      { id: 2, product_id: 50, quantity: 3 },
+    ]));
+    await service.ensureForOrder(77);
+    // 5 units x 2 per unit of component 99
+    expect(tx.production_orders.create.mock.calls[0][0].data.lines).toEqual({
+      create: [{ component_product_id: 99, planned_qty: new Prisma.Decimal(10), sort_order: 0 }],
+    });
+    expect(tx.production_order_lines.deleteMany).not.toHaveBeenCalled();
+  });
+
+  it('S1: the add-ons of the sale lines add their requirement (same expansion as the consumption) to the same component', async () => {
+    const addon = (component_product_id: number, quantity: number, scope = 'per_unit') => ({
+      scope,
+      component_type: 'ingredient',
+      component_product_id,
+      component_variant_id: null,
+      quantity,
+    });
+    setup(sale([
+      // 2 units: add-on 99 x1 per unit (same component as the recipe) and 200 x1 per line
+      { id: 1, product_id: 50, quantity: 2, order_item_options: [addon(99, 1), addon(200, 1, 'per_line')] },
+      { id: 2, product_id: 50, quantity: 3, order_item_options: [addon(200, 2)] },
+    ]));
+    await service.ensureForOrder(77);
+    // 99: recipe 5 x 2 = 10 + add-on 2 units x 1 = 12;  200: 1 (per line) + 2 x 3 = 7
+    expect(tx.production_orders.create.mock.calls[0][0].data.lines.create).toEqual([
+      { component_product_id: 99, planned_qty: new Prisma.Decimal(12), sort_order: 0 },
+      { component_product_id: 200, planned_qty: new Prisma.Decimal(7), sort_order: 1 },
+    ]);
+  });
+
+  it('S7: an add-on that cannot be expanded never blocks the production order; only the base recipe is planned', async () => {
+    const failing = (component_type: string) => ({
+      scope: 'per_unit',
+      component_type,
+      component_product_id: 300,
+      component_variant_id: null,
+      quantity: 1,
+    });
+    setup(sale([
+      { id: 1, product_id: 50, quantity: 5, order_item_options: [failing('recipe'), failing('product')] },
+    ]));
+    const boom = new Error('BOM cycle');
+    tx.recipes = { findMany: jest.fn().mockRejectedValue(boom) };
+    tx.products = { findFirst: jest.fn().mockRejectedValue(boom) };
+    recipesService.explodeBom.mockRejectedValue(boom);
+    const warn = jest.spyOn((service as any).logger, 'warn').mockImplementation(() => undefined);
+
+    const result = await service.ensureForOrder(77);
+
+    expect(result).toEqual([{ id: 100 }]);
+    expect(tx.production_orders.create).toHaveBeenCalledTimes(1);
+    expect(tx.production_orders.create.mock.calls[0][0].data.lines).toEqual({
+      create: [{ component_product_id: 99, planned_qty: new Prisma.Decimal(10), sort_order: 0 }],
+    });
+    expect(warn).toHaveBeenCalledWith(expect.stringContaining('Add-on plan skipped'));
+  });
+
+  it('S1: a draft whose sale quantity changes gets its lines rebuilt (delete by order id, recreate), only while nothing was consumed', async () => {
+    setup(
+      sale([{ id: 1, product_id: 50, quantity: 8 }]),
+      [{ id: 100, product_id: 50, status: 'draft', planned_qty: new Prisma.Decimal(5), due_date: start }],
+    );
+    await service.ensureForOrder(77);
+    expect(tx.production_order_lines.deleteMany).toHaveBeenCalledWith({ where: { order_id: 100 } });
+    expect(tx.production_order_lines.createMany).toHaveBeenCalledWith({
+      data: [
+        { order_id: 100, component_product_id: 99, planned_qty: new Prisma.Decimal(16), sort_order: 0 },
+      ],
+    });
+  });
+
+  it('S1: a draft whose quantity did not change keeps its lines untouched', async () => {
+    setup(
+      sale([{ id: 1, product_id: 50, quantity: 5 }]),
+      [{ id: 100, product_id: 50, status: 'draft', planned_qty: new Prisma.Decimal(5), due_date: new Date('2026-11-01T00:00:00Z') }],
+    );
+    await service.ensureForOrder(77);
+    expect(tx.production_order_lines.deleteMany).not.toHaveBeenCalled();
+    expect(tx.production_order_lines.createMany).not.toHaveBeenCalled();
+  });
+
+  it('A2: a draft whose add-ons change while its quantity stays the same gets its lines re-planned', async () => {
+    setup(
+      sale([
+        {
+          id: 1,
+          product_id: 50,
+          quantity: 5,
+          order_item_options: [
+            { scope: 'per_unit', component_type: 'ingredient', component_product_id: 200, component_variant_id: null, quantity: 1 },
+          ],
+        },
+      ]),
+      [{ id: 100, product_id: 50, recipe_id: 7, status: 'draft', planned_qty: new Prisma.Decimal(5), due_date: start }],
+    );
+    await service.ensureForOrder(77);
+    // Same quantity and due date: the order row is not rewritten, only its plan.
+    expect(tx.production_orders.updateMany).not.toHaveBeenCalled();
+    expect(tx.production_order_lines.deleteMany).toHaveBeenCalledWith({ where: { order_id: 100 } });
+    expect(tx.production_order_lines.createMany).toHaveBeenCalledWith({
+      data: [
+        { order_id: 100, component_product_id: 99, planned_qty: new Prisma.Decimal(10), sort_order: 0 },
+        { order_id: 100, component_product_id: 200, planned_qty: new Prisma.Decimal(5), sort_order: 1 },
+      ],
+    });
+  });
+
+  it('A2: a draft created before the plan existed (no lines) gets its planned lines on the next sync', async () => {
+    setup(
+      sale([{ id: 1, product_id: 50, quantity: 5 }]),
+      [{ id: 100, product_id: 50, recipe_id: 7, status: 'draft', planned_qty: new Prisma.Decimal(5), due_date: start }],
+    );
+    currentLines = [];
+    await service.ensureForOrder(77);
+    expect(tx.production_order_lines.createMany).toHaveBeenCalledWith({
+      data: [{ order_id: 100, component_product_id: 99, planned_qty: new Prisma.Decimal(10), sort_order: 0 }],
+    });
+  });
+
+  it('S1: lines with consumption are never rebuilt', async () => {
+    setup(
+      sale([{ id: 1, product_id: 50, quantity: 8 }]),
+      [{ id: 100, product_id: 50, status: 'draft', planned_qty: new Prisma.Decimal(5), due_date: start }],
+    );
+    lineConsumed = 1;
+    await service.ensureForOrder(77);
+    expect(tx.production_order_lines.deleteMany).not.toHaveBeenCalled();
+    expect(tx.production_order_lines.createMany).not.toHaveBeenCalled();
   });
 
   it('is idempotent: an existing order with the same quantity is neither created nor rewritten', async () => {
@@ -216,6 +379,11 @@ describe('ProductionSaleLinkService (QUI-995)', () => {
         sale_state: 'processing',
         qty: 5,
         due_date: start,
+        // S1: the live lines paired with the order travel along for the restart plan.
+        items: [
+          { id: 1, product_id: 50, product_variant_id: 10, quantity: 2 },
+          { id: 2, product_id: 50, product_variant_id: 10, quantity: 3 },
+        ],
       });
       // Only live production lines are read (same filter ensureForOrder uses).
       expect(client.orders.findFirst.mock.calls[0][0].select.order_items.where).toEqual({
@@ -577,6 +745,12 @@ describe('ProductionSaleLinkService — live-sync events (QUI-1002)', () => {
         findMany: jest.fn().mockResolvedValue(existing),
         create: jest.fn().mockResolvedValue({ id: 100 }),
         updateMany: jest.fn().mockResolvedValue({ count: 1 }),
+      },
+      production_order_lines: {
+        count: jest.fn().mockResolvedValue(0),
+        findMany: jest.fn().mockResolvedValue([]),
+        deleteMany: jest.fn().mockResolvedValue({ count: 0 }),
+        createMany: jest.fn().mockResolvedValue({ count: 0 }),
       },
     };
     client = {
