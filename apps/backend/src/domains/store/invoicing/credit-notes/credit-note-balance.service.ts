@@ -255,8 +255,21 @@ export class CreditNoteBalanceService {
    * completo la factura (total y cada línea). Una nota parcial o aún no
    * aceptada (validated/sent/pending) NO cuenta: la orden sigue bloqueada.
    * Reutiliza `computeRemaining` filtrando las notas a las aceptadas.
+   *
+   * Falla CERRADO: si el saldo no se puede leer (documento de origen no
+   * corregible, nota heredada ambigua, sin contexto de tienda) devuelve false
+   * —la orden sigue bloqueada— en vez de romper el detalle de la orden o la
+   * emisión que sólo preguntan si quedó liberada.
    */
   async isFullyReversedByAcceptedNotes(sourceId: number): Promise<boolean> {
+    try {
+      return await this.readFullyReversedByAcceptedNotes(sourceId);
+    } catch {
+      return false;
+    }
+  }
+
+  private async readFullyReversedByAcceptedNotes(sourceId: number): Promise<boolean> {
     const context = this.getTenantContext();
     const source = await this.readVisibleInvoice(sourceId, context);
     const notes = await this.readCreditNotes(source, context, undefined);

@@ -289,6 +289,11 @@ describe('CreditNoteBalanceService', () => {
         runInStoreContext(() => harness.service.isFullyReversedByAcceptedNotes(PARENT_ID)),
       ).resolves.toBe(false);
     });
+    it('fails closed (false, no throw) when the balance cannot be read, e.g. without tenant context', async () => {
+      const prior = fullNote({ status: 'accepted', transmission_status: 'accepted', dian_status: 'accepted', accepted_at: NOW });
+      const harness = createHarness({ notes: [prior] });
+      await expect(harness.service.isFullyReversedByAcceptedNotes(PARENT_ID)).resolves.toBe(false);
+    });
   });
 
   it('counts accepted projection, accepted ledger, marker, and legacy validated note once per note id', async () => {
