@@ -271,7 +271,7 @@ Como operario, quiero que al pasar de una orden a otra en el detalle se muestre 
 | T7 | S1-S11 | PR 1 a develop, verificador independiente (ítems 1 y 4) y gate ≥85 | inline + verificador Opus | hecho (#1137, gate 88/100; L11, L12) |
 | T8 | S12-S17, S19, S20 | Bloque 2 con tests | escritor sonnet + auditoría del padre | hecho (3215e3774, 04eb76ef4, 580e9b8b7, 47e98cbf3; L15) |
 | T9 | S12-S20 | PR 2 encadenado y gate ≥85 | inline | hecho (#1142, 5a3daad44, gate 90/100; L16) |
-| T10 | S21-S27 | Bloque 3 frontend, specs en la lista de karma de CI y Playwright | escritor sonnet (frontend, superficie disjunta del backend) | hecho (#1135, 0d5b765c5); verificado en el demo de prod (L17) |
+| T10 | S21-S27 | Bloque 3 frontend, specs en la lista de karma de CI y Playwright | escritor sonnet (frontend, superficie disjunta del backend) | hecho (#1135, 0d5b765c5); S24 verificado en el demo de prod, el resto con karma en CI (L17) |
 | T11 | S21-S28 | PR 3 encadenado y gate ≥85 | inline | hecho (#1135, gate 92/100) |
 | T12 | S28 | Pruebas que faltan, en el PR de su código | inline | hecho (#1137, #1135 y #1142) |
 
