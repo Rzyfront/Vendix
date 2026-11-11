@@ -324,33 +324,16 @@ describe('contado «Acuerdo mutuo» (ZZZ)', () => {
   });
 
   it('la factura persistida de contado ZZZ se reconoce sea de Consumidor final o nominativa', () => {
-    expect(
-      isMutualAgreementCashInvoice({
-        payment_form: '1',
-        payment_means_code: 'ZZZ',
-        customer_tax_id: '222222222222',
-      }),
-    ).toBe(true);
-    expect(
-      isMutualAgreementCashInvoice({
-        payment_form: '1',
-        payment_means_code: 'ZZZ',
-        customer_tax_id: '800177119',
-      }),
-    ).toBe(true);
-    expect(
-      isMutualAgreementCashInvoice({
-        payment_form: '1',
-        payment_means_code: '10',
-        customer_tax_id: '222222222222',
-      }),
-    ).toBe(false);
-    expect(
-      isMutualAgreementCashInvoice({
-        payment_form: '2',
-        payment_means_code: 'ZZZ',
-        customer_tax_id: '800177119',
-      }),
-    ).toBe(false);
+    // Facturas persistidas reales: traen el adquiriente, que el predicado ignora.
+    const persisted = (
+      payment_form: string,
+      payment_means_code: string,
+      customer_tax_id: string,
+    ) => ({ payment_form, payment_means_code, customer_tax_id });
+
+    expect(isMutualAgreementCashInvoice(persisted('1', 'ZZZ', '222222222222'))).toBe(true);
+    expect(isMutualAgreementCashInvoice(persisted('1', 'ZZZ', '800177119'))).toBe(true);
+    expect(isMutualAgreementCashInvoice(persisted('1', '10', '222222222222'))).toBe(false);
+    expect(isMutualAgreementCashInvoice(persisted('2', 'ZZZ', '800177119'))).toBe(false);
   });
 });
