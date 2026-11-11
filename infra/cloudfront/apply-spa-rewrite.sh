@@ -75,7 +75,7 @@ print("%s:%s" % (r["statusCode"], r["headers"]["location"]["value"]) if r else o
 /order/0b6f5c1e-2d3a-4e5f-8a9b-1c2d3e4f5a6b /index.html
 /pedido/0b6f5c1e-2d3a-4e5f-8a9b-1c2d3e4f5a6b /index.html
 /seguimiento-servicio/AbC_d-123 /index.html
-/ /index.html
+/ /marketing/index.html
 /main-ABC123.js /main-ABC123.js
 /assets/logo.png /assets/logo.png
 /favicon.ico /favicon.ico
