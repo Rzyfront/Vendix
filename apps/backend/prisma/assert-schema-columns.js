@@ -268,6 +268,35 @@ const REQUIRED_ENUM_VALUES = {
 const REQUIRED_INDEXES = ['refunds_ar_payment_id_key'];
 const REQUIRED_FOREIGN_KEYS = ['refunds_ar_payment_id_fkey'];
 
+/**
+ * Índices que además de existir deben ser PARCIALES (llevar `WHERE`).
+ *
+ * `production_orders_order_id_product_id_product_variant_id_key` (migración
+ * 20261128090000) es único con NULLS NOT DISTINCT y `WHERE order_id IS NOT
+ * NULL`. Sin la cláusula parcial dejaría de permitir dos órdenes manuales del
+ * mismo producto; sin el índice, la venta podría abrir dos órdenes de
+ * producción del mismo plato. Un `CREATE INDEX IF NOT EXISTS` previo con otra
+ * forma (o una migración saltada) pasa el chequeo de existencia, por eso se
+ * lee la definición.
+ */
+const REQUIRED_PARTIAL_INDEXES = [
+  'production_orders_order_id_product_id_product_variant_id_key',
+];
+
+/**
+ * Devuelve la descripción de cada índice parcial requerido que falta o que
+ * existe sin `WHERE`. `rows` son filas `{ indexname, indexdef }` de pg_indexes.
+ */
+function findBrokenPartialIndexes(rows, required = REQUIRED_PARTIAL_INDEXES) {
+  const defs = new Map(rows.map((r) => [r.indexname, String(r.indexdef || '')]));
+  return required.flatMap((name) => {
+    if (!defs.has(name)) return [`índice parcial ${name} (no existe)`];
+    return /\sWHERE\s/i.test(defs.get(name))
+      ? []
+      : [`índice ${name} existe pero NO es parcial (sin cláusula WHERE)`];
+  });
+}
+
 async function main() {
   const connectionString = process.env.DATABASE_URL;
   if (!connectionString) {
@@ -299,7 +328,7 @@ async function main() {
            JOIN pg_enum e ON e.enumtypid = t.oid
           WHERE t.typtype = 'e'`,
       );
-    const indexes = await client.query(`SELECT indexname FROM pg_indexes WHERE schemaname = current_schema()`);
+    const indexes = await client.query(`SELECT indexname, indexdef FROM pg_indexes WHERE schemaname = current_schema()`);
     const foreignKeys = await client.query(`SELECT conname FROM pg_constraint WHERE contype = 'f' AND connamespace = current_schema()::regnamespace`);
 
     const haveColumns = new Set(
@@ -337,6 +366,7 @@ async function main() {
       ...REQUIRED_FOREIGN_KEYS.filter((f) => !haveForeignKeys.has(f)).map(
         (f) => `clave foránea ${f}`,
       ),
+      ...findBrokenPartialIndexes(indexes.rows),
     ];
 
     if (missing.length > 0) {
@@ -362,7 +392,7 @@ async function main() {
     console.log(
       `✅ Esquema verificado contra la base: ${REQUIRED_COLUMNS.length} columnas, ` +
         `${REQUIRED_TABLES.length} tabla(s), ${REQUIRED_ENUM_TYPES.length} tipo(s) enum ` +
-        `${enumValueCount} valor(es) de enum, ${REQUIRED_INDEXES.length} índice(s) ` +
+        `${enumValueCount} valor(es) de enum, ${REQUIRED_INDEXES.length + REQUIRED_PARTIAL_INDEXES.length} índice(s) ` +
         `y ${REQUIRED_FOREIGN_KEYS.length} clave(s) foránea(s) presentes.`,
     );
   } finally {
@@ -370,7 +400,11 @@ async function main() {
   }
 }
 
-main().catch((error) => {
-  console.error(`\n❌ VERIFICACIÓN DE ESQUEMA FALLIDA\n\n${error.message}\n`);
-  process.exit(1);
-});
+if (require.main === module) {
+  main().catch((error) => {
+    console.error(`\n❌ VERIFICACIÓN DE ESQUEMA FALLIDA\n\n${error.message}\n`);
+    process.exit(1);
+  });
+}
+
+module.exports = { findBrokenPartialIndexes, REQUIRED_PARTIAL_INDEXES };
