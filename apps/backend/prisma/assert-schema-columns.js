@@ -285,15 +285,21 @@ const REQUIRED_PARTIAL_INDEXES = [
 
 /**
  * Devuelve la descripción de cada índice parcial requerido que falta o que
- * existe sin `WHERE`. `rows` son filas `{ indexname, indexdef }` de pg_indexes.
+ * existe sin `UNIQUE`, sin `NULLS NOT DISTINCT` o sin `WHERE`. `rows` son filas `{ indexname, indexdef }` de pg_indexes.
  */
 function findBrokenPartialIndexes(rows, required = REQUIRED_PARTIAL_INDEXES) {
   const defs = new Map(rows.map((r) => [r.indexname, String(r.indexdef || '')]));
   return required.flatMap((name) => {
     if (!defs.has(name)) return [`índice parcial ${name} (no existe)`];
-    return /\sWHERE\s/i.test(defs.get(name))
+    const def = defs.get(name);
+    const missing = [
+      !/^\s*CREATE\s+UNIQUE\s+INDEX\b/i.test(def) && 'UNIQUE',
+      !/\sNULLS\s+NOT\s+DISTINCT\b/i.test(def) && 'NULLS NOT DISTINCT',
+      !/\sWHERE\s/i.test(def) && 'cláusula WHERE (parcial)',
+    ].filter(Boolean);
+    return missing.length === 0
       ? []
-      : [`índice ${name} existe pero NO es parcial (sin cláusula WHERE)`];
+      : [`índice ${name} existe sin: ${missing.join(', ')}`];
   });
 }
 

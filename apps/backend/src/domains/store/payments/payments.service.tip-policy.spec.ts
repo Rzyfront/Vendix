@@ -91,4 +91,12 @@ describe('PaymentsService.assertPosTipPolicy', () => {
     await svc.isRestaurantStore(shared, 1);
     expect(industryReads(shared)).toBe(2);
   });
+
+  it('S12: un cliente de larga vida distinto (con $transaction, p. ej. withoutScope) tampoco memoiza', async () => {
+    const svc = build();
+    const longLived = Object.assign(txWith(['restaurant']), { $transaction: jest.fn() });
+    await svc.isRestaurantStore(longLived, 1);
+    await svc.isRestaurantStore(longLived, 1);
+    expect(industryReads(longLived)).toBe(2);
+  });
 });

@@ -1750,9 +1750,9 @@ export class PaymentsService {
         // exactamente la misma que decide el estado de la orden.
         // ----------------------------------------------------------------
         if (!createPosPaymentDto.is_draft) {
-          // Resolve industries once per call (no cache to keep the patch
-          // safe; the per-payment cost is one extra small query).
-          if (await this.isRestaurantStore(tx, createPosPaymentDto.store_id)) {
+          // S12: la industria se lee una vez por venta (memo por tx); el
+          // store_id de la orden es el mismo que el del cobro.
+          if (await this.isRestaurantStore(tx, order.store_id)) {
             // Collect candidate order_item_ids: all `prepared` items
             // with skip_kds=false. Persisted items already carry the
             // product_type via the products relation; we re-load the
@@ -4277,9 +4277,9 @@ export class PaymentsService {
 
   /**
    * S12: la industria de la tienda se lee UNA vez por transacción de venta.
-   * Se memoiza por `tx` (un cliente transaccional vive lo que dura la venta);
-   * fuera de una transacción (`tx` es el cliente compartido) no se memoiza,
-   * para no servir un valor viejo.
+   * Se memoiza por `tx` (un cliente transaccional vive lo que dura la venta).
+   * Un cliente de larga vida (el compartido, uno con alcance o `withoutScope`)
+   * expone `$transaction`; con él no se memoiza, para no servir un valor viejo.
    */
   private restaurantByTx?: WeakMap<object, Map<number, Promise<boolean>>>;
 
@@ -4291,7 +4291,7 @@ export class PaymentsService {
       });
       return storeIsRestaurant(store?.industries);
     };
-    if (tx === this.prisma) return read();
+    if (tx === this.prisma || typeof tx?.$transaction === 'function') return read();
     const memo = (this.restaurantByTx ??= new WeakMap());
     let perStore = memo.get(tx);
     if (!perStore) {

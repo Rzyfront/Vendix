@@ -16,6 +16,7 @@ import {
 } from '../interfaces';
 import { ProductionClockService } from './production-clock.service';
 import {
+  PRODUCTION_DAY_MAX_LIMIT,
   PRODUCTION_DAY_PAGE_SIZE,
   mergeDayPage,
   sortDayCards,
@@ -147,17 +148,18 @@ export class ProductionOrdersService {
   /**
    * The whole day: follows `next_cursor` until it is `null` and merges the
    * pages by card `key`. For screens that need every order at once (Producción
-   * activa: the timeline must show every in-progress order). Unsubscribing
-   * cancels the page in flight.
+   * activa: the timeline must show every in-progress order). Pages use the
+   * server maximum (500), so a normal day is still one request, as before
+   * pagination. Unsubscribing cancels the page in flight.
    */
   getDayAllPages(
     date: string,
     scope: ProductionApiScope = 'restaurant',
   ): Observable<ProductionDayResponse> {
-    return this.getDayPage(date, scope, null).pipe(
-      expand((res) =>
-        res.next_cursor ? this.getDayPage(date, scope, res.next_cursor) : EMPTY,
-      ),
+    const page = (cursor: string | null) =>
+      this.getDay(date, scope, { limit: PRODUCTION_DAY_MAX_LIMIT, cursor });
+    return page(null).pipe(
+      expand((res) => (res.next_cursor ? page(res.next_cursor) : EMPTY)),
       reduce<ProductionDayResponse, ProductionDayResponse | null>(
         (acc, page) => (acc ? mergeDayPage(acc, page) : { ...page, cards: sortDayCards(page.cards) }),
         null,
