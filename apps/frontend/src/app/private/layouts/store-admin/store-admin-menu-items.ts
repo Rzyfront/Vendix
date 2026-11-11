@@ -347,6 +347,13 @@ export const STORE_ADMIN_MENU_ITEMS: readonly MenuItem[] = [
         panelUiKey: 'orders_reservations',
       },
       {
+        // Same panel_ui module as "Reservas": providers are who attends the bookings.
+        label: 'Equipo de Servicio',
+        icon: 'user-cog',
+        route: '/admin/reservations/schedules',
+        panelUiKey: 'orders_reservations',
+      },
+      {
         label: 'Pedidos programados',
         icon: 'calendar-clock',
         route: '/admin/scheduled-orders',

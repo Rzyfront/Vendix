@@ -180,6 +180,11 @@ export class ScheduleManagementComponent {
   liveWeeklyHours = signal<number | null>(null);
   liveActiveDays = signal<number | null>(null);
 
+  // Display name editing
+  editingName = signal(false);
+  nameValue = signal('');
+  savingName = signal(false);
+
   // Bio editing
   editingBio = signal(false);
   bioValue = signal('');
@@ -450,6 +455,49 @@ export class ScheduleManagementComponent {
       error: () =>
         this.toastService.error('Error al actualizar asignacion de servicio'),
     });
+  }
+
+  startEditName(): void {
+    const provider = this.selectedProvider();
+    if (!provider) return;
+    this.nameValue.set(providerDisplayName(provider));
+    this.editingName.set(true);
+  }
+
+  cancelEditName(): void {
+    this.editingName.set(false);
+  }
+
+  saveName(): void {
+    const provider = this.selectedProvider();
+    const display_name = this.nameValue().trim();
+    if (!provider || this.savingName()) return;
+    if (!display_name) {
+      this.toastService.error('El nombre visible no puede quedar vacío');
+      return;
+    }
+
+    this.savingName.set(true);
+    this.reservationsService
+      .updateProvider(provider.id, { display_name })
+      .pipe(
+        takeUntilDestroyed(this.destroyRef),
+        finalize(() => this.savingName.set(false)),
+      )
+      .subscribe({
+        next: (updated) => {
+          this.selectedProvider.set(updated);
+          this.providers.set(
+            this.providers().map((p) => (p.id === updated.id ? updated : p)),
+          );
+          this.editingName.set(false);
+          this.toastService.success('Nombre actualizado');
+        },
+        error: (err) =>
+          this.toastService.error(
+            extractApiErrorMessage(err) || 'Error al guardar el nombre',
+          ),
+      });
   }
 
   startEditBio(): void {
