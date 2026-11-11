@@ -7078,6 +7078,13 @@ export const ErrorCodes = {
     httpStatus: 409,
     devMessage: 'Transición de estado inválida para la orden de producción',
   },
+  // S19: "Iniciar"/"Finalizar" la tarjeta de una venta con todas sus órdenes
+  // fallidas. `details.failed` trae el motivo de cada orden.
+  PRODUCTION_SALE_MOVE_FAILED: {
+    code: 'PRODUCTION_SALE_MOVE_FAILED',
+    httpStatus: 409,
+    devMessage: 'Ninguna orden de producción de la venta pudo avanzar',
+  },
   PRODUCTION_ORDER_CONCURRENT_UPDATE: {
     code: 'PRODUCTION_ORDER_CONCURRENT_UPDATE',
     httpStatus: 409,

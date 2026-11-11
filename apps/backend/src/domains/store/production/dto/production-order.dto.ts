@@ -175,4 +175,21 @@ export class ProductionDayQueryDto {
   @IsString()
   @Matches(/^\d{4}-\d{2}-\d{2}$/, { message: 'date debe tener el formato YYYY-MM-DD' })
   date?: string;
+
+  /**
+   * Tamaño de página (1..500). Sin `limit` el tamaño es 500: un cliente en
+   * caché recibe lo mismo que antes de la paginación.
+   */
+  @IsOptional()
+  @Type(() => Number)
+  @IsInt()
+  @Min(1)
+  @Max(500)
+  limit?: number;
+
+  /** Cursor opaco que devolvió la página anterior (`next_cursor`). */
+  @IsOptional()
+  @IsString()
+  @MaxLength(512)
+  cursor?: string;
 }
