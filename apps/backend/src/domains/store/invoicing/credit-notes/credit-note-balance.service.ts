@@ -231,6 +231,9 @@ export function buildCreditNoteCandidate(
   };
 }
 
+/** Órdenes cuya NC total es de devolución/cancelación: nunca se refacturan. */
+const RELEASE_BLOCKED_ORDER_STATES: ReadonlySet<string> = new Set(['refunded', 'cancelled']);
+
 @Injectable()
 export class CreditNoteBalanceService {
   constructor(private readonly prisma: StorePrismaService) {}
@@ -290,6 +293,14 @@ export class CreditNoteBalanceService {
     for (const line of remaining.lines.values()) {
       if (!line.remaining_total.isZero()) return false;
     }
+    // Una venta devuelta o cancelada también lleva NC total (reembolso), pero
+    // no se vuelve a facturar: sólo libera la NC que corrige una venta viva.
+    const owner = await this.prisma.invoices.findFirst({
+      where: { id: sourceId },
+      select: { order: { select: { state: true } } },
+    });
+    const order_state = owner?.order?.state;
+    if (order_state && RELEASE_BLOCKED_ORDER_STATES.has(order_state)) return false;
     return true;
   }
 

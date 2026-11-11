@@ -275,6 +275,31 @@ describe('CreditNoteBalanceService', () => {
       ).resolves.toBe(false);
     });
 
+    it.each(['refunded', 'cancelled'])(
+      'is false when the order is %s: a refund/cancel credit note never releases it for re-invoicing',
+      async (state) => {
+        const prior = fullNote({ status: 'accepted', transmission_status: 'accepted', dian_status: 'accepted', accepted_at: NOW });
+        const harness = createHarness({
+          parent: { ...invoice(), order: { state } } as ReturnType<typeof invoice>,
+          notes: [prior],
+        });
+        await expect(
+          runInStoreContext(() => harness.service.isFullyReversedByAcceptedNotes(PARENT_ID)),
+        ).resolves.toBe(false);
+      },
+    );
+
+    it('is true for a finished order fully reversed by accepted notes (holder correction)', async () => {
+      const prior = fullNote({ status: 'accepted', transmission_status: 'accepted', dian_status: 'accepted', accepted_at: NOW });
+      const harness = createHarness({
+        parent: { ...invoice(), order: { state: 'finished' } } as ReturnType<typeof invoice>,
+        notes: [prior],
+      });
+      await expect(
+        runInStoreContext(() => harness.service.isFullyReversedByAcceptedNotes(PARENT_ID)),
+      ).resolves.toBe(true);
+    });
+
     it('is false for a partial accepted note', async () => {
       const prior = note({ status: 'accepted', transmission_status: 'accepted', dian_status: 'accepted', accepted_at: NOW });
       const harness = createHarness({ notes: [prior] });
