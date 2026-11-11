@@ -125,7 +125,7 @@ import {
 import { tryResolveInvoiceControl } from '../../../../common/helpers/invoice-control.helper';
 import { assertNoteOriginalHasNoAcceptedRadianEvent } from '../utils/invoice-radian-note-coherence';
 import { markContractFiscalAcceptance } from '../../contracts/contract-invoice-lifecycle';
-import { isMutualAgreementFinalConsumerInvoice } from '../../payments/order-payment-means.contract';
+import { isMutualAgreementCashInvoice } from '../../payments/order-payment-means.contract';
 import { recordTriggerEvent } from '../../workflows/engine/workflow-trigger.outbox';
 import { consumeApproval } from '../../workflows/gates/approval-gate';
 import { enforceInvoiceVoidApproval } from '../invoice-approval-gate';
@@ -1095,9 +1095,9 @@ export class InvoiceFlowService {
     customer_tax_id?: string | null;
   }): Promise<string | null> {
     if (invoice.order_id == null) return null;
-    // Consumidor final de contado «Acuerdo mutuo»: el cajero decidió emitirla
+    // Contado «Acuerdo mutuo» (nominativa o Consumidor final): el cajero decidió emitirla
     // sin el pago registrado (la orden conserva su saldo y se cobra después).
-    if (isMutualAgreementFinalConsumerInvoice(invoice)) return null;
+    if (isMutualAgreementCashInvoice(invoice)) return null;
     if (
       !['sales_invoice', 'export_invoice', 'pos_equivalent_document'].includes(
         String(invoice.invoice_type),

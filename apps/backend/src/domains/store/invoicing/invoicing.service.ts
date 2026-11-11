@@ -63,7 +63,7 @@ import {
 import { DIAN_INVOICE_OPERATION_TYPES } from './providers/dian-direct/constants/dian-document-types';
 import {
   isMutualAgreementCash,
-  isMutualAgreementFinalConsumerInvoice,
+  isMutualAgreementCashInvoice,
   MUTUAL_AGREEMENT_CASH_MEANS,
   ORDER_PAYMENT_MEANS_INCLUDE,
   resolveOrderDianPaymentMeans,
@@ -320,10 +320,10 @@ export interface CreateFromOrderOptions {
    */
   force_final_consumer?: boolean;
   /**
-   * Con `force_final_consumer` sobre una orden sin cobrar: la factura sale de
-   * CONTADO con medio de pago «Acuerdo mutuo» (ZZZ) aunque no haya pago
-   * registrado. La orden no cambia (su saldo sigue pendiente). Sin
-   * `force_final_consumer` se ignora: sólo Consumidor final sale así.
+   * Orden sin cobrar facturada de CONTADO con medio de pago «Acuerdo mutuo»
+   * (ZZZ) aunque no haya pago registrado. La orden no cambia (su saldo sigue
+   * pendiente). El adquiriente no depende de esta bandera: es el titular de la
+   * orden, o Consumidor final si además llega `force_final_consumer`.
    */
   cash_by_mutual_agreement?: boolean;
   /**
@@ -4002,7 +4002,7 @@ export class InvoicingService {
       },
     });
     if (!invoice || !['draft', 'validated'].includes(invoice.status)) return;
-    if (isMutualAgreementFinalConsumerInvoice(invoice)) return;
+    if (isMutualAgreementCashInvoice(invoice)) return;
 
     const order = await this.prisma.orders.findFirst({
       where: { id: order_id },

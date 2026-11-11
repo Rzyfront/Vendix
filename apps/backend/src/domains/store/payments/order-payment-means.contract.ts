@@ -7,7 +7,6 @@ import {
   DianPaymentMethodCode,
   isDianPaymentMeansCode,
 } from '../invoicing/providers/dian-direct/constants/dian-document-types';
-import { DIAN_FINAL_CONSUMER_DOCUMENT_NUMBER } from '../invoicing/validators/customer-fiscal-identity.validator';
 
 /**
  * CONTRATO DEL MEDIO DE PAGO DE UNA ORDEN
@@ -289,37 +288,42 @@ export function resolveOrderDianPaymentMeans(
 }
 
 /**
- * CONSUMIDOR FINAL SIN COBRAR — contado con medio «Acuerdo mutuo» (ZZZ).
+ * FACTURA SIN COBRAR DE CONTADO — medio «Acuerdo mutuo» (ZZZ).
  *
- * Una orden sin pago registrado que el cajero decide facturar a Consumidor
- * final (no quiere crédito) sale de contado declarando que las partes acordaron
- * el medio de pago. Es la ÚNICA factura de contado que la puerta de pago deja
- * emitir con saldo pendiente: la orden no cambia y su saldo se cobra después.
+ * Una orden sin pago registrado que el cajero decide facturar de contado (no
+ * quiere crédito) declara que las partes acordaron el medio de pago. Es la
+ * ÚNICA factura de contado que la puerta de pago deja emitir con saldo
+ * pendiente: la orden no cambia y su saldo se cobra después. El adquiriente es
+ * el titular de la orden cuando está completo; Consumidor final sólo cuando la
+ * orden no tiene a nadie identificable.
  */
 export const MUTUAL_AGREEMENT_CASH_MEANS = {
   payment_form: DIAN_PAYMENT_METHODS.CASH,
   payment_means_code: DIAN_PAYMENT_MEANS.MUTUAL_AGREEMENT,
 } as const satisfies OrderDianPaymentMeans;
 
-/** El emisor pidió Consumidor final de contado «Acuerdo mutuo» (ambas banderas). */
+/**
+ * El emisor pidió contado «Acuerdo mutuo». Lo decide sólo
+ * `cash_by_mutual_agreement`: `force_final_consumer` elige el adquiriente, no
+ * el medio de pago.
+ */
 export function isMutualAgreementCash(
   opts?: { force_final_consumer?: boolean; cash_by_mutual_agreement?: boolean } | null,
 ): boolean {
-  return opts?.force_final_consumer === true && opts.cash_by_mutual_agreement === true;
+  return opts?.cash_by_mutual_agreement === true;
 }
 
 /**
- * La factura ya persistida es Consumidor final de contado «Acuerdo mutuo»: la
- * puerta de pago de la emisión (`invoice-flow`) la deja pasar con saldo.
+ * La factura ya persistida es de contado «Acuerdo mutuo» (nominativa o de
+ * Consumidor final): la puerta de pago de la emisión (`invoice-flow`) la deja
+ * pasar con saldo y el refresco del medio de pago no la reescribe.
  */
-export function isMutualAgreementFinalConsumerInvoice(invoice: {
+export function isMutualAgreementCashInvoice(invoice: {
   payment_form?: string | null;
   payment_means_code?: string | null;
-  customer_tax_id?: string | null;
 }): boolean {
   return (
     invoice.payment_form === MUTUAL_AGREEMENT_CASH_MEANS.payment_form &&
-    invoice.payment_means_code === MUTUAL_AGREEMENT_CASH_MEANS.payment_means_code &&
-    invoice.customer_tax_id === DIAN_FINAL_CONSUMER_DOCUMENT_NUMBER
+    invoice.payment_means_code === MUTUAL_AGREEMENT_CASH_MEANS.payment_means_code
   );
 }

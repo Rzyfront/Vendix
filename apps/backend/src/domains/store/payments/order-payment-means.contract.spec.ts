@@ -1,4 +1,6 @@
 import {
+  isMutualAgreementCash,
+  isMutualAgreementCashInvoice,
   OrderForPaymentMeans,
   OrderPaymentForMeans,
   ORDER_PAYMENT_MEANS_INCLUDE,
@@ -308,5 +310,47 @@ describe('order-payment-means.contract', () => {
         payment_means_code: '1',
       });
     });
+  });
+});
+
+describe('contado «Acuerdo mutuo» (ZZZ)', () => {
+  it('lo pide la bandera de contado sola: con o sin Consumidor final forzado', () => {
+    expect(isMutualAgreementCash({ cash_by_mutual_agreement: true })).toBe(true);
+    expect(
+      isMutualAgreementCash({ force_final_consumer: true, cash_by_mutual_agreement: true }),
+    ).toBe(true);
+    expect(isMutualAgreementCash({ force_final_consumer: true })).toBe(false);
+    expect(isMutualAgreementCash(undefined)).toBe(false);
+  });
+
+  it('la factura persistida de contado ZZZ se reconoce sea de Consumidor final o nominativa', () => {
+    expect(
+      isMutualAgreementCashInvoice({
+        payment_form: '1',
+        payment_means_code: 'ZZZ',
+        customer_tax_id: '222222222222',
+      }),
+    ).toBe(true);
+    expect(
+      isMutualAgreementCashInvoice({
+        payment_form: '1',
+        payment_means_code: 'ZZZ',
+        customer_tax_id: '800177119',
+      }),
+    ).toBe(true);
+    expect(
+      isMutualAgreementCashInvoice({
+        payment_form: '1',
+        payment_means_code: '10',
+        customer_tax_id: '222222222222',
+      }),
+    ).toBe(false);
+    expect(
+      isMutualAgreementCashInvoice({
+        payment_form: '2',
+        payment_means_code: 'ZZZ',
+        customer_tax_id: '800177119',
+      }),
+    ).toBe(false);
   });
 });

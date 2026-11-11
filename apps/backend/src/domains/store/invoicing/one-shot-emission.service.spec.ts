@@ -366,6 +366,7 @@ describe('OneShotEmissionService', () => {
             remaining_balance: '1000.00',
             credit_eligible: true,
             credit_blocker: null,
+            holder_identified: false,
           },
         }),
       });
@@ -926,17 +927,29 @@ describe('OneShotEmissionService', () => {
       expect(order_writes.some((d: any) => 'payment_form' in d || 'state' in d)).toBe(false);
     });
 
-    it('A5: orden sin cobrar con cliente COMPLETO + allow_final_consumer (rechazó el crédito): contado «Acuerdo mutuo» a Consumidor final', async () => {
+    it('A5: orden sin cobrar con cliente COMPLETO + allow_final_consumer (rechazó el crédito): contado «Acuerdo mutuo» a nombre del cliente, no a Consumidor final', async () => {
       const { service, invoicing, receivables } = build({
         order: baseOrder({ payments: [], state: 'finished' }),
       });
       const r = await service.emitOrder(1, undefined, { force_final_consumer: true });
       expect(r.state).toBe('issued');
       expect(invoicing.createFromOrder).toHaveBeenCalledWith(1, {
-        force_final_consumer: true,
         cash_by_mutual_agreement: true,
       });
       expect(receivables.createCreditSaleFromEvent).not.toHaveBeenCalled();
+    });
+
+    it('A5: el 409 de saldo informa si la orden tiene un titular completo (holder_identified)', async () => {
+      const complete = build({ order: baseOrder({ payments: [], state: 'finished' }) });
+      const err_complete: any = await complete.service.emitOrder(1).catch((e) => e);
+      expect(err_complete.getResponse().details).toMatchObject({ holder_identified: true });
+
+      const anonymous = build({
+        order: baseOrder({ customer_id: null, users: null, payments: [], state: 'finished' }),
+      });
+      const err_anonymous: any = await anonymous.service.emitOrder(1).catch((e) => e);
+      expect(err_anonymous.errorCode).toBe(ErrorCodes.INVOICING_ORDER_UNPAID_001.code);
+      expect(err_anonymous.getResponse().details).toMatchObject({ holder_identified: false });
     });
 
     it('A5: orden sin cobrar SIN cliente + allow_final_consumer: contado «Acuerdo mutuo» (antes: «asigna un cliente»)', async () => {

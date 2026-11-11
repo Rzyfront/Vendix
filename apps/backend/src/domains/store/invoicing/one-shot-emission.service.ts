@@ -25,6 +25,7 @@ import {
   isCfOverridable,
   isFinalConsumerCustomer,
   isUnidentifiedHolder,
+  OrderHolderSourceRows,
 } from './utils/order-acquirer-holder.util';
 import { OrderLeaseService } from '../../../common/locks/order-lease.service';
 
@@ -58,6 +59,15 @@ function isCodPromise(payment: { state: string | null } & CodPromiseProbe): bool
     payment.state === 'pending' &&
     payment.store_payment_method?.system_payment_method?.processing_mode === 'ON_DELIVERY'
   );
+}
+
+/**
+ * La orden tiene un titular con datos completos para una factura nominativa:
+ * misma evaluación que `createFromOrder` (`evaluateOrderHolder`).
+ */
+function isIdentifiedHolder(order: OrderHolderSourceRows): boolean {
+  const holder = evaluateOrderHolder(order);
+  return holder.source !== 'none' && holder.rail === 'nominative' && !holder.issue;
 }
 
 export type OneShotEmissionState = 'issued' | 'pending' | 'failed';
@@ -308,6 +318,9 @@ export class OneShotEmissionService {
           remaining_balance: remaining.toFixed(2),
           credit_eligible: offered === null,
           credit_blocker: offered,
+          // La UI nombra la salida de contado: a nombre del titular o a
+          // Consumidor final (la completitud la decide sólo el backend).
+          holder_identified: isIdentifiedHolder(order),
         },
       );
     }
@@ -427,18 +440,21 @@ export class OneShotEmissionService {
   }
 
   /**
-   * Consumidor final pedido explícitamente sobre una orden SIN cobrar cuyo
-   * titular no necesita el bloqueo (cliente completo o sin cliente): el cajero
-   * rechazó el crédito, así que sale de contado «Acuerdo mutuo» (ZZZ). En una
-   * orden pagada con cliente completo la bandera sigue ignorándose (la factura
+   * Contado pedido explícitamente (`allow_final_consumer`) sobre una orden SIN
+   * cobrar cuyo titular no necesita el bloqueo: el cajero rechazó el crédito,
+   * así que sale de contado «Acuerdo mutuo» (ZZZ). Con un titular completo la
+   * factura sale A SU NOMBRE (sólo `cash_by_mutual_agreement`); Consumidor
+   * final sólo cuando la orden no tiene a nadie identificable. En una orden
+   * pagada con cliente completo la bandera sigue ignorándose (la factura
    * nominativa es mejor), y una venta ya a crédito, una orden cancelada o una
    * emisión pedida a crédito nunca salen así.
    */
   private resolveFinalConsumerCash(
-    order: Parameters<typeof computeOrderUnpaidBalance>[0] & {
-      state: string;
-      payment_form: string | null;
-    },
+    order: Parameters<typeof computeOrderUnpaidBalance>[0] &
+      OrderHolderSourceRows & {
+        state: string;
+        payment_form: string | null;
+      },
     gate: HolderForce | undefined,
     emit_options: Pick<CreateFromOrderOptions, 'force_final_consumer'> | undefined,
     credit_requested: boolean,
@@ -449,6 +465,7 @@ export class OneShotEmissionService {
     }
     const { remaining } = computeOrderUnpaidBalance(order);
     if (remaining.lessThan(0.01)) return undefined;
+    if (isIdentifiedHolder(order)) return { cash_by_mutual_agreement: true };
     return { force_final_consumer: true, cash_by_mutual_agreement: true };
   }
 
