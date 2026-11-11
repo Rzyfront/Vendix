@@ -1,0 +1,33 @@
+.sector-ctas {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.75rem;
+  margin: 1.5rem 0;
+}
+
+.sector-cta {
+  display: inline-flex;
+  align-items: center;
+  min-height: 44px;
+  padding: 0.6rem 1.1rem;
+  border: 1px solid var(--color-border, #d1d5db);
+  border-radius: 0.6rem;
+  font-weight: 600;
+  text-decoration: none;
+  color: inherit;
+}
+
+.sector-cta--primary {
+  background: #006c49;
+  border-color: #006c49;
+  color: #fff;
+}
+
+.sector-cta:focus-visible {
+  outline: 3px solid #10b981;
+  outline-offset: 2px;
+}
+
+.sector-steps li {
+  margin-bottom: 0.6rem;
+}

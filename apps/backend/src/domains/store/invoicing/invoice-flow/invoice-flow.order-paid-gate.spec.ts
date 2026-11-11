@@ -95,16 +95,14 @@ describe('invoice-flow · puerta de orden pagada (INVOICING_ORDER_UNPAID_001)', 
     ).resolves.toBeUndefined();
   });
 
-  it('contado «Acuerdo mutuo» con cliente identificado (no Consumidor final) → sigue bloqueando', async () => {
+  it('contado «Acuerdo mutuo» a nombre del cliente identificado (no Consumidor final) sin pagos → pasa', async () => {
     const service = build({ grand_total: dec('66000'), payment_form: '1', payments: [] });
 
-    const error: any = await service
-      .assertOrderPaidForEmission(
+    await expect(
+      service.assertOrderPaidForEmission(
         invoice({ payment_form: '1', payment_means_code: 'ZZZ', customer_tax_id: '900123456' }),
-      )
-      .catch((e) => e);
-
-    expect(error.errorCode).toBe('INVOICING_ORDER_UNPAID_001');
+      ),
+    ).resolves.toBeUndefined();
   });
 
   it('Consumidor final de contado con otro medio (efectivo) sin pagos → sigue bloqueando', async () => {

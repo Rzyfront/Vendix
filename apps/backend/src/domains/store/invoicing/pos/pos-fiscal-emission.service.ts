@@ -12,6 +12,7 @@ import { PosFiscalState, PosFiscalStatus } from './pos-fiscal-status.interface';
 import { INVOICE_AUTO_SEND_FAILED_ALERT } from './presential-pos-sale';
 // Plan order-truth-and-invoice-tz (Step 6) — writer único de order_events.
 import { OrderHistoryService } from '../../orders/order-history/order-history.service';
+import { CreditNoteBalanceService } from '../credit-notes/credit-note-balance.service';
 
 /**
  * El tipo de evento con el que queda anotada una venta cobrada que se quedó
@@ -86,6 +87,9 @@ export class PosFiscalEmissionService {
     private readonly fiscal_scope: FiscalScopeService,
     // Sin ciclo: OrderHistoryModule solo importa PrismaModule.
     private readonly orderHistory: OrderHistoryService,
+    // S4: detecta la factura aceptada revertida por completo con NC aceptadas.
+    // Mismo módulo (InvoicingModule); opcional para specs existentes.
+    private readonly creditNoteBalance?: CreditNoteBalanceService,
   ) {}
 
   /**
@@ -228,7 +232,10 @@ export class PosFiscalEmissionService {
     try {
       if (status && status.state !== 'failed') return;
       const current = await this.findLatestSalesInvoice(order_id);
-      if (current?.status === 'accepted') {
+      if (
+        current?.status === 'accepted' &&
+        !(await this.isFullyReversedAccepted(current))
+      ) {
         await this.clearAutoSendFailedAlert(order_id);
         return;
       }
@@ -312,6 +319,13 @@ export class PosFiscalEmissionService {
     // Borrador descartado por un intento fallido anterior de la emisión en un
     // paso: no es una anulación deliberada, se vuelve a crear.
     if (opts?.recreate_after_discard && existing?.status === 'cancelled') {
+      existing = null;
+    }
+
+    // S4: una factura aceptada revertida por completo con notas crédito
+    // ACEPTADAS ya no es «la factura de la orden»: se emite una nueva (la fila
+    // original conserva su estado). Solo en la factura de la orden, no de cuenta.
+    if (account_id === null && (await this.isFullyReversedAccepted(existing))) {
       existing = null;
     }
 
@@ -547,6 +561,13 @@ export class PosFiscalEmissionService {
   // ---------------------------------------------------------------------------
   // Lectura
   // ---------------------------------------------------------------------------
+
+  private async isFullyReversedAccepted(
+    invoice: { id: number; status: string } | null,
+  ): Promise<boolean> {
+    if (invoice?.status !== 'accepted' || !this.creditNoteBalance) return false;
+    return this.creditNoteBalance.isFullyReversedByAcceptedNotes(invoice.id);
+  }
 
   /**
    * La factura de venta más reciente del pedido.

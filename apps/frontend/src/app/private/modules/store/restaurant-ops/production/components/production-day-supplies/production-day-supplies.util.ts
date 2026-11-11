@@ -21,8 +21,22 @@ export function shouldAutoOpenDaySummary(
   return wasOpen && isClosed && next.completed > 0;
 }
 
-/** Plain quantity: up to 3 decimals, es-CO separators; "—" when there is no value. */
-export function formatSupplyQty(value: number | null | undefined): string {
-  if (value == null || !Number.isFinite(value)) return '—';
-  return new Intl.NumberFormat('es-CO', { maximumFractionDigits: 3 }).format(value);
+/**
+ * Production quantity (supplies, and the orders of Planta): es-CO separators
+ * and up to 4 decimals, the precision `production_order_lines` stores, so the
+ * day panel, the summary and the order details read the same figure.
+ * Accepts the Decimal strings the API returns; "—" when there is no value.
+ */
+export function formatProductionQty(value: number | string | null | undefined): string {
+  if (value == null || value === '') return '—';
+  const n = Number(value);
+  if (!Number.isFinite(n)) return '—';
+  return new Intl.NumberFormat('es-CO', { maximumFractionDigits: 4 }).format(n);
+}
+
+/** Note for the finished orders of the day that have no consumption breakdown. */
+export function withoutBreakdownNote(count: number): string {
+  return count === 1
+    ? '1 orden del día se finalizó sin desglose de consumo.'
+    : `${count} órdenes del día se finalizaron sin desglose de consumo.`;
 }

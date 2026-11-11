@@ -39,7 +39,8 @@ jobs:
       # check-marketing-preview.cjs exige H1, enlaces, index/canonical/OG y que la
       # shell compartida dist/vendix/browser/index.html siga neutra.
       # Si este build falla (p. ej. la API de planes no responde), el deploy sigue y
-      # en S3 queda el /marketing/index.html anterior (la sincronización no lo borra).
+      # /marketing/index.html se reemplaza por la shell neutra del build actual: el HTML
+      # anterior referenciaría main-*.js/styles-*.css con hash que el sync --delete borra.
       - name: Build marketing HTML (SEO-TECH-02)
         id: marketing_html
         continue-on-error: true
@@ -99,7 +100,11 @@ jobs:
             --cache-control "public,max-age=0,must-revalidate" \
             --content-type "text/html"
           else
-            echo "::warning::HTML comercial no generado; se conserva el /marketing/index.html anterior."
+            echo "::warning::HTML comercial no generado; /marketing/index.html usa la shell neutra del build actual."
+            aws s3 cp apps/frontend/dist/vendix/browser/index.html \
+              s3://${{ env.S3_BUCKET }}/marketing/index.html \
+              --cache-control "public,max-age=0,must-revalidate" \
+            --content-type "text/html"
           fi
 
       - name: Invalidate CloudFront cache

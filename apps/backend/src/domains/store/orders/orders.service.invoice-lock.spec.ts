@@ -10,6 +10,9 @@ import { RequestContextService } from '@common/context/request-context.service';
  */
 describe('OrdersService — bloqueo por factura (ORD_INVOICED_LOCKED_001)', () => {
   const prisma: any = {
+    $transaction: jest.fn(async (arg: any) =>
+      typeof arg === 'function' ? arg(prisma) : Promise.all(arg),
+    ),
     orders: { findFirst: jest.fn(), update: jest.fn() },
     store_users: { findFirst: jest.fn() },
     invoices: { findFirst: jest.fn() },
