@@ -71,9 +71,17 @@ export class SubscriptionMetricsService {
       where: {
         state: 'paid',
         period_start: { lt: periodEnd },
-        period_end: { gt: periodStart },
+        // gte: an empty period (start == end == periodStart) is counted by
+        // recognizedShare, so the query must not drop it.
+        period_end: { gte: periodStart },
       },
-      select: { total: true, period_start: true, period_end: true },
+      select: {
+        total: true,
+        period_start: true,
+        period_end: true,
+        issued_at: true,
+        metadata: true,
+      },
     });
 
     const total = invoices
@@ -282,9 +290,15 @@ export class SubscriptionMetricsService {
       where: {
         state: 'paid',
         period_start: { lt: overallEnd },
-        period_end: { gt: overallStart },
+        period_end: { gte: overallStart },
       },
-      select: { total: true, period_start: true, period_end: true },
+      select: {
+        total: true,
+        period_start: true,
+        period_end: true,
+        issued_at: true,
+        metadata: true,
+      },
     });
 
     // Each month gets the share of every invoice whose service period overlaps
@@ -311,13 +325,30 @@ export class SubscriptionMetricsService {
   /**
    * Part of an invoice total that belongs to [from, to): total × overlap / service
    * period. A degenerate period (end <= start) counts whole if it starts inside.
+   * A prorated upgrade invoice stores the full cycle but its amount only covers
+   * the days left, so it is recognized from max(period_start, issued_at).
    */
   private recognizedShare(
-    inv: { total: Prisma.Decimal; period_start: Date; period_end: Date },
+    inv: {
+      total: Prisma.Decimal;
+      period_start: Date;
+      period_end: Date;
+      issued_at?: Date | null;
+      metadata?: unknown;
+    },
     from: number,
     to: number,
   ): Prisma.Decimal {
-    const start = inv.period_start.getTime();
+    const prorated =
+      (inv.metadata as { prorated?: boolean } | null | undefined)?.prorated ===
+      true;
+    let start = inv.period_start.getTime();
+    if (prorated && inv.issued_at) {
+      start = Math.min(
+        Math.max(start, inv.issued_at.getTime()),
+        inv.period_end.getTime(),
+      );
+    }
     const end = inv.period_end.getTime();
     const total = new Prisma.Decimal(inv.total);
     if (end <= start) {

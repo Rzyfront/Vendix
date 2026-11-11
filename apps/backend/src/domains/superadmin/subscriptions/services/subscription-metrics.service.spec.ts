@@ -52,7 +52,51 @@ describe('SubscriptionMetricsService', () => {
       expect(where.state).toBe('paid');
       // Overlap, not containment.
       expect(where.period_start.lt).toEqual(MARCH_END);
-      expect(where.period_end.gt).toEqual(MARCH_START);
+      // gte so the empty-period boundary (start == end == window start) matches
+      // the in-memory share, which counts it.
+      expect(where.period_end.gte).toEqual(MARCH_START);
+    });
+
+    it('recognizes a prorated upgrade invoice only from issued_at, not from the cycle start', async () => {
+      // Cycle 2026-03-01 → 2026-03-31 (30 days); upgrade issued on 03-16, so the
+      // 30,000 covers the last 15 days only (2,000/day).
+      const upgrade = {
+        total: new Prisma.Decimal(30000),
+        period_start: new Date('2026-03-01T00:00:00Z'),
+        period_end: new Date('2026-03-31T00:00:00Z'),
+        issued_at: new Date('2026-03-16T00:00:00Z'),
+        metadata: { prorated: true },
+      };
+      prisma.subscription_invoices.findMany.mockResolvedValue([upgrade]);
+
+      const firstHalf = await service.getMRR(
+        new Date('2026-03-01T00:00:00Z'),
+        new Date('2026-03-16T00:00:00Z'),
+      );
+      const secondHalf = await service.getMRR(
+        new Date('2026-03-16T00:00:00Z'),
+        new Date('2026-03-31T00:00:00Z'),
+      );
+      const whole = await service.getMRR(MARCH_START, new Date('2026-03-31T00:00:00Z'));
+
+      expect(firstHalf.value.toString()).toBe('0');
+      expect(secondHalf.value.toString()).toBe('30000');
+      expect(whole.value.toString()).toBe('30000');
+    });
+
+    it('keeps spreading non-prorated invoices over the full period even if issued late', async () => {
+      prisma.subscription_invoices.findMany.mockResolvedValue([
+        {
+          ...marchInvoice(30000),
+          issued_at: new Date('2026-03-16T00:00:00Z'),
+          metadata: { prorated: false },
+        },
+      ]);
+      const firstHalf = await service.getMRR(
+        new Date('2026-03-01T00:00:00Z'),
+        new Date('2026-03-16T00:00:00Z'),
+      );
+      expect(firstHalf.value.toString()).toBe('15000');
     });
 
     it('counts the overlapping share of invoices that run past the window (OPS-37: MRR was $0)', async () => {
@@ -122,7 +166,7 @@ describe('SubscriptionMetricsService', () => {
       ]);
       const where = prisma.subscription_invoices.findMany.mock.calls[0][0].where;
       expect(where.period_start.lt).toEqual(new Date('2026-12-01T00:00:00Z'));
-      expect(where.period_end.gt).toEqual(new Date('2026-10-01T00:00:00Z'));
+      expect(where.period_end.gte).toEqual(new Date('2026-10-01T00:00:00Z'));
     });
   });
 
@@ -171,6 +215,26 @@ describe('SubscriptionMetricsService', () => {
 
       expect(arpu.active_subs).toBe(10);
       expect(arpu.value.toString()).toBe('100000');
+    });
+
+    it('divides the 365-day MRR total by months (not the raw total) over a year window', async () => {
+      // Annual invoice fully inside the window: total 1,200,000 over 365 days.
+      prisma.subscription_invoices.findMany.mockResolvedValue([
+        {
+          total: new Prisma.Decimal(1200000),
+          period_start: new Date('2026-01-01T00:00:00Z'),
+          period_end: new Date('2027-01-01T00:00:00Z'),
+        },
+      ]);
+      prisma.store_subscriptions.count.mockResolvedValue(10);
+
+      const arpu = await service.getARPU(
+        new Date('2026-01-01T00:00:00Z'),
+        new Date('2027-01-01T00:00:00Z'),
+      );
+
+      // months = round(365 / 30.4375) = 12 → monthly_avg 100,000 → ARPU 10,000.
+      expect(arpu.value.toString()).toBe('10000');
     });
 
     it('falls back to dividing by 1 when active_subs = 0', async () => {
