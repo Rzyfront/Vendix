@@ -1535,7 +1535,12 @@ export class CustomersService {
       if (existingByDocument) {
         // Igual que el caso del email: el `details.kind` permite al bulk
         // service generar la acción sugerida ("usa otro documento") sin
-        // hardcodear el copy aquí.
+        // hardcodear el copy aquí. `existing_customer` permite a la UI
+        // ofrecer "editar cliente" o "agregar como nueva ubicación".
+        const inStore = await this.prisma.store_users.findFirst({
+          where: { store_id: storeId, user_id: existingByDocument.id },
+          select: { id: true },
+        });
         throw new VendixHttpException(
           ErrorCodes.SYS_CONFLICT_001,
           'Ya existe un cliente con este documento en la organización',
@@ -1543,6 +1548,20 @@ export class CustomersService {
             kind: 'document',
             value: normalizedDoc.number,
             type: normalizedDoc.type,
+            existing_customer_id: existingByDocument.id,
+            // Snapshot público explícito; nunca la fila users cruda.
+            existing_customer: {
+              id: existingByDocument.id,
+              first_name: existingByDocument.first_name ?? '',
+              last_name: existingByDocument.last_name ?? '',
+              legal_name: existingByDocument.legal_name ?? null,
+              email: existingByDocument.email ?? null,
+              phone: existingByDocument.phone ?? null,
+              document_type: existingByDocument.document_type ?? null,
+              document_number: existingByDocument.document_number ?? null,
+              person_type: existingByDocument.person_type ?? null,
+              in_store: !!inStore,
+            },
           },
         );
       }

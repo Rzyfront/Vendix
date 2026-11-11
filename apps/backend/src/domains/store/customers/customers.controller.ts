@@ -24,6 +24,8 @@ import { PermissionsGuard } from '../../auth/guards/permissions.guard';
 import { AuthenticatedRequest } from '@common/interfaces/authenticated-request.interface';
 import { Permissions } from '../../auth/decorators/permissions.decorator';
 import { ResponseService } from '@common/responses/response.service';
+import { AddressesService } from '../addresses/addresses.service';
+import { CreateCustomerLocationDto } from '../addresses/dto';
 
 @Controller('store/customers')
 @UseGuards(RolesGuard, PermissionsGuard)
@@ -33,6 +35,7 @@ export class CustomersController {
     private readonly customerLookupService: CustomerLookupService,
     private readonly externalIdentityLookupService: ExternalIdentityLookupService,
     private readonly responseService: ResponseService,
+    private readonly addressesService: AddressesService,
   ) {}
 
   @Post()
@@ -149,6 +152,26 @@ export class CustomersController {
     return this.responseService.success(
       result,
       'Top clientes obtenidos exitosamente',
+    );
+  }
+
+  /**
+   * Nueva ubicación/establecimiento de un cliente existente (mismo NIT o
+   * cédula, otra sede). Enlaza el cliente a la tienda si hacía falta y no
+   * duplica una dirección ya registrada.
+   */
+  @Post(':id/locations')
+  @Permissions('store:customers:update')
+  async addLocation(
+    @Param('id', ParseIntPipe) id: number,
+    @Body() dto: CreateCustomerLocationDto,
+  ) {
+    const result = await this.addressesService.addCustomerLocation(id, dto);
+    return this.responseService.success(
+      result,
+      result.created
+        ? 'Ubicación agregada al cliente'
+        : 'La ubicación ya estaba registrada',
     );
   }
 

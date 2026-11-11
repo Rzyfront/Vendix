@@ -19,9 +19,10 @@ import { CustomerEmailListener } from './customer-email.listener';
 import { ResponseModule } from '../../../common/responses/response.module';
 import { MetadataModule } from '../metadata/metadata.module';
 import { EmailModule } from '../../../email/email.module';
+import { AddressesModule } from '../addresses/addresses.module';
 
 @Module({
-  imports: [ResponseModule, MetadataModule, EmailModule],
+  imports: [ResponseModule, MetadataModule, EmailModule, AddressesModule],
   controllers: [
     CustomersController,
     CustomersBulkController,
