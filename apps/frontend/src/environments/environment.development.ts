@@ -6,6 +6,7 @@ export const environment = {
   // Vacío: la portada comercial no mide en desarrollo
   commercialAnalyticsId: '',
   sectorGuidesEnabled: true,
+  sectorPagesEnabled: true,
   // SEO-OPS-19: página /implementacion, apagada en producción hasta la aprobación de Ventas y Producto.
   implementationPageEnabled: true,
 
