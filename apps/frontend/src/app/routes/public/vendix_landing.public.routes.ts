@@ -1,6 +1,7 @@
 import { Routes } from '@angular/router';
 import { pricingRoutes } from '../../public/pricing/pricing.routes';
 import { SECTOR_GUIDES_ENABLED } from '../../public/landing/guides/sector-guides.config';
+import { SECTOR_PAGES, SECTOR_PAGES_ENABLED } from '../../public/sectors/sector-pages.content';
 
 const sectorGuideRoutes: Routes = SECTOR_GUIDES_ENABLED
   ? [
@@ -21,8 +22,21 @@ const sectorGuideRoutes: Routes = SECTOR_GUIDES_ENABLED
     }))
   : [];
 
+// SEO-OPS-17 / SEO-TECH-08: páginas de sector desde la plantilla. Solo existen con el
+// interruptor encendido (apagado en producción). Al publicar una, agregarla a MARKETING_PAGES
+// de infra/cloudfront/spa-rewrite.js, al sitemap del backend y al smoke SEO.
+const sectorPageRoutes: Routes = SECTOR_PAGES_ENABLED
+  ? SECTOR_PAGES.map((page) => ({
+      path: page.path,
+      loadComponent: () =>
+        import('../../public/sectors/sector-page.component').then((c) => c.SectorPageComponent),
+      data: { sectorPath: page.path },
+    }))
+  : [];
+
 export const vendixLandingPublicRoutes: Routes = [
   ...sectorGuideRoutes,
+  ...sectorPageRoutes,
   {
     path: '',
     loadComponent: () =>

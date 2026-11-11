@@ -6,6 +6,7 @@ export const environment = {
   // Vacío: la portada comercial no mide en desarrollo
   commercialAnalyticsId: '',
   sectorGuidesEnabled: true,
+  sectorPagesEnabled: true,
 
   // Configuración para desarrollo
   debugDomainDetection: true,
