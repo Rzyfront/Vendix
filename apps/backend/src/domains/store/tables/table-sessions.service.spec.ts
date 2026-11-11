@@ -88,6 +88,7 @@ describe('TableSessionsService — open + addItems (Fase E smoke)', () => {
         findFirst: jest.fn().mockResolvedValue({ currency: 'COP' }),
       },
       $transaction: jest.fn((cb: any) => cb(prismaMock)),
+      $executeRaw: jest.fn().mockResolvedValue(1),
       $queryRaw: jest.fn().mockResolvedValue([{ id: 100, state: 'draft', active_financial_split_id: null }]),
     };
 
@@ -804,6 +805,8 @@ describe('TableSessionsService — open + addItems (Fase E smoke)', () => {
             state: 'draft',
             store_id: STORE_ID,
             origin_cash_session_id: 515,
+            // S7: the POS numbering of the store, not "T-<epoch>-NNN".
+            order_number: expect.stringMatching(/^POS-\d{4}-\d{4,}$/),
           }),
         }),
       );

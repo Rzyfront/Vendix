@@ -43,6 +43,7 @@ import type { CancellationType } from './dto';
 import { ReassignTableSessionDto } from './dto/table-session.dto';
 import { OrderHistoryService } from '../orders/order-history/order-history.service';
 import { resolveLineDestinations } from '../orders/utils/line-destination.loader';
+import { nextPosOrderNumber } from '../orders/utils/pos-order-number.util';
 
 // `FullTaxRow` y su resolver viven en orders/utils/catalog-line-pricing.util
 // (compartidos con las cuentas de estaciones de servicio y con
@@ -433,9 +434,8 @@ export class TableSessionsService {
       originCashSessionId = openCashSessions[0]?.id ?? null;
     }
 
-    const orderNumber = `T-${Date.now()}-${Math.floor(Math.random() * 1000)
-      .toString()
-      .padStart(3, '0')}`;
+    // S7: the store's POS numbering, readable in the KDS ("POS-2026-0042").
+    const orderNumber = await nextPosOrderNumber(tx, args.storeId);
 
     const order = await tx.orders.create({
       data: {

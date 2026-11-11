@@ -152,6 +152,7 @@ import {
   enforceApproval,
   operationIsGoverned,
 } from '../workflows/gates/approval-gate';
+import { nextPosOrderNumber } from '../orders/utils/pos-order-number.util';
 
 /**
  * Multi-tarifa (Fase 5.5): snapshot por línea POS. Lleva tanto el dato
@@ -7926,31 +7927,7 @@ export class PaymentsService {
    * Generate unique order number per store
    */
   private async generateOrderNumber(tx: any, storeId: number): Promise<string> {
-    const date = new Date();
-    const year = date.getFullYear();
-    const prefix = `POS-${year}`;
-
-    // Find the last order number for this store and year
-    const lastOrder = await tx.orders.findFirst({
-      where: {
-        store_id: storeId,
-        order_number: {
-          startsWith: prefix,
-        },
-      },
-      orderBy: {
-        order_number: 'desc',
-      },
-      select: { order_number: true },
-    });
-
-    let sequence = 1;
-    if (lastOrder) {
-      const lastSequence = parseInt(lastOrder.order_number.split('-')[2]);
-      sequence = lastSequence + 1;
-    }
-
-    return `${prefix}-${sequence.toString().padStart(4, '0')}`;
+    return nextPosOrderNumber(tx, storeId);
   }
 
   /**
