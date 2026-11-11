@@ -1436,7 +1436,13 @@ export class ProductsBulkService {
       // (PROD_DUP_001). Se avisa aquí, no en el commit.
       if (item.action !== 'update' && item.name) {
         const effectiveSlug = product.slug || generateSlug(item.name);
-        const slugOwner = effectiveSlug ? slugMap.get(effectiveSlug) : undefined;
+        // Slug explícito: tal cual; derivado del nombre: también el legado
+        // (sin transliterar) que guardaban las cargas anteriores.
+        const slugOwner = product.slug
+          ? slugMap.get(product.slug)
+          : slugLookupCandidates(item.name)
+              .map((candidate) => slugMap.get(candidate))
+              .find(Boolean);
         if (slugOwner && slugOwner.id !== item.existing_product_id) {
           item.errors.push({
             code: 'DUPLICATE_SLUG',

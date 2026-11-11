@@ -940,6 +940,22 @@ describe('ProductsService', () => {
       expect(mockPrismaService.products.create).toHaveBeenCalled();
     });
 
+    it('create con nombre acentuado: un slug legado sin transliterar ("caf") sigue contando como duplicado', async () => {
+      arrange();
+      mockPrismaService.products.findFirst.mockResolvedValueOnce({
+        id: 3,
+        name: 'Caf',
+        slug: 'caf',
+      });
+      const err: any = await service
+        .create({ ...dto, name: 'Café', sku: undefined, barcode: undefined } as CreateProductDto)
+        .catch((e) => e);
+      expect(err.errorCode).toBe('PROD_DUP_001');
+      expect(mockPrismaService.products.findFirst.mock.calls[0][0].where.slug).toEqual({
+        in: expect.arrayContaining(['cafe', 'caf']),
+      });
+    });
+
     it('barcode en presentación de producto archivado: PROD_BARCODE_DUP_001 nombrando el producto', async () => {
       arrange();
       mockPrismaService.product_price_tier_assignments.findFirst.mockResolvedValue(

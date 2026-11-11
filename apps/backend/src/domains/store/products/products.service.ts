@@ -38,7 +38,7 @@ import {
   calculateVariantFinalPrice,
   extractTypedRates,
 } from '../taxes/utils/final-price.util';
-import { generateSlug } from '@common/utils/slug.util';
+import { generateSlug, slugLookupCandidates } from '@common/utils/slug.util';
 import { StockLevelManager } from '../inventory/shared/services/stock-level-manager.service';
 import {
   InventoryAdjustmentsService,
@@ -1127,9 +1127,15 @@ export class ProductsService {
       const slug = sanitizedDto.slug || generateSlug(sanitizedDto.name);
 
       // Verificar que el slug sea único dentro de la tienda
+      // Un slug explícito se compara tal cual; el derivado del nombre también
+      // contra el que guardaban los slugs anteriores a la transliteración.
       const existingProduct = await this.prisma.products.findFirst({
         where: {
-          slug: slug,
+          slug: {
+            in: sanitizedDto.slug
+              ? [slug]
+              : slugLookupCandidates(sanitizedDto.name),
+          },
           state: { not: ProductState.ARCHIVED },
         },
       });
@@ -7246,6 +7252,7 @@ export class ProductsService {
    */
   async findProductUniquenessConflictsForAgent(params: {
     slug: string;
+    slug_candidates?: string[];
     sku?: string | null;
     barcode?: string | null;
   }): Promise<{
@@ -7256,7 +7263,10 @@ export class ProductsService {
   }> {
     const [slug, sku, barcodeProduct, barcodeVariant] = await Promise.all([
       this.prisma.products.findFirst({
-        where: { slug: params.slug, state: { not: ProductState.ARCHIVED } },
+        where: {
+          slug: { in: params.slug_candidates ?? [params.slug] },
+          state: { not: ProductState.ARCHIVED },
+        },
         select: { id: true, name: true },
       }),
       params.sku

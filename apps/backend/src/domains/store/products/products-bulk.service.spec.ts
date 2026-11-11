@@ -2040,6 +2040,14 @@ describe('ProductsBulkService', () => {
         expect(result.with_errors).toBe(0);
       });
 
+      it('nombre acentuado cuyo slug legado ("caf") ya usa otro producto => DUPLICATE_SLUG', async () => {
+        mockPrismaService.products.findMany.mockResolvedValue([
+          { id: 8, sku: 'OTRO', name: 'Caf', slug: 'caf', state: 'active' },
+        ]);
+        const result = await service.analyzeProducts(csv(['Café,S-NEW,1000']), 1);
+        expect(codes(result.products[0])).toContain('DUPLICATE_SLUG');
+      });
+
       it('slug que usa un producto NO archivado de otro SKU => DUPLICATE_SLUG sin decir archivado', async () => {
         mockPrismaService.products.findMany.mockResolvedValue([
           { id: 8, sku: 'OTRO', name: 'Camisa Roja', slug: 'camisa-roja', state: 'active' },
