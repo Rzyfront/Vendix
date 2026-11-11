@@ -406,7 +406,7 @@ export class ServiceStationsService {
   }
 
   getServiceOptions(): Observable<StationServiceOption[]> {
-    return this.http.get<{ data?: unknown } | unknown>(`${environment.apiUrl}/store/products?product_type=service&limit=100`).pipe(
+    return this.http.get<{ data?: unknown } | unknown>(`${environment.apiUrl}/store/products?product_type=service&is_lodging=false&limit=100`).pipe(
       map((r) => {
         const unwrapped = this.unwrap<unknown>(r);
         if (Array.isArray(unwrapped)) return unwrapped as StationServiceOption[];

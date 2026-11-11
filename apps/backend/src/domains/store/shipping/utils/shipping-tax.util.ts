@@ -115,7 +115,8 @@ function isShippingTaxType(value: string): value is ShippingTaxType {
 }
 
 /**
- * ¿Puede esta categoría gravar un envío? Única definición: la usan la
+ * ¿Puede esta categoría gravar un envío o un alquiler de estación? Los
+ * motivos son neutros porque ambos flujos los muestran. Única definición: la usan la
  * validación de configuración (400 con el motivo), las opciones del wizard y
  * el resolutor de la copia al vender.
  */
@@ -134,7 +135,7 @@ export function evaluateShippingTaxCategory(
       eligible: false,
       reason_code: 'unsupported_tax_type',
       reason:
-        'Solo se pueden usar categorías de IVA o INC para el envío. Las retenciones e ICA no aplican.',
+        'Solo se pueden usar categorías de IVA o INC. Las retenciones e ICA no aplican a esta tarifa.',
       tax_type,
       rate_percent: single_percent,
     };
@@ -153,7 +154,7 @@ export function evaluateShippingTaxCategory(
       eligible: false,
       reason_code: 'multiple_positive_rates',
       reason:
-        'La categoría tiene más de una tarifa. Para el envío debe tener exactamente una.',
+        'La categoría tiene más de una tarifa. Debe tener exactamente una.',
       tax_type,
       rate_percent: null,
     };
