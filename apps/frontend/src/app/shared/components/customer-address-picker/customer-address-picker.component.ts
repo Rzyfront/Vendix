@@ -14,6 +14,8 @@ import { IconComponent } from '../icon/icon.component';
 
 export interface CustomerAddressPickerAddress {
   id: number;
+  /** Nombre de la sede / establecimiento (opcional). */
+  label?: string | null;
   address_line1: string;
   address_line2?: string | null;
   city: string;
@@ -73,6 +75,8 @@ export class CustomerAddressPickerComponent {
   readonly showEditLink = input<boolean>(true);
   /** Optional h4 heading above the list. */
   readonly heading = input<string>('');
+  /** Compact cards (tighter spacing) for use inside forms and modals. */
+  readonly compact = input<boolean>(false);
 
   /** Fires when the user selects an address. */
   readonly addressSelected = output<number>();

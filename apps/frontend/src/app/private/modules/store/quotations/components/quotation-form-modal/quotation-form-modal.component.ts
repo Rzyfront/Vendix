@@ -23,6 +23,8 @@ import { ButtonComponent } from '../../../../../../shared/components/button/butt
 import { InputComponent } from '../../../../../../shared/components/input/input.component';
 import { TextareaComponent } from '../../../../../../shared/components/textarea/textarea.component';
 import { IconComponent } from '../../../../../../shared/components/icon/icon.component';
+import { CustomerAddressPickerComponent, CustomerAddressPickerAddress } from '../../../../../../shared/components/customer-address-picker/customer-address-picker.component';
+import { CustomerLocationsService } from '../../../../../../shared/services/customer-locations.service';
 import type { PriceTier, ProductPriceTierOverride } from '../../../price-tiers/interfaces/price-tier.interface';
 import { PriceTierCacheService } from '../../../price-tiers/services/price-tier-cache.service';
 import { PriceTierSelectorComponent } from '../../../price-tiers/components/price-tier-selector/price-tier-selector.component';
@@ -78,6 +80,7 @@ function taxEntriesFromAssignments(assignments: any[] | null | undefined): Quota
     IconComponent,
     CurrencyPipe,
     PriceTierSelectorComponent,
+    CustomerAddressPickerComponent,
   ],
   template: `
     <app-modal
@@ -263,6 +266,21 @@ function taxEntriesFromAssignments(assignments: any[] | null | undefined): Quota
               <p class="text-xs text-red-600">Selecciona un cliente para cotizar un contrato.</p>
             }
           </div>
+
+          <!-- Customer location -->
+          @if (selectedCustomer() && customerLocations().length > 0) {
+            <div class="space-y-1">
+              <label class="text-sm font-medium text-text-primary">Ubicación / establecimiento</label>
+              <app-customer-address-picker
+                [addresses]="customerLocations()"
+                [selectedAddressId]="selectedLocationId()"
+                [showAddNew]="false"
+                [showEditLink]="false"
+                [compact]="true"
+                (addressSelected)="selectedLocationId.set($event)"
+              ></app-customer-address-picker>
+            </div>
+          }
 
           <!-- Valid Until -->
           <app-input
@@ -585,6 +603,7 @@ export class QuotationFormModalComponent implements OnInit {
   private readonly quotationsService = inject(QuotationsService);
   private readonly profilesService = inject(QuotationProfilesService);
   private readonly invoiceProfileService = inject(InvoiceProfileService);
+  private readonly customerLocationsService = inject(CustomerLocationsService);
   private readonly apiUrl = environment.apiUrl;
 
   /** Active tiers loaded once when the modal opens (if user has permission). */
@@ -679,6 +698,9 @@ export class QuotationFormModalComponent implements OnInit {
   readonly customerSearchTerm = signal('');
   readonly customerResults = signal<any[]>([]);
   readonly selectedCustomer = signal<any>(null);
+  /** Saved locations (shipping addresses) of the selected customer. */
+  readonly customerLocations = signal<CustomerAddressPickerAddress[]>([]);
+  readonly selectedLocationId = signal<number | null>(null);
 
   readonly productSearchTerm = signal('');
   readonly productResults = signal<any[]>([]);
@@ -817,6 +839,9 @@ export class QuotationFormModalComponent implements OnInit {
       this.selectedCustomer.set(q.customer || (q.customer_id
         ? { id: q.customer_id, first_name: 'Cliente asociado', last_name: '' }
         : null));
+      if (q.customer_id) {
+        this.loadCustomerLocations(q.customer_id, q.customer_address_id ?? null);
+      }
       this.form.patchValue({
         destination: (q.destination as QuotationDestination | undefined) || 'sale',
         profile_id: q.profile_id != null ? String(q.profile_id) : '',
@@ -1018,10 +1043,32 @@ export class QuotationFormModalComponent implements OnInit {
     this.customerRequiredError.set(false);
     this.customerSearchTerm.set('');
     this.customerResults.set([]);
+    this.loadCustomerLocations(customer?.id, null);
   }
 
   removeCustomer(): void {
     this.selectedCustomer.set(null);
+    this.customerLocations.set([]);
+    this.selectedLocationId.set(null);
+  }
+
+  /** Loads the customer's locations; preselects the saved one or the primary. */
+  private loadCustomerLocations(customerId: number | undefined, preferredId: number | null): void {
+    this.customerLocations.set([]);
+    this.selectedLocationId.set(null);
+    if (!customerId) return;
+    this.customerLocationsService
+      .listByCustomer(customerId)
+      .pipe(takeUntilDestroyed(this.destroyRef))
+      .subscribe((locations) => {
+        if (this.selectedCustomer()?.id !== customerId) return;
+        this.customerLocations.set(locations);
+        const chosen =
+          locations.find((l) => l.id === preferredId) ??
+          locations.find((l) => l.is_primary) ??
+          locations[0];
+        this.selectedLocationId.set(chosen?.id ?? null);
+      });
   }
 
   /**
@@ -1313,6 +1360,7 @@ export class QuotationFormModalComponent implements OnInit {
     const economicChanged = isContract && this.contractEconomicsChanged(rawValue);
     const dto: QuotationFormSaveDto = {
       customer_id: this.selectedCustomer()?.id,
+      ...(this.selectedLocationId() != null ? { customer_address_id: this.selectedLocationId()! } : {}),
       // B.2: destino solo al crear; en edicion se omite (inmutable, ADR-01).
       // Sin valor explicito el backend aplica `sale` (A.1).
       ...(!this.quotation() && rawValue.destination ? { destination: rawValue.destination } : {}),

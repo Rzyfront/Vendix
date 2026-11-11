@@ -51,7 +51,7 @@
                   [attr.aria-pressed]="addressId() === saved.id"
                   (click)="selectSavedAddress(saved.id)">
                   <app-icon name="map-pin" [size]="18"></app-icon>
-                  <span class="method-card-label">{{ saved.address_line1 }}, {{ saved.city }}</span>
+                  <span class="method-card-label">@if (saved.label) {<strong>{{ saved.label }}</strong> · }{{ saved.address_line1 }}, {{ saved.city }}</span>
                 </button>
                 <button type="button" class="saved-address-edit"
                   [attr.aria-label]="'Editar dirección ' + saved.address_line1 + ', ' + saved.city"
@@ -112,6 +112,12 @@
             <button type="button" class="no-methods-link" (click)="beginNewAddress()">Usar otra dirección</button>
           } @else {
             <p class="address-help">Usaremos el teléfono del cliente; puedes cambiarlo si recibirá otra persona.</p>
+          }
+          @if (!addressId()) {
+            <label class="address-help" for="pos-location-label">Nombre de la sede (opcional)</label>
+            <input id="pos-location-label" type="text" maxlength="120" class="w-full rounded-md border px-3 py-2 text-base"
+              style="border-color: var(--color-border); background: var(--color-surface); color: var(--color-text-primary);"
+              placeholder="Ej. Sede Norte" [value]="locationLabel()" (input)="onLocationLabelInput($event)" />
           }
           <app-address-form-fields #clientAddressForm
             [initialAddress]="initialAddress()"
@@ -252,7 +258,7 @@
                       [class.selected]="addressId() === saved.id"
                       [attr.aria-pressed]="addressId() === saved.id"
                       (click)="selectSavedAddress(saved.id)">
-                      <span class="method-card-label">{{ saved.address_line1 }}, {{ saved.city }}</span>
+                      <span class="method-card-label">@if (saved.label) {<strong>{{ saved.label }}</strong> · }{{ saved.address_line1 }}, {{ saved.city }}</span>
                     </button>
                     <button type="button" class="saved-address-edit"
                       [attr.aria-label]="'Editar dirección ' + saved.address_line1 + ', ' + saved.city"
@@ -279,6 +285,12 @@
                 Editar dirección
               </button>
             } @else {
+              @if (!addressId()) {
+                <label class="address-help" for="pos-location-label">Nombre de la sede (opcional)</label>
+                <input id="pos-location-label" type="text" maxlength="120" class="w-full rounded-md border px-3 py-2 text-base"
+                  style="border-color: var(--color-border); background: var(--color-surface); color: var(--color-text-primary);"
+                  placeholder="Ej. Sede Norte" [value]="locationLabel()" (input)="onLocationLabelInput($event)" />
+              }
               <app-address-form-fields
                 [initialAddress]="initialAddress()"
                 [compact]="true"

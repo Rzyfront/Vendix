@@ -106,6 +106,17 @@ interface ContractEconomicLineDisplay {
                       <app-icon name="phone" size="14" class="text-gray-400 flex-shrink-0 sm:[--icon-size:16px]"></app-icon>
                       <span class="truncate">{{ quotation()!.customer!.phone || 'Sin teléfono registrado' }}</span>
                     </div>
+                    @if (quotation()!.customer_address_snapshot; as location) {
+                      <div class="flex items-start gap-1.5 sm:gap-2 text-xs sm:text-sm text-gray-600">
+                        <app-icon name="map-pin" size="14" class="text-gray-400 flex-shrink-0 mt-0.5"></app-icon>
+                        <span class="min-w-0">
+                          @if (location.label) {
+                            <strong class="text-gray-900">{{ location.label }}</strong> ·
+                          }
+                          {{ location.address_line1 }}@if (location.city) {, {{ location.city }}}
+                        </span>
+                      </div>
+                    }
                   </div>
                 </div>
               } @else {

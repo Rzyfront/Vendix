@@ -233,6 +233,8 @@ export interface CreateDispatchNoteItemDto {
 
 export interface CreateDispatchNoteDto {
   customer_id: number;
+  /** Ubicación/establecimiento del cliente (addresses.id); solo al crear. */
+  customer_address_id?: number;
   sales_order_id?: number;
   dispatch_location_id?: number;
   emission_date?: string;
