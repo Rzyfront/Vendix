@@ -123,9 +123,9 @@
 
 | ID | S# | Tarea | Ruta | Estado |
 | --- | --- | --- | --- | --- |
-| T1 | S1, S2, S4, S7 | Backend: líneas planificadas al crear y recalcular, `persistLines` genérico en `complete()` con adiciones, `lines` en el detalle, endpoints `day/supplies`, con tests | escritor sonnet A (superficie backend) | en curso |
-| T2 | S3, S5, S6 | Frontend: tabla en el detalle de restaurante, panel "Consumo del día", modal de cierre con impresión, con specs en `ci.yml` | escritor sonnet B (superficie frontend, en paralelo, sobre el contrato de L3) | escrito y auditado (L6); karma pendiente en CI |
-| T3 | S1-S7 | Auditoría del padre, verificador Opus independiente (ítem 1), RDD, PRs, gate ≥85 y verificación en el demo de prod tras el deploy | inline + verificador Opus | pendiente |
+| T1 | S1, S2, S4, S7 | Backend: líneas planificadas al crear y recalcular, `persistLines` genérico en `complete()` con adiciones, `lines` en el detalle, endpoints `day/supplies`, con tests | escritor sonnet A (superficie backend) | escrito y auditado (L7), verificado S1-S7 PASS (L8), commits 33109053d + corrección |
+| T2 | S3, S5, S6 | Frontend: tabla en el detalle de restaurante, panel "Consumo del día", modal de cierre con impresión, con specs en `ci.yml` | escritor sonnet B (superficie frontend, en paralelo, sobre el contrato de L3) | escrito y auditado (L6), commit 2fb42c029; karma pendiente en CI |
+| T3 | S1-S7 | Auditoría del padre, verificador Opus independiente (ítem 1), RDD, PRs, gate ≥85 y verificación en el demo de prod tras el deploy | inline + verificador Opus | en curso (verificador lanzado, L7) |
 
 **Estimación.** Unas 1.000 líneas de autor: backend ~450 y frontend ~550.
 
@@ -158,3 +158,22 @@
   - S5: el panel recarga con `refreshToken = data()` del host. En la lista, `loadMore` también lo dispara (un refetch extra barato, aceptado).
   - S6: `shouldAutoOpenDaySummary(prev, next)`, con `prev` por fecha. Los hosts solo vacían `data` al cambiar de fecha (`resetView`), así que una recarga SSE no produce una lectura en cero que esconda la transición. La impresión usa una clase de body propia con `ViewEncapsulation.None`, porque el modal es un overlay.
   - Sin karma local (regla de la máquina); lo corre CI.
+- L7 (2026-11-11, auditoría del padre sobre T1 y commits):
+  - Superficie respetada. Util nuevo `production-order-lines.util.ts` con la escala, el plan de adiciones (`expandProduction` con los exploders del consumo), `replacePlannedLines` y `persistConsumptionLines`. Este último es igual al `persistLines` de Planta y además agrupa el mismo insumo repetido (receta + adición), que antes se pisaba por lectura vieja.
+  - Inyección: `ProductionSaleLinkService` recibe `RecipesService` y `StockValidatorService`, que el mismo `production.module` ya provee a `ProductionOrdersService`. `ensureForOrder` corre en una transacción sin scope y los exploders usan el `tx` recibido.
+  - Corrección del padre: si la expansión de adiciones lanza un error, `plannedRequirements` planifica solo la receta base y deja un aviso en el log, para que el plan informativo nunca bloquee la orden de una venta. Test S7 nuevo: RED sin el fallback (`BOM cycle`), GREEN con él. `production-sale-link.service.spec.ts`: 55/55.
+  - El escritor corrió 10 specs con `jest.isolated.config.js` (225 tests en verde). `npm run test:path` falla antes del cambio porque el cliente Prisma compartido del checkout principal está desactualizado. Los tipos quedan para `buildcheck:types` en CI.
+  - Desvíos aceptados: las adiciones ya consumidas por una comanda de cocina quedan planificadas pero no consumidas en la orden; un borrador cuyas adiciones cambian sin cambiar la cantidad no se replanifica.
+  - Commits: backend 33109053d, frontend 2fb42c029. `review assess` da `high` (`high_risk`, ítem 1 escalado). Corre el verificador Opus independiente y después la revisión nativa.
+- L8 (2026-11-11, verificador Opus independiente y corrección):
+  - Veredicto: S1-S7 PASS, sin bloqueantes. Probó con diferencial base contra HEAD sobre copias `git archive`: Planta guarda los mismos `consumed_qty`, `unit_cost`, `total_cost` y `cost_snapshot.entries` en complete simple, en dos parciales (3 y 7), con un insumo sin línea y sobre líneas escritas por el código viejo. Las llamadas a `updateStock` y el payload de `production.completed` son idénticos, también en una venta con adiciones.
+  - Advertencias atendidas:
+    - El plan de un borrador ahora sigue a la venta también cuando cambian solo las adiciones (A2). Cada sincronización compara el plan nuevo con las líneas (`plannedLinesMatch`) y reemplaza solo si difieren; de paso, los borradores de antes del deploy reciben sus líneas. Tests A2 nuevos: RED y luego GREEN.
+    - `restart()` usa `timeout: 20000`, igual que `complete()`.
+  - Advertencias aceptadas, con su motivo:
+    - Las adiciones que ya consumió otro flujo son un caso borde: la comanda de cocina, el inicio programado y el commit de stock saltan las líneas `production`.
+    - Una orden abierta antes del deploy se planifica solo desde la receta, como dice S2.
+    - El `catch` del plan de adiciones no recupera un error de Postgres; la expansión solo lee.
+    - Si la receta propia está inactiva, el replan usa la receta que elegiría una orden nueva.
+  - Regresión committeada: `manufacturing/orders/planta-consumption-lines-parity.spec.ts` (5/5) y `production/sale-completion-lines-parity.spec.ts` (1/1).
+  - Specs re-corridos: `production-sale-link.service` 57/57 y `production-orders.service` 73/73.

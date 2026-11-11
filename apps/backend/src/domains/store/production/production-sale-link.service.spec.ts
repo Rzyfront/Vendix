@@ -31,10 +31,13 @@ describe('ProductionSaleLinkService (QUI-995)', () => {
     ],
   };
   let lineConsumed = 0;
+  // Planned lines a draft already has (default: the plan of recipe 7 for 5 units).
+  let currentLines: Array<{ component_product_id: number; planned_qty: Prisma.Decimal }> = [];
   let recipesService: { explodeBom: jest.Mock };
 
   const setup = (s: any, existing: any[] = [], recipes: any[] = [recipe7]) => {
     lineConsumed = 0;
+    currentLines = [{ component_product_id: 99, planned_qty: new Prisma.Decimal(10) }];
     tx = {
       production_orders: {
         findMany: jest.fn().mockResolvedValue(existing),
@@ -43,6 +46,7 @@ describe('ProductionSaleLinkService (QUI-995)', () => {
       },
       production_order_lines: {
         count: jest.fn(async () => lineConsumed),
+        findMany: jest.fn(async () => currentLines),
         deleteMany: jest.fn().mockResolvedValue({ count: 1 }),
         createMany: jest.fn().mockResolvedValue({ count: 1 }),
       },
@@ -173,6 +177,44 @@ describe('ProductionSaleLinkService (QUI-995)', () => {
     await service.ensureForOrder(77);
     expect(tx.production_order_lines.deleteMany).not.toHaveBeenCalled();
     expect(tx.production_order_lines.createMany).not.toHaveBeenCalled();
+  });
+
+  it('A2: a draft whose add-ons change while its quantity stays the same gets its lines re-planned', async () => {
+    setup(
+      sale([
+        {
+          id: 1,
+          product_id: 50,
+          quantity: 5,
+          order_item_options: [
+            { scope: 'per_unit', component_type: 'ingredient', component_product_id: 200, component_variant_id: null, quantity: 1 },
+          ],
+        },
+      ]),
+      [{ id: 100, product_id: 50, recipe_id: 7, status: 'draft', planned_qty: new Prisma.Decimal(5), due_date: start }],
+    );
+    await service.ensureForOrder(77);
+    // Same quantity and due date: the order row is not rewritten, only its plan.
+    expect(tx.production_orders.updateMany).not.toHaveBeenCalled();
+    expect(tx.production_order_lines.deleteMany).toHaveBeenCalledWith({ where: { order_id: 100 } });
+    expect(tx.production_order_lines.createMany).toHaveBeenCalledWith({
+      data: [
+        { order_id: 100, component_product_id: 99, planned_qty: new Prisma.Decimal(10), sort_order: 0 },
+        { order_id: 100, component_product_id: 200, planned_qty: new Prisma.Decimal(5), sort_order: 1 },
+      ],
+    });
+  });
+
+  it('A2: a draft created before the plan existed (no lines) gets its planned lines on the next sync', async () => {
+    setup(
+      sale([{ id: 1, product_id: 50, quantity: 5 }]),
+      [{ id: 100, product_id: 50, recipe_id: 7, status: 'draft', planned_qty: new Prisma.Decimal(5), due_date: start }],
+    );
+    currentLines = [];
+    await service.ensureForOrder(77);
+    expect(tx.production_order_lines.createMany).toHaveBeenCalledWith({
+      data: [{ order_id: 100, component_product_id: 99, planned_qty: new Prisma.Decimal(10), sort_order: 0 }],
+    });
   });
 
   it('S1: lines with consumption are never rebuilt', async () => {
@@ -706,6 +748,7 @@ describe('ProductionSaleLinkService — live-sync events (QUI-1002)', () => {
       },
       production_order_lines: {
         count: jest.fn().mockResolvedValue(0),
+        findMany: jest.fn().mockResolvedValue([]),
         deleteMany: jest.fn().mockResolvedValue({ count: 0 }),
         createMany: jest.fn().mockResolvedValue({ count: 0 }),
       },

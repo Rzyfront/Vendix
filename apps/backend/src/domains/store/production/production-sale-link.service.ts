@@ -23,6 +23,7 @@ import {
   expandAddonRequirements,
   mergeRequirements,
   plannedLinesCreate,
+  plannedLinesMatch,
   replacePlannedLines,
   type ComponentRequirement,
   type RecipeForRequirements,
@@ -603,35 +604,39 @@ export class ProductionSaleLinkService {
             }
             continue;
           }
-          if (
-            current.status === 'draft' &&
-            (Number(current.planned_qty) !== qty ||
-              current.due_date?.getTime() !== due_date.getTime())
-          ) {
-            const { count } = await tx.production_orders.updateMany({
-              where: { id: current.id, status: 'draft' },
-              data: {
-                planned_qty: new Prisma.Decimal(qty),
-                due_date,
-                updated_at: new Date(),
-              },
-            });
-            // S1: a new quantity means new planned supplies (draft only, and never
-            // over lines that already consumed).
-            if (count === 1 && Number(current.planned_qty) !== qty) {
+          if (current.status === 'draft') {
+            const qtyChanged = Number(current.planned_qty) !== qty;
+            let claimed = true;
+            if (qtyChanged || current.due_date?.getTime() !== due_date.getTime()) {
+              const { count } = await tx.production_orders.updateMany({
+                where: { id: current.id, status: 'draft' },
+                data: {
+                  planned_qty: new Prisma.Decimal(qty),
+                  due_date,
+                  updated_at: new Date(),
+                },
+              });
+              claimed = count === 1;
+              touched.add(current.id);
+            }
+            // S1/A2: the plan follows the sale (quantity AND add-ons) while the
+            // order is a draft, and never over lines that already consumed. A
+            // draft from before the plan existed gets its lines here too.
+            if (claimed) {
               // The order's own recipe, else the one a new order would pick.
               const recipe =
                 recipesByProduct.get(product_id)?.find((r) => r.id === current.recipe_id) ??
                 recipeFor(product_id, variant_id);
               if (recipe) {
-                await replacePlannedLines(
-                  tx,
-                  current.id,
-                  await this.plannedRequirements(tx, { recipe, qty, items }),
-                );
+                const requirements = await this.plannedRequirements(tx, { recipe, qty, items });
+                if (
+                  (qtyChanged || !(await plannedLinesMatch(tx, current.id, requirements))) &&
+                  (await replacePlannedLines(tx, current.id, requirements))
+                ) {
+                  touched.add(current.id);
+                }
               }
             }
-            touched.add(current.id);
           }
         }
 

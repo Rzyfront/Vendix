@@ -230,6 +230,27 @@ export async function replacePlannedLines(
   return true;
 }
 
+/**
+ * Whether the planned lines of ONE order already equal `requirements`
+ * (same components, same planned quantity), so a sync can skip rewriting them.
+ */
+export async function plannedLinesMatch(
+  tx: Prisma.TransactionClient,
+  order_id: number,
+  requirements: ComponentRequirement[],
+): Promise<boolean> {
+  const lines = await tx.production_order_lines.findMany({
+    where: { order_id },
+    select: { component_product_id: true, planned_qty: true },
+  });
+  if (lines.length !== requirements.length) return false;
+  const wanted = new Map(requirements.map((r) => [r.component_product_id, r.quantity]));
+  return lines.every((line) => {
+    const qty = wanted.get(line.component_product_id);
+    return qty !== undefined && Math.abs(Number(line.planned_qty) - qty) < 1e-9;
+  });
+}
+
 /** Folds the consumptions of the same component (recipe item + add-on) into one entry. */
 function mergeConsumptions(consumptions: LineConsumption[]): LineConsumption[] {
   const groups = new Map<number, LineConsumption[]>();

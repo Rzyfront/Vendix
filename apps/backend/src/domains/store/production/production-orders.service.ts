@@ -1582,7 +1582,7 @@ export class ProductionOrdersService {
         await replacePlannedLines(tx, id, requirements);
       }
       return result;
-    });
+    }, { timeout: 20000 });
     if (claimed.count !== 1) {
       throw new VendixHttpException(ErrorCodes.PRODUCTION_ORDER_CONCURRENT_UPDATE);
     }
