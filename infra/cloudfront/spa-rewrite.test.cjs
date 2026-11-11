@@ -46,19 +46,20 @@ const cases = [
   ['/', 'vendix.online', { utm_source: { value: 'ig' } }, '/marketing/index.html'],
   ['/', 'VENDIX.ONLINE', {}, '/marketing/index.html'],
   ['/index.html', 'vendix.online', {}, '/index.html'],
-  ['/ayuda', 'vendix.online', {}, '/index.html'],
-  ['/pqr/consultar/T-123', 'vendix.online', {}, '/index.html'],
-  ['/pqr/gracias/T-123', 'vendix.online', {}, '/index.html'],
+  ['/ayuda', 'vendix.online', {}, '/noindex/index.html'],
+  ['/pqr/consultar/T-123', 'vendix.online', {}, '/noindex/index.html'],
+  ['/pqr/gracias/T-123', 'vendix.online', {}, '/noindex/index.html'],
   ['/legal/cookies', 'vendix.online', {}, '/index.html'],
   ['/guias/cierre-de-caja', 'vendix.online', {}, '/index.html'],
-  ['/auth/login', 'vendix.online', {}, '/index.html'],
-  ['/auth/verify-email', 'vendix.online', { token: { value: 'x' } }, '/index.html'],
-  ['/admin/dashboard', 'vendix.online', {}, '/index.html'],
-  ['/super-admin/dashboard', 'vendix.online', {}, '/index.html'],
-  ['/superadmin/dashboard', 'vendix.online', {}, '/index.html'],
-  ['/repartos/pool', 'vendix.online', {}, '/index.html'],
-  ['/onboarding', 'vendix.online', {}, '/index.html'],
-  ['/reset-password', 'vendix.online', { token: { value: 'x' } }, '/index.html'],
+  ['/auth/login', 'vendix.online', {}, '/noindex/index.html'],
+  ['/auth/verify-email', 'vendix.online', { token: { value: 'x' } }, '/noindex/index.html'],
+  ['/admin/dashboard', 'vendix.online', {}, '/noindex/index.html'],
+  ['/super-admin/dashboard', 'vendix.online', {}, '/noindex/index.html'],
+  ['/superadmin/dashboard', 'vendix.online', {}, '/noindex/index.html'],
+  ['/repartos/pool', 'vendix.online', {}, '/noindex/index.html'],
+  ['/onboarding', 'vendix.online', {}, '/noindex/index.html'],
+  ['/reset-password', 'vendix.online', { token: { value: 'x' } }, '/noindex/index.html'],
+  // SEO-TECH-04 arriba: ayuda, PQR, auth y paneles reciben la shell con noindex en el HTML.
   // Los prefijos de tienda siguen reescribiéndose en cualquier host (enlaces con token).
   ['/pedido/0b6f5c1e', 'vendix.online', {}, '/index.html'],
   // En tiendas no cambia nada: Angular decide.
@@ -79,3 +80,27 @@ for (const host of ['tienda-demo.vendix.online', 'mesura.beauty', 'vendix.online
   assert.notStrictEqual(result(handler(event('/', host))), '/marketing/index.html');
 }
 console.log('ok SEO-TECH-02 portada comercial');
+
+// SEO-TECH-04: noindex en el HTML servido. Tiendas (subdominio y dominio propio): las rutas privadas
+// o con token reciben /noindex/index.html; las indexables siguen con la shell normal.
+const STORE_HOSTS = ['tienda-demo.vendix.online', 'mesura.beauty'];
+const storeNoindex = ['/cart', '/cart/', '/checkout', '/account', '/account/orders/42', '/wishlist', '/pedido/0b6f5c1e', '/order/0b6f5c1e',
+  '/factura/abc', '/preconsulta/abc', '/pagar/abc', '/seguimiento-servicio/AbC_d-123', '/pre-registro/abc', '/calificar-estadia/abc',
+  '/hotel/reserva/7', '/flujos/abc', '/flujos/seguimiento/abc', '/firmar/abc', '/estacion/abc', '/fila', '/fila/volver', '/book/12',
+  '/pqr', '/pqr/consultar/T-1', '/reset-password', '/auth/login', '/admin/settings/general/venta', '/super-admin', '/repartos/pool', '/onboarding'];
+const storeIndexable = ['/', '/catalog', '/catalog/aceite-1.5l', '/productos/labial-rojo', '/products/x', '/producto/x', '/novedades', '/new',
+  '/ofertas', '/sale', '/cartas', '/hotel', '/cartera', '/accounting-tips', '/checkoutx', '/pqrs-info'];
+for (const host of STORE_HOSTS) {
+  for (const uri of storeNoindex) assert.strictEqual(result(handler(event(uri, host))), '/noindex/index.html', `${host}${uri} noindex`);
+  for (const uri of storeIndexable) assert.notStrictEqual(result(handler(event(uri, host))), '/noindex/index.html', `${host}${uri} indexable`);
+}
+// En vendix.online las páginas comerciales indexables no reciben noindex; los archivos nunca.
+for (const uri of ['/', '/pricing', '/legal/terminos', '/legal/privacidad', '/legal/cookies', '/guias/cierre-de-caja', '/ayudax', '/authors'])
+  assert.notStrictEqual(result(handler(event(uri, 'vendix.online'))), '/noindex/index.html', `vendix.online${uri}`);
+for (const [uri, host] of [['/auth/app.js', 'vendix.online'], ['/cart/logo.png', 'mesura.beauty'], ['/.well-known/x', 'mesura.beauty']])
+  assert.notStrictEqual(result(handler(event(uri, host))), '/noindex/index.html', `${host}${uri} archivo`);
+// Solo GET/HEAD; un POST sigue con la shell de siempre. www sigue redirigiendo antes.
+assert.strictEqual(result(handler(event('/auth/login', 'vendix.online', {}, 'HEAD'))), '/noindex/index.html');
+assert.strictEqual(result(handler(event('/auth/login', 'vendix.online', {}, 'POST'))), '/index.html');
+assert.strictEqual(result(handler(event('/cart', 'www.mesura.beauty'))), '301 https://mesura.beauty/cart');
+console.log('ok SEO-TECH-04 noindex en el HTML servido');

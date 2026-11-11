@@ -59,7 +59,12 @@
     <meta name="keywords" content="ecommerce, tienda online, punto de venta, POS, inventario, gestión de negocio, vendix, plataforma multitenant, inteligencia artificial" />
     <meta name="author" content="Vendix" />
     <meta name="robots" content="index, follow" />
-    <link rel="canonical" href="https://vendix.online/" />
+    <!-- SEO-TECH-04: esta shell la reciben TODAS las tiendas y dominios propios, así que
+         no declara canonical ni og:url: apuntarían a vendix.online desde cada tienda.
+         Cada página los pone en runtime (StoreSeo, marketing-page-metadata) y la portada
+         de vendix.online los trae en su HTML prerenderizado (index.marketing-preview.html).
+         deploy-s3.yml genera desde aquí /noindex/index.html cambiando SOLO esta meta robots
+         (make-noindex-shell.cjs): no le cambies el formato sin ajustar ese script. -->
 
     <!-- Open Graph (Facebook, LinkedIn, WhatsApp) -->
     <meta property="og:type" content="website" />
@@ -70,7 +75,6 @@
     <meta property="og:image:height" content="630" />
     <meta property="og:image:type" content="image/png" />
     <meta property="og:image:alt" content="Vendix — Tu negocio, simplificado" />
-    <meta property="og:url" content="https://vendix.online/" />
     <meta property="og:site_name" content="Vendix" />
     <meta property="og:locale" content="es_CO" />
 

@@ -59,6 +59,9 @@ const STORE_KNOWN = [
   { path: '/novedades', index: true },
   { path: '/ofertas', index: true },
   { path: '/cart', index: false },
+  // SEO-TECH-04: checkout y cuenta reciben la shell noindex desde la función de CloudFront.
+  { path: '/checkout', index: false },
+  { path: '/account', index: false },
 ];
 const UNKNOWN = '/ruta-que-no-existe-seo-smoke';
 

@@ -113,6 +113,71 @@ function isMarketingAppRoute(uri) {
 // apps/frontend/scripts/marketing-host-selector.cjs.
 var MARKETING_ROOT_OBJECT = '/marketing/index.html';
 
+// SEO-TECH-04: las rutas que no deben indexarse reciben una copia de la shell con
+// <meta name="robots" content="noindex, follow"> en el HTML servido (la sube
+// deploy-s3.yml como /noindex/index.html). Así el noindex no depende de que el
+// buscador ejecute JavaScript. Es la misma app: solo cambia esa etiqueta.
+// En vendix.online: ayuda, PQR, autenticación y paneles privados. En las tiendas
+// (subdominios y dominios propios): carrito, checkout, cuenta, enlaces con token,
+// PQR y paneles. Portada, catálogo, productos, novedades, ofertas y cartas no
+// están aquí: siguen indexables. Solo GET/HEAD.
+var NOINDEX_OBJECT = '/noindex/index.html';
+var MARKETING_NOINDEX_PREFIXES = [
+  '/ayuda',
+  '/pqr',
+  '/auth',
+  '/admin',
+  '/super-admin',
+  '/superadmin',
+  '/repartos',
+  '/onboarding',
+  '/reset-password',
+  '/authenticate'
+];
+var STORE_NOINDEX_PREFIXES = [
+  '/cart',
+  '/wishlist',
+  '/checkout',
+  '/account',
+  '/pedido',
+  '/order',
+  '/factura',
+  '/preconsulta',
+  '/pagar',
+  '/seguimiento-servicio',
+  '/pre-registro',
+  '/calificar-estadia',
+  '/hotel/reserva',
+  '/flujos',
+  '/firmar',
+  '/estacion',
+  '/fila',
+  '/book',
+  '/pqr',
+  '/reset-password',
+  '/auth',
+  '/admin',
+  '/super-admin',
+  '/superadmin',
+  '/repartos',
+  '/onboarding'
+];
+
+function matchesPrefix(uri, prefixes) {
+  var path = uri.length > 1 && endsWith(uri, '/') ? uri.substring(0, uri.length - 1) : uri;
+  for (var i = 0; i < prefixes.length; i++) {
+    var prefix = prefixes[i];
+    if (path === prefix || path.indexOf(prefix + '/') === 0) {
+      return true;
+    }
+  }
+  return false;
+}
+
+function isNoindexRoute(host, uri) {
+  return matchesPrefix(uri, host === MARKETING_HOST ? MARKETING_NOINDEX_PREFIXES : STORE_NOINDEX_PREFIXES);
+}
+
 var SPA_PREFIXES = [
   '/productos/',
   '/products/',
@@ -147,6 +212,12 @@ function handler(event) {
 
   if (host === MARKETING_HOST && uri === '/' && (request.method === 'GET' || request.method === 'HEAD')) {
     request.uri = MARKETING_ROOT_OBJECT;
+    return request;
+  }
+
+  if ((request.method === 'GET' || request.method === 'HEAD') &&
+      uri.substring(uri.lastIndexOf('/') + 1).indexOf('.') === -1 && isNoindexRoute(host, uri)) {
+    request.uri = NOINDEX_OBJECT;
     return request;
   }
 
