@@ -1,6 +1,7 @@
 import { Routes } from '@angular/router';
 import { pricingRoutes } from '../../public/pricing/pricing.routes';
 import { SECTOR_GUIDES_ENABLED } from '../../public/landing/guides/sector-guides.config';
+import { IMPLEMENTATION_PAGE_ENABLED } from '../../public/implementation/implementation-page.config';
 
 const sectorGuideRoutes: Routes = SECTOR_GUIDES_ENABLED
   ? [
@@ -21,8 +22,22 @@ const sectorGuideRoutes: Routes = SECTOR_GUIDES_ENABLED
     }))
   : [];
 
+// SEO-OPS-19: la ruta solo existe con el interruptor encendido (apagado en producción).
+const implementationRoutes: Routes = IMPLEMENTATION_PAGE_ENABLED
+  ? [
+      {
+        path: 'implementacion',
+        loadComponent: () =>
+          import('../../public/implementation/implementation-page.component').then(
+            (c) => c.ImplementationPageComponent,
+          ),
+      },
+    ]
+  : [];
+
 export const vendixLandingPublicRoutes: Routes = [
   ...sectorGuideRoutes,
+  ...implementationRoutes,
   {
     path: '',
     loadComponent: () =>
