@@ -7,6 +7,7 @@ import {
   Matches,
   MaxLength,
 } from 'class-validator';
+import { Transform } from 'class-transformer';
 
 const DATE_ONLY = /^\d{4}-\d{2}-\d{2}$/;
 
@@ -43,6 +44,13 @@ export class AgendaQueryDto {
 
   @ApiProperty({ required: false, example: 'scheduled,ready', description: 'Estados separados por coma' })
   @IsOptional()
+  // S16: `no_show` (nombre anterior de `expired`) sigue aceptándose en filtros
+  // guardados: se traduce antes de validar y el servicio solo ve `expired`.
+  @Transform(({ value }) =>
+    typeof value === 'string'
+      ? [...new Set(value.split(',').map((s) => (s === 'no_show' ? 'expired' : s)))].join(',')
+      : value,
+  )
   @Matches(/^(scheduled|in_production|ready|delivered|expired|cancelled)(,(scheduled|in_production|ready|delivered|expired|cancelled))*$/, {
     message: 'Estado de pedido programado no válido.',
   })

@@ -285,10 +285,17 @@ describe('KitchenFireService — add-ons (QUI-1000)', () => {
         expect.objectContaining({ name: 'Fresas', quantity: 160, image_url: 'signed:k/fresa.webp', note: 'sin semillas', recipe_id: null }),
         expect.objectContaining({ name: 'Bizcocho', quantity: 1, image_url: null, note: null, recipe_id: 90 }),
       ]);
-      expect(ticket.items[0].order_item).toEqual({ is_takeaway: false });
+      // S15: el ticket sigue trayendo `order_item_options` crudas además de `addons`.
+      expect(ticket.items[0].order_item).toEqual({
+        is_takeaway: false,
+        order_item_options: [
+          expect.objectContaining({ id: 5, option_name: 'Fresas', quantity: '80' }),
+          expect.objectContaining({ id: 6, option_name: 'Bizcocho', quantity: '1' }),
+        ],
+      });
       // A dish without add-ons keeps its payload and gets an empty list.
       expect(ticket.items[1].addons).toEqual([]);
-      expect(ticket.items[1].order_item).toEqual({ is_takeaway: true });
+      expect(ticket.items[1].order_item).toEqual({ is_takeaway: true, order_item_options: [] });
     });
   });
 

@@ -171,13 +171,24 @@ export async function resolveLineDestinations(
     previous?: PreviousLineDestinations;
     /** Edit path: counts this order's own active reservations as available. */
     orderId?: number;
+    /**
+     * S12: quien ya leyó la industria de la tienda en esta venta la pasa y
+     * se evita una segunda lectura. Sin ella, se lee aquí como siempre.
+     */
+    isRestaurant?: boolean;
   } = {},
 ): Promise<Array<ResolvedLineDestination | null>> {
-  const storeRow = await client.stores.findUnique({
-    where: { id: storeId },
-    select: { industries: true },
-  });
-  if (!storeIsRestaurant(storeRow?.industries)) {
+  const isRestaurant =
+    opts.isRestaurant ??
+    storeIsRestaurant(
+      (
+        await client.stores.findUnique({
+          where: { id: storeId },
+          select: { industries: true },
+        })
+      )?.industries,
+    );
+  if (!isRestaurant) {
     return items.map(() => null);
   }
   const ctx = await loadLineDestinationContext(client, storeId, items, {

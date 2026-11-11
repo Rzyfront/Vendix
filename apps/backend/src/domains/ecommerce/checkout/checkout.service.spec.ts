@@ -1316,6 +1316,38 @@ describe('CheckoutService - promotions and coupons', () => {
     });
   });
 
+  describe('S12 — los destinos de línea se resuelven una sola vez por checkout', () => {
+    const industryReads = () =>
+      prisma.stores.findUnique.mock.calls.filter(
+        ([args]: any[]) => args?.select?.industries === true,
+      );
+
+    it('checkout(): una sola lectura de industria (una resolución de destinos) y el mismo resultado de siempre', async () => {
+      mockOrderCreate(10000);
+
+      const result: any = await service.checkout({
+        payment_method_id: 7,
+        items: [{ product_id: PRODUCT_BASE.id, quantity: 1 }],
+        channel: 'whatsapp',
+      } as any);
+
+      expect(industryReads()).toHaveLength(1);
+      expect(prisma.orders.create).toHaveBeenCalledTimes(1);
+      expect(result.channel).toBe('whatsapp');
+    });
+
+    it('whatsappCheckout(): una sola lectura de industria', async () => {
+      mockOrderCreate(10000);
+
+      await service.whatsappCheckout({
+        items: [{ product_id: PRODUCT_BASE.id, quantity: 1 }],
+      } as any);
+
+      expect(industryReads()).toHaveLength(1);
+      expect(prisma.orders.create).toHaveBeenCalledTimes(1);
+    });
+  });
+
   describe('whatsappCheckout() — promotions share the same source of truth', () => {
     it('applies automatic promotions and returns discount details', async () => {
       promotionEngine.quoteDiscounts.mockResolvedValue({

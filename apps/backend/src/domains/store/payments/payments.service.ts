@@ -1750,13 +1750,9 @@ export class PaymentsService {
         // exactamente la misma que decide el estado de la orden.
         // ----------------------------------------------------------------
         if (!createPosPaymentDto.is_draft) {
-          // Resolve industries once per call (no cache to keep the patch
-          // safe; the per-payment cost is one extra small query).
-          const storeRow = await tx.stores.findUnique({
-            where: { id: createPosPaymentDto.store_id },
-            select: { industries: true },
-          });
-          if (storeIsRestaurant(storeRow?.industries)) {
+          // S12: la industria se lee una vez por venta (memo por tx); el
+          // store_id de la orden es el mismo que el del cobro.
+          if (await this.isRestaurantStore(tx, order.store_id)) {
             // Collect candidate order_item_ids: all `prepared` items
             // with skip_kds=false. Persisted items already carry the
             // product_type via the products relation; we re-load the
@@ -4279,12 +4275,35 @@ export class PaymentsService {
     }
   }
 
-  private async isRestaurantStore(tx: any, storeId: number): Promise<boolean> {
-    const store = await tx.stores.findUnique({
-      where: { id: storeId },
-      select: { industries: true },
-    });
-    return storeIsRestaurant(store?.industries);
+  /**
+   * S12: la industria de la tienda se lee UNA vez por transacción de venta.
+   * Se memoiza por `tx` (un cliente transaccional vive lo que dura la venta).
+   * Un cliente de larga vida (el compartido, uno con alcance o `withoutScope`)
+   * expone `$transaction`; con él no se memoiza, para no servir un valor viejo.
+   */
+  private restaurantByTx?: WeakMap<object, Map<number, Promise<boolean>>>;
+
+  private isRestaurantStore(tx: any, storeId: number): Promise<boolean> {
+    const read = async () => {
+      const store = await tx.stores.findUnique({
+        where: { id: storeId },
+        select: { industries: true },
+      });
+      return storeIsRestaurant(store?.industries);
+    };
+    if (tx === this.prisma || typeof tx?.$transaction === 'function') return read();
+    const memo = (this.restaurantByTx ??= new WeakMap());
+    let perStore = memo.get(tx);
+    if (!perStore) {
+      perStore = new Map();
+      memo.set(tx, perStore);
+    }
+    let cached = perStore.get(storeId);
+    if (!cached) {
+      cached = read();
+      perStore.set(storeId, cached);
+    }
+    return cached;
   }
 
   /** QUI-999: POS lines mapped to what the destination resolver reads. */
@@ -5413,6 +5432,7 @@ export class PaymentsService {
             tx,
             dtoStoreId,
             this.toDestinationLines(dto.items),
+            { isRestaurant: await this.isRestaurantStore(tx, dtoStoreId) },
           )
         : [];
     const newItems =
@@ -6349,16 +6369,15 @@ export class PaymentsService {
     if (!(dto.tip_amount || dto.tip_value)) return;
     // Lectura liviana dentro de la tx: `getSettings()` firma URLs de S3 y
     // alarga la transacción del cobro (riesgo P2028).
-    const storeRow = await tx.stores.findUnique({
+    // Secuencial: una tx interactiva usa una sola conexión.
+    const isRestaurant = await this.isRestaurantStore(tx, storeId);
+    const settingsRow = await tx.stores.findUnique({
       where: { id: storeId },
-      select: {
-        industries: true,
-        store_settings: { select: { settings: true } },
-      },
+      select: { store_settings: { select: { settings: true } } },
     });
     const policy = resolveTipPolicy(
-      (storeRow?.store_settings?.settings as any)?.pos?.tips,
-      storeIsRestaurant(storeRow?.industries),
+      (settingsRow?.store_settings?.settings as any)?.pos?.tips,
+      isRestaurant,
     );
     assertTipAllowed(dto, policy, grossProductsBase, (v) =>
       this.roundMoney(v),
@@ -6533,7 +6552,10 @@ export class PaymentsService {
       tx,
       dtoStoreId,
       this.toDestinationLines(items),
-      { isScheduled: !!dto.schedule },
+      {
+        isScheduled: !!dto.schedule,
+        isRestaurant: await this.isRestaurantStore(tx, dtoStoreId),
+      },
     );
 
     while (retries > 0) {

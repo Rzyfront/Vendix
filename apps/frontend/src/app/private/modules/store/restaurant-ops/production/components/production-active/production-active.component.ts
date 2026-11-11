@@ -46,6 +46,7 @@ import {
 } from '../../interfaces';
 import {
   ProductionApiScope,
+  ProductionClockService,
   ProductionOrdersService,
   ProductionSseService,
 } from '../../services';
@@ -416,6 +417,7 @@ export class ProductionActiveComponent {
   private readonly service = inject(ProductionOrdersService);
   private readonly manufacturing = inject(ManufacturingOrdersService);
   private readonly sse = inject(ProductionSseService);
+  private readonly clock = inject(ProductionClockService);
   private readonly settings = inject(StoreSettingsFacade);
   private readonly toast = inject(ToastService);
   private readonly dialog = inject(DialogService);
@@ -499,7 +501,8 @@ export class ProductionActiveComponent {
   });
 
   // --- shared 1 s ticker (only while something is in progress) -------------
-  readonly now = signal(Date.now());
+  /** S25: hora corregida con el desfase del servidor (ver `ProductionClockService`). */
+  readonly now = signal(this.clock.now());
   private readonly hasRunning = computed(() => this.summary().in_progress > 0);
 
   private loadSub: Subscription | null = null;
@@ -516,8 +519,8 @@ export class ProductionActiveComponent {
 
     effect((onCleanup) => {
       if (!this.hasRunning()) return;
-      this.now.set(Date.now());
-      const id = setInterval(() => this.now.set(Date.now()), 1000);
+      this.now.set(this.clock.now());
+      const id = setInterval(() => this.now.set(this.clock.now()), 1000);
       onCleanup(() => clearInterval(id));
     });
 
@@ -535,7 +538,9 @@ export class ProductionActiveComponent {
     if (resetView) this.data.set(null);
     this.loading.set(true);
     this.errorMessage.set(null);
-    this.loadSub = this.service.getDay(date, this.apiScope).subscribe({
+    // S20: la línea de tiempo necesita TODAS las órdenes en curso del día, así que
+    // esta pantalla recorre las páginas hasta que `next_cursor` sea null.
+    this.loadSub = this.service.getDayAllPages(date, this.apiScope).subscribe({
       next: (res) => {
         this.data.set(res);
         this.loading.set(false);

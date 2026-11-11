@@ -127,6 +127,10 @@ describe('ProductsService', () => {
     stores: {
       findUnique: jest.fn(),
     },
+    // S13: por defecto la tienda tiene recetas activas (comportamiento previo).
+    recipes: {
+      findFirst: jest.fn().mockResolvedValue({ id: 1 }),
+    },
     // Modelos que `ProductsService` toca en los caminos de escritura y que la
     // fixture original no declaraba (el suite fallaba con
     // "Cannot read properties of undefined").
@@ -1299,6 +1303,7 @@ describe('ProductsService', () => {
       mockPrismaService.products.count.mockResolvedValue(rows.length);
       mockPrismaService.stores.findUnique.mockResolvedValue({
         default_location_id: 1,
+        industries: ['restaurant'],
       });
       mockPrismaService.products.findMany.mockClear();
 
@@ -1319,6 +1324,67 @@ describe('ProductsService', () => {
       const args = mockPrismaService.products.findMany.mock.calls[0][0];
       expect(args.include._count.select.recipes).toEqual({
         where: { is_active: true },
+      });
+    });
+
+    describe('S13 — la subconsulta de receta corre solo donde se usa', () => {
+      const list = async (
+        industries: string[] | null,
+        activeRecipe: { id: number } | null,
+        query: any,
+      ) => {
+        const rows = [
+          { id: 1, name: 'Camiseta', stock_levels: [], is_batch_produced: true, _count: {} },
+        ];
+        mockPrismaService.products.findMany.mockResolvedValue(rows);
+        mockPrismaService.products.count.mockResolvedValue(rows.length);
+        mockPrismaService.stores.findUnique.mockResolvedValue({
+          default_location_id: 1,
+          industries,
+        });
+        mockPrismaService.recipes.findFirst.mockResolvedValue(activeRecipe);
+        mockPrismaService.recipes.findFirst.mockClear();
+        mockPrismaService.products.findMany.mockClear();
+        const res = await service.findAll({ page: 1, limit: 10, ...query });
+        return {
+          res,
+          args: mockPrismaService.products.findMany.mock.calls[0][0],
+        };
+      };
+
+      afterEach(() => {
+        mockPrismaService.recipes.findFirst.mockResolvedValue({ id: 1 });
+      });
+
+      it.each([
+        ['retail', ['retail']],
+        ['sin industrias (default retail)', []],
+        ['restaurante sin recetas todavía', ['restaurant']],
+      ])('%s sin recetas activas: ni el listado ni el POS piden recetas y el POS conserva is_producible en false', async (_n, industries) => {
+        for (const query of [{}, { pos_optimized: true }]) {
+          const { res, args } = await list(industries, null, query);
+          expect(mockPrismaService.recipes.findFirst).toHaveBeenCalledWith({
+            where: { store_id: 1, is_active: true },
+            select: { id: true },
+          });
+          expect(args.include._count.select).not.toHaveProperty('recipes');
+          expect(args.include).not.toHaveProperty('recipes');
+          if (query.pos_optimized) {
+            expect((res.data[0] as any).is_producible).toBe(false);
+          }
+        }
+      });
+
+      it('con alguna receta activa pide la subconsulta en cualquier industria, también retail', async () => {
+        for (const industries of [['restaurant'], ['manufacturing'], ['retail'], []]) {
+          const { args } = await list(industries, { id: 7 }, {});
+          expect(args.include._count.select.recipes).toEqual({ where: { is_active: true } });
+          expect(args.include.recipes).toEqual({
+            where: { is_active: true },
+            select: { id: true },
+            take: 1,
+          });
+        }
       });
     });
   });
