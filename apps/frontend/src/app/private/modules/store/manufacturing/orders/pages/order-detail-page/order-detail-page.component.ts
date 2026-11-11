@@ -37,6 +37,7 @@ import {
   ManufacturingSettingsService,
 } from '../../../services';
 import { ProductionSaleLinesComponent } from '../../../../restaurant-ops/production/components/production-sale-lines/production-sale-lines.component';
+import { formatProductionQty } from '../../../../restaurant-ops/production/components/production-day-supplies/production-day-supplies.util';
 import { ProductionOrdersService } from '../../../../restaurant-ops/production/services/production-orders.service';
 import { ProductionSseService } from '../../../../restaurant-ops/production/services/production-sse.service';
 import { ProductionOrder } from '../../../../restaurant-ops/production/interfaces/production-order.interface';
@@ -406,11 +407,9 @@ export class OrderDetailPageComponent implements OnInit {
     return value ? formatDateOnlyUTC(value) : '—';
   }
 
+  /** Same quantity format as the day panel and the restaurant detail. */
   num(value: number | string | null | undefined): string {
-    if (value == null || value === '') return '—';
-    const n = Number(value);
-    if (!Number.isFinite(n)) return String(value);
-    return Number.isInteger(n) ? n.toString() : n.toFixed(4).replace(/\.?0+$/, '');
+    return formatProductionQty(value);
   }
 
   lineName(line: ManufacturingOrderLine): string {

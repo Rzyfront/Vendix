@@ -629,6 +629,7 @@ jobs:
           --include='**/restaurant-ops/production/components/production-day-supplies/production-day-supplies.component.spec.ts'
           --include='**/restaurant-ops/production/components/production-order-detail/production-order-detail.component.spec.ts'
           --include='**/manufacturing/orders/pages/order-detail-page/order-detail-page.component.spec.ts'
+          --include='**/manufacturing/orders/components/complete-order-modal/complete-order-modal.component.spec.ts'
           --include='**/orders/components/orders-list/order-kitchen-summary.util.spec.ts'
           --include='**/shared/components/item-list/item-list.component.spec.ts'
           --include='**/orders/components/orders-list/orders-list.component.spec.ts'

@@ -35,6 +35,7 @@ import {
 import { ProductionOrdersService, ProductionSseService } from '../../services';
 import { formatYieldQuantity } from '../../services/yield-unit.util';
 import { ProductionSaleLinesComponent } from '../production-sale-lines/production-sale-lines.component';
+import { formatProductionQty } from '../production-day-supplies/production-day-supplies.util';
 
 /**
  * Shared detail of one production order (QUI-995 / T13): product, quantity,
@@ -281,12 +282,9 @@ export class ProductionOrderDetailComponent {
     return line.component_product?.name ?? `Producto #${line.component_product_id}`;
   }
 
-  /** Plain quantity for the supplies table (no yield unit: each line has its own). */
+  /** Plain quantity for the supplies table (no yield unit: each line has its own), as the day panel shows it. */
   num(value: number | string | null | undefined): string {
-    if (value == null || value === '') return '—';
-    const n = Number(value);
-    if (!Number.isFinite(n)) return String(value);
-    return Number.isInteger(n) ? n.toString() : n.toFixed(4).replace(/\.?0+$/, '');
+    return formatProductionQty(value);
   }
 
   toNumber(value: number | string | null | undefined): number | null {
