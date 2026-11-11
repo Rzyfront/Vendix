@@ -30,15 +30,37 @@ import { ExistingCustomerSummary } from '../../models/customer.model';
       @if (existing(); as c) {
         <div class="space-y-4">
           <p class="text-sm text-text-primary">
-            Ya hay un cliente registrado con este documento. No se creará un
+            Ya hay un cliente registrado con {{ matchText() }}. No se creará un
             cliente duplicado.
           </p>
-          <div class="rounded-xl border border-border bg-surface p-3">
+          <div class="rounded-xl border border-border bg-surface p-3 space-y-1">
             <p class="text-sm font-semibold text-text-primary">{{ name() }}</p>
             @if (documentLine()) {
               <p class="text-xs text-text-secondary">{{ documentLine() }}</p>
             }
+            @if (c.email) {
+              <p class="text-xs text-text-secondary">{{ c.email }}</p>
+            }
+            <div class="flex flex-wrap gap-1 pt-1">
+              @for (f of c.matched_by ?? []; track f) {
+                <span class="rounded-full bg-primary/10 px-2 py-0.5 text-xs font-medium text-primary">
+                  Coincide por {{ fieldLabel(f) }}
+                </span>
+              }
+            </div>
           </div>
+          @if (c.other_matches?.length) {
+            <div class="rounded-xl border border-warning/40 bg-warning/5 p-3">
+              <p class="text-xs font-semibold text-text-primary">También coincide:</p>
+              <ul class="mt-1 space-y-0.5">
+                @for (o of c.other_matches; track o.id) {
+                  <li class="text-xs text-text-secondary">
+                    {{ o.display_name }} — por {{ fieldsLabel(o.matched_by) }}
+                  </li>
+                }
+              </ul>
+            </div>
+          }
 
           <div class="space-y-1">
             <app-input
@@ -99,6 +121,22 @@ export class DuplicateCustomerDialogComponent {
     const type = c.document_type ? getDocumentTypeLabel(c.document_type) : '';
     return `${type ? type + ' ' : ''}${c.document_number}`;
   });
+
+  readonly matchText = computed(() => {
+    const f = this.existing()?.matched_by ?? ['document'];
+    if (f.includes('document') && f.includes('email')) {
+      return 'esta identificación y este correo';
+    }
+    return f.includes('email') ? 'este correo' : 'esta identificación';
+  });
+
+  fieldLabel(f: string): string {
+    return f === 'email' ? 'correo' : 'identificación';
+  }
+
+  fieldsLabel(fields: string[]): string {
+    return fields.map((f) => this.fieldLabel(f)).join(' y ');
+  }
 
   onOpenChange(open: boolean): void {
     if (!open) this.cancelled.emit();

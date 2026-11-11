@@ -230,49 +230,53 @@ export class CustomerAiImportService implements OnModuleInit {
     let match: ImportCustomerMatch | null = null;
     let existingKeys = new Set<string>();
 
-    if (customer.document_number) {
-      const existing = await this.customersService.findByDocumentInOrganization(
-        organizationId,
-        customer.document_number,
-        customer.document_type ?? undefined,
+    // S8 — coincidencia por identificación O correo, dentro del alcance
+    // operativo (tienda u organización).
+    const matches =
+      customer.document_number || customer.email
+        ? await this.customersService.findCustomerMatchesInScope(
+            organizationId,
+            storeId,
+            {
+              document_type: customer.document_type ?? null,
+              document_number: customer.document_number ?? null,
+              email: customer.email ?? null,
+            },
+          )
+        : [];
+    const existing = matches[0];
+    if (existing) {
+      const rows = await this.prisma.addresses.findMany({
+        where: { store_id: storeId, user_id: existing.id, type: 'shipping' },
+        select: {
+          id: true,
+          label: true,
+          address_line1: true,
+          city: true,
+        },
+        orderBy: { id: 'asc' },
+      });
+      const existingLocations: ImportExistingLocation[] = rows.map((r) => ({
+        id: r.id,
+        label: r.label ?? null,
+        address_line1: r.address_line1 ?? null,
+        city: r.city ?? null,
+      }));
+      existingKeys = new Set(
+        rows.map((r) => `${addressKey(r.address_line1)}|${addressKey(r.city)}`),
       );
-      if (existing) {
-        const rows = await this.prisma.addresses.findMany({
-          where: { store_id: storeId, user_id: existing.id, type: 'shipping' },
-          select: {
-            id: true,
-            label: true,
-            address_line1: true,
-            city: true,
-          },
-          orderBy: { id: 'asc' },
-        });
-        const existingLocations: ImportExistingLocation[] = rows.map((r) => ({
-          id: r.id,
-          label: r.label ?? null,
-          address_line1: r.address_line1 ?? null,
-          city: r.city ?? null,
-        }));
-        existingKeys = new Set(
-          rows.map((r) => `${addressKey(r.address_line1)}|${addressKey(r.city)}`),
-        );
-        match = {
-          existing_customer_id: existing.id,
-          display_name: this.displayName({
-            first_name: existing.first_name,
-            last_name: existing.last_name,
-            legal_name: existing.legal_name,
-            email: existing.email,
-            document_number: existing.document_number,
-          }),
-          in_store: Array.isArray(existing.store_users)
-            ? existing.store_users.some(
-                (su: { store_id: number }) => su.store_id === storeId,
-              )
-            : false,
-          existing_locations: existingLocations,
-        };
-      }
+      match = {
+        existing_customer_id: existing.id,
+        display_name: existing.display_name,
+        in_store: existing.in_store,
+        existing_locations: existingLocations,
+        matched_by: existing.matched_by,
+        other_matches: matches.slice(1).map((m) => ({
+          id: m.id,
+          display_name: m.display_name,
+          matched_by: m.matched_by,
+        })),
+      };
     }
 
     const messages: string[] = [];

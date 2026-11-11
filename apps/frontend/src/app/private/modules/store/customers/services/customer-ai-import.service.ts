@@ -61,6 +61,13 @@ export interface ImportCustomerMatch {
   display_name: string;
   in_store: boolean;
   existing_locations: ImportExistingLocation[];
+  /** S8 — identificación y/o correo. */
+  matched_by?: ('document' | 'email')[];
+  other_matches?: {
+    id: number;
+    display_name: string;
+    matched_by: ('document' | 'email')[];
+  }[];
 }
 
 export interface AnalyzedImportLocation extends ImportLocation {

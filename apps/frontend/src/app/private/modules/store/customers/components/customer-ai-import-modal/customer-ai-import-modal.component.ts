@@ -277,6 +277,17 @@ interface EditableCustomer {
                       <app-badge variant="warning" size="xsm">
                         Ya existe: {{ c.match.display_name }}
                       </app-badge>
+                      @if (c.match.matched_by?.length) {
+                        <p class="mt-1 text-xs text-text-secondary">
+                          Coincide por {{ matchFieldsLabel(c.match.matched_by) }}
+                        </p>
+                      }
+                      @for (o of c.match.other_matches ?? []; track o.id) {
+                        <p class="text-xs text-warning">
+                          También coincide {{ o.display_name }} por
+                          {{ matchFieldsLabel(o.matched_by) }}
+                        </p>
+                      }
                     } @else {
                       <app-badge variant="success" size="xsm">Nuevo</app-badge>
                     }
@@ -588,6 +599,12 @@ interface EditableCustomer {
   ],
 })
 export class CustomerAiImportModalComponent {
+  matchFieldsLabel(fields: readonly string[] | undefined): string {
+    return (fields ?? [])
+      .map((f) => (f === 'email' ? 'correo' : 'identificación'))
+      .join(' y ');
+  }
+
   private readonly destroyRef = inject(DestroyRef);
   private readonly service = inject(CustomerAiImportService);
   private readonly toast = inject(ToastService);

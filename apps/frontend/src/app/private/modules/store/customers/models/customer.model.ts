@@ -80,6 +80,18 @@ export interface ExistingCustomerSummary {
     document_number?: string | null;
     person_type?: PersonType | null;
     in_store?: boolean;
+    /** S8 — dato(s) por los que coincide con lo que se intentó crear. */
+    matched_by?: CustomerMatchField[];
+    /** Otros clientes del alcance que también coinciden (p. ej. el correo). */
+    other_matches?: CustomerOtherMatch[];
+}
+
+export type CustomerMatchField = 'document' | 'email';
+
+export interface CustomerOtherMatch {
+    id: number;
+    display_name: string;
+    matched_by: CustomerMatchField[];
 }
 
 /** Respuesta de `POST /store/customers/:id/locations`. */

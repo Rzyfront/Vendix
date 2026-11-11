@@ -85,7 +85,11 @@ describe('CustomersBulkService — ubicaciones por cliente', () => {
     addCustomerLocation.mockResolvedValue({ address: { id: 1 }, created: true });
     service = new CustomersBulkService(
       {} as any,
-      { create, findByDocumentInOrganization } as any,
+      {
+        create,
+        findByDocumentInOrganization,
+        resolveDuplicateStoreFilter: jest.fn().mockResolvedValue(null),
+      } as any,
       { addCustomerLocation } as any,
     );
     jest

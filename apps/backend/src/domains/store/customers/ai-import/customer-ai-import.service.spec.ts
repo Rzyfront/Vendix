@@ -12,6 +12,7 @@ describe('CustomerAiImportService', () => {
     create: jest.Mock;
     update: jest.Mock;
     findByDocumentInOrganization: jest.Mock;
+    findCustomerMatchesInScope: jest.Mock;
   };
   let addressesMock: { addCustomerLocation: jest.Mock };
   let registryMock: { register: jest.Mock };
@@ -76,6 +77,7 @@ describe('CustomerAiImportService', () => {
       create: jest.fn().mockResolvedValue({ id: 100 }),
       update: jest.fn().mockResolvedValue({ id: 100 }),
       findByDocumentInOrganization: jest.fn().mockResolvedValue(null),
+      findCustomerMatchesInScope: jest.fn().mockResolvedValue([]),
     };
     addressesMock = {
       addCustomerLocation: jest
@@ -161,15 +163,42 @@ describe('CustomerAiImportService', () => {
     ).rejects.toBeInstanceOf(VendixHttpException);
   });
 
-  it('analyze marca cliente existente y ubicación ya registrada', async () => {
-    customersMock.findByDocumentInOrganization.mockResolvedValue({
-      id: 77,
-      first_name: '',
-      last_name: '',
-      legal_name: 'Acme S.A.S',
-      document_number: '900123456',
-      store_users: [{ store_id: 5 }],
+  it('analyze informa coincidencia por correo y otros clientes que coinciden (S8)', async () => {
+    customersMock.findCustomerMatchesInScope.mockResolvedValue([
+      { id: 80, display_name: 'Ana Pérez', document_type: 'CC', document_number: '1', email: 'ana@x.co', in_store: true, matched_by: ['email'] },
+      { id: 81, display_name: 'Otra Ana', document_type: 'CC', document_number: '2', email: null, in_store: true, matched_by: ['document'] },
+    ]);
+    const result = await runInStore(() =>
+      service.analyze({
+        customers: [
+          { first_name: 'Ana', last_name: 'Pérez', email: 'ana@x.co', document_type: 'CC', document_number: '2', locations: [] },
+        ],
+      }),
+    );
+    expect(customersMock.findCustomerMatchesInScope).toHaveBeenCalledWith(
+      expect.any(Number),
+      expect.any(Number),
+      { document_type: 'CC', document_number: '2', email: 'ana@x.co' },
+    );
+    expect(result.customers[0].match).toMatchObject({
+      existing_customer_id: 80,
+      matched_by: ['email'],
+      other_matches: [{ id: 81, display_name: 'Otra Ana', matched_by: ['document'] }],
     });
+  });
+
+  it('analyze marca cliente existente y ubicación ya registrada', async () => {
+    customersMock.findCustomerMatchesInScope.mockResolvedValue([
+      {
+        id: 77,
+        display_name: 'Acme S.A.S',
+        document_type: 'NIT',
+        document_number: '900123456',
+        email: null,
+        in_store: true,
+        matched_by: ['document'],
+      },
+    ]);
     prismaMock.addresses.findMany.mockResolvedValue([
       { id: 1, label: 'Sede Norte', address_line1: 'Cra 1 # 2-3', city: 'Cali' },
     ]);

@@ -136,6 +136,14 @@ export interface ImportCustomerMatch {
   display_name: string;
   in_store: boolean;
   existing_locations: ImportExistingLocation[];
+  /** S8 — dato(s) por los que coincide: identificación y/o correo. */
+  matched_by: ('document' | 'email')[];
+  /** Otros clientes que también coinciden (p. ej. el correo es de otro). */
+  other_matches: {
+    id: number;
+    display_name: string;
+    matched_by: ('document' | 'email')[];
+  }[];
 }
 
 export interface AnalyzedImportLocation extends ImportLocation {

@@ -1,4 +1,4 @@
-import { Injectable, Logger } from '@nestjs/common';
+import { Injectable, Logger, Optional } from '@nestjs/common';
 import { randomBytes } from 'crypto';
 import {
   Prisma,
@@ -11,6 +11,7 @@ import {
 // `persona_type_enum` — the DTO does not export it, so it is redeclared here.
 type PersonaType = (typeof persona_type_enum)[keyof typeof persona_type_enum];
 import { StorePrismaService } from '../../../prisma/services/store-prisma.service';
+import { OperatingScopeService } from '@common/services/operating-scope.service';
 import { recordTriggerEvent } from '../workflows/engine/workflow-trigger.outbox';
 import { CreateCustomerDto } from './dto/create-customer.dto';
 import { ResolveCustomerDto } from './dto/resolve-customer.dto';
@@ -178,7 +179,127 @@ export class CustomersService {
   constructor(
     private readonly prisma: StorePrismaService,
     private readonly eventEmitter: EventEmitter2,
+    @Optional() private readonly operatingScope?: OperatingScopeService,
   ) {}
+
+  /**
+   * Alcance de la detección de duplicados (S8): si la organización opera por
+   * TIENDA, un cliente "ya existe" solo cuando está enlazado a esta tienda;
+   * si opera como ORGANIZACIÓN, cuando existe en cualquier tienda de ella.
+   * Sin el servicio (tests antiguos) se conserva el comportamiento previo
+   * (organización).
+   */
+  async resolveDuplicateStoreFilter(
+    organizationId: number,
+    storeId: number,
+  ): Promise<number | null> {
+    if (!this.operatingScope) return null;
+    const scope = await this.operatingScope.getOperatingScope(organizationId);
+    return scope === 'STORE' ? storeId : null;
+  }
+
+  /**
+   * Coincidencias de un cliente por identificación O correo dentro del
+   * alcance operativo. Devuelve cada cliente una vez con los datos por los
+   * que coincide, primero los que coinciden por documento.
+   */
+  async findCustomerMatchesInScope(
+    organizationId: number,
+    storeId: number,
+    input: {
+      document_type?: string | null;
+      document_number?: string | null;
+      email?: string | null;
+    },
+  ): Promise<
+    {
+      id: number;
+      display_name: string;
+      document_type: string | null;
+      document_number: string | null;
+      email: string | null;
+      in_store: boolean;
+      matched_by: ('document' | 'email')[];
+    }[]
+  > {
+    const doc = this.normalizeDocument({
+      type: input.document_type ?? null,
+      number: input.document_number ?? null,
+    });
+    const email = this.resolveCustomerEmail(input.email ?? undefined);
+    const or: any[] = [];
+    if (doc.number) {
+      or.push({
+        document_number: { equals: doc.number, mode: 'insensitive' },
+        ...(doc.type ? { document_type: doc.type } : {}),
+      });
+    }
+    if (email) or.push({ email: emailEquals(email) });
+    if (!or.length) return [];
+
+    const scopedStoreId = await this.resolveDuplicateStoreFilter(
+      organizationId,
+      storeId,
+    );
+    const rows = await this.prisma.users.findMany({
+      where: {
+        organization_id: organizationId,
+        state: { not: user_state_enum.archived },
+        user_roles: { some: { roles: { name: 'customer' } } },
+        ...(scopedStoreId
+          ? { store_users: { some: { store_id: scopedStoreId } } }
+          : {}),
+        OR: or,
+      },
+      select: {
+        id: true,
+        first_name: true,
+        last_name: true,
+        legal_name: true,
+        document_type: true,
+        document_number: true,
+        email: true,
+        store_users: { where: { store_id: storeId }, select: { id: true } },
+      },
+      take: 5,
+    });
+
+    return (rows ?? [])
+      .map((u) => {
+        const matched_by: ('document' | 'email')[] = [];
+        if (
+          doc.number &&
+          (u.document_number ?? '').toLowerCase() === doc.number.toLowerCase() &&
+          (!doc.type || u.document_type === doc.type)
+        ) {
+          matched_by.push('document');
+        }
+        if (
+          email &&
+          (u.email ?? '').trim().toLowerCase() === email.trim().toLowerCase()
+        ) {
+          matched_by.push('email');
+        }
+        const name =
+          u.legal_name?.trim() ||
+          [u.first_name, u.last_name].filter(Boolean).join(' ').trim() ||
+          `Cliente #${u.id}`;
+        return {
+          id: u.id,
+          display_name: name,
+          document_type: (u.document_type as string | null) ?? null,
+          document_number: u.document_number ?? null,
+          email: u.email ?? null,
+          in_store: (u.store_users ?? []).length > 0,
+          matched_by,
+        };
+      })
+      .sort(
+        (a, b) =>
+          Number(b.matched_by.includes('document')) -
+          Number(a.matched_by.includes('document')),
+      );
+  }
 
   private normalizeOptionalString(
     value?: string | null,
@@ -1433,11 +1554,35 @@ export class CustomersService {
 
     // Solo verificamos duplicidad por email cuando realmente hay un email.
     // Sin email no aplica el chequeo de unicidad de correo.
+    // S8 — el alcance de "ya existe" sigue el operating_scope de la org.
+    const duplicateStoreId = await this.resolveDuplicateStoreFilter(
+      store.organization_id,
+      storeId,
+    );
+    // Todas las coincidencias (documento O correo) para informar al usuario
+    // de cada cliente que coincide y por qué dato.
+    const scopeMatches = await this.findCustomerMatchesInScope(
+      store.organization_id,
+      storeId,
+      {
+        document_type: dto.document_type ?? null,
+        document_number: dto.document_number ?? null,
+        email: effectiveEmail,
+      },
+    );
+    const matchesFor = (id: number) =>
+      scopeMatches.find((m) => m.id === id)?.matched_by ?? [];
+    const otherMatches = (id: number) =>
+      scopeMatches.filter((m) => m.id !== id);
+
     if (effectiveEmail) {
       const existingUser = await this.prisma.users.findFirst({
         where: {
           email: emailEquals(effectiveEmail),
           organization_id: store.organization_id,
+          ...(duplicateStoreId
+            ? { store_users: { some: { store_id: duplicateStoreId } } }
+            : {}),
           // Archived customers are not "in use" — allow re-creating a new
           // customer that re-uses the same email after the old row was
           // archived (mirrors the document dedup filter in
@@ -1488,6 +1633,10 @@ export class CustomersService {
           {
             kind: 'email',
             value: effectiveEmail,
+            matched_by: matchesFor(existingUser.id).length
+              ? matchesFor(existingUser.id)
+              : ['email'],
+            other_matches: otherMatches(existingUser.id),
             existing_customer_id: existingUser.id,
             existing_customer_document_number:
               existingUser.document_number ?? null,
@@ -1530,6 +1679,7 @@ export class CustomersService {
         store.organization_id,
         normalizedDoc.number,
         normalizedDoc.type,
+        duplicateStoreId ?? undefined,
       );
 
       if (existingByDocument) {
@@ -1548,6 +1698,10 @@ export class CustomersService {
             kind: 'document',
             value: normalizedDoc.number,
             type: normalizedDoc.type,
+            matched_by: matchesFor(existingByDocument.id).length
+              ? matchesFor(existingByDocument.id)
+              : ['document'],
+            other_matches: otherMatches(existingByDocument.id),
             existing_customer_id: existingByDocument.id,
             // Snapshot público explícito; nunca la fila users cruda.
             existing_customer: {
@@ -2421,6 +2575,8 @@ export class CustomersService {
     organizationId: number,
     documentNumber: string,
     documentType?: string,
+    /** S8 — solo clientes enlazados a esta tienda (scope operativo STORE). */
+    onlyStoreId?: number,
   ): Promise<any | null> {
     // Defensive normalization: callers may pass raw user input (POS lookup,
     // legacy clients, etc.). Stored values are normalized, so we must look
@@ -2451,6 +2607,9 @@ export class CustomersService {
 
     if (normalized.type) {
       where.document_type = normalized.type;
+    }
+    if (onlyStoreId) {
+      where.store_users = { some: { store_id: onlyStoreId } };
     }
 
     const user = await this.prisma.users.findFirst({

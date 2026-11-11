@@ -202,9 +202,22 @@ export function extractDocumentConflict(
     return null;
   }
   const details = e.error.details;
-  if (details?.['kind'] !== 'document') return null;
-  const existing = details['existing_customer'] as
+  const kind = details?.['kind'];
+  // S8 — un cliente es el mismo por identificación O por correo.
+  if (kind !== 'document' && kind !== 'email') return null;
+  const existing = details?.['existing_customer'] as
     | ExistingCustomerSummary
     | undefined;
-  return existing && typeof existing.id === 'number' ? existing : null;
+  if (!existing || typeof existing.id !== 'number') return null;
+  const matchedBy = details?.['matched_by'];
+  const otherMatches = details?.['other_matches'];
+  return {
+    ...existing,
+    matched_by: Array.isArray(matchedBy)
+      ? (matchedBy as ExistingCustomerSummary['matched_by'])
+      : [kind],
+    other_matches: Array.isArray(otherMatches)
+      ? (otherMatches as ExistingCustomerSummary['other_matches'])
+      : [],
+  };
 }

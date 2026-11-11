@@ -22,7 +22,13 @@ describe('CustomersService.resolveInlineCustomer', () => {
       $transaction: (cb: (tx: unknown) => unknown) => cb(prisma),
     }),
     stores: { findUnique: jest.fn() },
-    users: { findFirst: jest.fn(), findUnique: jest.fn(), create: jest.fn() },
+    users: {
+      findFirst: jest.fn(),
+      findUnique: jest.fn(),
+      create: jest.fn(),
+      // S8: coincidencias por documento/correo en el alcance operativo.
+      findMany: jest.fn().mockResolvedValue([]),
+    },
     roles: { findFirst: jest.fn() },
     store_users: { upsert: jest.fn() },
     addresses: { create: jest.fn() },
@@ -156,6 +162,8 @@ describe('CustomersService.resolveInlineCustomer', () => {
         details: {
           kind: 'email',
           value: 'compras@tecnicell.co',
+          matched_by: ['email'],
+          other_matches: [],
           existing_customer_id: 12,
           existing_customer_document_number: '900123456',
           existing_customer_document_type: 'NIT',

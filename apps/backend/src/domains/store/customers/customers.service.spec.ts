@@ -307,6 +307,80 @@ describe('CustomersService — QUI-728 customer fiscal data', () => {
     });
   });
 
+  describe('create() — alcance operativo de duplicados (S8)', () => {
+    const build = (scope: 'STORE' | 'ORGANIZATION') =>
+      new CustomersService(
+        mockPrismaService as any,
+        mockEventEmitter as any,
+        { getOperatingScope: jest.fn().mockResolvedValue(scope) } as any,
+      );
+
+    it('en scope STORE solo busca duplicados entre clientes de esta tienda', async () => {
+      (mockPrismaService.users.findMany as jest.Mock).mockResolvedValue([]);
+      await build('STORE').create(1, {
+        first_name: 'Ana',
+        last_name: 'Pérez',
+        email: 'ana@x.co',
+        document_type: 'CC',
+        document_number: '12345678',
+      } as any);
+
+      const calls = (mockPrismaService.users.findFirst as jest.Mock).mock.calls.map(
+        (c) => c[0].where,
+      );
+      const emailCall = calls.find((w) => w.email);
+      const docCall = calls.find((w) => w.document_number);
+      expect(emailCall.store_users).toEqual({ some: { store_id: 1 } });
+      expect(docCall.store_users).toEqual({ some: { store_id: 1 } });
+      expect(
+        (mockPrismaService.users.findMany as jest.Mock).mock.calls[0][0].where
+          .store_users,
+      ).toEqual({ some: { store_id: 1 } });
+    });
+
+    it('en scope ORGANIZATION busca en toda la organización', async () => {
+      (mockPrismaService.users.findMany as jest.Mock).mockResolvedValue([]);
+      await build('ORGANIZATION').create(1, {
+        first_name: 'Ana',
+        last_name: 'Pérez',
+        document_type: 'CC',
+        document_number: '12345678',
+      } as any);
+      const docCall = (mockPrismaService.users.findFirst as jest.Mock).mock.calls
+        .map((c) => c[0].where)
+        .find((w) => w.document_number);
+      expect(docCall.organization_id).toBe(100);
+      expect(docCall.store_users).toBeUndefined();
+    });
+
+    it('informa por qué datos coincide y los otros clientes que coinciden', async () => {
+      (mockPrismaService.users.findMany as jest.Mock).mockResolvedValue([
+        { id: 77, legal_name: 'Andes SAS', document_type: 'NIT', document_number: '900123456', email: null, store_users: [{ id: 1 }] },
+        { id: 88, first_name: 'Ana', last_name: 'Pérez', document_type: 'CC', document_number: '1', email: 'compras@andes.co', store_users: [] },
+      ]);
+      mockPrismaService.users.findFirst
+        .mockResolvedValueOnce(null) // correo: no hay en este alcance (otro mock de findMany sí)
+        .mockResolvedValueOnce({ id: 77, legal_name: 'Andes SAS', document_type: 'NIT', document_number: '900123456', user_roles: [] });
+      mockPrismaService.store_users.findFirst.mockResolvedValueOnce({ id: 1 });
+
+      const error: any = await build('ORGANIZATION')
+        .create(1, {
+          legal_name: 'Andes SAS',
+          person_type: 'JURIDICA',
+          document_type: 'NIT',
+          document_number: '900123456',
+          email: 'compras@andes.co',
+        } as any)
+        .catch((e) => e);
+
+      expect(error.getResponse().details).toMatchObject({
+        kind: 'document',
+        matched_by: ['document'],
+        other_matches: [{ id: 88, display_name: 'Ana Pérez', matched_by: ['email'] }],
+      });
+    });
+  });
+
   describe('create() — responsabilidades fiscales + CIIU', () => {
     it('persists fiscal_responsibilities and ciiu_code verbatim', async () => {
       await service.create(1, {

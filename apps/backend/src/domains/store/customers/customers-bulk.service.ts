@@ -561,6 +561,11 @@ export class CustomersBulkService {
                 organizationId,
                 docKey.split(':')[1],
                 docKey.split(':')[0],
+                // S8 — solo esta tienda cuando la org opera por tienda.
+                (await this.customersService.resolveDuplicateStoreFilter(
+                  organizationId,
+                  storeId,
+                )) ?? undefined,
               );
             if (existing?.id) existingId = existing.id;
           }
