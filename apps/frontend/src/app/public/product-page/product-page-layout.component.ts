@@ -144,7 +144,7 @@ export class ProductPageLayoutComponent {
         const tenantConfig = (this.tenant.getCurrentTenantConfig() || {}) as any;
         const store = this.tenant.getCurrentStore();
 
-        const name = store?.name || domainConfig.store_slug || 'Tienda';
+        const name = store?.name || domainConfig.store_name || domainConfig.store_slug || 'Tienda';
         this.storeName.set(name);
         if (name !== 'Tienda') this.storeSeo.setStore(name, tenantConfig?.seo?.description);
 

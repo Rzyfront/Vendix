@@ -100,7 +100,7 @@ interface ComparisonRow {
                 <td class="text-center p-4" [ngClass]="popularCellClass(plan)">
                   <div class="flex flex-col items-center gap-0.5">
                     <span class="text-2xl font-extrabold text-[var(--color-text-primary)]">
-                      {{ asNumber(plan.base_price) | currency:plan.currency:'symbol':'1.0-0' }}
+                      {{ asNumber(plan.base_price) | currency:plan.currency:'symbol-narrow':'1.0-0':'es-CO' }}
                     </span>
                     <span class="text-[11px] text-[var(--color-text-secondary)]">
                       / {{ cycleSuffix(plan.billing_cycle) }}

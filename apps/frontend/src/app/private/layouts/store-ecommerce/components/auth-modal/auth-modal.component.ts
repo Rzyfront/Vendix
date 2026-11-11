@@ -232,7 +232,7 @@ import { LegalPreviewModalComponent } from '../../../../../public/ecommerce/comp
             }
 
             <app-input
-              label="Correo Electronico"
+              label="Correo electrónico"
               type="email"
               placeholder="tu@email.com"
               formControlName="email"
@@ -241,7 +241,7 @@ import { LegalPreviewModalComponent } from '../../../../../public/ecommerce/comp
 
             @if (!isForgot()) {
               <app-input
-                label="Contrasena"
+                label="Contraseña"
                 type="password"
                 placeholder="********"
                 formControlName="password"
@@ -400,15 +400,15 @@ export class AuthModalComponent {
     this.isForgot()
       ? 'Recuperar contraseña'
       : this.isLogin()
-        ? 'Iniciar Sesion'
-        : 'Crear Cuenta',
+        ? 'Iniciar sesión'
+        : 'Crear cuenta',
   );
   readonly headerSubtitle = computed(() =>
     this.isForgot()
       ? 'Te enviaremos instrucciones a tu correo'
       : this.isLogin()
         ? 'Ingresa tus credenciales para continuar'
-        : 'Registrate para realizar tu compra',
+        : 'Regístrate para realizar tu compra',
   );
 
   // Legal Documents state

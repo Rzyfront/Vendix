@@ -79,6 +79,10 @@ export interface BookableRoomType {
 
 const AMENITY_LABELS = new Map<string, string>(LODGING_AMENITIES.map((a) => [a.code, a.label]));
 
+/** S8 — shown to the guest when the store has no online payment yet. */
+export const ONLINE_PAYMENT_UNAVAILABLE =
+  'Esta reserva en línea no está disponible por ahora: el hotel aún no tiene el pago en línea activo.';
+
 /**
  * Hospitality Suite (H6.6) — the hotel's own booking engine in the
  * storefront.
@@ -220,6 +224,11 @@ export class LodgingBookingEngineService {
     stayNights(dto.arrival_date, dto.departure_date);
     await this.assertNotPast(store_id, dto.arrival_date);
     const settings = await this.loadSettings(store_id);
+    // Without online payment the hold could never be paid: fail before
+    // creating it or releasing the guest's previous one.
+    if (!(await this.paymentLinks.isConfigured())) {
+      throw new VendixHttpException(ErrorCodes.LODGING_BOOKING_001, ONLINE_PAYMENT_UNAVAILABLE);
+    }
 
     const previous = await this.prisma.lodging_reservations.findMany({
       where: { customer_id, status: 'tentative', hold_expires_at: { not: null } },

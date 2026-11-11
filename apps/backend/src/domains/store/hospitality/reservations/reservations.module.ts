@@ -36,6 +36,7 @@ import { LodgingFolioService } from './folio/folio.service';
 import { LodgingNightAuditJob } from './jobs/lodging-night-audit.job';
 import { LodgingGuestMessagesJob } from './guest-messages/guest-messages.job';
 import { WalletModule } from '../../wallet/wallet.module';
+import { KitchenFireModule } from '../../kitchen-fire/kitchen-fire.module';
 import { PaymentLinksModule } from '../../payment-links/payment-links.module';
 import { LodgingDepositsController } from './deposits/deposits.controller';
 import { LodgingDepositsService } from './deposits/deposits.service';
@@ -87,6 +88,7 @@ import { LodgingKeyHandoversService } from './key-handovers/key-handovers.servic
     // Wompi payment link.
     WalletModule,
     PaymentLinksModule,
+    KitchenFireModule,
     // H3.6 — a room charge commits stock like a paid POS sale and closes the
     // table session it came from. H3.8 — the split folio reuses the tables'
     // financial split and per-account payment.

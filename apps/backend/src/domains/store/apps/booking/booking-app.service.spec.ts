@@ -69,10 +69,38 @@ describe('BookingAppService', () => {
       releaseAppDomains: jest.fn().mockResolvedValue(undefined),
       listCustomDomains: jest.fn().mockResolvedValue([]),
     };
-    service = new BookingAppService(prisma as any, domains as any, {} as any);
+    service = new BookingAppService(
+      prisma as any,
+      domains as any,
+      {} as any,
+      {} as any,
+      {} as any,
+    );
   });
 
   afterEach(() => jest.restoreAllMocks());
+
+  it('the preview context says whether guests can pay online and brings the real policies (S9, S11)', async () => {
+    const view = { read: jest.fn().mockResolvedValue({ room_types: [], products: [] }) };
+    const paymentLinks = { isConfigured: jest.fn().mockResolvedValue(false) };
+    const policies = { defaults: jest.fn().mockResolvedValue({ check_in: 'Desde las 3:00 p. m.' }) };
+    const withDeps = new BookingAppService(
+      prisma as any,
+      domains as any,
+      view as any,
+      paymentLinks as any,
+      policies as any,
+    );
+    jest.spyOn(withDeps as any, 'findRow').mockResolvedValue(null);
+
+    await expect(withDeps.previewContext()).resolves.toEqual({
+      room_types: [],
+      products: [],
+      online_payment_ready: false,
+      policy_defaults: { check_in: 'Desde las 3:00 p. m.' },
+    });
+    expect(policies.defaults).toHaveBeenCalledWith(STORE_ID);
+  });
 
   it('refuses to publish for a store without the hospitality industry', async () => {
     prisma.stores.findUnique.mockResolvedValue({ industries: ['retail', 'services'] });

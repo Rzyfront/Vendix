@@ -15,9 +15,11 @@ import { ServicePageViewService } from './service-page/service-page-view.service
 import { AppDomainService } from './shared/app-domain.service';
 import { AppPageService } from './shared/app-page.service';
 import { LodgingReservationsModule } from '../hospitality/reservations/reservations.module';
+import { PaymentLinksModule } from '../payment-links/payment-links.module';
 import { BookingAppController } from './booking/booking-app.controller';
 import { BookingAppService } from './booking/booking-app.service';
 import { BookingCheckinService } from './booking/booking-checkin.service';
+import { BookingPoliciesService } from './booking/booking-policies';
 import { BookingPublicController } from './booking/booking-public.controller';
 import { BookingViewService } from './booking/booking-view.service';
 import { StoreHomeAppController } from './store-home/store-home-app.controller';
@@ -42,6 +44,7 @@ import { LandingLeadService } from './landing/landing-lead.service';
     LodgingReservationsModule,
     S3Module,
     CrmModule,
+    PaymentLinksModule,
   ],
   controllers: [
     ProductPageAppController,
@@ -67,6 +70,7 @@ import { LandingLeadService } from './landing/landing-lead.service';
     BookingAppService,
     BookingViewService,
     BookingCheckinService,
+    BookingPoliciesService,
     StoreHomeAppService,
     StoreHomeViewService,
     LandingPageAppService,

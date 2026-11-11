@@ -25,8 +25,10 @@ import {
   isCfOverridable,
   isFinalConsumerCustomer,
   isUnidentifiedHolder,
+  OrderHolderSourceRows,
 } from './utils/order-acquirer-holder.util';
 import { OrderLeaseService } from '../../../common/locks/order-lease.service';
+import { CreditNoteBalanceService } from './credit-notes/credit-note-balance.service';
 
 /** Options the holder gate can force on the emission. */
 type HolderForce = Pick<
@@ -58,6 +60,15 @@ function isCodPromise(payment: { state: string | null } & CodPromiseProbe): bool
     payment.state === 'pending' &&
     payment.store_payment_method?.system_payment_method?.processing_mode === 'ON_DELIVERY'
   );
+}
+
+/**
+ * La orden tiene un titular con datos completos para una factura nominativa:
+ * misma evaluación que `createFromOrder` (`evaluateOrderHolder`).
+ */
+function isIdentifiedHolder(order: OrderHolderSourceRows): boolean {
+  const holder = evaluateOrderHolder(order);
+  return holder.source !== 'none' && holder.rail === 'nominative' && !holder.issue;
 }
 
 export type OneShotEmissionState = 'issued' | 'pending' | 'failed';
@@ -92,6 +103,9 @@ export class OneShotEmissionService {
     private readonly invoicing: InvoicingService,
     private readonly lease: OrderLeaseService,
     private readonly invoice_flow: InvoiceFlowService,
+    // S4: una factura aceptada revertida por completo con NC aceptadas no
+    // cuenta como documento vivo/numerado. Mismo módulo; opcional para specs.
+    private readonly creditNoteBalance?: CreditNoteBalanceService,
   ) {}
 
   /**
@@ -113,11 +127,13 @@ export class OneShotEmissionService {
     return this.lease.withLease(order_id, async () => {
       // S10: sólo se descarta el borrador que NACIÓ en este intento. Si la orden
       // ya traía un documento vivo (borrador colgado, validado…) se conserva.
-      const prior = await this.prisma.invoices.findFirst({
+      const latest = await this.prisma.invoices.findFirst({
         where: { order_id, financial_account_id: null, invoice_type: 'sales_invoice' },
         orderBy: { created_at: 'desc' },
         select: { id: true, status: true },
       });
+      // S4: la factura aceptada revertida por completo ya no es documento vivo.
+      const prior = (await this.isFullyReversedAccepted(latest)) ? null : latest;
       const had_live_document =
         !!prior && !['cancelled', 'voided'].includes(prior.status);
       const recreate = prior?.status === 'cancelled';
@@ -132,6 +148,51 @@ export class OneShotEmissionService {
       }
       return result;
     });
+  }
+
+  private async isFullyReversedAccepted(
+    invoice: { id: number; status: string } | null,
+  ): Promise<boolean> {
+    if (invoice?.status !== 'accepted' || !this.creditNoteBalance) return false;
+    return this.creditNoteBalance.isFullyReversedByAcceptedNotes(invoice.id);
+  }
+
+  /**
+   * Documento de venta ya numerado de la orden (validated/sent/accepted/
+   * rejected). Solo facturas de venta: las notas crédito/débito de la orden
+   * también llevan `order_id` y NO son «la factura». Una factura aceptada
+   * revertida por completo con NC aceptadas se descarta (S4).
+   */
+  private async findNumberedSalesDocument(
+    order_id: number,
+  ): Promise<{ id: number } | null> {
+    const reversed: number[] = [];
+    for (;;) {
+      const found: { id: number; status?: string } | null =
+        await this.prisma.invoices.findFirst({
+          where: {
+            order_id,
+            financial_account_id: null,
+            invoice_type: {
+              in: ['sales_invoice', 'export_invoice', 'pos_equivalent_document'],
+            },
+            status: { in: ['validated', 'sent', 'accepted', 'rejected'] },
+            ...(reversed.length > 0 ? { id: { notIn: reversed } } : {}),
+          },
+          select: { id: true, status: true },
+        });
+      if (
+        found &&
+        (await this.isFullyReversedAccepted({
+          id: found.id,
+          status: found.status ?? '',
+        }))
+      ) {
+        reversed.push(found.id);
+        continue;
+      }
+      return found;
+    }
   }
 
   /**
@@ -270,14 +331,7 @@ export class OneShotEmissionService {
 
     // Una factura ya numerada pasó esta puerta cuando se creó: reintentar su
     // transmisión no es «facturar sin cobrar» y no debe responder 409.
-    const numbered = await this.prisma.invoices.findFirst({
-      where: {
-        order_id,
-        financial_account_id: null,
-        status: { in: ['validated', 'sent', 'accepted', 'rejected'] },
-      },
-      select: { id: true },
-    });
+    const numbered = await this.findNumberedSalesDocument(order_id);
     if (numbered) {
       return this.toResult(
         await this.emitFor(order_id, recreate, ...this.optsArg(undefined, force)),
@@ -308,6 +362,9 @@ export class OneShotEmissionService {
           remaining_balance: remaining.toFixed(2),
           credit_eligible: offered === null,
           credit_blocker: offered,
+          // La UI nombra la salida de contado: a nombre del titular o a
+          // Consumidor final (la completitud la decide sólo el backend).
+          holder_identified: isIdentifiedHolder(order),
         },
       );
     }
@@ -359,14 +416,7 @@ export class OneShotEmissionService {
     const holder = evaluateOrderHolder(order);
     if (!holder.issue) return undefined;
 
-    const numbered = await this.prisma.invoices.findFirst({
-      where: {
-        order_id: order.id,
-        financial_account_id: null,
-        status: { in: ['validated', 'sent', 'accepted', 'rejected'] },
-      },
-      select: { id: true },
-    });
+    const numbered = await this.findNumberedSalesDocument(order.id);
     if (numbered) return undefined;
 
     // Comprador no identificado (Consumidor final, invitado o cliente sólo con
@@ -427,18 +477,21 @@ export class OneShotEmissionService {
   }
 
   /**
-   * Consumidor final pedido explícitamente sobre una orden SIN cobrar cuyo
-   * titular no necesita el bloqueo (cliente completo o sin cliente): el cajero
-   * rechazó el crédito, así que sale de contado «Acuerdo mutuo» (ZZZ). En una
-   * orden pagada con cliente completo la bandera sigue ignorándose (la factura
+   * Contado pedido explícitamente (`allow_final_consumer`) sobre una orden SIN
+   * cobrar cuyo titular no necesita el bloqueo: el cajero rechazó el crédito,
+   * así que sale de contado «Acuerdo mutuo» (ZZZ). Con un titular completo la
+   * factura sale A SU NOMBRE (sólo `cash_by_mutual_agreement`); Consumidor
+   * final sólo cuando la orden no tiene a nadie identificable. En una orden
+   * pagada con cliente completo la bandera sigue ignorándose (la factura
    * nominativa es mejor), y una venta ya a crédito, una orden cancelada o una
    * emisión pedida a crédito nunca salen así.
    */
   private resolveFinalConsumerCash(
-    order: Parameters<typeof computeOrderUnpaidBalance>[0] & {
-      state: string;
-      payment_form: string | null;
-    },
+    order: Parameters<typeof computeOrderUnpaidBalance>[0] &
+      OrderHolderSourceRows & {
+        state: string;
+        payment_form: string | null;
+      },
     gate: HolderForce | undefined,
     emit_options: Pick<CreateFromOrderOptions, 'force_final_consumer'> | undefined,
     credit_requested: boolean,
@@ -449,6 +502,7 @@ export class OneShotEmissionService {
     }
     const { remaining } = computeOrderUnpaidBalance(order);
     if (remaining.lessThan(0.01)) return undefined;
+    if (isIdentifiedHolder(order)) return { cash_by_mutual_agreement: true };
     return { force_final_consumer: true, cash_by_mutual_agreement: true };
   }
 

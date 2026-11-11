@@ -20,13 +20,25 @@ export class PaymentLinksService {
     private readonly eventEmitter: EventEmitter2,
   ) {}
 
-  private async getWompiConfig(): Promise<Record<string, any>> {
+  private async findWompiMethod() {
     const methods = await this.prisma.store_payment_methods.findMany({
       where: { state: 'enabled', system_payment_method: { type: 'wompi' } },
       include: { system_payment_method: true },
     });
+    return methods[0];
+  }
 
-    const wompiMethod = methods[0];
+  /**
+   * Whether this store can open payment links (Wompi enabled with its
+   * config). Same lookup as the link creation, without decrypting anything:
+   * callers ask before creating records that only make sense with a link.
+   */
+  async isConfigured(): Promise<boolean> {
+    return Boolean((await this.findWompiMethod())?.custom_config);
+  }
+
+  private async getWompiConfig(): Promise<Record<string, any>> {
+    const wompiMethod = await this.findWompiMethod();
     if (!wompiMethod?.custom_config) {
       throw new BadRequestException(
         'Wompi no está configurado para esta tienda. Configúralo en Ajustes > Pagos.',

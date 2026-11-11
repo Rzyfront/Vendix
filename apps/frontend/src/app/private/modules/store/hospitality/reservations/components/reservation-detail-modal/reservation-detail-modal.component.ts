@@ -53,6 +53,7 @@ import {
 } from '../room-change-modal/room-change-modal.component';
 import { GuestRegisterComponent } from '../guest-register/guest-register.component';
 import { KeyHandoversPanelComponent } from '../key-handovers-panel/key-handovers-panel.component';
+import { guestCountLabel } from './guest-count.util';
 import { FolioPanelComponent } from '../folio-panel/folio-panel.component';
 import { DepositPanelComponent } from '../deposit-panel/deposit-panel.component';
 import { CheckOutModalComponent } from '../check-out-modal/check-out-modal.component';
@@ -355,6 +356,8 @@ const BLOCKED_HOUSEKEEPING = ['out_of_order', 'out_of_service'];
                 [inHouse]="r.status === 'checked_in'"
                 [refreshKey]="folioVersion()"
                 [holder]="{ id: r.customer.id, name: guestName() }"
+                [projectedTotal]="r.total_amount"
+                [totalNights]="totalNights()"
                 (changed)="onFolioChanged()"
                 (dueChange)="due.set($event)"
               />
@@ -550,8 +553,9 @@ export class ReservationDetailModalComponent {
   }
   /** H2.4 — "Penalidad: $250.000 (1 noche)" of cancelling now. */
   readonly quoteLabel = signal<string>('Calculando penalidad…');
-  /** H3.2 — physical rooms to pick at check-in, and the room picked per reservation room. */
-  readonly units = signal<LodgingUnit[]>([]);
+  /** H3.2 — physical rooms to pick at check-in, and the room picked per reservation room.
+   * Rooms free for each reservation room's own dates, by reservation room id. */
+  readonly unitsByRoom = signal<Record<number, LodgingUnit[]>>({});
   private readonly unitControls = signal(new Map<number, FormControl<number | null>>());
   /** Bumped on each pick so `checkInReady` re-reads the controls. */
   private readonly picks = signal(0);
@@ -580,8 +584,12 @@ export class ReservationDetailModalComponent {
     const rooms = this.activeRooms();
     const adults = rooms.reduce((sum, room) => sum + room.adults, 0);
     const children = rooms.reduce((sum, room) => sum + room.children, 0);
-    return children > 0 ? `${adults} adultos · ${children} niños` : `${adults} adultos`;
+    return guestCountLabel(adults, children);
   });
+  /** Sold nights of the active rooms (the folio compares them with the charged ones). */
+  readonly totalNights = computed(() =>
+    this.activeRooms().reduce((sum, room) => sum + (room.nights?.length ?? 0), 0),
+  );
   readonly reasonRequired = computed(() => this.pending() !== 'no_show');
   readonly confirmLabel = computed(() => {
     switch (this.pending()) {
@@ -688,14 +696,12 @@ export class ReservationDetailModalComponent {
   }
 
   roomGuests(room: LodgingReservationRoom): string {
-    const adults = `${room.adults} ${room.adults === 1 ? 'adulto' : 'adultos'}`;
-    if (room.children < 1) return adults;
-    return `${adults} · ${room.children} ${room.children === 1 ? 'niño' : 'niños'}`;
+    return guestCountLabel(room.adults, room.children);
   }
 
   /** Active rooms of the same type; a dirty one says so before picking it. */
   unitOptions(room: LodgingReservationRoom): SelectorOption[] {
-    return this.units()
+    return (this.unitsByRoom()[room.id] ?? [])
       .filter(
         (u) =>
           u.is_active &&
@@ -726,13 +732,23 @@ export class ReservationDetailModalComponent {
     this.unitControls.set(controls);
     this.dirtyWarning.set('');
     this.pending.set('check_in');
-    if (controls.size > 0 && this.units().length === 0) {
+    this.unitsByRoom.set({});
+    for (const room of this.unassignedRooms()) {
+      // Only rooms free on every night of this room's stay; its own nights do not count.
+      const dates =
+        room.arrival_date && room.departure_date
+          ? {
+              available_from: room.arrival_date.slice(0, 10),
+              available_to: room.departure_date.slice(0, 10),
+              exclude_reservation_room_id: room.id,
+            }
+          : undefined;
       this.unitsService
-        .list()
+        .list(dates)
         .pipe(takeUntilDestroyed(this.destroyRef))
         .subscribe({
-          next: (units) => this.units.set(units),
-          error: () => this.units.set([]),
+          next: (units) => this.unitsByRoom.update((map) => ({ ...map, [room.id]: units })),
+          error: () => this.unitsByRoom.update((map) => ({ ...map, [room.id]: [] })),
         });
     }
   }

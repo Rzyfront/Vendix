@@ -1409,3 +1409,67 @@ describe('ReservationsService — station deposits', () => {
     ).rejects.toMatchObject({ response: expect.objectContaining({ error_code: 'STATION_BOOKING_005' }) });
   });
 });
+
+/**
+ * S20: "today" is the store's local day, not the UTC day. At 2026-11-11T01:00:00Z
+ * it is still 2026-11-10 20:00 in Bogota.
+ */
+describe('ReservationsService — getStats / getToday use the store day (S20)', () => {
+  const build = () => {
+    const prisma: any = {
+      store_settings: {
+        findFirst: jest.fn().mockResolvedValue({
+          settings: {},
+          stores: { timezone: 'America/Bogota' },
+        }),
+      },
+      bookings: {
+        count: jest.fn().mockResolvedValue(0),
+        findMany: jest.fn().mockResolvedValue([]),
+      },
+    };
+    const service = new ReservationsService(
+      prisma,
+      {} as any,
+      {} as any,
+      { signUrl: jest.fn((u: string) => Promise.resolve(u)) } as any,
+      { emit: jest.fn() } as any,
+      {} as any,
+      {} as any,
+      {} as any,
+      {} as any,
+    );
+    return { service, prisma };
+  };
+
+  beforeEach(() => {
+    jest.useFakeTimers().setSystemTime(new Date('2026-11-11T01:00:00Z'));
+    jest
+      .spyOn(RequestContextService, 'getContext')
+      .mockReturnValue({ store_id: 7 } as any);
+  });
+  afterEach(() => {
+    jest.useRealTimers();
+    jest.restoreAllMocks();
+  });
+
+  it('getStats filters today by the store-local date (2026-11-10)', async () => {
+    const { service, prisma } = build();
+    await service.getStats();
+
+    const todayWhere = prisma.bookings.count.mock.calls[0][0].where.date;
+    expect(todayWhere.gte).toEqual(new Date('2026-11-10T00:00:00Z'));
+    expect(todayWhere.lt).toEqual(new Date('2026-11-11T00:00:00Z'));
+    const last30 = prisma.bookings.count.mock.calls[3][0].where.created_at.gte;
+    expect(last30).toEqual(new Date('2026-10-11T00:00:00Z'));
+  });
+
+  it('getToday filters by the store-local date (2026-11-10)', async () => {
+    const { service, prisma } = build();
+    await service.getToday();
+
+    const where = prisma.bookings.findMany.mock.calls[0][0].where.date;
+    expect(where.gte).toEqual(new Date('2026-11-10T00:00:00Z'));
+    expect(where.lt).toEqual(new Date('2026-11-11T00:00:00Z'));
+  });
+});

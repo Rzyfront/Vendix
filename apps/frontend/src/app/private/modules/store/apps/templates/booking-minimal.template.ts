@@ -39,18 +39,14 @@ export const BOOKING_MINIMAL: AppPageVariant = {
       {
         id: 'amenities',
         type: 'amenities',
-        enabled: true,
-        props: { title: 'Incluye', items: ['Wifi', 'Parqueadero', 'Desayuno', 'Recepción 24 h'] },
+        enabled: false,
+        props: { title: 'Incluye', items: [] },
       },
       {
         id: 'testimonials',
         type: 'testimonials',
-        enabled: true,
-        props: {
-          title: 'Reseñas',
-          rating_summary: '4.9/5',
-          items: [{ name: 'Paula', city: 'Bogotá', quote: 'Tranquilo, impecable y bien ubicado.', rating: 5 }],
-        },
+        enabled: false,
+        props: { title: 'Reseñas', items: [] },
       },
       {
         id: 'policies',
@@ -58,9 +54,10 @@ export const BOOKING_MINIMAL: AppPageVariant = {
         enabled: true,
         props: {
           title: 'Bueno saber',
-          check_in: 'Desde las 3:00 p. m.',
-          check_out: 'Hasta las 12:00 m.',
-          cancellation: 'Cancelación gratuita hasta 48 horas antes.',
+          // Empty on purpose: the public page fills them from the store settings.
+          check_in: '',
+          check_out: '',
+          cancellation: '',
         },
       },
       { id: 'location', type: 'location', enabled: false, props: { title: 'Ubicación' } },

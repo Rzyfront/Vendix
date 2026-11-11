@@ -120,9 +120,14 @@ export function notBeforeToday(control: AbstractControl): ValidationErrors | nul
           heading="Esta orden no tiene pagos registrados"
         >
           Al facturarla a crédito, el saldo quedará en Cartera como cuenta por
-          cobrar y la orden ya no se podrá modificar. Si no es una venta a
-          crédito, emítela como Consumidor final de contado (medio de pago
-          «Acuerdo mutuo»).
+          cobrar y la orden ya no se podrá modificar.
+          @if (holderIdentified()) {
+            Si no es una venta a crédito, emítela de contado a nombre del
+            cliente (medio de pago «Acuerdo mutuo»).
+          } @else {
+            Si no es una venta a crédito, emítela como Consumidor final de
+            contado (medio de pago «Acuerdo mutuo»).
+          }
         </app-alert-banner>
 
         @if (customerRequired()) {
@@ -230,7 +235,7 @@ export function notBeforeToday(control: AbstractControl): ValidationErrors | nul
                 [disabled]="busy()"
                 (clicked)="onUseFinalConsumer()"
               >
-                Emitir como Consumidor final (contado)
+                {{ holderIdentified() ? 'Emitir de contado' : 'Emitir como Consumidor final (contado)' }}
               </app-button>
             </div>
           }
@@ -256,10 +261,18 @@ export class CreditInvoiceModalComponent {
    * Consumidor final): no se ofrece el plazo, sólo asignar cliente o contado.
    */
   readonly customerRequired = input<boolean>(false);
+  /**
+   * El backend confirmó un titular completo (`holder_identified` del 409 de
+   * saldo): la salida de contado factura a su nombre, no a Consumidor final.
+   */
+  readonly holderIdentified = input<boolean>(false);
 
   readonly confirmed = output<CreditInvoiceSubmit>();
   readonly cancelled = output<void>();
-  /** El cajero no quiere crédito: emitir a Consumidor final de contado («Acuerdo mutuo»). */
+  /**
+   * El cajero no quiere crédito: emitir de contado («Acuerdo mutuo») a nombre
+   * del titular, o a Consumidor final si la orden no tiene uno completo.
+   */
   readonly finalConsumer = output<void>();
   /** Sin cliente identificado: el padre abre «Cambiar cliente». */
   readonly assignCustomer = output<void>();

@@ -27,6 +27,20 @@ import { AuthFacade } from '../auth/auth.facade';
 import { StoreSettingsFacade } from '../store-settings/store-settings.facade';
 import { StaffScanApprovalService } from '../../../private/modules/store/restaurant-ops/tables/services/staff-scan-approval.service';
 import { ToastService } from '../../../shared/components/toast/toast.service';
+import * as SubscriptionActions from '../subscription/subscription.actions';
+
+/**
+ * Public single-purpose apps (booking, landing, store home, product and
+ * service pages): a guest signed in there never sees the staff bell, so the
+ * store notifications list and stream are not requested.
+ */
+const PUBLIC_APP_TYPES = new Set<string>([
+  'STORE_LANDING',
+  'STORE_BOOKING',
+  'STORE_HOME',
+  'STORE_PRODUCT_PAGE',
+  'STORE_SERVICE_PAGE',
+]);
 
 @Injectable()
 export class NotificationsEffects {
@@ -52,7 +66,8 @@ export class NotificationsEffects {
    * para el carrier requeriría endpoints bajo `/store/carrier/*` (follow-up).
    */
   private notificationsAvailableForApp(): boolean {
-    return this.authFacade.selectedAppType() !== 'STORE_DELIVERY';
+    const appType = this.authFacade.selectedAppType();
+    return appType !== 'STORE_DELIVERY' && !PUBLIC_APP_TYPES.has(appType ?? '');
   }
 
   /**
@@ -138,6 +153,16 @@ export class NotificationsEffects {
           this.eventSource.onmessage = (event: MessageEvent) => {
             try {
               const data = JSON.parse(event.data);
+              // Single connection per tab: the subscription banner listens on
+              // this same stream instead of opening a second EventSource.
+              if (data?.type === 'subscription.updated') {
+                observer.next(
+                  SubscriptionActions.subscriptionUpdated({
+                    subscription: data.data ?? data.subscription ?? {},
+                  }),
+                );
+                return;
+              }
               // El hub SSE por tienda es compartido: además de notificaciones
               // del bell puede multiplexar eventos de otros dominios (p.ej.
               // 'membership-access' del acceso ambiental de gym). Esos no son

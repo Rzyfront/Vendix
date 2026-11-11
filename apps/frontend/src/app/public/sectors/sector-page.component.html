@@ -1,0 +1,79 @@
+<a class="skip-link" [routerLink]="[]" fragment="sector-content">Saltar al contenido</a>
+<header class="guide-header">
+  <a routerLink="/" class="guide-brand"><img src="/vlogo-128.png" alt="" width="32" height="32" />Vendix</a>
+  <nav aria-label="Navegación principal">
+    <a routerLink="/pricing">Planes y precios</a>
+    <a routerLink="/ayuda">Centro de ayuda</a>
+  </nav>
+</header>
+<main id="sector-content" class="guide-content">
+  @if (page(); as p) {
+    <p class="preview-label">Borrador para revisión · Sin publicar</p>
+    <p class="guide-category">{{ p.label }}</p>
+    <h1>{{ p.h1 }}</h1>
+    <p class="guide-intro">{{ p.intro }}</p>
+    <div class="sector-ctas">
+      <a class="sector-cta sector-cta--primary" [href]="whatsappUrl()" target="_blank" rel="noopener">Ver la demo</a>
+      <a class="sector-cta" routerLink="/auth/register">Probar 14 días gratis</a>
+    </div>
+
+    <section class="article-section" aria-labelledby="recorrido">
+      <h2 id="recorrido">Así se mueve un pedido</h2>
+      <ol class="sector-steps">
+        @for (step of p.steps; track step.title) {
+          <li><strong>{{ step.title }}.</strong> {{ step.text }}</li>
+        }
+      </ol>
+    </section>
+
+    @for (section of p.sections; track section.id) {
+      <section class="article-section" [attr.aria-labelledby]="'sector-' + section.id">
+        <h2 [id]="'sector-' + section.id">{{ section.heading }}</h2>
+        @for (paragraph of section.paragraphs ?? []; track paragraph.text) {
+          <p>{{ paragraph.text }}</p>
+        }
+        @if (section.bullets?.length) {
+          <ul>
+            @for (bullet of section.bullets ?? []; track bullet.text) {
+              <li>{{ bullet.text }}</li>
+            }
+          </ul>
+        }
+      </section>
+    }
+
+    <section class="article-section" aria-labelledby="antes-de-elegir">
+      <h2 id="antes-de-elegir">Lo que debes saber antes de elegir</h2>
+      <ul>
+        @for (limit of p.limits; track limit.text) {
+          <li>{{ limit.text }}</li>
+        }
+      </ul>
+    </section>
+
+    <section class="guide-checklist" aria-labelledby="preparar">
+      <h2 id="preparar">Qué preparar para tu demostración</h2>
+      <ul>
+        @for (item of p.prepare; track item) {
+          <li>{{ item }}</li>
+        }
+      </ul>
+    </section>
+
+    <section class="article-section" aria-labelledby="preguntas">
+      <h2 id="preguntas">Preguntas frecuentes</h2>
+      @for (faq of p.faqs; track faq.question) {
+        <h3>{{ faq.question }}</h3>
+        <p>{{ faq.text }}</p>
+      }
+    </section>
+
+    <div class="sector-ctas">
+      <a class="sector-cta sector-cta--primary" [href]="whatsappUrl()" target="_blank" rel="noopener">Ver la demo</a>
+      <a class="sector-cta" routerLink="/pricing">Ver planes y precios</a>
+    </div>
+  } @else {
+    <h1>Página no disponible</h1>
+    <p><a routerLink="/">Volver al inicio</a></p>
+  }
+</main>

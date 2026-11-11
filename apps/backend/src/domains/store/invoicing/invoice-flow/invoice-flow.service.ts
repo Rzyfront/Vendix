@@ -125,7 +125,7 @@ import {
 import { tryResolveInvoiceControl } from '../../../../common/helpers/invoice-control.helper';
 import { assertNoteOriginalHasNoAcceptedRadianEvent } from '../utils/invoice-radian-note-coherence';
 import { markContractFiscalAcceptance } from '../../contracts/contract-invoice-lifecycle';
-import { isMutualAgreementFinalConsumerInvoice } from '../../payments/order-payment-means.contract';
+import { isMutualAgreementCashInvoice } from '../../payments/order-payment-means.contract';
 import { recordTriggerEvent } from '../../workflows/engine/workflow-trigger.outbox';
 import { consumeApproval } from '../../workflows/gates/approval-gate';
 import { enforceInvoiceVoidApproval } from '../invoice-approval-gate';
@@ -237,8 +237,11 @@ export interface InvoiceDiscardRoute {
    * Es la única propiedad que le importa a quien llegó aquí por el 409 de
    * `INVOICING_CREATE_002`. `true` sólo para `cancel` y `void`, que son los dos
    * estados que `assertNotAlreadyInvoiced` excluye de «ya facturado»
-   * (`invoicing.service.ts`). La nota crédito NO libera la orden: la factura
-   * aceptada sigue existiendo y la orden sigue facturada.
+   * (`invoicing.service.ts`). Una nota crédito parcial o aún no aceptada NO
+   * libera la orden. Solo una nota crédito TOTAL ya aceptada por la DIAN
+   * (`CreditNoteBalanceService.isFullyReversedByAcceptedNotes`) la libera para
+   * cambiar el titular y re-facturar, pero eso no es una ruta de descarte: la
+   * factura original conserva su estado `accepted`.
    */
   releases_source_document: boolean;
 }
@@ -1095,9 +1098,9 @@ export class InvoiceFlowService {
     customer_tax_id?: string | null;
   }): Promise<string | null> {
     if (invoice.order_id == null) return null;
-    // Consumidor final de contado «Acuerdo mutuo»: el cajero decidió emitirla
+    // Contado «Acuerdo mutuo» (nominativa o Consumidor final): el cajero decidió emitirla
     // sin el pago registrado (la orden conserva su saldo y se cobra después).
-    if (isMutualAgreementFinalConsumerInvoice(invoice)) return null;
+    if (isMutualAgreementCashInvoice(invoice)) return null;
     if (
       !['sales_invoice', 'export_invoice', 'pos_equivalent_document'].includes(
         String(invoice.invoice_type),

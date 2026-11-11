@@ -5,7 +5,18 @@ import { StorePrismaService } from '../../../../prisma/services/store-prisma.ser
 import { VendixHttpException, ErrorCodes } from 'src/common/errors';
 import { CreateUnitDto, CreateUnitsBulkDto, UpdateUnitDto } from './dto';
 import { lodgingBusinessDate } from '../reservations/folio/folio-nights';
-import { dateOnlyToDb, formatShortDate } from '../reservations/stay-dates';
+import { dateOnlyToDb, formatShortDate, stayNights } from '../reservations/stay-dates';
+import { activeBlocksWhere, occupiedNightsWhere } from './unit-availability.util';
+
+const DATE_ONLY = /^\d{4}-\d{2}-\d{2}$/;
+
+/** Optional stay window: only rooms free on every night of `[from, to)`. */
+export interface UnitAvailabilityFilter {
+  from?: string;
+  to?: string;
+  /** The room being placed: its own nights do not count as occupied. */
+  exclude_reservation_room_id?: number;
+}
 
 const UNIT_INCLUDE = {
   unit_type: { select: { id: true, name: true } },
@@ -23,13 +34,47 @@ const UNIT_OMIT = { ical_export_token: true } satisfies Prisma.lodging_unitsOmit
 export class UnitsService {
   constructor(private readonly prisma: StorePrismaService) {}
 
-  async findAll(unit_type_id?: number) {
-    return this.prisma.lodging_units.findMany({
+  async findAll(unit_type_id?: number, availability?: UnitAvailabilityFilter) {
+    const units = await this.prisma.lodging_units.findMany({
       where: unit_type_id ? { unit_type_id } : undefined,
       include: UNIT_INCLUDE,
       omit: UNIT_OMIT,
       orderBy: [{ code: 'asc' }],
     });
+    if (!availability?.from || !availability?.to) return units;
+    return this.onlyFree(units, availability.from, availability.to, availability.exclude_reservation_room_id);
+  }
+
+  /** Drops rooms holding a night or a block inside `[from, to)` (same rule as room changes). */
+  private async onlyFree<T extends { id: number }>(
+    units: T[],
+    from: string,
+    to: string,
+    exclude_reservation_room_id?: number,
+  ): Promise<T[]> {
+    if (!DATE_ONLY.test(from) || !DATE_ONLY.test(to)) {
+      throw new VendixHttpException(ErrorCodes.LODGING_RESERVATION_DATES_001);
+    }
+    const nights = stayNights(from, to);
+    const store_id = RequestContextService.getContext()?.store_id;
+    if (!store_id) {
+      throw new VendixHttpException(ErrorCodes.STORE_CONTEXT_001);
+    }
+    if (units.length === 0) return units;
+    const unit_id = { in: units.map((u) => u.id) };
+    const taken = await this.prisma.lodging_room_nights.findMany({
+      where: occupiedNightsWhere({ store_id, unit_id, nights, exclude_reservation_room_id }),
+      select: { unit_id: true },
+    });
+    const blocked = await this.prisma.lodging_inventory_blocks.findMany({
+      where: activeBlocksWhere({ store_id, unit_id, arrival: from, departure: to }),
+      select: { unit_id: true },
+    });
+    const busy = new Set<number | null>([
+      ...taken.map((row) => row.unit_id),
+      ...blocked.map((row) => row.unit_id),
+    ]);
+    return units.filter((u) => !busy.has(u.id));
   }
 
   async findOne(id: number) {

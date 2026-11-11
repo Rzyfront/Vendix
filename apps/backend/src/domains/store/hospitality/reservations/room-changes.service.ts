@@ -7,6 +7,7 @@ import { RoomChangeDto } from './dto';
 import { LodgingAvailabilityService, LodgingInventoryClient } from './lodging-availability.service';
 import { assertCapacity } from './reservations.service';
 import { dateOnlyToDb, formatShortDate, stayNights } from './stay-dates';
+import { activeBlocksWhere, occupiedNightsWhere } from '../units/unit-availability.util';
 import { lodgingBusinessDate } from './folio/folio-nights';
 import { NIGHT_HOLDING_STATUSES } from './reservation-status';
 import { loadPlanPricing } from '../rates/rate-plans.service';
@@ -337,13 +338,12 @@ export class LodgingRoomChangesService {
     // The physical room must be free on every night of the new stay.
     if (unit) {
       const taken = await client.lodging_room_nights.findFirst({
-        where: {
+        where: occupiedNightsWhere({
           store_id,
           unit_id: unit.id,
-          is_active: true,
-          reservation_room_id: { not: room.id },
-          night_date: { in: nights.map(dateOnlyToDb) },
-        },
+          nights,
+          exclude_reservation_room_id: room.id,
+        }),
         select: { night_date: true },
         orderBy: { night_date: 'asc' },
       });
@@ -355,13 +355,7 @@ export class LodgingRoomChangesService {
       }
       // H5.3 — nor blocked for maintenance or owner use.
       const block = await client.lodging_inventory_blocks.findFirst({
-        where: {
-          store_id,
-          unit_id: unit.id,
-          released_at: null,
-          from_date: { lt: dateOnlyToDb(departure) },
-          to_date: { gt: dateOnlyToDb(arrival) },
-        },
+        where: activeBlocksWhere({ store_id, unit_id: unit.id, arrival, departure }),
         select: { from_date: true },
         orderBy: { from_date: 'asc' },
       });

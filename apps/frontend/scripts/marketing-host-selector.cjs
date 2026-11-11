@@ -1,7 +1,8 @@
 'use strict';
 
-// Candidate viewer-request selector. NOT attached to CloudFront by this PR.
-// Runs before cache lookup: different hosts resolve to different object keys.
+// Reference selector for the marketing object key. SEO-TECH-02: the same rule
+// lives in infra/cloudfront/spa-rewrite.js (MARKETING_ROOT_OBJECT), which is the
+// one attached to CloudFront. Keep both in sync.
 function marketingObjectKey(host, uri, method = 'GET') {
   if (typeof host !== 'string' || typeof uri !== 'string') return null;
   if (!['GET', 'HEAD'].includes(method)) return null;

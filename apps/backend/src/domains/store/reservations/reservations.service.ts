@@ -21,6 +21,7 @@ import {
 } from './dto';
 import { AvailabilityService } from './availability.service';
 import { OrdersService } from '../orders/orders.service';
+import { resolveStoreTimezone, localDateString } from '@common/utils/store-timezone.util';
 import { S3Service } from '@common/services/s3.service';
 import { PriceResolverService } from '../products/services/price-resolver.service';
 import { TablesService } from '../tables/tables.service';
@@ -1907,20 +1908,28 @@ export class ReservationsService {
   }
 
   /**
+   * S20: "today" is the store's local civil day. `bookings.date` is date-only
+   * (UTC midnight), so the local date string is parsed as a UTC midnight.
+   */
+  private async storeDayStart(): Promise<{ todayStart: Date }> {
+    const store_id = RequestContextService.getContext()?.store_id;
+    if (!store_id) {
+      throw new BadRequestException('No se encontro contexto de tienda');
+    }
+    const tz = await resolveStoreTimezone(this.prisma, store_id);
+    const localDate = localDateString(new Date(), tz);
+    return { todayStart: new Date(`${localDate}T00:00:00Z`) };
+  }
+
+  /**
    * Obtiene estadisticas de reservas
    *
-   * Date comparisons use UTC midnight (not local midnight) because
-   * the `bookings.date` column is `@db.Date` and is stored as UTC
-   * midnight (e.g. 2026-07-02 00:00:00Z). Using `new Date(year, month,
-   * day)` in a non-UTC tz (e.g. Colombia = UTC-5) yields a value 5h
-   * ahead of the stored value, so the gte compare fails. Both this
-   * method and `getToday` use `Date.UTC(...)` for consistency.
+   * "Today" is the store's local day (`storeDayStart`), expressed as the UTC
+   * midnight `bookings.date` (`@db.Date`) stores. Taking the UTC date of
+   * "now" showed tomorrow after 19:00 in Bogotá (S20).
    */
   async getStats() {
-    const now = new Date();
-    const todayStart = new Date(
-      Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), now.getUTCDate()),
-    );
+    const { todayStart } = await this.storeDayStart();
     const todayEnd = new Date(todayStart);
     todayEnd.setUTCDate(todayEnd.getUTCDate() + 1);
 
@@ -1983,16 +1992,11 @@ export class ReservationsService {
   /**
    * Obtiene las reservas de hoy ordenadas por hora de inicio
    *
-   * Uses UTC midnight for the date range. See getStats() comment
-   * for the rationale (bookings.date is @db.Date stored as UTC
-   * midnight; local midnight would miss the record in non-UTC
-   * timezones).
+   * The store's local day as the UTC-midnight range of `bookings.date`
+   * (see getStats()).
    */
   async getToday() {
-    const now = new Date();
-    const todayStart = new Date(
-      Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), now.getUTCDate()),
-    );
+    const { todayStart } = await this.storeDayStart();
     const todayEnd = new Date(todayStart);
     todayEnd.setUTCDate(todayEnd.getUTCDate() + 1);
 

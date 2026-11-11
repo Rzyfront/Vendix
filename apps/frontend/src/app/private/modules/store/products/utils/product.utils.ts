@@ -6,6 +6,8 @@ export class ProductUtils {
    */
   static generateSlug(name: string): string {
     return name
+      .normalize('NFD')
+      .replace(/[\u0300-\u036f]/g, '') // Strip accents: 'fútbol' → 'futbol', 'ñ' → 'n'
       .toLowerCase()
       .trim()
       .replace(/[^\w\s-]/g, '')

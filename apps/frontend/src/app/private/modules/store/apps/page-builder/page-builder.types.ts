@@ -36,10 +36,19 @@ export interface AppPageBuilderAdapter<S = unknown, C = unknown> {
   context$(): Observable<C>;
   /** The store's own domains the app may use; `null` when it has a fixed address. */
   domains$(): Observable<ProductPageCustomDomain[]> | null;
+  /** Non-blocking notices for General (e.g. online payment not active yet). */
+  warnings?(context: C | null): AppPageWarning[];
   /** Why the app cannot be published with these settings, or `null`. */
   publishBlocker(settings: S, page: AppPageDocument): string | null;
   publish$(customDomainId: number | null): Observable<unknown>;
   unpublish$(): Observable<unknown>;
+}
+
+/** A non-blocking notice shown in General, optionally with a link to fix it. */
+export interface AppPageWarning {
+  id: string;
+  text: string;
+  link?: { label: string; route: string };
 }
 
 /** What the editor posts to the preview frame on every change. */

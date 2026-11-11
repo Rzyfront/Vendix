@@ -5,6 +5,7 @@ on:
     branches: [develop]
     paths:
       - 'apps/frontend/**'
+      - 'infra/cloudfront/**'
       - '.github/workflows/marketing-preview.yml'
   workflow_dispatch:
 
@@ -23,11 +24,16 @@ jobs:
           cache: npm
       - run: npm ci
       - run: node --test apps/frontend/scripts/marketing-preview.test.cjs
+      - run: node infra/cloudfront/spa-rewrite.test.cjs
+      - run: node apps/frontend/scripts/make-noindex-shell.test.cjs
       - name: Produce neutral production artifact
         run: npm run build:prod -w apps/frontend
       - name: Produce separate marketing preview
         run: npm run build:marketing-preview -w apps/frontend
       - run: node apps/frontend/scripts/check-marketing-preview.cjs
+      # SEO-TECH-04: la shell noindex sale del artefacto real de producción (HTML ya procesado por el build).
+      - name: Produce noindex shell from the production artifact
+        run: node apps/frontend/scripts/make-noindex-shell.cjs
       - uses: actions/upload-artifact@v4
         with:
           name: marketing-html-preview

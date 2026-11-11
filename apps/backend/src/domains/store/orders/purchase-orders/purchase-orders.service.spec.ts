@@ -3292,6 +3292,38 @@ describe('PurchaseOrdersService.create() — nacimiento de la orden', () => {
       expect(tx.stores.findFirst).not.toHaveBeenCalled();
     });
 
+    it('resolve-lines: reutiliza una marca con tilde guardada con el slug anterior (S23)', async () => {
+      const { tx } = statefulCatalogTx();
+      // "Nestlé" auto-created by an older import kept the slug "nestl".
+      const legacy = { id: 61, name: 'Nestlé', slug: 'nestl', store_id: STORE_ID };
+      tx.brands = {
+        findFirst: jest.fn(async ({ where }: any) => {
+          const slugs: string[] = where.OR?.find((c: any) => c.slug)?.slug?.in ?? [];
+          return slugs.includes(legacy.slug) ? legacy : null;
+        }),
+        create: jest.fn(),
+      };
+      prismaService.$transaction.mockImplementation((cb: any) => cb(tx));
+
+      const res = await service.resolveLines({
+        location_id: LOCATION_ID,
+        items: [{ product_name: 'Leche', sku: 'SKU-N', unit_price: 1, brand_name: 'Nestlé' }],
+      } as any);
+
+      expect(res.items[0].error).toBeUndefined();
+      expect(tx.brands.create).not.toHaveBeenCalled();
+      expect(tx.brands.findFirst).toHaveBeenCalledWith({
+        where: {
+          store_id: STORE_ID,
+          OR: [
+            { slug: { in: ['nestle', 'nestl'] } },
+            { name: { equals: 'Nestlé', mode: 'insensitive' } },
+          ],
+        },
+      });
+      expect(tx.products.create.mock.calls[0][0].data.brand_id).toBe(61);
+    });
+
     it('resolve-lines: un SKU existente NO se modifica (sin products.update) y devuelve sus ids', async () => {
       const { tx, rows } = statefulCatalogTx();
       rows.push({ id: 501, sku: 'SKU-X', store_id: STORE_ID, state: 'active' });

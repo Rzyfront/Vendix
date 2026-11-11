@@ -116,8 +116,8 @@ export const BOOKING_TEMPLATE: AppPageTemplate = {
       {
         id: 'amenities',
         type: 'amenities',
-        enabled: true,
-        props: { title: 'Lo que ofrecemos', items: ['Wifi', 'Parqueadero', 'Desayuno incluido', 'Recepción 24 horas'] },
+        enabled: false,
+        props: { title: 'Lo que ofrecemos', items: [] },
       },
       {
         id: 'policies',
@@ -125,21 +125,18 @@ export const BOOKING_TEMPLATE: AppPageTemplate = {
         enabled: true,
         props: {
           title: 'Políticas',
-          check_in: 'Desde las 3:00 p. m.',
-          check_out: 'Hasta las 12:00 m.',
-          cancellation: 'Cancelación gratuita hasta 48 horas antes de la llegada.',
+          // Empty on purpose: the public page fills them from the store settings.
+          check_in: '',
+          check_out: '',
+          cancellation: '',
         },
       },
       { id: 'gallery', type: 'gallery', enabled: false, props: { title: 'Conoce el lugar' } },
       {
         id: 'testimonials',
         type: 'testimonials',
-        enabled: true,
-        props: {
-          title: 'Reseñas de huéspedes',
-          rating_summary: '4.8/5',
-          items: [{ name: 'María', city: 'Bogotá', quote: 'Todo impecable y la atención excelente.', rating: 5 }],
-        },
+        enabled: false,
+        props: { title: 'Reseñas de huéspedes', items: [] },
       },
       { id: 'location', type: 'location', enabled: false, props: { title: 'Ubicación' } },
       {

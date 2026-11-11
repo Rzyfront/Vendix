@@ -5,7 +5,7 @@ const fs = require('node:fs');
 const path = require('node:path');
 const { marketingObjectKey } = require('./marketing-host-selector.cjs');
 const root = path.resolve(__dirname, '..');
-test('core root GET and HEAD select a separate object', () => {
+test('core root GET and HEAD select a separate object (same key as infra/cloudfront/spa-rewrite.js)', () => {
   for (const host of ['vendix.online', 'www.vendix.online', 'VENDIX.ONLINE'])
     for (const method of ['GET', 'HEAD']) assert.equal(marketingObjectKey(host, '/', method), '/marketing/index.html');
 });
@@ -31,9 +31,18 @@ test('production keeps its neutral server entry and preview is opt-in', () => {
   assert.equal(build.configurations['marketing-preview'].server, 'src/main.marketing-preview.server.ts');
   assert.notEqual(build.configurations['marketing-preview'].outputPath, build.configurations.production.outputPath);
   const html = fs.readFileSync(path.join(root, 'src/index.marketing-preview.html'), 'utf8');
-  assert.match(html, /noindex, nofollow/);
+  assert.match(html, /<meta name="robots" content="index, follow"/);
+  assert.doesNotMatch(html, /noindex/);
+  assert.match(html, /<link rel="canonical" href="https:\/\/vendix\.online\/"/);
   assert.match(html, /<app-root ngSkipHydration>/);
   assert.doesNotMatch(html, /vendix-prerender-hidden/);
+  // SEO-TECH-11: la fuente de la landing se pide desde el head con la misma URL del @import del componente.
+  const scss = fs.readFileSync(path.join(root, 'src/app/public/landing/vendix-landing/vendix-landing.component.scss'), 'utf8');
+  const fontUrl = (scss.match(/@import url\('([^']+)'\)/) || [])[1];
+  assert.ok(fontUrl, 'vendix-landing.component.scss importa su fuente');
+  const headLinks = html.split('</head>')[0];
+  assert.ok(headLinks.includes('<link rel="stylesheet" href="' + fontUrl + '"'), 'el head pide la misma fuente que el componente');
+  assert.match(headLinks, /<link rel="preconnect" href="https:\/\/fonts\.gstatic\.com" crossorigin/);
 });
 
 const ts = require('typescript');

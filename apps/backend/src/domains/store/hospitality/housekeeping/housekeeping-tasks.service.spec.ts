@@ -125,6 +125,58 @@ describe('HousekeepingTasksService', () => {
       });
     });
 
+    it('an early check-out today gets the check-out clean today (S4)', () => {
+      const result = dailyHousekeepingTasks(
+        [{ ...stay(5, '2026-11-09', '2026-11-12', 'checked_out'), checked_out_on: '2026-11-10' }],
+        '2026-11-10',
+      );
+      expect(result).toEqual([{ unit_id: 5, type: 'checkout_clean' }]);
+    });
+
+    it('an early check-out yesterday does not get a second task on its departure day (S4)', () => {
+      const result = dailyHousekeepingTasks(
+        [{ ...stay(5, '2026-11-08', '2026-11-10', 'checked_out'), checked_out_on: '2026-11-09' }],
+        '2026-11-10',
+      );
+      expect(result).toEqual([]);
+    });
+
+    it('reading the day dates the check-out by its event in the store timezone (S4)', async () => {
+      const { localDateString } = jest.requireMock('@common/utils/store-timezone.util');
+      const checkedOutAt = new Date('2026-11-10T20:30:00.000Z');
+      rooms.findMany.mockResolvedValue([
+        {
+          ...stay(5, '2026-11-09', '2026-11-12', 'checked_out'),
+          reservation: { status: 'checked_out', events: [{ created_at: checkedOutAt }] },
+        },
+      ]);
+
+      await service.today();
+
+      expect(rooms.findMany).toHaveBeenCalledWith(
+        expect.objectContaining({
+          select: expect.objectContaining({
+            reservation: {
+              select: {
+                status: true,
+                events: {
+                  where: { to_status: 'checked_out' },
+                  orderBy: { created_at: 'desc' },
+                  take: 1,
+                  select: { created_at: true },
+                },
+              },
+            },
+          }),
+        }),
+      );
+      expect(localDateString).toHaveBeenCalledWith(checkedOutAt, 'America/Bogota');
+      expect(tasks.createMany).toHaveBeenCalledWith({
+        data: [{ unit_id: 5, type: 'checkout_clean', store_id: 5, task_date: d('2026-11-10') }],
+        skipDuplicates: true,
+      });
+    });
+
     it('nothing to create when no room is occupied', async () => {
       await service.today();
       expect(tasks.createMany).not.toHaveBeenCalled();

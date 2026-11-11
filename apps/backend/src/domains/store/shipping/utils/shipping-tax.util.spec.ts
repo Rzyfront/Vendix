@@ -376,6 +376,20 @@ describe('shipping-tax.util', () => {
       expect(e).toMatchObject({ eligible: false, reason_code: 'no_positive_rate' });
     });
 
+    // La misma elegibilidad alimenta el impuesto del alquiler de estaciones:
+    // el motivo no puede hablar del envío.
+    it.each([
+      ['unsupported_tax_type', { ...iva19, tax_type: 'ica' }],
+      ['multiple_positive_rates', { ...iva19, tax_rates: [{ id: 1, rate: 0.19 }, { id: 2, rate: 0.05 }] }],
+      ['no_positive_rate', { ...iva19, tax_rates: [{ id: 1, rate: 0 }] }],
+    ])('motivo %s es neutro (no menciona el envío)', (code, category) => {
+      const e = evaluateShippingTaxCategory(category);
+      expect(e).toMatchObject({ eligible: false, reason_code: code });
+      if (e.eligible) throw new Error('expected a non-eligible category');
+      expect(e.reason).toBeTruthy();
+      expect(e.reason.toLowerCase()).not.toContain('envío');
+    });
+
     it('tarifa >= 1 (porcentaje mal guardado) ⇒ no elegible', () => {
       const e = evaluateShippingTaxCategory({ ...iva19, tax_rates: [{ id: 1, rate: 19 }] });
       expect(e).toMatchObject({ eligible: false, reason_code: 'rate_out_of_range' });

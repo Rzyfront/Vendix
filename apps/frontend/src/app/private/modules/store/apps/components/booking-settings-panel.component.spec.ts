@@ -102,6 +102,14 @@ describe('BookingSettingsPanelComponent (apps-module Fase 4)', () => {
     expect(component.products().length).toBe(8);
   });
 
+  it('explica que los servicios no se listan en Para tu estadía', async () => {
+    await open(detail());
+    const hint = fixture.nativeElement.querySelector('[data-testid="booking-product-search-hint"]');
+    expect(hint?.textContent).toContain(
+      'Aquí solo se muestran productos. Los servicios (masajes, tours) se reservan desde su propia página.',
+    );
+  });
+
   it('el buscador deja fuera los servicios', async () => {
     products.getProducts.and.returnValue(
       of({ data: [item(5, 'Masaje', 'service'), item(9, 'Desayuno')], pagination: {} } as any),

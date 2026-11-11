@@ -63,7 +63,7 @@ import {
 import { DIAN_INVOICE_OPERATION_TYPES } from './providers/dian-direct/constants/dian-document-types';
 import {
   isMutualAgreementCash,
-  isMutualAgreementFinalConsumerInvoice,
+  isMutualAgreementCashInvoice,
   MUTUAL_AGREEMENT_CASH_MEANS,
   ORDER_PAYMENT_MEANS_INCLUDE,
   resolveOrderDianPaymentMeans,
@@ -320,10 +320,10 @@ export interface CreateFromOrderOptions {
    */
   force_final_consumer?: boolean;
   /**
-   * Con `force_final_consumer` sobre una orden sin cobrar: la factura sale de
-   * CONTADO con medio de pago «Acuerdo mutuo» (ZZZ) aunque no haya pago
-   * registrado. La orden no cambia (su saldo sigue pendiente). Sin
-   * `force_final_consumer` se ignora: sólo Consumidor final sale así.
+   * Orden sin cobrar facturada de CONTADO con medio de pago «Acuerdo mutuo»
+   * (ZZZ) aunque no haya pago registrado. La orden no cambia (su saldo sigue
+   * pendiente). El adquiriente no depende de esta bandera: es el titular de la
+   * orden, o Consumidor final si además llega `force_final_consumer`.
    */
   cash_by_mutual_agreement?: boolean;
   /**
@@ -373,6 +373,7 @@ export function needsOrderLineTaxSplit(
  */
 export { orderTaxFractionToInvoiceRate } from './utils/invoice-tax-rate.util';
 import { orderTaxFractionToInvoiceRate } from './utils/invoice-tax-rate.util';
+import { CreditNoteBalanceService } from './credit-notes/credit-note-balance.service';
 
 // F-212 — el desambiguador de magnitud vive en `utils/invoice-tax-rate.util`
 // porque lo comparten TRES sitios de dos capas: este escritor, el escritor de
@@ -978,6 +979,8 @@ export class InvoicingService {
     private readonly profileAccountingValidator?: ProfileAccountingValidator,
     /** Optional in TS for the same reason; Nest resolves it from CustomersModule. */
     private readonly customersService?: CustomersService,
+    /** Optional in TS for the same reason; same module (InvoicingModule). */
+    private readonly creditNoteBalance?: CreditNoteBalanceService,
   ) {}
 
   /**
@@ -3243,18 +3246,39 @@ export class InvoicingService {
   private async assertNotAlreadyInvoiced(
     where: { order_id: number } | { sales_order_id: number },
   ): Promise<void> {
-    const existing = await this.prisma.invoices.findFirst({
-      where: {
-        ...where,
-        // Las facturas de cuenta (reparto financiero) cuelgan de la orden por
-        // `order_id` pero no son «la factura de la orden».
-        financial_account_id: null,
-        invoice_type: 'sales_invoice',
-        status: { notIn: ['voided', 'cancelled'] },
-      },
-      select: { id: true, invoice_number: true, status: true },
-      orderBy: { id: 'desc' },
-    });
+    // S4: en el caso `order_id`, una factura aceptada revertida por completo
+    // con notas crédito ACEPTADAS no cuenta como «ya facturado» (la orden se
+    // puede re-facturar tras cambiar el titular). Se descartan una a una; si
+    // queda cualquier otra factura viva (o una NC parcial/no aceptada) bloquea.
+    const reversedIds: number[] = [];
+    let existing: { id: number; invoice_number: string | null; status: string } | null =
+      null;
+    for (;;) {
+      existing = await this.prisma.invoices.findFirst({
+        where: {
+          ...where,
+          // Las facturas de cuenta (reparto financiero) cuelgan de la orden por
+          // `order_id` pero no son «la factura de la orden».
+          financial_account_id: null,
+          invoice_type: 'sales_invoice',
+          status: { notIn: ['voided', 'cancelled'] },
+          ...(reversedIds.length > 0 ? { id: { notIn: reversedIds } } : {}),
+        },
+        select: { id: true, invoice_number: true, status: true },
+        orderBy: { id: 'desc' },
+      });
+      if (
+        existing &&
+        'order_id' in where &&
+        existing.status === 'accepted' &&
+        this.creditNoteBalance &&
+        (await this.creditNoteBalance.isFullyReversedByAcceptedNotes(existing.id))
+      ) {
+        reversedIds.push(existing.id);
+        continue;
+      }
+      break;
+    }
 
     if (!existing) {
       return;
@@ -4002,7 +4026,7 @@ export class InvoicingService {
       },
     });
     if (!invoice || !['draft', 'validated'].includes(invoice.status)) return;
-    if (isMutualAgreementFinalConsumerInvoice(invoice)) return;
+    if (isMutualAgreementCashInvoice(invoice)) return;
 
     const order = await this.prisma.orders.findFirst({
       where: { id: order_id },

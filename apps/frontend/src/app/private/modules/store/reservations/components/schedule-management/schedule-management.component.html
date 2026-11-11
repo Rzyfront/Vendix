@@ -146,7 +146,43 @@
             {{ getInitials(p) }}
           </div>
           <div class="profile-info">
-            <h2 class="profile-name">{{ getProviderDisplayName(p) }}</h2>
+            @if (editingName()) {
+              <div class="profile-name-edit">
+                <input
+                  class="profile-name-input"
+                  type="text"
+                  maxlength="100"
+                  aria-label="Nombre visible del proveedor"
+                  data-testid="provider-display-name-input"
+                  [value]="nameValue()"
+                  (input)="nameValue.set($any($event.target).value)"
+                  (keydown.enter)="saveName()"
+                  (keydown.escape)="cancelEditName()"
+                />
+                <app-button
+                  size="sm"
+                  data-testid="provider-display-name-save"
+                  [disabled]="!nameValue().trim() || savingName()"
+                  [loading]="savingName()"
+                  (clicked)="saveName()"
+                >Guardar</app-button>
+                <app-button size="sm" variant="ghost" (clicked)="cancelEditName()">Cancelar</app-button>
+              </div>
+            } @else {
+              <div class="profile-name-row">
+                <h2 class="profile-name">{{ getProviderDisplayName(p) }}</h2>
+                <button
+                  type="button"
+                  class="profile-name-edit-btn"
+                  aria-label="Editar nombre visible"
+                  title="Editar nombre visible"
+                  data-testid="provider-display-name-edit"
+                  (click)="startEditName()"
+                >
+                  <app-icon name="pencil" [size]="14"/>
+                </button>
+              </div>
+            }
             <div class="profile-position">
               <app-icon name="briefcase" [size]="12"/>
               <span>{{ getProviderSubtitle(p) || 'Sin cargo asignado' }}</span>
