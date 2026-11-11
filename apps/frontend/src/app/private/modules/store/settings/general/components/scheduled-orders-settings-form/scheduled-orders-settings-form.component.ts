@@ -34,9 +34,9 @@ import {
 } from '../../services/scheduled-order-exceptions.service';
 
 /**
- * Lo que este formulario guarda: la sección sin `fulfillment_types`. La entrega
- * usa los métodos de envío de la tienda (Configuración → Envíos); el backend
- * aún acepta la clave como opcional solo para clientes con caché.
+ * Lo que este formulario guarda: la sección sin `fulfillment_types` (obsoleto,
+ * ver `ScheduledOrdersSettings`). La entrega usa los métodos de envío de la
+ * tienda (Configuración → Envíos).
  */
 export type ScheduledOrdersPayload = Omit<
   ScheduledOrdersSettings,

@@ -290,9 +290,10 @@ export interface ScheduledOrdersSettings {
   min_lead_time_hours: number;
   max_days_ahead: number;
   /**
-   * Obsoleto: la entrega del pedido programado sale del método de envío
-   * elegido en el POS. Se conserva opcional porque tiendas existentes pueden
-   * tenerlo guardado; el formulario ya no lo escribe.
+   * Obsoleto: la entrega del pedido programado sale del método de envío de la
+   * orden (Configuración → Envíos), en el POS y en la tienda en línea. Queda
+   * opcional porque un guardado viejo puede traerlo y el backend lo sigue
+   * aceptando, ignorado, para un frontend en caché; el formulario ya no lo escribe.
    */
   fulfillment_types?: Array<'pickup' | 'delivery'>;
   reminders: ScheduledOrderReminderRule[];
