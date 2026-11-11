@@ -25,6 +25,17 @@ import { VendixHttpException, ErrorCodes } from 'src/common/errors';
 // verdad en la lista que la DIAN acepta, no solo que tenga 5 dígitos.
 import { findDianMunicipality } from '../invoicing/providers/dian-direct/constants/dian-geography';
 
+const ADDRESS_SORT_FIELDS = new Set([
+  'id',
+  'city',
+  'state_province',
+  'country_code',
+  'postal_code',
+  'is_primary',
+  'type',
+  'label',
+]);
+
 @Injectable()
 export class AddressesService {
   constructor(
@@ -192,12 +203,21 @@ export class AddressesService {
     if (country)
       where.country_code = { contains: country, mode: 'insensitive' };
 
+    // `addresses` no tiene created_at/updated_at: un sort_by fuera de la
+    // lista caía en un 500 de Prisma. Las ubicaciones de un cliente salen con
+    // la principal primero.
+    const sortField = ADDRESS_SORT_FIELDS.has(sort_by) ? sort_by : 'id';
+    const direction = sort_order === 'asc' ? 'asc' : 'desc';
+    const orderBy: Prisma.addressesOrderByWithRelationInput[] = query.customer_id
+      ? [{ is_primary: 'desc' }, { [sortField]: direction }]
+      : [{ [sortField]: direction }];
+
     const [addresses, total] = await Promise.all([
       this.prisma.addresses.findMany({
         where,
         skip,
         take: limit,
-        orderBy: { [sort_by]: sort_order },
+        orderBy,
         include: {
           stores: { select: { id: true, name: true } },
         },

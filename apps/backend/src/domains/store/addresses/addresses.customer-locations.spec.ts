@@ -213,6 +213,19 @@ describe('AddressesService customer locations', () => {
     );
   });
 
+  it('lists without a 500 when sort_by is the old created_at default, primary first', async () => {
+    prisma.addresses.findMany = jest.fn().mockResolvedValue([]);
+    await service.findAll(
+      { customer_id: 101, sort_by: 'created_at', sort_order: 'desc' } as any,
+      {},
+    );
+    expect(prisma.addresses.findMany).toHaveBeenCalledWith(
+      expect.objectContaining({
+        orderBy: [{ is_primary: 'desc' }, { id: 'desc' }],
+      }),
+    );
+  });
+
   it('refuses to delete a location used in a sales order with a clear message', async () => {
     prisma.sales_orders.count.mockResolvedValue(1);
     await expect(service.remove(1, {})).rejects.toThrow(

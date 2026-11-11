@@ -242,7 +242,16 @@ export class CreateCustomerLocationDto extends OmitType(CreateAddressDto, [
   'user_id',
   'type',
   'status',
-] as const) {}
+  'state',
+] as const) {
+  // Opcional aquí: una sede cargada en masa o desde el diálogo de cliente
+  // existente puede no traer departamento.
+  @ApiPropertyOptional({ example: 'Antioquia', description: 'Departamento' })
+  @IsString()
+  @IsOptional()
+  @MaxLength(100)
+  state?: string;
+}
 
 // Address Query DTO
 export class AddressQueryDto {
@@ -349,7 +358,7 @@ export class AddressQueryDto {
   })
   @IsOptional()
   @IsString()
-  sort_by?: string = 'created_at';
+  sort_by?: string = 'id';
 
   @ApiPropertyOptional({
     example: 'desc',
