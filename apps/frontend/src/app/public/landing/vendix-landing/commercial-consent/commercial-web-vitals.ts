@@ -96,17 +96,20 @@ export function startVitalsCollector(win: VitalsWindow): VitalsCollector {
   let lcp: number | null = null;
   const shifts: LayoutShiftLike[] = [];
   const events: EventTimingLike[] = [];
+  let firstInput: number | null = null;
   const observers: PerformanceObserver[] = [];
   const Observer = win.PerformanceObserver;
 
-  const observe = (type: string, onEntries: (list: PerformanceEntryList) => void, extra: Record<string, unknown> = {}): void => {
-    if (!Observer || !(Observer.supportedEntryTypes ?? []).includes(type)) return;
+  const observe = (type: string, onEntries: (list: PerformanceEntryList) => void, extra: Record<string, unknown> = {}): boolean => {
+    if (!Observer || !(Observer.supportedEntryTypes ?? []).includes(type)) return false;
     try {
       const o = new Observer((list) => onEntries(list.getEntries()));
       o.observe({ type, buffered: true, ...extra } as PerformanceObserverInit);
       observers.push(o);
+      return true;
     } catch {
       // Un navegador viejo o un bloqueador no puede romper la portada.
+      return false;
     }
   };
 
@@ -114,12 +117,18 @@ export function startVitalsCollector(win: VitalsWindow): VitalsCollector {
     const lastEntry = entries[entries.length - 1];
     if (lastEntry) lcp = lastEntry.startTime;
   });
-  observe('layout-shift', (entries) => {
+  const clsObserved = observe('layout-shift', (entries) => {
     for (const e of entries) shifts.push(e as unknown as LayoutShiftLike);
   });
   observe('event', (entries) => {
     for (const e of entries) events.push(e as unknown as EventTimingLike);
   }, { durationThreshold: 40 });
+  // Una interacción rápida (< 40 ms) no genera entradas `event`; `first-input` (como web-vitals)
+  // da una muestra para no sesgar el INP al alza.
+  observe('first-input', (entries) => {
+    const first = entries[0];
+    if (first && firstInput === null) firstInput = first.duration;
+  });
 
   return {
     samples() {
@@ -129,8 +138,8 @@ export function startVitalsCollector(win: VitalsWindow): VitalsCollector {
         out.push({ name, value, rating: rateVital(name, value) });
       };
       add('LCP', lcp);
-      add('CLS', observers.length ? clsFromShifts(shifts) : null);
-      add('INP', inpFromEvents(events));
+      add('CLS', clsObserved ? clsFromShifts(shifts) : null);
+      add('INP', inpFromEvents(events) ?? firstInput);
       return out;
     },
     stop() {

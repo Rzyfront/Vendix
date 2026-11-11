@@ -90,6 +90,27 @@ describe('commercial web vitals (SEO-TECH-11)', () => {
     expect(startVitalsCollector({ PerformanceObserver: Observer }).samples()).toEqual([]);
   });
 
+  it('does not report CLS when the browser lacks layout-shift support', () => {
+    const { Observer } = fakeObserver({
+      'largest-contentful-paint': [{ startTime: 1200 }],
+      event: [{ duration: 64, interactionId: 7 }],
+    });
+    const names = startVitalsCollector({ PerformanceObserver: Observer })
+      .samples()
+      .map((s) => s.name);
+    expect(names).toEqual(['LCP', 'INP']);
+  });
+
+  it('reports INP from first-input when every interaction is faster than the event threshold', () => {
+    const { Observer } = fakeObserver({
+      'layout-shift': [],
+      event: [],
+      'first-input': [{ duration: 16, startTime: 900 }],
+    });
+    const samples = startVitalsCollector({ PerformanceObserver: Observer }).samples();
+    expect(samples.find((s) => s.name === 'INP')).toEqual({ name: 'INP', value: 16, rating: 'good' });
+  });
+
   it('builds GA4 params with an integer value (CLS × 1000) and no personal data', () => {
     expect(vitalEventParams({ name: 'CLS', value: 0.23812, rating: 'needs-improvement' }, 'G-X')).toEqual({
       send_to: 'G-X',
