@@ -7,8 +7,6 @@ import { map } from 'rxjs/operators';
 import { environment } from '../../../../../../environments/environment';
 import { selectStoreSettings } from '../../../../../core/store/auth/auth.selectors';
 
-export type ScheduledFulfillmentType = 'pickup' | 'delivery';
-
 export type SlotBlockedReason =
   | 'lead_time'
   | 'too_far'
@@ -41,7 +39,6 @@ export interface FulfillmentDay {
 interface ScheduledOrdersSettingsView {
   enabled?: boolean;
   max_days_ahead?: number;
-  fulfillment_types?: ScheduledFulfillmentType[];
 }
 
 interface StoreSettingsView {
@@ -49,11 +46,13 @@ interface StoreSettingsView {
   product_options?: { enabled?: boolean };
 }
 
-/** Payload block sent to `POST /store/payments/pos`. */
+/**
+ * Payload block sent to `POST /store/payments/pos`. El tipo de entrega del
+ * agendamiento lo deriva el backend del método de envío elegido en el cobro.
+ */
 export interface PosSchedulePayload {
   start: string;
   end: string;
-  fulfillment_type: ScheduledFulfillmentType;
 }
 
 const MAX_RANGE_DAYS = 62;
@@ -67,10 +66,13 @@ function toLocalDateString(d: Date): string {
 
 /**
  * Holds the scheduled-order choice made in the POS checkout (one per sale) and
- * reads availability. The checkout splits the picker across three steps
- * (toggle in Pedido, day/slot in Cliente, fulfillment type in Envío), so the
- * picker state lives here and every section reads the same signals. With the setting off (default) `enabled()` is false, the
- * UI never renders and `schedule()` stays null, so payloads are unchanged.
+ * reads availability. The checkout splits the picker across steps (toggle in
+ * Pedido, day/slot in Cliente, summary in Envío, where the store's shipping
+ * methods are chosen), so the picker state lives here and every section reads
+ * the same signals. The state survives closing the checkout modal: it is only
+ * dropped by `reset()` (toggle off, charge completed or cart emptied). With the
+ * setting off (default) `enabled()` is false, the UI never renders and
+ * `schedule()` stays null, so payloads are unchanged.
  */
 @Injectable({ providedIn: 'root' })
 export class PosScheduledOrderService {
@@ -82,10 +84,6 @@ export class PosScheduledOrderService {
 
   readonly enabled = computed(() => this.settings()?.enabled === true);
   readonly maxDaysAhead = computed(() => this.settings()?.max_days_ahead ?? 14);
-  readonly fulfillmentTypes = computed<ScheduledFulfillmentType[]>(() => {
-    const types = this.settings()?.fulfillment_types;
-    return types?.length ? types : ['pickup', 'delivery'];
-  });
 
   /** Current choice; null when the sale is not scheduled. */
   readonly schedule = signal<PosSchedulePayload | null>(null);
@@ -97,7 +95,6 @@ export class PosScheduledOrderService {
   readonly days = signal<FulfillmentDay[]>([]);
   readonly selectedDate = signal<string | null>(null);
   readonly selectedStart = signal<string | null>(null);
-  readonly fulfillmentType = signal<ScheduledFulfillmentType | null>(null);
   /** Set by the checkout when it refuses to advance; shows the missing field. */
   readonly showValidation = signal(false);
   readonly selectedDay = computed(
@@ -134,30 +131,27 @@ export class PosScheduledOrderService {
   activate(): void {
     this.active.set(true);
     this.showValidation.set(false);
-    // Una sola opción habilitada: se preselecciona; con varias, elige el cajero.
-    const types = this.fulfillmentTypes();
-    this.fulfillmentType.set(types.length === 1 ? types[0] : null);
     this.loadAvailability();
   }
 
-  /** Drops the whole choice (toggle off, sale completed or checkout closed). */
+  /**
+   * Drops the whole choice. Only for an explicit end of the scheduled order:
+   * toggle off ("Quitar programación"), charge completed or cart emptied.
+   * Closing the checkout modal must NOT call it.
+   */
   reset(): void {
     this.active.set(false);
     this.days.set([]);
     this.selectedDate.set(null);
     this.selectedStart.set(null);
-    this.fulfillmentType.set(null);
     this.loadError.set(null);
     this.showValidation.set(false);
     this.clear();
   }
 
-  selectFulfillment(t: ScheduledFulfillmentType): void {
-    this.fulfillmentType.set(t);
-    this.syncSchedule();
-  }
-
   selectDay(date: string): void {
+    if (this.days().find((d) => d.date === date)?.blocked_reason) return;
+    if (this.selectedDate() === date) return;
     this.selectedDate.set(date);
     this.selectedStart.set(null);
     this.clear();
@@ -171,12 +165,11 @@ export class PosScheduledOrderService {
 
   private syncSchedule(): void {
     const slot = this.selectedDay()?.slots.find((s) => s.start === this.selectedStart());
-    const type = this.fulfillmentType();
-    if (!slot || !type) {
+    if (!slot) {
       this.clear();
       return;
     }
-    this.setSchedule({ start: slot.start, end: slot.end, fulfillment_type: type });
+    this.setSchedule({ start: slot.start, end: slot.end });
   }
 
   private loadAvailability(): void {

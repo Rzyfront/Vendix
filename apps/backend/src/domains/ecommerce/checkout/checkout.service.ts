@@ -2487,8 +2487,8 @@ export class CheckoutService {
     // recipe are excluded from reservation (computed once for the whole cart).
     // Se resuelve ACÁ, antes de crear la orden, porque la validación de stock
     // por presentación tiene que usar el mismo predicado que la reserva.
-    const cartLineDestinations =
-      await this.resolveCartLineDestinations(cart_items);
+    // S12: los destinos ya se resolvieron arriba para este mismo carrito.
+    const cartLineDestinations = earlyLineDestinations;
     const deferredPreparedProductIds =
       await this.getDeferredPreparedProductIds(cart_items, cartLineDestinations);
 
@@ -2754,6 +2754,7 @@ export class CheckoutService {
             store_id: order.store_id,
             order_id: order.id,
             schedule: dto.schedule!,
+            delivery_type: order.delivery_type,
             user_id: user_id ?? null,
           }),
         );
@@ -3500,8 +3501,8 @@ export class CheckoutService {
 
     // Mismo par que el checkout normal: predicado de diferimiento primero, y
     // validación de stock en unidades de stock antes de crear la orden.
-    const cartLineDestinations =
-      await this.resolveCartLineDestinations(cart_items);
+    // S12: los destinos ya se resolvieron arriba para este mismo carrito.
+    const cartLineDestinations = earlyLineDestinations;
     const deferredPreparedProductIds =
       await this.getDeferredPreparedProductIds(cart_items, cartLineDestinations);
 

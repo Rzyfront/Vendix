@@ -47,6 +47,10 @@ describe('PaymentsService — impuesto del envío en la venta POS', () => {
     payments: { findFirst: jest.fn().mockResolvedValue(null) },
     bookings: { updateMany: jest.fn() },
     order_items: { findMany: jest.fn().mockResolvedValue([]), update: jest.fn() },
+    // QUI-999: el cobro de un borrador existente cuenta sus adiciones.
+    order_item_options: { count: jest.fn().mockResolvedValue(0) },
+    // La industria se lee dentro de la tx (QUI-999): tienda retail.
+    stores: { findUnique: jest.fn().mockResolvedValue({ industries: ['retail'] }) },
     order_item_taxes: { update: jest.fn() },
     shipping_methods: {
       findFirst: jest.fn().mockResolvedValue({ id: 5, store_id: 1, is_active: true }),

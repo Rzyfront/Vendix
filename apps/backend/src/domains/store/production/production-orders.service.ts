@@ -96,6 +96,72 @@ export interface CompleteProductionOptions {
 /** Sale states in which a cancelled production order can no longer be restarted. */
 const RESTART_BLOCKED_SALE_STATES = ['cancelled', 'refunded', 'finished'];
 
+/** Tamaño de página por defecto y máximo de la lista del día (S20). */
+const PRODUCTION_DAY_PAGE_MAX = 500;
+
+type DayCursorRow = { due_date: Date | null; id: number };
+
+/**
+ * Cursor opaco de la lista del día (S20): `due_date` e `id` de la última
+ * fila base de la página. `created_at` no entra: es `timestamp(6)` y un
+ * `Date` de JS lo trunca al milisegundo, así que las filas creadas en la
+ * misma transacción no se podrían separar y el cursor dejaría de avanzar.
+ */
+function encodeDayCursor(row: DayCursorRow): string {
+  return Buffer.from(
+    JSON.stringify({
+      d: row.due_date ? row.due_date.toISOString() : null,
+      i: row.id,
+    }),
+  ).toString('base64url');
+}
+
+function decodeDayCursor(raw: string): DayCursorRow {
+  try {
+    const parsed = JSON.parse(Buffer.from(raw, 'base64url').toString('utf8'));
+    const due = parsed.d == null ? null : new Date(parsed.d);
+    if ((due && Number.isNaN(due.getTime())) || !Number.isInteger(parsed.i)) {
+      throw new Error('cursor inválido');
+    }
+    return { due_date: due, id: parsed.i };
+  } catch {
+    throw new VendixHttpException(
+      ErrorCodes.SYS_VALIDATION_001,
+      'cursor inválido',
+    );
+  }
+}
+
+/**
+ * Filas posteriores al cursor en el orden de la lista (`due_date asc` con
+ * nulos al final, `id asc`). `due_date` se compara por su milisegundo
+ * (`[d, d+1ms)`) porque la columna guarda microsegundos y el cursor no: la
+ * fila del cursor nunca vuelve y la paginación siempre avanza.
+ */
+function dayCursorWhere(c: DayCursorRow): Prisma.production_ordersWhereInput {
+  if (c.due_date == null) {
+    return { due_date: null, id: { gt: c.id } };
+  }
+  const nextMs = new Date(c.due_date.getTime() + 1);
+  return {
+    OR: [
+      { due_date: { gte: nextMs } },
+      { due_date: null },
+      { due_date: { gte: c.due_date, lt: nextMs }, id: { gt: c.id } },
+    ],
+  };
+}
+
+/** Mismo orden que el `orderBy` de la lista, para fusionar páginas y hermanas. */
+function compareDayRows(a: DayCursorRow, b: DayCursorRow): number {
+  if (a.due_date?.getTime() !== b.due_date?.getTime()) {
+    if (a.due_date == null) return 1;
+    if (b.due_date == null) return -1;
+    return a.due_date.getTime() - b.due_date.getTime();
+  }
+  return a.id - b.id;
+}
+
 /**
  * ProductionOrdersService
  *
@@ -471,6 +537,11 @@ export class ProductionOrdersService {
         },
       );
     }
+    // A Planta (manufacturing) draft stays "En espera" until it is released
+    // from its Planta detail: starting it here would skip that step.
+    if ((order as { source?: string | null }).source === 'manual') {
+      throw new VendixHttpException(ErrorCodes.PRODUCTION_ORDER_PLANT_START_001);
+    }
     // Atomic claim: two screens starting the same order cannot both win.
     const now = new Date();
     const claimed = await this.prisma.production_orders.updateMany({
@@ -527,6 +598,21 @@ export class ProductionOrdersService {
           message: error instanceof Error ? error.message : String(error),
         });
       }
+    }
+    // S19: si ninguna avanzó y alguna falló, la respuesta no puede ser éxito:
+    // el operario creería que la tarjeta avanzó. Con alguna movida, responde
+    // como siempre (movidas + fallidas).
+    if (result.moved.length === 0 && result.failed.length > 0) {
+      // El mensaje lleva los motivos, como el aviso que mostraba el panel.
+      throw new VendixHttpException(
+        ErrorCodes.PRODUCTION_SALE_MOVE_FAILED,
+        result.failed.map((f) => f.message).join(' · '),
+        {
+          action: from === 'draft' ? 'start' : 'complete',
+          failed: result.failed,
+          skipped: result.skipped,
+        },
+      );
     }
     return result;
   }
@@ -859,6 +945,7 @@ export class ProductionOrdersService {
           serve_all_variants: serveAllVariants,
           location_id,
           produced_qty: producedQty,
+          prior_produced_qty: Number(order.produced_qty ?? 0),
           planned_qty: Number(order.planned_qty),
           production_order_id: order.id,
         });
@@ -1071,7 +1158,8 @@ export class ProductionOrdersService {
 
   /**
    * What happens to the produced units once the order completes:
-   * - active sale: reserve min(produced, planned) for ('order', sale), without
+   * - active sale: reserve min(accumulated, planned) minus what is already
+   *   reserved for ('order', sale), without
    *   availability validation (the units were just credited, so `available`
    *   is unchanged and no other sale can take them);
    * - sale already delivered/finished: sell them now through the delivery
@@ -1088,6 +1176,8 @@ export class ProductionOrdersService {
       serve_all_variants: boolean;
       location_id: number;
       produced_qty: number;
+      /** Accumulated output of the PREVIOUS deliveries of this order (Planta partials). */
+      prior_produced_qty?: number;
       planned_qty: number;
       production_order_id: number;
     },
@@ -1129,7 +1219,12 @@ export class ProductionOrdersService {
       return 0;
     }
 
-    const quantity = Math.min(p.produced_qty, Math.round(p.planned_qty));
+    // Incremental: the sale never holds more than round(planned) in total, so
+    // each delivery reserves min(accumulated, planned) minus what the previous
+    // ones already reserved (same cap `handleSaleCancelled` releases with).
+    const cap = Math.round(p.planned_qty);
+    const prior = Math.max(0, p.prior_produced_qty ?? 0);
+    const quantity = Math.min(prior + p.produced_qty, cap) - Math.min(prior, cap);
     if (quantity <= 0) return 0;
     await this.stockLevelManager.reserveStock(
       p.product_id,
@@ -1357,10 +1452,23 @@ export class ProductionOrdersService {
         },
       );
     }
-    const cancelled = await this.prisma.production_orders.update({
-      where: { id },
+    // Atomic claim (as `start()` does): two cancellations, or a cancellation
+    // racing a completion, leave ONE winner; the loser gets a state error.
+    const claimed = await this.prisma.production_orders.updateMany({
+      where: {
+        id,
+        status: { in: ['draft', 'released', 'in_progress', 'partially_completed'] },
+      },
       data: { status: 'cancelled', updated_at: new Date() },
     });
+    if (claimed.count !== 1) {
+      throw new VendixHttpException(
+        ErrorCodes.PRODUCTION_ORDER_INVALID_STATE,
+        undefined,
+        { from: order.status, to: 'cancelled' },
+      );
+    }
+    const cancelled = await this.findOne(id);
     this.emitUpdated(cancelled);
     return cancelled;
   }
@@ -1498,44 +1606,84 @@ export class ProductionOrdersService {
     const local = resolveLocalDateRange(range, timezone);
     const naive = resolveLocalDateOnlyRange(range, timezone);
 
-    const rows = await this.prisma.production_orders.findMany({
-      where: {
-        status: { not: 'cancelled' },
-        OR: [
-          { order_id: { not: null }, due_date: { gte: local.startDate, lte: local.endDate } },
-          { order_id: null, due_date: { gte: naive.startDate, lte: naive.endDate } },
-          { due_date: null, created_at: { gte: local.startDate, lte: local.endDate } },
-          { status: { in: ['in_progress', 'partially_completed'] }, order_id: { not: null }, due_date: { lt: local.startDate } },
-          { status: { in: ['in_progress', 'partially_completed'] }, order_id: null, due_date: { lt: naive.startDate } },
-          { status: { in: ['in_progress', 'partially_completed'] }, due_date: null, created_at: { lt: local.startDate } },
-        ],
-      },
-      select: {
-        id: true,
-        order_number: true,
-        status: true,
-        source: true,
-        product_id: true,
-        planned_qty: true,
-        produced_qty: true,
-        started_at: true,
-        produced_at: true,
-        due_date: true,
-        created_at: true,
-        order_id: true,
-        estimated_minutes: true,
-        product: { select: { name: true, preparation_time_minutes: true } },
-        product_variant: { select: { name: true } },
-        sale_order: {
-          select: {
-            order_number: true,
-            customer_alias: true,
-            users: { select: { first_name: true, last_name: true } },
-          },
+    const dayWhere: Prisma.production_ordersWhereInput = {
+      status: { not: 'cancelled' },
+      OR: [
+        { order_id: { not: null }, due_date: { gte: local.startDate, lte: local.endDate } },
+        { order_id: null, due_date: { gte: naive.startDate, lte: naive.endDate } },
+        { due_date: null, created_at: { gte: local.startDate, lte: local.endDate } },
+        { status: { in: ['in_progress', 'partially_completed'] }, order_id: { not: null }, due_date: { lt: local.startDate } },
+        { status: { in: ['in_progress', 'partially_completed'] }, order_id: null, due_date: { lt: naive.startDate } },
+        { status: { in: ['in_progress', 'partially_completed'] }, due_date: null, created_at: { lt: local.startDate } },
+      ],
+    };
+    const select = {
+      id: true,
+      order_number: true,
+      status: true,
+      source: true,
+      product_id: true,
+      planned_qty: true,
+      produced_qty: true,
+      started_at: true,
+      produced_at: true,
+      due_date: true,
+      created_at: true,
+      order_id: true,
+      estimated_minutes: true,
+      product: { select: { name: true, preparation_time_minutes: true } },
+      product_variant: { select: { name: true } },
+      sale_order: {
+        select: {
+          order_number: true,
+          customer_alias: true,
+          users: { select: { first_name: true, last_name: true } },
         },
       },
-      orderBy: [{ due_date: 'asc' }, { created_at: 'asc' }, { id: 'asc' }],
-      take: 500,
+    } satisfies Prisma.production_ordersSelect;
+    // S20: orden estable por (`due_date`, `id`), el mismo del cursor. `id`
+    // crece con la inserción, así que equivale al `created_at` de antes.
+    const orderBy: Prisma.production_ordersOrderByWithRelationInput[] = [
+      { due_date: 'asc' },
+      { id: 'asc' },
+    ];
+
+    // Paginación keyset (S20): el cursor es la última fila base de la página.
+    const pageSize = query?.limit ?? PRODUCTION_DAY_PAGE_MAX;
+    const cursor = query?.cursor ? decodeDayCursor(query.cursor) : null;
+    const pageRows = await this.prisma.production_orders.findMany({
+      where: cursor ? { ...dayWhere, AND: [dayCursorWhere(cursor)] } : dayWhere,
+      select,
+      orderBy,
+      take: pageSize + 1,
+    });
+    const hasMore = pageRows.length > pageSize;
+    const page = hasMore ? pageRows.slice(0, pageSize) : pageRows;
+    const lastRow = page[page.length - 1];
+    const next_cursor = hasMore && lastRow ? encodeDayCursor(lastRow) : null;
+
+    // Una tarjeta de venta trae SIEMPRE todas sus filas del día. Con la
+    // primera página completa del día (sin cursor y sin más páginas) ya están
+    // todas; en cualquier otro caso se completan por `order_id`.
+    let rows = page;
+    const saleIds = [
+      ...new Set(page.map((r) => r.order_id).filter((id): id is number => id != null)),
+    ];
+    if ((cursor || hasMore) && saleIds.length > 0) {
+      const siblings = await this.prisma.production_orders.findMany({
+        where: { ...dayWhere, AND: [{ order_id: { in: saleIds } }] },
+        select,
+        orderBy,
+      });
+      const known = new Set(page.map((r) => r.id));
+      rows = [...page, ...siblings.filter((r) => !known.has(r.id))].sort(compareDayRows);
+    }
+
+    // El resumen cuenta SIEMPRE el día completo, no la página.
+    const statusCounts = await this.prisma.production_orders.groupBy({
+      by: ['status'],
+      where: dayWhere,
+      _count: { _all: true },
     });
 
     type Row = (typeof rows)[number];
@@ -1566,7 +1714,7 @@ export class ProductionOrdersService {
     }
 
     const summary = { waiting: 0, in_progress: 0, completed: 0 };
-    for (const r of rows) summary[bucket(r.status as string)] += 1;
+    for (const c of statusCounts) summary[bucket(c.status as string)] += c._count._all;
 
     const cards = [...groups.entries()].map(([key, list]) => {
       const first = list[0];
@@ -1623,6 +1771,8 @@ export class ProductionOrdersService {
       timezone,
       summary,
       cards: cards.map(({ _anchor, ...card }) => card),
+      next_cursor,
+      server_now: new Date().toISOString(),
     };
   }
 

@@ -24,6 +24,7 @@ export const ErrorCodes = {
   SCHED_TOO_FAR: { code: 'SCHED_TOO_FAR', httpStatus: 400, devMessage: 'Esa fecha está demasiado lejos para programar un pedido.' },
   SCHED_INVALID_RANGE: { code: 'SCHED_INVALID_RANGE', httpStatus: 400, devMessage: 'El rango de fechas no es válido.' },
   SCHED_FULFILLMENT_TYPE: { code: 'SCHED_FULFILLMENT_TYPE', httpStatus: 400, devMessage: 'La tienda no ofrece ese tipo de entrega para pedidos programados.' },
+  SCHED_CUSTOMER_REQUIRED: { code: 'SCHED_CUSTOMER_REQUIRED', httpStatus: 400, devMessage: 'El pedido programado necesita un cliente.' },
   SCHED_NOT_FOUND: { code: 'SCHED_NOT_FOUND', httpStatus: 404, devMessage: 'Pedido programado no encontrado.' },
   SCHED_ALREADY_SCHEDULED: { code: 'SCHED_ALREADY_SCHEDULED', httpStatus: 409, devMessage: 'Esta orden ya tiene un agendamiento.' },
   SCHED_INVALID_TRANSITION: { code: 'SCHED_INVALID_TRANSITION', httpStatus: 409, devMessage: 'Ese cambio de estado no está permitido para el pedido.' },
@@ -7077,11 +7078,24 @@ export const ErrorCodes = {
     httpStatus: 409,
     devMessage: 'Transición de estado inválida para la orden de producción',
   },
+  // S19: "Iniciar"/"Finalizar" la tarjeta de una venta con todas sus órdenes
+  // fallidas. `details.failed` trae el motivo de cada orden.
+  PRODUCTION_SALE_MOVE_FAILED: {
+    code: 'PRODUCTION_SALE_MOVE_FAILED',
+    httpStatus: 409,
+    devMessage: 'Ninguna orden de producción de la venta pudo avanzar',
+  },
   PRODUCTION_ORDER_CONCURRENT_UPDATE: {
     code: 'PRODUCTION_ORDER_CONCURRENT_UPDATE',
     httpStatus: 409,
     devMessage:
       'La orden de producción cambió en otra operación; recarga e intenta de nuevo',
+  },
+  PRODUCTION_ORDER_PLANT_START_001: {
+    code: 'PRODUCTION_ORDER_PLANT_START_001',
+    httpStatus: 409,
+    devMessage:
+      'Esta orden es de Planta: libérala desde su detalle de Planta.',
   },
   PRODUCTION_ORDER_RESTART_NOT_LINKED: {
     code: 'PRODUCTION_ORDER_RESTART_NOT_LINKED',

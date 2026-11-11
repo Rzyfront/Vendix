@@ -7,11 +7,12 @@ import { StockLevelManager } from '../inventory/shared/services/stock-level-mana
 import {
   PRODUCTION_SALE_CANCELLED_EVENT,
   PRODUCTION_SALE_SYNC_EVENT,
+  type ProductionSaleCancelledOutcome,
   type ProductionSaleCancelledPayload,
   type ProductionSaleSyncPayload,
 } from './production-sale-sync';
 import { emitProductionOrderUpdated } from './production-order-events';
-import { suggestProductionDisposition } from './production-disposition.util';
+import type { ProductionDisposition } from './production-disposition.util';
 import { findProductionOrderForLine } from './production-order-pairing.util';
 
 const CLOSED_SALE_STATES = ['cancelled', 'refunded'];
@@ -95,28 +96,39 @@ export class ProductionSaleLinkService {
    * released) are cancelled. A COMPLETED order keeps its finished goods, which
    * either go back to sellable stock (`release`) or are written off (`waste`);
    * a PARTIALLY completed one gets that disposition over what it produced and
-   * is cancelled. Never throws: the cancellation has already committed, so a
-   * failure is logged for follow-up.
+   * is cancelled. Each completed order takes ITS own choice, else the single
+   * `disposition`, else `release` (reuse). Never throws: the cancellation has
+   * already committed, so a failure is logged for follow-up; the outcome lists
+   * the orders whose write-off failed so the caller can keep them reserved.
    */
   @OnEvent(PRODUCTION_SALE_CANCELLED_EVENT)
-  async onSaleCancelled(payload: ProductionSaleCancelledPayload): Promise<void> {
+  async onSaleCancelled(
+    payload: ProductionSaleCancelledPayload,
+  ): Promise<ProductionSaleCancelledOutcome> {
+    const outcome: ProductionSaleCancelledOutcome = { unadjusted: [] };
     try {
-      await this.handleSaleCancelled(payload);
+      return await this.handleSaleCancelled(payload, outcome);
     } catch (error) {
       this.logger.error(
         `Production cleanup of cancelled sale #${payload.order_id} failed: ${
           error instanceof Error ? error.message : String(error)
         }`,
       );
+      // Whatever was registered as unadjusted stays held by the caller.
+      return outcome;
     }
   }
 
-  async handleSaleCancelled(payload: ProductionSaleCancelledPayload): Promise<void> {
+  async handleSaleCancelled(
+    payload: ProductionSaleCancelledPayload,
+    outcome: ProductionSaleCancelledOutcome = { unadjusted: [] },
+  ): Promise<ProductionSaleCancelledOutcome> {
     const client = this.prisma.withoutScope();
     const linked = await client.production_orders.findMany({
       where: { store_id: payload.store_id, order_id: payload.order_id },
       select: {
         id: true,
+        order_number: true,
         product_id: true,
         product_variant_id: true,
         status: true,
@@ -125,7 +137,46 @@ export class ProductionSaleLinkService {
         product: { select: { name: true } },
       },
     });
-    if (linked.length === 0) return;
+    if (linked.length === 0) return outcome;
+
+    const dispositionOf = (production_order_id: number): ProductionDisposition =>
+      payload.dispositions?.find((d) => d.production_order_id === production_order_id)
+        ?.disposition ??
+      payload.disposition ??
+      'release';
+    // A partially_completed order with no recorded output has nothing reserved.
+    const reservedOf = (order: (typeof linked)[number]): number => {
+      const produced =
+        order.status === 'partially_completed'
+          ? Number(order.produced_qty ?? 0)
+          : Number(order.produced_qty ?? order.planned_qty);
+      return Math.min(produced, Math.round(Number(order.planned_qty)));
+    };
+    const settle = (production_order_id: number) => {
+      const index = outcome.unadjusted.findIndex(
+        (u) => u.production_order_id === production_order_id,
+      );
+      if (index >= 0) outcome.unadjusted.splice(index, 1);
+    };
+    // S1 — pessimistic: every finished order chosen as waste counts as
+    // unadjusted until its write-off commits, so a failure ANYWHERE below
+    // (even before the loop) keeps its goods reserved instead of letting the
+    // caller's blanket release make them sellable.
+    if (this.stockLevelManager) {
+      for (const order of linked) {
+        if (order.status !== 'completed' && order.status !== 'partially_completed') continue;
+        if (dispositionOf(order.id) !== 'waste') continue;
+        const reserved = reservedOf(order);
+        if (reserved <= 0) continue;
+        outcome.unadjusted.push({
+          production_order_id: order.id,
+          order_number: order.order_number ?? null,
+          product_id: order.product_id,
+          product_variant_id: order.product_variant_id ?? null,
+          reserved_qty: reserved,
+        });
+      }
+    }
 
     // Nothing was produced yet (draft / in_progress / released): cancelled as is.
     const open = linked.filter((o) =>
@@ -154,7 +205,7 @@ export class ProductionSaleLinkService {
     const completed = linked.filter(
       (o) => o.status === 'completed' || o.status === 'partially_completed',
     );
-    if (completed.length === 0 || !this.stockLevelManager) return;
+    if (completed.length === 0 || !this.stockLevelManager) return outcome;
 
     const lines = await client.order_items.findMany({
       where: {
@@ -170,7 +221,6 @@ export class ProductionSaleLinkService {
         order_item_options: { select: { id: true }, take: 1 },
       },
     });
-    const disposition = payload.disposition ?? suggestProductionDisposition(lines);
     const wasteEvents: Array<Record<string, unknown>> = [];
 
     for (const order of completed) {
@@ -181,65 +231,78 @@ export class ProductionSaleLinkService {
       const productLines = lines.filter(
         (l) => l.product_id === order.product_id && (l.product_variant_id ?? null) === variant_id,
       );
-      if (productLines.length > 0 && productLines.every((l) => l.inventory_committed)) continue;
-      // A partially_completed order with no recorded output has nothing to release.
-      const produced =
-        order.status === 'partially_completed'
-          ? Number(order.produced_qty ?? 0)
-          : Number(order.produced_qty ?? order.planned_qty);
-      const reserved = Math.min(produced, Math.round(Number(order.planned_qty)));
+      if (productLines.length > 0 && productLines.every((l) => l.inventory_committed)) {
+        settle(order.id);
+        continue;
+      }
+      const reserved = reservedOf(order);
       if (reserved <= 0) continue;
-      await client.$transaction(async (tx) => {
-        // Only what is STILL reserved can be released or written off: a line
-        // delivered on its own already consumed its share of the reservation.
-        const quantity = await this.stockLevelManager!.releaseReservationQuantity(
-          'order',
-          payload.order_id,
-          order.product_id,
-          variant_id,
-          reserved,
-          disposition === 'waste' ? 'consumed' : 'cancelled',
-          tx,
-          { decrementOnHand: false },
-        );
-        if (disposition !== 'waste' || !(quantity > 0)) return;
-        const location_id = await this.stockLevelManager!.getDefaultLocationForProduct(
-          order.product_id,
-          variant_id ?? undefined,
-          tx,
-        );
-        const result = await this.stockLevelManager!.updateStock(
-          {
-            product_id: order.product_id,
-            ...(variant_id != null ? { variant_id } : {}),
-            location_id,
-            quantity_change: -quantity,
-            movement_type: 'damage',
-            reason: `Merma de producción #${order.id} por cancelación de la orden #${payload.order_id}${
-              payload.reason ? `: ${payload.reason}` : ''
-            }`,
-            source_module: 'production_sale_cancelled',
-            create_movement: true,
-            validate_availability: false,
-            allow_negative: true,
-          },
-          tx,
-        );
-        wasteEvents.push({
-          production_order_id: order.id,
-          order_id: payload.order_id,
-          store_id: payload.store_id,
-          product_name: order.product?.name ?? `#${order.product_id}`,
-          quantity,
-          total_cost: Number(result?.cost_snapshot?.total_cost ?? 0),
+      const disposition = dispositionOf(order.id);
+      try {
+        await client.$transaction(async (tx) => {
+          // Only what is STILL reserved can be released or written off: a line
+          // delivered on its own already consumed its share of the reservation.
+          const quantity = await this.stockLevelManager!.releaseReservationQuantity(
+            'order',
+            payload.order_id,
+            order.product_id,
+            variant_id,
+            reserved,
+            disposition === 'waste' ? 'consumed' : 'cancelled',
+            tx,
+            { decrementOnHand: false },
+          );
+          if (disposition !== 'waste' || !(quantity > 0)) return;
+          const location_id = await this.stockLevelManager!.getDefaultLocationForProduct(
+            order.product_id,
+            variant_id ?? undefined,
+            tx,
+          );
+          const result = await this.stockLevelManager!.updateStock(
+            {
+              product_id: order.product_id,
+              ...(variant_id != null ? { variant_id } : {}),
+              location_id,
+              quantity_change: -quantity,
+              movement_type: 'damage',
+              reason: `Merma de producción #${order.id} por cancelación de la orden #${payload.order_id}${
+                payload.reason ? `: ${payload.reason}` : ''
+              }`,
+              source_module: 'production_sale_cancelled',
+              create_movement: true,
+              validate_availability: false,
+              allow_negative: true,
+            },
+            tx,
+          );
+          wasteEvents.push({
+            production_order_id: order.id,
+            order_id: payload.order_id,
+            store_id: payload.store_id,
+            product_name: order.product?.name ?? `#${order.product_id}`,
+            quantity,
+            total_cost: Number(result?.cost_snapshot?.total_cost ?? 0),
+          });
         });
-      });
+        // Committed (written off, or nothing was still reserved): settled.
+        settle(order.id);
+      } catch (error) {
+        this.logger.error(
+          `Production order #${order.id} of cancelled sale #${payload.order_id}: ${disposition} failed: ${
+            error instanceof Error ? error.message : String(error)
+          }`,
+        );
+        // A failed release is harmless (the general release returns the units
+        // to sellable stock). A failed write-off stays registered as
+        // unadjusted (pessimistic entry above): the goods must not look
+        // sellable although they were discarded.
+      }
     }
 
     // Accounting after the stock commits (DR shrinkage / CR finished goods):
     // the finished goods entered inventory with `production.completed`, so the
     // write-off leaves it the same way an adjustment would.
-    if (wasteEvents.length === 0 || !this.eventEmitter) return;
+    if (wasteEvents.length === 0 || !this.eventEmitter) return outcome;
     const store = await client.stores.findUnique({
       where: { id: payload.store_id },
       select: { organization_id: true },
@@ -250,6 +313,7 @@ export class ProductionSaleLinkService {
         organization_id: store?.organization_id,
       });
     }
+    return outcome;
   }
 
   @OnEvent(PRODUCTION_SALE_SYNC_EVENT)
@@ -310,6 +374,17 @@ export class ProductionSaleLinkService {
       },
     });
     if (!sale || CLOSED_SALE_STATES.includes(sale.state as string)) return [];
+    // A sale without live production lines only has work here when some order
+    // is still linked to it (a draft whose lines are gone). Otherwise there is
+    // nothing to sync: skip the recipe read and the transaction (every POS
+    // payment, retail included, passes through here).
+    if (sale.order_items.length === 0) {
+      const linked = await client.production_orders.findFirst({
+        where: { store_id: sale.store_id, order_id: sale.id },
+        select: { id: true },
+      });
+      if (!linked) return [];
+    }
 
     // One order per product+variant: a variant sale must credit and reserve the
     // SOLD variant, so lines of different variants never share an order.

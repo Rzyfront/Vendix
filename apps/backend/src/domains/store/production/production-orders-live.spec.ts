@@ -34,6 +34,7 @@ describe('ProductionOrdersService — Producción activa (QUI-1002)', () => {
       production_orders: {
         findFirst: jest.fn().mockResolvedValue(order()),
         findMany: jest.fn().mockResolvedValue([]),
+        groupBy: jest.fn().mockResolvedValue([]),
         create: jest.fn(),
         update: jest.fn(),
         updateMany: jest.fn().mockResolvedValue({ count: 1 }),
@@ -151,8 +152,18 @@ describe('ProductionOrdersService — Producción activa (QUI-1002)', () => {
     });
 
     it('cancel emits the cancelled order; an already cancelled one stays idempotent and silent', async () => {
-      prisma.production_orders.update.mockResolvedValue(order({ status: 'cancelled' }));
+      // cancel() reclama con updateMany atómico y relee la orden (findOne).
+      prisma.production_orders.updateMany.mockResolvedValue({ count: 1 });
+      prisma.production_orders.findFirst
+        .mockResolvedValueOnce(order({ status: 'draft' }))
+        .mockResolvedValueOnce(order({ status: 'cancelled' }));
       await service.cancel(5);
+      expect(prisma.production_orders.updateMany).toHaveBeenCalledWith(
+        expect.objectContaining({
+          where: expect.objectContaining({ id: 5 }),
+          data: expect.objectContaining({ status: 'cancelled' }),
+        }),
+      );
       expect(updatedEvents()).toEqual([expect.objectContaining({ id: 5, status: 'cancelled' })]);
 
       emitter.emit.mockClear();
@@ -258,14 +269,47 @@ describe('ProductionOrdersService — Producción activa (QUI-1002)', () => {
       expect(result).toEqual({ moved: [2], skipped: [1, 3, 4], failed: [] });
     });
 
-    it('completeSale reports failures per order', async () => {
+    it('S19: completeSale con todas las órdenes fallidas responde error con los motivos', async () => {
       jest.spyOn(service, 'complete').mockRejectedValue(new Error('sin stock'));
-      const result = await service.completeSale(77);
-      expect(result).toEqual({
-        moved: [],
-        skipped: [1, 3, 4],
-        failed: [{ id: 2, message: 'sin stock' }],
+      await expect(service.completeSale(77)).rejects.toMatchObject({
+        errorCode: 'PRODUCTION_SALE_MOVE_FAILED',
+        response: {
+          error_code: 'PRODUCTION_SALE_MOVE_FAILED',
+          message: 'sin stock',
+          details: {
+            action: 'complete',
+            failed: [{ id: 2, message: 'sin stock' }],
+            skipped: [1, 3, 4],
+          },
+        },
       });
+    });
+
+    it('S19: startSale con todas las órdenes fallidas responde error con los motivos de cada una', async () => {
+      jest
+        .spyOn(service, 'start')
+        .mockRejectedValueOnce(new Error('claim lost'))
+        .mockRejectedValueOnce(new Error('sin insumos'));
+      await expect(service.startSale(77)).rejects.toMatchObject({
+        errorCode: 'PRODUCTION_SALE_MOVE_FAILED',
+        response: {
+          message: 'claim lost · sin insumos',
+          details: {
+            action: 'start',
+            failed: [
+              { id: 1, message: 'claim lost' },
+              { id: 3, message: 'sin insumos' },
+            ],
+          },
+        },
+      });
+    });
+
+    it('S19: sin órdenes por mover y sin fallas (todas saltadas) responde como siempre', async () => {
+      prisma.production_orders.findMany.mockResolvedValue([
+        { id: 4, status: 'completed', planned_qty: new Prisma.Decimal(1) },
+      ]);
+      expect(await service.completeSale(77)).toEqual({ moved: [], skipped: [4], failed: [] });
     });
 
     it('a sale without production orders returns empty lists', async () => {

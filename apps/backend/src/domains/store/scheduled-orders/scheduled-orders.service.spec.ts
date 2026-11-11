@@ -6,6 +6,15 @@ import {
   kitchenPendingItemsWhere,
 } from './scheduled-orders.service';
 
+/**
+ * S28 — `order_items.count` answers only for the exact pending-kitchen filter of
+ * the order under test; any other filter reads as 0 and fails the assertion.
+ */
+const countFor = (n: number, order_id = 50, store_id = 1) =>
+  jest.fn(async ({ where }: any) =>
+    JSON.stringify(where) === JSON.stringify(kitchenPendingItemsWhere(order_id, store_id)) ? n : 0,
+  );
+
 const TZ = 'America/Bogota';
 const NOW = new Date('2026-11-02T13:00:00.000Z'); // lunes 08:00 local
 const SLOT = {
@@ -193,18 +202,46 @@ describe('ScheduledOrdersService', () => {
       ).rejects.toMatchObject({ errorCode: 'SCHED_DISABLED' });
     });
 
-    it('rechaza un tipo de cumplimiento que la tienda no ofrece', async () => {
-      const { service, runInTx } = makeHarness();
-      await expect(
-        runInTx((tx) =>
-          service.createForOrder(tx, {
-            store_id: 1,
-            order_id: 50,
-            schedule: { ...SLOT, fulfillment_type: 'delivery' },
-            now: NOW,
-          }),
-        ),
-      ).rejects.toMatchObject({ errorCode: 'SCHED_FULFILLMENT_TYPE' });
+    it('S2: el tipo sale del método de envío: domicilio queda delivery aunque el ajuste viejo solo diga pickup', async () => {
+      const { service, rows, runInTx } = makeHarness();
+      await runInTx((tx) =>
+        service.createForOrder(tx, {
+          store_id: 1,
+          order_id: 50,
+          schedule: SLOT,
+          delivery_type: 'home_delivery',
+          now: NOW,
+        }),
+      );
+      expect(rows).toHaveLength(1);
+      expect(rows[0]).toMatchObject({ order_id: 50, fulfillment_type: 'delivery' });
+    });
+
+    it('S2: una orden con método de recogida queda pickup aunque un cliente en caché envíe delivery', async () => {
+      const { service, rows, runInTx } = makeHarness();
+      await runInTx((tx) =>
+        service.createForOrder(tx, {
+          store_id: 1,
+          order_id: 50,
+          schedule: { ...SLOT, fulfillment_type: 'delivery' },
+          delivery_type: 'pickup',
+          now: NOW,
+        }),
+      );
+      expect(rows[0]).toMatchObject({ fulfillment_type: 'pickup' });
+    });
+
+    it('sin delivery_type conserva el tipo que envía el cliente (compatibilidad)', async () => {
+      const { service, rows, runInTx } = makeHarness();
+      await runInTx((tx) =>
+        service.createForOrder(tx, {
+          store_id: 1,
+          order_id: 50,
+          schedule: { ...SLOT, fulfillment_type: 'delivery' },
+          now: NOW,
+        }),
+      );
+      expect(rows[0]).toMatchObject({ fulfillment_type: 'delivery' });
     });
 
     it('dos ventas concurrentes por el último cupo: una pasa, la otra recibe SCHED_SLOT_FULL', async () => {
@@ -230,6 +267,22 @@ describe('ScheduledOrdersService', () => {
       await expect(
         runInTx((tx) => service.createForOrder(tx, { store_id: 1, order_id: 50, schedule: SLOT, now: NOW })),
       ).rejects.toMatchObject({ errorCode: 'SCHED_ALREADY_SCHEDULED' });
+    });
+  });
+
+  describe('preValidate (S2)', () => {
+    it('no rechaza un domicilio aunque el ajuste viejo solo ofrezca recogida', async () => {
+      const { service } = makeHarness();
+      await expect(
+        service.preValidate(1, { ...SLOT, fulfillment_type: 'delivery' }, NOW),
+      ).resolves.toBeUndefined();
+    });
+
+    it('con el ajuste apagado sigue rechazando con SCHED_DISABLED', async () => {
+      const { service } = makeHarness({});
+      await expect(service.preValidate(1, SLOT, NOW)).rejects.toMatchObject({
+        errorCode: 'SCHED_DISABLED',
+      });
     });
   });
 
@@ -368,7 +421,7 @@ describe('ScheduledOrdersService', () => {
         if (!base || !args.include) return base;
         return { ...base, changes: [], order: applySelect(FULL_ORDER, args.include.order.select) };
       });
-      prisma.order_items = { count: jest.fn(async () => 0) };
+      prisma.order_items = { count: countFor(0) };
 
       const detail: any = await service.findOne(1);
 
@@ -399,7 +452,7 @@ describe('ScheduledOrdersService', () => {
         if (!base || !args.include) return base;
         return { ...base, changes: [], order: applySelect(FULL_ORDER, args.include.order.select) };
       });
-      prisma.order_items = { count: jest.fn(async () => 0) };
+      prisma.order_items = { count: countFor(0) };
 
       const detail: any = await service.findOne(1);
       const line = detail.order.order_items[0];
@@ -433,7 +486,7 @@ describe('ScheduledOrdersService', () => {
         if (!base || !args.include) return base;
         return { ...base, changes: [], order: applySelect(withLink, args.include.order.select) };
       });
-      prisma.order_items = { count: jest.fn(async () => 0) };
+      prisma.order_items = { count: countFor(0) };
 
       const detail: any = await service.findOne(1);
 
@@ -471,7 +524,7 @@ describe('ScheduledOrdersService', () => {
         if (!base || !args.include) return base;
         return { ...base, changes: [], order: applySelect(twoVariants, args.include.order.select) };
       });
-      prisma.order_items = { count: jest.fn(async () => 0) };
+      prisma.order_items = { count: countFor(0) };
 
       const detail: any = await service.findOne(1);
 
@@ -626,7 +679,7 @@ describe('ScheduledOrdersService', () => {
         if (!base || !args.include) return base;
         return { ...base, changes: [], order: applySelect({ ...FULL_ORDER, production_orders: [] }, args.include.order.select) };
       });
-      prisma.order_items = { count: jest.fn(async () => 2) };
+      prisma.order_items = { count: countFor(2) };
 
       const detail: any = await service.findOne(1);
 

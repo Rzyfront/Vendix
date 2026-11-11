@@ -41,8 +41,28 @@ export type FulfillmentType = 'pickup' | 'delivery';
 export interface ScheduleInput {
   start: string | Date;
   end: string | Date;
+  /**
+   * Solo clientes en caché lo envían. El tipo real sale del método de envío
+   * de la orden (`fulfillmentTypeForDelivery`); este valor es el respaldo
+   * cuando la orden no trae `delivery_type`.
+   */
   fulfillment_type?: FulfillmentType;
   notes?: string;
+}
+
+/**
+ * Tipo de cumplimiento del agendamiento a partir del `delivery_type` de la
+ * orden, que deriva del método de envío elegido: recogida en tienda → pickup;
+ * domicilio u otro envío → delivery. Sin `delivery_type`, el respaldo del
+ * cliente o `pickup`.
+ */
+export function fulfillmentTypeForDelivery(
+  delivery_type: string | null | undefined,
+  fallback?: FulfillmentType,
+): FulfillmentType {
+  if (delivery_type === 'pickup') return 'pickup';
+  if (delivery_type === 'home_delivery' || delivery_type === 'other') return 'delivery';
+  return fallback ?? 'pickup';
 }
 
 /**
@@ -279,18 +299,17 @@ export class ScheduledOrdersService {
    * crear la orden). La validación definitiva es `createForOrder`.
    */
   async preValidate(store_id: number, schedule: ScheduleInput, now = new Date()) {
-    const config = await this.availability.getEnabledConfig(store_id);
-    if (!config.fulfillment_types.includes(schedule.fulfillment_type ?? 'pickup')) {
-      throw new VendixHttpException(ErrorCodes.SCHED_FULFILLMENT_TYPE);
-    }
+    // La entrega la ofrecen los métodos de envío de la tienda; aquí solo se
+    // valida el ajuste activo, el día, la anticipación y el cupo.
     await this.availability.assertSlotAvailable(store_id, toDate(schedule.start), toDate(schedule.end), { now });
   }
 
   /**
    * Crea el agendamiento de una orden dentro de la MISMA transacción que la
-   * crea. Valida en el servidor ajuste activo, tipo de cumplimiento, día,
-   * anticipación y cupo. v1 sin hold con expiración: el cupo queda tomado con
-   * la orden y se libera cuando la orden se cancela (`cancelForOrder`).
+   * crea. Valida en el servidor ajuste activo, día, anticipación y cupo. El
+   * tipo de cumplimiento sale del `delivery_type` de la orden (método de
+   * envío). v1 sin hold con expiración: el cupo queda tomado con la orden y
+   * se libera cuando la orden se cancela (`cancelForOrder`).
    */
   async createForOrder(
     tx: Tx,
@@ -298,16 +317,19 @@ export class ScheduledOrdersService {
       store_id: number;
       order_id: number;
       schedule: ScheduleInput;
+      /** `delivery_type` de la orden: decide recogida o domicilio. */
+      delivery_type?: string | null;
       user_id?: number | null;
       now?: Date;
     },
   ) {
     const { store_id, order_id, schedule } = params;
-    const config = await this.availability.getEnabledConfig(store_id);
-    const fulfillment_type = schedule.fulfillment_type ?? 'pickup';
-    if (!config.fulfillment_types.includes(fulfillment_type)) {
-      throw new VendixHttpException(ErrorCodes.SCHED_FULFILLMENT_TYPE);
-    }
+    // Falla temprano con SCHED_DISABLED antes de tomar el bloqueo.
+    await this.availability.getEnabledConfig(store_id);
+    const fulfillment_type = fulfillmentTypeForDelivery(
+      params.delivery_type,
+      schedule.fulfillment_type,
+    );
 
     const start = toDate(schedule.start);
     const end = toDate(schedule.end);

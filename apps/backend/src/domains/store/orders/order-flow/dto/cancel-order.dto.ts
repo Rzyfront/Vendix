@@ -1,11 +1,25 @@
+import { Type } from 'class-transformer';
 import {
+  ArrayMaxSize,
+  IsArray,
   IsBoolean,
   IsIn,
+  IsInt,
   IsOptional,
   IsString,
   MaxLength,
   MinLength,
+  ValidateNested,
 } from 'class-validator';
+
+/** S6 — the choice for ONE completed production order of the cancelled sale. */
+export class ProductionDispositionChoiceDto {
+  @IsInt()
+  production_order_id: number;
+
+  @IsIn(['release', 'waste'])
+  disposition: 'release' | 'waste';
+}
 
 export class CancelOrderDto {
   @IsString()
@@ -20,12 +34,21 @@ export class CancelOrderDto {
   /**
    * QUI-995 — what to do with finished goods already produced for this sale:
    * `release` returns them to sellable stock, `waste` writes them off. Optional:
-   * when omitted the system suggests one (waste if any linked line has add-ons
-   * or notes, else release) and the cancellation is never blocked.
+   * when omitted every completed order is released (reuse) and the
+   * cancellation is never blocked. Applies to every production order that has
+   * no choice of its own in `productionDispositions`.
    */
   @IsOptional()
   @IsIn(['release', 'waste'])
   productionDisposition?: 'release' | 'waste';
+
+  /** S6 — one choice per production order; wins over `productionDisposition`. */
+  @IsOptional()
+  @IsArray()
+  @ArrayMaxSize(100)
+  @ValidateNested({ each: true })
+  @Type(() => ProductionDispositionChoiceDto)
+  productionDispositions?: ProductionDispositionChoiceDto[];
 
   /**
    * cod-auto-invoicing S5 — the operator confirmed that a TOTAL credit note is

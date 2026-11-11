@@ -1,6 +1,7 @@
 import {
   PRODUCTION_SALE_CANCELLED_EVENT,
   requestProductionSaleSync,
+  type ProductionSaleCancelledOutcome,
 } from '../../production/production-sale-sync';
 import { assertNotLodgingFolioOrder } from '../shared/lodging-folio-policy';
 import {
@@ -1213,7 +1214,12 @@ export class OrderFlowService {
   }): void {
     const productionCogs = input.commit.productionCogs ?? [];
     const productionTotal = productionCogs.reduce((sum, p) => sum + p.total_cost, 0);
-    const orderCost = Number((input.commit.totalCost - productionTotal).toFixed(4));
+    // Without production cost the commit total goes out untouched (as before
+    // production existed); only the subtraction is rounded.
+    const orderCost =
+      productionCogs.length === 0
+        ? input.commit.totalCost
+        : Number((input.commit.totalCost - productionTotal).toFixed(4));
     if (orderCost > 0) {
       this.eventEmitter.emit('order.completed', {
         order_id: input.order_id,
@@ -8134,17 +8140,24 @@ export class OrderFlowService {
 
     // QUI-995: linked production orders follow the sale. Runs BEFORE the blanket
     // release below so a `waste` decision consumes its reservation first.
-    await requestProductionSaleSync(
+    const productionResults = await requestProductionSaleSync(
       this.eventEmitter as any,
       this.logger,
       {
         order_id: orderId,
         store_id: order.store_id,
         disposition: dto.productionDisposition,
+        dispositions: dto.productionDispositions,
         reason: dto.reason,
       },
       PRODUCTION_SALE_CANCELLED_EVENT,
     );
+    // Orders whose write-off failed: their finished goods stay reserved (the
+    // blanket release below would make them sellable again) and the response
+    // warns the operator.
+    const unadjusted = (
+      (productionResults ?? []) as Array<ProductionSaleCancelledOutcome | undefined>
+    ).flatMap((result) => result?.unadjusted ?? []);
 
     // Release reserved stock by reference — kept OUTSIDE the transaction and
     // best-effort (exactly as before): a release failure must never abort a
@@ -8152,11 +8165,15 @@ export class OrderFlowService {
     // it (aborted-transaction). Runs exactly once because only the claim winner
     // reaches this point.
     try {
-      await this.stockLevelManager.releaseReservationsByReference(
-        'order',
-        orderId,
-        'cancelled',
-      );
+      if (unadjusted.length === 0) {
+        await this.stockLevelManager.releaseReservationsByReference(
+          'order',
+          orderId,
+          'cancelled',
+        );
+      } else {
+        await this.releaseReservationsExceptUnadjusted(orderId, unadjusted);
+      }
     } catch (error) {
       this.logger.warn(
         `Failed to release stock for cancelled order #${orderId}: ${error.message}`,
@@ -8214,7 +8231,68 @@ export class OrderFlowService {
       `Order #${orderId} cancelled: ${dto.reason} ` +
         `(kitchenDisposition=${dto.kitchenDisposition ?? 'n/a'} ticketsCancelled=${cancelledTicketIds.length})`,
     );
+    if (unadjusted.length > 0) {
+      const numbers = unadjusted
+        .map((entry) => entry.order_number ?? `#${entry.production_order_id}`)
+        .join(', ');
+      return {
+        ...updatedOrder,
+        warnings: [
+          `La venta se canceló, pero lo producido no se pudo ajustar. Ajústalo desde ${
+            unadjusted.length === 1 ? 'la orden' : 'las órdenes'
+          } de producción ${numbers}.`,
+        ],
+      };
+    }
     return updatedOrder;
+  }
+
+  /**
+   * Blanket release of a cancelled sale's reservations that leaves untouched the
+   * finished goods of the production orders whose write-off failed (S1): per
+   * product+variant it releases the active total minus what those orders hold.
+   */
+  private async releaseReservationsExceptUnadjusted(
+    orderId: number,
+    unadjusted: ProductionSaleCancelledOutcome['unadjusted'],
+  ): Promise<void> {
+    const keyOf = (product_id: number, variant_id: number | null) =>
+      `${product_id}:${variant_id ?? ''}`;
+    const held = new Map<string, number>();
+    for (const entry of unadjusted) {
+      const key = keyOf(entry.product_id, entry.product_variant_id ?? null);
+      held.set(key, (held.get(key) ?? 0) + entry.reserved_qty);
+    }
+    const reservations = await this.prisma.stock_reservations.findMany({
+      where: { reserved_for_type: 'order', reserved_for_id: orderId, status: 'active' },
+      select: { product_id: true, product_variant_id: true, quantity: true },
+    });
+    const totals = new Map<
+      string,
+      { product_id: number; variant_id: number | null; quantity: number }
+    >();
+    for (const r of reservations) {
+      const variant_id = r.product_variant_id ?? null;
+      const key = keyOf(r.product_id, variant_id);
+      const current = totals.get(key);
+      totals.set(key, {
+        product_id: r.product_id,
+        variant_id,
+        quantity: (current?.quantity ?? 0) + r.quantity,
+      });
+    }
+    for (const [key, total] of totals) {
+      const quantity = total.quantity - (held.get(key) ?? 0);
+      if (quantity <= 0) continue;
+      await this.stockLevelManager.releaseReservationQuantity(
+        'order',
+        orderId,
+        total.product_id,
+        total.variant_id,
+        quantity,
+        'cancelled',
+      );
+    }
   }
 
   /**

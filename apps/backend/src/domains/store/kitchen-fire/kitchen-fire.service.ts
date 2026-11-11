@@ -565,6 +565,30 @@ export class KitchenFireService {
   }
 
   /**
+   * S7 (release #1134) — sum-then-round within one fire, per dish
+   * (product + variant) and leaf, the same grouping production uses (one
+   * production order per product + variant, rounding the component of the
+   * summed quantity). Each line gets `round(cumulative) - alreadyAllocated`,
+   * so the total moved equals `round(sum)` instead of the sum of per-line
+   * roundings (0.5 + 0.5 of a dish used to give 1 + 1 = 2 instead of 1).
+   */
+  private allocateRoundedQty(
+    acc: Map<string, { raw: number; allocated: number }>,
+    orderItem: { product_id?: number | null; product_variant_id?: number | null },
+    componentProductId: number,
+    quantity: number,
+  ): number {
+    if (!Number.isFinite(quantity) || quantity <= 0) return 0;
+    const key = `${orderItem.product_id ?? ''}:${orderItem.product_variant_id ?? ''}:${componentProductId}`;
+    const entry = acc.get(key) ?? { raw: 0, allocated: 0 };
+    entry.raw += quantity;
+    const delta = Math.round(entry.raw) - entry.allocated;
+    entry.allocated += delta;
+    acc.set(key, entry);
+    return delta;
+  }
+
+  /**
    * No-overselling guard (docs/plans/no-overselling-stock-guard-plan.md,
    * step 6) — flattens the ALREADY-EXPLODED BOM of every prepared item being
    * fired into ingredient demand lines, net of confirmed exclusions
@@ -578,7 +602,13 @@ export class KitchenFireService {
    */
   private buildIngredientDemandLines(
     items: Array<{
-      orderItem: { id: number; quantity: any; product_name: string };
+      orderItem: {
+        id: number;
+        quantity: any;
+        product_name: string;
+        product_id?: number | null;
+        product_variant_id?: number | null;
+      };
       bomLines: BomExplosionLine[];
     }>,
     exclusionsByOrderItem: Map<number, number[]>,
@@ -586,6 +616,7 @@ export class KitchenFireService {
     resolvedByItem?: Map<number, ResolvedBomLine[]>,
   ): StockDemandLine[] {
     const demands: StockDemandLine[] = [];
+    const rounding = new Map<string, { raw: number; allocated: number }>();
     for (const { orderItem, bomLines } of items) {
       const orderQty = Number(orderItem.quantity || 0);
       if (!Number.isFinite(orderQty) || orderQty <= 0) continue;
@@ -608,7 +639,12 @@ export class KitchenFireService {
         ? bomLines.filter((l) => !excludedSet.has(l.component_product_id))
         : bomLines;
       for (const line of effectiveBomLines) {
-        const consumedQty = Math.round(line.quantity * orderQty);
+        const consumedQty = this.allocateRoundedQty(
+          rounding,
+          orderItem,
+          line.component_product_id,
+          line.quantity * orderQty,
+        );
         if (!Number.isFinite(consumedQty) || consumedQty <= 0) continue;
         demands.push({
           product_id: line.component_product_id,
@@ -1024,8 +1060,11 @@ export class KitchenFireService {
           },
           { timeout: 30000 },
         )
-      : await this.prisma.$transaction(async (tx) =>
-          this.fireOrderItemsInTx(tx, store_id, preComputed),
+      : await this.prisma.$transaction(
+          async (tx) => this.fireOrderItemsInTx(tx, store_id, preComputed),
+          // Same convention as the POS payment transaction: a large order with
+          // add-ons must not hit Prisma's 5 s default (`Transaction already closed`).
+          { timeout: 20_000, maxWait: 5_000 },
         );
     for (const run of afterCommit) {
       try {
@@ -1233,7 +1272,7 @@ export class KitchenFireService {
    * turns each item's raw add-ons into the `addons` the KDS shows (QUI-1000):
    * quantity, signed image (or null), note and the active recipe id of
    * preparation add-ons, so the ticket can open their recipe like Production.
-   * Existing ticket fields are left untouched; `addons` is additive.
+   * Existing ticket fields (incl. the raw `order_item_options`) are left untouched; `addons` is additive.
    */
   private async signTicketPayload<T>(root: T): Promise<T> {
     await this.decorateTicketAddons(root);
@@ -1304,7 +1343,8 @@ export class KitchenFireService {
         recipe_id:
           o.component_type === 'recipe' ? recipeFor(o.component_product_id, o.component_variant_id ?? null) : null,
       }));
-      delete item.order_item.order_item_options;
+      // S15: `order_item_options` crudas se conservan (contrato previo del
+      // ticket); `addons` es la vista nueva y se suma, no las reemplaza.
     }
   }
 
@@ -1582,6 +1622,7 @@ export class KitchenFireService {
       });
     }
 
+    const fireRounding = new Map<string, { raw: number; allocated: number }>();
     for (const ctxItem of preparedItems) {
       const { orderItem, bomLines } = ctxItem;
       const orderQty = Number(orderItem.quantity || 0);
@@ -1646,7 +1687,14 @@ export class KitchenFireService {
           quantity: l.quantity * orderQty,
         }));
       for (const line of consumableLines) {
-        const consumedQty = Math.round(line.quantity);
+        const consumedQty = resolvedLines
+          ? Math.round(line.quantity)
+          : this.allocateRoundedQty(
+              fireRounding,
+              orderItem,
+              line.component_product_id,
+              line.quantity,
+            );
         if (!Number.isFinite(consumedQty) || consumedQty <= 0) {
           this.logger.warn(
             `Skipping zero/invalid BOM line in recipe for order item ${orderItem.id}: component=${line.component_product_id} qty=${line.quantity}`,

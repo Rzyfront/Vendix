@@ -1,8 +1,9 @@
-import { DestroyRef, Injectable, OnDestroy, signal } from '@angular/core';
+import { DestroyRef, Injectable, OnDestroy, inject, signal } from '@angular/core';
 import { takeUntilDestroyed } from '@angular/core/rxjs-interop';
 import { Observable, Subject } from 'rxjs';
 import { debounceTime, filter } from 'rxjs/operators';
 import { environment } from '../../../../../../../environments/environment';
+import { AuthFacade } from '../../../../../../core/store/auth/auth.facade';
 import { ProductionStreamEvent } from '../interfaces';
 
 export type ProductionConnectionState =
@@ -37,6 +38,12 @@ const STREAM_PATHS: Record<ProductionApiScope, string> = {
   manufacturing: '/store/manufacturing/orders/stream',
 };
 
+/** Read permissions the backend accepts on each stream (the restaurant one takes either). */
+const STREAM_PERMISSIONS: Record<ProductionApiScope, string[]> = {
+  restaurant: ['store:production_orders:read', 'store:manufacturing:orders:read'],
+  manufacturing: ['store:manufacturing:orders:read'],
+};
+
 export const PRODUCTION_POLLING_INTERVAL_MS = 15_000;
 /** Same reconnection window as the KDS: after 5 min of failures, fall back to polling. */
 export const PRODUCTION_RECONNECT_WINDOW_MS = 5 * 60_000;
@@ -55,6 +62,7 @@ export const PRODUCTION_RELOAD_DEBOUNCE_MS = 300;
 @Injectable({ providedIn: 'root' })
 export class ProductionSseService implements OnDestroy {
   private readonly apiUrl = environment.apiUrl;
+  private readonly auth = inject(AuthFacade);
   /** Scope of the open connection (both streams carry the same events). */
   private scope: ProductionApiScope = 'restaurant';
   /** Listeners per scope, so the connection follows the scope that can pass its guard. */
@@ -70,6 +78,8 @@ export class ProductionSseService implements OnDestroy {
 
   readonly connectionState = signal<ProductionConnectionState>('idle');
   readonly mode = signal<ProductionStreamMode>('live');
+  /** True after the server answered 401/403: the stream stays stopped (no retry, no polling). */
+  readonly forbidden = signal(false);
 
   private eventSource: EventSource | null = null;
   private reconnectTimer: ReturnType<typeof setTimeout> | null = null;
@@ -80,6 +90,19 @@ export class ProductionSseService implements OnDestroy {
   private hadGap = false;
   private listeners = 0;
   private destroyed = false;
+  /** Bumped on every connect/disconnect so a late permission probe never acts on a stale connection. */
+  private generation = 0;
+  private probing = false;
+  private recoveryBound = false;
+  private readonly recoverLive = () => this.tryRecoverLive();
+
+  /**
+   * Whether the current user may open the stream of `scope`. Pages without the
+   * permission must not call `listen`/`acquire`: the server would answer 403.
+   */
+  canStream(scope: ProductionApiScope = 'restaurant'): boolean {
+    return this.auth.hasAnyPermission(STREAM_PERMISSIONS[scope]);
+  }
 
   /**
    * Subscribes `callback` (debounced) to stream signals for the lifetime of
@@ -167,14 +190,17 @@ export class ProductionSseService implements OnDestroy {
     if (this.destroyed) return;
     if (this.eventSource) return;
     this.mode.set('live');
+    this.forbidden.set(false);
     this.reconnectStartedAt = null;
     this.reconnectAttempt = 0;
     this.openEventSource();
   }
 
   private disconnect(): void {
+    this.generation += 1;
     this.clearReconnectTimer();
     this.stopPolling();
+    this.unbindRecovery();
     if (this.eventSource) {
       this.eventSource.close();
       this.eventSource = null;
@@ -213,6 +239,7 @@ export class ProductionSseService implements OnDestroy {
       if (this.mode() !== 'live') {
         this.mode.set('live');
         this.stopPolling();
+        this.unbindRecovery();
       }
       if (this.hadGap) {
         this.hadGap = false;
@@ -232,8 +259,55 @@ export class ProductionSseService implements OnDestroy {
         // ignore
       }
       if (this.eventSource === es) this.eventSource = null;
-      this.scheduleReconnect();
+      void this.handleStreamFailure(url);
     };
+  }
+
+  /**
+   * EventSource hides the HTTP status, so ask the server once: a 401/403 means
+   * the user cannot read production and retrying (or polling) is pointless.
+   */
+  private async handleStreamFailure(url: string): Promise<void> {
+    const generation = this.generation;
+    this.probing = true;
+    let status: number | null = null;
+    try {
+      status = await this.probeStatus(url);
+    } finally {
+      this.probing = false;
+    }
+    if (generation !== this.generation || this.destroyed) return;
+    if (status === 401 || status === 403) {
+      this.stopForbidden();
+      return;
+    }
+    this.scheduleReconnect();
+  }
+
+  /** HTTP status of the stream endpoint, or null when unreachable. Overridable in specs. */
+  protected async probeStatus(url: string): Promise<number | null> {
+    const controller = new AbortController();
+    try {
+      const response = await fetch(url, {
+        headers: { Accept: 'text/event-stream' },
+        signal: controller.signal,
+      });
+      return response.status;
+    } catch {
+      return null;
+    } finally {
+      // Never keep an accepted stream open: only the status matters.
+      controller.abort();
+    }
+  }
+
+  private stopForbidden(): void {
+    this.clearReconnectTimer();
+    this.stopPolling();
+    this.unbindRecovery();
+    this.forbidden.set(true);
+    this.mode.set('live');
+    this.connectionState.set('closed');
   }
 
   private handleMessage(event: MessageEvent): void {
@@ -280,6 +354,33 @@ export class ProductionSseService implements OnDestroy {
     }
     this.connectionState.set('closed');
     this.startPolling();
+    this.bindRecovery();
+  }
+
+  /** Manual mode: network back or window focused → try the live stream again. */
+  private bindRecovery(): void {
+    if (this.recoveryBound || typeof window === 'undefined') return;
+    this.recoveryBound = true;
+    window.addEventListener('online', this.recoverLive);
+    window.addEventListener('focus', this.recoverLive);
+  }
+
+  private unbindRecovery(): void {
+    if (!this.recoveryBound || typeof window === 'undefined') return;
+    this.recoveryBound = false;
+    window.removeEventListener('online', this.recoverLive);
+    window.removeEventListener('focus', this.recoverLive);
+  }
+
+  /**
+   * One live attempt while polling keeps running; `onopen` switches back to
+   * live and stops the polling. A failure leaves manual mode untouched.
+   */
+  private tryRecoverLive(): void {
+    if (this.destroyed || this.listeners === 0) return;
+    if (this.mode() !== 'manual' || this.eventSource || this.probing) return;
+    if (this.forbidden()) return;
+    this.openEventSource();
   }
 
   private startPolling(): void {

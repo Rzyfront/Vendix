@@ -12,6 +12,7 @@ import {
 } from '@angular/core';
 import { Router } from '@angular/router';
 import { takeUntilDestroyed } from '@angular/core/rxjs-interop';
+import { Subscription } from 'rxjs';
 import {
   BadgeComponent,
   ButtonComponent,
@@ -229,13 +230,18 @@ export class ProductionOrderDetailComponent {
     return formatYieldQuantity(value, o?.recipe?.yield_unit, text);
   }
 
+  /** In-flight detail request: a newer load cancels it so a late answer never overwrites the order on screen. */
+  private loadSub: Subscription | null = null;
+
   private load(id: number): void {
+    this.loadSub?.unsubscribe();
     this.loading.set(true);
-    this.service
+    this.loadSub = this.service
       .getById(id)
       .pipe(takeUntilDestroyed(this.destroyRef))
       .subscribe({
         next: (o) => {
+          if (id !== this.orderId()) return;
           this.order.set(o);
           this.loading.set(false);
         },

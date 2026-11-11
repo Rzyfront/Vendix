@@ -195,7 +195,7 @@ const PRINT_BODY_CLASS = 'production-list-printing';
           Insumos consolidados
         </h1>
         <div class="pl-toolbar-group">
-          <a routerLink="/admin/scheduled-orders/production">
+          <a routerLink="/admin/scheduled-orders/day">
             <app-button variant="ghost" size="sm">
               <app-icon slot="icon" name="arrow-left" [size]="16"></app-icon>
               Lista de producción

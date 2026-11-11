@@ -82,6 +82,23 @@ export interface CreateAddressPayload {
  */
 export type KitchenDisposition = 'reuse' | 'waste';
 
+/** Release #1134 (S6) — the choice for ONE completed production order of the sale. */
+export interface ProductionDispositionChoice {
+  production_order_id: number;
+  disposition: 'release' | 'waste';
+}
+
+/** One completed production order the cancel modal asks about (`production_cancel_items`). */
+export interface ProductionCancelItem {
+  production_order_id: number;
+  order_number: string | null;
+  product_name: string | null;
+  suggestion: 'release' | 'waste';
+}
+
+/** Cancel response: the order plus non-blocking warnings (S1). */
+export type FlowCancelOrderResult = Order & { warnings?: string[] };
+
 /**
  * Body de `POST /store/orders/:id/flow/cancel`. Extiende `CancelOrderDto`
  * (vive en `order.interface.ts`, fuera del alcance de este cambio) con la
@@ -90,8 +107,10 @@ export type KitchenDisposition = 'reuse' | 'waste';
  */
 export interface FlowCancelOrderDto extends CancelOrderDto {
   kitchenDisposition?: KitchenDisposition;
-  /** QUI-995 — finished sale production: release to stock or write off as waste. Omitted → server suggestion. */
+  /** QUI-995 — finished sale production: release to stock or write off as waste. Omitted → release. */
   productionDisposition?: 'release' | 'waste';
+  /** Release #1134 (S6) — one choice per completed production order of the sale. */
+  productionDispositions?: ProductionDispositionChoice[];
   /** cod-auto-invoicing S5 — emit the TOTAL credit note before cancelling. */
   issueCreditNote?: boolean;
 }
@@ -811,7 +830,7 @@ export class StoreOrdersService {
     );
   }
 
-  flowCancelOrder(orderId: string, dto: FlowCancelOrderDto): Observable<Order> {
+  flowCancelOrder(orderId: string, dto: FlowCancelOrderDto): Observable<FlowCancelOrderResult> {
     const url = `${this.apiUrl}/store/orders/${orderId}/flow/cancel`;
     return this.http.post<any>(url, dto).pipe(
       map((r) => r.data || r),
