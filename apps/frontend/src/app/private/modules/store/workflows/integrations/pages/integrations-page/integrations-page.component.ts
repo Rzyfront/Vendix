@@ -2,10 +2,9 @@ import { Component, inject, signal } from '@angular/core';
 import { AuthFacade } from '../../../../../../../core/store/auth/auth.facade';
 import {
   CardComponent,
-  ScrollableTabsComponent,
   StickyHeaderComponent,
 } from '../../../../../../../shared/components/index';
-import { ScrollableTab } from '../../../../../../../shared/components/scrollable-tabs/scrollable-tabs.component';
+import { StickyHeaderTab } from '../../../../../../../shared/components/sticky-header/sticky-header.component';
 import { ApiKeysPanelComponent } from '../../components/api-keys-panel.component';
 import { WebhooksPanelComponent } from '../../components/webhooks-panel.component';
 import { SecretsPanelComponent } from '../../../secrets/secrets-panel.component';
@@ -19,7 +18,7 @@ const TAB_PERMISSIONS: Record<IntegrationsTab, string> = {
   secrets: 'store:workflows:manage',
 };
 
-const ALL_TABS: (ScrollableTab & { id: IntegrationsTab })[] = [
+const ALL_TABS: (StickyHeaderTab & { id: IntegrationsTab })[] = [
   { id: 'api_keys', label: 'API keys', icon: 'key' },
   { id: 'webhooks', label: 'Webhooks', icon: 'webhook' },
   { id: 'secrets', label: 'Secretos', icon: 'key-round' },
@@ -32,7 +31,6 @@ const ALL_TABS: (ScrollableTab & { id: IntegrationsTab })[] = [
   imports: [
     StickyHeaderComponent,
     CardComponent,
-    ScrollableTabsComponent,
     ApiKeysPanelComponent,
     WebhooksPanelComponent,
     SecretsPanelComponent,
@@ -44,17 +42,12 @@ const ALL_TABS: (ScrollableTab & { id: IntegrationsTab })[] = [
         subtitle="Conecta tus flujos con otros sistemas: API keys, webhooks firmados y secretos para llamadas HTTP"
         icon="plug"
         variant="glass"
+        [tabs]="tabs"
+        [activeTab]="activeTab()"
+        tabsAriaLabel="Secciones de integraciones"
+        (tabChanged)="onTabChange($event)"
       />
       <app-card [responsive]="true" [padding]="false" overflow="visible">
-        <div class="border-b border-border px-2 py-1.5 md:px-6 md:py-4">
-          <app-scrollable-tabs
-            [tabs]="tabs"
-            [activeTab]="activeTab()"
-            size="sm"
-            ariaLabel="Secciones de integraciones"
-            (tabChange)="onTabChange($event)"
-          />
-        </div>
         <div class="p-2 md:p-4">
           @if (tabs.length) {
             @switch (activeTab()) {
@@ -82,7 +75,7 @@ export class IntegrationsPageComponent {
    * `integrations:api_keys` OR `workflows:manage`, so a role with just one of
    * them must not land on a tab that answers 403.
    */
-  readonly tabs: ScrollableTab[] = ALL_TABS.filter(
+  readonly tabs: StickyHeaderTab[] = ALL_TABS.filter(
     (tab) => this.auth.isOwner() || this.auth.hasPermission(TAB_PERMISSIONS[tab.id]),
   );
   // The route gate admits only users holding one of the two permissions, so

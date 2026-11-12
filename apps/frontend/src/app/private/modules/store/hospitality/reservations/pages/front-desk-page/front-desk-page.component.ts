@@ -21,8 +21,8 @@ import {
   ItemListCardConfig,
   OptionsDropdownComponent,
   ResponsiveDataViewComponent,
-  ScrollableTab,
-  ScrollableTabsComponent,
+  StickyHeaderComponent,
+  StickyHeaderTab,
   StatsComponent,
   TableAction,
   TableColumn,
@@ -137,7 +137,7 @@ const EMPTY_TEXT: Record<FrontDeskTab, { icon: string; title: string; descriptio
     FormsModule,
     StatsComponent,
     CardComponent,
-    ScrollableTabsComponent,
+    StickyHeaderComponent,
     InputsearchComponent,
     OptionsDropdownComponent,
     ResponsiveDataViewComponent,
@@ -158,9 +158,19 @@ const EMPTY_TEXT: Record<FrontDeskTab, { icon: string; title: string; descriptio
   ],
   template: `
     <div class="w-full md:space-y-4">
+      <app-sticky-header
+        title="Recepción"
+        subtitle="Llegadas, salidas y huéspedes en casa"
+        icon="concierge-bell"
+        tabsAriaLabel="Recepción"
+        [tabs]="tabs()"
+        [activeTab]="tab()"
+        (tabChanged)="onTab($event)"
+      />
+
       <!-- Stats: sticky on mobile, static on desktop -->
       <div
-        class="stats-container sticky top-0 z-20 bg-background md:static md:bg-transparent"
+        class="stats-container sticky top-header-tabs z-20 bg-background md:static md:bg-transparent"
       >
         <app-stats
           title="Llegadas hoy"
@@ -200,17 +210,10 @@ const EMPTY_TEXT: Record<FrontDeskTab, { icon: string; title: string; descriptio
         />
       </div>
 
-      <app-scrollable-tabs
-        ariaLabel="Recepción"
-        [tabs]="tabs()"
-        [activeTab]="tab()"
-        (tabChange)="onTab($event)"
-      />
-
       <app-card [responsive]="true" [padding]="false" overflow="visible">
         <!-- Sticky search header -->
         <div
-          class="sticky top-[99px] z-10 bg-background px-2 py-1.5 -mt-[5px]
+          class="sticky top-header-tabs-search z-10 bg-background px-2 py-1.5 -mt-[5px]
                  md:mt-0 md:static md:bg-transparent md:px-6 md:py-4 md:border-b md:border-border"
         >
           <div
@@ -422,7 +425,7 @@ export class HospitalityFrontDeskPageComponent implements OnInit {
     return count === 1 ? '1 cuenta en casa con saldo' : `${count} cuentas en casa con saldo`;
   });
 
-  readonly tabs = computed<ScrollableTab[]>(() => {
+  readonly tabs = computed<StickyHeaderTab[]>(() => {
     const board = this.board();
     return [
       { id: 'arrivals', label: `Llegadas (${board?.arrivals.length ?? 0})`, icon: 'log-in' },

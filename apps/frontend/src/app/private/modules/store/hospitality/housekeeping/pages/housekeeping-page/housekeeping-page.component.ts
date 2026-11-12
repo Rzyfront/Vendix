@@ -23,8 +23,8 @@ import {
   InputsearchComponent,
   ModalComponent,
   OptionsDropdownComponent,
-  ScrollableTab,
-  ScrollableTabsComponent,
+  StickyHeaderComponent,
+  StickyHeaderTab,
   StatsComponent,
   ToastService,
   SpinnerComponent,
@@ -108,16 +108,26 @@ const stringFilter = (values: FilterValues, key: string): string => {
     EmptyStateComponent,
     InputsearchComponent,
     OptionsDropdownComponent,
-    ScrollableTabsComponent,
+    StickyHeaderComponent,
     ModalComponent,
     HousekeepingTasksPanelComponent,
     HousekeepingTaskFormModalComponent,
   ],
   template: `
     <div class="w-full md:space-y-4">
+      <app-sticky-header
+        title="Limpieza"
+        subtitle="Estado de habitaciones y tareas del día"
+        icon="sparkles"
+        tabsAriaLabel="Limpieza"
+        [tabs]="tabs()"
+        [activeTab]="tab()"
+        (tabChanged)="onTab($event)"
+      />
+
       <!-- Stats: sticky on mobile, static on desktop -->
       <div
-        class="stats-container sticky top-0 z-20 bg-background md:static md:bg-transparent"
+        class="stats-container sticky top-header-tabs z-20 bg-background md:static md:bg-transparent"
       >
         <app-stats
           title="Sucias"
@@ -157,18 +167,10 @@ const stringFilter = (values: FilterValues, key: string): string => {
         />
       </div>
 
-      <!-- R-NAV: the tasks tab never vanishes; without access it says so. -->
-      <app-scrollable-tabs
-        ariaLabel="Limpieza"
-        [tabs]="tabs()"
-        [activeTab]="tab()"
-        (tabChange)="onTab($event)"
-      />
-
       <app-card [responsive]="true" [padding]="false" overflow="visible">
         <!-- Sticky search header -->
         <div
-          class="sticky top-[99px] z-10 bg-background px-2 py-1.5 -mt-[5px]
+          class="sticky top-header-tabs-search z-10 bg-background px-2 py-1.5 -mt-[5px]
                  md:mt-0 md:static md:bg-transparent md:px-6 md:py-4 md:border-b md:border-border"
         >
           <div
@@ -442,7 +444,7 @@ export class HospitalityHousekeepingPageComponent implements OnInit {
   readonly search = signal('');
   readonly filterValues = signal<FilterValues>({});
 
-  readonly tabs = computed<ScrollableTab[]>(() => [
+  readonly tabs = computed<StickyHeaderTab[]>(() => [
     { id: 'rooms', label: `Habitaciones (${this.board()?.units.length ?? 0})`, icon: 'bed-double' },
     {
       id: 'tasks',

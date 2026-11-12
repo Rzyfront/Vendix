@@ -22,8 +22,8 @@ import {
   ItemListCardConfig,
   OptionsDropdownComponent,
   ResponsiveDataViewComponent,
-  ScrollableTab,
-  ScrollableTabsComponent,
+  StickyHeaderComponent,
+  StickyHeaderTab,
   StatsComponent,
   TableAction,
   TableColumn,
@@ -171,7 +171,7 @@ interface SeasonRow extends Season {
     IconComponent,
     InputsearchComponent,
     OptionsDropdownComponent,
-    ScrollableTabsComponent,
+    StickyHeaderComponent,
     ResponsiveDataViewComponent,
     RatePlanFormModalComponent,
     SeasonFormModalComponent,
@@ -182,9 +182,19 @@ interface SeasonRow extends Season {
   ],
   template: `
     <div class="w-full md:space-y-4">
+      <app-sticky-header
+        title="Tarifas"
+        subtitle="Planes, temporadas, políticas y cupos"
+        icon="tag"
+        tabsAriaLabel="Secciones de tarifas"
+        [tabs]="tabs"
+        [activeTab]="activeTab()"
+        (tabChanged)="onTabChange($event)"
+      />
+
       <!-- Stats: sticky on mobile, static on desktop -->
       <div
-        class="stats-container sticky top-0 z-20 bg-background md:static md:bg-transparent"
+        class="stats-container sticky top-header-tabs z-20 bg-background md:static md:bg-transparent"
       >
         <app-stats
           title="Planes activos"
@@ -224,18 +234,10 @@ interface SeasonRow extends Season {
         />
       </div>
 
-      <!-- Tabs -->
-      <app-scrollable-tabs
-        [tabs]="tabs"
-        [activeTab]="activeTab()"
-        (tabChange)="onTabChange($event)"
-        ariaLabel="Secciones de tarifas"
-      />
-
       <app-card [responsive]="true" [padding]="false" overflow="visible">
         <!-- Sticky search header -->
         <div
-          class="sticky top-[99px] z-10 bg-background px-2 py-1.5 -mt-[5px]
+          class="sticky top-header-tabs-search z-10 bg-background px-2 py-1.5 -mt-[5px]
                  md:mt-0 md:static md:bg-transparent md:px-6 md:py-4 md:border-b md:border-border"
         >
           <div
@@ -492,7 +494,7 @@ export class HospitalityRatesPageComponent implements OnInit {
   readonly isPolicyFormOpen = signal(false);
   readonly editingPolicy = signal<CancellationPolicy | null>(null);
 
-  readonly tabs: ScrollableTab[] = [
+  readonly tabs: StickyHeaderTab[] = [
     { id: 'plans', label: 'Planes', icon: 'tag' },
     { id: 'seasons', label: 'Temporadas', icon: 'calendar-days' },
     { id: 'policies', label: 'Políticas', icon: 'shield-check' },

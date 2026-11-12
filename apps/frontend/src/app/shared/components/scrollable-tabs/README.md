@@ -2,6 +2,14 @@
 
 Tabs horizontales con scroll lateral cuando el contenido excede el ancho del contenedor. Flechas de navegacion izquierda/derecha y auto-scroll a la tab activa.
 
+## Cuándo usarlo (solo capa 4)
+
+Jerarquía de navegación: 1 módulo (sidebar) → 2 submódulo (sidebar) → 3 subvistas de una vista (tabs de `app-sticky-header`) → **4 subvistas dentro de una tab (este componente)**.
+
+- Úsalo solo dentro del contenido de una tab del sticky header.
+- No lo uses como primera fila de tabs de una vista: eso es capa 3 y va en `app-sticky-header` (`[tabs]`). Si la vista no tiene sticky header, agrégalo.
+- Nada por debajo de la capa 4.
+
 ## Uso
 
 ```typescript
@@ -30,7 +38,7 @@ tabs: ScrollableTab[] = [
 
 | Output    | Tipo         | Descripcion                  |
 | --------- | ------------ | ---------------------------- |
-| tabChange | EventEmitter | Emite el ID de la tab点击ada |
+| tabChange | EventEmitter | Emite el ID de la tab seleccionada |
 
 ## Interfaces
 

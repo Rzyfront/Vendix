@@ -64,6 +64,8 @@ The parent page owns stats and module-level state. The child list component owns
 
 `top-[99px]` is common in current standard list modules with sticky stats. It is not universal; adjust only if the actual stats/header height changes.
 
+Under an `app-sticky-header` (it is `sticky top-0` too and sits above the stats), shift both offsets by the header height on mobile: with a tab row the header is ~66px, so stats use `top-header-tabs` and search `top-header-tabs-search` (tokens `--sticky-header-tabs-offset` 69px / `--sticky-header-tabs-search-offset` 168px in `styles.scss`; never hardcode them) (header without tabs: stats `top-[52px]`). Otherwise the header covers the sticky stats on scroll.
+
 ## List Component Pattern
 
 ```html
@@ -122,7 +124,7 @@ Every list page uses the server-side pagination pattern (`ResponseService.pagina
 
 ## When to Use `app-sticky-header` Instead
 
-Use `app-sticky-header` for form/detail pages with save/cancel actions, such as product create/edit and settings pages. List modules usually use sticky stats plus sticky search instead.
+Use `app-sticky-header` for form/detail pages with save/cancel actions, such as product create/edit and settings pages. List modules usually use sticky stats plus sticky search instead. Exception: a list module with sub-views (navigation layer 3, see `vendix-ui-ux` → Navigation Hierarchy) puts those sub-views as `[tabs]` of an `app-sticky-header` above its stats and search; never as an `app-scrollable-tabs` row.
 
 ## Related Skills
 
