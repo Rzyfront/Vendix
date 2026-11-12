@@ -133,8 +133,12 @@ class ListPlatformInvoicesQueryDto {
     | 'cancelled';
 
   @IsOptional()
-  @IsIn(['sales_invoice', 'support_document'])
-  document_type?: 'sales_invoice' | 'support_document';
+  @IsIn(['sales_invoice', 'support_document', 'credit_note', 'debit_note'])
+  document_type?:
+    | 'sales_invoice'
+    | 'support_document'
+    | 'credit_note'
+    | 'debit_note';
 
   @IsOptional()
   @IsString()
@@ -197,7 +201,8 @@ export class PlatformInvoicingController {
   }
 
   /**
-   * Lista platform invoices (sales_invoice + support_document). FB-12:
+   * Lista platform invoices (sales_invoice + support_document + notas
+   * crédito/débito; filtrable por `document_type`). FB-12:
    * el rail tienda ya tiene `/transmissions` pero filtra por source_type
    * `subscription_invoice`; este endpoint expone los platform_*
    * (mismo ledger, diferente source_type).
@@ -626,17 +631,11 @@ export class PlatformInvoicingController {
   // ─── Notas crédito/débito plataforma (C.2 del CP-platform-invoicing-parity) ─
 
   /**
-   * Crea una `credit_note` del rail plataforma contra una factura plataforma.
-   *
-   * El body exige `related_invoice_id` (la factura que corrige) y
-   * `note_concept_code` (concepto DIAN — ver ERR-09 del plan: bloqueante
-   * si falta). El destinatario se hereda del documento relacionado; el
-   * caller puede override vía `customer` opcional.
-   *
-   * Persistencia delega en `InvoicingService.create()` del riel tienda
-   * dentro de un RequestContext sintetizado org-plataforma, sin tocar el
-   * servicio tienda. El spec tienda SIN modificaciones sigue verde
-   * (compuerta dura de ADR-7).
+   * Crea una `credit_note` del rail plataforma contra una factura aceptada.
+   * `related_invoice_id` es el `fiscal_transmissions.id` de la factura. Sin
+   * `items` es una nota TOTAL (copia todas las líneas); con `items`, parcial.
+   * Numera con la serie activa de notas crédito, firma, transmite a la DIAN y
+   * devuelve la nota con su estado real (aceptada, rechazada o con error).
    */
   @Post('credit-notes')
   @HttpCode(HttpStatus.CREATED)
@@ -650,12 +649,10 @@ export class PlatformInvoicingController {
   ): Promise<any> {
     const user_id = (req as any).user?.id ?? 0;
     const result = await this.creditNotes.createCreditNote(dto, user_id);
-    return this.responseService.created(
-      result,
-      'Nota crédito plataforma creada',
-    );
+    return this.responseService.created(result, this.noteMessage(result, 'Nota crédito'));
   }
 
+  /** Nota débito: exige `items`. Mismo flujo que la nota crédito. */
   @Post('debit-notes')
   @HttpCode(HttpStatus.CREATED)
   @Permissions('superadmin:fiscal:invoicing')
@@ -668,10 +665,29 @@ export class PlatformInvoicingController {
   ): Promise<any> {
     const user_id = (req as any).user?.id ?? 0;
     const result = await this.creditNotes.createDebitNote(dto, user_id);
-    return this.responseService.created(
-      result,
-      'Nota débito plataforma creada',
-    );
+    return this.responseService.created(result, this.noteMessage(result, 'Nota débito'));
+  }
+
+  /** Mensaje según el estado REAL de la nota (no anuncia éxito sobre un rechazo). */
+  private noteMessage(
+    result: { dian_status?: string; error_message?: string | null },
+    label: string,
+  ): string {
+    if (result?.dian_status === 'accepted') return `${label} emitida y aceptada por la DIAN`;
+    return `${label} creada pero la DIAN no la aceptó: ${result?.error_message || `estado ${result?.dian_status ?? 'desconocido'}`}`;
+  }
+
+  /**
+   * Notas asociadas a una factura, saldo acreditable y líneas de la factura
+   * (para armar una nota parcial). Un documento que no admite notas responde
+   * 200 con `can_create_notes=false` y el motivo.
+   */
+  @Get('invoices/:id/notes')
+  @Permissions('superadmin:fiscal:invoicing')
+  @ApiOperation({ summary: 'Notas crédito/débito de una factura y su saldo acreditable' })
+  async getInvoiceNotes(@Param('id', ParseIntPipe) id: number): Promise<any> {
+    const data = await this.creditNotes.getNotesOverview(id);
+    return this.responseService.success(data, 'Notas de la factura');
   }
 
   // ─── Reenvío por correo (C.3 del CP-platform-invoicing-parity) ─────────

@@ -2351,7 +2351,7 @@ export class SubscriptionFiscalService {
       select: { id: true },
     });
     if (notes.length === 0) return [];
-    const rows: Array<{ fiscal_transmission_id: number; metadata: any }> =
+    const rows: Array<{ fiscal_transmission_id: number | null; metadata: any }> =
       await db.fiscal_evidences.findMany({
         where: {
           fiscal_transmission_id: { in: notes.map((n) => n.id) },
@@ -2363,7 +2363,7 @@ export class SubscriptionFiscalService {
     const totals = new Map<number, string>();
     for (const r of rows) {
       if (r.metadata?.kind === 'platform_invoice_snapshot') {
-        totals.set(r.fiscal_transmission_id, String(r.metadata?.totals?.total ?? 0));
+        totals.set(r.fiscal_transmission_id as number, String(r.metadata?.totals?.total ?? 0));
       }
     }
     return notes.map((n) => totals.get(n.id) ?? '0');
@@ -2384,7 +2384,7 @@ export class SubscriptionFiscalService {
       },
     });
     if (notes.length === 0) return [];
-    const evidences: Array<{ fiscal_transmission_id: number; metadata: any }> =
+    const evidences: Array<{ fiscal_transmission_id: number | null; metadata: any }> =
       await db.fiscal_evidences.findMany({
         where: {
           fiscal_transmission_id: { in: notes.map((n) => n.id) },
@@ -2396,7 +2396,7 @@ export class SubscriptionFiscalService {
     const snaps = new Map<number, any>();
     for (const e of evidences) {
       if (e.metadata?.kind === 'platform_invoice_snapshot') {
-        snaps.set(e.fiscal_transmission_id, e.metadata);
+        snaps.set(e.fiscal_transmission_id as number, e.metadata);
       }
     }
     return notes.map((n) => ({
@@ -4382,11 +4382,15 @@ export class SubscriptionFiscalService {
     const transmission = await this.prisma.withoutScope().fiscal_transmissions.findFirst({
       where: {
         id,
-        source_type: 'platform_invoice',
+        source_type: { in: ['platform_invoice', ...PLATFORM_NOTE_SOURCE_TYPES] },
         accounting_entity_id: settings.accounting_entity_id ?? undefined,
       },
       select: {
         id: true,
+        document_type: true,
+        source_type: true,
+        cude: true,
+        related_transmission_id: true,
         transmission_status: true,
         dian_status: true,
         accounting_status: true,
@@ -4501,17 +4505,36 @@ export class SubscriptionFiscalService {
         ? Number(snapshotDiscount).toFixed(2)
         : (lineDiscountCents / 100).toFixed(2);
 
-    const collection = await this.platformPayments.summarize({
-      transmissionId: transmission.id,
-      total: totals.total ?? 0,
-      dueDate,
-      state,
-    });
+    // Una nota no se cobra: sin cartera, pagos ni estado de cobro.
+    const isNote = PLATFORM_NOTE_SOURCE_TYPES.includes(transmission.source_type);
+    const collection = isNote
+      ? {
+          amount_paid: '0.00',
+          balance_due: '0.00',
+          collection_status: null,
+          payments: [] as any[],
+        }
+      : await this.platformPayments.summarize({
+          transmissionId: transmission.id,
+          total: totals.total ?? 0,
+          dueDate,
+          state,
+        });
+    const relatedOriginal = transmission.related_transmission_id
+      ? await this.prisma.withoutScope().fiscal_transmissions.findFirst({
+          where: { id: transmission.related_transmission_id },
+          select: { document_number: true },
+        })
+      : null;
 
     const synthetic = {
       id: transmission.id,
       invoice_number: invoiceNumber,
-      invoice_type: 'sales_invoice',
+      invoice_type: isNote ? transmission.document_type : 'sales_invoice',
+      document_type: transmission.document_type,
+      related_transmission_id: transmission.related_transmission_id ?? null,
+      related_document_number: relatedOriginal?.document_number ?? null,
+      note: isNote ? ((metaExtras?.['note'] as unknown) ?? null) : null,
       state,
       issued_at: issuedIso,
       due_at: dueDate,
@@ -4559,6 +4582,9 @@ export class SubscriptionFiscalService {
           accounting_status: transmission.accounting_status,
           document_number: transmission.document_number,
           cufe: transmission.cufe,
+          cude: transmission.cude ?? null,
+          document_type: transmission.document_type,
+          related_transmission_id: transmission.related_transmission_id ?? null,
           qr_code: transmission.qr_code,
           tracking_id: transmission.tracking_id,
           accepted_at: transmission.accepted_at,
@@ -4690,7 +4716,7 @@ export class SubscriptionFiscalService {
       .fiscal_transmissions.findFirst({
         where: {
           id,
-          source_type: 'platform_invoice',
+          source_type: { in: ['platform_invoice', ...PLATFORM_NOTE_SOURCE_TYPES] },
           accounting_entity_id: settings.accounting_entity_id ?? undefined,
         },
         select: {
