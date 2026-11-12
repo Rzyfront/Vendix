@@ -14,11 +14,11 @@
     <p class="guide-intro">{{ p.intro }}</p>
     <div class="sector-ctas">
       <a class="sector-cta sector-cta--primary" [href]="whatsappUrl()" target="_blank" rel="noopener">Ver la demo</a>
-      <a class="sector-cta" routerLink="/auth/register">Probar 14 días gratis</a>
+      <a class="sector-cta" routerLink="/auth/register">Probar gratis</a>
     </div>
 
     <section class="article-section" aria-labelledby="recorrido">
-      <h2 id="recorrido">Así se mueve un pedido</h2>
+      <h2 id="recorrido">{{ p.stepsHeading ?? 'Así se mueve un pedido' }}</h2>
       <ol class="sector-steps">
         @for (step of p.steps; track step.title) {
           <li><strong>{{ step.title }}.</strong> {{ step.text }}</li>
