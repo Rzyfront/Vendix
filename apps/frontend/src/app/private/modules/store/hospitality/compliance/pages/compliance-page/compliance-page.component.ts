@@ -3,15 +3,15 @@ import { toSignal } from '@angular/core/rxjs-interop';
 import { ActivatedRoute, Router } from '@angular/router';
 import { map } from 'rxjs';
 import {
-  ScrollableTab,
-  ScrollableTabsComponent,
+  StickyHeaderComponent,
+  StickyHeaderTab,
 } from '../../../../../../../shared/components/index';
 import { HospitalityTraPageComponent } from '../tra-page/tra-page.component';
 import { HospitalitySirePageComponent } from '../sire-page/sire-page.component';
 
 export type HospitalityComplianceTab = 'tra' | 'sire';
 
-const COMPLIANCE_TABS: ScrollableTab[] = [
+const COMPLIANCE_TABS: StickyHeaderTab[] = [
   { id: 'tra', label: 'TRA (MinCIT)', icon: 'shield-check' },
   { id: 'sire', label: 'Planilla de viajeros (SIRE)', icon: 'globe' },
 ];
@@ -33,14 +33,17 @@ function toComplianceTab(value: string | null): HospitalityComplianceTab {
   selector: 'app-hospitality-compliance-page',
   standalone: true,
   changeDetection: ChangeDetectionStrategy.OnPush,
-  imports: [ScrollableTabsComponent, HospitalityTraPageComponent, HospitalitySirePageComponent],
+  imports: [StickyHeaderComponent, HospitalityTraPageComponent, HospitalitySirePageComponent],
   template: `
     <div class="w-full md:space-y-4">
-      <app-scrollable-tabs
-        ariaLabel="Cumplimiento"
+      <app-sticky-header
+        title="Cumplimiento"
+        subtitle="TRA y planilla de viajeros"
+        icon="shield-check"
+        tabsAriaLabel="Cumplimiento"
         [tabs]="tabs"
         [activeTab]="tab()"
-        (tabChange)="onTab($event)"
+        (tabChanged)="onTab($event)"
       />
 
       <div role="tabpanel" [attr.aria-label]="tabLabel()">
