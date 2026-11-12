@@ -34,6 +34,15 @@ describe('buildPlatformNoteLines', () => {
     ).toThrow(/MON|unidad/);
   });
 
+  it('rejects a negative or non-numeric unit_price instead of turning it into 0', () => {
+    expect(() =>
+      buildPlatformNoteLines([{ description: 'x', quantity: 1, unit_price: -5 }]),
+    ).toThrow(/mayor que 0/);
+    expect(() =>
+      buildPlatformNoteLines([{ description: 'x', quantity: 1, unit_price: 'abc' }]),
+    ).toThrow(/mayor que 0/);
+  });
+
   it('rejects amounts above the balance', () => {
     expect(() =>
       buildPlatformNoteLines(
@@ -56,6 +65,16 @@ describe('PlatformCreateCreditNoteDto lines', () => {
   it('accepts quantity 1.5 and unit NIU', async () => {
     const errors = await validate(mk({ description: 'x', quantity: 1.5, unit_code: 'NIU' }));
     expect(errors.filter((e) => e.property === 'items')).toHaveLength(0);
+  });
+
+  it('rejects a non-positive unit_price and an unknown customer override', async () => {
+    const e1 = await validate(mk({ description: 'x', quantity: 1, unit_price: -10 }));
+    expect(e1.some((e) => e.property === 'items')).toBe(true);
+    const withCustomer = plainToInstance(PlatformCreateCreditNoteDto, {
+      related_invoice_id: 1, note_concept_code: '2', reason: 'r', customer: { legal_name: 'X' },
+    });
+    const e2 = await validate(withCustomer, { whitelist: true, forbidNonWhitelisted: true });
+    expect(e2.some((e) => e.property === 'customer')).toBe(true);
   });
 
   it('rejects unit MON and non-positive quantity', async () => {

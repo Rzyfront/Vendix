@@ -2814,31 +2814,40 @@ export class SubscriptionFiscalService {
         );
       }
       if (type === 'credit_note') {
-        const original = await this.prisma.withoutScope().fiscal_transmissions.findFirst({
-          where: { id: transmission.related_transmission_id },
-          select: { id: true },
-        });
-        const origSnap: any = original
-          ? (
-              await db.fiscal_evidences.findFirst({
-                where: { fiscal_transmission_id: original.id, evidence_type: 'manual_support' },
-                orderBy: { created_at: 'desc' },
-              })
-            )?.metadata
-          : null;
-        if (origSnap?.totals?.total !== undefined) {
-          const credited = await this.sumCreditedNotes(transmission.related_transmission_id, {
-            excludeId: transmission.id,
-          });
-          const balance = creditBalance(origSnap.totals.total, credited);
-          if (Number(m.totals.total) > Number(balance)) {
-            throw new VendixHttpException(
-              ErrorCodes.INVOICING_CREDIT_NOTE_001,
-              `La nota crédito ${transmission.document_number} (${Number(m.totals.total).toFixed(2)}) ya no cabe en el saldo acreditable de la factura (${balance}).`,
-              { balance },
-            );
+        const originalId: number = transmission.related_transmission_id;
+        const origSnap: any = (
+          await db.fiscal_evidences.findFirst({
+            where: { fiscal_transmission_id: originalId, evidence_type: 'manual_support' },
+            orderBy: { created_at: 'desc' },
+          })
+        )?.metadata;
+        // Same balance lock as issuePlatformNote: the re-check and the move
+        // back to 'pending' happen atomically, so a concurrent new credit note
+        // counts this one (rejected notes are excluded from the balance).
+        await this.prisma.$transaction(async (tx: any) => {
+          await tx.$executeRawUnsafe(
+            'SELECT pg_advisory_xact_lock(hashtext($1))',
+            `platform_note_balance:${originalId}`,
+          );
+          if (origSnap?.totals?.total !== undefined) {
+            const credited = await this.sumCreditedNotes(originalId, {
+              client: tx,
+              excludeId: transmission.id,
+            });
+            const balance = creditBalance(origSnap.totals.total, credited);
+            if (Number(m.totals.total) > Number(balance)) {
+              throw new VendixHttpException(
+                ErrorCodes.INVOICING_CREDIT_NOTE_001,
+                `La nota crédito ${transmission.document_number} (${Number(m.totals.total).toFixed(2)}) ya no cabe en el saldo acreditable de la factura (${balance}).`,
+                { balance },
+              );
+            }
           }
-        }
+          await tx.fiscal_transmissions.updateMany({
+            where: { id: transmission.id, dian_status: { not: 'accepted' } },
+            data: { dian_status: 'pending', updated_at: new Date() },
+          });
+        });
       }
       const resolution = await db.invoice_resolutions.findFirst({
         where: { id: m.resolution_id, accounting_entity_id: settings.accounting_entity_id!, document_type: type },

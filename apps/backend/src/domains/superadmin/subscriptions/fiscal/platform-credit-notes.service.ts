@@ -93,7 +93,14 @@ export function buildPlatformNoteLines(
         { quantity: line.quantity },
       );
     }
-    const unit_price = Number(line.unit_price) || 0;
+    const unit_price = Number(line.unit_price);
+    if (!Number.isFinite(unit_price) || unit_price <= 0) {
+      throw new VendixHttpException(
+        ErrorCodes.INVOICING_VALIDATE_001,
+        'El precio unitario de cada línea debe ser mayor que 0.',
+        { unit_price: line.unit_price },
+      );
+    }
     return {
       description: line.description,
       quantity,

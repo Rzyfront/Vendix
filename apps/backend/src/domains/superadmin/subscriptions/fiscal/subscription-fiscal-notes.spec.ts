@@ -354,6 +354,25 @@ describe('issuePlatformNote', () => {
     expect(h.dianProvider.sendCreditNote).not.toHaveBeenCalled();
   });
 
+  it('resendPlatformNote re-checks the credit balance under the balance lock before re-sending', async () => {
+    const h = harness({ type: 'credit_note', credited: ['50.00'] });
+    h.tx.fiscal_transmissions.updateMany = jest.fn();
+    h.db.fiscal_transmissions.findFirst = jest.fn().mockResolvedValue({
+      id: 90, document_number: 'NC9', document_type: 'credit_note',
+      source_type: 'platform_credit_note', dian_status: 'rejected', related_transmission_id: 5,
+    });
+    h.db.fiscal_evidences.findFirst = jest
+      .fn()
+      .mockResolvedValueOnce({ metadata: { provider_data: {}, totals: { total: 119 }, resolution_id: 3 } })
+      .mockResolvedValueOnce({ metadata: { totals: { total: 119 } } });
+    await expect(h.svc.resendPlatformNote(90)).rejects.toMatchObject({
+      errorCode: 'INVOICING_CREDIT_NOTE_001',
+    });
+    expect(h.tx.$executeRawUnsafe.mock.calls[0][1]).toBe('platform_note_balance:5');
+    expect(h.tx.fiscal_transmissions.updateMany).not.toHaveBeenCalled();
+    expect(h.dianProvider.sendCreditNote).not.toHaveBeenCalled();
+  });
+
   it('resendPlatformNote refuses a note already accepted by DIAN', async () => {
     const h = harness({ type: 'credit_note' });
     h.db.fiscal_transmissions.findFirst = jest.fn().mockResolvedValue({
