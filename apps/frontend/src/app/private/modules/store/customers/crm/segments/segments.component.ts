@@ -64,15 +64,15 @@ const PAGE_SIZE = 25;
       ></app-sticky-header>
 
       <app-card>
-        <div class="mb-4 flex flex-col gap-3 md:flex-row md:items-center md:justify-end">
-          @if (tab() === 'segments') {
+        @if (tab() === 'segments') {
+          <div class="mb-4 flex flex-col gap-3 md:flex-row md:items-center md:justify-end">
             <app-inputsearch
               placeholder="Buscar segmento..."
               [debounceTime]="250"
               (searchChange)="search.set($event)"
             ></app-inputsearch>
-          }
-        </div>
+          </div>
+        }
 
         @if (tab() === 'segments') {
           @if (segmentsError()) {
