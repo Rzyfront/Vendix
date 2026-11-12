@@ -1,6 +1,7 @@
 import {
   Component,
   DestroyRef,
+  computed,
   HostListener,
   ElementRef,
   effect,
@@ -390,6 +391,12 @@ export class OptionsDropdownComponent {
   get hasActions(): boolean {
     return this.showActions() && this.actions().length > 0;
   }
+
+  /** The only action when there is exactly one: rendered as a direct button, not a menu. */
+  readonly singleAction = computed<DropdownAction | null>(() => {
+    const actions = this.actions();
+    return actions.length === 1 ? actions[0] : null;
+  });
 
   get hasFilters(): boolean {
     return this.filters().length > 0;

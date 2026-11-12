@@ -72,6 +72,21 @@
     }
   }
 
+  // Single action: rendered as a direct button instead of a one-item menu
+  &.single-action-trigger {
+    justify-content: center;
+
+    &:disabled {
+      opacity: 0.5;
+      cursor: not-allowed;
+      transform: none;
+    }
+  }
+
+  &.single-action-destructive {
+    color: var(--color-destructive);
+  }
+
   // Filters trigger styles
   &.filters-trigger {
     // Additional styles if needed

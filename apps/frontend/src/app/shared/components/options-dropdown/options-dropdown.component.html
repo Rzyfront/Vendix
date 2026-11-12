@@ -1,6 +1,19 @@
 <div class="options-dropdown-container" #dropdownContainer>
   <!-- Actions Trigger (Left) -->
-  @if (hasActions) {
+  @if (hasActions && singleAction(); as single) {
+    <button
+      type="button"
+      class="options-dropdown-trigger actions-trigger single-action-trigger"
+      [class.single-action-destructive]="single.variant === 'destructive'"
+      [disabled]="single.disabled || false"
+      (click)="onActionClick(single.action)"
+      [attr.aria-label]="single.label"
+      [title]="single.label"
+      >
+      <app-icon [name]="single.icon" [size]="16"></app-icon>
+      <span class="trigger-label-text">{{ single.label }}</span>
+    </button>
+  } @else if (hasActions) {
     <button
       #actionsTriggerButton
       type="button"

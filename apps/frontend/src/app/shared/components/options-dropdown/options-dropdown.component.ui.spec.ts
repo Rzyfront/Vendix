@@ -28,9 +28,10 @@ describe('OptionsDropdownComponent accessible identity', () => {
 
   it('retains cloned actions by action id and emits changes from the native select filter', async () => {
     fixture.componentRef.setInput('debounceMs', 0);
-    fixture.componentRef.setInput('actions', [{
-      label: 'Exportar', icon: 'download', action: 'export',
-    }]);
+    fixture.componentRef.setInput('actions', [
+      { label: 'Exportar', icon: 'download', action: 'export' },
+      { label: 'Imprimir', icon: 'printer', action: 'print' },
+    ]);
     fixture.componentRef.setInput('filters', [{
       key: 'status', label: 'Estado', type: 'select',
       options: [{ value: 'open', label: 'Abierto' }, { value: 'closed', label: 'Cerrado' }],
@@ -44,9 +45,10 @@ describe('OptionsDropdownComponent accessible identity', () => {
     click('.actions-trigger');
     await render();
     const actionButton = fixture.debugElement.query(By.css('.action-item')).nativeElement as HTMLButtonElement;
-    fixture.componentRef.setInput('actions', [{
-      label: 'Exportar CSV', icon: 'download', action: 'export',
-    }]);
+    fixture.componentRef.setInput('actions', [
+      { label: 'Exportar CSV', icon: 'download', action: 'export' },
+      { label: 'Imprimir', icon: 'printer', action: 'print' },
+    ]);
     await render();
     const refreshedButton = fixture.debugElement.query(By.css('.action-item')).nativeElement as HTMLButtonElement;
     expect(refreshedButton).toBe(actionButton);
@@ -99,5 +101,51 @@ describe('OptionsDropdownComponent accessible identity', () => {
     } finally {
       secondFixture.destroy();
     }
+  });
+
+  it('renders a single action as a direct button that runs it without opening a menu', async () => {
+    fixture.componentRef.setInput('actions', [
+      { label: 'Nuevo Usuario', icon: 'plus', action: 'create', variant: 'primary' },
+    ]);
+    const actionClick = jasmine.createSpy('actionClick');
+    component.actionClick.subscribe(actionClick);
+    await render();
+
+    const trigger = fixture.debugElement.query(By.css('.actions-trigger')).nativeElement as HTMLButtonElement;
+    expect(trigger.textContent).toContain('Nuevo Usuario');
+    expect(trigger.textContent).not.toContain('Acciones');
+    expect(trigger.getAttribute('aria-label')).toBe('Nuevo Usuario');
+    expect(trigger.hasAttribute('aria-haspopup')).toBeFalse();
+    expect(fixture.debugElement.query(By.css('.chevron-icon'))).toBeNull();
+
+    trigger.click();
+    await render();
+    expect(actionClick).toHaveBeenCalledOnceWith('create');
+    expect(fixture.debugElement.query(By.css('.actions-dropdown'))).toBeNull();
+  });
+
+  it('switches back to the Acciones menu when actions grow to more than one', async () => {
+    fixture.componentRef.setInput('actions', [{ label: 'Exportar', icon: 'download', action: 'export' }]);
+    await render();
+    expect(fixture.debugElement.query(By.css('.single-action-trigger'))).not.toBeNull();
+
+    fixture.componentRef.setInput('actions', [
+      { label: 'Exportar', icon: 'download', action: 'export' },
+      { label: 'Imprimir', icon: 'printer', action: 'print' },
+    ]);
+    await render();
+    expect(fixture.debugElement.query(By.css('.single-action-trigger'))).toBeNull();
+    click('.actions-trigger');
+    await render();
+    expect(fixture.debugElement.queryAll(By.css('.action-item')).length).toBe(2);
+  });
+
+  it('keeps a disabled single action disabled', async () => {
+    fixture.componentRef.setInput('actions', [
+      { label: 'Exportar', icon: 'download', action: 'export', disabled: true },
+    ]);
+    await render();
+    const trigger = fixture.debugElement.query(By.css('.actions-trigger')).nativeElement as HTMLButtonElement;
+    expect(trigger.disabled).toBeTrue();
   });
 });
