@@ -424,6 +424,7 @@ export class CustomerAiImportService implements OnModuleInit {
 
     let customerId: number | null = item.existing_customer_id ?? null;
     let action = item.action;
+    let resolvedByConflict = false;
 
     if (action === 'create') {
       try {
@@ -437,8 +438,11 @@ export class CustomerAiImportService implements OnModuleInit {
         // Carrera: el documento ya existe → se degrada a "agregar ubicaciones".
         const existingId = this.documentConflictCustomerId(error);
         if (existingId === null) throw error;
+        // D6 — el documento ya existe en la organización (otra tienda o una
+        // carrera): se enlaza ese cliente en vez de duplicarlo.
         customerId = existingId;
         action = 'add_locations';
+        resolvedByConflict = true;
       }
     }
 
@@ -454,6 +458,7 @@ export class CustomerAiImportService implements OnModuleInit {
     const organizationId = RequestContextService.getContext()?.organization_id;
     if (
       action !== 'create' &&
+      !resolvedByConflict &&
       (!organizationId ||
         !(await this.customersService.isCustomerInDuplicateScope(
           organizationId,

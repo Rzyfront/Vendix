@@ -1580,35 +1580,32 @@ export class CustomersService {
 
     // Solo verificamos duplicidad por email cuando realmente hay un email.
     // Sin email no aplica el chequeo de unicidad de correo.
-    // S8 — el alcance de "ya existe" sigue el operating_scope de la org.
-    const duplicateStoreId = await this.resolveDuplicateStoreFilter(
-      store.organization_id,
-      storeId,
-    );
-    // Todas las coincidencias (documento O correo) para informar al usuario
-    // de cada cliente que coincide y por qué dato.
-    const scopeMatches = await this.findCustomerMatchesInScope(
-      store.organization_id,
-      storeId,
-      {
-        document_type: dto.document_type ?? null,
-        document_number: dto.document_number ?? null,
-        email: effectiveEmail,
-      },
-    );
-    const matchesFor = (id: number) =>
-      scopeMatches.find((m) => m.id === id)?.matched_by ?? [];
-    const otherMatches = (id: number) =>
-      scopeMatches.filter((m) => m.id !== id);
+    // D6 — el BLOQUEO de duplicados sigue siendo por organización: el correo
+    // es la llave del login de e-commerce por organización y `users` no tiene
+    // índice único. El operating_scope (S8) solo decide QUÉ coincidencias se
+    // informan (`other_matches`), y se calcula únicamente al haber conflicto.
+    const describeMatches = async (id: number, fallback: 'email' | 'document') => {
+      const scopeMatches = await this.findCustomerMatchesInScope(
+        store.organization_id,
+        storeId,
+        {
+          document_type: dto.document_type ?? null,
+          document_number: dto.document_number ?? null,
+          email: effectiveEmail,
+        },
+      );
+      const own = scopeMatches.find((m) => m.id === id)?.matched_by ?? [];
+      return {
+        matched_by: own.length ? own : [fallback],
+        other_matches: scopeMatches.filter((m) => m.id !== id),
+      };
+    };
 
     if (effectiveEmail) {
       const existingUser = await this.prisma.users.findFirst({
         where: {
           email: emailEquals(effectiveEmail),
           organization_id: store.organization_id,
-          ...(duplicateStoreId
-            ? { store_users: { some: { store_id: duplicateStoreId } } }
-            : {}),
           // Archived customers are not "in use" — allow re-creating a new
           // customer that re-uses the same email after the old row was
           // archived (mirrors the document dedup filter in
@@ -1659,10 +1656,7 @@ export class CustomersService {
           {
             kind: 'email',
             value: effectiveEmail,
-            matched_by: matchesFor(existingUser.id).length
-              ? matchesFor(existingUser.id)
-              : ['email'],
-            other_matches: otherMatches(existingUser.id),
+            ...(await describeMatches(existingUser.id, 'email')),
             existing_customer_id: existingUser.id,
             existing_customer_document_number:
               existingUser.document_number ?? null,
@@ -1705,7 +1699,6 @@ export class CustomersService {
         store.organization_id,
         normalizedDoc.number,
         normalizedDoc.type,
-        duplicateStoreId ?? undefined,
       );
 
       if (existingByDocument) {
@@ -1724,10 +1717,7 @@ export class CustomersService {
             kind: 'document',
             value: normalizedDoc.number,
             type: normalizedDoc.type,
-            matched_by: matchesFor(existingByDocument.id).length
-              ? matchesFor(existingByDocument.id)
-              : ['document'],
-            other_matches: otherMatches(existingByDocument.id),
+            ...(await describeMatches(existingByDocument.id, 'document')),
             existing_customer_id: existingByDocument.id,
             // Snapshot público explícito; nunca la fila users cruda.
             existing_customer: {
@@ -2347,13 +2337,6 @@ export class CustomersService {
         ? this.resolveCustomerEmail(dto.email)
         : undefined;
 
-    // S8 — mismo alcance que el alta: con scope STORE solo chocan clientes de
-    // esta tienda (si no, un cliente creado legítimamente en la tienda B no
-    // se podría volver a guardar porque su correo/documento existe en A).
-    const duplicateStoreId = user.organization_id
-      ? await this.resolveDuplicateStoreFilter(user.organization_id, storeId)
-      : null;
-
     if (effectiveEmail && user.organization_id) {
       const emailConflict = await this.prisma.users.findFirst({
         where: {
@@ -2361,9 +2344,6 @@ export class CustomersService {
           organization_id: user.organization_id,
           id: { not: user.id },
           state: { not: user_state_enum.archived },
-          ...(duplicateStoreId
-            ? { store_users: { some: { store_id: duplicateStoreId } } }
-            : {}),
         },
         select: { id: true },
       });
@@ -2407,7 +2387,6 @@ export class CustomersService {
         user.organization_id,
         normalizedDoc.number,
         normalizedDoc.type,
-        duplicateStoreId ?? undefined,
       );
 
       if (conflict && conflict.id !== user.id) {

@@ -315,27 +315,52 @@ describe('CustomersService — QUI-728 customer fiscal data', () => {
         { getOperatingScope: jest.fn().mockResolvedValue(scope) } as any,
       );
 
-    it('en scope STORE solo busca duplicados entre clientes de esta tienda', async () => {
+    it('D6: en scope STORE el bloqueo sigue siendo por organización y solo la info se limita a la tienda', async () => {
       (mockPrismaService.users.findMany as jest.Mock).mockResolvedValue([]);
-      await build('STORE').create(1, {
-        first_name: 'Ana',
-        last_name: 'Pérez',
-        email: 'ana@x.co',
-        document_type: 'CC',
-        document_number: '12345678',
-      } as any);
+      mockPrismaService.users.findFirst
+        .mockResolvedValueOnce(null) // correo libre en la organización
+        .mockResolvedValueOnce({ id: 77, document_type: 'CC', document_number: '12345678', user_roles: [] });
+      mockPrismaService.store_users.findFirst.mockResolvedValueOnce(null);
 
-      const calls = (mockPrismaService.users.findFirst as jest.Mock).mock.calls.map(
+      const error: any = await build('STORE')
+        .create(1, {
+          first_name: 'Ana',
+          last_name: 'Pérez',
+          email: 'ana@x.co',
+          document_type: 'CC',
+          document_number: '12345678',
+        } as any)
+        .catch((e) => e);
+
+      // El documento existe en otra tienda de la org: igual se bloquea.
+      expect(error.getResponse().details).toMatchObject({
+        kind: 'document',
+        existing_customer: { id: 77, in_store: false },
+      });
+      const hardChecks = (mockPrismaService.users.findFirst as jest.Mock).mock.calls.map(
         (c) => c[0].where,
       );
-      const emailCall = calls.find((w) => w.email);
-      const docCall = calls.find((w) => w.document_number);
-      expect(emailCall.store_users).toEqual({ some: { store_id: 1 } });
-      expect(docCall.store_users).toEqual({ some: { store_id: 1 } });
+      for (const w of hardChecks) {
+        expect(w.organization_id).toBe(100);
+        expect(w.store_users).toBeUndefined();
+      }
+      // La información de coincidencias sí se limita a la tienda.
       expect(
         (mockPrismaService.users.findMany as jest.Mock).mock.calls[0][0].where
           .store_users,
       ).toEqual({ some: { store_id: 1 } });
+      expect(mockPrismaService.users.create).not.toHaveBeenCalled();
+    });
+
+    it('sin conflicto no consulta coincidencias extra', async () => {
+      (mockPrismaService.users.findMany as jest.Mock).mockClear();
+      await build('STORE').create(1, {
+        first_name: 'Ana',
+        last_name: 'Pérez',
+        document_type: 'CC',
+        document_number: '87654321',
+      } as any);
+      expect(mockPrismaService.users.findMany).not.toHaveBeenCalled();
     });
 
     it('en scope ORGANIZATION busca en toda la organización', async () => {

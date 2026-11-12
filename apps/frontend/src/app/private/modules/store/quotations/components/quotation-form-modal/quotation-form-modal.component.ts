@@ -845,7 +845,7 @@ export class QuotationFormModalComponent implements OnInit {
         ? { id: q.customer_id, first_name: 'Cliente asociado', last_name: '' }
         : null));
       if (q.customer_id) {
-        this.loadCustomerLocations(q.customer_id, q.customer_address_id ?? null);
+        this.loadCustomerLocations(q.customer_id, q.customer_address_id ?? null, false);
       }
       this.form.patchValue({
         destination: (q.destination as QuotationDestination | undefined) || 'sale',
@@ -1057,8 +1057,16 @@ export class QuotationFormModalComponent implements OnInit {
     this.selectedLocationId.set(null);
   }
 
-  /** Loads the customer's locations; preselects the saved one or the primary. */
-  private loadCustomerLocations(customerId: number | undefined, preferredId: number | null): void {
+  /**
+   * Loads the customer's locations; preselects the saved one, or the primary
+   * only when choosing a customer. Editing a quotation saved without a
+   * location keeps it without one until the user picks it.
+   */
+  private loadCustomerLocations(
+    customerId: number | undefined,
+    preferredId: number | null,
+    preselectPrimary = true,
+  ): void {
     this.customerLocations.set([]);
     this.selectedLocationId.set(null);
     if (!customerId) return;
@@ -1068,10 +1076,10 @@ export class QuotationFormModalComponent implements OnInit {
       .subscribe((locations) => {
         if (this.selectedCustomer()?.id !== customerId) return;
         this.customerLocations.set(locations);
-        const chosen =
-          locations.find((l) => l.id === preferredId) ??
-          locations.find((l) => l.is_primary) ??
-          locations[0];
+        const saved = locations.find((l) => l.id === preferredId);
+        const chosen = preselectPrimary
+          ? saved ?? locations.find((l) => l.is_primary) ?? locations[0]
+          : saved;
         this.selectedLocationId.set(chosen?.id ?? null);
       });
   }

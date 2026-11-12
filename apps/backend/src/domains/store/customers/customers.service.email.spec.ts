@@ -59,7 +59,7 @@ describe('CustomersService email identity', () => {
     );
   });
 
-  it('S8: con scope STORE, editar solo choca con clientes de esta tienda', async () => {
+  it('D6: con scope STORE, editar sigue validando el correo en toda la organización', async () => {
     const prisma = {
       users: {
         findFirst: jest.fn().mockResolvedValue(null),
@@ -89,7 +89,6 @@ describe('CustomersService email identity', () => {
         organization_id: 3,
         id: { not: 10 },
         state: { not: 'archived' },
-        store_users: { some: { store_id: 2 } },
       },
       select: { id: true },
     });

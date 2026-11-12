@@ -184,6 +184,31 @@ describe('CustomerAiImportService', () => {
     expect(addressesMock.addCustomerLocation).not.toHaveBeenCalled();
   });
 
+  it('D6: si al crear el documento existe en otra tienda, se enlaza en vez de fallar', async () => {
+    const conflict = new VendixHttpException(
+      ErrorCodes.SYS_CONFLICT_001,
+      'Ya existe',
+      { kind: 'document', existing_customer_id: 321 },
+    );
+    customersMock.create.mockRejectedValueOnce(conflict);
+    customersMock.isCustomerInDuplicateScope.mockResolvedValue(false);
+    const result = await runInStore(() =>
+      service.commit({
+        customers: [
+          {
+            action: 'create',
+            legal_name: 'Otra tienda SAS',
+            document_type: 'NIT',
+            document_number: '900',
+            locations: [{ address_line_1: 'Calle 1', city: 'Cali' }],
+          },
+        ],
+      } as any),
+    );
+    expect(result.failed).toBe(0);
+    expect(addressesMock.addCustomerLocation).toHaveBeenCalledWith(321, expect.any(Object));
+  });
+
   it('analyze descarta un DV que no corresponde al NIT y avisa', async () => {
     const result = await runInStore(() =>
       service.analyze({
