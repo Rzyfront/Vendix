@@ -39,6 +39,10 @@ const { Client } = require('pg');
  * Formato: 'tabla.columna'.
  */
 const REQUIRED_COLUMNS = [
+  // --- Notas crédito/débito de plataforma (20261130090000) ---
+  // Toda lectura de fiscal_transmissions de plataforma la selecciona: sin ella
+  // el listado y el detalle de facturas de plataforma dan 500.
+  'fiscal_transmissions.related_transmission_id',
   // --- Clientes con múltiples ubicaciones (20261129090000) ---
   'addresses.label',
   'quotations.customer_address_id',
@@ -272,7 +276,10 @@ const REQUIRED_ENUM_VALUES = {
 
 /** La identidad única de un abono CxC manual evita refund duplicado por retry. */
 const REQUIRED_INDEXES = ['refunds_ar_payment_id_key'];
-const REQUIRED_FOREIGN_KEYS = ['refunds_ar_payment_id_fkey'];
+const REQUIRED_FOREIGN_KEYS = [
+  'refunds_ar_payment_id_fkey',
+  'fiscal_transmissions_related_transmission_id_fkey',
+];
 
 /**
  * Índices que además de existir deben ser PARCIALES (llevar `WHERE`).
