@@ -1709,6 +1709,8 @@ export class SubscriptionFiscalService {
             invoice_number: true,
             state: true,
             total: true,
+            amount_paid: true,
+            due_at: true,
             currency: true,
             store_id: true,
             issued_at: true,

@@ -473,30 +473,12 @@ export class SuperAdminLayoutComponent {
             route: '/super-admin/fiscal/invoicing/invoices',
           },
           {
+            // Direct link: the sidebar renders two levels only, so nested
+            // children here were never shown and the item led nowhere. PUC,
+            // Asientos, Mapeos and Reportes are sub-tabs of the module shell.
             label: 'Contabilidad',
-            icon: 'folder',
-            children: [
-              {
-                label: 'Plan de Cuentas',
-                icon: 'circle',
-                route: '/super-admin/fiscal/accounting/chart-of-accounts',
-              },
-              {
-                label: 'Asientos Contables',
-                icon: 'circle',
-                route: '/super-admin/fiscal/accounting/journal-entries',
-              },
-              {
-                label: 'Mapeos Contables',
-                icon: 'circle',
-                route: '/super-admin/fiscal/accounting/account-mappings',
-              },
-              {
-                label: 'Reportes Contables',
-                icon: 'circle',
-                route: '/super-admin/fiscal/accounting/reports',
-              },
-            ],
+            icon: 'book-open',
+            route: '/super-admin/fiscal/accounting',
           },
         ],
       },
