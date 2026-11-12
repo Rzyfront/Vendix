@@ -1,73 +1,50 @@
 /**
  * PlatformCreditNotesService — notas crédito/débito del riel plataforma.
  *
- * ## Por que servicio paralelo y no delegación a CreditNotesService tienda
+ * Las facturas de plataforma NO viven en `invoices`: viven en
+ * `fiscal_transmissions` (source_type `platform_invoice` o
+ * `subscription_invoice`, document_type `sales_invoice`). Por eso este servicio
+ * ya no pasa por el `InvoicingService` de tienda (que exige `store_id` y rechaza
+ * las notas): resuelve el original en `fiscal_transmissions`, deriva las líneas
+ * de la factura corregida y delega la numeración, la firma y la transmisión en
+ * `SubscriptionFiscalService.issuePlatformNote`.
  *
- * `CreditNotesService` de tienda exige contexto JWT con `organization_id` Y
- * `store_id` (línea 67-79 del original: `AUTH_CONTEXT_001` si falta). La
- * plataforma no tiene store: emite con `platform_organization_id` y
- * `accounting_entity_id` resueltos desde `platform_settings`. Misma
- * justificación que `PlatformProfilesService` (B.1 del CP-platform-invoicing-parity).
- *
- * La persistencia final la hace `InvoicingService.create()` del riel tienda
- * —el mismo calculador, validador y cadena UBL que las facturas— envuelto en
- * `RequestContextService.run()` con un contexto sintetizado
- * `organization_id=platform, store_id=undefined, user_id`. El servicio del
- * riel tienda NO se toca: compuerta dura del plan, verificada por su spec
- * SIN modificaciones.
- *
- * ## Validaciones equivalentes a tienda (mismas reglas, distinto ámbito)
- *
- * - related_invoice existe y pertenece a la organización plataforma
- * - related_invoice.status == 'accepted' (con CUFE)
- * - related_invoice.invoice_type ∈ ['sales_invoice','export_invoice',
- *   'purchase_invoice'] (mismo `CORRECTABLE_BY_NOTE`)
- * - related_invoice.accounting_entity_id == entity plataforma
- *
- * ## Lo que NO hace este slice
- *
- * - NO genera consecutivo: la persistencia final delega en el
- *   `invoice_number_generator` del riel tienda vía `InvoicingService.create()`
- *   que ya usa pg_advisory_xact_lock (mecanismo de ADR-H4). Slice C.2.5
- *   verificable cuando la DB vuelva.
- * - NO transmite: `invoice-flow.service` se llama después por la fachada MvpV1
- *   (no implementado en MVP actual para support_document; C.2 hereda esa
- *   limitación de createSalesInvoice del riel plataforma).
- * - NO escribe el evento de delivery en `invoice_delivery_events`: eso es C.3.
+ * - Nota crédito sin `items` = nota TOTAL: copia todas las líneas del original.
+ * - Nota crédito con `items`: parcial; hereda el impuesto del original.
+ * - Nota débito: exige `items`; no tiene tope de saldo.
+ * - Saldo acreditable = total del original − notas crédito no rechazadas.
  */
 import { Injectable, Logger } from '@nestjs/common';
+import { OnEvent } from '@nestjs/event-emitter';
 
 import { AuditService } from '@common/audit/audit.service';
 import { ErrorCodes, VendixHttpException } from '@common/errors';
 import { GlobalPrismaService } from '../../../../prisma/services/global-prisma.service';
 import { PlatformOrgService } from '../../../../common/services/platform-org.service';
-import { RequestContextService } from '../../../../common/context/request-context.service';
 
 import {
   dianLineExtension,
   dianSum,
 } from '../../../../common/money-kernel/dian-money';
 import { isDianUnitCode } from '../../../store/invoicing/providers/dian-direct/constants/dian-unit-codes';
-import { InvoicingService } from '../../../store/invoicing/invoicing.service';
 import {
   PlatformCreateCreditNoteDto,
   PlatformCreateDebitNoteDto,
 } from './dto/platform-credit-note.dto';
-
-/**
- * Tipos de factura que admiten corrección por nota crédito o débito.
- * Réplica exacta del CORRECTABLE_BY_NOTE del riel tienda
- * (`credit-notes.service.ts:120-122`): una nota crédito/débito (tipos DIAN
- * 91/92) sólo corrige una FACTURA. Cada familia de documento tiene la suya:
- *   · doc equivalente POS → nota de ajuste 93/94
- *   · doc soporte          → nota de ajuste 95
- *   · una nota             → no se corrige con otra nota
- */
-const CORRECTABLE_BY_NOTE = [
-  'sales_invoice',
-  'export_invoice',
-  'purchase_invoice',
-];
+import { PlatformDeliveryService } from './platform-delivery.service';
+import {
+  NOTE_CORRECTABLE_SOURCES,
+  NOTE_TYPE_LABEL,
+  PlatformNoteComputation,
+  PlatformNoteOriginal,
+  PlatformNoteResult,
+  PlatformNoteType,
+  creditBalance,
+  linePercent,
+  noteTaxSignature,
+  totalNoteComputation,
+} from './platform-note.helpers';
+import { SubscriptionFiscalService } from './subscription-fiscal.service';
 
 export const PLATFORM_NOTE_DEFAULT_UNIT_CODE = 'NIU';
 
@@ -136,14 +113,30 @@ export function buildPlatformNoteLines(
   return { lines, total };
 }
 
-export interface PlatformCreditNoteResult {
-  invoice_id: number;
-  invoice_number: string;
-  invoice_type: 'credit_note' | 'debit_note';
-  related_invoice_id: number;
-  status: string;
-  cufe: string | null;
+export interface PlatformNotesOverview {
+  invoice: {
+    id: number;
+    document_number: string;
+    cufe: string | null;
+    dian_status: string;
+    issue_date: string | null;
+    total: string;
+    customer_name: string | null;
+  };
+  credit_balance: string;
+  can_create_notes: boolean;
+  blocked_reason: string | null;
+  lines: Array<{
+    description: string;
+    quantity: number;
+    unit_price: number;
+    unit_code: string;
+    tax_rate: number;
+  }>;
+  notes: unknown[];
 }
+
+type NoteDto = PlatformCreateCreditNoteDto | PlatformCreateDebitNoteDto;
 
 @Injectable()
 export class PlatformCreditNotesService {
@@ -152,212 +145,246 @@ export class PlatformCreditNotesService {
   constructor(
     private readonly prisma: GlobalPrismaService,
     private readonly platformOrg: PlatformOrgService,
-    private readonly invoicing: InvoicingService,
+    private readonly fiscal: SubscriptionFiscalService,
     private readonly audit: AuditService,
+    private readonly delivery: PlatformDeliveryService,
   ) {}
 
   async createCreditNote(
     dto: PlatformCreateCreditNoteDto,
     actorUserId: number,
-  ): Promise<PlatformCreditNoteResult> {
+  ): Promise<PlatformNoteResult> {
     return this.createNote(dto, 'credit_note', actorUserId);
   }
 
   async createDebitNote(
     dto: PlatformCreateDebitNoteDto,
     actorUserId: number,
-  ): Promise<PlatformCreditNoteResult> {
+  ): Promise<PlatformNoteResult> {
     return this.createNote(dto, 'debit_note', actorUserId);
   }
 
-  /**
-   * Crea la nota plataforma delegando en `InvoicingService.create()` del riel
-   * tienda. La envoltura en `RequestContextService.run()` es lo que evita
-   * tocar el servicio tienda: inyecta el contexto org-plataforma en el
-   * AsyncLocalStorage para que las llamadas internas (`getContext()`,
-   * `StorePrismaService`) lean los valores correctos sin que el código del
-   * riel tienda sepa que está siendo invocado desde plataforma.
-   */
-  private async createNote(
-    dto: PlatformCreateCreditNoteDto | PlatformCreateDebitNoteDto,
-    type: 'credit_note' | 'debit_note',
-    actorUserId: number,
-  ): Promise<PlatformCreditNoteResult> {
+  /** Why an original cannot be corrected, or null when it can. */
+  private blockedReason(
+    t: { document_type: string; source_type: string; dian_status: string; cufe: string | null; document_number: string },
+    type: PlatformNoteType | null,
+  ): { code: keyof typeof ErrorCodes; message: string } | null {
+    const label = type ? NOTE_TYPE_LABEL[type] : 'notas crédito o débito';
+    if (t.document_type !== 'sales_invoice') {
+      return {
+        code: 'FISCAL_DOCUMENT_UNSUPPORTED',
+        message: `El documento ${t.document_number} es de tipo «${t.document_type}» y no admite ${label}: solo se corrigen facturas de venta.`,
+      };
+    }
+    if (!(NOTE_CORRECTABLE_SOURCES as readonly string[]).includes(t.source_type)) {
+      return {
+        code: 'FISCAL_DOCUMENT_UNSUPPORTED',
+        message: `El documento ${t.document_number} no admite ${label}.`,
+      };
+    }
+    if (t.dian_status !== 'accepted' || !t.cufe) {
+      return {
+        code: 'INVOICING_STATUS_002',
+        message: `La factura ${t.document_number} debe estar aceptada por la DIAN (estado: ${t.dian_status}) antes de emitir ${label}.`,
+      };
+    }
+    return null;
+  }
+
+  private async loadOriginalTransmission(id: number) {
     const ctx = await this.platformOrg.requirePlatformContext();
-    const platformOrgId = ctx.organization_id;
-    const accountingEntityId = ctx.accounting_entity_id;
-
-    // 1. Validar la factura relacionada existe, es del ámbito plataforma,
-    //    está aceptada, tiene CUFE, y su tipo admite nota crédito/débito.
-    const related = await this.prisma
-      .withoutScope()
-      .invoices.findFirst({
-        where: { id: dto.related_invoice_id },
-        select: {
-          id: true,
-          invoice_number: true,
-          invoice_type: true,
-          status: true,
-          cufe: true,
-          accounting_entity_id: true,
-          organization_id: true,
-        },
-      });
-
-    if (!related) {
+    const row = await this.prisma.withoutScope().fiscal_transmissions.findFirst({
+      where: {
+        id,
+        organization_id: ctx.organization_id,
+        accounting_entity_id: ctx.accounting_entity_id,
+      },
+    });
+    if (!row) {
       throw new VendixHttpException(
         ErrorCodes.INVOICING_FIND_001,
-        `No se encontró la factura ${dto.related_invoice_id} en la plataforma.`,
-        { related_invoice_id: dto.related_invoice_id },
+        `No se encontró la factura ${id} en la plataforma.`,
+        { related_invoice_id: id },
       );
     }
+    return { row, ctx };
+  }
 
-    if (related.organization_id !== platformOrgId) {
+  private async createNote(
+    dto: NoteDto,
+    type: PlatformNoteType,
+    actorUserId: number,
+  ): Promise<PlatformNoteResult> {
+    const { row, ctx } = await this.loadOriginalTransmission(
+      dto.related_invoice_id,
+    );
+    const blocked = this.blockedReason(row as any, type);
+    if (blocked) {
+      throw new VendixHttpException(ErrorCodes[blocked.code], blocked.message, {
+        related_invoice_id: row.id,
+        dian_status: row.dian_status,
+      });
+    }
+
+    const original = await this.fiscal.loadPlatformNoteOriginal(row as any);
+    const items = dto.items ?? [];
+    const isTotal = type === 'credit_note' && items.length === 0;
+
+    if (type === 'debit_note' && items.length === 0) {
       throw new VendixHttpException(
-        ErrorCodes.FISCAL_SCOPE_INVALID,
-        'La factura relacionada pertenece a otra organización.',
-        {
-          related_invoice_id: related.id,
-          related_organization_id: related.organization_id,
-          platform_organization_id: platformOrgId,
-        },
+        ErrorCodes.INVOICING_VALIDATE_001,
+        'La nota débito requiere al menos una línea con el valor a cobrar.',
       );
     }
 
-    if (!CORRECTABLE_BY_NOTE.includes(related.invoice_type)) {
-      throw new VendixHttpException(
-        ErrorCodes.FISCAL_DOCUMENT_UNSUPPORTED,
-        `El documento ${related.invoice_number} es de tipo «${related.invoice_type}» y no admite ${type === 'credit_note' ? 'nota crédito' : 'nota débito'}.`,
-        {
-          related_invoice_id: related.id,
-          related_invoice_type: related.invoice_type,
-        },
-      );
-    }
+    const credited =
+      type === 'credit_note'
+        ? await this.fiscal.sumCreditedNotes(row.id)
+        : [];
+    const balance = creditBalance(original.total, credited);
 
-    if (related.status !== 'accepted' || !related.cufe) {
-      throw new VendixHttpException(
-        ErrorCodes.INVOICING_STATUS_002,
-        `La factura ${related.invoice_number} está en estado '${related.status}' y debe ser aceptada por la DIAN antes de corregirla.`,
-        {
-          related_invoice_id: related.id,
-          status: related.status,
-          has_cufe: Boolean(related.cufe),
-        },
-      );
-    }
+    const computation = isTotal
+      ? totalNoteComputation(original)
+      : this.partialComputation(original, items);
 
-    if (
-      related.accounting_entity_id &&
-      related.accounting_entity_id !== accountingEntityId
-    ) {
-      throw new VendixHttpException(
-        ErrorCodes.FISCAL_SCOPE_INVALID,
-        'La factura relacionada pertenece a otra entidad contable.',
-        {
-          related_invoice_id: related.id,
-          related_accounting_entity_id: related.accounting_entity_id,
-          platform_accounting_entity_id: accountingEntityId,
-        },
-      );
-    }
+    if (type === 'credit_note') this.assertWithinBalance(computation, balance);
 
-    // 2. Construir el DTO del riel tienda con la información de la nota.
-    //    Mapeo equivalente al que usa `mapMvpV1ToLegacyCreateDto` en C.1.
-    // TODO(platform-credit-notes): el lookup sigue en `invoices` porque `invoices.related_invoice_id` es FK a `invoices`; la factura de plataforma vive en fiscal_transmissions.
-    const noteLines = buildPlatformNoteLines((dto.items ?? []) as any[], {
-      balance:
-        type === 'credit_note' ? await this.creditBalance(related.id) : undefined,
-    });
-    const noteDto: any = {
-      invoice_type: type,
-      customer: dto.customer ?? {
-        tax_id: '',
-        tax_id_dv: '',
-        legal_name: 'Plataforma',
-      },
-      items: noteLines.lines.map((line) => ({
-        description: line.description,
-        quantity: line.quantity,
-        unit_price: line.unit_price,
-        unit_code: line.unit_code,
-        note_concept_code: dto.note_concept_code,
-      })),
-      currency: 'COP',
-      related_invoice_id: related.id,
+    const result = await this.fiscal.issuePlatformNote({
+      note_type: type,
+      original,
+      computation,
+      is_total: isTotal,
       note_concept_code: dto.note_concept_code,
       reason: dto.reason,
-      // profile_id propagado de C.1 si viene
-      profile_id: dto.profile_id ?? undefined,
-    };
+      actor_user_id: actorUserId,
+    });
 
-    // 3. Delegar en InvoicingService.create() del riel tienda, dentro de un
-    //    RequestContext sintetizado para que el `getContext()` interno lea
-    //    platform_org y store_id=undefined (ADR-7: org requerido, store
-    //    opcional). El calculador, validador y cadena UBL del riel tienda
-    //    operan exactamente igual que para una nota de tienda, sin saber
-    //    que el caller es plataforma.
-    const created = await RequestContextService.run(
-      {
-        user_id: actorUserId,
-        organization_id: platformOrgId,
-        store_id: undefined,
-        is_super_admin: true,
-        is_owner: false,
-        app_type: 'VENDIX_ADMIN',
-        roles: ['SUPER_ADMIN'],
-        permissions: ['superadmin:fiscal:invoicing'],
-        request_id: `platform-credit-note-${related.id}-${Date.now()}`,
-      },
-      () => this.invoicing.create(noteDto),
-    );
-
-    // 4. Auditar el acto (CP-platform-invoicing-parity B.4-style audit).
     await this.audit.log({
       action: 'CREATE',
-      resource: 'invoices',
-      resourceId: created.id,
+      resource: 'fiscal_transmissions',
+      resourceId: result.transmission_id,
       oldValues: null,
       newValues: {
-        invoice_type: type,
-        related_invoice_id: related.id,
+        document_type: type,
+        related_transmission_id: row.id,
         note_concept_code: dto.note_concept_code,
         reason: dto.reason,
       },
       userId: actorUserId,
-      organizationId: platformOrgId,
+      organizationId: ctx.organization_id,
       storeId: undefined,
-      metadata: { source: 'platform-fiscal', rail: 'credit_note' },
+      metadata: { source: 'platform-fiscal', rail: type },
     });
+    return result;
+  }
 
+  private assertWithinBalance(c: PlatformNoteComputation, balance: string) {
+    if (Number(c.payable) > Number(balance)) {
+      throw new VendixHttpException(
+        ErrorCodes.INVOICING_CREDIT_NOTE_001,
+        `El valor de la nota crédito (${c.payable}) supera el saldo acreditable de la factura (${balance}).`,
+        { total: c.payable, balance },
+      );
+    }
+  }
+
+  /** Partial note: the lines the operator typed, with the original's tax. */
+  private partialComputation(
+    original: PlatformNoteOriginal,
+    items: NonNullable<NoteDto['items']>,
+  ): PlatformNoteComputation {
+    const signature = noteTaxSignature(original.lines);
+    if (signature.kind === 'mixed') {
+      throw new VendixHttpException(
+        ErrorCodes.INVOICING_VALIDATE_001,
+        `La factura ${original.document_number} mezcla tarifas de impuesto distintas entre sus líneas: no se puede repartir el impuesto de una nota parcial. Emite una nota crédito total.`,
+      );
+    }
+    const normalized = buildPlatformNoteLines(items as any[], {
+      fallback_unit_code: original.lines[0]?.unit_code,
+    });
+    return this.fiscal.computePlatformInvoiceTotals({
+      items: normalized.lines.map((l) => ({
+        description: l.description,
+        quantity: l.quantity,
+        unit_price: l.unit_price,
+        unit_code: l.unit_code,
+        taxes:
+          signature.kind === 'uniform'
+            ? signature.taxes.map((t) => ({ ...t }))
+            : [],
+      })),
+    } as any) as unknown as PlatformNoteComputation;
+  }
+
+  /**
+   * Notas de una factura, saldo y líneas. Nunca lanza por "no admite notas":
+   * responde `can_create_notes=false` con el motivo, para que la pantalla
+   * decida qué mostrar sin tratarlo como un fallo.
+   */
+  async getNotesOverview(id: number): Promise<PlatformNotesOverview> {
+    const { row } = await this.loadOriginalTransmission(id);
+    const blocked = this.blockedReason(row as any, null);
+    const notes = await this.fiscal.listPlatformNotes(row.id);
+    if (blocked) {
+      return {
+        invoice: {
+          id: row.id,
+          document_number: row.document_number,
+          cufe: row.cufe ?? null,
+          dian_status: row.dian_status,
+          issue_date: null,
+          total: '0.00',
+          customer_name: null,
+        },
+        credit_balance: '0.00',
+        can_create_notes: false,
+        blocked_reason: blocked.message,
+        lines: [],
+        notes,
+      };
+    }
+    const original = await this.fiscal.loadPlatformNoteOriginal(row as any);
+    const credited = await this.fiscal.sumCreditedNotes(row.id);
     return {
-      invoice_id: created.id,
-      invoice_number: created.invoice_number,
-      invoice_type: type,
-      related_invoice_id: related.id,
-      status: created.status,
-      cufe: created.cufe,
+      invoice: {
+        id: row.id,
+        document_number: row.document_number,
+        cufe: row.cufe ?? null,
+        dian_status: row.dian_status,
+        issue_date: original.issue_date,
+        total: original.total,
+        customer_name:
+          (original.customer?.['legal_name'] as string | undefined) ??
+          (original.customer?.['name'] as string | undefined) ??
+          null,
+      },
+      credit_balance: creditBalance(original.total, credited),
+      can_create_notes: true,
+      blocked_reason: null,
+      lines: original.lines.map((l) => ({
+        description: l.description,
+        quantity: Number(l.quantity),
+        unit_price: Number(l.unit_price),
+        unit_code: l.unit_code,
+        tax_rate: linePercent(l),
+      })),
+      notes,
     };
   }
 
-  /** Saldo = total de la factura original menos notas crédito previas no anuladas. */
-  private async creditBalance(related_invoice_id: number): Promise<number | undefined> {
-    const db = this.prisma.withoutScope();
-    const original = await db.invoices.findFirst({
-      where: { id: related_invoice_id },
-      select: { subtotal_amount: true },
-    });
-    if (!original) return undefined;
-    const prior = await db.invoices.aggregate({
-      where: {
-        related_invoice_id,
-        invoice_type: 'credit_note',
-        status: { notIn: ['voided', 'rejected', 'cancelled'] as any },
-      },
-      _sum: { subtotal_amount: true },
-    });
-    return (
-      Number(original.subtotal_amount) - Number(prior._sum?.subtotal_amount ?? 0)
-    );
+  /**
+   * Una nota aceptada se envía al cliente de la factura original. Mejor
+   * esfuerzo: un fallo de correo no deshace la nota ya aceptada por la DIAN.
+   */
+  @OnEvent('platform_note.accepted')
+  async onNoteAccepted(event: { transmission_id: number }): Promise<void> {
+    try {
+      await this.delivery.deliverInvoice(event.transmission_id, null, 0);
+    } catch (error) {
+      this.logger.warn(
+        `No se pudo enviar por correo la nota ${event.transmission_id}: ${(error as Error)?.message ?? error}`,
+      );
+    }
   }
 }

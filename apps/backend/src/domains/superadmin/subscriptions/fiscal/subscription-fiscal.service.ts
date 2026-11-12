@@ -148,6 +148,16 @@ import {
   SubscriptionInvoiceMetadata,
 } from '../../../store/subscriptions/types/billing.types';
 import { PlatformInvoicingPersistenceService } from './platform-invoicing-persistence.service';
+import {
+  NoteSnapshotLine,
+  PLATFORM_NOTE_SOURCE,
+  PLATFORM_NOTE_SOURCE_TYPES,
+  PlatformNoteIssueInput,
+  PlatformNoteOriginal,
+  PlatformNoteResult,
+  PlatformNoteType,
+  creditBalance,
+} from './platform-note.helpers';
 import { isDianUnitCode } from '../../../store/invoicing/providers/dian-direct/constants/dian-unit-codes';
 import {
   buildSubscriptionItemCode,
@@ -2314,6 +2324,551 @@ export class SubscriptionFiscalService {
     };
   }
 
+
+  // ───────────────────────────────────────────────────────────────────────
+  // Notas crédito / débito de plataforma
+  //
+  // Una nota es una fila NUEVA de `fiscal_transmissions` (document_type
+  // credit_note|debit_note, source_type platform_credit_note|platform_debit_note,
+  // related_transmission_id = factura original). Su snapshot usa el mismo
+  // `platform_invoice_snapshot` que la factura, de modo que PDF, correo,
+  // asiento y detalle lo leen sin ramas nuevas.
+  // ───────────────────────────────────────────────────────────────────────
+
+  /** Totals of the credit notes that still count against the original (not rejected). */
+  async sumCreditedNotes(
+    originalId: number,
+    opts: { client?: any; excludeId?: number } = {},
+  ): Promise<string[]> {
+    const db = opts.client ?? this.prisma.withoutScope();
+    const notes: Array<{ id: number }> = await db.fiscal_transmissions.findMany({
+      where: {
+        related_transmission_id: originalId,
+        document_type: 'credit_note',
+        dian_status: { not: 'rejected' },
+        ...(opts.excludeId ? { id: { not: opts.excludeId } } : {}),
+      },
+      select: { id: true },
+    });
+    if (notes.length === 0) return [];
+    const rows: Array<{ fiscal_transmission_id: number; metadata: any }> =
+      await db.fiscal_evidences.findMany({
+        where: {
+          fiscal_transmission_id: { in: notes.map((n) => n.id) },
+          evidence_type: 'manual_support',
+        },
+        orderBy: { id: 'asc' },
+        select: { fiscal_transmission_id: true, metadata: true },
+      });
+    const totals = new Map<number, string>();
+    for (const r of rows) {
+      if (r.metadata?.kind === 'platform_invoice_snapshot') {
+        totals.set(r.fiscal_transmission_id, String(r.metadata?.totals?.total ?? 0));
+      }
+    }
+    return notes.map((n) => totals.get(n.id) ?? '0');
+  }
+
+  /** Notes linked to an invoice, newest first, in the shape the detail screen lists. */
+  async listPlatformNotes(originalId: number): Promise<unknown[]> {
+    const db = this.prisma.withoutScope();
+    const notes = await db.fiscal_transmissions.findMany({
+      where: { related_transmission_id: originalId },
+      orderBy: { id: 'desc' },
+      select: {
+        id: true,
+        document_type: true,
+        document_number: true,
+        dian_status: true,
+        created_at: true,
+      },
+    });
+    if (notes.length === 0) return [];
+    const evidences: Array<{ fiscal_transmission_id: number; metadata: any }> =
+      await db.fiscal_evidences.findMany({
+        where: {
+          fiscal_transmission_id: { in: notes.map((n) => n.id) },
+          evidence_type: 'manual_support',
+        },
+        orderBy: { id: 'asc' },
+        select: { fiscal_transmission_id: true, metadata: true },
+      });
+    const snaps = new Map<number, any>();
+    for (const e of evidences) {
+      if (e.metadata?.kind === 'platform_invoice_snapshot') {
+        snaps.set(e.fiscal_transmission_id, e.metadata);
+      }
+    }
+    return notes.map((n) => ({
+      id: n.id,
+      document_type: n.document_type,
+      document_number: n.document_number,
+      dian_status: n.dian_status,
+      total: String(snaps.get(n.id)?.totals?.total ?? '0.00'),
+      note_concept_code: snaps.get(n.id)?.note?.concept_code ?? null,
+      reason: snaps.get(n.id)?.note?.reason ?? null,
+      created_at: n.created_at,
+    }));
+  }
+
+  /**
+   * What a note needs from the invoice it corrects: customer, signed lines,
+   * taxes, totals and issue date. `platform_invoice` keeps the exact signed
+   * payload in its snapshot; `subscription_invoice` has none, so its payload is
+   * rebuilt from the subscription invoice (same builder that signed it).
+   */
+  async loadPlatformNoteOriginal(transmission: {
+    id: number;
+    source_type: string;
+    source_id: number;
+    document_number: string;
+    cufe: string | null;
+    sent_at?: Date | null;
+    accepted_at?: Date | null;
+    created_at?: Date | null;
+  }): Promise<PlatformNoteOriginal> {
+    const db = this.prisma.withoutScope();
+    const civil = (d?: Date | null): string =>
+      localDateString(d ?? new Date(), PLATFORM_TIMEZONE);
+
+    if (transmission.source_type === 'platform_invoice') {
+      const snap = await db.fiscal_evidences.findFirst({
+        where: {
+          fiscal_transmission_id: transmission.id,
+          evidence_type: 'manual_support',
+        },
+        orderBy: { created_at: 'desc' },
+      });
+      const m: any = snap?.metadata ?? null;
+      if (!m || m.kind !== 'platform_invoice_snapshot' || !m.provider_data) {
+        throw new VendixHttpException(
+          ErrorCodes.INVOICING_VALIDATE_001,
+          `La factura ${transmission.document_number} no guarda el payload firmado (se emitió antes de que se persistiera): no se puede derivar una nota de ella.`,
+          { related_invoice_id: transmission.id },
+        );
+      }
+      return {
+        id: transmission.id,
+        document_number: transmission.document_number,
+        cufe: transmission.cufe,
+        issue_date:
+          m.issue_date ?? civil(transmission.sent_at ?? transmission.accepted_at ?? transmission.created_at),
+        total: String(m.totals?.total ?? m.provider_data.total_amount ?? '0.00'),
+        currency: String(m.currency ?? 'COP'),
+        provider_data: m.provider_data,
+        lines: (Array.isArray(m.items) ? m.items : []) as NoteSnapshotLine[],
+        customer: m.customer ?? null,
+        tax_breakdown: Array.isArray(m.tax_breakdown) ? m.tax_breakdown : [],
+        counterpart_account_code: m.counterpart_account_code ?? null,
+      };
+    }
+
+    if (transmission.source_type === 'subscription_invoice') {
+      const settings = await this.getSettings();
+      const invoice = await this.loadSubscriptionInvoice(transmission.source_id);
+      const resolution = await this.loadInvoiceResolution(settings);
+      const {
+        control: _c,
+        technical_key: _t,
+        resolution_number: _r,
+        ...pd
+      } = this.buildProviderData(
+        invoice,
+        transmission.document_number,
+        resolution,
+      ) as ProviderInvoiceData & Record<string, any>;
+      const lines: NoteSnapshotLine[] = (pd.items ?? []).map((it: any) => ({
+        description: String(it.description),
+        quantity: Number(it.quantity),
+        unit_price: Number(it.unit_price),
+        line_total: Number(it.quantity) * Number(it.unit_price),
+        unit_code: String(it.unit_code ?? 'NIU'),
+        taxes: [],
+      }));
+      return {
+        id: transmission.id,
+        document_number: transmission.document_number,
+        cufe: transmission.cufe,
+        issue_date: civil(transmission.sent_at ?? transmission.accepted_at ?? transmission.created_at),
+        total: String(pd.total_amount),
+        currency: String(pd.currency ?? 'COP'),
+        provider_data: pd,
+        lines,
+        customer: {
+          legal_name: pd.customer_name,
+          tax_id: pd.customer_tax_id,
+          email: pd.customer_email ?? null,
+        },
+        tax_breakdown: [],
+        counterpart_account_code: null,
+      };
+    }
+
+    throw new VendixHttpException(
+      ErrorCodes.FISCAL_DOCUMENT_UNSUPPORTED,
+      `El documento ${transmission.document_number} no admite notas crédito o débito.`,
+    );
+  }
+
+  /** Payload the DIAN signs for a note: original customer, note lines, reference. */
+  private buildPlatformNoteProviderData(args: {
+    type: PlatformNoteType;
+    input: PlatformNoteIssueInput;
+    number: string;
+    resolution: PlatformInvoiceResolution;
+    issuedAt: Date;
+  }): PlatformProviderInvoiceData {
+    const { type, input, number, resolution, issuedAt } = args;
+    const { original, computation: c } = input;
+    const pd = original.provider_data;
+    const customerFields = Object.fromEntries(
+      Object.entries(pd).filter(([k]) => k.startsWith('customer_')),
+    );
+    const issueDate = localDateString(issuedAt, PLATFORM_TIMEZONE);
+    return {
+      ...customerFields,
+      invoice_number: number,
+      invoice_type: type,
+      issue_date: issueDate,
+      issue_time: localTimeString(issuedAt, PLATFORM_TIMEZONE),
+      due_date: issueDate,
+      subtotal_amount: c.subtotal,
+      discount_amount: c.discountTotal,
+      tax_amount: c.taxTotal,
+      withholding_amount: '0.00',
+      total_amount: c.payable,
+      currency: original.currency,
+      items: c.lineItems,
+      taxes: c.hasAnyTax ? c.lineItems.flatMap((l: any) => l.taxes ?? []) : [],
+      notes: input.reason,
+      payment_form: pd['payment_form'] ?? '1',
+      payment_means: pd['payment_means'] ?? '42',
+      order_reference: original.document_number,
+      original_invoice_number: original.document_number,
+      original_invoice_cufe: original.cufe ?? undefined,
+      original_invoice_issue_date: original.issue_date,
+      note_concept_code: input.note_concept_code,
+      resolution_number: resolution.resolution_number ?? undefined,
+      technical_key: this.technicalKeyVault.reveal(resolution) ?? undefined,
+      control: resolveInvoiceControl(resolution, PLATFORM_TIMEZONE, issuedAt, {
+        resolution_id: resolution.id,
+        document_type: type,
+      }),
+    } as unknown as PlatformProviderInvoiceData;
+  }
+
+  private async platformNoteResult(
+    transmissionId: number,
+    replay = false,
+  ): Promise<PlatformNoteResult> {
+    const db = this.prisma.withoutScope();
+    const row: any = await db.fiscal_transmissions.findUnique({
+      where: { id: transmissionId },
+    });
+    const original: any = row?.related_transmission_id
+      ? await db.fiscal_transmissions.findFirst({
+          where: { id: row.related_transmission_id },
+          select: { document_number: true },
+        })
+      : null;
+    const snap = await db.fiscal_evidences.findFirst({
+      where: { fiscal_transmission_id: transmissionId, evidence_type: 'manual_support' },
+      orderBy: { created_at: 'desc' },
+    });
+    const total = (snap?.metadata as any)?.totals?.total;
+    return {
+      transmission_id: transmissionId,
+      document_type: row?.document_type,
+      document_number: row?.document_number,
+      related_transmission_id: row?.related_transmission_id,
+      related_document_number: original?.document_number ?? '',
+      dian_status: row?.dian_status ?? 'unknown',
+      transmission_status: row?.transmission_status ?? 'unknown',
+      cude: row?.cude ?? null,
+      total: total !== undefined ? Number(total).toFixed(2) : '0.00',
+      error_code: row?.error_code ?? null,
+      error_message: row?.error_message ?? null,
+      ...(replay ? { idempotent_replay: true } : {}),
+    };
+  }
+
+  private async sendPlatformNote(type: PlatformNoteType, data: PlatformProviderInvoiceData) {
+    return type === 'credit_note'
+      ? this.dianProvider.sendCreditNote(data)
+      : this.dianProvider.sendDebitNote(data);
+  }
+
+  /**
+   * Emite una nota crédito/débito de plataforma: bajo un candado por factura
+   * original verifica el saldo (solo crédito), asigna el número de la serie del
+   * tipo, persiste la fila + snapshot, y fuera de la transacción firma y
+   * transmite. La aceptación emite el asiento y el correo.
+   */
+  async issuePlatformNote(input: PlatformNoteIssueInput): Promise<PlatformNoteResult> {
+    const settings = await this.getSettings();
+    if (!settings.is_enabled) {
+      throw new BadRequestException('La facturación de plataforma está desactivada');
+    }
+    if (!settings.accounting_entity_id) {
+      throw new BadRequestException('La plataforma no tiene una entidad contable activa');
+    }
+    if (!settings.dian_configuration_id) {
+      throw new BadRequestException('La plataforma no tiene una configuración DIAN activa');
+    }
+    const type = input.note_type;
+    const { original, computation: c } = input;
+
+    return this.runInPlatformContext(settings, async () => {
+      await this.assertPlatformSigningReady(settings);
+      const issuedAt = new Date();
+      const idempotencyKey = this.hash({
+        kind: PLATFORM_NOTE_SOURCE[type],
+        original_id: original.id,
+        concept: input.note_concept_code,
+        reason: input.reason,
+        items: c.lineItems,
+        total: c.payable,
+      });
+
+      let result;
+      try {
+        result = await this.prisma.$transaction(async (tx: any) => {
+          // Candado por factura original: serializa el cálculo del saldo con la
+          // inserción, y siempre ANTES del candado de numeración (mismo orden
+          // en todos los llamadores, sin interbloqueo).
+          await tx.$executeRawUnsafe(
+            'SELECT pg_advisory_xact_lock(hashtext($1))',
+            `platform_note_balance:${original.id}`,
+          );
+          const prior = await tx.fiscal_transmissions.findFirst({
+            where: {
+              accounting_entity_id: settings.accounting_entity_id!,
+              document_type: type,
+              idempotency_key: idempotencyKey,
+            },
+          });
+          if (prior) return { replay: true as const, transmission: prior };
+
+          if (type === 'credit_note') {
+            const credited = await this.sumCreditedNotes(original.id, { client: tx });
+            const balance = creditBalance(original.total, credited);
+            if (Number(c.payable) > Number(balance)) {
+              throw new VendixHttpException(
+                ErrorCodes.INVOICING_CREDIT_NOTE_001,
+                `El valor de la nota crédito (${c.payable}) supera el saldo acreditable de la factura (${balance}).`,
+                { total: c.payable, balance },
+              );
+            }
+          }
+
+          const allocated = await this.allocateFiscalNumber(tx, settings, undefined, type);
+          const providerData = this.buildPlatformNoteProviderData({
+            type,
+            input,
+            number: allocated.invoice_number,
+            resolution: allocated.resolution,
+            issuedAt,
+          });
+          const transmission = await tx.fiscal_transmissions.create({
+            data: {
+              organization_id: settings.platform_organization_id!,
+              store_id: null,
+              accounting_entity_id: settings.accounting_entity_id!,
+              dian_configuration_id: settings.dian_configuration_id!,
+              source_type: PLATFORM_NOTE_SOURCE[type],
+              source_id: original.id,
+              document_type: type,
+              related_transmission_id: original.id,
+              document_number: allocated.invoice_number,
+              transmission_status: 'queued',
+              dian_status: 'pending',
+              accounting_status: 'provisional',
+              idempotency_key: idempotencyKey,
+              request_hash: this.hash(providerData),
+              created_by_user_id: input.actor_user_id > 0 ? input.actor_user_id : null,
+            },
+          });
+          await tx.fiscal_evidences.create({
+            data: {
+              organization_id: settings.platform_organization_id!,
+              store_id: null,
+              accounting_entity_id: settings.accounting_entity_id!,
+              fiscal_transmission_id: transmission.id,
+              evidence_type: 'manual_support',
+              storage_key: null,
+              content_hash: idempotencyKey,
+              metadata: {
+                kind: 'platform_invoice_snapshot',
+                customer: original.customer,
+                items: c.snapshotItems,
+                totals: {
+                  subtotal: Number(c.subtotal),
+                  tax_amount: Number(c.taxTotal),
+                  total: Number(c.payable),
+                  discount_total: Number(c.discountTotal),
+                },
+                currency: original.currency,
+                withholdings: [],
+                counterpart_account_code: original.counterpart_account_code,
+                resolution_id: allocated.resolution.id,
+                issue_date: providerData.issue_date,
+                issue_time: providerData.issue_time,
+                payment_form: providerData.payment_form,
+                payment_means_code: providerData.payment_means,
+                due_date: providerData.due_date,
+                notes: providerData.notes,
+                tax_breakdown: c.taxBreakdown,
+                provider_data: this.serializablePlatformProviderData(providerData),
+                note: {
+                  type,
+                  is_total: input.is_total,
+                  concept_code: input.note_concept_code,
+                  reason: input.reason,
+                  original_transmission_id: original.id,
+                  original_document_number: original.document_number,
+                  original_cufe: original.cufe,
+                },
+                created_by: 'issuePlatformNote',
+              },
+            },
+          });
+          return { replay: false as const, transmission, providerData };
+        });
+      } catch (error: any) {
+        if (error?.code === 'P2002') {
+          const winner = await this.prisma.withoutScope().fiscal_transmissions.findFirst({
+            where: {
+              accounting_entity_id: settings.accounting_entity_id!,
+              document_type: type,
+              idempotency_key: idempotencyKey,
+            },
+          });
+          if (winner) return this.platformNoteResult(winner.id, true);
+        }
+        throw error;
+      }
+
+      if (result.replay) {
+        return this.platformNoteResult(result.transmission.id, true);
+      }
+
+      const { transmission, providerData } = result;
+      await this.markSubmitted(transmission.id);
+      try {
+        const response = await this.sendPlatformNote(type, providerData);
+        if (response.success) {
+          await this.markAccepted(transmission.id, response);
+        } else {
+          await this.markRejected(transmission.id, response);
+        }
+      } catch (error) {
+        await this.markError(transmission.id, error);
+        throw error;
+      }
+      return this.platformNoteResult(transmission.id);
+    });
+  }
+
+  /**
+   * Re-firma y re-envía una nota YA numerada (rechazada o con error). Conserva
+   * número y payload del primer intento; para crédito vuelve a comprobar el
+   * saldo sin contarse a sí misma.
+   */
+  async resendPlatformNote(transmissionId: number): Promise<PlatformNoteResult> {
+    const settings = await this.getSettings();
+    if (!settings.is_enabled || !settings.accounting_entity_id || !settings.dian_configuration_id) {
+      throw new BadRequestException('La facturación de plataforma no está configurada');
+    }
+    return this.runInPlatformContext(settings, async () => {
+      const db = this.prisma.withoutScope();
+      const transmission: any = await db.fiscal_transmissions.findFirst({
+        where: {
+          id: transmissionId,
+          source_type: { in: PLATFORM_NOTE_SOURCE_TYPES },
+          accounting_entity_id: settings.accounting_entity_id!,
+        },
+      });
+      if (!transmission) {
+        throw new VendixHttpException(
+          ErrorCodes.INVOICING_FIND_001,
+          `No se encontró la nota ${transmissionId}.`,
+        );
+      }
+      const type = transmission.document_type as PlatformNoteType;
+      const snap = await db.fiscal_evidences.findFirst({
+        where: { fiscal_transmission_id: transmission.id, evidence_type: 'manual_support' },
+        orderBy: { created_at: 'desc' },
+      });
+      const m: any = snap?.metadata ?? null;
+      if (!m?.provider_data) {
+        throw new VendixHttpException(
+          ErrorCodes.INVOICING_VALIDATE_001,
+          `La nota ${transmission.document_number} no guarda el payload firmado; no se puede reintentar.`,
+        );
+      }
+      if (type === 'credit_note') {
+        const original = await this.prisma.withoutScope().fiscal_transmissions.findFirst({
+          where: { id: transmission.related_transmission_id },
+          select: { id: true },
+        });
+        const origSnap: any = original
+          ? (
+              await db.fiscal_evidences.findFirst({
+                where: { fiscal_transmission_id: original.id, evidence_type: 'manual_support' },
+                orderBy: { created_at: 'desc' },
+              })
+            )?.metadata
+          : null;
+        if (origSnap?.totals?.total !== undefined) {
+          const credited = await this.sumCreditedNotes(transmission.related_transmission_id, {
+            excludeId: transmission.id,
+          });
+          const balance = creditBalance(origSnap.totals.total, credited);
+          if (Number(m.totals.total) > Number(balance)) {
+            throw new VendixHttpException(
+              ErrorCodes.INVOICING_CREDIT_NOTE_001,
+              `La nota crédito ${transmission.document_number} (${Number(m.totals.total).toFixed(2)}) ya no cabe en el saldo acreditable de la factura (${balance}).`,
+              { balance },
+            );
+          }
+        }
+      }
+      const resolution = await db.invoice_resolutions.findFirst({
+        where: { id: m.resolution_id, accounting_entity_id: settings.accounting_entity_id!, document_type: type },
+      });
+      if (!resolution) {
+        throw new BadRequestException(
+          `No se encontró la serie #${m.resolution_id} que usó la nota; el reintento no puede firmar contra otra autorización.`,
+        );
+      }
+      const providerData = {
+        ...(m.provider_data as PlatformProviderInvoiceData),
+        invoice_number: transmission.document_number,
+        resolution_number: resolution.resolution_number ?? undefined,
+        technical_key: this.technicalKeyVault.reveal(resolution) ?? undefined,
+        control: resolveInvoiceControl(resolution, PLATFORM_TIMEZONE, transmission.created_at ?? new Date(), {
+          resolution_id: resolution.id,
+          document_type: type,
+        }),
+      } as PlatformProviderInvoiceData;
+
+      await this.assertPlatformSigningReady(settings);
+      await this.markSubmitted(transmission.id);
+      try {
+        const response = await this.sendPlatformNote(type, providerData);
+        if (response.success) {
+          await this.markAccepted(transmission.id, response);
+        } else {
+          await this.markRejected(transmission.id, response);
+        }
+      } catch (error) {
+        await this.markError(transmission.id, error);
+        throw error;
+      }
+      return this.platformNoteResult(transmission.id);
+    });
+  }
+
   async retryTransmission(transmissionId: number) {
     const transmission = await this.prisma.withoutScope().fiscal_transmissions.findUnique({
       where: { id: transmissionId },
@@ -2329,6 +2884,9 @@ export class SubscriptionFiscalService {
     }
     if (transmission.source_type === 'platform_invoice') {
       return this.resendPlatformTransmission(transmissionId);
+    }
+    if (PLATFORM_NOTE_SOURCE_TYPES.includes(transmission.source_type)) {
+      return this.resendPlatformNote(transmissionId);
     }
     throw new BadRequestException(
       `Retransmisión no soportada para source_type='${transmission.source_type}'`,
@@ -5639,12 +6197,14 @@ export class SubscriptionFiscalService {
     tx: any,
     settings: SubscriptionFiscalSettings,
     preferredResolutionId?: number,
+    documentType: 'sales_invoice' | 'credit_note' | 'debit_note' = 'sales_invoice',
   ): Promise<{
     invoice_number: string;
     resolution_id: number;
     resolution: PlatformInvoiceResolution;
   }> {
-    if (!preferredResolutionId && !settings.invoice_resolution_id) {
+    const isNote = documentType !== 'sales_invoice';
+    if (!isNote && !preferredResolutionId && !settings.invoice_resolution_id) {
       throw new BadRequestException('A DIAN invoice resolution is required');
     }
     // Llave unificada con el riel de tienda. Antes la plataforma usaba un
@@ -5658,7 +6218,7 @@ export class SubscriptionFiscalService {
     // Adoptamos la misma llave del `invoice-number-generator.ts:110` para
     // que `pg_advisory_xact_lock` serialice TODO el espacio
     // (entidad, document_type) en una sola asignación concurrente.
-    const lockKey = `invoice_resolution:${settings.accounting_entity_id}:sales_invoice`;
+    const lockKey = `invoice_resolution:${settings.accounting_entity_id}:${documentType}`;
     // pg_advisory_xact_lock returns void — must use $executeRaw, not $queryRaw.
     // Prisma's driver adapter (7.4.1) cannot map a `void` result column and
     // throws P2010 UnsupportedNativeDataType when this runs through $queryRaw.
@@ -5671,19 +6231,30 @@ export class SubscriptionFiscalService {
     // nombrando la resolución pedida: caer en silencio a la del setting
     // emitiría contra otra autorización sin avisar y el operador creería
     // que está emitiendo contra la que eligió.
-    const resolutionIdToFind =
-      preferredResolutionId ?? settings.invoice_resolution_id;
+    // Las notas no tienen resolución elegible: usan la serie interna activa
+    // del tipo (una sola por entidad), sin pasar por el setting de facturas.
+    const resolutionIdToFind = isNote
+      ? undefined
+      : (preferredResolutionId ?? settings.invoice_resolution_id);
     // Sin id configurado ni pedido NO se cae a "la más reciente": la plataforma
     // factura solo contra la resolución nombrada (la regla compartida filtra por
     // `id` solo si viene).
-    const resolution = resolutionIdToFind
-      ? await findActiveResolution(tx, {
-          accounting_entity_id: settings.accounting_entity_id!,
-          document_type: 'sales_invoice',
-          now: new Date(),
-          resolution_id: resolutionIdToFind,
-        })
-      : null;
+    const resolution =
+      resolutionIdToFind || isNote
+        ? await findActiveResolution(tx, {
+            accounting_entity_id: settings.accounting_entity_id!,
+            document_type: documentType,
+            now: new Date(),
+            resolution_id: resolutionIdToFind,
+          })
+        : null;
+    if (!resolution && isNote) {
+      throw new VendixHttpException(
+        ErrorCodes.FISCAL_RESOLUTION_MISSING,
+        `No hay una serie activa para ${documentType === 'credit_note' ? 'notas crédito' : 'notas débito'}: actívala en Fiscal > Resoluciones antes de emitir.`,
+        { document_type: documentType },
+      );
+    }
     if (!resolution) {
       if (
         preferredResolutionId !== undefined &&
@@ -5709,10 +6280,12 @@ export class SubscriptionFiscalService {
     // prefiere la cifrada y es esa la que después se hashea: una fila con la
     // plana corregida y la cifrada rancia pasaría con 40 hex impecables y
     // firmaría con la vieja.
+    // Las notas se firman con el PIN del software (CUDE), no con la ClTec de la
+    // resolución: la serie interna de notas no la tiene.
     const technical_key = normalizeTechnicalKey(
       this.technicalKeyVault.reveal(resolution),
     );
-    if (!isWellFormedTechnicalKey(technical_key)) {
+    if (!isNote && !isWellFormedTechnicalKey(technical_key)) {
       throw new VendixHttpException(
         ErrorCodes.INVOICING_RESOLUTION_011,
         `La resolución ${resolution.prefix}${resolution.resolution_number} de la plataforma no tiene una clave técnica (ClTec) utilizable: ` +
@@ -6379,6 +6952,8 @@ export class SubscriptionFiscalService {
         accounting_status: 'provisional',
         tracking_id: response.tracking_id,
         cufe: response.cufe,
+        // Las notas (crédito/débito) devuelven CUDE; en una factura es undefined.
+        cude: response.cude,
         qr_code: response.qr_code,
         xml_document: response.xml_document,
         pdf_url: response.pdf_url,
@@ -6390,6 +6965,12 @@ export class SubscriptionFiscalService {
     });
     await this.createEvidences(updated, response);
     await this.emitInvoiceAccepted(updated);
+    if (PLATFORM_NOTE_SOURCE_TYPES.includes(updated.source_type)) {
+      // Nota aceptada: el listener de entrega la envía al cliente de la factura.
+      this.eventEmitter.emit('platform_note.accepted', {
+        transmission_id: updated.id,
+      });
+    }
   }
 
   /**
@@ -6420,6 +7001,8 @@ export class SubscriptionFiscalService {
     accounting_entity_id: number | null;
     document_number: string;
     created_by_user_id: number | null;
+    /** Notes travel on the same event with their own `invoice_type`. */
+    document_type?: string;
   }): Promise<void> {
     try {
       const snapshot = await this.persistence.loadInvoiceSnapshot(
@@ -6479,8 +7062,16 @@ export class SubscriptionFiscalService {
         Number(snapshot.totals?.tax_amount ?? 0),
       );
 
+      const noteType =
+        transmission.document_type === 'credit_note' ||
+        transmission.document_type === 'debit_note'
+          ? transmission.document_type
+          : null;
       const payload = {
         invoice_id: transmission.id,
+        // `AccountingEventsListener`: credit_note reverses income and VAT; a
+        // debit_note is booked as an invoice (adds income and VAT).
+        ...(noteType ? { invoice_type: noteType } : {}),
         invoice_number: transmission.document_number,
         organization_id: transmission.organization_id,
         store_id: transmission.store_id ?? undefined,
@@ -6566,6 +7157,7 @@ export class SubscriptionFiscalService {
         accounting_status: 'blocked',
         tracking_id: response.tracking_id,
         cufe: response.cufe,
+        cude: response.cude,
         qr_code: response.qr_code,
         xml_document: response.xml_document,
         pdf_url: response.pdf_url,
