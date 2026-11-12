@@ -17,6 +17,22 @@ import {
   ScrollableTab,
   ScrollableTabsComponent,
 } from '../../../../../../shared/components/scrollable-tabs/scrollable-tabs.component';
+import {
+  StickyHeaderComponent,
+  StickyHeaderTab,
+} from '../../../../../../shared/components/sticky-header/sticky-header.component';
+
+/**
+ * Optional page header for parents with no sticky header of their own. When
+ * set, the sub-tabs are the view's first tab row (navigation layer 3), so they
+ * render as `app-sticky-header` tabs instead of the `app-scrollable-tabs`
+ * sub-row reserved for layer 4.
+ */
+export interface AccountingSubTabsHeader {
+  title: string;
+  subtitle?: string;
+  icon?: string;
+}
 
 /** Sub-tab definition consumed by {@link AccountingSubTabsShellComponent}. */
 export interface AccountingSubTab extends ScrollableTab {
@@ -33,23 +49,37 @@ export interface AccountingSubTab extends ScrollableTab {
  * Route `data` contract (set on the shell's parent route):
  * - `subTabs: AccountingSubTab[]` — ordered sub-tabs; each `route` is absolute.
  * - `subTabsAriaLabel?: string`   — accessible label for the tab row.
+ * - `subTabsHeader?: AccountingSubTabsHeader` — set it when the parent has no
+ *   sticky header: the tabs then render in an `app-sticky-header` (layer 3).
  */
 @Component({
   selector: 'vendix-accounting-sub-tabs-shell',
   standalone: true,
   changeDetection: ChangeDetectionStrategy.OnPush,
-  imports: [RouterOutlet, ScrollableTabsComponent],
+  imports: [RouterOutlet, ScrollableTabsComponent, StickyHeaderComponent],
   template: `
     <div class="w-full">
-      <div class="mb-4 border-b border-border">
-        <app-scrollable-tabs
-          [tabs]="tabs()"
+      @if (header(); as h) {
+        <app-sticky-header
+          [title]="h.title"
+          [subtitle]="h.subtitle ?? ''"
+          [icon]="h.icon ?? 'book-open'"
+          [tabs]="headerTabs()"
           [activeTab]="activeTabId()"
-          size="sm"
-          [ariaLabel]="ariaLabel()"
-          (tabChange)="onTabChange($event)"
+          [tabsAriaLabel]="ariaLabel()"
+          (tabChanged)="onTabChange($event)"
         />
-      </div>
+      } @else {
+        <div class="mb-4 border-b border-border">
+          <app-scrollable-tabs
+            [tabs]="tabs()"
+            [activeTab]="activeTabId()"
+            size="sm"
+            [ariaLabel]="ariaLabel()"
+            (tabChange)="onTabChange($event)"
+          />
+        </div>
+      }
       <router-outlet />
     </div>
   `,
@@ -64,6 +94,18 @@ export class AccountingSubTabsShellComponent {
 
   readonly tabs = computed<AccountingSubTab[]>(
     () => (this.data()?.['subTabs'] as AccountingSubTab[]) ?? [],
+  );
+
+  readonly header = computed<AccountingSubTabsHeader | null>(
+    () => (this.data()?.['subTabsHeader'] as AccountingSubTabsHeader) ?? null,
+  );
+
+  /**
+   * State tabs (no `route`): navigation stays in {@link onTabChange} so the
+   * query params are preserved exactly as with the scrollable sub-row.
+   */
+  readonly headerTabs = computed<StickyHeaderTab[]>(() =>
+    this.tabs().map(({ id, label, icon }) => ({ id, label, icon })),
   );
 
   readonly ariaLabel = computed<string>(
