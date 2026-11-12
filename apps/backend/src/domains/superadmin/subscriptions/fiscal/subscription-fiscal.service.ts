@@ -7045,6 +7045,8 @@ export class SubscriptionFiscalService {
     created_by_user_id: number | null;
     /** Notes travel on the same event with their own `invoice_type`. */
     document_type?: string;
+    source_type?: string;
+    related_transmission_id?: number | null;
   }): Promise<void> {
     try {
       const snapshot = await this.persistence.loadInvoiceSnapshot(
@@ -7109,8 +7111,29 @@ export class SubscriptionFiscalService {
         transmission.document_type === 'debit_note'
           ? transmission.document_type
           : null;
+      // Subscription invoices are booked when they are PAID
+      // (`accounting.saas_subscription_payment.succeeded` → `saas_revenue`).
+      // Posting them again here would duplicate the revenue, so neither they
+      // nor notes on them produce an `invoice.accepted` entry.
+      const originSourceType =
+        noteType && transmission.related_transmission_id
+          ? (
+              await this.prisma.withoutScope().fiscal_transmissions.findUnique({
+                where: { id: transmission.related_transmission_id },
+                select: { source_type: true },
+              })
+            )?.source_type
+          : transmission.source_type;
+      const skipAutoEntry = originSourceType === 'subscription_invoice';
+
       const payload = {
         invoice_id: transmission.id,
+        // `invoice_id` is a fiscal_transmissions id: the accounting listener
+        // posts against the platform entity and links back to this row.
+        platform_transmission: true,
+        ...(skipAutoEntry
+          ? { skip_auto_entry: 'subscription_invoice_booked_on_payment' }
+          : {}),
         // `AccountingEventsListener`: credit_note reverses income and VAT; a
         // debit_note is booked as an invoice (adds income and VAT).
         ...(noteType ? { invoice_type: noteType } : {}),

@@ -408,6 +408,28 @@ describe('Plataforma fase 2 — 4) asiento contable por tipo de impuesto', () =>
     ]);
   });
 
+  it('factura de plataforma: el evento marca la transmisión y sí contabiliza', async () => {
+    const { service, emit } = setupEmit(
+      { kind: 'platform_invoice_snapshot' },
+      { subtotal: 100000, tax_amount: 19000, total: 119000 },
+    );
+    await (service as any).emitInvoiceAccepted({ ...tx, source_type: 'platform_invoice' });
+    expect(emit.mock.calls[0][1]).toMatchObject({ invoice_id: 501, platform_transmission: true });
+    expect(emit.mock.calls[0][1]).not.toHaveProperty('skip_auto_entry');
+  });
+
+  it('factura de suscripción: no contabiliza aquí (ya se contabiliza al cobro)', async () => {
+    const { service, emit } = setupEmit(
+      { kind: 'platform_invoice_snapshot' },
+      { subtotal: 100000, tax_amount: 19000, total: 119000 },
+    );
+    await (service as any).emitInvoiceAccepted({ ...tx, source_type: 'subscription_invoice' });
+    expect(emit.mock.calls[0][1]).toMatchObject({
+      platform_transmission: true,
+      skip_auto_entry: 'subscription_invoice_booked_on_payment',
+    });
+  });
+
   it('snapshot viejo sin desglose: comportamiento actual (sin tax_breakdown)', async () => {
     const { service, emit } = setupEmit(
       { kind: 'platform_invoice_snapshot' },

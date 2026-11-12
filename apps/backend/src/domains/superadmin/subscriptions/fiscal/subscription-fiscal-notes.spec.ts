@@ -163,7 +163,12 @@ describe('issuePlatformNote', () => {
     taxBreakdown: [{ tax_type: 'IVA', rate: 0.19, base: '100.00', amount: '19.00' }],
   });
 
-  function harness(opts: { type: 'credit_note' | 'debit_note'; credited?: string[]; accepted?: boolean }) {
+  function harness(opts: {
+    type: 'credit_note' | 'debit_note';
+    credited?: string[];
+    accepted?: boolean;
+    originSourceType?: string;
+  }) {
     const created: any[] = [];
     const evidences: any[] = [];
     const tx: any = {
@@ -211,7 +216,11 @@ describe('issuePlatformNote', () => {
       fiscal_transmissions: {
         updateMany: jest.fn().mockResolvedValue({ count: 1 }),
         update: jest.fn().mockResolvedValue(final),
-        findUnique: jest.fn().mockResolvedValue(final),
+        findUnique: jest.fn(async (args: any) =>
+          args?.select?.source_type
+            ? { source_type: opts.originSourceType ?? 'platform_invoice' }
+            : final,
+        ),
         findFirst: jest.fn().mockResolvedValue({ document_number: 'FV5' }),
       },
       fiscal_evidences: {
@@ -326,6 +335,21 @@ describe('issuePlatformNote', () => {
       subtotal_amount: 100,
       tax_amount: 19,
       total_amount: 119,
+      platform_transmission: true,
+    });
+    expect(h.eventEmitter.emit.mock.calls[0][1]).not.toHaveProperty('skip_auto_entry');
+  });
+
+  it('note on a subscription invoice emits without auto-entry (booked on payment)', async () => {
+    const h = harness({ type: 'credit_note', originSourceType: 'subscription_invoice' });
+    await h.svc.issuePlatformNote({
+      note_type: 'credit_note', original, computation: computation(), is_total: false,
+      note_concept_code: '3', reason: 'r', actor_user_id: 1,
+    });
+    expect(h.eventEmitter.emit.mock.calls[0][0]).toBe('invoice.accepted');
+    expect(h.eventEmitter.emit.mock.calls[0][1]).toMatchObject({
+      platform_transmission: true,
+      skip_auto_entry: 'subscription_invoice_booked_on_payment',
     });
   });
 

@@ -38,6 +38,12 @@ export interface AutoEntryEventData {
   description: string;
   lines: (AutoEntryLine | null)[];
   user_id?: number;
+  /**
+   * Platform document (Vendix as DIAN issuer): `source_id` is a
+   * `fiscal_transmissions.id`, not an `invoices` row, and there is no store
+   * context. The entry links back to that transmission instead of `invoices`.
+   */
+  platform_transmission_id?: number;
 }
 
 /**
@@ -1379,7 +1385,17 @@ export class AutoEntryService {
         }),
       });
 
-      if (
+      if (event_data.platform_transmission_id) {
+        // Platform document: no `invoices` row and no store context (the
+        // store-scoped `invoices` client throws and rolls the entry back).
+        await tx.fiscal_transmissions.updateMany({
+          where: {
+            id: event_data.platform_transmission_id,
+            accounting_entity_id: accounting_entity.id,
+          },
+          data: { accounting_status: 'posted' },
+        });
+      } else if (
         source_type === 'invoice.validated' ||
         source_type === 'credit_note.accepted' ||
         source_type === 'support_document.accepted'
@@ -1998,6 +2014,8 @@ export class AutoEntryService {
       store_payment_method_id?: number;
       bank_account_id?: number;
     };
+    /** `invoice_id` is a platform `fiscal_transmissions.id` (see AutoEntryEventData). */
+    platform_transmission?: boolean;
   }) {
     if (data.financial_account_id) {
       return this.createAutoEntry({
@@ -2017,7 +2035,11 @@ export class AutoEntryService {
     // hace `credit_sale.created` con la CxC. Si aquí se volviera a acreditar
     // ingreso + impuestos contra 1305, la venta quedaría DOS veces en 4135 /
     // 2408 / 2436 / 414505 y la 1305 nunca se cruzaría.
-    const prior = await this.findPriorSaleRecognition({
+    // A platform transmission id is not an `invoices` id: the POS/credit-sale
+    // recognition lookup does not apply and could match an unrelated invoice.
+    const prior = data.platform_transmission
+      ? null
+      : await this.findPriorSaleRecognition({
       invoice_id: data.invoice_id,
       organization_id: data.organization_id,
       invoice_total: data.total,
@@ -2214,6 +2236,9 @@ export class AutoEntryService {
           : `Invoice validated #${data.invoice_id}`,
       lines: posted_lines,
       user_id: data.user_id,
+      ...(data.platform_transmission
+        ? { platform_transmission_id: data.invoice_id }
+        : {}),
     });
   }
 
@@ -2746,6 +2771,8 @@ export class AutoEntryService {
     tax_breakdown?: TaxBreakdownItem[];
     total: number;
     user_id?: number;
+    /** `invoice_id` is a platform `fiscal_transmissions.id` (see AutoEntryEventData). */
+    platform_transmission?: boolean;
   }) {
     // Factura de origen omitida porque su venta ya se reconoció en el carril POS
     // (`not_applicable`, ver findPriorSaleRecognition): la 1305 nunca se debitó,
@@ -2757,7 +2784,11 @@ export class AutoEntryService {
     //     recibió el cobro (línea DR del asiento payment.received), y un
     //     refund.completed posterior de la orden sólo reclasifica esa cuenta
     //     contra su canal (ver onRefundCompleted).
-    const pos_sale = await this.findPosRecognizedSaleForCreditNote(
+    // Platform notes have no POS sale nor reissue mirror: both lookups read
+    // `invoices` by id, which is not the transmission id.
+    const pos_sale = data.platform_transmission
+      ? null
+      : await this.findPosRecognizedSaleForCreditNote(
       data.invoice_id,
       data.organization_id,
     );
@@ -2766,6 +2797,7 @@ export class AutoEntryService {
     // (DR 4175 / CR 1305) dejaría ingreso y cartera en cero con la factura
     // nueva también omitida, y el cobro posterior llevaría la 1305 a negativo.
     if (
+      !data.platform_transmission &&
       !pos_sale &&
       (await this.isReissueMirrorCreditNote(
         data.invoice_id,
@@ -2895,9 +2927,13 @@ export class AutoEntryService {
       source_id: data.invoice_id,
       organization_id: data.organization_id,
       store_id: data.store_id,
-      accounting_entity_id: data.accounting_entity_id,      description: `Credit note accepted #${data.invoice_id}`,
+      accounting_entity_id: data.accounting_entity_id,
+      description: `Credit note accepted #${data.invoice_id}`,
       lines,
       user_id: data.user_id,
+      ...(data.platform_transmission
+        ? { platform_transmission_id: data.invoice_id }
+        : {}),
     });
   }
 
