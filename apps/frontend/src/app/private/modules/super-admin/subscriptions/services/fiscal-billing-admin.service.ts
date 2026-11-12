@@ -39,6 +39,12 @@ import {
   VendorSupportFiscalQuery,
   VendorSupportFiscalTransmission,
 } from '../interfaces/fiscal-billing.interface';
+import type {
+  CreatePlatformNoteDto,
+  PlatformInvoiceDocumentTypeFilter,
+  PlatformInvoiceNotesInfo,
+  PlatformNoteResult,
+} from '../interfaces/fiscal-billing.interface';
 import {
   PlatformDianEvent,
   PlatformInvoiceDeliveryReceipt,
@@ -79,6 +85,7 @@ export interface ListPlatformInvoicesQuery {
   status?: string;
   q?: string;
   collection_status?: 'overdue' | 'pending' | 'partial' | 'paid';
+  document_type?: PlatformInvoiceDocumentTypeFilter;
 }
 
 @Injectable({ providedIn: 'root' })
@@ -756,10 +763,48 @@ export class FiscalBillingAdminService {
     if (query.collection_status) {
       params = params.set('collection_status', query.collection_status);
     }
+    if (query.document_type) {
+      params = params.set('document_type', query.document_type);
+    }
     return this.http.get<PaginatedEnvelope<SubscriptionFiscalTransmission>>(
       `${this.base}/invoices`,
       { params },
     );
+  }
+
+  /**
+   * Emite una nota crédito sobre una factura de plataforma aceptada —
+   * `POST superadmin/subscriptions/fiscal/credit-notes`. Sin `items` es una
+   * nota total (copia todas las líneas de la factura original).
+   */
+  createPlatformCreditNote(
+    dto: CreatePlatformNoteDto,
+  ): Observable<PlatformNoteResult> {
+    return this.http
+      .post<ApiEnvelope<PlatformNoteResult>>(`${this.base}/credit-notes`, dto)
+      .pipe(map((res) => res.data));
+  }
+
+  /** `POST superadmin/subscriptions/fiscal/debit-notes` (requiere `items`). */
+  createPlatformDebitNote(
+    dto: CreatePlatformNoteDto,
+  ): Observable<PlatformNoteResult> {
+    return this.http
+      .post<ApiEnvelope<PlatformNoteResult>>(`${this.base}/debit-notes`, dto)
+      .pipe(map((res) => res.data));
+  }
+
+  /**
+   * Notas asociadas, saldo acreditable y líneas de la factura —
+   * `GET superadmin/subscriptions/fiscal/invoices/:id/notes`
+   * (`id` = `fiscal_transmissions.id`).
+   */
+  getPlatformInvoiceNotes(id: number): Observable<PlatformInvoiceNotesInfo> {
+    return this.http
+      .get<ApiEnvelope<PlatformInvoiceNotesInfo>>(
+        `${this.base}/invoices/${id}/notes`,
+      )
+      .pipe(map((res) => res.data));
   }
 
   /**

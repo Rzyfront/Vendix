@@ -61,6 +61,66 @@ describe('AccountingEventsListener invoice.accepted routing', () => {
     };
   };
 
+  it('platform invoice forwards the transmission flag to the sale entry', async () => {
+    const { listener, auto_entry_service } = createListener();
+
+    await listener.handleInvoiceAccepted({
+      ...baseEvent,
+      store_id: undefined,
+      platform_transmission: true,
+    });
+
+    expect(auto_entry_service.onInvoiceValidated).toHaveBeenCalledWith(
+      expect.objectContaining({ invoice_id: 55, platform_transmission: true }),
+    );
+  });
+
+  it('platform invoice never crosses a lodging folio advance (id is not an invoices id)', async () => {
+    const { listener } = createListener();
+    const cross = jest
+      .spyOn(listener as any, 'handleLodgingFolioInvoiced')
+      .mockResolvedValue(undefined);
+
+    await listener.handleInvoiceAccepted({
+      ...baseEvent,
+      store_id: undefined,
+      platform_transmission: true,
+    });
+    expect(cross).not.toHaveBeenCalled();
+
+    await listener.handleInvoiceAccepted(baseEvent);
+    expect(cross).toHaveBeenCalledTimes(1);
+  });
+
+  it('platform credit note forwards the transmission flag to the reversal', async () => {
+    const { listener, auto_entry_service } = createListener();
+
+    await listener.handleInvoiceAccepted({
+      ...baseEvent,
+      store_id: undefined,
+      invoice_type: 'credit_note',
+      platform_transmission: true,
+    });
+
+    expect(auto_entry_service.onCreditNoteAccepted).toHaveBeenCalledWith(
+      expect.objectContaining({ invoice_id: 55, platform_transmission: true }),
+    );
+  });
+
+  it('skip_auto_entry posts nothing (document booked elsewhere)', async () => {
+    const { listener, auto_entry_service, entry_failure_service } = createListener();
+
+    await listener.handleInvoiceAccepted({
+      ...baseEvent,
+      platform_transmission: true,
+      skip_auto_entry: 'subscription_invoice_booked_on_payment',
+    });
+
+    expect(auto_entry_service.onInvoiceValidated).not.toHaveBeenCalled();
+    expect(auto_entry_service.onCreditNoteAccepted).not.toHaveBeenCalled();
+    expect(entry_failure_service.recordFailure).not.toHaveBeenCalled();
+  });
+
   it('routes credit_note to onCreditNoteAccepted (reversal), never the sale entry', async () => {
     const { listener, auto_entry_service } = createListener();
 

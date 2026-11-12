@@ -112,3 +112,90 @@ describe('PlatformInvoicingController — RUES, scan-draft y kind customer', () 
     expect(tenants.getTenantByKindAndId).not.toHaveBeenCalled();
   });
 });
+
+describe('PlatformInvoicingController — notas crédito/débito', () => {
+  const responseService = {
+    success: jest.fn((data: unknown, message?: string) => ({ success: true, data, message })),
+    created: jest.fn((data: unknown, message?: string) => ({ success: true, data, message })),
+  };
+  const creditNotes = {
+    createCreditNote: jest.fn(),
+    createDebitNote: jest.fn(),
+    getNotesOverview: jest.fn(),
+  };
+  const platformInvoicing = { listInvoices: jest.fn() };
+  const subscriptionFiscal = {
+    getSettingsForController: jest.fn().mockResolvedValue({
+      platform_organization_id: 1,
+      accounting_entity_id: 2,
+      dian_configuration_id: 3,
+    }),
+  };
+  const controller = new PlatformInvoicingController(
+    {
+      ...responseService,
+      paginated: jest.fn((rows: unknown[], total: number) => ({ rows, total })),
+    } as any,
+    platformInvoicing as any,
+    {} as any,
+    subscriptionFiscal as any,
+    creditNotes as any,
+    {} as any,
+    {} as any,
+    {} as any,
+    {} as any,
+    {} as any,
+    {} as any,
+  );
+  const proto = PlatformInvoicingController.prototype as any;
+  const pathOf = (m: string) => Reflect.getMetadata(PATH_METADATA, proto[m]);
+  const methodOf = (m: string) => Reflect.getMetadata(METHOD_METADATA, proto[m]);
+  const permsOf = (m: string) => Reflect.getMetadata(PERMISSIONS_KEY, proto[m]);
+
+  beforeEach(() => jest.clearAllMocks());
+
+  it('POST credit-notes delegates with the actor and reports an accepted note', async () => {
+    creditNotes.createCreditNote.mockResolvedValue({ dian_status: 'accepted', transmission_id: 9 });
+    const dto: any = { related_invoice_id: 5, note_concept_code: '2', reason: 'r' };
+    const res: any = await controller.createCreditNote(dto, { user: { id: 7 } } as any);
+    expect(creditNotes.createCreditNote).toHaveBeenCalledWith(dto, 7);
+    expect(res.message).toMatch(/aceptada por la DIAN/);
+    expect(pathOf('createCreditNote')).toBe('credit-notes');
+    expect(methodOf('createCreditNote')).toBe(RequestMethod.POST);
+    expect(permsOf('createCreditNote')).toEqual(['superadmin:fiscal:invoicing']);
+  });
+
+  it('POST debit-notes does not announce success over a DIAN rejection', async () => {
+    creditNotes.createDebitNote.mockResolvedValue({ dian_status: 'rejected', error_message: 'FAJ44' });
+    const res: any = await controller.createDebitNote({} as any, { user: { id: 7 } } as any);
+    expect(res.message).toMatch(/no la aceptó: FAJ44/);
+    expect(pathOf('createDebitNote')).toBe('debit-notes');
+    expect(permsOf('createDebitNote')).toEqual(['superadmin:fiscal:invoicing']);
+  });
+
+  it('GET invoices/:id/notes returns the overview', async () => {
+    creditNotes.getNotesOverview.mockResolvedValue({ can_create_notes: false });
+    const res: any = await controller.getInvoiceNotes(5);
+    expect(creditNotes.getNotesOverview).toHaveBeenCalledWith(5);
+    expect(res.data).toEqual({ can_create_notes: false });
+    expect(pathOf('getInvoiceNotes')).toBe('invoices/:id/notes');
+    expect(methodOf('getInvoiceNotes')).toBe(RequestMethod.GET);
+    expect(permsOf('getInvoiceNotes')).toEqual(['superadmin:fiscal:invoicing']);
+  });
+
+  it('GET invoices passes the credit_note document_type filter through', async () => {
+    platformInvoicing.listInvoices.mockResolvedValue({ rows: [], total: 0, page: 1, limit: 25 });
+    await controller.listInvoices({ document_type: 'credit_note' } as any);
+    expect(platformInvoicing.listInvoices.mock.calls[0][0].documentType).toBe('credit_note');
+  });
+
+  it('the document_type query DTO accepts the note values and rejects unknown ones', async () => {
+    const { plainToInstance } = await import('class-transformer');
+    const { validate } = await import('class-validator');
+    const ListDto = Reflect.getMetadata('design:paramtypes', proto, 'listInvoices')[0];
+    for (const ok of ['credit_note', 'debit_note', 'sales_invoice', 'support_document']) {
+      expect(await validate(plainToInstance(ListDto, { document_type: ok }))).toHaveLength(0);
+    }
+    expect(await validate(plainToInstance(ListDto, { document_type: 'bogus' }))).not.toHaveLength(0);
+  });
+});

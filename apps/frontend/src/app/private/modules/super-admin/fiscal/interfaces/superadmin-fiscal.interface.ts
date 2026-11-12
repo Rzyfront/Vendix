@@ -238,7 +238,7 @@ export interface GeneralLedgerRow {
   entry_number: string;
   entry_date: string;
   description: string;
-  source_type: JournalEntrySourceType;
+  source_type?: JournalEntrySourceType;
   account_code: string;
   debit_amount: string | number;
   credit_amount: string | number;

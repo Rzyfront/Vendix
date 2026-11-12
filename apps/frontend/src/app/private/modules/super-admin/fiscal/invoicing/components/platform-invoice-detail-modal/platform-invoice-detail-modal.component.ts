@@ -12,6 +12,7 @@ import {
 } from '@angular/core';
 import { DatePipe } from '@angular/common';
 import { takeUntilDestroyed } from '@angular/core/rxjs-interop';
+import { catchError, of } from 'rxjs';
 import { FormsModule } from '@angular/forms';
 
 import {
@@ -60,7 +61,13 @@ import type {
   PlatformInvoiceTransmission,
   PlatformInvoiceWithholding,
 } from '../../../../subscriptions/interfaces/platform-invoice-document.interface';
+import type {
+  PlatformInvoiceNotesInfo,
+  PlatformNoteDocumentType,
+} from '../../../../subscriptions/interfaces/fiscal-billing.interface';
 import { FiscalBillingAdminService } from '../../../../subscriptions/services/fiscal-billing-admin.service';
+import { PlatformInvoiceNoteModalComponent } from '../platform-invoice-note-modal/platform-invoice-note-modal.component';
+import { PlatformInvoiceNotesSectionComponent } from '../platform-invoice-notes-section/platform-invoice-notes-section.component';
 import {
   transmissionStatusBadgeClasses,
   transmissionStatusLabel,
@@ -101,6 +108,8 @@ interface NormalizedWithholding {
     ModalComponent,
     ResponsiveDataViewComponent,
     SelectorComponent,
+    PlatformInvoiceNoteModalComponent,
+    PlatformInvoiceNotesSectionComponent,
   ],
   template: `
     <app-modal
@@ -300,6 +309,17 @@ interface NormalizedWithholding {
                 <app-icon slot="icon" name="file-check" [size]="14"></app-icon>
                 Registrar Evento
               </app-button>
+
+              @if (canCreateNotes()) {
+                <app-button variant="outline" size="sm" (clicked)="openNoteModal('credit_note')">
+                  <app-icon slot="icon" name="file-minus" [size]="14"></app-icon>
+                  Nota crédito
+                </app-button>
+                <app-button variant="outline" size="sm" (clicked)="openNoteModal('debit_note')">
+                  <app-icon slot="icon" name="file-plus" [size]="14"></app-icon>
+                  Nota débito
+                </app-button>
+              }
             </div>
           </div>
 
@@ -542,6 +562,14 @@ interface NormalizedWithholding {
             </div>
           </div>
 
+          <!-- ── NOTAS ASOCIADAS ── -->
+          @if (notesInfo(); as notes) {
+            <app-platform-invoice-notes-section
+              [info]="notes"
+              (noteOpened)="onClose()"
+            />
+          }
+
           <!-- ── EVENTOS RADIAN TIMELINE ── -->
           <div class="space-y-3 pt-2">
             <h3 class="text-sm font-semibold text-text-primary uppercase tracking-wide">
@@ -587,6 +615,14 @@ interface NormalizedWithholding {
         <app-button variant="outline" (clicked)="onClose()">Cerrar</app-button>
       </div>
     </app-modal>
+
+    <!-- Modal Nota crédito / débito -->
+    <app-platform-invoice-note-modal
+      [(isOpen)]="isNoteModalOpen"
+      [invoiceId]="transmissionId()"
+      [noteType]="noteType()"
+      (created)="onNoteCreated()"
+    />
 
     <!-- Modal Reenvío Email -->
     <app-modal
@@ -662,6 +698,11 @@ export class PlatformInvoiceDetailModalComponent {
   readonly downloadingXml = signal(false);
   readonly registeringEvent = signal(false);
   readonly cufeCopied = signal(false);
+
+  /** Notes of the open invoice; null when it can't carry notes or the call failed. */
+  readonly notesInfo = signal<PlatformInvoiceNotesInfo | null>(null);
+  readonly isNoteModalOpen = signal(false);
+  readonly noteType = signal<PlatformNoteDocumentType>('credit_note');
 
   readonly isDeliverModalOpen = signal(false);
   readonly deliverEmail = signal('');
@@ -739,6 +780,21 @@ export class PlatformInvoiceDetailModalComponent {
    * enseña al operador a desconfiar de los que sí funcionan.
    */
   readonly invoiceKeyedActionsAvailable: boolean = false;
+
+  /**
+   * AC1: credit/debit note actions exist only on an accepted sales invoice with
+   * a CUFE. `can_create_notes` comes from the backend, which also excludes
+   * support documents and notes themselves.
+   */
+  readonly canCreateNotes = computed<boolean>(() => {
+    const t = this.transmission();
+    return (
+      this.canUsePlatformActions() &&
+      this.notesInfo()?.can_create_notes === true &&
+      t?.dian_status === 'accepted' &&
+      !!t?.cufe
+    );
+  });
 
   readonly documentNumber = computed<string | null>(
     () =>
@@ -1025,12 +1081,36 @@ export class PlatformInvoiceDetailModalComponent {
           this.eventsError.set(null);
         }
         this.loadResolution();
+        this.loadNotes(kind, transmissionId);
       },
       error: (err: unknown) => {
         this.error.set(describeApiFailure(err).message);
         this.loading.set(false);
       },
     });
+  }
+
+  private loadNotes(kind: PlatformInvoiceKind, transmissionId: number | null): void {
+    this.notesInfo.set(null);
+    if (kind !== 'platform' || !transmissionId) return;
+    this.fiscal
+      .getPlatformInvoiceNotes(transmissionId)
+      .pipe(
+        catchError(() => of(null)),
+        takeUntilDestroyed(this.destroyRef),
+      )
+      .subscribe((info) => this.notesInfo.set(info));
+  }
+
+  openNoteModal(type: PlatformNoteDocumentType): void {
+    this.noteType.set(type);
+    this.isNoteModalOpen.set(true);
+  }
+
+  onNoteCreated(): void {
+    const id = this.invoiceId();
+    if (id) this.loadDetail(id, this.invoiceKind());
+    this.invoiceUpdated.emit();
   }
 
   private applyPayload(data: PlatformInvoiceDetailPayload): void {

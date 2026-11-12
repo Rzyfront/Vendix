@@ -146,8 +146,19 @@ export class AccountingEventsListener {
     user_id?: number;
     /** C4-followup: propagado desde invoice-flow.service.ts (updated.customer). */
     customer?: { id: number; name?: string; tax_id?: string };
+    /** Platform document: `invoice_id` is a `fiscal_transmissions.id`. */
+    platform_transmission?: boolean;
+    /** The emitter already books this document elsewhere (reason code). */
+    skip_auto_entry?: string;
   }) {
     try {
+      if (event.skip_auto_entry) {
+        this.logger.log(
+          `invoice.accepted #${event.invoice_id}: no auto-entry ` +
+            `(${event.skip_auto_entry}).`,
+        );
+        return;
+      }
       if (
         !(await this.isFlowEnabled(
           event.store_id,
@@ -171,6 +182,7 @@ export class AccountingEventsListener {
           tax_breakdown: event.tax_breakdown,
           total: event.total_amount,
           user_id: event.user_id,
+          platform_transmission: event.platform_transmission,
         });
         this.logger.log(
           `Auto-entry (credit note reversal) created for invoice.accepted #${event.invoice_id}`,
@@ -194,13 +206,15 @@ export class AccountingEventsListener {
         total: event.total_amount,
         user_id: event.user_id,
         customer: event.customer,
+        platform_transmission: event.platform_transmission,
       });
       this.logger.log(
         `Auto-entry created for invoice.accepted #${event.invoice_id}`,
       );
       // H3.7 — the invoice of a guest folio crosses the advance its payments
-      // left in 2805 against the receivable it just booked.
-      if (!event.financial_account_id) {
+      // left in 2805 against the receivable it just booked. A platform
+      // transmission id is not an `invoices` id: never cross a tenant folio.
+      if (!event.financial_account_id && !event.platform_transmission) {
         await this.handleLodgingFolioInvoiced(event);
       }
     } catch (error) {

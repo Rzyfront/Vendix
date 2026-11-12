@@ -1,6 +1,14 @@
 import { HttpClient, HttpParams } from '@angular/common/http';
 import { Injectable, inject } from '@angular/core';
-import { Observable, forkJoin, map } from 'rxjs';
+import {
+  Observable,
+  catchError,
+  forkJoin,
+  map,
+  of,
+  switchMap,
+  throwError,
+} from 'rxjs';
 
 import { environment } from '../../../../../../environments/environment';
 import {
@@ -21,6 +29,16 @@ import {
   PaginatedResponse,
   TrialBalanceRow,
 } from '../interfaces/superadmin-fiscal.interface';
+import {
+  adaptBalanceSheet,
+  adaptFiscalPeriod,
+  adaptGeneralLedger,
+  adaptIncomeStatement,
+  adaptJournalEntry,
+  adaptTrialBalance,
+  chartOfAccountsParams,
+  journalEntriesParams,
+} from './superadmin-accounting.adapters';
 
 type VoidResponse = void;
 
@@ -128,15 +146,9 @@ export class SuperadminFiscalService {
   getChartOfAccounts(
     query: ChartOfAccountsQuery = {},
   ): Observable<PaginatedResponse<ChartAccount>> {
-    let params = new HttpParams();
-    if (query.search) params = params.set('search', query.search);
-    if (query.account_type) params = params.set('account_type', query.account_type);
-    if (query.page) params = params.set('page', String(query.page));
-    if (query.limit) params = params.set('limit', String(query.limit));
-
     return this.http.get<PaginatedResponse<ChartAccount>>(
       `${this.base}/accounting/chart-of-accounts`,
-      { params },
+      { params: new HttpParams({ fromObject: chartOfAccountsParams(query) }) },
     );
   }
 
@@ -162,34 +174,61 @@ export class SuperadminFiscalService {
   getJournalEntries(
     query: JournalEntryQuery = {},
   ): Observable<PaginatedResponse<JournalEntry>> {
-    let params = new HttpParams();
-    if (query.page) params = params.set('page', String(query.page));
-    if (query.limit) params = params.set('limit', String(query.limit));
-    if (query.from) params = params.set('from', query.from);
-    if (query.to) params = params.set('to', query.to);
-    if (query.source_type && query.source_type !== 'all') {
-      params = params.set('source_type', query.source_type);
-    }
-    if (query.fiscal_period_id) {
-      params = params.set('fiscal_period_id', query.fiscal_period_id);
-    }
-    if (query.search) params = params.set('search', query.search);
-
-    return this.http.get<PaginatedResponse<JournalEntry>>(
-      `${this.base}/accounting/journal-entries`,
-      { params },
-    );
+    return this.http
+      .get<PaginatedResponse<Record<string, unknown>>>(
+        `${this.base}/accounting/journal-entries`,
+        { params: new HttpParams({ fromObject: journalEntriesParams(query) }) },
+      )
+      .pipe(
+        map((res) => ({
+          ...res,
+          data: (res?.data ?? []).map((e) => adaptJournalEntry(e)),
+        })),
+      );
   }
 
+  /**
+   * The form captures account CODES; the backend (`CreateJournalEntryDto`)
+   * requires `account_id` per line and a numeric `fiscal_period_id`. Each
+   * distinct code is resolved against the platform PUC before posting; an
+   * unknown code stops the request with a readable message.
+   */
   createManualJournalEntry(
     dto: CreateManualJournalEntryDto,
   ): Observable<JournalEntry | null> {
-    return this.http
-      .post<ApiResponse<JournalEntry>>(
-        `${this.base}/accounting/journal-entries`,
-        dto,
-      )
-      .pipe(map((res) => (res?.success ? res.data : null)));
+    const codes = [...new Set(dto.lines.map((l) => l.account_code))];
+    return forkJoin(
+      codes.map((code) =>
+        this.getChartAccountByCode(code).pipe(catchError(() => of(null))),
+      ),
+    ).pipe(
+      switchMap((accounts) => {
+        const idByCode = new Map(codes.map((c, i) => [c, accounts[i]?.id]));
+        const missing = codes.filter((c) => !idByCode.get(c));
+        if (missing.length) {
+          return throwError(() => ({
+            error: {
+              message: `No existe en el PUC de la plataforma: ${missing.join(', ')}.`,
+            },
+          }));
+        }
+        return this.http.post<ApiResponse<Record<string, unknown>>>(
+          `${this.base}/accounting/journal-entries`,
+          {
+            entry_date: dto.entry_date,
+            fiscal_period_id: Number(dto.fiscal_period_id),
+            description: dto.description,
+            lines: dto.lines.map((l) => ({
+              account_id: Number(idByCode.get(l.account_code)),
+              description: l.description,
+              debit_amount: l.debit_amount,
+              credit_amount: l.credit_amount,
+            })),
+          },
+        );
+      }),
+      map((res) => (res?.success ? adaptJournalEntry(res.data) : null)),
+    );
   }
 
   // ─── Account Mappings ───────────────────────────────────────────────────
@@ -247,21 +286,21 @@ export class SuperadminFiscalService {
       .set('to', params.to);
 
     return this.http
-      .get<ApiResponse<TrialBalanceRow[]>>(
+      .get<ApiResponse<Record<string, unknown>>>(
         `${this.base}/accounting/reports/trial-balance`,
         { params: httpParams },
       )
-      .pipe(map((res) => (res?.success ? res.data : [])));
+      .pipe(map((res) => (res?.success ? adaptTrialBalance(res.data) : [])));
   }
 
   getBalanceSheet(as_of: string): Observable<BalanceSheetReport | null> {
     const params = new HttpParams().set('as_of', as_of);
     return this.http
-      .get<ApiResponse<BalanceSheetReport>>(
+      .get<ApiResponse<Record<string, unknown>>>(
         `${this.base}/accounting/reports/balance-sheet`,
         { params },
       )
-      .pipe(map((res) => (res?.success ? res.data : null)));
+      .pipe(map((res) => (res?.success ? adaptBalanceSheet(res.data) : null)));
   }
 
   getIncomeStatement(params: {
@@ -273,11 +312,13 @@ export class SuperadminFiscalService {
       .set('to', params.to);
 
     return this.http
-      .get<ApiResponse<IncomeStatementReport>>(
+      .get<ApiResponse<Record<string, unknown>>>(
         `${this.base}/accounting/reports/income-statement`,
         { params: httpParams },
       )
-      .pipe(map((res) => (res?.success ? res.data : null)));
+      .pipe(
+        map((res) => (res?.success ? adaptIncomeStatement(res.data) : null)),
+      );
   }
 
   getGeneralLedger(params: {
@@ -291,11 +332,11 @@ export class SuperadminFiscalService {
       .set('to', params.to);
 
     return this.http
-      .get<ApiResponse<GeneralLedgerRow[]>>(
+      .get<ApiResponse<Record<string, unknown>>>(
         `${this.base}/accounting/reports/general-ledger`,
         { params: httpParams },
       )
-      .pipe(map((res) => (res?.success ? res.data : [])));
+      .pipe(map((res) => (res?.success ? adaptGeneralLedger(res.data) : [])));
   }
 
   // ─── Obligations ────────────────────────────────────────────────────────
@@ -311,9 +352,13 @@ export class SuperadminFiscalService {
 
   getFiscalPeriods(): Observable<FiscalPeriod[]> {
     return this.http
-      .get<ApiResponse<FiscalPeriod[]>>(
+      .get<ApiResponse<Record<string, unknown>[]>>(
         `${this.base}/accounting/fiscal-periods`,
       )
-      .pipe(map((res) => (res?.success ? res.data : [])));
+      .pipe(
+        map((res) =>
+          res?.success ? (res.data ?? []).map((p) => adaptFiscalPeriod(p)) : [],
+        ),
+      );
   }
 }

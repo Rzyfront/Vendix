@@ -4,9 +4,10 @@
 // dos pipes con el mismo nombre y gana la última registrada.
 import { DatePipe, formatDate } from '@angular/common';
 import { HttpClient, HttpErrorResponse } from '@angular/common/http';
-import { Component, computed, inject, signal } from '@angular/core';
+import { Component, DestroyRef, computed, inject, signal } from '@angular/core';
+import { takeUntilDestroyed } from '@angular/core/rxjs-interop';
 import { ActivatedRoute, RouterLink } from '@angular/router';
-import { firstValueFrom } from 'rxjs';
+import { catchError, firstValueFrom, of } from 'rxjs';
 import { environment } from '../../../../../../../../environments/environment';
 import { ToastService } from '../../../../../../../shared/components/toast/toast.service';
 import {
@@ -24,7 +25,13 @@ import {
 } from '../../../../../../../shared/pipes/currency';
 import { describeApiFailure } from '../../../../../store/invoicing/utils/invoicing-errors.util';
 import type { PlatformInvoiceKind } from '../../../../subscriptions/interfaces/platform-invoice-document.interface';
+import type {
+  PlatformInvoiceNotesInfo,
+  PlatformNoteDocumentType,
+} from '../../../../subscriptions/interfaces/fiscal-billing.interface';
 import { FiscalBillingAdminService } from '../../../../subscriptions/services/fiscal-billing-admin.service';
+import { PlatformInvoiceNoteModalComponent } from '../../components/platform-invoice-note-modal/platform-invoice-note-modal.component';
+import { PlatformInvoiceNotesSectionComponent } from '../../components/platform-invoice-notes-section/platform-invoice-notes-section.component';
 import {
   billingCycleLabel,
   collectionStatusBadgeClasses,
@@ -216,6 +223,8 @@ interface SubscriptionInvoiceDetail {
     ResponsiveDataViewComponent,
     SelectorComponent,
     PlatformInvoicePaymentModalComponent,
+    PlatformInvoiceNoteModalComponent,
+    PlatformInvoiceNotesSectionComponent,
   ],
   template: `
     <div class="p-6 max-w-5xl mx-auto">
@@ -573,8 +582,35 @@ interface SubscriptionInvoiceDetail {
             >
               Regenerar PDF
             </button>
+            @if (canCreateNotes()) {
+              <button
+                app-button
+                type="button"
+                variant="secondary"
+                (click)="openNoteModal('credit_note')"
+                [disabled]="actionLoading()"
+              >
+                Nota crédito
+              </button>
+              <button
+                app-button
+                type="button"
+                variant="secondary"
+                (click)="openNoteModal('debit_note')"
+                [disabled]="actionLoading()"
+              >
+                Nota débito
+              </button>
+            }
           </div>
         </section>
+
+        <!-- Notas asociadas (crédito / débito) y saldo acreditable -->
+        @if (notesInfo(); as notes) {
+          <section class="mt-6 bg-surface rounded-card shadow-card p-4">
+            <app-platform-invoice-notes-section [info]="notes" />
+          </section>
+        }
         }
 
         <!-- Evidencias -->
@@ -599,6 +635,14 @@ interface SubscriptionInvoiceDetail {
     </div>
 
     @if (data(); as d) {
+      @if (isPlatformRail()) {
+        <app-platform-invoice-note-modal
+          [(isOpen)]="noteModalOpen"
+          [invoiceId]="d.invoice.id"
+          [noteType]="noteType()"
+          (created)="onNoteCreated(d.invoice.id)"
+        />
+      }
       @if (canRegisterPayment()) {
         <app-platform-invoice-payment-modal
           [(isOpen)]="paymentModalOpen"
@@ -680,6 +724,7 @@ interface SubscriptionInvoiceDetail {
 export class PlatformInvoiceDetailComponent {
   private readonly http = inject(HttpClient);
   private readonly route = inject(ActivatedRoute);
+  private readonly destroyRef = inject(DestroyRef);
   private readonly toast = inject(ToastService);
   private readonly fiscal = inject(FiscalBillingAdminService);
   private readonly currencyFormat = inject(CurrencyFormatService);
@@ -889,6 +934,45 @@ export class PlatformInvoiceDetailComponent {
 
   readonly paymentModalOpen = signal(false);
 
+  /** Notes of the open invoice; null while loading, on failure or on the SaaS rail. */
+  readonly notesInfo = signal<PlatformInvoiceNotesInfo | null>(null);
+  readonly noteModalOpen = signal(false);
+  readonly noteType = signal<PlatformNoteDocumentType>('credit_note');
+
+  /**
+   * AC1: note actions only on an accepted sales invoice with CUFE. The backend
+   * flag also excludes support documents and notes.
+   */
+  readonly canCreateNotes = computed<boolean>(() => {
+    const d = this.data();
+    if (!d || !this.isPlatformRail()) return false;
+    return (
+      this.notesInfo()?.can_create_notes === true &&
+      d.transmissions.some((t) => t.dian_status === 'accepted' && !!t.cufe)
+    );
+  });
+
+  openNoteModal(type: PlatformNoteDocumentType): void {
+    this.noteType.set(type);
+    this.noteModalOpen.set(true);
+  }
+
+  onNoteCreated(invoiceId: number): void {
+    void this.load(invoiceId);
+  }
+
+  private loadNotes(invoiceId: number): void {
+    this.notesInfo.set(null);
+    if (!this.isPlatformRail()) return;
+    this.fiscal
+      .getPlatformInvoiceNotes(invoiceId)
+      .pipe(
+        catchError(() => of(null)),
+        takeUntilDestroyed(this.destroyRef),
+      )
+      .subscribe((info) => this.notesInfo.set(info));
+  }
+
   constructor() {
     const kind: PlatformInvoiceKind =
       this.route.snapshot.data['kind'] === 'platform' ? 'platform' : 'subscription';
@@ -897,13 +981,20 @@ export class PlatformInvoiceDetailComponent {
       this.detailPathPrefix = '/platform-invoices';
       this.readinessPathPrefix = '/invoices';
     }
-    const id = Number(this.route.snapshot.paramMap.get('id'));
-    if (!Number.isInteger(id) || id <= 0) {
-      this.errorMessage.set('Identificador de factura inválido.');
-      this.loading.set(false);
-      return;
-    }
-    this.load(id);
+    // paramMap (not snapshot): the "Notas asociadas" links navigate between
+    // two ids on this same route, and Angular reuses the component instance.
+    this.route.paramMap.pipe(takeUntilDestroyed()).subscribe((params) => {
+      const id = Number(params.get('id'));
+      if (!Number.isInteger(id) || id <= 0) {
+        this.errorMessage.set('Identificador de factura inválido.');
+        this.loading.set(false);
+        return;
+      }
+      this.errorMessage.set(null);
+      this.data.set(null);
+      this.loading.set(true);
+      void this.load(id);
+    });
   }
 
   readonly saldo = computed<number>(() => {
@@ -1438,6 +1529,7 @@ export class PlatformInvoiceDetailComponent {
       );
       if (res?.success && res.data) {
         this.data.set(res.data);
+        this.loadNotes(res.data.invoice.id);
       } else {
         this.errorMessage.set('La API no devolvió la factura.');
       }
