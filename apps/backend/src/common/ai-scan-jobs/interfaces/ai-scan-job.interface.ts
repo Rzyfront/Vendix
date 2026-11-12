@@ -9,6 +9,7 @@ export type AiScanKind =
   | 'route_sheet'
   | 'inventory_count'
   | 'member_roster'
+  | 'customer_import'
   | 'product_image_enhance'
   | 'product_image_generate'
   | 'invoice_draft';

@@ -64,6 +64,41 @@ export interface CustomerAddress {
     municipality_code?: string | null;
     type?: string;
     is_primary?: boolean;
+    /** Nombre de la sede / establecimiento (`addresses.label`). */
+    label?: string | null;
+}
+
+/** Cliente existente que devuelve el conflicto por documento (`details.existing_customer`). */
+export interface ExistingCustomerSummary {
+    id: number;
+    first_name?: string | null;
+    last_name?: string | null;
+    legal_name?: string | null;
+    email?: string | null;
+    phone?: string | null;
+    document_type?: string | null;
+    document_number?: string | null;
+    person_type?: PersonType | null;
+    in_store?: boolean;
+    /** S8 — dato(s) por los que coincide con lo que se intentó crear. */
+    matched_by?: CustomerMatchField[];
+    /** Otros clientes del alcance que también coinciden (p. ej. el correo). */
+    other_matches?: CustomerOtherMatch[];
+}
+
+export type CustomerMatchField = 'document' | 'email';
+
+export interface CustomerOtherMatch {
+    id: number;
+    display_name: string;
+    matched_by: CustomerMatchField[];
+}
+
+/** Respuesta de `POST /store/customers/:id/locations`. */
+export interface AddCustomerLocationResult {
+    address: CustomerAddress;
+    /** `false` ⇒ ya existía una dirección idéntica y no se creó otra. */
+    created: boolean;
 }
 
 export interface CreateCustomerRequest {

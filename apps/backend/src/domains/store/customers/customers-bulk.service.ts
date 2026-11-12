@@ -1,6 +1,7 @@
 import { Injectable } from '@nestjs/common';
 import { StorePrismaService } from '../../../prisma/services/store-prisma.service';
 import { CustomersService } from './customers.service';
+import { AddressesService } from '../addresses/addresses.service';
 import { RequestContextService } from '@common/context/request-context.service';
 import { VendixHttpException } from '@common/errors/vendix-http.exception';
 import { ErrorCodes } from '@common/errors/error-codes';
@@ -13,6 +14,7 @@ import {
   BulkCustomerUploadResultDto,
   BulkCustomerUploadItemResultDto,
   BulkRowError,
+  BulkCustomerItemDto,
 } from './dto/bulk-customer.dto';
 import { buildReportBuffer } from '@common/reports/report-builder';
 import type { ReportColumn } from '@common/reports/report-column.types';
@@ -72,7 +74,24 @@ export class CustomersBulkService {
   constructor(
     private readonly prisma: StorePrismaService,
     private readonly customersService: CustomersService,
+    private readonly addressesService: AddressesService,
   ) {}
+
+  /**
+   * Clave estable de un documento dentro del archivo/organización. El NIT se
+   * compara sin DV pegado (`900123456-7` == `900123456`). Devuelve `null` si
+   * la fila no trae documento.
+   */
+  private documentKey(customer: BulkCustomerItemDto): string | null {
+    const raw = customer.document_number?.trim();
+    if (!raw) return null;
+    const type =
+      customer.document_type?.trim().toUpperCase() ||
+      (customer.person_type === 'JURIDICA' ? 'NIT' : 'CC');
+    const base = type === 'NIT' ? raw.split('-')[0] : raw;
+    const number = base.toUpperCase().replace(/[\s\-.]/g, '');
+    return number ? `${type}:${number}` : null;
+  }
 
   /**
    * Genera la plantilla de carga masiva en formato Excel (.xlsx)
@@ -90,6 +109,17 @@ export class CustomersBulkService {
       'Documento',
       'Tipo Documento',
       'Teléfono',
+      'Tipo Persona',
+      'Razón Social',
+      'DV',
+      'Nombre Sede',
+      'Dirección',
+      'Dirección 2',
+      'Ciudad',
+      'Departamento',
+      'Código DANE',
+      'País',
+      'Teléfono Sede',
     ];
 
     // Cada columna es texto (ejemplos). `key === header` para que las filas de
@@ -99,7 +129,7 @@ export class CustomersBulkService {
       (header): ReportColumn => ({ key: header, header, type: 'text' }),
     );
 
-    const exampleData = [
+    const exampleData: Array<Record<string, string>> = [
       {
         Correo: 'maria.garcia@email.com',
         Nombre: 'Maria',
@@ -180,6 +210,46 @@ export class CustomersBulkService {
         'Tipo Documento': 'PA',
         Teléfono: '3090123456',
       },
+      // Persona jurídica con varias sedes: mismo NIT en varias filas = un solo
+      // cliente con una ubicación por fila.
+      {
+        Correo: 'compras@acme.com',
+        Nombre: '',
+        Apellido: '',
+        Documento: '900123456',
+        'Tipo Documento': 'NIT',
+        Teléfono: '6041234567',
+        'Tipo Persona': 'JURIDICA',
+        'Razón Social': 'Acme S.A.S',
+        DV: '7',
+        'Nombre Sede': 'Sede Principal',
+        Dirección: 'Calle 10 # 20-30',
+        'Dirección 2': 'Oficina 301',
+        Ciudad: 'Medellín',
+        Departamento: 'Antioquia',
+        'Código DANE': '05001',
+        País: 'CO',
+        'Teléfono Sede': '6041234567',
+      },
+      {
+        Correo: '',
+        Nombre: '',
+        Apellido: '',
+        Documento: '900123456',
+        'Tipo Documento': 'NIT',
+        Teléfono: '',
+        'Tipo Persona': 'JURIDICA',
+        'Razón Social': 'Acme S.A.S',
+        DV: '7',
+        'Nombre Sede': 'Sede Norte',
+        Dirección: 'Carrera 50 # 80-12',
+        'Dirección 2': '',
+        Ciudad: 'Bogotá',
+        Departamento: 'Cundinamarca',
+        'Código DANE': '11001',
+        País: 'CO',
+        'Teléfono Sede': '6017654321',
+      },
     ];
 
     // Hoja de instrucciones con códigos válidos del catálogo DIAN.
@@ -212,6 +282,62 @@ export class CustomersBulkService {
       {
         Campo: 'Teléfono',
         Descripción: 'Número de contacto',
+        Obligatorio: 'No',
+      },
+      {
+        Campo: 'Tipo Persona',
+        Descripción: 'NATURAL o JURIDICA',
+        Obligatorio: 'No (por defecto NATURAL)',
+      },
+      {
+        Campo: 'Razón Social',
+        Descripción: 'Nombre legal de la empresa (personas jurídicas)',
+        Obligatorio: 'Sí si Tipo Persona es JURIDICA',
+      },
+      {
+        Campo: 'DV',
+        Descripción: 'Dígito de verificación del NIT',
+        Obligatorio: 'No',
+      },
+      {
+        Campo: 'Nombre Sede',
+        Descripción: 'Nombre de la ubicación o establecimiento (ej. Sede Norte)',
+        Obligatorio: 'No',
+      },
+      {
+        Campo: 'Dirección',
+        Descripción:
+          'Dirección de la ubicación. Repite el mismo Documento en varias filas para cargar varias ubicaciones de un mismo cliente',
+        Obligatorio: 'No (si la llenas, Ciudad es obligatoria)',
+      },
+      {
+        Campo: 'Dirección 2',
+        Descripción: 'Complemento de la dirección (oficina, bodega, etc.)',
+        Obligatorio: 'No',
+      },
+      {
+        Campo: 'Ciudad',
+        Descripción: 'Ciudad de la ubicación',
+        Obligatorio: 'Sí si hay Dirección',
+      },
+      {
+        Campo: 'Departamento',
+        Descripción: 'Departamento o estado',
+        Obligatorio: 'No',
+      },
+      {
+        Campo: 'Código DANE',
+        Descripción: 'Código DANE del municipio (5 dígitos, ej. 05001)',
+        Obligatorio: 'No',
+      },
+      {
+        Campo: 'País',
+        Descripción: 'Código ISO del país',
+        Obligatorio: 'No (por defecto CO)',
+      },
+      {
+        Campo: 'Teléfono Sede',
+        Descripción: 'Teléfono de contacto de la ubicación',
         Obligatorio: 'No',
       },
       { Campo: '', Descripción: '', Obligatorio: '' },
@@ -277,10 +403,17 @@ export class CustomersBulkService {
     // Pre-calculamos duplicados DENTRO del archivo y los marcamos por fila
     // (no rompemos el lote entero). Cada fila duplicada se reporta con su
     // propio `BulkRowError`.
+    const seenDocs = new Set<string>();
     const emailToFirstRow = new Map<string, number>();
     const duplicateEmailsByRow = new Map<number, string>(); // row -> email
     for (const customer of customers) {
-      if (!customer.email) continue;
+      // Una fila adicional del mismo documento con dirección es otra ubicación
+      // del mismo cliente: repite el correo legítimamente.
+      const docKey = this.documentKey(customer);
+      const isContinuation =
+        !!docKey && seenDocs.has(docKey) && this.hasAddress(customer);
+      if (docKey) seenDocs.add(docKey);
+      if (!customer.email || isContinuation) continue;
       const normalized = customer.email.toLowerCase().trim();
       const row = customer.row_number ?? 0;
       if (emailToFirstRow.has(normalized)) {
@@ -293,6 +426,11 @@ export class CustomersBulkService {
     const results: BulkCustomerUploadItemResultDto[] = [];
     let successful = 0;
     let failed = 0;
+    let locationsAdded = 0;
+    let warnings = 0;
+    const organizationId = context?.organization_id;
+    // Clientes creados/resueltos en este envío, por documento.
+    const customerIdByDoc = new Map<string, number>();
 
     for (const customerData of customers) {
       const rowNum = customerData.row_number ?? 0;
@@ -326,30 +464,139 @@ export class CustomersBulkService {
         continue;
       }
 
+      const docKey = this.documentKey(customerData);
+      const withAddress = this.hasAddress(customerData);
+      const isJuridica = customerData.person_type === 'JURIDICA';
+
+      if (isJuridica && !customerData.legal_name?.trim()) {
+        pushError({
+          row: rowNum,
+          column: 'Razón Social',
+          field: 'legal_name',
+          value: null,
+          code: 'missing_legal_name',
+          message: 'La razón social es obligatoria para personas jurídicas',
+          suggestion: 'Completa la columna "Razón Social" en esta fila.',
+        });
+        continue;
+      }
+      if (withAddress && !customerData.city?.trim()) {
+        pushError({
+          row: rowNum,
+          column: 'Ciudad',
+          field: 'city',
+          value: null,
+          code: 'missing_city',
+          message: 'La ciudad es obligatoria cuando la fila trae una dirección',
+          suggestion: 'Completa la columna "Ciudad" o deja vacía la dirección.',
+        });
+        continue;
+      }
+
+      /** Agrega la dirección de la fila como ubicación del cliente. */
+      const addLocation = async (customerId: number) => {
+        const { created } = await this.addressesService.addCustomerLocation(
+          customerId,
+          this.buildLocationDto(customerData),
+        );
+        return created;
+      };
+
+      /** Reporta la fila como ubicación agregada a un cliente existente. */
+      const reportExistingCustomerLocation = async (
+        customerId: number,
+      ): Promise<void> => {
+        try {
+          const created = await addLocation(customerId);
+          if (created) {
+            results.push({
+              customer: { id: customerId },
+              status: 'location_added',
+              message: 'Ubicación agregada al cliente existente',
+              row_number: rowNum,
+            });
+            locationsAdded++;
+          } else {
+            results.push({
+              customer: { id: customerId },
+              status: 'warning',
+              message: 'Ubicación ya registrada',
+              row_number: rowNum,
+            });
+            warnings++;
+          }
+          successful++;
+        } catch (locError) {
+          pushError({
+            row: rowNum,
+            column: 'Dirección',
+            field: 'address_line_1',
+            value: customerData.address_line_1 ?? null,
+            code: 'location_failed',
+            message: this.errorMessage(locError),
+          });
+        }
+      };
+
       try {
         // Validar: requiere al menos nombre O documento
-        if (!customerData.first_name && !customerData.document_number) {
+        if (
+          !customerData.first_name &&
+          !customerData.legal_name &&
+          !customerData.document_number
+        ) {
           throw new VendixHttpException(
             ErrorCodes.CUST_BULK_002,
             'Se requiere al menos el nombre o el número de documento',
           );
         }
 
+        // Mismo documento ya visto en este archivo/envío o ya existente en la
+        // organización, y la fila trae dirección: es otra ubicación.
+        if (withAddress && docKey) {
+          let existingId = customerIdByDoc.get(docKey);
+          if (existingId === undefined && organizationId) {
+            const existing =
+              await this.customersService.findByDocumentInOrganization(
+                organizationId,
+                docKey.split(':')[1],
+                docKey.split(':')[0],
+              );
+            if (existing?.id) existingId = existing.id;
+          }
+          if (existingId !== undefined) {
+            customerIdByDoc.set(docKey, existingId);
+            await reportExistingCustomerLocation(existingId);
+            continue;
+          }
+        }
+
         // Crear el cliente usando el servicio existente.
         // Sin email -> create() lo normaliza a null (resolveCustomerEmail).
-        const createdCustomer = await this.customersService.create(storeId, {
-          email: customerData.email?.trim() || null,
-          first_name: customerData.first_name?.trim() || '',
-          last_name: customerData.last_name?.trim() || '',
-          document_number: customerData.document_number?.trim() || '',
-          document_type: (customerData.document_type?.trim() || 'CC') as any,
-          phone: customerData.phone?.trim(),
-        });
+        const createdCustomer = await this.customersService.create(
+          storeId,
+          this.buildCreateDto(customerData),
+        );
+        if (docKey && createdCustomer?.id !== undefined) {
+          customerIdByDoc.set(docKey, createdCustomer.id);
+        }
+
+        let message = 'Cliente creado exitosamente';
+        let status: 'success' | 'warning' = 'success';
+        if (withAddress && createdCustomer?.id !== undefined) {
+          try {
+            if (await addLocation(createdCustomer.id)) locationsAdded++;
+          } catch (locError) {
+            status = 'warning';
+            warnings++;
+            message = `Cliente creado, pero la ubicación no se pudo guardar: ${this.errorMessage(locError)}`;
+          }
+        }
 
         results.push({
           customer: createdCustomer,
-          status: 'success',
-          message: 'Cliente creado exitosamente',
+          status,
+          message,
           row_number: rowNum,
         });
         successful++;
@@ -370,6 +617,19 @@ export class CustomersBulkService {
             })
           : { message: error?.message };
         const details = responseBody.details;
+
+        // Carrera / otra página: el documento ya existe y la fila trae
+        // dirección → es una ubicación nueva, no un duplicado.
+        if (
+          errorCode === 'SYS_CONFLICT_001' &&
+          details?.kind === 'document' &&
+          withAddress &&
+          typeof details.existing_customer_id === 'number'
+        ) {
+          if (docKey) customerIdByDoc.set(docKey, details.existing_customer_id);
+          await reportExistingCustomerLocation(details.existing_customer_id);
+          continue;
+        }
 
         // El mapper es la fuente de verdad del copy en español.
         // `baseMessage` solo es un fallback si el mapper no devuelve nada
@@ -409,7 +669,65 @@ export class CustomersBulkService {
       total_processed: customers.length,
       successful,
       failed,
+      locations_added: locationsAdded,
+      warnings,
       results,
     };
+  }
+
+  private hasAddress(customer: BulkCustomerItemDto): boolean {
+    return !!customer.address_line_1?.trim();
+  }
+
+  private errorMessage(error: unknown): string {
+    if (error instanceof VendixHttpException) {
+      const body = error.getResponse() as { message?: unknown };
+      if (typeof body?.message === 'string') return body.message;
+    }
+    return error instanceof Error ? error.message : 'Error desconocido';
+  }
+
+  /**
+   * Payload de `CustomersService.create`. Las columnas nuevas solo se envían
+   * cuando vienen en la fila, para que una plantilla antigua produzca
+   * exactamente el mismo payload de siempre.
+   */
+  private buildCreateDto(customer: BulkCustomerItemDto) {
+    const isJuridica = customer.person_type === 'JURIDICA';
+    const dto: Record<string, unknown> = {
+      email: customer.email?.trim() || null,
+      first_name: isJuridica ? '' : customer.first_name?.trim() || '',
+      last_name: isJuridica ? '' : customer.last_name?.trim() || '',
+      document_number: customer.document_number?.trim() || '',
+      document_type: (customer.document_type?.trim() ||
+        (isJuridica ? 'NIT' : 'CC')) as any,
+      phone: customer.phone?.trim(),
+    };
+    if (customer.person_type) dto.person_type = customer.person_type;
+    if (isJuridica) dto.legal_name = customer.legal_name?.trim();
+    if (customer.verification_digit?.trim()) {
+      dto.verification_digit = customer.verification_digit.trim();
+    }
+    return dto as unknown as Parameters<CustomersService['create']>[1];
+  }
+
+  private buildLocationDto(customer: BulkCustomerItemDto) {
+    const dto: Record<string, unknown> = {
+      address_line_1: customer.address_line_1!.trim(),
+      city: customer.city!.trim(),
+      state: customer.state?.trim() || '',
+      country: customer.country?.trim().toUpperCase() || 'CO',
+    };
+    if (customer.address_line_2?.trim()) {
+      dto.address_line_2 = customer.address_line_2.trim();
+    }
+    if (customer.municipality_code?.trim()) {
+      dto.municipality_code = customer.municipality_code.trim();
+    }
+    if (customer.location_name?.trim()) dto.label = customer.location_name.trim();
+    if (customer.location_phone?.trim()) {
+      dto.phone_number = customer.location_phone.trim();
+    }
+    return dto as unknown as Parameters<AddressesService['addCustomerLocation']>[1];
   }
 }

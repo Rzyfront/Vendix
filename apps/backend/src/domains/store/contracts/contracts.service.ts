@@ -549,6 +549,12 @@ export class ContractsService {
               quotation_id,
               contract_number,
               customer_id: currentQuotation.customer_id,
+              // S4: la ubicación elegida en la cotización pasa al contrato.
+              customer_address_id:
+                (currentQuotation as any).customer_address_id ?? null,
+              customer_address_snapshot:
+                (currentQuotation as any).customer_address_snapshot ??
+                Prisma.DbNull,
               status: 'draft',
               subtotal_amount: currentQuotation.subtotal_amount,
               discount_amount: currentQuotation.discount_amount,

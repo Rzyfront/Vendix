@@ -1,11 +1,14 @@
 import {
   Component,
+  DestroyRef,
   computed,
+  effect,
   inject,
   input,
   output,
   signal,
 } from '@angular/core';
+import { takeUntilDestroyed } from '@angular/core/rxjs-interop';
 
 import { ModalComponent } from '../../../../../../shared/components/modal/modal.component';
 import { ButtonComponent } from '../../../../../../shared/components/button/button.component';
@@ -15,6 +18,11 @@ import {
   AddressPayload,
 } from '../../../../../../shared/components';
 
+import {
+  CustomerAddressPickerComponent,
+  CustomerAddressPickerAddress,
+} from '../../../../../../shared/components/customer-address-picker/customer-address-picker.component';
+import { CustomerLocationsService } from '../../../../../../shared/services/customer-locations.service';
 import {
   CreateAddressPayload,
   UpdateAddressPayload,
@@ -48,6 +56,7 @@ import {
     ButtonComponent,
     IconComponent,
     AddressFormFieldsComponent,
+    CustomerAddressPickerComponent,
   ],
   template: `
     <app-modal
@@ -69,6 +78,33 @@ import {
           }}
         </span>
       </div>
+
+      @if (!addressId() && customerLocations().length > 0) {
+        <section class="mb-4 space-y-2" aria-label="Ubicaciones del cliente">
+          <h4 class="text-sm font-semibold text-text-primary">Ubicaciones del cliente</h4>
+          <app-customer-address-picker
+            [addresses]="customerLocations()"
+            [selectedAddressId]="selectedLocationId()"
+            [showAddNew]="false"
+            [showEditLink]="false"
+            [compact]="true"
+            (addressSelected)="selectedLocationId.set($event)"
+          ></app-customer-address-picker>
+          <app-button
+            variant="primary"
+            type="button"
+            size="sm"
+            [loading]="saving()"
+            [disabled]="selectedLocationId() == null || saving()"
+            (clicked)="useSelectedLocation()"
+          >
+            Usar esta ubicación
+          </app-button>
+          <p class="text-xs text-text-secondary">
+            O captura una nueva dirección:
+          </p>
+        </section>
+      }
 
       <app-address-form-fields
         [initialAddress]="initialAddress()"
@@ -122,6 +158,41 @@ export class ShippingAddressModalComponent {
   readonly submitForm = output<CreateAddressPayload>();
   /** Emite `{ addressId, payload }` listo para `PATCH /store/addresses/:id` (modo editar). */
   readonly submitEdit = output<{ addressId: number; payload: UpdateAddressPayload }>();
+
+  /**
+   * Emite el id de una ubicación guardada del cliente elegida para esta orden.
+   * El padre hace `PATCH /store/orders/:id` con ese id (sin crear dirección).
+   */
+  readonly locationSelected = output<number>();
+
+  private readonly customerLocationsService = inject(CustomerLocationsService);
+  private readonly destroyRef = inject(DestroyRef);
+
+  /** Ubicaciones guardadas del cliente (shipping), principal primero. */
+  readonly customerLocations = signal<CustomerAddressPickerAddress[]>([]);
+  readonly selectedLocationId = signal<number | null>(null);
+
+  constructor() {
+    effect(() => {
+      const cid = this.customerId();
+      if (cid == null) return;
+      this.customerLocationsService
+        .listByCustomer(cid)
+        .pipe(takeUntilDestroyed(this.destroyRef))
+        .subscribe((locations) => {
+          this.customerLocations.set(locations);
+          const chosen = locations.find((l) => l.is_primary) ?? locations[0];
+          this.selectedLocationId.set(chosen?.id ?? null);
+        });
+    });
+  }
+
+  /** Confirma la ubicación elegida como destino de envío de la orden. */
+  useSelectedLocation(): void {
+    const id = this.selectedLocationId();
+    if (id == null || this.saving()) return;
+    this.locationSelected.emit(id);
+  }
 
   /** Última dirección emitida por el formulario hijo. */
   readonly addressPayload = signal<AddressPayload | null>(null);

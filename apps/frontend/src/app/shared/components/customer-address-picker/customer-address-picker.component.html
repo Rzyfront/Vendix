@@ -2,7 +2,10 @@
   <h4 class="customer-address-picker__heading">{{ heading() }}</h4>
 }
 
-<div class="customer-address-picker__list">
+<div
+  class="customer-address-picker__list"
+  [class.customer-address-picker__list--compact]="compact()"
+>
   @for (addr of addresses(); track addr.id) {
     <div
       class="customer-address-picker__card"
@@ -19,7 +22,13 @@
         @if (addr.is_primary) {
           <span class="customer-address-picker__badge">Principal</span>
         }
-        <p class="customer-address-picker__line">{{ formatAddressLine1(addr) }}</p>
+        @if (addr.label) {
+          <p class="customer-address-picker__title">{{ addr.label }}</p>
+        }
+        <p
+          class="customer-address-picker__line"
+          [class.customer-address-picker__line--muted]="!!addr.label"
+        >{{ formatAddressLine1(addr) }}</p>
         <p class="customer-address-picker__line-secondary">
           {{ formatAddressCity(addr) }}
         </p>

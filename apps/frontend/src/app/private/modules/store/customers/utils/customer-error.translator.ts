@@ -1,4 +1,5 @@
 import { HttpErrorResponse } from '@angular/common/http';
+import type { ExistingCustomerSummary } from '../models/customer.model';
 
 /**
  * Traductor centralizado de errores HTTP del módulo de clientes a mensajes
@@ -183,4 +184,40 @@ export function translateCustomerError(
   }
 
   return fallback;
+}
+
+/**
+ * Si el error es el conflicto por documento (409 `SYS_CONFLICT_001` con
+ * `details.kind === 'document'`) devuelve el cliente existente; si no, `null`
+ * y el llamador conserva su toast/traducción habitual.
+ */
+export function extractDocumentConflict(
+  err: AnyError,
+): ExistingCustomerSummary | null {
+  const e = err as {
+    status?: number;
+    error?: { error_code?: string; details?: Record<string, unknown> };
+  } | null;
+  if (!e || e.status !== 409 || e.error?.error_code !== 'SYS_CONFLICT_001') {
+    return null;
+  }
+  const details = e.error.details;
+  const kind = details?.['kind'];
+  // S8 — un cliente es el mismo por identificación O por correo.
+  if (kind !== 'document' && kind !== 'email') return null;
+  const existing = details?.['existing_customer'] as
+    | ExistingCustomerSummary
+    | undefined;
+  if (!existing || typeof existing.id !== 'number') return null;
+  const matchedBy = details?.['matched_by'];
+  const otherMatches = details?.['other_matches'];
+  return {
+    ...existing,
+    matched_by: Array.isArray(matchedBy)
+      ? (matchedBy as ExistingCustomerSummary['matched_by'])
+      : [kind],
+    other_matches: Array.isArray(otherMatches)
+      ? (otherMatches as ExistingCustomerSummary['other_matches'])
+      : [],
+  };
 }

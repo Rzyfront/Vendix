@@ -1,4 +1,5 @@
 import { Component, DestroyRef, inject, signal, computed } from '@angular/core';
+import { customerDisplayName } from '../../../../../../shared/utils/customer-display-name.util';
 import { DatePipe } from '@angular/common';
 import { ActivatedRoute, Router, RouterLink } from '@angular/router';
 import { takeUntilDestroyed } from '@angular/core/rxjs-interop';
@@ -92,11 +93,11 @@ interface ContractEconomicLineDisplay {
               @if (quotation()!.customer) {
                 <div class="flex items-start gap-3 sm:gap-4">
                   <div class="w-10 h-10 sm:w-14 sm:h-14 bg-primary/10 text-primary rounded-lg sm:rounded-xl flex items-center justify-center text-base sm:text-xl font-bold border border-primary/5 flex-shrink-0">
-                    {{ quotation()!.customer!.first_name.charAt(0) || 'C' }}
+                    {{ customerName().charAt(0) || 'C' }}
                   </div>
                   <div class="space-y-0.5 sm:space-y-1 min-w-0">
                     <p class="text-base sm:text-lg font-bold text-gray-900 truncate">
-                      {{ quotation()!.customer!.first_name }} {{ quotation()!.customer!.last_name }}
+                      {{ customerName() }}
                     </p>
                     <div class="flex items-center gap-1.5 sm:gap-2 text-xs sm:text-sm text-gray-600">
                       <app-icon name="mail" size="14" class="text-gray-400 flex-shrink-0 sm:[--icon-size:16px]"></app-icon>
@@ -106,6 +107,17 @@ interface ContractEconomicLineDisplay {
                       <app-icon name="phone" size="14" class="text-gray-400 flex-shrink-0 sm:[--icon-size:16px]"></app-icon>
                       <span class="truncate">{{ quotation()!.customer!.phone || 'Sin teléfono registrado' }}</span>
                     </div>
+                    @if (quotation()!.customer_address_snapshot; as location) {
+                      <div class="flex items-start gap-1.5 sm:gap-2 text-xs sm:text-sm text-gray-600">
+                        <app-icon name="map-pin" size="14" class="text-gray-400 flex-shrink-0 mt-0.5"></app-icon>
+                        <span class="min-w-0">
+                          @if (location.label) {
+                            <strong class="text-gray-900">{{ location.label }}</strong> ·
+                          }
+                          {{ location.address_line1 }}@if (location.city) {, {{ location.city }}}
+                        </span>
+                      </div>
+                    }
                   </div>
                 </div>
               } @else {
@@ -450,6 +462,11 @@ interface ContractEconomicLineDisplay {
   styles: [],
 })
 export class QuotationDetailComponent {
+  /** Razón social para persona jurídica; nombres para persona natural. */
+  readonly customerName = computed(() =>
+    customerDisplayName(this.quotation()?.customer ?? null, 'Cliente'),
+  );
+
   private readonly route = inject(ActivatedRoute);
   private readonly router = inject(Router);
   private readonly destroyRef = inject(DestroyRef);

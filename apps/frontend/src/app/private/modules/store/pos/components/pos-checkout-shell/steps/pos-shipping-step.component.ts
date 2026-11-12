@@ -156,6 +156,8 @@ export class PosShippingStepComponent {
   // ── Inputs / two-way ──────────────────────────────────────────────────────
   readonly cartState = input<CartState | null>(null);
   readonly customerAlias = input<string>('');
+  /** Nombre de la sede (opcional) al crear una dirección nueva del cliente. */
+  readonly locationLabel = signal('');
   readonly editingOrderId = input<number | null>(null);
   /** The Cliente step renders delivery details from this component's template. */
   readonly detailsInCliente = input(false);
@@ -697,6 +699,10 @@ export class PosShippingStepComponent {
         latitude: null, longitude: null,
       });
     }
+  }
+
+  onLocationLabelInput(event: Event): void {
+    this.locationLabel.set((event.target as HTMLInputElement).value);
   }
 
   private setAddress(address: AddressPayload | null, id: number | null): void {
@@ -1543,6 +1549,8 @@ export class PosShippingStepComponent {
     if (p.latitude != null) dto.latitude = String(p.latitude);
     if (p.longitude != null) dto.longitude = String(p.longitude);
     if (p.municipality_code) dto.municipality_code = p.municipality_code;
+    const label = this.locationLabel().trim();
+    if (label) dto.label = label;
     return dto;
   }
 

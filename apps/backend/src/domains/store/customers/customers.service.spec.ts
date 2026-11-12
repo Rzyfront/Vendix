@@ -51,6 +51,7 @@ describe('CustomersService — QUI-728 customer fiscal data', () => {
     },
     store_users: {
       upsert: jest.fn(),
+      findFirst: jest.fn(),
     },
     // `$transaction([...ops])` runs the ops in order; each is awaited.
     // For tests we want the underlying `users.update` and `store_users.upsert`
@@ -236,6 +237,176 @@ describe('CustomersService — QUI-728 customer fiscal data', () => {
       expect(data.document_type).toBe('CC');
       expect(data.document_number).toBe('12345678');
       expect(data.verification_digit).toBeNull();
+    });
+  });
+
+  describe('create() — documento ya existente (múltiples ubicaciones)', () => {
+    it('rechaza con SYS_CONFLICT_001 y devuelve el cliente existente para elegir editar o agregar ubicación', async () => {
+      mockPrismaService.users.findFirst.mockResolvedValueOnce({
+        id: 77,
+        first_name: '',
+        last_name: '',
+        legal_name: 'Distribuidora Andes SAS',
+        email: 'compras@andes.co',
+        phone: '3001112233',
+        document_type: 'NIT',
+        document_number: '900123456',
+        person_type: 'JURIDICA',
+        password: 'secret-hash',
+        user_roles: [],
+      });
+      mockPrismaService.store_users.findFirst.mockResolvedValueOnce(null);
+
+      const error: any = await service
+        .create(1, {
+          legal_name: 'Distribuidora Andes SAS',
+          document_type: 'NIT',
+          document_number: '900123456',
+          person_type: 'JURIDICA',
+        } as any)
+        .catch((e) => e);
+      expect(error.errorCode).toBe('SYS_CONFLICT_001');
+      expect(error.getResponse()).toMatchObject({
+        details: {
+          kind: 'document',
+          existing_customer_id: 77,
+          existing_customer: {
+            id: 77,
+            legal_name: 'Distribuidora Andes SAS',
+            document_number: '900123456',
+            person_type: 'JURIDICA',
+            in_store: false,
+          },
+        },
+      });
+      expect(mockPrismaService.users.create).not.toHaveBeenCalled();
+    });
+
+    it('no expone columnas privadas del usuario existente', async () => {
+      mockPrismaService.users.findFirst.mockResolvedValueOnce({
+        id: 77,
+        document_type: 'CC',
+        document_number: '12345678',
+        password: 'secret-hash',
+        user_roles: [],
+      });
+      mockPrismaService.store_users.findFirst.mockResolvedValueOnce({ id: 1 });
+
+      const error: any = await service
+        .create(1, {
+          first_name: 'Ana',
+          last_name: 'Pérez',
+          document_type: 'CC',
+          document_number: '12345678',
+        } as any)
+        .catch((e) => e);
+
+      const details = error.getResponse().details;
+      expect(details.existing_customer.in_store).toBe(true);
+      expect(details.existing_customer).not.toHaveProperty('password');
+    });
+  });
+
+  describe('create() — alcance operativo de duplicados (S8)', () => {
+    const build = (scope: 'STORE' | 'ORGANIZATION') =>
+      new CustomersService(
+        mockPrismaService as any,
+        mockEventEmitter as any,
+        { getOperatingScope: jest.fn().mockResolvedValue(scope) } as any,
+      );
+
+    it('D6: en scope STORE el bloqueo sigue siendo por organización y solo la info se limita a la tienda', async () => {
+      (mockPrismaService.users.findMany as jest.Mock).mockResolvedValue([]);
+      mockPrismaService.users.findFirst
+        .mockResolvedValueOnce(null) // correo libre en la organización
+        .mockResolvedValueOnce({ id: 77, document_type: 'CC', document_number: '12345678', user_roles: [] });
+      mockPrismaService.store_users.findFirst.mockResolvedValueOnce(null);
+
+      const error: any = await build('STORE')
+        .create(1, {
+          first_name: 'Ana',
+          last_name: 'Pérez',
+          email: 'ana@x.co',
+          document_type: 'CC',
+          document_number: '12345678',
+        } as any)
+        .catch((e) => e);
+
+      // El documento existe en otra tienda de la org: igual se bloquea.
+      expect(error.getResponse().details).toMatchObject({
+        kind: 'document',
+        existing_customer: { id: 77, in_store: false },
+      });
+      const hardChecks = (mockPrismaService.users.findFirst as jest.Mock).mock.calls.map(
+        (c) => c[0].where,
+      );
+      for (const w of hardChecks) {
+        expect(w.organization_id).toBe(100);
+        expect(w.store_users).toBeUndefined();
+      }
+      // La información de coincidencias sí se limita a la tienda.
+      expect(
+        (mockPrismaService.users.findMany as jest.Mock).mock.calls[0][0].where
+          .store_users,
+      ).toEqual({ some: { store_id: 1 } });
+      expect(mockPrismaService.users.create).not.toHaveBeenCalled();
+    });
+
+    it('sin conflicto no consulta coincidencias extra', async () => {
+      (mockPrismaService.users.findMany as jest.Mock).mockClear();
+      await build('STORE').create(1, {
+        first_name: 'Ana',
+        last_name: 'Pérez',
+        document_type: 'CC',
+        document_number: '87654321',
+      } as any);
+      expect(mockPrismaService.users.findMany).not.toHaveBeenCalled();
+    });
+
+    it('en scope ORGANIZATION busca en toda la organización', async () => {
+      (mockPrismaService.users.findMany as jest.Mock).mockResolvedValue([]);
+      await build('ORGANIZATION').create(1, {
+        first_name: 'Ana',
+        last_name: 'Pérez',
+        document_type: 'CC',
+        document_number: '12345678',
+      } as any);
+      const docCall = (mockPrismaService.users.findFirst as jest.Mock).mock.calls
+        .map((c) => c[0].where)
+        .find((w) => w.document_number);
+      expect(docCall.organization_id).toBe(100);
+      expect(docCall.store_users).toBeUndefined();
+    });
+
+    it('informa por qué datos coincide y los otros clientes que coinciden', async () => {
+      (mockPrismaService.users.findMany as jest.Mock).mockResolvedValue([
+        { id: 77, legal_name: 'Andes SAS', document_type: 'NIT', document_number: '900123456', email: null, store_users: [{ id: 1 }] },
+        { id: 88, first_name: 'Ana', last_name: 'Pérez', document_type: 'CC', document_number: '1', email: 'compras@andes.co', store_users: [] },
+      ]);
+      mockPrismaService.users.findFirst
+        .mockResolvedValueOnce(null) // correo: no hay en este alcance (otro mock de findMany sí)
+        .mockResolvedValueOnce({ id: 77, legal_name: 'Andes SAS', document_type: 'NIT', document_number: '900123456', user_roles: [] });
+      mockPrismaService.store_users.findFirst.mockResolvedValueOnce({ id: 1 });
+
+      const error: any = await build('ORGANIZATION')
+        .create(1, {
+          legal_name: 'Andes SAS',
+          person_type: 'JURIDICA',
+          document_type: 'NIT',
+          document_number: '900123456',
+          email: 'compras@andes.co',
+        } as any)
+        .catch((e) => e);
+
+      expect(error.getResponse().details).toMatchObject({
+        kind: 'document',
+        matched_by: ['document'],
+        other_matches: [{ id: 88, display_name: 'Ana Pérez', matched_by: ['email'] }],
+      });
+      // Sin documento ni correo de terceros en el 409.
+      expect(error.getResponse().details.other_matches).toEqual([
+        { id: 88, display_name: 'Ana Pérez', matched_by: ['email'] },
+      ]);
     });
   });
 

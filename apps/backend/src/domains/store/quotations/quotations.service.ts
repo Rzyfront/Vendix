@@ -58,6 +58,10 @@ import {
 import { buildQuotationContractPresentation } from './quotation-contract-presentation';
 import type { ProfileContractCostLine } from '../invoicing/profiles/profile-contract-economics';
 import type { QuotationProfileConfig } from '../backend-quotations-profiles/quotation-profile-config';
+import {
+  resolveCustomerAddressSnapshot,
+  toAddressSnapshotJson,
+} from './customer-address-snapshot.util';
 
 /**
  * Total BRUTO de cada línea, antes del descuento.
@@ -155,6 +159,8 @@ export class QuotationsService {
         id: true,
         first_name: true,
         last_name: true,
+        // Persona jurídica: su nombre es la razón social.
+        legal_name: true,
         email: true,
         phone: true,
       },
@@ -264,10 +270,16 @@ export class QuotationsService {
           ? new Date(Date.now() + validityDays * 86400000)
           : null;
 
+    const addressColumns = await this.buildAddressColumnsForCreate(
+      createQuotationDto.customer_id,
+      createQuotationDto.customer_address_id,
+    );
+
     const quotation = await this.prisma.quotations.create({
       data: {
         store_id,
         customer_id: createQuotationDto.customer_id,
+        ...addressColumns,
         quotation_number,
         status: quotation_status_enum.draft,
         // A.1 (ADR-01): destino fijo al crear; sin valor nace `sale`.
@@ -357,11 +369,16 @@ export class QuotationsService {
           ? new Date(Date.now() + validityDays * 86400000)
           : null;
     const totals = snapshot.calculation.totals;
+    const addressColumns = await this.buildAddressColumnsForCreate(
+      dto.customer_id,
+      dto.customer_address_id,
+    );
 
     const quotation = await this.prisma.quotations.create({
       data: {
         store_id,
         customer_id: dto.customer_id,
+        ...addressColumns,
         quotation_number,
         status: quotation_status_enum.draft,
         destination: 'contract',
@@ -596,6 +613,11 @@ export class QuotationsService {
         tierSnapshots,
       );
 
+      const addressColumns = await this.buildAddressColumnsForUpdate(
+        quotation,
+        updateQuotationDto,
+      );
+
       return this.prisma.$transaction(async (tx) => {
         await tx.quotation_items.deleteMany({ where: { quotation_id: id } });
 
@@ -629,6 +651,7 @@ export class QuotationsService {
           data: {
             customer_id:
               updateQuotationDto.customer_id ?? quotation.customer_id,
+            ...addressColumns,
             channel: (updateQuotationDto.channel as any) ?? quotation.channel,
             valid_until: updateQuotationDto.valid_until
               ? new Date(updateQuotationDto.valid_until)
@@ -678,12 +701,18 @@ export class QuotationsService {
     const {
       items: _items,
       destination: _destination,
+      customer_address_id: _customerAddressId,
       ...updateData
     } = updateQuotationDto as any;
+    const addressColumns = await this.buildAddressColumnsForUpdate(
+      quotation,
+      updateQuotationDto,
+    );
     return this.prisma.quotations.update({
       where: { id },
       data: {
         ...updateData,
+        ...addressColumns,
         valid_until: updateData.valid_until
           ? new Date(updateData.valid_until)
           : undefined,
@@ -691,6 +720,59 @@ export class QuotationsService {
       },
       include: this.QUOTATION_INCLUDE,
     });
+  }
+
+  /** Location columns for a new quotation; validates ownership in this store. */
+  private async buildAddressColumnsForCreate(
+    customer_id: number | null | undefined,
+    customer_address_id: number | null | undefined,
+  ): Promise<{
+    customer_address_id?: number;
+    customer_address_snapshot?: Prisma.InputJsonValue;
+  }> {
+    if (customer_address_id == null) return {};
+    const snapshot = await resolveCustomerAddressSnapshot(
+      this.prisma,
+      customer_id,
+      customer_address_id,
+    );
+    return {
+      customer_address_id,
+      customer_address_snapshot: toAddressSnapshotJson(snapshot),
+    };
+  }
+
+  /**
+   * Location columns for an update. Passing an id re-validates it against the
+   * (possibly new) customer; changing the customer without passing a location
+   * clears both columns; otherwise nothing changes.
+   */
+  private async buildAddressColumnsForUpdate(
+    quotation: { customer_id?: number | null },
+    dto: { customer_id?: number | null; customer_address_id?: number | null },
+  ): Promise<{
+    customer_address_id?: number | null;
+    customer_address_snapshot?: Prisma.InputJsonValue | typeof Prisma.DbNull;
+  }> {
+    const customerId = dto.customer_id ?? quotation.customer_id;
+    if (dto.customer_address_id != null) {
+      const snapshot = await resolveCustomerAddressSnapshot(
+        this.prisma,
+        customerId,
+        dto.customer_address_id,
+      );
+      return {
+        customer_address_id: dto.customer_address_id,
+        customer_address_snapshot: toAddressSnapshotJson(snapshot),
+      };
+    }
+    if (dto.customer_id != null && dto.customer_id !== quotation.customer_id) {
+      return {
+        customer_address_id: null,
+        customer_address_snapshot: Prisma.DbNull,
+      };
+    }
+    return {};
   }
 
   private async updateContractQuotation(
@@ -748,6 +830,8 @@ export class QuotationsService {
         })
       : existingSnapshot;
 
+    const addressColumns = await this.buildAddressColumnsForUpdate(quotation, dto);
+
     const now = new Date();
     return this.prisma.$transaction(async (tx) => {
       // Raw transaction clients are unscoped: CAS includes both tenant anchors
@@ -774,6 +858,7 @@ export class QuotationsService {
 
       const data: Prisma.quotationsUncheckedUpdateInput = {
         customer_id: dto.customer_id,
+        ...addressColumns,
         channel: dto.channel as Prisma.quotationsUncheckedUpdateInput['channel'],
         valid_until:
           dto.valid_until !== undefined
@@ -1013,9 +1098,24 @@ export class QuotationsService {
         total_amount: header.grand_total,
         internal_notes: `Convertida desde cotización ${quotation.quotation_number}`,
         channel: quotation.channel,
+        // S4: la ubicación elegida en la cotización viaja a la orden.
+        ...((quotation as any).customer_address_id != null
+          ? { shipping_address_id: (quotation as any).customer_address_id }
+          : {}),
       } as any,
       { id: context?.user_id },
     );
+
+    // Snapshot de la ubicación: la orden no lo escribe en su flujo normal.
+    // Se completa solo si la cotización tiene uno y la orden no trae ninguno.
+    const quotationAddressSnapshot = (quotation as any)
+      .customer_address_snapshot;
+    if (quotationAddressSnapshot && !(order as any).shipping_address_snapshot) {
+      await this.prisma.orders.update({
+        where: { id: order.id },
+        data: { shipping_address_snapshot: quotationAddressSnapshot },
+      });
+    }
 
     // Update quotation status
     const updated = await this.prisma.quotations.update({
@@ -1052,6 +1152,9 @@ export class QuotationsService {
       data: {
         store_id,
         customer_id: quotation.customer_id,
+        customer_address_id: (quotation as any).customer_address_id ?? null,
+        customer_address_snapshot:
+          (quotation as any).customer_address_snapshot ?? Prisma.DbNull,
         quotation_number,
         status: quotation_status_enum.draft,
         // A.1: el duplicado hereda el destino (fijado al crear, no editable).

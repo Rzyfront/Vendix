@@ -115,6 +115,23 @@ const TRANSITION_META: Record<ContractTransitionTarget, { label: string; icon: s
               }
             </app-card>
 
+            @if (contract()!.customer_address_snapshot; as location) {
+              <app-card title="Ubicación / establecimiento" shadow="sm" [responsivePadding]="true">
+                <div class="text-sm text-text-primary">
+                  @if (location.label) {
+                    <p class="font-semibold">{{ location.label }}</p>
+                  }
+                  <p>{{ location.address_line1 }}@if (location.address_line2) {, {{ location.address_line2 }}}</p>
+                  <p class="text-text-secondary">
+                    {{ location.city }}@if (location.state_province) {, {{ location.state_province }}}
+                  </p>
+                  @if (location.phone_number) {
+                    <p class="text-text-secondary">Tel: {{ location.phone_number }}</p>
+                  }
+                </div>
+              </app-card>
+            }
+
             <app-card title="Líneas de costo directo de la cotización congelada" shadow="sm" [responsivePadding]="true">
               @if (contract()!.items?.length) {
                 <app-responsive-data-view

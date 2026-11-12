@@ -88,6 +88,12 @@ export class CreateQuotationDto {
   @IsInt()
   customer_id?: number;
 
+  /** Ubicación/establecimiento del cliente (addresses.id) para esta cotización. */
+  @IsOptional()
+  @IsInt()
+  @Min(1)
+  customer_address_id?: number;
+
   /**
    * A.1 (ADR-01, FB-01) — Destino de la cotizacion. Opcional al crear:
    * sin valor nace `sale` y fluye a orden como hoy. Se fija al crear y

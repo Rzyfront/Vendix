@@ -10,6 +10,10 @@ import { Queue } from 'bullmq';
 import { randomUUID } from 'crypto';
 import { StorePrismaService } from '../../../prisma/services/store-prisma.service';
 import {
+  resolveCustomerAddressSnapshot,
+  toAddressSnapshotJson,
+} from '../quotations/customer-address-snapshot.util';
+import {
   customerDisplayName,
   resolveCustomerSnapshotName,
 } from '../../../common/helpers/customer-display-name.helper';
@@ -1216,6 +1220,17 @@ export class DispatchNotesService {
 
     const customer_name = customerDisplayName(customer);
 
+    // S4: ubicación del cliente elegida; se valida con el cliente scoped y el
+    // snapshot se guarda en `customer_address` (mismas claves que las demás vías).
+    const locationSnapshot =
+      dto.customer_address_id != null
+        ? await resolveCustomerAddressSnapshot(
+            this.prisma,
+            dto.customer_id,
+            dto.customer_address_id,
+          )
+        : null;
+
     // Calculate totals from items
     const items: any[] = dto.items || [];
     const subtotal = items.reduce(
@@ -1250,6 +1265,9 @@ export class DispatchNotesService {
             customer_id: dto.customer_id,
             customer_name,
             customer_tax_id: customer.document_number || null,
+            ...(locationSnapshot
+              ? { customer_address: toAddressSnapshotJson(locationSnapshot) }
+              : {}),
             sales_order_id: dto.sales_order_id,
             dispatch_location_id: dto.dispatch_location_id,
             supplier_id: dto.supplier_id ?? null,

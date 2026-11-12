@@ -36,6 +36,7 @@ import {
   CustomerSectionEmptyComponent,
 } from '../components/customer-section/customer-section.component';
 import { CustomerCrmPanelComponent } from '../crm/profile/customer-crm-panel.component';
+import { CustomerLocationsComponent } from '../components/customer-locations/customer-locations.component';
 import {
   StickyHeaderComponent,
   StickyHeaderActionButton,
@@ -59,6 +60,7 @@ import {
     StickyHeaderComponent,
     ScrollableTabsComponent,
     CustomerCrmPanelComponent,
+    CustomerLocationsComponent,
     CustomerSectionComponent,
     CustomerSectionEmptyComponent,
     BadgeComponent,
@@ -78,16 +80,21 @@ import {
         (actionClicked)="onHeaderAction($event)"
       ></app-sticky-header>
     
-      @if (showCrmTab()) {
-        <div class="mb-4">
-          <app-scrollable-tabs
-            [tabs]="profileTabs"
-            [activeTab]="activeTab()"
-            size="sm"
-            ariaLabel="Secciones de la ficha del cliente"
-            (tabChange)="selectTab($event)"
-          ></app-scrollable-tabs>
-        </div>
+      <div class="mb-4">
+        <app-scrollable-tabs
+          [tabs]="visibleTabs()"
+          [activeTab]="activeTab()"
+          size="sm"
+          ariaLabel="Secciones de la ficha del cliente"
+          (tabChange)="selectTab($event)"
+        ></app-scrollable-tabs>
+      </div>
+
+      @if (activeTab() === 'ubicaciones' && customerId()) {
+        <app-customer-locations
+          [customerId]="customerId()!"
+          (changed)="loadCustomer()"
+        ></app-customer-locations>
       }
 
       @if (activeTab() === 'crm' && customerId()) {
@@ -244,6 +251,9 @@ import {
           @if (primaryAddress(); as addr) {
             <app-customer-section title="Dirección" icon="map-pin">
               <div class="space-y-1">
+                @if (addr.label) {
+                  <p class="text-sm font-semibold text-text-primary">{{ addr.label }}</p>
+                }
                 <p class="text-sm text-text-primary">
                   {{ addr.address_line1 }}{{ addr.address_line2 ? ', ' + addr.address_line2 : '' }}
                 </p>
@@ -258,6 +268,13 @@ import {
                     Tel: {{ addr.phone_number }}
                   </p>
                 }
+                <button
+                  type="button"
+                  class="text-xs font-semibold text-primary hover:underline"
+                  (click)="selectTab('ubicaciones')"
+                >
+                  Ver todas las ubicaciones ({{ customer()?.addresses?.length ?? 1 }})
+                </button>
               </div>
             </app-customer-section>
           }
@@ -758,21 +775,31 @@ export class CustomerDetailsComponent {
   // CRM tab (PLAN-CRM §7, H2). `?tab=crm` opens it directly.
   readonly profileTabs: ScrollableTab[] = [
     { id: 'info', label: 'Información', icon: 'user' },
+    { id: 'ubicaciones', label: 'Ubicaciones', icon: 'map-pin' },
     { id: 'crm', label: 'CRM', icon: 'trending-up' },
   ];
-  readonly activeTab = signal<'info' | 'crm'>('info');
+  readonly activeTab = signal<'info' | 'ubicaciones' | 'crm'>('info');
   readonly showCrmTab = computed(
     () =>
       this.authFacade.isOwner() ||
       this.authFacade.hasPermission('store:customers:read'),
   );
 
+  /** Las pestañas siempre se muestran; CRM solo con su permiso. */
+  readonly visibleTabs = computed<ScrollableTab[]>(() =>
+    this.profileTabs.filter((t) => t.id !== 'crm' || this.showCrmTab()),
+  );
+
+  private resolveTab(tab: string | null): 'info' | 'ubicaciones' | 'crm' {
+    return tab === 'crm' || tab === 'ubicaciones' ? tab : 'info';
+  }
+
   selectTab(tab: string): void {
-    const next = tab === 'crm' ? 'crm' : 'info';
+    const next = this.resolveTab(tab);
     this.activeTab.set(next);
     this.router.navigate([], {
       relativeTo: this.route,
-      queryParams: { tab: next === 'crm' ? 'crm' : null },
+      queryParams: { tab: next === 'info' ? null : next },
       queryParamsHandling: 'merge',
       replaceUrl: true,
     });
@@ -868,7 +895,7 @@ export class CustomerDetailsComponent {
     this.route.queryParamMap
       .pipe(takeUntilDestroyed(this.destroyRef))
       .subscribe((params) => {
-        this.activeTab.set(params.get('tab') === 'crm' ? 'crm' : 'info');
+        this.activeTab.set(this.resolveTab(params.get('tab')));
       });
 
     this.route.paramMap
