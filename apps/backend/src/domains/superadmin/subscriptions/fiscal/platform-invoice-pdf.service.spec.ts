@@ -214,6 +214,39 @@ describe('PlatformInvoicePdfService (graphic representation)', () => {
     expect(d.company_tax_responsibility_labels.join(' ')).toContain('O-13 Gran contribuyente');
   });
 
+  it('prints a credit note as NOTA CREDITO with the original invoice, concept and reason', async () => {
+    const gen = jest.spyOn(InvoicePdfBuilder, 'generate').mockResolvedValue(Buffer.from('%PDF'));
+    const { svc } = setup(
+      makeTx({
+        document_type: 'credit_note',
+        source_type: 'platform_credit_note',
+        document_number: 'NC5',
+        cufe: null,
+        cude: 'cude-xyz',
+      }),
+      {
+        ...SNAPSHOT,
+        notes: null,
+        note: {
+          type: 'credit_note',
+          concept_code: '3',
+          reason: 'Descuento pactado',
+          original_document_number: 'VNDS1',
+          original_cufe: 'cufe-orig',
+        },
+      },
+    );
+    await svc.previewPdf(69);
+    const d: any = gen.mock.calls[0][0];
+    expect(d.invoice_type).toBe('credit_note');
+    expect(d.invoice_number).toBe('NC5');
+    expect(d.cufe).toBe('cude-xyz');
+    expect(d.notes).toContain('Factura original: VNDS1');
+    expect(d.notes).toContain('cufe-orig');
+    expect(d.notes).toContain('Rebaja o descuento');
+    expect(d.notes).toContain('Motivo: Descuento pactado');
+  });
+
   it('falls back for old snapshots (created_at date, taxes grouped from lines, COP)', async () => {
     const gen = jest.spyOn(InvoicePdfBuilder, 'generate').mockResolvedValue(Buffer.from('%PDF'));
     const old = {

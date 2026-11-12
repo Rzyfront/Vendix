@@ -40,6 +40,7 @@ import {
   resolveDeliveryIssuerIdentity,
 } from '../../../store/invoicing/utils/dian-delivery-envelope.util';
 import { PlatformInvoicePdfService } from './platform-invoice-pdf.service';
+import { PLATFORM_NOTE_SOURCE_TYPES } from './platform-note.helpers';
 
 export interface PlatformDeliverResult {
   invoice_id: number;
@@ -80,7 +81,7 @@ export class PlatformDeliveryService {
         where: {
           id: invoice_id,
           organization_id: platformOrgId,
-          source_type: 'platform_invoice',
+          source_type: { in: ['platform_invoice', ...PLATFORM_NOTE_SOURCE_TYPES] },
         },
       });
     if (!transmission) {
@@ -115,7 +116,13 @@ export class PlatformDeliveryService {
     const acquirer = metas.find((m) => m.kind === 'platform_acquirer_snapshot');
     const invoiceSnap = metas.find((m) => m.kind === 'platform_invoice_snapshot');
 
-    const to = (recipient || acquirer?.email || '').trim();
+    // Una nota se envía al cliente de la factura original (su snapshot copia el cliente).
+    const to = (
+      recipient ||
+      acquirer?.email ||
+      (invoiceSnap?.customer as { email?: string } | undefined)?.email ||
+      ''
+    ).trim();
     if (!to || !isEmail(to)) {
       throw new VendixHttpException(
         ErrorCodes.INVOICING_DELIVERY_001,
@@ -125,6 +132,17 @@ export class PlatformDeliveryService {
     }
 
     const number = transmission.document_number;
+    const doc_type: 'sales_invoice' | 'credit_note' | 'debit_note' =
+      transmission.document_type === 'credit_note' ||
+      transmission.document_type === 'debit_note'
+        ? transmission.document_type
+        : 'sales_invoice';
+    const doc_label =
+      doc_type === 'credit_note'
+        ? 'Nota-Credito'
+        : doc_type === 'debit_note'
+          ? 'Nota-Debito'
+          : 'Factura';
     const { issuer, operation_mode } =
       await this.resolvePlatformIssuer(platformOrgId);
     const zip = new AdmZip();
@@ -133,7 +151,7 @@ export class PlatformDeliveryService {
     let pdf_buffer: Buffer | undefined;
     try {
       pdf_buffer = await this.pdf_service.previewPdf(transmission.id);
-      zip.addFile(`Factura-${number}.pdf`, pdf_buffer);
+      zip.addFile(`${doc_label}-${number}.pdf`, pdf_buffer);
       has_content = true;
     } catch (error) {
       this.logger.warn(
@@ -142,7 +160,7 @@ export class PlatformDeliveryService {
     }
     if (transmission.xml_document) {
       zip.addFile(
-        `Factura-${number}.xml`,
+        `${doc_label}-${number}.xml`,
         Buffer.from(transmission.xml_document, 'utf-8'),
       );
       has_content = true;
@@ -158,7 +176,7 @@ export class PlatformDeliveryService {
           document_number: number,
           issue_date: issue_date_raw,
           operation_mode,
-          fallback_name: `Factura-${number}.zip`,
+          fallback_name: `${doc_label}-${number}.zip`,
         })
       : null;
     const attachments: EmailAttachment[] = has_content
@@ -174,8 +192,11 @@ export class PlatformDeliveryService {
     const totals = (invoiceSnap?.totals ?? {}) as Record<string, number>;
     const email_data: InvoiceEmailData = {
       invoice_number: number,
-      invoice_type: 'sales_invoice',
-      customer_name: acquirer?.legal_name ?? 'Cliente',
+      invoice_type: doc_type,
+      customer_name:
+        acquirer?.legal_name ??
+        (invoiceSnap?.customer as { legal_name?: string } | undefined)?.legal_name ??
+        'Cliente',
       issuer_name: issuer?.legal_name ?? 'Vendix',
       issue_date: (invoiceSnap?.issue_date as string) ??
         (transmission.created_at
@@ -196,7 +217,7 @@ export class PlatformDeliveryService {
       withholding: 0,
       total: Number(totals.total ?? 0),
       currency: (invoiceSnap?.currency as string) ?? 'COP',
-      cufe: transmission.cufe ?? undefined,
+      cufe: transmission.cufe ?? transmission.cude ?? undefined,
       store_name: 'Vendix',
     };
     const html = generateInvoiceEmailHtml(email_data);
@@ -204,8 +225,8 @@ export class PlatformDeliveryService {
     const subject = buildDeliverySubject({
       issuer,
       document_number: number,
-      invoice_type: 'sales_invoice',
-      fallback_subject: `Factura ${number} - Vendix`,
+      invoice_type: doc_type,
+      fallback_subject: `${doc_label.replace('-', ' ')} ${number} - Vendix`,
     });
     const sender = buildDeliverySender(issuer);
 

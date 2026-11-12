@@ -67,13 +67,38 @@ describe('PlatformDeliveryService', () => {
     expect(prisma.fiscal_transmissions.findFirst.mock.calls[0][0].where).toMatchObject({
       id: 7,
       organization_id: 1,
-      source_type: 'platform_invoice',
+      source_type: { in: ['platform_invoice', 'platform_credit_note', 'platform_debit_note'] },
     });
     expect(email.sendEmailWithAttachments).toHaveBeenCalledTimes(1);
     expect(email.sendEmailWithAttachments.mock.calls[0][0]).toBe('cli@x.co');
     expect(res).toMatchObject({ status: 'sent', recipient: 'cli@x.co', zip_name: 'Factura-FV100.zip' });
     const data = prisma.fiscal_transmissions.update.mock.calls[0][0].data.provider_response;
     expect(data).toMatchObject({ foo: 'bar', delivered_to: 'cli@x.co' });
+  });
+
+  it('emails an accepted credit note to the customer of the original invoice', async () => {
+    const { svc, prisma, email } = build({
+      ...base,
+      source_type: 'platform_credit_note',
+      document_type: 'credit_note',
+      document_number: 'NC5',
+      cufe: null,
+      cude: 'cude-1',
+    });
+    prisma.fiscal_evidences.findMany.mockResolvedValue([
+      {
+        metadata: {
+          kind: 'platform_invoice_snapshot',
+          items: [],
+          totals: { total: 10 },
+          customer: { legal_name: 'Cliente SAS', email: 'nota@x.co' },
+        },
+      },
+    ]);
+    const res = await svc.deliverInvoice(7, '', 1);
+    expect(email.sendEmailWithAttachments.mock.calls[0][0]).toBe('nota@x.co');
+    expect(email.sendEmailWithAttachments.mock.calls[0][1]).toMatch(/Nota Cr/i);
+    expect(res.zip_name).toBe('Nota-Credito-NC5.zip');
   });
 
   it('rejects when the transmission is not accepted by DIAN', async () => {

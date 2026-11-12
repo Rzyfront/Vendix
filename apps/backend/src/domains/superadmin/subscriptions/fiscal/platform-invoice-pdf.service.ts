@@ -18,6 +18,11 @@ import * as QRCode from 'qrcode';
 
 import { ErrorCodes, VendixHttpException } from '@common/errors';
 import { GlobalPrismaService } from '../../../../prisma/services/global-prisma.service';
+import {
+  DIAN_CREDIT_NOTE_CONCEPT_LABELS,
+  DIAN_DEBIT_NOTE_CONCEPT_LABELS,
+} from '../../../store/invoicing/providers/dian-direct/constants/dian-note-concepts';
+import { PLATFORM_NOTE_SOURCE_TYPES } from './platform-note.helpers';
 import { PlatformOrgService } from '../../../../common/services/platform-org.service';
 import { S3Service } from '../../../../common/services/s3.service';
 import { InvoicePdfBuilder, InvoicePdfData } from '../../../store/invoicing/services/invoice-pdf.builder';
@@ -416,7 +421,13 @@ export class PlatformInvoicePdfService {
       where: {
         id: transmission_id,
         organization_id: platform_org_id,
-        source_type: { in: ['platform_invoice', 'platform_support_document'] },
+        source_type: {
+          in: [
+            'platform_invoice',
+            'platform_support_document',
+            ...PLATFORM_NOTE_SOURCE_TYPES,
+          ],
+        },
       },
     });
   }
@@ -875,8 +886,18 @@ export class PlatformInvoicePdfService {
     const responsibility_labels = this.resolveResponsibilityLabels(issuer.tax_responsibilities);
     const validity_legend = this.buildValidityLegend(transmission);
 
-    const invoice_type =
-      transmission.document_type === 'support_document' ? 'purchase_invoice' : 'invoice';
+    const is_note =
+      transmission.document_type === 'credit_note' ||
+      transmission.document_type === 'debit_note';
+    const invoice_type = is_note
+      ? transmission.document_type
+      : transmission.document_type === 'support_document'
+        ? 'purchase_invoice'
+        : 'invoice';
+    // Nota: la referencia a la factura original, el concepto DIAN y el motivo
+    // viajan en `notes` (el builder ya titula NOTA CREDITO/DEBITO ELECTRONICA).
+    const note_info = (invoiceSnap as { note?: Record<string, unknown> } | null)?.note;
+    const note_notes = is_note && note_info ? this.buildNoteLegend(transmission.document_type, note_info) : undefined;
 
     return {
       company_name: issuer.legal_name,
@@ -906,7 +927,7 @@ export class PlatformInvoicePdfService {
       issue_time,
       due_date,
       currency,
-      notes: invoiceSnap?.notes ? String(invoiceSnap.notes) : undefined,
+      notes: note_notes ?? (invoiceSnap?.notes ? String(invoiceSnap.notes) : undefined),
       items,
       taxes,
       subtotal_amount,
@@ -914,7 +935,7 @@ export class PlatformInvoicePdfService {
       tax_amount,
       withholding_amount,
       total_amount,
-      cufe: transmission.cufe || undefined,
+      cufe: transmission.cufe || transmission.cude || undefined,
       qr_code: transmission.qr_code || undefined,
       qr_code_buffer: await this.renderVerificationQr(transmission.qr_code),
       payment_form: invoiceSnap?.payment_form ? String(invoiceSnap.payment_form) : undefined,
@@ -929,6 +950,26 @@ export class PlatformInvoicePdfService {
       company_tax_responsibility_labels: responsibility_labels,
       validity_legend,
     };
+  }
+
+  /** Original invoice, DIAN concept and reason printed on a note's PDF. */
+  private buildNoteLegend(
+    document_type: string,
+    note: Record<string, unknown>,
+  ): string {
+    const code = String(note['concept_code'] ?? '');
+    const labels: Record<string, string> =
+      document_type === 'credit_note'
+        ? DIAN_CREDIT_NOTE_CONCEPT_LABELS
+        : DIAN_DEBIT_NOTE_CONCEPT_LABELS;
+    const concept = labels[code] ? `${code} - ${labels[code]}` : code;
+    const lines = [
+      `Factura original: ${String(note['original_document_number'] ?? '')}`,
+      note['original_cufe'] ? `CUFE de la factura original: ${String(note['original_cufe'])}` : null,
+      `Concepto: ${concept}`,
+      `Motivo: ${String(note['reason'] ?? '')}`,
+    ];
+    return lines.filter((l): l is string => !!l).join('\n');
   }
 
   private taxLabelOf(t: Record<string, unknown>): string {
@@ -1141,6 +1182,8 @@ export class PlatformInvoicePdfService {
           snapshot.acquirerSnapshot,
           transmission.cufe ?? null,
           transmission.qr_code ?? null,
+          // Solo las notas (CUDE); no altera la llave de las facturas ya generadas.
+          ...(transmission.cude ? [transmission.cude] : []),
         ]),
       )
       .digest('hex')
