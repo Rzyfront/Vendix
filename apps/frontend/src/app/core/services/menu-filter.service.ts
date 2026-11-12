@@ -702,7 +702,9 @@ export class MenuFilterService {
     if (this.matchesOperatingScope(item, scope)) {
       return 'allow';
     }
-    return item.showLocked ? 'lock' : 'hide';
+    // A module that does not apply to this scope is hidden, never shown with
+    // a lock: a lock suggests the user could unlock it, which they cannot.
+    return 'hide';
   }
 
   /**
@@ -1744,13 +1746,11 @@ export class MenuFilterService {
       ? verdicts[0]
       : (verdicts.find((verdict) => verdict.layer !== 'industry') ?? verdicts[0]);
     const hides = surface === 'sidebar' || surface === 'apps_card';
-    // An always-enforced key stays visible with a lock on the sidebar and the
-    // Apps card, so it is logged as `would_hide`, never as `hidden`.
+    // A module the industry does not allow is hidden from the sidebar and the
+    // Apps card (no lock: it cannot be unlocked); a URL is blocked.
     const decision: AccessDecision = block
       ? hides
-        ? alwaysEnforced
-          ? 'would_hide'
-          : 'hidden'
+        ? 'hidden'
         : 'blocked'
       : hides
         ? 'would_hide'
@@ -1762,7 +1762,7 @@ export class MenuFilterService {
       surface,
       ...(route ? { route } : {}),
     });
-    return !block || (alwaysEnforced && hides);
+    return !block;
   }
 
   /**
@@ -1778,9 +1778,12 @@ export class MenuFilterService {
     );
   }
 
-  /** Lock painted on a sidebar item: plan lock or industry lock. */
+  /**
+   * Lock painted on a sidebar item: only the plan lock (an upgrade unlocks it).
+   * Industry-closed modules never reach the sidebar: they are hidden.
+   */
   private isLockedForSidebar(keys: string[]): boolean {
-    return this.isPlanLocked(keys) || this.isIndustryLocked(keys);
+    return this.isPlanLocked(keys);
   }
 
   /** True when the plan in force does not include `key` (exempt keys never). */

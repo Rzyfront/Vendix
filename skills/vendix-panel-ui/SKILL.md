@@ -49,6 +49,19 @@ Direct URL: `panelUiGuard` (`core/guards/panel-ui.guard.ts`, in `store_admin.rou
 
 Any new hiding rule goes inside `diagnose()` (first blocker wins; backs Vexi `ui_why_hidden`), never as a separate `if` in a consumer. Authorization prefilters go in `passesAuthorizationGates()` and their inputs in `authorizationGates$`.
 
+## Hide vs. lock (UI pattern, mandatory)
+
+A module the store cannot use is either **hidden** or shown with a **lock**. The cause decides, never the component:
+
+| Cause | Sidebar / Apps card | Direct URL |
+| --- | --- | --- |
+| Plan does not include it (`isPlanLocked`) | Visible **with lock** (`_planLocked`); click opens the upgrade paywall | Plan paywall |
+| Industry does not allow it (incl. always-enforced `flows`, `documents`) | **Hidden** | Blocked (`isIndustryLocked` → industry paywall) |
+| Operating / fiscal scope mismatch | **Hidden** (`resolveScopeOutcome` never returns `lock`) | Blocked |
+| Panel UI off, permissions, `store_type`, `module_flows` | **Hidden** | Blocked |
+
+The lock means "an upgrade unlocks this"; only the plan can promise that. A lock for something the user can never unlock (industry, scope) confuses and clutters the UI, so it is a bug. `isLockedForSidebar` paints only the plan lock; do not add another lock source.
+
 ## Core rules
 
 - Canonical shape is nested by `app_type` (`ORG_ADMIN`, `STORE_ADMIN`, `STORE_ECOMMERCE`, `VENDIX_LANDING`). Flat legacy shape is discarded on read; never write it.
