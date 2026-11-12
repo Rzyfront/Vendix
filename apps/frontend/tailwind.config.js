@@ -279,6 +279,11 @@ module.exports = {
         // Legacy mapping
         card: 'var(--shadow-card)',
       },
+      inset: {
+        // Sticky stats/search under an app-sticky-header with tabs (see styles.scss)
+        'header-tabs': 'var(--sticky-header-tabs-offset)',
+        'header-tabs-search': 'var(--sticky-header-tabs-search-offset)',
+      },
       spacing: {
         sm: '0.375rem' /* 6px */,
         md: '0.75rem' /* 12px */,

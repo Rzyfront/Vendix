@@ -264,6 +264,13 @@
   --z-header: 35;
   --z-modal-backdrop: 40;
   --z-modal: 50;
+
+  /* Sticky offsets for list pages under an app-sticky-header with tabs
+     (mobile; md:static elsewhere). The header is ~66px with its tab row:
+     stats stick right below it and the search below the stats (+99px, the
+     standard stats height). Tailwind: top-header-tabs / top-header-tabs-search. */
+  --sticky-header-tabs-offset: 69px;
+  --sticky-header-tabs-search-offset: 168px;
   --z-notification: 60;
   --z-tooltip: 80;
   --z-toast: 70;

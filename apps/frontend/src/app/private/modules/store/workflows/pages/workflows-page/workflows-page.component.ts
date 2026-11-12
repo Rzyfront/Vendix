@@ -101,7 +101,7 @@ const BADGE_LABEL: Record<string, string> = {
         (tabChanged)="onTabChange($event)"
       />
 
-      <div class="stats-container sticky top-[69px] z-20 bg-background md:static md:bg-transparent">
+      <div class="stats-container sticky top-header-tabs z-20 bg-background md:static md:bg-transparent">
         <app-stats
           title="Flujos activos"
           [value]="stats().published"

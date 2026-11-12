@@ -110,7 +110,7 @@ function isFilter(value: unknown): value is SireFilter {
   template: `
     <div class="w-full md:space-y-4">
       <!-- Stats: sticky on mobile, static on desktop -->
-      <div class="stats-container sticky top-[69px] z-20 bg-background md:static md:bg-transparent">
+      <div class="stats-container sticky top-header-tabs z-20 bg-background md:static md:bg-transparent">
         <app-stats
           title="Pendientes"
           [value]="count(summary()?.stats?.pending)"
@@ -152,7 +152,7 @@ function isFilter(value: unknown): value is SireFilter {
       <app-card [responsive]="true" [padding]="false" overflow="visible">
         <!-- Sticky search header -->
         <div
-          class="sticky top-[168px] z-10 bg-background px-2 py-1.5 -mt-[5px]
+          class="sticky top-header-tabs-search z-10 bg-background px-2 py-1.5 -mt-[5px]
                  md:mt-0 md:static md:bg-transparent md:px-6 md:py-4 md:border-b md:border-border"
         >
           <div class="flex flex-col gap-2 md:flex-row md:justify-between md:items-center md:gap-4">
