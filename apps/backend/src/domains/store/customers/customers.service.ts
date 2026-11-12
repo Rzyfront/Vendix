@@ -1587,15 +1587,22 @@ export class CustomersService {
     // informan (`other_matches`), y se calcula únicamente al haber conflicto.
     const describeMatches = async (id: number, fallback: 'email' | 'document') => {
       // Informativo: si la consulta falla se responde igual el conflicto.
-      const scopeMatches = await this.findCustomerMatchesInScope(
-        store.organization_id,
-        storeId,
-        {
-          document_type: dto.document_type ?? null,
-          document_number: dto.document_number ?? null,
-          email: effectiveEmail,
-        },
-      ).catch(() => []);
+      let scopeMatches: Awaited<
+        ReturnType<CustomersService['findCustomerMatchesInScope']>
+      > = [];
+      try {
+        scopeMatches = await this.findCustomerMatchesInScope(
+          store.organization_id,
+          storeId,
+          {
+            document_type: dto.document_type ?? null,
+            document_number: dto.document_number ?? null,
+            email: effectiveEmail,
+          },
+        );
+      } catch {
+        scopeMatches = [];
+      }
       const own = scopeMatches.find((m) => m.id === id)?.matched_by ?? [];
       return {
         matched_by: own.length ? own : [fallback],
