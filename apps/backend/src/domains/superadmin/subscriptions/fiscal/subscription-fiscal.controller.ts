@@ -52,6 +52,7 @@ import {
 } from './dto/subscription-fiscal.dto';
 import { ArchiveResolutionDto } from '../../../store/invoicing/resolutions/dto/archive-resolution.dto';
 import { SubscriptionFiscalService } from './subscription-fiscal.service';
+import { withListMoneyFields } from './transmission-list-money.util';
 import { PlatformInvoicePaymentsService } from './platform-invoice-payments.service';
 import { assertManualAcquirerEmail } from '../../../store/invoicing/utils/acquirer-email.util';
 
@@ -362,8 +363,11 @@ export class SubscriptionFiscalController {
     @Query() query: SubscriptionFiscalQueryDto,
   ): Promise<any> {
     const result = await this.fiscalService.listTransmissions(query);
-    return this.responseService.paginated(
+    const collection = await this.paymentsService.collectionForTransmissions(
       result.data,
+    );
+    return this.responseService.paginated(
+      result.data.map((row) => withListMoneyFields(row, collection.get(row.id))),
       result.total,
       result.page,
       result.limit,

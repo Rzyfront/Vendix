@@ -41,11 +41,8 @@ import { CurrencyFormatService } from '../../../../../../../shared/pipes/currenc
 import { PlatformInvoicingStore } from '../../platform-invoicing.store';
 import { PlatformInvoiceDetailModalComponent } from '../../components/platform-invoice-detail-modal/platform-invoice-detail-modal.component';
 import {
-  COLLECTION_STATUS_COLOR_MAP,
   COLLECTION_STATUS_OPTIONS,
   asNumber,
-  collectionStatusLabel,
-  environmentLabel,
   formatDateOnly,
   optionalNumericIdValidator,
   parseRequiredId,
@@ -228,20 +225,6 @@ export class PlatformInvoicesComponent {
       transform: (val: string) => this.documentTypeLabel(val),
     },
     {
-      key: 'source_type',
-      label: 'Origen',
-      badge: true,
-      badgeConfig: {
-        type: 'custom',
-        colorMap: {
-          subscription_invoice: 'info',
-          platform_invoice: 'primary',
-          platform_support_document: 'secondary',
-        },
-      },
-      transform: (val: string) => this.sourceTypeLabel(val),
-    },
-    {
       key: 'source_id',
       label: 'Ref. Factura',
       transform: (val, item: SubscriptionFiscalTransmission) => {
@@ -270,13 +253,6 @@ export class PlatformInvoicesComponent {
       transform: (val) => transmissionStatusLabel(val),
     },
     {
-      key: 'environment',
-      label: 'Ambiente',
-      transform: (val, item: SubscriptionFiscalTransmission) => {
-        return environmentLabel(item.dian_configuration?.environment);
-      },
-    },
-    {
       key: 'total',
       label: 'Total',
       align: 'right',
@@ -294,16 +270,6 @@ export class PlatformInvoicesComponent {
       key: 'due_date',
       label: 'Vence',
       transform: (val) => formatDateOnly(val as string | null),
-    },
-    {
-      key: 'collection_status',
-      label: 'Cobro',
-      badge: true,
-      badgeConfig: {
-        type: 'custom',
-        colorMap: COLLECTION_STATUS_COLOR_MAP,
-      },
-      transform: (val) => collectionStatusLabel(val as string | null),
     },
     {
       key: 'created_at',
