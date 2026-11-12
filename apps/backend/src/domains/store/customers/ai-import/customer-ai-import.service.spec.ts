@@ -13,6 +13,7 @@ describe('CustomerAiImportService', () => {
     update: jest.Mock;
     findByDocumentInOrganization: jest.Mock;
     findCustomerMatchesInScope: jest.Mock;
+    isCustomerInDuplicateScope: jest.Mock;
   };
   let addressesMock: { addCustomerLocation: jest.Mock };
   let registryMock: { register: jest.Mock };
@@ -78,6 +79,7 @@ describe('CustomerAiImportService', () => {
       update: jest.fn().mockResolvedValue({ id: 100 }),
       findByDocumentInOrganization: jest.fn().mockResolvedValue(null),
       findCustomerMatchesInScope: jest.fn().mockResolvedValue([]),
+      isCustomerInDuplicateScope: jest.fn().mockResolvedValue(true),
     };
     addressesMock = {
       addCustomerLocation: jest
@@ -161,6 +163,25 @@ describe('CustomerAiImportService', () => {
         },
       ]),
     ).rejects.toBeInstanceOf(VendixHttpException);
+  });
+
+  it('commit rechaza un cliente existente fuera del alcance de la tienda (S8)', async () => {
+    customersMock.isCustomerInDuplicateScope.mockResolvedValue(false);
+    const result = await runInStore(() =>
+      service.commit({
+        customers: [
+          {
+            action: 'add_locations',
+            existing_customer_id: 999,
+            legal_name: 'Otra tienda SAS',
+            locations: [{ address_line_1: 'Calle 1', city: 'Cali' }],
+          },
+        ],
+      } as any),
+    );
+    expect(result.failed).toBe(1);
+    expect(result.results[0].error).toContain('no pertenece a esta tienda');
+    expect(addressesMock.addCustomerLocation).not.toHaveBeenCalled();
   });
 
   it('analyze descarta un DV que no corresponde al NIT y avisa', async () => {

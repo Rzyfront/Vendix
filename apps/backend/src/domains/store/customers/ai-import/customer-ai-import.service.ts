@@ -448,6 +448,24 @@ export class CustomerAiImportService implements OnModuleInit {
         'Falta el cliente existente al que agregar las ubicaciones.',
       );
     }
+    // S8 — un id que llega del cliente (o de un conflicto) debe estar dentro
+    // del alcance operativo: con scope STORE no se toca un cliente que solo
+    // existe en otra tienda de la organización.
+    const organizationId = RequestContextService.getContext()?.organization_id;
+    if (
+      action !== 'create' &&
+      (!organizationId ||
+        !(await this.customersService.isCustomerInDuplicateScope(
+          organizationId,
+          storeId,
+          customerId,
+        )))
+    ) {
+      throw new VendixHttpException(
+        ErrorCodes.SYS_VALIDATION_001,
+        'El cliente existente no pertenece a esta tienda.',
+      );
+    }
     result.customer_id = customerId;
     if (action !== 'create') result.outcome = 'locations_added';
 

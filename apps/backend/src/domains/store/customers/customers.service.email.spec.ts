@@ -59,6 +59,42 @@ describe('CustomersService email identity', () => {
     );
   });
 
+  it('S8: con scope STORE, editar solo choca con clientes de esta tienda', async () => {
+    const prisma = {
+      users: {
+        findFirst: jest.fn().mockResolvedValue(null),
+        update: jest.fn().mockImplementation(async ({ data }) => data),
+      },
+    };
+    const service = new CustomersService(
+      prisma as never,
+      {} as never,
+      { getOperatingScope: jest.fn().mockResolvedValue('STORE') } as never,
+    );
+    jest.spyOn(service, 'findOne').mockResolvedValue({
+      id: 10,
+      organization_id: 3,
+      document_type: null,
+      document_number: null,
+      first_name: 'Ana',
+      last_name: 'Diaz',
+      person_type: null,
+    } as never);
+
+    await service.update(2, 10, { email: 'ana@example.com' });
+
+    expect(prisma.users.findFirst).toHaveBeenCalledWith({
+      where: {
+        email: { equals: 'ana@example.com', mode: 'insensitive' },
+        organization_id: 3,
+        id: { not: 10 },
+        state: { not: 'archived' },
+        store_users: { some: { store_id: 2 } },
+      },
+      select: { id: true },
+    });
+  });
+
   it('rejects another active customer with the same email on edit', async () => {
     const { service, prisma } = createService();
     prisma.users.findFirst.mockResolvedValue({ id: 11 } as never);

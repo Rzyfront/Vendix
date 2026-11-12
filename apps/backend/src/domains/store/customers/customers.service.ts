@@ -199,6 +199,32 @@ export class CustomersService {
   }
 
   /**
+   * ¿El cliente pertenece al alcance operativo de esta tienda? (S8) Con scope
+   * STORE debe estar enlazado a la tienda; con ORGANIZATION basta la org.
+   */
+  async isCustomerInDuplicateScope(
+    organizationId: number,
+    storeId: number,
+    customerId: number,
+  ): Promise<boolean> {
+    const scopedStoreId = await this.resolveDuplicateStoreFilter(
+      organizationId,
+      storeId,
+    );
+    const found = await this.prisma.users.findFirst({
+      where: {
+        id: customerId,
+        organization_id: organizationId,
+        ...(scopedStoreId
+          ? { store_users: { some: { store_id: scopedStoreId } } }
+          : {}),
+      },
+      select: { id: true },
+    });
+    return !!found;
+  }
+
+  /**
    * Coincidencias de un cliente por identificación O correo dentro del
    * alcance operativo. Devuelve cada cliente una vez con los datos por los
    * que coincide, primero los que coinciden por documento.
@@ -2321,6 +2347,13 @@ export class CustomersService {
         ? this.resolveCustomerEmail(dto.email)
         : undefined;
 
+    // S8 — mismo alcance que el alta: con scope STORE solo chocan clientes de
+    // esta tienda (si no, un cliente creado legítimamente en la tienda B no
+    // se podría volver a guardar porque su correo/documento existe en A).
+    const duplicateStoreId = user.organization_id
+      ? await this.resolveDuplicateStoreFilter(user.organization_id, storeId)
+      : null;
+
     if (effectiveEmail && user.organization_id) {
       const emailConflict = await this.prisma.users.findFirst({
         where: {
@@ -2328,6 +2361,9 @@ export class CustomersService {
           organization_id: user.organization_id,
           id: { not: user.id },
           state: { not: user_state_enum.archived },
+          ...(duplicateStoreId
+            ? { store_users: { some: { store_id: duplicateStoreId } } }
+            : {}),
         },
         select: { id: true },
       });
@@ -2371,6 +2407,7 @@ export class CustomersService {
         user.organization_id,
         normalizedDoc.number,
         normalizedDoc.type,
+        duplicateStoreId ?? undefined,
       );
 
       if (conflict && conflict.id !== user.id) {
