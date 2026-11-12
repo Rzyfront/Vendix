@@ -74,7 +74,8 @@ export function adaptTrialBalance(data: Raw | null | undefined): TrialBalanceRow
   return accounts.map((a) => ({
     account_code: a['account_code'],
     account_name: a['account_name'],
-    account_type: a['account_type'],
+    // Backend enum is lowercase ('asset'); the UI type is uppercase.
+    account_type: String(a['account_type'] ?? '').toUpperCase() as ChartAccountType,
     total_debit: a['total_debit'],
     total_credit: a['total_credit'],
     net_balance: a['net_balance'] ?? a['balance'],

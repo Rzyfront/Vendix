@@ -47,8 +47,8 @@ describe('superadmin accounting adapters', () => {
       date_to: '2026-11-30',
       fiscal_period_id: '9',
     });
-    expect(p).not.toHaveProperty('from');
-    expect(p).not.toHaveProperty('to');
+    expect('from' in p).toBe(false);
+    expect('to' in p).toBe(false);
   });
 
   it('journal entry: counts lines and exposes the period name', () => {
@@ -65,10 +65,9 @@ describe('superadmin accounting adapters', () => {
   });
 
   it('fiscal period: status maps to state', () => {
-    expect(adaptFiscalPeriod({ id: 9, name: '2026-08', status: 'open' })).toMatchObject({
-      id: '9',
-      state: 'open',
-    });
+    const period = adaptFiscalPeriod({ id: 9, name: '2026-08', status: 'open' });
+    expect(period.id).toBe('9');
+    expect(period.state).toBe('open');
   });
 
   it('trial balance: unwraps accounts and maps balance to net_balance', () => {
@@ -81,7 +80,7 @@ describe('superadmin accounting adapters', () => {
       {
         account_code: '1105',
         account_name: 'Cuenta 1105',
-        account_type: 'asset',
+        account_type: 'ASSET',
         total_debit: -205000,
         total_credit: 0,
         net_balance: -205000,
@@ -98,8 +97,12 @@ describe('superadmin accounting adapters', () => {
       equity: { accounts: [], total: 0 },
       balance_check: { total_assets: 230000, total_liabilities_and_equity: 100 },
     });
-    expect(bs?.assets).toMatchObject({ account_type: 'ASSET', label: 'Activos', total: 230000 });
-    expect(bs?.assets.accounts[0]).toMatchObject({ account_code: '1305', balance: 230000 });
+    expect(bs?.assets.account_type).toBe('ASSET');
+    expect(bs?.assets.label).toBe('Activos');
+    expect(bs?.assets.total).toBe(230000);
+    expect(bs?.assets.accounts).toEqual([
+      { account_code: '1305', account_name: 'Cuenta 1305', balance: 230000 },
+    ]);
     expect(bs?.liabilities.label).toBe('Pasivos');
     expect(bs?.equity.label).toBe('Patrimonio');
     expect(bs?.total_assets).toBe(230000);
@@ -114,14 +117,12 @@ describe('superadmin accounting adapters', () => {
       cost: { accounts: [], total: 0 },
       net_income: -922000,
     });
-    expect(is).toMatchObject({
-      from: '2026-01-01',
-      to: '2026-11-30',
-      total_revenue: 1858000,
-      total_expenses: 2780000,
-      total_cost: 0,
-      net_income: -922000,
-    });
+    expect(is?.from).toBe('2026-01-01');
+    expect(is?.to).toBe('2026-11-30');
+    expect(is?.total_revenue).toBe(1858000);
+    expect(is?.total_expenses).toBe(2780000);
+    expect(is?.total_cost).toBe(0);
+    expect(is?.net_income).toBe(-922000);
     expect(is?.revenue.label).toBe('Ingresos');
     expect(is?.cost.label).toBe('Costos');
     expect(is?.expenses.label).toBe('Gastos');
