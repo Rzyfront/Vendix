@@ -101,7 +101,7 @@ const BADGE_LABEL: Record<string, string> = {
         (tabChanged)="onTabChange($event)"
       />
 
-      <div class="stats-container sticky top-[52px] z-20 bg-background md:static md:bg-transparent">
+      <div class="stats-container sticky top-[69px] z-20 bg-background md:static md:bg-transparent">
         <app-stats
           title="Flujos activos"
           [value]="stats().published"
@@ -142,7 +142,7 @@ const BADGE_LABEL: Record<string, string> = {
 
       <app-card [responsive]="true" [padding]="false" overflow="visible">
         <div
-          class="sticky top-[99px] z-10 bg-background px-2 py-1.5 -mt-[5px] md:mt-0 md:static md:bg-transparent md:px-6 md:py-4 md:border-b md:border-border"
+          class="sticky top-[116px] z-10 bg-background px-2 py-1.5 -mt-[5px] md:mt-0 md:static md:bg-transparent md:px-6 md:py-4 md:border-b md:border-border"
         >
           <div class="flex flex-col gap-2 md:flex-row md:justify-end md:items-center md:gap-4">
             <div class="flex items-center gap-2 w-full md:w-auto">
