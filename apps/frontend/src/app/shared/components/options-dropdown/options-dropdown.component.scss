@@ -83,6 +83,18 @@
     }
   }
 
+  // Tinted, not filled (Soft UI): same accent the item had inside the menu
+  &.single-action-primary {
+    color: var(--color-primary);
+    border-color: rgba(var(--color-primary-rgb, 59, 130, 246), 0.25);
+    background-color: rgba(var(--color-primary-rgb, 59, 130, 246), 0.1);
+
+    &:hover:not(:disabled) {
+      border-color: var(--color-primary);
+      background-color: rgba(var(--color-primary-rgb, 59, 130, 246), 0.15);
+    }
+  }
+
   &.single-action-destructive {
     color: var(--color-destructive);
   }

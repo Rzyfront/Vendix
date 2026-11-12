@@ -40,7 +40,7 @@ actions: DropdownAction[] = [
 
 ## Una sola acción
 
-Con **una sola** acción el componente no abre un menú: muestra un botón con el icono y el texto de esa acción y la ejecuta al hacer clic (`actionClick` emite su `action`). Con dos o más acciones vuelve al menú "Acciones". Es dinámico: si `actions` es un `computed` (por ejemplo, filtrado por permisos), el componente cambia solo de modo. No hace falta nada en el padre.
+Con **una sola** acción el componente no abre un menú: muestra un botón con el icono y el texto de esa acción y la ejecuta al hacer clic (`actionClick` emite su `action`). Con dos o más acciones vuelve al menú "Acciones". El botón respeta `disabled` y el `variant` de la acción (`primary` con tinte de marca, `destructive` en rojo). Si las acciones bajan a una con el menú abierto, el menú se cierra. Es dinámico: si `actions` es un `computed` (por ejemplo, filtrado por permisos), el componente cambia solo de modo. No hace falta nada en el padre.
 
 ## Filtros prearmados
 

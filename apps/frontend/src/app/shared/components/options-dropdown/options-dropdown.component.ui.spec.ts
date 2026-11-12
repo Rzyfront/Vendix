@@ -148,4 +148,20 @@ describe('OptionsDropdownComponent accessible identity', () => {
     const trigger = fixture.debugElement.query(By.css('.actions-trigger')).nativeElement as HTMLButtonElement;
     expect(trigger.disabled).toBeTrue();
   });
+
+  it('closes an open Acciones menu when actions drop to a single one', async () => {
+    fixture.componentRef.setInput('actions', [
+      { label: 'Exportar', icon: 'download', action: 'export' },
+      { label: 'Imprimir', icon: 'printer', action: 'print' },
+    ]);
+    await render();
+    click('.actions-trigger');
+    await render();
+    expect(fixture.debugElement.query(By.css('.actions-dropdown'))).not.toBeNull();
+
+    fixture.componentRef.setInput('actions', [{ label: 'Exportar', icon: 'download', action: 'export' }]);
+    await render();
+    expect(fixture.debugElement.query(By.css('.actions-dropdown'))).toBeNull();
+    expect(component.isActionsOpen()).toBeFalse();
+  });
 });

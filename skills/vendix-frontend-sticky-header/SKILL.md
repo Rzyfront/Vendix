@@ -18,7 +18,7 @@ metadata:
 - Replacing custom sticky header markup with the shared `app-sticky-header` component.
 - Replacing hardcoded module headers with compact route/state tabs.
 
-For standard list modules, use sticky stats plus sticky search from `vendix-frontend-standard-module` instead.
+For standard list modules without sub-views, use sticky stats plus sticky search from `vendix-frontend-standard-module`. A list module with sub-views (layer 3) also gets `app-sticky-header` with `[tabs]` above its stats and search.
 
 ## Source of Truth
 

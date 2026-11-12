@@ -5,6 +5,7 @@
       type="button"
       class="options-dropdown-trigger actions-trigger single-action-trigger"
       [class.single-action-destructive]="single.variant === 'destructive'"
+      [class.single-action-primary]="single.variant === 'primary'"
       [disabled]="single.disabled || false"
       (click)="onActionClick(single.action)"
       [attr.aria-label]="single.label"
@@ -55,7 +56,7 @@
   }
 
   <!-- Actions Dropdown Content -->
-  @if (isActionsOpen() && hasActions) {
+  @if (isActionsOpen() && hasActions && !singleAction()) {
     <div
       class="options-dropdown-content actions-dropdown"
       [class.mobile-fixed]="isMobileOrTablet"

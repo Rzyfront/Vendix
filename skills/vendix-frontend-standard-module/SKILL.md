@@ -122,7 +122,7 @@ Every list page uses the server-side pagination pattern (`ResponseService.pagina
 
 ## When to Use `app-sticky-header` Instead
 
-Use `app-sticky-header` for form/detail pages with save/cancel actions, such as product create/edit and settings pages. List modules usually use sticky stats plus sticky search instead.
+Use `app-sticky-header` for form/detail pages with save/cancel actions, such as product create/edit and settings pages. List modules usually use sticky stats plus sticky search instead. Exception: a list module with sub-views (navigation layer 3, see `vendix-ui-ux` → Navigation Hierarchy) puts those sub-views as `[tabs]` of an `app-sticky-header` above its stats and search; never as an `app-scrollable-tabs` row.
 
 ## Related Skills
 

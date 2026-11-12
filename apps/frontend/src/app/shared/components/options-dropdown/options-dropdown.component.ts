@@ -162,6 +162,14 @@ export class OptionsDropdownComponent {
     // y, por tanto, que se re-dispare cada vez que el usuario edita el
     // dropdown. La sincronía padre→local sigue siendo reactiva (sólo
     // depende de `this.filterValues()`).
+    // Una sola acción se muestra como botón directo: si las acciones bajan a
+    // una con el menú abierto, se cierra para no dejar el panel colgando.
+    effect(() => {
+      if (this.singleAction()) {
+        untracked(() => this.isActionsOpen.set(false));
+      }
+    });
+
     effect(() => {
       const incoming = this.filterValues();
       untracked(() => {

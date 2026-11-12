@@ -38,7 +38,7 @@ import { WithholdingCertificateViewerComponent } from './components/withholding-
         (tabChanged)="onTabChange($event)"
       ></app-sticky-header>
 
-      <!-- Stats
+      <!-- Stats -->
       <div class="sticky top-0 z-20 bg-background pb-2 md:static md:z-auto">
         <div class="flex gap-3 overflow-x-auto pb-2 md:grid md:grid-cols-4 md:overflow-visible">
           <app-stats title="Conceptos Activos" [value]="stats()?.active_concepts || 0" icon="file-text" color="blue"></app-stats>
