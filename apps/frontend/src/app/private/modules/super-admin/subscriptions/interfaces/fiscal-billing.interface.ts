@@ -219,6 +219,10 @@ export interface SubscriptionFiscalTransmission {
   accounting_entity_id: number;
   dian_configuration_id: number | null;
   document_type: string;
+  /** Original invoice (`fiscal_transmissions.id`) when the row is a credit/debit note. */
+  related_transmission_id?: number | null;
+  /** Document number of the original invoice, for "Ref: ..." in the list. */
+  related_document_number?: string | null;
   source_type: string;
   source_id: number;
   document_number: string;
@@ -678,4 +682,83 @@ export interface PlatformProfilePreviewResult {
     message: string;
     details?: Record<string, unknown>;
   }[];
+}
+
+// ── Platform credit / debit notes ───────────────────────────────────────────
+
+export type PlatformNoteDocumentType = 'credit_note' | 'debit_note';
+
+/** Values accepted by the `document_type` filter of `GET fiscal/invoices`. */
+export type PlatformInvoiceDocumentTypeFilter =
+  | 'sales_invoice'
+  | 'credit_note'
+  | 'debit_note'
+  | 'support_document';
+
+export interface CreatePlatformNoteItemDto {
+  description: string;
+  quantity: number;
+  unit_price: number;
+  unit_code?: string;
+}
+
+/** Body of `POST fiscal/credit-notes` and `POST fiscal/debit-notes`. */
+export interface CreatePlatformNoteDto {
+  /** `fiscal_transmissions.id` of the original invoice. */
+  related_invoice_id: number;
+  note_concept_code: string;
+  reason: string;
+  /** Omitted on a credit note = total note (copies every original line). */
+  items?: CreatePlatformNoteItemDto[];
+}
+
+export interface PlatformNoteResult {
+  transmission_id: number;
+  document_type: PlatformNoteDocumentType;
+  document_number: string | null;
+  related_transmission_id: number;
+  related_document_number: string | null;
+  dian_status: string | null;
+  transmission_status: string | null;
+  cude: string | null;
+  total: string | number;
+  error_code: string | null;
+  error_message: string | null;
+}
+
+export interface PlatformInvoiceNoteLine {
+  description: string;
+  quantity: string | number;
+  unit_price: string | number;
+  unit_code: string | null;
+  tax_rate: string | number | null;
+}
+
+export interface PlatformInvoiceNoteRow {
+  id: number;
+  document_type: PlatformNoteDocumentType;
+  document_number: string | null;
+  dian_status: string | null;
+  total: string | number;
+  note_concept_code: string | null;
+  reason: string | null;
+  created_at: string;
+}
+
+/** `data` of `GET fiscal/invoices/:id/notes`. */
+export interface PlatformInvoiceNotesInfo {
+  invoice: {
+    id: number;
+    document_number: string | null;
+    cufe: string | null;
+    dian_status: string | null;
+    issue_date: string | null;
+    total: string | number;
+    customer_name: string | null;
+  };
+  credit_balance: string;
+  can_create_notes: boolean;
+  blocked_reason: string | null;
+  lines: PlatformInvoiceNoteLine[];
+  notes: PlatformInvoiceNoteRow[];
 }

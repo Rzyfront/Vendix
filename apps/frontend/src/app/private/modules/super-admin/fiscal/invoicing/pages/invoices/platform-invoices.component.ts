@@ -28,6 +28,7 @@ import type {
 } from '../../../../../../../shared/components/options-dropdown/options-dropdown.interfaces';
 import {
   PaginatedEnvelope,
+  PlatformInvoiceDocumentTypeFilter,
   SubscriptionFiscalEnvironment,
   SubscriptionFiscalTransmission as BaseFiscalTransmission,
 } from '../../../../subscriptions/interfaces/fiscal-billing.interface';
@@ -139,6 +140,18 @@ export class PlatformInvoicesComponent {
       ],
     },
     {
+      key: 'document_type',
+      label: 'Tipo de documento',
+      type: 'select',
+      options: [
+        { value: '', label: 'Todos los tipos' },
+        { value: 'sales_invoice', label: 'Factura' },
+        { value: 'credit_note', label: 'Nota crédito' },
+        { value: 'debit_note', label: 'Nota débito' },
+        { value: 'support_document', label: 'Documento soporte' },
+      ],
+    },
+    {
       key: 'environment',
       label: 'Ambiente',
       type: 'select',
@@ -200,6 +213,21 @@ export class PlatformInvoicesComponent {
       },
     },
     {
+      key: 'document_type',
+      label: 'Tipo',
+      badge: true,
+      badgeConfig: {
+        type: 'custom',
+        colorMap: {
+          sales_invoice: 'info',
+          credit_note: 'warning',
+          debit_note: 'primary',
+          support_document: 'secondary',
+        },
+      },
+      transform: (val: string) => this.documentTypeLabel(val),
+    },
+    {
       key: 'source_type',
       label: 'Origen',
       badge: true,
@@ -217,6 +245,11 @@ export class PlatformInvoicesComponent {
       key: 'source_id',
       label: 'Ref. Factura',
       transform: (val, item: SubscriptionFiscalTransmission) => {
+        if (this.isNoteRow(item)) {
+          return item.related_document_number
+            ? `Ref: ${item.related_document_number}`
+            : 'Ref: —';
+        }
         return item.subscription_invoice?.invoice_number || `Factura #${val}`;
       },
     },
@@ -336,7 +369,9 @@ export class PlatformInvoicesComponent {
     // contra los strings del enum nunca acertaba, así que la tarjeta móvil
     // caía al `return val` y pintaba «[object Object]» de subtítulo.
     subtitleTransform: (item: SubscriptionFiscalTransmission) =>
-      this.sourceTypeLabel(item.source_type),
+      this.isNoteRow(item)
+        ? `${this.documentTypeLabel(item.document_type)} · Ref: ${item.related_document_number ?? '—'}`
+        : this.sourceTypeLabel(item.source_type),
     badgeKey: 'transmission_status',
     badgeConfig: {
       type: 'custom',
@@ -391,9 +426,15 @@ export class PlatformInvoicesComponent {
         | 'paid'
         | '') || undefined;
     const sourceType = (filters['source_type'] as string) || undefined;
-    // El estado de cobro solo existe en el listado de plataforma.
+    const documentType =
+      (filters['document_type'] as PlatformInvoiceDocumentTypeFilter | '') ||
+      undefined;
+    // El estado de cobro y el tipo de documento (notas) solo existen en el
+    // listado de plataforma.
     const platformListing =
-      !!collectionStatus || sourceType === 'platform_invoice';
+      !!collectionStatus ||
+      !!documentType ||
+      sourceType === 'platform_invoice';
 
     const request$: Observable<PaginatedEnvelope<SubscriptionFiscalTransmission>> =
       platformListing
@@ -403,6 +444,7 @@ export class PlatformInvoicesComponent {
             status,
             q: this.search(),
             collection_status: collectionStatus,
+            document_type: documentType,
           })
         : this.fiscal.listTransmissions({
             page: pagination.page,
@@ -469,11 +511,33 @@ export class PlatformInvoicesComponent {
     return sourceType || '—';
   }
 
+  /** Etiqueta del tipo de documento (factura, nota crédito/débito, doc. soporte). */
+  private documentTypeLabel(type: string | null | undefined): string {
+    switch (type) {
+      case 'sales_invoice':
+        return 'Factura';
+      case 'credit_note':
+        return 'Nota crédito';
+      case 'debit_note':
+        return 'Nota débito';
+      case 'support_document':
+        return 'Doc. soporte';
+      default:
+        return type || '—';
+    }
+  }
+
+  /** ¿La fila es una nota crédito o débito? */
+  private isNoteRow(row: SubscriptionFiscalTransmission): boolean {
+    return row.document_type === 'credit_note' || row.document_type === 'debit_note';
+  }
+
   /** ¿La fila pertenece al riel plataforma (y no al SaaS)? */
   private isPlatformRow(row: SubscriptionFiscalTransmission): boolean {
     return (
       row.source_type === 'platform_invoice' ||
-      row.source_type === 'platform_support_document'
+      row.source_type === 'platform_support_document' ||
+      this.isNoteRow(row)
     );
   }
 
