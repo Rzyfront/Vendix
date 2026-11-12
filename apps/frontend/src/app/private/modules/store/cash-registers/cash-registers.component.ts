@@ -75,7 +75,7 @@ import { StoreSettingsFacade } from '../../../../core/store/store-settings/store
 
       <!-- Stats: Sticky on mobile, static on desktop -->
       <div
-        class="stats-container sticky top-0 z-20 bg-background md:static md:bg-transparent"
+        class="stats-container sticky top-[69px] z-20 bg-background md:static md:bg-transparent"
       >
         <app-stats
           title="Cajas Activas"
@@ -112,7 +112,7 @@ import { StoreSettingsFacade } from '../../../../core/store/store-settings/store
         <app-card [responsive]="true" [padding]="false">
           <!-- Sticky search header -->
           <div
-            class="sticky top-[99px] z-10 bg-background px-2 py-1.5 -mt-[5px]
+            class="sticky top-[168px] z-10 bg-background px-2 py-1.5 -mt-[5px]
                       md:mt-0 md:static md:bg-transparent md:px-6 md:py-4 md:border-b md:border-border"
           >
             <div
@@ -205,7 +205,7 @@ import { StoreSettingsFacade } from '../../../../core/store/store-settings/store
         <app-card [responsive]="true" [padding]="false">
           <!-- Sticky search header -->
           <div
-            class="sticky top-[99px] z-10 bg-background px-2 py-1.5 -mt-[5px]
+            class="sticky top-[168px] z-10 bg-background px-2 py-1.5 -mt-[5px]
                       md:mt-0 md:static md:bg-transparent md:px-6 md:py-4 md:border-b md:border-border"
           >
             <div
