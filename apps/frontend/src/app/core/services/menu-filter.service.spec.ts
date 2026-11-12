@@ -1012,14 +1012,14 @@ describe('MenuFilterService — industria siempre aplicada (flujos-documental S6
     }
   });
 
-  it('sin la industria administration, sidebar y Apps conservan el módulo y lo marcan con candado', () => {
+  it('sin la industria administration, sidebar y Apps ocultan el módulo (sin candado)', () => {
     gate.report.calls.reset();
-    expect(service.applyAccessGate(['flows'], true, 'sidebar')).toBeTrue();
-    // Visible with a lock: logged as would_hide, never as hidden.
+    expect(service.applyAccessGate(['flows'], true, 'sidebar')).toBeFalse();
     expect(gate.report).toHaveBeenCalledOnceWith(
-      jasmine.objectContaining({ key: 'flows', decision: 'would_hide', surface: 'sidebar' }),
+      jasmine.objectContaining({ key: 'flows', decision: 'hidden', surface: 'sidebar' }),
     );
-    expect(service.applyAccessGate(['documents'], true, 'apps_card')).toBeTrue();
+    expect(service.applyAccessGate(['documents'], true, 'apps_card')).toBeFalse();
+    // The URL guard still knows the industry closes it (paywall on direct URL).
     expect(service.isIndustryLocked(['flows'])).toBeTrue();
     expect(service.isIndustryLocked(['documents'])).toBeTrue();
   });
@@ -1317,13 +1317,10 @@ describe('MenuFilterService — hijos de Flujos y Documentos (P5.7)', () => {
     expect(service.administrationPermissionBlockForUrl('/admin/workflows/exports')).toBeNull();
   });
 
-  it('una tienda sin la industria conserva ambos grupos con candado en el padre y en cada hijo', async () => {
+  it('una tienda sin la industria no ve los grupos Flujos ni Documentos (se ocultan, sin candado)', async () => {
     industries.set(['retail']);
     const groups = await filtered();
-    expect(groups.map((g) => g.label)).toEqual(['Flujos', 'Documentos']);
-    for (const item of groups.flatMap((g) => [g, ...(g.children ?? [])])) {
-      expect(item._planLocked).withContext(item.label).toBe(true);
-    }
+    expect(groups.map((g) => g.label)).toEqual([]);
     expect(service.isIndustryLocked(service.resolveGateKeysForRoute('/admin/workflows/board'))).toBe(true);
   });
 
