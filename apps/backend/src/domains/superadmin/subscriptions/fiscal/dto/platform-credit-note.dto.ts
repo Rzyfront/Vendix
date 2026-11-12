@@ -82,6 +82,11 @@ class PlatformNoteLineDto {
   quantity!: number;
 
   @IsOptional()
+  @IsNumber(
+    { maxDecimalPlaces: 2 },
+    { message: 'unit_price debe ser un número con hasta 2 decimales.' },
+  )
+  @IsPositive({ message: 'unit_price debe ser mayor que 0.' })
   unit_price?: number;
 
   /** Unidad de medida DIAN (UN/ECE rec. 20). Default 'NIU'; el mes es 'LUN', nunca 'MON'. */
@@ -100,9 +105,9 @@ class PlatformNoteLineDto {
  * (mismas reglas: related_invoice_id + note_concept_code obligatorios),
  * sin los items requeridos: la nota TOTAL es válida y se acepta sin líneas.
  *
- * El `customer` NO es obligatorio: la nota plataforma hereda el destinatario
- * del documento que corrige. Si el caller quiere override, lo manda
- * (mismo patrón que `customer.legal_name_override` del riel tienda).
+ * El destinatario NO se envía: la nota plataforma hereda siempre el cliente
+ * del documento que corrige (DIAN exige el mismo adquirente). Con
+ * `forbidNonWhitelisted`, un `customer` o `profile_id` en el body es un 400.
  */
 export class PlatformCreateCreditNoteDto {
   @IsInt({
@@ -131,29 +136,6 @@ export class PlatformCreateCreditNoteDto {
   @Type(() => PlatformNoteLineDto)
   items?: PlatformNoteLineDto[];
 
-  /**
-   * Override opcional del destinatario (snapshot heredado del documento
-   * relacionado si no se manda).
-   */
-  @IsOptional()
-  customer?: {
-    legal_name?: string;
-    tax_id?: string;
-    tax_id_dv?: string;
-    email?: string;
-    address_line?: string;
-    city?: string;
-    department_code?: string;
-  };
-
-  /**
-   * Perfil plataforma a aplicar como punto de partida (mismo campo que
-   * CreatePlatformSalesInvoiceDto.profile_id — ver C.1 del plan).
-   */
-  @IsOptional()
-  @IsInt({ message: 'profile_id debe ser entero positivo.' })
-  @Min(1, { message: 'profile_id debe ser entero positivo.' })
-  profile_id?: number;
 }
 
 export class PlatformCreateDebitNoteDto {
@@ -183,19 +165,4 @@ export class PlatformCreateDebitNoteDto {
   @Type(() => PlatformNoteLineDto)
   items?: PlatformNoteLineDto[];
 
-  @IsOptional()
-  customer?: {
-    legal_name?: string;
-    tax_id?: string;
-    tax_id_dv?: string;
-    email?: string;
-    address_line?: string;
-    city?: string;
-    department_code?: string;
-  };
-
-  @IsOptional()
-  @IsInt({ message: 'profile_id debe ser entero positivo.' })
-  @Min(1, { message: 'profile_id debe ser entero positivo.' })
-  profile_id?: number;
 }

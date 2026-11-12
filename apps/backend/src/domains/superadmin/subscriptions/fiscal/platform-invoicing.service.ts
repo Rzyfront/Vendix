@@ -1,4 +1,5 @@
 import { Injectable, Logger } from '@nestjs/common';
+import { PLATFORM_NOTE_SOURCE_TYPES } from './platform-note.helpers';
 import { Prisma, PrismaClient } from '@prisma/client';
 import { VendixHttpException, ErrorCodes } from '../../../../common/errors';
 import { GlobalPrismaService } from '../../../../prisma/services/global-prisma.service';
@@ -571,7 +572,9 @@ export class PlatformInvoicingService {
     const transmission = await this.prismaClient.fiscal_transmissions.findFirst({
       where: {
         id: args.invoiceId,
-        source_type: { in: ['platform_invoice', 'platform_support_document'] },
+        source_type: {
+          in: ['platform_invoice', 'platform_support_document', ...PLATFORM_NOTE_SOURCE_TYPES],
+        },
       },
     });
     if (!transmission) {
@@ -739,7 +742,12 @@ export class PlatformInvoicingService {
       | 'error'
       | 'cancelled'
       | null;
-    documentType: 'sales_invoice' | 'support_document' | null;
+    documentType:
+      | 'sales_invoice'
+      | 'support_document'
+      | 'credit_note'
+      | 'debit_note'
+      | null;
     q: string | null;
     collectionStatus?: 'overdue' | 'pending' | 'partial' | 'paid' | null;
     page: number;
@@ -753,7 +761,9 @@ export class PlatformInvoicingService {
     const page = Math.max(1, args.page);
     const limit = Math.min(Math.max(1, args.limit), 100);
     const where: any = {
-      source_type: { in: ['platform_invoice', 'platform_support_document'] },
+      source_type: {
+        in: ['platform_invoice', 'platform_support_document', ...PLATFORM_NOTE_SOURCE_TYPES],
+      },
       accounting_entity_id: args.accountingEntityId,
     };
     if (args.status) where.transmission_status = args.status;
@@ -776,6 +786,8 @@ export class PlatformInvoicingService {
       accounting_status: true,
       retry_count: true,
       cufe: true,
+      cude: true,
+      related_transmission_id: true,
       sent_at: true,
       accepted_at: true,
       rejected_at: true,
@@ -831,7 +843,51 @@ export class PlatformInvoicingService {
       }));
       total = count;
     }
-    return { rows, total, page, limit };
+    return { rows: await this.enrichNoteRows(rows), total, page, limit };
+  }
+
+  /**
+   * Filas de nota: numero de la factura original y total (del snapshot), para la
+   * lista. Las demas filas pasan con los campos en null.
+   */
+  private async enrichNoteRows(rows: any[]): Promise<any[]> {
+    const noteRows = rows.filter((r) => PLATFORM_NOTE_SOURCE_TYPES.includes(r.source_type));
+    const originals = new Map<number, string>();
+    const totals = new Map<number, string>();
+    if (noteRows.length > 0) {
+      const originalIds = [...new Set(noteRows.map((r) => r.related_transmission_id).filter(Boolean))];
+      const originalRows = originalIds.length
+        ? await this.prismaClient.fiscal_transmissions.findMany({
+            where: { id: { in: originalIds } },
+            select: { id: true, document_number: true },
+          })
+        : [];
+      for (const o of originalRows as any[]) originals.set(o.id, o.document_number);
+      const evidences = await this.prismaClient.fiscal_evidences.findMany({
+        where: {
+          fiscal_transmission_id: { in: noteRows.map((r) => r.id) },
+          evidence_type: 'manual_support',
+        },
+        orderBy: { id: 'asc' },
+        select: { fiscal_transmission_id: true, metadata: true },
+      });
+      for (const e of evidences as any[]) {
+        if (e.metadata?.kind === 'platform_invoice_snapshot') {
+          totals.set(e.fiscal_transmission_id, Number(e.metadata?.totals?.total ?? 0).toFixed(2));
+        }
+      }
+    }
+    return rows.map((r) => {
+      const isNote = PLATFORM_NOTE_SOURCE_TYPES.includes(r.source_type);
+      return {
+        ...r,
+        related_transmission_id: r.related_transmission_id ?? null,
+        related_document_number: isNote
+          ? (originals.get(r.related_transmission_id) ?? null)
+          : null,
+        ...(isNote ? { total: totals.get(r.id) ?? r.total ?? null } : {}),
+      };
+    });
   }
 
   /**
@@ -846,7 +902,9 @@ export class PlatformInvoicingService {
     const transmission = await this.prismaClient.fiscal_transmissions.findFirst({
       where: {
         id: args.transmissionId,
-        source_type: { in: ['platform_invoice', 'platform_support_document'] },
+        source_type: {
+          in: ['platform_invoice', 'platform_support_document', ...PLATFORM_NOTE_SOURCE_TYPES],
+        },
       },
       select: { id: true, source_type: true },
     });
@@ -859,6 +917,9 @@ export class PlatformInvoicingService {
     // Delegamos al reuso del riel tienda `resendPlatformTransmission`
     // ya operational (PR #636). El envia el invoice desde el snapshot
     // persistido; no necesita re-asignar numero.
+    if (PLATFORM_NOTE_SOURCE_TYPES.includes(transmission.source_type)) {
+      return this.subscriptionFiscalService.resendPlatformNote(args.transmissionId);
+    }
     return this.subscriptionFiscalService.resendPlatformTransmission(
       args.transmissionId,
     );

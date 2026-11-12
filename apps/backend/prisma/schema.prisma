@@ -8963,6 +8963,7 @@ model fiscal_transmissions {
   accepted_at           DateTime?                       @db.Timestamp(6)
   rejected_at           DateTime?                       @db.Timestamp(6)
   created_by_user_id    Int?
+  related_transmission_id Int?
   created_at            DateTime?                       @default(now()) @db.Timestamp(6)
   updated_at            DateTime?                       @default(now()) @db.Timestamp(6)
 
@@ -8971,12 +8972,16 @@ model fiscal_transmissions {
   accounting_entity  accounting_entities  @relation(fields: [accounting_entity_id], references: [id], onDelete: Restrict)
   dian_configuration dian_configurations? @relation(fields: [dian_configuration_id], references: [id], onDelete: Restrict)
   evidences          fiscal_evidences[]
+  /// Original document that a credit/debit note corrects (platform rail). NULL for every other document.
+  related_transmission fiscal_transmissions?  @relation("fiscal_transmission_notes", fields: [related_transmission_id], references: [id], onDelete: Restrict)
+  related_notes        fiscal_transmissions[] @relation("fiscal_transmission_notes")
 
   @@unique([accounting_entity_id, document_type, idempotency_key])
   @@unique([accounting_entity_id, document_type, document_number])
   @@index([organization_id, accounting_entity_id, document_type])
   @@index([store_id])
   @@index([source_type, source_id])
+  @@index([related_transmission_id])
   @@index([tracking_id])
   @@index([dian_status, transmission_status])
   @@index([created_at])

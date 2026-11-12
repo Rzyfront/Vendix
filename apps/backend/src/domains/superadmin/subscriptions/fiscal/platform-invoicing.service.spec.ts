@@ -159,3 +159,38 @@ describe('PlatformInvoicingService — identidad del cliente externo (release 92
     expect(upsert).not.toHaveBeenCalled();
   });
 });
+
+describe('PlatformInvoicingService.enrichNoteRows', () => {
+  const { PlatformInvoicingService: Svc } = require('./platform-invoicing.service');
+
+  it('adds the original number and the note total to note rows only', async () => {
+    const prismaClient = {
+      fiscal_transmissions: {
+        findMany: jest.fn().mockResolvedValue([{ id: 5, document_number: 'FV5' }]),
+      },
+      fiscal_evidences: {
+        findMany: jest.fn().mockResolvedValue([
+          {
+            fiscal_transmission_id: 8,
+            metadata: { kind: 'platform_invoice_snapshot', totals: { total: 119 } },
+          },
+        ]),
+      },
+    };
+    const rows = [
+      { id: 8, source_type: 'platform_credit_note', document_type: 'credit_note', related_transmission_id: 5, total: null },
+      { id: 5, source_type: 'platform_invoice', document_type: 'sales_invoice', total: '238.00' },
+    ];
+    const out = await Svc.prototype.enrichNoteRows.call({ prismaClient }, rows);
+    expect(out[0]).toMatchObject({
+      related_transmission_id: 5,
+      related_document_number: 'FV5',
+      total: '119.00',
+    });
+    expect(out[1]).toMatchObject({
+      related_transmission_id: null,
+      related_document_number: null,
+      total: '238.00',
+    });
+  });
+});
