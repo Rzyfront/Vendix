@@ -10,15 +10,31 @@ import { StorePrismaService } from '../../../prisma/services/store-prisma.servic
 import { AccessValidationService } from '@common/services/access-validation.service';
 import {
   CreateAddressDto,
+  CreateCustomerLocationDto,
   UpdateAddressDto,
   AddressQueryDto,
   UpdateGPSCoordinatesDto,
 } from './dto';
-import { Prisma } from '@prisma/client';
+import {
+  Prisma,
+  address_type_enum,
+  user_state_enum,
+} from '@prisma/client';
 import { VendixHttpException, ErrorCodes } from 'src/common/errors';
 // Función pura del catálogo Divipola (sin DI): valida que el código exista de
 // verdad en la lista que la DIAN acepta, no solo que tenga 5 dígitos.
 import { findDianMunicipality } from '../invoicing/providers/dian-direct/constants/dian-geography';
+
+const ADDRESS_SORT_FIELDS = new Set([
+  'id',
+  'city',
+  'state_province',
+  'country_code',
+  'postal_code',
+  'is_primary',
+  'type',
+  'label',
+]);
 
 @Injectable()
 export class AddressesService {
@@ -116,6 +132,8 @@ export class AddressesService {
       ),
       type: createAddressDto.type as any,
       is_primary: createAddressDto.is_primary,
+      label: this.normalizeText(createAddressDto.label),
+      phone_number: this.normalizeText(createAddressDto.phone_number),
       latitude: createAddressDto.latitude
         ? parseFloat(createAddressDto.latitude)
         : null,
@@ -177,6 +195,7 @@ export class AddressesService {
     }
 
     // Auto-scoped by StorePrismaService via store_id in context
+    if (query.customer_id) where.user_id = query.customer_id;
     if (type) where.type = type as any;
     if (is_primary !== undefined) where.is_primary = is_primary;
     if (city) where.city = { contains: city, mode: 'insensitive' };
@@ -184,12 +203,21 @@ export class AddressesService {
     if (country)
       where.country_code = { contains: country, mode: 'insensitive' };
 
+    // `addresses` no tiene created_at/updated_at: un sort_by fuera de la
+    // lista caía en un 500 de Prisma. Las ubicaciones de un cliente salen con
+    // la principal primero.
+    const sortField = ADDRESS_SORT_FIELDS.has(sort_by) ? sort_by : 'id';
+    const direction = sort_order === 'asc' ? 'asc' : 'desc';
+    const orderBy: Prisma.addressesOrderByWithRelationInput[] = query.customer_id
+      ? [{ is_primary: 'desc' }, { [sortField]: direction }]
+      : [{ [sortField]: direction }];
+
     const [addresses, total] = await Promise.all([
       this.prisma.addresses.findMany({
         where,
         skip,
         take: limit,
-        orderBy: { [sort_by]: sort_order },
+        orderBy,
         include: {
           stores: { select: { id: true, name: true } },
         },
@@ -248,8 +276,24 @@ export class AddressesService {
     const update_data: Prisma.addressesUpdateInput = {};
     if (updateAddressDto.address_line_1)
       update_data.address_line1 = updateAddressDto.address_line_1;
-    if (updateAddressDto.address_line_2)
-      update_data.address_line2 = updateAddressDto.address_line_2;
+    if (updateAddressDto.address_line_2 !== undefined)
+      update_data.address_line2 = this.normalizeText(
+        updateAddressDto.address_line_2,
+      );
+    if (updateAddressDto.label !== undefined)
+      update_data.label = this.normalizeText(updateAddressDto.label);
+    if (updateAddressDto.phone_number !== undefined)
+      update_data.phone_number = this.normalizeText(
+        updateAddressDto.phone_number,
+      );
+    if (updateAddressDto.latitude !== undefined)
+      update_data.latitude = updateAddressDto.latitude
+        ? parseFloat(updateAddressDto.latitude)
+        : null;
+    if (updateAddressDto.longitude !== undefined)
+      update_data.longitude = updateAddressDto.longitude
+        ? parseFloat(updateAddressDto.longitude)
+        : null;
     if (updateAddressDto.city) update_data.city = updateAddressDto.city;
     if (updateAddressDto.state)
       update_data.state_province = updateAddressDto.state;
@@ -289,33 +333,189 @@ export class AddressesService {
   }
 
   async remove(id: number, user: any) {
-    await this.findOne(id, user);
+    const address = await this.findOne(id, user);
 
-    const orderCount = await this.prisma.orders.count({
-      where: {
-        OR: [{ billing_address_id: id }, { shipping_address_id: id }],
-      },
-    });
+    // `orders`, `sales_orders` y `bookings` apuntan a la dirección con FK
+    // Restrict (sin snapshot completo): borrarla rompería esa historia.
+    const [orderCount, salesOrderCount, bookingCount] = await Promise.all([
+      this.prisma.orders.count({
+        where: {
+          OR: [{ billing_address_id: id }, { shipping_address_id: id }],
+        },
+      }),
+      this.prisma.sales_orders.count({ where: { shipping_address_id: id } }),
+      this.prisma.bookings.count({ where: { service_address_id: id } }),
+    ]);
 
-    if (orderCount > 0) {
+    if (orderCount + salesOrderCount + bookingCount > 0) {
       throw new BadRequestException(
-        'Cannot delete address that is used in orders',
+        'Esta ubicación está usada en órdenes o reservas; no se puede eliminar. Puedes editarla o marcar otra como principal.',
       );
     }
 
     try {
-      await this.prisma.addresses.delete({ where: { id } });
-      return { message: 'Address deleted successfully' };
+      await this.prisma.$transaction(async (tx) => {
+        await tx.addresses.delete({
+          where: { id, store_id: address.store_id! },
+        });
+        // Si era la principal del cliente, la más reciente del mismo tipo
+        // hereda la marca: el cliente nunca queda sin ubicación por defecto.
+        if (address.is_primary && address.user_id && address.store_id) {
+          const next = await tx.addresses.findFirst({
+            where: {
+              store_id: address.store_id,
+              user_id: address.user_id,
+              type: address.type,
+            },
+            orderBy: { id: 'desc' },
+            select: { id: true },
+          });
+          if (next) {
+            await tx.addresses.update({
+              where: { id: next.id, store_id: address.store_id },
+              data: { is_primary: true },
+            });
+          }
+        }
+      });
+      return { message: 'Dirección eliminada' };
     } catch (error) {
       if (error instanceof Prisma.PrismaClientKnownRequestError) {
         if (error.code === 'P2003') {
           throw new BadRequestException(
-            'Cannot delete address due to related data constraints',
+            'Esta ubicación está usada en otros documentos; no se puede eliminar.',
           );
         }
       }
       throw error;
     }
+  }
+
+  /**
+   * Registra una nueva ubicación (establecimiento) de un cliente existente de
+   * la organización. Si el cliente aún no está enlazado a esta tienda, lo
+   * enlaza. Una dirección idéntica (misma línea 1 y ciudad) ya registrada en
+   * la tienda no se duplica: se devuelve con `created: false`.
+   *
+   * La primera ubicación del cliente en la tienda queda como principal.
+   */
+  async addCustomerLocation(
+    customerId: number,
+    dto: CreateCustomerLocationDto,
+  ): Promise<{
+    address: Prisma.addressesGetPayload<object>;
+    created: boolean;
+  }> {
+    const context = RequestContextService.getContext();
+    const store_id = context?.store_id;
+    const organization_id = context?.organization_id;
+    if (!store_id || !organization_id) {
+      throw new VendixHttpException(ErrorCodes.STORE_CONTEXT_001);
+    }
+
+    const customer = await this.prisma.users.findFirst({
+      where: {
+        id: customerId,
+        organization_id,
+        state: { not: user_state_enum.archived },
+        user_roles: { some: { roles: { name: 'customer' } } },
+      },
+      select: { id: true },
+    });
+    if (!customer) {
+      throw new VendixHttpException(
+        ErrorCodes.ADDR_CUSTOMER_NOT_IN_STORE_001,
+        `El cliente #${customerId} no existe en esta organización.`,
+      );
+    }
+
+    const line1Key = this.addressKey(dto.address_line_1);
+    const cityKey = this.addressKey(dto.city);
+
+    return this.prisma.$transaction(async (tx) => {
+      // Mismo candado que `unsetOtherDefaults`: serializa altas concurrentes
+      // del mismo cliente (carga masiva + UI) para que solo una sea principal.
+      await tx.$executeRawUnsafe(
+        'SELECT pg_advisory_xact_lock(hashtext($1))',
+        `address_primary:${store_id}:${customer.id}`,
+      );
+
+      await tx.store_users.upsert({
+        where: {
+          store_id_user_id: { store_id, user_id: customer.id },
+        },
+        create: { store_id, user_id: customer.id },
+        update: {},
+      });
+
+      const existing = await tx.addresses.findMany({
+        where: {
+          store_id,
+          user_id: customer.id,
+          type: address_type_enum.shipping,
+        },
+      });
+      const duplicate = existing.find(
+        (a) =>
+          this.addressKey(a.address_line1) === line1Key &&
+          this.addressKey(a.city) === cityKey,
+      );
+      if (duplicate) {
+        return { address: duplicate, created: false };
+      }
+
+      const makePrimary = existing.length === 0 || dto.is_primary === true;
+      if (makePrimary && existing.length > 0) {
+        // Solo entre ubicaciones (shipping): la dirección fiscal (billing)
+        // conserva su propia marca de principal.
+        await tx.addresses.updateMany({
+          where: {
+            store_id,
+            user_id: customer.id,
+            type: address_type_enum.shipping,
+            is_primary: true,
+          },
+          data: { is_primary: false },
+        });
+      }
+
+      const address = await tx.addresses.create({
+        data: {
+          address_line1: dto.address_line_1.trim(),
+          address_line2: this.normalizeText(dto.address_line_2),
+          city: dto.city.trim(),
+          state_province: this.normalizeText(dto.state),
+          postal_code: this.normalizeText(dto.postal_code),
+          country_code: dto.country,
+          municipality_code: this.normalizeMunicipalityCode(
+            dto.municipality_code,
+          ),
+          label: this.normalizeText(dto.label),
+          phone_number: this.normalizeText(dto.phone_number),
+          latitude: dto.latitude ? parseFloat(dto.latitude) : null,
+          longitude: dto.longitude ? parseFloat(dto.longitude) : null,
+          type: address_type_enum.shipping,
+          is_primary: makePrimary,
+          store_id,
+          user_id: customer.id,
+        },
+      });
+      return { address, created: true };
+    });
+  }
+
+  private normalizeText(value: string | null | undefined): string | null {
+    const trimmed = value?.trim();
+    return trimmed ? trimmed : null;
+  }
+
+  private addressKey(value: string | null | undefined): string {
+    return (value ?? '')
+      .normalize('NFD')
+      .replace(/[\u0300-\u036f]/g, '')
+      .toLowerCase()
+      .replace(/[^a-z0-9]+/g, ' ')
+      .trim();
   }
 
   private async unsetOtherDefaults(

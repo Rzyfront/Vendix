@@ -169,6 +169,7 @@ export class CustomerListComponent {
   readonly delete = output<Customer>();
   readonly viewDetail = output<Customer>();
   readonly bulkUpload = output<void>();
+  readonly aiImport = output<void>();
   readonly pageChange = output<number>();
 
   get totalPages(): number {
@@ -226,6 +227,7 @@ export class CustomerListComponent {
   // Dropdown actions
   dropdownActions: DropdownAction[] = [
     { label: 'Carga Masiva', icon: 'upload', action: 'bulk-upload' },
+    { label: 'Cargar con IA', icon: 'sparkles', action: 'ai-import' },
     {
       label: 'Nuevo Cliente',
       icon: 'plus',
@@ -240,7 +242,10 @@ export class CustomerListComponent {
   // sort, so no column is marked sortable.
   readonly columns = computed<TableColumn[]>(() => [
     {
-      key: 'first_name',
+      // `id` y no `first_name`: la tabla compartida no aplica `transform`
+      // cuando el valor de la columna está vacío, y una persona jurídica
+      // tiene `first_name = ''` → se veía «—» en vez de su razón social.
+      key: 'id',
       label: 'Cliente',
       priority: 1,
       transform: (_val: any, row?: any) => customerDisplayName(row, '-'),
@@ -355,6 +360,9 @@ export class CustomerListComponent {
         break;
       case 'bulk-upload':
         this.bulkUpload.emit();
+        break;
+      case 'ai-import':
+        this.aiImport.emit();
         break;
     }
   }

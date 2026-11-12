@@ -197,6 +197,12 @@ export class CreateDispatchNoteDto {
   @Min(1)
   customer_id: number;
 
+  /** Ubicación/establecimiento del cliente (addresses.id) a la que se entrega. */
+  @IsOptional()
+  @IsInt()
+  @Min(1)
+  customer_address_id?: number;
+
   @IsOptional()
   @IsInt()
   @Min(1)

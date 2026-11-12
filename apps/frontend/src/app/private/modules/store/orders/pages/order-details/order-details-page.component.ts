@@ -3897,6 +3897,34 @@ export class OrderDetailsPageComponent {
   }
 
   /**
+   * Asigna a la orden una ubicación ya guardada del cliente (sin crear una
+   * dirección nueva).
+   */
+  onShippingAddressLocation(addressId: number): void {
+    const order = this.order();
+    if (!order || this.savingShippingAddress()) return;
+    this.savingShippingAddress.set(true);
+    this.ordersService
+      .updateOrderShippingAddress(String(order.id), addressId)
+      .pipe(takeUntilDestroyed(this.destroyRef))
+      .subscribe({
+        next: (updated: any) => {
+          const data = updated?.data ?? updated;
+          if (data) this.order.set(data);
+          this.savingShippingAddress.set(false);
+          this.showShippingAddressModal.set(false);
+          this.toastService.success('Ubicación asignada a la orden');
+        },
+        error: (err: unknown) => {
+          this.savingShippingAddress.set(false);
+          this.toastService.error(
+            err instanceof Error ? err.message : 'No se pudo asignar la ubicación',
+          );
+        },
+      });
+  }
+
+  /**
    * Route the chooser outcome to the wizard, the plain ship flow, or the
    * carrier pool. The switch is exhaustive over the three `DispatchMethod`
    * values (the `never` default gives a compile-time guarantee if a new

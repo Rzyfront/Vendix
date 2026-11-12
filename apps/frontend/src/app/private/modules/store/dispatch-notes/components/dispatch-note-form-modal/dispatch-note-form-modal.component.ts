@@ -5,7 +5,9 @@ import {
   input,
   output,
   signal,
+  DestroyRef,
 } from '@angular/core';
+import { takeUntilDestroyed } from '@angular/core/rxjs-interop';
 import { DecimalPipe } from '@angular/common';
 import { ReactiveFormsModule, FormBuilder, FormGroup, FormArray, Validators } from '@angular/forms';
 import {
@@ -20,6 +22,8 @@ import {
   CreateDispatchNoteItemDto,
 } from '../../interfaces/dispatch-note.interface';
 import { toLocalDateString } from '../../../../../../shared/utils/date.util';
+import { CustomerAddressPickerComponent, CustomerAddressPickerAddress } from '../../../../../../shared/components/customer-address-picker/customer-address-picker.component';
+import { CustomerLocationsService } from '../../../../../../shared/services/customer-locations.service';
 
 @Component({
   selector: 'app-dispatch-note-form-modal',
@@ -31,11 +35,14 @@ import { toLocalDateString } from '../../../../../../shared/utils/date.util';
     IconComponent,
     InputComponent,
     ModalComponent,
+    CustomerAddressPickerComponent,
   ],
   templateUrl: './dispatch-note-form-modal.component.html',
 })
 export class DispatchNoteFormModalComponent {
   private fb = inject(FormBuilder);
+  private customerLocationsService = inject(CustomerLocationsService);
+  private destroyRef = inject(DestroyRef);
 
   readonly dispatch_note = input<DispatchNote | null>(null);
   readonly is_open = input<boolean>(false);
@@ -45,12 +52,17 @@ export class DispatchNoteFormModalComponent {
 
   form!: FormGroup;
   readonly is_edit_mode = signal(false);
+  /** Saved locations of the typed customer id; primary preselected. */
+  readonly customerLocations = signal<CustomerAddressPickerAddress[]>([]);
+  readonly selectedLocationId = signal<number | null>(null);
 
   constructor() {
     this.initForm();
     effect(() => {
       if (this.is_open()) {
         this.initForm();
+        this.customerLocations.set([]);
+        this.selectedLocationId.set(null);
         const dn = this.dispatch_note();
         if (dn) {
           this.is_edit_mode.set(true);
@@ -103,6 +115,23 @@ export class DispatchNoteFormModalComponent {
         }));
       });
     }
+  }
+
+  /** Reloads the customer's locations whenever the customer id changes. */
+  onCustomerIdChange(): void {
+    const id = Number(this.form.get('customer_id')?.value);
+    this.customerLocations.set([]);
+    this.selectedLocationId.set(null);
+    if (!Number.isInteger(id) || id <= 0) return;
+    this.customerLocationsService
+      .listByCustomer(id)
+      .pipe(takeUntilDestroyed(this.destroyRef))
+      .subscribe((locations) => {
+        if (Number(this.form.get('customer_id')?.value) !== id) return;
+        this.customerLocations.set(locations);
+        const chosen = locations.find((l) => l.is_primary) ?? locations[0];
+        this.selectedLocationId.set(chosen?.id ?? null);
+      });
   }
 
   get items(): FormArray {
@@ -175,6 +204,9 @@ export class DispatchNoteFormModalComponent {
     const value = this.form.value;
     const dto: CreateDispatchNoteDto = {
       customer_id: value.customer_id,
+      ...(!this.is_edit_mode() && this.selectedLocationId() != null
+        ? { customer_address_id: this.selectedLocationId()! }
+        : {}),
       dispatch_location_id: value.dispatch_location_id,
       emission_date: value.emission_date,
       agreed_delivery_date: value.agreed_delivery_date,

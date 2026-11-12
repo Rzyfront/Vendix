@@ -159,6 +159,16 @@ export interface Contract {
   contract_number: string;
   status: ContractStatus;
   quotation_id: number;
+  /** Ubicación del cliente copiada de la cotización (solo lectura). */
+  customer_address_id?: number | null;
+  customer_address_snapshot?: {
+    label?: string | null;
+    address_line1?: string | null;
+    address_line2?: string | null;
+    city?: string | null;
+    state_province?: string | null;
+    phone_number?: string | null;
+  } | null;
   /** Objeto/alcance del contrato (snapshot congelado en C.1). */
   contract_object?: string | null;
   /** A/I/U values from the frozen invoice profile, never the quotation terms profile. */

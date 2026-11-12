@@ -10,7 +10,7 @@
     <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
       <div>
         <label class="block text-sm font-medium text-text-secondary mb-1">Cliente *</label>
-        <input type="number" formControlName="customer_id" placeholder="ID del cliente"
+        <input type="number" formControlName="customer_id" placeholder="ID del cliente" (change)="onCustomerIdChange()"
           class="w-full px-3 py-2 min-h-[44px] rounded-lg border border-border bg-surface text-text-primary text-sm focus:outline-none focus:ring-2 focus:ring-primary/30 focus:border-primary" />
       </div>
       <div>
@@ -29,6 +29,21 @@
           class="w-full px-3 py-2 min-h-[44px] rounded-lg border border-border bg-surface text-text-primary text-sm focus:outline-none focus:ring-2 focus:ring-primary/30 focus:border-primary" />
       </div>
     </div>
+
+    <!-- Customer location (create only) -->
+    @if (!is_edit_mode() && customerLocations().length > 0) {
+      <div class="space-y-1">
+        <label class="block text-sm font-medium text-text-secondary">Ubicación / establecimiento</label>
+        <app-customer-address-picker
+          [addresses]="customerLocations()"
+          [selectedAddressId]="selectedLocationId()"
+          [showAddNew]="false"
+          [showEditLink]="false"
+          [compact]="true"
+          (addressSelected)="selectedLocationId.set($event)"
+        ></app-customer-address-picker>
+      </div>
+    }
 
     <!-- Notes -->
     <div class="grid grid-cols-1 md:grid-cols-2 gap-4">

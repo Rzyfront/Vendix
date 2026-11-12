@@ -40,10 +40,25 @@ export interface QuotationItem {
   product_variant?: any;
 }
 
+export interface QuotationCustomerAddressSnapshot {
+  label?: string | null;
+  address_line1?: string | null;
+  address_line2?: string | null;
+  city?: string | null;
+  state_province?: string | null;
+  country_code?: string | null;
+  postal_code?: string | null;
+  municipality_code?: string | null;
+  phone_number?: string | null;
+}
+
 export interface Quotation {
   id: number;
   store_id: number;
   customer_id?: number;
+  /** Ubicación elegida del cliente y su copia congelada al cotizar. */
+  customer_address_id?: number | null;
+  customer_address_snapshot?: QuotationCustomerAddressSnapshot | null;
   quotation_number: string;
   status: QuotationStatus;
   /** B.2: destino fijo al crear (default `sale` en backend). Solo lectura en frontend. */
@@ -77,6 +92,7 @@ export interface Quotation {
     id: number;
     first_name: string;
     last_name: string;
+    legal_name?: string | null;
     email: string;
     phone?: string;
   };
@@ -143,6 +159,8 @@ export interface CreateQuotationItemDto {
 
 export interface CreateQuotationDto {
   customer_id?: number;
+  /** Ubicación/establecimiento del cliente (addresses.id). */
+  customer_address_id?: number;
   /** B.2 (FB-01/FB-05): destino al crear; omitido = backend aplica `sale`. Nunca se edita. */
   destination?: QuotationDestination;
   /** B.2 (FB-05): perfil opcional; omitido = cotizar desde cero. Id ajeno/inactivo da 400/403. */

@@ -11,6 +11,8 @@ export interface PosCustomerAddress {
   longitude?: number | string | null;
   type: string;
   is_primary: boolean;
+  /** Nombre de la sede/establecimiento del cliente. */
+  label?: string | null;
 }
 
 /** Régimen tributario del cliente (clasificación fiscal "el QUIEN"). Anexo 19. */

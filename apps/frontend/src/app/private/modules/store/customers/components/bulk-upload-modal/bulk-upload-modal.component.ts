@@ -18,6 +18,62 @@ import {
   StepsLineItem,
 } from '../../../../../../shared/components/steps-line/steps-line.component';
 
+interface CustomerGroupLocation {
+  label: string;
+  address: string;
+  city: string;
+}
+
+interface CustomerGroup {
+  key: string;
+  name: string;
+  document: string;
+  isJuridica: boolean;
+  locations: CustomerGroupLocation[];
+}
+
+/** Clave de agrupación por documento (NIT sin DV pegado); `null` si no hay documento. */
+function customerDocKey(row: Record<string, any>): string | null {
+  const raw = String(row['document_number'] ?? '').trim();
+  if (!raw) return null;
+  const isJuridica = String(row['person_type'] ?? '').toUpperCase() === 'JURIDICA';
+  const type = String(row['document_type'] || (isJuridica ? 'NIT' : 'CC')).trim().toUpperCase();
+  const base = type === 'NIT' ? raw.split('-')[0] : raw;
+  const number = base.toUpperCase().replace(/[\s\-.]/g, '');
+  return number ? `${type}:${number}` : null;
+}
+
+/** Agrupa filas parseadas: mismo documento = un cliente con varias ubicaciones. */
+function groupCustomerRows(rows: Record<string, any>[]): CustomerGroup[] {
+  const groups = new Map<string, CustomerGroup>();
+  for (const row of rows) {
+    const docKey = customerDocKey(row);
+    const key = docKey ?? `row:${row['row_number']}`;
+    let group = groups.get(key);
+    if (!group) {
+      group = {
+        key,
+        name:
+          row['legal_name'] ||
+          [row['first_name'], row['last_name']].filter(Boolean).join(' ') ||
+          'Sin nombre',
+        document: row['document_number'] || '',
+        isJuridica: String(row['person_type'] ?? '').toUpperCase() === 'JURIDICA',
+        locations: [],
+      };
+      groups.set(key, group);
+    }
+    if (row['address_line_1']) {
+      group.locations.push({
+        label: row['location_name'] || '',
+        address: row['address_line_1'],
+        city: row['city'] || '',
+      });
+    }
+  }
+  return [...groups.values()];
+}
+
 @Component({
   selector: 'app-customer-bulk-upload-modal',
   standalone: true,
@@ -54,8 +110,9 @@ import {
             <h4 class="font-bold text-indigo-900">Plantilla de Clientes</h4>
           </div>
           <p class="text-xs text-indigo-700 mb-3 leading-relaxed">
-            Incluye: Correo (opcional), Nombre, Apellido, Documento, Tipo Documento y Teléfono.
-            Con 10 ejemplos para guiarte.
+            Incluye: Correo (opcional), Nombre, Apellido, Documento, Tipo Documento, Teléfono,
+            Tipo Persona, Razón Social, DV y los datos de la ubicación (Nombre Sede, Dirección, Ciudad...).
+            Repite el mismo documento en varias filas para cargar varias ubicaciones de un cliente.
           </p>
           <div class="flex items-center text-xs font-bold text-indigo-600 group-hover:text-indigo-800">
             <app-icon name="download" [size]="14" class="mr-1"></app-icon>
@@ -130,13 +187,16 @@ import {
       <!-- ═══ STEP 1: Verificar ═══ -->
       @if (currentStep() === 1 && parsedData()) {
         <div class="space-y-4 mt-2">
-          <div class="bg-green-50 p-4 rounded-lg border border-green-100 flex items-center justify-between">
+          <div class="bg-green-50 p-4 rounded-lg border border-green-100 flex items-center justify-between gap-3">
             <div class="flex items-center">
               <app-icon name="check-circle" [size]="24" class="text-green-500 mr-3"></app-icon>
               <div>
                 <h4 class="text-sm font-medium text-green-900">
-                  {{ parsedData()!.length }} clientes encontrados
+                  {{ customerGroups().length }} clientes encontrados
                 </h4>
+                @if (totalLocations() > 0) {
+                  <p class="text-xs text-green-700">{{ totalLocations() }} ubicaciones en total</p>
+                }
               </div>
             </div>
             <button (click)="goToStep(0)" class="text-xs text-red-500 hover:text-red-700 font-medium">
@@ -144,35 +204,42 @@ import {
             </button>
           </div>
 
-          <!-- Preview Table -->
-          <div class="border rounded-md overflow-hidden">
-            <table class="min-w-full divide-y divide-gray-200 text-sm">
-              <thead class="bg-gray-50">
-                <tr>
-                  <th class="px-3 py-2 text-left font-medium text-gray-500">Fila</th>
-                  <th class="px-3 py-2 text-left font-medium text-gray-500">Correo</th>
-                  <th class="px-3 py-2 text-left font-medium text-gray-500">Nombre</th>
-                  <th class="px-3 py-2 text-left font-medium text-gray-500">Apellido</th>
-                  <th class="px-3 py-2 text-left font-medium text-gray-500">Documento</th>
-                  <th class="px-3 py-2 text-left font-medium text-gray-500">Teléfono</th>
-                </tr>
-              </thead>
-              <tbody class="bg-surface divide-y divide-gray-200">
-                @for (item of parsedData()!.slice(0, 5); track item.row_number) {
-                  <tr>
-                    <td class="px-3 py-2 text-gray-400 text-xs">{{ item.row_number }}</td>
-                    <td class="px-3 py-2 text-gray-900 text-xs">{{ item.email || '-' }}</td>
-                    <td class="px-3 py-2 text-gray-700">{{ item.first_name || '-' }}</td>
-                    <td class="px-3 py-2 text-gray-700">{{ item.last_name || '-' }}</td>
-                    <td class="px-3 py-2 text-gray-500 font-mono text-xs">{{ item.document_number || '-' }}</td>
-                    <td class="px-3 py-2 text-gray-500 text-xs">{{ item.phone || '-' }}</td>
-                  </tr>
+          <!-- Preview: una tarjeta por cliente -->
+          <div class="space-y-2">
+            @for (group of customerGroups().slice(0, 5); track group.key) {
+              <div class="rounded-lg border border-border bg-surface p-3">
+                <div class="flex items-start justify-between gap-2">
+                  <div class="min-w-0">
+                    <div class="text-sm font-semibold text-text-primary truncate">{{ group.name }}</div>
+                    <div class="text-xs text-text-secondary font-mono">
+                      {{ group.document || 'Sin documento' }}
+                      @if (group.isJuridica) { <span class="font-sans"> · Persona jurídica</span> }
+                    </div>
+                  </div>
+                  @if (group.locations.length > 0) {
+                    <span class="shrink-0 rounded-full bg-primary/10 px-2 py-0.5 text-xs font-medium text-primary">
+                      {{ group.locations.length }} {{ group.locations.length === 1 ? 'ubicación' : 'ubicaciones' }}
+                    </span>
+                  }
+                </div>
+                @if (group.locations.length > 0) {
+                  <ul class="mt-2 space-y-1">
+                    @for (loc of group.locations; track $index) {
+                      <li class="flex items-start gap-1.5 text-xs text-text-secondary">
+                        <app-icon name="map-pin" [size]="12" class="mt-0.5 shrink-0"></app-icon>
+                        <span class="min-w-0">
+                          @if (loc.label) { <span class="font-medium text-text-primary">{{ loc.label }} · </span> }
+                          {{ loc.address }}{{ loc.city ? ', ' + loc.city : '' }}
+                        </span>
+                      </li>
+                    }
+                  </ul>
                 }
-              </tbody>
-            </table>
-            @if (parsedData()!.length > 5) {
-              <div class="bg-gray-50 px-3 py-2 text-xs text-gray-500 text-center">
-                ... y {{ parsedData()!.length - 5 }} más
+              </div>
+            }
+            @if (customerGroups().length > 5) {
+              <div class="rounded-md bg-gray-50 px-3 py-2 text-xs text-gray-500 text-center">
+                ... y {{ customerGroups().length - 5 }} clientes más
               </div>
             }
           </div>
@@ -201,7 +268,7 @@ import {
           @if (isUploading()) {
             <div class="flex flex-col items-center justify-center py-8 gap-3">
               <app-icon name="loader" [size]="36" class="text-primary animate-spin"></app-icon>
-              <p class="text-sm text-gray-900 font-medium">Procesando {{ parsedData()?.length }} clientes...</p>
+              <p class="text-sm text-gray-900 font-medium">Procesando {{ customerGroups().length }} clientes...</p>
               @if (uploadProgress().total > 0) {
                 <div class="w-full rounded-lg border border-primary/30 bg-primary/5 px-3 py-2">
                   <div class="flex items-center justify-between text-[11px] text-gray-600">
@@ -248,8 +315,37 @@ import {
                     <div class="text-xs text-red-600 font-medium">Fallidos</div>
                     <div class="text-2xl font-bold text-red-700">{{ uploadResults()!.failed || 0 }}</div>
                   </div>
+                  @if (uploadResults()!.locations_added > 0) {
+                    <div class="bg-blue-50 p-3 rounded border border-blue-100">
+                      <div class="text-xs text-blue-600 font-medium">Ubicaciones agregadas</div>
+                      <div class="text-2xl font-bold text-blue-700">{{ uploadResults()!.locations_added }}</div>
+                    </div>
+                  }
+                  @if (uploadResults()!.warnings > 0) {
+                    <div class="bg-yellow-50 p-3 rounded border border-yellow-100">
+                      <div class="text-xs text-yellow-700 font-medium">Advertencias</div>
+                      <div class="text-2xl font-bold text-yellow-800">{{ uploadResults()!.warnings }}</div>
+                    </div>
+                  }
                 </div>
               </div>
+
+              <!-- Advertencias (p. ej. ubicación ya registrada) -->
+              @if (resultWarnings().length > 0) {
+                <div class="border rounded-lg overflow-hidden">
+                  <div class="bg-yellow-50 p-3 border-b border-yellow-100 text-yellow-800 font-medium text-sm flex items-center">
+                    <app-icon name="alert-triangle" [size]="16" class="mr-2"></app-icon>
+                    Advertencias
+                  </div>
+                  <ul class="max-h-48 overflow-y-auto bg-surface divide-y divide-gray-100 text-sm">
+                    @for (w of resultWarnings(); track $index) {
+                      <li class="px-3 py-2 text-yellow-800">
+                        <span class="font-medium">Fila {{ w.row_number }}:</span> {{ w.message }}
+                      </li>
+                    }
+                  </ul>
+                </div>
+              }
 
               <!-- Error Detail -->
               @if (uploadResults()!.failed > 0) {
@@ -354,7 +450,7 @@ import {
               [loading]="isUploading()"
             >
               <app-icon name="upload" [size]="16" slot="icon" ></app-icon>
-              Cargar {{ parsedData()!.length }} Clientes
+              Cargar {{ customerGroups().length }} Clientes
             </app-button>
           }
         </div>
@@ -392,6 +488,20 @@ export class CustomerBulkUploadModalComponent {
   readonly progressPercent = computed(() => {
     const p = this.uploadProgress();
     return p.total > 0 ? Math.round((p.processed / p.total) * 100) : 0;
+  });
+  // Una entrada por cliente: filas con el mismo documento = un cliente con N ubicaciones.
+  readonly customerGroups = computed<CustomerGroup[]>(() =>
+    groupCustomerRows(this.parsedData() ?? []),
+  );
+  readonly totalLocations = computed(() =>
+    this.customerGroups().reduce((sum, g) => sum + g.locations.length, 0),
+  );
+  readonly resultWarnings = computed<{ row_number: number; message: string }[]>(() => {
+    const r = this.uploadResults();
+    if (!r || !Array.isArray(r.results)) return [];
+    return r.results
+      .filter((x: any) => x?.status === 'warning')
+      .map((x: any) => ({ row_number: x.row_number, message: x.message }));
   });
   private uploadSub: Subscription | null = null;
   private payload: Record<string, any>[] = [];
@@ -454,6 +564,39 @@ export class CustomerBulkUploadModalComponent {
     teléfono: 'phone',
     telefono: 'phone',
     phone: 'phone',
+    'tipo persona': 'person_type',
+    'tipo de persona': 'person_type',
+    person_type: 'person_type',
+    'razón social': 'legal_name',
+    'razon social': 'legal_name',
+    legal_name: 'legal_name',
+    dv: 'verification_digit',
+    verification_digit: 'verification_digit',
+    'nombre sede': 'location_name',
+    sede: 'location_name',
+    location_name: 'location_name',
+    label: 'location_name',
+    dirección: 'address_line_1',
+    direccion: 'address_line_1',
+    address: 'address_line_1',
+    address_line_1: 'address_line_1',
+    'dirección 2': 'address_line_2',
+    'direccion 2': 'address_line_2',
+    address_line_2: 'address_line_2',
+    ciudad: 'city',
+    city: 'city',
+    departamento: 'state',
+    state: 'state',
+    'código dane': 'municipality_code',
+    'codigo dane': 'municipality_code',
+    dane: 'municipality_code',
+    municipality_code: 'municipality_code',
+    país: 'country',
+    pais: 'country',
+    country: 'country',
+    'teléfono sede': 'location_phone',
+    'telefono sede': 'location_phone',
+    location_phone: 'location_phone',
   };
 
   isErrorMessageArray(): boolean {
@@ -582,6 +725,7 @@ export class CustomerBulkUploadModalComponent {
 
         const customers: any[] = [];
         const warnings: string[] = [];
+        const seenDocs = new Set<string>();
 
         for (let i = 1; i < rawData.length; i++) {
           const row = rawData[i] as any[];
@@ -603,15 +747,28 @@ export class CustomerBulkUploadModalComponent {
           });
 
           // Fix: no requerir email — solo nombre O documento
-          if (hasData && (customer['first_name'] || customer['document_number'])) {
+          if (hasData && (customer['first_name'] || customer['legal_name'] || customer['document_number'])) {
             customer['row_number'] = i + 1; // fila Excel (1-based + header)
 
+            // Filas adicionales del mismo documento son otras ubicaciones del
+            // mismo cliente: no repiten advertencias de correo/documento.
+            const docKey = customerDocKey(customer);
+            const isContinuation = !!docKey && seenDocs.has(docKey);
+            if (docKey) seenDocs.add(docKey);
+            const displayName = customer['legal_name'] || customer['first_name'] || 'Sin nombre';
+
             // Generar warnings
-            if (!customer['email']) {
-              warnings.push(`Fila ${i + 1}: ${customer['first_name'] || 'Sin nombre'} ${customer['last_name'] || ''} — sin correo electrónico`);
+            if (!customer['email'] && !isContinuation) {
+              warnings.push(`Fila ${i + 1}: ${displayName} ${customer['last_name'] || ''} — sin correo electrónico`);
             }
             if (!customer['document_number']) {
-              warnings.push(`Fila ${i + 1}: ${customer['first_name'] || 'Sin nombre'} ${customer['last_name'] || ''} — sin número de documento`);
+              warnings.push(`Fila ${i + 1}: ${displayName} ${customer['last_name'] || ''} — sin número de documento`);
+            }
+            if (customer['person_type'] && String(customer['person_type']).toUpperCase() === 'JURIDICA' && !customer['legal_name']) {
+              warnings.push(`Fila ${i + 1}: persona jurídica sin razón social`);
+            }
+            if (customer['address_line_1'] && !customer['city']) {
+              warnings.push(`Fila ${i + 1}: la dirección no tiene ciudad`);
             }
 
             customers.push(customer);
@@ -667,7 +824,7 @@ export class CustomerBulkUploadModalComponent {
     });
 
     this.payload = sanitizedData;
-    this.accumulated = { success: true, total_processed: 0, successful: 0, failed: 0, results: [] };
+    this.accumulated = { success: true, total_processed: 0, successful: 0, failed: 0, locations_added: 0, warnings: 0, results: [] };
     this.failedAt.set(null);
     this.uploadProgress.set({ processed: 0, total: sanitizedData.length });
     this.runUpload(0);
@@ -698,6 +855,8 @@ export class CustomerBulkUploadModalComponent {
           const d = r?.data || r;
           acc.successful += d?.successful || 0;
           acc.failed += d?.failed || 0;
+          acc.locations_added += d?.locations_added || 0;
+          acc.warnings += d?.warnings || 0;
           acc.total_processed += d?.total_processed || 0;
           if (Array.isArray(d?.results)) acc.results.push(...d.results);
         }
@@ -717,16 +876,21 @@ export class CustomerBulkUploadModalComponent {
         } else if (acc.failed > 0) {
           this.toastService.warning('La carga se completó con algunos errores.');
         } else {
-          this.toastService.success(`${acc.successful} clientes cargados exitosamente`);
+          const locs = acc.locations_added > 0 ? ` (${acc.locations_added} ubicaciones)` : '';
+          this.toastService.success(`${acc.successful} filas cargadas exitosamente${locs}`);
           this.uploadComplete.emit();
         }
       });
   }
 
   getCustomerLabel(result: any, index: number): string {
-    const parsed = this.parsedData()?.[index];
+    // Buscar por número de fila: con lotes de 100 el índice del resultado no
+    // coincide con la posición en el archivo a partir del segundo lote.
+    const rows = this.parsedData() ?? [];
+    const parsed =
+      rows.find((r: any) => r?.row_number === result?.row_number) ?? rows[index];
     if (parsed) {
-      const name = [parsed.first_name, parsed.last_name].filter(Boolean).join(' ');
+      const name = parsed.legal_name || [parsed.first_name, parsed.last_name].filter(Boolean).join(' ');
       if (name) return name;
     }
     return `Cliente ${index + 1}`;

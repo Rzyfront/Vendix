@@ -5,6 +5,7 @@ import {
   IsNumber,
   IsOptional,
   IsString,
+  MaxLength,
   ArrayMaxSize,
   ValidateNested,
 } from 'class-validator';
@@ -66,6 +67,80 @@ export class BulkCustomerItemDto {
   @IsOptional()
   phone?: string;
 
+  @ApiPropertyOptional({ example: 'NATURAL', enum: ['NATURAL', 'JURIDICA'] })
+  @Transform(({ value }) =>
+    typeof value === 'string'
+      ? value.trim() === ''
+        ? undefined
+        : value.trim().toUpperCase()
+      : value,
+  )
+  @IsOptional()
+  @IsIn(['NATURAL', 'JURIDICA'], {
+    message: "El tipo de persona debe ser 'NATURAL' o 'JURIDICA'",
+  })
+  person_type?: 'NATURAL' | 'JURIDICA';
+
+  @ApiPropertyOptional({ example: 'Acme S.A.S' })
+  @IsOptional()
+  @IsString({ message: 'La razón social debe ser texto' })
+  @MaxLength(255)
+  legal_name?: string;
+
+  @ApiPropertyOptional({ example: '7' })
+  @IsOptional()
+  @IsString({ message: 'El DV debe ser texto' })
+  @MaxLength(1, { message: 'El DV debe ser un único dígito' })
+  verification_digit?: string;
+
+  @ApiPropertyOptional({ example: 'Sede Norte' })
+  @IsOptional()
+  @IsString({ message: 'El nombre de la sede debe ser texto' })
+  @MaxLength(120)
+  location_name?: string;
+
+  @ApiPropertyOptional({ example: 'Calle 123 # 45-67' })
+  @IsOptional()
+  @IsString({ message: 'La dirección debe ser texto' })
+  @MaxLength(255)
+  address_line_1?: string;
+
+  @ApiPropertyOptional({ example: 'Bodega 4' })
+  @IsOptional()
+  @IsString({ message: 'La dirección 2 debe ser texto' })
+  @MaxLength(255)
+  address_line_2?: string;
+
+  @ApiPropertyOptional({ example: 'Medellín' })
+  @IsOptional()
+  @IsString({ message: 'La ciudad debe ser texto' })
+  @MaxLength(100)
+  city?: string;
+
+  @ApiPropertyOptional({ example: 'Antioquia' })
+  @IsOptional()
+  @IsString({ message: 'El departamento debe ser texto' })
+  @MaxLength(100)
+  state?: string;
+
+  @ApiPropertyOptional({ example: '05001' })
+  @IsOptional()
+  @IsString({ message: 'El código DANE debe ser texto' })
+  @MaxLength(10)
+  municipality_code?: string;
+
+  @ApiPropertyOptional({ example: 'CO' })
+  @IsOptional()
+  @IsString({ message: 'El país debe ser texto' })
+  @MaxLength(3)
+  country?: string;
+
+  @ApiPropertyOptional({ example: '3001234567' })
+  @IsOptional()
+  @IsString({ message: 'El teléfono de la sede debe ser texto' })
+  @MaxLength(50)
+  location_phone?: string;
+
   @ApiPropertyOptional({ example: 3 })
   @IsNumber({}, { message: 'El número de fila debe ser numérico' })
   @IsOptional()
@@ -91,7 +166,7 @@ export class BulkCustomerUploadItemResultDto {
   customer?: any;
 
   @ApiProperty({ example: 'success' })
-  status: 'success' | 'error';
+  status: 'success' | 'error' | 'location_added' | 'warning';
 
   @ApiProperty({ example: 'Cliente creado exitosamente' })
   message: string;
@@ -124,6 +199,18 @@ export class BulkCustomerUploadResultDto {
 
   @ApiProperty({ example: 2 })
   failed: number;
+
+  @ApiPropertyOptional({
+    example: 2,
+    description: 'Ubicaciones agregadas (a clientes nuevos o existentes)',
+  })
+  locations_added?: number;
+
+  @ApiPropertyOptional({
+    example: 1,
+    description: 'Filas con advertencia (p. ej. "Ubicación ya registrada")',
+  })
+  warnings?: number;
 
   @ApiProperty({ type: [BulkCustomerUploadItemResultDto] })
   results: BulkCustomerUploadItemResultDto[];

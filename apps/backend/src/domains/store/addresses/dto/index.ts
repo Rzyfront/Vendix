@@ -13,7 +13,7 @@ import {
 } from 'class-validator';
 import { ApiProperty, ApiPropertyOptional } from '@nestjs/swagger';
 import { Transform } from 'class-transformer';
-import { PartialType } from '@nestjs/mapped-types';
+import { OmitType, PartialType } from '@nestjs/mapped-types';
 
 export * from './dian-municipality.dto';
 
@@ -128,6 +128,25 @@ export class CreateAddressDto {
   @IsOptional()
   type?: AddressType;
 
+  @ApiPropertyOptional({
+    example: 'Sede Norte',
+    description:
+      'Nombre de la ubicación/establecimiento del cliente (opcional)',
+  })
+  @IsString()
+  @IsOptional()
+  @MaxLength(120)
+  label?: string;
+
+  @ApiPropertyOptional({
+    example: '3001234567',
+    description: 'Teléfono de contacto de la ubicación (opcional)',
+  })
+  @IsString()
+  @IsOptional()
+  @MaxLength(50)
+  phone_number?: string;
+
   @ApiPropertyOptional({ example: 1, description: 'ID de cliente (opcional)' })
   @IsInt()
   @IsOptional()
@@ -210,6 +229,29 @@ export class CreateAddressDto {
 
 // Update Address DTO
 export class UpdateAddressDto extends PartialType(CreateAddressDto) {}
+
+/**
+ * Nueva ubicación/establecimiento de un cliente existente. El cliente sale de
+ * la ruta (`:id`), nunca del cuerpo, y el tipo es siempre `shipping`: es el
+ * tipo que el resto del sistema ya trata como "direcciones del cliente".
+ */
+export class CreateCustomerLocationDto extends OmitType(CreateAddressDto, [
+  'customer_id',
+  'store_id',
+  'organization_id',
+  'user_id',
+  'type',
+  'status',
+  'state',
+] as const) {
+  // Opcional aquí: una sede cargada en masa o desde el diálogo de cliente
+  // existente puede no traer departamento.
+  @ApiPropertyOptional({ example: 'Antioquia', description: 'Departamento' })
+  @IsString()
+  @IsOptional()
+  @MaxLength(100)
+  state?: string;
+}
 
 // Address Query DTO
 export class AddressQueryDto {
@@ -316,7 +358,7 @@ export class AddressQueryDto {
   })
   @IsOptional()
   @IsString()
-  sort_by?: string = 'created_at';
+  sort_by?: string = 'id';
 
   @ApiPropertyOptional({
     example: 'desc',
