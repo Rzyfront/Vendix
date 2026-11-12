@@ -463,6 +463,8 @@ export class PosCustomerService {
         phone_number: addr.phone_number,
         type: addr.type,
         is_primary: addr.is_primary,
+        // Branch name ("Sede Norte"): the address selector shows it in bold.
+        label: addr.label ?? null,
       })),
       created_at: new Date(apiCustomer.created_at),
       updated_at: new Date(apiCustomer.updated_at),

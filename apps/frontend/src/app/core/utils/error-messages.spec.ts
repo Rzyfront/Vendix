@@ -561,3 +561,23 @@ describe('ERROR_MESSAGES / stockShortages — INV_STOCK_002 (entrega sin stock)'
     expect(parsed.stockShortages).toBeUndefined();
   });
 });
+
+describe('ERROR_MESSAGES — DISPATCH_NOTE_NO_SHIPPING_ADDRESS (despacho sin dirección)', () => {
+  it('explains what is missing and what to do, in Spanish', () => {
+    const parsed = parseApiError({
+      error: {
+        statusCode: 400,
+        error_code: 'DISPATCH_NOTE_NO_SHIPPING_ADDRESS',
+        // Same copy as the backend devMessage (error-codes.ts).
+        message: ERROR_MESSAGES['DISPATCH_NOTE_NO_SHIPPING_ADDRESS'],
+      },
+    });
+
+    expect(parsed.errorCode).toBe('DISPATCH_NOTE_NO_SHIPPING_ADDRESS');
+    expect(parsed.userMessage).toBe(ERROR_MESSAGES['DISPATCH_NOTE_NO_SHIPPING_ADDRESS']);
+    expect(parsed.userMessage).toContain('Esta orden');
+    expect(parsed.userMessage).toContain('no tiene dirección de entrega');
+    expect(parsed.userMessage).toContain('Agregar dirección de entrega');
+    expect(parsed.userMessage).not.toContain('shipping address');
+  });
+});
