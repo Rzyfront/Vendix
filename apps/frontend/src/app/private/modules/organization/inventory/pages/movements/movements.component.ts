@@ -73,6 +73,8 @@ const MOVEMENT_TYPE_LABELS: Record<string, string> = {
   damage: 'Daño',
   expiration: 'Vencimiento',
   theft: 'Pérdida',
+  production: 'Producción',
+  consumption: 'Consumo de insumos',
 };
 
 const MOVEMENT_TYPE_COLOR_MAP: Record<string, string> = {
