@@ -228,11 +228,15 @@ export class CommercialConsentService {
       }
 
       const pageLocation = this.pageLocation(win);
+      // SEO-TECH-06: antes las cookies iban a «.vendix.online» y las veían todas las
+      // tiendas (subdominios). Se borran esas cookies de dominio y GA escribe solo en
+      // este host (cookie_domain: 'none').
+      this.deleteDomainAnalyticsCookies(win.location.hostname);
       win.gtag('config', this.measurementId, {
         send_page_view: false,
         page_location: pageLocation,
         page_referrer: this.document.referrer.split(/[?#]/)[0],
-        cookie_domain: win.location.hostname,
+        cookie_domain: 'none',
         allow_google_signals: false,
         allow_ad_personalization_signals: false,
       });
@@ -295,6 +299,17 @@ export class CommercialConsentService {
 
   private setDisabled(disabled: boolean): void {
     if (this.win) this.win[`ga-disable-${this.measurementId}`] = disabled;
+  }
+
+  /** Borra solo las cookies de GA con atributo Domain (las heredadas de cookie_domain = host). */
+  private deleteDomainAnalyticsCookies(hostname: string): void {
+    const suffix = this.measurementId.replace(/^G-/, '');
+    const apex = hostname.replace(/^www\./, '');
+    for (const name of ['_ga', `_ga_${suffix}`]) {
+      for (const domain of new Set([hostname, `.${hostname}`, `.${apex}`])) {
+        this.document.cookie = `${name}=; expires=Thu, 01 Jan 1970 00:00:00 GMT; path=/; domain=${domain}`;
+      }
+    }
   }
 
   private deleteAnalyticsCookies(hostname: string): void {
