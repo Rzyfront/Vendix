@@ -44,7 +44,13 @@ import {
   SpinnerComponent,
   CardComponent,
   DialogService,
+  ModalComponent,
 } from '../../../../shared/components';
+import {
+  CustomerAddressPickerAddress,
+  CustomerAddressPickerComponent,
+} from '../../../../shared/components/customer-address-picker/customer-address-picker.component';
+import { CustomerLocationsService } from '../../../../shared/services/customer-locations.service';
 import { CurrencyFormatService } from '../../../../shared/pipes/currency';
 import {
   selectStoreSettings,
@@ -183,6 +189,8 @@ export function resolvePosPaymentCustomerName(
   selector: 'app-pos',
   standalone: true,
   imports: [
+    ModalComponent,
+    CustomerAddressPickerComponent,
     KitchenConfirmModalComponent,
     FormsModule,
     ButtonComponent,
@@ -718,6 +726,35 @@ export function resolvePosPaymentCustomerName(
       (customerUpdated)="onCustomerUpdated($event)"
       (customerSelected)="onCustomerSelected($event)"
     ></app-pos-customer-modal>
+
+    <!-- Ubicación/establecimiento del cliente para la cotización (S4) -->
+    <app-modal
+      [isOpen]="showQuoteLocationModal()"
+      (isOpenChange)="showQuoteLocationModal.set($event)"
+      size="md"
+      title="¿A qué ubicación es la cotización?"
+    >
+      <app-customer-address-picker
+        [addresses]="quoteLocations()"
+        [selectedAddressId]="quoteLocationId()"
+        [showAddNew]="false"
+        [showEditLink]="false"
+        [compact]="true"
+        (addressSelected)="quoteLocationId.set($event)"
+      ></app-customer-address-picker>
+      <div slot="footer" class="flex justify-end gap-2">
+        <app-button variant="ghost" (clicked)="showQuoteLocationModal.set(false)">
+          Cancelar
+        </app-button>
+        <app-button
+          variant="primary"
+          [disabled]="!quoteLocationId()"
+          (clicked)="confirmQuoteLocation()"
+        >
+          Crear cotización
+        </app-button>
+      </div>
+    </app-modal>
   `,
   styles: [
     `
@@ -1365,6 +1402,10 @@ export class PosComponent {
   protected restaurantIntegration = inject(PosRestaurantIntegrationService);
   // Phase D.3 — settings facade + payment catalog are read-only inputs here.
   private readonly settingsFacade = inject(StoreSettingsFacade);
+  private readonly customerLocations = inject(CustomerLocationsService);
+  readonly showQuoteLocationModal = signal(false);
+  readonly quoteLocations = signal<CustomerAddressPickerAddress[]>([]);
+  readonly quoteLocationId = signal<number | null>(null);
   private readonly kitchenTicketPrint = inject(KitchenTicketPrintService);
   private readonly paymentMethodsCatalogService = inject(
     PaymentMethodsCatalogService,
@@ -2291,6 +2332,37 @@ export class PosComponent {
       return;
     }
 
+    // S4 — al crear, la cotización va a una ubicación del cliente. Con una
+    // sola se usa directo; con varias se pregunta (principal preseleccionada).
+    // Al editar se conserva la que ya tenía (se cambia desde la cotización).
+    if (this.editingQuotationId()) {
+      this.submitQuote(null);
+      return;
+    }
+    const customerId = Number(this.selectedCustomer()!.id);
+    this.loading.set(true);
+    this.customerLocations
+      .listByCustomer(customerId)
+      .pipe(takeUntilDestroyed(this.destroyRef))
+      .subscribe((locations) => {
+        this.loading.set(false);
+        if (locations.length > 1) {
+          this.quoteLocations.set(locations);
+          this.quoteLocationId.set(locations[0].id);
+          this.showQuoteLocationModal.set(true);
+          return;
+        }
+        this.submitQuote(locations[0]?.id ?? null);
+      });
+  }
+
+  confirmQuoteLocation(): void {
+    this.showQuoteLocationModal.set(false);
+    this.submitQuote(this.quoteLocationId());
+  }
+
+  private submitQuote(customerAddressId: number | null): void {
+    if (!this.cartState() || this.isEmpty) return;
     this.loading.set(true);
     const items = this.cartState()!.items.map((item) => ({
       product_id:
@@ -2323,6 +2395,7 @@ export class PosComponent {
       channel: 'pos' as const,
       items,
       ...(cartNotes ? { notes: cartNotes } : {}),
+      ...(customerAddressId ? { customer_address_id: customerAddressId } : {}),
     };
 
     // Matriz de permisos POS→quotations (paso 1 plan POS-stitch; backend:

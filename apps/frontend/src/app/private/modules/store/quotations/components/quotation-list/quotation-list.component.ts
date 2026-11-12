@@ -1,4 +1,5 @@
 import { Component, input, output, computed, inject } from '@angular/core';
+import { customerDisplayName } from '../../../../../../shared/utils/customer-display-name.util';
 import { FormsModule } from '@angular/forms';
 
 import { CardComponent } from '../../../../../../shared/components/card/card.component';
@@ -230,10 +231,7 @@ export class QuotationListComponent {
       label: 'Cliente',
       priority: 1,
       defaultValue: 'Sin cliente',
-      transform: (_, item) =>
-        item.customer
-          ? `${item.customer.first_name} ${item.customer.last_name}`
-          : 'Sin cliente',
+      transform: (_, item) => customerDisplayName(item.customer, 'Sin cliente'),
     },
     {
       key: 'status',
@@ -269,9 +267,7 @@ export class QuotationListComponent {
     titleKey: 'quotation_number',
     subtitleKey: 'customer',
     subtitleTransform: (item: Quotation) =>
-      item.customer
-        ? `${item.customer.first_name} ${item.customer.last_name}`
-        : 'Sin cliente',
+      customerDisplayName(item.customer, 'Sin cliente'),
     badgeKey: 'status',
     badgeTransform: (v: string) => this.getStatusLabel(v),
     badgeConfig: { type: 'status', size: 'sm' },

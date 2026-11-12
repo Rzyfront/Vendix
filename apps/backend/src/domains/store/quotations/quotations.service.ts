@@ -159,6 +159,8 @@ export class QuotationsService {
         id: true,
         first_name: true,
         last_name: true,
+        // Persona jurídica: su nombre es la razón social.
+        legal_name: true,
         email: true,
         phone: true,
       },

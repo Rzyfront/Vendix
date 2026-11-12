@@ -242,7 +242,10 @@ export class CustomerListComponent {
   // sort, so no column is marked sortable.
   readonly columns = computed<TableColumn[]>(() => [
     {
-      key: 'first_name',
+      // `id` y no `first_name`: la tabla compartida no aplica `transform`
+      // cuando el valor de la columna está vacío, y una persona jurídica
+      // tiene `first_name = ''` → se veía «—» en vez de su razón social.
+      key: 'id',
       label: 'Cliente',
       priority: 1,
       transform: (_val: any, row?: any) => customerDisplayName(row, '-'),

@@ -92,6 +92,7 @@ export interface Quotation {
     id: number;
     first_name: string;
     last_name: string;
+    legal_name?: string | null;
     email: string;
     phone?: string;
   };
