@@ -6607,8 +6607,26 @@ export class OrderDetailsPageComponent {
       });
       return;
     }
+    if (parsed.errorCode === 'DISPATCH_NOTE_NO_SHIPPING_ADDRESS') {
+      // Actionable: say what is missing and open the address capture flow.
+      this.toastService.show({
+        description: parsed.userMessage,
+        variant: 'error',
+        duration: 10000,
+        action: {
+          label: 'Agregar dirección',
+          onClick: () => this.promptAddShippingAddress(),
+        },
+      });
+      return;
+    }
+    // An HTTP error's own `message` is "Http failure response for …": the
+    // backend's explanation (parsed.userMessage) goes first.
     this.toastService.error(
-      (error as Error | null)?.message || parsed.userMessage || fallback,
+      (parsed.errorCode ? parsed.userMessage : null) ||
+        (error as Error | null)?.message ||
+        parsed.userMessage ||
+        fallback,
     );
   }
 
