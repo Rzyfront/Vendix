@@ -1,4 +1,5 @@
 import { Component, DestroyRef, OnInit, computed, inject, input, output, signal } from '@angular/core';
+import { customerDisplayName } from '../../../../../../shared/utils/customer-display-name.util';
 import { FormArray, FormBuilder, FormGroup, ReactiveFormsModule, Validators } from '@angular/forms';
 import { HttpClient } from '@angular/common/http';
 import { Subject, debounceTime, distinctUntilChanged, switchMap, of, catchError, map, merge, timer } from 'rxjs';
@@ -217,7 +218,7 @@ function taxEntriesFromAssignments(assignments: any[] | null | undefined): Quota
             @if (selectedCustomer()) {
               <div class="flex items-center justify-between rounded-md px-3 py-2 text-sm"
                    style="background: var(--color-background); border: 1px solid var(--color-border);">
-                <span>{{ selectedCustomer()!.first_name }} {{ selectedCustomer()!.last_name }}</span>
+                <span>{{ displayName(selectedCustomer()) }}</span>
                 <button
                   type="button"
                   aria-label="Quitar cliente"
@@ -252,7 +253,7 @@ function taxEntriesFromAssignments(assignments: any[] | null | undefined): Quota
                         style="color: var(--color-text-primary);"
                         (click)="selectCustomer(customer)"
                       >
-                        {{ customer.first_name }} {{ customer.last_name }}
+                        {{ displayName(customer) }}
                         @if (customer.email) {
                           <span class="ml-1" style="color: var(--color-text-secondary);">- {{ customer.email }}</span>
                         }
@@ -582,6 +583,10 @@ function taxEntriesFromAssignments(assignments: any[] | null | undefined): Quota
   `,
 })
 export class QuotationFormModalComponent implements OnInit {
+  displayName(c: { first_name?: string | null; last_name?: string | null; legal_name?: string | null } | null | undefined): string {
+    return customerDisplayName(c, 'Cliente');
+  }
+
   /** Input: existing quotation for edit mode, null for create mode */
   readonly quotation = input<Quotation | null>(null);
   readonly initialDestination = input<QuotationDestination>('sale');

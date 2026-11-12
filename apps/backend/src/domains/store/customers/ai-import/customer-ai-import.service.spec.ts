@@ -163,6 +163,27 @@ describe('CustomerAiImportService', () => {
     ).rejects.toBeInstanceOf(VendixHttpException);
   });
 
+  it('analyze descarta un DV que no corresponde al NIT y avisa', async () => {
+    const result = await runInStore(() =>
+      service.analyze({
+        customers: [
+          {
+            person_type: 'JURIDICA',
+            legal_name: 'Acme SAS',
+            document_type: 'NIT',
+            document_number: '811222333',
+            verification_digit: '4',
+            locations: [],
+          },
+        ],
+      }),
+    );
+    const [c] = result.customers;
+    expect(c.verification_digit).toBeNull();
+    expect(c.status).toBe('warning');
+    expect(c.messages.join(' ')).toContain('no corresponde al NIT');
+  });
+
   it('analyze informa coincidencia por correo y otros clientes que coinciden (S8)', async () => {
     customersMock.findCustomerMatchesInScope.mockResolvedValue([
       { id: 80, display_name: 'Ana Pérez', document_type: 'CC', document_number: '1', email: 'ana@x.co', in_store: true, matched_by: ['email'] },

@@ -1,4 +1,5 @@
 import { Injectable, Logger, OnModuleInit } from '@nestjs/common';
+import { computeNitDv } from '../../../../common/utils/nit.util';
 import * as XLSX from 'xlsx';
 import { AIEngineService } from '../../../../ai-engine/ai-engine.service';
 import { AIMessage } from '../../../../ai-engine/interfaces/ai-provider.interface';
@@ -286,6 +287,25 @@ export class CustomerAiImportService implements OnModuleInit {
       if (level === 'error' || status === 'ready') status = level;
     };
 
+    // La IA puede leer mal el dígito de verificación: si no corresponde al
+    // NIT se descarta (el alta lo calcula) y se avisa, en vez de fallar al
+    // crear el lote.
+    let checkedCustomer = customer;
+    if (
+      customer.document_type === 'NIT' &&
+      customer.document_number &&
+      customer.verification_digit
+    ) {
+      const expected = computeNitDv(customer.document_number);
+      if (expected && expected !== customer.verification_digit) {
+        checkedCustomer = { ...customer, verification_digit: null };
+        raise(
+          'warning',
+          `El dígito de verificación leído (${customer.verification_digit}) no corresponde al NIT; se usará ${expected}.`,
+        );
+      }
+    }
+
     // Un cliente existente no necesita nombre: solo se agregan ubicaciones.
     if (!match) {
       if (customer.person_type === 'JURIDICA') {
@@ -332,7 +352,7 @@ export class CustomerAiImportService implements OnModuleInit {
       raise('error', 'Hay ubicaciones con datos faltantes.');
     }
 
-    return { ...customer, locations, match, status, messages };
+    return { ...checkedCustomer, locations, match, status, messages };
   }
 
   // ─────────────────────────────────────────────────────────────────────────
