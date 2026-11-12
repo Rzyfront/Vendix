@@ -230,10 +230,10 @@ describe('CustomerAiImportService', () => {
     expect(c.messages.join(' ')).toContain('no corresponde al NIT');
   });
 
-  it('analyze informa coincidencia por correo y otros clientes que coinciden (S8)', async () => {
+  it('analyze: coincide por documento y avisa del otro cliente que coincide por correo (S8)', async () => {
     customersMock.findCustomerMatchesInScope.mockResolvedValue([
-      { id: 80, display_name: 'Ana Pérez', document_type: 'CC', document_number: '1', email: 'ana@x.co', in_store: true, matched_by: ['email'] },
-      { id: 81, display_name: 'Otra Ana', document_type: 'CC', document_number: '2', email: null, in_store: true, matched_by: ['document'] },
+      { id: 81, display_name: 'Ana Pérez', document_type: 'CC', document_number: '2', email: null, in_store: true, matched_by: ['document'] },
+      { id: 80, display_name: 'Otra Ana', document_type: 'CC', document_number: '1', email: 'ana@x.co', in_store: true, matched_by: ['email'] },
     ]);
     const result = await runInStore(() =>
       service.analyze({
@@ -248,10 +248,39 @@ describe('CustomerAiImportService', () => {
       { document_type: 'CC', document_number: '2', email: 'ana@x.co' },
     );
     expect(result.customers[0].match).toMatchObject({
-      existing_customer_id: 80,
-      matched_by: ['email'],
-      other_matches: [{ id: 81, display_name: 'Otra Ana', matched_by: ['document'] }],
+      existing_customer_id: 81,
+      matched_by: ['document'],
+      other_matches: [{ id: 80, display_name: 'Otra Ana', matched_by: ['email'] }],
     });
+  });
+
+  it('analyze: documento nuevo con correo de otro cliente no se fusiona (error)', async () => {
+    customersMock.findCustomerMatchesInScope.mockResolvedValue([
+      { id: 80, display_name: 'Otra Ana', document_type: 'CC', document_number: '1', email: 'ana@x.co', in_store: true, matched_by: ['email'] },
+    ]);
+    const result = await runInStore(() =>
+      service.analyze({
+        customers: [
+          { first_name: 'Ana', last_name: 'Pérez', email: 'ana@x.co', document_type: 'CC', document_number: '999', locations: [] },
+        ],
+      }),
+    );
+    const [c] = result.customers;
+    expect(c.match).toBeNull();
+    expect(c.status).toBe('error');
+    expect(c.messages.join(' ')).toContain('El correo ya lo usa otro cliente (Otra Ana)');
+  });
+
+  it('analyze: sin documento, la coincidencia por correo es el cliente existente', async () => {
+    customersMock.findCustomerMatchesInScope.mockResolvedValue([
+      { id: 80, display_name: 'Otra Ana', document_type: null, document_number: null, email: 'ana@x.co', in_store: true, matched_by: ['email'] },
+    ]);
+    const result = await runInStore(() =>
+      service.analyze({
+        customers: [{ first_name: 'Ana', email: 'ana@x.co', locations: [] }],
+      }),
+    );
+    expect(result.customers[0].match).toMatchObject({ existing_customer_id: 80, matched_by: ['email'] });
   });
 
   it('analyze marca cliente existente y ubicación ya registrada', async () => {

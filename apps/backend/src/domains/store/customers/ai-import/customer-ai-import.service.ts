@@ -245,7 +245,15 @@ export class CustomerAiImportService implements OnModuleInit {
             },
           )
         : [];
-    const existing = matches[0];
+    // Con documento propio, el cliente existente es el que coincide por
+    // documento. Si solo coincide el correo y el documento es otro, NO es el
+    // mismo cliente: se informa como error en vez de fusionarlo en silencio.
+    const byDocument = matches.find((m) => m.matched_by.includes('document'));
+    const existing = customer.document_number ? byDocument : matches[0];
+    const emailOwner =
+      customer.document_number && !byDocument
+        ? matches.find((m) => m.matched_by.includes('email'))
+        : undefined;
     if (existing) {
       const rows = await this.prisma.addresses.findMany({
         where: { store_id: storeId, user_id: existing.id, type: 'shipping' },
@@ -286,6 +294,13 @@ export class CustomerAiImportService implements OnModuleInit {
       messages.push(message);
       if (level === 'error' || status === 'ready') status = level;
     };
+
+    if (emailOwner) {
+      raise(
+        'error',
+        `El correo ya lo usa otro cliente (${emailOwner.display_name}); corrígelo o déjalo vacío.`,
+      );
+    }
 
     // La IA puede leer mal el dígito de verificación: si no corresponde al
     // NIT se descarta (el alta lo calcula) y se avisa, en vez de fallar al

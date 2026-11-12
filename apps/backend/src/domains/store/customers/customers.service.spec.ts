@@ -403,6 +403,10 @@ describe('CustomersService — QUI-728 customer fiscal data', () => {
         matched_by: ['document'],
         other_matches: [{ id: 88, display_name: 'Ana Pérez', matched_by: ['email'] }],
       });
+      // Sin documento ni correo de terceros en el 409.
+      expect(error.getResponse().details.other_matches).toEqual([
+        { id: 88, display_name: 'Ana Pérez', matched_by: ['email'] },
+      ]);
     });
   });
 

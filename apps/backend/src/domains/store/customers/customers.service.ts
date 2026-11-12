@@ -287,7 +287,8 @@ export class CustomersService {
         email: true,
         store_users: { where: { store_id: storeId }, select: { id: true } },
       },
-      take: 5,
+      orderBy: { id: 'asc' },
+      take: 10,
     });
 
     return (rows ?? [])
@@ -1585,6 +1586,7 @@ export class CustomersService {
     // índice único. El operating_scope (S8) solo decide QUÉ coincidencias se
     // informan (`other_matches`), y se calcula únicamente al haber conflicto.
     const describeMatches = async (id: number, fallback: 'email' | 'document') => {
+      // Informativo: si la consulta falla se responde igual el conflicto.
       const scopeMatches = await this.findCustomerMatchesInScope(
         store.organization_id,
         storeId,
@@ -1593,11 +1595,18 @@ export class CustomersService {
           document_number: dto.document_number ?? null,
           email: effectiveEmail,
         },
-      );
+      ).catch(() => []);
       const own = scopeMatches.find((m) => m.id === id)?.matched_by ?? [];
       return {
         matched_by: own.length ? own : [fallback],
-        other_matches: scopeMatches.filter((m) => m.id !== id),
+        // Solo lo que la UI necesita: nada de documento/correo de terceros.
+        other_matches: scopeMatches
+          .filter((m) => m.id !== id)
+          .map((m) => ({
+            id: m.id,
+            display_name: m.display_name,
+            matched_by: m.matched_by,
+          })),
       };
     };
 
