@@ -212,8 +212,9 @@ export class AccountingEventsListener {
         `Auto-entry created for invoice.accepted #${event.invoice_id}`,
       );
       // H3.7 — the invoice of a guest folio crosses the advance its payments
-      // left in 2805 against the receivable it just booked.
-      if (!event.financial_account_id) {
+      // left in 2805 against the receivable it just booked. A platform
+      // transmission id is not an `invoices` id: never cross a tenant folio.
+      if (!event.financial_account_id && !event.platform_transmission) {
         await this.handleLodgingFolioInvoiced(event);
       }
     } catch (error) {

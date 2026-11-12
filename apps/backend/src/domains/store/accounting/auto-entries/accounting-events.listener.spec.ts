@@ -75,6 +75,23 @@ describe('AccountingEventsListener invoice.accepted routing', () => {
     );
   });
 
+  it('platform invoice never crosses a lodging folio advance (id is not an invoices id)', async () => {
+    const { listener } = createListener();
+    const cross = jest
+      .spyOn(listener as any, 'handleLodgingFolioInvoiced')
+      .mockResolvedValue(undefined);
+
+    await listener.handleInvoiceAccepted({
+      ...baseEvent,
+      store_id: undefined,
+      platform_transmission: true,
+    });
+    expect(cross).not.toHaveBeenCalled();
+
+    await listener.handleInvoiceAccepted(baseEvent);
+    expect(cross).toHaveBeenCalledTimes(1);
+  });
+
   it('platform credit note forwards the transmission flag to the reversal', async () => {
     const { listener, auto_entry_service } = createListener();
 

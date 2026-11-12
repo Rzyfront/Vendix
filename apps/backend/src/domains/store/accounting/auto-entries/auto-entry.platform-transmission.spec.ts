@@ -82,6 +82,7 @@ describe('AutoEntryService · platform transmissions', () => {
     await service.onInvoiceValidated(platformInvoice);
 
     expect(unscoped.invoices.findFirst).not.toHaveBeenCalled();
+    expect(unscoped.invoice_items.findMany).not.toHaveBeenCalled();
     expect(createAutoEntry).toHaveBeenCalledTimes(1);
     const data = createAutoEntry.mock.calls[0][0];
     expect(data).toMatchObject({

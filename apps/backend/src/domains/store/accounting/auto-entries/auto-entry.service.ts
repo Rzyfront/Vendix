@@ -664,6 +664,8 @@ export class AutoEntryService {
     revenue_total: number;
     default_mapping_key: string;
     label: string;
+    /** `invoice_id` is a platform transmission id: no `invoice_items` to split. */
+    platform_transmission?: boolean;
   }): Promise<(AutoEntryLine | null)[]> {
     const {
       organization_id,
@@ -672,6 +674,7 @@ export class AutoEntryService {
       revenue_total,
       default_mapping_key,
       label,
+      platform_transmission,
     } = params;
 
     const default_mapping = await this.account_mapping_service.getMapping(
@@ -695,7 +698,9 @@ export class AutoEntryService {
         : null,
     ];
 
-    if (!default_account || !(revenue_total > 0)) return legacy_single_line();
+    if (platform_transmission || !default_account || !(revenue_total > 0)) {
+      return legacy_single_line();
+    }
 
     // Se lee SIN scope y con el predicado de tenant explícito: este método corre
     // dentro de un listener de eventos, donde el AsyncLocalStorage de contexto
@@ -2155,6 +2160,7 @@ export class AutoEntryService {
         revenue_total: product_revenue,
         default_mapping_key: 'invoice.validated.revenue',
         label: 'Revenue',
+        platform_transmission: data.platform_transmission,
       })),
     );
 
