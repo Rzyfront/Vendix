@@ -116,13 +116,14 @@ export class PlatformDeliveryService {
     const acquirer = metas.find((m) => m.kind === 'platform_acquirer_snapshot');
     const invoiceSnap = metas.find((m) => m.kind === 'platform_invoice_snapshot');
 
-    // Una nota se envía al cliente de la factura original (su snapshot copia el cliente).
-    const to = (
-      recipient ||
-      acquirer?.email ||
-      (invoiceSnap?.customer as { email?: string } | undefined)?.email ||
-      ''
-    ).trim();
+    // Una nota se envía al cliente de la factura original (su snapshot copia el
+    // cliente). Ese fallback aplica SOLO a notas: la factura conserva su
+    // comportamiento previo (adquirente o destinatario explícito).
+    const isNote = PLATFORM_NOTE_SOURCE_TYPES.includes(transmission.source_type);
+    const noteCustomerEmail = isNote
+      ? (invoiceSnap?.customer as { email?: string } | undefined)?.email
+      : undefined;
+    const to = (recipient || acquirer?.email || noteCustomerEmail || '').trim();
     if (!to || !isEmail(to)) {
       throw new VendixHttpException(
         ErrorCodes.INVOICING_DELIVERY_001,

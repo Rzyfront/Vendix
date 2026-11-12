@@ -2794,6 +2794,13 @@ export class SubscriptionFiscalService {
           `No se encontró la nota ${transmissionId}.`,
         );
       }
+      if (transmission.dian_status === 'accepted') {
+        throw new VendixHttpException(
+          ErrorCodes.INVOICING_STATUS_002,
+          `La nota ${transmission.document_number} ya fue aceptada por la DIAN; no se reintenta.`,
+          { transmission_id: transmission.id, dian_status: transmission.dian_status },
+        );
+      }
       const type = transmission.document_type as PlatformNoteType;
       const snap = await db.fiscal_evidences.findFirst({
         where: { fiscal_transmission_id: transmission.id, evidence_type: 'manual_support' },

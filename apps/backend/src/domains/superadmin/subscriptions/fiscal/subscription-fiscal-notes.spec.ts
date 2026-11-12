@@ -353,4 +353,16 @@ describe('issuePlatformNote', () => {
     expect(h.tx.invoice_resolutions.updateMany).not.toHaveBeenCalled();
     expect(h.dianProvider.sendCreditNote).not.toHaveBeenCalled();
   });
+
+  it('resendPlatformNote refuses a note already accepted by DIAN', async () => {
+    const h = harness({ type: 'credit_note' });
+    h.db.fiscal_transmissions.findFirst = jest.fn().mockResolvedValue({
+      id: 90, document_number: 'NC9', document_type: 'credit_note',
+      source_type: 'platform_credit_note', dian_status: 'accepted', related_transmission_id: 5,
+    });
+    await expect(h.svc.resendPlatformNote(90)).rejects.toMatchObject({
+      errorCode: 'INVOICING_STATUS_002',
+    });
+    expect(h.dianProvider.sendCreditNote).not.toHaveBeenCalled();
+  });
 });

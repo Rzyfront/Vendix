@@ -101,6 +101,24 @@ describe('PlatformDeliveryService', () => {
     expect(res.zip_name).toBe('Nota-Credito-NC5.zip');
   });
 
+  it('an invoice without acquirer email does not fall back to the snapshot customer email', async () => {
+    const { svc, prisma, email } = build(base);
+    prisma.fiscal_evidences.findMany.mockResolvedValue([
+      {
+        metadata: {
+          kind: 'platform_invoice_snapshot',
+          items: [],
+          totals: { total: 10 },
+          customer: { legal_name: 'Cliente SAS', email: 'otro@x.co' },
+        },
+      },
+    ]);
+    await expect(svc.deliverInvoice(7, '', 1)).rejects.toMatchObject({
+      errorCode: 'INVOICING_DELIVERY_001',
+    });
+    expect(email.sendEmailWithAttachments).not.toHaveBeenCalled();
+  });
+
   it('rejects when the transmission is not accepted by DIAN', async () => {
     const { svc, email } = build({ ...base, dian_status: 'pending' });
     await expect(svc.deliverInvoice(7, 'a@b.co', 1)).rejects.toThrow(/no está aceptada/);
