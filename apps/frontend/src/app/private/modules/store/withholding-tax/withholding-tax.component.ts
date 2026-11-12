@@ -4,9 +4,9 @@ import { WithholdingTaxService } from './services/withholding-tax.service';
 import { WithholdingStats } from './interfaces/withholding.interface';
 import { StatsComponent } from '../../../../shared/components/stats/stats.component';
 import {
-  ScrollableTab,
-  ScrollableTabsComponent,
-} from '../../../../shared/components';
+  StickyHeaderComponent,
+  StickyHeaderTab,
+} from '../../../../shared/components/sticky-header/sticky-header.component';
 import { CurrencyFormatService } from '../../../../shared/pipes/currency/currency.pipe';
 import { WithholdingConceptsTabComponent } from './components/withholding-concepts-tab.component';
 import { WithholdingCalculationsListComponent } from './components/withholding-calculations-list.component';
@@ -22,14 +22,23 @@ import { WithholdingCertificateViewerComponent } from './components/withholding-
   standalone: true,
   imports: [
     StatsComponent,
-    ScrollableTabsComponent,
+    StickyHeaderComponent,
     WithholdingConceptsTabComponent,
     WithholdingCalculationsListComponent,
     WithholdingCertificateViewerComponent,
   ],
   template: `
     <div class="w-full">
-      <!-- Stats -->
+      <app-sticky-header
+        title="Retención"
+        subtitle="Conceptos, cálculos y certificados de retención"
+        icon="calculator"
+        [tabs]="tabs"
+        [activeTab]="activeTab()"
+        (tabChanged)="onTabChange($event)"
+      ></app-sticky-header>
+
+      <!-- Stats
       <div class="sticky top-0 z-20 bg-background pb-2 md:static md:z-auto">
         <div class="flex gap-3 overflow-x-auto pb-2 md:grid md:grid-cols-4 md:overflow-visible">
           <app-stats title="Conceptos Activos" [value]="stats()?.active_concepts || 0" icon="file-text" color="blue"></app-stats>
@@ -37,16 +46,6 @@ import { WithholdingCertificateViewerComponent } from './components/withholding-
           <app-stats title="Ret. del Mes" [value]="formatCurrency(stats()?.month_withholdings || 0)" icon="trending-down" color="orange"></app-stats>
           <app-stats title="Ret. del Año" [value]="formatCurrency(stats()?.year_withholdings || 0)" icon="calendar" color="purple"></app-stats>
         </div>
-      </div>
-
-      <!-- Tabs -->
-      <div class="mt-2 mb-3">
-        <app-scrollable-tabs
-          [tabs]="tabs"
-          [activeTab]="activeTab()"
-          (tabChange)="onTabChange($event)"
-          size="sm"
-        ></app-scrollable-tabs>
       </div>
 
       <!-- Tab Content -->
@@ -70,7 +69,7 @@ export class WithholdingTaxComponent {
   readonly stats = signal<WithholdingStats | null>(null);
   readonly activeTab = signal<string>('concepts');
 
-  readonly tabs: ScrollableTab[] = [
+  readonly tabs: StickyHeaderTab[] = [
     { id: 'concepts', label: 'Conceptos', icon: 'file-text' },
     { id: 'calculations', label: 'Cálculos', icon: 'calculator' },
     { id: 'certificates', label: 'Certificados', icon: 'printer' },

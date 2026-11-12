@@ -26,8 +26,8 @@ import {
   SelectorOption,
 } from '../../../../shared/components/index';
 import {
-  ScrollableTabsComponent,
-  ScrollableTab,
+  StickyHeaderComponent,
+  StickyHeaderTab,
 } from '../../../../shared/components/index';
 import {
   PosCashRegisterService,
@@ -55,7 +55,7 @@ import { StoreSettingsFacade } from '../../../../core/store/store-settings/store
     IconComponent,
     InputsearchComponent,
     ResponsiveDataViewComponent,
-    ScrollableTabsComponent,
+    StickyHeaderComponent,
     ModalComponent,
     InputComponent,
     SelectorComponent,
@@ -64,6 +64,15 @@ import { StoreSettingsFacade } from '../../../../core/store/store-settings/store
   ],
   template: `
     <div class="w-full md:space-y-4">
+      <app-sticky-header
+        title="Caja Registradora"
+        subtitle="Cajas y sesiones de la tienda"
+        icon="monitor"
+        [tabs]="tabs"
+        [activeTab]="active_tab()"
+        (tabChanged)="onTabChange($event)"
+      ></app-sticky-header>
+
       <!-- Stats: Sticky on mobile, static on desktop -->
       <div
         class="stats-container sticky top-0 z-20 bg-background md:static md:bg-transparent"
@@ -97,13 +106,6 @@ import { StoreSettingsFacade } from '../../../../core/store/store-settings/store
           iconColor="text-amber-600"
         ></app-stats>
       </div>
-
-      <!-- Tabs -->
-      <app-scrollable-tabs
-        [tabs]="tabs"
-        [activeTab]="active_tab()"
-        (tabChange)="onTabChange($event)"
-      />
 
       <!-- Tab: Cajas -->
       @if (active_tab() === 'registers') {
@@ -445,7 +447,7 @@ export class CashRegistersComponent {
   );
 
   // Tabs configuration
-  readonly tabs: ScrollableTab[] = [
+  readonly tabs: StickyHeaderTab[] = [
     { id: 'registers', label: 'Cajas', icon: 'monitor' },
     { id: 'sessions', label: 'Sesiones', icon: 'clock' },
   ];

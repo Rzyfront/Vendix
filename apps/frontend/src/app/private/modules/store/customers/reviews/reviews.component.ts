@@ -25,9 +25,9 @@ import { PaginationComponent } from '../../../../../shared/components/pagination
 import { IconComponent } from '../../../../../shared/components/icon/icon.component';
 import { ModalComponent } from '../../../../../shared/components/modal/modal.component';
 import {
-  ScrollableTab,
-  ScrollableTabsComponent,
-} from '../../../../../shared/components/scrollable-tabs/scrollable-tabs.component';
+  StickyHeaderComponent,
+  StickyHeaderTab,
+} from '../../../../../shared/components/sticky-header/sticky-header.component';
 import { OrderReviewsListComponent } from './components/order-reviews-list/order-reviews-list.component';
 import { translateCustomerError } from '../utils/customer-error.translator';
 import { formatDateOnlyUTC } from '../../../../../shared/utils/date.util';
@@ -46,19 +46,19 @@ import { formatDateOnlyUTC } from '../../../../../shared/utils/date.util';
     PaginationComponent,
     IconComponent,
     ModalComponent,
-    ScrollableTabsComponent,
+    StickyHeaderComponent,
     OrderReviewsListComponent,
   ],
   template: `
-    <div class="px-2 pt-1 md:px-0 md:pb-2">
-      <app-scrollable-tabs
-        [tabs]="reviewTabs"
-        [activeTab]="activeTab()"
-        size="sm"
-        ariaLabel="Tipo de reseña"
-        (tabChange)="onTabChange($event)"
-      />
-    </div>
+    <app-sticky-header
+      title="Reseñas"
+      subtitle="Opiniones de tus clientes"
+      icon="star"
+      [tabs]="reviewTabs"
+      [activeTab]="activeTab()"
+      tabsAriaLabel="Tipo de reseña"
+      (tabChanged)="onTabChange($event)"
+    ></app-sticky-header>
 
     @if (activeTab() === 'experience') {
       <app-order-reviews-list />
@@ -446,7 +446,7 @@ export class ReviewsComponent {
   private router = inject(Router);
 
   // Tabs: "Productos" (vista original) y "Experiencia de compra".
-  readonly reviewTabs: ScrollableTab[] = [
+  readonly reviewTabs: StickyHeaderTab[] = [
     { id: 'products', label: 'Productos', icon: 'package' },
     { id: 'experience', label: 'Experiencia de compra', icon: 'star' },
   ];

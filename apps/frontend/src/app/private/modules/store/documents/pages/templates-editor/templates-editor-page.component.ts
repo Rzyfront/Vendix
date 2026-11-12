@@ -10,9 +10,8 @@ import {
   CardComponent,
   ConfirmationModalComponent,
   InputComponent,
-  ScrollableTab,
-  ScrollableTabsComponent,
   StickyHeaderComponent,
+  StickyHeaderTab,
   ToastService,
 } from '../../../../../../shared/components/index';
 import {
@@ -36,7 +35,7 @@ import { TemplateVersionsComponent } from './template-versions.component';
 
 type EditorTab = 'design' | 'versions';
 
-const TABS: ScrollableTab[] = [
+const TABS: StickyHeaderTab[] = [
   { id: 'design', label: 'Diseño', icon: 'pencil' },
   { id: 'versions', label: 'Versiones', icon: 'history' },
 ];
@@ -81,7 +80,6 @@ async function messageOf(error: unknown): Promise<string> {
     InputComponent,
     BadgeComponent,
     AlertBannerComponent,
-    ScrollableTabsComponent,
     ConfirmationModalComponent,
     TemplateBlocksEditorComponent,
     TemplateBasePdfEditorComponent,
@@ -98,7 +96,11 @@ async function messageOf(error: unknown): Promise<string> {
         [showBackButton]="true"
         backRoute="/admin/documents/templates"
         [actions]="headerActions()"
+        [tabs]="headerTabs()"
+        [activeTab]="tab()"
+        tabsAriaLabel="Secciones de la plantilla"
         (actionClicked)="onHeaderAction($event)"
+        (tabChanged)="onTab($event)"
       />
 
       @if (loading()) {
@@ -135,14 +137,6 @@ async function messageOf(error: unknown): Promise<string> {
               </div>
             </div>
           </app-card>
-
-          <app-scrollable-tabs
-            [tabs]="tabs"
-            [activeTab]="tab()"
-            size="md"
-            ariaLabel="Secciones de la plantilla"
-            (tabChange)="onTab($event)"
-          />
 
           @if (tab() === 'design') {
             <div class="grid gap-4 lg:grid-cols-2">
@@ -216,6 +210,10 @@ export class TemplatesEditorPageComponent implements OnInit {
 
   readonly tabs = TABS;
   readonly tab = signal<EditorTab>('design');
+  /** Tabs show only once the template is loaded, as before (content lived in the loaded branch). */
+  readonly headerTabs = computed<StickyHeaderTab[]>(() =>
+    !this.loading() && !this.loadError() && this.template() ? this.tabs : [],
+  );
   readonly loading = signal(true);
   readonly loadError = signal('');
   readonly template = signal<TemplateDetail | null>(null);

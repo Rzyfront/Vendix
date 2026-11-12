@@ -11,7 +11,6 @@ import {
   ItemListCardConfig,
   PaginationComponent,
   ResponsiveDataViewComponent,
-  ScrollableTabsComponent,
   SelectorComponent,
   StatsComponent,
   StickyHeaderComponent,
@@ -20,7 +19,7 @@ import {
   ToastService,
   ToggleComponent,
 } from '../../../../../../shared/components/index';
-import { ScrollableTab } from '../../../../../../shared/components/scrollable-tabs/scrollable-tabs.component';
+import { StickyHeaderTab } from '../../../../../../shared/components/sticky-header/sticky-header.component';
 import { WorkflowPublicLinkModalComponent } from '../../components/public-link-modal.component';
 import { ImportDefinitionModalComponent } from '../../components/import-definition-modal.component';
 import { NewDefinitionModalComponent } from '../../components/new-definition-modal.component';
@@ -74,7 +73,6 @@ const BADGE_LABEL: Record<string, string> = {
     StickyHeaderComponent,
     StatsComponent,
     CardComponent,
-    ScrollableTabsComponent,
     InputsearchComponent,
     ResponsiveDataViewComponent,
     PaginationComponent,
@@ -96,7 +94,11 @@ const BADGE_LABEL: Record<string, string> = {
         icon="git-branch"
         variant="glass"
         [actions]="headerActions"
+        [tabs]="tabs"
+        [activeTab]="activeTab()"
+        tabsAriaLabel="Secciones de flujos"
         (actionClicked)="onHeaderAction($event)"
+        (tabChanged)="onTabChange($event)"
       />
 
       <div class="stats-container sticky top-[52px] z-20 bg-background md:static md:bg-transparent">
@@ -142,14 +144,7 @@ const BADGE_LABEL: Record<string, string> = {
         <div
           class="sticky top-[99px] z-10 bg-background px-2 py-1.5 -mt-[5px] md:mt-0 md:static md:bg-transparent md:px-6 md:py-4 md:border-b md:border-border"
         >
-          <div class="flex flex-col gap-2 md:flex-row md:justify-between md:items-center md:gap-4">
-            <app-scrollable-tabs
-              [tabs]="tabs"
-              [activeTab]="activeTab()"
-              size="sm"
-              ariaLabel="Secciones de flujos"
-              (tabChange)="onTabChange($event)"
-            />
+          <div class="flex flex-col gap-2 md:flex-row md:justify-end md:items-center md:gap-4">
             <div class="flex items-center gap-2 w-full md:w-auto">
               <app-inputsearch
                 class="flex-1 md:w-64 shadow-[0_2px_8px_rgba(0,0,0,0.07)] md:shadow-none rounded-[10px]"
@@ -286,7 +281,7 @@ export class WorkflowsPageComponent implements OnInit {
   private readonly destroyRef = inject(DestroyRef);
 
   readonly limit = 10;
-  readonly tabs: ScrollableTab[] = [
+  readonly tabs: StickyHeaderTab[] = [
     { id: 'flows', label: 'Flujos', icon: 'git-branch' },
     { id: 'requests', label: 'Solicitudes', icon: 'list-checks' },
   ];
