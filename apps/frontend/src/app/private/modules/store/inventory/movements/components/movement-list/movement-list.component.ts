@@ -157,7 +157,10 @@ export class MovementListComponent {
     titleKey: 'products.name',
     titleTransform: (item: any) => item.products?.name || 'Sin producto',
     subtitleKey: 'movement_type',
-    subtitleTransform: (val: MovementType) => this.getTypeLabel(val),
+    // item-list pasa la fila completa a subtitleTransform (no el valor de
+    // subtitleKey); con el valor, la tarjeta mostraba «[object Object]».
+    subtitleTransform: (item: InventoryMovement) =>
+      this.getTypeLabel(item.movement_type),
     badgeKey: 'movement_type',
     badgeConfig: {
       type: 'custom',

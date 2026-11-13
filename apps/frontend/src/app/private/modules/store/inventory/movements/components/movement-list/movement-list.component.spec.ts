@@ -73,4 +73,10 @@ describe('MovementListComponent movement direction display', () => {
     expect(component.formatQuantity(3, movement('consumption'))).toBe('-3');
     expect(component.formatQuantity(3, movement('production'))).toBe('+3');
   });
+
+  it('la tarjeta muestra el tipo de movimiento, no «[object Object]»', () => {
+    const subtitle = component.cardConfig.subtitleTransform!;
+    expect(subtitle(movement('stock_in'))).toBe('Entrada');
+    expect(subtitle(movement('consumption'))).toBe('Consumo de insumos');
+  });
 });
