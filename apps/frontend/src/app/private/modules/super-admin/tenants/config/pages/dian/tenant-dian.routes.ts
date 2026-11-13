@@ -32,11 +32,11 @@ import { TenantDianConsoleStore } from './tenant-dian-console.store';
  *
  * ## `provideSuperadminDianApi()` NO se repite aquí
  *
- * Ya lo provee el shell de Configuración un nivel más arriba, y este árbol
- * cuelga de él. Re-declararlo crearía una segunda instancia de
- * `DianConfigApiService` en esta rama: los componentes compartidos leerían las
- * capacidades de un token y escribirían por el otro, que es exactamente el
- * defecto que el factory documenta.
+ * Ya lo provee la ruta `dian` de `tenant-profile.routes.ts`, un nivel más
+ * arriba, y este árbol cuelga de ella. Re-declararlo crearía una segunda
+ * instancia de `DianConfigApiService` en esta rama: los componentes compartidos
+ * leerían las capacidades de un token y escribirían por el otro, que es
+ * exactamente el defecto que el factory documenta.
  */
 export const TENANT_DIAN_ROUTES: Routes = [
   {

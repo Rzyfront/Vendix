@@ -34,12 +34,6 @@ const CONFIG_TABS: readonly (ScrollableTab & { readonly path: string })[] = [
     label: 'Identidad fiscal',
     icon: 'file-check',
   },
-  {
-    id: 'dian',
-    path: 'dian',
-    label: 'Documentos electrónicos',
-    icon: 'shield',
-  },
   { id: 'domains', path: 'domains', label: 'Dominios', icon: 'globe' },
 ];
 
@@ -100,10 +94,8 @@ export class TenantConfigShellComponent {
    * Qué pestaña está activa, leída de la URL.
    *
    * Se busca el ÚLTIMO segmento que coincida con una pestaña, no el último
-   * segmento a secas: «Documentos electrónicos» tiene sub-rutas propias
-   * (`…/configuration/dian/numeracion`), así que mirar sólo la cola devolvería
-   * `numeracion` —que no es ninguna pestaña de este nivel— y el tablist marcaría
-   * «Ajustes» mientras el operador edita la numeración del tenant.
+   * segmento a secas, para que una sub-ruta futura de alguna sección no deje el
+   * tablist marcando «Ajustes».
    *
    * Una URL sin ningún segmento reconocible cae en la primera pestaña, para no
    * dejar el tablist sin selección.
@@ -176,19 +168,8 @@ export const TENANT_CONFIG_ROUTES: Routes = [
             (c) => c.TenantFiscalComponent,
           ),
       },
-      {
-        // Documentos electrónicos es, a su vez, una sección con cinco vistas
-        // propias (Habilitaciones · Certificado · Numeración · Set de pruebas ·
-        // Bitácora), así que entra por `loadChildren` y no por `loadComponent`:
-        // su shell necesita su propio `router-outlet` y su propio store de rama.
-        // El título lo declara cada hoja, no este nodo, porque el nodo nunca es
-        // la URL final.
-        path: 'dian',
-        loadChildren: () =>
-          import('./pages/dian/tenant-dian.routes').then(
-            (m) => m.TENANT_DIAN_ROUTES,
-          ),
-      },
+      // Documentos electrónicos ya no cuelga de aquí: es pestaña del header
+      // de la ficha (`tenant-profile.routes.ts`, ruta `dian`).
       {
         path: 'domains',
         title: 'Dominios - Configuración del tenant',

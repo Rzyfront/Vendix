@@ -247,6 +247,14 @@ export class TenantProfileShellComponent {
         disabled: !hasProfile,
       },
       {
+        id: 'dian',
+        route: 'dian',
+        label: 'Documentos electrónicos',
+        shortLabel: 'DIAN',
+        icon: 'shield',
+        disabled: !hasProfile,
+      },
+      {
         id: 'subscription',
         route: 'subscription',
         label: 'Suscripción',
