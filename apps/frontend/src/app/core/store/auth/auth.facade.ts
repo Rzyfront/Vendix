@@ -400,7 +400,7 @@ export class AuthFacade {
     );
   }
 
-  forgotOwnerPassword(organization_slug: string, email: string): void {
+  forgotOwnerPassword(organization_slug: string | undefined, email: string): void {
     this.store.dispatch(
       AuthActions.forgotOwnerPassword({ organization_slug, email }),
     );

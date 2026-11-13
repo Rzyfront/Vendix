@@ -23,14 +23,18 @@ export class ForgotPasswordDto {
   )
   email: string;
 
+  // QUI-943: opcional y acepta el V-link de la organización O el de la
+  // tienda, igual que el login de staff. El nombre del campo se conserva por
+  // compatibilidad con los clientes existentes (web y mobile).
   @ApiProperty({
     example: 'mi-organizacion',
-    description: 'Slug de la organización (requerido para multi-tenant)',
-    required: true,
+    description:
+      'V-link de la organización o de la tienda (opcional). Sin él, se usa la única cuenta de staff del email.',
+    required: false,
   })
+  @IsOptional()
   @IsString()
-  @IsNotEmpty()
-  organization_slug: string;
+  organization_slug?: string;
 }
 
 export class ForgotPasswordCustomerDto {
