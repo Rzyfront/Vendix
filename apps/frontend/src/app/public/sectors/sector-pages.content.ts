@@ -40,6 +40,12 @@ export interface SectorPageContent {
   intro: string;
   /** Título del recorrido (por defecto «Así se mueve un pedido»). */
   stepsHeading?: string;
+  /** Texto del botón de WhatsApp (por defecto «Ver la demo»). */
+  primaryCtaLabel?: string;
+  /** Título de los límites (por defecto «Lo que debes saber antes de elegir»). */
+  limitsHeading?: string;
+  /** Título de la lista de preparación (por defecto «Qué preparar para tu demostración»). */
+  prepareHeading?: string;
   steps: readonly SectorStep[];
   sections: readonly SectorSection[];
   limits: readonly EvidencedText[];
@@ -330,7 +336,209 @@ const SOFTWARE_POS: SectorPageContent = {
   whatsappText: 'Hola, tengo un comercio y quiero ver la demo del punto de venta.',
 };
 
-export const SECTOR_PAGES: readonly SectorPageContent[] = [RESTAURANTES, SOFTWARE_POS];
+const QA_13_NOV =
+  'QA de importación 13-nov-2026, tienda demo Pit & Grill (seguimiento: evidencias/OPS-16-20-importacion-muestra-2026-11-13.md)';
+const BULK = 'apps/backend/src/domains/store/products/products-bulk.service.ts';
+
+/**
+ * SEO-OPS-20: página de migración de datos. Texto del borrador v2 (29-oct) con lo comprobado
+ * en la QA del 13-nov (carga, reimportación y archivo con errores). La migración la hace el
+ * cliente con las plantillas: no hay migración gratuita (C24, C25), ni conectores con otros
+ * programas, ni importación de históricos o contabilidad.
+ */
+const MIGRACION: SectorPageContent = {
+  path: 'migracion',
+  metadata: {
+    title: 'Migra tu catálogo a Vendix: formatos y requisitos',
+    description:
+      'Qué datos puedes importar a Vendix desde Excel o CSV, cómo preparar las plantillas, qué no se transfiere y cómo revisar errores antes de empezar a vender.',
+    robots: 'noindex, follow',
+    canonicalPath: null,
+  },
+  label: 'Migración de datos',
+  h1: 'Trae tu catálogo a Vendix sin empezar de cero',
+  intro:
+    'Si hoy tienes tus productos y clientes en Excel o en otro programa, no tienes que escribirlos uno por uno. Exporta lo que tengas, pásalo a las plantillas de Vendix y súbelas desde el panel. Antes de guardar, Vendix revisa el archivo fila por fila y te muestra qué está listo y qué hay que corregir. La migración la haces tú, con nuestras plantillas.',
+  stepsHeading: 'Cómo hacerlo, paso a paso',
+  primaryCtaLabel: 'Revisar mi caso',
+  limitsHeading: 'Lo que no se transfiere',
+  prepareHeading: 'Qué tener listo antes de empezar',
+  steps: [
+    {
+      title: 'Haz un respaldo de lo que tienes',
+      text: 'Exporta tu catálogo y tus clientes desde tu sistema actual y guarda una copia sin modificar. Es tu punto de comparación.',
+      evidence: 'Borrador v2 OPS-20 (29-oct), paso 1',
+    },
+    {
+      title: 'Descarga la plantilla de Vendix',
+      text: 'En Productos, menú Acciones, Carga masiva, descargas la plantilla vigente. Usa siempre la del día y no cambies los nombres de las columnas.',
+      evidence: 'apps/backend/src/domains/store/products/products-bulk.controller.ts (template/download); ' + QA_13_NOV,
+    },
+    {
+      title: 'Pasa tus datos a la plantilla',
+      text: 'Un producto por fila y un SKU distinto para cada producto y cada variante. Escribe los precios solo con números, como 8500 u 8.500.',
+      evidence: BULK + ' (obligatorios y formato de precio); ' + QA_13_NOV + ', prueba de filas erróneas',
+    },
+    {
+      title: 'Prueba con pocos productos',
+      text: 'Sube primero un archivo con 5 a 10 productos y revisa cómo quedan en el panel.',
+      evidence: 'Borrador v2 OPS-20 (29-oct), paso 4',
+    },
+    {
+      title: 'Sube el archivo completo y lee la revisión',
+      text: 'Vendix te muestra cuántas filas están listas, cuáles tienen advertencias y cuáles tienen errores, con el motivo de cada una. Nada se guarda hasta que confirmas. Al confirmar, las filas con error no se cargan y las demás sí.',
+      evidence: QA_13_NOV + ' (revisión: 1 lista, 2 advertencias, 4 errores; resultados: 3 exitosos, 4 fallidos)',
+    },
+    {
+      title: 'Confirma la carga inicial de inventario',
+      text: 'Si tu archivo trae cantidades, Vendix te pide marcar que es una carga inicial, porque cambia tus existencias y su costo. Las cantidades quedan en la ubicación principal.',
+      evidence: QA_13_NOV + ' (5 productos, 125 unidades en la ubicación principal)',
+    },
+    {
+      title: 'Concilia',
+      text: 'Compara con tu respaldo cuántos productos hay en Vendix frente a las filas de tu archivo, las unidades de una muestra de productos y sus precios. Puedes descargar tus productos desde Vendix en el formato de la plantilla para comparar en Excel.',
+      evidence: 'apps/backend/src/domains/store/products/products-bulk.controller.ts (export)',
+    },
+    {
+      title: 'Haz el corte',
+      text: 'Elige el día en que empiezas a vender con Vendix. Ese día cuenta tu inventario físico y ajusta en Vendix las diferencias. Desde ese momento registras las ventas solo en Vendix.',
+      evidence: 'Borrador v2 OPS-20 (29-oct), paso 8; ajustes de inventario en Inventario',
+    },
+  ],
+  sections: [
+    {
+      id: 'que-importar',
+      heading: 'Qué puedes importar',
+      bullets: [
+        { text: 'Productos, con nombre, SKU y precio de venta en cada fila.', evidence: BULK + '; ' + QA_13_NOV },
+        {
+          text: 'Variantes como talla o color, en la misma plantilla: una fila por variante con el SKU del producto padre.',
+          evidence: QA_13_NOV + ' (camiseta y gorra con 2 variantes cada una)',
+        },
+        {
+          text: 'Existencia inicial, en la columna Cantidad Inicial. Incluye el precio de compra: sin él, el costo queda en cero.',
+          evidence: QA_13_NOV + ' (advertencia de precio de compra)',
+        },
+        { text: 'Servicios, con su propia plantilla.', evidence: BULK + ' (plantilla de servicios)' },
+        {
+          text: 'Clientes, con nombre o documento en cada fila.',
+          evidence: 'apps/backend/src/domains/store/customers/customers-bulk.service.ts',
+        },
+        {
+          text: 'Existencias por bodega o por variante, con la plantilla de ajuste de inventario: eliges la ubicación y escribes la cantidad nueva.',
+          evidence: 'apps/backend/src/domains/store/inventory/adjustments/inventory-adjustments-bulk.service.ts',
+        },
+        {
+          text: 'Fotos de productos, en un archivo ZIP: cada foto se asocia por SKU.',
+          evidence: 'apps/backend/src/domains/store/products/products-bulk-image.controller.ts',
+        },
+        {
+          text: 'Formatos: Excel (.xlsx o .xls) o CSV, hasta 20 MB y 10.000 productos por archivo. Se lee la primera hoja.',
+          evidence: 'products-bulk.controller.ts (MaxFileSizeValidator 20 MB); ' + BULK + ' (MAX_BATCH_SIZE); bulk-upload-modal «Máximo 20 MB»',
+        },
+      ],
+    },
+    {
+      id: 'repetidos',
+      heading: 'Qué pasa con los repetidos',
+      bullets: [
+        {
+          text: 'Si el SKU ya existe en tu tienda, la fila actualiza ese producto. Puedes subir el mismo archivo dos veces sin duplicar productos ni sumar existencias.',
+          evidence: QA_13_NOV + ' (reimportación: 8 actualizados, total 80 y movimientos sin cambio)',
+        },
+        {
+          text: 'Si el mismo SKU aparece dos veces en el archivo, Vendix te avisa y la última fila reemplaza a la primera. Deja un SKU por producto.',
+          evidence: QA_13_NOV + ' (MUE-ERR-DUP)',
+        },
+        {
+          text: 'Si el código de barras ya lo usa otro producto, la fila no se carga.',
+          evidence: QA_13_NOV + ' (MUE-ERR-CB)',
+        },
+        {
+          text: 'Dos productos nuevos con el mismo nombre no se cargan: cambia el nombre o agrega un detalle.',
+          evidence: BULK + ' (slug ya usado por otro producto)',
+        },
+        {
+          text: 'Si el correo o el documento de un cliente ya existe, esa fila no se carga. Los clientes no se actualizan con el archivo.',
+          evidence: 'customers-bulk.service.ts (duplicate_email, duplicate_document)',
+        },
+        {
+          text: 'Las categorías y marcas que no existen se crean. Revisa la ortografía para no terminar con «Papeleria» y «Papelería».',
+          evidence: QA_13_NOV + ' (8 categorías y 1 marca creadas)',
+        },
+      ],
+    },
+    {
+      id: 'errores',
+      heading: 'Errores frecuentes y cómo corregirlos',
+      bullets: [
+        { text: 'Precio de venta vacío o escrito en letras: deja solo números, como 20000 o 20.000.', evidence: QA_13_NOV + ' (MUE-ERR-SINPRECIO, MUE-ERR-LETRAS)' },
+        { text: 'Fila sin nombre: completa la celda.', evidence: QA_13_NOV + ' («Nombre es requerido»)' },
+        { text: 'Código de barras en uso: revisa a qué producto pertenece o déjalo vacío.', evidence: QA_13_NOV + ' (MUE-ERR-CB)' },
+        { text: 'Variante sin su producto padre en el archivo: agrega la fila del padre o corrige el SKU Padre.', evidence: BULK + ' (VARIANT_PARENT_NOT_FOUND)' },
+      ],
+    },
+    {
+      id: 'ejemplo',
+      heading: 'Una prueba con datos ficticios',
+      paragraphs: [
+        {
+          text: 'Cargamos un archivo de 12 filas inventadas: 8 productos, dos de ellos con 2 variantes, y cantidades en 5 productos. Quedaron 8 productos con sus variantes y 125 unidades en la ubicación principal. Al subir el mismo archivo otra vez, los 8 productos se actualizaron, no se creó ninguno nuevo y las existencias no cambiaron.',
+          evidence: QA_13_NOV,
+        },
+      ],
+    },
+  ],
+  limits: [
+    { text: 'Historial de ventas, facturas electrónicas y notas crédito de tu sistema anterior.', evidence: 'Sin importador (búsqueda de FileInterceptor y template/download, 27-oct)' },
+    { text: 'Contabilidad: plan de cuentas, saldos y asientos.', evidence: 'Sin importador contable (27-oct)' },
+    { text: 'Cartera, cuentas por pagar y proveedores.', evidence: 'Sin importador de cartera ni proveedores (27-oct)' },
+    {
+      text: 'Conexiones con otros programas: Vendix no se conecta con tu software anterior. Un archivo exportado no es una integración.',
+      evidence: 'Brief BRIEF-MIG-01 (OPS-12); decisión del 22-oct',
+    },
+    {
+      text: 'La carga la haces tú. Si prefieres que el equipo cargue muchos productos por ti, lo cotizamos como implementación avanzada.',
+      evidence: 'Decisión del 22-oct (BRIEF-MIG-01); claims-register C24, C25',
+    },
+  ],
+  prepare: [
+    'Una copia de tus productos y clientes tal como salen de tu sistema actual.',
+    'Un SKU distinto para cada producto y cada variante.',
+    'El precio de compra de los productos que traen cantidad.',
+    'El día en que vas a empezar a vender con Vendix.',
+  ],
+  faqs: [
+    {
+      question: '¿Puedo importar desde Siigo, Alegra u otro programa?',
+      text: 'Puedes exportar tus datos desde ese programa a Excel y pasarlos a nuestras plantillas. No hay conexión directa entre programas.',
+      evidence: 'Brief BRIEF-MIG-01 (OPS-12)',
+    },
+    {
+      question: '¿Se pasan mis facturas y mi contabilidad?',
+      text: 'No. Se importan productos, servicios, clientes, existencias y fotos.',
+      evidence: 'Sin importador de facturas ni contabilidad (27-oct)',
+    },
+    {
+      question: '¿Qué pasa si subo el mismo archivo dos veces?',
+      text: 'Los productos con el mismo SKU se actualizan y no se duplican. Los clientes repetidos no se cargan.',
+      evidence: QA_13_NOV + '; customers-bulk.service.ts',
+    },
+    {
+      question: '¿Cuántos productos puedo subir?',
+      text: 'Hasta 10.000 productos por archivo, de hasta 20 MB. Si tienes más, divídelos en varios archivos.',
+      evidence: BULK + ' (MAX_BATCH_SIZE); products-bulk.controller.ts (20 MB)',
+    },
+    {
+      question: '¿Puedo cargar existencias en varias bodegas?',
+      text: 'Sí, con la plantilla de ajuste de inventario, eligiendo la ubicación. La plantilla de productos solo carga la ubicación principal.',
+      evidence: QA_13_NOV + '; inventory-adjustments-bulk.service.ts',
+    },
+  ],
+  whatsappText: 'Hola, quiero pasar mi catálogo a Vendix y revisar cómo preparar mis archivos.',
+};
+
+export const SECTOR_PAGES: readonly SectorPageContent[] = [RESTAURANTES, SOFTWARE_POS, MIGRACION];
 
 export function sectorPageByPath(path: string): SectorPageContent | null {
   return SECTOR_PAGES.find((page) => page.path === path) ?? null;
