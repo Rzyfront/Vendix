@@ -152,6 +152,13 @@ export const FISCAL_ROUTES: Routes = [
     data: {
       subTabs: ACCOUNTING_SUB_TABS,
       subTabsAriaLabel: 'Contabilidad de plataforma',
+      // Sin sticky header en el padre: las sub-tabs son la capa 3 y van en
+      // las tabs del header (ver skill vendix-ui-ux, Navigation Hierarchy).
+      subTabsHeader: {
+        title: 'Contabilidad',
+        subtitle: 'Plan de cuentas, asientos, mapeos y reportes de la plataforma',
+        icon: 'book-open',
+      },
     },
     children: [
       {

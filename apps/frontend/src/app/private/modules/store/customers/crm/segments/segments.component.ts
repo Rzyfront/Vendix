@@ -8,12 +8,11 @@ import {
   EmptyStateComponent,
   IconComponent,
   InputsearchComponent,
-  ScrollableTabsComponent,
   SpinnerComponent,
   StickyHeaderComponent,
   ToastService,
 } from '../../../../../../shared/components';
-import type { ScrollableTab, StickyHeaderActionButton } from '../../../../../../shared/components';
+import type { StickyHeaderActionButton, StickyHeaderTab } from '../../../../../../shared/components';
 import { AuthFacade } from '../../../../../../core/store/auth/auth.facade';
 import { parseApiError } from '../../../../../../core/utils/parse-api-error';
 import { CrmSegmentsService } from '../shared/crm-segments.service';
@@ -44,7 +43,6 @@ const PAGE_SIZE = 25;
     EmptyStateComponent,
     IconComponent,
     InputsearchComponent,
-    ScrollableTabsComponent,
     SpinnerComponent,
     StickyHeaderComponent,
     CampaignDetailModalComponent,
@@ -58,30 +56,23 @@ const PAGE_SIZE = 25;
         subtitle="Agrupa clientes con reglas y envíales campañas por WhatsApp, SMS o correo."
         icon="users"
         [actions]="headerActions()"
+        [tabs]="headerTabs()"
+        [activeTab]="tab()"
+        tabsAriaLabel="Segmentos o campañas"
         (actionClicked)="openNew()"
+        (tabChanged)="tab.set($any($event))"
       ></app-sticky-header>
 
       <app-card>
-        <div class="mb-4 flex flex-col gap-3 md:flex-row md:items-center md:justify-between">
-          @if (canSend()) {
-            <app-scrollable-tabs
-              [tabs]="tabs"
-              [activeTab]="tab()"
-              size="sm"
-              ariaLabel="Segmentos o campañas"
-              (tabChange)="tab.set($any($event))"
-            ></app-scrollable-tabs>
-          } @else {
-            <span></span>
-          }
-          @if (tab() === 'segments') {
+        @if (tab() === 'segments') {
+          <div class="mb-4 flex flex-col gap-3 md:flex-row md:items-center md:justify-end">
             <app-inputsearch
               placeholder="Buscar segmento..."
               [debounceTime]="250"
               (searchChange)="search.set($event)"
             ></app-inputsearch>
-          }
-        </div>
+          </div>
+        }
 
         @if (tab() === 'segments') {
           @if (segmentsError()) {
@@ -261,7 +252,7 @@ export class SegmentsComponent {
   private readonly toast = inject(ToastService);
   private readonly auth = inject(AuthFacade);
 
-  protected readonly tabs: ScrollableTab[] = [
+  private readonly tabs: StickyHeaderTab[] = [
     { id: 'segments', label: 'Segmentos', icon: 'users' },
     { id: 'campaigns', label: 'Campañas', icon: 'send' },
   ];
@@ -275,6 +266,10 @@ export class SegmentsComponent {
   );
   protected readonly canSend = computed(
     () => this.auth.isOwner() || this.auth.hasPermission('store:crm_campaigns:send'),
+  );
+  /** Tabs only for users who can send campaigns; others see no tab row. */
+  protected readonly headerTabs = computed<StickyHeaderTab[]>(() =>
+    this.canSend() ? this.tabs : [],
   );
   protected readonly headerActions = computed<StickyHeaderActionButton[]>(() =>
     this.canManage() ? [{ id: 'new', label: 'Nuevo segmento', icon: 'plus', variant: 'primary' }] : [],

@@ -21,16 +21,17 @@ import {
   WorkflowStageType,
 } from '../../../../../../../shared/workflows/contract/workflow-contract';
 import { WorkflowEditorStore } from '../../workflow-editor.store';
-import { STAGE_TYPE_ICON, STAGE_TYPE_LABEL, outcomeText, removeAt } from '../../workflow-editor.utils';
+import { STAGE_TYPE_LABEL, outcomeText, removeAt } from '../../workflow-editor.utils';
 import { ConditionBuilderComponent } from '../condition-builder.component';
 import { CanvasPaletteComponent, PALETTE_DRAG_TYPE } from './canvas-palette.component';
+import { StageNodeCardComponent } from '../stage-node-card.component';
+import { WORKFLOW_BOARD_STYLES } from './workflow-board.styles';
 import {
   CANVAS_NODE_H,
   CANVAS_NODE_W,
   CanvasNode,
   CanvasPoint,
   STAGE_PALETTE,
-  STAGE_TONE,
   clampPoint,
   computeCanvas,
   connectStages,
@@ -76,7 +77,31 @@ interface PendingConnection {
 @Component({
   selector: 'app-workflow-canvas',
   standalone: true,
-  imports: [ButtonComponent, IconComponent, CanvasPaletteComponent, ConditionBuilderComponent],
+  imports: [ButtonComponent, IconComponent, CanvasPaletteComponent, ConditionBuilderComponent, StageNodeCardComponent],
+  styles: [WORKFLOW_BOARD_STYLES, `
+    .node-host.is-dragging {
+      z-index: 10;
+      filter: drop-shadow(0 12px 20px color-mix(in srgb, var(--color-text-primary) 14%, transparent));
+    }
+    .port-in {
+      position: absolute;
+      left: -5px;
+      top: 50%;
+      width: 10px;
+      height: 10px;
+      transform: translateY(-50%);
+      border-radius: var(--radius-pill);
+      border: 2px solid var(--color-surface);
+      background: color-mix(in srgb, var(--color-text-secondary) 55%, transparent);
+    }
+    .port-out {
+      opacity: 0.7;
+    }
+    .node-host:hover .port-out,
+    .port-out:focus-visible {
+      opacity: 1;
+    }
+  `],
   template: `
     <div class="flex flex-col gap-3" data-testid="workflow-canvas" (keydown.escape)="cancel()">
       <app-canvas-palette [disabled]="atLimit()" (add)="addAt($event)" />
@@ -111,7 +136,7 @@ interface PendingConnection {
       }
 
       <div
-        class="overflow-auto rounded-xl border border-border bg-surface"
+        class="wf-board overflow-auto rounded-2xl border border-border"
         style="max-height: 70vh"
         (dragover)="onDragOver($event)"
         (drop)="onDrop($event)"
@@ -132,8 +157,11 @@ interface PendingConnection {
             [attr.height]="model().height"
           >
             <defs>
-              <marker id="wf-canvas-arrow" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="8" markerHeight="8" orient="auto-start-reverse">
-                <path d="M 0 0 L 10 5 L 0 10 z" class="fill-text-secondary" />
+              <marker id="wf-canvas-arrow" viewBox="0 0 10 10" refX="8" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
+                <path d="M 1 1 L 9 5 L 1 9 z" stroke-linejoin="round" class="wf-arrow" />
+              </marker>
+              <marker id="wf-canvas-arrow-active" viewBox="0 0 10 10" refX="8" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
+                <path d="M 1 1 L 9 5 L 1 9 z" stroke-linejoin="round" class="fill-primary" />
               </marker>
             </defs>
 
@@ -143,19 +171,22 @@ interface PendingConnection {
                 <path
                   [attr.d]="edge.path"
                   fill="none"
-                  [class]="edge.id === selectedEdge() ? 'stroke-primary' : 'stroke-text-secondary'"
-                  [attr.stroke-width]="edge.id === selectedEdge() ? 2.5 : 1.5"
-                  [attr.stroke-dasharray]="edge.conditional ? '6 4' : null"
-                  marker-end="url(#wf-canvas-arrow)"
+                  stroke-linecap="round"
+                  [class]="edge.id === selectedEdge() ? 'stroke-primary' : 'wf-edge'"
+                  [attr.stroke-width]="edge.id === selectedEdge() ? 2.25 : 1.75"
+                  [attr.stroke-dasharray]="edge.conditional ? '5 5' : null"
+                  [attr.marker-end]="edge.id === selectedEdge() ? 'url(#wf-canvas-arrow-active)' : 'url(#wf-canvas-arrow)'"
                 />
                 <text
                   [attr.x]="edge.labelX"
                   [attr.y]="edge.labelY"
                   text-anchor="middle"
                   paint-order="stroke"
-                  stroke-width="4"
+                  stroke-width="6"
+                  stroke-linejoin="round"
                   pointer-events="all"
-                  class="fill-text-primary stroke-surface text-xs"
+                  class="wf-edge-label"
+                  [class.is-active]="edge.id === selectedEdge()"
                 >{{ short(edge.label, 38) }}</text>
               </g>
             }
@@ -167,7 +198,7 @@ interface PendingConnection {
 
           @for (node of model().nodes; track node.key) {
             <div
-              class="absolute touch-none select-none rounded-xl border border-l-4 bg-surface shadow-sm focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/30"
+              class="node-host absolute touch-none select-none rounded-2xl focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/30"
               [class]="nodeClass(node)"
               [style.left.px]="node.x"
               [style.top.px]="node.y"
@@ -184,20 +215,19 @@ interface PendingConnection {
               (pointercancel)="onNodeUp()"
               (keydown)="onNodeKey($event, node)"
             >
-              <span class="pointer-events-none absolute -left-[7px] top-1/2 h-2.5 w-2.5 -translate-y-1/2 rounded-full border border-border bg-surface" aria-hidden="true"></span>
-              <div class="pointer-events-none flex h-full items-center gap-2 px-2.5">
-                <span class="flex h-8 w-8 shrink-0 items-center justify-center rounded-lg" [class]="tone(node.type).chip">
-                  <app-icon [name]="icon(node.type)" [size]="16" />
-                </span>
-                <span class="min-w-0">
-                  <span class="block truncate text-sm font-semibold text-text-primary">{{ node.name }}</span>
-                  <span class="block truncate text-xs text-text-secondary">{{ caption(node) }}</span>
-                </span>
-              </div>
+              <app-stage-node-card
+                class="pointer-events-none"
+                [name]="node.name"
+                [type]="node.type"
+                [start]="!!node.start"
+                [unreachable]="!!node.unreachable"
+                [selected]="node.key === store.selectedKey()"
+              />
+              <span class="port-in pointer-events-none" aria-hidden="true"></span>
               @if (hasOutput(node)) {
                 <button
                   type="button"
-                  class="absolute -right-3 top-1/2 flex h-6 w-6 -translate-y-1/2 cursor-crosshair touch-none items-center justify-center rounded-full border border-primary bg-surface text-primary shadow-sm transition-colors hover:bg-primary/10 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/30"
+                  class="port-out absolute -right-3 top-1/2 flex h-6 w-6 -translate-y-1/2 cursor-crosshair touch-none items-center justify-center rounded-full border border-primary/40 bg-surface text-primary shadow-sm transition-all hover:scale-110 hover:border-primary hover:bg-primary hover:text-[var(--color-text-on-primary)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/30"
                   [attr.aria-label]="'Conectar «' + node.name + '» con otro paso: arrastra hasta el destino o toca y luego toca el destino'"
                   [attr.data-testid]="'canvas-port-' + node.key"
                   (pointerdown)="onPortDown($event, node)"
@@ -326,14 +356,6 @@ export class WorkflowCanvasComponent {
 
   // ─── Presentation helpers ───────────────────────────────────────────
 
-  icon(type: WorkflowStageType): string {
-    return STAGE_TYPE_ICON[type];
-  }
-
-  tone(type: WorkflowStageType): { chip: string; bar: string } {
-    return STAGE_TONE[type];
-  }
-
   outcomeLabel(outcome: string): string {
     return outcomeText(outcome);
   }
@@ -342,25 +364,14 @@ export class WorkflowCanvasComponent {
     return text.length > max ? `${text.slice(0, max - 1)}…` : text;
   }
 
-  caption(node: CanvasNode): string {
-    const parts: string[] = [STAGE_TYPE_LABEL[node.type]];
-    if (node.start) parts.push('Inicio');
-    if (node.unreachable) parts.push('Inalcanzable');
-    return parts.join(' · ');
-  }
 
   nodeLabel(node: CanvasNode): string {
     return `${node.name} (${STAGE_TYPE_LABEL[node.type]})${node.start ? ', paso inicial' : ''}${node.unreachable ? ', inalcanzable' : ''}`;
   }
 
+  /** Border, tone and selection live in `app-stage-node-card`; the host only reflects dragging. */
   nodeClass(node: CanvasNode): string {
-    const selected = node.key === this.store.selectedKey();
-    return [
-      STAGE_TONE[node.type].bar,
-      selected ? 'border-primary ring-2 ring-primary/20' : 'border-border',
-      node.unreachable ? 'border-dashed' : '',
-      this.dragPos()?.key === node.key ? 'cursor-grabbing shadow-lg' : 'cursor-grab',
-    ].join(' ');
+    return this.dragPos()?.key === node.key ? 'is-dragging cursor-grabbing' : 'cursor-grab';
   }
 
   hasOutput(node: CanvasNode): boolean {

@@ -5,7 +5,7 @@ description: >
 license: MIT
 metadata:
   author: rzyfront
-  version: "3.0"
+  version: "3.1"
   scope: [root]
   auto_invoke: "Designing UI screens, mobile-first layouts, accessibility review, landing pages, UX patterns"
 ---
@@ -40,6 +40,26 @@ unless the task asks.
   and headings. Icons 12–14 in small controls, 16 in 40–44px.
 - **Destructive** uses the `error` token tinted (`bg-error/10 border-error/25 text-error`), not
   `rose-*`/`red-*`. Badges use `<app-badge>` semantic variants.
+
+## Navigation Hierarchy (mandatory)
+
+Every admin view is navigated in four layers. Use the component that belongs to the layer, never another:
+
+| Layer | What it is | Component |
+| --- | --- | --- |
+| 1 | Module | Sidebar item |
+| 2 | Submodule | Sidebar child item |
+| 3 | Sub-views of a view | Tabs in `app-sticky-header` (`[tabs]`), route or state tabs |
+| 4 | Sub-views inside one tab | `app-scrollable-tabs` (`size="sm"`), below the header, inside the tab content |
+
+- **Tabs are the default** way to add sub-views to a view (layer 3). Don't add a new sidebar item,
+  a page-local tab bar, buttons or a dropdown for that.
+- Layer 3 always lives in the sticky header. If the view has no `app-sticky-header`, add one with
+  its tabs instead of using `app-scrollable-tabs`.
+- `app-scrollable-tabs` is only valid at layer 4: inside the content of a layer-3 tab. Using it as
+  the first tab row of a view is a bug to fix.
+- Nothing deeper than layer 4. A fifth level means the view must be split.
+- Details: `vendix-frontend-sticky-header` (layer 3) and the `scrollable-tabs` README (layer 4).
 
 ## Core Standards
 

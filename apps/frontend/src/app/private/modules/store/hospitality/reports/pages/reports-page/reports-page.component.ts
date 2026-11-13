@@ -3,8 +3,8 @@ import { toSignal } from '@angular/core/rxjs-interop';
 import { ActivatedRoute, Router } from '@angular/router';
 import { map } from 'rxjs';
 import {
-  ScrollableTab,
-  ScrollableTabsComponent,
+  StickyHeaderComponent,
+  StickyHeaderTab,
 } from '../../../../../../../shared/components/index';
 import { HospitalityCancellationsPageComponent } from '../../../reservations/pages/cancellations-page/cancellations-page.component';
 import { HospitalityNightAuditPageComponent } from '../../../reservations/pages/night-audit-page/night-audit-page.component';
@@ -14,7 +14,7 @@ import { HospitalityFonturPageComponent } from '../../../reservations/pages/font
 
 export type HospitalityReportTab = 'night-audit' | 'performance' | 'pickup' | 'cancellations' | 'fontur';
 
-const REPORT_TABS: ScrollableTab[] = [
+const REPORT_TABS: StickyHeaderTab[] = [
   { id: 'night-audit', label: 'Cierre del día', icon: 'moon' },
   { id: 'performance', label: 'Indicadores', icon: 'chart-line' },
   { id: 'pickup', label: 'Ritmo de reservas', icon: 'calendar-clock' },
@@ -41,7 +41,7 @@ function toReportTab(value: string | null): HospitalityReportTab {
   standalone: true,
   changeDetection: ChangeDetectionStrategy.OnPush,
   imports: [
-    ScrollableTabsComponent,
+    StickyHeaderComponent,
     HospitalityNightAuditPageComponent,
     HospitalityPerformancePageComponent,
     HospitalityPickupPageComponent,
@@ -50,11 +50,14 @@ function toReportTab(value: string | null): HospitalityReportTab {
   ],
   template: `
     <div class="w-full md:space-y-4">
-      <app-scrollable-tabs
-        ariaLabel="Reportes de hotel"
+      <app-sticky-header
+        title="Reportes de hotel"
+        subtitle="Indicadores y cierres del hotel"
+        icon="chart-line"
+        tabsAriaLabel="Reportes de hotel"
         [tabs]="tabs"
         [activeTab]="tab()"
-        (tabChange)="onTab($event)"
+        (tabChanged)="onTab($event)"
       />
 
       <div role="tabpanel" [attr.aria-label]="tabLabel()">

@@ -81,6 +81,19 @@ type StickyHeaderBadgeColor = "green" | "blue" | "yellow" | "gray" | "red";
 
 Las pestañas se renderizan en una fila compacta en la parte superior del header.
 
+### Jerarquía de navegación (obligatoria)
+
+| Capa | Qué es | Componente |
+| ---- | ------ | ---------- |
+| 1 | Módulo | Ítem del sidebar |
+| 2 | Submódulo | Ítem hijo del sidebar |
+| 3 | Subvistas de una vista | **Tabs de este header** (`[tabs]`) |
+| 4 | Subvistas dentro de una tab | `app-scrollable-tabs` (`size="sm"`) |
+
+- Las tabs del sticky header son la forma principal y predeterminada de agregar subvistas a una vista.
+- Si la vista no tiene sticky header, agrégalo para alojar sus tabs; no uses `app-scrollable-tabs` como primera fila de tabs.
+- `app-scrollable-tabs` solo va dentro del contenido de una tab de este header (capa 4).
+
 ## Estándar visual
 
 El header mantiene el mismo tamaño de ícono y padding en todos los módulos:

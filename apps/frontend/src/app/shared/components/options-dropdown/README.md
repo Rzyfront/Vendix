@@ -38,6 +38,10 @@ actions: DropdownAction[] = [
 <app-options-dropdown [filters]="filters" [actions]="actions" [filterValues]="filterValues" triggerLabel="Filtros" triggerIcon="sliders-horizontal" [debounceMs]="350" [isLoading]="false" (filterChange)="onFilterChange($event)" (actionClick)="onAction($event)" (clearAllFilters)="onClearAll()"> </app-options-dropdown>
 ```
 
+## Una sola acción
+
+Con **una sola** acción el componente no abre un menú: muestra un botón con el icono y el texto de esa acción y la ejecuta al hacer clic (`actionClick` emite su `action`). Con dos o más acciones vuelve al menú "Acciones". El botón respeta `disabled` y el `variant` de la acción (`primary` con tinte de marca, `destructive` en rojo). Si las acciones bajan a una con el menú abierto, el menú se cierra. Es dinámico: si `actions` es un `computed` (por ejemplo, filtrado por permisos), el componente cambia solo de modo. No hace falta nada en el padre.
+
 ## Filtros prearmados
 
 `order-filter.preset.ts` — orden alfabético reutilizable para cualquier vista
@@ -57,7 +61,7 @@ decide qué ordenar con ese valor.
 | Input        | Tipo             | Default              | Descripcion                           |
 | ------------ | ---------------- | -------------------- | ------------------------------------- |
 | filters      | FilterConfig[]   | []                   | Configuracion de cada filtro          |
-| actions      | DropdownAction[] | []                   | Acciones disponibles en el dropdown   |
+| actions      | DropdownAction[] | []                   | Acciones disponibles en el dropdown (ver "Una sola acción") |
 | filterValues | FilterValues     | {}                   | Valores actuales de los filtros       |
 | title        | string           | 'Opciones'           | Titulo en el header del dropdown      |
 | triggerLabel | string           | 'Opciones'           | Texto del boton trigger               |

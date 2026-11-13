@@ -27,10 +27,9 @@ import {
   InputComponent,
   SelectorComponent,
   PaginationComponent,
-  ScrollableTabsComponent,
   BadgeComponent,
 } from '../../../../../../app/shared/components';
-import type { BadgeVariant, ScrollableTab } from '../../../../../../app/shared/components';
+import type { BadgeVariant } from '../../../../../../app/shared/components';
 import {
   CustomerSectionComponent,
   CustomerSectionEmptyComponent,
@@ -40,6 +39,7 @@ import { CustomerLocationsComponent } from '../components/customer-locations/cus
 import {
   StickyHeaderComponent,
   StickyHeaderActionButton,
+  StickyHeaderTab,
 } from '../../../../../../app/shared/components/sticky-header/sticky-header.component';
 
 @Component({
@@ -58,7 +58,6 @@ import {
     SelectorComponent,
     PaginationComponent,
     StickyHeaderComponent,
-    ScrollableTabsComponent,
     CustomerCrmPanelComponent,
     CustomerLocationsComponent,
     CustomerSectionComponent,
@@ -77,18 +76,12 @@ import {
         [badgeText]="customer()?.state === 'active' ? 'Activo' : customer()?.state === 'inactive' ? 'Inactivo' : ''"
         [badgeColor]="customer()?.state === 'active' ? 'green' : 'red'"
         [actions]="gymProfileActions()"
+        [tabs]="visibleTabs()"
+        [activeTab]="activeTab()"
+        tabsAriaLabel="Secciones de la ficha del cliente"
         (actionClicked)="onHeaderAction($event)"
+        (tabChanged)="selectTab($event)"
       ></app-sticky-header>
-    
-      <div class="mb-4">
-        <app-scrollable-tabs
-          [tabs]="visibleTabs()"
-          [activeTab]="activeTab()"
-          size="sm"
-          ariaLabel="Secciones de la ficha del cliente"
-          (tabChange)="selectTab($event)"
-        ></app-scrollable-tabs>
-      </div>
 
       @if (activeTab() === 'ubicaciones' && customerId()) {
         <app-customer-locations
@@ -773,7 +766,7 @@ export class CustomerDetailsComponent {
   customerId = signal<number | null>(null);
 
   // CRM tab (PLAN-CRM §7, H2). `?tab=crm` opens it directly.
-  readonly profileTabs: ScrollableTab[] = [
+  readonly profileTabs: StickyHeaderTab[] = [
     { id: 'info', label: 'Información', icon: 'user' },
     { id: 'ubicaciones', label: 'Ubicaciones', icon: 'map-pin' },
     { id: 'crm', label: 'CRM', icon: 'trending-up' },
@@ -786,7 +779,7 @@ export class CustomerDetailsComponent {
   );
 
   /** Las pestañas siempre se muestran; CRM solo con su permiso. */
-  readonly visibleTabs = computed<ScrollableTab[]>(() =>
+  readonly visibleTabs = computed<StickyHeaderTab[]>(() =>
     this.profileTabs.filter((t) => t.id !== 'crm' || this.showCrmTab()),
   );
 

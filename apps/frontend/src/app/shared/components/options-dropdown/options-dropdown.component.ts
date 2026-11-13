@@ -1,6 +1,7 @@
 import {
   Component,
   DestroyRef,
+  computed,
   HostListener,
   ElementRef,
   effect,
@@ -134,6 +135,14 @@ export class OptionsDropdownComponent {
   private readonly debounceTrigger$ = new Subject<number>(); // LEGÍTIMO — debounce pipeline para filterChange
 
   constructor() {
+    // Una sola acción se muestra como botón directo: si las acciones bajan a
+    // una con el menú abierto, se cierra para no dejar el panel colgando.
+    effect(() => {
+      if (this.singleAction()) {
+        untracked(() => this.isActionsOpen.set(false));
+      }
+    });
+
     // Sync filterValues input → local state.
     //
     // BUG FIX admin-orders-filters: antes leíamos `this.localFilterValues()`
@@ -390,6 +399,12 @@ export class OptionsDropdownComponent {
   get hasActions(): boolean {
     return this.showActions() && this.actions().length > 0;
   }
+
+  /** The only action when there is exactly one: rendered as a direct button, not a menu. */
+  readonly singleAction = computed<DropdownAction | null>(() => {
+    const actions = this.actions();
+    return actions.length === 1 ? actions[0] : null;
+  });
 
   get hasFilters(): boolean {
     return this.filters().length > 0;

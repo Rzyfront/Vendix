@@ -40,7 +40,7 @@ import {
 // respondía 404 con el toast genérico "Error al actualizar la configuración".
 //
 // La configuración real de una tienda vive en la ficha de tenant, así que la
-// acción de fila lleva ahora a `/super-admin/stores/:id/config/dian`. El
+// acción de fila lleva ahora a `/super-admin/stores/:id/dian`. El
 // archivo del modal se deja en disco, sin consumidores desde este módulo.
 
 // Import shared components
@@ -620,7 +620,6 @@ private initializeCreateForm(): void {
     void this.router.navigate([
       '/super-admin/stores',
       store.id,
-      'config',
       'dian',
     ]);
   }

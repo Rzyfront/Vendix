@@ -6,7 +6,7 @@ description: >
 license: Apache-2.0
 metadata:
   author: rzyfront
-  version: "2.3"
+  version: "2.4"
   scope: [root]
   auto_invoke: "Implementing sticky headers or refactoring module headers"
 ---
@@ -18,7 +18,7 @@ metadata:
 - Replacing custom sticky header markup with the shared `app-sticky-header` component.
 - Replacing hardcoded module headers with compact route/state tabs.
 
-For standard list modules, use sticky stats plus sticky search from `vendix-frontend-standard-module` instead.
+For standard list modules without sub-views, use sticky stats plus sticky search from `vendix-frontend-standard-module`. A list module with sub-views (layer 3) also gets `app-sticky-header` with `[tabs]` above its stats and search.
 
 ## Source of Truth
 
@@ -100,8 +100,14 @@ Soft UI (`vendix-ui-ux` → `references/soft-ui.md`): at most one `primary` acti
 
 ## Tabs
 
-Use header tabs for page-level module views. Tabs can be local state tabs or route tabs:
-The component renders tabs as a compact top row above the title/action row.
+Header tabs are **layer 3** of the navigation hierarchy (`vendix-ui-ux` → Navigation Hierarchy):
+1 module (sidebar) → 2 submodule (sidebar) → **3 sub-views of a view (these tabs)** → 4 sub-views
+inside one tab (`app-scrollable-tabs`). They are the default way to add sub-views to a view. If the
+view has no sticky header, add one to host its tabs; never use `app-scrollable-tabs` as the
+view's first tab row.
+
+Tabs can be local state tabs or route tabs. The component renders them as a compact top row above
+the title/action row.
 
 ```typescript
 readonly activeTab = signal('overview');
@@ -141,7 +147,8 @@ If a header action submits the form, keep the `<form>` around both `app-sticky-h
 ## Rules
 
 - Use `app-sticky-header` before custom markup unless the page has a documented exception.
-- Put page-level tabs in `app-sticky-header` before creating custom tab bars or sibling `app-scrollable-tabs`.
+- Put page-level tabs (layer 3) in `app-sticky-header`; never in custom tab bars or `app-scrollable-tabs`.
+- `app-scrollable-tabs` only for layer 4: sub-views inside the content of one header tab.
 - Keep page content padding below the header, not on the sticky parent.
 - Verify every header icon exists in `icons.registry.ts`.
 - Keep action arrays signal/computed-based when they depend on saving/loading/edit mode state.

@@ -74,13 +74,18 @@ const SUFFERED_COUNTERPARTY_OPTIONS: SelectorOption[] = [
   imports: [FormsModule, ButtonComponent, IconComponent, SelectorComponent],
   template: `
     <div class="bg-[var(--color-surface)] rounded-lg shadow">
-      <!-- Selectors -->
-      <div class="p-4 border-b border-border">
-        <div class="flex flex-col gap-2 md:flex-row md:items-end md:justify-between">
+      <!-- Certificate inputs: required to build the document, so they stay
+           visible as a form row instead of hiding in a filter dropdown. -->
+      <div class="p-4 border-b border-border space-y-3">
+        <div>
           <h2 class="text-lg font-semibold text-text-primary">
             Certificados de Retención
           </h2>
-          <div class="grid grid-cols-2 gap-2 md:flex md:flex-wrap md:gap-3">
+          <p class="text-xs text-text-secondary">
+            Elige el tipo, el tercero y el año gravable para generar el certificado.
+          </p>
+        </div>
+        <div class="grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-3">
             <app-selector
               label="Tipo de certificado"
               size="sm"
@@ -147,7 +152,6 @@ const SUFFERED_COUNTERPARTY_OPTIONS: SelectorOption[] = [
               [ngModel]="selectedYear()"
               (ngModelChange)="onYearChange($event)"
             ></app-selector>
-          </div>
         </div>
       </div>
 

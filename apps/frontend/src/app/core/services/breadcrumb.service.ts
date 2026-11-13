@@ -653,7 +653,7 @@ export class BreadcrumbService {
     // Configuration
     {
       path: '/admin/config/application',
-      title: 'General',
+      title: 'Aplicación',
       parent: 'Configuration',
       icon: 'sliders',
     },
@@ -681,6 +681,12 @@ export class BreadcrumbService {
       title: 'Reservas',
       parent: 'Tienda',
       icon: 'calendar-check',
+    },
+    {
+      path: '/admin/reservations/schedules',
+      title: 'Equipo de servicio',
+      parent: 'Reservas',
+      icon: 'users',
     },
     {
       path: '/admin/reservations/reschedule-requests',
@@ -1097,6 +1103,32 @@ export class BreadcrumbService {
       title: 'Segmentos',
       parent: 'Clientes',
       icon: 'users',
+    },
+    {
+      path: '/admin/data-collection',
+      title: 'Recolección de datos',
+      parent: 'Clientes',
+      icon: 'clipboard-list',
+    },
+    {
+      path: '/admin/data-collection/fields',
+      title: 'Campos',
+      parent: 'Recolección de datos',
+      icon: 'database',
+    },
+    {
+      path: '/admin/data-collection/templates',
+      // Not "Plantillas": that title is the parent of the documents templates
+      // breadcrumbs, and parents are looked up by title.
+      title: 'Plantillas de formulario',
+      parent: 'Recolección de datos',
+      icon: 'layout-template',
+    },
+    {
+      path: '/admin/data-collection/submissions',
+      title: 'Formularios',
+      parent: 'Recolección de datos',
+      icon: 'inbox',
     },
     {
       path: '/admin/customers/:id',
@@ -1538,6 +1570,24 @@ export class BreadcrumbService {
       title: 'Retenciones',
       parent: 'Impuestos',
       icon: 'percent',
+    },
+    {
+      path: '/admin/accounting/taxes/withholding/concepts',
+      title: 'Conceptos de retención',
+      parent: 'Impuestos',
+      icon: 'file-text',
+    },
+    {
+      path: '/admin/accounting/taxes/withholding/calculations',
+      title: 'Retenciones calculadas',
+      parent: 'Impuestos',
+      icon: 'calculator',
+    },
+    {
+      path: '/admin/accounting/taxes/withholding/certificates',
+      title: 'Certificados de retención',
+      parent: 'Impuestos',
+      icon: 'printer',
     },
     {
       path: '/admin/accounting/taxes/exogenous',

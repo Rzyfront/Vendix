@@ -8,6 +8,7 @@ import {
   IconComponent,
 } from '../../../../shared/components';
 import { seedTenantContextGuard } from './guards/seed-tenant-context.guard';
+import { provideSuperadminDianApi } from './services/superadmin-dian-context.factory';
 import type { TenantScopeSegment } from './interfaces/tenant-profile.interface';
 import { SuperadminTenantApiService } from './services/superadmin-tenant-api.service';
 import {
@@ -250,16 +251,45 @@ export function tenantProfileRoutes(
               (c) => c.TenantActivityComponent,
             ),
         },
+        // Documentos electrónicos vivía en `configuration/dian`, una capa por
+        // debajo de las sub-pestañas de Configuración (capa 5). Se mantienen
+        // los enlaces viejos: la sub-vista viaja tal cual a la ruta nueva.
+        {
+          path: 'configuration/dian/:view',
+          redirectTo: 'dian/:view',
+        },
+        {
+          path: 'configuration/dian',
+          pathMatch: 'full',
+          redirectTo: 'dian',
+        },
         {
           // Configuración es una sección con sub-navegación propia (Ajustes ·
-          // Módulos · Identidad fiscal · Documentos electrónicos · Dominios),
-          // así que entra por `loadChildren` y no por `loadComponent`: su shell
-          // necesita su propio `router-outlet` y sus providers de rama para el
-          // contexto DIAN tenant-scoped.
+          // Módulos · Identidad fiscal · Dominios), así que entra por
+          // `loadChildren` y no por `loadComponent`: su shell necesita su
+          // propio `router-outlet` y sus providers de rama.
           path: 'configuration',
           loadChildren: () =>
             import('./config/tenant-config.routes').then(
               (m) => m.TENANT_CONFIG_ROUTES,
+            ),
+        },
+        {
+          // Documentos electrónicos es pestaña del header (capa 3) y sus cinco
+          // vistas (Habilitaciones · Certificado · Numeración · Set de pruebas ·
+          // Bitácora) son su capa 4.
+          //
+          // `provideSuperadminDianApi()` reapunta el `DIAN_API_CONTEXT` al rail
+          // del tenant y crea un `DianConfigApiService` propio para ESTA rama,
+          // así el panel de facturación del comerciante (singleton de raíz)
+          // sigue apuntando a `/api/store/invoicing/*`. El router no destruye
+          // estos providers al salir: el factory resuelve el tenant en cada
+          // llamada, nunca al construirse.
+          path: 'dian',
+          providers: [...provideSuperadminDianApi()],
+          loadChildren: () =>
+            import('./config/pages/dian/tenant-dian.routes').then(
+              (m) => m.TENANT_DIAN_ROUTES,
             ),
         },
         {

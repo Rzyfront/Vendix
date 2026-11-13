@@ -21,8 +21,8 @@ import {
   ItemListCardConfig,
   OptionsDropdownComponent,
   ResponsiveDataViewComponent,
-  ScrollableTab,
-  ScrollableTabsComponent,
+  StickyHeaderComponent,
+  StickyHeaderTab,
   StatsComponent,
   TableAction,
   TableColumn,
@@ -146,16 +146,26 @@ function matchesActive(filter: FilterValues[string], isActive: boolean): boolean
     IconComponent,
     InputsearchComponent,
     OptionsDropdownComponent,
-    ScrollableTabsComponent,
+    StickyHeaderComponent,
     ResponsiveDataViewComponent,
     UnitTypeFormModalComponent,
     UnitFormModalComponent,
   ],
   template: `
     <div class="w-full md:space-y-4">
+      <app-sticky-header
+        title="Habitaciones"
+        subtitle="Tipos de habitación y unidades"
+        icon="bed-double"
+        tabsAriaLabel="Secciones de habitaciones"
+        [tabs]="tabs"
+        [activeTab]="activeTab()"
+        (tabChanged)="onTabChange($event)"
+      />
+
       <!-- Stats: sticky on mobile, static on desktop -->
       <div
-        class="stats-container sticky top-0 z-20 bg-background md:static md:bg-transparent"
+        class="stats-container sticky top-header-tabs z-20 bg-background md:static md:bg-transparent"
       >
         <app-stats
           title="Tipos de habitación"
@@ -195,18 +205,10 @@ function matchesActive(filter: FilterValues[string], isActive: boolean): boolean
         />
       </div>
 
-      <!-- Tabs -->
-      <app-scrollable-tabs
-        [tabs]="tabs"
-        [activeTab]="activeTab()"
-        (tabChange)="onTabChange($event)"
-        ariaLabel="Secciones de habitaciones"
-      />
-
       <app-card [responsive]="true" [padding]="false" overflow="visible">
         <!-- Sticky search header -->
         <div
-          class="sticky top-[99px] z-10 bg-background px-2 py-1.5 -mt-[5px]
+          class="sticky top-header-tabs-search z-10 bg-background px-2 py-1.5 -mt-[5px]
                  md:mt-0 md:static md:bg-transparent md:px-6 md:py-4 md:border-b md:border-border"
         >
           <div
@@ -365,7 +367,7 @@ export class HospitalityRoomsPageComponent implements OnInit {
     this.authFacade.hasPermission('store:lodging:inventory:write'),
   );
 
-  readonly tabs: ScrollableTab[] = [
+  readonly tabs: StickyHeaderTab[] = [
     { id: 'types', label: 'Tipos', icon: 'bed-double' },
     { id: 'units', label: 'Habitaciones', icon: 'door-open' },
   ];
