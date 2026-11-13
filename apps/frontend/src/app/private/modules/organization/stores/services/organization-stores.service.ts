@@ -20,8 +20,12 @@ import {
   StoreState,
   OrganizationProfitLossSummary,
 } from '../interfaces/store.interface';
+import { collectAllPages } from '../utils/collect-all-pages.util';
 
 // All interfaces now available locally
+
+/** Page size used when walking every page of the organization stores. */
+const ALL_STORES_PAGE_SIZE = 100;
 
 export interface ApiResponse<T> {
   success: boolean;
@@ -56,7 +60,7 @@ export class OrganizationStoresService {
    */
   getStores(
     query?: Omit<StoreQueryDto, 'organization_id'>,
-  ): Observable<PaginatedResponse<StoreListItem[]>> {
+  ): Observable<PaginatedResponse<StoreListItem>> {
     let params = new HttpParams();
 
     if (query) {
@@ -68,9 +72,22 @@ export class OrganizationStoresService {
     }
 
     // Organization scoping is handled automatically by backend
-    return this.http.get<PaginatedResponse<StoreListItem[]>>(
+    return this.http.get<PaginatedResponse<StoreListItem>>(
       `${this.apiUrl}/organization/stores`,
       { params },
+    );
+  }
+
+  /**
+   * Get every store of the current organization (all pages). The API pages at
+   * 10 by default, so callers that must list the complete set (sidebar store
+   * switcher) use this instead of getStores() (QUI-984).
+   */
+  getAllStores(
+    query?: Omit<StoreQueryDto, 'organization_id' | 'page' | 'limit'>,
+  ): Observable<StoreListItem[]> {
+    return collectAllPages((page) =>
+      this.getStores({ ...query, page, limit: ALL_STORES_PAGE_SIZE }),
     );
   }
 
