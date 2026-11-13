@@ -683,6 +683,12 @@ export class BreadcrumbService {
       icon: 'calendar-check',
     },
     {
+      path: '/admin/reservations/schedules',
+      title: 'Equipo de servicio',
+      parent: 'Reservas',
+      icon: 'users',
+    },
+    {
       path: '/admin/reservations/reschedule-requests',
       title: 'Solicitudes de reagenda',
       parent: 'Reservas',
