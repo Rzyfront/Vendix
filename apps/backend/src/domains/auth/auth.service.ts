@@ -45,6 +45,7 @@ import { EventEmitter2 } from '@nestjs/event-emitter';
 import { Prisma, organizations } from '@prisma/client';
 import { recordTriggerEvent } from '../store/workflows/engine/workflow-trigger.outbox';
 import { mergeStoreSettingsWithDefaults } from '../store/settings/defaults/default-store-settings';
+import { signUserAvatar } from './helpers/sign-user-avatar.helper';
 
 /**
  * Result of organization lookup with smart fallback logic
@@ -2236,7 +2237,9 @@ export class AuthService {
     const permissions = this.getPermissionsFromRoles(effective_user_roles);
 
     return {
-      user: userWithRolesAndPassword, // Usar usuario con roles array simple y store activo
+      // Usar usuario con roles array simple y store activo. QUI-982: el avatar
+      // viaja firmado; la key cruda se resolvía contra el host del frontend.
+      user: await signUserAvatar(this.s3Service, userWithRolesAndPassword),
       user_settings: userSettingsForResponse,
       store_settings: active_store_settings,
       default_panel_ui: defaults.panel_ui,
@@ -2376,7 +2379,10 @@ export class AuthService {
       );
 
       return {
-        user: { ...userWithoutPassword, user_roles: refreshed_user_roles },
+        user: await signUserAvatar(this.s3Service, {
+          ...userWithoutPassword,
+          user_roles: refreshed_user_roles,
+        }),
         permissions: this.getPermissionsFromRoles(refreshed_user_roles),
         ...tokens,
       };
@@ -3617,10 +3623,10 @@ export class AuthService {
     const { password, ...userWithoutPassword } = user as any;
     const roles = userRoles.map((ur) => ur.roles?.name).filter(Boolean);
 
-    return {
+    return signUserAvatar(this.s3Service, {
       ...userWithoutPassword,
       roles,
-    };
+    });
   }
 
   async getUserSessions(user_id: number) {

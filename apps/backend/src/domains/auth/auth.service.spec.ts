@@ -72,11 +72,15 @@ describe('AuthService Login Flow', () => {
     login_attempts: {
       create: jest.fn(),
     },
+    user_roles: {
+      findMany: jest.fn().mockResolvedValue([]),
+    },
     $transaction: jest.fn((cb) => cb(mockPrismaService)),
   };
 
   const mockJwtService = {
     sign: jest.fn(() => 'token'),
+    verify: jest.fn(),
   };
 
   const mockConfigService = {
@@ -383,5 +387,119 @@ describe('AuthService Login Flow', () => {
         },
       }),
     );
+  });
+  /**
+   * QUI-982 — `users.avatar_url` guarda la key de S3. Toda respuesta que
+   * alimenta la sesión del frontend debe exponer la URL firmada: una key cruda
+   * en `<img src>` se resuelve contra el host del frontend y da 404.
+   */
+  describe('session user avatar (QUI-982)', () => {
+    const AVATAR_KEY = 'organizations/org-a-1/users/1/avatars/123-a.webp';
+    const SIGNED = `https://bucket.s3.amazonaws.com/${AVATAR_KEY}?X-Amz-Signature=sig`;
+
+    beforeEach(() => {
+      mockS3Service.signUrl.mockImplementation(async (url) =>
+        url === AVATAR_KEY ? SIGNED : url,
+      );
+    });
+
+    afterEach(() => {
+      mockS3Service.signUrl.mockImplementation((url) => url);
+      mockConfigService.get.mockReset();
+      jest.restoreAllMocks();
+    });
+
+    async function loginOwner(avatar_url: string | null) {
+      mockPrismaService.users.findMany.mockResolvedValue([
+        accountRow({
+          email: 'owner@test.com',
+          password: await bcrypt.hash('123', 4),
+          avatar_url,
+          user_roles: [{ roles: { name: 'owner', role_permissions: [] } }],
+        }),
+      ]);
+      mockPrismaService.stores.findFirst.mockResolvedValue({
+        id: 10,
+        slug: 'store-a',
+        organization_id: 1,
+        organizations: { slug: 'org-a' },
+      });
+      mockPrismaService.user_settings.findUnique.mockResolvedValue({
+        config: {},
+      });
+      mockPrismaService.stores.findUnique.mockResolvedValue({
+        id: 10,
+        slug: 'store-a',
+        organization_id: 1,
+      });
+      mockPrismaService.store_users.findFirst.mockResolvedValue({
+        store: { id: 10, organizations: { id: 1 } },
+      });
+      mockPrismaService.refresh_tokens.create.mockResolvedValue({});
+      mockPrismaService.users.update.mockResolvedValue({});
+      return service.login({
+        email: 'owner@test.com',
+        password: '123',
+        store_slug: 'store-a',
+      });
+    }
+
+    it('login returns the signed storage URL, not the S3 key', async () => {
+      const result: any = await loginOwner(AVATAR_KEY);
+      expect(result.user.avatar_url).toBe(SIGNED);
+    });
+
+    it('login keeps avatar_url null for users without avatar', async () => {
+      const result: any = await loginOwner(null);
+      expect(result.user.avatar_url).toBeNull();
+    });
+
+    it('getCurrentUser (/auth/me) returns the signed avatar URL', async () => {
+      mockPrismaService.users.findUnique.mockResolvedValue({
+        id: 1,
+        password: 'hashed',
+        avatar_url: AVATAR_KEY,
+      });
+
+      const result: any = await service.getCurrentUser(1, null);
+
+      expect(result.avatar_url).toBe(SIGNED);
+      expect(result.password).toBeUndefined();
+    });
+
+    it('refreshToken returns the signed avatar URL', async () => {
+      mockConfigService.get.mockImplementation((key: string) =>
+        key === 'JWT_REFRESH_SECRET' ? 'refresh-secret' : undefined,
+      );
+      mockJwtService.verify.mockReturnValue({
+        sub: 1,
+        organization_id: 1,
+        store_id: null,
+      });
+      mockPrismaService.refresh_tokens.findFirst.mockResolvedValue({
+        id: 7,
+        users: {
+          id: 1,
+          organization_id: 1,
+          avatar_url: AVATAR_KEY,
+          user_roles: [],
+        },
+      });
+      mockPrismaService.refresh_tokens.update.mockResolvedValue({});
+      jest
+        .spyOn(service as any, 'validateRefreshTokenSecurity')
+        .mockResolvedValue(undefined);
+      jest.spyOn(service as any, 'generateTokens').mockResolvedValue({
+        access_token: 'a',
+        refresh_token: 'r',
+        token_type: 'Bearer',
+        expires_in: 900,
+      });
+
+      const result = await service.refreshToken({ refresh_token: 'rt' });
+
+      expect(result.user.avatar_url).toBe(SIGNED);
+      expect(result.access_token).toBe('a');
+    });
   });
 });
