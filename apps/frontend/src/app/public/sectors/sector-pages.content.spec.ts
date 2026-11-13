@@ -69,5 +69,15 @@ describe('SECTOR_PAGES (SEO-TECH-08 / SEO-OPS-17)', () => {
     expect(/varios medios|cinco medios|devoluci|lector/i.test(text)).toBeFalse();
     expect(/\d+ d[ií]as/i.test(text)).toBeFalse();
   });
+
+  it('SEO-OPS-20: la página de migración no promete conectores, históricos ni migración hecha por Vendix', () => {
+    const mig = sectorPageByPath('migracion');
+    expect(mig).not.toBeNull();
+    expect(mig!.primaryCtaLabel).toBe('Revisar mi caso');
+    const text = [mig!.intro, ...mig!.steps.map((s) => s.text), ...mig!.faqs.map((f) => f.text)].join(' ');
+    expect(/gratis|gratuit|integraci[oó]n con|desde cualquier|nosotros migramos|te migramos/i.test(text)).toBeFalse();
+    expect(mig!.limits.some((l) => /facturas/i.test(l.text))).toBeTrue();
+    expect(mig!.limits.some((l) => /contabilidad/i.test(l.text))).toBeTrue();
+  });
 });
 

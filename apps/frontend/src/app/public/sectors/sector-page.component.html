@@ -13,7 +13,7 @@
     <h1>{{ p.h1 }}</h1>
     <p class="guide-intro">{{ p.intro }}</p>
     <div class="sector-ctas">
-      <a class="sector-cta sector-cta--primary" [href]="whatsappUrl()" target="_blank" rel="noopener">Ver la demo</a>
+      <a class="sector-cta sector-cta--primary" [href]="whatsappUrl()" target="_blank" rel="noopener">{{ p.primaryCtaLabel ?? 'Ver la demo' }}</a>
       <a class="sector-cta" routerLink="/auth/register">Probar gratis</a>
     </div>
 
@@ -43,7 +43,7 @@
     }
 
     <section class="article-section" aria-labelledby="antes-de-elegir">
-      <h2 id="antes-de-elegir">Lo que debes saber antes de elegir</h2>
+      <h2 id="antes-de-elegir">{{ p.limitsHeading ?? 'Lo que debes saber antes de elegir' }}</h2>
       <ul>
         @for (limit of p.limits; track limit.text) {
           <li>{{ limit.text }}</li>
@@ -52,7 +52,7 @@
     </section>
 
     <section class="guide-checklist" aria-labelledby="preparar">
-      <h2 id="preparar">Qué preparar para tu demostración</h2>
+      <h2 id="preparar">{{ p.prepareHeading ?? 'Qué preparar para tu demostración' }}</h2>
       <ul>
         @for (item of p.prepare; track item) {
           <li>{{ item }}</li>
@@ -69,7 +69,7 @@
     </section>
 
     <div class="sector-ctas">
-      <a class="sector-cta sector-cta--primary" [href]="whatsappUrl()" target="_blank" rel="noopener">Ver la demo</a>
+      <a class="sector-cta sector-cta--primary" [href]="whatsappUrl()" target="_blank" rel="noopener">{{ p.primaryCtaLabel ?? 'Ver la demo' }}</a>
       <a class="sector-cta" routerLink="/pricing">Ver planes y precios</a>
     </div>
   } @else {
