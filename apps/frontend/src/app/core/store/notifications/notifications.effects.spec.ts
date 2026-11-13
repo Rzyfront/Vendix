@@ -92,9 +92,33 @@ describe('NotificationsEffects (demo hotel/canchas S14, S15)', () => {
   ]) {
     it(`does not load staff notifications on the public app ${publicApp}`, () => {
       appType = publicApp;
-      expect(afterLogin()).toEqual([]);
+      expect(afterLogin()).toEqual([NotificationsActions.disconnectSse()]);
     });
   }
+
+  // QUI-981: el backend rechaza /store/* a un token ORG_ADMIN (DomainScopeGuard).
+  it('does not request store notifications in the organization panel and closes the inherited stream', () => {
+    appType = 'ORG_ADMIN';
+    expect(afterLogin()).toEqual([NotificationsActions.disconnectSse()]);
+  });
+
+  it('does not poll store notifications in the organization panel', () => {
+    jasmine.clock().install();
+    try {
+      const emitted: Action[] = [];
+      appType = 'ORG_ADMIN';
+      const sub = effects.poll$.subscribe((a) => emitted.push(a));
+      jasmine.clock().tick(35_000);
+      expect(emitted).toEqual([]);
+
+      appType = 'STORE_ADMIN';
+      jasmine.clock().tick(30_000);
+      expect(emitted).toEqual([NotificationsActions.loadNotifications()]);
+      sub.unsubscribe();
+    } finally {
+      jasmine.clock().uninstall();
+    }
+  });
 
   it('keeps loading notifications and the stream in the admin and the ecommerce', () => {
     for (const app of ['STORE_ADMIN', 'STORE_ECOMMERCE']) {
@@ -108,7 +132,7 @@ describe('NotificationsEffects (demo hotel/canchas S14, S15)', () => {
 
   it('keeps skipping the carrier app', () => {
     appType = 'STORE_DELIVERY';
-    expect(afterLogin()).toEqual([]);
+    expect(afterLogin()).toEqual([NotificationsActions.disconnectSse()]);
   });
 
   it('forwards subscription.updated from the shared stream instead of a second connection', () => {

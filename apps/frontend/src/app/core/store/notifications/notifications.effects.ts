@@ -65,9 +65,19 @@ export class NotificationsEffects {
    * carrier no monta campana. El pool de reparto es pull-based. Una campana push
    * para el carrier requeriría endpoints bajo `/store/carrier/*` (follow-up).
    */
+  /**
+   * QUI-981 — el panel de organización (`ORG_ADMIN`) tampoco tiene
+   * notificaciones: el `DomainScopeGuard` rechaza `/store/*` a ese token y no
+   * existe un equivalente bajo `/organization/*`. Sin esta exclusión el poll
+   * golpeaba `/store/notifications` cada 30 s con 403.
+   */
   private notificationsAvailableForApp(): boolean {
     const appType = this.authFacade.selectedAppType();
-    return appType !== 'STORE_DELIVERY' && !PUBLIC_APP_TYPES.has(appType ?? '');
+    return (
+      appType !== 'STORE_DELIVERY' &&
+      appType !== 'ORG_ADMIN' &&
+      !PUBLIC_APP_TYPES.has(appType ?? '')
+    );
   }
 
   /**
@@ -252,12 +262,18 @@ export class NotificationsEffects {
         AuthActions.loginCustomerSuccess,
         AuthActions.restoreAuthState,
       ),
-      // Repartos: no arrancar notificaciones admin en el shell carrier (403).
-      filter(() => this.notificationsAvailableForApp()),
-      switchMap(() => [
-        NotificationsActions.loadNotifications(),
-        NotificationsActions.connectSse(),
-      ]),
+      // Repartos, apps públicas y panel de organización: no arrancar
+      // notificaciones de tienda (403). Si se llega desde un contexto que sí
+      // las tenía (cambio tienda → organización), se cierra el stream heredado
+      // para no seguir recibiendo eventos de la tienda anterior (QUI-981).
+      switchMap(() =>
+        this.notificationsAvailableForApp()
+          ? [
+              NotificationsActions.loadNotifications(),
+              NotificationsActions.connectSse(),
+            ]
+          : [NotificationsActions.disconnectSse()],
+      ),
     ),
   );
 
