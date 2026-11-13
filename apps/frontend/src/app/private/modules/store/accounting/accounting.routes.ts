@@ -47,24 +47,40 @@ const CARTERA_SUB_TABS: AccountingSubTab[] = [
   },
 ];
 
+// Retenciones used to nest its own Conceptos / Cálculos / Certificados row
+// under this one (layer 5). They are now siblings here: configure (concepts,
+// ICA rates), operate (calculated withholdings), report (certificates,
+// exógena).
 const TAXES_SUB_TABS: AccountingSubTab[] = [
   {
-    id: 'withholding',
-    label: 'Retenciones',
-    icon: 'percent',
-    route: '/admin/accounting/taxes/withholding',
+    id: 'withholding-concepts',
+    label: 'Conceptos de retención',
+    icon: 'file-text',
+    route: '/admin/accounting/taxes/withholding/concepts',
   },
   {
-    id: 'exogenous',
-    label: 'Exógena',
-    icon: 'file-spreadsheet',
-    route: '/admin/accounting/taxes/exogenous',
+    id: 'withholding-calculations',
+    label: 'Retenciones calculadas',
+    icon: 'calculator',
+    route: '/admin/accounting/taxes/withholding/calculations',
+  },
+  {
+    id: 'withholding-certificates',
+    label: 'Certificados',
+    icon: 'printer',
+    route: '/admin/accounting/taxes/withholding/certificates',
   },
   {
     id: 'ica',
     label: 'Tarifas ICA',
     icon: 'landmark',
     route: '/admin/accounting/taxes/ica',
+  },
+  {
+    id: 'exogenous',
+    label: 'Exógena',
+    icon: 'file-spreadsheet',
+    route: '/admin/accounting/taxes/exogenous',
   },
 ];
 

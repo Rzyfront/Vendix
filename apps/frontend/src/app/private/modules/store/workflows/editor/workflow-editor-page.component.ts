@@ -1,4 +1,4 @@
-import { Component, DestroyRef, OnInit, computed, inject, signal } from '@angular/core';
+import { Component, DestroyRef, OnInit, computed, effect, inject, signal, untracked } from '@angular/core';
 import { takeUntilDestroyed } from '@angular/core/rxjs-interop';
 import { ActivatedRoute, RouterLink } from '@angular/router';
 import {
@@ -33,6 +33,31 @@ import { WorkflowEditorLookups } from './workflow-editor-lookups.service';
 import { WorkflowEditorStore } from './workflow-editor.store';
 
 type CenterView = 'canvas' | 'map' | 'matrix';
+type EditorPanel = 'stages' | 'properties';
+
+const PANEL_PREFS_KEY = 'vendix_workflow_editor_panels';
+
+function isWideScreen(): boolean {
+  return typeof window !== 'undefined' && window.matchMedia?.('(min-width: 1536px)').matches === true;
+}
+
+function readPanelPref(panel: EditorPanel, fallback: boolean): boolean {
+  try {
+    const prefs = JSON.parse(localStorage.getItem(PANEL_PREFS_KEY) ?? '{}') as Partial<Record<EditorPanel, boolean>>;
+    return typeof prefs[panel] === 'boolean' ? prefs[panel] : fallback;
+  } catch {
+    return fallback;
+  }
+}
+
+function writePanelPref(panel: EditorPanel, collapsed: boolean): void {
+  try {
+    const prefs = JSON.parse(localStorage.getItem(PANEL_PREFS_KEY) ?? '{}') as Record<string, boolean>;
+    localStorage.setItem(PANEL_PREFS_KEY, JSON.stringify({ ...prefs, [panel]: collapsed }));
+  } catch {
+    // Storage blocked (private mode): the toggle still works for this visit.
+  }
+}
 
 /** `/admin/workflows/:id/edit`: stages · route map · stage properties. */
 @Component({
@@ -62,6 +87,57 @@ type CenterView = 'canvas' | 'map' | 'matrix';
     ValidationPanelComponent,
     WorkflowConnectionsComponent,
   ],
+  styles: `
+    .panel-toggle {
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      width: 1.75rem;
+      height: 1.75rem;
+      border-radius: var(--radius-md);
+      color: var(--color-text-secondary);
+      transition: background-color 150ms, color 150ms;
+    }
+    .panel-toggle:hover {
+      color: var(--color-primary);
+      background: color-mix(in srgb, var(--color-primary) 10%, transparent);
+    }
+    .panel-rail {
+      display: none;
+    }
+    @media (min-width: 1024px) {
+      .panel-rail {
+        display: flex;
+        flex-direction: column;
+        align-items: center;
+        gap: 0.5rem;
+        width: 2.75rem;
+        flex-shrink: 0;
+        align-self: stretch;
+        padding: 0.75rem 0;
+        border: 1px solid var(--color-border);
+        border-radius: var(--radius-card);
+        background: var(--color-surface);
+        color: var(--color-text-secondary);
+        transition: border-color 150ms, color 150ms;
+      }
+      .panel-rail:hover {
+        color: var(--color-primary);
+        border-color: color-mix(in srgb, var(--color-primary) 25%, transparent);
+      }
+    }
+    .panel-rail-label {
+      writing-mode: vertical-rl;
+      transform: rotate(180deg);
+      font-size: 0.75rem;
+      font-weight: 600;
+    }
+    .panel-toggle:focus-visible,
+    .panel-rail:focus-visible {
+      outline: 2px solid var(--color-primary);
+      outline-offset: 2px;
+    }
+  `,
   template: `
     <div class="flex w-full flex-col gap-3 overflow-x-hidden p-2 md:p-4">
       <header class="flex items-center gap-3">
@@ -110,8 +186,22 @@ type CenterView = 'canvas' | 'map' | 'matrix';
         }
 
         <div class="flex flex-col gap-3 lg:flex-row lg:items-start">
-          <!-- P5.1: the canvas already shows and edits the stages; on wide screens it takes this column too. -->
-          <app-card [responsive]="true" [class]="view() === 'canvas' ? 'lg:hidden' : 'lg:w-72 lg:shrink-0'"><app-stage-list /></app-card>
+          <!-- P5.1: the canvas already shows and edits the stages; on wide screens it takes this column too.
+               On wide screens both side panels collapse to a rail so the route gets the room. -->
+          <app-card [responsive]="true" [class]="stagesPanelClass()">
+            <div class="hidden lg:flex justify-end -mt-1 mb-1">
+              <button type="button" class="panel-toggle" aria-label="Contraer etapas" title="Contraer etapas" (click)="toggleStages()">
+                <app-icon name="panel-left-close" [size]="16" />
+              </button>
+            </div>
+            <app-stage-list />
+          </app-card>
+          @if (view() !== 'canvas' && stagesCollapsed()) {
+            <button type="button" class="panel-rail" aria-label="Mostrar etapas" title="Mostrar etapas" (click)="toggleStages()">
+              <app-icon name="panel-left-open" [size]="16" />
+              <span class="panel-rail-label">Etapas</span>
+            </button>
+          }
           <app-card [responsive]="true" class="min-w-0 flex-1">
             <div class="flex flex-col gap-3">
               <app-scrollable-tabs [tabs]="views" [activeTab]="view()" size="sm" ariaLabel="Vista de la ruta" (tabChange)="setView($event)" />
@@ -124,7 +214,20 @@ type CenterView = 'canvas' | 'map' | 'matrix';
               }
             </div>
           </app-card>
-          <app-card [responsive]="true" class="lg:w-96 lg:shrink-0"><app-stage-properties /></app-card>
+          @if (propertiesCollapsed()) {
+            <button type="button" class="panel-rail" aria-label="Mostrar propiedades de la etapa" title="Mostrar propiedades de la etapa" (click)="toggleProperties()">
+              <app-icon name="panel-right-open" [size]="16" />
+              <span class="panel-rail-label">Propiedades</span>
+            </button>
+          }
+          <app-card [responsive]="true" [class]="propertiesPanelClass()">
+            <div class="hidden lg:flex justify-start -mt-1 mb-1">
+              <button type="button" class="panel-toggle" aria-label="Contraer propiedades" title="Contraer propiedades" (click)="toggleProperties()">
+                <app-icon name="panel-right-close" [size]="16" />
+              </button>
+            </div>
+            <app-stage-properties />
+          </app-card>
         </div>
         <app-card [responsive]="true"><app-triggers-panel /></app-card>
         @if (hasWebhook() || hasEmail() || store.isPublished()) {
@@ -164,6 +267,49 @@ export class WorkflowEditorPageComponent implements OnInit {
     { id: 'matrix', label: 'Matriz de transiciones', icon: 'table' },
   ];
   readonly view = signal<CenterView>('canvas');
+
+  /**
+   * Side panels can collapse to a rail on wide screens (lg+) to give the route
+   * view the room. Below 2xl the stages column starts collapsed: there the
+   * three columns leave the route view too narrow to read. The choice is a
+   * per-viewer convenience kept in localStorage; on mobile the panels stack
+   * and the state is ignored.
+   */
+  readonly stagesCollapsed = signal(readPanelPref('stages', !isWideScreen()));
+  readonly propertiesCollapsed = signal(readPanelPref('properties', false));
+  readonly stagesPanelClass = computed(() =>
+    this.view() === 'canvas' || this.stagesCollapsed() ? 'lg:hidden' : 'lg:w-72 lg:shrink-0',
+  );
+  readonly propertiesPanelClass = computed(() =>
+    this.propertiesCollapsed() ? 'lg:hidden' : 'lg:w-96 lg:shrink-0',
+  );
+
+  /**
+   * Picking a different step means editing it, so a collapsed Propiedades
+   * panel opens. Only a switch from one step to another counts: the start
+   * step the editor selects on load does not override the saved preference,
+   * which is left as is for the next visit.
+   */
+  private lastSelectedKey: string | null = null;
+  private readonly expandPropertiesOnSelect = effect(() => {
+    const key = this.store.selectedKey();
+    const previous = this.lastSelectedKey;
+    this.lastSelectedKey = key;
+    if (!previous || !key || key === previous) return;
+    untracked(() => {
+      if (this.propertiesCollapsed()) this.propertiesCollapsed.set(false);
+    });
+  });
+
+  toggleStages(): void {
+    this.stagesCollapsed.update((v) => !v);
+    writePanelPref('stages', this.stagesCollapsed());
+  }
+
+  toggleProperties(): void {
+    this.propertiesCollapsed.update((v) => !v);
+    writePanelPref('properties', this.propertiesCollapsed());
+  }
   readonly id = computed(() => this.store.definitionId() ?? 0);
   /** Draft triggers that need a connection card (webhook URL, mailbox). */
   readonly hasWebhook = computed(() => (this.store.draft()?.triggers ?? []).some((t) => t.kind === 'webhook'));

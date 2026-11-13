@@ -2,41 +2,36 @@ import { Component, ChangeDetectionStrategy, computed, inject } from '@angular/c
 import { RouterModule, Router, NavigationEnd } from '@angular/router';
 import { toSignal } from '@angular/core/rxjs-interop';
 import { filter, map, startWith } from 'rxjs/operators';
-import { ScrollableTabsComponent, ScrollableTab } from '../../../../shared/components/scrollable-tabs/scrollable-tabs.component';
-import { IconComponent } from '../../../../shared/components/icon/icon.component';
+import {
+  StickyHeaderComponent,
+  StickyHeaderTab,
+} from '../../../../shared/components/sticky-header/sticky-header.component';
 
+/**
+ * Recolección de datos: the module header (layer 3) with Campos · Plantillas ·
+ * Formularios as route tabs. The per-type / per-status rows inside Campos and
+ * Formularios are its layer 4. The template editor is a detail screen with its
+ * own header and back button, so the module header steps aside there.
+ */
 @Component({
   selector: 'app-data-collection-layout',
   standalone: true,
-  imports: [RouterModule, ScrollableTabsComponent, IconComponent],
+  imports: [RouterModule, StickyHeaderComponent],
   changeDetection: ChangeDetectionStrategy.OnPush,
   template: `
     <div>
-      <!-- Sticky Tabs Navigation -->
-      <div class="sticky top-0 z-30 backdrop-blur-md shadow-sm flex items-center gap-1" style="background: color-mix(in srgb, var(--color-surface) 85%, transparent); border-bottom: 1px solid var(--color-border)">
-        <!-- El editor de plantillas ya trae su propia flecha de volver -->
-        @if (!isEditor()) {
-          <button
-            type="button"
-            class="ml-2 shrink-0 w-9 h-9 rounded-lg flex items-center justify-center border border-transparent hover:border-[var(--color-border)] hover:bg-[var(--color-background)] transition-colors"
-            aria-label="Volver"
-            title="Volver"
-            (click)="goBack()"
-          >
-            <app-icon name="arrow-left" [size]="18" />
-          </button>
-        }
-        <div class="flex-1 min-w-0">
-          <app-scrollable-tabs
-            [tabs]="tabs"
-            [activeTab]="activeTabId()"
-            size="sm"
-            ariaLabel="Módulo de Recolección de Datos"
-            (tabChange)="onTabChange($event)"
-          />
-        </div>
-      </div>
-      <!-- Page Content -->
+      @if (!isEditor()) {
+        <app-sticky-header
+          title="Recolección de datos"
+          subtitle="Campos, plantillas y formularios que llenan tus clientes"
+          icon="clipboard-list"
+          [showBackButton]="true"
+          [backRoute]="backRoute()"
+          [backQueryParams]="backQueryParams()"
+          [tabs]="tabs"
+          tabsAriaLabel="Módulo de Recolección de Datos"
+        />
+      }
       <router-outlet />
     </div>
   `,
@@ -44,10 +39,25 @@ import { IconComponent } from '../../../../shared/components/icon/icon.component
 export class DataCollectionLayoutComponent {
   private readonly router = inject(Router);
 
-  tabs: ScrollableTab[] = [
-    { id: 'fields', label: 'Campos', icon: 'database' },
-    { id: 'templates', label: 'Plantillas', icon: 'layout-template' },
-    { id: 'submissions', label: 'Formularios', icon: 'inbox' },
+  readonly tabs: StickyHeaderTab[] = [
+    {
+      id: 'fields',
+      label: 'Campos',
+      icon: 'database',
+      route: '/admin/data-collection/fields',
+    },
+    {
+      id: 'templates',
+      label: 'Plantillas',
+      icon: 'layout-template',
+      route: '/admin/data-collection/templates',
+    },
+    {
+      id: 'submissions',
+      label: 'Formularios',
+      icon: 'inbox',
+      route: '/admin/data-collection/submissions',
+    },
   ];
 
   private readonly url = toSignal(
@@ -58,13 +68,6 @@ export class DataCollectionLayoutComponent {
     ),
     { initialValue: this.router.url },
   );
-
-  readonly activeTabId = computed(() => {
-    const url = this.url();
-    if (url.includes('templates')) return 'templates';
-    if (url.includes('submissions')) return 'submissions';
-    return 'fields';
-  });
 
   readonly isEditor = computed(() => /\/templates\/\d+\/edit/.test(this.url()));
 
@@ -79,11 +82,14 @@ export class DataCollectionLayoutComponent {
     return previous && !previous.startsWith('/admin/data-collection') ? previous : null;
   })();
 
-  goBack(): void {
-    this.router.navigateByUrl(this.exitUrl ?? '/admin');
-  }
+  /** Back goes to the screen we came from, query params included. */
+  private readonly exitTree = this.router.parseUrl(this.exitUrl ?? '/admin');
 
-  onTabChange(tabId: string): void {
-    this.router.navigate(['/admin/data-collection/' + tabId]);
-  }
+  readonly backRoute = computed(() => {
+    const segments =
+      this.exitTree.root.children['primary']?.segments.map((s) => s.path) ?? [];
+    return '/' + segments.join('/');
+  });
+
+  readonly backQueryParams = computed(() => this.exitTree.queryParams);
 }

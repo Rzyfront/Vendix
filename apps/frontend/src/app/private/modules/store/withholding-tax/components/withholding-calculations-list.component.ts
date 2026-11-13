@@ -5,7 +5,6 @@ import {
   inject,
   signal,
 } from '@angular/core';
-import { FormsModule } from '@angular/forms';
 import { takeUntilDestroyed } from '@angular/core/rxjs-interop';
 import { WithholdingTaxService } from '../services/withholding-tax.service';
 import {
@@ -14,11 +13,12 @@ import {
   WithholdingRole,
 } from '../interfaces/withholding.interface';
 import {
+  FilterConfig,
+  FilterValues,
   ItemListCardConfig,
+  OptionsDropdownComponent,
   PaginationComponent,
   ResponsiveDataViewComponent,
-  SelectorComponent,
-  SelectorOption,
   TableColumn,
 } from '../../../../../shared/components';
 import { CurrencyFormatService } from '../../../../../shared/pipes/currency/currency.pipe';
@@ -48,42 +48,26 @@ const MONTH_LABELS = [
   selector: 'app-withholding-calculations-list',
   standalone: true,
   imports: [
-    FormsModule,
     ResponsiveDataViewComponent,
     PaginationComponent,
-    SelectorComponent,
+    OptionsDropdownComponent,
   ],
   template: `
     <div class="bg-[var(--color-surface)] rounded-lg shadow">
-      <!-- Filters -->
+      <!-- Header: list filters live in the standard Filtros dropdown -->
       <div class="p-4 border-b border-border">
-        <div class="flex flex-col gap-2 md:flex-row md:items-end md:justify-between">
+        <div class="flex items-center justify-between gap-2">
           <h2 class="text-lg font-semibold text-text-primary">
             Auditoría de Cálculos
           </h2>
-          <div class="grid grid-cols-3 gap-2 md:flex md:gap-3">
-            <app-selector
-              label="Año"
-              size="sm"
-              [options]="yearOptions"
-              [ngModel]="yearFilter()"
-              (ngModelChange)="onYearChange($event)"
-            ></app-selector>
-            <app-selector
-              label="Mes"
-              size="sm"
-              [options]="monthOptions"
-              [ngModel]="monthFilter()"
-              (ngModelChange)="onMonthChange($event)"
-            ></app-selector>
-            <app-selector
-              label="Rol"
-              size="sm"
-              [options]="roleOptions"
-              [ngModel]="roleFilter()"
-              (ngModelChange)="onRoleChange($event)"
-            ></app-selector>
-          </div>
+          <app-options-dropdown
+            class="shadow-[0_2px_8px_rgba(0,0,0,0.07)] md:shadow-none rounded-[10px]"
+            [filters]="filterConfigs"
+            [filterValues]="filterValues()"
+            [isLoading]="loading()"
+            (filterChange)="onFilterChange($event)"
+            (clearAllFilters)="onFilterChange({})"
+          />
         </div>
       </div>
 
@@ -120,32 +104,45 @@ export class WithholdingCalculationsListComponent {
   readonly totalItems = signal(0);
   readonly filters = signal({ page: 1, limit: 10 });
 
-  /** '' = sin filtro */
-  readonly yearFilter = signal<number | ''>('');
-  readonly monthFilter = signal<number | ''>('');
-  readonly roleFilter = signal<WithholdingRole | ''>('');
+  /** Empty / null value = no filter. */
+  readonly filterValues = signal<FilterValues>({});
 
   readonly totalPages = computed(
     () => Math.ceil(this.totalItems() / this.filters().limit) || 1,
   );
 
-  readonly yearOptions: SelectorOption[] = [
-    { value: '', label: 'Todos' },
-    ...Array.from({ length: 6 }, (_, i) => {
-      const year = new Date().getFullYear() - i;
-      return { value: year, label: String(year) };
-    }),
-  ];
-
-  readonly monthOptions: SelectorOption[] = [
-    { value: '', label: 'Todos' },
-    ...MONTH_LABELS.map((label, i) => ({ value: i + 1, label })),
-  ];
-
-  readonly roleOptions: SelectorOption[] = [
-    { value: '', label: 'Todas' },
-    { value: 'practiced', label: 'Practicadas' },
-    { value: 'suffered', label: 'Sufridas' },
+  readonly filterConfigs: FilterConfig[] = [
+    {
+      key: 'year',
+      label: 'Año',
+      type: 'select',
+      options: [
+        { value: '', label: 'Todos' },
+        ...Array.from({ length: 6 }, (_, i) => {
+          const year = String(new Date().getFullYear() - i);
+          return { value: year, label: year };
+        }),
+      ],
+    },
+    {
+      key: 'month',
+      label: 'Mes',
+      type: 'select',
+      options: [
+        { value: '', label: 'Todos' },
+        ...MONTH_LABELS.map((label, i) => ({ value: String(i + 1), label })),
+      ],
+    },
+    {
+      key: 'role',
+      label: 'Rol',
+      type: 'select',
+      options: [
+        { value: '', label: 'Todas' },
+        { value: 'practiced', label: 'Practicadas' },
+        { value: 'suffered', label: 'Sufridas' },
+      ],
+    },
   ];
 
   readonly columns: TableColumn[] = [
@@ -275,11 +272,10 @@ export class WithholdingCalculationsListComponent {
       page: this.filters().page,
       limit: this.filters().limit,
     };
-    if (this.yearFilter() !== '') query.year = Number(this.yearFilter());
-    if (this.monthFilter() !== '') query.month = Number(this.monthFilter());
-    if (this.roleFilter() !== '') {
-      query.role = this.roleFilter() as WithholdingRole;
-    }
+    const { year, month, role } = this.filterValues();
+    if (typeof year === 'string' && year !== '') query.year = Number(year);
+    if (typeof month === 'string' && month !== '') query.month = Number(month);
+    if (role === 'practiced' || role === 'suffered') query.role = role;
 
     this.service
       .getCalculations(query)
@@ -298,18 +294,8 @@ export class WithholdingCalculationsListComponent {
       });
   }
 
-  onYearChange(value: number | ''): void {
-    this.yearFilter.set(value === '' ? '' : Number(value));
-    this.resetAndReload();
-  }
-
-  onMonthChange(value: number | ''): void {
-    this.monthFilter.set(value === '' ? '' : Number(value));
-    this.resetAndReload();
-  }
-
-  onRoleChange(value: WithholdingRole | ''): void {
-    this.roleFilter.set(value);
+  onFilterChange(values: FilterValues): void {
+    this.filterValues.set(values);
     this.resetAndReload();
   }
 

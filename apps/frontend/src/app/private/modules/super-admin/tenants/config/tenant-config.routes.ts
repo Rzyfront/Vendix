@@ -13,7 +13,6 @@ import {
   ScrollableTabsComponent,
   type ScrollableTab,
 } from '../../../../../shared/components/scrollable-tabs/scrollable-tabs.component';
-import { provideSuperadminDianApi } from '../services/superadmin-dian-context.factory';
 
 /**
  * Sub-secciones de la pestaña Configuración, en el orden en que se recorren:
@@ -33,12 +32,6 @@ const CONFIG_TABS: readonly (ScrollableTab & { readonly path: string })[] = [
     path: 'fiscal',
     label: 'Identidad fiscal',
     icon: 'file-check',
-  },
-  {
-    id: 'dian',
-    path: 'dian',
-    label: 'Documentos electrónicos',
-    icon: 'shield',
   },
   { id: 'domains', path: 'domains', label: 'Dominios', icon: 'globe' },
 ];
@@ -100,10 +93,8 @@ export class TenantConfigShellComponent {
    * Qué pestaña está activa, leída de la URL.
    *
    * Se busca el ÚLTIMO segmento que coincida con una pestaña, no el último
-   * segmento a secas: «Documentos electrónicos» tiene sub-rutas propias
-   * (`…/configuration/dian/numeracion`), así que mirar sólo la cola devolvería
-   * `numeracion` —que no es ninguna pestaña de este nivel— y el tablist marcaría
-   * «Ajustes» mientras el operador edita la numeración del tenant.
+   * segmento a secas, para que una sub-ruta futura de alguna sección no deje el
+   * tablist marcando «Ajustes».
    *
    * Una URL sin ningún segmento reconocible cae en la primera pestaña, para no
    * dejar el tablist sin selección.
@@ -131,20 +122,14 @@ export class TenantConfigShellComponent {
  * Se enchufan desde `tenant-profile.routes.ts` con
  * `loadChildren: () => import('./config/tenant-config.routes').then(m => m.TENANT_CONFIG_ROUTES)`.
  *
- * **Los providers de DIAN viven en el shell y no en la raíz.** Reapuntan el
- * `DIAN_API_CONTEXT` compartido al rail `/superadmin/tenants/:scope/:id/invoicing`
- * y crean una instancia propia de `DianConfigApiService` para esta rama, de modo
- * que el panel de facturación del comerciante —que inyecta el singleton de
- * raíz— sigue apuntando a `/api/store/invoicing/*` sin enterarse.
- *
- * OJO: el router NO destruye estos providers al salir. `provideSuperadminDianApi()`
- * está escrito para eso: resuelve el tenant en cada llamada, nunca al construirse.
+ * Los providers de DIAN (`provideSuperadminDianApi()`) ya no viven aquí: ninguna
+ * sección de Configuración los consume. Los declara la ruta `dian` de
+ * `tenant-profile.routes.ts`, que es la pestaña Documentos electrónicos.
  */
 export const TENANT_CONFIG_ROUTES: Routes = [
   {
     path: '',
     component: TenantConfigShellComponent,
-    providers: [...provideSuperadminDianApi()],
     // Cada hoja declara su propio `title` (formato «Sección - Ámbito», el mismo
     // de `users.routes.ts`). Sin él, `BreadcrumbService` no encuentra entrada
     // para una URL de cinco segmentos, su efecto de título se abstiene y la
@@ -176,19 +161,8 @@ export const TENANT_CONFIG_ROUTES: Routes = [
             (c) => c.TenantFiscalComponent,
           ),
       },
-      {
-        // Documentos electrónicos es, a su vez, una sección con cinco vistas
-        // propias (Habilitaciones · Certificado · Numeración · Set de pruebas ·
-        // Bitácora), así que entra por `loadChildren` y no por `loadComponent`:
-        // su shell necesita su propio `router-outlet` y su propio store de rama.
-        // El título lo declara cada hoja, no este nodo, porque el nodo nunca es
-        // la URL final.
-        path: 'dian',
-        loadChildren: () =>
-          import('./pages/dian/tenant-dian.routes').then(
-            (m) => m.TENANT_DIAN_ROUTES,
-          ),
-      },
+      // Documentos electrónicos ya no cuelga de aquí: es pestaña del header
+      // de la ficha (`tenant-profile.routes.ts`, ruta `dian`).
       {
         path: 'domains',
         title: 'Dominios - Configuración del tenant',

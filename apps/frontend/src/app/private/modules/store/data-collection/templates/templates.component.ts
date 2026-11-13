@@ -10,7 +10,6 @@ import { ENTITY_TYPE_LABELS, MetadataField } from '../interfaces/metadata-field.
 import { MetadataFieldsService } from '../services/metadata-fields.service';
 import { IconComponent } from '../../../../../shared/components/icon/icon.component';
 import { ButtonComponent } from '../../../../../shared/components/button/button.component';
-import { StickyHeaderComponent, StickyHeaderActionButton } from '../../../../../shared/components/sticky-header/sticky-header.component';
 import { SpinnerComponent } from '../../../../../shared/components/spinner/spinner.component';
 import { EmptyStateComponent } from '../../../../../shared/components/empty-state/empty-state.component';
 import { BadgeComponent } from '../../../../../shared/components/badge/badge.component';
@@ -24,7 +23,6 @@ import { environment } from '../../../../../../environments/environment';
   selector: 'app-templates',
   standalone: true,
   imports: [
-    StickyHeaderComponent,
     ButtonComponent,
     SpinnerComponent,
     EmptyStateComponent,
@@ -35,15 +33,23 @@ import { environment } from '../../../../../../environments/environment';
   changeDetection: ChangeDetectionStrategy.OnPush,
   template: `
     <div>
-      <app-sticky-header
-        title="Plantillas de Formulario"
-        subtitle="Configura los formularios de recolección de datos"
-        icon="layout-template"
-        [actions]="headerActions"
-        (actionClicked)="onHeaderAction($event)"
-      />
-
+      <!-- The module header (layout) is the page header; this is the list bar. -->
       <div class="p-4 sm:p-6">
+      <div class="flex items-center justify-between gap-2 mb-4">
+        <h2 class="text-lg font-semibold text-text-primary">
+          Plantillas de formulario
+          @if (!loading()) {
+            <span class="text-text-secondary font-normal">({{ templates().length }})</span>
+          }
+        </h2>
+        <!-- The empty state carries its own create button -->
+        @if (loading() || templates().length > 0) {
+          <app-button variant="primary" size="sm" (clicked)="openCreateModal()">
+            <app-icon name="plus" [size]="16" slot="icon"></app-icon>
+            Nueva plantilla
+          </app-button>
+        }
+      </div>
       @if (loading()) {
         <div class="flex items-center justify-center py-12">
           <app-spinner size="md" />
@@ -169,14 +175,6 @@ export class TemplatesComponent implements OnInit {
   selectedTemplate = signal<DataCollectionTemplate | null>(null);
   availableFields = signal<MetadataField[]>([]);
   availableProducts = signal<any[]>([]);
-
-  headerActions: StickyHeaderActionButton[] = [
-    { id: 'new', label: 'Nueva Plantilla', variant: 'primary', icon: 'plus' },
-  ];
-
-  onHeaderAction(actionId: string): void {
-    if (actionId === 'new') this.openCreateModal();
-  }
 
   ngOnInit() {
     this.loadTemplates();
