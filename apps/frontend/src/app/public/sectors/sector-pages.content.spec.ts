@@ -59,4 +59,15 @@ describe('SECTOR_PAGES (SEO-TECH-08 / SEO-OPS-17)', () => {
     expect(decodeURIComponent(url.split('text=')[1])).not.toMatch(/@|\d{7,}/);
     expect(sectorPageByPath('sectores/no-existe')).toBeNull();
   });
+
+  it('SEO-OPS-15: la página de POS solo afirma lo comprobado y no promete días de prueba', () => {
+    const pos = sectorPageByPath('soluciones/software-pos');
+    expect(pos).not.toBeNull();
+    expect(pos!.stepsHeading).toBeTruthy();
+    const text = [pos!.intro, ...pos!.steps.map((s) => s.text), ...pos!.faqs.map((f) => f.text)].join(' ');
+    // Fuera hasta tener demo: cobro repartido en varios medios, devoluciones, lector de código de barras.
+    expect(/varios medios|cinco medios|devoluci|lector/i.test(text)).toBeFalse();
+    expect(/\d+ d[ií]as/i.test(text)).toBeFalse();
+  });
 });
+
