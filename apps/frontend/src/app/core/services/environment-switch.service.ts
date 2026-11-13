@@ -176,25 +176,37 @@ export class EnvironmentSwitchService {
         expires_in: normalized_tokens.expiresIn,
       };
 
-      this.authFacade.restoreAuthState(
-        response_data.user,
-        tokens_payload,
-        response_data.permissions || response_data.user?.permissions || [],
-        response_data.roles || response_data.user?.roles || [],
-        response_data.user_settings,
-        response_data.store_settings,
-        response_data.default_panel_ui,
-      );
+      // QUI-981: desmontar el <router-outlet> ANTES de cambiar el token y no
+      // volver a montarlo hasta que el router esté en las rutas del nuevo
+      // entorno. Si se re-monta antes, reactiva el árbol de rutas anterior
+      // (layout/página de organización) con el token nuevo → 403 en
+      // /organization/* (y en /store/* en el sentido inverso).
+      this.routeManager.suspendOutlet();
+      let reloading = false;
+      try {
+        this.authFacade.restoreAuthState(
+          response_data.user,
+          tokens_payload,
+          response_data.permissions || response_data.user?.permissions || [],
+          response_data.roles || response_data.user?.roles || [],
+          response_data.user_settings,
+          response_data.store_settings,
+          response_data.default_panel_ui,
+        );
 
-      this.saveUnifiedAuthState(response_data, tokens_payload);
+        this.saveUnifiedAuthState(response_data, tokens_payload);
 
-      // 8. Actualizar configuración y RUTAS inmediatamente
-      await this.updateAppConfigAndRoutes(updated_environment);
+        // 8. Actualizar configuración y RUTAS (sin re-montar el outlet)
+        await this.updateAppConfigAndRoutes(updated_environment);
 
-      await this.waitForAuthStateSync();
+        await this.waitForAuthStateSync();
 
-      // 10. Redirigir y RECARGAR para asegurar contexto limpio
-      await this.redirectToEnvironment();
+        // 10. Navegar al dashboard del nuevo entorno
+        reloading = !(await this.redirectToEnvironment());
+      } finally {
+        // Con recarga completa en curso no se re-monta: la página se va.
+        if (!reloading) this.routeManager.resumeOutlet();
+      }
 
       return true;
     } catch (error) {
@@ -296,20 +308,25 @@ export class EnvironmentSwitchService {
         newEnvironment,
       );
 
-      // 3. ¡CRÍTICO! Actualizar las rutas en el Router inmediatamente
-      this.routeManager.configureDynamicRoutes(updatedConfig);
+      // 3. ¡CRÍTICO! Actualizar las rutas en el Router inmediatamente. El
+      // outlet sigue desmontado; performEnvironmentSwitch lo re-monta tras navegar.
+      this.routeManager.replaceRoutes(updatedConfig);
     } catch (error) {
       console.error('❌ Failed to update AppConfig and Routes:', error);
     }
   }
 
-  private async redirectToEnvironment(): Promise<void> {
+  /**
+   * Navega al dashboard del nuevo entorno. Devuelve `false` cuando cae a una
+   * recarga completa (`window.location.href`), para no re-montar el outlet
+   * sobre el árbol de rutas anterior mientras la página se va.
+   */
+  private async redirectToEnvironment(): Promise<boolean> {
+    const redirect_path = '/admin/dashboard';
     try {
       // Delay intencional para que la transición sea suave (600ms)
       // Esto da tiempo a que el spinner se vea y el estado de NgRx se asiente
       await new Promise((resolve) => setTimeout(resolve, 600));
-
-      const redirect_path = '/admin/dashboard';
 
       // Navegar a la nueva ruta
       const navigated = await this.router.navigate([redirect_path], {
@@ -318,19 +335,13 @@ export class EnvironmentSwitchService {
 
       if (!navigated) {
         window.location.href = redirect_path;
-        return;
+        return false;
       }
-
-      // OPCIONAL: Podrías omitir el reload() si confías plenamente en el estado de NgRx.
-      // Pero para Vendix, al cambiar de ORG a STORE, hay muchos IDs de contexto que limpiar.
-      // Hacemos el reload DESPUÉS de navegar para que el usuario ya vea el nuevo dashboard.
-      setTimeout(() => {
-        // window.location.reload(); // Si quieres máxima fluidez, comenta esta línea.
-        // Pero es recomendable para limpiar singletons de servicios.
-      }, 100);
+      return true;
     } catch (error) {
       console.error('❌ Error redirecting to environment:', error);
-      window.location.href = '/admin/dashboard';
+      window.location.href = redirect_path;
+      return false;
     }
   }
 
