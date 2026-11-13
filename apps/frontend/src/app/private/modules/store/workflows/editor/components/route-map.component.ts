@@ -1,6 +1,8 @@
 import { Component, computed, inject } from '@angular/core';
 import { WorkflowEditorStore } from '../workflow-editor.store';
 import { MapNode, NODE_H, NODE_W, STAGE_TYPE_LABEL, computeLayout } from '../workflow-editor.utils';
+import { WORKFLOW_BOARD_STYLES } from './canvas/workflow-board.styles';
+import { StageNodeCardComponent } from './stage-node-card.component';
 
 /**
  * Read-only route map: SVG laid out by BFS levels from the start stage.
@@ -10,8 +12,10 @@ import { MapNode, NODE_H, NODE_W, STAGE_TYPE_LABEL, computeLayout } from '../wor
 @Component({
   selector: 'app-route-map',
   standalone: true,
+  imports: [StageNodeCardComponent],
+  styles: [WORKFLOW_BOARD_STYLES],
   template: `
-    <div class="overflow-auto rounded-xl border border-border bg-surface" data-testid="route-map">
+    <div class="wf-board overflow-auto rounded-2xl border border-border" data-testid="route-map">
       <svg
         role="img"
         [attr.aria-label]="ariaLabel()"
@@ -21,8 +25,8 @@ import { MapNode, NODE_H, NODE_W, STAGE_TYPE_LABEL, computeLayout } from '../wor
         class="block max-w-none"
       >
         <defs>
-          <marker id="wf-arrow" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="8" markerHeight="8" orient="auto-start-reverse">
-            <path d="M 0 0 L 10 5 L 0 10 z" class="fill-text-secondary" />
+          <marker id="wf-arrow" viewBox="0 0 10 10" refX="8" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
+            <path d="M 1 1 L 9 5 L 1 9 z" stroke-linejoin="round" class="wf-arrow" />
           </marker>
         </defs>
 
@@ -30,9 +34,10 @@ import { MapNode, NODE_H, NODE_W, STAGE_TYPE_LABEL, computeLayout } from '../wor
           <path
             [attr.d]="edge.path"
             fill="none"
-            class="stroke-text-secondary"
-            stroke-width="1.5"
-            [attr.stroke-dasharray]="edge.conditional ? '6 4' : null"
+            stroke-linecap="round"
+            class="wf-edge"
+            stroke-width="1.75"
+            [attr.stroke-dasharray]="edge.conditional ? '5 5' : null"
             marker-end="url(#wf-arrow)"
           />
           <text
@@ -40,27 +45,32 @@ import { MapNode, NODE_H, NODE_W, STAGE_TYPE_LABEL, computeLayout } from '../wor
             [attr.y]="edge.labelY"
             text-anchor="middle"
             paint-order="stroke"
-            stroke-width="4"
-            class="fill-text-primary stroke-surface text-xs"
+            stroke-width="6"
+            stroke-linejoin="round"
+            class="wf-edge-label"
           >{{ short(edge.label, 34) }}</text>
         }
 
         @for (node of layout().nodes; track node.key) {
-          <g class="cursor-pointer" (click)="store.selectStage(node.key)">
-            <rect
-              [attr.x]="node.x"
-              [attr.y]="node.y"
-              [attr.width]="nodeW"
-              [attr.height]="nodeH"
-              rx="12"
-              class="fill-surface"
-              [class]="node.key === store.selectedKey() ? 'stroke-primary' : 'stroke-border'"
-              [attr.stroke-width]="node.key === store.selectedKey() ? 3 : 1"
-              [attr.stroke-dasharray]="node.unreachable ? '5 4' : null"
-            />
-            <text [attr.x]="node.x + 12" [attr.y]="node.y + 24" class="fill-text-primary text-sm font-semibold">{{ short(node.name, 22) }}</text>
-            <text [attr.x]="node.x + 12" [attr.y]="node.y + 44" class="fill-text-secondary text-xs">{{ caption(node) }}</text>
-          </g>
+          <!-- Same HTML card as the canvas; a few px of room so the selection halo is not clipped. -->
+          <foreignObject
+            [attr.x]="node.x - 6"
+            [attr.y]="node.y - 6"
+            [attr.width]="nodeW + 12"
+            [attr.height]="nodeH + 12"
+            class="cursor-pointer overflow-visible"
+            (click)="store.selectStage(node.key)"
+          >
+            <div class="h-full w-full p-1.5">
+              <app-stage-node-card
+                [name]="node.name"
+                [type]="node.type"
+                [start]="!!node.start"
+                [unreachable]="!!node.unreachable"
+                [selected]="node.key === store.selectedKey()"
+              />
+            </div>
+          </foreignObject>
         }
       </svg>
     </div>

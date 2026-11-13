@@ -32,17 +32,18 @@ export const SLOT_COLUMNS = 3;
 const SLOT_START = 32;
 
 /** Icon bubble and left bar classes of each stage type (theme tokens only). */
-export const STAGE_TONE: Record<WorkflowStageType, { chip: string; bar: string }> = {
-  form: { chip: 'bg-primary/10 text-primary', bar: 'border-l-primary' },
-  approval: { chip: 'bg-success/10 text-success', bar: 'border-l-success' },
-  review: { chip: 'bg-info/10 text-info', bar: 'border-l-info' },
-  automatic: { chip: 'bg-warning/10 text-warning', bar: 'border-l-warning' },
-  ai: { chip: 'bg-primary/10 text-primary', bar: 'border-l-primary' },
-  parallel: { chip: 'bg-info/10 text-info', bar: 'border-l-info' },
-  subflow: { chip: 'bg-primary/10 text-primary', bar: 'border-l-primary' },
-  wait: { chip: 'bg-warning/10 text-warning', bar: 'border-l-warning' },
-  loop: { chip: 'bg-success/10 text-success', bar: 'border-l-success' },
-  end: { chip: 'bg-error/10 text-error', bar: 'border-l-error' },
+/** `text` drives the node's accent stripe (currentColor). */
+export const STAGE_TONE: Record<WorkflowStageType, { chip: string; bar: string; text: string }> = {
+  form: { chip: 'bg-primary/10 text-primary', bar: 'border-l-primary', text: 'text-primary' },
+  approval: { chip: 'bg-success/10 text-success', bar: 'border-l-success', text: 'text-success' },
+  review: { chip: 'bg-info/10 text-info', bar: 'border-l-info', text: 'text-info' },
+  automatic: { chip: 'bg-warning/10 text-warning', bar: 'border-l-warning', text: 'text-warning' },
+  ai: { chip: 'bg-primary/10 text-primary', bar: 'border-l-primary', text: 'text-primary' },
+  parallel: { chip: 'bg-info/10 text-info', bar: 'border-l-info', text: 'text-info' },
+  subflow: { chip: 'bg-primary/10 text-primary', bar: 'border-l-primary', text: 'text-primary' },
+  wait: { chip: 'bg-warning/10 text-warning', bar: 'border-l-warning', text: 'text-warning' },
+  loop: { chip: 'bg-success/10 text-success', bar: 'border-l-success', text: 'text-success' },
+  end: { chip: 'bg-error/10 text-error', bar: 'border-l-error', text: 'text-error' },
 };
 
 const PALETTE_HINT: Record<WorkflowStageType, string> = {
@@ -191,7 +192,8 @@ export function edgeGeometry(
   to: CanvasPoint,
   order: number,
 ): { path: string; labelX: number; labelY: number } {
-  const offset = ((order % 3) - 1) * 28;
+  // The first transition goes straight; siblings fan out below and above it.
+  const offset = [0, 28, -28][order % 3];
   if (from.x === to.x && from.y === to.y) {
     // Self loop above the node.
     const x1 = from.x + CANVAS_NODE_W - 24;
@@ -206,7 +208,9 @@ export function edgeGeometry(
   const y1 = from.y + CANVAS_NODE_H / 2;
   const x2 = to.x;
   const y2 = to.y + CANVAS_NODE_H / 2;
-  const reach = Math.max(64, Math.abs(x2 - x1) / 2);
+  // Forward edges between close steps keep their handles from crossing (that
+  // drew a kink); backward edges keep a wide loop around the nodes.
+  const reach = x2 >= x1 ? Math.max(24, (x2 - x1) / 2) : Math.max(64, Math.abs(x2 - x1) / 2);
   const c1x = x1 + reach;
   const c2x = x2 - reach;
   const c1y = y1 + offset;
