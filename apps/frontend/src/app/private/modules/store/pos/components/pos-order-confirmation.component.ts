@@ -257,6 +257,12 @@ import { ShippingAddressModalComponent } from '../../orders/components/shipping-
                 <span class="confirm-payment-amount">{{ formatCurrency(paymentInfo.amount) }}</span>
               </div>
               @if ((paymentInfo.change ?? 0) > 0) {
+                <!-- T8 (demo 11-nov) — con vuelto, el cajero ve el billete que
+                     recibió, no solo lo cobrado ($25.000 con $30.000 → 30.000). -->
+                <div class="confirm-payment-row">
+                  <span class="confirm-payment-method-name">Efectivo recibido:</span>
+                  <span class="confirm-payment-amount">{{ formatCurrency(scalarCashReceived) }}</span>
+                </div>
                 <div class="confirm-payment-row">
                   <span class="confirm-payment-method-name">Vuelto:</span>
                   <span class="confirm-payment-amount">{{ formatCurrency(paymentInfo.change) }}</span>
@@ -1103,6 +1109,18 @@ export class PosOrderConfirmationComponent {
   get multiPaymentReceived(): number {
     return this.multiPaymentTotalPaid + this.multiPaymentChange;
   }
+
+  /**
+   * T8 (demo 11-nov) — cobro escalar: `paymentInfo.amount` es lo cobrado y
+   * `paymentInfo.change` el vuelto, así que lo recibido es su suma (misma
+   * identidad que `multiPaymentReceived`). Sin vuelto, lo recibido es lo
+   * cobrado.
+   */
+  get scalarCashReceived(): number {
+    const amount = Number(this.paymentInfo?.amount) || 0;
+    const change = Number(this.paymentInfo?.change) || 0;
+    return change > 0 ? amount + change : amount;
+  }
 private authFacade = inject(AuthFacade);
   private toastService = inject(ToastService);
   private ticketService = inject(PosTicketService);
@@ -1506,7 +1524,7 @@ private authFacade = inject(AuthFacade);
       cashReceived:
         this.paymentBreakdown && this.paymentBreakdown.length > 1
           ? this.multiPaymentReceived
-          : this.paymentInfo?.amount || (this.derivedOrderTotal() || this.orderTotal),
+          : this.scalarCashReceived || (this.derivedOrderTotal() || this.orderTotal),
       change:
         this.paymentBreakdown && this.paymentBreakdown.length > 1
           ? this.multiPaymentChange
