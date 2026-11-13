@@ -582,7 +582,10 @@ openCreateStoreModal(): void {
       ...(this.selectedStoreType() && {
         store_type: this.selectedStoreType() as StoreType})};
 
-    this.storesService.getStores(query).subscribe({
+    this.storesService
+      .getStores(query)
+      .pipe(takeUntilDestroyed(this.destroyRef))
+      .subscribe({
       next: (response) => {
         if (response.success && response.data) {
           const total = response.meta?.total ?? response.data.length;
