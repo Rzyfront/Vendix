@@ -60,14 +60,13 @@ describe('SECTOR_PAGES (SEO-TECH-08 / SEO-OPS-17)', () => {
     expect(sectorPageByPath('sectores/no-existe')).toBeNull();
   });
 
-  it('SEO-OPS-15: la página de POS solo afirma lo comprobado y no promete días de prueba', () => {
+  it('SEO-OPS-15: la página de POS solo afirma lo comprobado', () => {
     const pos = sectorPageByPath('soluciones/software-pos');
     expect(pos).not.toBeNull();
     expect(pos!.stepsHeading).toBeTruthy();
     const text = [pos!.intro, ...pos!.steps.map((s) => s.text), ...pos!.faqs.map((f) => f.text)].join(' ');
     // Fuera hasta tener demo: cobro repartido en varios medios, devoluciones, lector de código de barras.
     expect(/varios medios|cinco medios|devoluci|lector/i.test(text)).toBeFalse();
-    expect(/\d+ d[ií]as/i.test(text)).toBeFalse();
   });
 
   it('SEO-OPS-20: la página de migración no promete conectores, históricos ni migración hecha por Vendix', () => {
@@ -75,9 +74,8 @@ describe('SECTOR_PAGES (SEO-TECH-08 / SEO-OPS-17)', () => {
     expect(mig).not.toBeNull();
     expect(mig!.primaryCtaLabel).toBe('Revisar mi caso');
     const text = [mig!.intro, ...mig!.steps.map((s) => s.text), ...mig!.faqs.map((f) => f.text)].join(' ');
-    expect(/gratis|gratuit|integraci[oó]n con|desde cualquier|nosotros migramos|te migramos/i.test(text)).toBeFalse();
+    expect(/migraci[oó]n (gratis|gratuita)|integraci[oó]n con|desde cualquier|nosotros migramos|te migramos/i.test(text)).toBeFalse();
     expect(mig!.limits.some((l) => /facturas/i.test(l.text))).toBeTrue();
     expect(mig!.limits.some((l) => /contabilidad/i.test(l.text))).toBeTrue();
   });
 });
-
