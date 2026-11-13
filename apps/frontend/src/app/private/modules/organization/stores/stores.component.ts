@@ -137,6 +137,22 @@ import {
         </div>
       }
 
+      @if (failedStoresText()) {
+        <div
+          class="flex items-start gap-3 p-3 rounded-lg bg-warning-light border border-warning/30"
+          role="status"
+        >
+          <app-icon
+            name="alert-triangle"
+            [size]="16"
+            class="text-warning shrink-0 mt-0.5"
+          ></app-icon>
+          <p class="text-xs text-text-secondary leading-relaxed">
+            {{ failedStoresText() }}
+          </p>
+        </div>
+      }
+
       <!-- Stores List -->
       <div class="bg-surface rounded-card shadow-card border border-border overflow-visible">
         <div class="px-6 py-4 border-b border-border">
@@ -304,6 +320,13 @@ export class StoresComponent implements OnInit {
   readonly incompleteCostText = computed(() =>
     buildIncompleteCostText(this.profitLoss()),
   );
+  // QUI-987: una tienda que falla no tumba las tarjetas; se avisa cuál quedó fuera.
+  readonly failedStoresText = computed(() => {
+    const failed = this.profitLoss()?.failed_stores ?? [];
+    if (failed.length === 0) return '';
+    const names = failed.map((store) => store.name).join(', ');
+    return `No se pudieron incluir en las estadísticas: ${names}. Las cifras corresponden al resto de tiendas.`;
+  });
   readonly searchTerm = signal('');
   readonly selectedState = signal('');
   readonly selectedStoreType = signal('');
