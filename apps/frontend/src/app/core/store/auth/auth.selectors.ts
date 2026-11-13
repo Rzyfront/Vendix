@@ -1,6 +1,10 @@
 import { createSelector, createFeatureSelector } from '@ngrx/store';
 import { AuthState } from './auth.reducer';
 import {
+  resolveOrganizationPublicHostname,
+  resolveStorePublicHostname,
+} from './public-link-domain.util';
+import {
   FiscalArea,
   FiscalStatusBlock,
   fiscalAreaHasPendingSignal,
@@ -595,29 +599,45 @@ export const selectHasNewModules = createSelector(
   (count: number) => count > 0,
 );
 
-// Domain settings selector
-// Prioridad: 1) dominio de la tienda, 2) dominio de la organización
+// Domain settings selector (primary domain; used by POS invoice links, CRM
+// preview and settings). Prioridad: 1) dominio de la tienda, 2) dominio de la
+// organización. Since QUI-980 the auth payload also carries non-primary
+// STORE_HOME/STORE_LANDING rows for the sidebar link, so only primaries count.
+const firstPrimary = (domains: any[] | null | undefined): any =>
+  (domains ?? []).find((d) => d?.is_primary !== false) ?? null;
+
 export const selectUserDomainSettings = createSelector(
   selectUser,
-  (user: any) => {
-    // Primero buscar dominio de la tienda
-    if (user?.store?.domain_settings && user.store.domain_settings.length > 0) {
-      return user.store.domain_settings[0]; // Tomar el primero (is_primary: true)
-    }
-    // Si no hay dominio de tienda, buscar dominio de la organización
-    if (user?.store?.organizations?.domain_settings && user.store.organizations.domain_settings.length > 0) {
-      return user.store.organizations.domain_settings[0]; // Tomar el primero (is_primary: true)
-    }
-    // También verificar en user.organizations directamente (para login de ORG_ADMIN)
-    if (user?.organizations?.domain_settings && user.organizations.domain_settings.length > 0) {
-      return user.organizations.domain_settings[0];
-    }
-    return null;
-  },
+  (user: any) =>
+    firstPrimary(user?.store?.domain_settings) ??
+    firstPrimary(user?.store?.organizations?.domain_settings) ??
+    // ORG_ADMIN login: user.organizations directly
+    firstPrimary(user?.organizations?.domain_settings),
 );
 
 // Domain hostname selector (convenience selector)
 export const selectUserDomainHostname = createSelector(
   selectUserDomainSettings,
   (domainSettings: any) => domainSettings?.hostname || null,
+);
+
+// Sidebar link of the store admin panel: the active store's own STORE_HOME /
+// STORE_LANDING. No fallback to organization domains, which may belong to
+// another store; null falls back to the slug.
+export const selectStorePublicLinkHostname = createSelector(
+  selectUser,
+  (user: any): string | null =>
+    resolveStorePublicHostname(user?.store?.domain_settings),
+);
+
+// Sidebar link of the organization admin panel: the organization's own
+// ORG_LANDING. Ignores `user.store`, which login fills with the main store
+// even in organization context.
+export const selectOrganizationPublicLinkHostname = createSelector(
+  selectUser,
+  (user: any): string | null =>
+    resolveOrganizationPublicHostname(
+      user?.organizations?.domain_settings ??
+        user?.store?.organizations?.domain_settings,
+    ),
 );

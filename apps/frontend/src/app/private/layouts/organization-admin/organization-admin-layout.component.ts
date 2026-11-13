@@ -196,7 +196,7 @@ export class OrganizationAdminLayoutComponent {
     initialValue: null as string | null,
   });
   readonly organizationDomainHostname = toSignal(
-    this.authFacade.userDomainHostname$,
+    this.authFacade.organizationPublicLinkHostname$,
     { initialValue: null as string | null },
   );
   readonly logoUrl = toSignal(
