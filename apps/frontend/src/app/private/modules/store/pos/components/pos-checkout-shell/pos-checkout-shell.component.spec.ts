@@ -201,6 +201,8 @@ class ScheduledOrderPickerStub {
 @Directive({ selector: '[appCurrencyInput]', standalone: true })
 class CurrencyInputStub {
   readonly currencyDecimals = input<number | undefined>(undefined);
+  // #1179 — los campos de efectivo recibido enlazan [selectOnFocus].
+  readonly selectOnFocus = input<boolean>(false);
 }
 
 @Component({ selector: 'app-payment-wompi-fields', standalone: true, template: `` })
