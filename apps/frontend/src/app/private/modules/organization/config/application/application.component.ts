@@ -13,12 +13,10 @@ import {
   IconComponent,
   ImageSourceModalComponent,
   InputComponent,
-  ScrollableTabsComponent,
   SpinnerComponent,
   StickyHeaderComponent,
 } from '../../../../../shared/components';
 import type {
-  ScrollableTab,
   StickyHeaderActionButton,
   StickyHeaderBadgeColor,
 } from '../../../../../shared/components';
@@ -78,7 +76,6 @@ class BrandingAssetUploadError {
     IconComponent,
     ImageSourceModalComponent,
     InputComponent,
-    ScrollableTabsComponent,
     SpinnerComponent,
     StickyHeaderComponent,
   ],
@@ -98,18 +95,8 @@ class BrandingAssetUploadError {
         (actionClicked)="onHeaderAction($event)"
       ></app-sticky-header>
 
-      <div
-        class="sticky top-[41px] z-10 bg-background py-1.5 md:static md:bg-transparent md:py-0 lg:hidden"
-      >
-        <app-scrollable-tabs
-          [tabs]="sections"
-          [activeTab]="activeSection()"
-          size="md"
-          ariaLabel="Secciones de identidad visual"
-          (tabChange)="scrollToSection($event)"
-        />
-      </div>
-
+      <!-- One short form with three cards: it scrolls, no section jump row
+           (that row looked like view tabs without being one). -->
       @if (loading()) {
         <div class="loading-card">
           <app-spinner size="lg" text="Cargando configuración..." />
@@ -837,7 +824,6 @@ export class ApplicationComponent {
   readonly settings = signal<OrganizationSettings | null>(null);
   readonly hasUnsavedChanges = signal(false);
   readonly lastSaved = signal<Date | null>(null);
-  readonly activeSection = signal('preview');
   readonly uploadingAssets = signal(false);
   readonly logoPreview = signal<string | null>(null);
   readonly faviconPreview = signal<string | null>(null);
@@ -923,11 +909,6 @@ export class ApplicationComponent {
     },
   ]);
 
-  readonly sections: ScrollableTab[] = [
-    { id: 'preview', label: 'Vista', icon: 'app-window' },
-    { id: 'identity', label: 'Identidad', icon: 'building-2' },
-    { id: 'colors', label: 'Colores', icon: 'palette' },
-  ];
 
   readonly colorFields: BrandingColorField[] = [
     { control: 'primary_color', label: 'Primario' },
@@ -1128,14 +1109,6 @@ export class ApplicationComponent {
 
   dismissError(): void {
     this.error.set(null);
-  }
-
-  scrollToSection(sectionId: string): void {
-    this.activeSection.set(sectionId);
-    if (typeof document === 'undefined') return;
-
-    const el = document.getElementById(`section-${sectionId}`);
-    el?.scrollIntoView({ behavior: 'smooth', block: 'start' });
   }
 
   private loadSettings(): void {
