@@ -48,12 +48,14 @@ const INBOUND_TYPES = new Set([
   'purchase',
   'transfer_in',
   'transfer-in',
+  'production',
 ]);
 const OUTBOUND_TYPES = new Set([
   'stock_out',
   'sale',
   'transfer_out',
   'transfer-out',
+  'consumption',
 ]);
 const LOSS_TYPES = new Set(['damage', 'expiration', 'theft']);
 
@@ -93,6 +95,8 @@ const MOVEMENT_TYPE_COLOR_MAP: Record<string, string> = {
   damage: '#ef4444',
   expiration: '#f97316',
   theft: '#dc2626',
+  production: '#14b8a6',
+  consumption: '#f97316',
 };
 
 const PAGE_LIMIT_DEFAULT = 25;
@@ -374,6 +378,8 @@ export class OrgMovementsComponent {
         { value: 'damage', label: 'Daño' },
         { value: 'expiration', label: 'Vencimiento' },
         { value: 'theft', label: 'Pérdida' },
+        { value: 'production', label: 'Producción' },
+        { value: 'consumption', label: 'Consumo de insumos' },
       ],
     },
     {
