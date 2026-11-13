@@ -13,6 +13,8 @@ import {
   FormBuilder,
   FormGroup,
   Validators,
+  AbstractControl,
+  ValidationErrors,
   ReactiveFormsModule,
 } from '@angular/forms';
 import { takeUntilDestroyed } from '@angular/core/rxjs-interop';
@@ -26,6 +28,14 @@ import {
 import { PosCashRegisterService } from '../services/pos-cash-register.service';
 import { ToastService } from '../../../../../shared/components/toast/toast.service';
 import { extractApiErrorMessage } from '../../../../../core/utils/api-error-handler';
+
+/** Requerido que no acepta solo espacios (el backend recorta antes de validar). */
+function notBlank(control: AbstractControl): ValidationErrors | null {
+  const value = control.value;
+  return typeof value === 'string' && value.trim().length > 0
+    ? null
+    : { required: true };
+}
 
 @Component({
   selector: 'app-pos-cash-movement-modal',
@@ -119,9 +129,16 @@ import { extractApiErrorMessage } from '../../../../../core/utils/api-error-hand
         <app-input
           formControlName="notes"
           label="Notas"
-          placeholder="Notas adicionales..."
+          [placeholder]="
+            form.value.type === 'cash_out'
+              ? 'Motivo de la salida (obligatorio)'
+              : 'Notas adicionales...'
+          "
           type="text"
           [size]="'md'"
+          [required]="form.value.type === 'cash_out'"
+          [error]="getFieldError('notes')"
+          (inputBlur)="onFieldBlur('notes')"
         ></app-input>
       </form>
 
@@ -292,6 +309,13 @@ export class PosCashMovementModalComponent {
       notes: [''],
     });
 
+    // El backend exige notes en cash_out (un egreso sin motivo no es auditable):
+    // el formulario lo valida antes de enviar en vez de recibir un 400 genérico.
+    this.form
+      .get('type')!
+      .valueChanges.pipe(takeUntilDestroyed(this.destroyRef))
+      .subscribe((type) => this.syncNotesValidator(type));
+
     effect(() => {
       if (this.isOpen()) {
         untracked(() => this.form.reset({ type: 'cash_in' }));
@@ -302,10 +326,19 @@ export class PosCashMovementModalComponent {
   getFieldError(fieldName: string): string | undefined {
     const field = this.form.get(fieldName);
     if (field && field.errors && field.touched) {
-      if (field.errors['required']) return 'Este campo es requerido';
+      if (field.errors['required'])
+        return fieldName === 'notes'
+          ? 'Escribe el motivo de la salida'
+          : 'Este campo es requerido';
       if (field.errors['min']) return 'El monto debe ser mayor a 0';
     }
     return undefined;
+  }
+
+  private syncNotesValidator(type: string | null): void {
+    const notes = this.form.get('notes')!;
+    notes.setValidators(type === 'cash_out' ? notBlank : null);
+    notes.updateValueAndValidity({ emitEvent: false });
   }
 
   onFieldBlur(fieldName: string): void {
