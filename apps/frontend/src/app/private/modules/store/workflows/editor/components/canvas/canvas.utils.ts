@@ -31,19 +31,18 @@ const SLOT_GAP_Y = 40;
 export const SLOT_COLUMNS = 3;
 const SLOT_START = 32;
 
-/** Icon bubble and left bar classes of each stage type (theme tokens only). */
-/** `text` drives the node's accent stripe (currentColor). */
-export const STAGE_TONE: Record<WorkflowStageType, { chip: string; bar: string; text: string }> = {
-  form: { chip: 'bg-primary/10 text-primary', bar: 'border-l-primary', text: 'text-primary' },
-  approval: { chip: 'bg-success/10 text-success', bar: 'border-l-success', text: 'text-success' },
-  review: { chip: 'bg-info/10 text-info', bar: 'border-l-info', text: 'text-info' },
-  automatic: { chip: 'bg-warning/10 text-warning', bar: 'border-l-warning', text: 'text-warning' },
-  ai: { chip: 'bg-primary/10 text-primary', bar: 'border-l-primary', text: 'text-primary' },
-  parallel: { chip: 'bg-info/10 text-info', bar: 'border-l-info', text: 'text-info' },
-  subflow: { chip: 'bg-primary/10 text-primary', bar: 'border-l-primary', text: 'text-primary' },
-  wait: { chip: 'bg-warning/10 text-warning', bar: 'border-l-warning', text: 'text-warning' },
-  loop: { chip: 'bg-success/10 text-success', bar: 'border-l-success', text: 'text-success' },
-  end: { chip: 'bg-error/10 text-error', bar: 'border-l-error', text: 'text-error' },
+/** Theme-token classes per stage type: `chip` tints the icon, `text` drives the node accent stripe. */
+export const STAGE_TONE: Record<WorkflowStageType, { chip: string; text: string }> = {
+  form: { chip: 'bg-primary/10 text-primary', text: 'text-primary' },
+  approval: { chip: 'bg-success/10 text-success', text: 'text-success' },
+  review: { chip: 'bg-info/10 text-info', text: 'text-info' },
+  automatic: { chip: 'bg-warning/10 text-warning', text: 'text-warning' },
+  ai: { chip: 'bg-primary/10 text-primary', text: 'text-primary' },
+  parallel: { chip: 'bg-info/10 text-info', text: 'text-info' },
+  subflow: { chip: 'bg-primary/10 text-primary', text: 'text-primary' },
+  wait: { chip: 'bg-warning/10 text-warning', text: 'text-warning' },
+  loop: { chip: 'bg-success/10 text-success', text: 'text-success' },
+  end: { chip: 'bg-error/10 text-error', text: 'text-error' },
 };
 
 const PALETTE_HINT: Record<WorkflowStageType, string> = {

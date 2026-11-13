@@ -280,9 +280,11 @@ export function tenantProfileRoutes(
           // Bitácora) son su capa 4.
           //
           // `provideSuperadminDianApi()` reapunta el `DIAN_API_CONTEXT` al rail
-          // del tenant para ESTA rama. Configuración declara el suyo en su
-          // propia rama hermana: no comparten instancia, así que no hay dos
-          // `DianConfigApiService` en un mismo árbol.
+          // del tenant y crea un `DianConfigApiService` propio para ESTA rama,
+          // así el panel de facturación del comerciante (singleton de raíz)
+          // sigue apuntando a `/api/store/invoicing/*`. El router no destruye
+          // estos providers al salir: el factory resuelve el tenant en cada
+          // llamada, nunca al construirse.
           path: 'dian',
           providers: [...provideSuperadminDianApi()],
           loadChildren: () =>

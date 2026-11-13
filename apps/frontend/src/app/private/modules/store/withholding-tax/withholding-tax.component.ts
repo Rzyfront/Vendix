@@ -5,7 +5,16 @@ import { WithholdingTaxService } from './services/withholding-tax.service';
 import { WithholdingStats } from './interfaces/withholding.interface';
 import { StatsComponent } from '../../../../shared/components/stats/stats.component';
 import { CurrencyFormatService } from '../../../../shared/pipes/currency/currency.pipe';
-import { WithholdingConceptsTabComponent } from './components/withholding-concepts-tab.component';
+
+/** Routed views that change the stats expose a `changed` output (Conceptos). */
+interface StatsChangingView {
+  changed: { subscribe(listener: () => void): unknown };
+}
+
+function changesStats(view: unknown): view is StatsChangingView {
+  const changed = (view as Partial<StatsChangingView> | null)?.changed;
+  return typeof changed?.subscribe === 'function';
+}
 
 /**
  * Retenciones container: stats cards on top of the routed view. Conceptos
@@ -50,11 +59,13 @@ export class WithholdingTaxComponent {
 
   /**
    * Conceptos edits change the "Conceptos Activos" card. The view is routed,
-   * so its `changed` output is wired here instead of in the template. The
-   * subscription ends with the routed component.
+   * so its `changed` output is wired here instead of in the template. It is
+   * matched by shape, not by class, so this shell does not import Conceptos and
+   * its route keeps loading lazily. The subscription ends with the routed
+   * component.
    */
   onActivate(view: unknown): void {
-    if (view instanceof WithholdingConceptsTabComponent) {
+    if (changesStats(view)) {
       view.changed.subscribe(() => this.loadStats());
     }
   }

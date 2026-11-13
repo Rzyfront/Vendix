@@ -1,4 +1,4 @@
-import { Component, DestroyRef, OnInit, computed, inject, signal } from '@angular/core';
+import { Component, DestroyRef, OnInit, computed, effect, inject, signal, untracked } from '@angular/core';
 import { takeUntilDestroyed } from '@angular/core/rxjs-interop';
 import { ActivatedRoute, RouterLink } from '@angular/router';
 import {
@@ -283,6 +283,23 @@ export class WorkflowEditorPageComponent implements OnInit {
   readonly propertiesPanelClass = computed(() =>
     this.propertiesCollapsed() ? 'lg:hidden' : 'lg:w-96 lg:shrink-0',
   );
+
+  /**
+   * Picking a different step means editing it, so a collapsed Propiedades
+   * panel opens. Only a switch from one step to another counts: the start
+   * step the editor selects on load does not override the saved preference,
+   * which is left as is for the next visit.
+   */
+  private lastSelectedKey: string | null = null;
+  private readonly expandPropertiesOnSelect = effect(() => {
+    const key = this.store.selectedKey();
+    const previous = this.lastSelectedKey;
+    this.lastSelectedKey = key;
+    if (!previous || !key || key === previous) return;
+    untracked(() => {
+      if (this.propertiesCollapsed()) this.propertiesCollapsed.set(false);
+    });
+  });
 
   toggleStages(): void {
     this.stagesCollapsed.update((v) => !v);

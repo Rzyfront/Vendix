@@ -21,7 +21,7 @@ import {
   WorkflowStageType,
 } from '../../../../../../../shared/workflows/contract/workflow-contract';
 import { WorkflowEditorStore } from '../../workflow-editor.store';
-import { STAGE_TYPE_ICON, STAGE_TYPE_LABEL, outcomeText, removeAt } from '../../workflow-editor.utils';
+import { STAGE_TYPE_LABEL, outcomeText, removeAt } from '../../workflow-editor.utils';
 import { ConditionBuilderComponent } from '../condition-builder.component';
 import { CanvasPaletteComponent, PALETTE_DRAG_TYPE } from './canvas-palette.component';
 import { StageNodeCardComponent } from '../stage-node-card.component';
@@ -32,7 +32,6 @@ import {
   CanvasNode,
   CanvasPoint,
   STAGE_PALETTE,
-  STAGE_TONE,
   clampPoint,
   computeCanvas,
   connectStages,
@@ -357,14 +356,6 @@ export class WorkflowCanvasComponent {
 
   // ─── Presentation helpers ───────────────────────────────────────────
 
-  icon(type: WorkflowStageType): string {
-    return STAGE_TYPE_ICON[type];
-  }
-
-  tone(type: WorkflowStageType): { chip: string; bar: string } {
-    return STAGE_TONE[type];
-  }
-
   outcomeLabel(outcome: string): string {
     return outcomeText(outcome);
   }
@@ -373,12 +364,6 @@ export class WorkflowCanvasComponent {
     return text.length > max ? `${text.slice(0, max - 1)}…` : text;
   }
 
-  caption(node: CanvasNode): string {
-    const parts: string[] = [STAGE_TYPE_LABEL[node.type]];
-    if (node.start) parts.push('Inicio');
-    if (node.unreachable) parts.push('Inalcanzable');
-    return parts.join(' · ');
-  }
 
   nodeLabel(node: CanvasNode): string {
     return `${node.name} (${STAGE_TYPE_LABEL[node.type]})${node.start ? ', paso inicial' : ''}${node.unreachable ? ', inalcanzable' : ''}`;

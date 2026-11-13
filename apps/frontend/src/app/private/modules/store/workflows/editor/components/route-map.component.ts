@@ -105,11 +105,4 @@ export class RouteMapComponent {
   typeLabel(node: MapNode): string {
     return STAGE_TYPE_LABEL[node.type];
   }
-
-  caption(node: MapNode): string {
-    const parts = [STAGE_TYPE_LABEL[node.type]];
-    if (node.start) parts.push('Inicio');
-    if (node.unreachable) parts.push('Inalcanzable');
-    return parts.join(' · ');
-  }
 }
