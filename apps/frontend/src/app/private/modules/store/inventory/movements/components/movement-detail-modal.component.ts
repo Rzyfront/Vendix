@@ -320,6 +320,16 @@ export class MovementDetailModalComponent {
       icon: 'clock',
       colorClass: 'bg-gray-100 text-gray-700 border border-gray-200',
     },
+    production: {
+      label: 'Producción',
+      icon: 'arrow-down-circle',
+      colorClass: 'bg-teal-100 text-teal-700 border border-teal-200',
+    },
+    consumption: {
+      label: 'Consumo de insumos',
+      icon: 'arrow-up-circle',
+      colorClass: 'bg-orange-100 text-orange-700 border border-orange-200',
+    },
   };
 
   private sourceOrderLabels: Record<SourceOrderType, string> = {

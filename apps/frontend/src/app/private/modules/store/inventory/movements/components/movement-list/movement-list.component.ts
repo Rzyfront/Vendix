@@ -68,6 +68,8 @@ export class MovementListComponent {
         { value: 'return', label: 'Devolución' },
         { value: 'damage', label: 'Daño' },
         { value: 'expiration', label: 'Vencimiento' },
+        { value: 'production', label: 'Producción' },
+        { value: 'consumption', label: 'Consumo de insumos' },
       ],
     },
   ];
@@ -155,7 +157,10 @@ export class MovementListComponent {
     titleKey: 'products.name',
     titleTransform: (item: any) => item.products?.name || 'Sin producto',
     subtitleKey: 'movement_type',
-    subtitleTransform: (val: MovementType) => this.getTypeLabel(val),
+    // item-list pasa la fila completa a subtitleTransform (no el valor de
+    // subtitleKey); con el valor, la tarjeta mostraba «[object Object]».
+    subtitleTransform: (item: InventoryMovement) =>
+      this.getTypeLabel(item.movement_type),
     badgeKey: 'movement_type',
     badgeConfig: {
       type: 'custom',
@@ -169,6 +174,8 @@ export class MovementListComponent {
         return: '#06b6d4',
         damage: '#dc2626',
         expiration: '#6b7280',
+        production: '#14b8a6',
+        consumption: '#f97316',
       },
     },
     badgeTransform: (val: MovementType) => this.getTypeLabel(val),
@@ -250,6 +257,8 @@ export class MovementListComponent {
       return: 'Devolución',
       damage: 'Daño',
       expiration: 'Vencimiento',
+      production: 'Producción',
+      consumption: 'Consumo de insumos',
     };
     return labels[type] || type;
   }
