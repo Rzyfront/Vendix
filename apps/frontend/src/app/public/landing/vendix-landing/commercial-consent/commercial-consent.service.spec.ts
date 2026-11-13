@@ -159,6 +159,18 @@ describe('CommercialConsentService (SEO-TECH-06)', () => {
     expect(pageViews(returning).length).toBe(1);
   });
 
+  it('SEO-TECH-06: GA escribe sus cookies solo en vendix.online, no en las tiendas', () => {
+    const service = setup();
+    service.attach();
+    service.accept();
+    const calls = gtagCalls(win);
+    const config = calls.find((c) => c[0] === 'config');
+    expect((config?.[2] as Record<string, unknown>)['cookie_domain']).toBe('none');
+    // Las cookies heredadas con Domain (visibles en *.vendix.online) se borran antes del config.
+    expect(cookieWrites.some((c) => c.startsWith('_ga=;') && c.includes('domain=.vendix.online'))).toBeTrue();
+    expect(cookieWrites.filter((c) => c.startsWith('_ga') && !c.includes('domain=')).length).toBe(0);
+  });
+
   it('revocar desde «Preferencias de cookies» desactiva GA, borra sus cookies y no vuelve a enviar', () => {
     const service = setup();
     service.attach();
