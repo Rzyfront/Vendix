@@ -727,6 +727,7 @@ jobs:
           --include='**/super-admin/subscriptions/pages/plans/plan-form.component.spec.ts'
           --include='**/super-admin/subscriptions/pages/plans/workflow-limits.util.spec.ts'
           --include='**/super-admin/workflows-ops/**/*.spec.ts'
+          --include='**/organization/stores/utils/collect-all-pages.util.spec.ts'
 
   mobile:
     name: Mobile
