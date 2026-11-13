@@ -1,32 +1,23 @@
 import { Component, DestroyRef, inject, signal } from '@angular/core';
 import { takeUntilDestroyed } from '@angular/core/rxjs-interop';
+import { RouterOutlet } from '@angular/router';
 import { WithholdingTaxService } from './services/withholding-tax.service';
 import { WithholdingStats } from './interfaces/withholding.interface';
 import { StatsComponent } from '../../../../shared/components/stats/stats.component';
-import {
-  ScrollableTab,
-  ScrollableTabsComponent,
-} from '../../../../shared/components';
 import { CurrencyFormatService } from '../../../../shared/pipes/currency/currency.pipe';
 import { WithholdingConceptsTabComponent } from './components/withholding-concepts-tab.component';
-import { WithholdingCalculationsListComponent } from './components/withholding-calculations-list.component';
-import { WithholdingCertificateViewerComponent } from './components/withholding-certificate-viewer.component';
 
 /**
- * Retenciones container: stats cards on top plus three internal tabs —
- * Conceptos (CRUD), Cálculos (audit of practiced/suffered withholdings) and
- * Certificados (printable art. 381 ET certificates per supplier/year).
+ * Retenciones container: stats cards on top of the routed view. Conceptos
+ * (CRUD), Retenciones calculadas (audit of practiced/suffered withholdings)
+ * and Certificados (printable art. 381 ET certificates per supplier/year) are
+ * sibling pills of Impuestos (layer 4), declared in `TAXES_SUB_TABS`, so this
+ * component no longer renders its own tab row (that was a layer 5).
  */
 @Component({
   selector: 'app-withholding-tax',
   standalone: true,
-  imports: [
-    StatsComponent,
-    ScrollableTabsComponent,
-    WithholdingConceptsTabComponent,
-    WithholdingCalculationsListComponent,
-    WithholdingCertificateViewerComponent,
-  ],
+  imports: [StatsComponent, RouterOutlet],
   template: `
     <div class="w-full">
       <!-- Stats -->
@@ -39,26 +30,10 @@ import { WithholdingCertificateViewerComponent } from './components/withholding-
         </div>
       </div>
 
-      <!-- Tabs -->
-      <div class="mt-2 mb-3">
-        <app-scrollable-tabs
-          [tabs]="tabs"
-          [activeTab]="activeTab()"
-          (tabChange)="onTabChange($event)"
-          size="sm"
-        ></app-scrollable-tabs>
+      <!-- Routed view -->
+      <div class="mt-2">
+        <router-outlet (activate)="onActivate($event)" />
       </div>
-
-      <!-- Tab Content -->
-      @if (activeTab() === 'concepts') {
-        <app-withholding-concepts-tab
-          (changed)="loadStats()"
-        ></app-withholding-concepts-tab>
-      } @else if (activeTab() === 'calculations') {
-        <app-withholding-calculations-list></app-withholding-calculations-list>
-      } @else if (activeTab() === 'certificates') {
-        <app-withholding-certificate-viewer></app-withholding-certificate-viewer>
-      }
     </div>
   `,
 })
@@ -68,20 +43,20 @@ export class WithholdingTaxComponent {
   private destroyRef = inject(DestroyRef);
 
   readonly stats = signal<WithholdingStats | null>(null);
-  readonly activeTab = signal<string>('concepts');
-
-  readonly tabs: ScrollableTab[] = [
-    { id: 'concepts', label: 'Conceptos', icon: 'file-text' },
-    { id: 'calculations', label: 'Cálculos', icon: 'calculator' },
-    { id: 'certificates', label: 'Certificados', icon: 'printer' },
-  ];
 
   constructor() {
     this.loadStats();
   }
 
-  onTabChange(tabId: string): void {
-    this.activeTab.set(tabId);
+  /**
+   * Conceptos edits change the "Conceptos Activos" card. The view is routed,
+   * so its `changed` output is wired here instead of in the template. The
+   * subscription ends with the routed component.
+   */
+  onActivate(view: unknown): void {
+    if (view instanceof WithholdingConceptsTabComponent) {
+      view.changed.subscribe(() => this.loadStats());
+    }
   }
 
   loadStats(): void {

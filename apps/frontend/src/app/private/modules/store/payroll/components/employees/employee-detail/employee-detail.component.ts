@@ -621,14 +621,13 @@ export class EmployeeDetailComponent {
    * Navigate to the withholding-tax module's "Certificados" viewer to generate
    * the employee's "Certificado de Ingresos y Retenciones" (Formulario 220 DIAN).
    * The employee id + tax year are passed as query params so a follow-up can
-   * auto-open the certificate; the viewer currently opens on its Certificados tab.
+   * auto-open the certificate.
    */
   onGenerateForm220(): void {
     const emp = this.employee();
     if (!emp) return;
-    this.router.navigate(['/admin/accounting/taxes/withholding'], {
+    this.router.navigate(['/admin/accounting/taxes/withholding/certificates'], {
       queryParams: {
-        tab: 'certificates',
         kind: 'employee',
         employeeId: emp.id,
         year: new Date().getFullYear(),

@@ -1540,6 +1540,24 @@ export class BreadcrumbService {
       icon: 'percent',
     },
     {
+      path: '/admin/accounting/taxes/withholding/concepts',
+      title: 'Conceptos de retención',
+      parent: 'Impuestos',
+      icon: 'file-text',
+    },
+    {
+      path: '/admin/accounting/taxes/withholding/calculations',
+      title: 'Retenciones calculadas',
+      parent: 'Impuestos',
+      icon: 'calculator',
+    },
+    {
+      path: '/admin/accounting/taxes/withholding/certificates',
+      title: 'Certificados de retención',
+      parent: 'Impuestos',
+      icon: 'printer',
+    },
+    {
       path: '/admin/accounting/taxes/exogenous',
       title: 'Info Exógena',
       parent: 'Impuestos',
