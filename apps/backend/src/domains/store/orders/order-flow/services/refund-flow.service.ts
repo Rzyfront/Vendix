@@ -197,6 +197,28 @@ export function allocateRefundAcrossPayments(
 }
 
 /**
+ * QUI-893 — ¿este reembolso saca billetes del cajón? Espejo de
+ * `buildRefundMovementTramos`: con canal efectivo `cash` siempre; con
+ * `original_payment` y varios pagos, el reparto toma primero los pagos en
+ * efectivo, así que basta con que uno lo sea. Pasarela, transferencia y saldo
+ * interno no tocan el cajón y no exigen caja abierta.
+ */
+export function refundTouchesCashDrawer(
+  refundMethod: string,
+  effectiveChannel: EffectiveRefundChannel,
+  paymentTypes: ReadonlyArray<string | null>,
+): boolean {
+  if (effectiveChannel === 'cash') return true;
+  return (
+    refundMethod === 'original_payment' &&
+    paymentTypes.length > 1 &&
+    paymentTypes.some(
+      (type) => resolveEffectiveRefundChannel('original_payment', type) === 'cash',
+    )
+  );
+}
+
+/**
  * Método con el que se asienta un movimiento NO efectivo: el tipo real del
  * pago cuando coincide con el canal por el que salió el dinero; si el
  * operador eligió otro canal (p.ej. pago en efectivo devuelto a saldo
@@ -904,6 +926,23 @@ export class RefundFlowService {
     // tipos de pago desconocidos, y en esos no existe processor ni endpoint de
     // aprobación, así que aparcarlos los atasca para siempre.
     const awaitsReversal = awaitsExternalReversal(dto.refund_method, paymentType);
+
+    // QUI-893 — gate único de caja ANTES de la tx: un reembolso que saca
+    // efectivo del cajón exige la caja abierta de quien lo ejecuta. Sin este
+    // gate el refund se completaba y su salida quedaba en el outbox esperando
+    // una sesión (el outbox sigue cubriendo la carrera de cierre posterior).
+    // Sin usuario (llamada de sistema) no hay caja propia que exigir: sigue el
+    // carril B18 (outbox con el actor del sale).
+    if (
+      userId &&
+      refundTouchesCashDrawer(
+        dto.refund_method,
+        effectiveChannel,
+        channelPayments.map(paymentTypeOf),
+      )
+    ) {
+      await this.sessionsService.assertSessionForSales(userId);
+    }
 
     // Paso 6 — dish post-commit collector (KDS SSE + COGS reclass). Filled
     // in-tx by `processDishRefundLine`, drained in the `.then()` below.
@@ -2539,6 +2578,12 @@ export class RefundFlowService {
         !Object.values(RefundPayoutChannel).includes(payoutChannel as RefundPayoutChannel))
     ) {
       throw new VendixHttpException(ErrorCodes.REF_PAYOUT_REQUIRED_001);
+    }
+
+    // QUI-893 — gate único de caja antes de la tx: completar un reembolso
+    // pagado en efectivo saca billetes del cajón de quien lo resuelve.
+    if (targetState === 'completed' && payoutChannel === RefundPayoutChannel.CASH) {
+      await this.sessionsService.assertSessionForSales(userId);
     }
 
     // refunds has no `stores` relation. The scoped order read establishes the

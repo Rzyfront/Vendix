@@ -415,6 +415,14 @@ export class PaymentsService {
         })),
       );
 
+      // QUI-893 — gate único de caja antes del gateway, igual que
+      // `processPayment`: sin caja de quien cobra no se crea la orden (antes
+      // la orden nacía y el `sale` fallaba dentro de la tx, dejándola
+      // huérfana). Cubre POS, renovación de membresías y la tool de IA.
+      await this.sessionsService.assertSessionForSales(
+        user?.id ?? RequestContextService.getUserId(),
+      );
+
       const result = await this.paymentGateway.processPaymentWithNewOrder({
         orderId: createOrderPaymentDto.orderId,
         customerId: createOrderPaymentDto.customerId,

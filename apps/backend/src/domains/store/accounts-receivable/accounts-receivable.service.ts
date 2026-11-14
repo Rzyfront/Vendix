@@ -8,6 +8,7 @@ import { EventEmitter2 } from '@nestjs/event-emitter';
 import { Prisma } from '@prisma/client';
 import { StorePrismaService } from '../../../prisma/services/store-prisma.service';
 import { MovementsService } from '../cash-registers/movements/movements.service';
+import { SessionsService } from '../cash-registers/sessions/sessions.service';
 import { lockOrderLifecycle } from '../orders/order-flow/order-lifecycle-lock.util';
 import { ArQueryDto } from './dto/ar-query.dto';
 import { RegisterArPaymentDto } from './dto/register-ar-payment.dto';
@@ -28,6 +29,7 @@ export class AccountsReceivableService {
     private readonly prisma: StorePrismaService,
     private readonly event_emitter: EventEmitter2,
     private readonly movements: MovementsService,
+    private readonly sessions: SessionsService,
   ) {}
 
   // ─── LIST ──────────────────────────────────────────────────
@@ -247,6 +249,13 @@ export class AccountsReceivableService {
 
     if (!ar) {
       throw new NotFoundException(`Cuenta por cobrar #${ar_id} no encontrada`);
+    }
+
+    // QUI-893 — gate único de caja antes de la tx: un abono manual (sin
+    // `payment_id`) es dinero que recibe este usuario, en cualquier método.
+    // El abono ligado a un cobro POS ya pasó por el gate de ese cobro.
+    if (!dto.payment_id) {
+      await this.sessions.assertSessionForSales(user_id);
     }
 
     const result = await this.prisma.$transaction(async (tx: Prisma.TransactionClient) => {
