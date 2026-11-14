@@ -5,6 +5,7 @@ import { ReactiveFormsModule, FormBuilder, Validators } from '@angular/forms';
 import { firstValueFrom } from 'rxjs';
 
 import { CarteraService } from '../../services/cartera.service';
+import { parseApiError } from '../../../../../../core/utils/parse-api-error';
 import { AccountReceivable } from '../../interfaces/cartera.interface';
 import { CurrencyFormatService } from '../../../../../../shared/pipes/currency/currency.pipe';
 import {
@@ -176,9 +177,14 @@ export class ReceivablePaymentModalComponent implements OnChanges {
       this.toastService.success('Cobro registrado exitosamente');
       this.saved.emit();
       this.onClose();
-    } catch {
+    } catch (error) {
       this.is_submitting.set(false);
-      this.toastService.error('Error al registrar el cobro');
+      // QUI-893: show the real reason (e.g. the operator's cash session is
+      // closed) instead of a generic failure.
+      const { errorCode, userMessage } = parseApiError(error);
+      this.toastService.error(
+        errorCode ? userMessage : 'Error al registrar el cobro',
+      );
     }
   }
 

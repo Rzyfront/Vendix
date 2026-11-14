@@ -22,6 +22,8 @@ import {
 } from '../../../../../../shared/components/steps-line/steps-line.component';
 
 import { InventoryService } from '../../services';
+import { BulkUploadLogService } from '../../../bulk-uploads/services/bulk-upload-log.service';
+import { BulkUploadFileInfo } from '../../../bulk-uploads/bulk-upload-log.interface';
 
 interface BulkResultItem {
   row_number: number;
@@ -720,6 +722,8 @@ export class BulkAdjustmentModalComponent {
   readonly completed = output<void>();
 
   private inventory_service = inject(InventoryService);
+  private bulkUploadLog = inject(BulkUploadLogService);
+  private fileInfo: BulkUploadFileInfo = {};
   private toast_service = inject(ToastService);
   private destroyRef = inject(DestroyRef);
 
@@ -853,6 +857,7 @@ export class BulkAdjustmentModalComponent {
     if (!file || !locId) return;
 
     this.initialLoadAck.set(false);
+    this.fileInfo = {};
     this.isAnalyzing.set(true);
     this.uploadError.set(null);
 
@@ -867,6 +872,11 @@ export class BulkAdjustmentModalComponent {
       .subscribe({
         next: (response) => {
           const result = response.data as BulkAnalysisResult;
+          this.fileInfo = {
+            file_name: response.data?.file_name,
+            file_hash: response.data?.file_hash,
+            duplicate_of: response.data?.duplicate_of,
+          };
           if (result.total > 10000) {
             this.sessionId = result.session_id;
             this.cancelSession();
@@ -887,7 +897,11 @@ export class BulkAdjustmentModalComponent {
   }
 
   /** Paso 3 -> 4: commit paginado de 100 en 100. */
-  confirmUpload(): void {
+  async confirmUpload(): Promise<void> {
+    // QUI-1004: warn about a repeated file before any commit call.
+    if (!(await this.bulkUploadLog.confirmDuplicate(this.fileInfo.duplicate_of))) {
+      return;
+    }
     if (this.analysis()?.requires_initial_load_ack && !this.initialLoadAck()) {
       this.initialLoadAckBlock()?.requestAttention();
       return;
@@ -934,6 +948,7 @@ export class BulkAdjustmentModalComponent {
         type,
         desc,
         initialLoadAck,
+        this.fileInfo,
       );
 
     fetchPage(startOffset)

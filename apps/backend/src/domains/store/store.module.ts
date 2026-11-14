@@ -88,6 +88,7 @@ import { MembershipPlansModule } from './membership-plans/membership-plans.modul
 import { MembershipsModule } from './memberships/memberships.module';
 import { MembershipAccessModule } from './membership-access/membership-access.module';
 import { UomModule } from './uom/uom.module';
+import { BulkUploadsModule } from './bulk-uploads/bulk-uploads.module';
 import { WeeklyReportModule } from './weekly-report/weekly-report.module';
 import { PrintFormatsModule } from './print-formats/print-formats.module';
 import { CrmModule } from './crm/crm.module';
@@ -97,6 +98,7 @@ import { ServiceSessionsModule } from './service-sessions/service-sessions.modul
 import { ServiceDepositsModule } from './service-deposits/service-deposits.module';
 import { ServiceRemindersModule } from './service-reminders/service-reminders.module';
 import { ServiceBudgetsModule } from './service-budgets/service-budgets.module';
+import { RemindersModule } from './reminders/reminders.module';
 
 @Module({
   imports: [
@@ -188,6 +190,7 @@ import { ServiceBudgetsModule } from './service-budgets/service-budgets.module';
     MembershipsModule,
     MembershipAccessModule,
     UomModule,
+    BulkUploadsModule,
     WeeklyReportModule,
     PrintFormatsModule,
     CrmModule,
@@ -197,6 +200,7 @@ import { ServiceBudgetsModule } from './service-budgets/service-budgets.module';
     ServiceDepositsModule,
     ServiceRemindersModule,
     ServiceBudgetsModule,
+    RemindersModule,
   ],
   exports: [PrintFormatsModule],
 })

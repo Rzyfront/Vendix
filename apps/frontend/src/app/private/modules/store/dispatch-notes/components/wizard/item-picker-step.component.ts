@@ -42,6 +42,7 @@ import type {
 } from '../../../inventory/interfaces';
 import { ReceiptScanItem } from '../../interfaces/dispatch-note.interface';
 import { DispatchNotesService } from '../../services/dispatch-notes.service';
+import { BulkUploadLogService } from '../../../bulk-uploads/services/bulk-upload-log.service';
 import {
   DispatchNoteWizardService,
   WizardItem,
@@ -619,6 +620,7 @@ export class ItemPickerStepComponent {
   private readonly locationsService = inject(LocationsService);
   private readonly toast = inject(ToastService);
   private readonly destroyRef = inject(DestroyRef);
+  private readonly bulkUploadLog = inject(BulkUploadLogService);
 
   // --- Manual search state ---
   readonly searchResults = signal<Product[]>([]);
@@ -941,7 +943,7 @@ export class ItemPickerStepComponent {
   // Excel — client-side parse (SheetJS)
   // ==========================================================================
 
-  onExcelSelected(event: Event, input: HTMLInputElement): void {
+  async onExcelSelected(event: Event, input: HTMLInputElement): Promise<void> {
     const file = input.files?.[0];
     input.value = '';
     if (!file) return;
@@ -952,7 +954,19 @@ export class ItemPickerStepComponent {
       return;
     }
 
+    // QUI-1004 — repeated-file warning (same store and upload type, scoped
+    // by the backend): «Cancelar» (default) imports nothing.
     this.parsing.set(true);
+    const file_hash = await this.bulkUploadLog.fingerprint(file);
+    const proceed = await this.bulkUploadLog.confirmFileIsNew(
+      'dispatch_notes',
+      file_hash,
+    );
+    if (!proceed) {
+      this.parsing.set(false);
+      return;
+    }
+
     const reader = new FileReader();
     reader.onload = async (e: any) => {
       try {
@@ -975,11 +989,18 @@ export class ItemPickerStepComponent {
 
         const suggestions: ReceiptSuggestion[] = [];
         const warnings: string[] = [];
+        let totalRows = 0;
+        let failedRows = 0;
         for (let i = 1; i < rows.length; i++) {
           const row = rows[i] as any[];
           if (!row || row.length === 0) continue;
+          if (row.every((value) => String(value ?? '').trim() === '')) continue;
+          totalRows++;
           const name = this.cell(row, headerMap.product_name);
-          if (!name) continue;
+          if (!name) {
+            failedRows++;
+            continue;
+          }
           const qty = this.toNumber(this.cell(row, headerMap.quantity));
           const price = this.toNumber(this.cell(row, headerMap.unit_price));
           if (qty === null || qty <= 0) {
@@ -1003,6 +1024,14 @@ export class ItemPickerStepComponent {
 
         this.detectedSupplierName.set(null);
         this.importWarnings.set(warnings);
+        // QUI-1004 — registered against the note once it is created.
+        this.wizardService.addExcelUpload({
+          file_name: file.name,
+          file_hash,
+          total_rows: totalRows,
+          failed_rows: failedRows,
+          loaded_rows: suggestions.length,
+        });
         // Excel has no backend match → auto-match by exact SKU, rest to "por vincular".
         this.ingest(suggestions, { autoMatchBySku: true });
         this.toast.success(`Excel procesado: ${suggestions.length} línea(s).`);

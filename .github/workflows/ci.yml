@@ -587,6 +587,8 @@ jobs:
           --progress=false
           --include='**/interceptors/auth.interceptor.spec.ts'
           --include='**/core/store/auth/auth.reducer.spec.ts'
+          --include='**/core/store/notifications/notifications.effects.spec.ts'
+          --include='**/core/services/environment-switch.service.spec.ts'
           --include='**/legal/document-viewer/legal-document-metadata.spec.ts'
           --include='**/pos/utils/document-format-hint.util.spec.ts'
           --include='**/pos/utils/customer-document-requirement.util.spec.ts'
@@ -727,6 +729,7 @@ jobs:
           --include='**/super-admin/subscriptions/pages/plans/plan-form.component.spec.ts'
           --include='**/super-admin/subscriptions/pages/plans/workflow-limits.util.spec.ts'
           --include='**/super-admin/workflows-ops/**/*.spec.ts'
+          --include='**/organization/stores/utils/collect-all-pages.util.spec.ts'
 
   mobile:
     name: Mobile

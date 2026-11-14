@@ -21,7 +21,9 @@ import {
   getRefreshTokenHmacSecret,
   hmacSha256,
 } from './constants/token.constants';
+import { STORE_AUTH_DOMAINS_INCLUDE } from './constants/store-public-domains.constants';
 import { buildActiveUserRolesWhere } from '@common/utils/role-scope.util';
+import { signUserAvatar } from './helpers/sign-user-avatar.helper';
 
 @Injectable()
 export class EnvironmentSwitchService {
@@ -198,12 +200,7 @@ export class EnvironmentSwitchService {
               },
             },
           },
-          domain_settings: {
-            where: {
-              is_primary: true,
-              status: 'active',
-            },
-          },
+          domain_settings: STORE_AUTH_DOMAINS_INCLUDE,
           store_users: {
             where: {
               user_id: userId,
@@ -454,7 +451,8 @@ export class EnvironmentSwitchService {
       : null;
 
     const response = {
-      user: user_with_store,
+      // QUI-982: avatar firmado; la key cruda rompía la imagen en el header.
+      user: await signUserAvatar(this.s3Service, user_with_store),
       user_settings: userSettingsForResponse,
       store_settings:
         targetEnvironment === 'STORE_ADMIN' ? active_store_settings : null,

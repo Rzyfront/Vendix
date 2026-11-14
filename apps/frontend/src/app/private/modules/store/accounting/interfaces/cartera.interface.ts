@@ -140,7 +140,6 @@ export interface ApQueryParams {
 
 export interface RegisterArPaymentDto {
   amount: number;
-  payment_id?: number;
   payment_method?: string;
   reference?: string;
   notes?: string;

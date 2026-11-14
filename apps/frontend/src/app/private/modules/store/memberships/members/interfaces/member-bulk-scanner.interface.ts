@@ -227,6 +227,9 @@ export interface CommitMemberDto {
 export interface CommitMemberRosterDto {
   plans: CommitPlanDto[];
   members: CommitMemberDto[];
+  /** QUI-1004 — huella devuelta por el escaneo, para el registro de cargas. */
+  file_name?: string;
+  file_hash?: string;
 }
 
 /** Per-member commit outcome — echoed back so the UI can report failures. */

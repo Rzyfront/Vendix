@@ -1,4 +1,4 @@
-import {Component, OnInit, inject, signal, DestroyRef} from '@angular/core';
+import {Component, OnInit, inject, signal, DestroyRef, effect} from '@angular/core';
 import { takeUntilDestroyed } from '@angular/core/rxjs-interop';
 import { DOCUMENT } from '@angular/common';
 import { Meta, Title } from '@angular/platform-browser';
@@ -12,6 +12,8 @@ import {
   ReactiveFormsModule,
 } from '@angular/forms';
 import { AuthFacade } from '../../../../core/store/auth/auth.facade';
+import { ConfigFacade } from '../../../../core/store/config';
+import { DomainConfig } from '../../../../core/models/domain-config.interface';
 import { ToastService } from '../../../../shared/components/toast/toast.service';
 import { extractApiErrorMessage } from '../../../../core/utils/api-error-handler';
 import { CardComponent } from '../../../../shared/components/card/card.component';
@@ -56,7 +58,7 @@ import { IconComponent } from '../../../../shared/components';
             Recuperar Contraseña
           </h2>
           <p class="mt-2 mb-2 text-sm text-[var(--color-text-secondary)] px-2">
-            Ingresa tu Vlink y email para recibir instrucciones.
+            Ingresa tu email para recibir instrucciones. El V-link de tu tienda u organización es opcional.
           </p>
         </div>
 
@@ -84,21 +86,21 @@ import { IconComponent } from '../../../../shared/components';
             <!-- Inputs con gap reducido -->
             <div class="space-y-4">
               <app-input
-                label="V-link"
+                label="V-link (opcional)"
                 formControlName="vlink"
                 [control]="forgotPasswordForm.get('vlink')"
                 type="text"
                 size="md"
-                placeholder="mi-organizacion"
+                placeholder="mi-tienda"
               ></app-input>
 
               <app-input
-                label="Email de Propietario"
+                label="Email"
                 formControlName="email"
                 [control]="forgotPasswordForm.get('email')"
                 type="email"
                 size="md"
-                placeholder="propietario@empresa.com"
+                placeholder="tu@correo.com"
               ></app-input>
             </div>
 
@@ -153,6 +155,7 @@ export class ForgotOwnerPasswordComponent implements OnInit {
   error: string | null = null;
 
   private toast = inject(ToastService);
+  private configFacade = inject(ConfigFacade);
 
   constructor(
     private fb: FormBuilder,
@@ -160,9 +163,32 @@ export class ForgotOwnerPasswordComponent implements OnInit {
     private router: Router,
   ) {
     this.forgotPasswordForm = this.fb.group({
-      vlink: ['', [Validators.required]],
+      // QUI-943: optional, like the staff login. The backend accepts the
+      // organization or the store V-link, or resolves the account by email.
+      vlink: [''],
       email: ['', [Validators.required, Validators.email]],
     });
+
+    // Prefill the V-link of the store/organization whose login sent the user
+    // here, so a store employee never has to guess their organization slug.
+    effect(() => {
+      const vlink = this.contextVlink(this.configFacade.appConfig()?.domainConfig);
+      const control = this.forgotPasswordForm.get('vlink');
+      if (vlink && control && control.pristine && !control.value) {
+        control.setValue(vlink);
+      }
+    });
+  }
+
+  private contextVlink(domainConfig: DomainConfig | undefined): string {
+    if (!domainConfig?.environment) return '';
+    if (domainConfig.environment.startsWith('STORE_')) {
+      return domainConfig.store_slug || '';
+    }
+    if (domainConfig.environment.startsWith('ORG_')) {
+      return domainConfig.organization_slug || '';
+    }
+    return '';
   }
 
   ngOnInit(): void {
@@ -182,7 +208,7 @@ export class ForgotOwnerPasswordComponent implements OnInit {
     if (this.forgotPasswordForm.valid) {
       this.error = null; // Clear any previous errors
       const { vlink, email } = this.forgotPasswordForm.value;
-      this.authFacade.forgotOwnerPassword(vlink, email);
+      this.authFacade.forgotOwnerPassword(vlink?.trim() || undefined, email);
 
       const loadingSubscription = this.authFacade.loading$.pipe(takeUntilDestroyed(this.destroyRef)).subscribe(
         (isLoading) => {

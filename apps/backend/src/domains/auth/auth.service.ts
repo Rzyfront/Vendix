@@ -12,6 +12,7 @@ import { ConfigService } from '@nestjs/config';
 import { GlobalPrismaService } from '../../prisma/services/global-prisma.service';
 import { EmailService } from '../../email/email.service';
 import { EmailBrandingService } from '../../email/services/email-branding.service';
+import { PasswordResetEmailOptions } from '../../email/interfaces/branding.interface';
 import * as bcrypt from 'bcrypt';
 import { LoginDto } from './dto/login.dto';
 import { RegisterOwnerDto } from './dto/register-owner.dto';
@@ -39,12 +40,14 @@ import {
   getRefreshTokenHmacSecret,
   hmacSha256,
 } from './constants/token.constants';
+import { STORE_AUTH_DOMAINS_INCLUDE } from './constants/store-public-domains.constants';
 import { CustomersService } from '../store/customers/customers.service';
 import { S3Service } from '@common/services/s3.service';
 import { EventEmitter2 } from '@nestjs/event-emitter';
 import { Prisma, organizations } from '@prisma/client';
 import { recordTriggerEvent } from '../store/workflows/engine/workflow-trigger.outbox';
 import { mergeStoreSettingsWithDefaults } from '../store/settings/defaults/default-store-settings';
+import { signUserAvatar } from './helpers/sign-user-avatar.helper';
 
 /**
  * Result of organization lookup with smart fallback logic
@@ -281,12 +284,7 @@ export class AuthService {
                 },
               },
             },
-            domain_settings: {
-              where: {
-                is_primary: true,
-                status: 'active',
-              },
-            },
+            domain_settings: STORE_AUTH_DOMAINS_INCLUDE,
           },
         },
       },
@@ -1997,12 +1995,7 @@ export class AuthService {
                   },
                 },
               },
-              domain_settings: {
-                where: {
-                  is_primary: true,
-                  status: 'active',
-                },
-              },
+              domain_settings: STORE_AUTH_DOMAINS_INCLUDE,
             },
           },
         },
@@ -2030,12 +2023,7 @@ export class AuthService {
                 },
               },
             },
-            domain_settings: {
-              where: {
-                is_primary: true,
-                status: 'active',
-              },
-            },
+            domain_settings: STORE_AUTH_DOMAINS_INCLUDE,
           },
         });
 
@@ -2236,7 +2224,9 @@ export class AuthService {
     const permissions = this.getPermissionsFromRoles(effective_user_roles);
 
     return {
-      user: userWithRolesAndPassword, // Usar usuario con roles array simple y store activo
+      // Usar usuario con roles array simple y store activo. QUI-982: el avatar
+      // viaja firmado; la key cruda se resolvía contra el host del frontend.
+      user: await signUserAvatar(this.s3Service, userWithRolesAndPassword),
       user_settings: userSettingsForResponse,
       store_settings: active_store_settings,
       default_panel_ui: defaults.panel_ui,
@@ -2376,7 +2366,10 @@ export class AuthService {
       );
 
       return {
-        user: { ...userWithoutPassword, user_roles: refreshed_user_roles },
+        user: await signUserAvatar(this.s3Service, {
+          ...userWithoutPassword,
+          user_roles: refreshed_user_roles,
+        }),
         permissions: this.getPermissionsFromRoles(refreshed_user_roles),
         ...tokens,
       };
@@ -2712,37 +2705,28 @@ export class AuthService {
 
   // ===== FUNCIONES DE RECUPERACIÓN DE CONTRASEÑA =====
 
+  /**
+   * Recuperación de contraseña para cuentas de staff/propietario.
+   *
+   * QUI-943: el login de staff acepta el V-link de la organización, el de la
+   * tienda o ninguno (CD1/CD2), pero la recuperación solo aceptaba el slug de
+   * la organización: un usuario de tienda que escribía el V-link de su tienda
+   * (o no lo sabía) recibía el mensaje genérico y nunca el correo. La cuenta
+   * se resuelve ahora con las mismas reglas que el login
+   * (`resolvePasswordRecoveryAccount`).
+   *
+   * Anti-enumeración: la respuesta es SIEMPRE el mismo mensaje genérico.
+   */
   async forgotPassword(
     email: string,
-    organization_slug: string,
+    vlink?: string,
   ): Promise<{ message: string }> {
-    // Validar que la organización existe
-    const organization = await this.prismaService.organizations.findUnique({
-      where: { slug: organization_slug },
-    });
+    const genericMessage =
+      'Si el email existe, recibirás instrucciones para restablecer tu contraseña';
 
-    if (!organization) {
-      // Por seguridad, devolvemos el mismo mensaje genérico
-      return {
-        message:
-          'Si el email y organización existen, recibirás instrucciones para restablecer tu contraseña',
-      };
-    }
-
-    // Buscar usuario específico en la organización
-    const user = await this.prismaService.users.findFirst({
-      where: {
-        email: emailEquals(email),
-        organization_id: organization.id,
-      },
-    });
-
-    // Por seguridad, siempre devolvemos el mismo mensaje
+    const user = await this.resolvePasswordRecoveryAccount(email, vlink);
     if (!user) {
-      return {
-        message:
-          'Si el email y organización existen, recibirás instrucciones para restablecer tu contraseña',
-      };
+      return { message: genericMessage };
     }
 
     // Invalidar tokens anteriores
@@ -2764,16 +2748,11 @@ export class AuthService {
       },
     });
 
-    // Enviar email de recuperación de contraseña (solo si el usuario tiene correo).
-    // El flujo de "forgot password" se inicia por email, por lo que en la
-    // práctica siempre existe; el guard es defensivo para el tipo nullable.
-    if (user.email) {
-      await this.emailService.sendPasswordResetEmail(
-        user.email,
-        token,
-        user.first_name,
-      );
-    }
+    const emailSent = await this.deliverPasswordResetEmail(
+      user,
+      token,
+      'forgotPassword',
+    );
 
     // Registrar auditoría de solicitud de recuperación
     await this.auditService.logAuth(
@@ -2782,16 +2761,117 @@ export class AuthService {
       {
         method: 'forgot_password_request',
         success: true,
-        email_sent: true,
+        email_sent: emailSent,
       },
       undefined, // IP no disponible en este contexto
       undefined, // User-Agent no disponible en este contexto
     );
 
-    return {
-      message:
-        'Si el email existe, recibirás instrucciones para restablecer tu contraseña',
-    };
+    return { message: genericMessage };
+  }
+
+  /**
+   * Resuelve la cuenta de staff/propietario que pide recuperar su contraseña.
+   *
+   * 1. V-link = slug de organización → cuenta del email en esa organización
+   *    (comportamiento histórico, incluye cualquier rol).
+   * 2. V-link = slug de tienda → cuenta del email en la organización de esa
+   *    tienda. El slug de tienda solo es único dentro de su organización, así
+   *    que se aceptan varias tiendas y se exige UNA sola cuenta candidata.
+   * 3. Sin V-link, o si el V-link no llevó a ninguna cuenta → misma regla que
+   *    el login email-only: la única cuenta staff del email.
+   *
+   * Nunca adivina: con varias candidatas devuelve null. El token solo viaja al
+   * correo de la propia cuenta, así que resolverla no expone nada al
+   * solicitante.
+   */
+  private async resolvePasswordRecoveryAccount(
+    email: string,
+    vlink?: string,
+  ): Promise<{ id: number; email: string | null; first_name: string } | null> {
+    const slug = vlink?.trim();
+
+    if (slug) {
+      const organization = await this.prismaService.organizations.findUnique({
+        where: { slug },
+      });
+
+      if (organization) {
+        const orgUser = await this.prismaService.users.findFirst({
+          where: {
+            email: emailEquals(email),
+            organization_id: organization.id,
+          },
+        });
+        if (orgUser) return orgUser;
+      } else {
+        const stores = await this.prismaService.stores.findMany({
+          where: { slug },
+          select: { organization_id: true },
+        });
+        const organizationIds = [
+          ...new Set(stores.map((store) => store.organization_id)),
+        ];
+
+        if (organizationIds.length > 0) {
+          const storeAccounts = await this.prismaService.users.findMany({
+            where: {
+              email: emailEquals(email),
+              organization_id: { in: organizationIds },
+              state: { notIn: ['suspended', 'archived'] },
+            },
+          });
+          if (storeAccounts.length === 1) return storeAccounts[0];
+        }
+      }
+    }
+
+    const lookup = await this.findUserAccountsByEmail(email);
+    return lookup.matchType === 'single_account' ? lookup.user : null;
+  }
+
+  /**
+   * Envía el correo de restablecimiento sin propagar fallos del proveedor.
+   *
+   * Los providers devuelven `{ success: false }` en vez de lanzar; antes ese
+   * resultado se ignoraba y la auditoría registraba `email_sent: true` aunque
+   * el correo no hubiera salido (QUI-943). El log usa el id de usuario, nunca
+   * el email, y la respuesta al cliente sigue siendo la genérica.
+   *
+   * @returns true solo si el proveedor confirmó el envío.
+   */
+  private async deliverPasswordResetEmail(
+    user: { id: number; email: string | null; first_name: string },
+    token: string,
+    flow: 'forgotPassword' | 'forgotPasswordCustomer',
+    options?: PasswordResetEmailOptions,
+  ): Promise<boolean> {
+    if (!user.email) {
+      this.logger.warn(`${flow}: user ${user.id} has no email — reset not sent`);
+      return false;
+    }
+
+    try {
+      const result = await this.emailService.sendPasswordResetEmail(
+        user.email,
+        token,
+        user.first_name,
+        options,
+      );
+
+      if (!result?.success) {
+        this.logger.error(
+          `${flow}: reset email for user ${user.id} was not sent: ${result?.error ?? 'unknown provider error'}`,
+        );
+        return false;
+      }
+      return true;
+    } catch (error) {
+      this.logger.error(
+        `${flow}: reset email for user ${user.id} failed: ${error instanceof Error ? error.message : String(error)}`,
+      );
+      return false;
+    }
   }
 
   /**
@@ -2888,15 +2968,13 @@ export class AuthService {
     // 6. Branding de la tienda para personalizar el email
     const branding = await this.emailBrandingService.getStoreBranding(store_id);
 
-    // 7. Enviar email de recuperación (solo si el usuario tiene correo)
-    if (user.email) {
-      await this.emailService.sendPasswordResetEmail(
-        user.email,
-        token,
-        user.first_name,
-        { resetUrl, branding, storeName: store.name },
-      );
-    }
+    // 7. Enviar email de recuperación (fallos del proveedor quedan en log)
+    const emailSent = await this.deliverPasswordResetEmail(
+      user,
+      token,
+      'forgotPasswordCustomer',
+      { resetUrl, branding, storeName: store.name },
+    );
 
     // 8. Registrar auditoría de solicitud de recuperación
     await this.auditService.logAuth(
@@ -2905,7 +2983,7 @@ export class AuthService {
       {
         method: 'forgot_password_customer_request',
         success: true,
-        email_sent: true,
+        email_sent: emailSent,
       },
       undefined, // IP no disponible en este contexto
       undefined, // User-Agent no disponible en este contexto
@@ -3617,10 +3695,10 @@ export class AuthService {
     const { password, ...userWithoutPassword } = user as any;
     const roles = userRoles.map((ur) => ur.roles?.name).filter(Boolean);
 
-    return {
+    return signUserAvatar(this.s3Service, {
       ...userWithoutPassword,
       roles,
-    };
+    });
   }
 
   async getUserSessions(user_id: number) {
@@ -4064,12 +4142,7 @@ export class AuthService {
               },
             },
           },
-          domain_settings: {
-            where: {
-              is_primary: true,
-              status: 'active',
-            },
-          },
+          domain_settings: STORE_AUTH_DOMAINS_INCLUDE,
         },
       });
 

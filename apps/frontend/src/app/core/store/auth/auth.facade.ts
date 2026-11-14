@@ -155,6 +155,13 @@ export class AuthFacade {
   readonly userDomainHostname$ = this.store.select(
     AuthSelectors.selectUserDomainHostname,
   );
+  // Sidebar header link (QUI-980): store home/landing, or organization landing.
+  readonly storePublicLinkHostname$ = this.store.select(
+    AuthSelectors.selectStorePublicLinkHostname,
+  );
+  readonly organizationPublicLinkHostname$ = this.store.select(
+    AuthSelectors.selectOrganizationPublicLinkHostname,
+  );
 
   // ─── Signal parallels (Angular 20 — backward compatible) ──────────────────
   // Consumers can migrate from `| async` / `take(1)` to these signals.
@@ -400,7 +407,7 @@ export class AuthFacade {
     );
   }
 
-  forgotOwnerPassword(organization_slug: string, email: string): void {
+  forgotOwnerPassword(organization_slug: string | undefined, email: string): void {
     this.store.dispatch(
       AuthActions.forgotOwnerPassword({ organization_slug, email }),
     );

@@ -1,6 +1,8 @@
 import { Test, TestingModule } from '@nestjs/testing';
 import { ProductsBulkController } from './products-bulk.controller';
 import { ProductsBulkService } from './products-bulk.service';
+import { BulkUploadLogsService } from '../bulk-uploads/bulk-upload-logs.service';
+import { RequestContextService } from '@common/context/request-context.service';
 import { ResponseService } from '@common/responses/response.service';
 import { PermissionsGuard } from '../../auth/guards/permissions.guard';
 import { BulkProductUploadDto } from './dto';
@@ -22,6 +24,20 @@ describe('ProductsBulkController', () => {
     // `parseFile` es síncrono: convierte el buffer subido en filas antes de
     // cualquier validación.
     parseFile: jest.fn(),
+    analyzeProducts: jest.fn(),
+    uploadProductsFromSession: jest.fn(),
+  };
+
+  // QUI-1004 — registro de cargas masivas (su lógica tiene spec propio).
+  const FILE_INFO = {
+    file_name: 'products.csv',
+    file_hash: 'f'.repeat(64),
+    duplicate_of: null,
+  };
+  const mockBulkUploadLogs = {
+    describeFile: jest.fn(),
+    trackUpload: jest.fn(),
+    trackSessionPage: jest.fn(),
   };
 
   // `downloadTemplate` y `export` responden con @Res(): escriben cabeceras y
@@ -67,6 +83,10 @@ describe('ProductsBulkController', () => {
           provide: ResponseService,
           useValue: mockResponseService,
         },
+        {
+          provide: BulkUploadLogsService,
+          useValue: mockBulkUploadLogs,
+        },
       ],
     })
       .overrideGuard(PermissionsGuard)
@@ -79,6 +99,7 @@ describe('ProductsBulkController', () => {
 
     // Reset all mocks
     jest.clearAllMocks();
+    mockBulkUploadLogs.describeFile.mockResolvedValue(FILE_INFO);
   });
 
   describe('uploadProducts', () => {
@@ -697,6 +718,73 @@ describe('ProductsBulkController', () => {
         'Se encontraron errores en el archivo',
       );
       expect(mockProductsBulkService.uploadProducts).not.toHaveBeenCalled();
+    });
+  });
+
+  describe('registro de cargas masivas (QUI-1004)', () => {
+    afterEach(() => jest.restoreAllMocks());
+
+    it('analyze devuelve la huella del archivo y el aviso de carga repetida', async () => {
+      jest
+        .spyOn(RequestContextService, 'getContext')
+        .mockReturnValue({ store_id: 3 } as any);
+      const duplicate = {
+        id: 9,
+        created_at: new Date('2026-11-10T15:00:00Z'),
+        user_name: 'Ana Pérez',
+        file_name: 'products.csv',
+        status: 'completed',
+        result_reference: null,
+      };
+      mockBulkUploadLogs.describeFile.mockResolvedValue({
+        ...FILE_INFO,
+        duplicate_of: duplicate,
+      });
+      mockProductsBulkService.analyzeProducts.mockResolvedValue({
+        session_id: 's-1',
+        total_products: 2,
+      });
+      const file = { buffer: Buffer.from('x'), originalname: 'products.csv' };
+
+      await controller.analyzeProducts(file as any);
+
+      expect(mockBulkUploadLogs.describeFile).toHaveBeenCalledWith(
+        'products',
+        file.buffer,
+        'products.csv',
+      );
+      expect(mockResponseService.success).toHaveBeenCalledWith(
+        expect.objectContaining({
+          session_id: 's-1',
+          file_hash: FILE_INFO.file_hash,
+          duplicate_of: duplicate,
+        }),
+        'Análisis completado',
+      );
+    });
+
+    it('cada página confirmada suma al registro de la sesión con su archivo', async () => {
+      jest
+        .spyOn(RequestContextService, 'getContext')
+        .mockReturnValue({ store_id: 3 } as any);
+      const page = { successful: 100, failed: 0, total: 150, done: false };
+      mockProductsBulkService.uploadProductsFromSession.mockResolvedValue(page);
+      const body = {
+        session_id: 's-1',
+        offset: 0,
+        limit: 100,
+        file_name: 'products.csv',
+        file_hash: FILE_INFO.file_hash,
+      };
+
+      await controller.uploadFromSession(body as any, mockRequest as any);
+
+      expect(mockBulkUploadLogs.trackSessionPage).toHaveBeenCalledWith(
+        'products',
+        's-1',
+        body,
+        page,
+      );
     });
   });
 });

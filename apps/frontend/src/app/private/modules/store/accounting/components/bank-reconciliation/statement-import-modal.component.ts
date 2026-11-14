@@ -1,5 +1,6 @@
 import {Component, input, output, inject, signal, computed, ViewChild, DestroyRef} from '@angular/core';
 import { takeUntilDestroyed } from '@angular/core/rxjs-interop';
+import { firstValueFrom } from 'rxjs';
 
 import { FormsModule } from '@angular/forms';
 import {
@@ -13,6 +14,8 @@ import {
 } from '../../../../../../shared/components';
 import type { SelectorOption, StepsLineItem } from '../../../../../../shared/components';
 import { BankReconciliationService } from '../../services/bank-reconciliation.service';
+import { BulkUploadLogService } from '../../../bulk-uploads/services/bulk-upload-log.service';
+import { BulkUploadFileInfo } from '../../../bulk-uploads/bulk-upload-log.interface';
 import { BankAccount, ColumnMappingConfig } from '../../interfaces/accounting.interface';
 
 @Component({
@@ -272,6 +275,7 @@ export class StatementImportModalComponent {
   @ViewChild('dropzone') dropzoneRef!: FileUploadDropzoneComponent;
 
   private reconciliationService = inject(BankReconciliationService);
+  private bulkUploadLog = inject(BulkUploadLogService);
   private toastService = inject(ToastService);
 
   steps: StepsLineItem[] = [
@@ -452,11 +456,25 @@ export class StatementImportModalComponent {
     this.currentStep.set(2);
   }
 
-  executeImport(): void {
+  async executeImport(): Promise<void> {
     const file = this.selectedFile();
     if (!file || !this.selectedAccountId) return;
 
+    // QUI-1004: preview tells whether this store already imported this file.
+    // A failed preview must not block the import itself.
+    if (this.importing()) return;
     this.importing.set(true);
+    const accountId = this.selectedAccountId;
+    const duplicate = await firstValueFrom(
+      this.reconciliationService.previewImport(accountId, file),
+    )
+      .then((res) => (res.data as BulkUploadFileInfo | undefined)?.duplicate_of ?? null)
+      .catch(() => null);
+    if (!(await this.bulkUploadLog.confirmDuplicate(duplicate))) {
+      this.importing.set(false);
+      return;
+    }
+
     this.reconciliationService.importStatement(this.selectedAccountId, file).pipe(takeUntilDestroyed(this.destroyRef)).subscribe({
       next: (res) => {
         this.importing.set(false);

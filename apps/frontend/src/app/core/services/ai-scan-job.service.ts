@@ -33,11 +33,16 @@ export interface AiScanJobOptions {
   timeoutMs?: number;
   /** Aviso de lentitud (ms). Por defecto 60_000. */
   stallMs?: number;
+  /**
+   * Recibe el `data` de la respuesta del encolado (además de `job_id`, p. ej.
+   * la huella del archivo para el registro de cargas masivas, QUI-1004).
+   */
+  onEnqueued?: (data: Record<string, unknown>) => void;
 }
 
 interface EnqueueEnvelope {
   success?: boolean;
-  data?: { job_id?: string };
+  data?: { job_id?: string } & Record<string, unknown>;
   message?: string;
 }
 
@@ -64,6 +69,7 @@ export class AiScanJobService {
       map((response) => {
         const jobId = response?.data?.job_id;
         if (!jobId) throw new Error('No se pudo iniciar el escaneo');
+        opts?.onEnqueued?.(response.data ?? {});
         return jobId;
       }),
       switchMap((jobId) => {

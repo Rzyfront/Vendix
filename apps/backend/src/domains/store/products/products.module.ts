@@ -1,4 +1,5 @@
 import { Module, OnModuleInit } from '@nestjs/common';
+import { BulkUploadsModule } from '../bulk-uploads/bulk-uploads.module';
 import { AIToolRegistry } from '../../../ai-engine/tools/ai-tool-registry';
 import { createProductTools } from '../../../ai-engine/tools/domains/products.tools';
 import { createVariantTools } from '../../../ai-engine/tools/domains/variants.tools';
@@ -42,6 +43,7 @@ import { AccountingModule } from '../accounting/accounting.module';
 @Module({
   imports: [
     ResponseModule,
+    BulkUploadsModule,
     InventoryModule,
     PrismaModule,
     S3Module,

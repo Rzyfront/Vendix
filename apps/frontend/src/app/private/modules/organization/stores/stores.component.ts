@@ -59,7 +59,8 @@ import {
   FilterConfig,
   FilterValues,
   DropdownAction,
-  IconComponent} from '../../../../shared/components/index';
+  IconComponent,
+  PaginationComponent} from '../../../../shared/components/index';
 
 @Component({
   selector: 'app-stores',
@@ -77,6 +78,7 @@ import {
     InputsearchComponent,
     ResponsiveDataViewComponent,
     OptionsDropdownComponent,
+    PaginationComponent,
   ],
   template: `
     <div class="space-y-4">
@@ -135,6 +137,22 @@ import {
         </div>
       }
 
+      @if (failedStoresText()) {
+        <div
+          class="flex items-start gap-3 p-3 rounded-lg bg-warning-light border border-warning/30"
+          role="status"
+        >
+          <app-icon
+            name="alert-triangle"
+            [size]="16"
+            class="text-warning shrink-0 mt-0.5"
+          ></app-icon>
+          <p class="text-xs text-text-secondary leading-relaxed">
+            {{ failedStoresText() }}
+          </p>
+        </div>
+      }
+
       <!-- Stores List -->
       <div class="bg-surface rounded-card shadow-card border border-border overflow-visible">
         <div class="px-6 py-4 border-b border-border">
@@ -143,7 +161,7 @@ import {
           >
             <div class="flex-1 min-w-0">
               <h2 class="text-lg font-semibold text-text-primary">
-                Todas las tiendas ({{ stores().length }})
+                Todas las tiendas ({{ pagination().total }})
               </h2>
             </div>
 
@@ -213,6 +231,16 @@ import {
               (rowClick)="viewStore($event)"
             >
             </app-responsive-data-view>
+            <div class="mt-4 flex justify-center">
+              <app-pagination
+                [currentPage]="pagination().page"
+                [totalPages]="pagination().totalPages"
+                [total]="pagination().total"
+                [limit]="pagination().limit"
+                infoStyle="none"
+                (pageChange)="onPageChange($event)"
+              />
+            </div>
           </div>
         }
       </div>
@@ -269,6 +297,8 @@ export class StoresComponent implements OnInit {
 
   readonly stores = signal<StoreListItem[]>([]);
   readonly isLoading = signal(false);
+  // Server-side pagination: the API pages at 10 by default (QUI-984).
+  readonly pagination = signal({ page: 1, limit: 10, total: 0, totalPages: 0 });
   readonly profitLoss = signal<OrganizationProfitLossSummary | null>(null);
   readonly statsLoading = signal(false);
   readonly ingresosSubText = computed(() =>
@@ -290,6 +320,13 @@ export class StoresComponent implements OnInit {
   readonly incompleteCostText = computed(() =>
     buildIncompleteCostText(this.profitLoss()),
   );
+  // QUI-987: una tienda que falla no tumba las tarjetas; se avisa cuál quedó fuera.
+  readonly failedStoresText = computed(() => {
+    const failed = this.profitLoss()?.failed_stores ?? [];
+    if (failed.length === 0) return '';
+    const names = failed.map((store) => store.name).join(', ');
+    return `No se pudieron incluir en las estadísticas: ${names}. Las cifras corresponden al resto de tiendas.`;
+  });
   readonly searchTerm = signal('');
   readonly selectedState = signal('');
   readonly selectedStoreType = signal('');
@@ -553,7 +590,10 @@ openCreateStoreModal(): void {
   loadStores(): void {
     this.isLoading.set(true);
 
+    const { page, limit } = this.pagination();
     const query = {
+      page,
+      limit,
       ...(this.searchTerm() && { search: this.searchTerm() }),
       ...(this.selectedState() && {
         is_active:
@@ -565,9 +605,25 @@ openCreateStoreModal(): void {
       ...(this.selectedStoreType() && {
         store_type: this.selectedStoreType() as StoreType})};
 
-    this.storesService.getStores(query).subscribe({
+    this.storesService
+      .getStores(query)
+      .pipe(takeUntilDestroyed(this.destroyRef))
+      .subscribe({
       next: (response) => {
         if (response.success && response.data) {
+          const total = response.meta?.total ?? response.data.length;
+          const totalPages = response.meta?.totalPages ?? 1;
+          // The current page can become empty after a delete or a filter
+          // change: step back to the last page that still has stores.
+          if (response.data.length === 0 && page > 1 && totalPages > 0) {
+            this.pagination.update((pg) => ({
+              ...pg,
+              page: Math.min(page - 1, totalPages),
+            }));
+            this.loadStores();
+            return;
+          }
+          this.pagination.update((pg) => ({ ...pg, total, totalPages }));
           this.stores.set(
             response.data.map((store: any) => ({
               id: store.id,
@@ -594,6 +650,7 @@ openCreateStoreModal(): void {
           );
         } else {
           this.stores.set([]);
+          this.pagination.update((pg) => ({ ...pg, total: 0, totalPages: 0 }));
         }
         this.isLoading.set(false);
       },
@@ -634,21 +691,25 @@ openCreateStoreModal(): void {
     this.selectedState.set('');
     this.selectedStoreType.set('');
     this.filterValues.set({});
+    this.resetToFirstPage();
     this.loadStores();
   }
 
   onSearchChange(searchTerm: string): void {
     this.searchTerm.set(searchTerm);
+    this.resetToFirstPage();
     this.loadStores();
   }
 
   onStoreTypeChange(event: any): void {
     this.selectedStoreType.set(event.target.value);
+    this.resetToFirstPage();
     this.loadStores();
   }
 
   onStateChange(event: any): void {
     this.selectedState.set(event.target.value);
+    this.resetToFirstPage();
     this.loadStores();
   }
 
@@ -656,7 +717,17 @@ openCreateStoreModal(): void {
     this.filterValues.set({ ...values });
     this.selectedStoreType.set((values['store_type'] as string) || '');
     this.selectedState.set((values['state'] as string) || '');
+    this.resetToFirstPage();
     this.loadStores();
+  }
+
+  onPageChange(page: number): void {
+    this.pagination.update((pg) => ({ ...pg, page }));
+    this.loadStores();
+  }
+
+  private resetToFirstPage(): void {
+    this.pagination.update((pg) => ({ ...pg, page: 1 }));
   }
 
   onActionClick(action: string): void {
@@ -790,9 +861,8 @@ openCreateStoreModal(): void {
       .subscribe({
         next: (response) => {
           if (response.success) {
-            this.stores.update((list) =>
-              list.filter((s) => s.id !== this.selectedStoreForDelete()!.id),
-            );
+            // Reload the page so the total and the next store shift in.
+            this.loadStores();
             this.loadStats();
             this.toastService.success('Tienda eliminada exitosamente');
             this.isDeleteModalOpen.set(false);

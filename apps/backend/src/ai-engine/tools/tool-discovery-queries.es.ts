@@ -3108,4 +3108,42 @@ export const TOOL_DISCOVERY_QUERIES_ES: Readonly<
     'Chequee que los roles del flujo sí existan en la tienda',
     'Qué errores tiene la definición del flujo 12',
   ],
+  // QUI-580 — bitácora personal de recordatorios (escritas a mano, sin datos de clientes).
+  complete_reminder: [
+    'Ya revisé el stock, marca ese recordatorio como hecho',
+    'Listo lo del proveedor, tacha ese pendiente',
+    'Marca como hecho el recordatorio de llamar al banco',
+    'Ese recordatorio ya lo cumplí, ciérralo',
+    'Vuelve a dejar pendiente el recordatorio que marqué por error',
+  ],
+  create_reminder: [
+    'Recuérdame mañana a las 9 llamar al proveedor de lácteos',
+    'Recuérdame hoy a las 5 pm revisar el stock de Coca-Cola',
+    'Anota en mi bitácora que el viernes debo pagar el arriendo',
+    'Ponme un recordatorio para revisar las ventas del mes el lunes',
+    'Agéndame un pendiente: cobrarle a ese cliente la otra semana',
+    'Crea un recordatorio para hacer seguimiento a la orden 1050',
+    'No se me puede olvidar pedir más bolsas, déjame una nota',
+  ],
+  delete_reminder: [
+    'Borra el recordatorio de llamar al proveedor',
+    'Elimina ese pendiente de mi bitácora, ya no aplica',
+    'Quita el recordatorio de revisar el stock',
+    'Ya no necesito ese recordatorio, bórralo',
+  ],
+  list_reminders: [
+    '¿Qué recordatorios tengo?',
+    'Muéstrame mi bitácora de pendientes',
+    '¿Qué tengo pendiente para hoy?',
+    '¿Tengo recordatorios vencidos?',
+    'Qué me toca hacer esta semana según mis recordatorios',
+    'Muéstrame los recordatorios que ya marqué como hechos',
+  ],
+  update_reminder: [
+    'Cambia el recordatorio del proveedor para mañana a las 10',
+    'Mueve ese pendiente para el viernes',
+    'Edita el recordatorio y ponle una nota: pedir 20 cajas',
+    'Quítale la fecha a ese recordatorio',
+    'Cámbiale el título al recordatorio de las ventas',
+  ],
 };

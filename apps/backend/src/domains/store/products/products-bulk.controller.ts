@@ -19,6 +19,7 @@ import {
 import { Response } from 'express';
 import { FileInterceptor } from '@nestjs/platform-express';
 import { ProductsBulkService } from './products-bulk.service';
+import { BulkUploadLogsService } from '../bulk-uploads/bulk-upload-logs.service';
 import { ResponseService } from '@common/responses/response.service';
 import { VendixHttpException, ErrorCodes } from '@common/errors';
 import { PermissionsGuard } from '../../auth/guards/permissions.guard';
@@ -42,6 +43,7 @@ export class ProductsBulkController {
   constructor(
     private readonly productsBulkService: ProductsBulkService,
     private readonly responseService: ResponseService,
+    private readonly bulkUploadLogs: BulkUploadLogsService,
   ) {}
 
   /**
@@ -189,6 +191,13 @@ export class ProductsBulkController {
         { products: validationResult.validProducts },
         req.user,
       );
+    // QUI-1004 — una fila en el registro de cargas masivas de la tienda.
+    const fileInfo = await this.bulkUploadLogs.describeFile(
+      'products',
+      file.buffer,
+      file.originalname,
+    );
+    await this.bulkUploadLogs.trackUpload('products', fileInfo, uploadResult);
 
     if (uploadResult.failed > 0) {
       return this.responseService.created(
@@ -233,8 +242,17 @@ export class ProductsBulkController {
       file.buffer,
       storeId,
     );
+    // QUI-1004 — huella del archivo y aviso si esta tienda ya lo cargó.
+    const fileInfo = await this.bulkUploadLogs.describeFile(
+      'products',
+      file.buffer,
+      file.originalname,
+    );
 
-    return this.responseService.success(result, 'Análisis completado');
+    return this.responseService.success(
+      { ...result, ...fileInfo },
+      'Análisis completado',
+    );
   }
 
   /**
@@ -266,6 +284,12 @@ export class ProductsBulkController {
         req.user,
         { offset: body.offset, limit: body.limit },
         { initialLoadAck: body.initial_load_ack === true },
+      );
+      await this.bulkUploadLogs.trackSessionPage(
+        'products',
+        body.session_id,
+        body,
+        result,
       );
 
       if (result.failed > 0) {

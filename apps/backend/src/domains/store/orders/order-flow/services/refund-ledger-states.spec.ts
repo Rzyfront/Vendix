@@ -172,7 +172,7 @@ describe('RefundCoverageLedger — estados LEDGER (M2 fix-forward)', () => {
           { provide: RequestContextService, useValue: { getUserId: () => 1 } },
           { provide: StockLevelManager, useValue: { updateStock: jest.fn() } },
           { provide: SettingsService, useValue: {} },
-          { provide: SessionsService, useValue: {} },
+          { provide: SessionsService, useValue: { assertSessionForSales: jest.fn() } },
           { provide: MovementsService, useValue: { recordRefundCashMovementDurable: jest.fn() } },
           {
             provide: SerialNumberEnforcementService,

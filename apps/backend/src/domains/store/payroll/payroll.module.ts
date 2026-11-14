@@ -1,4 +1,5 @@
 import { Module, OnModuleInit } from '@nestjs/common';
+import { BulkUploadsModule } from '../bulk-uploads/bulk-uploads.module';
 import { AIToolRegistry } from '../../../ai-engine/tools/ai-tool-registry';
 import { createPayrollTools } from '../../../ai-engine/tools/domains/payroll.tools';
 import { ResponseModule } from '../../../common/responses/response.module';
@@ -37,6 +38,7 @@ import { DaviviendaBatchBuilder } from './bank-export/builders/davivienda-batch.
 @Module({
   imports: [
     ResponseModule,
+    BulkUploadsModule,
     PrismaModule,
     S3Module,
     PayrollProviderModule.register(),

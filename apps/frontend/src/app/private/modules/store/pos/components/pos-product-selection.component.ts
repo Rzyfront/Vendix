@@ -63,6 +63,7 @@ import {
   priceUnitLabel,
   weighMaxFor,
 } from '../utils/manual-weigh.util';
+import { availableStockLabel } from '../utils/product-card-stock.util';
 import { PosRestaurantIntegrationService } from '../services/pos-restaurant-integration.service';
 import { PosVariantSelectorComponent } from './pos-variant-selector/pos-variant-selector.component';
 import { AuthFacade } from '../../../../../core/store/auth/auth.facade';
@@ -505,10 +506,11 @@ function isMultiTokenQuery(query: string): boolean {
                         Últimas {{ product.stock }}
                       </span>
                     } @else {
+                      <!-- QUI-986: con inventario muestra la cantidad, como en escritorio. -->
                       <span
                         class="text-[9px] font-semibold text-emerald-700 bg-emerald-50 border border-emerald-200 px-1.5 py-0.2 rounded-full shrink-0"
                       >
-                        Disponible
+                        {{ availableStockLabel(product) }}
                       </span>
                     }
                     @if (product.active_promotion) {
@@ -1246,6 +1248,8 @@ export class PosProductSelectionComponent {
   }
   readonly allowManualWeightEntry = signal(true);
   readonly lowStockThreshold = signal(10);
+  /** QUI-986: label of the mobile card's availability badge. */
+  readonly availableStockLabel = availableStockLabel;
   readonly allowNegativeStock = computed(() => this.cartService.allowNegativeStock());
 
   // Filter configuration for the options dropdown

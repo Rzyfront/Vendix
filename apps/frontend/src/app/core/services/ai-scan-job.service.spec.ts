@@ -41,6 +41,20 @@ describe('AiScanJobService', () => {
     expect(out).toEqual([{ a: 1 }]);
   }));
 
+  it('hands the enqueue data (file fingerprint) to onEnqueued (QUI-1004)', fakeAsync(() => {
+    const seen: Record<string, unknown>[] = [];
+    service
+      .enqueueAndWait(URL, new FormData(), { onEnqueued: (d) => seen.push(d) })
+      .subscribe();
+    http.expectOne(URL).flush({
+      success: true,
+      data: { job_id: 'job-1', file_hash: 'h', file_name: 'f.pdf' },
+    });
+    tick(0);
+    http.expectOne(POLL).flush({ status: 'completed', result: {} });
+    expect(seen).toEqual([{ job_id: 'job-1', file_hash: 'h', file_name: 'f.pdf' }]);
+  }));
+
   it('fails when job_id is missing', fakeAsync(() => {
     let err: Error | undefined;
     service.enqueueAndWait(URL, {}).subscribe({ error: (e) => (err = e) });

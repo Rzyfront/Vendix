@@ -1,4 +1,5 @@
 import { Module, OnModuleInit } from '@nestjs/common';
+import { BulkUploadsModule } from '../bulk-uploads/bulk-uploads.module';
 import { MembershipsController } from './memberships.controller';
 import { MemberProfilesController } from './member-profiles.controller';
 import { MemberBulkScannerController } from './member-bulk-scanner.controller';
@@ -39,6 +40,7 @@ import { createMembershipTools } from '../../../ai-engine/tools/domains/membersh
     PaymentsModule,
     OrderFlowModule,
     CustomersModule,
+    BulkUploadsModule,
   ],
   controllers: [
     MembershipsController,

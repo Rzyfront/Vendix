@@ -99,7 +99,7 @@ describe('RefundFlowService — gate de platos (paso 6, CP-REFUND-FLOW-REDESIGN)
       { provide: RequestContextService, useValue: {} },
       { provide: StockLevelManager, useValue: stockLevelManager },
       { provide: SettingsService, useValue: {} },
-      { provide: SessionsService, useValue: {} },
+      { provide: SessionsService, useValue: { assertSessionForSales: jest.fn() } },
       { provide: MovementsService, useValue: {} },
       { provide: SerialNumberEnforcementService, useValue: {} },
       { provide: InventorySerialNumbersService, useValue: {} },
