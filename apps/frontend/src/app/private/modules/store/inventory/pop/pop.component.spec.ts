@@ -28,6 +28,7 @@ describe('PopComponent — QUI-855 puntos de entrada', () => {
   let poService: { createPurchaseOrder: jasmine.Spy };
   let toast: { success: jasmine.Spy; warning: jasmine.Spy; error: jasmine.Spy; info: jasmine.Spy };
   let component: PopComponent;
+  let bulkLog: { register: jasmine.Spy };
 
   function makeState(over: Record<string, unknown> = {}): any {
     return {
@@ -58,6 +59,7 @@ describe('PopComponent — QUI-855 puntos de entrada', () => {
       error: jasmine.createSpy('error'),
       info: jasmine.createSpy('info'),
     };
+    bulkLog = { register: jasmine.createSpy('register').and.returnValue(of(true)) };
     TestBed.configureTestingModule({
       providers: [
         { provide: PopCartService, useValue: cart },
@@ -70,7 +72,7 @@ describe('PopComponent — QUI-855 puntos de entrada', () => {
         { provide: AuthFacade, useValue: { getUserId: () => 1 } },
         { provide: DispatchNotesService, useValue: {} },
         { provide: VexiUiHostRegistry, useValue: { register: () => undefined, unregister: () => undefined } },
-        { provide: BulkUploadLogService, useValue: { register: () => of(true) } },
+        { provide: BulkUploadLogService, useValue: bulkLog },
       ],
     });
     TestBed.overrideComponent(PopComponent, { set: { template: '', imports: [] } });
@@ -325,6 +327,38 @@ describe('PopComponent — QUI-855 puntos de entrada', () => {
       component.orderResult.set({ id: 774, total: 0, orderNumber: 'PO-774' });
       component.onCheckoutCancelled();
       expect(component.orderResult()?.id).toBe(774);
+    });
+  });
+
+  describe('QUI-1004 — varias cargas masivas en el mismo carrito', () => {
+    const row = (name: string, sku: string) => ({ name, sku, quantity: 2, cost: 1000 });
+    const upload = (file_name: string, file_hash: string, rows: object[], failed_rows = 0) => ({
+      items: rows,
+      summary: { file_name, file_hash, total_rows: rows.length + failed_rows, failed_rows },
+    });
+
+    beforeEach(() => {
+      cart.addPrebulkItems = jasmine.createSpy('addPrebulkItems').and.returnValue(of(null));
+    });
+
+    it('dos archivos antes de crear la OC quedan ambos registrados contra la misma orden', () => {
+      component.onBulkDataReceived(upload('a.xlsx', 'a'.repeat(64), [row('Uno', 'U1'), row('Dos', 'D2')], 1));
+      component.onBulkDataReceived(upload('b.xlsx', 'b'.repeat(64), [row('Tres', 'T3')]));
+
+      const summary = (component as any)._recordBulkUpload({ order_number: 'PO-900' });
+
+      expect(bulkLog.register).toHaveBeenCalledTimes(2);
+      const [first, second] = bulkLog.register.calls.allArgs().map((args) => args[0]);
+      expect(first).toEqual(jasmine.objectContaining({
+        file_name: 'a.xlsx', total_rows: 3, successful_rows: 2, failed_rows: 1, result_reference: 'PO-900',
+      }));
+      expect(second).toEqual(jasmine.objectContaining({
+        file_name: 'b.xlsx', total_rows: 1, successful_rows: 1, failed_rows: 0, result_reference: 'PO-900',
+      }));
+      expect(summary).toBe('Carga masiva: 3 cargadas · 1 con error · 0 omitidas · orden PO-900.');
+      // Registra una sola vez por carga.
+      expect((component as any)._recordBulkUpload({ order_number: 'PO-901' })).toBeNull();
+      expect(bulkLog.register).toHaveBeenCalledTimes(2);
     });
   });
 });

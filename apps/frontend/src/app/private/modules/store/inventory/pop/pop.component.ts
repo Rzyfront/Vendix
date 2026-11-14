@@ -380,18 +380,19 @@ export class PopComponent implements OnInit, OnDestroy {
   private bulkUploadLog = inject(BulkUploadLogService);
 
   /**
-   * QUI-1004 — carga masiva que llenó el carrito y aún no termina en una OC.
-   * Se registra (una fila) al terminar la orden, con su número; se descarta
-   * si el operador vacía el carrito.
+   * QUI-1004 — cargas masivas que llenaron el carrito y aún no terminan en una
+   * OC. Cada archivo se registra (una fila por carga) al terminar la orden,
+   * con su número; se descartan si el operador vacía el carrito. Es una
+   * lista: dos archivos subidos al mismo carrito quedan ambos en el registro.
    */
-  private pendingBulkUpload:
-    | (PopBulkImportSummary & {
-        valid_rows: number;
-        loaded_rows: number;
-        /** Cargadas cuyo producto no existía: se crean con la orden. */
-        created_rows: number;
-      })
-    | null = null;
+  private pendingBulkUploads: Array<
+    PopBulkImportSummary & {
+      valid_rows: number;
+      loaded_rows: number;
+      /** Cargadas cuyo producto no existía: se crean con la orden. */
+      created_rows: number;
+    }
+  > = [];
   private vexiHosts = inject(VexiUiHostRegistry);
   private dispatchNotesService = inject(DispatchNotesService);
   /**
@@ -1680,12 +1681,12 @@ export class PopComponent implements OnInit, OnDestroy {
         });
     });
 
-    this.pendingBulkUpload = {
+    this.pendingBulkUploads.push({
       ...event.summary,
       valid_rows: items.length,
       loaded_rows: requests.length,
       created_rows: createdRows,
-    };
+    });
 
     if (requests.length > 0) {
       this.popCartService
@@ -1865,7 +1866,7 @@ export class PopComponent implements OnInit, OnDestroy {
       // no corresponde a esa OC y reanudar su recepción ignoraría la compra nueva.
       this.pendingReceptionOrder.set(null);
       // QUI-1004 — la carga masiva vaciada no terminó en ninguna orden.
-      this.pendingBulkUpload = null;
+      this.pendingBulkUploads = [];
       this.popCartService.clearCart().pipe(takeUntilDestroyed(this.destroyRef)).subscribe({
         next: () => {
           this.toastService.info('Orden vaciada');
@@ -3067,30 +3068,39 @@ export class PopComponent implements OnInit, OnDestroy {
    * creados) · M con error · K omitidas»). Cargadas = filas que entraron al
    * carrito; creados = cargadas cuyo producto no existía; con error = filas
    * omitidas por error en la revisión; omitidas = filas válidas que no
-   * llegaron al carrito. Registra una sola vez por carga.
+   * llegaron al carrito. Registra una sola vez por carga; con varios archivos
+   * en el mismo carrito registra una fila por archivo y suma el resumen.
    */
   private _recordBulkUpload(
     order: { order_number?: string } | null | undefined,
     accessoryStepFailed = false,
   ): string | null {
-    const pending = this.pendingBulkUpload;
-    if (!pending || !order) return null;
-    this.pendingBulkUpload = null;
+    const pendingUploads = this.pendingBulkUploads;
+    if (pendingUploads.length === 0 || !order) return null;
+    this.pendingBulkUploads = [];
 
-    const successful_rows = pending.loaded_rows;
-    const skipped_rows = Math.max(0, pending.valid_rows - pending.loaded_rows);
     const reference = order.order_number ?? '';
-    if (pending.file_hash) {
+    let successful_rows = 0;
+    let created_rows = 0;
+    let failed_rows = 0;
+    let skipped_rows = 0;
+    for (const pending of pendingUploads) {
+      const fileSkipped = Math.max(0, pending.valid_rows - pending.loaded_rows);
+      successful_rows += pending.loaded_rows;
+      created_rows += pending.created_rows;
+      failed_rows += pending.failed_rows;
+      skipped_rows += fileSkipped;
+      if (!pending.file_hash) continue;
       this.bulkUploadLog
         .register({
           upload_type: 'purchase_orders',
           file_name: pending.file_name,
           file_hash: pending.file_hash,
           total_rows: pending.total_rows,
-          successful_rows,
+          successful_rows: pending.loaded_rows,
           created_rows: pending.created_rows,
           failed_rows: pending.failed_rows,
-          skipped_rows,
+          skipped_rows: fileSkipped,
           accessory_step_failed: accessoryStepFailed,
           ...(reference ? { result_reference: reference } : {}),
         })
@@ -3099,10 +3109,8 @@ export class PopComponent implements OnInit, OnDestroy {
     }
     const summary =
       `Carga masiva: ${successful_rows} cargadas` +
-      (pending.created_rows > 0
-        ? ` (${pending.created_rows} productos creados)`
-        : '') +
-      ` · ${pending.failed_rows} con error · ` +
+      (created_rows > 0 ? ` (${created_rows} productos creados)` : '') +
+      ` · ${failed_rows} con error · ` +
       `${skipped_rows} omitidas${reference ? ` · orden ${reference}` : ''}` +
       (accessoryStepFailed ? ' (parcial).' : '.');
     this.toastService.info(summary, undefined, 8000);
