@@ -30,7 +30,10 @@ import { ManualRefundDeliveryService } from '../../../accounting/auto-entries/ma
 describe('RefundFlowService — gate de caja durable (paso 4, CP-REFUND-FLOW-REDESIGN)', () => {
   let service: RefundFlowService;
   let settingsService: { getSettings: jest.Mock };
-  let sessionsService: { getActiveSession: jest.Mock };
+  let sessionsService: {
+    getActiveSession: jest.Mock;
+    assertSessionForSales: jest.Mock;
+  };
   let movementsService: { recordRefundCashMovementDurable: jest.Mock };
 
   const cashInput = (over: any = {}) => ({

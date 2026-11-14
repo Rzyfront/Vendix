@@ -38,6 +38,7 @@ function setup() {
     order_installments: { findFirst: jest.fn().mockResolvedValue(null), findMany: jest.fn().mockResolvedValue([]) },
     agreement_installments: { findFirst: jest.fn().mockResolvedValue(null) },
     ar_payments: { create: jest.fn().mockResolvedValue({ id: 80 }) },
+    payments: { findMany: jest.fn().mockResolvedValue([]) },
     $executeRawUnsafe: jest.fn().mockResolvedValue(0),
   };
   const prisma = {

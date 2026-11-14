@@ -2257,10 +2257,16 @@ export class RefundFlowService {
         where: { type: 'refund', payment_id: { in: payments.map((p) => p.id) } },
         _sum: { amount: true },
       });
-      const refunded = new Map(
+      const refunded = new Map<number, number>(
         rows
           .filter((r) => r.payment_id != null)
-          .map((r) => [r.payment_id as number, Number(r._sum.amount ?? 0)]),
+          .map(
+            (r) =>
+              [r.payment_id as number, Number(r._sum.amount ?? 0)] as [
+                number,
+                number,
+              ],
+          ),
       );
       return payments.map(
         (p) => Number(p.amount ?? 0) - (refunded.get(p.id) ?? 0),
