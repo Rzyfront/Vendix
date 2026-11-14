@@ -25,6 +25,7 @@ describe('InventoryAdjustmentsController.scanCountAsync', () => {
       scanner,
       jobs,
       response,
+      {} as any,
     );
   });
 

@@ -11,6 +11,7 @@ import { DialogService } from '../../../../../shared/components/dialog/dialog.se
 import { AuthFacade } from '../../../../../core/store/auth/auth.facade';
 import { DispatchNotesService } from '../../dispatch-notes/services/dispatch-notes.service';
 import { VexiUiHostRegistry } from '../../../../../core/services/vexi-ui-host.registry';
+import { BulkUploadLogService } from '../../bulk-uploads/services/bulk-upload-log.service';
 import type {
   InvoiceMatchResult,
   InvoiceScanResult,
@@ -69,6 +70,7 @@ describe('PopComponent — QUI-855 puntos de entrada', () => {
         { provide: AuthFacade, useValue: { getUserId: () => 1 } },
         { provide: DispatchNotesService, useValue: {} },
         { provide: VexiUiHostRegistry, useValue: { register: () => undefined, unregister: () => undefined } },
+        { provide: BulkUploadLogService, useValue: { register: () => of(true) } },
       ],
     });
     TestBed.overrideComponent(PopComponent, { set: { template: '', imports: [] } });
