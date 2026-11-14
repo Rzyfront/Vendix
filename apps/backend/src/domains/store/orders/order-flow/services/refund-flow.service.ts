@@ -198,24 +198,27 @@ export function allocateRefundAcrossPayments(
 
 /**
  * QUI-893 — ¿este reembolso saca billetes del cajón? Espejo de
- * `buildRefundMovementTramos`: con canal efectivo `cash` siempre; con
- * `original_payment` y varios pagos, el reparto toma primero los pagos en
- * efectivo, así que basta con que uno lo sea. Pasarela, transferencia y saldo
- * interno no tocan el cajón y no exigen caja abierta.
+ * `buildRefundMovementTramos`: con `original_payment` y varios pagos manda el
+ * reparto, que toma primero los pagos en efectivo CON capacidad restante
+ * (`remaining[i]`, monto del pago menos lo ya reembolsado; sin dato se asume
+ * capacidad). Si el efectivo ya se devolvió completo, el reparto va a los
+ * otros pagos y no toca el cajón. En otro caso decide el canal: `cash` toca el
+ * cajón; pasarela, transferencia y saldo interno no.
  */
 export function refundTouchesCashDrawer(
   refundMethod: string,
   effectiveChannel: EffectiveRefundChannel,
   paymentTypes: ReadonlyArray<string | null>,
+  remaining?: ReadonlyArray<number>,
 ): boolean {
-  if (effectiveChannel === 'cash') return true;
-  return (
-    refundMethod === 'original_payment' &&
-    paymentTypes.length > 1 &&
-    paymentTypes.some(
-      (type) => resolveEffectiveRefundChannel('original_payment', type) === 'cash',
-    )
-  );
+  if (refundMethod === 'original_payment' && paymentTypes.length > 1) {
+    return paymentTypes.some(
+      (type, index) =>
+        resolveEffectiveRefundChannel('original_payment', type) === 'cash' &&
+        (remaining?.[index] ?? Number.POSITIVE_INFINITY) > 0,
+    );
+  }
+  return effectiveChannel === 'cash';
 }
 
 /**
@@ -939,6 +942,7 @@ export class RefundFlowService {
         dto.refund_method,
         effectiveChannel,
         channelPayments.map(paymentTypeOf),
+        await this.remainingRefundCapacity(dto.refund_method, channelPayments),
       )
     ) {
       await this.sessionsService.assertSessionForSales(userId);
@@ -2234,6 +2238,38 @@ export class RefundFlowService {
    * `original_payment`: reparto con `allocateRefundAcrossPayments`, cuya
    * capacidad por pago descuenta lo ya devuelto según el libro de caja.
    */
+  /**
+   * QUI-893 — capacidad restante por pago (monto − movimientos `refund` ya
+   * asentados), la misma lectura de `buildRefundMovementTramos`, solo cuando el
+   * reparto aplica (`original_payment` con varios pagos). Si la lectura falla
+   * se devuelve `undefined`: el gate asume capacidad (conservador).
+   */
+  private async remainingRefundCapacity(
+    refundMethod: string,
+    payments: ReadonlyArray<{ id: number; amount?: unknown }>,
+  ): Promise<number[] | undefined> {
+    if (refundMethod !== 'original_payment' || payments.length <= 1) {
+      return undefined;
+    }
+    try {
+      const rows = await this.prisma.cash_register_movements.groupBy({
+        by: ['payment_id'],
+        where: { type: 'refund', payment_id: { in: payments.map((p) => p.id) } },
+        _sum: { amount: true },
+      });
+      const refunded = new Map(
+        rows
+          .filter((r) => r.payment_id != null)
+          .map((r) => [r.payment_id as number, Number(r._sum.amount ?? 0)]),
+      );
+      return payments.map(
+        (p) => Number(p.amount ?? 0) - (refunded.get(p.id) ?? 0),
+      );
+    } catch {
+      return undefined;
+    }
+  }
+
   private async buildRefundMovementTramos(input: {
     refundMethod: string;
     effectiveChannel: EffectiveRefundChannel;

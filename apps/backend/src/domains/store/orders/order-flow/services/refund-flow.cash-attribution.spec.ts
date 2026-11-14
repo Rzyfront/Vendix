@@ -338,5 +338,18 @@ describe('RefundFlowService — caja del reembolso (B18, B25)', () => {
         ).toBe(expected);
       },
     );
+
+    // Revisión 1, hallazgo 4: el reparto descuenta lo ya reembolsado por pago.
+    it('efectivo ya devuelto completo: el reparto va a tarjeta y no exige caja', () => {
+      expect(
+        refundTouchesCashDrawer('original_payment', 'cash', ['cash', 'card'], [0, 80]),
+      ).toBe(false);
+    });
+
+    it('efectivo con capacidad restante: sigue exigiendo caja', () => {
+      expect(
+        refundTouchesCashDrawer('original_payment', 'cash', ['cash', 'card'], [20, 80]),
+      ).toBe(true);
+    });
   });
 });
