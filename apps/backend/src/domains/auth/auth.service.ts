@@ -40,6 +40,7 @@ import {
   getRefreshTokenHmacSecret,
   hmacSha256,
 } from './constants/token.constants';
+import { STORE_AUTH_DOMAINS_INCLUDE } from './constants/store-public-domains.constants';
 import { CustomersService } from '../store/customers/customers.service';
 import { S3Service } from '@common/services/s3.service';
 import { EventEmitter2 } from '@nestjs/event-emitter';
@@ -283,12 +284,7 @@ export class AuthService {
                 },
               },
             },
-            domain_settings: {
-              where: {
-                is_primary: true,
-                status: 'active',
-              },
-            },
+            domain_settings: STORE_AUTH_DOMAINS_INCLUDE,
           },
         },
       },
@@ -1999,12 +1995,7 @@ export class AuthService {
                   },
                 },
               },
-              domain_settings: {
-                where: {
-                  is_primary: true,
-                  status: 'active',
-                },
-              },
+              domain_settings: STORE_AUTH_DOMAINS_INCLUDE,
             },
           },
         },
@@ -2032,12 +2023,7 @@ export class AuthService {
                 },
               },
             },
-            domain_settings: {
-              where: {
-                is_primary: true,
-                status: 'active',
-              },
-            },
+            domain_settings: STORE_AUTH_DOMAINS_INCLUDE,
           },
         });
 
@@ -4156,12 +4142,7 @@ export class AuthService {
               },
             },
           },
-          domain_settings: {
-            where: {
-              is_primary: true,
-              status: 'active',
-            },
-          },
+          domain_settings: STORE_AUTH_DOMAINS_INCLUDE,
         },
       });
 

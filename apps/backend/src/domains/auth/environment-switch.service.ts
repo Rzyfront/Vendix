@@ -21,6 +21,7 @@ import {
   getRefreshTokenHmacSecret,
   hmacSha256,
 } from './constants/token.constants';
+import { STORE_AUTH_DOMAINS_INCLUDE } from './constants/store-public-domains.constants';
 import { buildActiveUserRolesWhere } from '@common/utils/role-scope.util';
 import { signUserAvatar } from './helpers/sign-user-avatar.helper';
 
@@ -199,12 +200,7 @@ export class EnvironmentSwitchService {
               },
             },
           },
-          domain_settings: {
-            where: {
-              is_primary: true,
-              status: 'active',
-            },
-          },
+          domain_settings: STORE_AUTH_DOMAINS_INCLUDE,
           store_users: {
             where: {
               user_id: userId,

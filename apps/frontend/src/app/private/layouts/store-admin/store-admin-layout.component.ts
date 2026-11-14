@@ -406,9 +406,10 @@ export class StoreAdminLayoutComponent {
   readonly storeSlug = toSignal(this.authFacade.userStoreSlug$, {
     initialValue: null,
   });
-  readonly storeDomainHostname = toSignal(this.authFacade.userDomainHostname$, {
-    initialValue: null,
-  });
+  readonly storeDomainHostname = toSignal(
+    this.authFacade.storePublicLinkHostname$,
+    { initialValue: null },
+  );
 
   // --- storeLogo: computed from store$ + domainConfig ---
   private readonly storeSignal = toSignal(this.authFacade.userStore$, {
