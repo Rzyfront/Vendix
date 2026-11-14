@@ -39,6 +39,11 @@ const { Client } = require('pg');
  * Formato: 'tabla.columna'.
  */
 const REQUIRED_COLUMNS = [
+  // --- Registro de cargas masivas (20261202090000, QUI-1004) ---
+  // El historial y el aviso de archivo repetido lo leen en cada carga.
+  'bulk_upload_logs.file_hash',
+  'bulk_upload_logs.session_id',
+  'bulk_upload_logs.result_reference',
   // --- Notas crédito/débito de plataforma (20261130090000) ---
   // Toda lectura de fiscal_transmissions de plataforma la selecciona: sin ella
   // el listado y el detalle de facturas de plataforma dan 500.

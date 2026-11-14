@@ -1704,6 +1704,14 @@ export async function seedPermissionsAndRoles(
       path: '/api/store/settings',
       method: 'GET',
     },
+    // QUI-1004 — historial de cargas masivas (solo lectura). Consultar si un
+    // archivo está repetido y registrar una carga usan el permiso de la carga.
+    {
+      name: 'store:bulk_uploads:read',
+      description: 'Ver historial de cargas masivas de la tienda',
+      path: '/api/store/bulk-uploads',
+      method: 'GET',
+    },
     {
       name: 'store:settings:update',
       description: 'Actualizar configuración de tienda',
