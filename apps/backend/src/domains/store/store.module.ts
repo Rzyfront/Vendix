@@ -98,6 +98,7 @@ import { ServiceSessionsModule } from './service-sessions/service-sessions.modul
 import { ServiceDepositsModule } from './service-deposits/service-deposits.module';
 import { ServiceRemindersModule } from './service-reminders/service-reminders.module';
 import { ServiceBudgetsModule } from './service-budgets/service-budgets.module';
+import { RemindersModule } from './reminders/reminders.module';
 
 @Module({
   imports: [
@@ -199,6 +200,7 @@ import { ServiceBudgetsModule } from './service-budgets/service-budgets.module';
     ServiceDepositsModule,
     ServiceRemindersModule,
     ServiceBudgetsModule,
+    RemindersModule,
   ],
   exports: [PrintFormatsModule],
 })

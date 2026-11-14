@@ -8161,6 +8161,23 @@ export const ErrorCodes = {
     httpStatus: 404,
     devMessage: 'La nota no existe.',
   },
+  REMINDER_001: {
+    code: 'REMINDER_001',
+    httpStatus: 404,
+    devMessage: 'El recordatorio no existe o no tienes acceso a él.',
+  },
+  REMINDER_LINK_001: {
+    code: 'REMINDER_LINK_001',
+    httpStatus: 400,
+    devMessage:
+      'El dato vinculado no existe en esta tienda o el vínculo está incompleto.',
+  },
+  REMINDER_DATE_001: {
+    code: 'REMINDER_DATE_001',
+    httpStatus: 400,
+    devMessage:
+      'La fecha del recordatorio no es válida. Usa YYYY-MM-DDTHH:mm (hora de la tienda) o ISO 8601.',
+  },
   CRM_TASK_001: {
     code: 'CRM_TASK_001',
     httpStatus: 404,
