@@ -41,6 +41,22 @@ import { RequestContextService } from '../../../common/context/request-context.s
 import { SmsSpendLimitReachedEvent } from '../../../messaging/spend/sms-spend.service';
 import type { PaymentRequestReceiptSubmittedEvent } from '../../ecommerce/payment-requests/interfaces/payment-request-events.interface';
 
+/**
+ * QUI-854 — customer-facing order state labels, same wording as the
+ * storefront "Mis pedidos" page.
+ */
+const CUSTOMER_ORDER_STATE_LABELS: Record<string, string> = {
+  created: 'Creado',
+  pending_payment: 'Pago pendiente',
+  processing: 'En proceso',
+  pending_delivery: 'Pendiente de entrega',
+  shipped: 'Enviado',
+  delivered: 'Entregado',
+  finished: 'Finalizado',
+  cancelled: 'Cancelado',
+  refunded: 'Reembolsado',
+};
+
 @Injectable()
 export class NotificationsEventsListener {
   private readonly logger = new Logger(NotificationsEventsListener.name);
@@ -166,6 +182,68 @@ export class NotificationsEventsListener {
       `Orden #${event.order_number}: ${event.old_state} → ${event.new_state}`,
       { order_id: event.order_id, order_number: event.order_number },
     );
+
+    // QUI-854 — the storefront bell only shows notifications targeted at the
+    // customer, so the buyer gets their own copy. Drafts are not visible to
+    // the customer yet.
+    if (event.new_state === 'draft') {
+      return;
+    }
+    const state_label =
+      CUSTOMER_ORDER_STATE_LABELS[event.new_state] ?? event.new_state;
+    await this.notifyOrderCustomer(
+      event.store_id,
+      event.order_id,
+      'order_status_change',
+      'Tu pedido fue actualizado',
+      `Tu pedido #${event.order_number} ahora está: ${state_label}`,
+      { order_number: event.order_number, new_state: event.new_state },
+    );
+  }
+
+  /**
+   * QUI-854 — sends a targeted notification to the customer who owns the
+   * order. The lookup is pinned to `store_id`, so an order id from another
+   * store never resolves. Orders without a customer (anonymous POS sale,
+   * table) are skipped. Best-effort: a failure never breaks the staff flow.
+   */
+  private async notifyOrderCustomer(
+    store_id: number,
+    order_id: number | null | undefined,
+    type: string,
+    title: string,
+    body: string,
+    data: Record<string, unknown>,
+  ): Promise<void> {
+    if (!order_id) {
+      return;
+    }
+    try {
+      const order = await this.global_prisma.orders.findFirst({
+        where: { id: order_id, store_id },
+        select: { customer_id: true },
+      });
+      if (!order?.customer_id) {
+        return;
+      }
+      await this.notifications_service.sendToUser(
+        store_id,
+        order.customer_id,
+        type,
+        title,
+        body,
+        {
+          order_id,
+          ...data,
+          audience: 'customer',
+          route: `/account/orders/${order_id}`,
+        },
+      );
+    } catch (err) {
+      this.logger.warn(
+        `[notifyOrderCustomer] failed for order ${order_id}: ${(err as Error).message}`,
+      );
+    }
   }
 
   /**
@@ -354,6 +432,15 @@ export class NotificationsEventsListener {
       'Pago Recibido',
       `Pago de $${event.amount} ${event.currency} para orden #${event.order_number}`,
       { order_id: event.order_id, payment_method: event.payment_method },
+    );
+
+    await this.notifyOrderCustomer(
+      event.store_id,
+      event.order_id,
+      'payment_received',
+      'Recibimos tu pago',
+      `Registramos tu pago de $${event.amount} ${event.currency} para el pedido #${event.order_number}`,
+      { order_number: event.order_number },
     );
   }
 
