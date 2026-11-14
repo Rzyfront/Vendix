@@ -7,6 +7,7 @@ import { runChunked, ChunkProgress, MAX_BULK_RECORDS } from '../../../../../../s
 // dentro del handler, que es el unico momento en que hay un archivo que leer.
 import type * as XLSX from 'xlsx';
 import { CustomersService } from '../../services/customers.service';
+import { BulkUploadLogService } from '../../../bulk-uploads/services/bulk-upload-log.service';
 import {
   ModalComponent,
   ButtonComponent,
@@ -547,6 +548,11 @@ export class CustomerBulkUploadModalComponent {
   });
 
   private customersService = inject(CustomersService);
+  private bulkUploadLog = inject(BulkUploadLogService);
+  // QUI-1004: the browser parses this file, so it computes the hash and registers the upload.
+  private fileName = '';
+  private fileHashPromise: Promise<string | null> = Promise.resolve(null);
+  private uploadRegistered = false;
   private toastService = inject(ToastService);
 
   // Mapeo de encabezados en español a claves del DTO
@@ -623,6 +629,9 @@ export class CustomerBulkUploadModalComponent {
     this.failedAt.set(null);
     this.payload = [];
     this.accumulated = null;
+    this.fileName = '';
+    this.fileHashPromise = Promise.resolve(null);
+    this.uploadRegistered = false;
   }
 
   goToStep(step: number) {
@@ -692,6 +701,9 @@ export class CustomerBulkUploadModalComponent {
     this.isProcessingFile.set(true);
     this.uploadError.set(null);
     this.warnings.set([]);
+    this.fileName = file.name;
+    this.uploadRegistered = false;
+    this.fileHashPromise = this.bulkUploadLog.fingerprint(file);
 
     const reader: FileReader = new FileReader();
 
@@ -801,8 +813,12 @@ export class CustomerBulkUploadModalComponent {
     reader.readAsBinaryString(file);
   }
 
-  confirmUpload() {
+  async confirmUpload() {
     if (!this.parsedData()) return;
+
+    // QUI-1004: warn about a repeated file before uploading anything.
+    const fileHash = await this.fileHashPromise;
+    if (!(await this.bulkUploadLog.confirmFileIsNew('customers', fileHash))) return;
 
     this.currentStep.set(2);
     this.isUploading.set(true);
@@ -874,13 +890,38 @@ export class CustomerBulkUploadModalComponent {
             `Se guardaron ${base + p.processed} de ${this.payload.length}. Puedes reintentar.`,
           );
         } else if (acc.failed > 0) {
+          this.registerUpload(acc);
           this.toastService.warning('La carga se completó con algunos errores.');
         } else {
+          this.registerUpload(acc);
           const locs = acc.locations_added > 0 ? ` (${acc.locations_added} ubicaciones)` : '';
           this.toastService.success(`${acc.successful} filas cargadas exitosamente${locs}`);
           this.uploadComplete.emit();
         }
       });
+  }
+
+  /** Registers the finished upload once (all pages done); never blocks the UI. */
+  private registerUpload(acc: { successful: number; failed: number }) {
+    if (this.uploadRegistered) return;
+    this.uploadRegistered = true;
+    const fileName = this.fileName;
+    const total = this.payload.length;
+    void this.fileHashPromise.then((fileHash) => {
+      if (!fileHash) return;
+      this.bulkUploadLog
+        .register({
+          upload_type: 'customers',
+          file_name: fileName,
+          file_hash: fileHash,
+          total_rows: total,
+          successful_rows: acc.successful,
+          failed_rows: acc.failed,
+          skipped_rows: 0,
+        })
+        .pipe(takeUntilDestroyed(this.destroyRef))
+        .subscribe();
+    });
   }
 
   getCustomerLabel(result: any, index: number): string {
