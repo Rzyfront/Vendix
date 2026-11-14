@@ -15,6 +15,8 @@ import { EMPTY, Subscription, expand, of } from 'rxjs';
 import { catchError, tap } from 'rxjs/operators';
 import { RouterLink } from '@angular/router';
 import { ProductsService } from '../../services/products.service';
+import { BulkUploadLogService } from '../../../bulk-uploads/services/bulk-upload-log.service';
+import { BulkUploadFileInfo } from '../../../bulk-uploads/bulk-upload-log.interface';
 import {
   ModalComponent,
   ButtonComponent,
@@ -1668,6 +1670,8 @@ export class BulkUploadModalComponent {
   readonly uploadError = signal<string | null>(null);
 
   private productsService = inject(ProductsService);
+  private bulkUploadLog = inject(BulkUploadLogService);
+  private fileInfo: BulkUploadFileInfo = {};
   private toastService = inject(ToastService);
 
   constructor() {
@@ -1852,6 +1856,7 @@ export class BulkUploadModalComponent {
     this.analysisResult.set(null);
     this.initialLoadAck.set(false);
     this.sessionId = null;
+    this.fileInfo = {};
     this.isUploading.set(false);
     this.uploadResults.set(null);
     this.uploadError.set(null);
@@ -1957,6 +1962,11 @@ export class BulkUploadModalComponent {
           this.isAnalyzing.set(false);
           this.analysisResult.set(result);
           this.sessionId = result.session_id;
+          this.fileInfo = {
+            file_name: result.file_name,
+            file_hash: result.file_hash,
+            duplicate_of: result.duplicate_of,
+          };
 
           if (result.with_errors > 0) {
             this.toastService.warning(
@@ -1980,7 +1990,7 @@ export class BulkUploadModalComponent {
   }
 
   // Step 1 -> 2: Upload (páginas de 100 en serie, sin abortar por una fallida)
-  proceedWithUpload() {
+  async proceedWithUpload() {
     const sessionId = this.sessionId;
     if (!sessionId) return;
 
@@ -1988,6 +1998,11 @@ export class BulkUploadModalComponent {
       this.analysisResult()?.initial_load?.requires_ack === true;
     if (requiresAck && !this.initialLoadAck()) {
       this.initialLoadAckBlock()?.requestAttention();
+      return;
+    }
+
+    // QUI-1004: warn about a repeated file before any commit call.
+    if (!(await this.bulkUploadLog.confirmDuplicate(this.fileInfo.duplicate_of))) {
       return;
     }
     const initialLoadAck = requiresAck ? true : undefined;
@@ -2021,6 +2036,7 @@ export class BulkUploadModalComponent {
           offset,
           limit,
           initialLoadAck,
+          this.fileInfo,
         )
         .pipe(
           catchError((error) => {

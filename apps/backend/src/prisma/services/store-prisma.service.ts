@@ -58,6 +58,9 @@ export class StorePrismaService extends BasePrismaService {
     'coupons',
     'marketing_ad_creatives',
     'quotations',
+    // QUI-1004 — registro de cargas masivas: `store_id` propio y NO nullable.
+    // La tienda sale SIEMPRE del contexto (create la inyecta, where la filtra).
+    'bulk_upload_logs',
     // B.1 — perfiles de cotización. `store_id` propio y NO nullable: el
     // invariante «un solo predeterminado por store» se apoya en el índice
     // único PARCIAL `quotation_profiles_store_default_uq`. Su tabla de
@@ -1160,6 +1163,10 @@ export class StorePrismaService extends BasePrismaService {
 
   get product_tax_assignments() {
     return this.scoped_client.product_tax_assignments;
+  }
+
+  get bulk_upload_logs() {
+    return this.scoped_client.bulk_upload_logs;
   }
 
   get inventory_adjustments() {

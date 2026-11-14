@@ -13,6 +13,10 @@ import {
   Max,
 } from 'class-validator';
 import { Type, Transform } from 'class-transformer';
+import {
+  BulkFileHashField,
+  BulkFileNameField,
+} from '../../../bulk-uploads/dto/bulk-upload-log.dto';
 
 export class BulkEmployeeItemDto {
   @IsString()
@@ -188,6 +192,13 @@ export class BulkEmployeeUploadSessionDto {
   @Min(1)
   @Max(MAX_BULK_EMPLOYEE_UPLOAD_PAGE)
   limit?: number;
+
+  /** QUI-1004 — nombre y huella del archivo (vienen del analyze). */
+  @BulkFileNameField()
+  file_name?: string;
+
+  @BulkFileHashField()
+  file_hash?: string;
 }
 
 export class BulkEmployeeUploadSessionResultDto extends BulkEmployeeUploadResultDto {

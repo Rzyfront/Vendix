@@ -1,4 +1,5 @@
 import { Module, OnModuleInit } from '@nestjs/common';
+import { BulkUploadsModule } from '../bulk-uploads/bulk-uploads.module';
 import { BullModule } from '@nestjs/bullmq';
 import { ResponseModule } from '../../../common/responses/response.module';
 import { PrismaModule } from '../../../prisma/prisma.module';
@@ -89,6 +90,7 @@ import { DepreciationCalculatorService } from './fixed-assets/depreciation-calcu
 @Module({
   imports: [
     ResponseModule,
+    BulkUploadsModule,
     PrismaModule,
     S3Module,
     AccountsPayableModule,

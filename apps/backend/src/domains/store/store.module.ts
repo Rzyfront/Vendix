@@ -88,6 +88,7 @@ import { MembershipPlansModule } from './membership-plans/membership-plans.modul
 import { MembershipsModule } from './memberships/memberships.module';
 import { MembershipAccessModule } from './membership-access/membership-access.module';
 import { UomModule } from './uom/uom.module';
+import { BulkUploadsModule } from './bulk-uploads/bulk-uploads.module';
 import { WeeklyReportModule } from './weekly-report/weekly-report.module';
 import { PrintFormatsModule } from './print-formats/print-formats.module';
 import { CrmModule } from './crm/crm.module';
@@ -188,6 +189,7 @@ import { ServiceBudgetsModule } from './service-budgets/service-budgets.module';
     MembershipsModule,
     MembershipAccessModule,
     UomModule,
+    BulkUploadsModule,
     WeeklyReportModule,
     PrintFormatsModule,
     CrmModule,

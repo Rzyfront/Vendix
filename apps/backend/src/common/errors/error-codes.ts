@@ -5256,6 +5256,11 @@ export const ErrorCodes = {
     httpStatus: 422,
     devMessage: 'Invalid field type in bulk product data',
   },
+  BULK_LOG_NOT_FOUND: {
+    code: 'BULK_LOG_NOT_FOUND',
+    httpStatus: 404,
+    devMessage: 'No se encontró la carga masiva en esta tienda.',
+  },
   BULK_PROD_UPLOAD_FAILED: {
     code: 'BULK_PROD_UPLOAD_FAILED',
     httpStatus: 500,

@@ -17,6 +17,8 @@ import {
 import { Response } from 'express';
 import { FileInterceptor } from '@nestjs/platform-express';
 import { ProductsBulkImageService } from './products-bulk-image.service';
+import { BulkUploadLogsService } from '../bulk-uploads/bulk-upload-logs.service';
+import { BulkImageUploadSessionDto } from './dto/bulk-image-upload.dto';
 import { ResponseService } from '@common/responses/response.service';
 import { PermissionsGuard } from '../../auth/guards/permissions.guard';
 import { Permissions } from '../../auth/decorators/permissions.decorator';
@@ -29,6 +31,7 @@ export class ProductsBulkImageController {
   constructor(
     private readonly bulkImageService: ProductsBulkImageService,
     private readonly responseService: ResponseService,
+    private readonly bulkUploadLogs: BulkUploadLogsService,
   ) {}
 
   /**
@@ -105,8 +108,17 @@ export class ProductsBulkImageController {
       file.buffer,
       storeId,
     );
+    // QUI-1004 — huella del ZIP y aviso si esta tienda ya lo cargó.
+    const fileInfo = await this.bulkUploadLogs.describeFile(
+      'product_images',
+      file.buffer,
+      file.originalname,
+    );
 
-    return this.responseService.success(result, 'Análisis completado');
+    return this.responseService.success(
+      { ...result, ...fileInfo },
+      'Análisis completado',
+    );
   }
 
   /**
@@ -118,7 +130,7 @@ export class ProductsBulkImageController {
   })
   @Post('upload-session')
   @Permissions('store:products:create')
-  async uploadFromSession(@Body() body: { session_id: string }) {
+  async uploadFromSession(@Body() body: BulkImageUploadSessionDto) {
     const context = RequestContextService.getContext();
     const storeId = context?.store_id;
 
@@ -133,6 +145,12 @@ export class ProductsBulkImageController {
     const result = await this.bulkImageService.processImageZipFromSession(
       body.session_id,
       storeId,
+    );
+    await this.bulkUploadLogs.trackSessionPage(
+      'product_images',
+      body.session_id,
+      body,
+      { ...result, total: result.total_skus_processed },
     );
 
     if (result.failed > 0) {

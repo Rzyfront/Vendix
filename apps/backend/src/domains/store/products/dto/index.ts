@@ -1,4 +1,8 @@
 import {
+  BulkFileHashField,
+  BulkFileNameField,
+} from '../../bulk-uploads/dto/bulk-upload-log.dto';
+import {
   IsString,
   IsEmail,
   IsOptional,
@@ -2622,6 +2626,13 @@ export class BulkUploadSessionDto {
   @IsOptional()
   @IsBoolean()
   initial_load_ack?: boolean;
+
+  /** QUI-1004 — nombre y huella del archivo (vienen del analyze). */
+  @BulkFileNameField()
+  file_name?: string;
+
+  @BulkFileHashField()
+  file_hash?: string;
 }
 
 export class BulkUploadItemResultDto {

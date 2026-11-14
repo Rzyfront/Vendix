@@ -11,6 +11,10 @@ import {
   ValidateNested,
 } from 'class-validator';
 import { Type } from 'class-transformer';
+import {
+  BulkFileHashField,
+  BulkFileNameField,
+} from '../../bulk-uploads/dto/bulk-upload-log.dto';
 
 // ───────────────────────────────────────────────────────────────────────────
 // Interfaces — AI extraction (no class-validator, raw JSON from the model)
@@ -312,6 +316,13 @@ export class CommitMemberRosterDto {
   @ValidateNested({ each: true })
   @Type(() => CommitMemberDto)
   members!: CommitMemberDto[];
+
+  /** QUI-1004 — devueltos por el escaneo para el registro de cargas masivas. */
+  @BulkFileNameField()
+  file_name?: string;
+
+  @BulkFileHashField()
+  file_hash?: string;
 }
 
 // ───────────────────────────────────────────────────────────────────────────

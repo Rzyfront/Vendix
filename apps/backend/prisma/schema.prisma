@@ -8,6 +8,7 @@ datasource db {
 }
 
 model users {
+  bulk_upload_logs             bulk_upload_logs[]
   workflow_definitions_created workflow_definitions[] @relation("workflow_definitions_created_by")
   workflow_instance_comments   workflow_instance_comments[]
   workflow_public_links        workflow_public_links[]
@@ -2545,6 +2546,37 @@ model pos_search_selections {
   @@index([store_id, created_at])
   @@index([store_id, query_hash, created_at])
   @@map("pos_search_selections")
+}
+
+// QUI-1004 — registro liviano de cargas masivas: UNA fila por carga con los
+// datos clave (tipo, usuario, archivo, huella, conteos, estado, referencia).
+// Nunca guarda el archivo ni el detalle por fila. Scoped por `store_id` en
+// StorePrismaService (store_scoped_models): el valor sale del contexto.
+model bulk_upload_logs {
+  id               Int      @id @default(autoincrement())
+  store_id         Int
+  user_id          Int?
+  upload_type      String   @db.VarChar(40)
+  file_name        String   @db.VarChar(255)
+  file_hash        String   @db.VarChar(64)
+  // Sesión de análisis de las cargas paginadas: cada página suma a esta fila.
+  session_id       String?  @db.VarChar(64)
+  total_rows       Int      @default(0)
+  successful_rows  Int      @default(0)
+  // Parte de `successful_rows` que creó un producto; null = el tipo no lo distingue.
+  created_rows     Int?
+  failed_rows      Int      @default(0)
+  skipped_rows     Int      @default(0)
+  status           String   @db.VarChar(16)
+  result_reference String?  @db.VarChar(120)
+  created_at       DateTime @default(now()) @db.Timestamp(6)
+  updated_at       DateTime @default(now()) @updatedAt @db.Timestamp(6)
+  user             users?   @relation(fields: [user_id], references: [id], onDelete: SetNull)
+
+  @@index([store_id, upload_type, file_hash])
+  @@index([store_id, created_at])
+  @@index([store_id, session_id])
+  @@map("bulk_upload_logs")
 }
 
 // ===== PRICE TIERS (MULTI-TARIFA) =====

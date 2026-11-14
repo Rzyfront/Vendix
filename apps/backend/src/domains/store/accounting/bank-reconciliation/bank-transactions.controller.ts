@@ -18,6 +18,7 @@ import {
 } from '@nestjs/common';
 import { FileInterceptor } from '@nestjs/platform-express';
 import { BankTransactionsService } from './bank-transactions.service';
+import { BulkUploadLogsService } from '../../bulk-uploads/bulk-upload-logs.service';
 import { ResponseService } from '../../../../common/responses/response.service';
 import { QueryBankTransactionDto } from './dto/query-bank-transaction.dto';
 
@@ -28,6 +29,7 @@ export class BankTransactionsController {
   constructor(
     private readonly bank_transactions_service: BankTransactionsService,
     private readonly response_service: ResponseService,
+    private readonly bulk_upload_logs: BulkUploadLogsService,
   ) {}
 
   @Get()
@@ -55,6 +57,21 @@ export class BankTransactionsController {
       file.buffer,
       file.originalname,
     );
+    // QUI-1004 — una fila en el registro de cargas masivas de la tienda. Los
+    // movimientos ya importados antes cuentan como omitidos; las líneas que
+    // el parser no pudo leer, como error.
+    const file_info = await this.bulk_upload_logs.describeFile(
+      'bank_statements',
+      file.buffer,
+      file.originalname,
+    );
+    const parse_errors = Array.isArray(result.errors) ? result.errors.length : 0;
+    await this.bulk_upload_logs.trackUpload('bank_statements', file_info, {
+      total: result.total_parsed + parse_errors,
+      successful: result.imported,
+      failed: parse_errors,
+      skipped: result.duplicates_skipped,
+    });
     return this.response_service.success(
       result,
       'Statement imported successfully',
@@ -73,7 +90,13 @@ export class BankTransactionsController {
       file.buffer,
       file.originalname,
     );
-    return this.response_service.success(result);
+    // QUI-1004 — aviso si esta tienda ya importó este mismo extracto.
+    const file_info = await this.bulk_upload_logs.describeFile(
+      'bank_statements',
+      file.buffer,
+      file.originalname,
+    );
+    return this.response_service.success({ ...result, ...file_info });
   }
 
   @Delete(':id')
