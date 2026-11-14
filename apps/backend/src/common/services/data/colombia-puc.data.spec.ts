@@ -13,7 +13,7 @@ import { getColombiaPucAccounts, PucAccountInput } from './colombia-puc.data';
  */
 const MIGRATION_PATH = join(
   __dirname,
-  '../../../../prisma/migrations/20261113120000_seed_puc_payroll_cost_center_accounts/migration.sql',
+  '../../../../prisma/migrations/20261201090000_seed_puc_payroll_cost_center_accounts/migration.sql',
 );
 
 interface MigrationAccount {
