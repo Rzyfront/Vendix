@@ -207,6 +207,7 @@ export class BulkUploadLogsService {
         select: {
           id: true,
           successful_rows: true,
+          created_rows: true,
           failed_rows: true,
           skipped_rows: true,
         },
@@ -228,6 +229,10 @@ export class BulkUploadLogsService {
       const merged = this.normalizeCounts({
         total_rows: pageCounts.total_rows,
         successful_rows: existing.successful_rows + pageCounts.successful_rows,
+        created_rows:
+          existing.created_rows == null && pageCounts.created_rows == null
+            ? null
+            : (existing.created_rows ?? 0) + (pageCounts.created_rows ?? 0),
         failed_rows: existing.failed_rows + pageCounts.failed_rows,
         skipped_rows: existing.skipped_rows + pageCounts.skipped_rows,
       });
@@ -286,6 +291,7 @@ export class BulkUploadLogsService {
     return this.normalizeCounts({
       total_rows: toCount(result.total ?? result.total_processed),
       successful_rows,
+      created_rows: result.created == null ? null : toCount(result.created),
       failed_rows,
       skipped_rows,
     });
@@ -296,12 +302,18 @@ export class BulkUploadLogsService {
     const successful_rows = toCount(counts.successful_rows);
     const failed_rows = toCount(counts.failed_rows);
     const skipped_rows = toCount(counts.skipped_rows);
+    // Lo creado es parte de lo cargado: nunca lo supera.
+    const created_rows =
+      counts.created_rows == null
+        ? null
+        : Math.min(toCount(counts.created_rows), successful_rows);
     return {
       total_rows: Math.max(
         toCount(counts.total_rows),
         successful_rows + failed_rows + skipped_rows,
       ),
       successful_rows,
+      created_rows,
       failed_rows,
       skipped_rows,
     };

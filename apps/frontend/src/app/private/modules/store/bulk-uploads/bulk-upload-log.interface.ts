@@ -53,6 +53,8 @@ export interface BulkUploadLog {
   file_hash: string;
   total_rows: number;
   successful_rows: number;
+  /** Parte de las cargadas que creó un producto; null = el tipo no lo distingue. */
+  created_rows: number | null;
   failed_rows: number;
   skipped_rows: number;
   status: BulkUploadStatus;
@@ -75,6 +77,7 @@ export interface RegisterBulkUploadRequest {
   file_hash: string;
   total_rows: number;
   successful_rows: number;
+  created_rows?: number;
   failed_rows: number;
   skipped_rows: number;
   accessory_step_failed?: boolean;

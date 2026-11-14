@@ -2563,6 +2563,8 @@ model bulk_upload_logs {
   session_id       String?  @db.VarChar(64)
   total_rows       Int      @default(0)
   successful_rows  Int      @default(0)
+  // Parte de `successful_rows` que creó un producto; null = el tipo no lo distingue.
+  created_rows     Int?
   failed_rows      Int      @default(0)
   skipped_rows     Int      @default(0)
   status           String   @db.VarChar(16)

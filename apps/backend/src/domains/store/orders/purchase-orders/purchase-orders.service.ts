@@ -1925,7 +1925,8 @@ export class PurchaseOrdersService {
 
   /**
    * QUI-1004 — carga masiva de compras: a qué producto EXISTENTE de la tienda
-   * del contexto corresponde cada fila. Solo lectura; la tienda sale del
+   * del contexto corresponde cada fila, o si se creará (`will_create`) al
+   * crear la OC. Solo lectura; la tienda sale del
    * contexto, nunca del cuerpo. Detalle por fila con HTTP 200.
    */
   async checkBulkLines(

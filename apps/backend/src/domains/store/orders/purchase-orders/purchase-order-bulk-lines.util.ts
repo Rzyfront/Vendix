@@ -3,7 +3,6 @@ import {
   CheckBulkPurchaseLineDto,
 } from './dto/check-bulk-lines.dto';
 
-export const BULK_LINE_NOT_FOUND = 'PO_BULK_PRODUCT_NOT_FOUND';
 export const BULK_LINE_WITHOUT_CODE = 'PO_BULK_LINE_WITHOUT_CODE';
 
 type ProductRow = { id: number; name: string; sku: string | null; barcode: string | null };
@@ -27,7 +26,10 @@ export interface BulkLineLookupClient {
  * EXISTENTE de la tienda, con la misma precedencia que `resolve-lines`: SKU de
  * producto → código de barras de producto → SKU de variante → código de
  * barras de variante (productos no archivados; SKU crudo y recortado). Una
- * fila sin coincidencia vuelve con error y nada se crea.
+ * fila sin coincidencia NO es error: vuelve con `will_create: true` porque
+ * `resolve-lines` / la creación de la OC crea el producto (decisión de Rafael,
+ * 13-nov: la carga de compras también da de alta catálogo). Solo es error la
+ * fila sin SKU ni código de barras. Esta función no escribe nada.
  *
  * Dos consultas para todo el lote (no N por fila). La tienda va explícita en
  * cada `where` además del scope del cliente.
@@ -99,6 +101,7 @@ export async function matchBulkPurchaseLines(
         product_variant_id: null,
         product_name: null,
         sku: null,
+        will_create: false,
         error: {
           code: BULK_LINE_WITHOUT_CODE,
           message: 'falta el SKU o el código de barras del producto',
@@ -116,6 +119,7 @@ export async function matchBulkPurchaseLines(
         product_variant_id: null,
         product_name: product.name,
         sku: product.sku,
+        will_create: false,
       };
     }
     const variant =
@@ -130,6 +134,7 @@ export async function matchBulkPurchaseLines(
         product_variant_id: variant.id,
         product_name: [base, variant.name].filter(Boolean).join(' - ') || null,
         sku: variant.sku,
+        will_create: false,
       };
     }
     return {
@@ -138,7 +143,7 @@ export async function matchBulkPurchaseLines(
       product_variant_id: null,
       product_name: null,
       sku: line.sku || null,
-      error: { code: BULK_LINE_NOT_FOUND, message: 'producto no encontrado' },
+      will_create: true,
     };
   });
 }

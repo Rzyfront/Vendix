@@ -596,8 +596,8 @@ export class PurchaseOrdersController {
 
   // QUI-1004 — estática, antes de `:id`. Valida sin escribir las filas de la
   // carga masiva de compras contra los productos existentes de la tienda: la
-  // fila sin producto es error de esa fila (la carga masiva no crea
-  // productos). HTTP 200 con detalle por fila.
+  // fila sin producto vuelve con `will_create` (la OC lo crea); solo la fila
+  // sin SKU ni código de barras es error. HTTP 200 con detalle por fila.
   @Post('bulk/check-lines')
   @HttpCode(HttpStatus.OK)
   @Permissions('store:orders:purchase_orders:create')

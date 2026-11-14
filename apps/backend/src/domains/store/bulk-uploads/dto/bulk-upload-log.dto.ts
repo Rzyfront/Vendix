@@ -106,6 +106,16 @@ export class RegisterBulkUploadDto {
   @Max(MAX_ROWS)
   successful_rows: number;
 
+  @ApiPropertyOptional({
+    description:
+      'Parte de successful_rows que creó un producto (compras crea los productos que no existen).',
+  })
+  @IsOptional()
+  @IsInt()
+  @Min(0)
+  @Max(MAX_ROWS)
+  created_rows?: number;
+
   @ApiProperty()
   @IsInt()
   @Min(0)

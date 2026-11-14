@@ -385,7 +385,12 @@ export class PopComponent implements OnInit, OnDestroy {
    * si el operador vacía el carrito.
    */
   private pendingBulkUpload:
-    | (PopBulkImportSummary & { valid_rows: number; loaded_rows: number })
+    | (PopBulkImportSummary & {
+        valid_rows: number;
+        loaded_rows: number;
+        /** Cargadas cuyo producto no existía: se crean con la orden. */
+        created_rows: number;
+      })
     | null = null;
   private vexiHosts = inject(VexiUiHostRegistry);
   private dispatchNotesService = inject(DispatchNotesService);
@@ -1488,6 +1493,7 @@ export class PopComponent implements OnInit, OnDestroy {
     // Se acumulan y se agregan de una vez: un solo set del carrito y un solo
     // cálculo de resumen (fila por fila era O(N²) con 10.000 filas).
     const requests: AddToPopCartRequest[] = [];
+    let createdRows = 0;
 
     items.forEach((row) => {
       const normalizedRow = this.normalizeBulkRow(row);
@@ -1641,6 +1647,9 @@ export class PopComponent implements OnInit, OnDestroy {
         is_active: true,
       };
 
+      // QUI-1004 — `bulk/check-lines` marcó que el producto no existe: la
+      // orden lo crea y la carga lo cuenta como «creado».
+      if ((row as { will_create?: boolean }).will_create === true) createdRows++;
       requests.push({
           product: dummyProduct,
           quantity: quantity,
@@ -1675,6 +1684,7 @@ export class PopComponent implements OnInit, OnDestroy {
       ...event.summary,
       valid_rows: items.length,
       loaded_rows: requests.length,
+      created_rows: createdRows,
     };
 
     if (requests.length > 0) {
@@ -1687,7 +1697,7 @@ export class PopComponent implements OnInit, OnDestroy {
       );
     } else {
       this.toastService.warning(
-        'No se encontraron productos válidos en el archivo (requiere SKU o código de barras)',
+        'No se encontraron productos válidos en el archivo (requiere nombre y SKU o código de barras)',
       );
     }
   }
@@ -3053,8 +3063,9 @@ export class PopComponent implements OnInit, OnDestroy {
 
   /**
    * QUI-1004 — registra la carga masiva pendiente contra la orden que generó
-   * y devuelve el resumen para el operador («N cargadas · M con error · K
-   * omitidas»). Cargadas = filas que entraron al carrito; con error = filas
+   * y devuelve el resumen para el operador («N cargadas (C productos
+   * creados) · M con error · K omitidas»). Cargadas = filas que entraron al
+   * carrito; creados = cargadas cuyo producto no existía; con error = filas
    * omitidas por error en la revisión; omitidas = filas válidas que no
    * llegaron al carrito. Registra una sola vez por carga.
    */
@@ -3077,6 +3088,7 @@ export class PopComponent implements OnInit, OnDestroy {
           file_hash: pending.file_hash,
           total_rows: pending.total_rows,
           successful_rows,
+          created_rows: pending.created_rows,
           failed_rows: pending.failed_rows,
           skipped_rows,
           accessory_step_failed: accessoryStepFailed,
@@ -3086,7 +3098,11 @@ export class PopComponent implements OnInit, OnDestroy {
         .subscribe();
     }
     const summary =
-      `Carga masiva: ${successful_rows} cargadas · ${pending.failed_rows} con error · ` +
+      `Carga masiva: ${successful_rows} cargadas` +
+      (pending.created_rows > 0
+        ? ` (${pending.created_rows} productos creados)`
+        : '') +
+      ` · ${pending.failed_rows} con error · ` +
       `${skipped_rows} omitidas${reference ? ` · orden ${reference}` : ''}` +
       (accessoryStepFailed ? ' (parcial).' : '.');
     this.toastService.info(summary, undefined, 8000);

@@ -281,6 +281,52 @@ describe('BulkUploadLogsService · conteos y estado', () => {
     expect(h.rows.map((r) => r.status)).toEqual(['failed', 'partial']);
   });
 
+  it('compras: los productos creados se registran como «creados» dentro de lo cargado', async () => {
+    const h = buildHarness();
+    asStore(STORE_A);
+    await h.service.register({
+      upload_type: 'purchase_orders',
+      file_name: 'compras.xlsx',
+      file_hash: HASH_A,
+      total_rows: 10,
+      successful_rows: 7,
+      created_rows: 2,
+      failed_rows: 3,
+      skipped_rows: 0,
+      result_reference: 'PO-0003',
+    });
+    expect(h.rows[0]).toMatchObject({
+      store_id: STORE_A.store_id,
+      total_rows: 10,
+      successful_rows: 7,
+      created_rows: 2,
+      failed_rows: 3,
+      status: 'partial',
+      result_reference: 'PO-0003',
+    });
+  });
+
+  it('lo creado nunca supera lo cargado; sin dato queda null', async () => {
+    const h = buildHarness();
+    asStore(STORE_A);
+    await h.service.register({
+      upload_type: 'purchase_orders',
+      file_name: 'a.xlsx',
+      file_hash: HASH_A,
+      total_rows: 2,
+      successful_rows: 1,
+      created_rows: 5,
+      failed_rows: 1,
+      skipped_rows: 0,
+    });
+    await h.service.trackUpload(
+      'bank_statements',
+      { file_name: 'e.csv', file_hash: HASH_B },
+      { total_processed: 1, successful: 1 },
+    );
+    expect(h.rows.map((r) => r.created_rows)).toEqual([1, null]);
+  });
+
   it('un fallo al registrar no tumba la carga', async () => {
     const h = buildHarness();
     asStore(STORE_A);

@@ -44,6 +44,7 @@ const REQUIRED_COLUMNS = [
   'bulk_upload_logs.file_hash',
   'bulk_upload_logs.session_id',
   'bulk_upload_logs.result_reference',
+  'bulk_upload_logs.created_rows',
   // --- Notas crédito/débito de plataforma (20261130090000) ---
   // Toda lectura de fiscal_transmissions de plataforma la selecciona: sin ella
   // el listado y el detalle de facturas de plataforma dan 500.

@@ -1,13 +1,14 @@
 import {
-  BULK_LINE_NOT_FOUND,
   BULK_LINE_WITHOUT_CODE,
   BulkLineLookupClient,
   matchBulkPurchaseLines,
 } from './purchase-order-bulk-lines.util';
 
 /**
- * QUI-1004 — la carga masiva de compras solo acepta productos EXISTENTES de la
- * tienda; una fila sin producto es error de esa fila y no se crea nada.
+ * QUI-1004 — la carga masiva de compras empareja cada fila con un producto
+ * existente de la tienda; la fila sin producto NO es error: vuelve marcada
+ * para crearse con la OC (decisión de Rafael, 13-nov). Solo la fila sin SKU ni
+ * código de barras es error.
  */
 const STORE = 3;
 const OTHER_STORE = 4;
@@ -53,7 +54,7 @@ function buildClient() {
 }
 
 describe('matchBulkPurchaseLines', () => {
-  it('empareja por SKU, código de barras y variante; lo demás es error de su fila', async () => {
+  it('empareja por SKU, código de barras y variante; el producto inexistente se marca para crear', async () => {
     const { client } = buildClient();
     const result = await matchBulkPurchaseLines(client, STORE, [
       { sku: ' CAF-1 ' },
@@ -64,29 +65,50 @@ describe('matchBulkPurchaseLines', () => {
       {},
     ]);
 
-    expect(result[0]).toMatchObject({ product_id: 1, product_name: 'Café' });
-    expect(result[1]).toMatchObject({ product_id: 1 });
+    expect(result[0]).toMatchObject({
+      product_id: 1,
+      product_name: 'Café',
+      will_create: false,
+    });
+    expect(result[1]).toMatchObject({ product_id: 1, will_create: false });
     expect(result[2]).toMatchObject({
       product_id: 4,
       product_variant_id: 40,
       product_name: 'Camisa - M',
     });
-    expect(result[3]).toMatchObject({
+    expect(result[2].will_create).toBe(false);
+    // Producto inexistente: no es error, se creará con la OC.
+    expect(result[3]).toEqual({
+      index: 3,
       product_id: null,
-      error: { code: BULK_LINE_NOT_FOUND, message: 'producto no encontrado' },
+      product_variant_id: null,
+      product_name: null,
+      sku: 'NO-EXISTE',
+      will_create: true,
     });
-    // Un producto archivado no se reutiliza: la fila es error, no se revive.
-    expect(result[4].error?.code).toBe(BULK_LINE_NOT_FOUND);
-    expect(result[5].error?.code).toBe(BULK_LINE_WITHOUT_CODE);
+    // Un producto archivado no se reutiliza ni se revive: se crea uno nuevo,
+    // igual que en `resolve-lines`.
+    expect(result[4]).toMatchObject({ product_id: null, will_create: true });
+    expect(result[4].error).toBeUndefined();
+    // Fila inválida (sin SKU ni código de barras): error y no se crea.
+    expect(result[5]).toMatchObject({
+      product_id: null,
+      will_create: false,
+      error: { code: BULK_LINE_WITHOUT_CODE },
+    });
   });
 
-  it('nunca empareja con productos de otra tienda', async () => {
+  it('nunca empareja con productos de otra tienda: los trata como nuevos de esta', async () => {
     const { client, calls } = buildClient();
     const result = await matchBulkPurchaseLines(client, STORE, [
       { sku: 'AJ-1' },
       { barcode: '9999' },
     ]);
-    expect(result.every((r) => r.error?.code === BULK_LINE_NOT_FOUND)).toBe(true);
+    expect(
+      result.every(
+        (r) => r.product_id === null && r.will_create && !r.product_name && !r.error,
+      ),
+    ).toBe(true);
     expect(calls[0].where.store_id).toBe(STORE);
     expect(calls[1].where.products.store_id).toBe(STORE);
   });

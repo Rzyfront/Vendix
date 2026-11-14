@@ -30,8 +30,9 @@ export class CheckBulkPurchaseLineDto {
 /**
  * `POST store/orders/purchase-orders/bulk/check-lines` (QUI-1004) — dice, sin
  * escribir nada, a qué producto EXISTENTE de la tienda corresponde cada fila
- * de la carga masiva de compras. Una fila sin coincidencia es error de esa
- * fila: la carga masiva de compras no crea productos.
+ * de la carga masiva de compras. Una fila sin coincidencia vuelve con
+ * `will_create: true`: al crear la OC se crea el producto. Solo la fila sin
+ * SKU ni código de barras vuelve con error.
  */
 export class CheckBulkPurchaseLinesDto {
   @ApiProperty({ type: [CheckBulkPurchaseLineDto] })
@@ -49,5 +50,7 @@ export interface CheckBulkLineResult {
   product_variant_id: number | null;
   product_name: string | null;
   sku: string | null;
+  /** Ningún producto de la tienda tiene ese código: se creará con la OC. */
+  will_create: boolean;
   error?: { code: string; message: string };
 }

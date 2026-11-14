@@ -58,6 +58,11 @@ export const BULK_FILE_HASH_PATTERN = /^[a-f0-9]{64}$/;
 export interface BulkUploadCounts {
   total_rows: number;
   successful_rows: number;
+  /**
+   * Parte de `successful_rows` que creó un producto (compras crea los que no
+   * existen). `null`/ausente = el tipo de carga no lo distingue.
+   */
+  created_rows?: number | null;
   failed_rows: number;
   skipped_rows: number;
 }
@@ -98,6 +103,7 @@ export interface BulkUploadPageResult {
   total?: number;
   total_processed?: number;
   successful?: number;
+  created?: number;
   failed?: number;
   skipped?: number;
 }

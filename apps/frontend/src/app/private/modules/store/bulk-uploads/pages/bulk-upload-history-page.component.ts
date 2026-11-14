@@ -151,6 +151,9 @@ export class BulkUploadHistoryPageComponent {
   private readonly statusLabel = (v: BulkUploadStatus): string =>
     BULK_UPLOAD_STATUS_LABELS[v] ?? v;
   private readonly orDash = (v: string | null): string => v || '—';
+  /** `created_rows` null = ese tipo de carga no distingue lo creado. */
+  private readonly countOrDash = (v: number | null): string =>
+    v == null ? '—' : String(v);
 
   readonly columns: TableColumn[] = [
     { key: 'upload_type', label: 'Tipo', transform: this.typeLabel },
@@ -163,6 +166,12 @@ export class BulkUploadHistoryPageComponent {
     { key: 'file_name', label: 'Archivo' },
     { key: 'total_rows', label: 'Total', align: 'right' },
     { key: 'successful_rows', label: 'Cargadas', align: 'right' },
+    {
+      key: 'created_rows',
+      label: 'Creadas',
+      align: 'right',
+      transform: this.countOrDash,
+    },
     { key: 'failed_rows', label: 'Con error', align: 'right' },
     { key: 'skipped_rows', label: 'Omitidas', align: 'right' },
     {
@@ -192,6 +201,12 @@ export class BulkUploadHistoryPageComponent {
       { key: 'user_name', label: 'Usuario', icon: 'user', transform: this.orDash },
       { key: 'total_rows', label: 'Total', icon: 'list' },
       { key: 'successful_rows', label: 'Cargadas', icon: 'check' },
+      {
+        key: 'created_rows',
+        label: 'Creadas',
+        icon: 'package-plus',
+        transform: this.countOrDash,
+      },
       { key: 'failed_rows', label: 'Con error', icon: 'alert-circle' },
       { key: 'skipped_rows', label: 'Omitidas', icon: 'info' },
       {

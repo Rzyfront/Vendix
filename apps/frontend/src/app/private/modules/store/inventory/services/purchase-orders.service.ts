@@ -39,6 +39,8 @@ export interface CheckBulkPurchaseLineResult {
     product_variant_id: number | null;
     product_name: string | null;
     sku: string | null;
+    /** No existe en la tienda: se crea al crear la orden (QUI-1004). */
+    will_create: boolean;
     error?: { code: string; message: string };
 }
 

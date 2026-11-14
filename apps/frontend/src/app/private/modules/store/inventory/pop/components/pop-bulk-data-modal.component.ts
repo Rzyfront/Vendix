@@ -29,6 +29,10 @@ import {
   CheckBulkPurchaseLineResult,
 } from '../../services/purchase-orders.service';
 import { BulkUploadLogService } from '../../../bulk-uploads/services/bulk-upload-log.service';
+import {
+  applyBulkLineMatch,
+  bulkRowBasicErrors,
+} from '../utils/bulk-row-check.util';
 
 /** Filas por llamada a `bulk/check-lines` (tope del backend). */
 const CHECK_LINES_CHUNK = 100;
@@ -55,6 +59,8 @@ interface AnalyzedItem {
   /** Producto existente que corresponde a la fila (QUI-1004). */
   product_id?: number | null;
   product_variant_id?: number | null;
+  /** No existe en el catálogo: se crea al crear la orden (QUI-1004). */
+  will_create?: boolean;
   name: string;
   sku: string;
   barcode?: string;
@@ -90,6 +96,8 @@ interface AnalysisResult {
   valid: number;
   warnings: number;
   errors: number;
+  /** Filas sin error cuyo producto no existe: se crearán. */
+  new_products: number;
   items: AnalyzedItem[];
 }
 
@@ -380,10 +388,12 @@ interface AnalysisResult {
                 class="text-amber-600 shrink-0 mt-0.5"
               ></app-icon>
               <p class="text-[11px] text-amber-800 leading-relaxed">
-                <span class="font-medium">Importante:</span> Cada fila debe
-                ser un producto que ya existe en tu catálogo (por SKU o código
-                de barras). Las filas con un producto inexistente o una
-                cantidad inválida se marcan como error y se omiten.
+                <span class="font-medium">Importante:</span> Los productos se
+                cargarán temporalmente en la orden. Los que no existan en tu
+                catálogo (por SKU o código de barras) se crearán al confirmar,
+                igual que las marcas o categorías nuevas. Las filas inválidas
+                (sin SKU ni código de barras, cantidad o costo inválidos, o un
+                producto nuevo sin nombre) se marcan como error y se omiten.
               </p>
             </div>
 
@@ -522,6 +532,12 @@ interface AnalysisResult {
                 <p class="text-sm font-medium text-gray-900 mt-3">
                   {{ result.total - result.errors }} listas ·
                   {{ result.errors }} con error
+                  @if (result.new_products > 0) {
+                    <span class="font-normal text-gray-600">
+                      ({{ result.new_products }} producto(s) nuevo(s) se
+                      crearán)
+                    </span>
+                  }
                 </p>
                 @if (result.errors > 0) {
                   <div
@@ -791,11 +807,11 @@ interface AnalysisResult {
                 <div class="bg-green-50 border border-green-200 rounded-lg px-4 py-3 flex items-start gap-3">
                   <app-icon name="package-plus" [size]="20" class="text-green-600 shrink-0 mt-0.5"></app-icon>
                   <div class="flex-1 text-sm text-green-800">
-                    <p class="font-medium mb-1">Solo productos existentes</p>
+                    <p class="font-medium mb-1">Productos nuevos serán creados en el catálogo</p>
                     <p class="text-xs text-green-700">
-                      Las filas con error se omitieron y no se creó ningún producto.
-                      Los productos recibirán stock con costo trazable y respaldo contable
-                      al crear la orden; ahí verás el resumen de la carga.
+                      Los productos que no existan en el catálogo se crearán automáticamente.
+                      Los productos existentes recibirán stock con costo trazable y respaldo contable.
+                      Las filas con error se omitieron; al crear la orden verás el resumen de la carga.
                     </p>
                   </div>
                 </div>
@@ -900,7 +916,7 @@ interface AnalysisResult {
           @if (analysisResult() && totalValidItems() > 0) {
             <app-button variant="primary" (clicked)="confirmImport()">
               <app-icon name="package-plus" [size]="16" slot="icon" ></app-icon>
-              Agregar al pedido ({{ totalValidItems() }})
+              Crear catálogo + ingresar mercancía ({{ totalValidItems() }})
             </app-button>
           }
         }
@@ -1556,18 +1572,15 @@ export class PopBulkDataModalComponent {
           const warnings: string[] = [];
           const errors: string[] = [];
 
-          // QUI-1004 — el producto se identifica por SKU o código de barras
-          // y debe existir (lo confirma `bulk/check-lines` más abajo).
-          if (!sku && !barcode) {
-            errors.push('falta el SKU o el código de barras del producto');
-          }
+          // QUI-1004 — solo las filas inválidas son error. Si el producto no
+          // existe se crea con la orden (`bulk/check-lines` lo marca abajo).
+          errors.push(
+            ...bulkRowBasicErrors({ sku, barcode, quantity: qty, unit_cost: cost }),
+          );
           if (barcodeParsed.error) {
             warnings.push(`${barcodeParsed.error}; se ignora el código de barras`);
           }
-          if (isNaN(qty) || qty <= 0) {
-            errors.push('cantidad inválida');
-          }
-          if (isNaN(cost) || cost <= 0) {
+          if (isNaN(cost) || cost === 0) {
             warnings.push('Precio de compra no especificado');
           }
           if (is_on_sale && (sale_price ?? 0) <= 0) {
@@ -1629,12 +1642,16 @@ export class PopBulkDataModalComponent {
         const valid = items.filter((i) => i.status === 'ready').length;
         const withWarnings = items.filter((i) => i.status === 'warning').length;
         const withErrors = items.filter((i) => i.status === 'error').length;
+        const newProducts = items.filter(
+          (i) => i.status !== 'error' && i.will_create,
+        ).length;
 
         this.analysisResult.set({
           total: items.length,
           valid,
           warnings: withWarnings,
           errors: withErrors,
+          new_products: newProducts,
           items,
         });
 
@@ -1694,9 +1711,10 @@ export class PopBulkDataModalComponent {
 
   /**
    * Empareja las filas sin error con productos existentes (`bulk/check-lines`,
-   * de a 100). La fila sin producto queda en error («producto no
-   * encontrado»); la emparejada completa nombre/SKU desde el catálogo para que
-   * el carrito la reconozca aunque el Excel solo traiga el código de barras.
+   * de a 100). La fila sin producto NO es error: se marca `will_create` y se
+   * crea con la orden (si trae nombre); la emparejada completa nombre/SKU
+   * desde el catálogo para que el carrito la reconozca aunque el Excel solo
+   * traiga el código de barras. Reglas en `bulk-row-check.util`.
    */
   private async matchExistingProducts(items: AnalyzedItem[]): Promise<void> {
     const pending = items.filter((i) => i.errors.length === 0);
@@ -1712,15 +1730,10 @@ export class PopBulkDataModalComponent {
       );
       const results: CheckBulkPurchaseLineResult[] = response?.data?.items ?? [];
       chunk.forEach((item, index) => {
-        const match = results.find((r) => r.index === index);
-        if (!match || match.error || !match.product_id) {
-          item.errors.push(match?.error?.message ?? 'producto no encontrado');
-          return;
-        }
-        item.product_id = match.product_id;
-        item.product_variant_id = match.product_variant_id;
-        if (!item.name && match.product_name) item.name = match.product_name;
-        if (!item.sku && match.sku) item.sku = match.sku;
+        applyBulkLineMatch(
+          item,
+          results.find((r) => r.index === index),
+        );
       });
     }
     for (const item of items) {
