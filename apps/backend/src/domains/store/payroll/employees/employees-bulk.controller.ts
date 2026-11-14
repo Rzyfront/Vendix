@@ -17,6 +17,7 @@ import {
 import { Response } from 'express';
 import { FileInterceptor } from '@nestjs/platform-express';
 import { EmployeesBulkService } from './employees-bulk.service';
+import { BulkUploadLogsService } from '../../bulk-uploads/bulk-upload-logs.service';
 import { ResponseService } from '@common/responses/response.service';
 import { PermissionsGuard } from '../../../auth/guards/permissions.guard';
 import { Permissions } from '../../../auth/decorators/permissions.decorator';
@@ -33,6 +34,7 @@ export class EmployeesBulkController {
   constructor(
     private readonly employeesBulkService: EmployeesBulkService,
     private readonly responseService: ResponseService,
+    private readonly bulkUploadLogs: BulkUploadLogsService,
   ) {}
 
   @Post('upload')
@@ -161,8 +163,17 @@ export class EmployeesBulkController {
       storeId,
       organizationId,
     );
+    // QUI-1004 — huella del archivo y aviso si esta tienda ya lo cargó.
+    const fileInfo = await this.bulkUploadLogs.describeFile(
+      'employees',
+      file.buffer,
+      file.originalname,
+    );
 
-    return this.responseService.success(result, 'Analisis completado');
+    return this.responseService.success(
+      { ...result, ...fileInfo },
+      'Analisis completado',
+    );
   }
 
   /**
@@ -188,6 +199,12 @@ export class EmployeesBulkController {
       storeId,
       req.user,
       { offset: body.offset, limit: body.limit },
+    );
+    await this.bulkUploadLogs.trackSessionPage(
+      'employees',
+      body.session_id,
+      body,
+      result,
     );
 
     if (result.failed > 0) {

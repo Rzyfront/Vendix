@@ -1,3 +1,4 @@
+import { applyDecorators } from '@nestjs/common';
 import { ApiProperty, ApiPropertyOptional } from '@nestjs/swagger';
 import { Type } from 'class-transformer';
 import {
@@ -133,20 +134,22 @@ export class RegisterBulkUploadDto {
 }
 
 /**
- * Campos opcionales que el commit de una carga trae del analyze para que el
- * registro conozca el archivo (el commit no vuelve a recibirlo).
+ * Decoradores para los DTO de commit de las cargas existentes: traen del
+ * analyze el nombre y la huella del archivo para el registro (QUI-1004).
  */
-export class BulkUploadFileRefDto {
-  @ApiPropertyOptional({ description: 'Nombre original del archivo' })
-  @IsOptional()
-  @IsString()
-  @MaxLength(255)
-  file_name?: string;
+export const BulkFileNameField = () =>
+  applyDecorators(
+    ApiPropertyOptional({ description: 'Nombre original del archivo' }),
+    IsOptional(),
+    IsString(),
+    MaxLength(255),
+  );
 
-  @ApiPropertyOptional({ description: 'Huella devuelta por el analyze' })
-  @IsOptional()
-  @Matches(BULK_FILE_HASH_PATTERN, {
-    message: 'file_hash debe ser un SHA-256 en hexadecimal',
-  })
-  file_hash?: string;
-}
+export const BulkFileHashField = () =>
+  applyDecorators(
+    ApiPropertyOptional({ description: 'Huella devuelta por el analyze' }),
+    IsOptional(),
+    Matches(BULK_FILE_HASH_PATTERN, {
+      message: 'file_hash debe ser un SHA-256 en hexadecimal',
+    }),
+  );

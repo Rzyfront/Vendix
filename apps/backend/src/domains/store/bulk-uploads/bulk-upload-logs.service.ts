@@ -16,7 +16,10 @@ import {
   BULK_FILE_HASH_PATTERN,
   resolveBulkUploadStatus,
 } from './bulk-upload-log.types';
-import { normalizeUploadFileName } from './bulk-file-fingerprint.util';
+import {
+  computeBulkFileFingerprint,
+  normalizeUploadFileName,
+} from './bulk-file-fingerprint.util';
 import {
   QueryBulkUploadLogsDto,
   RegisterBulkUploadDto,
@@ -90,6 +93,26 @@ export class BulkUploadLogsService {
       status: previous.status,
       result_reference: previous.result_reference ?? null,
     };
+  }
+
+  /**
+   * Para el analyze de las cargas que suben el archivo: nombre limpio, huella
+   * y la carga anterior de esta tienda con la misma huella (si la hay). El
+   * cliente devuelve `file_name` y `file_hash` en el commit.
+   */
+  async describeFile(
+    upload_type: BulkUploadType,
+    buffer: Buffer,
+    original_name?: string,
+  ): Promise<{
+    file_name: string;
+    file_hash: string;
+    duplicate_of: BulkUploadDuplicateInfo | null;
+  }> {
+    const file_name = normalizeUploadFileName(original_name);
+    const file_hash = computeBulkFileFingerprint(buffer, file_name);
+    const duplicate_of = await this.findDuplicateSafe(upload_type, file_hash);
+    return { file_name, file_hash, duplicate_of };
   }
 
   /** Igual que `findDuplicate`, pero un fallo de lectura no tumba el analyze. */

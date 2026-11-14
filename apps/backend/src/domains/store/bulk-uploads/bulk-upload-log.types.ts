@@ -24,7 +24,10 @@ export type BulkUploadType = (typeof BULK_UPLOAD_TYPES)[number];
  * `POST store/bulk-uploads`; el resto lo registra el servidor al procesar la
  * carga, así nadie puede fabricar una fila de un tipo que el servidor ve.
  */
-export const CLIENT_REGISTERED_UPLOAD_TYPES = ['purchase_orders'] as const;
+export const CLIENT_REGISTERED_UPLOAD_TYPES = [
+  'purchase_orders',
+  'customers',
+] as const;
 
 export const BULK_UPLOAD_STATUSES = ['completed', 'partial', 'failed'] as const;
 

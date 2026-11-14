@@ -10,6 +10,10 @@ import {
   Max,
 } from 'class-validator';
 import { Type } from 'class-transformer';
+import {
+  BulkFileHashField,
+  BulkFileNameField,
+} from '../../../bulk-uploads/dto/bulk-upload-log.dto';
 
 const VALID_ADJUSTMENT_TYPES = [
   'damage',
@@ -86,6 +90,13 @@ export class BulkAdjustmentUploadSessionDto extends BulkAdjustmentUploadDto {
   @Min(1)
   @Max(MAX_BULK_ADJUSTMENT_UPLOAD_PAGE)
   limit?: number;
+
+  /** QUI-1004 — nombre y huella del archivo (vienen del analyze). */
+  @BulkFileNameField()
+  file_name?: string;
+
+  @BulkFileHashField()
+  file_hash?: string;
 
   /**
    * Confirmación explícita de que las filas con SKU vacío crean productos
