@@ -18,6 +18,11 @@ import {
   ResolvePurchaseOrderLinesDto,
 } from './dto/resolve-lines.dto';
 import { NewItemConflictsDto } from './dto/new-item-conflicts.dto';
+import {
+  CheckBulkLineResult,
+  CheckBulkPurchaseLinesDto,
+} from './dto/check-bulk-lines.dto';
+import { matchBulkPurchaseLines } from './purchase-order-bulk-lines.util';
 import { PurchaseOrderQueryDto } from './dto/purchase-order-query.dto';
 import { ReceivePurchaseOrderDto } from './dto/receive-purchase-order.dto';
 import { RegisterPaymentDto } from './dto/register-payment.dto';
@@ -1916,6 +1921,28 @@ export class PurchaseOrdersService {
       product_variant_id: finalVariantId ?? null,
       created,
     };
+  }
+
+  /**
+   * QUI-1004 — carga masiva de compras: a qué producto EXISTENTE de la tienda
+   * del contexto corresponde cada fila. Solo lectura; la tienda sale del
+   * contexto, nunca del cuerpo. Detalle por fila con HTTP 200.
+   */
+  async checkBulkLines(
+    dto: CheckBulkPurchaseLinesDto,
+  ): Promise<{ items: CheckBulkLineResult[] }> {
+    const storeId = RequestContextService.getStoreId();
+    if (!storeId) {
+      throw new BadRequestException(
+        'No se pudo resolver la tienda de la petición para validar las líneas.',
+      );
+    }
+    const items = await matchBulkPurchaseLines(
+      this.prisma,
+      storeId,
+      dto.items ?? [],
+    );
+    return { items };
   }
 
   /**

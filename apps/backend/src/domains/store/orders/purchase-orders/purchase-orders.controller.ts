@@ -37,6 +37,7 @@ import { ConfirmScannedInvoiceDto } from './dto/scan-invoice.dto';
 import { CostPreviewDto } from './dto/cost-preview.dto';
 import { NewItemConflictsDto } from './dto/new-item-conflicts.dto';
 import { ResolvePurchaseOrderLinesDto } from './dto/resolve-lines.dto';
+import { CheckBulkPurchaseLinesDto } from './dto/check-bulk-lines.dto';
 import {
   RevalidateInvoiceDto,
   REVALIDATE_CONSOLIDATED_MAX_BYTES,
@@ -591,6 +592,18 @@ export class PurchaseOrdersController {
   async resolveLines(@Body() dto: ResolvePurchaseOrderLinesDto) {
     const result = await this.purchaseOrdersService.resolveLines(dto);
     return this.responseService.success(result, 'Líneas resueltas');
+  }
+
+  // QUI-1004 — estática, antes de `:id`. Valida sin escribir las filas de la
+  // carga masiva de compras contra los productos existentes de la tienda: la
+  // fila sin producto es error de esa fila (la carga masiva no crea
+  // productos). HTTP 200 con detalle por fila.
+  @Post('bulk/check-lines')
+  @HttpCode(HttpStatus.OK)
+  @Permissions('store:orders:purchase_orders:create')
+  async checkBulkLines(@Body() dto: CheckBulkPurchaseLinesDto) {
+    const result = await this.purchaseOrdersService.checkBulkLines(dto);
+    return this.responseService.success(result, 'Líneas validadas');
   }
 
   // ===== Sub-resource routes (BEFORE :id to avoid route conflicts) =====
