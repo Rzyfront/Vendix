@@ -38,6 +38,15 @@ Dedicated bulk surface for a module: a controller + service pair, separate from 
 - **Client chunking:** `concatMap` (not `mergeMap`) with `catchError` **inside** so a failed batch reports its ids as failed and the chain continues; or `runChunked` (reports `failedAt`, retry with `items.slice(failedAt)`; confirmed batches are not reverted). Progress exposed as a signal (`BulkOrdersProgress` / `BulkEditProgress`).
 - **Selection state:** page owns a `selectedIds` Set (survives pagination/filters) and a growing cache Map; Zoneless signals, no `| async`.
 
+## Upload Log and Repeated Files (QUI-1004)
+
+Every file import writes ONE row to `bulk_upload_logs` (type, user, file name, content hash, total/ok/error/skipped counts, `completed|partial|failed`, result reference) through `BulkUploadLogsService` (`domains/store/bulk-uploads/`); never the file or per-row detail. The model is in `store_scoped_models`: the store always comes from the context.
+
+- Server-side imports: the analyze/preview handler returns `...await bulkUploadLogs.describeFile(type, file.buffer, file.originalname)` (`file_name`, `file_hash`, `duplicate_of`); the commit DTO takes optional `file_name`/`file_hash` (`@BulkFileNameField()`/`@BulkFileHashField()`) and the handler calls `trackSessionPage` (paged, sums per `session_id`) or `trackUpload` (one shot). Logging is best effort and never breaks an upload.
+- Browser-parsed imports (purchase orders, customers): `BulkUploadLogService.fingerprint(file)` (same normalized SHA-256), `confirmFileIsNew(type, hash)` before writing, `register(...)` once at the end (`CLIENT_REGISTERED_UPLOAD_TYPES`).
+- Frontend: `confirmDuplicate(duplicate_of)` before the first commit call (Cancelar = nothing written). History: `/admin/settings/bulk-uploads` (`store:bulk_uploads:read`).
+- New import type: add it to `BULK_UPLOAD_TYPES` + `BULK_UPLOAD_TYPE_PERMISSIONS` (backend) and `BulkUploadType` + labels (frontend).
+
 ## Bulk Printing (orders)
 
 `POST store/orders/bulk/print` (`store:orders:bulk_print`) returns **JSON**, not a PDF: `BulkPrintResultDto { total, printable, orders[], skipped[], pos_ticket_format }` with `printable + skipped.length === total`. The backend never fails for one order: it skips `not_found` (out of store scope) and `non_printable_state` (`cancelled`/`refunded`); only "nothing printable" is an HTTP error. Paper comes from `store_settings.receipts.pos_ticket_format` only (fallback `thermal_80`), never from the client.
