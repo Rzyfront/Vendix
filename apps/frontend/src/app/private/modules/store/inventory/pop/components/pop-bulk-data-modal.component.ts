@@ -32,10 +32,13 @@ import { BulkUploadLogService } from '../../../bulk-uploads/services/bulk-upload
 import {
   applyBulkLineMatch,
   bulkRowBasicErrors,
+  mapWithConcurrency,
 } from '../utils/bulk-row-check.util';
 
 /** Filas por llamada a `bulk/check-lines` (tope del backend). */
 const CHECK_LINES_CHUNK = 100;
+/** QUI-1004 — `bulk/check-lines` batches validated in parallel. */
+const CHECK_LINES_CONCURRENCY = 4;
 
 /**
  * QUI-1004 — datos de la carga para el registro de cargas masivas. Se
@@ -1718,8 +1721,13 @@ export class PopBulkDataModalComponent {
    */
   private async matchExistingProducts(items: AnalyzedItem[]): Promise<void> {
     const pending = items.filter((i) => i.errors.length === 0);
+    const chunks: AnalyzedItem[][] = [];
     for (let start = 0; start < pending.length; start += CHECK_LINES_CHUNK) {
-      const chunk = pending.slice(start, start + CHECK_LINES_CHUNK);
+      chunks.push(pending.slice(start, start + CHECK_LINES_CHUNK));
+    }
+    // Up to CHECK_LINES_CONCURRENCY batches in flight (10.000 rows used to be
+    // 100 sequential calls) and one retry per batch before aborting.
+    await mapWithConcurrency(chunks, CHECK_LINES_CONCURRENCY, async (chunk) => {
       const response = await firstValueFrom(
         this.purchaseOrdersService.checkBulkLines(
           chunk.map((i) => ({
@@ -1735,7 +1743,7 @@ export class PopBulkDataModalComponent {
           results.find((r) => r.index === index),
         );
       });
-    }
+    });
     for (const item of items) {
       item.status =
         item.errors.length > 0

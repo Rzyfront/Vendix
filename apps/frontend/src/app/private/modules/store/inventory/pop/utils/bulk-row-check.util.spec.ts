@@ -3,6 +3,7 @@ import {
   BulkMatchableRow,
   applyBulkLineMatch,
   bulkRowBasicErrors,
+  mapWithConcurrency,
 } from './bulk-row-check.util';
 
 describe('bulk-row-check.util (QUI-1004)', () => {
@@ -107,5 +108,46 @@ describe('bulk-row-check.util (QUI-1004)', () => {
       applyBulkLineMatch(b, undefined);
       expect(b.errors).toEqual([BULK_ROW_ERRORS.notChecked]);
     });
+  });
+});
+
+describe('mapWithConcurrency (QUI-1004 — validación de compras en paralelo)', () => {
+  const tick = () => new Promise<void>((resolve) => setTimeout(resolve, 1));
+
+  it('nunca tiene más de `limit` lotes en vuelo y conserva el orden de los resultados', async () => {
+    let inFlight = 0;
+    let peak = 0;
+    const results = await mapWithConcurrency([1, 2, 3, 4, 5, 6, 7, 8, 9, 10], 4, async (n) => {
+      inFlight++;
+      peak = Math.max(peak, inFlight);
+      await tick();
+      inFlight--;
+      return n * 10;
+    });
+    expect(peak).toBe(4);
+    expect(results).toEqual([10, 20, 30, 40, 50, 60, 70, 80, 90, 100]);
+  });
+
+  it('un lote que falla una vez se reintenta y la revisión sigue', async () => {
+    const calls: number[] = [];
+    const results = await mapWithConcurrency([1, 2, 3], 2, async (n) => {
+      calls.push(n);
+      if (n === 2 && calls.filter((c) => c === 2).length === 1) throw new Error('timeout');
+      return n;
+    });
+    expect(results).toEqual([1, 2, 3]);
+    expect(calls.filter((c) => c === 2).length).toBe(2);
+  });
+
+  it('un lote que falla dos veces aborta y no se inician más lotes', async () => {
+    const started: number[] = [];
+    await expectAsync(
+      mapWithConcurrency([1, 2, 3, 4, 5], 1, async (n) => {
+        started.push(n);
+        if (n === 2) throw new Error('down');
+        return n;
+      }),
+    ).toBeRejectedWithError('down');
+    expect(started).toEqual([1, 2, 2]);
   });
 });

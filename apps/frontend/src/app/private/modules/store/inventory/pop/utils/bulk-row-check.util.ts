@@ -81,3 +81,45 @@ export function applyBulkLineMatch(
   row.product_variant_id = null;
   row.will_create = true;
 }
+
+/**
+ * QUI-1004 — runs `worker` over `inputs` with at most `limit` calls in flight,
+ * keeping results in input order. Each input gets `retries` extra attempts;
+ * the first input that still fails rejects the whole run and no further
+ * input is started (the caller aborts the review, as before).
+ */
+export async function mapWithConcurrency<T, R>(
+  inputs: readonly T[],
+  limit: number,
+  worker: (input: T, index: number) => Promise<R>,
+  retries = 1,
+): Promise<R[]> {
+  const results = new Array<R>(inputs.length);
+  let next = 0;
+  let failed = false;
+  const attempt = async (index: number): Promise<R> => {
+    for (let tries = 0; ; tries++) {
+      try {
+        return await worker(inputs[index], index);
+      } catch (error) {
+        if (tries >= retries) throw error;
+      }
+    }
+  };
+  const runners = Array.from(
+    { length: Math.min(Math.max(1, limit), inputs.length) },
+    async () => {
+      while (!failed && next < inputs.length) {
+        const index = next++;
+        try {
+          results[index] = await attempt(index);
+        } catch (error) {
+          failed = true;
+          throw error;
+        }
+      }
+    },
+  );
+  await Promise.all(runners);
+  return results;
+}
