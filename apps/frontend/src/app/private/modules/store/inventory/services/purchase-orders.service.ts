@@ -27,6 +27,21 @@ import type {
     ResolvePurchaseOrderLinesResponse,
 } from '../pop/interfaces/pop-order.interface';
 
+/** QUI-1004 — fila de la carga masiva de compras a emparejar. */
+export interface CheckBulkPurchaseLine {
+    sku?: string;
+    barcode?: string;
+}
+
+export interface CheckBulkPurchaseLineResult {
+    index: number;
+    product_id: number | null;
+    product_variant_id: number | null;
+    product_name: string | null;
+    sku: string | null;
+    error?: { code: string; message: string };
+}
+
 @Injectable({
     providedIn: 'root',
 })
@@ -188,6 +203,22 @@ export class PurchaseOrdersService {
     ): Observable<ApiResponse<ResolvePurchaseOrderLinesResponse>> {
         return this.http
             .post<ApiResponse<ResolvePurchaseOrderLinesResponse>>(`${this.api_url}/resolve-lines`, body)
+            .pipe(catchError(this.handleError));
+    }
+
+    /**
+     * QUI-1004 — valida, sin escribir, a qué producto EXISTENTE de la tienda
+     * corresponde cada fila de la carga masiva de compras (hasta 100 por
+     * llamada). Una fila sin producto vuelve con `error`.
+     */
+    checkBulkLines(
+        items: CheckBulkPurchaseLine[],
+    ): Observable<ApiResponse<{ items: CheckBulkPurchaseLineResult[] }>> {
+        return this.http
+            .post<ApiResponse<{ items: CheckBulkPurchaseLineResult[] }>>(
+                `${this.api_url}/bulk/check-lines`,
+                { items },
+            )
             .pipe(catchError(this.handleError));
     }
 

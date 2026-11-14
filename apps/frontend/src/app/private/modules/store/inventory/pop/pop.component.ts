@@ -95,6 +95,11 @@ import {
   UpdatePopCartItemRequest,
 } from './interfaces/pop-cart.interface';
 import { POP_USE_UNIFIED_MODAL } from './pop.config';
+import {
+  PopBulkImport,
+  PopBulkImportSummary,
+} from './components/pop-bulk-data-modal.component';
+import { BulkUploadLogService } from '../../bulk-uploads/services/bulk-upload-log.service';
 import { toLocalDateString } from '../../../../../shared/utils/date.util';
 import { parseApiError } from '../../../../../core/utils/parse-api-error';
 import { extractApiErrorMessage } from '../../../../../core/utils/api-error-handler';
@@ -372,6 +377,16 @@ const PAY_OMITTED_NOTICE_DURATION_MS = 6000;
 })
 export class PopComponent implements OnInit, OnDestroy {
   private destroyRef = inject(DestroyRef);
+  private bulkUploadLog = inject(BulkUploadLogService);
+
+  /**
+   * QUI-1004 — carga masiva que llenó el carrito y aún no termina en una OC.
+   * Se registra (una fila) al terminar la orden, con su número; se descarta
+   * si el operador vacía el carrito.
+   */
+  private pendingBulkUpload:
+    | (PopBulkImportSummary & { valid_rows: number; loaded_rows: number })
+    | null = null;
   private vexiHosts = inject(VexiUiHostRegistry);
   private dispatchNotesService = inject(DispatchNotesService);
   /**
@@ -1466,8 +1481,9 @@ export class PopComponent implements OnInit, OnDestroy {
     return ids.length > 0 ? Array.from(new Set(ids)) : undefined;
   }
 
-  onBulkDataReceived(items: any[]): void {
-    if (!items || items.length === 0) return;
+  onBulkDataReceived(event: PopBulkImport): void {
+    const items = event?.items ?? [];
+    if (items.length === 0) return;
 
     // Se acumulan y se agregan de una vez: un solo set del carrito y un solo
     // cálculo de resumen (fila por fila era O(N²) con 10.000 filas).
@@ -1482,10 +1498,6 @@ export class PopComponent implements OnInit, OnDestroy {
       const sku =
         this.getBulkValue(normalizedRow, 'sku', 'code', 'codigo', 'id');
 
-      if (!name || !sku) {
-        return;
-      }
-
       const barcode = this.parseBulkBarcode(
         this.getBulkValue(
           normalizedRow,
@@ -1496,6 +1508,13 @@ export class PopComponent implements OnInit, OnDestroy {
           'gtin',
         ),
       );
+
+      // QUI-1004 — la fila ya viene emparejada con un producto existente; si el
+      // Excel solo traía el código de barras, ese es su código.
+      const code = sku || barcode;
+      if (!name || !code) {
+        return;
+      }
 
       const product_type = this.normalizeBulkProductType(
         this.getBulkValue(normalizedRow, 'product_type', 'tipo'),
@@ -1615,7 +1634,7 @@ export class PopComponent implements OnInit, OnDestroy {
       const dummyProduct = {
         id: 0,
         name: String(name),
-        code: String(sku),
+        code: String(code),
         cost: unit_cost,
         price: base_price,
         stock: 0,
@@ -1629,7 +1648,7 @@ export class PopComponent implements OnInit, OnDestroy {
           is_prebulk: true,
           prebulk_data: {
             name: String(name),
-            code: String(sku),
+            code: String(code),
             barcode,
             description: String(description),
             state: String(state),
@@ -1652,6 +1671,12 @@ export class PopComponent implements OnInit, OnDestroy {
         });
     });
 
+    this.pendingBulkUpload = {
+      ...event.summary,
+      valid_rows: items.length,
+      loaded_rows: requests.length,
+    };
+
     if (requests.length > 0) {
       this.popCartService
         .addPrebulkItems(requests)
@@ -1662,7 +1687,7 @@ export class PopComponent implements OnInit, OnDestroy {
       );
     } else {
       this.toastService.warning(
-        'No se encontraron productos válidos en el archivo (requiere Nombre y SKU)',
+        'No se encontraron productos válidos en el archivo (requiere SKU o código de barras)',
       );
     }
   }
@@ -1829,6 +1854,8 @@ export class PopComponent implements OnInit, OnDestroy {
       // Vaciar el carrito descarta el reintento pendiente: el próximo carrito ya
       // no corresponde a esa OC y reanudar su recepción ignoraría la compra nueva.
       this.pendingReceptionOrder.set(null);
+      // QUI-1004 — la carga masiva vaciada no terminó en ninguna orden.
+      this.pendingBulkUpload = null;
       this.popCartService.clearCart().pipe(takeUntilDestroyed(this.destroyRef)).subscribe({
         next: () => {
           this.toastService.info('Orden vaciada');
@@ -2042,6 +2069,7 @@ export class PopComponent implements OnInit, OnDestroy {
     this.purchaseOrdersService.createPurchaseOrder(request).pipe(takeUntilDestroyed(this.destroyRef)).subscribe({
       next: (response) => {
         this.toastService.success('Orden guardada como borrador');
+        this._recordBulkUpload(response?.data);
         this.popCartService.clearCart().pipe(takeUntilDestroyed(this.destroyRef)).subscribe();
         this.router.navigate(['/admin/products']);
       },
@@ -3001,6 +3029,10 @@ export class PopComponent implements OnInit, OnDestroy {
     } = {},
   ): void {
     if (!order) return;
+    // QUI-1004 — una carga masiva que llegó a orden se registra aquí, con la
+    // PO; si falló un paso accesorio (pago o recepción) queda «parcial».
+    const bulkSummary = this._recordBulkUpload(order, !!extras.failedStage);
+    const notice = [extras.notice, bulkSummary].filter(Boolean).join(' ');
     this.orderResult.set({
       id: order.id,
       total: Number(order.total_amount ?? 0),
@@ -3015,8 +3047,50 @@ export class PopComponent implements OnInit, OnDestroy {
       state: order.state ?? order.status ?? '',
       ...(extras.stages ? { stages: extras.stages } : {}),
       ...(extras.failedStage ? { failedStage: extras.failedStage } : {}),
-      ...(extras.notice ? { notice: extras.notice } : {}),
+      ...(notice ? { notice } : {}),
     });
+  }
+
+  /**
+   * QUI-1004 — registra la carga masiva pendiente contra la orden que generó
+   * y devuelve el resumen para el operador («N cargadas · M con error · K
+   * omitidas»). Cargadas = filas que entraron al carrito; con error = filas
+   * omitidas por error en la revisión; omitidas = filas válidas que no
+   * llegaron al carrito. Registra una sola vez por carga.
+   */
+  private _recordBulkUpload(
+    order: { order_number?: string } | null | undefined,
+    accessoryStepFailed = false,
+  ): string | null {
+    const pending = this.pendingBulkUpload;
+    if (!pending || !order) return null;
+    this.pendingBulkUpload = null;
+
+    const successful_rows = pending.loaded_rows;
+    const skipped_rows = Math.max(0, pending.valid_rows - pending.loaded_rows);
+    const reference = order.order_number ?? '';
+    if (pending.file_hash) {
+      this.bulkUploadLog
+        .register({
+          upload_type: 'purchase_orders',
+          file_name: pending.file_name,
+          file_hash: pending.file_hash,
+          total_rows: pending.total_rows,
+          successful_rows,
+          failed_rows: pending.failed_rows,
+          skipped_rows,
+          accessory_step_failed: accessoryStepFailed,
+          ...(reference ? { result_reference: reference } : {}),
+        })
+        .pipe(takeUntilDestroyed(this.destroyRef))
+        .subscribe();
+    }
+    const summary =
+      `Carga masiva: ${successful_rows} cargadas · ${pending.failed_rows} con error · ` +
+      `${skipped_rows} omitidas${reference ? ` · orden ${reference}` : ''}` +
+      (accessoryStepFailed ? ' (parcial).' : '.');
+    this.toastService.info(summary, undefined, 8000);
+    return summary;
   }
 
   /**
