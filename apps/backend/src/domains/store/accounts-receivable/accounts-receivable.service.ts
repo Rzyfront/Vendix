@@ -11,7 +11,7 @@ import { MovementsService } from '../cash-registers/movements/movements.service'
 import { SessionsService } from '../cash-registers/sessions/sessions.service';
 import { lockOrderLifecycle } from '../orders/order-flow/order-lifecycle-lock.util';
 import { ArQueryDto } from './dto/ar-query.dto';
-import { RegisterArPaymentDto } from './dto/register-ar-payment.dto';
+import { RegisterArPaymentInput } from './dto/register-ar-payment.dto';
 
 /**
  * QUI-979 — marca de la fila de `ar_payments` que asienta la cuota inicial de
@@ -240,7 +240,7 @@ export class AccountsReceivableService {
   // ─── REGISTER PAYMENT ──────────────────────────────────────
   async registerPayment(
     ar_id: number,
-    dto: RegisterArPaymentDto,
+    dto: RegisterArPaymentInput,
     user_id: number,
   ) {
     const ar = await this.prisma.accounts_receivable.findFirst({

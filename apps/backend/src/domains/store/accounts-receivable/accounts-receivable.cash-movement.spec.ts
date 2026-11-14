@@ -1,4 +1,6 @@
+import { BadRequestException, ValidationPipe } from '@nestjs/common';
 import { AccountsReceivableService } from './accounts-receivable.service';
+import { RegisterArPaymentDto } from './dto/register-ar-payment.dto';
 
 /**
  * B04 — el abono de CxC en efectivo (sin payment_id del POS) deja un cash_in
@@ -115,5 +117,34 @@ describe('AccountsReceivableService.registerPayment — movimiento de caja (B04)
       );
       expect(gate).not.toHaveBeenCalled();
     });
+  });
+});
+
+/**
+ * QUI-893 — el carril `payment_id` (abono ligado a un cobro que ya pasó por el
+ * gate) es interno: el body HTTP no puede traerlo, o un abono manual se saltaría
+ * el gate de caja y el movimiento.
+ */
+describe('RegisterArPaymentDto — payment_id no es aceptado desde HTTP (QUI-893)', () => {
+  // Misma configuración que el ValidationPipe global (main.ts).
+  const validate = (body: Record<string, unknown>) =>
+    new ValidationPipe({
+      transform: true,
+      whitelist: true,
+      forbidNonWhitelisted: true,
+      transformOptions: { enableImplicitConversion: true },
+    }).transform(body, { type: 'body', metatype: RegisterArPaymentDto });
+
+  it('rechaza con 400 un body que trae payment_id', async () => {
+    const error = await validate({ amount: 50000, payment_id: 123 }).catch((e) => e);
+
+    expect(error).toBeInstanceOf(BadRequestException);
+    expect(JSON.stringify(error.getResponse())).toContain('payment_id');
+  });
+
+  it('un abono manual sin payment_id sigue siendo válido', async () => {
+    await expect(validate({ amount: 50000, payment_method: 'cash' })).resolves.toEqual(
+      expect.objectContaining({ amount: 50000, payment_method: 'cash' }),
+    );
   });
 });
