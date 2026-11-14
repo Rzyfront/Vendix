@@ -221,4 +221,26 @@ describe('PopOrderConfirmationModalComponent', () => {
     expect(buttons.length).toBe(2);
     expect((buttons[1] as HTMLButtonElement).disabled).toBe(true);
   });
+  it('(k) QUI-942: sin notice no pinta la nota', () => {
+    fixture.componentRef.setInput('isOpen', true);
+    fixture.detectChanges();
+
+    const root = fixture.nativeElement as HTMLElement;
+    expect(root.querySelector('.pop-order-confirmation__notice')).toBeNull();
+  });
+
+  it('(l) QUI-942: con notice pinta la nota persistente en el modal', () => {
+    fixture.componentRef.setInput('isOpen', true);
+    fixture.componentRef.setInput(
+      'notice',
+      'La orden quedó con total $0: no se registró ningún pago.',
+    );
+    fixture.detectChanges();
+
+    const note = (fixture.nativeElement as HTMLElement).querySelector(
+      '.pop-order-confirmation__notice',
+    );
+    expect(note).not.toBeNull();
+    expect(note?.textContent).toContain('no se registró ningún pago');
+  });
 });

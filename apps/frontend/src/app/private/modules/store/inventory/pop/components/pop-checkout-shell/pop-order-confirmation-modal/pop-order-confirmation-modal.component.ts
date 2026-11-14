@@ -97,6 +97,11 @@ export class PopOrderConfirmationModalComponent {
    * navegar a una ruta con id falsamente válido.
    */
   readonly orderId = input<number | null>(null);
+  /**
+   * QUI-942 — nota informativa persistente (p. ej. «no se registró ningún
+   * pago» en una OC de total $0). Vacía ⇒ no se pinta nada.
+   */
+  readonly notice = input<string>('');
 
   /** El operador eligió empezar otra OC. El padre limpia el carrito. */
   readonly newPurchase = output<void>();
