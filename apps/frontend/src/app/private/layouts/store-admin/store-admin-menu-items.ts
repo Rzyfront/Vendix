@@ -870,6 +870,11 @@ export const STORE_ADMIN_MENU_ITEMS: readonly MenuItem[] = [
         route: '/admin/settings/appearance',
       },
       {
+        label: 'Historial de cargas',
+        icon: 'circle',
+        route: '/admin/settings/bulk-uploads',
+      },
+      {
         label: 'Seguridad',
         icon: 'circle',
         route: '/admin/settings/security',
