@@ -114,6 +114,12 @@ const SHIPPING_METHOD_OPTIONS: SelectorOption[] = [
 /** Mínimo que acepta `RegisterPaymentDto.amount` (`@Min(0.01)`). */
 const MIN_PAYMENT_AMOUNT = 0.01;
 
+/** QUI-942 — aviso cuando la OC quedó en total $0 y no se registró pago. */
+const PAY_OMITTED_ZERO_TOTAL_NOTICE =
+  'La orden quedó con total $0: no se registró ningún pago.';
+/** Duración del aviso anterior (el `info` por defecto dura 1,5 s). */
+const PAY_OMITTED_NOTICE_DURATION_MS = 6000;
+
 /**
  * POP (Point of Purchase) Main Component
  * Purchase order creation interface similar to POS
@@ -307,6 +313,7 @@ const MIN_PAYMENT_AMOUNT = 0.01;
       [total]="orderResult()?.total ?? 0"
       [state]="orderResult()?.state ?? ''"
       [orderId]="orderResult()?.id ?? null"
+      [notice]="orderResult()?.notice ?? ''"
       (newPurchase)="onNewPurchase()"
       (viewOrder)="onViewOrder()"
     ></app-pop-order-confirmation-modal>
@@ -549,6 +556,12 @@ export class PopComponent implements OnInit, OnDestroy {
       errorMessage?: string;
     }>;
     failedStage?: 'create' | 'receive' | 'pay';
+    /**
+     * QUI-942 — nota persistente para el modal de éxito (p. ej. «no se
+     * registró ningún pago» en una OC de total $0). Un toast de 1,5 s junto
+     * al de éxito pasaba desapercibido.
+     */
+    notice?: string;
   } | null>(null);
   readonly orderError = signal<string | null>(null);
 
@@ -2793,11 +2806,16 @@ export class PopComponent implements OnInit, OnDestroy {
               receive: doReceive ? 'success' : 'skipped',
               pay: paid ? 'success' : 'skipped',
             }),
+            ...(payOmittedZeroTotal ? { notice: PAY_OMITTED_ZERO_TOTAL_NOTICE } : {}),
           });
           this.toastService.success(this._buildSuccessMessage(doReceive, paid));
           if (payOmittedZeroTotal) {
+            // QUI-942 — 1,5 s (por defecto) junto al toast de éxito pasaba
+            // desapercibido; el modal de éxito también lo muestra.
             this.toastService.info(
-              'La orden quedó con total $0: no se registró ningún pago.',
+              PAY_OMITTED_ZERO_TOTAL_NOTICE,
+              undefined,
+              PAY_OMITTED_NOTICE_DURATION_MS,
             );
           }
           this._finalizeAfterOrder();
@@ -2971,6 +2989,7 @@ export class PopComponent implements OnInit, OnDestroy {
         errorMessage?: string;
       }>;
       failedStage?: 'create' | 'receive' | 'pay';
+      notice?: string;
     } = {},
   ): void {
     if (!order) return;
@@ -2988,6 +3007,7 @@ export class PopComponent implements OnInit, OnDestroy {
       state: order.state ?? order.status ?? '',
       ...(extras.stages ? { stages: extras.stages } : {}),
       ...(extras.failedStage ? { failedStage: extras.failedStage } : {}),
+      ...(extras.notice ? { notice: extras.notice } : {}),
     });
   }
 

@@ -253,7 +253,10 @@ describe('PopComponent — QUI-855 puntos de entrada', () => {
       expect(toast.error).not.toHaveBeenCalled();
       expect(toast.info).toHaveBeenCalledWith(
         'La orden quedó con total $0: no se registró ningún pago.',
+        undefined,
+        6000,
       );
+      expect(result?.notice).toBe('La orden quedó con total $0: no se registró ningún pago.');
       expect(component.isProcessingOrder()).toBeFalse();
     });
 
@@ -268,6 +271,7 @@ describe('PopComponent — QUI-855 puntos de entrada', () => {
       expect(po['registerPurchaseOrderPayment'].calls.mostRecent().args[0]).toBe(774);
       expect(po['registerPurchaseOrderPayment'].calls.mostRecent().args[1].amount).toBe(30000);
       expect(component.orderResult()?.stages?.find((s) => s.name === 'pay')?.status).toBe('success');
+      expect(component.orderResult()?.notice).toBeUndefined();
     });
 
     it('carrito vacío: avisa y no envía una OC sin proveedor, bodega ni líneas', () => {
