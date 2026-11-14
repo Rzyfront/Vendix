@@ -53,8 +53,6 @@ jobs:
         IMAGE_TAG: ${{ github.sha }}
         EC2_INSTANCE_ID: ${{ secrets.EC2_INSTANCE_ID }}
         SSH_KEY: ${{ secrets.VENDIX_SSH_PRIVATE_KEY }}
-        AWS_ACCESS_KEY_ID: ${{ secrets.AWS_ACCESS_KEY_ID }}
-        AWS_SECRET_ACCESS_KEY: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
       run: |
         echo "🚀 Deploying to EC2 instance: $EC2_INSTANCE_ID"
 
@@ -80,11 +78,22 @@ jobs:
         # Deploy on EC2
         ssh -o StrictHostKeyChecking=no -i /tmp/vendix-key.pem ec2-user@$EC2_PUBLIC_IP << ENDSSH
           set -e
-          echo "🔐 Logging into ECR..."
-          aws configure set aws_access_key_id $AWS_ACCESS_KEY_ID
-          aws configure set aws_secret_access_key $AWS_SECRET_ACCESS_KEY
+          echo "🔐 Authenticating with the EC2 instance role (IMDS)..."
+          # QUI-586: never write long-lived IAM keys to the host. Drop any leftover
+          # static credentials so the AWS CLI resolves the instance profile.
+          rm -f ~/.aws/credentials
           aws configure set region us-east-1
-          aws ecr get-login-password --region us-east-1 | sudo docker login --username AWS --password-stdin $ECR_REGISTRY
+          CALLER_ARN=\$(aws sts get-caller-identity --query Arn --output text 2>&1) || true
+          case "\$CALLER_ARN" in
+            *:assumed-role/*) echo "✅ AWS identity: \$CALLER_ARN" ;;
+            *) echo "❌ Expected the EC2 instance role, got: \$CALLER_ARN"; exit 1 ;;
+          esac
+
+          echo "🔐 Logging into ECR..."
+          if ! aws ecr get-login-password --region us-east-1 | sudo docker login --username AWS --password-stdin $ECR_REGISTRY; then
+            echo "❌ ECR login with the instance role failed. Attach vendix-ec2-ecr-pull-access to the role (infra/ec2-iam/README.md). Running containers were not touched."
+            exit 1
+          fi
 
           echo "💾 Checking disk space before cleanup..."
           df -h /
