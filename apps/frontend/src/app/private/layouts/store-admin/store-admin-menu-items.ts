@@ -870,9 +870,13 @@ export const STORE_ADMIN_MENU_ITEMS: readonly MenuItem[] = [
         route: '/admin/settings/appearance',
       },
       {
+        // QUI-1004: a leaf without a panel key is dropped by the filter's
+        // defensive fallback (only groups with children survive), so it
+        // reuses the general-settings key like Formatos de Impresión.
         label: 'Historial de cargas',
         icon: 'circle',
         route: '/admin/settings/bulk-uploads',
+        panelUiKey: 'settings_general',
       },
       {
         label: 'Seguridad',

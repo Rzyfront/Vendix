@@ -241,6 +241,12 @@ describe('STORE_ADMIN menu — Finanzas por etapa del wizard fiscal', () => {
       expect(childLabels(await filtered(), 'Configuración')).not.toContain('Canales');
     });
 
+    it('QUI-1004: Historial de cargas aparece en Configuración con la key settings_general', async () => {
+      expect(childLabels(await filtered(), 'Configuración')).toContain('Historial de cargas');
+      visibleModules$.next(OWNER_KEYS.filter((key) => key !== 'settings_general'));
+      expect(childLabels(await filtered(), 'Configuración')).not.toContain('Historial de cargas');
+    });
+
     it('diagnose explica qué etapa falta y manda al wizard', () => {
       setFiscal(null);
       const impuestos = STORE_ADMIN_MENU_ITEMS.find((item) => item.label === 'Finanzas')!
