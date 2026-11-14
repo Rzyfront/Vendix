@@ -178,4 +178,32 @@ describe('RemindersService — behaviour', () => {
     const reopened = await service.update(ANA_S1, 1, { status: 'pending' });
     expect(reopened.completed_at).toBeNull();
   });
+
+  it('keeps minute precision: re-sending the same minute does not re-arm a sent notice', async () => {
+    const sentAt = new Date('2026-11-14T22:00:30Z');
+    const { service, prisma } = setup([
+      {
+        id: 1,
+        store_id: 1,
+        user_id: 10,
+        title: 'a',
+        remind_at: new Date('2026-11-14T22:00:30Z'),
+        notified_at: sentAt,
+      },
+    ]);
+    // Vex may send seconds; they are dropped.
+    expect(service.parseRemindAt('2026-11-20T12:00:30', 'America/Bogota')?.toISOString()).toBe(
+      '2026-11-20T17:00:00.000Z',
+    );
+    expect(service.parseRemindAt('2026-11-20T17:00:30.500Z', 'America/Bogota')?.toISOString()).toBe(
+      '2026-11-20T17:00:00.000Z',
+    );
+    // The modal re-sends `YYYY-MM-DDTHH:mm` (17:00 Bogota) while editing only the title.
+    await service.update(ANA_S1, 1, { title: 'b', remind_at: '2026-11-14T17:00' });
+    expect(prisma.rows[0].title).toBe('b');
+    expect(prisma.rows[0].notified_at).toEqual(sentAt);
+    // A different minute still re-arms it.
+    await service.update(ANA_S1, 1, { remind_at: '2026-11-14T17:01' });
+    expect(prisma.rows[0].notified_at).toBeNull();
+  });
 });

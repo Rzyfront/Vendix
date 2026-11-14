@@ -5,7 +5,7 @@ const NOW = new Date('2026-11-14T22:00:00Z'); // 17:00 Bogota
 
 function setup(seed: Record<string, any>[]) {
   const prisma = createFakeRemindersPrisma(seed);
-  const notifications = { sendToUser: jest.fn(async (..._args: unknown[]) => null) };
+  const notifications = { sendToUser: jest.fn(async (..._args: unknown[]): Promise<unknown> => ({ id: 1 })) };
   const job = new UserReminderDueJob(prisma as any, notifications as any);
   return { job, prisma, notifications };
 }
@@ -60,5 +60,21 @@ describe('UserReminderDueJob (QUI-580)', () => {
     prisma.user_reminders.updateMany.mockResolvedValueOnce({ count: 0 });
     expect(await job.notifyDue(NOW)).toBe(0);
     expect(notifications.sendToUser).not.toHaveBeenCalled();
+  });
+
+  it('a failed send releases the claim, so the next run retries and notifies once', async () => {
+    const { job, prisma, notifications } = setup([
+      { id: 1, store_id: 1, user_id: 10, title: 'Ana', remind_at: new Date('2026-11-14T21:00:00Z') },
+    ]);
+    notifications.sendToUser.mockResolvedValueOnce(null);
+    expect(await job.notifyDue(NOW)).toBe(0);
+    expect(prisma.rows[0].notified_at).toBeNull();
+
+    const next = new Date(NOW.getTime() + 60_000);
+    expect(await job.notifyDue(next)).toBe(1);
+    expect(await job.notifyDue(new Date(next.getTime() + 60_000))).toBe(0);
+    expect(notifications.sendToUser).toHaveBeenCalledTimes(2);
+    expect(notifications.sendToUser.mock.calls[1].slice(0, 2)).toEqual([1, 10]);
+    expect(prisma.rows[0].notified_at).toEqual(next);
   });
 });

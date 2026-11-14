@@ -19,7 +19,8 @@ const REMINDER_DUE_BATCH = 200;
  *
  * "Once" lives in the database: the row is claimed by setting `notified_at`
  * only while it is still null, so the API and the worker never notify twice.
- * Changing `remind_at` clears `notified_at` and re-arms it.
+ * Changing `remind_at` clears `notified_at` and re-arms it. A failed send
+ * releases the claim so the next run retries it.
  */
 @Injectable()
 export class UserReminderDueJob {
@@ -75,7 +76,7 @@ export class UserReminderDueJob {
         data: { notified_at: now },
       });
       if (claimed.count !== 1) continue;
-      await this.notifications.sendToUser(
+      const notification = await this.notifications.sendToUser(
         reminder.store_id,
         reminder.user_id,
         REMINDER_DUE_NOTIFICATION,
@@ -85,6 +86,18 @@ export class UserReminderDueJob {
           : reminder.title,
         { kind: 'user_reminder', reminder_id: reminder.id, url: REMINDERS_ROUTE },
       );
+      if (!notification) {
+        // `sendToUser` swallows its errors and answers null: release this
+        // run's claim (only if still ours) so the next run retries it.
+        await this.prisma.user_reminders.updateMany({
+          where: { id: reminder.id, notified_at: now },
+          data: { notified_at: null },
+        });
+        this.logger.warn(
+          `Reminder ${reminder.id} due notification failed; will retry`,
+        );
+        continue;
+      }
       sent++;
     }
     return sent;

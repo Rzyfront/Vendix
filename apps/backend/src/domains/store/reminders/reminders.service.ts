@@ -26,6 +26,12 @@ export const REMINDERS_ROUTE = '/admin/dashboard?tab=bitacora';
 const DEFAULT_LIMIT = 100;
 /** A date without time ("el viernes") reminds at this store-local hour. */
 const DATE_ONLY_HOUR = 8;
+const MINUTE_MS = 60_000;
+
+/** Epoch millis floored to the minute, or null when there is no date. */
+function minuteOf(date: Date | null | undefined): number | null {
+  return date ? Math.floor(date.getTime() / MINUTE_MS) * MINUTE_MS : null;
+}
 
 /**
  * Owner of every reminder operation. Always taken from the session (HTTP
@@ -180,7 +186,9 @@ export class RemindersService {
     if (dto.note !== undefined) data.note = dto.note?.trim() || null;
     if (dto.remind_at !== undefined) {
       const remindAt = this.parseRemindAt(dto.remind_at, window.tz);
-      if (remindAt?.getTime() !== current.remind_at?.getTime()) {
+      // Minute precision on both sides: re-sending the same minute (the
+      // modal always sends `YYYY-MM-DDTHH:mm`) must not re-arm a sent notice.
+      if (minuteOf(remindAt) !== minuteOf(current.remind_at)) {
         data.remind_at = remindAt;
         // A new date re-arms the one-time due notification.
         data.notified_at = null;
@@ -264,7 +272,8 @@ export class RemindersService {
   /**
    * `YYYY-MM-DDTHH:mm[:ss]` without offset is a store-local wall clock;
    * `YYYY-MM-DD` reminds at {@link DATE_ONLY_HOUR} local; anything with `Z` or
-   * an offset is an absolute instant.
+   * an offset is an absolute instant. Seconds are accepted but dropped: a
+   * reminder has minute precision (the due job runs every minute).
    */
   parseRemindAt(value: string | null | undefined, tz: string): Date | null {
     if (value === undefined || value === null || value.trim() === '') return null;
@@ -284,14 +293,14 @@ export class RemindersService {
       ) {
         throw new VendixHttpException(ErrorCodes.REMINDER_DATE_001);
       }
-      return zonedWallClockToUtc(parts[0], parts[1], parts[2], hour, minute, second, 0, tz);
+      return zonedWallClockToUtc(parts[0], parts[1], parts[2], hour, minute, 0, 0, tz);
     }
     const hasZone = /(Z|[+-]\d{2}:?\d{2})$/i.test(raw);
     const instant = new Date(raw);
     if (!hasZone || Number.isNaN(instant.getTime())) {
       throw new VendixHttpException(ErrorCodes.REMINDER_DATE_001);
     }
-    return instant;
+    return new Date(minuteOf(instant)!);
   }
 
   /**

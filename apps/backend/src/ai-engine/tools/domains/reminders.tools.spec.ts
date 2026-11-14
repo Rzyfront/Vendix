@@ -4,7 +4,6 @@ import { TOOL_DISCOVERY_QUERIES_ES } from '../tool-discovery-queries.es';
 import { RegisteredTool, ToolExecutionContext } from '../interfaces/tool.interface';
 import { createReminderTools } from './reminders.tools';
 import { RemindersService } from '../../../domains/store/reminders/reminders.service';
-import { StorePrismaService } from '../../../prisma/services/store-prisma.service';
 import { createFakeRemindersPrisma } from '../../../domains/store/reminders/testing/fake-reminders-prisma';
 
 const ANA_S1: ToolExecutionContext = { store_id: 1, organization_id: 1, user_id: 10 };
@@ -12,17 +11,17 @@ const BETO_S1: ToolExecutionContext = { store_id: 1, organization_id: 1, user_id
 const CARLA_S2: ToolExecutionContext = { store_id: 2, organization_id: 2, user_id: 20 };
 
 function build() {
-  const prisma = createFakeRemindersPrisma([
+  const db = createFakeRemindersPrisma([
     { id: 1, store_id: 1, user_id: 10, title: 'Llamar al proveedor de lácteos' },
     { id: 2, store_id: 1, user_id: 11, title: 'Pendiente de Beto' },
     { id: 3, store_id: 2, user_id: 20, title: 'Pendiente de Carla' },
   ]);
-  const remindersService = new RemindersService(prisma as unknown as StorePrismaService);
+  const remindersService = new RemindersService(db as unknown as ConstructorParameters<typeof RemindersService>[0]);
   const tools = createReminderTools({ remindersService });
   const tool = (name: string) => tools.find((t) => t.name === name) as RegisteredTool;
   const call = async (name: string, args: Record<string, unknown>, ctx: ToolExecutionContext) =>
     JSON.parse(await tool(name).handler!(args, ctx));
-  return { prisma, tools, tool, call };
+  return { db, tools, tool, call };
 }
 
 describe('reminders tools — Vex only sees the current user reminders (QUI-580)', () => {
@@ -36,7 +35,7 @@ describe('reminders tools — Vex only sees the current user reminders (QUI-580)
   });
 
   it('cannot complete, edit nor delete a reminder of another user or store', async () => {
-    const { call, prisma, tool } = build();
+    const { call, db, tool } = build();
     for (const ctx of [BETO_S1, CARLA_S2]) {
       expect((await call('complete_reminder', { reminder_id: 1 }, ctx)).error).toBeDefined();
       expect(
@@ -46,7 +45,7 @@ describe('reminders tools — Vex only sees the current user reminders (QUI-580)
       const preview = await tool('delete_reminder').preview!({ reminder_id: 1 }, ctx);
       expect(preview.status).toBe('error');
     }
-    expect(prisma.rows.find((r) => r.id === 1)).toMatchObject({
+    expect(db.rows.find((r) => r.id === 1)).toMatchObject({
       title: 'Llamar al proveedor de lácteos',
       status: 'pending',
     });
@@ -59,7 +58,7 @@ describe('reminders tools — Vex only sees the current user reminders (QUI-580)
   });
 
   it('create_reminder stores it for the caller with source vex and a product link', async () => {
-    const { call, prisma } = build();
+    const { call, db } = build();
     const out = await call(
       'create_reminder',
       {
@@ -76,7 +75,7 @@ describe('reminders tools — Vex only sees the current user reminders (QUI-580)
       link: { type: 'product', id: 501, label: 'Coca-Cola 1.5L', url: '/admin/products/501' },
     });
     expect(out.display).toContain('Coca-Cola 1.5L');
-    expect(prisma.rows.find((r) => r.id === out.created.reminder_id)).toMatchObject({
+    expect(db.rows.find((r) => r.id === out.created.reminder_id)).toMatchObject({
       store_id: 1,
       user_id: 11,
       source: 'vex',
@@ -84,9 +83,9 @@ describe('reminders tools — Vex only sees the current user reminders (QUI-580)
   });
 
   it('ignores store or user ids smuggled in the arguments', async () => {
-    const { call, prisma } = build();
+    const { call, db } = build();
     const out = await call('create_reminder', { title: 'y', store_id: 2, user_id: 20 }, BETO_S1);
-    expect(prisma.rows.find((r) => r.id === out.created.reminder_id)).toMatchObject({
+    expect(db.rows.find((r) => r.id === out.created.reminder_id)).toMatchObject({
       store_id: 1,
       user_id: 11,
     });
@@ -101,7 +100,7 @@ describe('reminders tools — Vex only sees the current user reminders (QUI-580)
   });
 
   it('delete_reminder asks for confirmation with a preview naming the reminder', async () => {
-    const { tool, call, prisma } = build();
+    const { tool, call, db } = build();
     const del = tool('delete_reminder');
     expect(del.requiresConfirmation).toBe(true);
     expect(del.irreversible).toBe(true);
@@ -109,7 +108,7 @@ describe('reminders tools — Vex only sees the current user reminders (QUI-580)
     expect(preview).toMatchObject({ status: 'warning', domain: 'reminders' });
     expect(preview.target).toContain('Llamar al proveedor de lácteos');
     await call('delete_reminder', { reminder_id: 1 }, ANA_S1);
-    expect(prisma.rows.find((r) => r.id === 1)).toBeUndefined();
+    expect(db.rows.find((r) => r.id === 1)).toBeUndefined();
   });
 
   it('registers in the real registry with discovery queries; only delete needs confirmation', () => {
