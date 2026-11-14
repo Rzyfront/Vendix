@@ -6,6 +6,8 @@ import { WalletBalanceService } from './services/wallet-balance.service';
 import { WalletQueryDto } from './dto/wallet-query.dto';
 import { TopUpWalletDto } from './dto/top-up-wallet.dto';
 import { AdjustWalletDto, AdjustmentType } from './dto/adjust-wallet.dto';
+import { MovementsService } from '../cash-registers/movements/movements.service';
+import { SessionsService } from '../cash-registers/sessions/sessions.service';
 
 @Injectable()
 export class WalletService {
@@ -13,6 +15,8 @@ export class WalletService {
     private readonly prisma: StorePrismaService,
     private readonly walletBalance: WalletBalanceService,
     private readonly eventEmitter: EventEmitter2,
+    private readonly movements: MovementsService,
+    private readonly sessions: SessionsService,
   ) {}
 
   /**
@@ -98,16 +102,49 @@ export class WalletService {
 
   /**
    * Top up a customer's wallet (add funds).
+   *
+   * QUI-893 — a top-up is money the staff member receives: with the cash
+   * register enabled it requires their own open session (checked before the
+   * transaction) and leaves a movement in it, in the same transaction as the
+   * credit. Cash counts toward the drawer (`cash_in`); any other method is an
+   * informational row with its real method (`include_non_cash`).
    */
   async topUp(customerId: number, dto: TopUpWalletDto, userId: number) {
-    const wallet = await this.getOrCreateWallet(customerId);
+    await this.sessions.assertSessionForSales(userId);
 
-    const result = await this.walletBalance.credit(wallet.id, dto.amount, {
-      reference_type: 'topup',
-      description:
-        dto.description ||
-        `Top-up via ${dto.payment_method || 'manual'}${dto.reference ? ` (ref: ${dto.reference})` : ''}`,
-      created_by: userId,
+    const wallet = await this.getOrCreateWallet(customerId);
+    const store_id = RequestContextService.getContext()?.store_id;
+
+    const result = await this.prisma.$transaction(async (tx) => {
+      const credited = await this.walletBalance.creditInTransaction(
+        tx,
+        wallet.id,
+        dto.amount,
+        {
+          reference_type: 'topup',
+          description:
+            dto.description ||
+            `Top-up via ${dto.payment_method || 'manual'}${dto.reference ? ` (ref: ${dto.reference})` : ''}`,
+          created_by: userId,
+        },
+      );
+
+      if (store_id) {
+        await this.movements.recordModuleCashMovement(tx, {
+          store_id,
+          user_id: userId,
+          direction: 'in',
+          amount: dto.amount,
+          payment_method: dto.payment_method,
+          source_type: 'wallet_topup',
+          source_id: credited.transaction.id,
+          reference: `Recarga billetera #${wallet.id}`,
+          notes: dto.reference || undefined,
+          include_non_cash: true,
+        });
+      }
+
+      return credited;
     });
 
     this.eventEmitter.emit('wallet.credited', {

@@ -38,6 +38,7 @@ function setup() {
     order_installments: { findFirst: jest.fn().mockResolvedValue(null), findMany: jest.fn().mockResolvedValue([]) },
     agreement_installments: { findFirst: jest.fn().mockResolvedValue(null) },
     ar_payments: { create: jest.fn().mockResolvedValue({ id: 80 }) },
+    payments: { findMany: jest.fn().mockResolvedValue([]) },
     $executeRawUnsafe: jest.fn().mockResolvedValue(0),
   };
   const prisma = {
@@ -45,7 +46,7 @@ function setup() {
     accounts_receivable: { findFirst: jest.fn().mockResolvedValue(creditAr) },
     $transaction: jest.fn((callback: (client: typeof tx) => Promise<unknown>) => callback(tx)),
   };
-  const service = new AccountsReceivableService(prisma as any, { emit: jest.fn() } as any, { recordModuleCashMovement: jest.fn() } as any);
+  const service = new AccountsReceivableService(prisma as any, { emit: jest.fn() } as any, { recordModuleCashMovement: jest.fn() } as any, { assertSessionForSales: jest.fn() } as any);
   return { tx, prisma, service };
 }
 

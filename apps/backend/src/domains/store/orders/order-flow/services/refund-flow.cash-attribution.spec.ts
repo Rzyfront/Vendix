@@ -2,7 +2,10 @@ import { BadRequestException } from '@nestjs/common';
 import { Test, TestingModule } from '@nestjs/testing';
 import { EventEmitter2 } from '@nestjs/event-emitter';
 import { Prisma } from '@prisma/client';
-import { RefundFlowService } from './refund-flow.service';
+import {
+  RefundFlowService,
+  refundTouchesCashDrawer,
+} from './refund-flow.service';
 import { RefundCalculationService } from './refund-calculation.service';
 import { RefundCoverageService } from './refund-coverage.service';
 import { StorePrismaService } from 'src/prisma/services/store-prisma.service';
@@ -127,7 +130,7 @@ describe('RefundFlowService — caja del reembolso (B18, B25)', () => {
         { provide: RequestContextService, useValue: { getUserId: () => 1 } },
         { provide: StockLevelManager, useValue: { updateStock: jest.fn() } },
         { provide: SettingsService, useValue: { getSettings: jest.fn().mockResolvedValue({ pos: { cash_register: { enabled: true } } }) } },
-        { provide: SessionsService, useValue: {} },
+        { provide: SessionsService, useValue: { assertSessionForSales: jest.fn() } },
         { provide: MovementsService, useValue: movements },
         {
           provide: SerialNumberEnforcementService,
@@ -278,5 +281,75 @@ describe('RefundFlowService — caja del reembolso (B18, B25)', () => {
       errorCode: 'REFUND_ALLOCATION_MISMATCH',
     });
     expect(movements.recordRefundCashMovementDurable).not.toHaveBeenCalled();
+  });
+
+  describe('QUI-893 — gate de caja antes de la tx', () => {
+    const gate = () =>
+      (service as any).sessionsService.assertSessionForSales as jest.Mock;
+
+    beforeEach(() => {
+      jest.spyOn(RequestContextService, 'getUserId').mockReturnValue(1);
+    });
+
+    it('reembolso en efectivo sin caja abierta se bloquea sin crear el refund', async () => {
+      withOrder([cashPayment(100, 5000)]);
+      gate().mockRejectedValueOnce(new Error('CASH_SESSION_REQUIRED_001'));
+      await expect(service.createRefund(1, dto() as any)).rejects.toThrow(
+        'CASH_SESSION_REQUIRED_001',
+      );
+      expect(gate()).toHaveBeenCalledWith(1);
+      expect(mockPrisma.$transaction).not.toHaveBeenCalled();
+      expect(mockPrisma.refunds.create).not.toHaveBeenCalled();
+    });
+
+    it('reembolso de un pago con tarjeta no exige caja', async () => {
+      withOrder([
+        {
+          id: 100,
+          state: 'succeeded',
+          amount: 5000,
+          store_payment_method: { system_payment_method: { type: 'card' } },
+        },
+      ]);
+      await service.createRefund(1, dto() as any).catch(() => undefined);
+      expect(gate()).not.toHaveBeenCalled();
+    });
+
+    it('con caja abierta el reembolso en efectivo continúa a la tx', async () => {
+      withOrder([cashPayment(100, 5000)]);
+      await service.createRefund(1, dto() as any);
+      expect(gate()).toHaveBeenCalledWith(1);
+      expect(mockPrisma.refunds.create).toHaveBeenCalledTimes(1);
+    });
+  });
+
+  describe('refundTouchesCashDrawer', () => {
+    it.each([
+      ['original_payment', 'cash', ['cash'], true],
+      ['cash', 'cash', ['card'], true],
+      ['original_payment', 'gateway', ['card'], false],
+      ['original_payment', 'bank_transfer', ['bank_transfer', 'cash'], true],
+      ['store_credit', 'store_credit', ['cash', 'card'], false],
+    ] as const)(
+      '%s / canal %s / pagos %j → %s',
+      (method, channel, types, expected) => {
+        expect(
+          refundTouchesCashDrawer(method, channel as any, [...types]),
+        ).toBe(expected);
+      },
+    );
+
+    // Revisión 1, hallazgo 4: el reparto descuenta lo ya reembolsado por pago.
+    it('efectivo ya devuelto completo: el reparto va a tarjeta y no exige caja', () => {
+      expect(
+        refundTouchesCashDrawer('original_payment', 'cash', ['cash', 'card'], [0, 80]),
+      ).toBe(false);
+    });
+
+    it('efectivo con capacidad restante: sigue exigiendo caja', () => {
+      expect(
+        refundTouchesCashDrawer('original_payment', 'cash', ['cash', 'card'], [20, 80]),
+      ).toBe(true);
+    });
   });
 });

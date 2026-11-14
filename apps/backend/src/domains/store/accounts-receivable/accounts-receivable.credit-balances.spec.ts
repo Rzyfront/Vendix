@@ -59,6 +59,7 @@ describe('AccountsReceivableService — saldos de crédito (QUI-979)', () => {
       prisma as any,
       { emit: jest.fn() } as any,
       { recordModuleCashMovement: jest.fn() } as any,
+      { assertSessionForSales: jest.fn() } as any,
     );
     return { tx, service };
   }
@@ -142,6 +143,7 @@ describe('AccountsReceivableService — saldos de crédito (QUI-979)', () => {
       prisma as any,
       { emit: jest.fn() } as any,
       { recordModuleCashMovement: jest.fn() } as any,
+      { assertSessionForSales: jest.fn() } as any,
     );
 
     const result = await service.getDashboard();
@@ -214,6 +216,7 @@ describe('AccountsReceivableService — saldos de crédito (QUI-979)', () => {
       prisma as any,
       { emit: jest.fn() } as any,
       { recordModuleCashMovement: jest.fn() } as any,
+      { assertSessionForSales: jest.fn() } as any,
     );
     return { tx, service };
   }
