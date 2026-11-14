@@ -16,7 +16,7 @@ const SEED = [
   { id: 4, store_id: 2, user_id: 10, title: 'Ana tienda 2' },
 ];
 
-function setup(seed = SEED) {
+function setup(seed: Parameters<typeof createFakeRemindersPrisma>[0] = SEED) {
   const prisma = createFakeRemindersPrisma(seed);
   const service = new RemindersService(prisma as unknown as StorePrismaService);
   return { prisma, service };
