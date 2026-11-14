@@ -28,6 +28,8 @@ import type {
 } from '../../services/dispatch-note-wizard.service';
 import { DispatchNotesService } from '../../services/dispatch-notes.service';
 import { DispatchNotePrintService } from '../../services/dispatch-note-print.service';
+import { BulkUploadLogService } from '../../../bulk-uploads/services/bulk-upload-log.service';
+import { buildDispatchNoteBulkUploadRequests } from '../../utils/dispatch-note-bulk-upload.util';
 import type {
   DispatchNote,
   CreateDispatchFromOrderDto,
@@ -214,6 +216,7 @@ export class DispatchNoteWizardComponent {
   private readonly dialog = inject(DialogService);
   private readonly router = inject(Router);
   private readonly printService = inject(DispatchNotePrintService);
+  private readonly bulkUploadLog = inject(BulkUploadLogService);
 
   // Inputs
   readonly isOpen = input<boolean>(false);
@@ -535,6 +538,7 @@ export class DispatchNoteWizardComponent {
       .pipe(takeUntilDestroyed(this.destroyRef))
       .subscribe({
         next: (note) => {
+          this._recordExcelUploads(note);
           this._finishCreated(note);
           this.toast.success('Remisión creada');
         },
@@ -553,6 +557,28 @@ export class DispatchNoteWizardComponent {
         dispatched_quantity: item.dispatched_quantity,
         product_name: item.product?.name ?? `Producto #${item.product_id}`,
       }));
+  }
+
+  /**
+   * QUI-1004 — registers the Excel files imported into this purchase receipt
+   * (one log row per file, referencing the note). Accessory: a failure never
+   * affects the created note.
+   */
+  private _recordExcelUploads(note: DispatchNote): void {
+    const uploads = this.wizardService.excelUploads();
+    if (uploads.length === 0) return;
+    this.wizardService.excelUploads.set([]);
+    const requests = buildDispatchNoteBulkUploadRequests(
+      uploads,
+      note.dispatch_note_items?.length ?? 0,
+      note.dispatch_number,
+    );
+    for (const request of requests) {
+      this.bulkUploadLog
+        .register(request)
+        .pipe(takeUntilDestroyed(this.destroyRef))
+        .subscribe();
+    }
   }
 
   private _finishCreated(note: DispatchNote): void {

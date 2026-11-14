@@ -16,6 +16,7 @@ export const BULK_UPLOAD_TYPES = [
   'purchase_orders',
   'memberships',
   'customers_ai',
+  'dispatch_notes',
 ] as const;
 
 export type BulkUploadType = (typeof BULK_UPLOAD_TYPES)[number];
@@ -29,6 +30,7 @@ export type BulkUploadType = (typeof BULK_UPLOAD_TYPES)[number];
 export const CLIENT_REGISTERED_UPLOAD_TYPES = [
   'purchase_orders',
   'customers',
+  'dispatch_notes',
 ] as const;
 
 export const BULK_UPLOAD_STATUSES = ['completed', 'partial', 'failed'] as const;
@@ -50,6 +52,8 @@ export const BULK_UPLOAD_TYPE_PERMISSIONS: Record<BulkUploadType, string> = {
   purchase_orders: 'store:orders:purchase_orders:create',
   memberships: 'store:memberships:bulk_import',
   customers_ai: 'store:customers:create',
+  // Excel import of a purchase-receipt dispatch note (wizard «Excel» mode).
+  dispatch_notes: 'store:dispatch_notes:create',
 };
 
 export const BULK_UPLOAD_ANY_PERMISSION = Array.from(

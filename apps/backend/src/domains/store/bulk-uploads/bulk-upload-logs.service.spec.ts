@@ -185,6 +185,36 @@ describe('BulkUploadLogsService · aislamiento por tienda', () => {
     });
   });
 
+  it('QUI-1004: notas de despacho por Excel — B no lista ni recibe aviso por el archivo de A', async () => {
+    const h = buildHarness();
+    asStore(STORE_A);
+    await h.service.register({
+      upload_type: 'dispatch_notes',
+      file_name: 'recibo.xlsx',
+      file_hash: HASH_A,
+      total_rows: 3,
+      successful_rows: 3,
+      failed_rows: 0,
+      skipped_rows: 0,
+      result_reference: 'RM-0001',
+    });
+    expect(h.rows[0]).toMatchObject({
+      store_id: STORE_A.store_id,
+      upload_type: 'dispatch_notes',
+    });
+    asStore(STORE_B);
+    await expect(
+      h.service.findDuplicate('dispatch_notes', HASH_A),
+    ).resolves.toBeNull();
+    await expect(
+      h.service.list({ upload_type: 'dispatch_notes' }),
+    ).resolves.toMatchObject({ total: 0, data: [] });
+    asStore(STORE_A);
+    await expect(
+      h.service.findDuplicate('dispatch_notes', HASH_A),
+    ).resolves.toMatchObject({ result_reference: 'RM-0001' });
+  });
+
   it('el duplicado es por tipo de carga: la misma huella en otro tipo no avisa', async () => {
     const h = buildHarness();
     await seedStoreA(h);

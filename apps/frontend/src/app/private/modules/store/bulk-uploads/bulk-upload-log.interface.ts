@@ -11,7 +11,8 @@ export type BulkUploadType =
   | 'bank_statements'
   | 'purchase_orders'
   | 'memberships'
-  | 'customers_ai';
+  | 'customers_ai'
+  | 'dispatch_notes';
 
 export type BulkUploadStatus = 'completed' | 'partial' | 'failed';
 
@@ -25,6 +26,7 @@ export const BULK_UPLOAD_TYPE_LABELS: Record<BulkUploadType, string> = {
   purchase_orders: 'Compras',
   memberships: 'Padrón de miembros',
   customers_ai: 'Clientes con IA',
+  dispatch_notes: 'Remisiones de compra',
 };
 
 export const BULK_UPLOAD_STATUS_LABELS: Record<BulkUploadStatus, string> = {
@@ -96,7 +98,10 @@ export interface BulkUploadLogQuery {
 }
 
 export interface RegisterBulkUploadRequest {
-  upload_type: Extract<BulkUploadType, 'purchase_orders' | 'customers'>;
+  upload_type: Extract<
+    BulkUploadType,
+    'purchase_orders' | 'customers' | 'dispatch_notes'
+  >;
   file_name: string;
   file_hash: string;
   total_rows: number;

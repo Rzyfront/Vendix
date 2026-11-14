@@ -1,6 +1,9 @@
 import { BulkUploadLogsController } from './bulk-upload-logs.controller';
 import { BulkUploadLogsService } from './bulk-upload-logs.service';
 import { ResponseService } from '@common/responses/response.service';
+import { plainToInstance } from 'class-transformer';
+import { validate } from 'class-validator';
+import { RegisterBulkUploadDto } from './dto/bulk-upload-log.dto';
 
 /**
  * QUI-1004 — consultar si un archivo está repetido o registrar una carga exige
@@ -66,5 +69,28 @@ describe('BulkUploadLogsController · permiso por tipo de carga', () => {
     await expect(
       controller.register(dto, requestWith('store:orders:purchase_orders:create')),
     ).resolves.toMatchObject({ data: { id: 7, status: 'completed' } });
+  });
+
+  it('QUI-1004: la importación Excel de notas de despacho se registra con el permiso de notas de despacho', async () => {
+    const dto = {
+      upload_type: 'dispatch_notes' as const,
+      file_name: 'recibo.xlsx',
+      file_hash: HASH,
+      total_rows: 3,
+      successful_rows: 3,
+      failed_rows: 0,
+      skipped_rows: 0,
+      result_reference: 'RM-0001',
+    };
+    expect(
+      await validate(plainToInstance(RegisterBulkUploadDto, dto)),
+    ).toEqual([]);
+    await expect(
+      controller.register(dto, requestWith('store:orders:purchase_orders:create')),
+    ).rejects.toMatchObject({ status: 403 });
+    await expect(
+      controller.register(dto, requestWith('store:dispatch_notes:create')),
+    ).resolves.toMatchObject({ data: { id: 7, status: 'completed' } });
+    expect(service.register).toHaveBeenCalledWith(dto);
   });
 });
