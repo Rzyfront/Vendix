@@ -578,7 +578,10 @@ export class FiscalActivationWizardComponent implements OnInit {
   private async initializeWizard(): Promise<void> {
     try {
       await this.service.loadStatus();
-      await this.service.loadPrefill();
+      // force=true: the service is a root singleton, so a prefill cached on a
+      // previous visit would position the cursor and seed the forms with stale
+      // data when the user leaves the wizard and comes back (QUI-414).
+      await this.service.loadPrefill(true);
     } catch {
       // loadStatus / loadPrefill already surface the error to
       // service.error(); a partial init is non-fatal — restoreWizard will
