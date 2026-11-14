@@ -31,7 +31,7 @@ pressure and Docker cleanup → `vendix-ec2-maintenance`.
 
 | Need | Source |
 | --- | --- |
-| Backend deploy | `.github/workflows/deploy-backend-ec2.yml` (GitHub Actions → ECR `vendix-backend` → EC2) |
+| Backend deploy | `.github/workflows/deploy-backend-ec2.yml` (GitHub Actions → ECR `vendix-backend` → EC2; the host authenticates with its instance role, never static keys: `infra/ec2-iam/README.md`) |
 | Frontend deploy | `.github/workflows/deploy-s3.yml` (S3 + CloudFront) |
 | EC2 id / public IP | `aws ec2 describe-instances` |
 | DNS: EC2 or CloudFront? | Route53 + `dig` |
