@@ -2248,9 +2248,17 @@ export class PopComponent implements OnInit, OnDestroy {
     this.orderError.set(null);
   }
 
-  /** QUI-942 — «Ver orden» desde el panel de resultado parcial del shell. */
+  /**
+   * QUI-942 — «Ver orden» desde el panel de resultado parcial del shell.
+   * Tras un fallo de recepción el carrito y `pendingReceptionOrder` se
+   * conservan para reintentar; al salir al detalle la OC pendiente se
+   * perdería pero el carrito (persistido) no, y «Confirmar» crearía una
+   * segunda OC. La OC ya existe: la recepción se completa desde su detalle.
+   */
   onPartialViewOrder(): void {
+    const partial = this.orderResult();
     this.showOrderConfirmModal.set(false);
+    if (partial?.failedStage === 'receive') this._finalizeAfterOrder();
     this.onViewOrder();
   }
 

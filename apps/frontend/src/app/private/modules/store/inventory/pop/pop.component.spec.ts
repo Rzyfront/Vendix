@@ -297,6 +297,28 @@ describe('PopComponent — QUI-855 puntos de entrada', () => {
       expect(component.orderError()).toBeNull();
     });
 
+    it('«Ver orden» tras fallar la recepción vacía el carrito y suelta la OC pendiente (sin segunda OC)', () => {
+      const router = TestBed.inject(Router);
+      const navigate = spyOn(router, 'navigate').and.returnValue(Promise.resolve(true));
+      component.pendingReceptionOrder.set({ id: 774 } as any);
+      component.orderResult.set({ id: 774, total: 0, orderNumber: 'PO-774', failedStage: 'receive' });
+
+      component.onPartialViewOrder();
+
+      expect(cart.clearCart).toHaveBeenCalledTimes(1);
+      expect(component.pendingReceptionOrder()).toBeNull();
+      expect(navigate).toHaveBeenCalledWith(['/admin/orders/purchase-orders', 774]);
+    });
+
+    it('«Ver orden» tras fallar el pago navega igual que antes (el carrito ya se vació al crear)', () => {
+      const router = TestBed.inject(Router);
+      const navigate = spyOn(router, 'navigate').and.returnValue(Promise.resolve(true));
+      component.orderResult.set({ id: 774, total: 0, orderNumber: 'PO-774', failedStage: 'pay' });
+      component.onPartialViewOrder();
+      expect(navigate).toHaveBeenCalledWith(['/admin/orders/purchase-orders', 774]);
+      expect(cart.clearCart).not.toHaveBeenCalled();
+    });
+
     it('cerrar el checkout NO borra un éxito pleno (lo muestra su propio modal)', () => {
       component.orderResult.set({ id: 774, total: 0, orderNumber: 'PO-774' });
       component.onCheckoutCancelled();
