@@ -111,6 +111,9 @@ const SHIPPING_METHOD_OPTIONS: SelectorOption[] = [
   { value: 'other', label: 'Otro' },
 ];
 
+/** Mínimo que acepta `RegisterPaymentDto.amount` (`@Min(0.01)`). */
+const MIN_PAYMENT_AMOUNT = 0.01;
+
 /**
  * POP (Point of Purchase) Main Component
  * Purchase order creation interface similar to POS
@@ -268,9 +271,10 @@ const SHIPPING_METHOD_OPTIONS: SelectorOption[] = [
       [shippingCost]="shellShippingCost()"
       [shippingCostAllocation]="shellShippingCostAllocation()"
       (confirmed)="onOrderConfirmed()"
-      (cancelled)="showOrderConfirmModal.set(false)"
+      (cancelled)="onCheckoutCancelled()"
       (navigateToSettings)="onNavigateToSettings()"
       (retryOrder)="onOrderConfirmed()"
+      (viewOrder)="onPartialViewOrder()"
       (pricingOverridesChange)="onPricingOverridesChange($event)"
       (ackReceiveChange)="ackReceive.set($event)"
       (paymentPlanChange)="paymentPlan.set($event)"
@@ -2149,8 +2153,16 @@ export class PopComponent implements OnInit, OnDestroy {
   onOrderConfirmed(): void {
     // Punto de entrada real del envío. Un reintento de recepción no crea OC
     // (ya existe), así que no se bloquea.
-    if (!this.pendingReceptionOrder() && this.blockSubmitIfTaxUnconfirmed()) {
-      return;
+    if (!this.pendingReceptionOrder()) {
+      // QUI-942 — tras una compra ya creada el carrito queda vacío; un segundo
+      // envío mandaba una OC sin proveedor, bodega ni líneas (400).
+      if (this.popCartService.currentState.items.length === 0) {
+        this.toastService.warning(
+          'El pedido está vacío: agrega productos antes de crear la orden.',
+        );
+        return;
+      }
+      if (this.blockSubmitIfTaxUnconfirmed()) return;
     }
     // CP-ID-VNDX-2026-08-18-PO-PROD — F2.S6: NO cerrar el modal antes del POST.
     // Antes `showOrderConfirmModal.set(false)` corría como primera línea y el
@@ -2209,6 +2221,24 @@ export class PopComponent implements OnInit, OnDestroy {
     if (typeof id === 'number' && id > 0) {
       this.router.navigate(['/admin/orders/purchase-orders', id]);
     }
+  }
+
+  /**
+   * QUI-942 — el wizard se cierra sin éxito. Un resultado PARCIAL (OC creada
+   * con una etapa caída) o un error de creación ya se le mostró al operador en
+   * el shell: si sobrevivieran, la siguiente apertura arrancaría en ese panel
+   * en lugar del wizard. Un éxito pleno no se toca: lo pinta su propio modal.
+   */
+  onCheckoutCancelled(): void {
+    this.showOrderConfirmModal.set(false);
+    if (this.orderResult()?.failedStage) this.orderResult.set(null);
+    this.orderError.set(null);
+  }
+
+  /** QUI-942 — «Ver orden» desde el panel de resultado parcial del shell. */
+  onPartialViewOrder(): void {
+    this.showOrderConfirmModal.set(false);
+    this.onViewOrder();
   }
 
   onNavigateToSettings(): void {
@@ -2661,6 +2691,12 @@ export class PopComponent implements OnInit, OnDestroy {
     // carrito) o si falló la creación (conservar carrito para reintentar).
     let createdOrder: any = pendingOrder;
 
+    // QUI-942 — el pago inmediato se omite cuando no hay nada que pagar (una
+    // carga masiva con costos en 0 deja la OC en total 0): el DTO exige
+    // `amount >= 0.01`, así que mandarlo siempre fallaba con 400 sobre una
+    // orden ya creada y recibida.
+    let payOmittedZeroTotal = false;
+
     // Reintento: se RELEE la OC del servidor para saber qué falta recibir
     // (una recepción grande pudo quedar parcial). Si la relectura falla se usa
     // la foto recordada y se pide la recepción completa, como antes.
@@ -2700,10 +2736,15 @@ export class PopComponent implements OnInit, OnDestroy {
           const payment$ = reception$.pipe(
             switchMap(() => {
               if (!doPay) return of(null);
-              const amount =
+              const amount = this._round2(
                 Number(order.total_amount) > 0
                   ? Number(order.total_amount)
-                  : cartTotal;
+                  : cartTotal,
+              );
+              if (amount < MIN_PAYMENT_AMOUNT) {
+                payOmittedZeroTotal = true;
+                return of(null);
+              }
               return this.purchaseOrdersService
                 .registerPurchaseOrderPayment(order.id, {
                   amount,
@@ -2745,14 +2786,20 @@ export class PopComponent implements OnInit, OnDestroy {
           // `_executeSubmitOrder` (action='create') populaba `orderResult`,
           // así que al confirmar "Crear y Recibir" el modal se quedaba
           // abierto con el wizard visible aunque la OC ya existía en DB.
+          const paid = doPay && !payOmittedZeroTotal;
           this._setOrderResultFromCreated(createdOrder, {
             stages: this._buildStageTrail(doReceive, doPay, {
               create: 'success',
               receive: doReceive ? 'success' : 'skipped',
-              pay: doPay ? 'success' : 'skipped',
+              pay: paid ? 'success' : 'skipped',
             }),
           });
-          this.toastService.success(this._buildSuccessMessage(doReceive, doPay));
+          this.toastService.success(this._buildSuccessMessage(doReceive, paid));
+          if (payOmittedZeroTotal) {
+            this.toastService.info(
+              'La orden quedó con total $0: no se registró ningún pago.',
+            );
+          }
           this._finalizeAfterOrder();
         },
         error: (err: any) => {
