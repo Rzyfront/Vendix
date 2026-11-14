@@ -56,3 +56,31 @@ describe('InventoryAdjustmentsController.scanCountAsync', () => {
     expect(res).toEqual({ success: true, data: { job_id: 'j2' } });
   });
 });
+
+describe('InventoryAdjustmentsController.uploadBulkAdjustments (QUI-1004)', () => {
+  it('la carga directa queda en el registro de cargas masivas', async () => {
+    const result = { success: true, total_processed: 3, successful: 2, failed: 1, results: [] };
+    const bulkService = { uploadFromFile: jest.fn().mockResolvedValue(result) };
+    const fileInfo = { file_name: 'ajustes.xlsx', file_hash: 'c'.repeat(64), duplicate_of: null };
+    const logs = {
+      describeFile: jest.fn().mockResolvedValue(fileInfo),
+      trackUpload: jest.fn().mockResolvedValue(undefined),
+    };
+    const controller = new InventoryAdjustmentsController(
+      {} as any,
+      bulkService as any,
+      {} as any,
+      {} as any,
+      { success: jest.fn((d) => ({ success: true, data: d })) } as any,
+      logs as any,
+    );
+    const file = { buffer: Buffer.from('x'), originalname: 'ajustes.xlsx' };
+    await controller.uploadBulkAdjustments(file, {} as any);
+    expect(logs.describeFile).toHaveBeenCalledWith(
+      'inventory_adjustments',
+      file.buffer,
+      'ajustes.xlsx',
+    );
+    expect(logs.trackUpload).toHaveBeenCalledWith('inventory_adjustments', fileInfo, result);
+  });
+});

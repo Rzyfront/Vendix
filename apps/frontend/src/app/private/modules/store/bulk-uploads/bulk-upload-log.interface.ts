@@ -9,7 +9,9 @@ export type BulkUploadType =
   | 'inventory_adjustments'
   | 'customers'
   | 'bank_statements'
-  | 'purchase_orders';
+  | 'purchase_orders'
+  | 'memberships'
+  | 'customers_ai';
 
 export type BulkUploadStatus = 'completed' | 'partial' | 'failed';
 
@@ -21,6 +23,8 @@ export const BULK_UPLOAD_TYPE_LABELS: Record<BulkUploadType, string> = {
   customers: 'Clientes',
   bank_statements: 'Extractos bancarios',
   purchase_orders: 'Compras',
+  memberships: 'Padrón de miembros',
+  customers_ai: 'Clientes con IA',
 };
 
 export const BULK_UPLOAD_STATUS_LABELS: Record<BulkUploadStatus, string> = {
@@ -44,6 +48,26 @@ export interface BulkUploadFileInfo {
   file_name?: string;
   file_hash?: string;
   duplicate_of?: BulkUploadDuplicateInfo | null;
+}
+
+/**
+ * Huella que devuelve el encolado de un escaneo con IA (padrón de miembros,
+ * clientes con IA). Lo que no tenga la forma esperada se descarta.
+ */
+export function toBulkUploadFileInfo(
+  data: Record<string, unknown> | null | undefined,
+): BulkUploadFileInfo {
+  const file_name = typeof data?.['file_name'] === 'string' ? data['file_name'] : undefined;
+  const file_hash = typeof data?.['file_hash'] === 'string' ? data['file_hash'] : undefined;
+  const duplicate = data?.['duplicate_of'];
+  return {
+    file_name,
+    file_hash,
+    duplicate_of:
+      duplicate && typeof duplicate === 'object'
+        ? (duplicate as BulkUploadDuplicateInfo)
+        : null,
+  };
 }
 
 export interface BulkUploadLog {

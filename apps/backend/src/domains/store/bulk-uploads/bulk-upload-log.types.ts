@@ -14,6 +14,8 @@ export const BULK_UPLOAD_TYPES = [
   'customers',
   'bank_statements',
   'purchase_orders',
+  'memberships',
+  'customers_ai',
 ] as const;
 
 export type BulkUploadType = (typeof BULK_UPLOAD_TYPES)[number];
@@ -46,6 +48,8 @@ export const BULK_UPLOAD_TYPE_PERMISSIONS: Record<BulkUploadType, string> = {
   customers: 'store:customers:create',
   bank_statements: 'store:accounting:bank_reconciliation:create',
   purchase_orders: 'store:orders:purchase_orders:create',
+  memberships: 'store:memberships:bulk_import',
+  customers_ai: 'store:customers:create',
 };
 
 export const BULK_UPLOAD_ANY_PERMISSION = Array.from(

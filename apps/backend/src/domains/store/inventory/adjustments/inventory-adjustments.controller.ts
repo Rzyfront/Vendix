@@ -107,6 +107,17 @@ export class InventoryAdjustmentsController {
       file.buffer,
       upload_dto,
     );
+    // QUI-1004 — la carga directa también deja su fila en el registro.
+    const fileInfo = await this.bulkUploadLogs.describeFile(
+      'inventory_adjustments',
+      file.buffer,
+      file.originalname,
+    );
+    await this.bulkUploadLogs.trackUpload(
+      'inventory_adjustments',
+      fileInfo,
+      result,
+    );
 
     if (result.failed > 0) {
       return this.responseService.success(
