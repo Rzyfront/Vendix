@@ -452,6 +452,16 @@
             }
           </div>
         }
+        @if (cancelError(); as message) {
+          <div
+            role="alert"
+            data-testid="cancel-error"
+            class="rounded-xl p-3 border text-sm font-medium"
+            style="color: var(--color-error); background: color-mix(in srgb, var(--color-error) 8%, transparent); border-color: color-mix(in srgb, var(--color-error) 25%, transparent)"
+          >
+            {{ message }}
+          </div>
+        }
       </div>
 
       <div slot="footer" class="flex items-center justify-end gap-3 px-4 py-3 bg-[var(--color-background)] rounded-b-xl">
