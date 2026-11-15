@@ -425,10 +425,12 @@ export class CashSettlementService {
   // vive en `RouteFlowService.settleStop` (DISPATCH_ROUTE_PARTIAL_DISABLED).
 
   async emitRefundCompleted(input: RefundInput) {
-    // refunds table requires order_id NOT NULL. For dispatch_route changes, we
-    // bypass the refunds table and just emit refund.completed event for
-    // accounting listeners (the cash_register_movement with type='refund' is
-    // the actual ledger entry).
+    // Change handed back at the door (`change_amount`) is informative only:
+    // `collected_amount` is already net of it (route-flow `settleStop`), so the
+    // driver hands in exactly the collected cash and route close records that
+    // net amount in the settler's session. Writing a cash movement here would
+    // count the change twice, so this method never touches the cash drawer
+    // (QUI-893). It only keeps the refunds row / `refund.completed` trace.
     if (input.sales_order_id && input.user_id) {
       try {
         const refund = await this.prisma.refunds.create({

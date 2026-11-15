@@ -338,3 +338,39 @@ describe('CashSettlementService.listOpenSessions — B20 sesiones de quien liqui
     });
   });
 });
+
+describe('CashSettlementService.emitRefundCompleted — vuelto en ruta (QUI-893)', () => {
+  it('no escribe movimiento de caja: el recaudo ya es neto del vuelto', async () => {
+    const prisma = {
+      refunds: { create: jest.fn().mockResolvedValue({ id: 61 }) },
+      cash_register_movements: { create: jest.fn(), findFirst: jest.fn() },
+      cash_register_sessions: { findFirst: jest.fn() },
+    };
+    const eventEmitter = { emit: jest.fn() };
+    const sessions = { assertSessionForSales: jest.fn() };
+    const service = new CashSettlementService(
+      prisma as any,
+      eventEmitter as any,
+      sessions as any,
+    );
+
+    await service.emitRefundCompleted({
+      store_id: 12,
+      route_id: 3,
+      stop_id: 5,
+      dispatch_note_id: 8,
+      sales_order_id: 900,
+      amount: 5000,
+      user_id: 7,
+      reason: 'Cambio/devolución en ruta',
+    } as any);
+
+    expect(prisma.cash_register_movements.create).not.toHaveBeenCalled();
+    expect(prisma.cash_register_sessions.findFirst).not.toHaveBeenCalled();
+    expect(sessions.assertSessionForSales).not.toHaveBeenCalled();
+    expect(eventEmitter.emit).toHaveBeenCalledWith(
+      'refund.completed',
+      expect.objectContaining({ source_type: 'dispatch_route_change', amount: 5000 }),
+    );
+  });
+});
