@@ -97,9 +97,9 @@ const endpoints: CatalogEntry[] = [
   ['store/cash-registers/sessions/:id', 'GET', ['store:cash_registers:read']],
   ['store/stock-transfers/:id', 'GET', ['store:stock-transfers:read']],
   [
-    'store/orders/return-orders/:id',
+    'store/orders/:orderId/refunds',
     'GET',
-    ['store:orders:return_orders:read'],
+    ['store:orders:order_flow:read'],
   ],
   ['store/expenses', 'POST', ['store:expenses:create']],
 ].map(([path, method, requiredPermissions]) => ({
@@ -149,10 +149,14 @@ describe('release playbook contract against real factories (no business executio
     const controllers = [
       'cash-registers/sessions/sessions.controller.ts',
       'orders/stock-transfers/stock-transfers.controller.ts',
-      'orders/return-orders/return-orders.controller.ts',
+      'orders/order-flow/order-flow.controller.ts',
       'expenses/expenses.controller.ts',
-    ].map((path) =>
-      readFileSync(resolve(__dirname, '../../domains/store', path), 'utf8'),
+    ].flatMap((path) =>
+      // A file may declare several controllers (order-flow.controller.ts
+      // holds the flow and the order-refunds ones): pin each one separately.
+      readFileSync(resolve(__dirname, '../../domains/store', path), 'utf8')
+        .split(/(?=@Controller\()/)
+        .filter((block) => block.startsWith('@Controller(')),
     );
     for (const endpoint of endpoints) {
       const declaration = controllers.find((text) => {

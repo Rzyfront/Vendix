@@ -7409,6 +7409,13 @@ export class OrderFlowService {
       reteica?: number;
     };
     /**
+     * QUI-893 B3 — user who invoiced a standalone contra entrega remisión
+     * (off-route). When present, the collection is a cash `sale` in that
+     * user's open session, inside the payment tx. The route flow never sends
+     * it: route cash enters at planilla close.
+     */
+    cashUserId?: number;
+    /**
      * Origen del `order_events`. Los dos llamadores reales son listeners
      * (`DispatchNoteEventsListener` y `PaymentFromDispatchRouteListener`),
      * así que el default es `'listener'`; un llamador HTTP futuro debe
@@ -7475,17 +7482,7 @@ export class OrderFlowService {
     // debt stays in cartera. Exception (cod-auto-invoicing S6): a contra entrega
     // sale invoiced on credit before delivery keeps its (cancelled) ON_DELIVERY
     // promise, so the standalone remisión still collects it and settles the AR.
-    const isCodOriginCredit =
-      isCreditSale &&
-      input.stopId == null &&
-      (await this.prisma.payments.findFirst({
-        where: {
-          order_id: order.id,
-          store_payment_method: { system_payment_method: { processing_mode: 'ON_DELIVERY' } },
-        },
-        select: { id: true },
-      })) != null;
-    if (isCreditSale && input.stopId == null && !isCodOriginCredit) {
+    if (input.stopId == null && !(await this.isStandaloneCodCollectable(order))) {
       this.logger.debug(
         `[applyDispatchCodPayment] credit order #${order.id} outside a route collection — NO-OP (${input.correlationKey})`,
       );
@@ -7569,6 +7566,17 @@ export class OrderFlowService {
       }
       createdPayment.id = payment.id;
 
+      if (input.cashUserId != null && input.stopId == null) {
+        await this.recordStandaloneCodCashSale(tx, {
+          storeId: input.storeId,
+          userId: input.cashUserId,
+          orderId: order.id,
+          paymentId: payment.id,
+          amount: applied,
+          paymentMethod,
+        });
+      }
+
       await this.orderHistoryService?.record(tx, {
         orderId: order.id,
         storeId: input.storeId,
@@ -7626,6 +7634,109 @@ export class OrderFlowService {
       `[applyDispatchCodPayment] COD order #${order.id} settled via ${input.correlationKey}: applied=${applied} remaining=${
         Math.round(newRemaining * 100) / 100
       }`,
+    );
+  }
+
+  /**
+   * A standalone remisión (no route stop) only collects a contra entrega
+   * balance. A credit sale (payment_form '2') stays in cartera unless it was
+   * a contra entrega invoiced on credit before delivery: its (cancelled)
+   * ON_DELIVERY promise remains (cod-auto-invoicing S6).
+   */
+  private async isStandaloneCodCollectable(order: {
+    id: number;
+    payment_form: string | null;
+  }): Promise<boolean> {
+    if (order.payment_form !== '2') return true;
+    const onDeliveryPromise = await this.prisma.payments.findFirst({
+      where: {
+        order_id: order.id,
+        store_payment_method: { system_payment_method: { processing_mode: 'ON_DELIVERY' } },
+      },
+      select: { id: true },
+    });
+    return onDeliveryPromise != null;
+  }
+
+  /**
+   * QUI-893 B3 — gate of `DispatchNoteFlowService.invoice`. Invoicing a
+   * contra entrega remisión with a balance that did NOT travel on a route
+   * planilla collects that balance (see `dispatch_note.invoiced`), so the
+   * invoicer needs an open drawer (CASH_SESSION_REQUIRED_001), checked before
+   * the remisión changes state. Returns whether the invoice collects into the
+   * invoicer's session. Route remisiones are unchanged: false, no gate.
+   */
+  async assertStandaloneCodInvoiceCashSession(input: {
+    storeId: number;
+    dispatchNoteId: number;
+    userId: number | undefined;
+  }): Promise<boolean> {
+    const note = await this.prisma.dispatch_notes.findFirst({
+      where: { id: input.dispatchNoteId, store_id: input.storeId },
+      select: { order_id: true },
+    });
+    if (!note?.order_id) return false;
+    const onRoute = await this.prisma.dispatch_route_stops.findFirst({
+      where: { dispatch_note_id: input.dispatchNoteId, status: { not: 'released' } },
+      select: { id: true },
+    });
+    if (onRoute) return false;
+    const order = await this.prisma.orders.findFirst({
+      where: { id: note.order_id, store_id: input.storeId },
+      select: { id: true, remaining_balance: true, payment_form: true },
+    });
+    if (!order || !(Number(order.remaining_balance) > 0)) return false;
+    if (!(await this.isStandaloneCodCollectable(order))) return false;
+    await this.sessionsService.assertSessionForSales(input.userId);
+    return true;
+  }
+
+  /**
+   * QUI-893 B3 — the off-route contra entrega collection is a `sale` in the
+   * invoicer's open session, in the payment tx (linked by order and payment,
+   * so `reversePaymentCashMovements` finds it). Cash register off: nothing.
+   * A drawer closed since the invoice gate aborts the collection
+   * (CASH_SESSION_REQUIRED_001) instead of leaving cash outside any drawer.
+   */
+  private async recordStandaloneCodCashSale(
+    tx: Prisma.TransactionClient,
+    input: {
+      storeId: number;
+      userId: number;
+      orderId: number;
+      paymentId: number;
+      amount: number;
+      paymentMethod: string;
+    },
+  ): Promise<void> {
+    if (!(input.amount > 0)) return;
+    const settings = await tx.store_settings.findUnique({
+      where: { store_id: input.storeId },
+      select: { settings: true },
+    });
+    const enabled = (
+      settings?.settings as { pos?: { cash_register?: { enabled?: boolean } } } | null
+    )?.pos?.cash_register?.enabled;
+    if (!enabled) return;
+    const session = await tx.cash_register_sessions.findFirst({
+      where: { store_id: input.storeId, status: 'open', opened_by: input.userId },
+      orderBy: [{ opened_at: 'desc' }, { id: 'desc' }],
+      select: { id: true },
+    });
+    if (!session) {
+      throw new VendixHttpException(ErrorCodes.CASH_SESSION_REQUIRED_001);
+    }
+    await this.movementsService.recordSaleMovement(
+      session.id,
+      {
+        store_id: input.storeId,
+        user_id: input.userId,
+        amount: input.amount,
+        payment_method: input.paymentMethod,
+        order_id: input.orderId,
+        payment_id: input.paymentId,
+      },
+      tx,
     );
   }
 
@@ -7780,15 +7891,20 @@ export class OrderFlowService {
     // de quien cancela. Sin efectivo que devolver no se exige caja.
     // Espejo en memoria de `resolveCancelCashReversal` (pagos `succeeded` en
     // efectivo), sin la consulta: `getOrder` ya trae el método de cada pago.
-    await this.assertCashSessionForCashOut(async () =>
-      order.payments.some(
-        (payment) =>
-          payment.state === 'succeeded' &&
-          (CASH_METHOD_ENUM_VALUES as readonly string[]).includes(
-            payment.store_payment_method?.system_payment_method?.type ?? '',
-          ),
-      ),
-    );
+    // QUI-893 r2: solo si ese efectivo entró al cajón (dejó su `sale`); un
+    // cobro hecho con la caja apagada no saca nada del cajón al cancelar.
+    await this.assertCashSessionForCashOut(async () => {
+      const cashIds = order.payments
+        .filter(
+          (payment) =>
+            payment.state === 'succeeded' &&
+            (CASH_METHOD_ENUM_VALUES as readonly string[]).includes(
+              payment.store_payment_method?.system_payment_method?.type ?? '',
+            ),
+        )
+        .map((payment) => payment.id);
+      return (await this.cashPaymentIdsInDrawer(orderId, cashIds)).size > 0;
+    });
 
     // cod-auto-invoicing S5 — nota crédito TOTAL confirmada por el operador,
     // ANTES del claim: el gate DIAN de la transacción exige la nota `accepted`.
@@ -8449,6 +8565,43 @@ export class OrderFlowService {
     );
   }
 
+  /**
+   * QUI-893 r2 — pagos en efectivo cuyo dinero entró al cajón: los que tienen
+   * su propio `sale`. Un `sale` huérfano de la orden (sin `payment_id`, no
+   * desvinculado por compensación) no se puede atribuir a un pago, así que
+   * todos cuentan como dentro del cajón (comportamiento previo).
+   */
+  private async cashPaymentIdsInDrawer(
+    orderId: number,
+    paymentIds: number[],
+  ): Promise<Set<number>> {
+    if (paymentIds.length === 0) return new Set();
+    const sales = await this.prisma.cash_register_movements.findMany({
+      where: {
+        type: 'sale',
+        OR: [
+          { payment_id: { in: paymentIds } },
+          { order_id: orderId, payment_id: null },
+        ],
+      },
+      select: { payment_id: true, notes: true },
+    });
+    if (
+      sales.some(
+        (sale) =>
+          sale.payment_id == null &&
+          !sale.notes?.startsWith(UNLINKED_SALE_NOTES_PREFIX),
+      )
+    ) {
+      return new Set(paymentIds);
+    }
+    return new Set(
+      sales
+        .map((sale) => sale.payment_id)
+        .filter((id): id is number => id != null),
+    );
+  }
+
   private async resolveCancelCashReversal(order: {
     payments: { id: number; state: string }[];
   }, client: Prisma.TransactionClient | StorePrismaService = this.prisma): Promise<{
@@ -8784,6 +8937,36 @@ export class OrderFlowService {
       // sesión que no existe. No es una falla: no se escala.
       if (!cashRegister?.enabled) {
         return true;
+      }
+
+      // QUI-893 r2 — solo sale del cajón el efectivo que entró al cajón. Un
+      // pago en efectivo sin `sale` (cobrado con la caja apagada) no tiene
+      // billete en ninguna sesión: un egreso descuadraría el arqueo. No es
+      // una falla: el reembolso contable sigue su curso.
+      const inDrawer = await this.cashPaymentIdsInDrawer(
+        orderId,
+        reversal.payments.map((pay) => pay.id),
+      );
+      const outsideDrawer = reversal.payments.filter((pay) => !inDrawer.has(pay.id));
+      if (outsideDrawer.length > 0) {
+        this.logger.log(
+          `Order #${orderId} cancelled: no cash-out for payments ` +
+            `${outsideDrawer.map((pay) => pay.id).join(', ')} (no sale in the cash drawer)`,
+        );
+      }
+      if (outsideDrawer.length === reversal.payments.length) {
+        return true;
+      }
+      if (outsideDrawer.length > 0) {
+        const drawerPayments = reversal.payments.filter((pay) => inDrawer.has(pay.id));
+        reversal = {
+          amount: drawerPayments.reduce(
+            (acc, pay) => acc.plus(pay.amount),
+            new Prisma.Decimal(0),
+          ),
+          paymentIds: drawerPayments.map((pay) => pay.id),
+          payments: drawerPayments,
+        };
       }
 
       // B17 — cancelación sin usuario (webhook/job): el egreso no se omite ni deja

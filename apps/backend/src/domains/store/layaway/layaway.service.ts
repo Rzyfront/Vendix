@@ -6,6 +6,7 @@ import { StockLevelManager } from '../inventory/shared/services/stock-level-mana
 import { EventEmitter2 } from '@nestjs/event-emitter';
 import { MovementsService } from '../cash-registers/movements/movements.service';
 import { SessionsService } from '../cash-registers/sessions/sessions.service';
+import { WalletService } from '../wallet/wallet.service';
 import { VendixHttpException, ErrorCodes } from 'src/common/errors';
 import { Prisma } from '@prisma/client';
 import { resolveTierSnapshotsForItems } from '../products/services/tier-snapshot.util';
@@ -20,7 +21,26 @@ import {
   MakeLayawayPaymentDto,
   ModifyInstallmentsDto,
   CancelLayawayDto,
+  LayawayRefundMethod,
 } from './dto';
+
+/** source_type of the drawer row / wallet credit of a cancelled layaway refund. */
+export const LAYAWAY_CANCEL_REFUND_SOURCE = 'layaway_cancel_refund';
+
+/**
+ * Amounts of a cancellation (reversal of the 2805 advance): what the customer
+ * paid splits into the refund and the retained fee. Invariant for a balanced
+ * entry: refund + fee == total_paid. Default: full refund, no fee.
+ */
+function resolveCancelAmounts(paidAmount: unknown, dto: CancelLayawayDto) {
+  const total_paid = Number(paidAmount || 0);
+  const cancellation_fee = Math.min(Number(dto.cancellation_fee ?? 0), total_paid);
+  const refund_amount =
+    dto.refund_amount != null
+      ? Math.min(Number(dto.refund_amount), total_paid - cancellation_fee)
+      : total_paid - cancellation_fee;
+  return { total_paid, cancellation_fee, refund_amount };
+}
 
 @Injectable()
 export class LayawayService {
@@ -30,6 +50,7 @@ export class LayawayService {
     private eventEmitter: EventEmitter2,
     private movementsService: MovementsService,
     private sessionsService: SessionsService,
+    private walletService: WalletService,
   ) {}
 
   /**
@@ -779,6 +800,25 @@ export class LayawayService {
 
   async cancel(plan_id: number, dto: CancelLayawayDto) {
     const context = RequestContextService.getContext();
+    const user_id = context?.user_id ?? undefined;
+
+    // QUI-893 B2 — the refund leaves through a method the cashier picks, and
+    // cash needs the canceller's open drawer: both checked before the tx.
+    const current = await this.prisma.layaway_plans.findUnique({
+      where: { id: plan_id },
+      select: { paid_amount: true },
+    });
+    if (!current) {
+      throw new VendixHttpException(ErrorCodes.LAY_FIND_001);
+    }
+    if (resolveCancelAmounts(current.paid_amount, dto).refund_amount > 0) {
+      if (!dto.refund_method) {
+        throw new VendixHttpException(ErrorCodes.LAY_REFUND_METHOD_REQUIRED_001);
+      }
+      if (dto.refund_method === 'cash') {
+        await this.sessionsService.assertSessionForSales(user_id);
+      }
+    }
 
     return this.prisma.$transaction(async (tx: any) => {
       const plan = await tx.layaway_plans.findUnique({
@@ -791,6 +831,16 @@ export class LayawayService {
 
       if (plan.state === 'completed') {
         throw new VendixHttpException(ErrorCodes.LAY_STATE_001);
+      }
+
+      // Amounts from the plan read inside the tx (a payment may have landed
+      // since the pre-check): the money that leaves is what was really paid.
+      const { total_paid, cancellation_fee, refund_amount } =
+        resolveCancelAmounts(plan.paid_amount, dto);
+      const refund_method: LayawayRefundMethod | undefined =
+        refund_amount > 0 ? dto.refund_method : undefined;
+      if (refund_amount > 0 && !refund_method) {
+        throw new VendixHttpException(ErrorCodes.LAY_REFUND_METHOD_REQUIRED_001);
       }
 
       // 1. Marcar plan como cancelado
@@ -821,22 +871,17 @@ export class LayawayService {
         tx,
       );
 
-      // 4. Resolver montos del cuadre contable (reversa del anticipo 2805):
-      //    total_paid = lo abonado por el cliente; el descuadre se reparte entre
-      //    devolución (caja/banco) y penalización retenida (otros ingresos).
-      //    Invariante para que el asiento balancee: refund + fee == total_paid.
-      //    Default si no se especifica: devolución total, sin penalización.
-      const total_paid = Number(plan.paid_amount || 0);
-      const cancellation_fee = Math.min(
-        Number(dto.cancellation_fee ?? 0),
-        total_paid,
-      );
-      const refund_amount =
-        dto.refund_amount != null
-          ? Math.min(Number(dto.refund_amount), total_paid - cancellation_fee)
-          : total_paid - cancellation_fee;
+      // 4. QUI-893 B2 — the refund actually leaves, in this same tx.
+      if (refund_amount > 0 && refund_method) {
+        await this.recordCancelRefund(tx, {
+          plan,
+          amount: refund_amount,
+          method: refund_method,
+          user_id,
+        });
+      }
 
-      // 5. Emitir evento
+      // 5. Emitir evento (asiento: DR 2805 / CR según el método real)
       this.eventEmitter.emit('layaway.cancelled', {
         store_id: plan.store_id,
         organization_id: context?.organization_id,
@@ -847,6 +892,7 @@ export class LayawayService {
         total_paid,
         refund_amount,
         cancellation_fee,
+        refund_method,
         cancellation_reason: dto.cancellation_reason,
         user_id: context?.user_id,
       });
@@ -857,6 +903,55 @@ export class LayawayService {
           customer: { select: { id: true, first_name: true, last_name: true } },
         },
       });
+    });
+  }
+
+  /**
+   * QUI-893 B2 — where a cancelled layaway's refund goes:
+   *  - cash: `cash_out` in the canceller's open session (the helper throws
+   *    CASH_SESSION_REQUIRED_001 if it closed after the pre-check).
+   *  - bank_transfer / card: informative `refund` row, only when the store
+   *    tracks non-cash payments (`track_non_cash_payments`).
+   *  - wallet: credit to the customer's wallet balance.
+   * With the cash register off the helper writes nothing (no behavior change).
+   */
+  private async recordCancelRefund(
+    tx: Prisma.TransactionClient,
+    input: {
+      plan: { id: number; store_id: number; customer_id: number; plan_number: string };
+      amount: number;
+      method: LayawayRefundMethod;
+      user_id: number | undefined;
+    },
+  ) {
+    const reference = `Devolución separé ${input.plan.plan_number}`;
+    if (input.method === 'wallet') {
+      await this.walletService.creditInTransaction(
+        tx,
+        input.plan.customer_id,
+        input.amount,
+        {
+          reference_type: LAYAWAY_CANCEL_REFUND_SOURCE,
+          reference_id: input.plan.id,
+          description: reference,
+          created_by: input.user_id,
+        },
+      );
+      return;
+    }
+    // Without an actor there is no drawer to book to; cash already failed the
+    // pre-check gate when the register is on.
+    if (!input.user_id) return;
+    await this.movementsService.recordModuleCashMovement(tx, {
+      store_id: input.plan.store_id,
+      user_id: input.user_id,
+      direction: 'out',
+      amount: input.amount,
+      payment_method: input.method,
+      source_type: LAYAWAY_CANCEL_REFUND_SOURCE,
+      source_id: input.plan.id,
+      reference,
+      include_non_cash: true,
     });
   }
 

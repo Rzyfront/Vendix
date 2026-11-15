@@ -130,8 +130,13 @@ export interface ModifyInstallmentsRequest {
   }[];
 }
 
+/** QUI-893 B2 — how the paid amount goes back to the customer. */
+export type LayawayRefundMethod = 'cash' | 'bank_transfer' | 'card' | 'wallet';
+
 export interface CancelLayawayRequest {
   cancellation_reason: string;
+  /** Required by the API when something was paid. */
+  refund_method?: LayawayRefundMethod;
 }
 
 export interface LayawayQueryParams {

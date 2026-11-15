@@ -2,7 +2,6 @@ import {
   Injectable,
   BadRequestException,
   NotFoundException,
-  Logger,
 } from '@nestjs/common';
 import { StorePrismaService } from '../../../../prisma/services/store-prisma.service';
 import { CreateReturnOrderDto } from './dto/create-return-order.dto';
@@ -15,37 +14,39 @@ import {
   return_order_type_enum,
 } from '@prisma/client';
 import { VendixHttpException, ErrorCodes } from 'src/common/errors';
-import { EventEmitter2 } from '@nestjs/event-emitter';
 import { RequestContextService } from '@common/context/request-context.service';
-import {
-  buildTaxBreakdown,
-  scaleBreakdownToTotal,
-  TaxBreakdownItem,
-} from 'src/common/interfaces/tax-breakdown.interface';
 import { StockLevelManager } from '../../inventory/shared/services/stock-level-manager.service';
-import {
-  ReturnLine,
-  ReturnSoldLine,
-  ReturnStockAllocator,
-} from './return-stock-units.util';
 
 /**
- * Lo que `buildReturnAllocator` necesita del `tx`. Los delegados de Prisma son
- * genéricos; el resultado se fija con los tipos de `return-stock-units.util`.
+ * QUI-893 B1 — a return that gives goods (and money) back to a CUSTOMER. The
+ * only way to do that is "Reembolsar" from the order detail
+ * (`RefundFlowService`: cash-session gate, drawer movement, refund entry and
+ * restock in one flow). A supplier-typed return pointing at a customer sale or
+ * partner is the same thing under another label, so it is caught too.
  */
-interface ReturnAllocatorClient {
-  order_items: { findMany(args: object): Promise<ReturnSoldLine[]> };
-  return_order_items: { findMany(args: object): Promise<ReturnLine[]> };
+function isCustomerReturn(fields: {
+  type?: string | null;
+  related_order_type?: string | null;
+  partner_type?: string | null;
+}): boolean {
+  return (
+    fields.type === return_order_type_enum.sales_return ||
+    fields.related_order_type === 'sales_order' ||
+    fields.partner_type === 'customer'
+  );
+}
+
+function assertNotCustomerReturn(fields: Parameters<typeof isCustomerReturn>[0]) {
+  if (isCustomerReturn(fields)) {
+    throw new VendixHttpException(ErrorCodes.RETURN_ORDER_SALES_USE_REFUND_001);
+  }
 }
 
 @Injectable()
 export class ReturnOrdersService {
-  private readonly logger = new Logger(ReturnOrdersService.name);
-
   constructor(
     private prisma: StorePrismaService,
     private stockLevelManager: StockLevelManager,
-    private eventEmitter: EventEmitter2,
   ) {}
 
   /**
@@ -67,6 +68,7 @@ export class ReturnOrdersService {
    * violar un `NOT NULL`.
    */
   async create(createReturnOrderDto: CreateReturnOrderDto) {
+    assertNotCustomerReturn(createReturnOrderDto);
     const organization_id = RequestContextService.getContext()?.organization_id;
     if (!organization_id) {
       throw new VendixHttpException(ErrorCodes.ORG_CONTEXT_001);
@@ -226,6 +228,10 @@ export class ReturnOrdersService {
     if (existingReturn.status !== return_order_status_enum.draft) {
       throw new BadRequestException('Only draft returns can be updated');
     }
+    // A draft can not be relabeled into a customer return (nor an old
+    // customer-return draft into a supplier one to get it processed).
+    assertNotCustomerReturn(existingReturn);
+    assertNotCustomerReturn(updateReturnOrderDto);
 
     return this.prisma.return_orders.update({
       where: { id },
@@ -259,30 +265,13 @@ export class ReturnOrdersService {
         throw new BadRequestException('Only draft returns can be processed');
       }
 
-      // Líneas de la venta original: la devolución mueve las mismas unidades
-      // de stock que la venta descontó (`stock_units_consumed ?? quantity`),
-      // no la cantidad lógica de la línea (1 en una pesada de 0,180 kg). Las
-      // devoluciones ya procesadas de esa venta se descuentan primero.
-      const allocator = await this.buildReturnAllocator(tx, returnOrder);
-      const stockUnitsFor = (returnItem: ReturnLine): number => {
-        const { units, ambiguous, exhausted } = allocator.take(returnItem);
-        if (exhausted) {
-          this.logger.warn(
-            `Devolución #${returnOrder.id}: el producto ${returnItem.product_id}` +
-              ` (variante ${returnItem.product_variant_id ?? '—'}) ya se había devuelto por` +
-              ' completo en devoluciones anteriores de esta venta; no se mueve stock.',
-          );
-        }
-        if (ambiguous) {
-          this.logger.warn(
-            `Devolución #${returnOrder.id}: la línea del producto ${returnItem.product_id}` +
-              ` (variante ${returnItem.product_variant_id ?? '—'}) no se puede atribuir a una` +
-              ` línea vendida concreta (líneas de distinto tipo o tamaño); se mueven ${units}` +
-              ' unidades de stock, la atribución más conservadora.',
-          );
-        }
-        return units;
-      };
+      // Legacy customer-return drafts are closed: no stock, no accounting.
+      // The refund from the order detail does the restock with the money.
+      assertNotCustomerReturn(returnOrder);
+
+      // A supplier return moves the logical quantity of each line.
+      const stockUnitsFor = (returnItem: { quantity: number }): number =>
+        Number(returnItem.quantity);
 
       // Process each item
       for (const item of items) {
@@ -345,73 +334,9 @@ export class ReturnOrdersService {
       });
     });
 
-    // Emit refund.completed for accounting after successful transaction
-    try {
-      const refund_amount = await this.resolveRefundAmount(processed_return);
-      if (refund_amount > 0) {
-        // Derive tax proportion from the original order if linked
-        let tax_amount = 0;
-        let store_id: number | undefined;
-        let tax_breakdown: TaxBreakdownItem[] = [];
-        if (processed_return.related_order_id) {
-          const original_order = await this.prisma.orders.findUnique({
-            where: { id: processed_return.related_order_id },
-            select: {
-              tax_amount: true,
-              grand_total: true,
-              store_id: true,
-            },
-          });
-          if (original_order) {
-            store_id = original_order.store_id;
-            const order_total = Number(original_order.grand_total || 0);
-            const order_tax = Number(original_order.tax_amount || 0);
-            if (order_total > 0 && order_tax > 0) {
-              // Proportional tax: refund_amount / grand_total * tax_amount
-              tax_amount =
-                Math.round((refund_amount / order_total) * order_tax * 100) /
-                100;
-              // Preserve the original fiscal-type mix when reversing taxes, so
-              // an IVA+INC sale reverses against 2408 and 2436 proportionally.
-              const items = await this.prisma.order_items.findMany({
-                where: { order_id: processed_return.related_order_id },
-                select: {
-                  order_item_taxes: {
-                    select: { tax_type: true, tax_amount: true },
-                  },
-                },
-              });
-              const baseBreakdown = buildTaxBreakdown(
-                items.flatMap((i) => i.order_item_taxes || []),
-              );
-              tax_breakdown = scaleBreakdownToTotal(baseBreakdown, tax_amount);
-            }
-          }
-        }
-
-        this.eventEmitter.emit('refund.completed', {
-          // `refund_id` es `return_orders.id`, NO `refunds.id`: `source`
-          // separa el espacio de ids (source_type `return_order.refund` en el
-          // asiento) y `order_id` habilita el carril único de reversa frente
-          // a una nota crédito de la misma orden.
-          refund_id: processed_return.id,
-          source: 'return_order',
-          order_id: processed_return.related_order_id ?? undefined,
-          organization_id: processed_return.organization_id,
-          store_id,
-          amount: refund_amount,
-          tax_amount,
-          tax_breakdown,
-          return_type: processed_return.type,
-          user_id: RequestContextService.getUserId(),
-        });
-      }
-    } catch (error) {
-      this.logger.error(
-        `Failed to emit refund.completed for return order #${id}: ${error.message}`,
-      );
-    }
-
+    // QUI-893 B1 — no `refund.completed` here: a supplier return moves no
+    // money to a customer, and customer refunds are booked by RefundFlowService
+    // when the money actually leaves.
     return processed_return;
   }
 
@@ -445,119 +370,6 @@ export class ReturnOrdersService {
     });
   }
 
-
-  /**
-   * Importe a reembolsar por una devolución ya procesada.
-   *
-   * `return_orders` no tiene ninguna columna monetaria — el código leía
-   * `total_refund_amount`, que no existe, así que el valor era siempre
-   * `undefined`, el importe salía 0 y **el evento contable `refund.completed`
-   * no se emitía nunca**: procesar una devolución no reversaba nada.
-   *
-   * El importe se deriva de la orden de venta enlazada: por cada línea
-   * devuelta se toma el precio unitario efectivo de la línea original
-   * (`total_price / quantity`, que ya incorpora descuentos y
-   * `price_unit_quantity`) y se multiplica por la cantidad devuelta. Si no hay
-   * orden enlazada o ninguna línea casa, se devuelve 0 y no se emite evento —
-   * como antes, pero ahora por una razón declarada en vez de por una columna
-   * fantasma.
-   */
-  private async resolveRefundAmount(returnOrder: any): Promise<number> {
-    if (!returnOrder.related_order_id) return 0;
-
-    const original_items = await this.prisma.order_items.findMany({
-      where: { order_id: returnOrder.related_order_id },
-      select: {
-        product_id: true,
-        product_variant_id: true,
-        quantity: true,
-        total_price: true,
-      },
-    });
-    if (!original_items.length) return 0;
-
-    const unit_price_by_key = new Map<string, number>();
-    for (const line of original_items) {
-      const quantity = Number(line.quantity || 0);
-      if (quantity <= 0) continue;
-      const key = `${line.product_id}-${line.product_variant_id ?? 'null'}`;
-      unit_price_by_key.set(key, Number(line.total_price || 0) / quantity);
-    }
-
-    let total = 0;
-    for (const item of returnOrder.return_order_items ?? []) {
-      const key = `${item.product_id}-${item.product_variant_id ?? 'null'}`;
-      const unit_price = unit_price_by_key.get(key);
-      if (unit_price === undefined) continue;
-      total += unit_price * Number(item.quantity || 0);
-    }
-
-    return Math.round(total * 100) / 100;
-  }
-
-  /**
-   * Asignador de unidades de stock para la devolución: líneas de la orden de
-   * VENTA enlazada (con su snapshot y su peso) menos lo que ya movieron las
-   * devoluciones procesadas antes contra esa misma venta. Una devolución a
-   * proveedor (`purchase_order`) o sin orden no tiene líneas de venta: cada
-   * línea reingresa su cantidad, como siempre.
-   */
-  private async buildReturnAllocator(
-    tx: ReturnAllocatorClient,
-    returnOrder: {
-      id: number;
-      organization_id: number;
-      type: string;
-      related_order_id: number | null;
-      related_order_type: string | null;
-    },
-  ): Promise<ReturnStockAllocator> {
-    // Solo una devolución de VENTA tiene líneas de venta que atribuir. Una
-    // devolución a proveedor (`purchase_return`) con el mismo
-    // `related_order_id` que una venta del mismo producto leería esa venta y
-    // reingresaría unidades que nunca salieron por esta devolución.
-    if (
-      returnOrder.type !== 'sales_return' ||
-      !returnOrder.related_order_id ||
-      returnOrder.related_order_type === 'purchase_order'
-    ) {
-      return new ReturnStockAllocator([]);
-    }
-    const soldLines: ReturnSoldLine[] = await tx.order_items.findMany({
-      where: { order_id: returnOrder.related_order_id },
-      select: {
-        id: true,
-        product_id: true,
-        product_variant_id: true,
-        quantity: true,
-        stock_units_consumed: true,
-        weight: true,
-      },
-      orderBy: { id: 'asc' },
-    });
-    const allocator = new ReturnStockAllocator(soldLines);
-
-    const previous: ReturnLine[] = await tx.return_order_items.findMany({
-      where: {
-        return_order_id: { not: returnOrder.id },
-        // Solo devoluciones de CLIENTE de esta misma venta y organización:
-        // una devolución a proveedor de la orden de compra con el mismo id
-        // numérico no es "lo ya devuelto" de esta venta.
-        return_orders: {
-          organization_id: returnOrder.organization_id,
-          related_order_id: returnOrder.related_order_id,
-          type: return_order_type_enum.sales_return,
-          // `NOT` sobre una columna nullable descartaría también los NULL.
-          OR: [{ related_order_type: null }, { related_order_type: 'sales_order' }],
-          status: return_order_status_enum.processed,
-        },
-      },
-      select: { product_id: true, product_variant_id: true, quantity: true },
-      orderBy: [{ return_order_id: 'asc' }, { id: 'asc' }],
-    });
-    for (const line of previous) allocator.take(line);
-    return allocator;
-  }
 
   /**
    * Bodega sobre la que se mueve el stock de una línea devuelta.

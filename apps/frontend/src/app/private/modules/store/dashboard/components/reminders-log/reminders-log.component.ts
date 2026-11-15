@@ -234,6 +234,10 @@ export class RemindersLogComponent implements OnInit {
   readonly modalOpen = signal(false);
   readonly editing = signal<Reminder | null>(null);
   readonly submitted = signal(false);
+  private readonly confirming = signal(false);
+
+  /** True while a form or confirmation is open: the host card must not rotate away. */
+  readonly busy = computed(() => this.modalOpen() || this.confirming() || this.saving());
 
   readonly form = new FormGroup({
     title: new FormControl('', {
@@ -369,13 +373,19 @@ export class RemindersLogComponent implements OnInit {
   }
 
   async confirmDelete(item: Reminder): Promise<void> {
-    const confirmed = await this.dialog.confirm({
-      title: 'Eliminar recordatorio',
-      message: `¿Eliminar "${item.title}"? Esta acción no se puede deshacer.`,
-      confirmText: 'Eliminar',
-      cancelText: 'Cancelar',
-      confirmVariant: 'danger',
-    });
+    this.confirming.set(true);
+    let confirmed = false;
+    try {
+      confirmed = await this.dialog.confirm({
+        title: 'Eliminar recordatorio',
+        message: `¿Eliminar "${item.title}"? Esta acción no se puede deshacer.`,
+        confirmText: 'Eliminar',
+        cancelText: 'Cancelar',
+        confirmVariant: 'danger',
+      });
+    } finally {
+      this.confirming.set(false);
+    }
     if (!confirmed) return;
     this.remindersService
       .remove(item.id)

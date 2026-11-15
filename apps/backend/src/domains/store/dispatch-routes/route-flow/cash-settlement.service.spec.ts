@@ -131,8 +131,20 @@ describe('CashSettlementService.emitPaymentReceived — close-session lock', () 
 });
 
 describe('CashSettlementService — cierre de planilla contra caja', () => {
-  const build = () => {
+  const build = (track?: boolean) => {
     const tx = {
+      store_settings: {
+        findUnique: jest.fn().mockResolvedValue({
+          settings: {
+            pos: {
+              cash_register: {
+                enabled: true,
+                ...(track === undefined ? {} : { track_non_cash_payments: track }),
+              },
+            },
+          },
+        }),
+      },
       cash_register_movements: {
         findMany: jest.fn().mockResolvedValue([]),
         findFirst: jest.fn().mockResolvedValue(null),
@@ -209,6 +221,22 @@ describe('CashSettlementService — cierre de planilla contra caja', () => {
     expect(tx.cash_register_movements.create).toHaveBeenCalledTimes(2);
     // No `cash_register.movement` (el listener trataria un `sale` como retiro).
     expect(eventEmitter.emit).not.toHaveBeenCalled();
+  });
+
+  it('QUI-893: con "Registrar Pagos No Efectivo" apagado el cierre solo registra el efectivo', async () => {
+    const { service, tx } = build(false);
+    const res = await service.recordRouteCloseMovements(tx, {
+      ...base,
+      stops: [
+        stop(1),
+        stop(3, { payment_method: 'transfer', collected_amount: 70 }),
+      ],
+    });
+    expect(res).toHaveLength(1);
+    expect(tx.cash_register_movements.create).toHaveBeenCalledTimes(1);
+    expect(tx.cash_register_movements.create).toHaveBeenCalledWith({
+      data: expect.objectContaining({ amount: 100, payment_method: 'cash' }),
+    });
   });
 
   it('A1/B20: cobro sin método en una parada se trata como cash solo en el cierre de ruta (no falla la planilla) y avisa', async () => {
@@ -308,5 +336,41 @@ describe('CashSettlementService.listOpenSessions — B20 sesiones de quien liqui
       store_id: 12,
       status: 'open',
     });
+  });
+});
+
+describe('CashSettlementService.emitRefundCompleted — vuelto en ruta (QUI-893)', () => {
+  it('no escribe movimiento de caja: el recaudo ya es neto del vuelto', async () => {
+    const prisma = {
+      refunds: { create: jest.fn().mockResolvedValue({ id: 61 }) },
+      cash_register_movements: { create: jest.fn(), findFirst: jest.fn() },
+      cash_register_sessions: { findFirst: jest.fn() },
+    };
+    const eventEmitter = { emit: jest.fn() };
+    const sessions = { assertSessionForSales: jest.fn() };
+    const service = new CashSettlementService(
+      prisma as any,
+      eventEmitter as any,
+      sessions as any,
+    );
+
+    await service.emitRefundCompleted({
+      store_id: 12,
+      route_id: 3,
+      stop_id: 5,
+      dispatch_note_id: 8,
+      sales_order_id: 900,
+      amount: 5000,
+      user_id: 7,
+      reason: 'Cambio/devolución en ruta',
+    } as any);
+
+    expect(prisma.cash_register_movements.create).not.toHaveBeenCalled();
+    expect(prisma.cash_register_sessions.findFirst).not.toHaveBeenCalled();
+    expect(sessions.assertSessionForSales).not.toHaveBeenCalled();
+    expect(eventEmitter.emit).toHaveBeenCalledWith(
+      'refund.completed',
+      expect.objectContaining({ source_type: 'dispatch_route_change', amount: 5000 }),
+    );
   });
 });

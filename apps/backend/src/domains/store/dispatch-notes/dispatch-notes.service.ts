@@ -1495,11 +1495,10 @@ export class DispatchNotesService {
    * Create a customer return dispatch note (inbound, subtype customer_return).
    *
    * Decision: EMIT-OWN for the dispatch_note creation. The financial refund
-   * (credit note, return_orders processing) is NOT coupled here — it goes
-   * through return_orders separately (v1 decoupling). The stock restock
-   * happens at the `dispatch_note.received` event via the listener
-   * (movement_type 'return', quantity_change +qty). If the user wants a
-   * refund, they create a return_orders record separately.
+   * is NOT coupled here (v1 decoupling). The stock restock happens at the
+   * `dispatch_note.received` event via the listener (movement_type 'return',
+   * quantity_change +qty). If the user wants a refund, it is "Reembolsar"
+   * from the order detail (QUI-893 B1: the only customer refund path).
    *
    * related_dispatch_id is required and validated to exist + belong to same store.
    */

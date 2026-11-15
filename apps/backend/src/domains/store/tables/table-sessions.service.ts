@@ -3254,7 +3254,8 @@ export class TableSessionsService {
    * cash-register ↔ ledger reconciliation.
    *
    * Business rule: with `pos.cash_register.enabled`, EVERY method is recorded
-   * (the arqueo still counts only cash). This helper runs in the payment tx
+   * (the arqueo still counts only cash), unless `track_non_cash_payments` is
+   * off: then `recordSaleMovement` keeps only cash (QUI-893). This helper runs in the payment tx
    * before the payment update; failures escape so both writes roll back.
    */
   private async recordStaffCashMovement(args: {

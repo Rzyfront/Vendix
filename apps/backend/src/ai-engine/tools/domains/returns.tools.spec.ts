@@ -3,6 +3,7 @@ import {
   ReturnToolDeps,
 } from './returns.tools';
 import { RegisteredTool } from '../interfaces/tool.interface';
+import { VendixHttpException, ErrorCodes } from '../../../common/errors';
 
 /**
  * Track B paso 10 — contrato O-29 (devoluciones).
@@ -39,9 +40,11 @@ describe('returns.tools · O-29 manage_return_orders', () => {
 
   const DRAFT = {
     id: 301,
-    type: 'sales_return',
+    type: 'purchase_return',
     status: 'draft',
     related_order_id: 101,
+    related_order_type: 'purchase_order',
+    partner_type: 'supplier',
     return_order_items: [
       {
         id: 7001,
@@ -84,7 +87,7 @@ describe('returns.tools · O-29 manage_return_orders', () => {
       const preview = await tool.preview!(
         {
           action: 'create',
-          type: 'sales_return',
+          type: 'purchase_return',
           related_order_id: 101,
           lines: [{ product_id: 9, quantity: 2 }],
         },
@@ -93,13 +96,13 @@ describe('returns.tools · O-29 manage_return_orders', () => {
 
       expect(preview).toEqual({
         status: 'ok',
-        target: 'Nueva devolución — devolución de venta (del cliente)',
+        target: 'Nueva devolución — devolución de compra (al proveedor)',
         changes: [
           {
             field: 'type',
             label: 'Clase',
             from: null,
-            to: 'devolución de venta (del cliente)',
+            to: 'devolución de compra (al proveedor)',
           },
           {
             field: 'lines',
@@ -123,7 +126,7 @@ describe('returns.tools · O-29 manage_return_orders', () => {
       const { tools } = buildTools({ create });
       const tool = getTool(tools, 'manage_return_orders');
       const preview = await tool.preview!(
-        { action: 'create', type: 'sales_return', lines: [] },
+        { action: 'create', type: 'purchase_return', lines: [] },
         CONTEXT,
       );
 
@@ -135,7 +138,7 @@ describe('returns.tools · O-29 manage_return_orders', () => {
     it('handler happy delega con DTO validado', async () => {
       const create = jest.fn().mockResolvedValue({
         id: 302,
-        type: 'sales_return',
+        type: 'purchase_return',
         status: 'draft',
       });
       const { tools } = buildTools({ create });
@@ -144,7 +147,7 @@ describe('returns.tools · O-29 manage_return_orders', () => {
         await tool.handler!(
           {
             action: 'create',
-            type: 'sales_return',
+            type: 'purchase_return',
             related_order_id: 101,
             lines: [{ product_id: 9, quantity: 2 }],
           },
@@ -154,8 +157,95 @@ describe('returns.tools · O-29 manage_return_orders', () => {
 
       expect(answer.return_id).toBe(302);
       expect(create).toHaveBeenCalledWith(
-        expect.objectContaining({ type: 'sales_return' }),
+        expect.objectContaining({ type: 'purchase_return' }),
       );
+    });
+  });
+
+  describe('QUI-893 B1 — clientes se reembolsan con refund_order', () => {
+    it('declara solo purchase_return y nombra refund_order en la descripción', () => {
+      const { tools } = buildTools();
+      const tool = getTool(tools, 'manage_return_orders');
+      const props = (tool.parameters as any).properties;
+      expect(props.type.enum).toEqual(['purchase_return']);
+      expect(props.related_order_type.enum).toEqual(['purchase_order']);
+      expect(props.partner_type.enum).toEqual(['supplier']);
+      expect(tool.description).toMatch(/refund_order/);
+      expect(tool.description).not.toMatch(/reembolso contable/);
+    });
+
+    it.each([
+      [{ type: 'sales_return' }],
+      [{ type: 'purchase_return', related_order_type: 'sales_order' }],
+      [{ type: 'purchase_return', partner_type: 'customer' }],
+    ])('create de devolución de cliente %j: preview y handler derivan a refund_order sin llamar al servicio', async (fields) => {
+      const create = jest.fn();
+      const { tools } = buildTools({ create });
+      const tool = getTool(tools, 'manage_return_orders');
+      const args = {
+        action: 'create',
+        related_order_id: 101,
+        lines: [{ product_id: 9, quantity: 1 }],
+        ...fields,
+      };
+      const preview = await tool.preview!(args, CONTEXT);
+      expect(preview.status).toBe('error');
+      expect(preview.message).toMatch(/Reembolsar desde el detalle de la orden/);
+      expect(preview.message).toMatch(/refund_order/);
+
+      const answer = JSON.parse(await tool.handler!(args, CONTEXT));
+      expect(answer.code).toBe('RETURN_ORDER_SALES_USE_REFUND_001');
+      expect(answer.next_step).toMatch(/preview_refund/);
+      expect(create).not.toHaveBeenCalled();
+    });
+
+    it('preview de process sobre un borrador viejo de cliente aborta y deriva a refund_order', async () => {
+      const process = jest.fn();
+      const { tools } = buildTools({
+        findOne: jest.fn().mockResolvedValue({
+          ...DRAFT,
+          type: 'sales_return',
+          related_order_type: 'sales_order',
+          partner_type: 'customer',
+        }),
+        process,
+      });
+      const tool = getTool(tools, 'manage_return_orders');
+      const preview = await tool.preview!(
+        {
+          action: 'process',
+          return_id: 301,
+          process_items: [{ id: 7001, action: 'restock' }],
+        },
+        CONTEXT,
+      );
+      expect(preview.status).toBe('error');
+      expect(preview.message).toMatch(/refund_order/);
+      expect(process).not.toHaveBeenCalled();
+    });
+
+    it('handler traduce el rechazo del dominio en la guía de refund_order', async () => {
+      const { tools } = buildTools({
+        findOne: jest.fn().mockResolvedValue(DRAFT),
+        process: jest
+          .fn()
+          .mockRejectedValue(
+            new VendixHttpException(ErrorCodes.RETURN_ORDER_SALES_USE_REFUND_001),
+          ),
+      });
+      const tool = getTool(tools, 'manage_return_orders');
+      const answer = JSON.parse(
+        await tool.handler!(
+          {
+            action: 'process',
+            return_id: 301,
+            process_items: [{ id: 7001, action: 'restock' }],
+          },
+          CONTEXT,
+        ),
+      );
+      expect(answer.code).toBe('RETURN_ORDER_SALES_USE_REFUND_001');
+      expect(answer.next_step).toMatch(/refund_order/);
     });
   });
 
@@ -179,7 +269,7 @@ describe('returns.tools · O-29 manage_return_orders', () => {
 
       expect(preview.status).toBe('warning');
       expect(preview.target).toBe(
-        'Devolución #301 — devolución de venta (del cliente) (draft)',
+        'Devolución #301 — devolución de compra (al proveedor) (draft)',
       );
       expect(JSON.stringify(preview.changes)).toMatch(
         /Café 500g x2 → reingresar a inventario/,

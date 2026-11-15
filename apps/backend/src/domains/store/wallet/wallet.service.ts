@@ -1,4 +1,5 @@
 import { Injectable } from '@nestjs/common';
+import { Prisma } from '@prisma/client';
 import { EventEmitter2 } from '@nestjs/event-emitter';
 import { StorePrismaService } from '../../../prisma/services/store-prisma.service';
 import { RequestContextService } from '../../../common/context/request-context.service';
@@ -186,6 +187,34 @@ export class WalletService {
       created_by: params.user_id,
     });
 
+    return { ...result, wallet_id: wallet.id };
+  }
+
+  /**
+   * QUI-893 B2 — credit a customer's wallet inside the caller's transaction,
+   * so the credit commits or rolls back with the operation that owes it (a
+   * layaway cancelled with a wallet refund). Like `creditForRefund`, it does
+   * NOT emit `wallet.credited`: that listener books a top-up (DR cash/bank),
+   * and here no money comes in — the caller's own entry covers accounting.
+   */
+  async creditInTransaction(
+    tx: Prisma.TransactionClient,
+    customerId: number,
+    amount: number,
+    params: {
+      reference_type: string;
+      reference_id: number;
+      description: string;
+      created_by?: number;
+    },
+  ) {
+    const wallet = await this.getOrCreateWallet(customerId);
+    const result = await this.walletBalance.creditInTransaction(
+      tx,
+      wallet.id,
+      amount,
+      params,
+    );
     return { ...result, wallet_id: wallet.id };
   }
 

@@ -177,6 +177,8 @@ const MAPPING_DEFAULTS: Record<string, string> = {
   // Layaway cancellation — reversa anticipo, devolución y penalización
   'layaway.cancelled.advance': '2805',
   'layaway.cancelled.refund': '1105',
+  'layaway.cancelled.refund_bank': '1110',
+  'layaway.cancelled.refund_wallet': '2805',
   'layaway.cancelled.forfeit_income': '4295',
   // Fixed Assets - Depreciation
   'depreciation.monthly.depreciation_expense': '5199',

@@ -61,9 +61,12 @@ export class RemindersService {
   private readonly http = inject(HttpClient);
   private readonly baseUrl = `${environment.apiUrl}/store/reminders`;
 
-  list(status: ReminderListFilter): Observable<RemindersList> {
+  /** `limit` is optional (server default 100, max 200). */
+  list(status: ReminderListFilter, limit?: number): Observable<RemindersList> {
+    const params: Record<string, string> = { status };
+    if (limit !== undefined) params['limit'] = String(limit);
     return this.http
-      .get<ApiEnvelope<RemindersList>>(this.baseUrl, { params: { status } })
+      .get<ApiEnvelope<RemindersList>>(this.baseUrl, { params })
       .pipe(map((res) => res.data));
   }
 
