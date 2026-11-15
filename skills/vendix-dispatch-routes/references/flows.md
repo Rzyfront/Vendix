@@ -18,6 +18,13 @@ Desde 2026-10-14 el recaudo en ruta NO exige caja: `settleStop` no escribe `cash
 - NO emite `cash_register.movement` (el listener solo entiende `cash_in`/`cash_out` y trataría `sale` como retiro). El recaudo se asienta por `payment.received`.
 - Calcula totales y `cash_variance`, emite `dispatch_route.closed` → `AutoEntryService.onDispatchRouteClosed` asienta SOLO la diferencia de caja (gate fiscal `cash_register`); no re-contabiliza recaudo ni retenciones.
 
+## Contra entrega facturada fuera de ruta (QUI-893 B3)
+
+Remisión suelta (sin parada activa: `dispatch_route_stops.status <> 'released'`) de una orden contra entrega con saldo:
+- `DispatchNoteFlowService.invoice` llama `OrderFlowService.assertStandaloneCodInvoiceCashSession` ANTES de cambiar el estado → sin caja abierta de quien factura: 409 `CASH_SESSION_REQUIRED_001` y la remisión sigue entregada.
+- `dispatch_note.invoiced` lleva `user_id` y `cod_cash_collection`; el listener pasa `cashUserId` a `applyDispatchCodPayment`, que escribe una `sale` en efectivo (con `order_id` y `payment_id`) en la sesión de ese usuario dentro de la tx del pago.
+- Remisión en planilla, venta a crédito pura o caja apagada: igual que antes (la ruta recauda al cierre de planilla).
+
 ## Encargado y tracking
 
 - Encargado = `driver_user_id` si `!is_primary_driver_external`; si existe, solo él despacha (403 `DISPATCH_ROUTE_NOT_RESPONSIBLE`); conductor externo ⇒ cualquiera con `dispatch`.
