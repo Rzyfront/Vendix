@@ -1,4 +1,16 @@
-import { Component, signal, inject, effect, untracked, computed, DestroyRef } from '@angular/core';
+import {
+  Component,
+  signal,
+  inject,
+  effect,
+  untracked,
+  computed,
+  DestroyRef,
+  PLATFORM_ID,
+  viewChild,
+} from '@angular/core';
+import { isPlatformBrowser } from '@angular/common';
+import { FormsModule } from '@angular/forms';
 import { ActivatedRoute, Router } from '@angular/router';
 import { takeUntilDestroyed, toSignal } from '@angular/core/rxjs-interop';
 import { EChartsOption } from 'echarts';
@@ -34,9 +46,12 @@ import {
 import { StoreDashboardService } from './services/store-dashboard.service';
 import { RemindersLogComponent } from './components/reminders-log/reminders-log.component';
 import {
-  ScrollableTab,
-  ScrollableTabsComponent,
-} from '../../../../shared/components/scrollable-tabs/scrollable-tabs.component';
+  InputButtonOption,
+  InputButtonsComponent,
+} from '../../../../shared/components/input-buttons/input-buttons.component';
+import { AutoRotator } from './utils/auto-rotator.util';
+
+type ChannelsCardView = 'channels' | 'log';
 
 // Channel → CSS variable mapping for the pie chart
 const CHANNEL_COLOR_VAR: Record<string, string> = {
@@ -87,7 +102,8 @@ interface FixedPeriodState {
     IconComponent,
     OptionsDropdownComponent,
     EmptyStateComponent,
-    ScrollableTabsComponent,
+    FormsModule,
+    InputButtonsComponent,
     RemindersLogComponent,
   ],
   template: `
@@ -203,27 +219,40 @@ interface FixedPeriodState {
           </div>
         </div>
 
-        <!-- Sales by Channel Chart: Rosa / Bitácora tabs -->
-        <div class="bg-surface rounded-xl shadow-[0_2px_8px_rgba(0,0,0,0.07)] md:border md:border-border overflow-hidden flex flex-col">
-          <div class="p-4 border-b border-border">
-            <app-scrollable-tabs
-              [tabs]="channelsCardTabs"
-              [activeTab]="channelsCardTab()"
-              size="sm"
-              ariaLabel="Ventas por canal y bitácora"
-              (tabChange)="channelsCardTab.set($event)"
-            />
+        <!-- Sales by Channel Chart: Rosa / Bitácora selector, auto-rotating -->
+        <div
+          class="bg-surface rounded-xl shadow-[0_2px_8px_rgba(0,0,0,0.07)] md:border md:border-border overflow-hidden flex flex-col"
+          (mouseenter)="onChannelsCardEnter('hover')"
+          (mouseleave)="onChannelsCardLeave('hover')"
+          (focusin)="onChannelsCardEnter('focus')"
+          (focusout)="onChannelsCardFocusOut($event)"
+        >
+          <div class="p-4 border-b border-border flex items-center justify-between gap-2">
+            <div class="min-w-0">
+              @if (channelsCardView() === 'log') {
+                <h3 class="font-semibold text-text-primary text-sm">Bitácora</h3>
+                <p class="text-xs text-text-secondary">Recordatorios de la tienda</p>
+              } @else {
+                <h3 class="font-semibold text-text-primary text-sm">Ventas por Canal</h3>
+                <p class="text-xs text-text-secondary">Distribución del período</p>
+              }
+            </div>
+            <app-input-buttons
+              [options]="channelsCardOptions"
+              [ngModel]="channelsCardView()"
+              (ngModelChange)="onChannelsCardSelect($event)"
+              [hideLabelsOnMobile]="true"
+              [equalWidth]="false"
+              customWrapperClass="!w-auto !mt-0 shrink-0"
+              customContainerClass="!h-9 !rounded-lg"
+            ></app-input-buttons>
           </div>
-          @if (channelsCardTab() === 'log') {
-            <div class="p-4 flex-1 min-h-0 max-h-[400px] overflow-y-auto">
+          @if (channelsCardView() === 'log') {
+            <div class="channels-card-panel p-4 flex-1 min-h-0 max-h-[400px] overflow-y-auto">
               <app-reminders-log />
             </div>
           } @else {
-            <div class="p-4 flex-1">
-              <div class="mb-2">
-                <h3 class="font-semibold text-text-primary text-sm">Ventas por Canal</h3>
-                <p class="text-xs text-text-secondary">Distribución del período</p>
-              </div>
+            <div class="channels-card-panel p-4 flex-1">
               @if (loadingChannels()) {
                 <div class="h-56 flex items-center justify-center">
                   <div class="animate-spin rounded-full h-8 w-8 border-b-2 border-primary"></div>
@@ -351,6 +380,28 @@ interface FixedPeriodState {
       </div>
     </div>
   `,
+  styles: [
+    `
+      .channels-card-panel {
+        animation: channels-card-in 200ms ease-out;
+      }
+
+      @keyframes channels-card-in {
+        from {
+          opacity: 0;
+        }
+        to {
+          opacity: 1;
+        }
+      }
+
+      @media (prefers-reduced-motion: reduce) {
+        .channels-card-panel {
+          animation: none;
+        }
+      }
+    `,
+  ],
 })
 export class DashboardComponent {
   private readonly authFacade = inject(AuthFacade);
@@ -507,12 +558,24 @@ export class DashboardComponent {
   dispatchPendingCount = signal(0);
   refundPendingCount = signal(0);
 
-  // Channels card tabs (Rosa / Bitácora). `?tab=bitacora` opens the log.
-  readonly channelsCardTabs: ScrollableTab[] = [
-    { id: 'channels', label: 'Rosa' },
-    { id: 'log', label: 'Bitácora' },
+  // Channels card (Rosa / Bitácora). Starts on Rosa and alternates every 5 s;
+  // the rotation pauses while the user hovers/focuses the card, after a manual
+  // choice (until leaving the card) and while a log form/confirmation is open.
+  // `?tab=bitacora` opens the log and keeps it there.
+  readonly channelsCardOptions: InputButtonOption[] = [
+    { value: 'channels', label: 'Rosa', icon: 'pie-chart' },
+    { value: 'log', label: 'Bitácora', icon: 'notebook-pen' },
   ];
-  readonly channelsCardTab = signal<string>('channels');
+  readonly channelsCardView = signal<ChannelsCardView>('channels');
+  private readonly remindersLog = viewChild(RemindersLogComponent);
+  private readonly channelsCardRotator = new AutoRotator<ChannelsCardView>(
+    ['channels', 'log'],
+    () => this.channelsCardView(),
+    (view) => this.channelsCardView.set(view),
+    5000,
+  );
+  private channelsCardHovered = false;
+  private channelsCardFocused = false;
 
   // Charts
   trendChartOptions = signal<EChartsOption>({});
@@ -526,8 +589,22 @@ export class DashboardComponent {
     this.activatedRoute.queryParamMap
       .pipe(takeUntilDestroyed(this.destroyRef))
       .subscribe((params) => {
-        if (params.get('tab') === 'bitacora') this.channelsCardTab.set('log');
+        if (params.get('tab') === 'bitacora') {
+          this.channelsCardView.set('log');
+          this.channelsCardRotator.setPaused('manual', true);
+        }
       });
+
+    // Never rotate away from the log while its form or a confirmation is open.
+    effect(() => {
+      const busy = this.remindersLog()?.busy() ?? false;
+      untracked(() => this.channelsCardRotator.setPaused('log-busy', busy));
+    });
+
+    if (isPlatformBrowser(inject(PLATFORM_ID))) {
+      this.channelsCardRotator.start();
+    }
+    this.destroyRef.onDestroy(() => this.channelsCardRotator.stop());
 
     // Bootstrap: al conocer el store, hidrata el período fijado (si lo hay) y
     // carga una sola vez. Hidratar ANTES del fetch evita el flash del rango
@@ -564,6 +641,34 @@ export class DashboardComponent {
   private rangeSignature(): string {
     const r = this.dateRange();
     return `${r.preset}|${r.start_date}|${r.end_date}`;
+  }
+
+  onChannelsCardSelect(view: ChannelsCardView): void {
+    this.channelsCardView.set(view);
+    this.channelsCardRotator.setPaused('manual', true);
+  }
+
+  onChannelsCardEnter(reason: 'hover' | 'focus'): void {
+    if (reason === 'hover') this.channelsCardHovered = true;
+    else this.channelsCardFocused = true;
+    this.channelsCardRotator.setPaused(reason, true);
+  }
+
+  onChannelsCardLeave(reason: 'hover' | 'focus'): void {
+    if (reason === 'hover') this.channelsCardHovered = false;
+    else this.channelsCardFocused = false;
+    this.channelsCardRotator.setPaused(reason, false);
+    // A manual choice holds until the user has fully left the card.
+    if (!this.channelsCardHovered && !this.channelsCardFocused) {
+      this.channelsCardRotator.setPaused('manual', false);
+    }
+  }
+
+  onChannelsCardFocusOut(event: FocusEvent): void {
+    const card = event.currentTarget as HTMLElement | null;
+    const next = event.relatedTarget as Node | null;
+    if (card && next && card.contains(next)) return;
+    this.onChannelsCardLeave('focus');
   }
 
   onDateFilterChange(values: FilterValues): void {
