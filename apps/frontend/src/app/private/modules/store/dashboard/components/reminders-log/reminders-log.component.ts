@@ -127,7 +127,7 @@ function toStoreWallClock(iso: string, tz: string): string {
                 </div>
                 <button
                   type="button"
-                  class="shrink-0 min-h-[36px] px-2.5 rounded-lg text-xs font-medium text-primary hover:bg-primary/10 transition-colors flex items-center gap-1"
+                  class="shrink-0 min-h-[40px] sm:min-h-[44px] px-2.5 rounded-lg text-xs font-medium text-primary hover:bg-primary/10 transition-colors flex items-center gap-1"
                   [attr.aria-label]="'Ver detalle de ' + row.item.title"
                   data-testid="reminder-detail-button"
                   (click)="openDetail(row.item)"
@@ -167,6 +167,7 @@ function toStoreWallClock(iso: string, tz: string): string {
 
     <app-modal
       [(isOpen)]="detailOpen"
+      (closed)="detailId.set(null)"
       [title]="detail()?.title ?? 'Recordatorio'"
       subtitle="Detalle del recordatorio"
       size="md"
@@ -229,7 +230,7 @@ function toStoreWallClock(iso: string, tz: string): string {
       }
       <div slot="footer" class="flex flex-wrap justify-end gap-2 sm:gap-3">
         @if (detail(); as item) {
-          <app-button variant="outline-danger" (clicked)="confirmDelete(item)">
+          <app-button variant="outline-danger" (clicked)="confirmDelete(item)" [loading]="deleting()">
             <app-icon name="trash-2" [size]="14" slot="icon"></app-icon>
             Eliminar
           </app-button>
@@ -301,6 +302,7 @@ export class RemindersLogComponent implements OnInit {
   readonly detailOpen = signal(false);
   readonly detailId = signal<number | null>(null);
   readonly toggling = signal(false);
+  readonly deleting = signal(false);
   /** Current instant; ticks every minute so the time bars advance. */
   readonly now = signal(Date.now());
   private readonly confirming = signal(false);
@@ -319,7 +321,12 @@ export class RemindersLogComponent implements OnInit {
   /** True while a form, the detail or a confirmation is open: the host card must not rotate away. */
   readonly busy = computed(
     () =>
-      this.modalOpen() || this.detailOpen() || this.confirming() || this.saving() || this.toggling(),
+      this.modalOpen() ||
+      this.detailOpen() ||
+      this.confirming() ||
+      this.saving() ||
+      this.toggling() ||
+      this.deleting(),
   );
 
   readonly form = new FormGroup({
@@ -500,6 +507,7 @@ export class RemindersLogComponent implements OnInit {
   }
 
   async confirmDelete(item: Reminder): Promise<void> {
+    if (this.deleting() || this.confirming()) return;
     this.confirming.set(true);
     let confirmed = false;
     try {
@@ -514,17 +522,21 @@ export class RemindersLogComponent implements OnInit {
       this.confirming.set(false);
     }
     if (!confirmed) return;
+    this.deleting.set(true);
     this.remindersService
       .remove(item.id)
       .pipe(takeUntilDestroyed(this.destroyRef))
       .subscribe({
         next: () => {
+          this.deleting.set(false);
           this.toast.success('Recordatorio eliminado');
           this.closeDetail();
           this.load();
         },
-        error: (err) =>
-          this.toast.error(extractApiError(err).message ?? 'No se pudo eliminar el recordatorio'),
+        error: (err) => {
+          this.deleting.set(false);
+          this.toast.error(extractApiError(err).message ?? 'No se pudo eliminar el recordatorio');
+        },
       });
   }
 }
