@@ -20,6 +20,8 @@ export const ERROR_MESSAGES: Record<string, string> = {
   SYS_FORBIDDEN_001: 'No tiene permisos para realizar esta accion.',
   SYS_UNAUTHORIZED_001: 'Debe iniciar sesion para continuar.',
   SYS_CONFLICT_001: 'El recurso ya existe o esta en conflicto.',
+  // 503: transacción vencida (P2028) o pool agotado (P2024). Reintentable.
+  SYS_BUSY_001: 'El sistema está ocupado, intenta de nuevo en unos segundos',
 
   // Tarifas: la regla de ajuste (precio fijo, monto o porcentaje) sin valor.
   PRICE_TIER_ADJUSTMENT_001:

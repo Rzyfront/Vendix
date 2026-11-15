@@ -243,6 +243,22 @@ export const ErrorCodes = {
     devMessage: 'Resource conflict',
   },
   /**
+   * La base está saturada: la transacción interactiva venció (Prisma P2028),
+   * no hubo conexión libre en el pool (P2024) o una escritura dentro de la tx
+   * volvió sin fila porque la tx se cerró bajo ella. Prisma ya hizo rollback:
+   * no quedó nada a medias y reintentar es seguro. 503 y no 500 porque la
+   * petición es válida; lo que falta es capacidad en este momento.
+   *
+   * El mensaje es el texto que ve el usuario (S4 de
+   * odd/tasks/transacciones-colgadas-cancelaciones.md); el frontend lo repite
+   * en `error-messages.ts`.
+   */
+  SYS_BUSY_001: {
+    code: 'SYS_BUSY_001',
+    httpStatus: 503,
+    devMessage: 'El sistema está ocupado, intenta de nuevo en unos segundos',
+  },
+  /**
    * RED DE SEGURIDAD DEL FILTRO GLOBAL — Prisma P2020 («value out of range»).
    *
    * Por qué existe: `ParseIntPipe` acepta `999999999999999999` porque ES un

@@ -68,7 +68,7 @@ describe('TableSessionPageComponent waiter delivery', () => {
   });
 
   beforeEach(async () => {
-    api = jasmine.createSpyObj('TablesService', ['markItemDelivered', 'updateItemNotes', 'updateInformalNotes', 'getOrderReassignmentEvidence', 'getSession', 'getFloorMap', 'addItems', 'payTableSession', 'getFinancialSplit']);
+    api = jasmine.createSpyObj('TablesService', ['markItemDelivered', 'updateItemNotes', 'updateInformalNotes', 'getOrderReassignmentEvidence', 'getSession', 'getFloorMap', 'addItems', 'payTableSession', 'getFinancialSplit', 'cancelOrderItem']);
     api.getFinancialSplit.and.returnValue(of(null));
     settings = signal<unknown>(null);
     floorTables = signal<Table[]>([]);
@@ -511,6 +511,92 @@ describe('TableSessionPageComponent waiter delivery', () => {
       expect(labels()).toContain('Cobrar');
       expect(labels()).toContain('Dividir cuenta');
       expect(component.financialSplitAccountCount()).toBeNull();
+    });
+  });
+
+  /**
+   * T8 — una cancelación que choca con una transacción vencida o con el pool
+   * agotado llega como 503 SYS_BUSY_001. `TablesService.handleError` ya la
+   * entrega como string con el mensaje exacto; la página lo muestra, libera
+   * el botón y no permite un segundo envío mientras el primero está en vuelo.
+   */
+  describe('cancelar un ítem con el sistema ocupado (T8)', () => {
+    const BUSY = 'El sistema está ocupado, intenta de nuevo en unos segundos';
+    // Solo microtareas: los diálogos resuelven con promesas. Un macrotask
+    // (setTimeout) dejaría correr el scheduler zoneless y su ngOnInit.
+    const flush = async () => {
+      for (let i = 0; i < 10; i++) await Promise.resolve();
+    };
+    const simple = (id: number): TableSessionOrderItem => ({
+      ...item(id, false),
+      item_type: 'physical',
+      inventory_consumed_at_fire: false,
+      kitchen_ticket_items: [],
+    });
+
+    it('onRemoveItem no abre otro diálogo mientras una cancelación sigue en vuelo', () => {
+      component.session.set(session([simple(1), simple(2)]));
+      dialog.confirm.and.resolveTo(false);
+      component.removingItemId.set(1);
+
+      component.onRemoveItem(simple(2));
+
+      expect(dialog.confirm).not.toHaveBeenCalled();
+      expect(api.cancelOrderItem).not.toHaveBeenCalled();
+    });
+
+    it('onRemoveItem con doble clic envía una sola cancelación', async () => {
+      component.session.set(session([simple(1)]));
+      dialog.confirm.and.resolveTo(true);
+      dialog.prompt.and.resolveTo('Cliente se fue');
+      const pending$ = new Subject<TableSession>();
+      api.cancelOrderItem.and.returnValue(pending$.asObservable());
+
+      component.onRemoveItem(simple(1));
+      component.onRemoveItem(simple(1));
+      await flush();
+
+      expect(api.cancelOrderItem).toHaveBeenCalledTimes(1);
+      expect(component.removingItemId()).toBe(1);
+    });
+
+    it('onRemoveItem muestra el mensaje 503 y libera el botón', async () => {
+      component.session.set(session([simple(1)]));
+      dialog.confirm.and.resolveTo(true);
+      dialog.prompt.and.resolveTo('Cliente se fue');
+      const pending$ = new Subject<TableSession>();
+      api.cancelOrderItem.and.returnValue(pending$.asObservable());
+
+      component.onRemoveItem(simple(1));
+      await flush();
+      pending$.error(BUSY);
+
+      expect(toast.error).toHaveBeenCalledOnceWith(BUSY);
+      expect(toast.success).not.toHaveBeenCalled();
+      expect(component.removingItemId()).toBeNull();
+    });
+
+    it('el modal de mesa muestra el 503, queda abierto, bloquea el doble envío y permite reintentar', () => {
+      const prepared = item(1, false);
+      component.session.set(session([prepared]));
+      component.openItemCancellationModal(prepared);
+      const pending$ = new Subject<TableSession>();
+      api.cancelOrderItem.and.returnValue(pending$.asObservable());
+
+      component.onCancellationConfirmed({ reason: 'Cliente se fue', destination: 'reuse' });
+      component.onCancellationConfirmed({ reason: 'Cliente se fue', destination: 'reuse' });
+      expect(api.cancelOrderItem).toHaveBeenCalledTimes(1);
+
+      pending$.error(BUSY);
+
+      expect(component.cancellationError()).toBe(BUSY);
+      expect(component.cancellationTarget()).toEqual(prepared);
+      expect(component.removingItemId()).toBeNull();
+      expect(toast.success).not.toHaveBeenCalled();
+
+      api.cancelOrderItem.and.returnValue(new Subject<TableSession>().asObservable());
+      component.onCancellationConfirmed({ reason: 'Cliente se fue', destination: 'reuse' });
+      expect(api.cancelOrderItem).toHaveBeenCalledTimes(2);
     });
   });
 });
