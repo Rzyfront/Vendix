@@ -1540,6 +1540,16 @@ export const ErrorCodes = {
     httpStatus: 404,
     devMessage: 'Orden de compra no encontrada',
   },
+  // QUI-893 B1 — a customer return (goods and money back to a customer) only
+  // exists as "Reembolsar" from the order detail (RefundFlowService: cash
+  // session gate + drawer movement + refund entry). `return-orders` keeps
+  // supplier returns only.
+  RETURN_ORDER_SALES_USE_REFUND_001: {
+    code: 'RETURN_ORDER_SALES_USE_REFUND_001',
+    httpStatus: 409,
+    devMessage:
+      'Las devoluciones de clientes se hacen con Reembolsar desde el detalle de la orden.',
+  },
 
   // QUI-647 — plan de pago al crear la OC. Red final del wizard: el frontend
   // valida inline, pero estos códigos son la cara HTTP cuando un request
@@ -4509,6 +4519,13 @@ export const ErrorCodes = {
     httpStatus: 409,
     devMessage: 'Invalid layaway plan state transition',
   },
+  // QUI-893 B2 — cancelling with money to give back needs the refund method
+  // (cash / bank_transfer / card / wallet) so the money leaves a real place.
+  LAY_REFUND_METHOD_REQUIRED_001: {
+    code: 'LAY_REFUND_METHOD_REQUIRED_001',
+    httpStatus: 400,
+    devMessage: 'Elige cómo se le devuelve el dinero al cliente.',
+  },
   LAY_PAYMENT_001: {
     code: 'LAY_PAYMENT_001',
     httpStatus: 400,
@@ -5129,7 +5146,7 @@ export const ErrorCodes = {
     code: 'DISPATCH_NOTE_VOID_INVOICED_REQUIRES_CREDIT_NOTE',
     httpStatus: 409,
     devMessage:
-      'Cannot void an invoiced dispatch note directly; issue a credit note via return_orders instead',
+      'Cannot void an invoiced dispatch note directly; issue a credit note or refund it from the order detail instead',
   },
   DISPATCH_NOTE_PO_LINE_UNRESOLVED: {
     code: 'DISPATCH_NOTE_PO_LINE_UNRESOLVED',

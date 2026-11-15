@@ -504,6 +504,9 @@ export const ERROR_MESSAGES: Record<string, string> = {
   LAY_STATE_001:
     'No se puede realizar esta accion en el estado actual del plan.',
   LAY_PAYMENT_001: 'El monto del pago excede el saldo pendiente.',
+  LAY_REFUND_METHOD_REQUIRED_001: 'Elige cómo se le devuelve el dinero al cliente.',
+  RETURN_ORDER_SALES_USE_REFUND_001:
+    'Las devoluciones de clientes se hacen con Reembolsar desde el detalle de la orden.',
   LAY_INSTALLMENT_001:
     'La suma de las cuotas no coincide con el saldo pendiente.',
   LAY_INSTALLMENT_002: 'La cuota seleccionada ya fue pagada.',

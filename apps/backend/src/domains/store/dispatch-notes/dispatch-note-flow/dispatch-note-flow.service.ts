@@ -3,6 +3,7 @@ import {
   BadRequestException,
   NotFoundException,
   Logger,
+  Optional,
 } from '@nestjs/common';
 import { StorePrismaService } from '../../../../prisma/services/store-prisma.service';
 import { RequestContextService } from '@common/context/request-context.service';
@@ -21,6 +22,7 @@ import {
 import { SerialNumberEnforcementService } from '../../inventory/serial-numbers/serial-number-enforcement.service';
 import { InventorySerialNumbersService } from '../../inventory/serial-numbers/inventory-serial-numbers.service';
 import { VendixHttpException, ErrorCodes } from 'src/common/errors';
+import { OrderFlowService } from '../../orders/order-flow/order-flow.service';
 
 type DispatchNoteStatus = dispatch_note_status_enum;
 type DispatchNoteDirection = dispatch_note_direction_enum;
@@ -112,6 +114,9 @@ export class DispatchNoteFlowService {
     private readonly eventEmitter: EventEmitter2,
     private readonly serialEnforcement: SerialNumberEnforcementService,
     private readonly serials: InventorySerialNumbersService,
+    // QUI-893 B3 — cash-session gate of an off-route contra entrega invoice.
+    // `@Optional()` keeps the manual 4-arg constructions of older specs.
+    @Optional() private readonly orderFlowService?: OrderFlowService,
   ) {}
 
   private async getDispatchNote(id: number) {
@@ -415,7 +420,7 @@ export class DispatchNoteFlowService {
     // symmetric stock reversal (return/+qty for outbound, stock_out/-qty for
     // inbound), reverts serials, and releases order_items.inventory_committed.
     // Invoiced notes stay non-voidable (invoiced: [] in the transition map) —
-    // those require a credit note via the return_orders flow.
+    // those require a credit note / refund from the order detail.
     this.validateTransition(
       dispatch_note.status as DispatchNoteStatus,
       'voided',
@@ -458,6 +463,20 @@ export class DispatchNoteFlowService {
       dispatch_note.direction as DispatchNoteDirection,
     );
 
+    // QUI-893 B3 — an off-route contra entrega remisión with a balance is
+    // collected when invoiced (`dispatch_note.invoiced` listener): the cash
+    // enters the invoicer's drawer, so it must be open before anything moves.
+    // Route remisiones are unchanged (their cash enters at planilla close).
+    const user_id = RequestContextService.getUserId() ?? undefined;
+    const cod_cash_collection =
+      dispatch_note.order_id != null && dispatch_note.sales_order_id == null
+        ? ((await this.orderFlowService?.assertStandaloneCodInvoiceCashSession({
+            storeId: dispatch_note.store_id,
+            dispatchNoteId: id,
+            userId: user_id,
+          })) ?? false)
+        : false;
+
     const updated = await this.prisma.dispatch_notes.update({
       where: { id },
       data: {
@@ -473,6 +492,9 @@ export class DispatchNoteFlowService {
       store_id: updated.store_id,
       sales_order_id: updated.sales_order_id,
       order_id: updated.order_id,
+      // QUI-893 B3 — who invoiced, and whether the balance goes to their drawer.
+      user_id,
+      cod_cash_collection,
     });
 
     this.logger.log(`Dispatch note #${id} invoiced`);

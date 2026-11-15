@@ -7409,6 +7409,13 @@ export class OrderFlowService {
       reteica?: number;
     };
     /**
+     * QUI-893 B3 — user who invoiced a standalone contra entrega remisión
+     * (off-route). When present, the collection is a cash `sale` in that
+     * user's open session, inside the payment tx. The route flow never sends
+     * it: route cash enters at planilla close.
+     */
+    cashUserId?: number;
+    /**
      * Origen del `order_events`. Los dos llamadores reales son listeners
      * (`DispatchNoteEventsListener` y `PaymentFromDispatchRouteListener`),
      * así que el default es `'listener'`; un llamador HTTP futuro debe
@@ -7475,17 +7482,7 @@ export class OrderFlowService {
     // debt stays in cartera. Exception (cod-auto-invoicing S6): a contra entrega
     // sale invoiced on credit before delivery keeps its (cancelled) ON_DELIVERY
     // promise, so the standalone remisión still collects it and settles the AR.
-    const isCodOriginCredit =
-      isCreditSale &&
-      input.stopId == null &&
-      (await this.prisma.payments.findFirst({
-        where: {
-          order_id: order.id,
-          store_payment_method: { system_payment_method: { processing_mode: 'ON_DELIVERY' } },
-        },
-        select: { id: true },
-      })) != null;
-    if (isCreditSale && input.stopId == null && !isCodOriginCredit) {
+    if (input.stopId == null && !(await this.isStandaloneCodCollectable(order))) {
       this.logger.debug(
         `[applyDispatchCodPayment] credit order #${order.id} outside a route collection — NO-OP (${input.correlationKey})`,
       );
@@ -7569,6 +7566,17 @@ export class OrderFlowService {
       }
       createdPayment.id = payment.id;
 
+      if (input.cashUserId != null && input.stopId == null) {
+        await this.recordStandaloneCodCashSale(tx, {
+          storeId: input.storeId,
+          userId: input.cashUserId,
+          orderId: order.id,
+          paymentId: payment.id,
+          amount: applied,
+          paymentMethod,
+        });
+      }
+
       await this.orderHistoryService?.record(tx, {
         orderId: order.id,
         storeId: input.storeId,
@@ -7626,6 +7634,109 @@ export class OrderFlowService {
       `[applyDispatchCodPayment] COD order #${order.id} settled via ${input.correlationKey}: applied=${applied} remaining=${
         Math.round(newRemaining * 100) / 100
       }`,
+    );
+  }
+
+  /**
+   * A standalone remisión (no route stop) only collects a contra entrega
+   * balance. A credit sale (payment_form '2') stays in cartera unless it was
+   * a contra entrega invoiced on credit before delivery: its (cancelled)
+   * ON_DELIVERY promise remains (cod-auto-invoicing S6).
+   */
+  private async isStandaloneCodCollectable(order: {
+    id: number;
+    payment_form: string | null;
+  }): Promise<boolean> {
+    if (order.payment_form !== '2') return true;
+    const onDeliveryPromise = await this.prisma.payments.findFirst({
+      where: {
+        order_id: order.id,
+        store_payment_method: { system_payment_method: { processing_mode: 'ON_DELIVERY' } },
+      },
+      select: { id: true },
+    });
+    return onDeliveryPromise != null;
+  }
+
+  /**
+   * QUI-893 B3 — gate of `DispatchNoteFlowService.invoice`. Invoicing a
+   * contra entrega remisión with a balance that did NOT travel on a route
+   * planilla collects that balance (see `dispatch_note.invoiced`), so the
+   * invoicer needs an open drawer (CASH_SESSION_REQUIRED_001), checked before
+   * the remisión changes state. Returns whether the invoice collects into the
+   * invoicer's session. Route remisiones are unchanged: false, no gate.
+   */
+  async assertStandaloneCodInvoiceCashSession(input: {
+    storeId: number;
+    dispatchNoteId: number;
+    userId: number | undefined;
+  }): Promise<boolean> {
+    const note = await this.prisma.dispatch_notes.findFirst({
+      where: { id: input.dispatchNoteId, store_id: input.storeId },
+      select: { order_id: true },
+    });
+    if (!note?.order_id) return false;
+    const onRoute = await this.prisma.dispatch_route_stops.findFirst({
+      where: { dispatch_note_id: input.dispatchNoteId, status: { not: 'released' } },
+      select: { id: true },
+    });
+    if (onRoute) return false;
+    const order = await this.prisma.orders.findFirst({
+      where: { id: note.order_id, store_id: input.storeId },
+      select: { id: true, remaining_balance: true, payment_form: true },
+    });
+    if (!order || !(Number(order.remaining_balance) > 0)) return false;
+    if (!(await this.isStandaloneCodCollectable(order))) return false;
+    await this.sessionsService.assertSessionForSales(input.userId);
+    return true;
+  }
+
+  /**
+   * QUI-893 B3 — the off-route contra entrega collection is a `sale` in the
+   * invoicer's open session, in the payment tx (linked by order and payment,
+   * so `reversePaymentCashMovements` finds it). Cash register off: nothing.
+   * A drawer closed since the invoice gate aborts the collection
+   * (CASH_SESSION_REQUIRED_001) instead of leaving cash outside any drawer.
+   */
+  private async recordStandaloneCodCashSale(
+    tx: Prisma.TransactionClient,
+    input: {
+      storeId: number;
+      userId: number;
+      orderId: number;
+      paymentId: number;
+      amount: number;
+      paymentMethod: string;
+    },
+  ): Promise<void> {
+    if (!(input.amount > 0)) return;
+    const settings = await tx.store_settings.findUnique({
+      where: { store_id: input.storeId },
+      select: { settings: true },
+    });
+    const enabled = (
+      settings?.settings as { pos?: { cash_register?: { enabled?: boolean } } } | null
+    )?.pos?.cash_register?.enabled;
+    if (!enabled) return;
+    const session = await tx.cash_register_sessions.findFirst({
+      where: { store_id: input.storeId, status: 'open', opened_by: input.userId },
+      orderBy: [{ opened_at: 'desc' }, { id: 'desc' }],
+      select: { id: true },
+    });
+    if (!session) {
+      throw new VendixHttpException(ErrorCodes.CASH_SESSION_REQUIRED_001);
+    }
+    await this.movementsService.recordSaleMovement(
+      session.id,
+      {
+        store_id: input.storeId,
+        user_id: input.userId,
+        amount: input.amount,
+        payment_method: input.paymentMethod,
+        order_id: input.orderId,
+        payment_id: input.paymentId,
+      },
+      tx,
     );
   }
 

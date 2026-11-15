@@ -129,6 +129,8 @@ const MAPPING_KEYS_FALLBACK: MappingKeyDef[] = [
   { key: 'layaway.completed.revenue', label: 'Plan separe completado · Ingresos por Ventas (separé completado)' },
   { key: 'layaway.cancelled.advance', label: 'Plan separe cancelado · Anticipos de Clientes (reversa separé cancelado)' },
   { key: 'layaway.cancelled.refund', label: 'Plan separe cancelado · Caja/Banco (devolución separé cancelado)' },
+  { key: 'layaway.cancelled.refund_bank', label: 'Plan separe cancelado · Bancos (devolución por transferencia/tarjeta)' },
+  { key: 'layaway.cancelled.refund_wallet', label: 'Plan separe cancelado · Anticipos de clientes (devolución a la billetera)' },
   { key: 'layaway.cancelled.forfeit_income', label: 'Plan separe cancelado · Otros Ingresos (penalización separé cancelado)' },
   { key: 'depreciation.monthly.depreciation_expense', label: 'Depreciación mensual · Gasto por Depreciación' },
   { key: 'depreciation.monthly.accumulated_depreciation', label: 'Depreciación mensual · Depreciación Acumulada' },

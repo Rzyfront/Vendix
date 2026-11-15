@@ -2033,13 +2033,13 @@ export const TOOL_DISCOVERY_QUERIES_ES: Readonly<
   ],
   manage_return_orders: [
     'Crea una devolución de compra',
-    'Oe, haz una devolución de venta',
+    'Oe, devuélvele esas cajas al proveedor',
     'Parce, procesa la devolución y reingresa el stock',
     'Cancela esa devolución',
     'Edita la devolución en borrador',
     'Registra la devolución de mercancía al proveedor',
     'Elimina la devolución que no sirve',
-    'Procesa el reembolso de esa devolución',
+    'Procesa la devolución al proveedor y da de baja lo dañado',
   ],
   manage_shipping_method: [
     'Activa el envío por distancia para la tienda',

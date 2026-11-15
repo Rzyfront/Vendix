@@ -1187,4 +1187,20 @@ describe('DispatchNoteEventsListener — handleInvoiced → no fake payment on c
       expect.objectContaining({ amount: 500, correlationKey: 'dispatch_note:900' }),
     );
   });
+
+  it('QUI-893 B3 — off-route invoice: the collection goes to the invoicer drawer (user from the event payload)', async () => {
+    const { listener, orderFlowMock } = build({ remaining_balance: 500, payment_form: '1' });
+    await listener.handleInvoiced({ ...event, user_id: 9, cod_cash_collection: true });
+    expect(orderFlowMock.applyDispatchCodPayment).toHaveBeenCalledWith(
+      expect.objectContaining({ amount: 500, cashUserId: 9 }),
+    );
+  });
+
+  it('QUI-893 B3 — without the off-route flag no drawer is named (route flow unchanged)', async () => {
+    const { listener, orderFlowMock } = build({ remaining_balance: 500, payment_form: '1' });
+    await listener.handleInvoiced({ ...event, user_id: 9, cod_cash_collection: false });
+    expect(orderFlowMock.applyDispatchCodPayment).toHaveBeenCalledWith(
+      expect.not.objectContaining({ cashUserId: expect.anything() }),
+    );
+  });
 });

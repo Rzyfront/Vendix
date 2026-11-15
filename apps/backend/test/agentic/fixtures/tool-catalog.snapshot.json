@@ -6159,7 +6159,7 @@
 {
 "name": "manage_return_orders",
 "domain": "returns",
-"description": "Crea, edita, procesa, cancela o elimina devoluciones de compra/venta. Solo el borrador acepta edición o proceso; procesar mueve stock (reingreso/baja/reparación) y genera el reembolso contable; cancelar cierra sin mover stock. Acciones: create (type + lines), update (solo borrador, sin líneas), process (process_items con acción por línea), cancel, delete.",
+"description": "Crea, edita, procesa, cancela o elimina devoluciones A PROVEEDOR (purchase_return). Las devoluciones de CLIENTES no van aquí: se hacen con preview_refund + refund_order (Reembolsar desde el detalle de la orden). Solo el borrador acepta edición o proceso; procesar mueve stock (reingreso/baja/reparación) y no mueve dinero; cancelar cierra sin mover stock. Acciones: create (type + lines), update (solo borrador, sin líneas), process (process_items con acción por línea), cancel, delete.",
 "readOnly": false,
 "requiresConfirmation": true,
 "clientSide": false,
@@ -6176,11 +6176,11 @@
 },
 "type": {
 "type": "string",
-"description": "Clase de devolución (requerido para create): purchase_return al proveedor, sales_return del cliente."
+"description": "Clase de devolución (requerido para create): purchase_return al proveedor. Un cliente se reembolsa con refund_order."
 },
 "related_order_id": {
 "type": "number",
-"description": "Orden vinculada (venta o compra)."
+"description": "Orden de compra vinculada."
 },
 "related_order_type": {
 "type": "string",
@@ -6192,7 +6192,7 @@
 },
 "partner_id": {
 "type": "number",
-"description": "Cliente o proveedor, según partner_type."
+"description": "Proveedor."
 },
 "partner_type": {
 "type": "string",

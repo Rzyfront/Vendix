@@ -285,7 +285,9 @@ export class DispatchNoteDetailPageComponent {
           this.toastService.success('Factura generada exitosamente');
           this.loadDispatchNote(dn.id);
         },
-        error: () => this.toastService.error('Error al facturar la remision'),
+        // QUI-893 B3: shows "Abre tu caja para registrar pagos." when blocked.
+        error: (err) =>
+          this.toastService.error(extractApiError(err).message || 'Error al facturar la remision'),
       });
   }
 

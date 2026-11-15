@@ -51,6 +51,7 @@ import {
 } from '../../interfaces/dispatch-note.interface';
 import { CurrencyFormatService } from '../../../../../../shared/pipes/currency';
 import { formatDateOnlyUTC } from '../../../../../../shared/utils/date.util';
+import { extractApiError } from '../../../../../../shared/utils/http-error.util';
 
 @Component({
   selector: 'app-dispatch-note-list',
@@ -628,7 +629,9 @@ export class DispatchNoteListComponent {
           this.toastService.success('Factura generada exitosamente');
           this.loadDispatchNotes();
         },
-        error: () => this.toastService.error('Error al facturar la remision'),
+        // QUI-893 B3: shows "Abre tu caja para registrar pagos." when blocked.
+        error: (err) =>
+          this.toastService.error(extractApiError(err).message || 'Error al facturar la remision'),
       });
   }
 

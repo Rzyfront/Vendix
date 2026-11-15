@@ -5,7 +5,7 @@ import { takeUntilDestroyed } from '@angular/core/rxjs-interop';
 import { IconComponent } from '../../../../../../shared/components/icon/icon.component';
 import { StatsComponent } from '../../../../../../shared/components/stats/stats.component';
 import { LayawayApiService } from '../../services/layaway.service';
-import { LayawayPlan, LayawayInstallment } from '../../interfaces/layaway.interface';
+import { LayawayPlan, LayawayInstallment, LayawayRefundMethod } from '../../interfaces/layaway.interface';
 import { FormsModule } from '@angular/forms';
 import { ModalComponent } from '../../../../../../shared/components/modal/modal.component';
 import { StickyHeaderComponent } from '../../../../../../shared/components/sticky-header/sticky-header.component';
@@ -69,6 +69,21 @@ export class LayawayDetailPageComponent {
   showCancelModal = signal(false);
   cancelReason = signal('');
   isProcessingCancel = signal(false);
+  // QUI-893 B2 — what was paid goes back through a method the cashier picks.
+  readonly refundMethodOptions: { value: LayawayRefundMethod; label: string }[] = [
+    { value: 'cash', label: 'Efectivo' },
+    { value: 'bank_transfer', label: 'Transferencia' },
+    { value: 'card', label: 'Tarjeta' },
+    { value: 'wallet', label: 'Billetera del cliente' },
+  ];
+  cancelRefundMethod = signal<LayawayRefundMethod | null>(null);
+  cancelRefundAmount = computed(() => Number(this.plan()?.paid_amount ?? 0));
+  canSubmitCancel = computed(
+    () =>
+      !this.isProcessingCancel() &&
+      !!this.cancelReason().trim() &&
+      (this.cancelRefundAmount() <= 0 || this.cancelRefundMethod() !== null),
+  );
 
   // Complete confirmation
   isProcessingComplete = signal(false);
@@ -238,6 +253,7 @@ export class LayawayDetailPageComponent {
   // Cancel modal methods
   openCancelModal(): void {
     this.cancelReason.set('');
+    this.cancelRefundMethod.set(null);
     this.showCancelModal.set(true);
   }
 
@@ -247,21 +263,27 @@ export class LayawayDetailPageComponent {
 
   submitCancel(): void {
     const plan = this.plan();
-    if (!plan || !this.cancelReason().trim()) return;
+    if (!plan || !this.canSubmitCancel()) return;
 
+    const refundMethod = this.cancelRefundMethod();
     this.isProcessingCancel.set(true);
-    this.layaway_service.cancel(plan.id, { cancellation_reason: this.cancelReason() }).subscribe({
-      next: () => {
-        this.isProcessingCancel.set(false);
-        this.closeCancelModal();
-        this.loadPlan(plan.id);
-        this.toast.success('Plan cancelado');
-      },
-      error: (err: any) => {
-        this.isProcessingCancel.set(false);
-        this.toast.error(err.error?.message || 'Error al cancelar el plan');
-      },
-    });
+    this.layaway_service
+      .cancel(plan.id, {
+        cancellation_reason: this.cancelReason(),
+        ...(this.cancelRefundAmount() > 0 && refundMethod ? { refund_method: refundMethod } : {}),
+      })
+      .subscribe({
+        next: () => {
+          this.isProcessingCancel.set(false);
+          this.closeCancelModal();
+          this.loadPlan(plan.id);
+          this.toast.success('Plan cancelado');
+        },
+        error: (err: any) => {
+          this.isProcessingCancel.set(false);
+          this.toast.error(err.error?.message || 'Error al cancelar el plan');
+        },
+      });
   }
 
   // Complete modal methods

@@ -550,6 +550,16 @@ export const DEFAULT_ACCOUNT_MAPPINGS: Record<
     code: '1105',
     description: 'Caja/Banco (devolución separé cancelado)',
   },
+  // QUI-893 B2 — the refund credit follows the method the cashier picked:
+  // transfer/card leave the bank, a wallet refund stays as customer balance.
+  'layaway.cancelled.refund_bank': {
+    code: '1110',
+    description: 'Bancos (devolución separé cancelado por transferencia/tarjeta)',
+  },
+  'layaway.cancelled.refund_wallet': {
+    code: '2805',
+    description: 'Anticipos de clientes (devolución separé a la billetera)',
+  },
   'layaway.cancelled.forfeit_income': {
     code: '4295',
     description: 'Otros Ingresos (penalización separé cancelado)',

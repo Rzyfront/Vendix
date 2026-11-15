@@ -32,6 +32,13 @@ interface DispatchNoteEvent {
   order_id?: number | null;
 }
 
+/** QUI-893 B3 — `dispatch_note.invoiced` carries the invoicer. */
+interface DispatchNoteInvoicedEvent extends DispatchNoteEvent {
+  user_id?: number;
+  /** Off-route contra entrega: the balance is collected into user_id's drawer. */
+  cod_cash_collection?: boolean;
+}
+
 interface DispatchNoteVoidedEvent extends DispatchNoteEvent {
   void_reason: string;
 }
@@ -1197,7 +1204,7 @@ export class DispatchNoteEventsListener {
 
   // ─── INVOICED ───────────────────────────────────────────────
   @OnEvent('dispatch_note.invoiced')
-  async handleInvoiced(event: DispatchNoteEvent) {
+  async handleInvoiced(event: DispatchNoteInvoicedEvent) {
     try {
       const dispatch_note = await this.prisma.dispatch_notes.findFirst({
         where: { id: event.dispatch_note_id },
@@ -1254,6 +1261,10 @@ export class DispatchNoteEventsListener {
               dispatchNoteId: dispatch_note.id,
               amount: remaining,
               correlationKey: `dispatch_note:${dispatch_note.id}`,
+              // QUI-893 B3 — off-route: the sale lands in the invoicer drawer.
+              ...(event.cod_cash_collection && event.user_id
+                ? { cashUserId: event.user_id }
+                : {}),
             });
           }
           await this.orderFlowService.reconcileOrderFromDispatch(

@@ -15,7 +15,27 @@ export interface ReturnToolDeps {
   returnOrdersService: ReturnOrdersService;
 }
 
-const RETURN_TYPES = Object.values(return_order_type_enum);
+// QUI-893 B1 — only supplier returns live here. A customer return (goods and
+// money back to a customer) is "Reembolsar" from the order detail:
+// `preview_refund` → `refund_order` (cash-session gate + drawer movement).
+const RETURN_TYPES = [return_order_type_enum.purchase_return];
+const CUSTOMER_RETURN_CODE = 'RETURN_ORDER_SALES_USE_REFUND_001';
+const CUSTOMER_RETURN_MESSAGE =
+  'Las devoluciones de clientes se hacen con Reembolsar desde el detalle de la orden, no con manage_return_orders.';
+const CUSTOMER_RETURN_NEXT_STEP =
+  'Usa preview_refund con la orden y los renglones devueltos y luego refund_order (elige método e inventory_action por renglón).';
+
+function isCustomerReturn(fields: {
+  type?: unknown;
+  related_order_type?: unknown;
+  partner_type?: unknown;
+}): boolean {
+  return (
+    fields.type === return_order_type_enum.sales_return ||
+    fields.related_order_type === 'sales_order' ||
+    fields.partner_type === 'customer'
+  );
+}
 const PROCESS_ACTIONS = ['restock', 'write_off', 'repair'] as const;
 const ITEM_CONDITIONS = ['good', 'damaged'] as const;
 
@@ -128,8 +148,9 @@ function returnLabel(r: any): string {
  *
  * Familia propia (no va en `orders.tools.ts`, de otro track): CRUD +
  * process/cancel sobre `ReturnOrdersService`. Solo el borrador (draft) acepta
- * edición o procesamiento; procesar mueve stock real (reingreso/baja) y emite
- * `refund.completed` para contabilidad; cancelar cierra sin mover stock.
+ * edición o procesamiento; procesar mueve stock real (reingreso/baja) y no
+ * mueve dinero; cancelar cierra sin mover stock. QUI-893 B1: solo devoluciones
+ * a proveedor; un cliente se reembolsa con `preview_refund` → `refund_order`.
  * La lectura (findOne/findAll) vive en el preview y en la re-verificación del
  * handler, porque el preview es proyección, no transacción.
  */
@@ -194,7 +215,7 @@ export function createReturnTools(deps: ReturnToolDeps): RegisteredTool[] {
       version: '1',
       domain: 'returns',
       description:
-        'Crea, edita, procesa, cancela o elimina devoluciones de compra/venta. Solo el borrador acepta edición o proceso; procesar mueve stock (reingreso/baja/reparación) y genera el reembolso contable; cancelar cierra sin mover stock. Acciones: create (type + lines), update (solo borrador, sin líneas), process (process_items con acción por línea), cancel, delete.',
+        'Crea, edita, procesa, cancela o elimina devoluciones A PROVEEDOR (purchase_return). Las devoluciones de CLIENTES no van aquí: se hacen con preview_refund + refund_order (Reembolsar desde el detalle de la orden). Solo el borrador acepta edición o proceso; procesar mueve stock (reingreso/baja/reparación) y no mueve dinero; cancelar cierra sin mover stock. Acciones: create (type + lines), update (solo borrador, sin líneas), process (process_items con acción por línea), cancel, delete.',
       parameters: {
         type: 'object',
         properties: {
@@ -212,24 +233,24 @@ export function createReturnTools(deps: ReturnToolDeps): RegisteredTool[] {
             type: 'string',
             enum: RETURN_TYPES,
             description:
-              'Clase de devolución (requerido para create): purchase_return al proveedor, sales_return del cliente.',
+              'Clase de devolución (requerido para create): purchase_return al proveedor. Un cliente se reembolsa con refund_order.',
           },
           related_order_id: {
             type: 'number',
-            description: 'Orden vinculada (venta o compra).',
+            description: 'Orden de compra vinculada.',
           },
           related_order_type: {
             type: 'string',
-            enum: ['purchase_order', 'sales_order'],
+            enum: ['purchase_order'],
           },
           related_dispatch_id: { type: 'number' },
           partner_id: {
             type: 'number',
-            description: 'Cliente o proveedor, según partner_type.',
+            description: 'Proveedor.',
           },
           partner_type: {
             type: 'string',
-            enum: ['customer', 'supplier'],
+            enum: ['supplier'],
           },
           reason_id: { type: 'number' },
           lines: {
@@ -293,6 +314,12 @@ export function createReturnTools(deps: ReturnToolDeps): RegisteredTool[] {
 
         try {
           if (action === 'create') {
+            if (isCustomerReturn(args)) {
+              return previewError(
+                'Nueva devolución',
+                `${CUSTOMER_RETURN_MESSAGE} ${CUSTOMER_RETURN_NEXT_STEP}`,
+              );
+            }
             const checked = buildCreateDto(args);
             if (!checked.ok) {
               return previewError('Nueva devolución', checked.message);
@@ -341,6 +368,15 @@ export function createReturnTools(deps: ReturnToolDeps): RegisteredTool[] {
           const lines = (order.return_order_items ?? []).map(
             compactReturnLine,
           );
+          if (
+            (action === 'update' || action === 'process') &&
+            (isCustomerReturn(order) || isCustomerReturn(args))
+          ) {
+            return previewError(
+              label,
+              `${CUSTOMER_RETURN_MESSAGE} ${CUSTOMER_RETURN_NEXT_STEP} Este borrador solo puede cancelarse o eliminarse.`,
+            );
+          }
 
           if (action === 'update') {
             if (order.status !== return_order_status_enum.draft) {
@@ -414,7 +450,7 @@ export function createReturnTools(deps: ReturnToolDeps): RegisteredTool[] {
                   field: 'status',
                   label: 'Estado',
                   from: 'draft',
-                  to: 'processed (mueve stock + reembolso contable)',
+                  to: 'processed (mueve stock, sin mover dinero)',
                 },
                 {
                   field: 'items',
@@ -424,7 +460,7 @@ export function createReturnTools(deps: ReturnToolDeps): RegisteredTool[] {
                 },
               ],
               message:
-                'Procesar es irreversible: reingresa o da de baja el stock y emite el evento contable del reembolso.',
+                'Procesar es irreversible: reingresa o da de baja el stock.',
               domain: 'returns',
             };
           }
@@ -487,6 +523,13 @@ export function createReturnTools(deps: ReturnToolDeps): RegisteredTool[] {
 
         try {
           if (action === 'create') {
+            if (isCustomerReturn(args)) {
+              return toolError(
+                CUSTOMER_RETURN_MESSAGE,
+                CUSTOMER_RETURN_NEXT_STEP,
+                CUSTOMER_RETURN_CODE,
+              );
+            }
             const checked = buildCreateDto(args);
             if (!checked.ok) return toolError(checked.message);
             const created = await returnOrdersService.create(checked.dto);
@@ -615,7 +658,7 @@ export function createReturnTools(deps: ReturnToolDeps): RegisteredTool[] {
               })),
             );
             return JSON.stringify({
-              resumen: `Devolución #${returnId} procesada: ${items.length} línea(s) con stock movido y reembolso contable emitido`,
+              resumen: `Devolución #${returnId} procesada: ${items.length} línea(s) con stock movido`,
               return_id: returnId,
               status: processed.status ?? 'processed',
             });
@@ -653,6 +696,13 @@ export function createReturnTools(deps: ReturnToolDeps): RegisteredTool[] {
           );
         } catch (error) {
           const info = describeError(error);
+          if (info.code === CUSTOMER_RETURN_CODE) {
+            return toolError(
+              CUSTOMER_RETURN_MESSAGE,
+              CUSTOMER_RETURN_NEXT_STEP,
+              CUSTOMER_RETURN_CODE,
+            );
+          }
           return toolError(
             info.message,
             'Lee la devolución (GET /store/return-orders/:id) para ver su estado y líneas actuales.',

@@ -405,17 +405,25 @@ const RULES: Record<string, Rule> = {
       same(d.to_location_id, i.to_location_id) &&
       stockRowsValid(read(obs, 'stock', 'get_stock_levels')),
   },
+  // QUI-893 B1 — a customer return is the order refund (refund_order): the
+  // proof is that order's refund list holding exactly that completed refund.
   'devolucion-reembolso': {
     tool: 'call_endpoint',
-    id: 'return_order_id',
-    identity: (d) => d.id,
-    bridgePath: (i) => `store/orders/return-orders/${i.return_order_id}`,
-    required: ['return_order_id', 'order_id'],
-    effects: [['return', 'manage_return_orders']],
+    id: 'order_id',
+    bridgePath: (i) => `store/orders/${i.order_id}/refunds`,
+    required: ['order_id', 'refund_id', 'amount'],
+    effects: [['refund', 'refund_order']],
     predicate: (d, i) =>
-      d.status === 'processed' &&
-      same(d.related_order_id, i.order_id) &&
-      array(d.return_order_items).length > 0,
+      positive(i.amount) &&
+      array(d.data).filter((r) => {
+        const refund = record(r);
+        return (
+          same(refund.id, i.refund_id) &&
+          same(refund.order_id, i.order_id) &&
+          refund.state === 'completed' &&
+          equalMoney(refund.amount, i.amount)
+        );
+      }).length === 1,
   },
   'registrar-gasto': {
     tool: 'get_expense',
