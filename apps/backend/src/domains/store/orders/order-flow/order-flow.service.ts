@@ -1254,8 +1254,23 @@ export class OrderFlowService {
        * the history must show the state the user actually saw (the
        * pre-claim one), not the transient claim. */
       historyFromState?: OrderState | null;
+      /**
+       * Run inside the caller's open transaction instead of opening a new one
+       * (`reactivateOrder`). The reads and the state write use `tx`, and the
+       * `order.status_changed` event is pushed to `afterCommit` for the caller
+       * to publish once its transaction commits. Only for states that do not
+       * move inventory: `finished`/`delivered` own their commit transaction.
+       */
+      inTx?: { tx: Prisma.TransactionClient; afterCommit: Array<() => void> };
     },
   ) {
+    if (opts?.inTx && (newState === 'finished' || newState === 'delivered')) {
+      throw new Error(
+        `updateOrderState: '${newState}' commits inventory in its own transaction; inTx is not supported`,
+      );
+    }
+    const db = opts?.inTx?.tx ?? this.prisma;
+
     // Filter out non-schema fields and store them in internal_notes as JSON metadata
     const schemaFields: Record<string, any> = {
       state: newState,
@@ -1283,7 +1298,7 @@ export class OrderFlowService {
     );
 
     if (metadataKeys.length > 0) {
-      const currentOrder = await this.prisma.orders.findUnique({
+      const currentOrder = await db.orders.findUnique({
         where: { id: orderId },
         select: { internal_notes: true },
       });
@@ -1316,7 +1331,7 @@ export class OrderFlowService {
       });
     }
 
-    const previous_order = await this.prisma.orders.findUnique({
+    const previous_order = await db.orders.findUnique({
       where: { id: orderId },
       select: {
         state: true,
@@ -1523,7 +1538,7 @@ export class OrderFlowService {
 
     // All other states: no inventory mutation. Flujos P1.1: the state write,
     // its history row and the workflow event commit together.
-    const updated_order = await this.prisma.$transaction(async (tx) => {
+    const writeState = async (tx: Prisma.TransactionClient) => {
       const written = await tx.orders.update({
         where: { id: orderId },
         data: schemaFields,
@@ -1559,16 +1574,23 @@ export class OrderFlowService {
       }
 
       return written;
-    });
+    };
+    const updated_order = opts?.inTx
+      ? await writeState(opts.inTx.tx)
+      : await this.prisma.$transaction(writeState);
 
-    this.eventEmitter.emit('order.status_changed', {
-      store_id: updated_order.store_id,
-      order_id: orderId,
-      order_number: previous_order?.order_number || '',
-      old_state: previous_order?.state || '',
-      new_state: newState,
-      ...(opts?.source ? { source: opts.source } : {}),
-    });
+    const emitStatusChanged = () =>
+      this.eventEmitter.emit('order.status_changed', {
+        store_id: updated_order.store_id,
+        order_id: orderId,
+        order_number: previous_order?.order_number || '',
+        old_state: previous_order?.state || '',
+        new_state: newState,
+        ...(opts?.source ? { source: opts.source } : {}),
+      });
+    // Inside the caller's tx the event waits for that tx to commit.
+    if (opts?.inTx) opts.inTx.afterCommit.push(emitStatusChanged);
+    else emitStatusChanged();
 
     return updated_order;
   }
@@ -6096,6 +6118,8 @@ export class OrderFlowService {
       );
     }
 
+    // Explicit budget (repo convention): the 5 s Prisma default expired in
+    // rush hour, when restaurant cancellations take 7-11 s.
     const effects = await this.prisma.$transaction(async (tx) => {
       await this.assertOrderItemsCancellableInTx(tx, orderId, order.store_id);
       return this.cancelOrderItemInTx(tx, {
@@ -6105,7 +6129,7 @@ export class OrderFlowService {
         cancellationType,
         classification,
       });
-    });
+    }, { timeout: 20_000, maxWait: 5_000 });
 
     if (effects.alreadyCancelled) return this.getOrder(orderId);
     await this.runOrderItemCancelEffectsAfterCommit(
@@ -6925,7 +6949,9 @@ export class OrderFlowService {
       // Recálculo excluyendo cancelados (`cancelled_at IS NULL`) — mismo
       // patrón F-082 del seam (conserva envío/propina/descuento, clamp 0).
       await this.recalcOrderTotalsAfterItemCancelInTx(tx, order, orderId);
-    });
+      // Presupuesto explícito (convención del repo): el default de 5 s vencía
+      // en hora pico, cuando la reversa de un plato con receta tarda 7-11 s.
+    }, { timeout: 20_000, maxWait: 5_000 });
 
     if (alreadyCancelledInTx) return this.getOrder(orderId);
     for (const publish of preparedStockAfterCommit) publish();
@@ -8245,7 +8271,9 @@ export class OrderFlowService {
           payments: true,
         },
       });
-    });
+      // Explicit budget (repo convention): the 5 s Prisma default expired in
+      // rush hour while cancelling a table order with fired dishes.
+    }, { timeout: 20_000, maxWait: 5_000 });
 
     for (const publish of preparedStockAfterCommit) publish();
     for (const entry of preparedDispositions) {
@@ -9115,8 +9143,11 @@ export class OrderFlowService {
     ];
 
     const userId = RequestContextService.getUserId();
+    // `order.status_changed` of the state write, published only after the
+    // reservation + state write commit together.
+    const afterCommit: Array<() => void> = [];
 
-    return this.prisma.$transaction(async (tx) => {
+    const reactivated = await this.prisma.$transaction(async (tx) => {
       // 1. Load order with items + products (track_inventory, product_type) + variants.
       const order = await tx.orders.findFirst({
         where: { id: orderId },
@@ -9234,17 +9265,28 @@ export class OrderFlowService {
       // the new VALID_TRANSITIONS row added in this same plan.
       this.validateTransition('cancelled', targetState);
 
-      const updatedOrder = await this.updateOrderState(orderId, targetState, {
-        reactivated_at: new Date(),
-        reactivation_reason: dto.reason,
-      });
+      // Same tx as the reservation above: a second transaction here took
+      // another pool connection while this one stayed open (not atomic and,
+      // under load, this one expired waiting).
+      const updatedOrder = await this.updateOrderState(
+        orderId,
+        targetState,
+        {
+          reactivated_at: new Date(),
+          reactivation_reason: dto.reason,
+        },
+        { inTx: { tx, afterCommit } },
+      );
 
       this.logger.log(
         `Order #${orderId} reactivated to '${targetState}': ${dto.reason ?? '(no reason)'}`,
       );
 
       return updatedOrder;
-    });
+    }, { timeout: 20_000, maxWait: 5_000 });
+
+    for (const publish of afterCommit) publish();
+    return reactivated;
   }
 
   /**

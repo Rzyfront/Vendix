@@ -932,7 +932,7 @@ export class LayawayService {
           customer: { select: { id: true, first_name: true, last_name: true } },
         },
       });
-    });
+    }, { timeout: 20_000, maxWait: 5_000 });
   }
 
   /**

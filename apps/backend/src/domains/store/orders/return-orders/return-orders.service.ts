@@ -332,7 +332,7 @@ export class ReturnOrdersService {
           },
         },
       });
-    });
+    }, { timeout: 20_000, maxWait: 5_000 });
 
     // QUI-893 B1 — no `refund.completed` here: a supplier return moves no
     // money to a customer, and customer refunds are booked by RefundFlowService

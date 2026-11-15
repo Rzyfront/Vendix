@@ -139,6 +139,10 @@ describe('ReturnOrdersService — customer returns go through the order refund',
     });
     await service.process(99, [{ id: 10, action: 'restock' }]);
     expect(moved()).toEqual([2]);
+    // Explicit budget for the processing transaction (the 5 s default expired).
+    expect(prisma.$transaction).toHaveBeenCalledWith(
+      expect.any(Function), { timeout: 20_000, maxWait: 5_000 },
+    );
     // Without an explicit warehouse the default one is resolved on the
     // return's tx connection, never on a second pool connection.
     expect(stockLevelManager.getDefaultLocationForProduct).toHaveBeenCalledWith(7, undefined, tx);

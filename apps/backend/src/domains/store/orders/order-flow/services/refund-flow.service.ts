@@ -1358,7 +1358,7 @@ export class RefundFlowService {
         );
 
         return completedRefund;
-      })
+      }, { timeout: 20_000, maxWait: 5_000 })
       .then(async (completedRefund) => {
         // 7. Dispatch the original_payment reversal to the processor BEFORE
         // emitting refund.completed.
