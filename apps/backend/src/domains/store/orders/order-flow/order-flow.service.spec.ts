@@ -1273,7 +1273,7 @@ describe('OrderFlowService.cancelOrder — kitchenDisposition y reversa de hojas
       select: { id: true, product_id: true, product_variant_id: true, quantity_change: true, unit_cost: true, total_cost: true },
     });
     expect(stock.getDefaultLocationForProduct.mock.calls).toEqual([
-      [701, undefined], [702, 91], [703, undefined],
+      [701, undefined, prismaMock], [702, 91, prismaMock], [703, undefined, prismaMock],
     ]);
     expect(stock.updateStock).toHaveBeenCalledTimes(3);
     const expectedReturns = [
@@ -3368,7 +3368,9 @@ describe('OrderFlowService.cancelDeliveredOrderItem — reversa (1060 paso 2)', 
     // Destino aplicado: las 2 unidades vuelven al stock como `return`.
     expect(
       stockLevelManager.getDefaultLocationForProduct,
-    ).toHaveBeenCalledWith(11, undefined);
+      // Dentro de la tx de la reversa: sin `tx` cada consulta pide otra
+      // conexión del pool y la reversa se queda colgada bajo carga.
+    ).toHaveBeenCalledWith(11, undefined, txMock);
     expect(stockLevelManager.updateStock).toHaveBeenCalledTimes(1);
     expect(stockLevelManager.updateStock.mock.calls[0][0]).toEqual(
       expect.objectContaining({

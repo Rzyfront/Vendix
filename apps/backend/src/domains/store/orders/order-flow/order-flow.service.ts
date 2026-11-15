@@ -599,7 +599,7 @@ export class OrderFlowService {
       const quantity = Math.abs(ct.quantity_change);
       const locationId = disposition === 'reuse'
         ? await this.stockLevelManager.getDefaultLocationForProduct(
-            ct.product_id, ct.product_variant_id ?? undefined,
+            ct.product_id, ct.product_variant_id ?? undefined, tx,
           )
         : null;
       const totalCost = Number(ct.total_cost ?? 0);
@@ -1884,7 +1884,7 @@ export class OrderFlowService {
                   : allocation.slices)
               : [{
                   location_id: await this.stockLevelManager.getDefaultLocationForProduct(
-                    group.product_id, group.product_variant_id,
+                    group.product_id, group.product_variant_id, tx,
                   ),
                   quantity: toReserve,
                 }];
@@ -6271,6 +6271,7 @@ export class OrderFlowService {
           await this.stockLevelManager.getDefaultLocationForProduct(
             ct.product_id,
             ct.product_variant_id ?? undefined,
+            tx,
           );
         await this.stockLevelManager.updateStock(
           {
@@ -6856,6 +6857,7 @@ export class OrderFlowService {
               await this.stockLevelManager.getDefaultLocationForProduct(
                 orderItem.product_id,
                 orderItem.product_variant_id ?? undefined,
+                tx,
               );
             await this.stockLevelManager.updateStock(
               {
@@ -9180,6 +9182,7 @@ export class OrderFlowService {
           await this.stockLevelManager.getDefaultLocationForProduct(
             item.product_id,
             item.product_variant_id || undefined,
+            tx,
           );
 
         // Direct read inside the tx to make the decision atomic with the

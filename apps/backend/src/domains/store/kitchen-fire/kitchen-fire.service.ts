@@ -4232,7 +4232,7 @@ export class KitchenFireService {
           totalCost += cost;
           if (disposition === 'reuse') {
             const locationId = await this.stockLevelManager.getDefaultLocationForProduct(
-              ct.product_id, ct.product_variant_id ?? undefined,
+              ct.product_id, ct.product_variant_id ?? undefined, tx,
             );
             await this.stockLevelManager.updateStock({
               product_id: ct.product_id,
