@@ -1,3 +1,5 @@
+import { InjectionToken } from '@angular/core';
+
 /**
  * Cycles through a fixed list of values on an interval, pausing while any
  * pause reason is active (hover, focus, an open form, a manual choice…).
@@ -11,10 +13,16 @@ export interface RotatorTimers {
   clearInterval(id: unknown): void;
 }
 
-const browserTimers: RotatorTimers = {
+export const browserTimers: RotatorTimers = {
   setInterval: (handler, ms) => setInterval(handler, ms),
   clearInterval: (id) => clearInterval(id as ReturnType<typeof setInterval>),
 };
+
+/** Timers used by components that host an `AutoRotator`; tests swap in a fake clock. */
+export const ROTATOR_TIMERS = new InjectionToken<RotatorTimers>('ROTATOR_TIMERS', {
+  providedIn: 'root',
+  factory: () => browserTimers,
+});
 
 export class AutoRotator<T extends string> {
   private readonly reasons = new Set<string>();
