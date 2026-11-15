@@ -1,3 +1,4 @@
+import { tracksNonCashPayments } from '../../../cash-registers/movements/cash-movement-policy.util';
 import {
   Injectable,
   Inject,
@@ -2374,6 +2375,8 @@ export class RefundFlowService {
     try {
       const settings = await this.settingsService.getSettings();
       if (!(settings as any)?.pos?.cash_register?.enabled) return;
+      // QUI-893: "Registrar Pagos No Efectivo" off → the session only reflects cash.
+      if (!tracksNonCashPayments(settings)) return;
     } catch (error) {
       this.logger.error(
         `Refund #${input.refund_id}: cannot read cash register settings, non-cash movement not recorded: ${error instanceof Error ? error.message : String(error)}`,

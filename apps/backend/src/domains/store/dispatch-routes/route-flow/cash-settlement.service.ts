@@ -3,7 +3,10 @@ import { EventEmitter2 } from '@nestjs/event-emitter';
 import { StorePrismaService } from '../../../../prisma/services/store-prisma.service';
 import { SessionsService } from '../../cash-registers/sessions/sessions.service';
 import { ErrorCodes, VendixHttpException } from '@common/errors';
-import { shouldRecordCashMovement } from '../../cash-registers/movements/cash-movement-policy.util';
+import {
+  shouldRecordCashMovement,
+  tracksNonCashPayments,
+} from '../../cash-registers/movements/cash-movement-policy.util';
 import type { Prisma } from '@prisma/client';
 
 export interface PaymentReceivedInput {
@@ -249,6 +252,20 @@ export class CashSettlementService {
       byMethod.set(method, cur);
     }
 
+    // QUI-893: "Registrar Pagos No Efectivo" off → only the cash total enters
+    // the session. Settings are read only when a non-cash method is present.
+    if ([...byMethod.keys()].some((m) => m !== 'cash')) {
+      const row = await tx.store_settings.findUnique({
+        where: { store_id: input.store_id },
+        select: { settings: true },
+      });
+      if (!tracksNonCashPayments(row?.settings)) {
+        for (const method of [...byMethod.keys()]) {
+          if (method !== 'cash') byMethod.delete(method);
+        }
+      }
+    }
+
     const created: Array<{
       id: number;
       payment_method: string;
@@ -408,10 +425,12 @@ export class CashSettlementService {
   // vive en `RouteFlowService.settleStop` (DISPATCH_ROUTE_PARTIAL_DISABLED).
 
   async emitRefundCompleted(input: RefundInput) {
-    // refunds table requires order_id NOT NULL. For dispatch_route changes, we
-    // bypass the refunds table and just emit refund.completed event for
-    // accounting listeners (the cash_register_movement with type='refund' is
-    // the actual ledger entry).
+    // Change handed back at the door (`change_amount`) is informative only:
+    // `collected_amount` is already net of it (route-flow `settleStop`), so the
+    // driver hands in exactly the collected cash and route close records that
+    // net amount in the settler's session. Writing a cash movement here would
+    // count the change twice, so this method never touches the cash drawer
+    // (QUI-893). It only keeps the refunds row / `refund.completed` trace.
     if (input.sales_order_id && input.user_id) {
       try {
         const refund = await this.prisma.refunds.create({

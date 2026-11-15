@@ -4450,8 +4450,16 @@ describe('OrderFlowService.cancelOrder — egreso de caja de la venta cobrada en
       invoices: ['findMany', 'findFirst'],
       accounts_receivable: ['findMany', 'update'],
       order_installments: ['updateMany'],
-      cash_register_movements: ['findFirst'],
+      cash_register_movements: ['findFirst', 'findMany'],
     });
+    // QUI-893 r2: por defecto cada pago en efectivo dejó su `sale` en caja.
+    prismaMock.cash_register_movements.findMany.mockImplementation(
+      async ({ where }: any) =>
+        (where?.OR?.[0]?.payment_id?.in ?? []).map((id: number) => ({
+          payment_id: id,
+          notes: null,
+        })),
+    );
     prismaMock.invoices.findMany.mockResolvedValue([]);
     prismaMock.accounts_receivable.findMany.mockResolvedValue([]);
     prismaMock.$queryRaw = jest.fn().mockResolvedValue([{ id: ORDER_ID, state: 'processing' }]);
@@ -4628,6 +4636,48 @@ describe('OrderFlowService.cancelOrder — egreso de caja de la venta cobrada en
     expect(
       emitter.emit.mock.calls.filter(([name]: [string]) => name === 'cash_register.movement'),
     ).toHaveLength(0);
+  });
+
+  it('QUI-893 r2: pago en efectivo sin sale en caja (caja apagada al cobrar): no registra egreso, el reembolso contable sigue', async () => {
+    jest.spyOn(service as any, 'getOrder').mockResolvedValue(
+      cancelableOrder([
+        buildPayment({ id: CASH_PAYMENT_ID, state: 'succeeded', store_payment_method_id: CASH_METHOD_ID, amount: new Prisma.Decimal('59.50') }),
+      ]),
+    );
+    prismaMock.payments.findMany.mockResolvedValue([
+      { id: CASH_PAYMENT_ID, amount: new Prisma.Decimal('59.50') },
+    ]);
+    prismaMock.cash_register_movements.findMany.mockResolvedValue([]);
+
+    await service.cancelOrder(ORDER_ID, DTO);
+
+    expect(movements.recordCompensationCashMovementDurable).not.toHaveBeenCalled();
+    expect(sessions.assertSessionForSales).not.toHaveBeenCalled();
+    expect(refundFlow.completeCancellationCashRefund).toHaveBeenCalledWith(81);
+    expect(audit.log).not.toHaveBeenCalledWith(
+      expect.objectContaining({ action: 'order.cancel.cash_out_unrecorded' }),
+    );
+  });
+
+  it('QUI-893 r2: dos pagos en efectivo y solo uno con sale: egreso solo por ese pago', async () => {
+    jest.spyOn(service as any, 'getOrder').mockResolvedValue(
+      cancelableOrder([
+        buildPayment({ id: CASH_PAYMENT_ID, state: 'succeeded', store_payment_method_id: CASH_METHOD_ID, amount: new Prisma.Decimal('40.00') }),
+        buildPayment({ id: CASH_PAYMENT_ID + 1, state: 'succeeded', store_payment_method_id: CASH_METHOD_ID, amount: new Prisma.Decimal('19.50') }),
+      ]),
+    );
+    prismaMock.payments.findMany.mockResolvedValue([
+      { id: CASH_PAYMENT_ID, amount: new Prisma.Decimal('40.00') },
+      { id: CASH_PAYMENT_ID + 1, amount: new Prisma.Decimal('19.50') },
+    ]);
+    prismaMock.cash_register_movements.findMany.mockResolvedValue([
+      { payment_id: CASH_PAYMENT_ID + 1, notes: null },
+    ]);
+
+    await service.cancelOrder(ORDER_ID, DTO);
+
+    const calls = movements.recordCompensationCashMovementDurable.mock.calls.map(([p]: [any]) => [p.payment_id, p.amount]);
+    expect(calls).toEqual([[CASH_PAYMENT_ID + 1, 19.5]]);
   });
 
   it('dos pagos en efectivo: un movimiento por pago, cada uno con su payment_id', async () => {
@@ -6299,7 +6349,10 @@ describe('OrderFlowService — gate de caja en salidas de dinero (QUI-893)', () 
 
   it('cancelOrder de una venta cobrada en efectivo: sin caja rechaza CASH_SESSION_REQUIRED_001 antes de la tx', async () => {
     mockRequestContext({ store_id: 4, organization_id: 1, user_id: USER_B });
-    const { service, prismaMock, sessions } = build({ order: paidOrder('processing') });
+    const { service, prismaMock, sessions } = build({
+      order: paidOrder('processing'),
+      sales: [{ payment_id: 501, notes: null }],
+    });
 
     const error = await service
       .cancelOrder(1, { reason: 'cliente desiste' } as any)
@@ -6308,6 +6361,33 @@ describe('OrderFlowService — gate de caja en salidas de dinero (QUI-893)', () 
     expect(error).toBeInstanceOf(VendixHttpException);
     expect(error.errorCode).toBe('CASH_SESSION_REQUIRED_001');
     expect(sessions.assertSessionForSales).toHaveBeenCalledWith(USER_B);
+    expect(prismaMock.$transaction).not.toHaveBeenCalled();
+  });
+
+  it('QUI-893 r2: cancelOrder de un cobro en efectivo sin sale en caja (caja apagada al cobrar): no exige caja', async () => {
+    mockRequestContext({ store_id: 4, organization_id: 1, user_id: USER_B });
+    const { service, prismaMock, sessions } = build({ order: paidOrder('processing') });
+
+    const error = await service
+      .cancelOrder(1, { reason: 'cliente desiste' } as any)
+      .catch((failure) => failure);
+
+    expect(sessions.assertSessionForSales).not.toHaveBeenCalled();
+    expect(error.message).toBe('TX_REACHED');
+  });
+
+  it('QUI-893 r2: cancelOrder con un sale huérfano de la orden (no atribuible): sigue exigiendo caja', async () => {
+    mockRequestContext({ store_id: 4, organization_id: 1, user_id: USER_B });
+    const { service, prismaMock, sessions } = build({
+      order: paidOrder('processing'),
+      sales: [{ payment_id: null, notes: null }],
+    });
+
+    const error = await service
+      .cancelOrder(1, { reason: 'cliente desiste' } as any)
+      .catch((failure) => failure);
+
+    expect(error.errorCode).toBe('CASH_SESSION_REQUIRED_001');
     expect(prismaMock.$transaction).not.toHaveBeenCalled();
   });
 

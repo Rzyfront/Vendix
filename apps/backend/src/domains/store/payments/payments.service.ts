@@ -78,7 +78,10 @@ import type {
 import { CouponsService } from '../coupons/coupons.service';
 import { SessionsService } from '../cash-registers/sessions/sessions.service';
 import { MovementsService } from '../cash-registers/movements/movements.service';
-import { shouldRecordCashMovement } from '../cash-registers/movements/cash-movement-policy.util';
+import {
+  shouldRecordCashMovement,
+  tracksNonCashPayments,
+} from '../cash-registers/movements/cash-movement-policy.util';
 import { PaymentEncryptionService } from './services/payment-encryption.service';
 import { InvoiceDataRequestsService } from '../invoicing/invoice-data-requests/invoice-data-requests.service';
 // Sólo el CONTRATO del evento fiscal del POS: un tipo y una constante, sin
@@ -2563,7 +2566,13 @@ export class PaymentsService {
               method?.system_payment_method?.processing_mode;
             // Shared policy with `flow/pay` (B08); a method without a type is
             // rejected instead of being counted as cash (B26).
-            if (!shouldRecordCashMovement(methodType, processingMode)) {
+            if (
+              !shouldRecordCashMovement(
+                methodType,
+                processingMode,
+                tracksNonCashPayments(settings),
+              )
+            ) {
               continue;
             }
             movementLegs.push({
