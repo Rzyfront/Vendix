@@ -164,18 +164,15 @@ interface FixedPeriodState {
         </div>
       }
 
-      <!-- Charts card: Gráfico / Rosa / Bitácora tabs -->
-      <div class="bg-surface rounded-xl shadow-[0_2px_8px_rgba(0,0,0,0.07)] md:border md:border-border overflow-hidden flex flex-col">
-        <div class="p-4 border-b border-border flex items-center justify-between gap-2">
-          <app-scrollable-tabs
-            class="min-w-0 flex-1"
-            [tabs]="chartsTabs"
-            [activeTab]="chartsTab()"
-            size="sm"
-            ariaLabel="Vistas del dashboard"
-            (tabChange)="chartsTab.set($event)"
-          />
-          @if (chartsTab() !== 'log') {
+      <!-- Charts: Trend (2/3) + Channels (1/3) -->
+      <div class="grid grid-cols-1 lg:grid-cols-3 gap-4">
+        <!-- Sales Trend Chart -->
+        <div class="lg:col-span-2 bg-surface rounded-xl shadow-[0_2px_8px_rgba(0,0,0,0.07)] md:border md:border-border overflow-hidden flex flex-col">
+          <div class="p-4 border-b border-border flex items-center justify-between gap-2">
+            <div>
+              <h3 class="font-semibold text-text-primary text-sm">Tendencia de Ventas</h3>
+              <p class="text-xs text-text-secondary">{{ dateRangeLabel() }}</p>
+            </div>
             <app-options-dropdown
               [filters]="dateFilters()"
               [filterValues]="dateFilterValues()"
@@ -186,38 +183,47 @@ interface FixedPeriodState {
               (filterChange)="onDateFilterChange($event)"
               (clearAllFilters)="onClearDateFilters()"
             />
-          }
+          </div>
+          <div class="p-4 flex-1">
+            @if (loadingTrends()) {
+              <div class="h-56 flex items-center justify-center">
+                <div class="animate-spin rounded-full h-8 w-8 border-b-2 border-primary"></div>
+              </div>
+            } @else if (trends().length === 0) {
+              <app-empty-state
+                icon="bar-chart-2"
+                title="No hay datos de ventas"
+                description="Realiza ventas para ver las tendencias"
+                [showActionButton]="false"
+                size="sm"
+              />
+            } @else {
+              <app-chart [options]="trendChartOptions()" size="large"></app-chart>
+            }
+          </div>
         </div>
-        @switch (chartsTab()) {
-          @case ('trend') {
-            <div class="px-4 pt-3">
-              <h3 class="font-semibold text-text-primary text-sm">Tendencia de Ventas</h3>
-              <p class="text-xs text-text-secondary">{{ dateRangeLabel() }}</p>
+
+        <!-- Sales by Channel Chart: Rosa / Bitácora tabs -->
+        <div class="bg-surface rounded-xl shadow-[0_2px_8px_rgba(0,0,0,0.07)] md:border md:border-border overflow-hidden flex flex-col">
+          <div class="p-4 border-b border-border">
+            <app-scrollable-tabs
+              [tabs]="channelsCardTabs"
+              [activeTab]="channelsCardTab()"
+              size="sm"
+              ariaLabel="Ventas por canal y bitácora"
+              (tabChange)="channelsCardTab.set($event)"
+            />
+          </div>
+          @if (channelsCardTab() === 'log') {
+            <div class="p-4 flex-1 min-h-0 max-h-[400px] overflow-y-auto">
+              <app-reminders-log />
             </div>
+          } @else {
             <div class="p-4 flex-1">
-              @if (loadingTrends()) {
-                <div class="h-56 flex items-center justify-center">
-                  <div class="animate-spin rounded-full h-8 w-8 border-b-2 border-primary"></div>
-                </div>
-              } @else if (trends().length === 0) {
-                <app-empty-state
-                  icon="bar-chart-2"
-                  title="No hay datos de ventas"
-                  description="Realiza ventas para ver las tendencias"
-                  [showActionButton]="false"
-                  size="sm"
-                />
-              } @else {
-                <app-chart [options]="trendChartOptions()" size="large"></app-chart>
-              }
-            </div>
-          }
-          @case ('channels') {
-            <div class="px-4 pt-3">
-              <h3 class="font-semibold text-text-primary text-sm">Ventas por Canal</h3>
-              <p class="text-xs text-text-secondary">Distribución del período</p>
-            </div>
-            <div class="p-4 flex-1">
+              <div class="mb-2">
+                <h3 class="font-semibold text-text-primary text-sm">Ventas por Canal</h3>
+                <p class="text-xs text-text-secondary">Distribución del período</p>
+              </div>
               @if (loadingChannels()) {
                 <div class="h-56 flex items-center justify-center">
                   <div class="animate-spin rounded-full h-8 w-8 border-b-2 border-primary"></div>
@@ -235,12 +241,7 @@ interface FixedPeriodState {
               }
             </div>
           }
-          @case ('log') {
-            <div class="p-4 flex-1">
-              <app-reminders-log />
-            </div>
-          }
-        }
+        </div>
       </div>
 
       <!-- Alerts (1/2) + Quick Links (1/2) -->
@@ -506,13 +507,12 @@ export class DashboardComponent {
   dispatchPendingCount = signal(0);
   refundPendingCount = signal(0);
 
-  // Charts card tabs (Gráfico / Rosa / Bitácora). `?tab=bitacora` opens the log.
-  readonly chartsTabs: ScrollableTab[] = [
-    { id: 'trend', label: 'Gráfico' },
+  // Channels card tabs (Rosa / Bitácora). `?tab=bitacora` opens the log.
+  readonly channelsCardTabs: ScrollableTab[] = [
     { id: 'channels', label: 'Rosa' },
     { id: 'log', label: 'Bitácora' },
   ];
-  readonly chartsTab = signal<string>('trend');
+  readonly channelsCardTab = signal<string>('channels');
 
   // Charts
   trendChartOptions = signal<EChartsOption>({});
@@ -526,7 +526,7 @@ export class DashboardComponent {
     this.activatedRoute.queryParamMap
       .pipe(takeUntilDestroyed(this.destroyRef))
       .subscribe((params) => {
-        if (params.get('tab') === 'bitacora') this.chartsTab.set('log');
+        if (params.get('tab') === 'bitacora') this.channelsCardTab.set('log');
       });
 
     // Bootstrap: al conocer el store, hidrata el período fijado (si lo hay) y
