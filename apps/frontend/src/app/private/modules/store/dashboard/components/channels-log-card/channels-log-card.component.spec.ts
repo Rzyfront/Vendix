@@ -1,11 +1,12 @@
 import { provideHttpClient } from '@angular/common/http';
 import { provideHttpClientTesting } from '@angular/common/http/testing';
-import { provideZonelessChangeDetection } from '@angular/core';
+import { provideZonelessChangeDetection, signal } from '@angular/core';
 import { ComponentFixture, TestBed } from '@angular/core/testing';
 import { By } from '@angular/platform-browser';
 import { provideRouter } from '@angular/router';
 import { Observable, of } from 'rxjs';
 
+import { CurrencyFormatService } from '../../../../../../shared/pipes/currency/currency.pipe';
 import { RemindersList, RemindersService } from '../../services/reminders.service';
 import { ROTATOR_TIMERS, RotatorTimers } from '../../utils/auto-rotator.util';
 import { RemindersLogComponent } from '../reminders-log/reminders-log.component';
@@ -96,6 +97,17 @@ describe('ChannelsLogCardComponent (Rosa · Bitácora)', () => {
         provideHttpClientTesting(),
         { provide: ROTATOR_TIMERS, useValue: timers },
         { provide: RemindersService, useValue: api },
+        // The log form's app-input pulls CurrencyFormatService (NgRx store) in.
+        {
+          provide: CurrencyFormatService,
+          useValue: {
+            currencySymbol: signal('$'),
+            currencyFormatStyle: () => 'comma_dot',
+            currencyDecimals: () => 0,
+            loadCurrency: () => undefined,
+            format: (v: number) => `$${v}`,
+          },
+        },
       ],
     });
     fixture = TestBed.createComponent(ChannelsLogCardComponent);
