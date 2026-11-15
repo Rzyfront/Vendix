@@ -4519,6 +4519,13 @@ export const ErrorCodes = {
     httpStatus: 409,
     devMessage: 'Invalid layaway plan state transition',
   },
+  // QUI-893 B2 — cancelling with money to give back needs the refund method
+  // (cash / bank_transfer / card / wallet) so the money leaves a real place.
+  LAY_REFUND_METHOD_REQUIRED_001: {
+    code: 'LAY_REFUND_METHOD_REQUIRED_001',
+    httpStatus: 400,
+    devMessage: 'Elige cómo se le devuelve el dinero al cliente.',
+  },
   LAY_PAYMENT_001: {
     code: 'LAY_PAYMENT_001',
     httpStatus: 400,

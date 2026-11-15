@@ -47,6 +47,7 @@ describe('LayawayService.makePayment — movimiento de caja (B04)', () => {
       { emit: jest.fn() } as any,
       { recordModuleCashMovement } as any,
       { assertSessionForSales } as any,
+      {} as any,
     );
     jest.spyOn(RequestContextService, 'getContext').mockReturnValue({
       store_id: 10,

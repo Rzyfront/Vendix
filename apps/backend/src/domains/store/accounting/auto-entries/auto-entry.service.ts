@@ -7131,7 +7131,9 @@ export class AutoEntryService {
   /**
    * layaway.cancelled: reversa del anticipo recibido.
    *   DR 2805 Anticipos recibidos      (total_paid)
-   *   CR 1105/1110 Caja/Banco          (refund_amount, dinero devuelto)
+   *   CR por el método real de la devolución (QUI-893 B2):
+   *      cash 1105 Caja · bank_transfer/card 1110 Bancos · wallet 2805 saldo
+   *      a favor del cliente               (refund_amount)
    *   CR 4295 Otros ingresos           (cancellation_fee, penalización retenida)
    * Invariante: refund_amount + cancellation_fee == total_paid (la entrada
    * balancea por construcción: DR total_paid == CR (refund + fee)).
@@ -7168,7 +7170,7 @@ export class AutoEntryService {
       lines.push(
         await this.resolveAccountLine(
           data.organization_id,
-          'layaway.cancelled.refund',
+          AutoEntryService.layawayCancelRefundKey(data.refund_method),
           `Devolución separé ${data.plan_number}`,
           0,
           data.refund_amount,
@@ -7199,6 +7201,21 @@ export class AutoEntryService {
       lines,
       user_id: data.user_id,
     });
+  }
+
+  /** QUI-893 B2 — credit account of a cancelled layaway's refund, by method. */
+  private static layawayCancelRefundKey(refund_method?: string): string {
+    switch (refund_method) {
+      case 'bank_transfer':
+      case 'card':
+        return 'layaway.cancelled.refund_bank';
+      case 'wallet':
+        return 'layaway.cancelled.refund_wallet';
+      case 'cash':
+      default:
+        // Legacy events carry no method: they always meant the drawer.
+        return 'layaway.cancelled.refund';
+    }
   }
 
   /**

@@ -11,9 +11,19 @@ import {
   IsBoolean,
   Min,
   MaxLength,
+  IsIn,
 } from 'class-validator';
 import { Type, Transform } from 'class-transformer';
 import { PartialType } from '@nestjs/mapped-types';
+
+/** QUI-893 B2 — ways the money of a cancelled layaway goes back. */
+export const LAYAWAY_REFUND_METHODS = [
+  'cash',
+  'bank_transfer',
+  'card',
+  'wallet',
+] as const;
+export type LayawayRefundMethod = (typeof LAYAWAY_REFUND_METHODS)[number];
 
 // ===== Items sub-DTO =====
 
@@ -258,4 +268,14 @@ export class CancelLayawayDto {
   @IsNumber()
   @Min(0)
   cancellation_fee?: number;
+
+  /**
+   * QUI-893 B2 — how the refund leaves. Required when the refund is > 0:
+   * `cash` (canceller's drawer, cash_out), `bank_transfer` / `card`
+   * (informative row per track_non_cash_payments) or `wallet` (customer
+   * balance).
+   */
+  @IsOptional()
+  @IsIn(LAYAWAY_REFUND_METHODS)
+  refund_method?: LayawayRefundMethod;
 }
