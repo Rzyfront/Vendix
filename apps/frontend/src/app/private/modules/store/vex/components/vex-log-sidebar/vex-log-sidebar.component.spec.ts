@@ -7,6 +7,7 @@ import { StoreSettingsFacade } from '../../../../../../core/store/store-settings
 import { ToastService } from '../../../../../../shared/components/toast/toast.service';
 import {
   Reminder,
+  ReminderListFilter,
   RemindersList,
   RemindersService,
   UpdateReminderPayload,
@@ -31,20 +32,34 @@ function reminder(partial: Partial<Reminder> & Pick<Reminder, 'id' | 'title'>): 
   };
 }
 
-/** In-memory `/store/reminders` of the signed-in user: the only data the sidebar may show. */
+/**
+ * In-memory `/store/reminders` of the signed-in user: the only data the sidebar
+ * may show. Mirrors the API paging: filter by status, order by status then
+ * `remind_at`, and keep `limit` rows (default 100).
+ */
 class FakeRemindersService {
   rows: Reminder[] = [];
   listCalls = 0;
+  requests: Array<{ status: ReminderListFilter; limit: number | undefined }> = [];
   updates: Array<{ id: number; payload: UpdateReminderPayload }> = [];
   failNextList = false;
 
-  list(): Observable<RemindersList> {
+  list(status: ReminderListFilter, limit?: number): Observable<RemindersList> {
     this.listCalls++;
+    this.requests.push({ status, limit });
     if (this.failNextList) {
       this.failNextList = false;
       return throwError(() => new Error('boom'));
     }
-    return of({ items: this.rows.map((r) => ({ ...r })), timezone: 'America/Bogota' });
+    const page = this.rows
+      .filter((r) => status === 'all' || r.status === status)
+      .sort(
+        (a, b) =>
+          (a.status === b.status ? 0 : a.status === 'pending' ? -1 : 1) ||
+          (a.remind_at ?? '\uffff').localeCompare(b.remind_at ?? '\uffff'),
+      )
+      .slice(0, limit ?? 100);
+    return of({ items: page.map((r) => ({ ...r })), timezone: 'America/Bogota' });
   }
 
   update(id: number, payload: UpdateReminderPayload): Observable<Reminder> {
@@ -178,7 +193,8 @@ describe('VexLogSidebarComponent (Bitácora empresarial)', () => {
     await wait(10);
     root = await settle();
     expect(api.updates).toEqual([{ id: 1, payload: { status: 'done' } }]);
-    expect(api.listCalls).toBe(before + 1);
+    // One refresh = one pending page + one done page.
+    expect(api.listCalls).toBe(before + 2);
     expect(text(root)).not.toContain('Llamar al proveedor');
     expect(chip(root, 'Hechos').textContent).toContain('2');
   });
@@ -234,6 +250,31 @@ describe('VexLogSidebarComponent (Bitácora empresarial)', () => {
     await wait(10);
     root = await settle();
     expect(text(root)).toContain('Llamar al proveedor');
+  });
+
+  it('reads pending and done separately, so more than 100 reminders do not cut "Hechos"', async () => {
+    api.rows = [
+      ...Array.from({ length: 120 }, (_, i) =>
+        reminder({ id: 1000 + i, title: `Pendiente ${i}`, bucket: 'upcoming', remind_at: '2026-12-01T15:00:00Z' }),
+      ),
+      ...Array.from({ length: 130 }, (_, i) =>
+        reminder({
+          id: 2000 + i,
+          title: `Hecho ${i}`,
+          status: 'done',
+          bucket: 'done',
+          completed_at: `2026-11-${String(1 + (i % 14)).padStart(2, '0')}T10:00:00Z`,
+        }),
+      ),
+    ];
+    const root = await render();
+
+    expect(api.requests).toEqual([
+      { status: 'pending', limit: 200 },
+      { status: 'done', limit: 200 },
+    ]);
+    expect(chip(root, 'Pendientes').textContent).toContain('120');
+    expect(chip(root, 'Hechos').textContent).toContain('130');
   });
 
   it('links to the dashboard Bitácora to manage reminders', async () => {

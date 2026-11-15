@@ -1,5 +1,5 @@
 import { DestroyRef, Injectable, computed, effect, inject, signal, untracked } from '@angular/core';
-import { firstValueFrom } from 'rxjs';
+import { firstValueFrom, forkJoin } from 'rxjs';
 import { StoreSettingsFacade } from '../../../../../core/store/store-settings/store-settings.facade';
 import { ToastService } from '../../../../../shared/components/toast/toast.service';
 import { extractApiError } from '../../../../../shared/utils/http-error.util';
@@ -11,6 +11,13 @@ import {
   filterReminders,
   vexActivityFingerprint,
 } from './vex-reminders.util';
+
+/**
+ * Page size of each status request (the API maximum). Pending and done are
+ * read separately so a long history of done reminders never pushes pending
+ * ones out of one shared page, and "Hechos" is not cut at the default 100.
+ */
+export const VEX_REMINDERS_PAGE_LIMIT = 200;
 
 /** Wait for a burst of Vex activity (thread load, several receipts) to settle. */
 const ACTIVITY_REFRESH_DELAY_MS = 400;
@@ -86,10 +93,18 @@ export class VexLogStore {
   async refresh(): Promise<void> {
     const seq = ++this.load_seq;
     try {
-      const res = await firstValueFrom(this.reminders.list('all'));
+      const [pending, done] = await firstValueFrom(
+        forkJoin([
+          this.reminders.list('pending', VEX_REMINDERS_PAGE_LIMIT),
+          this.reminders.list('done', VEX_REMINDERS_PAGE_LIMIT),
+        ]),
+      );
       if (this.destroyed || seq !== this.load_seq) return;
-      this._items.set(Array.isArray(res?.items) ? res.items : []);
-      this._server_timezone.set(res?.timezone || null);
+      this._items.set([
+        ...(Array.isArray(pending?.items) ? pending.items : []),
+        ...(Array.isArray(done?.items) ? done.items : []),
+      ]);
+      this._server_timezone.set(pending?.timezone || done?.timezone || null);
       this._error.set(false);
     } catch {
       // Secondary panel: show an inline retry instead of toasting over the chat.
