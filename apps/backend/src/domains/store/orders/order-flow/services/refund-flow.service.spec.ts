@@ -103,7 +103,7 @@ describe('RefundFlowService — refund overhaul invariants', () => {
         { provide: RequestContextService, useValue: { getUserId: () => 1 } },
         { provide: StockLevelManager, useValue: mockStockLevelManager },
         { provide: SettingsService, useValue: {} },
-        { provide: SessionsService, useValue: {} },
+        { provide: SessionsService, useValue: { assertSessionForSales: jest.fn() } },
         { provide: MovementsService, useValue: mockMovementsService },
         {
           provide: SerialNumberEnforcementService,

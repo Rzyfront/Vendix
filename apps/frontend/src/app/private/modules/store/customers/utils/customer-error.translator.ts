@@ -46,6 +46,12 @@ const ERROR_CODE_MESSAGES: Record<string, string> = {
   CUST_BULK_003: 'Hay correos duplicados en el archivo',
   CUST_BULK_004: 'Se requiere contexto de tienda para la carga masiva',
 
+  // Cash register (QUI-893): wallet top-up requires the operator's own open
+  // session. Mapped explicitly so the generic 409 fallback ("cliente
+  // duplicado") never masks it.
+  CASH_SESSION_REQUIRED_001:
+    'Abre tu caja para registrar pagos.',
+
   // System (used by customers domain)
   SYS_CONFLICT_001:
     'Ya existe un cliente con este documento en la organización',

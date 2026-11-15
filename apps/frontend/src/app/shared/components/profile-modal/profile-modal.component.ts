@@ -1,4 +1,4 @@
-import {Component, inject, output, input, model, signal, DestroyRef} from '@angular/core';
+import {Component, inject, output, input, model, signal, computed, DestroyRef} from '@angular/core';
 import { takeUntilDestroyed } from '@angular/core/rxjs-interop';
 import { DatePipe, UpperCasePipe } from '@angular/common';
 import {
@@ -63,14 +63,13 @@ import { dataUrlToFile } from '../../utils/data-url.util';
             <div
               class="w-20 h-20 md:w-24 md:h-24 rounded-xl overflow-hidden border-2 border-primary-200 mb-3"
             >
-              @if (userInfo()?.avatar_url) {
+              @if (avatarSrc(); as src) {
                 <img
-                  [src]="userInfo().avatar_url"
+                  [src]="src"
                   alt="Avatar"
                   class="w-full h-full object-contain"
                 />
-              }
-              @if (!userInfo()?.avatar_url) {
+              } @else {
                 <div
                   class="w-full h-full bg-primary-100 flex items-center justify-center text-primary-600 text-2xl md:text-3xl font-bold"
                 >
@@ -326,14 +325,13 @@ import { dataUrlToFile } from '../../utils/data-url.util';
               class="relative w-20 h-20 rounded-xl overflow-hidden border-2 border-primary-200 cursor-pointer group flex-shrink-0"
               (click)="openAvatarModal()"
             >
-              @if (avatarPreview() || userInfo()?.avatar_url) {
+              @if (avatarPreview() || avatarSrc(); as src) {
                 <img
-                  [src]="avatarPreview() || userInfo()?.avatar_url"
+                  [src]="src"
                   alt="Avatar"
                   class="w-full h-full object-contain"
                 />
-              }
-              @if (!avatarPreview() && !userInfo()?.avatar_url) {
+              } @else {
                 <div
                   class="w-full h-full bg-primary-100 flex items-center justify-center text-primary-600 text-2xl font-bold"
                 >
@@ -571,6 +569,18 @@ export class ProfileModalComponent {
   pendingAvatarKey: string | null = null;
 
   readonly userInfo = signal<any>(null);
+  /**
+   * QUI-982 — Only render absolute URLs (signed S3, data:, blob:). A bare S3
+   * key (e.g. a session persisted before the backend signed it) would resolve
+   * against the frontend host and 404; show initials until `getProfile()`
+   * brings the signed URL.
+   */
+  readonly avatarSrc = computed<string | null>(() => {
+    const url: unknown = this.userInfo()?.avatar_url;
+    return typeof url === 'string' && /^(https?:|data:|blob:)/i.test(url)
+      ? url
+      : null;
+  });
   readonly addressInfo = signal<any>(null);
   readonly hasAddress = signal(false);
 

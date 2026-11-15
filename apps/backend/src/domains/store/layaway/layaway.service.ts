@@ -5,6 +5,7 @@ import { RequestContextService } from '@common/context/request-context.service';
 import { StockLevelManager } from '../inventory/shared/services/stock-level-manager.service';
 import { EventEmitter2 } from '@nestjs/event-emitter';
 import { MovementsService } from '../cash-registers/movements/movements.service';
+import { SessionsService } from '../cash-registers/sessions/sessions.service';
 import { VendixHttpException, ErrorCodes } from 'src/common/errors';
 import { Prisma } from '@prisma/client';
 import { resolveTierSnapshotsForItems } from '../products/services/tier-snapshot.util';
@@ -28,6 +29,7 @@ export class LayawayService {
     private stockLevelManager: StockLevelManager,
     private eventEmitter: EventEmitter2,
     private movementsService: MovementsService,
+    private sessionsService: SessionsService,
   ) {}
 
   /**
@@ -76,6 +78,13 @@ export class LayawayService {
 
     // Un separado es una venta: Insumo / Uso interno no entran.
     await assertSaleNatureLines(this.prisma, dto.items);
+
+    // QUI-893 — la cuota inicial es un cobro: gate único de caja antes de la tx.
+    if (Number(dto.down_payment_amount ?? 0) > 0) {
+      await this.sessionsService.assertSessionForSales(
+        context?.user_id ?? undefined,
+      );
+    }
 
     return this.prisma.$transaction(async (tx: any) => {
       // 1. Generar plan_number
@@ -468,6 +477,11 @@ export class LayawayService {
 
   async makePayment(plan_id: number, dto: MakeLayawayPaymentDto) {
     const context = RequestContextService.getContext();
+
+    // QUI-893 — gate único de caja antes de la tx (cualquier método).
+    await this.sessionsService.assertSessionForSales(
+      context?.user_id ?? undefined,
+    );
 
     return this.prisma.$transaction(async (tx: any) => {
       // 1. Obtener plan

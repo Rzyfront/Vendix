@@ -1,3 +1,9 @@
+import { IsNotEmpty, IsString } from 'class-validator';
+import {
+  BulkFileHashField,
+  BulkFileNameField,
+} from '../../bulk-uploads/dto/bulk-upload-log.dto';
+
 export class BulkImageSkuResultDto {
   sku: string;
   status: 'success' | 'error' | 'skipped';
@@ -13,4 +19,20 @@ export class BulkImageUploadResultDto {
   failed: number;
   skipped: number;
   results: BulkImageSkuResultDto[];
+}
+
+/**
+ * Body de `POST store/products/bulk-images/upload-session`. `file_name` y
+ * `file_hash` vienen del analyze para el registro de cargas (QUI-1004).
+ */
+export class BulkImageUploadSessionDto {
+  @IsString()
+  @IsNotEmpty()
+  session_id: string;
+
+  @BulkFileNameField()
+  file_name?: string;
+
+  @BulkFileHashField()
+  file_hash?: string;
 }

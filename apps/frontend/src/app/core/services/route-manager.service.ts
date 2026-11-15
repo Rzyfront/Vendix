@@ -123,6 +123,34 @@ export class RouteManagerService {
     }
   }
 
+  /**
+   * Environment switch (QUI-981): unmount the root `<router-outlet>` (the app
+   * shows its loading state) so the previous environment's components are
+   * destroyed and cannot fire requests with the new environment's token.
+   * Pair with `replaceRoutes()` + navigation and finish with `resumeOutlet()`.
+   */
+  public suspendOutlet(): void {
+    this.routesConfigured.next(false);
+  }
+
+  /**
+   * Swap the router config WITHOUT remounting the outlet. Remounting before the
+   * router navigates re-activates the old route tree (e.g. the ORG_ADMIN layout
+   * calling /organization/* with a STORE_ADMIN token → 403).
+   */
+  public replaceRoutes(appConfig: AppConfig): void {
+    this.router.resetConfig(
+      appConfig?.routes
+        ? this.buildFinalRoutes(appConfig)
+        : this.getFallbackRoutes(),
+    );
+  }
+
+  /** Remount the root outlet once the router is on the new environment routes. */
+  public resumeOutlet(): void {
+    this.routesConfigured.next(true);
+  }
+
   private initialized_complete = false;
 
   private buildFinalRoutes(appConfig: AppConfig): Routes {

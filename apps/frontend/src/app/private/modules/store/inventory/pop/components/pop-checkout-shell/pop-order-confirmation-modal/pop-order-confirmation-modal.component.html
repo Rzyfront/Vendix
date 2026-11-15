@@ -40,6 +40,13 @@
       </div>
     </div>
 
+    @if (notice()) {
+      <p class="pop-order-confirmation__notice" role="status">
+        <app-icon name="info" [size]="16" />
+        <span>{{ notice() }}</span>
+      </p>
+    }
+
     <!--
       Las dos rutas de salida del taller POP. «Nueva compra» (secondary)
       mantiene al operador en el taller con el carrito vacío; «Ver orden»

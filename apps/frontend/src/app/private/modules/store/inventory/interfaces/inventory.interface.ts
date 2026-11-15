@@ -530,7 +530,11 @@ export type MovementType =
   | 'sale'
   | 'return'
   | 'damage'
-  | 'expiration';
+  | 'expiration'
+  // Suite de restaurante (movement_type_enum del backend): insumos que gasta
+  // una receta o una orden de producción, y producto terminado que esta crea.
+  | 'production'
+  | 'consumption';
 
 export type SourceOrderType = 'purchase' | 'sale' | 'transfer' | 'return';
 

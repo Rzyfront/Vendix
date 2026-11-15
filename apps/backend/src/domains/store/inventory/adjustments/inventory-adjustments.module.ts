@@ -1,4 +1,5 @@
 import { Module } from '@nestjs/common';
+import { BulkUploadsModule } from '../../bulk-uploads/bulk-uploads.module';
 import { EventEmitterModule } from '@nestjs/event-emitter';
 import { InventoryAdjustmentsService } from './inventory-adjustments.service';
 import { InventoryAdjustmentsBulkService } from './inventory-adjustments-bulk.service';
@@ -23,6 +24,7 @@ import { SettingsModule } from '../../settings/settings.module';
   ],
   imports: [
     InventoryTransactionsModule,
+    BulkUploadsModule,
     PrismaModule,
     EventEmitterModule,
     ResponseModule,

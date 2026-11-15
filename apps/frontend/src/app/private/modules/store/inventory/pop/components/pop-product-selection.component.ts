@@ -20,7 +20,10 @@ import { StoreSettingsFacade } from '../../../../../../core/store/store-settings
 
 import { PopCartService } from '../services/pop-cart.service';
 import { ProductsService } from '../../../products/services/products.service';
-import { PopBulkDataModalComponent } from './pop-bulk-data-modal.component';
+import {
+  PopBulkDataModalComponent,
+  PopBulkImport,
+} from './pop-bulk-data-modal.component';
 import {
   PopProductConfigModalComponent,
   PopProductConfigResult,
@@ -317,7 +320,7 @@ export class PopProductSelectionComponent {
 
   readonly productSelected = output<any>();
   readonly requestManualAdd = output<void>();
-  readonly bulkDataLoaded = output<any[]>();
+  readonly bulkDataLoaded = output<PopBulkImport>();
   readonly productAddedToCart = output<{ product: any; quantity: number }>();
   readonly scanInvoice = output<void>();
 
@@ -526,7 +529,7 @@ export class PopProductSelectionComponent {
     }
   }
 
-  onBulkDataLoaded(data: any[]): void {
+  onBulkDataLoaded(data: PopBulkImport): void {
     this.bulkDataLoaded.emit(data);
   }
 

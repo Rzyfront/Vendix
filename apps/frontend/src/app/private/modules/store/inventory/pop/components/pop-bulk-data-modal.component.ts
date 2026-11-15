@@ -9,6 +9,7 @@ import {
   computed,
 } from '@angular/core';
 import { NgClass, CurrencyPipe } from '@angular/common';
+import { firstValueFrom } from 'rxjs';
 import { MAX_BULK_RECORDS } from '../../../../../../shared/utils/run-chunked';
 // Solo tipos. El runtime (7,2 MB) llega por `await import('xlsx')` en los dos
 // puntos que de verdad lo usan: descargar la plantilla y leer el archivo.
@@ -23,8 +24,46 @@ import {
   StepsLineComponent,
   StepsLineItem,
 } from '../../../../../../shared/components/steps-line/steps-line.component';
+import {
+  PurchaseOrdersService,
+  CheckBulkPurchaseLineResult,
+} from '../../services/purchase-orders.service';
+import { BulkUploadLogService } from '../../../bulk-uploads/services/bulk-upload-log.service';
+import {
+  applyBulkLineMatch,
+  bulkRowBasicErrors,
+  mapWithConcurrency,
+} from '../utils/bulk-row-check.util';
+
+/** Filas por llamada a `bulk/check-lines` (tope del backend). */
+const CHECK_LINES_CHUNK = 100;
+/** QUI-1004 — `bulk/check-lines` batches validated in parallel. */
+const CHECK_LINES_CONCURRENCY = 4;
+
+/**
+ * QUI-1004 — datos de la carga para el registro de cargas masivas. Se
+ * registra cuando la orden de compra termina (ahí se conoce la PO-XXX).
+ */
+export interface PopBulkImportSummary {
+  file_name: string;
+  file_hash: string | null;
+  total_rows: number;
+  failed_rows: number;
+}
+
+export interface PopBulkImport {
+  items: object[];
+  summary: PopBulkImportSummary;
+}
 
 interface AnalyzedItem {
+  /** Fila del Excel (la de encabezados es la 1). */
+  row_number: number;
+  /** Producto existente que corresponde a la fila (QUI-1004). */
+  product_id?: number | null;
+  product_variant_id?: number | null;
+  /** No existe en el catálogo: se crea al crear la orden (QUI-1004). */
+  will_create?: boolean;
   name: string;
   sku: string;
   barcode?: string;
@@ -60,6 +99,8 @@ interface AnalysisResult {
   valid: number;
   warnings: number;
   errors: number;
+  /** Filas sin error cuyo producto no existe: se crearán. */
+  new_products: number;
   items: AnalyzedItem[];
 }
 
@@ -351,8 +392,11 @@ interface AnalysisResult {
               ></app-icon>
               <p class="text-[11px] text-amber-800 leading-relaxed">
                 <span class="font-medium">Importante:</span> Los productos se
-                cargarán temporalmente en la orden. Si contienen nuevas marcas o
-                categorías, estas se crearán automáticamente al confirmar.
+                cargarán temporalmente en la orden. Los que no existan en tu
+                catálogo (por SKU o código de barras) se crearán al confirmar,
+                igual que las marcas o categorías nuevas. Las filas inválidas
+                (sin SKU ni código de barras, cantidad o costo inválidos, o un
+                producto nuevo sin nombre) se marcan como error y se omiten.
               </p>
             </div>
 
@@ -487,6 +531,31 @@ interface AnalysisResult {
                     </div>
                   </div>
                 </div>
+
+                <p class="text-sm font-medium text-gray-900 mt-3">
+                  {{ result.total - result.errors }} listas ·
+                  {{ result.errors }} con error
+                  @if (result.new_products > 0) {
+                    <span class="font-normal text-gray-600">
+                      ({{ result.new_products }} producto(s) nuevo(s) se
+                      crearán)
+                    </span>
+                  }
+                </p>
+                @if (result.errors > 0) {
+                  <div
+                    class="mt-2 bg-red-50 border border-red-100 rounded-lg px-3 py-2 max-h-32 overflow-y-auto"
+                  >
+                    <p class="text-xs font-medium text-red-800 mb-1">
+                      Estas filas se omitirán:
+                    </p>
+                    @for (item of errorItems(); track item.row_number) {
+                      <p class="text-xs text-red-700">
+                        Fila {{ item.row_number }}: {{ item.errors.join('; ') }}
+                      </p>
+                    }
+                  </div>
+                }
 
                 <!-- Detail table (desktop) -->
                 <div
@@ -745,6 +814,7 @@ interface AnalysisResult {
                     <p class="text-xs text-green-700">
                       Los productos que no existan en el catálogo se crearán automáticamente.
                       Los productos existentes recibirán stock con costo trazable y respaldo contable.
+                      Las filas con error se omitieron; al crear la orden verás el resumen de la carga.
                     </p>
                   </div>
                 </div>
@@ -872,7 +942,7 @@ interface AnalysisResult {
 export class PopBulkDataModalComponent {
   readonly isOpen = model<boolean>(false);
   readonly close = output<void>();
-  readonly dataLoaded = output<any[]>();
+  readonly dataLoaded = output<PopBulkImport>();
 
   private static readonly INTRO_CACHE_KEY = 'vendix_bulk_pop_intro_dismissed';
   private static readonly INTRO_DURATION = 20000;
@@ -908,6 +978,13 @@ export class PopBulkDataModalComponent {
   // Error state
   readonly uploadError = signal<string | null>(null);
 
+  /** Huella del archivo para el registro y el aviso de repetido (QUI-1004). */
+  private readonly fileHash = signal<string | null>(null);
+
+  readonly errorItems = computed(
+    () => this.analysisResult()?.items.filter((i) => i.status === 'error') ?? [],
+  );
+
   readonly totalValidItems = computed(() => {
     const result = this.analysisResult();
     if (!result) return 0;
@@ -915,6 +992,8 @@ export class PopBulkDataModalComponent {
   });
 
   private toastService = inject(ToastService);
+  private purchaseOrdersService = inject(PurchaseOrdersService);
+  private bulkUploadLog = inject(BulkUploadLogService);
 
   constructor() {
     inject(DestroyRef).onDestroy(() => this.clearIntroTimer());
@@ -1013,6 +1092,7 @@ export class PopBulkDataModalComponent {
     this.analysisResult.set(null);
     this.importedItems.set([]);
     this.uploadError.set(null);
+    this.fileHash.set(null);
   }
 
   // Step 0: File operations
@@ -1400,8 +1480,12 @@ export class PopBulkDataModalComponent {
           return;
         }
 
-        const items: AnalyzedItem[] = data.map((row: any) => {
+        const items: AnalyzedItem[] = data.map((row: any, index: number) => {
           const read = this.createRowReader(row);
+          // `__rowNum__` (base 0) lo pone xlsx: sobrevive al filtro de filas
+          // vacías, así «Fila N» es la del Excel.
+          const row_number =
+            (typeof row?.__rowNum__ === 'number' ? row.__rowNum__ : index + 1) + 1;
           const name = this.parseText(read('Nombre', 'name', 'producto'));
           const sku = this.parseText(read('SKU', 'sku', 'código', 'codigo'));
           const barcodeParsed = this.parseBarcode(
@@ -1491,22 +1575,15 @@ export class PopBulkDataModalComponent {
           const warnings: string[] = [];
           const errors: string[] = [];
 
-          if (!name && !sku) {
-            errors.push('Falta nombre y SKU');
-          }
-          if (!name && sku) {
-            warnings.push('Falta el nombre del producto');
-          }
-          if (name && !sku) {
-            warnings.push('Falta el SKU');
-          }
+          // QUI-1004 — solo las filas inválidas son error. Si el producto no
+          // existe se crea con la orden (`bulk/check-lines` lo marca abajo).
+          errors.push(
+            ...bulkRowBasicErrors({ sku, barcode, quantity: qty, unit_cost: cost }),
+          );
           if (barcodeParsed.error) {
-            warnings.push(`${barcodeParsed.error}; se importa sin código de barras`);
+            warnings.push(`${barcodeParsed.error}; se ignora el código de barras`);
           }
-          if (isNaN(qty) || qty <= 0) {
-            warnings.push('Cantidad no especificada o inválida');
-          }
-          if (isNaN(cost) || cost <= 0) {
+          if (isNaN(cost) || cost === 0) {
             warnings.push('Precio de compra no especificado');
           }
           if (is_on_sale && (sale_price ?? 0) <= 0) {
@@ -1521,6 +1598,7 @@ export class PopBulkDataModalComponent {
           }
 
           return {
+            row_number,
             name,
             sku,
             barcode,
@@ -1551,15 +1629,32 @@ export class PopBulkDataModalComponent {
           };
         });
 
+        // QUI-1004 — cada fila debe ser un producto EXISTENTE de la tienda.
+        try {
+          await this.matchExistingProducts(items);
+        } catch {
+          this.uploadError.set(
+            'No se pudieron validar los productos contra el catálogo. Intenta de nuevo.',
+          );
+          this.isProcessing.set(false);
+          this.currentStep.set(0);
+          return;
+        }
+        this.fileHash.set(await this.bulkUploadLog.fingerprint(file));
+
         const valid = items.filter((i) => i.status === 'ready').length;
         const withWarnings = items.filter((i) => i.status === 'warning').length;
         const withErrors = items.filter((i) => i.status === 'error').length;
+        const newProducts = items.filter(
+          (i) => i.status !== 'error' && i.will_create,
+        ).length;
 
         this.analysisResult.set({
           total: items.length,
           valid,
           warnings: withWarnings,
           errors: withErrors,
+          new_products: newProducts,
           items,
         });
 
@@ -1567,7 +1662,7 @@ export class PopBulkDataModalComponent {
 
         if (withErrors > 0) {
           this.toastService.warning(
-            `${withErrors} producto(s) con errores detectados`,
+            `${withErrors} fila(s) con error se omitirán`,
           );
         }
       } catch (err) {
@@ -1584,19 +1679,78 @@ export class PopBulkDataModalComponent {
     reader.readAsBinaryString(file);
   }
 
-  confirmImport() {
+  async confirmImport() {
     const result = this.analysisResult();
-    if (!result) return;
+    const file = this.selectedFile();
+    if (!result || !file) return;
+
+    // QUI-1004 — aviso de archivo repetido; Cancelar no agrega nada.
+    const fileHash = this.fileHash();
+    if (
+      !(await this.bulkUploadLog.confirmFileIsNew('purchase_orders', fileHash))
+    ) {
+      return;
+    }
 
     const validItems = result.items
       .filter((i) => i.status !== 'error')
-      .map(({ status, warnings, errors, ...item }) => item);
+      .map(({ status, warnings, errors, row_number, ...item }) => item);
 
     this.importedItems.set(validItems);
     this.currentStep.set(2);
-    this.dataLoaded.emit(validItems);
+    this.dataLoaded.emit({
+      items: validItems,
+      summary: {
+        file_name: file.name,
+        file_hash: fileHash,
+        total_rows: result.total,
+        failed_rows: result.errors,
+      },
+    });
     this.toastService.success(
-      `${validItems.length} producto(s) importados al pedido`,
+      `${validItems.length} producto(s) agregados al pedido`,
     );
+  }
+
+  /**
+   * Empareja las filas sin error con productos existentes (`bulk/check-lines`,
+   * de a 100). La fila sin producto NO es error: se marca `will_create` y se
+   * crea con la orden (si trae nombre); la emparejada completa nombre/SKU
+   * desde el catálogo para que el carrito la reconozca aunque el Excel solo
+   * traiga el código de barras. Reglas en `bulk-row-check.util`.
+   */
+  private async matchExistingProducts(items: AnalyzedItem[]): Promise<void> {
+    const pending = items.filter((i) => i.errors.length === 0);
+    const chunks: AnalyzedItem[][] = [];
+    for (let start = 0; start < pending.length; start += CHECK_LINES_CHUNK) {
+      chunks.push(pending.slice(start, start + CHECK_LINES_CHUNK));
+    }
+    // Up to CHECK_LINES_CONCURRENCY batches in flight (10.000 rows used to be
+    // 100 sequential calls) and one retry per batch before aborting.
+    await mapWithConcurrency(chunks, CHECK_LINES_CONCURRENCY, async (chunk) => {
+      const response = await firstValueFrom(
+        this.purchaseOrdersService.checkBulkLines(
+          chunk.map((i) => ({
+            ...(i.sku ? { sku: i.sku } : {}),
+            ...(i.barcode ? { barcode: i.barcode } : {}),
+          })),
+        ),
+      );
+      const results: CheckBulkPurchaseLineResult[] = response?.data?.items ?? [];
+      chunk.forEach((item, index) => {
+        applyBulkLineMatch(
+          item,
+          results.find((r) => r.index === index),
+        );
+      });
+    });
+    for (const item of items) {
+      item.status =
+        item.errors.length > 0
+          ? 'error'
+          : item.warnings.length > 0
+            ? 'warning'
+            : 'ready';
+    }
   }
 }

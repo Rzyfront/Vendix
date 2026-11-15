@@ -41,6 +41,11 @@ import {
   ImportLocation,
   ImportPersonType,
 } from '../../services/customer-ai-import.service';
+import { BulkUploadLogService } from '../../../bulk-uploads/services/bulk-upload-log.service';
+import {
+  BulkUploadFileInfo,
+  toBulkUploadFileInfo,
+} from '../../../bulk-uploads/bulk-upload-log.interface';
 
 const MAX_DOCUMENT_BYTES = 10 * 1024 * 1024;
 const MAX_SHEET_BYTES = 5 * 1024 * 1024;
@@ -608,6 +613,9 @@ export class CustomerAiImportModalComponent {
   private readonly destroyRef = inject(DestroyRef);
   private readonly service = inject(CustomerAiImportService);
   private readonly toast = inject(ToastService);
+  private readonly bulkUploadLog = inject(BulkUploadLogService);
+  /** QUI-1004 — huella del archivo escaneado y carga anterior, si la hay. */
+  private fileInfo: BulkUploadFileInfo = {};
 
   readonly isOpen = input<boolean>(false);
   readonly close = output<void>();
@@ -748,8 +756,12 @@ export class CustomerAiImportModalComponent {
     this.scanStalled.set(false);
 
     let scanWarnings: string[] = [];
+    this.fileInfo = {};
     this.scanSub = this.service
-      .scan(file, { onStall: () => this.scanStalled.set(true) })
+      .scan(file, {
+        onStall: () => this.scanStalled.set(true),
+        onEnqueued: (data) => (this.fileInfo = toBulkUploadFileInfo(data)),
+      })
       .pipe(
         switchMap((res) => {
           if (!res.success || !res.data) {
@@ -945,17 +957,21 @@ export class CustomerAiImportModalComponent {
 
   // ---------------------------------------------------------------- commit
 
-  onCommit(): void {
+  async onCommit(): Promise<void> {
     if (!this.aiAck()) {
       this.ackBlock()?.requestAttention();
       return;
     }
     if (!this.canCommit()) return;
+    // QUI-1004 — aviso de archivo repetido; Cancelar no carga nada.
+    if (!(await this.bulkUploadLog.confirmDuplicate(this.fileInfo.duplicate_of))) {
+      return;
+    }
 
     const payload = this.customers().map((c) => this.toCommitItem(c));
     this.committing.set(true);
     this.service
-      .commit(payload)
+      .commit(payload, this.fileInfo)
       .pipe(takeUntilDestroyed(this.destroyRef))
       .subscribe({
         next: (res) => {

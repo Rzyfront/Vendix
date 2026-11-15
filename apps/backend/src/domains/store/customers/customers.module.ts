@@ -1,3 +1,4 @@
+import { BulkUploadsModule } from '../bulk-uploads/bulk-uploads.module';
 import { Module, OnModuleInit } from '@nestjs/common';
 import { AIToolRegistry } from '../../../ai-engine/tools/ai-tool-registry';
 import { createCustomerTools } from '../../../ai-engine/tools/domains/customers.tools';
@@ -24,7 +25,13 @@ import { EmailModule } from '../../../email/email.module';
 import { AddressesModule } from '../addresses/addresses.module';
 
 @Module({
-  imports: [ResponseModule, MetadataModule, EmailModule, AddressesModule],
+  imports: [
+    ResponseModule,
+    MetadataModule,
+    EmailModule,
+    AddressesModule,
+    BulkUploadsModule,
+  ],
   controllers: [
     CustomersController,
     CustomersBulkController,

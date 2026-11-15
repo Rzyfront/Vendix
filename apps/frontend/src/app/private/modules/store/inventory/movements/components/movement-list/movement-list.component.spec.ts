@@ -65,4 +65,18 @@ describe('MovementListComponent movement direction display', () => {
     expect(component.formatQuantity(20)).toBe('+20');
     expect(component.quantityColor()).toBe('var(--color-success)');
   });
+
+  // Hallazgo demo 11-nov (T6): los consumos de receta salían como «consumption».
+  it('traduce los tipos de la suite de restaurante y los consumos restan stock', () => {
+    expect(component.getTypeLabel('consumption')).toBe('Consumo de insumos');
+    expect(component.getTypeLabel('production')).toBe('Producción');
+    expect(component.formatQuantity(3, movement('consumption'))).toBe('-3');
+    expect(component.formatQuantity(3, movement('production'))).toBe('+3');
+  });
+
+  it('la tarjeta muestra el tipo de movimiento, no «[object Object]»', () => {
+    const subtitle = component.cardConfig.subtitleTransform!;
+    expect(subtitle(movement('stock_in'))).toBe('Entrada');
+    expect(subtitle(movement('consumption'))).toBe('Consumo de insumos');
+  });
 });

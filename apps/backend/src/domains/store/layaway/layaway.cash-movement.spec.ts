@@ -35,13 +35,18 @@ describe('LayawayService.makePayment — movimiento de caja (B04)', () => {
     },
   });
 
-  const build = (tx: any, recordModuleCashMovement: jest.Mock) => {
+  const build = (
+    tx: any,
+    recordModuleCashMovement: jest.Mock,
+    assertSessionForSales: jest.Mock = jest.fn().mockResolvedValue(undefined),
+  ) => {
     const prisma = { $transaction: jest.fn((fn: any) => fn(tx)) };
     const service = new LayawayService(
       prisma as any,
       {} as any,
       { emit: jest.fn() } as any,
       { recordModuleCashMovement } as any,
+      { assertSessionForSales } as any,
     );
     jest.spyOn(RequestContextService, 'getContext').mockReturnValue({
       store_id: 10,
@@ -95,5 +100,52 @@ describe('LayawayService.makePayment — movimiento de caja (B04)', () => {
     const record = jest.fn();
     await build(tx, record).makePayment(12, { amount: 50000 } as any);
     expect(record).not.toHaveBeenCalled();
+  });
+
+  describe('QUI-893 — gate de caja antes de la tx', () => {
+    const blockedGate = () =>
+      jest.fn().mockRejectedValue(new Error('CASH_SESSION_REQUIRED_001'));
+
+    it('abono sin caja abierta (cualquier método) se bloquea sin abrir la tx', async () => {
+      const tx = makeTx('credit_card');
+      const gate = blockedGate();
+      const service = build(tx, jest.fn(), gate);
+      await expect(
+        service.makePayment(12, {
+          amount: 50000,
+          store_payment_method_id: 4,
+        } as any),
+      ).rejects.toThrow('CASH_SESSION_REQUIRED_001');
+      expect(gate).toHaveBeenCalledWith(9);
+      expect((service as any).prisma.$transaction).not.toHaveBeenCalled();
+      expect(tx.layaway_payments.create).not.toHaveBeenCalled();
+    });
+
+    it('separado con cuota inicial sin caja abierta se bloquea antes de crear nada', async () => {
+      const tx = makeTx('cash');
+      const gate = blockedGate();
+      const service = build(tx, jest.fn(), gate);
+      await expect(
+        service.create({
+          customer_id: 3,
+          items: [],
+          down_payment_amount: 20000,
+          down_payment_method_id: 4,
+        } as any),
+      ).rejects.toThrow('CASH_SESSION_REQUIRED_001');
+      expect(gate).toHaveBeenCalledWith(9);
+      expect((service as any).prisma.$transaction).not.toHaveBeenCalled();
+    });
+
+    it('separado sin cuota inicial no exige caja', async () => {
+      const gate = blockedGate();
+      const service = build(makeTx(null), jest.fn(), gate);
+      // Falla después por datos incompletos del mock; lo que importa es que
+      // el gate no se consultó.
+      await service
+        .create({ customer_id: 3, items: [] } as any)
+        .catch(() => undefined);
+      expect(gate).not.toHaveBeenCalled();
+    });
   });
 });

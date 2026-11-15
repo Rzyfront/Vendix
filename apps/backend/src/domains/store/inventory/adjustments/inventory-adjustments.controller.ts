@@ -26,6 +26,7 @@ import {
   ApiBearerAuth,
 } from '@nestjs/swagger';
 import { InventoryAdjustmentsService } from './inventory-adjustments.service';
+import { BulkUploadLogsService } from '../../bulk-uploads/bulk-upload-logs.service';
 import { InventoryAdjustmentsBulkService } from './inventory-adjustments-bulk.service';
 import { InventoryCountScannerService } from './inventory-count-scanner.service';
 import { AiScanJobService } from '@common/ai-scan-jobs/ai-scan-job.service';
@@ -55,6 +56,7 @@ export class InventoryAdjustmentsController {
     private readonly inventoryCountScanner: InventoryCountScannerService,
     private readonly aiScanJobs: AiScanJobService,
     private readonly responseService: ResponseService,
+    private readonly bulkUploadLogs: BulkUploadLogsService,
   ) {}
 
   @Get('bulk/template/download')
@@ -105,6 +107,17 @@ export class InventoryAdjustmentsController {
       file.buffer,
       upload_dto,
     );
+    // QUI-1004 — la carga directa también deja su fila en el registro.
+    const fileInfo = await this.bulkUploadLogs.describeFile(
+      'inventory_adjustments',
+      file.buffer,
+      file.originalname,
+    );
+    await this.bulkUploadLogs.trackUpload(
+      'inventory_adjustments',
+      fileInfo,
+      result,
+    );
 
     if (result.failed > 0) {
       return this.responseService.success(
@@ -137,7 +150,16 @@ export class InventoryAdjustmentsController {
     @Body() upload_dto: BulkAdjustmentUploadDto,
   ) {
     const result = await this.bulkService.analyzeFile(file.buffer, upload_dto);
-    return this.responseService.success(result, 'Analisis completado');
+    // QUI-1004 — huella del archivo y aviso si esta tienda ya lo cargó.
+    const fileInfo = await this.bulkUploadLogs.describeFile(
+      'inventory_adjustments',
+      file.buffer,
+      file.originalname,
+    );
+    return this.responseService.success(
+      { ...result, ...fileInfo },
+      'Analisis completado',
+    );
   }
 
   @Post('bulk/upload-session')
@@ -150,11 +172,18 @@ export class InventoryAdjustmentsController {
   async uploadBulkAdjustmentsFromSession(
     @Body() body: BulkAdjustmentUploadSessionDto,
   ) {
-    const { session_id, offset, limit, ...upload_dto } = body;
+    const { session_id, offset, limit, file_name, file_hash, ...upload_dto } =
+      body;
     const result = await this.bulkService.uploadFromSession(
       session_id,
       upload_dto as BulkAdjustmentUploadDto & { initial_load_ack?: boolean },
       { offset, limit },
+    );
+    await this.bulkUploadLogs.trackSessionPage(
+      'inventory_adjustments',
+      session_id,
+      { file_name, file_hash },
+      result,
     );
 
     if (result.failed > 0) {

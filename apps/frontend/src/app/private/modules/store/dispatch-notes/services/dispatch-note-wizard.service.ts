@@ -9,6 +9,7 @@ import {
   DISPATCH_SUBTYPE_BY_DIRECTION,
   DISPATCH_REASON_BY_SUBTYPE,
 } from '../interfaces/dispatch-note.interface';
+import type { DispatchNoteExcelUpload } from '../utils/dispatch-note-bulk-upload.util';
 
 // ============================================================================
 // INTERFACES — order-first wizard (ref 2026-06-25)
@@ -117,6 +118,17 @@ export class DispatchNoteWizardService {
    * debe volver a resaltar, y un booleano ya en `true` no emitiría cambio.
    */
   readonly aiAckAttention = signal(0);
+
+  /**
+   * QUI-1004 — Excel files imported into this note (purchase receipt). Each
+   * one is registered in the bulk upload log once the note is created; a
+   * list so two files loaded into the same note are both recorded.
+   */
+  readonly excelUploads = signal<DispatchNoteExcelUpload[]>([]);
+
+  addExcelUpload(upload: DispatchNoteExcelUpload): void {
+    this.excelUploads.update((list) => [...list, upload]);
+  }
   readonly details = signal<WizardDetails>({ currency: 'COP' });
 
   readonly routeMode = signal<WizardRouteMode>('none');
@@ -566,6 +578,7 @@ export class DispatchNoteWizardService {
     this.currentStep.set(0);
     this.aiPrefilled.set(false);
     this.aiAck.set(false);
+    this.excelUploads.set([]);
     this.direction.set('outbound');
     this.subtype.set('customer_delivery');
     this.reason.set(null);

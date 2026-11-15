@@ -17,8 +17,10 @@ import { ResponseService } from '@common/responses/response.service';
 import { VendixHttpException, ErrorCodes } from '@common/errors';
 import { MemberBulkScannerService } from './member-bulk-scanner.service';
 import { AiScanJobService } from '@common/ai-scan-jobs/ai-scan-job.service';
+import { BulkUploadLogsService } from '../bulk-uploads/bulk-upload-logs.service';
 import {
   CommitMemberRosterDto,
+  CommitMemberRosterResult,
   RosterScanResult,
 } from './dto/scan-roster.dto';
 import { IndustryModuleGuard } from '../../../common/guards/industry-module.guard';
@@ -41,6 +43,24 @@ import { IndustryModule } from '../../../common/decorators/industry-module.decor
  * emits the correct status + error code; opaque errors get wrapped into
  * `SYS_CONFLICT_001` with the underlying message preserved.
  */
+/**
+ * QUI-1004 — conteos del padrón para el registro de cargas masivas. Si falla
+ * la fase de planes no se persiste ningún miembro: todo cuenta como error.
+ */
+export function rosterUploadCounts(result: CommitMemberRosterResult) {
+  const total = result.ready ?? result.results?.length ?? 0;
+  if (result.plan_errors?.length) {
+    return { total, successful: 0, failed: total, skipped: 0 };
+  }
+  return {
+    total,
+    successful: result.succeeded,
+    failed: result.failed,
+    skipped: (result.results ?? []).filter((r) => r.status === 'skipped')
+      .length,
+  };
+}
+
 @Controller('store/memberships/bulk-scan')
 @UseGuards(PermissionsGuard, IndustryModuleGuard)
 @IndustryModule('memberships_members')
@@ -58,6 +78,7 @@ export class MemberBulkScannerController {
     private readonly scannerService: MemberBulkScannerService,
     private readonly aiScanJobs: AiScanJobService,
     private readonly responseService: ResponseService,
+    private readonly bulkUploadLogs: BulkUploadLogsService,
   ) {}
 
   private fail(error: any, fallback: string): never {
@@ -98,8 +119,13 @@ export class MemberBulkScannerController {
         throw new VendixHttpException(ErrorCodes.MEMBER_SCAN_NO_FILE);
       }
       const result = await this.scannerService.scanRoster(file);
+      const fileInfo = await this.bulkUploadLogs.describeFile(
+        'memberships',
+        file.buffer,
+        file.originalname,
+      );
       return this.responseService.success(
-        result,
+        { ...result, ...fileInfo },
         'Padrón escaneado exitosamente',
       );
     } catch (error) {
@@ -124,7 +150,17 @@ export class MemberBulkScannerController {
         [this.scannerService.toScanFile(file!)],
         {},
       );
-      return this.responseService.success({ job_id }, 'Escaneo encolado');
+      // QUI-1004 — huella del archivo y carga anterior de esta tienda con la
+      // misma huella; el cliente la devuelve en el commit.
+      const fileInfo = await this.bulkUploadLogs.describeFile(
+        'memberships',
+        file!.buffer,
+        file!.originalname,
+      );
+      return this.responseService.success(
+        { job_id, ...fileInfo },
+        'Escaneo encolado',
+      );
     } catch (error) {
       this.fail(error, 'Error al encolar el escaneo del padrón');
     }
@@ -155,6 +191,11 @@ export class MemberBulkScannerController {
   async commit(@Body() dto: CommitMemberRosterDto) {
     try {
       const result = await this.scannerService.commitRoster(dto);
+      await this.bulkUploadLogs.trackUpload(
+        'memberships',
+        dto,
+        rosterUploadCounts(result),
+      );
       return this.responseService.success(
         result,
         'Padrón cargado exitosamente',

@@ -64,6 +64,9 @@ const STORE_KNOWN = [
   { path: '/account', index: false },
 ];
 const UNKNOWN = '/ruta-que-no-existe-seo-smoke';
+// Título de la web comercial en la shell compartida (apps/frontend/src/index.html).
+// En el HTML servido de una tienda indica que el bot ve la landing de Vendix y no la tienda.
+const MARKETING_TITLE = 'Vendix — Plataforma de gestión y e-commerce para tu negocio';
 
 const pick = (html, re) => { const m = html.match(re); return m ? m[1].trim() : null; };
 const visibleText = html => (html.split(/<body[^>]*>/i)[1] || '')
@@ -172,6 +175,14 @@ function createSmoke(opts = {}) {
       const desc = pick(html, /<meta[^>]+name=["']description["'][^>]*content=["']([^"']+)/i);
       const expected = base + (r.path === '/' ? '/' : r.path);
       if (r.index) add('metadata', r.path + ' canonical propio (HTML servido)', canonical === expected ? 'OK' : 'FALLA', String(canonical));
+      if (host !== APEX_HOST) {
+        // SEO-TECH-15: una tienda nunca declara como propia una URL de otro host (vendix.online u otra tienda).
+        const ogUrl = pick(html, /<meta[^>]+property=["']og:url["'][^>]*content=["']([^"']+)/i);
+        const foreign = [['canonical', canonical], ['og:url', ogUrl]].filter(([, u]) => u && hostOf(resolveLoc(u, base + r.path)) !== host.toLowerCase());
+        add('host-cruzado', r.path + ' canonical y og:url del propio host', foreign.length ? 'FALLA' : 'OK',
+          foreign.length ? foreign.map(([k, u]) => k + ' → ' + hostOf(resolveLoc(u, base + r.path))).join(', ') : 'sin URL de otro host', { id: 'tienda-host-cruzado' });
+        if (title === MARKETING_TITLE) add('host-cruzado', r.path + ' título propio de la tienda en el HTML servido', 'AVISO', 'título de la web comercial de Vendix', { id: 'tienda-titulo-comercial' });
+      }
       const noindex = /noindex/i.test(robots);
       add('metadata', r.path + (r.index ? ' indexable' : ' noindex'), r.index === !noindex ? 'OK' : 'FALLA', robots);
       const text = visibleText(html).length;
@@ -287,5 +298,5 @@ async function main() {
   process.exitCode = report.exitCode;
 }
 
-module.exports = { createSmoke, formatReport, parseArgs, TOKEN_RE, KNOWN, STORE_KNOWN };
+module.exports = { createSmoke, formatReport, parseArgs, TOKEN_RE, KNOWN, STORE_KNOWN, MARKETING_TITLE };
 if (require.main === module) main();

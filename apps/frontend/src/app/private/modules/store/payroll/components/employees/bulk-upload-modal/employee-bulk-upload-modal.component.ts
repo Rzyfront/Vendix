@@ -4,6 +4,8 @@ import { takeUntilDestroyed } from '@angular/core/rxjs-interop';
 import { NgClass } from '@angular/common';
 import { CurrencyPipe } from '../../../../../../../shared/pipes/currency';
 import { PayrollService } from '../../../services/payroll.service';
+import { BulkUploadLogService } from '../../../../bulk-uploads/services/bulk-upload-log.service';
+import { BulkUploadFileInfo } from '../../../../bulk-uploads/bulk-upload-log.interface';
 import { parseApiError } from '../../../../../../../core/utils/parse-api-error';
 import {
   ModalComponent,
@@ -994,6 +996,8 @@ export class EmployeeBulkUploadModalComponent {
   readonly retryOffset = signal<number | null>(null);
 
   private payrollService = inject(PayrollService);
+  private bulkUploadLog = inject(BulkUploadLogService);
+  private fileInfo: BulkUploadFileInfo = {};
   private toastService = inject(ToastService);
   private destroyRef = inject(DestroyRef);
 
@@ -1121,6 +1125,7 @@ export class EmployeeBulkUploadModalComponent {
     this.isAnalyzing.set(false);
     this.analysisResult.set(null);
     this.sessionId.set(null);
+    this.fileInfo = {};
     this.isUploading.set(false);
     this.uploadResults.set(null);
     this.uploadError.set(null);
@@ -1214,6 +1219,11 @@ export class EmployeeBulkUploadModalComponent {
         this.isAnalyzing.set(false);
         this.analysisResult.set(result);
         this.sessionId.set(result.session_id);
+        this.fileInfo = {
+          file_name: result.file_name,
+          file_hash: result.file_hash,
+          duplicate_of: result.duplicate_of,
+        };
 
         if (result.with_errors > 0) {
           this.toastService.warning(
@@ -1233,8 +1243,12 @@ export class EmployeeBulkUploadModalComponent {
   }
 
   // Step 1 -> 2: Upload (páginas de 100 en serie; una página fallida detiene la cadena)
-  proceedWithUpload() {
+  async proceedWithUpload() {
     if (!this.sessionId()) return;
+    // QUI-1004: warn about a repeated file before any commit call.
+    if (!(await this.bulkUploadLog.confirmDuplicate(this.fileInfo.duplicate_of))) {
+      return;
+    }
     this.uploadResults.set(null);
     this.progressState.set({
       doneRows: 0,
@@ -1262,7 +1276,12 @@ export class EmployeeBulkUploadModalComponent {
     this.currentStep.set(2);
 
     const fetchPage = (offset: number) =>
-      this.payrollService.uploadBulkEmployeesSessionPage(sessionId, offset, limit);
+      this.payrollService.uploadBulkEmployeesSessionPage(
+        sessionId,
+        offset,
+        limit,
+        this.fileInfo,
+      );
 
     fetchPage(startOffset)
       .pipe(

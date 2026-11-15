@@ -11,6 +11,10 @@ import {
   ValidateNested,
 } from 'class-validator';
 import { Type } from 'class-transformer';
+import {
+  BulkFileHashField,
+  BulkFileNameField,
+} from '../../../bulk-uploads/dto/bulk-upload-log.dto';
 
 export const IMPORT_MAX_CUSTOMERS = 200;
 export const IMPORT_MAX_LOCATIONS = 50;
@@ -118,6 +122,13 @@ export class CommitCustomerImportDto {
   @ValidateNested({ each: true })
   @Type(() => CommitCustomerItemDto)
   customers: CommitCustomerItemDto[];
+
+  /** QUI-1004 — devueltos por `async` para el registro de cargas masivas. */
+  @BulkFileNameField()
+  file_name?: string;
+
+  @BulkFileHashField()
+  file_hash?: string;
 }
 
 // ── Response shapes ───────────────────────────────────────────────────────

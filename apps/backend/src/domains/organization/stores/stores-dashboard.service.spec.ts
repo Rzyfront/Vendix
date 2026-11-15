@@ -88,6 +88,55 @@ describe('StoresDashboardService', () => {
     expect(result.comparison.expenses_growth).toBeNull();
   });
 
+  it('reports no failed stores when every store succeeds', async () => {
+    const result = await RequestContextService.runIsolated(ctx, () =>
+      service.getProfitLossSummary({} as any),
+    );
+    expect(result.failed_stores).toEqual([]);
+  });
+
+  it('aggregates the healthy stores and lists the one that failed (QUI-987)', async () => {
+    prisma.stores.findMany.mockResolvedValue([
+      { id: 1, name: 'Centro' },
+      { id: 2, name: 'Norte' },
+    ]);
+    analytics.getProfitLossSummary.mockImplementation(async () => {
+      const id = RequestContextService.getContext()?.store_id;
+      if (id === 2) throw new RangeError('Invalid time zone specified');
+      return summary(1);
+    });
+
+    const result = await RequestContextService.runIsolated(ctx, () =>
+      service.getProfitLossSummary({} as any),
+    );
+
+    expect(analytics.getProfitLossSummary).toHaveBeenCalledTimes(2);
+    expect(result.store_count).toBe(1);
+    expect(result.cash.income).toBe(100);
+    expect(result.operating_expenses).toBe(40);
+    expect(result.failed_stores).toEqual([{ id: 2, name: 'Norte' }]);
+  });
+
+  it('still fails when every store fails, instead of returning zeros', async () => {
+    analytics.getProfitLossSummary.mockRejectedValue(new Error('db down'));
+
+    await expect(
+      RequestContextService.runIsolated(ctx, () =>
+        service.getProfitLossSummary({} as any),
+      ),
+    ).rejects.toThrow('db down');
+  });
+
+  it('returns zeros without error when the organization has no active stores', async () => {
+    prisma.stores.findMany.mockResolvedValue([]);
+    const result = await RequestContextService.runIsolated(ctx, () =>
+      service.getProfitLossSummary({} as any),
+    );
+    expect(result.store_count).toBe(0);
+    expect(result.cash.income).toBe(0);
+    expect(result.failed_stores).toEqual([]);
+  });
+
   it('throws when there is no organization_id', async () => {
     await expect(
       RequestContextService.runIsolated(

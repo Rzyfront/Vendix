@@ -16,6 +16,8 @@ Controles con id (solo `vendix.online` los dos primeros):
 | `robots-200`, `sitemap-200` | `robots.txt` y `sitemap.xml` responden 200 |
 | `sitemap-hosts` | el sitemap no lista hosts ajenos (extra: `SEO_SMOKE_ALLOWED_HOSTS=a.com,b.com`) |
 | `sitemap-tokens` | el sitemap no lista URL con token (pedido, order, factura); no se piden ni se imprimen |
+| `tienda-host-cruzado` | en una tienda, el canonical y el og:url del HTML servido no apuntan a otro host (vendix.online u otra tienda) |
+| `tienda-titulo-comercial` | AVISO: el HTML servido de la tienda trae el título de la web comercial de Vendix (shell compartida); no bloquea |
 | `http-https` | `http://<host>/` responde 301/308 a https |
 | `hsts`, `nosniff`, `referrer-policy` | la portada trae `Strict-Transport-Security`, `X-Content-Type-Options: nosniff` y `Referrer-Policy` |
 
@@ -45,7 +47,7 @@ El workflow `.github/workflows/seo-smoke.yml` corre cada 6 h y bajo demanda; no 
 
 ### Alerta (SEO-TECH-22)
 
-Desde el 5-nov el workflow trae `SEO_SMOKE_ENFORCE` con los controles que ya pasan en producción: `www-apex`, `precios-pricing`, `archivo-404`, `http-https`, `hsts`, `nosniff`, `referrer-policy`, `robots-200`, `sitemap-200`, `sitemap-hosts` y `sitemap-tokens`. Si alguno se rompe, el job falla y GitHub envía el correo de fallo de la corrida programada.
+Desde el 5-nov el workflow trae `SEO_SMOKE_ENFORCE` con los controles que ya pasan en producción: `www-apex`, `precios-pricing`, `archivo-404`, `http-https`, `hsts`, `nosniff`, `referrer-policy`, `robots-200`, `sitemap-200`, `sitemap-hosts` y `sitemap-tokens`; desde el 12-nov también `tienda-host-cruzado`. Si alguno se rompe, el job falla y GitHub envía el correo de fallo de la corrida programada.
 
 | Qué falla | Primer paso | Reversa |
 |---|---|---|

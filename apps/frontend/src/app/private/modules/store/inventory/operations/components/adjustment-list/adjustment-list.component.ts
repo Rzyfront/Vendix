@@ -173,7 +173,10 @@ export class AdjustmentListComponent {
     titleTransform: (item: any) =>
       item.products?.name || item.product?.name || 'Sin producto',
     subtitleKey: 'adjustment_type',
-    subtitleTransform: (val: AdjustmentType) => this.getTypeLabel(val),
+    // item-list pasa la fila completa a subtitleTransform (no el valor de
+    // subtitleKey); con el valor, la tarjeta mostraba «[object Object]».
+    subtitleTransform: (item: { adjustment_type: AdjustmentType }) =>
+      this.getTypeLabel(item.adjustment_type),
     badgeKey: 'adjustment_type',
     badgeConfig: {
       type: 'custom',

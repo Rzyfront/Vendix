@@ -88,6 +88,25 @@
     }
   }
 
+  &__notice {
+    width: 100%;
+    display: flex;
+    align-items: flex-start;
+    gap: 0.5rem;
+    margin: 0;
+    padding: 0.75rem;
+    border-radius: var(--radius-md, 0.5rem);
+    background-color: var(--color-info-light);
+    color: var(--color-text-primary, #111827);
+    font-size: 0.8125rem;
+    text-align: left;
+
+    app-icon {
+      flex-shrink: 0;
+      color: var(--color-info);
+    }
+  }
+
   &__actions {
     width: 100%;
     display: flex;

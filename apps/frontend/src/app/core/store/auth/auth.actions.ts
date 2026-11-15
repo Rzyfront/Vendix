@@ -150,7 +150,7 @@ export const setError = createAction(
 export const forgotOwnerPassword = createAction(
   '[Auth] Forgot Owner Password',
 
-  props<{ organization_slug: string; email: string }>(),
+  props<{ organization_slug?: string; email: string }>(),
 );
 
 export const forgotOwnerPasswordSuccess = createAction(

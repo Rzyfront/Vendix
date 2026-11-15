@@ -1,5 +1,5 @@
 import { Component, signal, inject, effect, untracked, computed, DestroyRef } from '@angular/core';
-import { Router } from '@angular/router';
+import { ActivatedRoute, Router } from '@angular/router';
 import { takeUntilDestroyed, toSignal } from '@angular/core/rxjs-interop';
 import { EChartsOption } from 'echarts';
 
@@ -32,6 +32,11 @@ import {
   hasIncompleteCost as hasIncompleteCostFn,
 } from './utils/profit-loss-cards.util';
 import { StoreDashboardService } from './services/store-dashboard.service';
+import { RemindersLogComponent } from './components/reminders-log/reminders-log.component';
+import {
+  ScrollableTab,
+  ScrollableTabsComponent,
+} from '../../../../shared/components/scrollable-tabs/scrollable-tabs.component';
 
 // Channel → CSS variable mapping for the pie chart
 const CHANNEL_COLOR_VAR: Record<string, string> = {
@@ -82,6 +87,8 @@ interface FixedPeriodState {
     IconComponent,
     OptionsDropdownComponent,
     EmptyStateComponent,
+    ScrollableTabsComponent,
+    RemindersLogComponent,
   ],
   template: `
     <div class="w-full space-y-4 pb-6">
@@ -157,15 +164,18 @@ interface FixedPeriodState {
         </div>
       }
 
-      <!-- Charts: Trend (2/3) + Channels (1/3) -->
-      <div class="grid grid-cols-1 lg:grid-cols-3 gap-4">
-        <!-- Sales Trend Chart -->
-        <div class="lg:col-span-2 bg-surface rounded-xl shadow-[0_2px_8px_rgba(0,0,0,0.07)] md:border md:border-border overflow-hidden flex flex-col">
-          <div class="p-4 border-b border-border flex items-center justify-between gap-2">
-            <div>
-              <h3 class="font-semibold text-text-primary text-sm">Tendencia de Ventas</h3>
-              <p class="text-xs text-text-secondary">{{ dateRangeLabel() }}</p>
-            </div>
+      <!-- Charts card: Gráfico / Rosa / Bitácora tabs -->
+      <div class="bg-surface rounded-xl shadow-[0_2px_8px_rgba(0,0,0,0.07)] md:border md:border-border overflow-hidden flex flex-col">
+        <div class="p-4 border-b border-border flex items-center justify-between gap-2">
+          <app-scrollable-tabs
+            class="min-w-0 flex-1"
+            [tabs]="chartsTabs"
+            [activeTab]="chartsTab()"
+            size="sm"
+            ariaLabel="Vistas del dashboard"
+            (tabChange)="chartsTab.set($event)"
+          />
+          @if (chartsTab() !== 'log') {
             <app-options-dropdown
               [filters]="dateFilters()"
               [filterValues]="dateFilterValues()"
@@ -176,50 +186,61 @@ interface FixedPeriodState {
               (filterChange)="onDateFilterChange($event)"
               (clearAllFilters)="onClearDateFilters()"
             />
-          </div>
-          <div class="p-4 flex-1">
-            @if (loadingTrends()) {
-              <div class="h-56 flex items-center justify-center">
-                <div class="animate-spin rounded-full h-8 w-8 border-b-2 border-primary"></div>
-              </div>
-            } @else if (trends().length === 0) {
-              <app-empty-state
-                icon="bar-chart-2"
-                title="No hay datos de ventas"
-                description="Realiza ventas para ver las tendencias"
-                [showActionButton]="false"
-                size="sm"
-              />
-            } @else {
-              <app-chart [options]="trendChartOptions()" size="large"></app-chart>
-            }
-          </div>
+          }
         </div>
-
-        <!-- Sales by Channel Chart -->
-        <div class="bg-surface rounded-xl shadow-[0_2px_8px_rgba(0,0,0,0.07)] md:border md:border-border overflow-hidden flex flex-col">
-          <div class="p-4 border-b border-border">
-            <h3 class="font-semibold text-text-primary text-sm">Ventas por Canal</h3>
-            <p class="text-xs text-text-secondary">Distribución del período</p>
-          </div>
-          <div class="p-4 flex-1">
-            @if (loadingChannels()) {
-              <div class="h-56 flex items-center justify-center">
-                <div class="animate-spin rounded-full h-8 w-8 border-b-2 border-primary"></div>
-              </div>
-            } @else if (channels().length === 0) {
-              <app-empty-state
-                icon="pie-chart"
-                title="No hay datos de canales"
-                description="Realiza ventas para ver la distribución por canal"
-                [showActionButton]="false"
-                size="sm"
-              />
-            } @else {
-              <app-chart [options]="channelChartOptions()" size="large"></app-chart>
-            }
-          </div>
-        </div>
+        @switch (chartsTab()) {
+          @case ('trend') {
+            <div class="px-4 pt-3">
+              <h3 class="font-semibold text-text-primary text-sm">Tendencia de Ventas</h3>
+              <p class="text-xs text-text-secondary">{{ dateRangeLabel() }}</p>
+            </div>
+            <div class="p-4 flex-1">
+              @if (loadingTrends()) {
+                <div class="h-56 flex items-center justify-center">
+                  <div class="animate-spin rounded-full h-8 w-8 border-b-2 border-primary"></div>
+                </div>
+              } @else if (trends().length === 0) {
+                <app-empty-state
+                  icon="bar-chart-2"
+                  title="No hay datos de ventas"
+                  description="Realiza ventas para ver las tendencias"
+                  [showActionButton]="false"
+                  size="sm"
+                />
+              } @else {
+                <app-chart [options]="trendChartOptions()" size="large"></app-chart>
+              }
+            </div>
+          }
+          @case ('channels') {
+            <div class="px-4 pt-3">
+              <h3 class="font-semibold text-text-primary text-sm">Ventas por Canal</h3>
+              <p class="text-xs text-text-secondary">Distribución del período</p>
+            </div>
+            <div class="p-4 flex-1">
+              @if (loadingChannels()) {
+                <div class="h-56 flex items-center justify-center">
+                  <div class="animate-spin rounded-full h-8 w-8 border-b-2 border-primary"></div>
+                </div>
+              } @else if (channels().length === 0) {
+                <app-empty-state
+                  icon="pie-chart"
+                  title="No hay datos de canales"
+                  description="Realiza ventas para ver la distribución por canal"
+                  [showActionButton]="false"
+                  size="sm"
+                />
+              } @else {
+                <app-chart [options]="channelChartOptions()" size="large"></app-chart>
+              }
+            </div>
+          }
+          @case ('log') {
+            <div class="p-4 flex-1">
+              <app-reminders-log />
+            </div>
+          }
+        }
       </div>
 
       <!-- Alerts (1/2) + Quick Links (1/2) -->
@@ -337,6 +358,7 @@ export class DashboardComponent {
   private readonly currencyService = inject(CurrencyFormatService);
   private readonly toastService = inject(ToastService);
   private readonly router = inject(Router);
+  private readonly activatedRoute = inject(ActivatedRoute);
   private readonly destroyRef = inject(DestroyRef);
 
   // Quick links config
@@ -484,12 +506,28 @@ export class DashboardComponent {
   dispatchPendingCount = signal(0);
   refundPendingCount = signal(0);
 
+  // Charts card tabs (Gráfico / Rosa / Bitácora). `?tab=bitacora` opens the log.
+  readonly chartsTabs: ScrollableTab[] = [
+    { id: 'trend', label: 'Gráfico' },
+    { id: 'channels', label: 'Rosa' },
+    { id: 'log', label: 'Bitácora' },
+  ];
+  readonly chartsTab = signal<string>('trend');
+
   // Charts
   trendChartOptions = signal<EChartsOption>({});
   channelChartOptions = signal<EChartsOption>({});
 
   constructor() {
     this.currencyService.loadCurrency();
+
+    // `?tab=bitacora` (reminder notification deep link) opens the log tab, also
+    // when the dashboard is already open.
+    this.activatedRoute.queryParamMap
+      .pipe(takeUntilDestroyed(this.destroyRef))
+      .subscribe((params) => {
+        if (params.get('tab') === 'bitacora') this.chartsTab.set('log');
+      });
 
     // Bootstrap: al conocer el store, hidrata el período fijado (si lo hay) y
     // carga una sola vez. Hidratar ANTES del fetch evita el flash del rango

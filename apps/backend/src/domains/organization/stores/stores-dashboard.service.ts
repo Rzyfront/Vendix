@@ -1,4 +1,4 @@
-import { Injectable } from '@nestjs/common';
+import { Injectable, Logger } from '@nestjs/common';
 import { OrganizationPrismaService } from '../../../prisma/services/organization-prisma.service';
 import { RequestContextService } from '@common/context/request-context.service';
 import { VendixHttpException, ErrorCodes } from 'src/common/errors';
@@ -16,13 +16,25 @@ type ProfitLossSummary = Awaited<
   ReturnType<FinancialAnalyticsService['getProfitLossSummary']>
 >;
 
+export interface FailedStore {
+  id: number;
+  name: string;
+}
+
 /**
  * Organization-level aggregation of the store dashboard P&L cards (QUI-945).
  * Reuses FinancialAnalyticsService.getProfitLossSummary per store (store
  * context isolated per call) and sums the results. No new metrics.
+ *
+ * QUI-987: a store whose summary fails is left out and reported in
+ * `failed_stores` instead of failing the whole organization view. If every
+ * store fails, the first error is rethrown so the UI never shows zeros as
+ * real figures.
  */
 @Injectable()
 export class StoresDashboardService {
+  private readonly logger = new Logger(StoresDashboardService.name);
+
   constructor(
     private readonly prisma: OrganizationPrismaService,
     private readonly financialAnalytics: FinancialAnalyticsService,
@@ -37,14 +49,16 @@ export class StoresDashboardService {
     // Same criterion as StoresService.getGlobalDashboard: active stores only.
     const stores = await this.prisma.stores.findMany({
       where: { is_active: true },
-      select: { id: true },
+      select: { id: true, name: true },
       orderBy: { id: 'asc' },
     });
 
     const summaries: ProfitLossSummary[] = [];
+    const failedStores: FailedStore[] = [];
+    let firstError: unknown;
     for (let i = 0; i < stores.length; i += STORE_BATCH_SIZE) {
       const batch = stores.slice(i, i + STORE_BATCH_SIZE);
-      const results = await Promise.all(
+      const results = await Promise.allSettled(
         batch.map((store) =>
           RequestContextService.runIsolated(
             { ...context, store_id: store.id },
@@ -52,10 +66,27 @@ export class StoresDashboardService {
           ),
         ),
       );
-      summaries.push(...results);
+      results.forEach((result, index) => {
+        const store = batch[index];
+        if (result.status === 'fulfilled') {
+          summaries.push(result.value);
+          return;
+        }
+        firstError ??= result.reason;
+        failedStores.push({ id: store.id, name: store.name });
+        const reason = result.reason as Error | undefined;
+        this.logger.warn(
+          `Profit-loss summary failed for store_id=${store.id} ` +
+            `(organization_id=${context.organization_id}): ${reason?.message ?? String(result.reason)}`,
+        );
+      });
     }
 
-    return this.aggregate(summaries);
+    if (stores.length > 0 && summaries.length === 0) {
+      throw firstError;
+    }
+
+    return { ...this.aggregate(summaries), failed_stores: failedStores };
   }
 
   private aggregate(summaries: ProfitLossSummary[]) {

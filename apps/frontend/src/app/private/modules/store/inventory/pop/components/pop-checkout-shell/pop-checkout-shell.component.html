@@ -46,6 +46,56 @@
         </div>
       </div>
     }
+    <!-- QUI-942 — resultado parcial: la OC existe y una etapa posterior falló.
+         Se nombra la orden, el estado de cada etapa y el motivo, sin ofrecer
+         nada que vuelva a crear la compra. -->
+    @if (partialResult(); as partial) {
+      <div class="pop-partial-result" role="status">
+        <div class="pop-partial-result__icon">
+          <app-icon name="alert-triangle" [size]="36" />
+        </div>
+        <h3 class="pop-partial-result__title">
+          La orden {{ partial.orderNumber || '#' + partial.id }} se creó, pero un paso no terminó
+        </h3>
+        <p class="pop-partial-result__hint">
+          La orden ya quedó registrada: no vuelvas a cargar ni a crear esta compra.
+        </p>
+        <ul class="pop-partial-result__stages">
+          @for (stage of partial.stages ?? []; track stage.name) {
+            <li class="pop-partial-result__stage" [attr.data-status]="stage.status">
+              <app-icon [name]="stageIcons[stage.status]" [size]="18" />
+              <div>
+                <span class="pop-partial-result__stage-label">{{ stage.label }}</span>
+                <span class="pop-partial-result__stage-status">{{ stageStatusLabels[stage.status] }}</span>
+                @if (stage.errorMessage) {
+                  <p class="pop-partial-result__stage-error">{{ stage.errorMessage }}</p>
+                }
+              </div>
+            </li>
+          }
+        </ul>
+        <div class="pop-partial-result__actions">
+          @if (partial.failedStage === 'receive') {
+            <button
+              type="button"
+              class="btn-confirm"
+              [disabled]="isProcessing()"
+              (click)="retryOrder.emit()"
+            >
+              Reintentar recepción
+            </button>
+          }
+          <button
+            type="button"
+            [class]="partial.failedStage === 'receive' ? 'btn-prev' : 'btn-next'"
+            [disabled]="isProcessing()"
+            (click)="viewOrder.emit()"
+          >
+            Ver orden
+          </button>
+        </div>
+      </div>
+    }
     @if (orderResult() === null && orderError() === null) {
     <!-- Stepper -->
     <div class="pop-checkout-stepper">
@@ -171,8 +221,9 @@
           (click)="onModalClosed()"
           [disabled]="isProcessing()"
         >
-          Cancelar
+          {{ hasResult() ? 'Cerrar' : 'Cancelar' }}
         </button>
+        @if (!hasResult()) {
         @if (!isFirstStep()) {
           <button
             type="button"
@@ -212,11 +263,22 @@
             {{ confirmLabel() }}
           </button>
         }
+        }
       </div>
     </div>
 
     <!-- Footer móvil -->
     <div class="footer-mobile">
+      @if (hasResult()) {
+        <button
+          type="button"
+          class="btn-back-mobile"
+          (click)="onModalClosed()"
+          [disabled]="isProcessing()"
+        >
+          Cerrar
+        </button>
+      } @else {
       <button
         type="button"
         class="btn-back-mobile"
@@ -253,6 +315,7 @@
             <app-icon name="arrow-right" [size]="18"></app-icon>
           }
         </button>
+      }
       }
     </div>
   </div>

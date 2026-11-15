@@ -22,7 +22,8 @@ No tiene inputs. Toda la data viene del `NotificationsFacade` inyectado.
 
 - Se integra con `NotificationsFacade` — observables: `notifications$` y `unreadCount$`
 - Click fuera o `Escape` cierra el dropdown
-- Cada notificacion tiene navegacion automatica al hacer click segun su `type`:
+- Si la notificacion trae `data.route` (ruta absoluta), se usa esa ruta. Asi llegan las del cliente en la tienda en linea (QUI-854): `order_status_change` y `payment_received` dirigidas al comprador traen `route: /account/orders/:id`.
+- Si no, navega segun su `type`:
   - `new_order`, `order_status_change`, `payment_received` -> `/admin/orders/...`
   - `new_customer` -> `/admin/customers/...`
   - `low_stock` -> `/admin/products/...`

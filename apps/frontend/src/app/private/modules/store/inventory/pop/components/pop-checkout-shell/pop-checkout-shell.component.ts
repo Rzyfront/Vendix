@@ -40,6 +40,9 @@ import { PopConfigStepComponent } from './steps/pop-config-step.component';
 
 export type PopCheckoutAction = 'create' | 'create-receive';
 
+/** Estado de una etapa de la cadena crear → recibir → pagar. */
+type PopOrderStageStatus = 'success' | 'failed' | 'skipped';
+
 /**
  * PASO 4 QUI-647 — `app-pop-checkout-shell`.
  *
@@ -196,6 +199,8 @@ export class PopCheckoutShellComponent {
    * de error del wizard (no del modal).
    */
   readonly retryOrder = output<void>();
+  /** QUI-942 — «Ver orden» del panel de resultado parcial. */
+  readonly viewOrder = output<void>();
   readonly pricingOverridesChange = output<PopPricingOverridesMap>();
   readonly ackReceiveChange = output<boolean>();
   readonly paymentPlanChange = output<PopPaymentPlan>();
@@ -303,6 +308,31 @@ export class PopCheckoutShellComponent {
           : 'Confirmación · Revisar la orden';
     }
   });
+
+  /**
+   * QUI-942 — la OC se creó pero una etapa posterior (recepción o pago) falló.
+   * Antes este estado no tenía vista: el cuerpo quedaba en blanco y el pie
+   * seguía ofreciendo «Confirmar» con el carrito ya vacío.
+   */
+  readonly partialResult = computed(() => {
+    const result = this.orderResult();
+    return result?.failedStage ? result : null;
+  });
+
+  /** Icono y texto por estado de etapa del panel de resultado parcial. */
+  readonly stageIcons: Record<PopOrderStageStatus, string> = {
+    success: 'check-circle',
+    failed: 'x-circle',
+    skipped: 'minus-circle',
+  };
+  readonly stageStatusLabels: Record<PopOrderStageStatus, string> = {
+    success: 'Hecho',
+    failed: 'Falló',
+    skipped: 'Omitido',
+  };
+
+  /** Con un resultado en pantalla el pie solo ofrece cerrar: nada re-envía. */
+  readonly hasResult = computed<boolean>(() => this.orderResult() !== null);
 
   /** Flash del botón "Siguiente" cuando un paso no deja avanzar. */
   readonly buttonFlash = signal(false);

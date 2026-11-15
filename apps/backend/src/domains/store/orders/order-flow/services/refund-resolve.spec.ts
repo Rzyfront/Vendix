@@ -116,7 +116,10 @@ describe('RefundFlowService — gate de resolve canónico (paso 5, CP-REFUND-FLO
         },
         {
           provide: SessionsService,
-          useValue: { getActiveSession: jest.fn().mockResolvedValue({ id: 3 }) },
+          useValue: {
+            getActiveSession: jest.fn().mockResolvedValue({ id: 3 }),
+            assertSessionForSales: jest.fn(),
+          },
         },
         { provide: MovementsService, useValue: movementsService },
         { provide: SerialNumberEnforcementService, useValue: {} },
@@ -347,6 +350,27 @@ describe('RefundFlowService — gate de resolve canónico (paso 5, CP-REFUND-FLO
         data: { state: 'refunded', updated_at: expect.any(Date) },
       });
       expect(completedEmit()).toMatchObject({ is_full_refund: true });
+    });
+  });
+
+  describe('QUI-893 — gate de caja antes de la tx', () => {
+    const gate = () =>
+      (service as any).sessionsService.assertSessionForSales as jest.Mock;
+
+    it('completar un pago en efectivo sin caja abierta se bloquea sin tocar el refund', async () => {
+      gate().mockRejectedValueOnce(new Error('CASH_SESSION_REQUIRED_001'));
+      await expect(
+        service.manuallyResolveRefund(1, 55, 'completed', 'verificado', 7, 'MAN-001', RefundPayoutChannel.CASH),
+      ).rejects.toThrow('CASH_SESSION_REQUIRED_001');
+      expect(gate()).toHaveBeenCalledWith(7);
+      expect(mockPrisma.$transaction).not.toHaveBeenCalled();
+      expect(mockPrisma.refunds.updateMany).not.toHaveBeenCalled();
+    });
+
+    it('pago por transferencia o marcar fallido no exige caja', async () => {
+      await service.manuallyResolveRefund(1, 55, 'completed', 'verificado', 7, 'MAN-001', RefundPayoutChannel.BANK_TRANSFER);
+      await service.manuallyResolveRefund(1, 55, 'failed', 'pasarela rechazó', 7);
+      expect(gate()).not.toHaveBeenCalled();
     });
   });
 });

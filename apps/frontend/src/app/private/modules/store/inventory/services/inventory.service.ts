@@ -433,6 +433,7 @@ export class InventoryService {
     adjustment_type?: string,
     description?: string,
     initial_load_ack?: boolean,
+    file_info?: { file_name?: string; file_hash?: string },
   ): Observable<ApiResponse<any>> {
     const body: Record<string, unknown> = {
       session_id,
@@ -443,6 +444,8 @@ export class InventoryService {
     if (adjustment_type) body['adjustment_type'] = adjustment_type;
     if (description) body['description'] = description;
     if (initial_load_ack) body['initial_load_ack'] = true;
+    if (file_info?.file_name) body['file_name'] = file_info.file_name;
+    if (file_info?.file_hash) body['file_hash'] = file_info.file_hash;
 
     return this.http
       .post<ApiResponse<any>>(

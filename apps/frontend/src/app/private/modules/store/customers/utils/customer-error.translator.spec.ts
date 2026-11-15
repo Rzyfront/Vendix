@@ -1,4 +1,7 @@
-import { extractDocumentConflict } from './customer-error.translator';
+import {
+  extractDocumentConflict,
+  translateCustomerError,
+} from './customer-error.translator';
 
 describe('extractDocumentConflict', () => {
   const conflict = (kind: string, existing?: unknown) => ({
@@ -29,5 +32,20 @@ describe('extractDocumentConflict', () => {
   it('ignora otros errores', () => {
     expect(extractDocumentConflict({ status: 500, error: {} })).toBeNull();
     expect(extractDocumentConflict(null)).toBeNull();
+  });
+});
+
+describe('translateCustomerError — caja requerida (QUI-893)', () => {
+  it('un 409 por caja cerrada no se confunde con cliente duplicado', () => {
+    const err = {
+      status: 409,
+      error: {
+        error_code: 'CASH_SESSION_REQUIRED_001',
+        message: 'Abre tu caja para registrar pagos.',
+      },
+    };
+    expect(translateCustomerError(err, 'No se pudo recargar el saldo')).toBe(
+      'Abre tu caja para registrar pagos.',
+    );
   });
 });

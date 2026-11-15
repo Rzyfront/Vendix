@@ -582,6 +582,65 @@ describe('PosOrderConfirmationComponent — Auto-print & Fiscal Sync (CP-pos-fe-
     expect(mockTicketService.printTicket.calls.mostRecent().args[1].trigger).toBe('explicit');
   });
 
+  /**
+   * T8 (demo 11-nov) — venta de $25.000 pagada con un billete de $30.000:
+   * el tiquete decía «Efectivo recibido: $25.000 · Cambio: $5.000».
+   */
+  describe('T8 — efectivo recibido en el cobro escalar', () => {
+    const cashOrder = {
+      ...sampleOrder,
+      grand_total: 25000,
+      payment: { method: 'Efectivo', amount: 25000, change: 5000 },
+    };
+
+    beforeEach(() => {
+      activeFiscalAreasSignal.set([]);
+      mockTicketService.shouldAutoPrint.and.returnValue(Promise.resolve(false));
+    });
+
+    it('la confirmación muestra lo recibido (cobrado + vuelto)', async () => {
+      fixture.componentRef.setInput('isOpen', true);
+      fixture.componentRef.setInput('orderData', cashOrder);
+      fixture.detectChanges();
+      await fixture.whenStable();
+      fixture.detectChanges();
+
+      expect(component.scalarCashReceived).toBe(30000);
+      const text: string = fixture.nativeElement.textContent;
+      expect(text).toContain('Efectivo recibido:');
+      expect(text).toContain('$30000');
+      expect(text).toContain('Vuelto:');
+      expect(text).toContain('$5000');
+    });
+
+    it('el tiquete impreso lleva el efectivo recibido, no el cobrado', async () => {
+      fixture.componentRef.setInput('isOpen', true);
+      fixture.componentRef.setInput('orderData', cashOrder);
+      fixture.detectChanges();
+      await fixture.whenStable();
+
+      component.printReceipt();
+
+      const ticket = mockTicketService.printTicket.calls.mostRecent().args[0];
+      expect(ticket.cashReceived).toBe(30000);
+      expect(ticket.change).toBe(5000);
+    });
+
+    it('sin vuelto, lo recibido es lo cobrado y no se agrega la fila', async () => {
+      fixture.componentRef.setInput('isOpen', true);
+      fixture.componentRef.setInput('orderData', sampleOrder);
+      fixture.detectChanges();
+      await fixture.whenStable();
+      fixture.detectChanges();
+
+      expect(component.scalarCashReceived).toBe(50000);
+      expect(fixture.nativeElement.textContent).not.toContain('Efectivo recibido:');
+
+      component.printReceipt();
+      expect(mockTicketService.printTicket.calls.mostRecent().args[0].cashReceived).toBe(50000);
+    });
+  });
+
   it('una FE emitida manualmente revalida el gate y pasa trigger automatic', async () => {
     activeFiscalAreasSignal.set([]);
     mockTicketService.shouldAutoPrint.and.returnValue(Promise.resolve(false));

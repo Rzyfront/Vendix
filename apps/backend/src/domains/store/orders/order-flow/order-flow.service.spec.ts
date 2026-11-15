@@ -4414,7 +4414,7 @@ describe('OrderFlowService.cancelOrder — egreso de caja de la venta cobrada en
   let service: OrderFlowService;
   let prismaMock: PrismaMock;
   let settings: { getSettings: jest.Mock };
-  let sessions: { getActiveSession: jest.Mock };
+  let sessions: { getActiveSession: jest.Mock; assertSessionForSales: jest.Mock };
   let movements: { recordCompensationCashMovementDurable: jest.Mock; resolveSaleActor: jest.Mock };
   let audit: { log: jest.Mock; logCustom: jest.Mock };
   let stock: { releaseReservationsByReference: jest.Mock };
@@ -4478,6 +4478,8 @@ describe('OrderFlowService.cancelOrder — egreso de caja de la venta cobrada en
     };
     sessions = {
       getActiveSession: jest.fn().mockResolvedValue({ id: SESSION_ID }),
+      // QUI-893 — el gate pasa: estos casos cubren lo que ocurre después.
+      assertSessionForSales: jest.fn().mockResolvedValue(undefined),
     };
     movements = {
       recordCompensationCashMovementDurable: jest
@@ -6196,6 +6198,145 @@ describe('OrderFlowService — gate de caja para cobros (CASH_SESSION_REQUIRED_0
       where: { id: 900 },
       data: { payment_id: 501 },
     });
+  });
+});
+
+describe('OrderFlowService — gate de caja en salidas de dinero (QUI-893)', () => {
+  const USER_B = 42;
+
+  const build = (opts: {
+    order: any;
+    sales?: Array<{ payment_id: number | null; notes: string | null }>;
+    gate?: jest.Mock;
+  }) => {
+    const prismaMock: any = {
+      cash_register_movements: {
+        findMany: jest.fn().mockResolvedValue(opts.sales ?? []),
+      },
+      order_items: { findMany: jest.fn().mockResolvedValue([]) },
+      payments: { findMany: jest.fn().mockResolvedValue([]) },
+      $transaction: jest.fn().mockRejectedValue(new Error('TX_REACHED')),
+    };
+    const sessions = {
+      assertSessionForSales:
+        opts.gate ??
+        jest
+          .fn()
+          .mockRejectedValue(
+            new VendixHttpException(ErrorCodes.CASH_SESSION_REQUIRED_001),
+          ),
+      getActiveSession: jest.fn(),
+    };
+    const service = new OrderFlowService(
+      prismaMock,
+      { emit: jest.fn() } as any,
+      {} as any,
+      sessions as any,
+      {} as any,
+      {} as any,
+      {} as any,
+      {} as any,
+      {} as any,
+    );
+    jest.spyOn(service as any, 'getOrder').mockResolvedValue(opts.order);
+    jest
+      .spyOn(service as any, 'assertNoIssuedSalesInvoiceForPaymentCancel')
+      .mockResolvedValue(undefined);
+    jest
+      .spyOn(service as any, 'assertNoOpenTableForDraft')
+      .mockResolvedValue(undefined);
+    return { service, prismaMock, sessions };
+  };
+
+  const paidOrder = (state: string) => ({
+    id: 1,
+    store_id: 4,
+    state,
+    payments: [
+      {
+        id: 501,
+        state: 'succeeded',
+        amount: 100,
+        store_payment_method: {
+          system_payment_method: { type: 'cash', processing_mode: 'DIRECT' },
+        },
+      },
+    ],
+  });
+
+  it('cancelPayment de un pago con sale en caja: sin caja rechaza CASH_SESSION_REQUIRED_001 antes de la tx', async () => {
+    mockRequestContext({ store_id: 4, organization_id: 1, user_id: USER_B });
+    const { service, prismaMock, sessions } = build({
+      order: paidOrder('processing'),
+      sales: [{ payment_id: 501, notes: null }],
+    });
+
+    const error = await service
+      .cancelPayment(1, { reason: 'error de cobro' } as any, 'B')
+      .catch((failure) => failure);
+
+    expect(error).toBeInstanceOf(VendixHttpException);
+    expect(error.errorCode).toBe('CASH_SESSION_REQUIRED_001');
+    expect(sessions.assertSessionForSales).toHaveBeenCalledWith(USER_B);
+    expect(prismaMock.$transaction).not.toHaveBeenCalled();
+  });
+
+  it('cancelPayment de un pago sin sale en caja (tarjeta no rastreada): no exige caja', async () => {
+    mockRequestContext({ store_id: 4, organization_id: 1, user_id: USER_B });
+    const { service, prismaMock, sessions } = build({
+      order: paidOrder('processing'),
+      sales: [{ payment_id: null, notes: 'Desvinculado del pago #77 tras compensación (x)' }],
+    });
+
+    const error = await service
+      .cancelPayment(1, { reason: 'error' } as any, 'B')
+      .catch((failure) => failure);
+
+    expect(sessions.assertSessionForSales).not.toHaveBeenCalled();
+    expect(error.message).toBe('TX_REACHED');
+    expect(prismaMock.$transaction).toHaveBeenCalledTimes(1);
+  });
+
+  it('cancelOrder de una venta cobrada en efectivo: sin caja rechaza CASH_SESSION_REQUIRED_001 antes de la tx', async () => {
+    mockRequestContext({ store_id: 4, organization_id: 1, user_id: USER_B });
+    const { service, prismaMock, sessions } = build({ order: paidOrder('processing') });
+
+    const error = await service
+      .cancelOrder(1, { reason: 'cliente desiste' } as any)
+      .catch((failure) => failure);
+
+    expect(error).toBeInstanceOf(VendixHttpException);
+    expect(error.errorCode).toBe('CASH_SESSION_REQUIRED_001');
+    expect(sessions.assertSessionForSales).toHaveBeenCalledWith(USER_B);
+    expect(prismaMock.$transaction).not.toHaveBeenCalled();
+  });
+
+  it('cancelOrder sin efectivo que devolver: no exige caja', async () => {
+    mockRequestContext({ store_id: 4, organization_id: 1, user_id: USER_B });
+    const { service, prismaMock, sessions } = build({
+      order: { id: 1, store_id: 4, state: 'created', payments: [] },
+    });
+
+    const error = await service
+      .cancelOrder(1, { reason: 'borrador' } as any)
+      .catch((failure) => failure);
+
+    expect(sessions.assertSessionForSales).not.toHaveBeenCalled();
+    expect(error.message).toBe('TX_REACHED');
+    expect(prismaMock.$transaction).toHaveBeenCalledTimes(1);
+  });
+
+  it('cancelOrder sin usuario (webhook): no se gatea, sigue el carril B17', async () => {
+    mockRequestContext({ store_id: 4, organization_id: 1, user_id: undefined });
+    const { service, prismaMock, sessions } = build({ order: paidOrder('processing') });
+
+    const error = await service
+      .cancelOrder(1, { reason: 'pago rechazado' } as any)
+      .catch((failure) => failure);
+
+    expect(sessions.assertSessionForSales).not.toHaveBeenCalled();
+    expect(error.message).toBe('TX_REACHED');
+    expect(prismaMock.$transaction).toHaveBeenCalledTimes(1);
   });
 });
 

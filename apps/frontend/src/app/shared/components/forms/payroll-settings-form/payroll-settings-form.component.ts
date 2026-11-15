@@ -487,6 +487,9 @@ export class PayrollSettingsFormComponent {
       const v = this.initialValue();
       if (v) {
         this.form.patchValue(v, { emitEvent: false });
+        // patchValue runs with emitEvent:false, so the valueChanges
+        // subscription does not fire: sync the summary frequency here.
+        this.paymentFrequency.set(this.form.controls.payment_frequency.value);
         this.emitCurrent();
       }
     });
@@ -494,6 +497,9 @@ export class PayrollSettingsFormComponent {
     effect(() => {
       if (this.disabled()) this.form.disable({ emitEvent: false });
       else this.form.enable({ emitEvent: false });
+      // Re-report validity: toggling with emitEvent:false is silent, and a
+      // stale verdict would keep the host's "Continuar" button wedged.
+      this.emitCurrent();
     });
 
     this.form.valueChanges
@@ -513,7 +519,10 @@ export class PayrollSettingsFormComponent {
   }
 
   private emitCurrent(): void {
-    const isValid = this.form.valid;
+    // A disabled form reports `valid === false` (status 'DISABLED'). Read-only
+    // or submitting states have nothing for the user to fix, so only an
+    // actually INVALID form must block the host step (QUI-414).
+    const isValid = this.form.status !== 'INVALID';
     this.valid.set(isValid);
     this.validityChange.emit(isValid);
     this.valueChange.emit(this.form.getRawValue());

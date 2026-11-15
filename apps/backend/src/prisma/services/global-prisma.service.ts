@@ -744,6 +744,12 @@ export class GlobalPrismaService extends BasePrismaService {
     return this.baseClient.crm_tasks;
   }
 
+  // QUI-580 — due reminders job (cron without store context). Each row names
+  // its store and user; the job only claims and notifies their owner.
+  get user_reminders() {
+    return this.baseClient.user_reminders;
+  }
+
   // Subscription / SaaS billing models — global access (no tenant scope)
   // because SaaS billing operations cross stores (cron jobs, listeners,
   // platform-level webhook reconciliation, etc.).

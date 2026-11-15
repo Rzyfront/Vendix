@@ -18,10 +18,18 @@ import { ResponseService } from '@common/responses/response.service';
 import { VendixHttpException, ErrorCodes } from '@common/errors';
 import { AiScanJobService } from '@common/ai-scan-jobs/ai-scan-job.service';
 import { CustomerAiImportService } from './customer-ai-import.service';
+import { BulkUploadLogsService } from '../../bulk-uploads/bulk-upload-logs.service';
 import {
   AnalyzeCustomerImportDto,
   CommitCustomerImportDto,
+  CommitCustomerImportResult,
 } from './dto/customer-ai-import.dto';
+
+/** Clientes existentes a los que solo se les sumaron ubicaciones. */
+function countLocationsOnly(result: CommitCustomerImportResult): number {
+  return (result.results ?? []).filter((r) => r.outcome === 'locations_added')
+    .length;
+}
 
 /**
  * Carga masiva de clientes asistida por IA.
@@ -39,6 +47,7 @@ export class CustomerAiImportController {
     private readonly importService: CustomerAiImportService,
     private readonly aiScanJobs: AiScanJobService,
     private readonly responseService: ResponseService,
+    private readonly bulkUploadLogs: BulkUploadLogsService,
   ) {}
 
   private fail(error: unknown, fallback: string): never {
@@ -68,7 +77,17 @@ export class CustomerAiImportController {
         [this.importService.toScanFile(file!)],
         {},
       );
-      return this.responseService.success({ job_id }, 'Escaneo encolado');
+      // QUI-1004 — aquí sí llega el archivo: su huella y la carga anterior de
+      // esta tienda con la misma huella. El cliente la devuelve en el commit.
+      const fileInfo = await this.bulkUploadLogs.describeFile(
+        'customers_ai',
+        file!.buffer,
+        file!.originalname,
+      );
+      return this.responseService.success(
+        { job_id, ...fileInfo },
+        'Escaneo encolado',
+      );
     } catch (error) {
       this.fail(error, 'Error al encolar el escaneo de clientes');
     }
@@ -90,6 +109,15 @@ export class CustomerAiImportController {
   async commit(@Body() dto: CommitCustomerImportDto) {
     try {
       const result = await this.importService.commit(dto);
+      // QUI-1004 — una fila en el registro de cargas masivas (accesorio: un
+      // fallo al registrar no tumba el lote ya escrito).
+      await this.bulkUploadLogs.trackUpload('customers_ai', dto, {
+        total: dto.customers.length,
+        successful: result.created + result.updated + countLocationsOnly(result),
+        created: result.created,
+        failed: result.failed,
+        skipped: result.skipped,
+      });
       return this.responseService.success(result, 'Lote procesado');
     } catch (error) {
       this.fail(error, 'Error al cargar el lote de clientes');

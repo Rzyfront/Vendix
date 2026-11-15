@@ -378,4 +378,9 @@ export interface OrganizationProfitLossSummary {
     operating_expenses: number;
     expenses_growth: number | null;
   };
+  /**
+   * QUI-987: tiendas cuyo resumen falló y quedaron fuera de los totales.
+   * Opcional para tolerar un backend anterior durante el despliegue.
+   */
+  failed_stores?: Array<{ id: number; name: string }>;
 }

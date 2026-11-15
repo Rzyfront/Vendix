@@ -58,6 +58,10 @@ describe('AuthService Login Flow', () => {
       // cliente no manda organization_slug, y esa lectura es findFirst: el slug
       // de tienda solo es único DENTRO de la organización, no globalmente.
       findFirst: jest.fn(),
+      // QUI-943: la recuperación de staff acepta el V-link de la tienda; como
+      // el slug de tienda solo es único dentro de la organización, se leen
+      // TODAS las tiendas con ese slug.
+      findMany: jest.fn().mockResolvedValue([]),
     },
     store_users: {
       findFirst: jest.fn(),
@@ -72,18 +76,28 @@ describe('AuthService Login Flow', () => {
     login_attempts: {
       create: jest.fn(),
     },
+    password_reset_tokens: {
+      updateMany: jest.fn().mockResolvedValue({ count: 0 }),
+      create: jest.fn().mockResolvedValue({}),
+    },
+    user_roles: {
+      findMany: jest.fn().mockResolvedValue([]),
+    },
     $transaction: jest.fn((cb) => cb(mockPrismaService)),
   };
 
   const mockJwtService = {
     sign: jest.fn(() => 'token'),
+    verify: jest.fn(),
   };
 
   const mockConfigService = {
     get: jest.fn(),
   };
 
-  const mockEmailService = {};
+  const mockEmailService = {
+    sendPasswordResetEmail: jest.fn().mockResolvedValue({ success: true }),
+  };
   const mockAuditService = {
     logAuth: jest.fn(),
   };
@@ -383,5 +397,339 @@ describe('AuthService Login Flow', () => {
         },
       }),
     );
+  });
+
+  /**
+   * QUI-943 — un usuario de tienda pedía recuperar la contraseña con el V-link
+   * de su TIENDA (o sin V-link, porque el login de staff ya no lo exige) y el
+   * backend solo buscaba organizaciones por slug: respondía el mensaje
+   * genérico y nunca enviaba el correo.
+   */
+  describe('forgotPassword account resolution (QUI-943)', () => {
+    const GENERIC =
+      'Si el email existe, recibirás instrucciones para restablecer tu contraseña';
+    const staff = accountRow({
+      id: 41,
+      email: 'cajero@tienda.com',
+      first_name: 'Ana',
+      organization_id: 12,
+      user_roles: [{ roles: { name: 'employee' } }],
+    });
+
+    beforeEach(() => {
+      mockPrismaService.organizations.findUnique.mockReset();
+      mockPrismaService.users.findFirst.mockReset();
+      mockPrismaService.users.findMany.mockReset().mockResolvedValue([]);
+      mockPrismaService.stores.findMany.mockReset().mockResolvedValue([]);
+      mockPrismaService.password_reset_tokens.create.mockClear();
+      mockEmailService.sendPasswordResetEmail
+        .mockReset()
+        .mockResolvedValue({ success: true });
+      mockAuditService.logAuth.mockClear();
+    });
+
+    it('sends the reset email when the V-link is the store slug', async () => {
+      mockPrismaService.organizations.findUnique.mockResolvedValue(null);
+      mockPrismaService.stores.findMany.mockResolvedValue([
+        { organization_id: 12 },
+      ]);
+      mockPrismaService.users.findMany.mockResolvedValueOnce([staff]);
+
+      const result = await service.forgotPassword(
+        'cajero@tienda.com',
+        'mi-tienda',
+      );
+
+      expect(result).toEqual({ message: GENERIC });
+      expect(mockPrismaService.stores.findMany).toHaveBeenCalledWith({
+        where: { slug: 'mi-tienda' },
+        select: { organization_id: true },
+      });
+      expect(mockPrismaService.users.findMany).toHaveBeenCalledWith({
+        where: {
+          email: { equals: 'cajero@tienda.com', mode: 'insensitive' },
+          organization_id: { in: [12] },
+          state: { notIn: ['suspended', 'archived'] },
+        },
+      });
+      expect(mockPrismaService.password_reset_tokens.create).toHaveBeenCalledWith(
+        expect.objectContaining({
+          data: expect.objectContaining({ user_id: 41 }),
+        }),
+      );
+      expect(mockEmailService.sendPasswordResetEmail).toHaveBeenCalledWith(
+        'cajero@tienda.com',
+        expect.any(String),
+        'Ana',
+        undefined,
+      );
+      expect(mockAuditService.logAuth).toHaveBeenCalledWith(
+        41,
+        expect.anything(),
+        expect.objectContaining({ email_sent: true }),
+        undefined,
+        undefined,
+      );
+    });
+
+    it('sends the reset email without V-link when the email has one staff account', async () => {
+      mockPrismaService.users.findMany.mockResolvedValue([staff]);
+
+      const result = await service.forgotPassword('cajero@tienda.com');
+
+      expect(result).toEqual({ message: GENERIC });
+      expect(mockPrismaService.organizations.findUnique).not.toHaveBeenCalled();
+      expect(mockEmailService.sendPasswordResetEmail).toHaveBeenCalledWith(
+        'cajero@tienda.com',
+        expect.any(String),
+        'Ana',
+        undefined,
+      );
+    });
+
+    it('keeps the organization-slug lookup for existing clients', async () => {
+      mockPrismaService.organizations.findUnique.mockResolvedValue({ id: 12 });
+      mockPrismaService.users.findFirst.mockResolvedValue(staff);
+
+      await service.forgotPassword('cajero@tienda.com', 'org-a');
+
+      expect(mockPrismaService.users.findFirst).toHaveBeenCalledWith({
+        where: {
+          email: { equals: 'cajero@tienda.com', mode: 'insensitive' },
+          organization_id: 12,
+        },
+      });
+      expect(mockPrismaService.stores.findMany).not.toHaveBeenCalled();
+      expect(mockEmailService.sendPasswordResetEmail).toHaveBeenCalledTimes(1);
+    });
+
+    it('answers the same generic message and sends nothing for an unknown email', async () => {
+      mockPrismaService.organizations.findUnique.mockResolvedValue(null);
+
+      const withSlug = await service.forgotPassword('nadie@x.com', 'no-existe');
+      const withoutSlug = await service.forgotPassword('nadie@x.com');
+
+      expect(withSlug).toEqual({ message: GENERIC });
+      expect(withoutSlug).toEqual({ message: GENERIC });
+      expect(mockPrismaService.password_reset_tokens.create).not.toHaveBeenCalled();
+      expect(mockEmailService.sendPasswordResetEmail).not.toHaveBeenCalled();
+    });
+
+    it('does not guess when the email has several staff accounts and no V-link', async () => {
+      mockPrismaService.users.findMany.mockResolvedValue([
+        staff,
+        { ...staff, id: 42, organization_id: 13 },
+      ]);
+
+      await service.forgotPassword('cajero@tienda.com');
+
+      expect(mockEmailService.sendPasswordResetEmail).not.toHaveBeenCalled();
+    });
+
+    it('records email_sent=false and keeps the generic answer when the provider fails', async () => {
+      mockPrismaService.users.findMany.mockResolvedValue([staff]);
+      mockEmailService.sendPasswordResetEmail.mockResolvedValue({
+        success: false,
+        error: 'MessageRejected',
+      });
+      const logError = jest
+        .spyOn((service as any).logger, 'error')
+        .mockImplementation(() => undefined);
+
+      const result = await service.forgotPassword('cajero@tienda.com');
+
+      expect(result).toEqual({ message: GENERIC });
+      expect(mockAuditService.logAuth).toHaveBeenCalledWith(
+        41,
+        expect.anything(),
+        expect.objectContaining({ email_sent: false }),
+        undefined,
+        undefined,
+      );
+      expect(logError).toHaveBeenCalledWith(
+        expect.stringContaining('user 41'),
+      );
+      expect(logError).not.toHaveBeenCalledWith(
+        expect.stringContaining('cajero@tienda.com'),
+      );
+    });
+
+    it('records email_sent=false when the provider throws', async () => {
+      mockPrismaService.users.findMany.mockResolvedValue([staff]);
+      mockEmailService.sendPasswordResetEmail.mockRejectedValue(
+        new Error('timeout'),
+      );
+      jest
+        .spyOn((service as any).logger, 'error')
+        .mockImplementation(() => undefined);
+
+      await expect(
+        service.forgotPassword('cajero@tienda.com'),
+      ).resolves.toEqual({ message: GENERIC });
+      expect(mockAuditService.logAuth).toHaveBeenCalledWith(
+        41,
+        expect.anything(),
+        expect.objectContaining({ email_sent: false }),
+        undefined,
+        undefined,
+      );
+    });
+
+    it('customer recovery also records the real email_sent result', async () => {
+      mockPrismaService.stores.findUnique.mockResolvedValue({
+        id: 22,
+        organization_id: 12,
+        name: 'Mi Tienda',
+      });
+      mockPrismaService.users.findFirst.mockResolvedValue({
+        id: 77,
+        email: 'cliente@x.com',
+        first_name: 'Luis',
+        state: 'active',
+        user_roles: [{ roles: { name: 'customer' } }],
+        store_users: [],
+      });
+      mockEmailService.sendPasswordResetEmail.mockResolvedValue({
+        success: false,
+        error: 'MessageRejected',
+      });
+      jest
+        .spyOn((service as any).logger, 'error')
+        .mockImplementation(() => undefined);
+
+      await expect(
+        service.forgotPasswordCustomer('cliente@x.com', 22),
+      ).resolves.toEqual({ message: GENERIC });
+      expect(mockEmailService.sendPasswordResetEmail).toHaveBeenCalledWith(
+        'cliente@x.com',
+        expect.any(String),
+        'Luis',
+        expect.objectContaining({ storeName: 'Mi Tienda' }),
+      );
+      expect(mockAuditService.logAuth).toHaveBeenCalledWith(
+        77,
+        expect.anything(),
+        expect.objectContaining({
+          method: 'forgot_password_customer_request',
+          email_sent: false,
+        }),
+        undefined,
+        undefined,
+      );
+    });
+  });
+  /**
+   * QUI-982 — `users.avatar_url` guarda la key de S3. Toda respuesta que
+   * alimenta la sesión del frontend debe exponer la URL firmada: una key cruda
+   * en `<img src>` se resuelve contra el host del frontend y da 404.
+   */
+  describe('session user avatar (QUI-982)', () => {
+    const AVATAR_KEY = 'organizations/org-a-1/users/1/avatars/123-a.webp';
+    const SIGNED = `https://bucket.s3.amazonaws.com/${AVATAR_KEY}?X-Amz-Signature=sig`;
+
+    beforeEach(() => {
+      mockS3Service.signUrl.mockImplementation(async (url) =>
+        url === AVATAR_KEY ? SIGNED : url,
+      );
+    });
+
+    afterEach(() => {
+      mockS3Service.signUrl.mockImplementation((url) => url);
+      mockConfigService.get.mockReset();
+      jest.restoreAllMocks();
+    });
+
+    async function loginOwner(avatar_url: string | null) {
+      mockPrismaService.users.findMany.mockResolvedValue([
+        accountRow({
+          email: 'owner@test.com',
+          password: await bcrypt.hash('123', 4),
+          avatar_url,
+          user_roles: [{ roles: { name: 'owner', role_permissions: [] } }],
+        }),
+      ]);
+      mockPrismaService.stores.findFirst.mockResolvedValue({
+        id: 10,
+        slug: 'store-a',
+        organization_id: 1,
+        organizations: { slug: 'org-a' },
+      });
+      mockPrismaService.user_settings.findUnique.mockResolvedValue({
+        config: {},
+      });
+      mockPrismaService.stores.findUnique.mockResolvedValue({
+        id: 10,
+        slug: 'store-a',
+        organization_id: 1,
+      });
+      mockPrismaService.store_users.findFirst.mockResolvedValue({
+        store: { id: 10, organizations: { id: 1 } },
+      });
+      mockPrismaService.refresh_tokens.create.mockResolvedValue({});
+      mockPrismaService.users.update.mockResolvedValue({});
+      return service.login({
+        email: 'owner@test.com',
+        password: '123',
+        store_slug: 'store-a',
+      });
+    }
+
+    it('login returns the signed storage URL, not the S3 key', async () => {
+      const result: any = await loginOwner(AVATAR_KEY);
+      expect(result.user.avatar_url).toBe(SIGNED);
+    });
+
+    it('login keeps avatar_url null for users without avatar', async () => {
+      const result: any = await loginOwner(null);
+      expect(result.user.avatar_url).toBeNull();
+    });
+
+    it('getCurrentUser (/auth/me) returns the signed avatar URL', async () => {
+      mockPrismaService.users.findUnique.mockResolvedValue({
+        id: 1,
+        password: 'hashed',
+        avatar_url: AVATAR_KEY,
+      });
+
+      const result: any = await service.getCurrentUser(1, null);
+
+      expect(result.avatar_url).toBe(SIGNED);
+      expect(result.password).toBeUndefined();
+    });
+
+    it('refreshToken returns the signed avatar URL', async () => {
+      mockConfigService.get.mockImplementation((key: string) =>
+        key === 'JWT_REFRESH_SECRET' ? 'refresh-secret' : undefined,
+      );
+      mockJwtService.verify.mockReturnValue({
+        sub: 1,
+        organization_id: 1,
+        store_id: null,
+      });
+      mockPrismaService.refresh_tokens.findFirst.mockResolvedValue({
+        id: 7,
+        users: {
+          id: 1,
+          organization_id: 1,
+          avatar_url: AVATAR_KEY,
+          user_roles: [],
+        },
+      });
+      mockPrismaService.refresh_tokens.update.mockResolvedValue({});
+      jest
+        .spyOn(service as any, 'validateRefreshTokenSecurity')
+        .mockResolvedValue(undefined);
+      jest.spyOn(service as any, 'generateTokens').mockResolvedValue({
+        access_token: 'a',
+        refresh_token: 'r',
+        token_type: 'Bearer',
+        expires_in: 900,
+      });
+
+      const result = await service.refreshToken({ refresh_token: 'rt' });
+
+      expect(result.user.avatar_url).toBe(SIGNED);
+      expect(result.access_token).toBe('a');
+    });
   });
 });

@@ -109,4 +109,79 @@ describe('StoresService · la industria se escribe en sus dos fuentes (S18)', ()
       'restaurant',
     ]);
   });
+  /**
+   * QUI-983 — editar industrias (o settings parciales) desde la organización
+   * reemplazaba el JSON completo de `store_settings.settings` por lo que traía
+   * el DTO: se perdían fiscal_data, invoicing, pos… y general.timezone/currency.
+   */
+  describe('update conserva la configuración guardada (QUI-983)', () => {
+    const stored = () => ({
+      general: {
+        timezone: 'America/Bogota',
+        currency: 'COP',
+        name: 'Café Luna',
+        store_type: 'physical',
+        industries: ['retail'],
+      },
+      fiscal_data: { nit: '900123456', dv: '7', tax_regime: 'common' },
+      invoicing: { prefix: 'FE', next_number: 120 },
+      branding: { primary_color: '#112233' },
+      pos: { tips: { enabled: true }, allow_negative_stock: false },
+      vexi: { enabled: true },
+      hospitality: { default_overbooking_allowance: 2 },
+    });
+
+    const seedStore = async () => {
+      await service.create({
+        name: 'Café Luna',
+        store_type: 'physical',
+        industries: ['retail'],
+      } as any);
+      const id = db.tables.stores[0].id;
+      db.tables.store_settings.find((s) => s.store_id === id)!.settings = stored();
+      return id;
+    };
+
+    const settingsOf = (id: number) =>
+      db.tables.store_settings.find((s) => s.store_id === id)!.settings;
+
+    it('cambiar industrias solo cambia general.industries', async () => {
+      const id = await seedStore();
+
+      await service.update(id, { industries: ['restaurant', 'retail'] } as any);
+
+      const expected = stored();
+      expected.general.industries = ['restaurant', 'retail'];
+      expect(settingsOf(id)).toEqual(expected);
+      expect(db.tables.stores.find((s) => s.id === id)!.industries).toEqual([
+        'restaurant',
+        'retail',
+      ]);
+    });
+
+    it('settings parciales se fusionan por sección sin borrar lo demás', async () => {
+      const id = await seedStore();
+
+      await service.update(id, {
+        industries: ['restaurant'],
+        settings: { pos: { tips: { enabled: false } }, general: { currency: 'USD' } },
+      } as any);
+
+      const expected: any = stored();
+      expected.general.currency = 'USD';
+      expected.general.industries = ['restaurant'];
+      expected.pos.tips = { enabled: false };
+      expect(settingsOf(id)).toEqual(expected);
+    });
+
+    it('sin fila de settings previa crea el espejo de industrias', async () => {
+      await service.create({ name: 'Café Luna', store_type: 'physical' } as any);
+      const id = db.tables.stores[0].id;
+      expect(db.tables.store_settings ?? []).toHaveLength(0);
+
+      await service.update(id, { industries: ['restaurant'] } as any);
+
+      expect(settingsOf(id)).toEqual({ general: { industries: ['restaurant'] } });
+    });
+  });
 });

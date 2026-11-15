@@ -324,8 +324,18 @@ export class StoresService {
     // Update store settings if provided. Mirror `industries` into
     // `settings.general.industries` to keep the JSON mirror in sync with
     // the `stores.industries` column (same pattern as create()).
+    // QUI-983: merge over the STORED settings, section by section (same
+    // pattern as SettingsService.updateSettings). Building the JSON from the
+    // DTO alone wiped fiscal_data, invoicing, pos, general.timezone, etc.
     if (settings || storeData.industries?.length) {
-      const mergedSettings = { ...(settings ?? {}) };
+      const current = await this.prisma.store_settings.findUnique({
+        where: { store_id: id },
+        select: { settings: true },
+      });
+      const mergedSettings = this.mergeSettingsSections(
+        current?.settings,
+        settings,
+      );
       if (storeData.industries?.length) {
         mergedSettings.general = {
           ...(mergedSettings.general ?? {}),
@@ -437,6 +447,30 @@ export class StoresService {
       },
       include: { organizations: true, addresses: true, store_settings: true },
     });
+  }
+
+  /**
+   * Section-level merge of a settings patch over the stored settings JSON:
+   * each top-level section keeps its stored keys and takes the patch keys
+   * on top. Non-object values in the patch replace the stored value.
+   */
+  private mergeSettingsSections(
+    stored: unknown,
+    patch: Record<string, any> | undefined,
+  ): Record<string, any> {
+    const isPlainObject = (v: unknown): v is Record<string, any> =>
+      typeof v === 'object' && v !== null && !Array.isArray(v);
+
+    const merged: Record<string, any> = isPlainObject(stored)
+      ? { ...stored }
+      : {};
+    for (const [section, value] of Object.entries(patch ?? {})) {
+      merged[section] =
+        isPlainObject(value) && isPlainObject(merged[section])
+          ? { ...merged[section], ...value }
+          : value;
+    }
+    return merged;
   }
 
   async updateStoreSettings(

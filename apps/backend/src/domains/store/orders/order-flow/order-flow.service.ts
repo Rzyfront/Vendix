@@ -4280,6 +4280,12 @@ export class OrderFlowService {
     }
     await this.assertNoIssuedSalesInvoiceForPaymentCancel(orderId);
 
+    // QUI-893 — gate único de caja ANTES de la tx: anular un pago que dejó su
+    // `sale` en caja escribe el contra-movimiento en la sesión de quien anula.
+    await this.assertCashSessionForCashOut(() =>
+      this.paymentCancelTouchesCashDrawer(orderId, order.payments),
+    );
+
     let cancelledPaymentIds: number[] = [];
     // Captured inside the transaction (fresh `payments` + their resolved
     // `store_payment_method.system_payment_method.type`) and emitted AFTER
@@ -7769,6 +7775,21 @@ export class OrderFlowService {
       );
     }
 
+    // QUI-893 — gate único de caja ANTES de cualquier efecto (nota crédito,
+    // claim): cancelar una venta cobrada en efectivo saca el billete del cajón
+    // de quien cancela. Sin efectivo que devolver no se exige caja.
+    // Espejo en memoria de `resolveCancelCashReversal` (pagos `succeeded` en
+    // efectivo), sin la consulta: `getOrder` ya trae el método de cada pago.
+    await this.assertCashSessionForCashOut(async () =>
+      order.payments.some(
+        (payment) =>
+          payment.state === 'succeeded' &&
+          (CASH_METHOD_ENUM_VALUES as readonly string[]).includes(
+            payment.store_payment_method?.system_payment_method?.type ?? '',
+          ),
+      ),
+    );
+
     // cod-auto-invoicing S5 — nota crédito TOTAL confirmada por el operador,
     // ANTES del claim: el gate DIAN de la transacción exige la nota `accepted`.
     // Solo si nada más bloquea la cancelación (no emitir una nota fiscal para
@@ -8384,6 +8405,50 @@ export class OrderFlowService {
    * mayoritario (venta con tarjeta, orden sin cobrar, cancelación desde un
    * webhook de pago rechazado).
    */
+  /**
+   * QUI-893 — gate de caja para salidas de dinero ejecutadas por personal
+   * (anular pago, cancelar orden). Sin usuario en contexto (webhook/job) no
+   * hay caja propia que exigir: sigue el carril B17 (actor del `sale`).
+   * `touchesDrawer` solo se evalúa con usuario, para no leer de más.
+   */
+  private async assertCashSessionForCashOut(
+    touchesDrawer: () => Promise<boolean>,
+  ): Promise<void> {
+    const userId = RequestContextService.getUserId();
+    if (!userId) return;
+    if (!(await touchesDrawer())) return;
+    await this.sessionsService.assertSessionForSales(userId);
+  }
+
+  /**
+   * QUI-893 — ¿anular estos pagos escribe en caja? Espejo de
+   * `recordPaymentCompensationInTx`: solo compensa los pagos con `sale` propio
+   * y los `sale` huérfanos de la orden aún no desvinculados.
+   */
+  private async paymentCancelTouchesCashDrawer(
+    orderId: number,
+    payments: { id: number; state: string }[],
+  ): Promise<boolean> {
+    const activeIds = payments
+      .filter((p) => p.state === 'succeeded' || p.state === 'pending')
+      .map((p) => p.id);
+    const sales = await this.prisma.cash_register_movements.findMany({
+      where: {
+        type: 'sale',
+        OR: [
+          ...(activeIds.length > 0 ? [{ payment_id: { in: activeIds } }] : []),
+          { order_id: orderId, payment_id: null },
+        ],
+      },
+      select: { payment_id: true, notes: true },
+    });
+    return sales.some(
+      (sale) =>
+        sale.payment_id != null ||
+        !sale.notes?.startsWith(UNLINKED_SALE_NOTES_PREFIX),
+    );
+  }
+
   private async resolveCancelCashReversal(order: {
     payments: { id: number; state: string }[];
   }, client: Prisma.TransactionClient | StorePrismaService = this.prisma): Promise<{

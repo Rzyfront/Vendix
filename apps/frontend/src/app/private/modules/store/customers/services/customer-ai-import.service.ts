@@ -164,10 +164,15 @@ export class CustomerAiImportService {
 
   commit(
     customers: CommitCustomerItem[],
+    file?: { file_name?: string; file_hash?: string },
   ): Observable<ApiResponse<CommitCustomerImportResult>> {
+    // QUI-1004 — la huella que devolvió `async`, para el registro de cargas.
+    const fileRef = file?.file_hash
+      ? { file_name: file.file_name, file_hash: file.file_hash }
+      : {};
     return this.http.post<ApiResponse<CommitCustomerImportResult>>(
       `${this.apiUrl}/commit`,
-      { customers },
+      { customers, ...fileRef },
     );
   }
 }

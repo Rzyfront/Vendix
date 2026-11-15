@@ -809,6 +809,14 @@ export const storeAdminRoutes: Routes = [
               ),
           },
           {
+            path: 'bulk-uploads',
+            title: 'Historial de cargas masivas - Vendix',
+            loadComponent: () =>
+              import('../../private/modules/store/bulk-uploads/pages/bulk-upload-history-page.component').then(
+                (c) => c.BulkUploadHistoryPageComponent,
+              ),
+          },
+          {
             path: 'payments',
             loadComponent: () =>
               import('../../private/modules/store/settings/payments/payments-settings.component').then(

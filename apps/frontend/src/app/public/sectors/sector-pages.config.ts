@@ -5,4 +5,4 @@ import { environment } from '../../../environments/environment';
 // Mantener `SECTOR_PAGE_PATHS` alineado con `SECTOR_PAGES` (lo verifica el spec del contenido).
 export const SECTOR_PAGES_ENABLED = environment.sectorPagesEnabled;
 
-export const SECTOR_PAGE_PATHS: readonly string[] = ['sectores/restaurantes'];
+export const SECTOR_PAGE_PATHS: readonly string[] = ['sectores/restaurantes', 'soluciones/software-pos', 'migracion'];

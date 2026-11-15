@@ -169,6 +169,7 @@
                               <span class="pc-multi-label">Recibido</span>
                               <input
                                 appCurrencyInput
+                                [selectOnFocus]="true"
                                 [currencyDecimals]="currencyDecimals()"
                                 formControlName="amountReceived"
                                 class="pc-input"
@@ -373,6 +374,7 @@
                   <input
                     id="pc-cash-received"
                     appCurrencyInput
+                    [selectOnFocus]="true"
                     [currencyDecimals]="currencyDecimals()"
                     [formControl]="cashReceivedControl"
                     class="pc-cash-input"
@@ -729,6 +731,7 @@
                         <span class="pc-multi-label">Recibido</span>
                         <input
                           appCurrencyInput
+                          [selectOnFocus]="true"
                           [currencyDecimals]="currencyDecimals()"
                           formControlName="amountReceived"
                           class="pc-input"
@@ -867,6 +870,7 @@
 
           <input
             appCurrencyInput
+            [selectOnFocus]="true"
             [currencyDecimals]="currencyDecimals()"
             [formControl]="cashReceivedControl"
             class="pc-input pc-input-lg"

@@ -196,7 +196,7 @@ export class OrganizationAdminLayoutComponent {
     initialValue: null as string | null,
   });
   readonly organizationDomainHostname = toSignal(
-    this.authFacade.userDomainHostname$,
+    this.authFacade.organizationPublicLinkHostname$,
     { initialValue: null as string | null },
   );
   readonly logoUrl = toSignal(
@@ -536,11 +536,13 @@ export class OrganizationAdminLayoutComponent {
   loadStores(): void {
     this.isLoadingStores.set(true);
 
-    this.storesService.getStores().pipe(takeUntilDestroyed(this.destroyRef)).subscribe({
-      next: (response) => {
-        if (response.success && response.data) {
+    // All pages: the API defaults to 10 per page and the sidebar must list
+    // every store of the organization (QUI-984).
+    this.storesService.getAllStores().pipe(takeUntilDestroyed(this.destroyRef)).subscribe({
+      next: (stores) => {
+        if (stores.length > 0) {
           this.stores.set(
-            response.data.map((store: any) => ({
+            stores.map((store: any) => ({
               id: store.id,
               name: store.name,
               slug: store.slug,

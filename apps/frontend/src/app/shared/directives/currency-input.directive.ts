@@ -53,6 +53,12 @@ export class CurrencyInputDirective implements ControlValueAccessor {
   /** Allow negative values */
   allowNegative = input<boolean>(false);
 
+  /**
+   * Selecciona todo el valor al enfocar, para que lo que se escriba lo reemplace.
+   * Útil en campos que llegan prellenados con una sugerencia (p. ej. el efectivo recibido).
+   */
+  selectOnFocus = input<boolean>(false);
+
   private rawValue: number | null = null;
   private onChange: (value: number | null) => void = () => {};
   private onTouched: () => void = () => {};
@@ -126,6 +132,13 @@ export class CurrencyInputDirective implements ControlValueAccessor {
   onFocusEvent(): void {
     this.isFocused = true;
     // Keep formatted value on focus (user can still type normally)
+    if (this.selectOnFocus()) {
+      // Diferido: el mouseup del clic que enfocó el campo movería el cursor y quitaría la selección.
+      const input = this.el.nativeElement;
+      setTimeout(() => {
+        if (document.activeElement === input) input.select();
+      });
+    }
   }
 
   onPasteEvent(event: ClipboardEvent): void {

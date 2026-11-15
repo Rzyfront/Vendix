@@ -298,7 +298,9 @@ import { StoreSettingsFacade } from '../../../core/store/store-settings/store-se
             </a>
           }
           <app-help-search-overlay></app-help-search-overlay>
-          <app-notifications-dropdown></app-notifications-dropdown>
+          @if (show_notifications_bell()) {
+            <app-notifications-dropdown></app-notifications-dropdown>
+          }
           <app-user-dropdown
             (closeDropdown)="onDropdownClose()"
           ></app-user-dropdown>
@@ -472,6 +474,13 @@ export class HeaderComponent {
    * Show chip only when authenticated and inside ORG_ADMIN. Avoids leaking
    * the org scope chip into STORE_ADMIN, SUPER_ADMIN, or public/auth screens.
    */
+  /**
+   * QUI-981 — las notificaciones son de tienda (`/store/notifications`); el
+   * panel de organización no tiene campana propia y el backend rechaza esos
+   * endpoints a un token ORG_ADMIN.
+   */
+  readonly show_notifications_bell = computed(() => !this.is_org_admin());
+
   readonly show_scope_chip = computed(
     () => this.authFacade.isAuthenticated() && this.is_org_admin(),
   );

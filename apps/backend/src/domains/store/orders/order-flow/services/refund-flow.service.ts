@@ -197,6 +197,31 @@ export function allocateRefundAcrossPayments(
 }
 
 /**
+ * QUI-893 — ¿este reembolso saca billetes del cajón? Espejo de
+ * `buildRefundMovementTramos`: con `original_payment` y varios pagos manda el
+ * reparto, que toma primero los pagos en efectivo CON capacidad restante
+ * (`remaining[i]`, monto del pago menos lo ya reembolsado; sin dato se asume
+ * capacidad). Si el efectivo ya se devolvió completo, el reparto va a los
+ * otros pagos y no toca el cajón. En otro caso decide el canal: `cash` toca el
+ * cajón; pasarela, transferencia y saldo interno no.
+ */
+export function refundTouchesCashDrawer(
+  refundMethod: string,
+  effectiveChannel: EffectiveRefundChannel,
+  paymentTypes: ReadonlyArray<string | null>,
+  remaining?: ReadonlyArray<number>,
+): boolean {
+  if (refundMethod === 'original_payment' && paymentTypes.length > 1) {
+    return paymentTypes.some(
+      (type, index) =>
+        resolveEffectiveRefundChannel('original_payment', type) === 'cash' &&
+        (remaining?.[index] ?? Number.POSITIVE_INFINITY) > 0,
+    );
+  }
+  return effectiveChannel === 'cash';
+}
+
+/**
  * Método con el que se asienta un movimiento NO efectivo: el tipo real del
  * pago cuando coincide con el canal por el que salió el dinero; si el
  * operador eligió otro canal (p.ej. pago en efectivo devuelto a saldo
@@ -904,6 +929,24 @@ export class RefundFlowService {
     // tipos de pago desconocidos, y en esos no existe processor ni endpoint de
     // aprobación, así que aparcarlos los atasca para siempre.
     const awaitsReversal = awaitsExternalReversal(dto.refund_method, paymentType);
+
+    // QUI-893 — gate único de caja ANTES de la tx: un reembolso que saca
+    // efectivo del cajón exige la caja abierta de quien lo ejecuta. Sin este
+    // gate el refund se completaba y su salida quedaba en el outbox esperando
+    // una sesión (el outbox sigue cubriendo la carrera de cierre posterior).
+    // Sin usuario (llamada de sistema) no hay caja propia que exigir: sigue el
+    // carril B18 (outbox con el actor del sale).
+    if (
+      userId &&
+      refundTouchesCashDrawer(
+        dto.refund_method,
+        effectiveChannel,
+        channelPayments.map(paymentTypeOf),
+        await this.remainingRefundCapacity(dto.refund_method, channelPayments),
+      )
+    ) {
+      await this.sessionsService.assertSessionForSales(userId);
+    }
 
     // Paso 6 — dish post-commit collector (KDS SSE + COGS reclass). Filled
     // in-tx by `processDishRefundLine`, drained in the `.then()` below.
@@ -2195,6 +2238,44 @@ export class RefundFlowService {
    * `original_payment`: reparto con `allocateRefundAcrossPayments`, cuya
    * capacidad por pago descuenta lo ya devuelto según el libro de caja.
    */
+  /**
+   * QUI-893 — capacidad restante por pago (monto − movimientos `refund` ya
+   * asentados), la misma lectura de `buildRefundMovementTramos`, solo cuando el
+   * reparto aplica (`original_payment` con varios pagos). Si la lectura falla
+   * se devuelve `undefined`: el gate asume capacidad (conservador).
+   */
+  private async remainingRefundCapacity(
+    refundMethod: string,
+    payments: ReadonlyArray<{ id: number; amount?: unknown }>,
+  ): Promise<number[] | undefined> {
+    if (refundMethod !== 'original_payment' || payments.length <= 1) {
+      return undefined;
+    }
+    try {
+      const rows = await this.prisma.cash_register_movements.groupBy({
+        by: ['payment_id'],
+        where: { type: 'refund', payment_id: { in: payments.map((p) => p.id) } },
+        _sum: { amount: true },
+      });
+      const refunded = new Map<number, number>(
+        rows
+          .filter((r) => r.payment_id != null)
+          .map(
+            (r) =>
+              [r.payment_id as number, Number(r._sum.amount ?? 0)] as [
+                number,
+                number,
+              ],
+          ),
+      );
+      return payments.map(
+        (p) => Number(p.amount ?? 0) - (refunded.get(p.id) ?? 0),
+      );
+    } catch {
+      return undefined;
+    }
+  }
+
   private async buildRefundMovementTramos(input: {
     refundMethod: string;
     effectiveChannel: EffectiveRefundChannel;
@@ -2539,6 +2620,12 @@ export class RefundFlowService {
         !Object.values(RefundPayoutChannel).includes(payoutChannel as RefundPayoutChannel))
     ) {
       throw new VendixHttpException(ErrorCodes.REF_PAYOUT_REQUIRED_001);
+    }
+
+    // QUI-893 — gate único de caja antes de la tx: completar un reembolso
+    // pagado en efectivo saca billetes del cajón de quien lo resuelve.
+    if (targetState === 'completed' && payoutChannel === RefundPayoutChannel.CASH) {
+      await this.sessionsService.assertSessionForSales(userId);
     }
 
     // refunds has no `stores` relation. The scoped order read establishes the

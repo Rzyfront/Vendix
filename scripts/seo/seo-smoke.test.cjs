@@ -1,7 +1,7 @@
 'use strict';
 const test = require('node:test');
 const assert = require('node:assert/strict');
-const { createSmoke, parseArgs, TOKEN_RE } = require('./seo-smoke.cjs');
+const { createSmoke, parseArgs, TOKEN_RE, MARKETING_TITLE } = require('./seo-smoke.cjs');
 
 const BASE = 'https://vendix.online';
 const NOW = Date.parse('2026-11-03T12:00:00Z');
@@ -197,4 +197,53 @@ test('en una tienda se evalúan las rutas de tienda y no las comerciales', async
   const pedidas = log.map(l => l.replace(/^(GET|HEAD) /, ''));
   for (const p of ['/pricing', '/ayuda', '/legal/terminos', '/legal/privacidad', '/legal/cookies', '/auth/login']) assert.ok(!pedidas.includes(STORE + p), p + ' no debe pedirse en una tienda');
   for (const p of ['/catalog', '/novedades', '/ofertas']) assert.equal(r.results.find(x => x.check === p + ' responde 200').status, 'OK');
+});
+
+// SEO-TECH-15: gate de host cruzado en las tiendas.
+function storeSite(STORE, head) {
+  const SEC = { 'strict-transport-security': 'max-age=1', 'x-content-type-options': 'nosniff', 'referrer-policy': 'x', 'cache-control': 'max-age=0' };
+  const t = {};
+  for (const p of ['/', '/catalog', '/novedades', '/ofertas', '/cart', '/checkout', '/account']) t[STORE + p] = { status: 200, headers: { 'content-type': 'text/html', ...SEC }, body: `<html><head>${head(p)}</head><body><h1>H</h1></body></html>` };
+  t[STORE + '/robots.txt'] = { status: 200, body: 'User-agent: *\nSitemap: ' + STORE + '/sitemap.xml\n' };
+  t[STORE + '/sitemap.xml'] = { status: 200, body: '<urlset></urlset>' };
+  return t;
+}
+const STORE_X = 'https://tienda-demo.vendix.online';
+const storeRun = head => createSmoke({ base: STORE_X, fetch: fakeFetch(storeSite(STORE_X, head)), now: () => NOW }).run();
+const byId = (r, id) => r.results.filter(x => x.id === id);
+
+test('host cruzado: canonical y og:url del propio host (o relativos) pasan', async () => {
+  const r = await storeRun(p => `<title>Tienda ${p}</title><link rel="canonical" href="${STORE_X}${p}"><meta property="og:url" content="${p}">`);
+  const g = byId(r, 'tienda-host-cruzado');
+  assert.equal(g.length, 7);
+  assert.ok(g.every(x => x.status === 'OK'));
+  assert.equal(byId(r, 'tienda-titulo-comercial').length, 0);
+});
+
+test('host cruzado: canonical a vendix.online en una tienda falla', async () => {
+  const r = await storeRun(p => `<title>Tienda</title><link rel="canonical" href="https://vendix.online${p}">`);
+  const g = byId(r, 'tienda-host-cruzado');
+  assert.ok(g.every(x => x.status === 'FALLA'));
+  assert.match(g[0].observed, /canonical → vendix\.online/);
+});
+
+test('host cruzado: og:url de otra tienda falla aunque el canonical sea propio', async () => {
+  const r = await storeRun(p => `<title>Tienda</title><link rel="canonical" href="${STORE_X}${p}"><meta property="og:url" content="https://otra-tienda.vendix.online${p}">`);
+  const x = byId(r, 'tienda-host-cruzado').find(y => y.check.startsWith('/catalog '));
+  assert.equal(x.status, 'FALLA');
+  assert.match(x.observed, /og:url → otra-tienda\.vendix\.online/);
+});
+
+test('host cruzado: la shell sin canonical pasa, pero el título de la web comercial queda como AVISO', async () => {
+  const r = await storeRun(() => `<title>${MARKETING_TITLE}</title>`);
+  assert.ok(byId(r, 'tienda-host-cruzado').every(x => x.status === 'OK'));
+  const t = byId(r, 'tienda-titulo-comercial');
+  assert.equal(t.length, 7);
+  assert.ok(t.every(x => x.status === 'AVISO'));
+});
+
+test('host cruzado: en vendix.online no se evalúa', async () => {
+  const r = await exec(site());
+  assert.equal(byId(r, 'tienda-host-cruzado').length, 0);
+  assert.equal(byId(r, 'tienda-titulo-comercial').length, 0);
 });

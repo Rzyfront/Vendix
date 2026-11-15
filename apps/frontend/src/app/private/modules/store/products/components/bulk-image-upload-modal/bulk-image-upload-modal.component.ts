@@ -2,6 +2,8 @@ import {Component, inject, input, output, effect, signal, computed, DestroyRef} 
 import { takeUntilDestroyed } from '@angular/core/rxjs-interop';
 import { NgClass } from '@angular/common';
 import { ProductsService } from '../../services/products.service';
+import { BulkUploadLogService } from '../../../bulk-uploads/services/bulk-upload-log.service';
+import { BulkUploadFileInfo } from '../../../bulk-uploads/bulk-upload-log.interface';
 import {
   ModalComponent,
   ButtonComponent,
@@ -541,6 +543,8 @@ export class BulkImageUploadModalComponent {
   supportedFormats = ['.jpg', '.jpeg', '.png', '.webp', '.gif', '.bmp', '.tiff', '.heic', '.heif', '.avif', '.svg'];
 
   private productsService = inject(ProductsService);
+  private bulkUploadLog = inject(BulkUploadLogService);
+  private fileInfo: BulkUploadFileInfo = {};
   private toastService = inject(ToastService);
 
   constructor() {
@@ -644,6 +648,7 @@ export class BulkImageUploadModalComponent {
     this.isAnalyzing.set(false);
     this.analysisResult.set(null);
     this.sessionId = null;
+    this.fileInfo = {};
     this.isUploading.set(false);
     this.uploadResults.set(null);
     this.uploadError.set(null);
@@ -729,6 +734,11 @@ export class BulkImageUploadModalComponent {
         this.isAnalyzing.set(false);
         this.analysisResult.set(result);
         this.sessionId = result.session_id;
+        this.fileInfo = {
+          file_name: result.file_name,
+          file_hash: result.file_hash,
+          duplicate_of: result.duplicate_of,
+        };
 
         if (result.with_errors > 0) {
           this.toastService.warning(`${result.with_errors} SKU(s) con errores detectados`);
@@ -746,13 +756,18 @@ export class BulkImageUploadModalComponent {
   }
 
   // Step 1 -> 2: Upload
-  proceedWithUpload() {
+  async proceedWithUpload() {
     if (!this.sessionId) return;
+
+    // QUI-1004: warn about a repeated file before any commit call.
+    if (!(await this.bulkUploadLog.confirmDuplicate(this.fileInfo.duplicate_of))) {
+      return;
+    }
 
     this.isUploading.set(true);
     this.currentStep.set(2);
 
-    this.productsService.uploadBulkImagesFromSession(this.sessionId).pipe(takeUntilDestroyed(this.destroyRef)).subscribe({
+    this.productsService.uploadBulkImagesFromSession(this.sessionId, this.fileInfo).pipe(takeUntilDestroyed(this.destroyRef)).subscribe({
       next: (result) => {
         this.isUploading.set(false);
         this.uploadResults.set(result);

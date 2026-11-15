@@ -243,3 +243,87 @@
     transform: rotate(360deg);
   }
 }
+/* ── QUI-942 · Resultado parcial (OC creada, una etapa falló) ── */
+.pop-partial-result {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 12px;
+  padding: 32px 16px;
+  text-align: center;
+}
+
+.pop-partial-result__icon {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 64px;
+  height: 64px;
+  border-radius: 9999px;
+  background: var(--color-warning-light);
+  color: var(--color-warning);
+}
+
+.pop-partial-result__title {
+  font-size: 18px;
+  font-weight: 600;
+  color: var(--color-text-primary);
+}
+
+.pop-partial-result__hint {
+  max-width: 28rem;
+  font-size: 14px;
+  color: var(--color-text-secondary);
+}
+
+.pop-partial-result__stages {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  width: 100%;
+  max-width: 28rem;
+  text-align: left;
+}
+
+.pop-partial-result__stage {
+  display: flex;
+  align-items: flex-start;
+  gap: 10px;
+  padding: 10px 12px;
+  border: 1px solid var(--color-border);
+  border-radius: 12px;
+  color: var(--color-text-secondary);
+
+  &[data-status='success'] {
+    color: var(--color-success);
+  }
+
+  &[data-status='failed'] {
+    border-color: var(--color-destructive);
+    color: var(--color-destructive);
+  }
+}
+
+.pop-partial-result__stage-label {
+  font-size: 14px;
+  font-weight: 600;
+  color: var(--color-text-primary);
+}
+
+.pop-partial-result__stage-status {
+  margin-left: 8px;
+  font-size: 12px;
+}
+
+.pop-partial-result__stage-error {
+  margin-top: 4px;
+  font-size: 13px;
+}
+
+.pop-partial-result__actions {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: center;
+  gap: 8px;
+  margin-top: 4px;
+}

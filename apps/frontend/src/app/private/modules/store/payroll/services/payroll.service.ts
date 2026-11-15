@@ -3,6 +3,7 @@ import { HttpClient } from '@angular/common/http';
 import { Observable, throwError } from 'rxjs';
 import { map, catchError } from 'rxjs/operators';
 import { environment } from '../../../../../../environments/environment';
+import { BulkUploadFileInfo } from '../../bulk-uploads/bulk-upload-log.interface';
 import {
   Employee,
   PayrollRun,
@@ -143,11 +144,13 @@ export class PayrollService {
     return this.http.get(this.getApiUrl('employees/bulk/template/download'), { responseType: 'blob' });
   }
 
-  analyzeBulkEmployees(file: File): Observable<BulkEmployeeAnalysisResult> {
+  analyzeBulkEmployees(
+    file: File,
+  ): Observable<BulkEmployeeAnalysisResult & BulkUploadFileInfo> {
     const formData = new FormData();
     formData.append('file', file);
     return this.http
-      .post<ApiResponse<BulkEmployeeAnalysisResult>>(
+      .post<ApiResponse<BulkEmployeeAnalysisResult & BulkUploadFileInfo>>(
         this.getApiUrl('employees/bulk/analyze'),
         formData,
       )
@@ -176,11 +179,18 @@ export class PayrollService {
     sessionId: string,
     offset: number,
     limit: number,
+    fileInfo?: Pick<BulkUploadFileInfo, 'file_name' | 'file_hash'>,
   ): Observable<BulkEmployeeUploadPage> {
     return this.http
       .post<ApiResponse<BulkEmployeeUploadPage>>(
         this.getApiUrl('employees/bulk/upload-session'),
-        { session_id: sessionId, offset, limit },
+        {
+          session_id: sessionId,
+          offset,
+          limit,
+          ...(fileInfo?.file_name ? { file_name: fileInfo.file_name } : {}),
+          ...(fileInfo?.file_hash ? { file_hash: fileInfo.file_hash } : {}),
+        },
       )
       .pipe(
         map((response) => response.data),

@@ -39,6 +39,7 @@ import {
   BulkProductUploadResult,
 } from '../interfaces/bulk-product-analysis.interface';
 import { PRODUCT_SAVE_ERROR_MAP } from '../utils/product-save-requirements';
+import { BulkUploadFileInfo } from '../../bulk-uploads/bulk-upload-log.interface';
 
 interface ApiResponse<T> {
   success: boolean;
@@ -708,12 +709,14 @@ export class ProductsService {
       );
   }
 
-  analyzeBulkImages(file: File): Observable<BulkImageAnalysisResult> {
+  analyzeBulkImages(
+    file: File,
+  ): Observable<BulkImageAnalysisResult & BulkUploadFileInfo> {
     const formData = new FormData();
     formData.append('file', file);
     return this.http
       .post<
-        ApiResponse<BulkImageAnalysisResult>
+        ApiResponse<BulkImageAnalysisResult & BulkUploadFileInfo>
       >(`${this.apiUrl}/store/products/bulk-images/analyze`, formData)
       .pipe(
         map((response) => response.data),
@@ -723,11 +726,15 @@ export class ProductsService {
 
   uploadBulkImagesFromSession(
     sessionId: string,
+    fileInfo?: Pick<BulkUploadFileInfo, 'file_name' | 'file_hash'>,
   ): Observable<BulkImageUploadResult> {
     return this.http
       .post<
         ApiResponse<BulkImageUploadResult>
-      >(`${this.apiUrl}/store/products/bulk-images/upload-session`, { session_id: sessionId })
+      >(`${this.apiUrl}/store/products/bulk-images/upload-session`, {
+        session_id: sessionId,
+        ...this.fileInfoBody(fileInfo),
+      })
       .pipe(
         map((response) => response.data),
         catchError(this.handleError),
@@ -735,12 +742,14 @@ export class ProductsService {
   }
 
   // Carga Masiva de Productos (Análisis y Sesión)
-  analyzeBulkProducts(file: File): Observable<BulkProductAnalysisResult> {
+  analyzeBulkProducts(
+    file: File,
+  ): Observable<BulkProductAnalysisResult & BulkUploadFileInfo> {
     const formData = new FormData();
     formData.append('file', file);
     return this.http
       .post<
-        ApiResponse<BulkProductAnalysisResult>
+        ApiResponse<BulkProductAnalysisResult & BulkUploadFileInfo>
       >(`${this.apiUrl}/store/products/bulk/analyze`, formData)
       .pipe(
         map((response) => response.data),
@@ -767,6 +776,7 @@ export class ProductsService {
     offset: number,
     limit: number,
     initialLoadAck?: boolean,
+    fileInfo?: Pick<BulkUploadFileInfo, 'file_name' | 'file_hash'>,
   ): Observable<BulkProductUploadPage> {
     return this.http
       .post<
@@ -776,11 +786,22 @@ export class ProductsService {
         offset,
         limit,
         ...(initialLoadAck ? { initial_load_ack: true } : {}),
+        ...this.fileInfoBody(fileInfo),
       })
       .pipe(
         map((response) => response.data),
         catchError(this.handleError),
       );
+  }
+
+  /** QUI-1004: file name/hash so the backend records the upload. */
+  private fileInfoBody(
+    fileInfo?: Pick<BulkUploadFileInfo, 'file_name' | 'file_hash'>,
+  ): Pick<BulkUploadFileInfo, 'file_name' | 'file_hash'> {
+    return {
+      ...(fileInfo?.file_name ? { file_name: fileInfo.file_name } : {}),
+      ...(fileInfo?.file_hash ? { file_hash: fileInfo.file_hash } : {}),
+    };
   }
 
   cancelBulkProductSession(sessionId: string): Observable<void> {

@@ -641,3 +641,160 @@ describe('NotificationsEventsListener.handleOrderStatusChanged', () => {
     );
   });
 });
+
+describe('NotificationsEventsListener — customer order notifications (QUI-854)', () => {
+  function buildListener(order: { customer_id: number | null } | null) {
+    const notificationsService = {
+      createAndBroadcast: jest.fn().mockResolvedValue({}),
+      sendToUser: jest.fn().mockResolvedValue({}),
+    } as any;
+    const globalPrisma = {
+      orders: { findFirst: jest.fn().mockResolvedValue(order) },
+    } as any;
+    const listener = new NotificationsEventsListener(
+      notificationsService,
+      globalPrisma,
+      {} as any,
+      {} as any,
+      { refreshAndBroadcastQueue: jest.fn() } as any,
+      { emit: jest.fn() } as any,
+      { deliver: jest.fn() } as any,
+    );
+    return { listener, notificationsService, globalPrisma };
+  }
+
+  const statusEvent = {
+    store_id: 3,
+    order_id: 77,
+    order_number: 'ORD-77',
+    old_state: 'pending_payment',
+    new_state: 'shipped',
+  };
+
+  it('sends the order status change to the order customer, scoped to the store', async () => {
+    const { listener, notificationsService, globalPrisma } = buildListener({
+      customer_id: 12,
+    });
+
+    await listener.handleOrderStatusChanged(statusEvent);
+
+    expect(globalPrisma.orders.findFirst).toHaveBeenCalledWith({
+      where: { id: 77, store_id: 3 },
+      select: { customer_id: true },
+    });
+    expect(notificationsService.sendToUser).toHaveBeenCalledWith(
+      3,
+      12,
+      'order_status_change',
+      'Tu pedido fue actualizado',
+      'Tu pedido #ORD-77 ahora está: Enviado',
+      {
+        order_id: 77,
+        order_number: 'ORD-77',
+        new_state: 'shipped',
+        audience: 'customer',
+        route: '/account/orders/77',
+      },
+    );
+    // Staff broadcast is unchanged.
+    expect(notificationsService.createAndBroadcast).toHaveBeenCalledWith(
+      3,
+      'order_status_change',
+      'Estado de Orden Actualizado',
+      'Orden #ORD-77: pending_payment → shipped',
+      { order_id: 77, order_number: 'ORD-77' },
+    );
+  });
+
+  it('does not notify anyone extra when the order has no customer', async () => {
+    const { listener, notificationsService } = buildListener({
+      customer_id: null,
+    });
+    await listener.handleOrderStatusChanged(statusEvent);
+    expect(notificationsService.sendToUser).not.toHaveBeenCalled();
+    expect(notificationsService.createAndBroadcast).toHaveBeenCalledTimes(1);
+  });
+
+  it('does not notify the customer when the order belongs to another store', async () => {
+    const { listener, notificationsService } = buildListener(null);
+    await listener.handleOrderStatusChanged(statusEvent);
+    expect(notificationsService.sendToUser).not.toHaveBeenCalled();
+  });
+
+  it('skips the customer for draft orders and kitchen bridge transitions', async () => {
+    const { listener, notificationsService, globalPrisma } = buildListener({
+      customer_id: 12,
+    });
+    await listener.handleOrderStatusChanged({
+      ...statusEvent,
+      old_state: 'created',
+      new_state: 'draft',
+    });
+    await listener.handleOrderStatusChanged({
+      ...statusEvent,
+      source: 'kitchen_bridge',
+    });
+    expect(globalPrisma.orders.findFirst).not.toHaveBeenCalled();
+    expect(notificationsService.sendToUser).not.toHaveBeenCalled();
+  });
+
+  it('keeps the staff broadcast when the customer lookup fails', async () => {
+    const { listener, notificationsService, globalPrisma } = buildListener(null);
+    globalPrisma.orders.findFirst.mockRejectedValueOnce(new Error('db down'));
+    await expect(
+      listener.handleOrderStatusChanged(statusEvent),
+    ).resolves.toBeUndefined();
+    expect(notificationsService.createAndBroadcast).toHaveBeenCalledTimes(1);
+    expect(notificationsService.sendToUser).not.toHaveBeenCalled();
+  });
+
+  it('sends the payment received to the order customer', async () => {
+    const { listener, notificationsService } = buildListener({
+      customer_id: 12,
+    });
+    await listener.handlePaymentReceived({
+      store_id: 3,
+      order_id: 77,
+      order_number: 'ORD-77',
+      amount: 50000,
+      currency: 'COP',
+      payment_method: 'wompi',
+    });
+    expect(notificationsService.sendToUser).toHaveBeenCalledWith(
+      3,
+      12,
+      'payment_received',
+      'Recibimos tu pago',
+      'Registramos tu pago de $50000 COP para el pedido #ORD-77',
+      {
+        order_id: 77,
+        order_number: 'ORD-77',
+        audience: 'customer',
+        route: '/account/orders/77',
+      },
+    );
+    expect(notificationsService.createAndBroadcast).toHaveBeenCalledWith(
+      3,
+      'payment_received',
+      'Pago Recibido',
+      'Pago de $50000 COP para orden #ORD-77',
+      { order_id: 77, payment_method: 'wompi' },
+    );
+  });
+
+  it('does not look up a customer for payments without an order', async () => {
+    const { listener, notificationsService, globalPrisma } = buildListener({
+      customer_id: 12,
+    });
+    await listener.handlePaymentReceived({
+      store_id: 3,
+      order_id: undefined as unknown as number,
+      order_number: '',
+      amount: 1000,
+      currency: 'COP',
+      payment_method: 'cash',
+    });
+    expect(globalPrisma.orders.findFirst).not.toHaveBeenCalled();
+    expect(notificationsService.sendToUser).not.toHaveBeenCalled();
+  });
+});

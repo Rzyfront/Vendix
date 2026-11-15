@@ -5,6 +5,7 @@ import { LayawayService } from './layaway.service';
 import { StorePrismaService } from '../../../prisma/services/store-prisma.service';
 import { StockLevelManager } from '../inventory/shared/services/stock-level-manager.service';
 import { MovementsService } from '../cash-registers/movements/movements.service';
+import { SessionsService } from '../cash-registers/sessions/sessions.service';
 import { RequestContextService } from '@common/context/request-context.service';
 
 /**
@@ -57,6 +58,7 @@ describe('LayawayService — consumo de stock al entregar', () => {
         { provide: StockLevelManager, useValue: stockLevelManager },
         { provide: EventEmitter2, useValue: { emit: jest.fn() } },
         { provide: MovementsService, useValue: { recordModuleCashMovement: jest.fn() } },
+        { provide: SessionsService, useValue: { assertSessionForSales: jest.fn() } },
       ],
     }).compile();
 

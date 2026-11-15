@@ -788,6 +788,27 @@ describe('PaymentsService', () => {
 
       expect(result.success).toBe(true);
       expect(paymentGateway.processPaymentWithNewOrder).toHaveBeenCalledTimes(1);
+      expect(sessionsService.assertSessionForSales).toHaveBeenCalledWith(
+        mockUser.id,
+      );
+    });
+
+    it('QUI-893 — sin caja abierta se bloquea antes de crear la orden (POS y renovación de membresías)', async () => {
+      (sessionsService.assertSessionForSales as jest.Mock).mockRejectedValueOnce(
+        new VendixHttpException(ErrorCodes.CASH_SESSION_REQUIRED_001),
+      );
+      const gatewaySpy = jest.spyOn(paymentGateway, 'processPaymentWithNewOrder');
+
+      const error = await service
+        .processPaymentWithOrder(buildWithOrderDto(), mockUser)
+        .catch((failure) => failure);
+
+      expect(error).toBeInstanceOf(VendixHttpException);
+      expect(error.errorCode).toBe(ErrorCodes.CASH_SESSION_REQUIRED_001.code);
+      expect(sessionsService.assertSessionForSales).toHaveBeenCalledWith(
+        mockUser.id,
+      );
+      expect(gatewaySpy).not.toHaveBeenCalled();
     });
   });
 

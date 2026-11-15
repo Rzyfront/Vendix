@@ -34,6 +34,11 @@ import {
 import { CurrencyPipe } from '../../../../../../../shared/pipes/currency/currency.pipe';
 
 import { MemberBulkScannerService } from '../../services/member-bulk-scanner.service';
+import { BulkUploadLogService } from '../../../../bulk-uploads/services/bulk-upload-log.service';
+import {
+  BulkUploadFileInfo,
+  toBulkUploadFileInfo,
+} from '../../../../bulk-uploads/bulk-upload-log.interface';
 import {
   AnalyzedMember,
   AnalyzedMemberStatus,
@@ -640,6 +645,9 @@ export class MemberBulkScannerModalComponent {
   private readonly destroyRef = inject(DestroyRef);
   private readonly service = inject(MemberBulkScannerService);
   private readonly toast = inject(ToastService);
+  private readonly bulkUploadLog = inject(BulkUploadLogService);
+  /** QUI-1004 — huella del archivo escaneado y carga anterior, si la hay. */
+  private fileInfo: BulkUploadFileInfo = {};
 
   readonly isOpen = input<boolean>(false);
   readonly close = output<void>();
@@ -842,8 +850,12 @@ export class MemberBulkScannerModalComponent {
 
     this.scanSub?.unsubscribe();
     this.scanStalled.set(false);
+    this.fileInfo = {};
     this.scanSub = this.service
-      .scanRoster(file, { onStall: () => this.scanStalled.set(true) })
+      .scanRoster(file, {
+        onStall: () => this.scanStalled.set(true),
+        onEnqueued: (data) => (this.fileInfo = toBulkUploadFileInfo(data)),
+      })
       .pipe(
         switchMap((res) => {
           if (!res.success || !res.data) {
@@ -1123,7 +1135,7 @@ export class MemberBulkScannerModalComponent {
    * responsible for calling `commitRoster(...)` and surfacing the toast
    * because only it owns the memberships list refresh.
    */
-  onConfirm(): void {
+  async onConfirm(): Promise<void> {
     const plans = this.editablePlans();
     const members = this.editableMembers();
     if (members.length === 0) return;
@@ -1188,7 +1200,21 @@ export class MemberBulkScannerModalComponent {
         period_end: m.period_end ?? null,
       }));
 
-    this.confirmed.emit({ plans: commitPlans, members: commitMembers });
+    // QUI-1004 — aviso de archivo repetido; Cancelar no carga nada.
+    if (!(await this.bulkUploadLog.confirmDuplicate(this.fileInfo.duplicate_of))) {
+      return;
+    }
+
+    this.confirmed.emit({
+      plans: commitPlans,
+      members: commitMembers,
+      ...(this.fileInfo.file_hash
+        ? {
+            file_name: this.fileInfo.file_name,
+            file_hash: this.fileInfo.file_hash,
+          }
+        : {}),
+    });
     this.closeAfterCommit();
   }
 

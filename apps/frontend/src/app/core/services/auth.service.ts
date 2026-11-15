@@ -389,11 +389,12 @@ export class AuthService {
     return this.http.post(`${this.API_URL}/resend-verification`, { email });
   }
   forgotOwnerPassword(
-    organization_slug: string,
+    organization_slug: string | undefined,
     email: string,
   ): Observable<any> {
+    // QUI-943: the V-link is optional (organization or store slug).
     return this.http.post(`${this.API_URL}/forgot-owner-password`, {
-      organization_slug,
+      ...(organization_slug ? { organization_slug } : {}),
       email,
     });
   }

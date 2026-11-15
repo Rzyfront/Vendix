@@ -95,6 +95,11 @@ import {
   UpdatePopCartItemRequest,
 } from './interfaces/pop-cart.interface';
 import { POP_USE_UNIFIED_MODAL } from './pop.config';
+import {
+  PopBulkImport,
+  PopBulkImportSummary,
+} from './components/pop-bulk-data-modal.component';
+import { BulkUploadLogService } from '../../bulk-uploads/services/bulk-upload-log.service';
 import { toLocalDateString } from '../../../../../shared/utils/date.util';
 import { parseApiError } from '../../../../../core/utils/parse-api-error';
 import { extractApiErrorMessage } from '../../../../../core/utils/api-error-handler';
@@ -110,6 +115,15 @@ const SHIPPING_METHOD_OPTIONS: SelectorOption[] = [
   { value: 'pickup', label: 'Recolección' },
   { value: 'other', label: 'Otro' },
 ];
+
+/** Mínimo que acepta `RegisterPaymentDto.amount` (`@Min(0.01)`). */
+const MIN_PAYMENT_AMOUNT = 0.01;
+
+/** QUI-942 — aviso cuando la OC quedó en total $0 y no se registró pago. */
+const PAY_OMITTED_ZERO_TOTAL_NOTICE =
+  'La orden quedó con total $0: no se registró ningún pago.';
+/** Duración del aviso anterior (el `info` por defecto dura 1,5 s). */
+const PAY_OMITTED_NOTICE_DURATION_MS = 6000;
 
 /**
  * POP (Point of Purchase) Main Component
@@ -268,9 +282,10 @@ const SHIPPING_METHOD_OPTIONS: SelectorOption[] = [
       [shippingCost]="shellShippingCost()"
       [shippingCostAllocation]="shellShippingCostAllocation()"
       (confirmed)="onOrderConfirmed()"
-      (cancelled)="showOrderConfirmModal.set(false)"
+      (cancelled)="onCheckoutCancelled()"
       (navigateToSettings)="onNavigateToSettings()"
       (retryOrder)="onOrderConfirmed()"
+      (viewOrder)="onPartialViewOrder()"
       (pricingOverridesChange)="onPricingOverridesChange($event)"
       (ackReceiveChange)="ackReceive.set($event)"
       (paymentPlanChange)="paymentPlan.set($event)"
@@ -303,6 +318,7 @@ const SHIPPING_METHOD_OPTIONS: SelectorOption[] = [
       [total]="orderResult()?.total ?? 0"
       [state]="orderResult()?.state ?? ''"
       [orderId]="orderResult()?.id ?? null"
+      [notice]="orderResult()?.notice ?? ''"
       (newPurchase)="onNewPurchase()"
       (viewOrder)="onViewOrder()"
     ></app-pop-order-confirmation-modal>
@@ -361,6 +377,22 @@ const SHIPPING_METHOD_OPTIONS: SelectorOption[] = [
 })
 export class PopComponent implements OnInit, OnDestroy {
   private destroyRef = inject(DestroyRef);
+  private bulkUploadLog = inject(BulkUploadLogService);
+
+  /**
+   * QUI-1004 — cargas masivas que llenaron el carrito y aún no terminan en una
+   * OC. Cada archivo se registra (una fila por carga) al terminar la orden,
+   * con su número; se descartan si el operador vacía el carrito. Es una
+   * lista: dos archivos subidos al mismo carrito quedan ambos en el registro.
+   */
+  private pendingBulkUploads: Array<
+    PopBulkImportSummary & {
+      valid_rows: number;
+      loaded_rows: number;
+      /** Cargadas cuyo producto no existía: se crean con la orden. */
+      created_rows: number;
+    }
+  > = [];
   private vexiHosts = inject(VexiUiHostRegistry);
   private dispatchNotesService = inject(DispatchNotesService);
   /**
@@ -545,6 +577,12 @@ export class PopComponent implements OnInit, OnDestroy {
       errorMessage?: string;
     }>;
     failedStage?: 'create' | 'receive' | 'pay';
+    /**
+     * QUI-942 — nota persistente para el modal de éxito (p. ej. «no se
+     * registró ningún pago» en una OC de total $0). Un toast de 1,5 s junto
+     * al de éxito pasaba desapercibido.
+     */
+    notice?: string;
   } | null>(null);
   readonly orderError = signal<string | null>(null);
 
@@ -1449,12 +1487,14 @@ export class PopComponent implements OnInit, OnDestroy {
     return ids.length > 0 ? Array.from(new Set(ids)) : undefined;
   }
 
-  onBulkDataReceived(items: any[]): void {
-    if (!items || items.length === 0) return;
+  onBulkDataReceived(event: PopBulkImport): void {
+    const items = event?.items ?? [];
+    if (items.length === 0) return;
 
     // Se acumulan y se agregan de una vez: un solo set del carrito y un solo
     // cálculo de resumen (fila por fila era O(N²) con 10.000 filas).
     const requests: AddToPopCartRequest[] = [];
+    let createdRows = 0;
 
     items.forEach((row) => {
       const normalizedRow = this.normalizeBulkRow(row);
@@ -1464,10 +1504,6 @@ export class PopComponent implements OnInit, OnDestroy {
 
       const sku =
         this.getBulkValue(normalizedRow, 'sku', 'code', 'codigo', 'id');
-
-      if (!name || !sku) {
-        return;
-      }
 
       const barcode = this.parseBulkBarcode(
         this.getBulkValue(
@@ -1479,6 +1515,13 @@ export class PopComponent implements OnInit, OnDestroy {
           'gtin',
         ),
       );
+
+      // QUI-1004 — la fila ya viene emparejada con un producto existente; si el
+      // Excel solo traía el código de barras, ese es su código.
+      const code = sku || barcode;
+      if (!name || !code) {
+        return;
+      }
 
       const product_type = this.normalizeBulkProductType(
         this.getBulkValue(normalizedRow, 'product_type', 'tipo'),
@@ -1598,13 +1641,16 @@ export class PopComponent implements OnInit, OnDestroy {
       const dummyProduct = {
         id: 0,
         name: String(name),
-        code: String(sku),
+        code: String(code),
         cost: unit_cost,
         price: base_price,
         stock: 0,
         is_active: true,
       };
 
+      // QUI-1004 — `bulk/check-lines` marcó que el producto no existe: la
+      // orden lo crea y la carga lo cuenta como «creado».
+      if ((row as { will_create?: boolean }).will_create === true) createdRows++;
       requests.push({
           product: dummyProduct,
           quantity: quantity,
@@ -1612,7 +1658,7 @@ export class PopComponent implements OnInit, OnDestroy {
           is_prebulk: true,
           prebulk_data: {
             name: String(name),
-            code: String(sku),
+            code: String(code),
             barcode,
             description: String(description),
             state: String(state),
@@ -1635,6 +1681,13 @@ export class PopComponent implements OnInit, OnDestroy {
         });
     });
 
+    this.pendingBulkUploads.push({
+      ...event.summary,
+      valid_rows: items.length,
+      loaded_rows: requests.length,
+      created_rows: createdRows,
+    });
+
     if (requests.length > 0) {
       this.popCartService
         .addPrebulkItems(requests)
@@ -1645,7 +1698,7 @@ export class PopComponent implements OnInit, OnDestroy {
       );
     } else {
       this.toastService.warning(
-        'No se encontraron productos válidos en el archivo (requiere Nombre y SKU)',
+        'No se encontraron productos válidos en el archivo (requiere nombre y SKU o código de barras)',
       );
     }
   }
@@ -1812,6 +1865,8 @@ export class PopComponent implements OnInit, OnDestroy {
       // Vaciar el carrito descarta el reintento pendiente: el próximo carrito ya
       // no corresponde a esa OC y reanudar su recepción ignoraría la compra nueva.
       this.pendingReceptionOrder.set(null);
+      // QUI-1004 — la carga masiva vaciada no terminó en ninguna orden.
+      this.pendingBulkUploads = [];
       this.popCartService.clearCart().pipe(takeUntilDestroyed(this.destroyRef)).subscribe({
         next: () => {
           this.toastService.info('Orden vaciada');
@@ -2025,6 +2080,7 @@ export class PopComponent implements OnInit, OnDestroy {
     this.purchaseOrdersService.createPurchaseOrder(request).pipe(takeUntilDestroyed(this.destroyRef)).subscribe({
       next: (response) => {
         this.toastService.success('Orden guardada como borrador');
+        this._recordBulkUpload(response?.data);
         this.popCartService.clearCart().pipe(takeUntilDestroyed(this.destroyRef)).subscribe();
         this.router.navigate(['/admin/products']);
       },
@@ -2149,8 +2205,16 @@ export class PopComponent implements OnInit, OnDestroy {
   onOrderConfirmed(): void {
     // Punto de entrada real del envío. Un reintento de recepción no crea OC
     // (ya existe), así que no se bloquea.
-    if (!this.pendingReceptionOrder() && this.blockSubmitIfTaxUnconfirmed()) {
-      return;
+    if (!this.pendingReceptionOrder()) {
+      // QUI-942 — tras una compra ya creada el carrito queda vacío; un segundo
+      // envío mandaba una OC sin proveedor, bodega ni líneas (400).
+      if (this.popCartService.currentState.items.length === 0) {
+        this.toastService.warning(
+          'El pedido está vacío: agrega productos antes de crear la orden.',
+        );
+        return;
+      }
+      if (this.blockSubmitIfTaxUnconfirmed()) return;
     }
     // CP-ID-VNDX-2026-08-18-PO-PROD — F2.S6: NO cerrar el modal antes del POST.
     // Antes `showOrderConfirmModal.set(false)` corría como primera línea y el
@@ -2209,6 +2273,32 @@ export class PopComponent implements OnInit, OnDestroy {
     if (typeof id === 'number' && id > 0) {
       this.router.navigate(['/admin/orders/purchase-orders', id]);
     }
+  }
+
+  /**
+   * QUI-942 — el wizard se cierra sin éxito. Un resultado PARCIAL (OC creada
+   * con una etapa caída) o un error de creación ya se le mostró al operador en
+   * el shell: si sobrevivieran, la siguiente apertura arrancaría en ese panel
+   * en lugar del wizard. Un éxito pleno no se toca: lo pinta su propio modal.
+   */
+  onCheckoutCancelled(): void {
+    this.showOrderConfirmModal.set(false);
+    if (this.orderResult()?.failedStage) this.orderResult.set(null);
+    this.orderError.set(null);
+  }
+
+  /**
+   * QUI-942 — «Ver orden» desde el panel de resultado parcial del shell.
+   * Tras un fallo de recepción el carrito y `pendingReceptionOrder` se
+   * conservan para reintentar; al salir al detalle la OC pendiente se
+   * perdería pero el carrito (persistido) no, y «Confirmar» crearía una
+   * segunda OC. La OC ya existe: la recepción se completa desde su detalle.
+   */
+  onPartialViewOrder(): void {
+    const partial = this.orderResult();
+    this.showOrderConfirmModal.set(false);
+    if (partial?.failedStage === 'receive') this._finalizeAfterOrder();
+    this.onViewOrder();
   }
 
   onNavigateToSettings(): void {
@@ -2661,6 +2751,12 @@ export class PopComponent implements OnInit, OnDestroy {
     // carrito) o si falló la creación (conservar carrito para reintentar).
     let createdOrder: any = pendingOrder;
 
+    // QUI-942 — el pago inmediato se omite cuando no hay nada que pagar (una
+    // carga masiva con costos en 0 deja la OC en total 0): el DTO exige
+    // `amount >= 0.01`, así que mandarlo siempre fallaba con 400 sobre una
+    // orden ya creada y recibida.
+    let payOmittedZeroTotal = false;
+
     // Reintento: se RELEE la OC del servidor para saber qué falta recibir
     // (una recepción grande pudo quedar parcial). Si la relectura falla se usa
     // la foto recordada y se pide la recepción completa, como antes.
@@ -2700,10 +2796,15 @@ export class PopComponent implements OnInit, OnDestroy {
           const payment$ = reception$.pipe(
             switchMap(() => {
               if (!doPay) return of(null);
-              const amount =
+              const amount = this._round2(
                 Number(order.total_amount) > 0
                   ? Number(order.total_amount)
-                  : cartTotal;
+                  : cartTotal,
+              );
+              if (amount < MIN_PAYMENT_AMOUNT) {
+                payOmittedZeroTotal = true;
+                return of(null);
+              }
               return this.purchaseOrdersService
                 .registerPurchaseOrderPayment(order.id, {
                   amount,
@@ -2745,14 +2846,25 @@ export class PopComponent implements OnInit, OnDestroy {
           // `_executeSubmitOrder` (action='create') populaba `orderResult`,
           // así que al confirmar "Crear y Recibir" el modal se quedaba
           // abierto con el wizard visible aunque la OC ya existía en DB.
+          const paid = doPay && !payOmittedZeroTotal;
           this._setOrderResultFromCreated(createdOrder, {
             stages: this._buildStageTrail(doReceive, doPay, {
               create: 'success',
               receive: doReceive ? 'success' : 'skipped',
-              pay: doPay ? 'success' : 'skipped',
+              pay: paid ? 'success' : 'skipped',
             }),
+            ...(payOmittedZeroTotal ? { notice: PAY_OMITTED_ZERO_TOTAL_NOTICE } : {}),
           });
-          this.toastService.success(this._buildSuccessMessage(doReceive, doPay));
+          this.toastService.success(this._buildSuccessMessage(doReceive, paid));
+          if (payOmittedZeroTotal) {
+            // QUI-942 — 1,5 s (por defecto) junto al toast de éxito pasaba
+            // desapercibido; el modal de éxito también lo muestra.
+            this.toastService.info(
+              PAY_OMITTED_ZERO_TOTAL_NOTICE,
+              undefined,
+              PAY_OMITTED_NOTICE_DURATION_MS,
+            );
+          }
           this._finalizeAfterOrder();
         },
         error: (err: any) => {
@@ -2924,9 +3036,14 @@ export class PopComponent implements OnInit, OnDestroy {
         errorMessage?: string;
       }>;
       failedStage?: 'create' | 'receive' | 'pay';
+      notice?: string;
     } = {},
   ): void {
     if (!order) return;
+    // QUI-1004 — una carga masiva que llegó a orden se registra aquí, con la
+    // PO; si falló un paso accesorio (pago o recepción) queda «parcial».
+    const bulkSummary = this._recordBulkUpload(order, !!extras.failedStage);
+    const notice = [extras.notice, bulkSummary].filter(Boolean).join(' ');
     this.orderResult.set({
       id: order.id,
       total: Number(order.total_amount ?? 0),
@@ -2941,7 +3058,63 @@ export class PopComponent implements OnInit, OnDestroy {
       state: order.state ?? order.status ?? '',
       ...(extras.stages ? { stages: extras.stages } : {}),
       ...(extras.failedStage ? { failedStage: extras.failedStage } : {}),
+      ...(notice ? { notice } : {}),
     });
+  }
+
+  /**
+   * QUI-1004 — registra la carga masiva pendiente contra la orden que generó
+   * y devuelve el resumen para el operador («N cargadas (C productos
+   * creados) · M con error · K omitidas»). Cargadas = filas que entraron al
+   * carrito; creados = cargadas cuyo producto no existía; con error = filas
+   * omitidas por error en la revisión; omitidas = filas válidas que no
+   * llegaron al carrito. Registra una sola vez por carga; con varios archivos
+   * en el mismo carrito registra una fila por archivo y suma el resumen.
+   */
+  private _recordBulkUpload(
+    order: { order_number?: string } | null | undefined,
+    accessoryStepFailed = false,
+  ): string | null {
+    const pendingUploads = this.pendingBulkUploads;
+    if (pendingUploads.length === 0 || !order) return null;
+    this.pendingBulkUploads = [];
+
+    const reference = order.order_number ?? '';
+    let successful_rows = 0;
+    let created_rows = 0;
+    let failed_rows = 0;
+    let skipped_rows = 0;
+    for (const pending of pendingUploads) {
+      const fileSkipped = Math.max(0, pending.valid_rows - pending.loaded_rows);
+      successful_rows += pending.loaded_rows;
+      created_rows += pending.created_rows;
+      failed_rows += pending.failed_rows;
+      skipped_rows += fileSkipped;
+      if (!pending.file_hash) continue;
+      this.bulkUploadLog
+        .register({
+          upload_type: 'purchase_orders',
+          file_name: pending.file_name,
+          file_hash: pending.file_hash,
+          total_rows: pending.total_rows,
+          successful_rows: pending.loaded_rows,
+          created_rows: pending.created_rows,
+          failed_rows: pending.failed_rows,
+          skipped_rows: fileSkipped,
+          accessory_step_failed: accessoryStepFailed,
+          ...(reference ? { result_reference: reference } : {}),
+        })
+        .pipe(takeUntilDestroyed(this.destroyRef))
+        .subscribe();
+    }
+    const summary =
+      `Carga masiva: ${successful_rows} cargadas` +
+      (created_rows > 0 ? ` (${created_rows} productos creados)` : '') +
+      ` · ${failed_rows} con error · ` +
+      `${skipped_rows} omitidas${reference ? ` · orden ${reference}` : ''}` +
+      (accessoryStepFailed ? ' (parcial).' : '.');
+    this.toastService.info(summary, undefined, 8000);
+    return summary;
   }
 
   /**

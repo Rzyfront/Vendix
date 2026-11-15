@@ -11,6 +11,7 @@ import { DialogService } from '../../../../../shared/components/dialog/dialog.se
 import { AuthFacade } from '../../../../../core/store/auth/auth.facade';
 import { DispatchNotesService } from '../../dispatch-notes/services/dispatch-notes.service';
 import { VexiUiHostRegistry } from '../../../../../core/services/vexi-ui-host.registry';
+import { BulkUploadLogService } from '../../bulk-uploads/services/bulk-upload-log.service';
 import type {
   InvoiceMatchResult,
   InvoiceScanResult,
@@ -25,8 +26,9 @@ import type {
 describe('PopComponent — QUI-855 puntos de entrada', () => {
   let cart: any;
   let poService: { createPurchaseOrder: jasmine.Spy };
-  let toast: { success: jasmine.Spy; warning: jasmine.Spy; error: jasmine.Spy };
+  let toast: { success: jasmine.Spy; warning: jasmine.Spy; error: jasmine.Spy; info: jasmine.Spy };
   let component: PopComponent;
+  let bulkLog: { register: jasmine.Spy };
 
   function makeState(over: Record<string, unknown> = {}): any {
     return {
@@ -55,7 +57,9 @@ describe('PopComponent — QUI-855 puntos de entrada', () => {
       success: jasmine.createSpy('success'),
       warning: jasmine.createSpy('warning'),
       error: jasmine.createSpy('error'),
+      info: jasmine.createSpy('info'),
     };
+    bulkLog = { register: jasmine.createSpy('register').and.returnValue(of(true)) };
     TestBed.configureTestingModule({
       providers: [
         { provide: PopCartService, useValue: cart },
@@ -68,6 +72,7 @@ describe('PopComponent — QUI-855 puntos de entrada', () => {
         { provide: AuthFacade, useValue: { getUserId: () => 1 } },
         { provide: DispatchNotesService, useValue: {} },
         { provide: VexiUiHostRegistry, useValue: { register: () => undefined, unregister: () => undefined } },
+        { provide: BulkUploadLogService, useValue: bulkLog },
       ],
     });
     TestBed.overrideComponent(PopComponent, { set: { template: '', imports: [] } });
@@ -190,6 +195,170 @@ describe('PopComponent — QUI-855 puntos de entrada', () => {
     it('escaneo sin descuento (cifras null): no pisa el descuento tecleado en el carrito', () => {
       confirm(scan({ discount_amount: null, discount_amount_printed: null }));
       expect(cart.setDiscountAmount).not.toHaveBeenCalled();
+    });
+  });
+
+  /**
+   * QUI-942 — carga masiva con costos en 0: la OC sale con total 0 y el pago
+   * inmediato se enviaba con `amount: 0` (400). El fallo dejaba el modal en
+   * blanco con «Confirmar» habilitado y el carrito vacío, y el segundo clic
+   * creaba una OC sin proveedor/bodega/líneas (otro 400).
+   */
+  describe('QUI-942 — compra de total 0 y resultado parcial', () => {
+    let po: Record<string, jasmine.Spy>;
+
+    function lineState(total: number): any {
+      return makeState({
+        has_vat: false,
+        orderDate: new Date('2026-10-13'),
+        summary: { subtotal: total, tax_amount: 0, total },
+        items: [{ id: 'a', product: { id: 7 }, quantity: 3, unit_cost: total / 3, tax_rate: 0 }],
+      });
+    }
+
+    function confirmCreateAndPay(): void {
+      component.confirmOrderAction = 'create-receive';
+      component.ackReceive.set(false);
+      component.paymentPlan.set({
+        payment_plan: 'immediate',
+        down_payment_amount: 0,
+        payment_installments: [],
+      });
+      component.onOrderConfirmed();
+    }
+
+    beforeEach(() => {
+      po = poService as unknown as Record<string, jasmine.Spy>;
+      cart.clearCart = jasmine.createSpy('clearCart').and.returnValue(of(null));
+      po['createPurchaseOrder'].and.returnValue(
+        of({ success: true, data: { id: 774, order_number: 'PO-774', total_amount: 0, status: 'draft' } }),
+      );
+      po['approvePurchaseOrder'] = jasmine
+        .createSpy('approvePurchaseOrder')
+        .and.callFake((id: number) => of({ success: true, data: { id, order_number: 'PO-774', total_amount: 0, status: 'approved' } }));
+      po['registerPurchaseOrderPayment'] = jasmine
+        .createSpy('registerPurchaseOrderPayment')
+        .and.returnValue(of({ success: true, data: {} }));
+      po['getPurchaseOrderById'] = jasmine
+        .createSpy('getPurchaseOrderById')
+        .and.returnValue(of({ success: true, data: { status: 'approved' } }));
+    });
+
+    it('total 0 con pago inmediato: no registra pago, termina con éxito y marca el pago como omitido', () => {
+      cart.currentState = lineState(0);
+      confirmCreateAndPay();
+
+      expect(po['createPurchaseOrder']).toHaveBeenCalledTimes(1);
+      expect(po['registerPurchaseOrderPayment']).not.toHaveBeenCalled();
+      const result = component.orderResult();
+      expect(result?.id).toBe(774);
+      expect(result?.failedStage).toBeUndefined();
+      expect(result?.stages?.find((s) => s.name === 'pay')?.status).toBe('skipped');
+      expect(toast.error).not.toHaveBeenCalled();
+      expect(toast.info).toHaveBeenCalledWith(
+        'La orden quedó con total $0: no se registró ningún pago.',
+        undefined,
+        6000,
+      );
+      expect(result?.notice).toBe('La orden quedó con total $0: no se registró ningún pago.');
+      expect(component.isProcessingOrder()).toBeFalse();
+    });
+
+    it('total > 0 con pago inmediato: sigue registrando el pago por el total (comportamiento previo)', () => {
+      cart.currentState = lineState(30000);
+      po['approvePurchaseOrder'].and.callFake((id: number) =>
+        of({ success: true, data: { id, order_number: 'PO-775', total_amount: 30000, status: 'approved' } }),
+      );
+      confirmCreateAndPay();
+
+      expect(po['registerPurchaseOrderPayment']).toHaveBeenCalledTimes(1);
+      expect(po['registerPurchaseOrderPayment'].calls.mostRecent().args[0]).toBe(774);
+      expect(po['registerPurchaseOrderPayment'].calls.mostRecent().args[1].amount).toBe(30000);
+      expect(component.orderResult()?.stages?.find((s) => s.name === 'pay')?.status).toBe('success');
+      expect(component.orderResult()?.notice).toBeUndefined();
+    });
+
+    it('carrito vacío: avisa y no envía una OC sin proveedor, bodega ni líneas', () => {
+      cart.currentState = makeState({ items: [], supplierId: null, locationId: null });
+      confirmCreateAndPay();
+
+      expect(po['createPurchaseOrder']).not.toHaveBeenCalled();
+      expect(toast.warning).toHaveBeenCalledWith(
+        'El pedido está vacío: agrega productos antes de crear la orden.',
+      );
+      expect(component.isProcessingOrder()).toBeFalse();
+    });
+
+    it('cerrar el checkout tras un resultado parcial lo limpia para la próxima apertura', () => {
+      component.orderResult.set({ id: 774, total: 0, orderNumber: 'PO-774', failedStage: 'pay' });
+      component.orderError.set('x');
+      component.showOrderConfirmModal.set(true);
+
+      component.onCheckoutCancelled();
+
+      expect(component.showOrderConfirmModal()).toBeFalse();
+      expect(component.orderResult()).toBeNull();
+      expect(component.orderError()).toBeNull();
+    });
+
+    it('«Ver orden» tras fallar la recepción vacía el carrito y suelta la OC pendiente (sin segunda OC)', () => {
+      const router = TestBed.inject(Router);
+      const navigate = spyOn(router, 'navigate').and.returnValue(Promise.resolve(true));
+      component.pendingReceptionOrder.set({ id: 774 } as any);
+      component.orderResult.set({ id: 774, total: 0, orderNumber: 'PO-774', failedStage: 'receive' });
+
+      component.onPartialViewOrder();
+
+      expect(cart.clearCart).toHaveBeenCalledTimes(1);
+      expect(component.pendingReceptionOrder()).toBeNull();
+      expect(navigate).toHaveBeenCalledWith(['/admin/orders/purchase-orders', 774]);
+    });
+
+    it('«Ver orden» tras fallar el pago navega igual que antes (el carrito ya se vació al crear)', () => {
+      const router = TestBed.inject(Router);
+      const navigate = spyOn(router, 'navigate').and.returnValue(Promise.resolve(true));
+      component.orderResult.set({ id: 774, total: 0, orderNumber: 'PO-774', failedStage: 'pay' });
+      component.onPartialViewOrder();
+      expect(navigate).toHaveBeenCalledWith(['/admin/orders/purchase-orders', 774]);
+      expect(cart.clearCart).not.toHaveBeenCalled();
+    });
+
+    it('cerrar el checkout NO borra un éxito pleno (lo muestra su propio modal)', () => {
+      component.orderResult.set({ id: 774, total: 0, orderNumber: 'PO-774' });
+      component.onCheckoutCancelled();
+      expect(component.orderResult()?.id).toBe(774);
+    });
+  });
+
+  describe('QUI-1004 — varias cargas masivas en el mismo carrito', () => {
+    const row = (name: string, sku: string) => ({ name, sku, quantity: 2, cost: 1000 });
+    const upload = (file_name: string, file_hash: string, rows: object[], failed_rows = 0) => ({
+      items: rows,
+      summary: { file_name, file_hash, total_rows: rows.length + failed_rows, failed_rows },
+    });
+
+    beforeEach(() => {
+      cart.addPrebulkItems = jasmine.createSpy('addPrebulkItems').and.returnValue(of(null));
+    });
+
+    it('dos archivos antes de crear la OC quedan ambos registrados contra la misma orden', () => {
+      component.onBulkDataReceived(upload('a.xlsx', 'a'.repeat(64), [row('Uno', 'U1'), row('Dos', 'D2')], 1));
+      component.onBulkDataReceived(upload('b.xlsx', 'b'.repeat(64), [row('Tres', 'T3')]));
+
+      const summary = (component as any)._recordBulkUpload({ order_number: 'PO-900' });
+
+      expect(bulkLog.register).toHaveBeenCalledTimes(2);
+      const [first, second] = bulkLog.register.calls.allArgs().map((args) => args[0]);
+      expect(first).toEqual(jasmine.objectContaining({
+        file_name: 'a.xlsx', total_rows: 3, successful_rows: 2, failed_rows: 1, result_reference: 'PO-900',
+      }));
+      expect(second).toEqual(jasmine.objectContaining({
+        file_name: 'b.xlsx', total_rows: 1, successful_rows: 1, failed_rows: 0, result_reference: 'PO-900',
+      }));
+      expect(summary).toBe('Carga masiva: 3 cargadas · 1 con error · 0 omitidas · orden PO-900.');
+      // Registra una sola vez por carga.
+      expect((component as any)._recordBulkUpload({ order_number: 'PO-901' })).toBeNull();
+      expect(bulkLog.register).toHaveBeenCalledTimes(2);
     });
   });
 });

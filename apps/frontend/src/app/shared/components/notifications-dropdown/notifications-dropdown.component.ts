@@ -308,6 +308,7 @@ export class NotificationsDropdownComponent {
       auto_renew_disabled_no_credential: 'alert-triangle',
       auto_renew_charge_failed: 'alert-octagon',
       workflow_task: 'list-checks',
+      reminder_due: 'notebook-pen',
     };
     return map[type] ?? 'bell';
   }

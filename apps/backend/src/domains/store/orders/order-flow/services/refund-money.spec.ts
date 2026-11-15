@@ -30,7 +30,10 @@ import { ManualRefundDeliveryService } from '../../../accounting/auto-entries/ma
 describe('RefundFlowService — gate de caja durable (paso 4, CP-REFUND-FLOW-REDESIGN)', () => {
   let service: RefundFlowService;
   let settingsService: { getSettings: jest.Mock };
-  let sessionsService: { getActiveSession: jest.Mock };
+  let sessionsService: {
+    getActiveSession: jest.Mock;
+    assertSessionForSales: jest.Mock;
+  };
   let movementsService: { recordRefundCashMovementDurable: jest.Mock };
 
   const cashInput = (over: any = {}) => ({
@@ -50,7 +53,10 @@ describe('RefundFlowService — gate de caja durable (paso 4, CP-REFUND-FLOW-RED
     settingsService = {
       getSettings: jest.fn().mockResolvedValue({ pos: { cash_register: { enabled: true } } }),
     };
-    sessionsService = { getActiveSession: jest.fn().mockResolvedValue({ id: 3 }) };
+    sessionsService = {
+      getActiveSession: jest.fn().mockResolvedValue({ id: 3 }),
+      assertSessionForSales: jest.fn(),
+    };
     movementsService = {
       recordRefundCashMovementDurable: jest.fn().mockResolvedValue({ status: 'recorded', movement_id: 9 }),
     };
@@ -144,7 +150,7 @@ describe('WalletService — gate de crédito por refund (paso 4, corrección con
     const prisma = {
       wallets: { findFirst: jest.fn().mockResolvedValue({ id: 8, balance: 0 }) },
     };
-    const service = new WalletService(prisma as any, walletBalance as any, eventEmitter as any);
+    const service = new WalletService(prisma as any, walletBalance as any, eventEmitter as any, {} as any, {} as any);
 
     const result = await service.creditForRefund(21, 1000, {
       refund_id: 999,
