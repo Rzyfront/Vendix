@@ -246,7 +246,7 @@ export class LayawayDetailPageComponent {
         this.loadPlan(plan.id);
         this.toast.success('Pago registrado correctamente');
       },
-      error: (err: any) => {
+      error: (err: unknown) => {
         this.isProcessingPayment.set(false);
         this.toast.error(extractApiErrorMessage(err));
       },
@@ -317,7 +317,7 @@ export class LayawayDetailPageComponent {
         this.loadPlan(plan.id);
         this.toast.success('Plan completado exitosamente');
       },
-      error: (err: any) => {
+      error: (err: unknown) => {
         this.isProcessingComplete.set(false);
         this.toast.error(extractApiErrorMessage(err));
       },
@@ -391,7 +391,7 @@ export class LayawayDetailPageComponent {
         this.loadPlan(plan.id);
         this.toast.success('Cuotas modificadas correctamente');
       },
-      error: (err: any) => {
+      error: (err: unknown) => {
         this.isProcessingModify.set(false);
         this.toast.error(extractApiErrorMessage(err));
       },
