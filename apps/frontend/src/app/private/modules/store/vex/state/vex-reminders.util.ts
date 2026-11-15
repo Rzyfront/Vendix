@@ -2,8 +2,8 @@ import type { Reminder } from '../../dashboard/services/reminders.service';
 import type { VexConversation } from '../models/vex.models';
 
 /**
- * Filters of the Vex "Bitácora empresarial" sidebar. They mirror the buckets
- * the dashboard Bitácora groups by (`GROUP_ORDER` in `reminders-log`), so both
+ * Filters of the Vex "Bitácora empresarial" sidebar, built on the same
+ * reminder buckets the dashboard Bitácora (`reminders-log`) reads, so both
  * views read the same reminders the same way.
  */
 export type VexReminderFilter = 'pending' | 'today' | 'overdue' | 'upcoming' | 'done';

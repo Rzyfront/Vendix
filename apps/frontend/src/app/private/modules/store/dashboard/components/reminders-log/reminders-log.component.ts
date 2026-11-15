@@ -1,4 +1,13 @@
-import { Component, DestroyRef, OnInit, computed, inject, signal } from '@angular/core';
+import {
+  Component,
+  DestroyRef,
+  OnInit,
+  PLATFORM_ID,
+  computed,
+  inject,
+  signal,
+} from '@angular/core';
+import { isPlatformBrowser } from '@angular/common';
 import { takeUntilDestroyed, toSignal } from '@angular/core/rxjs-interop';
 import { FormControl, FormGroup, ReactiveFormsModule, Validators } from '@angular/forms';
 import { RouterLink } from '@angular/router';
@@ -13,26 +22,21 @@ import { ToastService } from '../../../../../../shared/components/toast/toast.se
 import { DialogService } from '../../../../../../shared/components/dialog/dialog.service';
 import { formatStoreDateTime } from '../../../../../../shared/utils/date.util';
 import { extractApiError } from '../../../../../../shared/utils/http-error.util';
+import { Reminder, RemindersService } from '../../services/reminders.service';
 import {
-  Reminder,
-  ReminderBucket,
-  RemindersService,
-} from '../../services/reminders.service';
+  ReminderProgress,
+  ReminderTimeTone,
+  reminderProgress,
+  sortReminders,
+} from './reminders-log.util';
 
-interface ReminderGroup {
-  bucket: ReminderBucket;
-  label: string;
-  tone: string;
-  items: Reminder[];
+export interface ReminderRow {
+  item: Reminder;
+  progress: ReminderProgress | null;
 }
 
-const GROUP_ORDER: { bucket: ReminderBucket; label: string; tone: string }[] = [
-  { bucket: 'overdue', label: 'Vencidos', tone: 'text-error' },
-  { bucket: 'today', label: 'Hoy', tone: 'text-primary' },
-  { bucket: 'upcoming', label: 'Próximos', tone: 'text-text-secondary' },
-  { bucket: 'no_date', label: 'Sin fecha', tone: 'text-text-secondary' },
-  { bucket: 'done', label: 'Hechos', tone: 'text-text-secondary' },
-];
+/** How often the time bars move forward. */
+export const REMINDERS_CLOCK_MS = 60_000;
 
 /** Store-local wall clock `YYYY-MM-DDTHH:mm` of a UTC instant (for datetime-local inputs). */
 function toStoreWallClock(iso: string, tz: string): string {
@@ -90,7 +94,7 @@ function toStoreWallClock(iso: string, tz: string): string {
         <div class="h-40 flex items-center justify-center">
           <div class="animate-spin rounded-full h-8 w-8 border-b-2 border-primary"></div>
         </div>
-      } @else if (groups().length === 0) {
+      } @else if (rows().length === 0) {
         <app-empty-state
           icon="notebook-pen"
           title="Sin recordatorios"
@@ -99,87 +103,147 @@ function toStoreWallClock(iso: string, tz: string): string {
           size="sm"
         />
       } @else {
-        @for (group of groups(); track group.bucket) {
-          <section>
-            <h4 class="text-xs font-semibold uppercase tracking-wide mb-2" [class]="group.tone">
-              {{ group.label }} ({{ group.items.length }})
-            </h4>
-            <ul class="space-y-2">
-              @for (item of group.items; track item.id) {
-                <li
-                  class="flex items-start gap-3 p-3 rounded-xl border border-border bg-surface"
-                  [class.opacity-60]="item.status === 'done'"
-                >
-                  <button
-                    type="button"
-                    class="mt-0.5 shrink-0 w-6 h-6 rounded-full border-2 flex items-center justify-center transition-colors"
-                    [class]="item.status === 'done' ? 'bg-primary border-primary text-white' : 'border-border hover:border-primary'"
-                    [attr.aria-label]="item.status === 'done' ? 'Reabrir recordatorio' : 'Marcar como hecho'"
-                    (click)="toggleStatus(item)"
+        <ul class="space-y-2" data-testid="reminders-list">
+          @for (row of rows(); track row.item.id) {
+            <li
+              class="p-3 rounded-xl border border-border bg-surface"
+              [class.opacity-60]="row.item.status === 'done'"
+              data-testid="reminder-row"
+            >
+              <div class="flex items-start gap-3">
+                <div class="flex-1 min-w-0">
+                  <p
+                    class="text-sm font-medium text-text-primary truncate"
+                    [class.line-through]="row.item.status === 'done'"
+                    [title]="row.item.title"
+                    data-testid="reminder-title"
                   >
-                    @if (item.status === 'done') {
-                      <app-icon name="check" [size]="14"></app-icon>
-                    }
-                  </button>
-                  <div class="flex-1 min-w-0">
-                    <div class="flex items-center gap-2 flex-wrap">
-                      <p
-                        class="text-sm font-medium text-text-primary break-words"
-                        [class.line-through]="item.status === 'done'"
-                      >
-                        {{ item.title }}
-                      </p>
-                      @if (item.source === 'vex') {
-                        <span class="text-[10px] font-semibold px-1.5 py-0.5 rounded-full bg-primary/10 text-primary">Vex</span>
-                      }
-                    </div>
-                    @if (item.note) {
-                      <p class="text-xs text-text-secondary mt-0.5 break-words">{{ item.note }}</p>
-                    }
-                    <div class="flex items-center gap-3 flex-wrap mt-1 text-xs text-text-secondary">
-                      @if (item.remind_at) {
-                        <span class="flex items-center gap-1">
-                          <app-icon name="clock" [size]="12"></app-icon>
-                          {{ formatDate(item.remind_at) }}
-                        </span>
-                      }
-                      @if (item.link) {
-                        <span class="flex items-center gap-1">
-                          <app-icon name="link" [size]="12"></app-icon>
-                          @if (item.link.url) {
-                            <a [routerLink]="item.link.url" class="text-primary hover:underline">{{ item.link.label }}</a>
-                          } @else {
-                            <span>{{ item.link.label }}</span>
-                          }
-                        </span>
-                      }
-                    </div>
+                    {{ row.item.title }}
+                  </p>
+                  <p class="flex items-center gap-1 mt-0.5 text-xs text-text-secondary" data-testid="reminder-date">
+                    <app-icon name="clock" [size]="12"></app-icon>
+                    {{ row.item.remind_at ? formatDate(row.item.remind_at) : 'Sin fecha' }}
+                  </p>
+                </div>
+                <button
+                  type="button"
+                  class="shrink-0 min-h-[36px] px-2.5 rounded-lg text-xs font-medium text-primary hover:bg-primary/10 transition-colors flex items-center gap-1"
+                  [attr.aria-label]="'Ver detalle de ' + row.item.title"
+                  data-testid="reminder-detail-button"
+                  (click)="openDetail(row.item)"
+                >
+                  <app-icon name="eye" [size]="14"></app-icon>
+                  Ver detalle
+                </button>
+              </div>
+              @if (row.progress; as progress) {
+                <div class="mt-2 flex items-center gap-2">
+                  <div
+                    class="flex-1 h-1.5 rounded-full bg-border overflow-hidden"
+                    role="progressbar"
+                    aria-valuemin="0"
+                    aria-valuemax="100"
+                    [attr.aria-valuenow]="progress.percent"
+                    [attr.aria-valuetext]="progress.label"
+                    [attr.aria-label]="'Tiempo transcurrido de ' + row.item.title"
+                    data-testid="reminder-progress"
+                  >
+                    <div
+                      class="h-full rounded-full transition-[width] duration-500"
+                      [class]="toneBar[progress.tone]"
+                      [style.width.%]="progress.percent"
+                    ></div>
                   </div>
-                  <div class="flex items-center gap-1 shrink-0">
-                    <button
-                      type="button"
-                      class="w-8 h-8 rounded-lg flex items-center justify-center text-text-secondary hover:bg-surface-hover hover:text-primary transition-colors"
-                      aria-label="Editar recordatorio"
-                      (click)="openEdit(item)"
-                    >
-                      <app-icon name="pencil" [size]="14"></app-icon>
-                    </button>
-                    <button
-                      type="button"
-                      class="w-8 h-8 rounded-lg flex items-center justify-center text-text-secondary hover:bg-error/10 hover:text-error transition-colors"
-                      aria-label="Eliminar recordatorio"
-                      (click)="confirmDelete(item)"
-                    >
-                      <app-icon name="trash-2" [size]="14"></app-icon>
-                    </button>
-                  </div>
-                </li>
+                  <span class="shrink-0 text-[11px] font-medium" [class]="toneText[progress.tone]">
+                    {{ progress.label }}
+                  </span>
+                </div>
               }
-            </ul>
-          </section>
-        }
+            </li>
+          }
+        </ul>
       }
     </div>
+
+    <app-modal
+      [(isOpen)]="detailOpen"
+      [title]="detail()?.title ?? 'Recordatorio'"
+      subtitle="Detalle del recordatorio"
+      size="md"
+    >
+      @if (detail(); as item) {
+        <div class="space-y-4 text-sm" data-testid="reminder-detail">
+          <div class="flex items-center gap-2 flex-wrap">
+            <span
+              class="text-xs font-semibold px-2 py-0.5 rounded-full"
+              [class]="item.status === 'done' ? 'bg-success/10 text-success' : 'bg-warning/10 text-warning'"
+            >
+              {{ item.status === 'done' ? 'Hecho' : 'Pendiente' }}
+            </span>
+            <span class="text-xs font-semibold px-2 py-0.5 rounded-full bg-primary/10 text-primary">
+              {{ item.source === 'vex' ? 'Creado por Vex' : 'Creado manualmente' }}
+            </span>
+          </div>
+
+          <dl class="grid grid-cols-[auto_1fr] gap-x-3 gap-y-2 text-xs">
+            <dt class="text-text-secondary">Fecha</dt>
+            <dd class="text-text-primary">{{ item.remind_at ? formatDate(item.remind_at) : 'Sin fecha' }}</dd>
+            @if (detailProgress(); as progress) {
+              <dt class="text-text-secondary">Tiempo</dt>
+              <dd [class]="toneText[progress.tone]">{{ progress.label }}</dd>
+            }
+            <dt class="text-text-secondary">Creado</dt>
+            <dd class="text-text-primary">{{ formatDate(item.created_at) }}</dd>
+            @if (item.completed_at) {
+              <dt class="text-text-secondary">Completado</dt>
+              <dd class="text-text-primary">{{ formatDate(item.completed_at) }}</dd>
+            }
+          </dl>
+
+          <div>
+            <p class="text-xs text-text-secondary mb-1">Nota</p>
+            <p class="text-text-primary whitespace-pre-line break-words" data-testid="reminder-detail-note">
+              {{ item.note || 'Sin nota' }}
+            </p>
+          </div>
+
+          @if (item.link) {
+            <div>
+              <p class="text-xs text-text-secondary mb-1">Vinculado a</p>
+              <p class="flex items-center gap-1.5">
+                <app-icon name="link" [size]="14"></app-icon>
+                @if (item.link.url) {
+                  <a
+                    [routerLink]="item.link.url"
+                    class="text-primary hover:underline"
+                    data-testid="reminder-detail-link"
+                    (click)="detailOpen.set(false)"
+                  >{{ item.link.label }}</a>
+                } @else {
+                  <span class="text-text-primary">{{ item.link.label }}</span>
+                }
+              </p>
+            </div>
+          }
+        </div>
+      }
+      <div slot="footer" class="flex flex-wrap justify-end gap-2 sm:gap-3">
+        @if (detail(); as item) {
+          <app-button variant="outline-danger" (clicked)="confirmDelete(item)">
+            <app-icon name="trash-2" [size]="14" slot="icon"></app-icon>
+            Eliminar
+          </app-button>
+          <app-button variant="outline" (clicked)="editFromDetail(item)">
+            <app-icon name="pencil" [size]="14" slot="icon"></app-icon>
+            Editar
+          </app-button>
+          <app-button variant="primary" (clicked)="toggleStatus(item)" [loading]="toggling()">
+            <app-icon [name]="item.status === 'done' ? 'rotate-ccw' : 'check'" [size]="14" slot="icon"></app-icon>
+            {{ item.status === 'done' ? 'Marcar pendiente' : 'Marcar hecho' }}
+          </app-button>
+        }
+      </div>
+    </app-modal>
 
     <app-modal
       [(isOpen)]="modalOpen"
@@ -234,10 +298,29 @@ export class RemindersLogComponent implements OnInit {
   readonly modalOpen = signal(false);
   readonly editing = signal<Reminder | null>(null);
   readonly submitted = signal(false);
+  readonly detailOpen = signal(false);
+  readonly detailId = signal<number | null>(null);
+  readonly toggling = signal(false);
+  /** Current instant; ticks every minute so the time bars advance. */
+  readonly now = signal(Date.now());
   private readonly confirming = signal(false);
 
-  /** True while a form or confirmation is open: the host card must not rotate away. */
-  readonly busy = computed(() => this.modalOpen() || this.confirming() || this.saving());
+  readonly toneBar: Record<ReminderTimeTone, string> = {
+    far: 'bg-success',
+    near: 'bg-warning',
+    overdue: 'bg-error',
+  };
+  readonly toneText: Record<ReminderTimeTone, string> = {
+    far: 'text-success',
+    near: 'text-warning',
+    overdue: 'text-error',
+  };
+
+  /** True while a form, the detail or a confirmation is open: the host card must not rotate away. */
+  readonly busy = computed(
+    () =>
+      this.modalOpen() || this.detailOpen() || this.confirming() || this.saving() || this.toggling(),
+  );
 
   readonly form = new FormGroup({
     title: new FormControl('', {
@@ -253,13 +336,31 @@ export class RemindersLogComponent implements OnInit {
     initialValue: this.form.status,
   });
 
-  readonly groups = computed<ReminderGroup[]>(() => {
-    const all = this.items();
-    return GROUP_ORDER.map((g) => ({
-      ...g,
-      items: all.filter((r) => (g.bucket === 'done' ? r.status === 'done' : r.status === 'pending' && r.bucket === g.bucket)),
-    })).filter((g) => g.items.length > 0);
+  /** Compact rows: soonest due date first, then no date, then done. */
+  readonly rows = computed<ReminderRow[]>(() => {
+    const now = this.now();
+    return sortReminders(this.items()).map((item) => ({
+      item,
+      progress: reminderProgress(item, now),
+    }));
   });
+
+  readonly detail = computed<Reminder | null>(() => {
+    const id = this.detailId();
+    return id === null ? null : (this.items().find((r) => r.id === id) ?? null);
+  });
+
+  readonly detailProgress = computed(() => {
+    const item = this.detail();
+    return item ? reminderProgress(item, this.now()) : null;
+  });
+
+  constructor() {
+    if (isPlatformBrowser(inject(PLATFORM_ID))) {
+      const timer = setInterval(() => this.now.set(Date.now()), REMINDERS_CLOCK_MS);
+      this.destroyRef.onDestroy(() => clearInterval(timer));
+    }
+  }
 
   readonly titleError = computed(() => {
     this.formStatus();
@@ -298,13 +399,31 @@ export class RemindersLogComponent implements OnInit {
         next: (res) => {
           this.items.set(res.items);
           this.timezone.set(res.timezone || this.timezone());
+          this.now.set(Date.now());
           this.loading.set(false);
+          // The reminder shown in the detail is gone (deleted or hidden as done).
+          if (this.detailOpen() && !this.detail()) this.closeDetail();
         },
         error: (err) => {
           this.loading.set(false);
           this.toast.error(extractApiError(err).message ?? 'No se pudieron cargar los recordatorios');
         },
       });
+  }
+
+  openDetail(item: Reminder): void {
+    this.detailId.set(item.id);
+    this.detailOpen.set(true);
+  }
+
+  closeDetail(): void {
+    this.detailOpen.set(false);
+    this.detailId.set(null);
+  }
+
+  editFromDetail(item: Reminder): void {
+    this.closeDetail();
+    this.openEdit(item);
   }
 
   openCreate(): void {
@@ -361,14 +480,22 @@ export class RemindersLogComponent implements OnInit {
   }
 
   toggleStatus(item: Reminder): void {
+    if (this.toggling()) return;
     const status = item.status === 'done' ? 'pending' : 'done';
+    this.toggling.set(true);
     this.remindersService
       .update(item.id, { status })
       .pipe(takeUntilDestroyed(this.destroyRef))
       .subscribe({
-        next: () => this.load(),
-        error: (err) =>
-          this.toast.error(extractApiError(err).message ?? 'No se pudo actualizar el recordatorio'),
+        next: () => {
+          this.toggling.set(false);
+          this.toast.success(status === 'done' ? 'Recordatorio marcado como hecho' : 'Recordatorio reabierto');
+          this.load();
+        },
+        error: (err) => {
+          this.toggling.set(false);
+          this.toast.error(extractApiError(err).message ?? 'No se pudo actualizar el recordatorio');
+        },
       });
   }
 
@@ -393,6 +520,7 @@ export class RemindersLogComponent implements OnInit {
       .subscribe({
         next: () => {
           this.toast.success('Recordatorio eliminado');
+          this.closeDetail();
           this.load();
         },
         error: (err) =>
