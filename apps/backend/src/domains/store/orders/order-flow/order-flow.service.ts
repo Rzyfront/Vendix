@@ -7780,15 +7780,20 @@ export class OrderFlowService {
     // de quien cancela. Sin efectivo que devolver no se exige caja.
     // Espejo en memoria de `resolveCancelCashReversal` (pagos `succeeded` en
     // efectivo), sin la consulta: `getOrder` ya trae el método de cada pago.
-    await this.assertCashSessionForCashOut(async () =>
-      order.payments.some(
-        (payment) =>
-          payment.state === 'succeeded' &&
-          (CASH_METHOD_ENUM_VALUES as readonly string[]).includes(
-            payment.store_payment_method?.system_payment_method?.type ?? '',
-          ),
-      ),
-    );
+    // QUI-893 r2: solo si ese efectivo entró al cajón (dejó su `sale`); un
+    // cobro hecho con la caja apagada no saca nada del cajón al cancelar.
+    await this.assertCashSessionForCashOut(async () => {
+      const cashIds = order.payments
+        .filter(
+          (payment) =>
+            payment.state === 'succeeded' &&
+            (CASH_METHOD_ENUM_VALUES as readonly string[]).includes(
+              payment.store_payment_method?.system_payment_method?.type ?? '',
+            ),
+        )
+        .map((payment) => payment.id);
+      return (await this.cashPaymentIdsInDrawer(orderId, cashIds)).size > 0;
+    });
 
     // cod-auto-invoicing S5 — nota crédito TOTAL confirmada por el operador,
     // ANTES del claim: el gate DIAN de la transacción exige la nota `accepted`.
@@ -8449,6 +8454,43 @@ export class OrderFlowService {
     );
   }
 
+  /**
+   * QUI-893 r2 — pagos en efectivo cuyo dinero entró al cajón: los que tienen
+   * su propio `sale`. Un `sale` huérfano de la orden (sin `payment_id`, no
+   * desvinculado por compensación) no se puede atribuir a un pago, así que
+   * todos cuentan como dentro del cajón (comportamiento previo).
+   */
+  private async cashPaymentIdsInDrawer(
+    orderId: number,
+    paymentIds: number[],
+  ): Promise<Set<number>> {
+    if (paymentIds.length === 0) return new Set();
+    const sales = await this.prisma.cash_register_movements.findMany({
+      where: {
+        type: 'sale',
+        OR: [
+          { payment_id: { in: paymentIds } },
+          { order_id: orderId, payment_id: null },
+        ],
+      },
+      select: { payment_id: true, notes: true },
+    });
+    if (
+      sales.some(
+        (sale) =>
+          sale.payment_id == null &&
+          !sale.notes?.startsWith(UNLINKED_SALE_NOTES_PREFIX),
+      )
+    ) {
+      return new Set(paymentIds);
+    }
+    return new Set(
+      sales
+        .map((sale) => sale.payment_id)
+        .filter((id): id is number => id != null),
+    );
+  }
+
   private async resolveCancelCashReversal(order: {
     payments: { id: number; state: string }[];
   }, client: Prisma.TransactionClient | StorePrismaService = this.prisma): Promise<{
@@ -8784,6 +8826,36 @@ export class OrderFlowService {
       // sesión que no existe. No es una falla: no se escala.
       if (!cashRegister?.enabled) {
         return true;
+      }
+
+      // QUI-893 r2 — solo sale del cajón el efectivo que entró al cajón. Un
+      // pago en efectivo sin `sale` (cobrado con la caja apagada) no tiene
+      // billete en ninguna sesión: un egreso descuadraría el arqueo. No es
+      // una falla: el reembolso contable sigue su curso.
+      const inDrawer = await this.cashPaymentIdsInDrawer(
+        orderId,
+        reversal.payments.map((pay) => pay.id),
+      );
+      const outsideDrawer = reversal.payments.filter((pay) => !inDrawer.has(pay.id));
+      if (outsideDrawer.length > 0) {
+        this.logger.log(
+          `Order #${orderId} cancelled: no cash-out for payments ` +
+            `${outsideDrawer.map((pay) => pay.id).join(', ')} (no sale in the cash drawer)`,
+        );
+      }
+      if (outsideDrawer.length === reversal.payments.length) {
+        return true;
+      }
+      if (outsideDrawer.length > 0) {
+        const drawerPayments = reversal.payments.filter((pay) => inDrawer.has(pay.id));
+        reversal = {
+          amount: drawerPayments.reduce(
+            (acc, pay) => acc.plus(pay.amount),
+            new Prisma.Decimal(0),
+          ),
+          paymentIds: drawerPayments.map((pay) => pay.id),
+          payments: drawerPayments,
+        };
       }
 
       // B17 — cancelación sin usuario (webhook/job): el egreso no se omite ni deja
