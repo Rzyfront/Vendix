@@ -1,3 +1,5 @@
+import { provideHttpClient } from '@angular/common/http';
+import { provideHttpClientTesting } from '@angular/common/http/testing';
 import { provideZonelessChangeDetection } from '@angular/core';
 import { ComponentFixture, TestBed } from '@angular/core/testing';
 import { By } from '@angular/platform-browser';
@@ -90,6 +92,8 @@ describe('ChannelsLogCardComponent (Rosa · Bitácora)', () => {
       providers: [
         provideZonelessChangeDetection(),
         provideRouter([]),
+        provideHttpClient(),
+        provideHttpClientTesting(),
         { provide: ROTATOR_TIMERS, useValue: timers },
         { provide: RemindersService, useValue: api },
       ],
