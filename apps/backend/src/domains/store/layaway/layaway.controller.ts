@@ -21,6 +21,14 @@ import {
   CancelLayawayDto,
 } from './dto';
 
+/**
+ * No handler here has a `try/catch`, and none must get one back (QUI-893).
+ * Returning `response_service.error(...)` from a catch answered 200/201 with
+ * `success:false`, so the UI showed "Plan cancelado" for a cancellation the
+ * backend had blocked. `LayawayService` throws `VendixHttpException`; the global
+ * `AllExceptionsFilter` emits the real status and `error_code`.
+ * Contract pinned by `layaway.http-contract.spec.ts`.
+ */
 @Controller('store/layaway')
 @UseGuards(PermissionsGuard)
 export class LayawayController {
@@ -32,69 +40,37 @@ export class LayawayController {
   @Post()
   @Permissions('store:layaway:create')
   async create(@Body() dto: CreateLayawayDto) {
-    try {
-      const result = await this.layaway_service.create(dto);
-      return this.response_service.created(
-        result,
-        'Plan separé creado exitosamente',
-      );
-    } catch (error) {
-      return this.response_service.error(
-        error.message || 'Error al crear el plan separé',
-        error.response?.message || error.message,
-        error.status || 400,
-      );
-    }
+    const result = await this.layaway_service.create(dto);
+    return this.response_service.created(
+      result,
+      'Plan separé creado exitosamente',
+    );
   }
 
   @Get()
   @Permissions('store:layaway:read')
   async findAll(@Query() query: LayawayQueryDto) {
-    try {
-      const result = await this.layaway_service.findAll(query);
-      return this.response_service.paginated(
-        result.data,
-        result.meta.total,
-        result.meta.page,
-        result.meta.limit,
-      );
-    } catch (error) {
-      return this.response_service.error(
-        error.message || 'Error al listar planes separé',
-        error.response?.message || error.message,
-        error.status || 400,
-      );
-    }
+    const result = await this.layaway_service.findAll(query);
+    return this.response_service.paginated(
+      result.data,
+      result.meta.total,
+      result.meta.page,
+      result.meta.limit,
+    );
   }
 
   @Get('stats')
   @Permissions('store:layaway:read')
   async getStats() {
-    try {
-      const result = await this.layaway_service.getStats();
-      return this.response_service.success(result);
-    } catch (error) {
-      return this.response_service.error(
-        error.message || 'Error al obtener estadísticas',
-        error.response?.message || error.message,
-        error.status || 400,
-      );
-    }
+    const result = await this.layaway_service.getStats();
+    return this.response_service.success(result);
   }
 
   @Get(':id')
   @Permissions('store:layaway:read')
   async findOne(@Param('id', ParseIntPipe) id: number) {
-    try {
-      const result = await this.layaway_service.findOne(id);
-      return this.response_service.success(result);
-    } catch (error) {
-      return this.response_service.error(
-        error.message || 'Error al obtener plan separé',
-        error.response?.message || error.message,
-        error.status || 404,
-      );
-    }
+    const result = await this.layaway_service.findOne(id);
+    return this.response_service.success(result);
   }
 
   @Post(':id/payment')
@@ -103,19 +79,8 @@ export class LayawayController {
     @Param('id', ParseIntPipe) id: number,
     @Body() dto: MakeLayawayPaymentDto,
   ) {
-    try {
-      const result = await this.layaway_service.makePayment(id, dto);
-      return this.response_service.success(
-        result,
-        'Pago registrado exitosamente',
-      );
-    } catch (error) {
-      return this.response_service.error(
-        error.message || 'Error al registrar pago',
-        error.response?.message || error.message,
-        error.status || 400,
-      );
-    }
+    const result = await this.layaway_service.makePayment(id, dto);
+    return this.response_service.success(result, 'Pago registrado exitosamente');
   }
 
   @Patch(':id/installments')
@@ -124,19 +89,11 @@ export class LayawayController {
     @Param('id', ParseIntPipe) id: number,
     @Body() dto: ModifyInstallmentsDto,
   ) {
-    try {
-      const result = await this.layaway_service.modifyInstallments(id, dto);
-      return this.response_service.success(
-        result,
-        'Cuotas modificadas exitosamente',
-      );
-    } catch (error) {
-      return this.response_service.error(
-        error.message || 'Error al modificar cuotas',
-        error.response?.message || error.message,
-        error.status || 400,
-      );
-    }
+    const result = await this.layaway_service.modifyInstallments(id, dto);
+    return this.response_service.success(
+      result,
+      'Cuotas modificadas exitosamente',
+    );
   }
 
   @Post(':id/cancel')
@@ -145,30 +102,14 @@ export class LayawayController {
     @Param('id', ParseIntPipe) id: number,
     @Body() dto: CancelLayawayDto,
   ) {
-    try {
-      const result = await this.layaway_service.cancel(id, dto);
-      return this.response_service.success(result, 'Plan separé cancelado');
-    } catch (error) {
-      return this.response_service.error(
-        error.message || 'Error al cancelar plan separé',
-        error.response?.message || error.message,
-        error.status || 400,
-      );
-    }
+    const result = await this.layaway_service.cancel(id, dto);
+    return this.response_service.success(result, 'Plan separé cancelado');
   }
 
   @Post(':id/complete')
   @Permissions('store:layaway:update')
   async complete(@Param('id', ParseIntPipe) id: number) {
-    try {
-      const result = await this.layaway_service.complete(id);
-      return this.response_service.success(result, 'Plan separé completado');
-    } catch (error) {
-      return this.response_service.error(
-        error.message || 'Error al completar plan separé',
-        error.response?.message || error.message,
-        error.status || 400,
-      );
-    }
+    const result = await this.layaway_service.complete(id);
+    return this.response_service.success(result, 'Plan separé completado');
   }
 }

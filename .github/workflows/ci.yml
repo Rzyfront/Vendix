@@ -638,6 +638,7 @@ jobs:
           --include='**/inventory/inventory-dashboard.component.spec.ts'
           --include='**/ecommerce/pages/guest-order-summary/guest-order-summary.component.spec.ts'
           --include='**/workflow-public-form/workflow-public-form.component.spec.ts'
+          --include='**/layaway/pages/layaway-detail-page/layaway-detail-page.component.spec.ts'
           --include='**/workflows/pages/inbox-page/inbox-page.component.spec.ts'
           --include='**/workflows/pages/workflows-page/workflows-page.component.spec.ts'
           --include='**/workflows/services/workflows-api.service.spec.ts'

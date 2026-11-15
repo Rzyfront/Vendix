@@ -16,6 +16,7 @@ import { PaymentMethodsService } from '../../../settings/payments/services/payme
 import { CurrencyFormatService, CurrencyPipe } from '../../../../../../shared/pipes/currency/currency.pipe';
 import { toLocalDateString } from '../../../../../../shared/utils/date.util';
 import { TableColumn, TableComponent } from '../../../../../../shared/components/table/table.component';
+import { extractApiErrorMessage } from '../../../../../../core/utils/api-error-handler';
 
 @Component({
   selector: 'app-layaway-detail-page',
@@ -69,6 +70,8 @@ export class LayawayDetailPageComponent {
   showCancelModal = signal(false);
   cancelReason = signal('');
   isProcessingCancel = signal(false);
+  /** Backend rejection shown inside the cancel modal (QUI-893); the modal stays open. */
+  cancelError = signal<string | null>(null);
   // QUI-893 B2 — what was paid goes back through a method the cashier picks.
   readonly refundMethodOptions: { value: LayawayRefundMethod; label: string }[] = [
     { value: 'cash', label: 'Efectivo' },
@@ -243,9 +246,9 @@ export class LayawayDetailPageComponent {
         this.loadPlan(plan.id);
         this.toast.success('Pago registrado correctamente');
       },
-      error: (err: any) => {
+      error: (err: unknown) => {
         this.isProcessingPayment.set(false);
-        this.toast.error(err.error?.message || 'Error al registrar el pago');
+        this.toast.error(extractApiErrorMessage(err));
       },
     });
   }
@@ -254,6 +257,7 @@ export class LayawayDetailPageComponent {
   openCancelModal(): void {
     this.cancelReason.set('');
     this.cancelRefundMethod.set(null);
+    this.cancelError.set(null);
     this.showCancelModal.set(true);
   }
 
@@ -267,6 +271,7 @@ export class LayawayDetailPageComponent {
 
     const refundMethod = this.cancelRefundMethod();
     this.isProcessingCancel.set(true);
+    this.cancelError.set(null);
     this.layaway_service
       .cancel(plan.id, {
         cancellation_reason: this.cancelReason(),
@@ -279,9 +284,14 @@ export class LayawayDetailPageComponent {
           this.loadPlan(plan.id);
           this.toast.success('Plan cancelado');
         },
-        error: (err: any) => {
+        // QUI-893: a blocked cancellation (no open cash session, missing
+        // refund method, already cancelled…) keeps the modal open and shows
+        // the backend reason; it never reports success.
+        error: (err: unknown) => {
+          const message = extractApiErrorMessage(err);
           this.isProcessingCancel.set(false);
-          this.toast.error(err.error?.message || 'Error al cancelar el plan');
+          this.cancelError.set(message);
+          this.toast.error(message);
         },
       });
   }
@@ -307,9 +317,9 @@ export class LayawayDetailPageComponent {
         this.loadPlan(plan.id);
         this.toast.success('Plan completado exitosamente');
       },
-      error: (err: any) => {
+      error: (err: unknown) => {
         this.isProcessingComplete.set(false);
-        this.toast.error(err.error?.message || 'Error al completar el plan');
+        this.toast.error(extractApiErrorMessage(err));
       },
     });
   }
@@ -381,9 +391,9 @@ export class LayawayDetailPageComponent {
         this.loadPlan(plan.id);
         this.toast.success('Cuotas modificadas correctamente');
       },
-      error: (err: any) => {
+      error: (err: unknown) => {
         this.isProcessingModify.set(false);
-        this.toast.error(err.error?.message || 'Error al modificar cuotas');
+        this.toast.error(extractApiErrorMessage(err));
       },
     });
   }
