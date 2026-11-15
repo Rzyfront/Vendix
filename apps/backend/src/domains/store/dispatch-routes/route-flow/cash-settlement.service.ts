@@ -3,7 +3,10 @@ import { EventEmitter2 } from '@nestjs/event-emitter';
 import { StorePrismaService } from '../../../../prisma/services/store-prisma.service';
 import { SessionsService } from '../../cash-registers/sessions/sessions.service';
 import { ErrorCodes, VendixHttpException } from '@common/errors';
-import { shouldRecordCashMovement } from '../../cash-registers/movements/cash-movement-policy.util';
+import {
+  shouldRecordCashMovement,
+  tracksNonCashPayments,
+} from '../../cash-registers/movements/cash-movement-policy.util';
 import type { Prisma } from '@prisma/client';
 
 export interface PaymentReceivedInput {
@@ -247,6 +250,20 @@ export class CashSettlementService {
       cur.amount += amount;
       cur.stops += 1;
       byMethod.set(method, cur);
+    }
+
+    // QUI-893: "Registrar Pagos No Efectivo" off → only the cash total enters
+    // the session. Settings are read only when a non-cash method is present.
+    if ([...byMethod.keys()].some((m) => m !== 'cash')) {
+      const row = await tx.store_settings.findUnique({
+        where: { store_id: input.store_id },
+        select: { settings: true },
+      });
+      if (!tracksNonCashPayments(row?.settings)) {
+        for (const method of [...byMethod.keys()]) {
+          if (method !== 'cash') byMethod.delete(method);
+        }
+      }
     }
 
     const created: Array<{

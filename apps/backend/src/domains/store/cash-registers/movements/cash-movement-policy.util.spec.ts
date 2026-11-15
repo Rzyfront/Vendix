@@ -1,5 +1,8 @@
 import { VendixHttpException } from '@common/errors';
-import { shouldRecordCashMovement } from './cash-movement-policy.util';
+import {
+  shouldRecordCashMovement,
+  tracksNonCashPayments,
+} from './cash-movement-policy.util';
 
 describe('shouldRecordCashMovement', () => {
   it.each([
@@ -30,4 +33,38 @@ describe('shouldRecordCashMovement', () => {
       }
     },
   );
+
+  describe('track_non_cash_payments = false', () => {
+    it.each([
+      ['card', 'DIRECT'],
+      ['bank_transfer', 'DIRECT'],
+      ['voucher', null],
+    ])('%s / %s is not recorded', (type, mode) => {
+      expect(shouldRecordCashMovement(type, mode, false)).toBe(false);
+    });
+
+    it('still records cash', () => {
+      expect(shouldRecordCashMovement('cash', 'DIRECT', false)).toBe(true);
+    });
+
+    it('still rejects a missing method type', () => {
+      expect(() => shouldRecordCashMovement('', 'DIRECT', false)).toThrow(
+        VendixHttpException,
+      );
+    });
+  });
+});
+
+describe('tracksNonCashPayments', () => {
+  it.each([
+    [{ pos: { cash_register: { track_non_cash_payments: false } } }, false],
+    [{ pos: { cash_register: { track_non_cash_payments: true } } }, true],
+    // Absent = store default (`true`): stores that never saved the toggle keep today's behavior.
+    [{ pos: { cash_register: { enabled: true } } }, true],
+    [{}, true],
+    [null, true],
+    [undefined, true],
+  ])('%j -> %s', (settings, expected) => {
+    expect(tracksNonCashPayments(settings)).toBe(expected);
+  });
 });

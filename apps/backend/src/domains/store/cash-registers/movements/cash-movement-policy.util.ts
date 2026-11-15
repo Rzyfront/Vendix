@@ -14,6 +14,7 @@ import { VendixHttpException, ErrorCodes } from '@common/errors';
  * | cash_on_delivery                         | any            | no (same reason) |
  * | wompi                                    | any            | no (money stays at the gateway) |
  * | wallet                                   | any            | no (internal balance, no cash enters) |
+ * | card, bank_transfer, voucher, ... (non-cash) | other, `trackNonCash=false` | no (`pos.cash_register.track_non_cash_payments` off: the session only reflects cash) |
  * | cash, card, bank_transfer, voucher, ...  | other          | yes (the closing count only sums `cash`; non-cash rows are informative) |
  *
  * POS and `flow/pay` used to disagree: the POS skipped the four gateway /
@@ -26,10 +27,27 @@ import { VendixHttpException, ErrorCodes } from '@common/errors';
 export function shouldRecordCashMovement(
   methodType: string | null | undefined,
   processingMode?: string | null,
+  trackNonCash = true,
 ): boolean {
   if (!methodType) {
     throw new VendixHttpException(ErrorCodes.PAY_METHOD_MISCONFIGURED);
   }
   if (processingMode === 'ON_DELIVERY') return false;
+  if (methodType !== 'cash' && !trackNonCash) return false;
   return !['cash_on_delivery', 'wompi', 'wallet'].includes(methodType);
+}
+
+/**
+ * `pos.cash_register.track_non_cash_payments` ("Registrar Pagos No Efectivo").
+ * Off: card / transfer payments leave no row in the session, which only
+ * reflects cash. Absent means the store default (`true`), so stores that never
+ * saved the toggle keep recording non-cash rows (QUI-893).
+ */
+export function tracksNonCashPayments(settings: unknown): boolean {
+  const flag = (
+    settings as {
+      pos?: { cash_register?: { track_non_cash_payments?: boolean } };
+    } | null | undefined
+  )?.pos?.cash_register?.track_non_cash_payments;
+  return flag !== false;
 }

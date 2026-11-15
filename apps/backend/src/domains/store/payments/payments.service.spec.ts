@@ -6051,6 +6051,19 @@ describe('PaymentsService', () => {
       expect(new Set(movementPaymentIds).size).toBe(2);
     });
 
+    it('QUI-893: con "Registrar Pagos No Efectivo" apagado solo registra el tramo en efectivo', async () => {
+      const { tx } = arrangeMultiLegSale();
+      (settingsService.getSettings as jest.Mock).mockResolvedValue({
+        checkout: { require_customer_data: false },
+        pos: { cash_register: { enabled: true, track_non_cash_payments: false } },
+      });
+      await service.processPosPayment(buildMultiDto(), posUser);
+      expect(tx.cash_register_movements.create).toHaveBeenCalledTimes(1);
+      expect(tx.cash_register_movements.create).toHaveBeenCalledWith({
+        data: expect.objectContaining({ type: 'sale', amount: 20000, payment_method: 'cash', payment_id: 7 }),
+      });
+    });
+
     it('revierte el pago si no encuentra una sesión abierta para registrar el movimiento', async () => {
       const { tx } = arrangeMultiLegSale();
       (settingsService.getSettings as jest.Mock).mockResolvedValue({

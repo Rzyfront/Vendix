@@ -1719,5 +1719,21 @@ describe('RefundFlowService — refund overhaul invariants', () => {
       });
       expect((mockPrisma as any).audit_logs.create).not.toHaveBeenCalled();
     });
+
+    it('QUI-893: con "Registrar Pagos No Efectivo" apagado no registra el tramo no efectivo ni audita', async () => {
+      (service as any).settingsService.getSettings = jest.fn().mockResolvedValue({
+        pos: { cash_register: { enabled: true, track_non_cash_payments: false } },
+      });
+      (mockPrisma as any).audit_logs = { create: jest.fn().mockResolvedValue({}) };
+      movementsService.recordNonCashRefundMovement.mockClear();
+
+      await (service as any).recordNonCashRefundMovements({
+        organization_id: 1, store_id: 10, user_id: 7, refund_id: 3004, order_id: 5,
+        tramos: [{ payment_id: 1, amount: 800, method: 'bank_transfer' }],
+      });
+
+      expect(movementsService.recordNonCashRefundMovement).not.toHaveBeenCalled();
+      expect((mockPrisma as any).audit_logs.create).not.toHaveBeenCalled();
+    });
   });
 });

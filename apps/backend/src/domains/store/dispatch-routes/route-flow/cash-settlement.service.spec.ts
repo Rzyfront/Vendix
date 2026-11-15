@@ -131,8 +131,20 @@ describe('CashSettlementService.emitPaymentReceived — close-session lock', () 
 });
 
 describe('CashSettlementService — cierre de planilla contra caja', () => {
-  const build = () => {
+  const build = (track?: boolean) => {
     const tx = {
+      store_settings: {
+        findUnique: jest.fn().mockResolvedValue({
+          settings: {
+            pos: {
+              cash_register: {
+                enabled: true,
+                ...(track === undefined ? {} : { track_non_cash_payments: track }),
+              },
+            },
+          },
+        }),
+      },
       cash_register_movements: {
         findMany: jest.fn().mockResolvedValue([]),
         findFirst: jest.fn().mockResolvedValue(null),
@@ -209,6 +221,22 @@ describe('CashSettlementService — cierre de planilla contra caja', () => {
     expect(tx.cash_register_movements.create).toHaveBeenCalledTimes(2);
     // No `cash_register.movement` (el listener trataria un `sale` como retiro).
     expect(eventEmitter.emit).not.toHaveBeenCalled();
+  });
+
+  it('QUI-893: con "Registrar Pagos No Efectivo" apagado el cierre solo registra el efectivo', async () => {
+    const { service, tx } = build(false);
+    const res = await service.recordRouteCloseMovements(tx, {
+      ...base,
+      stops: [
+        stop(1),
+        stop(3, { payment_method: 'transfer', collected_amount: 70 }),
+      ],
+    });
+    expect(res).toHaveLength(1);
+    expect(tx.cash_register_movements.create).toHaveBeenCalledTimes(1);
+    expect(tx.cash_register_movements.create).toHaveBeenCalledWith({
+      data: expect.objectContaining({ amount: 100, payment_method: 'cash' }),
+    });
   });
 
   it('A1/B20: cobro sin método en una parada se trata como cash solo en el cierre de ruta (no falla la planilla) y avisa', async () => {

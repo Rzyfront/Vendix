@@ -11,7 +11,10 @@ import { StorePrismaService } from '../../../../prisma/services/store-prisma.ser
 import { RequestContextService } from '@common/context/request-context.service';
 import { VendixHttpException, ErrorCodes } from '@common/errors';
 import { MAX_MANUAL_MOVEMENT_AMOUNT } from '../dto/create-movement.dto';
-import { shouldRecordCashMovement } from './cash-movement-policy.util';
+import {
+  shouldRecordCashMovement,
+  tracksNonCashPayments,
+} from './cash-movement-policy.util';
 
 /**
  * CP-REFUND-FLOW-REDESIGN paso 4 — outbox semántico para el movimiento de
@@ -296,6 +299,18 @@ export class MovementsService {
     return movement;
   }
 
+  /** `pos.cash_register.track_non_cash_payments` of the store (absent = `true`). */
+  private async tracksNonCash(
+    db: Prisma.TransactionClient,
+    store_id: number,
+  ): Promise<boolean> {
+    const row = await db.store_settings.findUnique({
+      where: { store_id },
+      select: { settings: true },
+    });
+    return tracksNonCashPayments(row?.settings);
+  }
+
   /**
    * Record a sale movement from POS payment processing.
    * Called automatically when cash_register feature is enabled.
@@ -313,6 +328,13 @@ export class MovementsService {
     tx?: Prisma.TransactionClient,
   ) {
     const create = async (db: Prisma.TransactionClient) => {
+      // QUI-893: "Registrar Pagos No Efectivo" off → the session only reflects cash.
+      if (
+        data.payment_method !== 'cash' &&
+        !(await this.tracksNonCash(db, data.store_id))
+      ) {
+        return null;
+      }
       await this.assertOpenSessionLocked(db, session_id, data.store_id);
       return db.cash_register_movements.create({
         data: {
@@ -456,6 +478,8 @@ export class MovementsService {
       } | null
     )?.pos?.cash_register?.enabled;
     if (!enabled) return null;
+    // QUI-893: "Registrar Pagos No Efectivo" off → only cash reaches the session.
+    if (!isCash && !tracksNonCashPayments(settings?.settings)) return null;
 
     const session = await tx.cash_register_sessions.findFirst({
       where: {
@@ -621,7 +645,12 @@ export class MovementsService {
     ) {
       throw new Error(`Deferred cash movement signal #${input.failure_id} is missing or mismatched`);
     }
+    const trackNonCash =
+      input.movements.every((m) => m.payment_method === 'cash') ||
+      (await this.tracksNonCash(tx, input.store_id));
     for (const movement of input.movements) {
+      // QUI-893: "Registrar Pagos No Efectivo" off → only cash legs are written.
+      if (movement.payment_method !== 'cash' && !trackNonCash) continue;
       const existing = await tx.cash_register_movements.findFirst({
         where: {
           store_id: input.store_id,
