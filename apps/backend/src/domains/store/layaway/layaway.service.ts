@@ -6,6 +6,7 @@ import { StockLevelManager } from '../inventory/shared/services/stock-level-mana
 import { EventEmitter2 } from '@nestjs/event-emitter';
 import { MovementsService } from '../cash-registers/movements/movements.service';
 import { SessionsService } from '../cash-registers/sessions/sessions.service';
+import { tracksNonCashPayments } from '../cash-registers/movements/cash-movement-policy.util';
 import { WalletService } from '../wallet/wallet.service';
 import { VendixHttpException, ErrorCodes } from 'src/common/errors';
 import { Prisma } from '@prisma/client';
@@ -41,6 +42,11 @@ function resolveCancelAmounts(paidAmount: unknown, dto: CancelLayawayDto) {
       : total_paid - cancellation_fee;
   return { total_paid, cancellation_fee, refund_amount };
 }
+
+/** QUI-893 P1-1 — states a layaway plan never leaves (no cancel, no complete). */
+const TERMINAL_LAYAWAY_STATES = ['completed', 'cancelled'] as const;
+const isTerminalLayawayState = (state: string | null | undefined): boolean =>
+  (TERMINAL_LAYAWAY_STATES as readonly string[]).includes(state ?? '');
 
 @Injectable()
 export class LayawayService {
@@ -802,20 +808,34 @@ export class LayawayService {
     const context = RequestContextService.getContext();
     const user_id = context?.user_id ?? undefined;
 
-    // QUI-893 B2 — the refund leaves through a method the cashier picks, and
-    // cash needs the canceller's open drawer: both checked before the tx.
+    // QUI-893 B2 — the refund leaves through a method the cashier picks, and a
+    // method that books to the canceller's drawer needs it open: all checked
+    // before the tx, so the cashier gets a clear message and nothing is opened.
     const current = await this.prisma.layaway_plans.findUnique({
       where: { id: plan_id },
-      select: { paid_amount: true },
+      select: { paid_amount: true, state: true, store_id: true },
     });
     if (!current) {
       throw new VendixHttpException(ErrorCodes.LAY_FIND_001);
+    }
+    // QUI-893 P1-1 — a plan that already finished never refunds again.
+    if (isTerminalLayawayState(current.state)) {
+      throw new VendixHttpException(ErrorCodes.LAY_STATE_001);
     }
     if (resolveCancelAmounts(current.paid_amount, dto).refund_amount > 0) {
       if (!dto.refund_method) {
         throw new VendixHttpException(ErrorCodes.LAY_REFUND_METHOD_REQUIRED_001);
       }
       if (dto.refund_method === 'cash') {
+        await this.sessionsService.assertSessionForSales(user_id);
+      } else if (
+        dto.refund_method !== 'wallet' &&
+        user_id &&
+        (await this.refundBooksNonCashToDrawer(current.store_id))
+      ) {
+        // QUI-893 P2-1 — transfer/card leave a `refund` row in the drawer when
+        // the store tracks non-cash payments; without this the cancel failed
+        // inside the transaction.
         await this.sessionsService.assertSessionForSales(user_id);
       }
     }
@@ -829,7 +849,7 @@ export class LayawayService {
         throw new VendixHttpException(ErrorCodes.LAY_FIND_001);
       }
 
-      if (plan.state === 'completed') {
+      if (isTerminalLayawayState(plan.state)) {
         throw new VendixHttpException(ErrorCodes.LAY_STATE_001);
       }
 
@@ -843,9 +863,14 @@ export class LayawayService {
         throw new VendixHttpException(ErrorCodes.LAY_REFUND_METHOD_REQUIRED_001);
       }
 
-      // 1. Marcar plan como cancelado
-      await tx.layaway_plans.update({
-        where: { id: plan_id },
+      // 1. Marcar plan como cancelado. QUI-893 P1-1 — conditional transition:
+      // of two concurrent cancels only one moves the row; the other waits on
+      // its lock, matches nothing and rolls back before any refund or event.
+      const transition = await tx.layaway_plans.updateMany({
+        where: {
+          id: plan_id,
+          state: { notIn: [...TERMINAL_LAYAWAY_STATES] },
+        },
         data: {
           state: 'cancelled',
           cancelled_at: new Date(),
@@ -853,6 +878,9 @@ export class LayawayService {
           updated_at: new Date(),
         },
       });
+      if (transition.count !== 1) {
+        throw new VendixHttpException(ErrorCodes.LAY_STATE_001);
+      }
 
       // 2. Cancelar cuotas pendientes
       await tx.layaway_installments.updateMany({
@@ -904,6 +932,24 @@ export class LayawayService {
         },
       });
     });
+  }
+
+  /**
+   * QUI-893 P2-1 — whether a transfer/card refund books an informative row to
+   * the canceller's drawer: same conditions `recordModuleCashMovement` applies
+   * (cash register on and `track_non_cash_payments` not off).
+   */
+  private async refundBooksNonCashToDrawer(store_id: number): Promise<boolean> {
+    const row = await this.prisma.store_settings.findUnique({
+      where: { store_id },
+      select: { settings: true },
+    });
+    const enabled = (
+      row?.settings as {
+        pos?: { cash_register?: { enabled?: boolean } };
+      } | null
+    )?.pos?.cash_register?.enabled;
+    return !!enabled && tracksNonCashPayments(row?.settings);
   }
 
   /**

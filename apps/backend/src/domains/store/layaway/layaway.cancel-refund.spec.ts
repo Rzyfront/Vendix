@@ -19,18 +19,31 @@ describe('LayawayService.cancel — refund method (QUI-893 B2)', () => {
     paid_amount: 60000,
   };
 
-  const build = (opts: { plan?: Partial<typeof PLAN>; userId?: number | null } = {}) => {
+  const build = (
+    opts: {
+      plan?: Partial<typeof PLAN>;
+      userId?: number | null;
+      storeSettings?: Record<string, unknown> | null;
+    } = {},
+  ) => {
     const plan = { ...PLAN, ...opts.plan };
     const tx = {
       layaway_plans: {
         findUnique: jest.fn().mockResolvedValue(plan),
-        update: jest.fn().mockResolvedValue({}),
+        updateMany: jest.fn().mockResolvedValue({ count: 1 }),
       },
       layaway_installments: { updateMany: jest.fn().mockResolvedValue({}) },
     };
     const prisma = {
       $transaction: jest.fn((fn: (t: typeof tx) => unknown) => fn(tx)),
       layaway_plans: { findUnique: jest.fn().mockResolvedValue(plan) },
+      store_settings: {
+        findUnique: jest
+          .fn()
+          .mockResolvedValue(
+            opts.storeSettings ? { settings: opts.storeSettings } : null,
+          ),
+      },
     };
     const stockLevelManager = {
       releaseReservationsByReference: jest.fn().mockResolvedValue(undefined),
@@ -69,7 +82,7 @@ describe('LayawayService.cancel — refund method (QUI-893 B2)', () => {
       expect(error.getStatus()).toBe(400);
     });
     expect(prisma.$transaction).not.toHaveBeenCalled();
-    expect(tx.layaway_plans.update).not.toHaveBeenCalled();
+    expect(tx.layaway_plans.updateMany).not.toHaveBeenCalled();
     expect(sessions.assertSessionForSales).not.toHaveBeenCalled();
   });
 
@@ -161,7 +174,7 @@ describe('LayawayService.cancel — refund method (QUI-893 B2)', () => {
   it('nothing paid: no method needed, no money movement', async () => {
     const { service, movements, wallet, sessions, tx } = build({ plan: { paid_amount: 0 } });
     await service.cancel(12, { cancellation_reason: 'x' });
-    expect(tx.layaway_plans.update).toHaveBeenCalled();
+    expect(tx.layaway_plans.updateMany).toHaveBeenCalled();
     expect(sessions.assertSessionForSales).not.toHaveBeenCalled();
     expect(movements.recordModuleCashMovement).not.toHaveBeenCalled();
     expect(wallet.creditInTransaction).not.toHaveBeenCalled();
@@ -171,5 +184,112 @@ describe('LayawayService.cancel — refund method (QUI-893 B2)', () => {
     const { service, movements } = build();
     await service.cancel(12, { cancellation_reason: 'x', cancellation_fee: 60000 });
     expect(movements.recordModuleCashMovement).not.toHaveBeenCalled();
+  });
+
+  const cancelledEvents = (eventEmitter: { emit: jest.Mock }) =>
+    eventEmitter.emit.mock.calls.filter(([name]) => name === 'layaway.cancelled');
+
+  describe('cancelling twice (P1-1)', () => {
+    it('the transition is conditional on a non-terminal state', async () => {
+      const { service, tx } = build();
+      await service.cancel(12, { cancellation_reason: 'x', refund_method: 'wallet' });
+      expect(tx.layaway_plans.updateMany).toHaveBeenCalledWith(
+        expect.objectContaining({
+          where: { id: 12, state: { notIn: ['completed', 'cancelled'] } },
+          data: expect.objectContaining({ state: 'cancelled' }),
+        }),
+      );
+    });
+
+    it('a second sequential cancel is rejected and the wallet is credited once', async () => {
+      const { service, prisma, tx, wallet, eventEmitter } = build();
+      await service.cancel(12, { cancellation_reason: 'x', refund_method: 'wallet' });
+      // The plan is now cancelled for every later read.
+      const cancelled = { ...PLAN, state: 'cancelled' };
+      prisma.layaway_plans.findUnique.mockResolvedValue(cancelled);
+      tx.layaway_plans.findUnique.mockResolvedValue(cancelled);
+
+      await expect(
+        service.cancel(12, { cancellation_reason: 'x', refund_method: 'wallet' }),
+      ).rejects.toMatchObject({ errorCode: 'LAY_STATE_001' });
+      expect(prisma.$transaction).toHaveBeenCalledTimes(1);
+      expect(wallet.creditInTransaction).toHaveBeenCalledTimes(1);
+      expect(cancelledEvents(eventEmitter)).toHaveLength(1);
+    });
+
+    it('two concurrent cancels: the loser of the conditional update rolls back without crediting', async () => {
+      const { service, tx, wallet, eventEmitter, movements } = build();
+      // Both requests read the plan as active; only one row transition wins.
+      tx.layaway_plans.updateMany
+        .mockResolvedValueOnce({ count: 1 })
+        .mockResolvedValueOnce({ count: 0 });
+
+      const results = await Promise.allSettled([
+        service.cancel(12, { cancellation_reason: 'x', refund_method: 'wallet' }),
+        service.cancel(12, { cancellation_reason: 'x', refund_method: 'wallet' }),
+      ]);
+
+      expect(results.filter((r) => r.status === 'fulfilled')).toHaveLength(1);
+      const rejected = results.find(
+        (r): r is PromiseRejectedResult => r.status === 'rejected',
+      );
+      expect(rejected?.reason).toMatchObject({ errorCode: 'LAY_STATE_001' });
+      expect(wallet.creditInTransaction).toHaveBeenCalledTimes(1);
+      expect(movements.recordModuleCashMovement).not.toHaveBeenCalled();
+      expect(cancelledEvents(eventEmitter)).toHaveLength(1);
+    });
+
+    it.each(['cancelled', 'completed'])(
+      'a %s plan is rejected with LAY_STATE_001 before the transaction',
+      async (state) => {
+        const { service, prisma, wallet, sessions } = build({ plan: { state } });
+        await expect(
+          service.cancel(12, { cancellation_reason: 'x', refund_method: 'cash' }),
+        ).rejects.toMatchObject({ errorCode: 'LAY_STATE_001' });
+        expect(prisma.$transaction).not.toHaveBeenCalled();
+        expect(sessions.assertSessionForSales).not.toHaveBeenCalled();
+        expect(wallet.creditInTransaction).not.toHaveBeenCalled();
+      },
+    );
+  });
+
+  describe('non-cash refund needs an open drawer when the store tracks it (P2-1)', () => {
+    const tracking = (track: boolean, enabled = true) => ({
+      pos: { cash_register: { enabled, track_non_cash_payments: track } },
+    });
+
+    it.each(['bank_transfer', 'card'] as const)(
+      '%s without an open drawer is blocked before the transaction',
+      async (method) => {
+        const { service, prisma, sessions, movements } = build({
+          storeSettings: tracking(true),
+        });
+        sessions.assertSessionForSales.mockRejectedValue(
+          new VendixHttpException(ErrorCodes.CASH_SESSION_REQUIRED_001),
+        );
+        await expect(
+          service.cancel(12, { cancellation_reason: 'x', refund_method: method }),
+        ).rejects.toMatchObject({ errorCode: 'CASH_SESSION_REQUIRED_001' });
+        expect(sessions.assertSessionForSales).toHaveBeenCalledWith(9);
+        expect(prisma.$transaction).not.toHaveBeenCalled();
+        expect(movements.recordModuleCashMovement).not.toHaveBeenCalled();
+      },
+    );
+
+    it.each([
+      ['tracking off', tracking(false)],
+      ['cash register off', tracking(true, false)],
+    ])('%s: no drawer needed for a transfer refund', async (_label, settings) => {
+      const { service, prisma, sessions } = build({ storeSettings: settings });
+      await service.cancel(12, { cancellation_reason: 'x', refund_method: 'bank_transfer' });
+      expect(sessions.assertSessionForSales).not.toHaveBeenCalled();
+      expect(prisma.$transaction).toHaveBeenCalled();
+    });
+
+    it('wallet never asks for a drawer even when tracking is on', async () => {
+      const { service, sessions } = build({ storeSettings: tracking(true) });
+      await service.cancel(12, { cancellation_reason: 'x', refund_method: 'wallet' });
+      expect(sessions.assertSessionForSales).not.toHaveBeenCalled();
+    });
   });
 });

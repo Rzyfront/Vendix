@@ -6,6 +6,7 @@ import { map, switchMap, catchError, withLatestFrom } from 'rxjs/operators';
 import { LayawayApiService } from '../../services/layaway.service';
 import * as LayawayActions from '../actions/layaway.actions';
 import { selectLayawayState } from '../selectors/layaway.selectors';
+import { extractApiErrorMessage } from '../../../../../../core/utils/api-error-handler';
 
 @Injectable()
 export class LayawayEffects {
@@ -35,7 +36,7 @@ export class LayawayEffects {
               }),
             ),
             catchError((error) =>
-              of(LayawayActions.loadLayawaysFailure({ error: error.error?.message || 'Error al cargar planes' })),
+              of(LayawayActions.loadLayawaysFailure({ error: extractApiErrorMessage(error) })),
             ),
           ),
       ),
@@ -49,7 +50,7 @@ export class LayawayEffects {
         this.layaway_service.create(data).pipe(
           map((response) => LayawayActions.createLayawaySuccess({ layaway: response.data })),
           catchError((error) =>
-            of(LayawayActions.createLayawayFailure({ error: error.error?.message || 'Error al crear plan' })),
+            of(LayawayActions.createLayawayFailure({ error: extractApiErrorMessage(error) })),
           ),
         ),
       ),
@@ -63,7 +64,7 @@ export class LayawayEffects {
         this.layaway_service.makePayment(plan_id, data).pipe(
           map(() => LayawayActions.makePaymentSuccess()),
           catchError((error) =>
-            of(LayawayActions.makePaymentFailure({ error: error.error?.message || 'Error al registrar pago' })),
+            of(LayawayActions.makePaymentFailure({ error: extractApiErrorMessage(error) })),
           ),
         ),
       ),
@@ -77,7 +78,7 @@ export class LayawayEffects {
         this.layaway_service.cancel(plan_id, data).pipe(
           map(() => LayawayActions.cancelLayawaySuccess()),
           catchError((error) =>
-            of(LayawayActions.cancelLayawayFailure({ error: error.error?.message || 'Error al cancelar plan' })),
+            of(LayawayActions.cancelLayawayFailure({ error: extractApiErrorMessage(error) })),
           ),
         ),
       ),
@@ -91,7 +92,7 @@ export class LayawayEffects {
         this.layaway_service.getStats().pipe(
           map((response) => LayawayActions.loadStatsSuccess({ stats: response.data })),
           catchError((error) =>
-            of(LayawayActions.loadStatsFailure({ error: error.error?.message || 'Error al cargar estadisticas' })),
+            of(LayawayActions.loadStatsFailure({ error: extractApiErrorMessage(error) })),
           ),
         ),
       ),

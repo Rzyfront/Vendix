@@ -121,6 +121,7 @@ import {
 } from '../settings/payments/interfaces/payment-methods.interface';
 import type { PaymentMethod as CanonicalPaymentMethod } from '../../../../shared/models/payment-method.model';
 import { EMPTY_CART_MESSAGE } from '../../../../core/utils/error-messages';
+import { extractApiErrorMessage } from '../../../../core/utils/api-error-handler';
 import type { PaymentSubmit } from '../../../../shared/components';
 import type { BusinessHours } from '../../../../core/models/store-settings.interface';
 import { QuotationsService } from '../quotations/services/quotations.service';
@@ -2495,9 +2496,7 @@ export class PosComponent {
         },
         error: (err: any) => {
           this.loading.set(false);
-          this.toastService.error(
-            err?.error?.message || 'Error al crear plan separé',
-          );
+          this.toastService.error(extractApiErrorMessage(err));
         },
       });
   }
