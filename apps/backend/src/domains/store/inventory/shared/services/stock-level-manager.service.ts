@@ -674,9 +674,13 @@ export class StockLevelManager {
       return 'weighted_average';
     }
 
+    // Read on the movement's own tx connection (`prisma` is the caller's tx
+    // or the one `updateStock` opened): outside it, every stock movement asks
+    // the pool for a second connection while the transaction stays open.
     return this.costingMethodResolver.resolveCostingMethod(
       organizationId,
       storeId ?? undefined,
+      prisma,
     );
   }
 

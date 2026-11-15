@@ -294,6 +294,7 @@ export class LayawayService {
           (await this.stockLevelManager.getDefaultLocationForProduct(
             item.product_id,
             item.product_variant_id,
+            tx,
           ));
 
         await this.stockLevelManager.reserveStock(

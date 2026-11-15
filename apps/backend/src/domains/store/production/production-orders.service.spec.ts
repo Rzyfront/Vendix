@@ -246,9 +246,11 @@ describe('ProductionOrdersService — complete() (Fase C smoke)', () => {
         waste_percent: new Prisma.Decimal(0),
       },
     });
-    prismaMock.$transaction.mockImplementation(async (cb: any) =>
-      cb({ production_orders: { update: txOrderUpdate, updateMany: claimOk }, production_order_lines: noLines() }),
-    );
+    const txClient = {
+      production_orders: { update: txOrderUpdate, updateMany: claimOk },
+      production_order_lines: noLines(),
+    };
+    prismaMock.$transaction.mockImplementation(async (cb: any) => cb(txClient));
 
     // 4. The outer `production_orders.update` (post-transaction) is also
     // observed by some callers; mock it for safety.
@@ -271,6 +273,13 @@ describe('ProductionOrdersService — complete() (Fase C smoke)', () => {
     expect(consumeCall[0].movement_type).toBe('consumption');
     expect(consumeCall[0].quantity_change).toBeLessThan(0);
     expect(consumeCall[0].quantity_change).toBeCloseTo(-10, 4);
+    // (b2) the ingredient's warehouse is resolved on the completion's tx
+    // connection: without it each ingredient asks the pool for a second
+    // connection while the transaction is still open.
+    expect(stockLevelManager.getDefaultLocationForProduct).toHaveBeenCalledWith(
+      99, undefined, txClient,
+    );
+    expect(consumeCall[0].location_id).toBe(1);
 
     // (c) production has movement_type='production' and positive qty
     expect(produceCall[0].movement_type).toBe('production');

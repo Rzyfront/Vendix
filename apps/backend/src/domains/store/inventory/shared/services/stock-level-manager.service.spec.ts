@@ -479,6 +479,14 @@ describe('StockLevelManager', () => {
       const result = await service.updateStock(saleParams);
 
       expect(result.stock_level.quantity_available).toBe(70);
+      // The costing method of an outgoing movement is read on the movement's
+      // own tx connection: outside it, every stock movement asks the pool for
+      // a second connection while the transaction is still open.
+      const resolver = (service as any).costingMethodResolver;
+      expect(resolver.resolveCostingMethod).toHaveBeenCalled();
+      for (const call of resolver.resolveCostingMethod.mock.calls) {
+        expect(call).toEqual([1, 1, mockTx]);
+      }
     });
 
     it('should work with external transaction client', async () => {

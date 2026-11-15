@@ -1841,6 +1841,7 @@ export class RefundFlowService {
           await this.stockLevelManager.getDefaultLocationForProduct(
             ct.product_id,
             ct.product_variant_id ?? undefined,
+            tx,
           );
         await this.stockLevelManager.updateStock(
           {
