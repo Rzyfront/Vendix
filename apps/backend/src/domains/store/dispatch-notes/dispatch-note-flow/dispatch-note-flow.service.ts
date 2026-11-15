@@ -415,7 +415,7 @@ export class DispatchNoteFlowService {
     // symmetric stock reversal (return/+qty for outbound, stock_out/-qty for
     // inbound), reverts serials, and releases order_items.inventory_committed.
     // Invoiced notes stay non-voidable (invoiced: [] in the transition map) —
-    // those require a credit note via the return_orders flow.
+    // those require a credit note / refund from the order detail.
     this.validateTransition(
       dispatch_note.status as DispatchNoteStatus,
       'voided',

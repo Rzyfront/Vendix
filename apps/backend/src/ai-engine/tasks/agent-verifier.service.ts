@@ -340,8 +340,6 @@ function projectedIds(
         add('session_id', d.id);
       if (args.path === `store/stock-transfers/${d.id}`)
         add('transfer_id', d.id);
-      if (args.path === `store/orders/return-orders/${d.id}`)
-        add('return_order_id', d.id);
       break;
   }
   return ids;
