@@ -8,6 +8,7 @@ import { ReplaySubject } from 'rxjs';
 import { AppConfig } from './app-config.service';
 import * as ConfigActions from '../store/config/config.actions';
 import { LandingOnlyGuard } from '../guards/landing-only.guard';
+import { withWhatsappSignupBridge } from '../../public/whatsapp-signup-bridge/whatsapp-signup-bridge.routes';
 
 @Injectable({
   providedIn: 'root',
@@ -155,7 +156,11 @@ export class RouteManagerService {
 
   private buildFinalRoutes(appConfig: AppConfig): Routes {
     const staticAuthRoutes = this.getStaticAuthRoutes();
-    const dynamicAppRoutes = appConfig.routes;
+    // The WhatsApp signup bridge hangs off the main domain, not the app_type.
+    const dynamicAppRoutes = withWhatsappSignupBridge(
+      appConfig.routes,
+      appConfig.domainConfig,
+    );
 
     return [
       ...staticAuthRoutes,
