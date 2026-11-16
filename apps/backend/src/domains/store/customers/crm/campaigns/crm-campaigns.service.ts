@@ -7,6 +7,7 @@ import { StorePrismaService } from '../../../../../prisma/services/store-prisma.
 import { AuditService } from '../../../../../common/audit/audit.service';
 import { ErrorCodes, VendixHttpException } from '../../../../../common/errors';
 import { MessagingService } from '../../../../../messaging/messaging.service';
+import { MessagingPricesService } from '../../../../../messaging/pricing/messaging-prices.service';
 import { SmsSpendService } from '../../../../../messaging/spend/sms-spend.service';
 import { maskAddress } from '../../../../../messaging/utils/mask-address.util';
 import { resolveCrmViewer } from '../shared/crm-access';
@@ -111,6 +112,7 @@ export class CrmCampaignsService {
     private readonly config: ConfigService,
     private readonly audit: AuditService,
     private readonly events: EventEmitter2,
+    private readonly prices: MessagingPricesService,
   ) {}
 
   async estimate(dto: CrmCampaignContentDto): Promise<CampaignEstimate> {
@@ -420,14 +422,15 @@ export class CrmCampaignsService {
       content.channel,
       this.config.get<string>('SNS_SMS_DEFAULT_COUNTRY_CODE') || '57',
     );
+    const prices = await this.prices.resolve();
     const estimatedCost = estimateCampaignCost(
       audience.eligible,
       { channel: content.channel, body: content.body },
       storeName,
       {
-        sms_price_table: this.config.get<string>('SNS_SMS_PRICE_TABLE'),
-        whatsapp_price_table: this.config.get<string>('CRM_WHATSAPP_PRICE_TABLE'),
-        email_price_usd: Number(this.config.get<string>('CRM_EMAIL_PRICE_USD')) || undefined,
+        sms_price_table: prices.sms_price_table.value,
+        whatsapp_price_table: prices.whatsapp_price_table.value,
+        email_price_usd: prices.email_price_usd.value,
       },
     );
 

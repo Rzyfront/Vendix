@@ -1,10 +1,14 @@
 import {
+  SmsPriceTable,
   estimateSmsCost,
   normalizeE164,
-  parseSmsPriceTable,
   pricePerSegment,
 } from '../../../../../messaging/utils/sms.util';
-import { FALLBACK_PRICE_PER_SEGMENT_USD } from '../../../../../messaging/providers/sns-sms.provider';
+import {
+  EMAIL_FALLBACK_PRICE_USD,
+  SMS_FALLBACK_PRICE_PER_SEGMENT_USD,
+  WHATSAPP_FALLBACK_PRICE_USD as WHATSAPP_FALLBACK,
+} from '../../../../../messaging/pricing/messaging-prices.constants';
 import type { SegmentRecipientRow } from '../segments/crm-segment-query.service';
 
 export const CAMPAIGN_CHANNELS = ['whatsapp', 'sms', 'email'] as const;
@@ -26,8 +30,8 @@ const PLACEHOLDER_PATTERN = /\{([a-z_]+)\}/g;
 const EMAIL_PATTERN = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
 
 /** Fallback prices (USD), deliberately on the high side: an estimate never undershoots. */
-export const WHATSAPP_FALLBACK_PRICE_USD = 0.05;
-export const EMAIL_DEFAULT_PRICE_USD = 0.0001;
+export const WHATSAPP_FALLBACK_PRICE_USD = WHATSAPP_FALLBACK;
+export const EMAIL_DEFAULT_PRICE_USD = EMAIL_FALLBACK_PRICE_USD;
 
 export interface CampaignRecipient {
   customer_id: number;
@@ -141,9 +145,10 @@ export function renderPlaceholders(
   );
 }
 
+/** Already-parsed prices (see `MessagingPricesService.resolve()`). */
 export interface CostConfig {
-  sms_price_table?: string;
-  whatsapp_price_table?: string;
+  sms_price_table?: SmsPriceTable;
+  whatsapp_price_table?: SmsPriceTable;
   email_price_usd?: number;
 }
 
@@ -166,13 +171,13 @@ export function estimateCampaignCost(
 ): number {
   let total = 0;
   if (content.channel === 'sms') {
-    const table = parseSmsPriceTable(config.sms_price_table);
+    const table = config.sms_price_table ?? {};
     for (const recipient of audience) {
       const text = renderPlaceholders(content.body ?? '', recipient, storeName);
-      total += estimateSmsCost(recipient.address, text, table, FALLBACK_PRICE_PER_SEGMENT_USD).cost;
+      total += estimateSmsCost(recipient.address, text, table, SMS_FALLBACK_PRICE_PER_SEGMENT_USD).cost;
     }
   } else if (content.channel === 'whatsapp') {
-    const table = parseSmsPriceTable(config.whatsapp_price_table);
+    const table = config.whatsapp_price_table ?? {};
     for (const recipient of audience) {
       total += pricePerSegment(recipient.address, table, WHATSAPP_FALLBACK_PRICE_USD);
     }
