@@ -53,9 +53,14 @@ describe('startEmbeddedSignupFlow', () => {
   beforeEach(() => jasmine.clock().install());
   afterEach(() => jasmine.clock().uninstall());
 
-  it('sends only setup extras (no undocumented featureType)', () => {
+  it('launches with the business app onboarding extras and no version', () => {
     const flow = setup();
-    expect(flow.options()['extras']).toEqual({ setup: {} });
+    expect(flow.options()['extras']).toEqual({
+      setup: {},
+      featureType: 'whatsapp_business_app_onboarding',
+      sessionInfoVersion: '3',
+    });
+    expect(flow.options()['version']).toBeUndefined();
     expect(flow.options()['config_id']).toBe('cfg');
     // leave the flow settled so no timers leak
     postSession('CANCEL');
@@ -98,6 +103,37 @@ describe('startEmbeddedSignupFlow', () => {
       );
     });
   }
+
+  it('reports the business app onboarding finish event', async () => {
+    const flow = setup();
+    postSession('FINISH_WHATSAPP_BUSINESS_APP_ONBOARDING', {
+      waba_id: 'w1',
+      phone_number_id: 'p1',
+    });
+    flow.login({ authResponse: { code: 'abc' } });
+    await tick();
+    expect(flow.result()?.finish_event).toBe(
+      'FINISH_WHATSAPP_BUSINESS_APP_ONBOARDING',
+    );
+  });
+
+  it('keeps a plain FINISH working and reports it', async () => {
+    const flow = setup();
+    postSession('FINISH', { waba_id: 'w1', phone_number_id: 'p1' });
+    flow.login({ authResponse: { code: 'abc' } });
+    await tick();
+    expect(flow.result()).toEqual(
+      jasmine.objectContaining({ code: 'abc', waba_id: 'w1', finish_event: 'FINISH' }),
+    );
+  });
+
+  it('leaves finish_event absent when no session event arrived', async () => {
+    const flow = setup();
+    flow.login({ authResponse: { code: 'abc' } });
+    await tick(EMBEDDED_SIGNUP_SESSION_GRACE_MS);
+    expect(flow.result()?.code).toBe('abc');
+    expect(flow.result()?.finish_event).toBeUndefined();
+  });
 
   it('resolves when the session event arrives after the code', async () => {
     const flow = setup();
