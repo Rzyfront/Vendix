@@ -262,6 +262,8 @@ export class SuperAdminLayoutComponent {
     '/super-admin/system/ai-engine': 'AI Engine',
     '/super-admin/system/integrations/meta-whatsapp':
       'Integraciones / Meta / WhatsApp',
+    '/super-admin/system/integrations/messaging-prices':
+      'Integraciones / Precios de mensajería',
     '/super-admin/system/templates': 'Plantillas',
     '/super-admin/system/backups': 'Copias de Seguridad',
     '/super-admin/system/payroll-defaults': 'Parámetros de Nómina',
@@ -435,6 +437,11 @@ export class SuperAdminLayoutComponent {
             label: 'Integraciones · Meta / WhatsApp',
             icon: 'circle',
             route: '/super-admin/system/integrations/meta-whatsapp',
+          },
+          {
+            label: 'Integraciones · Precios de mensajería',
+            icon: 'circle',
+            route: '/super-admin/system/integrations/messaging-prices',
           },
           {
             label: 'Plantillas',

@@ -1,0 +1,200 @@
+<div class="space-y-4 md:space-y-6 p-4 md:p-6 max-w-4xl">
+  <div>
+    <h1 class="text-lg font-bold text-text-primary">Precios de mensajería</h1>
+    <p class="text-sm text-text-secondary">
+      Integraciones · precios en USD de SMS, WhatsApp y correo. Lo que no se
+      defina aquí usa el valor del entorno y, si no existe, el valor por
+      defecto.
+    </p>
+  </div>
+
+  @if (!canRead()) {
+    <div class="rounded-2xl border border-error/25 bg-error/10 p-4 text-sm text-error">
+      No tienes permiso para ver esta configuración.
+    </div>
+  } @else if (loading()) {
+    <div class="rounded-2xl border border-border bg-surface p-6 text-center text-sm text-text-secondary">
+      Cargando configuración...
+    </div>
+  } @else if (view(); as cfg) {
+    @for (section of tableSections; track section.key) {
+      <section class="rounded-2xl border border-border bg-surface p-4 md:p-6 space-y-3">
+        <div class="flex items-center justify-between gap-2 flex-wrap">
+          <div class="flex items-center gap-2">
+            <h2 class="text-sm font-semibold text-text-primary">{{ section.title }}</h2>
+            <span class="rounded-full border border-border bg-background px-2 py-0.5 text-xs text-text-secondary">
+              {{ isCleared(section.key) ? 'Respaldo al guardar' : sourceLabels[cfg[section.key].source] }}
+            </span>
+          </div>
+          @if (canWrite()) {
+            @if (isCleared(section.key)) {
+              <app-button variant="ghost" size="sm" (clicked)="undoFallback(section.key)">
+                Deshacer
+              </app-button>
+            } @else if (isPanel(section.key)) {
+              <app-button variant="outline" size="sm" (clicked)="useFallback(section.key)">
+                <app-icon name="rotate-ccw" [size]="14" slot="icon"></app-icon>
+                Usar respaldo
+              </app-button>
+            }
+          }
+        </div>
+
+        <p class="text-xs text-text-secondary">
+          Si el país no está en la tabla:
+          {{ formatUsd(cfg.fallbacks[section.fallbackKey]) }} USD por
+          {{ section.fallbackUnit }}. Usa la fila «default» para cambiar ese
+          valor.
+        </p>
+
+        @if (!isCleared(section.key)) {
+          <div class="space-y-2">
+            <div class="grid grid-cols-[1fr_1fr_auto] gap-2 text-xs font-semibold text-text-secondary">
+              <span>Código de país</span>
+              <span>{{ section.priceHeader }}</span>
+              <span class="w-9"></span>
+            </div>
+            @for (row of rows[section.key](); track row.id) {
+              <div class="grid grid-cols-[1fr_1fr_auto] gap-2 items-start">
+                <div class="min-w-0">
+                  <input
+                    type="text"
+                    inputmode="numeric"
+                    autocomplete="off"
+                    placeholder="57"
+                    class="w-full rounded-xl border bg-background px-3 py-2 text-sm text-text-primary"
+                    [class]="tableErrors[section.key]().errors[row.id]?.country ? 'border-error' : 'border-border'"
+                    [value]="row.country"
+                    [disabled]="!canWrite()"
+                    (input)="updateRow(section.key, row.id, 'country', valueOf($event))"
+                  />
+                  @if (tableErrors[section.key]().errors[row.id]?.country; as msg) {
+                    <p class="mt-1 text-xs text-error">{{ msg }}</p>
+                  }
+                </div>
+                <div class="min-w-0">
+                  <input
+                    type="text"
+                    inputmode="decimal"
+                    autocomplete="off"
+                    placeholder="0.0509"
+                    class="w-full rounded-xl border bg-background px-3 py-2 text-sm text-text-primary"
+                    [class]="tableErrors[section.key]().errors[row.id]?.price ? 'border-error' : 'border-border'"
+                    [value]="row.price"
+                    [disabled]="!canWrite()"
+                    (input)="updateRow(section.key, row.id, 'price', valueOf($event))"
+                  />
+                  @if (tableErrors[section.key]().errors[row.id]?.price; as msg) {
+                    <p class="mt-1 text-xs text-error">{{ msg }}</p>
+                  }
+                </div>
+                @if (canWrite()) {
+                  <app-button
+                    variant="ghost"
+                    size="sm"
+                    ariaLabel="Quitar fila"
+                    (clicked)="removeRow(section.key, row.id)"
+                  >
+                    <app-icon name="trash-2" [size]="16" slot="icon"></app-icon>
+                  </app-button>
+                }
+              </div>
+            } @empty {
+              <p class="text-sm text-text-secondary">Sin filas: todos los países usan el respaldo.</p>
+            }
+            @if (canWrite()) {
+              <app-button variant="outline" size="sm" (clicked)="addRow(section.key)">
+                <app-icon name="plus" [size]="14" slot="icon"></app-icon>
+                Agregar país
+              </app-button>
+            }
+          </div>
+        } @else {
+          <p class="text-sm text-text-secondary">
+            Al guardar se quitará la tabla del panel y se usará el respaldo.
+          </p>
+        }
+      </section>
+    }
+
+    <section class="rounded-2xl border border-border bg-surface p-4 md:p-6 space-y-4">
+      <h2 class="text-sm font-semibold text-text-primary">Tope por SMS</h2>
+      <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
+        @for (field of smsCapFields; track field.key) {
+          <ng-container *ngTemplateOutlet="scalarField; context: { $implicit: field }"></ng-container>
+        }
+      </div>
+    </section>
+
+    <section class="rounded-2xl border border-border bg-surface p-4 md:p-6 space-y-4">
+      <h2 class="text-sm font-semibold text-text-primary">Correo</h2>
+      <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
+        @for (field of emailFields; track field.key) {
+          <ng-container *ngTemplateOutlet="scalarField; context: { $implicit: field }"></ng-container>
+        }
+      </div>
+    </section>
+
+    <div class="flex items-center justify-between gap-3 flex-wrap pt-2">
+      <p class="text-xs text-text-secondary">
+        @if (cfg.updated_at; as updatedAt) {
+          Última actualización: {{ updatedAt | date: 'medium' }}
+          @if (cfg.updated_by_user_id; as uid) { por usuario #{{ uid }} }
+        } @else {
+          Sin cambios registrados.
+        }
+      </p>
+      @if (canWrite()) {
+        <app-button
+          variant="primary"
+          [loading]="saving()"
+          [disabled]="!canSave()"
+          (clicked)="save()"
+        >
+          Guardar
+        </app-button>
+      }
+    </div>
+  }
+</div>
+
+<ng-template #scalarField let-field>
+  <div class="space-y-1 min-w-0">
+    <div class="flex items-center justify-between gap-2 flex-wrap">
+      <label class="text-sm font-medium text-text-primary">{{ field.label }}</label>
+      <span class="rounded-full border border-border bg-background px-2 py-0.5 text-xs text-text-secondary">
+        {{ isCleared(field.key) ? 'Respaldo al guardar' : sourceLabels[sourceOf(field.key) ?? 'default'] }}
+      </span>
+    </div>
+    @if (isCleared(field.key)) {
+      <p class="rounded-xl border border-border bg-background px-3 py-2 text-sm text-text-secondary">
+        Al guardar se quitará del panel y se usará el respaldo.
+      </p>
+    } @else {
+      <input
+        type="text"
+        inputmode="decimal"
+        autocomplete="off"
+        class="w-full rounded-xl border bg-background px-3 py-2 text-sm text-text-primary"
+        [class]="scalarErrors()[field.key] ? 'border-error' : 'border-border'"
+        [value]="scalars()[field.key]"
+        [disabled]="!canWrite()"
+        (input)="updateScalar(field.key, valueOf($event))"
+      />
+      @if (scalarErrors()[field.key]; as msg) {
+        <p class="text-xs text-error">{{ msg }}</p>
+      }
+    }
+    <p class="text-xs text-text-secondary">{{ field.hint }}</p>
+    @if (canWrite()) {
+      @if (isCleared(field.key)) {
+        <app-button variant="ghost" size="sm" (clicked)="undoFallback(field.key)">Deshacer</app-button>
+      } @else if (isPanel(field.key)) {
+        <app-button variant="outline" size="sm" (clicked)="useFallback(field.key)">
+          <app-icon name="rotate-ccw" [size]="14" slot="icon"></app-icon>
+          Usar respaldo
+        </app-button>
+      }
+    }
+  </div>
+</ng-template>
