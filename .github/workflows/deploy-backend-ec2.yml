@@ -124,6 +124,18 @@ jobs:
           # documented dev fallback (no deploy break). Add the key once and every future
           # deploy injects it automatically — mirrors how JWT_SECRET flows.
           REFRESH_TOKEN_HMAC_SECRET=\$(aws secretsmanager get-secret-value --secret-id vendix/production/jwt --query SecretString --output text | python3 -c "import sys, json; print(json.load(sys.stdin).get('REFRESH_TOKEN_HMAC_SECRET', ''))")
+          # Encryption key for social channel tokens (Meta/WhatsApp). It lives in its
+          # own secret and is REQUIRED: the backend refuses to boot in production
+          # without it, and a different key makes the tokens already stored in
+          # social_channels and platform_settings unreadable. Abort here, before
+          # migrations or any container change, if the secret does not carry it.
+          # It always travels by -e, which wins over --env-file, so a stale value
+          # in /opt/vendix/.env never decides which key a container uses.
+          SOCIAL_CHANNEL_ENCRYPTION_KEY=\$(aws secretsmanager get-secret-value --secret-id vendix/production/social-channels --query SecretString --output text | python3 -c "import sys, json; print(json.load(sys.stdin).get('SOCIAL_CHANNEL_ENCRYPTION_KEY', ''))")
+          if [ -z "\$SOCIAL_CHANNEL_ENCRYPTION_KEY" ]; then
+            echo "❌ vendix/production/social-channels has no SOCIAL_CHANNEL_ENCRYPTION_KEY. Aborting before any change."
+            exit 1
+          fi
           EMAIL_PASSWORD=\$(aws secretsmanager get-secret-value --secret-id vendix/production/email --query SecretString --output text | python3 -c "import sys, json; data=json.load(sys.stdin); print(data.get('EMAIL_PASSWORD', ''))")
 
           # Fetch app configuration secrets
@@ -293,6 +305,7 @@ jobs:
               --env-file /opt/vendix/.env \\
               -e VENDIX_PROCESS_ROLE="\$role" \\
               -e REFRESH_TOKEN_HMAC_SECRET="\$REFRESH_TOKEN_HMAC_SECRET" \\
+              -e SOCIAL_CHANNEL_ENCRYPTION_KEY="\$SOCIAL_CHANNEL_ENCRYPTION_KEY" \\
               -e BASE_DOMAIN="\$BASE_DOMAIN" \\
               -e FRONTEND_URL="\$FRONTEND_URL" \\
               -e PORT="\$PORT" \\
@@ -505,6 +518,7 @@ jobs:
               -e VENDIX_PROCESS_ROLE=worker \\
               -e NODE_OPTIONS="--max-old-space-size=2048" \\
               -e REFRESH_TOKEN_HMAC_SECRET="\$REFRESH_TOKEN_HMAC_SECRET" \\
+              -e SOCIAL_CHANNEL_ENCRYPTION_KEY="\$SOCIAL_CHANNEL_ENCRYPTION_KEY" \\
               -e BASE_DOMAIN="\$BASE_DOMAIN" \\
               -e FRONTEND_URL="\$FRONTEND_URL" \\
               -e NODE_ENV="\$NODE_ENV" \\
