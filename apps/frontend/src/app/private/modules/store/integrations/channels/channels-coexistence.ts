@@ -55,7 +55,10 @@ export function allowsRegistrationRetry(
 
 /** Toast after a successful connect: coexistence never says «falta registrar». */
 export function connectedOutcome(
-  channel: Pick<WhatsappChannel, 'status' | 'last_error' | 'registration_status'>,
+  channel: Pick<
+    WhatsappChannel,
+    'status' | 'last_error' | 'registration_status'
+  >,
 ): { kind: 'success'; message: string } | { kind: 'error'; message: string } {
   if (channel.status === 'error' && !registrationNotRequired(channel)) {
     return {
@@ -66,4 +69,17 @@ export function connectedOutcome(
     };
   }
   return { kind: 'success', message: CONNECT_SUCCESS_MESSAGE };
+}
+
+/**
+ * Reason shown above the card: the error of a failed channel, or why Meta
+ * disconnected it (a disconnect from Vendix stores no reason).
+ */
+export function channelAlertMessage(
+  channel: Pick<WhatsappChannel, 'status' | 'last_error'> | null | undefined,
+): string | null {
+  if (!channel?.last_error) return null;
+  return channel.status === 'error' || channel.status === 'disconnected'
+    ? channel.last_error
+    : null;
 }

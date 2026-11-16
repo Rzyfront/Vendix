@@ -1,5 +1,6 @@
 import {
   allowsRegistrationRetry,
+  channelAlertMessage,
   connectedOutcome,
   isCoexistenceChannel,
   needsRegistrationNotice,
@@ -17,7 +18,11 @@ describe('channels coexistence display rules', () => {
     expect(isCoexistenceChannel({})).toBeFalse();
     expect(
       isCoexistenceChannel({
-        coexistence: { enabled: false, contacts_sync: null, history_sync: null },
+        coexistence: {
+          enabled: false,
+          contacts_sync: null,
+          history_sync: null,
+        },
       }),
     ).toBeFalse();
     expect(
@@ -71,5 +76,24 @@ describe('channels coexistence display rules', () => {
       kind: 'error',
       message: 'WhatsApp quedó conectado, pero falta registrar el número.',
     });
+  });
+
+  it('shows the stored reason for an error or a disconnection from Meta', () => {
+    expect(
+      channelAlertMessage({ status: 'error', last_error: 'Token vencido' }),
+    ).toBe('Token vencido');
+    expect(
+      channelAlertMessage({
+        status: 'disconnected',
+        last_error: 'Desconectaste Vendix desde la app WhatsApp Business.',
+      }),
+    ).toBe('Desconectaste Vendix desde la app WhatsApp Business.');
+    expect(
+      channelAlertMessage({ status: 'disconnected', last_error: null }),
+    ).toBeNull();
+    expect(
+      channelAlertMessage({ status: 'connected', last_error: 'x' }),
+    ).toBeNull();
+    expect(channelAlertMessage(null)).toBeNull();
   });
 });

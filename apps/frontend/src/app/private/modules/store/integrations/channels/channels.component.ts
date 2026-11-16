@@ -18,6 +18,7 @@ import { MessagingChannelCardsComponent } from './messaging-channels/messaging-c
 import { MetaReadiness, WhatsappChannel } from './channels.interface';
 import {
   allowsRegistrationRetry,
+  channelAlertMessage,
   CONNECT_HELP_MESSAGE,
   connectedOutcome,
   COEXISTENCE_DISCONNECT_NOTE,
@@ -69,9 +70,9 @@ import { environment } from '../../../../../../environments/environment';
           </app-alert-banner>
         }
 
-        @if (channel()?.status === 'error' && channel()?.last_error) {
+        @if (channelAlert(); as alert) {
           <app-alert-banner variant="warning" icon="triangle-alert">
-            {{ channel()?.last_error }}
+            {{ alert }}
           </app-alert-banner>
         }
 
@@ -111,60 +112,60 @@ import { environment } from '../../../../../../environments/environment';
             </div>
 
             <div class="flex flex-col gap-3 pt-1 lg:max-w-sm lg:pt-0">
-            <div class="flex flex-wrap gap-3">
-              @if (channel()?.connected) {
-                <app-button
-                  variant="outline-danger"
-                  size="md"
-                  [loading]="disconnecting()"
-                  (clicked)="disconnectWhatsapp()"
-                >
-                  <app-icon slot="icon" name="plug" [size]="16"></app-icon>
-                  Desconectar
-                </app-button>
-              } @else {
-                @if (canRetryRegistration()) {
+              <div class="flex flex-wrap gap-3">
+                @if (channel()?.connected) {
                   <app-button
-                    variant="outline"
+                    variant="outline-danger"
                     size="md"
-                    [loading]="registering()"
-                    (clicked)="retryRegistration()"
+                    [loading]="disconnecting()"
+                    (clicked)="disconnectWhatsapp()"
+                  >
+                    <app-icon slot="icon" name="plug" [size]="16"></app-icon>
+                    Desconectar
+                  </app-button>
+                } @else {
+                  @if (canRetryRegistration()) {
+                    <app-button
+                      variant="outline"
+                      size="md"
+                      [loading]="registering()"
+                      (clicked)="retryRegistration()"
+                    >
+                      <app-icon
+                        slot="icon"
+                        name="refresh-cw"
+                        [size]="16"
+                      ></app-icon>
+                      Reintentar registro
+                    </app-button>
+                  }
+                  <app-button
+                    variant="primary"
+                    size="md"
+                    [disabled]="!canConnectWhatsapp()"
+                    [loading]="connecting()"
+                    (clicked)="connectWhatsapp()"
                   >
                     <app-icon
                       slot="icon"
-                      name="refresh-cw"
+                      name="message-circle"
                       [size]="16"
                     ></app-icon>
-                    Reintentar registro
+                    Conectar WhatsApp
                   </app-button>
                 }
-                <app-button
-                  variant="primary"
-                  size="md"
-                  [disabled]="!canConnectWhatsapp()"
-                  [loading]="connecting()"
-                  (clicked)="connectWhatsapp()"
-                >
-                  <app-icon
-                    slot="icon"
-                    name="message-circle"
-                    [size]="16"
-                  ></app-icon>
-                  Conectar WhatsApp
-                </app-button>
-              }
-            </div>
-            @if (channel()?.connected) {
-              @if (isCoexistence()) {
+              </div>
+              @if (channel()?.connected) {
+                @if (isCoexistence()) {
+                  <p class="text-xs text-[var(--color-text-secondary)]">
+                    {{ coexistenceDisconnectNote }}
+                  </p>
+                }
+              } @else {
                 <p class="text-xs text-[var(--color-text-secondary)]">
-                  {{ coexistenceDisconnectNote }}
+                  {{ connectHelp }}
                 </p>
               }
-            } @else {
-              <p class="text-xs text-[var(--color-text-secondary)]">
-                {{ connectHelp }}
-              </p>
-            }
             </div>
           </div>
         </app-card>
@@ -345,6 +346,10 @@ export class ChannelsComponent {
 
   protected readonly isCoexistence = computed(() =>
     isCoexistenceChannel(this.channel()),
+  );
+
+  protected readonly channelAlert = computed(() =>
+    channelAlertMessage(this.channel()),
   );
 
   protected readonly connectHelp = CONNECT_HELP_MESSAGE;
