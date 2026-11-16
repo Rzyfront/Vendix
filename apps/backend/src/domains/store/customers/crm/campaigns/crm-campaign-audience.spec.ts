@@ -94,11 +94,11 @@ describe('campaign audience', () => {
     it('prices SMS per segment and country with the provider price table', () => {
       // 160 GSM-7 characters is one segment; 161 is two.
       const one = estimateCampaignCost(recipients, { channel: 'sms', body: 'a'.repeat(160) }, 'X', {
-        sms_price_table: '{"57":0.0075}',
+        sms_price_table: { '57': 0.0075 },
       });
       expect(one).toBe(0.015);
       const two = estimateCampaignCost(recipients, { channel: 'sms', body: 'a'.repeat(161) }, 'X', {
-        sms_price_table: '{"57":0.0075}',
+        sms_price_table: { '57': 0.0075 },
       });
       expect(two).toBe(0.03);
     });
@@ -106,7 +106,7 @@ describe('campaign audience', () => {
     it('counts the rendered text of each recipient', () => {
       const long = buildAudience([row(1, { first_name: 'x'.repeat(30) })], 'sms').eligible;
       const cost = estimateCampaignCost(long, { channel: 'sms', body: `${'a'.repeat(140)}{first_name}` }, 'X', {
-        sms_price_table: '{"57":0.0075}',
+        sms_price_table: { '57': 0.0075 },
       });
       expect(cost).toBe(0.015);
     });
@@ -118,7 +118,7 @@ describe('campaign audience', () => {
 
     it('prices WhatsApp per message and email per send', () => {
       const wa = buildAudience([row(1, { whatsapp_consent: 'opted_in' })], 'whatsapp').eligible;
-      expect(estimateCampaignCost(wa, { channel: 'whatsapp' }, 'X', { whatsapp_price_table: '{"57":0.0125}' })).toBe(0.0125);
+      expect(estimateCampaignCost(wa, { channel: 'whatsapp' }, 'X', { whatsapp_price_table: { '57': 0.0125 } })).toBe(0.0125);
       expect(estimateCampaignCost(wa, { channel: 'whatsapp' }, 'X', {})).toBe(0.05);
 
       const mails = buildAudience([row(1), row(2), row(3)], 'email').eligible;

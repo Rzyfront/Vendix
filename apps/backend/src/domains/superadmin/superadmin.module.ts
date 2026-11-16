@@ -23,6 +23,7 @@ import { PayrollDefaultsModule } from './payroll-defaults/payroll-defaults.modul
 import { SuperadminSubscriptionsModule } from './subscriptions/subscriptions.module';
 import { SuperadminSettingsSyncModule } from './settings-sync/settings-sync.module';
 import { SuperadminSocialSalesModule } from './social-sales/social-sales.module';
+import { SuperadminMessagingPricesModule } from './messaging-prices/messaging-prices.module';
 import { NotificationSoundsModule } from './notification-sounds/notification-sounds.module';
 import { SuperadminAccountingModule } from './accounting/superadmin-accounting.module';
 import { SuperadminFiscalOperationsModule } from './fiscal-operations/superadmin-fiscal-operations.module';
@@ -58,6 +59,7 @@ import { WorkflowsOpsModule } from './workflows-ops/workflows-ops.module';
     SuperadminSubscriptionsModule,
     SuperadminSettingsSyncModule,
     SuperadminSocialSalesModule,
+    SuperadminMessagingPricesModule,
     NotificationSoundsModule,
     SuperadminAccountingModule,
     SuperadminFiscalOperationsModule,

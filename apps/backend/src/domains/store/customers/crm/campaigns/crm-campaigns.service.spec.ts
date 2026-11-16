@@ -1,3 +1,4 @@
+import { MessagingPricesService } from '../../../../../messaging/pricing/messaging-prices.service';
 import { RequestContextService } from '@common/context/request-context.service';
 import { VendixHttpException } from '../../../../../common/errors';
 import { CRM_CAMPAIGN_DISPATCH_EVENT, CrmCampaignsService } from './crm-campaigns.service';
@@ -50,6 +51,7 @@ function setup(options: {
   rows?: SegmentRecipientRow[];
   campaign?: ReturnType<typeof draft> | null;
   env?: Record<string, string>;
+  priceRow?: { value: unknown } | null;
   smsChannel?: Record<string, unknown> | null;
   templates?: Array<Record<string, unknown>>;
 } = {}) {
@@ -103,6 +105,10 @@ function setup(options: {
   const config = { get: jest.fn((key: string) => env[key]) };
   const audit = { log: jest.fn().mockResolvedValue(undefined) };
   const events = { emit: jest.fn() };
+  const prices = new MessagingPricesService(
+    { platform_settings: { findUnique: jest.fn().mockResolvedValue(options.priceRow ?? null) } } as never,
+    config as never,
+  );
   const service = new CrmCampaignsService(
     prisma as never,
     segments as never,
@@ -111,6 +117,7 @@ function setup(options: {
     config as never,
     audit as never,
     events as never,
+    prices,
   );
   return { service, prisma, segments, audit, events, smsSpend };
 }
@@ -148,6 +155,34 @@ describe('CrmCampaignsService', () => {
         exceeds_spend_limit: false,
         template_verified: null,
       });
+    });
+
+    it('estimates SMS, WhatsApp and email with the Superadmin prices over the environment', async () => {
+      const priceRow = {
+        value: {
+          sms_price_table: { '57': 0.0509 },
+          whatsapp_price_table: { '57': 0.02 },
+          email_price_usd: 0.001,
+        },
+      };
+      const { service } = setup({ priceRow, env: { CRM_EMAIL_PRICE_USD: '0.5' } });
+
+      const sms = await asStore(() =>
+        service.estimate({ segment_id: 4, channel: 'sms', body: 'Hola' }),
+      );
+      expect(sms).toMatchObject({ recipients: 2, estimated_cost: 0.1018 });
+
+      const wa = await asStore(() =>
+        service.estimate({ segment_id: 4, channel: 'whatsapp', template: { name: 'promo', language: 'es' } }),
+      );
+      expect(wa.recipients).toBeGreaterThan(0);
+      expect(wa.estimated_cost).toBeCloseTo(wa.recipients * 0.02, 4);
+
+      const email = await asStore(() =>
+        service.estimate({ segment_id: 4, channel: 'email', subject: 'Hola', body: 'x' }),
+      );
+      expect(email.recipients).toBeGreaterThan(0);
+      expect(email.estimated_cost).toBeCloseTo(email.recipients * 0.001, 4);
     });
 
     it('flags an SMS campaign that does not fit in the remaining monthly cap', async () => {

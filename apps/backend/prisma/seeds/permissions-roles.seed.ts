@@ -4210,6 +4210,19 @@ export async function seedPermissionsAndRoles(
       method: 'PATCH',
     },
     {
+      name: 'superadmin:messaging:prices:read',
+      description: 'Leer los precios de mensajería (SMS, WhatsApp y correo)',
+      path: '/api/superadmin/messaging/prices/unique-read',
+      method: 'GET',
+    },
+    {
+      name: 'superadmin:messaging:prices:write',
+      description:
+        'Editar los precios de mensajería (SMS, WhatsApp y correo)',
+      path: '/api/superadmin/messaging/prices/unique-write',
+      method: 'PATCH',
+    },
+    {
       name: 'superadmin:notification_sounds:read',
       description: 'Ver catálogo global de sonidos de notificación',
       path: '/api/superadmin/notification-sounds',

@@ -199,7 +199,7 @@ export class MessagingService {
    * certainly rejected the message (PLAN-CRM §5.2).
    */
   private async sendSms(message: OutboundMessage): Promise<SendResult> {
-    const quote = this.snsSms.quote(message);
+    const quote = await this.snsSms.quote(message);
     if (!('cost' in quote)) return quote;
 
     if (await this.customerOptedOut(message, 'sms_consent')) {
@@ -238,7 +238,13 @@ export class MessagingService {
       );
     }
 
-    const result = await this.snsSms.send({ ...message, to: quote.to }, channel);
+    // Hand over the reserved quote so the MaxPrice sent to SNS comes from the
+    // same price snapshot as the amount reserved.
+    const result = await this.snsSms.send(
+      { ...message, to: quote.to },
+      channel,
+      quote,
+    );
     if (
       result.status === 'failed' &&
       !SPEND_KEPT_ON.has(result.error_code ?? 'UNKNOWN')
