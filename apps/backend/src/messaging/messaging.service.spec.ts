@@ -8,6 +8,7 @@ import { SendResult } from './interfaces/messaging.interface';
 import { SnsSmsMessagingProvider } from './providers/sns-sms.provider';
 import { SesEmailMessagingProvider } from './providers/ses-email.provider';
 import { SmsSpendService } from './spend/sms-spend.service';
+import { MessagingPricesService } from './pricing/messaging-prices.service';
 
 const PLAIN_TOKEN = 'EAAG-plain-token';
 const HOUR = 60 * 60 * 1000;
@@ -67,7 +68,11 @@ function createService(env: Record<string, string | undefined> = {}) {
     get: jest.fn().mockResolvedValue(null),
     set: jest.fn().mockResolvedValue('OK'),
   };
-  const snsSms = new SnsSmsMessagingProvider(config, redis as never);
+  const snsSms = new SnsSmsMessagingProvider(
+    config,
+    redis as never,
+    new MessagingPricesService(prisma as never, config as never),
+  );
   jest.spyOn(snsSms, 'isOptedOut').mockResolvedValue(false);
   jest.spyOn(snsSms, 'send').mockResolvedValue({
     status: 'sent',
@@ -363,9 +368,34 @@ describe('MessagingService', () => {
       expect(snsSms.send).toHaveBeenCalledWith(
         expect.objectContaining({ to: '+573001234567' }),
         expect.objectContaining({ id: 7, settings: { sender_id: 'Tienda' } }),
+        expect.objectContaining({ cost: 0.0075, max_price: '0.0075' }),
       );
       expect(result).toMatchObject({ status: 'sent', provider: 'sns_sms' });
       expect(smsSpend.release).not.toHaveBeenCalled();
+    });
+
+    it('reserves and sends the cap from a single price resolution, even if prices change in between', async () => {
+      const { service, prisma, snsSms, smsSpend } = createService();
+      prisma.social_channels.findFirst.mockResolvedValue(smsRow);
+      const priceReads = () =>
+        prisma.platform_settings.findUnique.mock.calls.filter(
+          ([args]: [{ where: { key: string } }]) =>
+            args.where.key === 'messaging:prices',
+        ).length;
+      // Superadmin raises the price while the spend is being reserved.
+      smsSpend.reserve.mockImplementation(async () => {
+        prisma.platform_settings.findUnique.mockResolvedValue({
+          value: { sms_price_table: { '57': 0.2 }, sms_max_price_margin: 3 },
+        });
+        return { reserved: true, period_start: '2026-10-01', used: 1, limit: 10 };
+      });
+
+      await service.send(sms());
+
+      expect(smsSpend.reserve).toHaveBeenCalledWith(expect.anything(), 0.0075);
+      expect(priceReads()).toBe(1);
+      const quote = (snsSms.send as jest.Mock).mock.calls[0][2];
+      expect(quote).toMatchObject({ cost: 0.0075, max_price: '0.0075' });
     });
 
     it('rejects with SPEND_LIMIT and never publishes when the cap is used up', async () => {

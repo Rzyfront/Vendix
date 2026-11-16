@@ -66,7 +66,7 @@ function setup(options: {
     },
   };
   const realCampaigns = new CrmCampaignsService(
-    {} as never, {} as never, {} as never, {} as never, {} as never, {} as never, {} as never,
+    {} as never, {} as never, {} as never, {} as never, {} as never, {} as never, {} as never, {} as never,
   );
   const evaluate = jest.fn().mockResolvedValue({
     store_name: 'Tienda Sol',

@@ -95,6 +95,13 @@ export const superAdminRoutes: Routes = [
           ).then((c) => c.MetaWhatsappConfigComponent),
       },
       {
+        path: 'system/integrations/messaging-prices',
+        loadComponent: () =>
+          import(
+            '../../private/modules/super-admin/integrations/messaging-prices/messaging-prices.component'
+          ).then((c) => c.MessagingPricesComponent),
+      },
+      {
         path: 'system/templates',
         loadComponent: () =>
           import(

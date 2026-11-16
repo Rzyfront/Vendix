@@ -8,6 +8,7 @@ import { MetaCloudMessagingProvider } from './providers/meta-cloud.provider';
 import { SnsSmsMessagingProvider } from './providers/sns-sms.provider';
 import { SesEmailMessagingProvider } from './providers/ses-email.provider';
 import { SmsSpendService } from './spend/sms-spend.service';
+import { MessagingPricesService } from './pricing/messaging-prices.service';
 import { EmailModule } from '../email/email.module';
 import { CRM_OUTBOUND_QUEUE } from './queue/crm-outbound.constants';
 import { CrmOutboundQueue } from './queue/crm-outbound.queue';
@@ -29,6 +30,7 @@ import { CrmInboxEventsService } from './events/crm-inbox-events.service';
     SnsSmsMessagingProvider,
     SesEmailMessagingProvider,
     SmsSpendService,
+    MessagingPricesService,
     CrmOutboundQueue,
     CrmOutboundProcessor,
     CrmInboxEventsService,
@@ -38,6 +40,7 @@ import { CrmInboxEventsService } from './events/crm-inbox-events.service';
     CrmOutboundQueue,
     CrmInboxEventsService,
     SmsSpendService,
+    MessagingPricesService,
   ],
 })
 export class MessagingModule {}

@@ -16,17 +16,16 @@ import {
   SendResult,
 } from '../interfaces/messaging.interface';
 import { maskAddress } from '../utils/mask-address.util';
+import { estimateSmsCost, normalizeE164 } from '../utils/sms.util';
+import { SMS_FALLBACK_PRICE_PER_SEGMENT_USD } from '../pricing/messaging-prices.constants';
 import {
-  estimateSmsCost,
-  normalizeE164,
-  parseSmsPriceTable,
-} from '../utils/sms.util';
+  MessagingPricesService,
+  ResolvedMessagingPrices,
+} from '../pricing/messaging-prices.service';
 
-const DEFAULT_MAX_PRICE_USD = '0.50';
-/** `MaxPrice` = reserved cost × margin; 1 means SNS never charges more than reserved. */
-const DEFAULT_MAX_PRICE_MARGIN = 1;
-/** Used when `SNS_SMS_PRICE_TABLE` has no entry: deliberately high. */
-export const FALLBACK_PRICE_PER_SEGMENT_USD = 0.1;
+/** Used when no price table has an entry: deliberately high. */
+export const FALLBACK_PRICE_PER_SEGMENT_USD =
+  SMS_FALLBACK_PRICE_PER_SEGMENT_USD;
 const OPT_OUT_CACHE_TTL_SECONDS = 24 * 60 * 60;
 const SENDER_ID_PATTERN = /^(?=.*[A-Za-z])[A-Za-z0-9]{1,11}$/;
 const REQUEST_TIMEOUT_MS = 10_000;
@@ -100,6 +99,11 @@ export interface SmsQuote {
   cost: number;
   segments: number;
   encoding: 'GSM-7' | 'UCS-2';
+  /**
+   * `AWS.SNS.SMS.MaxPrice` for this SMS, computed from the same price
+   * snapshot as `cost` so the reservation and the cap never disagree.
+   */
+  max_price: string;
 }
 
 /**
@@ -117,13 +121,14 @@ export class SnsSmsMessagingProvider implements MessagingProvider {
   constructor(
     private readonly config: ConfigService,
     @Inject(REDIS_CLIENT) private readonly redis: Redis,
+    private readonly prices: MessagingPricesService,
   ) {}
 
   /**
    * Validates the recipient and body and estimates the cost. Returns a
    * failed `SendResult` when the message must not be published at all.
    */
-  quote(message: OutboundMessage): SmsQuote | SendResult {
+  async quote(message: OutboundMessage): Promise<SmsQuote | SendResult> {
     const to = normalizeE164(
       message.to,
       this.config.get<string>('SNS_SMS_DEFAULT_COUNTRY_CODE') || '57',
@@ -145,13 +150,21 @@ export class SnsSmsMessagingProvider implements MessagingProvider {
       );
     }
 
+    // One resolution feeds both the cost and the MaxPrice of this quote.
+    const prices = await this.prices.resolve();
     const { cost, segments } = estimateSmsCost(
       to,
       body,
-      parseSmsPriceTable(this.config.get<string>('SNS_SMS_PRICE_TABLE')),
+      prices.sms_price_table.value,
       FALLBACK_PRICE_PER_SEGMENT_USD,
     );
-    return { to, cost, segments: segments.segments, encoding: segments.encoding };
+    return {
+      to,
+      cost,
+      segments: segments.segments,
+      encoding: segments.encoding,
+      max_price: this.messageMaxPrice(cost, prices),
+    };
   }
 
   /**
@@ -188,8 +201,11 @@ export class SnsSmsMessagingProvider implements MessagingProvider {
   async send(
     message: OutboundMessage,
     channel: ResolvedChannel | null,
+    reserved?: SmsQuote,
   ): Promise<SendResult> {
-    const quote = this.quote(message);
+    // The quote the spend was reserved with, so the cap sent to SNS cannot
+    // drift if the prices change between the reservation and the send.
+    const quote = reserved ?? (await this.quote(message));
     if (!('cost' in quote)) return quote;
 
     const attributes: Record<string, MessageAttributeValue> = {
@@ -199,7 +215,7 @@ export class SnsSmsMessagingProvider implements MessagingProvider {
       },
       'AWS.SNS.SMS.MaxPrice': {
         DataType: 'Number',
-        StringValue: this.messageMaxPrice(quote.cost),
+        StringValue: quote.max_price,
       },
     };
     const senderId = channel?.settings?.sender_id;
@@ -246,30 +262,20 @@ export class SnsSmsMessagingProvider implements MessagingProvider {
 
   /**
    * Per-message `MaxPrice`: the cost reserved against the store cap (times
-   * the margin), never above `SNS_SMS_MAX_PRICE_USD`. SNS refuses an SMS that
+   * the margin), never above the configured maximum. SNS refuses an SMS that
    * would cost more, so the real charge cannot exceed the reservation even
-   * when `SNS_SMS_PRICE_TABLE` lags behind the AWS price. Rounded down to the
+   * when the price table lags behind the AWS price. Rounded down to the
    * reservation's 4 decimals.
    */
-  private messageMaxPrice(reservedCost: number): string {
+  private messageMaxPrice(
+    reservedCost: number,
+    prices: ResolvedMessagingPrices,
+  ): string {
     const cap = Math.min(
-      Number(this.maxPrice()),
-      reservedCost * this.maxPriceMargin(),
+      prices.sms_max_price_usd.value,
+      reservedCost * prices.sms_max_price_margin.value,
     );
     return (Math.floor(Number((cap * 10_000).toFixed(6))) / 10_000).toFixed(4);
-  }
-
-  private maxPriceMargin(): number {
-    const value = Number(this.config.get<string>('SNS_SMS_MAX_PRICE_MARGIN'));
-    return Number.isFinite(value) && value >= 1 ? value : DEFAULT_MAX_PRICE_MARGIN;
-  }
-
-  private maxPrice(): string {
-    const raw = this.config.get<string>('SNS_SMS_MAX_PRICE_USD');
-    const value = Number(raw);
-    return raw && Number.isFinite(value) && value > 0
-      ? String(value)
-      : DEFAULT_MAX_PRICE_USD;
   }
 
   private getClient(): SNSClient {
