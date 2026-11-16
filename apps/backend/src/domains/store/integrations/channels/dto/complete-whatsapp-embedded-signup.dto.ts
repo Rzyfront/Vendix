@@ -1,4 +1,20 @@
-import { IsNotEmpty, IsOptional, IsString, MaxLength } from 'class-validator';
+import {
+  IsIn,
+  IsNotEmpty,
+  IsOptional,
+  IsString,
+  MaxLength,
+} from 'class-validator';
+
+export const WHATSAPP_SIGNUP_FINISH_EVENTS = [
+  'FINISH',
+  'FINISH_ONLY_WABA',
+  'FINISH_WHATSAPP_BUSINESS_APP_ONBOARDING',
+  'FINISH_GRANT_ONLY_API_ACCESS',
+] as const;
+
+export type WhatsappSignupFinishEvent =
+  (typeof WHATSAPP_SIGNUP_FINISH_EVENTS)[number];
 
 export class CompleteWhatsappEmbeddedSignupDto {
   @IsString()
@@ -27,4 +43,9 @@ export class CompleteWhatsappEmbeddedSignupDto {
   @IsString()
   @MaxLength(100)
   business_account_id?: string;
+
+  /** Raw FINISH* session event received by the popup, when one arrived. */
+  @IsOptional()
+  @IsIn(WHATSAPP_SIGNUP_FINISH_EVENTS)
+  finish_event?: WhatsappSignupFinishEvent;
 }

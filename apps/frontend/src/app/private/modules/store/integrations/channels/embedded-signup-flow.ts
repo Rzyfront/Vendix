@@ -39,6 +39,8 @@ export interface EmbeddedSignupFlowResult {
   phone_number_id?: string;
   display_phone_number?: string;
   business_account_id?: string;
+  /** Raw FINISH* session event, when one arrived. */
+  finish_event?: string;
 }
 
 /** An error whose message is already user-facing Spanish. */
@@ -74,6 +76,7 @@ export function startEmbeddedSignupFlow(
   return new Promise((resolve, reject) => {
     let loginCode: string | null = null;
     let signupData: any = null;
+    let finishEvent: string | undefined;
     let cancelSeen = false;
     let settled = false;
     let graceTimer: number | undefined;
@@ -101,6 +104,7 @@ export function startEmbeddedSignupFlow(
         phone_number_id: signupData?.phone_number_id || undefined,
         display_phone_number: signupData?.display_phone_number || undefined,
         business_account_id: signupData?.business_id || undefined,
+        finish_event: finishEvent,
       });
     };
 
@@ -112,6 +116,7 @@ export function startEmbeddedSignupFlow(
 
       if (FINISH_EVENTS.has(data.event)) {
         signupData = { ...(signupData ?? {}), ...(data.data ?? {}) };
+        finishEvent = data.event;
         if (loginCode) finish();
       } else if (data.event === 'CANCEL') {
         cancelSeen = true;
@@ -154,7 +159,11 @@ export function startEmbeddedSignupFlow(
         config_id: config.whatsapp_config_id,
         response_type: 'code',
         override_default_response_type: true,
-        extras: { setup: {} },
+        extras: {
+          setup: {},
+          featureType: 'whatsapp_business_app_onboarding',
+          sessionInfoVersion: '3',
+        },
       },
     );
   });

@@ -34,6 +34,7 @@ const RESULT_FIELDS = [
   'phone_number_id',
   'display_phone_number',
   'business_account_id',
+  'finish_event',
 ] as const;
 const NONCE_PATTERN = /^[0-9a-f]{32}$/;
 
