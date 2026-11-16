@@ -18,15 +18,18 @@ import { MessagingChannelCardsComponent } from './messaging-channels/messaging-c
 import { MetaReadiness, WhatsappChannel } from './channels.interface';
 import {
   EmbeddedSignupFlowError,
+  EmbeddedSignupFlowResult,
   startEmbeddedSignupFlow,
 } from './embedded-signup-flow';
-
-declare global {
-  interface Window {
-    FB?: any;
-    fbAsyncInit?: () => void;
-  }
-}
+import { FacebookSdkService } from './facebook-sdk.service';
+import {
+  createSignupBridgeNonce,
+  openSignupBridge,
+  shouldUseSignupBridge,
+  waitForSignupBridgeResult,
+  whatsappSignupBridgeOrigin,
+} from './whatsapp-signup-bridge';
+import { environment } from '../../../../../../environments/environment';
 
 @Component({
   selector: 'app-integrations-channels',
@@ -277,7 +280,7 @@ declare global {
 export class ChannelsComponent {
   private readonly service = inject(ChannelsService);
   private readonly toast = inject(ToastService);
-  private sdkLoadingPromise: Promise<void> | null = null;
+  private readonly facebookSdk = inject(FacebookSdkService);
 
   protected readonly loading = signal(false);
   protected readonly connecting = signal(false);
@@ -380,17 +383,41 @@ export class ChannelsComponent {
       return;
     }
 
-    this.connecting.set(true);
     this.error.set(null);
 
-    try {
-      await this.loadFacebookSdk(readiness);
-      if (!window.FB) {
-        throw new EmbeddedSignupFlowError(
-          'WhatsApp no está listo para conectar',
+    // Meta only answers on the fixed host. Elsewhere the signup runs in the
+    // bridge window, which must open synchronously inside this click.
+    const bridgeOrigin = whatsappSignupBridgeOrigin(environment.vendixDomain);
+    let bridge: { popup: Window; nonce: string } | null = null;
+    if (shouldUseSignupBridge(window.location.origin, bridgeOrigin)) {
+      const nonce = createSignupBridgeNonce();
+      try {
+        const popup = openSignupBridge(
+          (url, target, features) => window.open(url, target, features),
+          bridgeOrigin,
+          window.location.origin,
+          nonce,
         );
+        bridge = { popup, nonce };
+      } catch (error) {
+        this.error.set(this.extractErrorMessage(error));
+        return;
       }
-      const signup = await startEmbeddedSignupFlow(window.FB, readiness);
+    }
+
+    this.connecting.set(true);
+
+    try {
+      const signup: EmbeddedSignupFlowResult = bridge
+        ? await waitForSignupBridgeResult(
+            bridge.popup,
+            bridgeOrigin,
+            bridge.nonce,
+          )
+        : await startEmbeddedSignupFlow(
+            await this.facebookSdk.load(readiness),
+            readiness,
+          );
       const channel = await firstValueFrom(
         this.service.completeWhatsappEmbeddedSignup(signup),
       );
@@ -452,57 +479,6 @@ export class ChannelsComponent {
       dateStyle: 'medium',
       timeStyle: 'short',
     }).format(new Date(value));
-  }
-
-  private loadFacebookSdk(readiness: MetaReadiness): Promise<void> {
-    if (typeof window === 'undefined') {
-      return Promise.reject(
-        new Error('WhatsApp no está disponible en este momento'),
-      );
-    }
-
-    if (window.FB) {
-      window.FB.init({
-        appId: readiness.app_id,
-        cookie: true,
-        xfbml: true,
-        version: readiness.graph_version,
-      });
-      return Promise.resolve();
-    }
-
-    if (this.sdkLoadingPromise) return this.sdkLoadingPromise;
-
-    this.sdkLoadingPromise = new Promise((resolve, reject) => {
-      const timeout = window.setTimeout(() => {
-        reject(new Error('WhatsApp no respondió a tiempo'));
-      }, 15000);
-
-      window.fbAsyncInit = () => {
-        window.FB?.init({
-          appId: readiness.app_id,
-          cookie: true,
-          xfbml: true,
-          version: readiness.graph_version,
-        });
-        window.clearTimeout(timeout);
-        resolve();
-      };
-
-      const existingScript = document.getElementById('facebook-jssdk');
-      if (existingScript) return;
-
-      const script = document.createElement('script');
-      script.id = 'facebook-jssdk';
-      script.async = true;
-      script.defer = true;
-      script.src = 'https://connect.facebook.net/es_LA/sdk.js';
-      script.onerror = () =>
-        reject(new Error('No fue posible preparar la conexión de WhatsApp'));
-      document.body.appendChild(script);
-    });
-
-    return this.sdkLoadingPromise;
   }
 
   private extractErrorMessage(error: unknown): string {
