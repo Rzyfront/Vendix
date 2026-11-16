@@ -15,14 +15,9 @@ import { ChannelEncryptionService } from './channel-encryption.service';
 import {
   META_WHATSAPP_PLATFORM_SETTINGS_KEY,
   MetaWhatsappPlatformConfig,
+  computeMetaWhatsappSignupGate,
   resolveMetaWhatsappPlatformConfig,
 } from './meta-whatsapp-platform-config.resolver';
-
-type MetaReadinessStatus =
-  | 'missing_env'
-  | 'pending_approval'
-  | 'approved'
-  | 'rejected';
 
 interface MetaTokenResponse {
   access_token?: string;
@@ -50,15 +45,6 @@ type RegistrationState = {
 export class MetaWhatsappEmbeddedSignupService {
   private readonly logger = new Logger(MetaWhatsappEmbeddedSignupService.name);
 
-  private readonly requiredEnvVars = [
-    'META_APP_ID',
-    'META_APP_SECRET',
-    'META_WHATSAPP_CONFIG_ID',
-    'META_WHATSAPP_VERIFY_TOKEN',
-    'META_GRAPH_VERSION',
-    'SOCIAL_CHANNEL_ENCRYPTION_KEY',
-  ];
-
   private readonly requiredPermissions = [
     'whatsapp_business_management',
     'whatsapp_business_messaging',
@@ -73,23 +59,14 @@ export class MetaWhatsappEmbeddedSignupService {
 
   async getReadiness() {
     const platformConfig = await this.getPlatformConfig();
-    const missing_envs = this.requiredEnvVars.filter(
-      (envName) => !this.getConfigValue(platformConfig, envName),
-    );
-    const app_review_status = (
-      platformConfig.app_review_status || 'pending'
-    ).toLowerCase();
-    const allow_dev_signup = this.parseBoolean(platformConfig.allow_dev_signup);
-    const is_approved = app_review_status === 'approved';
-    const configured = missing_envs.length === 0;
-    const can_start_signup = configured && (is_approved || allow_dev_signup);
-    const status: MetaReadinessStatus = !configured
-      ? 'missing_env'
-      : app_review_status === 'rejected'
-        ? 'rejected'
-        : is_approved
-          ? 'approved'
-          : 'pending_approval';
+    const {
+      status,
+      configured,
+      missing_envs,
+      app_review_status,
+      allow_dev_signup,
+      can_start_signup,
+    } = computeMetaWhatsappSignupGate(platformConfig, this.encryption.isEnabled);
 
     return {
       status,
@@ -677,11 +654,6 @@ export class MetaWhatsappEmbeddedSignupService {
     return null;
   }
 
-  private parseBoolean(value?: string | boolean | null): boolean {
-    if (typeof value === 'boolean') return value;
-    return ['1', 'true', 'yes', 'on'].includes((value || '').toLowerCase());
-  }
-
   private asRecord(value: unknown): Record<string, any> | null {
     if (!value || typeof value !== 'object' || Array.isArray(value))
       return null;
@@ -694,25 +666,5 @@ export class MetaWhatsappEmbeddedSignupService {
       this.configService,
       this.encryption,
     );
-  }
-
-  private getConfigValue(
-    platformConfig: MetaWhatsappPlatformConfig,
-    envName: string,
-  ): string | null | undefined {
-    const map: Record<string, keyof MetaWhatsappPlatformConfig> = {
-      META_APP_ID: 'app_id',
-      META_APP_SECRET: 'app_secret',
-      META_WHATSAPP_CONFIG_ID: 'whatsapp_config_id',
-      META_WHATSAPP_VERIFY_TOKEN: 'verify_token',
-      META_GRAPH_VERSION: 'graph_version',
-      SOCIAL_CHANNEL_ENCRYPTION_KEY: 'app_id',
-    };
-
-    if (envName === 'SOCIAL_CHANNEL_ENCRYPTION_KEY') {
-      return this.encryption.isEnabled ? 'configured' : null;
-    }
-
-    return platformConfig[map[envName]] as string | null | undefined;
   }
 }

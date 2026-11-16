@@ -6,6 +6,8 @@ import { S3Module } from '@common/services/s3.module';
 import { S3PathHelper } from '@common/helpers/s3-path.helper';
 import { MetaWhatsappWebhookController } from './meta-whatsapp-webhook.controller';
 import { MetaWhatsappWebhookService } from './meta-whatsapp-webhook.service';
+import { MetaWhatsappSignupConfigController } from './meta-whatsapp-signup-config.controller';
+import { MetaWhatsappSignupConfigService } from './meta-whatsapp-signup-config.service';
 import { ChannelEncryptionService } from '../../store/integrations/channels/channel-encryption.service';
 import { CRM_INBOUND_QUEUE } from './inbound/crm-inbound.constants';
 import { CrmInboundQueue } from './inbound/crm-inbound.queue';
@@ -19,9 +21,13 @@ import { MetaWhatsappInboundService } from './inbound/meta-whatsapp-inbound.serv
     S3Module,
     BullModule.registerQueue({ name: CRM_INBOUND_QUEUE }),
   ],
-  controllers: [MetaWhatsappWebhookController],
+  controllers: [
+    MetaWhatsappWebhookController,
+    MetaWhatsappSignupConfigController,
+  ],
   providers: [
     MetaWhatsappWebhookService,
+    MetaWhatsappSignupConfigService,
     ChannelEncryptionService,
     S3PathHelper,
     CrmInboundQueue,
