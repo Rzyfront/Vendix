@@ -178,7 +178,7 @@ describe('KitchenFireService.resendOrderItems — cancelled lines (S20)', () => 
       stockLevelManager.updateStock.mock.calls.map(([p]: any[]) => [p.product_id, p.quantity_change, p.order_item_id]);
     const resend = (ids: number[], reason: 'remake_dish' | 'lost_command') =>
       service.resendOrderItems({ order_id: 100, order_item_ids: ids, reason });
-    return { service, tx, store, resets, moves, resend, eventEmitter };
+    return { service, tx, store, resets, moves, resend, eventEmitter, prisma };
   }
 
   it('lost_command with a waste line: cooks again, consumes recipe and add-ons once, flag back to true', async () => {
@@ -201,6 +201,12 @@ describe('KitchenFireService.resendOrderItems — cancelled lines (S20)', () => 
     expect(h.resets).toEqual([[10]]);
     expect(h.moves().every(([, , id]) => id === 10)).toBe(true);
     expect(h.moves()).toHaveLength(2);
+    // Both resend transactions (waste remake + plain reprint) carry the
+    // explicit budget: the 5 s Prisma default expired in rush hour.
+    expect(h.prisma.$transaction).toHaveBeenCalledTimes(2);
+    for (const call of h.prisma.$transaction.mock.calls) {
+      expect(call[1]).toEqual({ timeout: 20_000, maxWait: 5_000 });
+    }
   });
 
   it('post-cancel remake: waste and reused lines are cooked once each, recipe and add-ons, and both reset the add-on marker', async () => {

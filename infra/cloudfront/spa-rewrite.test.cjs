@@ -59,6 +59,8 @@ const cases = [
   ['/repartos/pool', 'vendix.online', {}, '/noindex/index.html'],
   ['/onboarding', 'vendix.online', {}, '/noindex/index.html'],
   ['/reset-password', 'vendix.online', { token: { value: 'x' } }, '/noindex/index.html'],
+  // Puente del signup de WhatsApp: ruta de la app (200, no 404) y sin indexar.
+  ['/integraciones/whatsapp/conectar', 'vendix.online', { origin: { value: 'https://mitienda.com' }, nonce: { value: 'n' } }, '/noindex/index.html'],
   // SEO-TECH-04 arriba: ayuda, PQR, auth y paneles reciben la shell con noindex en el HTML.
   // Los prefijos de tienda siguen reescribiéndose en cualquier host (enlaces con token).
   ['/pedido/0b6f5c1e', 'vendix.online', {}, '/index.html'],

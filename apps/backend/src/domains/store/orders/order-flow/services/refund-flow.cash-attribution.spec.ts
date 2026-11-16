@@ -105,16 +105,11 @@ describe('RefundFlowService — caja del reembolso (B18, B25)', () => {
       order_items: { findMany: jest.fn().mockResolvedValue([]) },
       payments: { update: jest.fn().mockResolvedValue({}) },
       cash_register_movements: { groupBy: jest.fn().mockResolvedValue([]), findFirst: jest.fn().mockResolvedValue(null) },
-      // Forma de dos args como Prisma real: el rechazo de la tx pasa por el
-      // handler (mapeo P2002 → conflicto) en vez de propagarse crudo.
-      $transaction: jest.fn(async (cb: any, onReject?: any) => {
-        try {
-          return await cb(mockPrisma);
-        } catch (e) {
-          if (onReject) return onReject(e);
-          throw e;
-        }
-      }),
+      // Firma real de Prisma: `$transaction(fn, options)`; el 2º arg son las
+      // opciones (timeout/maxWait), NO un handler. El rechazo de la tx se
+      // propaga y lo mapea el `.then(onFulfilled, onRejected)` del servicio
+      // (P2002 → conflicto).
+      $transaction: jest.fn(async (cb: any, _options?: unknown) => cb(mockPrisma)),
     };
     // Pre-tx usa `include`, el re-read bajo el lock usa `select`.
     mockPrisma.orders.findFirst.mockImplementation((args: any) =>

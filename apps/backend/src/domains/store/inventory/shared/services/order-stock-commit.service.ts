@@ -993,6 +993,7 @@ export class OrderStockCommitService {
         (await this.stockLevelManager.getDefaultLocationForProduct(
           line.product_id,
           variant,
+          tx,
         ));
       // "Bodega de la caja": an accepted oversell never lands outside the
       // register's warehouse, even when an older reservation sits elsewhere.

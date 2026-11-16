@@ -811,6 +811,8 @@ export class ProductionOrdersService {
           options?.inputLocationId ??
           (await this.stockLevelManager.getDefaultLocationForProduct(
             item.component_product_id,
+            undefined,
+            tx,
           ));
 
         const result = await this.stockLevelManager.updateStock(

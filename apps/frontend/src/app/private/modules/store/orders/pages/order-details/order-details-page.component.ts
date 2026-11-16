@@ -6727,6 +6727,10 @@ export class OrderDetailsPageComponent {
    */
   cancelItem(item: OrderItem): void {
     if (this.splitLocked()) return;
+    // Un plato a la vez: con una cancelación o reversa en vuelo no se abre
+    // otro flujo (dos tx sobre la misma orden compiten por el pool).
+    if (this.cancellingItemId() !== null || this.reversingItemId() !== null)
+      return;
     if (this.cancellationBlockedByPayment()) return;
     if (!this.canCancelItem(item)) return;
     const orderId = this.order()?.id;
@@ -6770,6 +6774,13 @@ export class OrderDetailsPageComponent {
               );
               return;
             }
+            // Doble clic: dos diálogos encolados llegan aquí; solo el
+            // primero envía.
+            if (
+              this.cancellingItemId() !== null ||
+              this.reversingItemId() !== null
+            )
+              return;
             this.cancellingItemId.set(item.id);
             this.ordersFlowService
               .cancelOrderItem(orderId, item.id, { reason })
@@ -6786,10 +6797,16 @@ export class OrderDetailsPageComponent {
                 },
                 error: (err: unknown) => {
                   this.cancellingItemId.set(null);
+                  // 503 SYS_BUSY_001 (tx vencida o pool agotado): el mesero
+                  // necesita saber que puede reintentar. El resto conserva
+                  // el copy previo.
+                  const parsed = parseApiError(err);
                   this.toastService.error(
                     typeof err === 'string'
                       ? err
-                      : 'Error al cancelar el plato',
+                      : parsed.errorCode === 'SYS_BUSY_001'
+                        ? parsed.userMessage
+                        : 'Error al cancelar el plato',
                   );
                   console.error('Cancel item failed', err);
                 },

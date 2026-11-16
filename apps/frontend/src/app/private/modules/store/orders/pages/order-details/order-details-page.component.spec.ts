@@ -1,5 +1,6 @@
 import { signal } from '@angular/core';
-import { of } from 'rxjs';
+import { HttpErrorResponse } from '@angular/common/http';
+import { of, Subject } from 'rxjs';
 import {
   ORDER_DELIVERY_CONFIG, ORDER_DELIVERY_STEP_LABELS, pendingKitchenLabelsFromError,
   cancellationBody, isOrderItemCancellationPaid, shippingTaxModePrefix,
@@ -796,5 +797,123 @@ describe('S4 — factura revertida por completo libera el cambio de titular', ()
     await proto.openChangeCustomer.call(self);
     expect(self.showTitularSearchModal()).toBeFalse();
     expect(self.notifyTitularLocked).toHaveBeenCalledWith('ORD_TITULAR_INVOICED_001');
+  });
+});
+
+/**
+ * T8 — cancelar o reversar un plato que choca con una transacción vencida o
+ * con el pool agotado llega como 503 SYS_BUSY_001. La página muestra el
+ * mensaje exacto, libera el botón y no envía dos veces mientras hay una
+ * cancelación en vuelo.
+ */
+describe('T8 — cancelar un plato con el sistema ocupado (503)', () => {
+  const BUSY = 'El sistema está ocupado, intenta de nuevo en unos segundos';
+  const proto = OrderDetailsPageComponent.prototype as any;
+  const flush = () => new Promise<void>((resolve) => setTimeout(resolve, 0));
+  const busyError = () =>
+    new HttpErrorResponse({
+      status: 503,
+      error: { statusCode: 503, error_code: 'SYS_BUSY_001', message: BUSY },
+    });
+
+  const build = () => {
+    const pending: Subject<unknown>[] = [];
+    const self: any = {
+      splitLocked: () => false,
+      cancellationBlockedByPayment: () => false,
+      canCancelItem: () => true,
+      order: () => ({ id: 30 }),
+      kitchenStateFor: () => null,
+      cancellationTarget: signal<unknown>(null),
+      cancellationError: signal<string | null>(null),
+      cancellationNeedsDisposition: () => false,
+      cancellingItemId: signal<number | null>(null),
+      reversingItemId: signal<number | null>(null),
+      dialogService: {
+        confirm: jasmine.createSpy('confirm').and.resolveTo(true),
+        prompt: jasmine.createSpy('prompt').and.resolveTo('Cliente se fue'),
+      },
+      ordersFlowService: {
+        cancelOrderItem: jasmine.createSpy('cancelOrderItem').and.callFake(() => {
+          const s = new Subject<unknown>();
+          pending.push(s);
+          return s.asObservable();
+        }),
+      },
+      http: { post: jasmine.createSpy('post') },
+      destroyRef: { onDestroy: () => () => undefined },
+      toastService: jasmine.createSpyObj('ToastService', ['success', 'error', 'warning']),
+      closeItemCancellationModal: jasmine.createSpy('closeItemCancellationModal'),
+      openItemCancellationModal: jasmine.createSpy('openItemCancellationModal'),
+      openRefundModal: jasmine.createSpy('openRefundModal'),
+      refreshOrder: jasmine.createSpy('refreshOrder'),
+    };
+    return { self, pending };
+  };
+  const simpleItem = { id: 12, product_name: 'Gaseosa', products: { product_type: 'physical' } };
+  const preparedItem = { id: 11, product_name: 'Pollo', products: { product_type: 'prepared' } };
+
+  it('modal: muestra el 503, queda abierto, bloquea el doble envío y permite reintentar', () => {
+    const { self, pending } = build();
+    self.cancellationTarget.set({ item: preparedItem, mode: 'cancel' });
+    const submit = { reason: 'Cliente se fue', destination: 'reuse' };
+
+    proto.submitItemCancellation.call(self, submit);
+    proto.submitItemCancellation.call(self, submit);
+    expect(self.ordersFlowService.cancelOrderItem).toHaveBeenCalledTimes(1);
+
+    pending[0].error(busyError());
+
+    expect(self.cancellationError()).toBe(BUSY);
+    expect(self.cancellingItemId()).toBeNull();
+    expect(self.closeItemCancellationModal).not.toHaveBeenCalled();
+    expect(self.toastService.success).not.toHaveBeenCalled();
+
+    proto.submitItemCancellation.call(self, submit);
+    expect(self.ordersFlowService.cancelOrderItem).toHaveBeenCalledTimes(2);
+  });
+
+  it('cancelItem (no preparado) muestra el mensaje 503 exacto y libera el botón', async () => {
+    const { self, pending } = build();
+
+    proto.cancelItem.call(self, simpleItem);
+    await flush();
+    pending[0].error(busyError());
+
+    expect(self.toastService.error).toHaveBeenCalledOnceWith(BUSY);
+    expect(self.cancellingItemId()).toBeNull();
+    expect(self.refreshOrder).not.toHaveBeenCalled();
+  });
+
+  it('cancelItem con doble clic envía una sola cancelación', async () => {
+    const { self } = build();
+
+    proto.cancelItem.call(self, simpleItem);
+    proto.cancelItem.call(self, simpleItem);
+    await flush();
+
+    expect(self.ordersFlowService.cancelOrderItem).toHaveBeenCalledTimes(1);
+    expect(self.cancellingItemId()).toBe(12);
+  });
+
+  it('cancelItem no abre otro flujo mientras una cancelación o reversa sigue en vuelo', () => {
+    const { self } = build();
+    self.reversingItemId.set(99);
+
+    proto.cancelItem.call(self, simpleItem);
+    proto.cancelItem.call(self, preparedItem);
+
+    expect(self.dialogService.confirm).not.toHaveBeenCalled();
+    expect(self.openItemCancellationModal).not.toHaveBeenCalled();
+  });
+
+  it('cancelItem conserva el copy previo ante un error que no es 503', async () => {
+    const { self, pending } = build();
+
+    proto.cancelItem.call(self, simpleItem);
+    await flush();
+    pending[0].error(new Error('boom'));
+
+    expect(self.toastService.error).toHaveBeenCalledOnceWith('Error al cancelar el plato');
   });
 });

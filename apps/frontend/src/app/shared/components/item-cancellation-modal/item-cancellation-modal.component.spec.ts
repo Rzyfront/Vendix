@@ -76,4 +76,28 @@ describe('ItemCancellationModalComponent — reusar por defecto', () => {
     expect(emitted).toHaveSize(0);
     expect(component.isOpen()).toBeTrue();
   });
+
+  it('503 sistema ocupado: muestra el mensaje, bloquea el doble envío en vuelo y permite reintentar', () => {
+    const BUSY = 'El sistema está ocupado, intenta de nuevo en unos segundos';
+    const component = open();
+    const emitted: ItemCancellationSubmit[] = [];
+    component.confirmed.subscribe((value) => emitted.push(value));
+    component.reason.set('Cliente se fue');
+
+    component.onConfirm();
+    fixture.componentRef.setInput('inFlight', true);
+    fixture.detectChanges();
+    component.onConfirm();
+    expect(emitted).toHaveSize(1);
+
+    fixture.componentRef.setInput('serverError', BUSY);
+    fixture.componentRef.setInput('inFlight', false);
+    fixture.detectChanges();
+    expect(component.error()).toBe(BUSY);
+    expect(component.isOpen()).toBeTrue();
+
+    component.onConfirm();
+    expect(emitted).toHaveSize(2);
+    expect(emitted[1]).toEqual({ reason: 'Cliente se fue', destination: 'reuse' });
+  });
 });

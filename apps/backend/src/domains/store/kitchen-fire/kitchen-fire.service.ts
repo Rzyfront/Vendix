@@ -2434,7 +2434,7 @@ export class KitchenFireService {
           reconsumeAddonItemIds: addonResetIds,
           historyExtras: { resend: true, reason: dto.reason },
         });
-      });
+      }, { timeout: 20_000, maxWait: 5_000 });
       if (wasteResult) {
         wasteTicketIds = wasteResult.ticketIds;
         wasteCogsTotal = wasteResult.cogsTotal;
@@ -2588,6 +2588,7 @@ export class KitchenFireService {
         });
         return ids;
       },
+      { timeout: 20_000, maxWait: 5_000 },
     );
 
     const ticketIds = [...plainTicketIds, ...wasteTicketIds];
@@ -4232,7 +4233,7 @@ export class KitchenFireService {
           totalCost += cost;
           if (disposition === 'reuse') {
             const locationId = await this.stockLevelManager.getDefaultLocationForProduct(
-              ct.product_id, ct.product_variant_id ?? undefined,
+              ct.product_id, ct.product_variant_id ?? undefined, tx,
             );
             await this.stockLevelManager.updateStock({
               product_id: ct.product_id,
@@ -4314,7 +4315,7 @@ export class KitchenFireService {
           });
         }
       }
-    });
+    }, { timeout: 20_000, maxWait: 5_000 });
 
     for (const publish of afterCommit) publish();
     for (const entry of posted) {
@@ -4736,7 +4737,7 @@ export class KitchenFireService {
           },
         });
       }
-    });
+    }, { timeout: 20_000, maxWait: 5_000 });
 
     const full = await this.getTicketForStore(ticketId);
     this.pushKitchenEvent(store_id, {

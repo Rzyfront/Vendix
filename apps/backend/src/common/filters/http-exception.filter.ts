@@ -7,7 +7,12 @@ import {
 } from '@nestjs/common';
 import { Request, Response } from 'express';
 import { Prisma } from '@prisma/client';
-import { ErrorCodes, FinancialSplitErrors, VendixHttpException } from '../errors';
+import {
+  ErrorCodes,
+  FinancialSplitErrors,
+  VendixHttpException,
+  isPrismaBusyError,
+} from '../errors';
 import { RequestContextService } from '../context/request-context.service';
 import { redactSensitiveRoute } from '../utils/sensitive-route.util';
 
@@ -161,6 +166,22 @@ export class AllExceptionsFilter implements ExceptionFilter {
       // y columna: se queda en el log del servidor, nunca en la respuesta.
       console.error(
         `[AllExceptionsFilter] Prisma P2020 on ${request.method} ${safePath}:`,
+        redactSensitiveRoute(exception.message, request.url),
+      );
+    } else if (isPrismaBusyError(exception)) {
+      /**
+       * P2028 (transacción interactiva vencida) y P2024 (pool sin conexiones
+       * libres): la base está saturada, no hay nada mal en la petición y
+       * Prisma ya hizo rollback. El usuario ve un mensaje para reintentar en
+       * vez de un 500 genérico; el texto de Prisma (tiempos, ids de la tx) se
+       * queda en el log.
+       */
+      const entry = ErrorCodes.SYS_BUSY_001;
+      status = entry.httpStatus;
+      errorCode = entry.code;
+      message = entry.devMessage;
+      console.error(
+        `[AllExceptionsFilter] Prisma ${exception.code} (database busy) on ${request.method} ${safePath}:`,
         redactSensitiveRoute(exception.message, request.url),
       );
     } else if (
