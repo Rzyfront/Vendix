@@ -70,16 +70,6 @@ export const vendixLandingPublicRoutes: Routes = [
         '../../public/landing/help-center/help-center.component'
       ).then((c) => c.HelpCenterComponent),
   },
-  // Puente del Embedded Signup de WhatsApp: Meta solo responde en el host fijo
-  // (vendix.online), así que los paneles en otros hosts abren esta página para
-  // conectar. Sin sesión: devuelve el resultado al panel que la abrió.
-  {
-    path: 'integraciones/whatsapp/conectar',
-    loadComponent: () =>
-      import(
-        '../../public/whatsapp-signup-bridge/whatsapp-signup-bridge.component'
-      ).then((c) => c.WhatsappSignupBridgeComponent),
-  },
   // PQR (Peticiones, Quejas y Reclamos) — canal público centralizado
   // para atención al cliente. El link en el footer del landing apunta
   // a /pqr; las rutas thank-you y track también son públicas (sin

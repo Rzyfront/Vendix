@@ -698,6 +698,7 @@ jobs:
           --include='**/integrations/meta-whatsapp/meta-whatsapp-config.component.spec.ts'
           --include='**/integrations/channels/embedded-signup-flow.spec.ts'
           --include='**/integrations/channels/whatsapp-signup-bridge.spec.ts'
+          --include='**/whatsapp-signup-bridge/whatsapp-signup-bridge.routes.spec.ts'
           --include='**/store/apps/**/*.spec.ts'
           --include='**/store/settings/domains/components/domain-form-modal.component.spec.ts'
           --include='**/public/landing-page/landing-offer.component.spec.ts'
