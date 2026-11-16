@@ -18,6 +18,7 @@ import {
   computeMetaWhatsappSignupGate,
   resolveMetaWhatsappPlatformConfig,
 } from './meta-whatsapp-platform-config.resolver';
+import { buildWhatsappDisconnectData } from './whatsapp-channel-disconnect';
 
 interface MetaTokenResponse {
   access_token?: string;
@@ -40,6 +41,26 @@ type RegistrationState = {
   registered_at?: string;
   error?: string;
 };
+
+// The number is already registered through the WhatsApp Business app, so
+// Vendix must never call /register (it would reset the two-step PIN).
+type CoexistenceRegistration = {
+  status: 'not_required';
+  reason: 'business_app';
+};
+
+type SmbSyncType = 'smb_app_state_sync' | 'history';
+
+type SmbSyncState = {
+  status: 'requested' | 'failed';
+  request_id?: string;
+  requested_at: string;
+  error?: string;
+};
+
+const COEXISTENCE_FINISH_EVENT = 'FINISH_WHATSAPP_BUSINESS_APP_ONBOARDING';
+const COEXISTENCE_RETRY_MESSAGE =
+  'Este número también se usa en la app WhatsApp Business y no necesita registro.';
 
 @Injectable()
 export class MetaWhatsappEmbeddedSignupService {
@@ -66,7 +87,10 @@ export class MetaWhatsappEmbeddedSignupService {
       app_review_status,
       allow_dev_signup,
       can_start_signup,
-    } = computeMetaWhatsappSignupGate(platformConfig, this.encryption.isEnabled);
+    } = computeMetaWhatsappSignupGate(
+      platformConfig,
+      this.encryption.isEnabled,
+    );
 
     return {
       status,
@@ -137,20 +161,61 @@ export class MetaWhatsappEmbeddedSignupService {
     });
     const previousMetadata = this.asRecord(existing?.metadata) ?? {};
 
-    const registration = await this.registerPhoneNumber(
+    const phoneStatus = await this.fetchPhoneStatus(
       ids.phone_number_id,
       accessToken,
       platformConfig,
-      this.asRecord(previousMetadata.registration) as RegistrationState | null,
     );
+    // Never register when either signal says the number is on the app.
+    const isCoexistence =
+      phoneStatus?.is_on_biz_app === true ||
+      dto.finish_event === COEXISTENCE_FINISH_EVENT;
+
+    // A reconnect with a regular number must not keep a stale coexistence flag.
+    const { coexistence: _staleCoexistence, ...baseMetadata } =
+      previousMetadata;
+    let registration: RegistrationState | CoexistenceRegistration;
+    let coexistenceMetadata: Record<string, unknown> | null = null;
+    if (isCoexistence) {
+      registration = { status: 'not_required', reason: 'business_app' };
+      const contacts_sync = await this.requestSmbAppData(
+        ids.phone_number_id,
+        accessToken,
+        platformConfig,
+        'smb_app_state_sync',
+      );
+      const history_sync = await this.requestSmbAppData(
+        ids.phone_number_id,
+        accessToken,
+        platformConfig,
+        'history',
+      );
+      coexistenceMetadata = {
+        enabled: true,
+        onboarded_at: connected_at.toISOString(),
+        platform_type: phoneStatus?.platform_type ?? null,
+        contacts_sync,
+        history_sync,
+      };
+    } else {
+      registration = await this.registerPhoneNumber(
+        ids.phone_number_id,
+        accessToken,
+        platformConfig,
+        this.asRecord(
+          previousMetadata.registration,
+        ) as RegistrationState | null,
+      );
+    }
 
     const data = {
       channel_type: 'whatsapp',
       provider: 'meta_cloud',
-      status: registration.status === 'registered' ? 'connected' : 'error',
+      status: registration.status === 'failed' ? 'error' : 'connected',
       waba_id: ids.waba_id,
       phone_number_id: ids.phone_number_id,
-      display_phone_number: dto.display_phone_number || null,
+      display_phone_number:
+        dto.display_phone_number || phoneStatus?.display_phone_number || null,
       business_account_id: dto.business_account_id || null,
       access_token_encrypted: encryptedToken,
       token_type: tokenResponse.token_type || null,
@@ -159,7 +224,7 @@ export class MetaWhatsappEmbeddedSignupService {
       disconnected_at: null,
       last_error: this.buildLastError(registration, webhookSubscription),
       metadata: {
-        ...previousMetadata,
+        ...(isCoexistence ? previousMetadata : baseMetadata),
         embedded_signup: {
           completed_at: connected_at.toISOString(),
           config_id: platformConfig.whatsapp_config_id,
@@ -167,6 +232,7 @@ export class MetaWhatsappEmbeddedSignupService {
         },
         webhook_subscription: webhookSubscription,
         registration,
+        ...(coexistenceMetadata ? { coexistence: coexistenceMetadata } : {}),
       } as Prisma.InputJsonValue,
     };
 
@@ -223,6 +289,9 @@ export class MetaWhatsappEmbeddedSignupService {
     }
 
     const metadata = this.asRecord(existing.metadata) ?? {};
+    if (this.asRecord(metadata.coexistence)?.enabled === true) {
+      throw new BadRequestException(COEXISTENCE_RETRY_MESSAGE);
+    }
     const previous = this.asRecord(
       metadata.registration,
     ) as RegistrationState | null;
@@ -290,16 +359,7 @@ export class MetaWhatsappEmbeddedSignupService {
         channel_type: 'whatsapp',
         provider: 'meta_cloud',
       },
-      data: {
-        status: 'disconnected',
-        access_token_encrypted: null,
-        last_error: null,
-        disconnected_at: new Date(),
-        metadata: {
-          ...(this.asRecord(existing.metadata) ?? {}),
-          disconnected_at: new Date().toISOString(),
-        },
-      },
+      data: buildWhatsappDisconnectData(this.asRecord(existing.metadata)),
     });
 
     return this.getWhatsappChannel();
@@ -340,7 +400,7 @@ export class MetaWhatsappEmbeddedSignupService {
   }
 
   private buildLastError(
-    registration: RegistrationState,
+    registration: RegistrationState | CoexistenceRegistration,
     webhookSubscription: Record<string, any> | null,
   ): string | null {
     if (registration.status === 'failed') return registration.error ?? null;
@@ -413,6 +473,81 @@ export class MetaWhatsappEmbeddedSignupService {
         attempted_at,
         error:
           'No se pudo registrar el número en WhatsApp por un error de conexión. Puedes reintentar el registro más tarde.',
+      };
+    }
+  }
+
+  /**
+   * Reads whether the number also lives in the WhatsApp Business app.
+   * Best effort: null when the lookup fails, so the caller falls back to the
+   * session finish_event.
+   */
+  private async fetchPhoneStatus(
+    phoneNumberId: string,
+    accessToken: string,
+    platformConfig: MetaWhatsappPlatformConfig,
+  ): Promise<{
+    is_on_biz_app?: boolean;
+    platform_type?: string;
+    display_phone_number?: string;
+  } | null> {
+    const body = await this.graphGet(
+      `https://graph.facebook.com/${platformConfig.graph_version}/${phoneNumberId}?fields=is_on_biz_app,platform_type,display_phone_number`,
+      accessToken,
+    );
+    return this.asRecord(body);
+  }
+
+  /**
+   * Asks Meta to sync WhatsApp Business app data (contacts or chat history).
+   * Each type can only be requested once per onboarding. Never throws: a
+   * failure is stored and must not fail the onboarding.
+   */
+  private async requestSmbAppData(
+    phoneNumberId: string,
+    accessToken: string,
+    platformConfig: MetaWhatsappPlatformConfig,
+    syncType: SmbSyncType,
+  ): Promise<SmbSyncState> {
+    const requested_at = new Date().toISOString();
+    const url = `https://graph.facebook.com/${platformConfig.graph_version}/${phoneNumberId}/smb_app_data`;
+    try {
+      const response = await fetch(url, {
+        method: 'POST',
+        headers: {
+          Authorization: `Bearer ${accessToken}`,
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({
+          messaging_product: 'whatsapp',
+          sync_type: syncType,
+        }),
+      });
+      const body: any = await response.json().catch(() => ({}));
+      if (response.ok && typeof body?.request_id === 'string') {
+        return {
+          status: 'requested',
+          request_id: body.request_id,
+          requested_at,
+        };
+      }
+      return {
+        status: 'failed',
+        requested_at,
+        error:
+          this.extractMetaError(body) ||
+          'No se pudo pedir la sincronización de WhatsApp Business',
+      };
+    } catch (error) {
+      this.logger.warn(
+        `WhatsApp smb_app_data (${syncType}) request failed: ${
+          error instanceof Error ? error.message : 'unknown error'
+        }`,
+      );
+      return {
+        status: 'failed',
+        requested_at,
+        error: 'Error de conexión al pedir la sincronización',
       };
     }
   }
@@ -608,6 +743,7 @@ export class MetaWhatsappEmbeddedSignupService {
 
     const metadata = this.asRecord(channel.metadata);
     const registration = this.asRecord(metadata?.registration);
+    const coexistence = this.asRecord(metadata?.coexistence);
 
     return {
       id: channel.id,
@@ -624,6 +760,11 @@ export class MetaWhatsappEmbeddedSignupService {
       disconnected_at: channel.disconnected_at,
       last_error: channel.last_error,
       registration_status: registration?.status ?? null,
+      coexistence: {
+        enabled: coexistence?.enabled === true,
+        contacts_sync: this.syncStatus(coexistence?.contacts_sync),
+        history_sync: this.syncStatus(coexistence?.history_sync),
+      },
       metadata: this.stripRegistrationSecret(metadata),
     };
   }
@@ -637,6 +778,11 @@ export class MetaWhatsappEmbeddedSignupService {
     if (!registration) return metadata;
     const { pin_encrypted: _pin, ...safe } = registration;
     return { ...metadata, registration: safe };
+  }
+
+  private syncStatus(value: unknown): string | null {
+    const status = this.asRecord(value)?.status;
+    return typeof status === 'string' ? status : null;
   }
 
   private maskPhone(phone?: string | null): string | null {

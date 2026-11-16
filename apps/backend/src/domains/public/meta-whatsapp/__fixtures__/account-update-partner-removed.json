@@ -1,0 +1,25 @@
+{
+  "object": "whatsapp_business_account",
+  "entry": [
+    {
+      "id": "000000000000009",
+      "time": 1761900200,
+      "changes": [
+        {
+          "value": {
+            "event": "PARTNER_REMOVED",
+            "waba_info": {
+              "waba_id": "000000000000002",
+              "owner_business_id": "000000000000008"
+            },
+            "disconnection_info": {
+              "reason": "ACCOUNT_DISCONNECTED",
+              "initiated_by": "USER"
+            }
+          },
+          "field": "account_update"
+        }
+      ]
+    }
+  ]
+}
