@@ -587,6 +587,117 @@ describe('MetaWhatsappEmbeddedSignupService', () => {
       });
     });
 
+    function reconnectWith(coexistence: Record<string, unknown>) {
+      const updateMany = jest.fn();
+      const { service } = createService({
+        updateMany,
+        findFirst: jest.fn().mockResolvedValue({
+          id: 7,
+          metadata: {
+            registration: { status: 'not_required', reason: 'business_app' },
+            coexistence,
+          },
+        }),
+      });
+      let n = 0;
+      const fetchMock = mockGraph({
+        'oauth/access_token': tokenOk,
+        '/waba-1/subscribed_apps': subscribeOk,
+        [statusKey]: onBizApp,
+        '/phone-1/smb_app_data': () => syncOk(`req-new-${++n}`),
+      });
+      const complete = () =>
+        run(() =>
+          service.completeEmbeddedSignup({
+            code: 'oauth-code',
+            waba_id: 'waba-1',
+            phone_number_id: 'phone-1',
+          }),
+        );
+      return { updateMany, fetchMock, complete };
+    }
+
+    it('keeps the saved sync requests on a reconnect within 24 h', async () => {
+      const onboarded_at = new Date(Date.now() - 60 * 60 * 1000).toISOString();
+      const { updateMany, fetchMock, complete } = reconnectWith({
+        enabled: true,
+        onboarded_at,
+        contacts_sync: {
+          status: 'requested',
+          request_id: 'req-a',
+          requested_at: onboarded_at,
+        },
+        history_sync: {
+          status: 'requested',
+          request_id: 'req-b',
+          requested_at: onboarded_at,
+        },
+      });
+
+      await complete();
+
+      expect(syncCalls(fetchMock)).toHaveLength(0);
+      const co = updateMany.mock.calls[0][0].data.metadata.coexistence;
+      expect(co.onboarded_at).toBe(onboarded_at);
+      expect(co.contacts_sync.request_id).toBe('req-a');
+      expect(co.history_sync.request_id).toBe('req-b');
+    });
+
+    it('requests again only the sync type that has no request_id within 24 h', async () => {
+      const onboarded_at = new Date(Date.now() - 60 * 60 * 1000).toISOString();
+      const { updateMany, fetchMock, complete } = reconnectWith({
+        enabled: true,
+        onboarded_at,
+        contacts_sync: {
+          status: 'requested',
+          request_id: 'req-a',
+          requested_at: onboarded_at,
+        },
+        history_sync: {
+          status: 'failed',
+          requested_at: onboarded_at,
+          error: 'x',
+        },
+      });
+
+      await complete();
+
+      expect(syncCalls(fetchMock).map((c) => c.body.sync_type)).toEqual([
+        'history',
+      ]);
+      const co = updateMany.mock.calls[0][0].data.metadata.coexistence;
+      expect(co.onboarded_at).toBe(onboarded_at);
+      expect(co.contacts_sync.request_id).toBe('req-a');
+      expect(co.history_sync).toEqual({
+        status: 'requested',
+        request_id: 'req-new-1',
+        requested_at: expect.any(String),
+      });
+    });
+
+    it('starts a new onboarding with both syncs after 24 h', async () => {
+      const onboarded_at = new Date(
+        Date.now() - 25 * 60 * 60 * 1000,
+      ).toISOString();
+      const { updateMany, fetchMock, complete } = reconnectWith({
+        enabled: true,
+        onboarded_at,
+        contacts_sync: { status: 'requested', request_id: 'req-a' },
+        history_sync: { status: 'requested', request_id: 'req-b' },
+      });
+
+      await complete();
+
+      expect(syncCalls(fetchMock).map((c) => c.body.sync_type)).toEqual([
+        'smb_app_state_sync',
+        'history',
+      ]);
+      const co = updateMany.mock.calls[0][0].data.metadata.coexistence;
+      expect(co.onboarded_at).not.toBe(onboarded_at);
+      expect(co.contacts_sync.request_id).toBe('req-new-1');
+      expect(co.history_sync.request_id).toBe('req-new-2');
+    });
+
     it('prefers the display number sent by the popup', async () => {
       const create = jest.fn();
       const { service } = createService({
@@ -797,6 +908,10 @@ describe('MetaWhatsappEmbeddedSignupService', () => {
         enabled: true,
         contacts_sync: 'requested',
         history_sync: 'failed',
+      });
+      expect(JSON.stringify(result)).not.toContain('req-secret');
+      expect(result.metadata.coexistence.contacts_sync).toEqual({
+        status: 'requested',
       });
     });
 

@@ -59,6 +59,7 @@ type SmbSyncState = {
 };
 
 const COEXISTENCE_FINISH_EVENT = 'FINISH_WHATSAPP_BUSINESS_APP_ONBOARDING';
+const SMB_SYNC_WINDOW_MS = 24 * 60 * 60 * 1000;
 const COEXISTENCE_RETRY_MESSAGE =
   'Este número también se usa en la app WhatsApp Business y no necesita registro.';
 
@@ -178,21 +179,32 @@ export class MetaWhatsappEmbeddedSignupService {
     let coexistenceMetadata: Record<string, unknown> | null = null;
     if (isCoexistence) {
       registration = { status: 'not_required', reason: 'business_app' };
-      const contacts_sync = await this.requestSmbAppData(
-        ids.phone_number_id,
-        accessToken,
-        platformConfig,
-        'smb_app_state_sync',
+      // Meta accepts each sync once per onboarding (24 h window): a reconnect
+      // inside that window keeps the saved request ids instead of asking again.
+      const previousCoexistence = this.resolveActiveCoexistence(
+        previousMetadata.coexistence,
+        connected_at,
       );
-      const history_sync = await this.requestSmbAppData(
-        ids.phone_number_id,
-        accessToken,
-        platformConfig,
-        'history',
-      );
+      const contacts_sync =
+        this.keptSyncRequest(previousCoexistence?.contacts_sync) ??
+        (await this.requestSmbAppData(
+          ids.phone_number_id,
+          accessToken,
+          platformConfig,
+          'smb_app_state_sync',
+        ));
+      const history_sync =
+        this.keptSyncRequest(previousCoexistence?.history_sync) ??
+        (await this.requestSmbAppData(
+          ids.phone_number_id,
+          accessToken,
+          platformConfig,
+          'history',
+        ));
       coexistenceMetadata = {
         enabled: true,
-        onboarded_at: connected_at.toISOString(),
+        onboarded_at:
+          previousCoexistence?.onboarded_at ?? connected_at.toISOString(),
         platform_type: phoneStatus?.platform_type ?? null,
         contacts_sync,
         history_sync,
@@ -499,6 +511,43 @@ export class MetaWhatsappEmbeddedSignupService {
   }
 
   /**
+   * The previous coexistence onboarding while its 24 h sync window is still
+   * open, or null when there is none or it already expired.
+   */
+  private resolveActiveCoexistence(
+    value: unknown,
+    now: Date,
+  ): {
+    onboarded_at: string;
+    contacts_sync?: unknown;
+    history_sync?: unknown;
+  } | null {
+    const previous = this.asRecord(value);
+    if (previous?.enabled !== true) return null;
+    const onboardedAt =
+      typeof previous.onboarded_at === 'string'
+        ? new Date(previous.onboarded_at)
+        : null;
+    if (!onboardedAt || Number.isNaN(onboardedAt.getTime())) return null;
+    if (now.getTime() - onboardedAt.getTime() >= SMB_SYNC_WINDOW_MS) {
+      return null;
+    }
+    return {
+      onboarded_at: previous.onboarded_at,
+      contacts_sync: previous.contacts_sync,
+      history_sync: previous.history_sync,
+    };
+  }
+
+  /** A previous sync request that Meta already accepted (has request_id). */
+  private keptSyncRequest(value: unknown): SmbSyncState | null {
+    const previous = this.asRecord(value);
+    return typeof previous?.request_id === 'string'
+      ? (previous as SmbSyncState)
+      : null;
+  }
+
+  /**
    * Asks Meta to sync WhatsApp Business app data (contacts or chat history).
    * Each type can only be requested once per onboarding. Never throws: a
    * failure is stored and must not fail the onboarding.
@@ -769,15 +818,39 @@ export class MetaWhatsappEmbeddedSignupService {
     };
   }
 
-  /** The encrypted PIN must never leave the server. */
+  /**
+   * The encrypted PIN must never leave the server, and Meta's sync request
+   * ids are support data that the client does not need.
+   */
   private stripRegistrationSecret(
     metadata: Record<string, any> | null,
   ): Record<string, any> | null {
     if (!metadata) return null;
+    let safe: Record<string, any> = metadata;
     const registration = this.asRecord(metadata.registration);
-    if (!registration) return metadata;
-    const { pin_encrypted: _pin, ...safe } = registration;
-    return { ...metadata, registration: safe };
+    if (registration) {
+      const { pin_encrypted: _pin, ...rest } = registration;
+      safe = { ...safe, registration: rest };
+    }
+    const coexistence = this.asRecord(metadata.coexistence);
+    if (coexistence) {
+      safe = {
+        ...safe,
+        coexistence: {
+          ...coexistence,
+          contacts_sync: this.withoutRequestId(coexistence.contacts_sync),
+          history_sync: this.withoutRequestId(coexistence.history_sync),
+        },
+      };
+    }
+    return safe;
+  }
+
+  private withoutRequestId(value: unknown): unknown {
+    const sync = this.asRecord(value);
+    if (!sync) return value;
+    const { request_id: _requestId, ...rest } = sync;
+    return rest;
   }
 
   private syncStatus(value: unknown): string | null {
