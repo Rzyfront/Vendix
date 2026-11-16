@@ -1,4 +1,5 @@
 import { Injectable, Logger } from '@nestjs/common';
+import { Prisma } from '@prisma/client';
 import { GlobalPrismaService } from '../../../../../prisma/services/global-prisma.service';
 import {
   OrganizationSettings,
@@ -14,6 +15,12 @@ import { StoreSettings } from '../../../settings/interfaces/store-settings.inter
  *   runtime per Plan Unificado §13 #7.
  */
 export type ResolvedCostingMethod = 'weighted_average' | 'fifo';
+
+/** The two settings accessors the resolver reads, global or transactional. */
+type SettingsReader = Pick<
+  Prisma.TransactionClient,
+  'organization_settings' | 'store_settings'
+>;
 
 /**
  * Resolves the effective inventory `costing_method` for a given organization
@@ -52,20 +59,30 @@ export class CostingMethodResolverService {
    * Resolve the effective costing method for an organization (and optional
    * storeId fallback). Never throws — falls back to `'weighted_average'` on
    * any DB or shape error.
+   *
+   * `client` is optional: a caller that already holds an open transaction
+   * (every stock movement in `StockLevelManager`) passes it so the settings
+   * read runs on that transaction's connection instead of asking the pool for
+   * another one while the transaction stays open. The transaction client is
+   * the same unscoped base client the global accessors use, so the read and
+   * the result are identical.
    */
   async resolveCostingMethod(
     organizationId: number,
     storeId?: number,
+    client?: Prisma.TransactionClient,
   ): Promise<ResolvedCostingMethod> {
+    const db = client ?? this.globalPrisma;
+
     // 1. ORG-level wins.
-    const orgValue = await this.readOrgCostingMethod(organizationId);
+    const orgValue = await this.readOrgCostingMethod(db, organizationId);
     if (orgValue !== null) {
       return orgValue;
     }
 
     // 2. STORE-level fallback (with cpp/lifo defensive mapping).
     if (typeof storeId === 'number') {
-      const storeValue = await this.readStoreCostingMethod(storeId);
+      const storeValue = await this.readStoreCostingMethod(db, storeId);
       if (storeValue !== null) {
         return storeValue;
       }
@@ -81,10 +98,11 @@ export class CostingMethodResolverService {
    * absent. `'lifo'` is mapped defensively to `'weighted_average'`.
    */
   private async readOrgCostingMethod(
+    db: SettingsReader,
     organizationId: number,
   ): Promise<ResolvedCostingMethod | null> {
     try {
-      const row = await this.globalPrisma.organization_settings.findUnique({
+      const row = await db.organization_settings.findUnique({
         where: { organization_id: organizationId },
         select: { settings: true },
       });
@@ -127,10 +145,11 @@ export class CostingMethodResolverService {
    * - `'weighted_average'` → `'weighted_average'`
    */
   private async readStoreCostingMethod(
+    db: SettingsReader,
     storeId: number,
   ): Promise<ResolvedCostingMethod | null> {
     try {
-      const row = await this.globalPrisma.store_settings.findUnique({
+      const row = await db.store_settings.findUnique({
         where: { store_id: storeId },
         select: { settings: true },
       });

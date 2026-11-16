@@ -581,3 +581,40 @@ describe('ERROR_MESSAGES — DISPATCH_NOTE_NO_SHIPPING_ADDRESS (despacho sin dir
     expect(parsed.userMessage).not.toContain('shipping address');
   });
 });
+
+/**
+ * T8 — una transacción vencida (P2028) o el pool agotado (P2024) llegan del
+ * backend como 503 `SYS_BUSY_001`. El mesero/cajero debe leer el mensaje
+ * exacto y reintentar, nunca el genérico ni el texto crudo de Prisma.
+ */
+describe('ERROR_MESSAGES — SYS_BUSY_001 (sistema ocupado, 503)', () => {
+  const BUSY = 'El sistema está ocupado, intenta de nuevo en unos segundos';
+
+  it('el catálogo tiene el mensaje exacto', () => {
+    expect(ERROR_MESSAGES['SYS_BUSY_001']).toBe(BUSY);
+  });
+
+  it('parseApiError de un 503 SYS_BUSY_001 muestra el mensaje exacto', () => {
+    const parsed = parseApiError(
+      new HttpErrorResponse({
+        status: 503,
+        error: { statusCode: 503, error_code: 'SYS_BUSY_001', message: BUSY },
+      }),
+    );
+
+    expect(parsed.errorCode).toBe('SYS_BUSY_001');
+    expect(parsed.userMessage).toBe(BUSY);
+  });
+
+  it('sin `message` en el cuerpo cae al copy del catálogo, no al genérico', () => {
+    const parsed = parseApiError(
+      new HttpErrorResponse({
+        status: 503,
+        error: { statusCode: 503, error_code: 'SYS_BUSY_001' },
+      }),
+    );
+
+    expect(parsed.userMessage).toBe(BUSY);
+    expect(parsed.userMessage).not.toBe(DEFAULT_ERROR_MESSAGE);
+  });
+});

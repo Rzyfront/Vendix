@@ -99,8 +99,12 @@ describe('LayawayService.cancel — refund method (QUI-893 B2)', () => {
   });
 
   it('cash records a cash_out in the canceller drawer and the event carries the method', async () => {
-    const { service, tx, movements, wallet, eventEmitter } = build();
+    const { service, tx, prisma, movements, wallet, eventEmitter } = build();
     await service.cancel(12, { cancellation_reason: 'x', refund_method: 'cash' });
+    // Explicit budget for the cancel transaction (the 5 s default expired).
+    expect(prisma.$transaction).toHaveBeenCalledWith(
+      expect.any(Function), { timeout: 20_000, maxWait: 5_000 },
+    );
     expect(movements.recordModuleCashMovement).toHaveBeenCalledWith(
       tx,
       expect.objectContaining({

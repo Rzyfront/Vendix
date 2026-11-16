@@ -1245,6 +1245,8 @@ export class TableSessionPageComponent implements OnInit {
   onRemoveItem(item: TableSessionOrderItem): void {
     const sessionId = this.session()?.id;
     if (!sessionId || this.isClosed()) return;
+    // Un plato a la vez: con una cancelación en vuelo no se abre otro flujo.
+    if (this.removingItemId() !== null) return;
     if (!this.canRemoveItem(item)) return;
     if (this.isPrepared(item)) {
       this.openItemCancellationModal(item);
@@ -1290,6 +1292,9 @@ export class TableSessionPageComponent implements OnInit {
               );
               return;
             }
+            // Doble clic: dos diálogos encolados llegan aquí; solo el
+            // primero envía.
+            if (this.removingItemId() !== null) return;
             this.removingItemId.set(item.id);
             this.tablesService
               .cancelOrderItem(sessionId, item.id, { reason })

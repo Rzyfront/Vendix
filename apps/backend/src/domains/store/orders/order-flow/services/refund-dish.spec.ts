@@ -204,6 +204,10 @@ describe('RefundFlowService — gate de platos (paso 6, CP-REFUND-FLOW-REDESIGN)
 
       await run(t, i);
 
+      // La bodega del insumo se resuelve con la tx del reembolso: sin ella
+      // cada insumo pide otra conexión del pool con la transacción abierta.
+      expect(stockLevelManager.getDefaultLocationForProduct).toHaveBeenCalledWith(7, undefined, t);
+
       expect(stockLevelManager.updateStock).toHaveBeenCalledWith(
         expect.objectContaining({
           product_id: 7,

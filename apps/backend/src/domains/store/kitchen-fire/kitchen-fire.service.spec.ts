@@ -86,14 +86,18 @@ describe('KitchenFireService.cancelTicket — stock disposition by KDS stage', (
     jest.spyOn(RequestContextService, 'getContext').mockReturnValue({
       store_id: 1, organization_id: 3, user_id: 9,
     } as any);
-    return { service, tx, stock, accounting, orderSync, moduleRef };
+    return { service, tx, stock, accounting, orderSync, moduleRef, prisma };
   };
 
   afterEach(() => jest.restoreAllMocks());
 
   it('pending restores each consumed leaf once and reverses COGS even when waste was requested', async () => {
-    const { service, tx, stock, accounting } = harness('pending');
+    const { service, tx, stock, accounting, prisma } = harness('pending');
     await service.cancelTicket(55, 'waste');
+    // Explicit budget for the cancel transaction (the 5 s default expired).
+    expect(prisma.$transaction).toHaveBeenCalledWith(
+      expect.any(Function), { timeout: 20_000, maxWait: 5_000 },
+    );
     expect(stock.updateStock).toHaveBeenCalledWith(expect.objectContaining({
       product_id: 400, quantity_change: 2, movement_type: 'return',
       allow_negative: true,
@@ -2842,6 +2846,11 @@ describe('KitchenFireService — fireOrderItems() (Fase D smoke)', () => {
 
     it('clears only this delivered ticket’s line stamps inside the ticket transaction, then emits the reversal', async () => {
       await service.revertTicket(555);
+
+      // Explicit budget for the revert transaction (the 5 s default expired).
+      expect(prismaMock.$transaction).toHaveBeenCalledWith(
+        expect.any(Function), { timeout: 20_000, maxWait: 5_000 },
+      );
 
       // H1 — a 'delivered' ticket is not the 'cancelled' full-ticket case, so
       // the item revert excludes any line that was individually cancelled

@@ -5434,6 +5434,7 @@ export class OrdersService {
             await this.stockLevelManager.getDefaultLocationForProduct(
               item.product_id,
               item.product_variant_id || undefined,
+              tx,
             );
           const stockUnitsConsumed =
             typeof item.stock_units_consumed === 'number' &&

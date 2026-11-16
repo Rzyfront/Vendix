@@ -86,7 +86,10 @@ export class InventoryBatchesService {
         },
       });
 
-      // 4. Actualizar stock levels
+      // 4. Actualizar stock levels con el cliente de ESTA transacción: sin él
+      //    `updateStock` abre otra transacción en una segunda conexión del
+      //    pool, el lote y el stock dejan de ser atómicos y, bajo carga, la
+      //    transacción de afuera vence esperando una conexión.
       await this.stockLevelManager.updateStock({
         product_id: createBatchDto.product_id,
         variant_id: createBatchDto.product_variant_id,
@@ -97,7 +100,7 @@ export class InventoryBatchesService {
         user_id: createBatchDto.userId,
         create_movement: true,
         validate_availability: false,
-      });
+      }, prisma);
 
       return batch;
     });
@@ -408,7 +411,7 @@ export class InventoryBatchesService {
         user_id: userId,
         create_movement: true,
         validate_availability: true,
-      });
+      }, prisma);
 
       return updatedBatch;
     });
@@ -497,7 +500,7 @@ export class InventoryBatchesService {
         validate_availability: true,
         from_location_id: batch.location_id,
         to_location_id: toLocationId,
-      });
+      }, prisma);
 
       // Crear movimiento de stock (entrada a ubicación destino)
       await this.stockLevelManager.updateStock({
@@ -512,7 +515,7 @@ export class InventoryBatchesService {
         validate_availability: false,
         from_location_id: batch.location_id,
         to_location_id: toLocationId,
-      });
+      }, prisma);
 
       return newBatch;
     });

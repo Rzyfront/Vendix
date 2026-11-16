@@ -13,3 +13,4 @@ export {
 } from './vendix-http.exception';
 
 export { FinancialSplitErrors } from './financial-split-error-codes';
+export { PRISMA_BUSY_CODES, isPrismaBusyError } from './prisma-busy.util';

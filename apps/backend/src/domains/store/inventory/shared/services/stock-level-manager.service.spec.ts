@@ -316,6 +316,101 @@ describe('StockLevelManager', () => {
       );
     });
 
+    describe('escritura perdida bajo una tx que se cierra (T7)', () => {
+      // Bajo carga, la tx interactiva puede vencer con una escritura en vuelo:
+      // Prisma hace rollback y libera la conexión, y lo que quedaba de esa
+      // operación ya no corre dentro de la tx. La escritura vuelve SIN fila.
+      // Antes: `TypeError: Cannot read properties of null (reading 'id')` en
+      // `transaction.id` y el resto de escrituras seguían fuera de la tx.
+      const buildTx = () => ({
+        $queryRaw: (prismaService as any).$queryRaw,
+        stock_levels: prismaService.stock_levels,
+        inventory_movements: prismaService.inventory_movements,
+        products: prismaService.products,
+        product_variants: (prismaService as any).product_variants,
+        inventory_locations: prismaService.inventory_locations,
+        inventory_valuation_snapshots: (prismaService as any)
+          .inventory_valuation_snapshots,
+        inventory_cost_layers: (prismaService as any).inventory_cost_layers,
+        store_settings: (prismaService as any).store_settings,
+      });
+      // Misma forma que la reposición de un insumo al reversar un plato
+      // (`disposeConsumedPreparedLeaves`, disposición `reuse`).
+      const reuseParams = {
+        ...updateStockParams,
+        quantity_change: 2,
+        movement_type: 'return' as const,
+        create_movement: true,
+        validate_availability: false,
+        allow_negative: true,
+      };
+
+      beforeEach(() => {
+        prismaService.products.findFirst.mockResolvedValue(mockProduct);
+        prismaService.inventory_locations.findFirst.mockResolvedValue(mockLocation);
+        prismaService.stock_levels.findFirst.mockResolvedValue(mockStockLevel);
+        prismaService.stock_levels.update.mockResolvedValue({
+          ...mockStockLevel,
+          quantity_on_hand: 102,
+          quantity_available: 92,
+        });
+      });
+
+      it('la transacción de inventario sin fila corta con SYS_BUSY_001 (503) sin más escrituras', async () => {
+        transactionsService.createTransaction.mockResolvedValue(null as any);
+        const afterCommit: Array<() => void> = [];
+
+        const call = service.updateStock({ ...reuseParams, afterCommit }, buildTx() as any);
+
+        await expect(call).rejects.toMatchObject({ errorCode: 'SYS_BUSY_001' });
+        await call.catch((error) => expect(error.getStatus()).toBe(503));
+        expect(prismaService.inventory_movements.create).not.toHaveBeenCalled();
+        expect(
+          (prismaService as any).inventory_valuation_snapshots.create,
+        ).not.toHaveBeenCalled();
+        expect(prismaService.products.update).not.toHaveBeenCalled();
+        expect(afterCommit).toHaveLength(0);
+        expect(eventEmitter.emit).not.toHaveBeenCalled();
+      });
+
+      it('el re-read del stock reclamado sin fila corta con SYS_BUSY_001 antes de escribir la transacción', async () => {
+        prismaService.stock_levels.findUnique.mockResolvedValue(null);
+
+        const call = service.updateStock(
+          {
+            ...updateStockParams,
+            quantity_change: -5,
+            movement_type: 'stock_out' as const,
+            validate_availability: true,
+          },
+          buildTx() as any,
+        );
+
+        await expect(call).rejects.toMatchObject({ errorCode: 'SYS_BUSY_001' });
+        expect(transactionsService.createTransaction).not.toHaveBeenCalled();
+        expect(eventEmitter.emit).not.toHaveBeenCalled();
+      });
+
+      it('con filas normales la reposición sigue escribiendo movimiento y emitiendo (sin cambios)', async () => {
+        transactionsService.createTransaction.mockResolvedValue(mockTransaction);
+        prismaService.stock_levels.aggregate.mockResolvedValue({
+          _sum: { quantity_available: 92 },
+        });
+        const afterCommit: Array<() => void> = [];
+
+        const result = await service.updateStock({ ...reuseParams, afterCommit }, buildTx() as any);
+
+        expect(result.transaction).toBe(mockTransaction);
+        expect(prismaService.inventory_movements.create).toHaveBeenCalledTimes(1);
+        expect(prismaService.inventory_movements.create).toHaveBeenCalledWith(
+          expect.objectContaining({
+            data: expect.objectContaining({ movement_type: 'return', quantity: 2 }),
+          }),
+        );
+        expect(afterCommit.length).toBeGreaterThan(0);
+      });
+    });
+
     it('should handle stock_out movement with availability validation', async () => {
       const stockOutParams = {
         ...updateStockParams,
@@ -479,6 +574,14 @@ describe('StockLevelManager', () => {
       const result = await service.updateStock(saleParams);
 
       expect(result.stock_level.quantity_available).toBe(70);
+      // The costing method of an outgoing movement is read on the movement's
+      // own tx connection: outside it, every stock movement asks the pool for
+      // a second connection while the transaction is still open.
+      const resolver = (service as any).costingMethodResolver;
+      expect(resolver.resolveCostingMethod).toHaveBeenCalled();
+      for (const call of resolver.resolveCostingMethod.mock.calls) {
+        expect(call).toEqual([1, 1, mockTx]);
+      }
     });
 
     it('should work with external transaction client', async () => {

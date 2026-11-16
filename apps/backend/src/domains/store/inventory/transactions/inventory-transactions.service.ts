@@ -6,6 +6,7 @@ import {
 } from '@nestjs/common';
 import { StorePrismaService } from '../../../../prisma/services/store-prisma.service';
 import { RequestContextService } from '@common/context/request-context.service';
+import { isPrismaBusyError } from '@common/errors';
 import {
   CreateTransactionDto,
   TransactionQueryDto,
@@ -78,6 +79,10 @@ export class InventoryTransactionsService {
         },
       });
     } catch (error) {
+      // An expired transaction (P2028) or an exhausted pool (P2024) is not a
+      // bad request: let it reach the global filter, which answers 503
+      // SYS_BUSY_001 instead of leaking Prisma's text in a 400.
+      if (isPrismaBusyError(error)) throw error;
       throw new BadRequestException(
         `Failed to create inventory transaction: ${error.message}`,
       );

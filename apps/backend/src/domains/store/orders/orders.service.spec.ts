@@ -2972,6 +2972,50 @@ describe('OrdersService', () => {
       }
     });
 
+    it('orden creada (no borrador): reserva las líneas nuevas resolviendo la bodega con la tx del editor', async () => {
+      setupContext();
+      const contextSpy = spyContext();
+      try {
+        arrangeEditableDraft();
+        mockPrismaService.orders.findFirst
+          .mockReset()
+          .mockResolvedValueOnce({ ...draftOrder, state: 'created' } as any)
+          .mockResolvedValue({ ...persistedOrder, state: 'created' } as any);
+        mockPrismaService.products.findUnique.mockResolvedValue({
+          id: 1,
+          name: 'Test product',
+          product_type: 'simple',
+          product_variants: [],
+        } as any);
+        mockPrismaService.order_items.findMany.mockResolvedValue([
+          {
+            id: 1,
+            product_id: 1,
+            product_variant_id: null,
+            quantity: 1,
+            stock_units_consumed: null,
+            products: { id: 1, track_inventory: true },
+          },
+        ] as any);
+
+        await service.updateOrderFromEditor(500, fullDto);
+
+        // Sin `tx` la consulta pide otra conexión del pool con la transacción
+        // del editor abierta: bajo carga el pool se agota y el editor vence.
+        expect(mockStockLevelManager.getDefaultLocationForProduct).toHaveBeenCalledWith(
+          1, undefined, mockPrismaService,
+        );
+        // La reserva sigue cayendo en esa bodega, dentro de la misma tx.
+        expect(mockStockLevelManager.reserveStock).toHaveBeenCalledWith(
+          1, undefined, 1, 1, 'order', 500,
+          expect.anything(), true, mockPrismaService,
+          undefined, false, undefined, false,
+        );
+      } finally {
+        contextSpy.mockRestore();
+      }
+    });
+
     it('QUI-650 — línea con comanda/movimientos -> 409 ORD_EDIT_LINES_LOCKED_001 sin deleteMany', async () => {
       setupContext();
       const contextSpy = spyContext();

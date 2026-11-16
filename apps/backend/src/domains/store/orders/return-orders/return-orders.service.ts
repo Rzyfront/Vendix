@@ -332,7 +332,7 @@ export class ReturnOrdersService {
           },
         },
       });
-    });
+    }, { timeout: 20_000, maxWait: 5_000 });
 
     // QUI-893 B1 — no `refund.completed` here: a supplier return moves no
     // money to a customer, and customer refunds are booked by RefundFlowService
@@ -379,8 +379,12 @@ export class ReturnOrdersService {
    * parámetro `location_id` es obligatorio. Cuando el cliente no manda una
    * bodega explícita se resuelve la misma que usan POS y ecommerce, que además
    * falla con `INV_LOC_001` tipado si la tienda no tiene ninguna vendible.
+   *
+   * La consulta corre con la `tx` de la devolución: sin ella cada línea pide
+   * otra conexión del pool mientras la transacción sigue abierta.
    */
   private resolveItemLocation(
+    tx: Prisma.TransactionClient,
     returnItem: any,
     locationId?: number,
   ): Promise<number> {
@@ -388,6 +392,7 @@ export class ReturnOrdersService {
     return this.stockLevelManager.getDefaultLocationForProduct(
       returnItem.product_id,
       returnItem.product_variant_id || undefined,
+      tx,
     );
   }
 
@@ -413,6 +418,7 @@ export class ReturnOrdersService {
     locationId?: number,
   ) {
     const target_location_id = await this.resolveItemLocation(
+      tx,
       returnItem,
       locationId,
     );
@@ -440,6 +446,7 @@ export class ReturnOrdersService {
     locationId?: number,
   ) {
     const target_location_id = await this.resolveItemLocation(
+      tx,
       returnItem,
       locationId,
     );
@@ -469,6 +476,7 @@ export class ReturnOrdersService {
     locationId?: number,
   ) {
     const target_location_id = await this.resolveItemLocation(
+      tx,
       returnItem,
       locationId,
     );

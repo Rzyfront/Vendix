@@ -1267,13 +1267,17 @@ describe('OrderFlowService.cancelOrder — kitchenDisposition y reversa de hojas
     await expect(service.cancelOrder(ORDER_ID, { reason, kitchenDisposition: 'reuse' }))
       .resolves.toMatchObject({ state: 'cancelled' });
 
+    // Presupuesto explícito de la tx de la cancelación (el default de 5 s vencía).
+    expect(prismaMock.$transaction).toHaveBeenCalledWith(
+      expect.any(Function), { timeout: 20_000, maxWait: 5_000 },
+    );
     expect(prismaMock.inventory_transactions.findMany).toHaveBeenCalledTimes(1);
     expect(prismaMock.inventory_transactions.findMany).toHaveBeenCalledWith({
       where: { order_item_id: ITEM_ID, quantity_change: { lt: 0 } },
       select: { id: true, product_id: true, product_variant_id: true, quantity_change: true, unit_cost: true, total_cost: true },
     });
     expect(stock.getDefaultLocationForProduct.mock.calls).toEqual([
-      [701, undefined], [702, 91], [703, undefined],
+      [701, undefined, prismaMock], [702, 91, prismaMock], [703, undefined, prismaMock],
     ]);
     expect(stock.updateStock).toHaveBeenCalledTimes(3);
     const expectedReturns = [
@@ -2201,10 +2205,15 @@ describe('OrderFlowService.cancelOrderItem — seam compartido', () => {
   });
 
   it('cancela la línea cuando la orden no tiene factura vigente', async () => {
-    const { service, txMock } = buildService({ lockingInvoice: null });
+    const { service, txMock, prismaMock } = buildService({ lockingInvoice: null });
 
     await service.cancelOrderItem(ORDER_ID, ITEM_ID, 'cliente se arrepintió');
     expect(txMock.order_items.update).toHaveBeenCalled();
+    // Presupuesto explícito de la tx: el default de Prisma (5 s) vencía en
+    // hora pico con 7-11 s reales.
+    expect(prismaMock.$transaction).toHaveBeenCalledWith(
+      expect.any(Function), { timeout: 20_000, maxWait: 5_000 },
+    );
   });
 
   it('QUI-995 F3: cancelar una línea pide UNA vez el sync de producción con el id de la orden, después del commit', async () => {
@@ -3325,6 +3334,10 @@ describe('OrderFlowService.cancelDeliveredOrderItem — reversa (1060 paso 2)', 
       ORDER_ID, ITEM_ID, 'mosca en el plato', 'waste',
     );
     expect(prismaMock.$transaction).toHaveBeenCalledTimes(1);
+    // Presupuesto explícito de la tx de la reversa (el default de 5 s vencía).
+    expect(prismaMock.$transaction).toHaveBeenCalledWith(
+      expect.any(Function), { timeout: 20_000, maxWait: 5_000 },
+    );
   });
 
   it('reprecio COD pendiente al reversar una línea entregada sin cobrar', async () => {
@@ -3368,7 +3381,9 @@ describe('OrderFlowService.cancelDeliveredOrderItem — reversa (1060 paso 2)', 
     // Destino aplicado: las 2 unidades vuelven al stock como `return`.
     expect(
       stockLevelManager.getDefaultLocationForProduct,
-    ).toHaveBeenCalledWith(11, undefined);
+      // Dentro de la tx de la reversa: sin `tx` cada consulta pide otra
+      // conexión del pool y la reversa se queda colgada bajo carga.
+    ).toHaveBeenCalledWith(11, undefined, txMock);
     expect(stockLevelManager.updateStock).toHaveBeenCalledTimes(1);
     expect(stockLevelManager.updateStock.mock.calls[0][0]).toEqual(
       expect.objectContaining({
