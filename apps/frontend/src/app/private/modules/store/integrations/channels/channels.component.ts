@@ -17,6 +17,16 @@ import { ChannelsService } from './channels.service';
 import { MessagingChannelCardsComponent } from './messaging-channels/messaging-channel-cards.component';
 import { MetaReadiness, WhatsappChannel } from './channels.interface';
 import {
+  allowsRegistrationRetry,
+  channelAlertMessage,
+  CONNECT_HELP_MESSAGE,
+  connectedOutcome,
+  COEXISTENCE_DISCONNECT_NOTE,
+  COEXISTENCE_PHONE_LINE,
+  isCoexistenceChannel,
+  needsRegistrationNotice,
+} from './channels-coexistence';
+import {
   EmbeddedSignupFlowError,
   EmbeddedSignupFlowResult,
   startEmbeddedSignupFlow,
@@ -60,17 +70,13 @@ import { environment } from '../../../../../../environments/environment';
           </app-alert-banner>
         }
 
-        @if (channel()?.status === 'error' && channel()?.last_error) {
+        @if (channelAlert(); as alert) {
           <app-alert-banner variant="warning" icon="triangle-alert">
-            {{ channel()?.last_error }}
+            {{ alert }}
           </app-alert-banner>
         }
 
-        @if (
-          channel()?.status === 'connected' &&
-          channel()?.phone_number_id &&
-          channel()?.registration_status !== 'registered'
-        ) {
+        @if (showRegistrationNotice()) {
           <app-alert-banner variant="warning" icon="triangle-alert">
             {{
               channel()?.last_error ||
@@ -105,47 +111,60 @@ import { environment } from '../../../../../../environments/environment';
               </div>
             </div>
 
-            <div class="flex flex-wrap gap-3 pt-1 lg:pt-0">
-              @if (channel()?.connected) {
-                <app-button
-                  variant="outline-danger"
-                  size="md"
-                  [loading]="disconnecting()"
-                  (clicked)="disconnectWhatsapp()"
-                >
-                  <app-icon slot="icon" name="plug" [size]="16"></app-icon>
-                  Desconectar
-                </app-button>
-              } @else {
-                @if (canRetryRegistration()) {
+            <div class="flex flex-col gap-3 pt-1 lg:max-w-sm lg:pt-0">
+              <div class="flex flex-wrap gap-3">
+                @if (channel()?.connected) {
                   <app-button
-                    variant="outline"
+                    variant="outline-danger"
                     size="md"
-                    [loading]="registering()"
-                    (clicked)="retryRegistration()"
+                    [loading]="disconnecting()"
+                    (clicked)="disconnectWhatsapp()"
+                  >
+                    <app-icon slot="icon" name="plug" [size]="16"></app-icon>
+                    Desconectar
+                  </app-button>
+                } @else {
+                  @if (canRetryRegistration()) {
+                    <app-button
+                      variant="outline"
+                      size="md"
+                      [loading]="registering()"
+                      (clicked)="retryRegistration()"
+                    >
+                      <app-icon
+                        slot="icon"
+                        name="refresh-cw"
+                        [size]="16"
+                      ></app-icon>
+                      Reintentar registro
+                    </app-button>
+                  }
+                  <app-button
+                    variant="primary"
+                    size="md"
+                    [disabled]="!canConnectWhatsapp()"
+                    [loading]="connecting()"
+                    (clicked)="connectWhatsapp()"
                   >
                     <app-icon
                       slot="icon"
-                      name="refresh-cw"
+                      name="message-circle"
                       [size]="16"
                     ></app-icon>
-                    Reintentar registro
+                    Conectar WhatsApp
                   </app-button>
                 }
-                <app-button
-                  variant="primary"
-                  size="md"
-                  [disabled]="!canConnectWhatsapp()"
-                  [loading]="connecting()"
-                  (clicked)="connectWhatsapp()"
-                >
-                  <app-icon
-                    slot="icon"
-                    name="message-circle"
-                    [size]="16"
-                  ></app-icon>
-                  Conectar WhatsApp
-                </app-button>
+              </div>
+              @if (channel()?.connected) {
+                @if (isCoexistence()) {
+                  <p class="text-xs text-[var(--color-text-secondary)]">
+                    {{ coexistenceDisconnectNote }}
+                  </p>
+                }
+              } @else {
+                <p class="text-xs text-[var(--color-text-secondary)]">
+                  {{ connectHelp }}
+                </p>
               }
             </div>
           </div>
@@ -235,6 +254,11 @@ import { environment } from '../../../../../../environments/environment';
                   >
                     {{ channel()?.display_phone_number || 'No disponible' }}
                   </p>
+                  @if (isCoexistence()) {
+                    <p class="mt-1 text-xs text-[var(--color-text-secondary)]">
+                      {{ coexistencePhoneLine }}
+                    </p>
+                  }
                 </div>
                 <div class="rounded-lg border border-[var(--color-border)] p-4">
                   <p class="text-xs text-[var(--color-text-secondary)]">
@@ -310,18 +334,27 @@ export class ChannelsComponent {
     );
   });
 
-  protected readonly canRetryRegistration = computed(() => {
-    const channel = this.channel();
+  protected readonly canRetryRegistration = computed(
     // Also covers channels connected before registration existed: status
-    // 'connected' with no registration state yet.
-    return Boolean(
-      channel &&
-      channel.status !== 'disconnected' &&
-      channel.phone_number_id &&
-      channel.registration_status !== 'registered' &&
-      !this.registering(),
-    );
-  });
+    // 'connected' with no registration state yet. Never for coexistence.
+    () => allowsRegistrationRetry(this.channel()) && !this.registering(),
+  );
+
+  protected readonly showRegistrationNotice = computed(() =>
+    needsRegistrationNotice(this.channel()),
+  );
+
+  protected readonly isCoexistence = computed(() =>
+    isCoexistenceChannel(this.channel()),
+  );
+
+  protected readonly channelAlert = computed(() =>
+    channelAlertMessage(this.channel()),
+  );
+
+  protected readonly connectHelp = CONNECT_HELP_MESSAGE;
+  protected readonly coexistencePhoneLine = COEXISTENCE_PHONE_LINE;
+  protected readonly coexistenceDisconnectNote = COEXISTENCE_DISCONNECT_NOTE;
 
   protected readonly channelStatusLabel = computed(() => {
     const channel = this.channel();
@@ -422,13 +455,11 @@ export class ChannelsComponent {
         this.service.completeWhatsappEmbeddedSignup(signup),
       );
       this.channel.set(channel);
-      if (channel.status === 'error') {
-        this.error.set(
-          channel.last_error ||
-            'WhatsApp quedó conectado, pero falta registrar el número.',
-        );
+      const outcome = connectedOutcome(channel);
+      if (outcome.kind === 'error') {
+        this.error.set(outcome.message);
       } else {
-        this.toast.success('WhatsApp quedó conectado.');
+        this.toast.success(outcome.message);
       }
     } catch (error) {
       this.error.set(this.extractErrorMessage(error));

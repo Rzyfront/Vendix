@@ -13,6 +13,10 @@ import { isOptOutKeyword } from '../../../../messaging/utils/opt-out-keywords.ut
 import { S3Service } from '../../../../common/services/s3.service';
 import { S3PathHelper } from '../../../../common/helpers/s3-path.helper';
 import { CrmInboxEventsService } from '../../../../messaging/events/crm-inbox-events.service';
+import {
+  buildWhatsappDisconnectData,
+  resolveWhatsappDisconnectionMessage,
+} from '../../../store/integrations/channels/whatsapp-channel-disconnect';
 
 const PROVIDER = 'meta_cloud';
 const MEDIA_TYPES = ['image', 'video', 'audio', 'document', 'sticker'] as const;
@@ -59,7 +63,29 @@ export interface InboundOutcome {
   messages_created: number;
   statuses_applied: number;
   statuses_missing: number;
+  /** Messages sent from the WhatsApp Business app, mirrored from echoes. */
+  echoes_created: number;
+  /** Echoes without a recipient phone (BSUID only), not stored. */
+  echoes_skipped: number;
+  /** Channels disconnected by an `account_update` event. */
+  channels_disconnected: number;
 }
+
+/** Webhook `changes[].field` values this service acts on. */
+type WebhookField =
+  | 'messages'
+  | 'smb_message_echoes'
+  | 'account_update'
+  | 'history'
+  | 'smb_app_state_sync';
+const HANDLED_FIELDS: WebhookField[] = [
+  'messages',
+  'smb_message_echoes',
+  'account_update',
+  'history',
+  'smb_app_state_sync',
+];
+const DISCONNECT_EVENTS = ['PARTNER_REMOVED', 'ACCOUNT_OFFBOARDED'];
 
 interface StoredMedia {
   type: string;
@@ -116,6 +142,9 @@ export class MetaWhatsappInboundService {
       messages_created: 0,
       statuses_applied: 0,
       statuses_missing: 0,
+      echoes_created: 0,
+      echoes_skipped: 0,
+      channels_disconnected: 0,
     };
 
     const event = await this.prisma.social_webhook_events.findUnique({
@@ -129,10 +158,29 @@ export class MetaWhatsappInboundService {
       return { ...outcome, status: 'skipped' };
     }
 
-    const values = this.extractValues(event.payload);
-    let matchedChannel = false;
+    const changes = this.extractChanges(event.payload);
+    let handled = false;
+    const ignoredReasons: string[] = [];
 
-    for (const value of values) {
+    for (const { field, value } of changes) {
+      if (field === 'account_update') {
+        const result = await this.handleAccountUpdate(value);
+        outcome.channels_disconnected += result.disconnected;
+        if (result.handled) handled = true;
+        else ignoredReasons.push(result.reason);
+        continue;
+      }
+      if (field === 'smb_app_state_sync') {
+        // Contacts are not used yet (D4); the raw payload stays stored.
+        handled = true;
+        continue;
+      }
+      if (field === 'history') {
+        // History is not processed yet; the raw payload stays stored.
+        ignoredReasons.push('history sync is not processed yet');
+        continue;
+      }
+
       const phoneNumberId = value?.metadata?.phone_number_id;
       if (!phoneNumberId) continue;
       // `phone_number_id` is not unique and a disconnected row keeps it, so
@@ -150,12 +198,28 @@ export class MetaWhatsappInboundService {
           { id: 'desc' },
         ],
       });
-      if (!channel) continue;
-      matchedChannel = true;
+      if (!channel) {
+        ignoredReasons.push('No WhatsApp channel for phone_number_id');
+        continue;
+      }
+      handled = true;
 
       await RequestContextService.runIsolated(
         { store_id: channel.store_id, is_super_admin: false, is_owner: false },
         async () => {
+          if (field === 'smb_message_echoes') {
+            for (const echo of this.asArray(value.message_echoes)) {
+              const result = await this.handleEcho(
+                event.id,
+                channel,
+                echo,
+                options,
+              );
+              if (result === 'created') outcome.echoes_created++;
+              if (result === 'skipped') outcome.echoes_skipped++;
+            }
+            return;
+          }
           for (const message of this.asArray(value.messages)) {
             const created = await this.handleMessage(
               event.id,
@@ -174,11 +238,13 @@ export class MetaWhatsappInboundService {
       );
     }
 
-    if (!matchedChannel) {
+    if (!handled) {
       await this.settle(
         eventId,
         'ignored',
-        'No WhatsApp channel for phone_number_id',
+        ignoredReasons.length
+          ? [...new Set(ignoredReasons)].join('; ')
+          : 'No WhatsApp channel for phone_number_id',
       );
       return { ...outcome, status: 'ignored' };
     }
@@ -297,6 +363,170 @@ export class MetaWhatsappInboundService {
       direction: 'inbound',
     });
     return true;
+  }
+
+  /**
+   * A message the business sent from the WhatsApp Business app. The
+   * customer is `to`. It is stored as a sent outbound message but never
+   * bumps unread or `last_inbound_at`: only a customer message opens the
+   * 24h window (Meta), and the business already knows what it wrote.
+   * Echoes without a phone (BSUID only) are skipped (D5).
+   */
+  private async handleEcho(
+    eventId: number,
+    channel: WhatsappChannelRow,
+    echo: any,
+    options: InboundProcessOptions,
+  ): Promise<'created' | 'duplicate' | 'skipped' | 'ignored'> {
+    const wamid = typeof echo?.id === 'string' ? echo.id : null;
+    if (!wamid) return 'ignored';
+    const contact = toE164(echo?.to);
+    if (!contact) return 'skipped';
+    if (echo.type === 'reaction') return 'ignored';
+
+    const existing = await this.prisma.crm_messages.findUnique({
+      where: {
+        provider_provider_message_id: {
+          provider: PROVIDER,
+          provider_message_id: wamid,
+        },
+      },
+    });
+    if (existing) return 'duplicate';
+
+    const sentAt = this.toDate(echo.timestamp);
+    const media = await this.collectMedia(channel, echo, options);
+    const conversation = await this.findOrCreateConversation(channel, contact);
+
+    let createdId: number;
+    try {
+      const created = await this.prisma.crm_messages.create({
+        data: {
+          store_id: channel.store_id,
+          conversation_id: conversation.id,
+          direction: 'outbound',
+          channel: 'whatsapp',
+          status: 'sent',
+          body: this.extractBody(echo),
+          media: media
+            ? (media as unknown as Prisma.InputJsonValue)
+            : undefined,
+          provider: PROVIDER,
+          provider_message_id: wamid,
+          webhook_event_id: eventId,
+          sent_at: sentAt,
+          created_at: sentAt,
+          sent_by_user_id: null,
+        },
+      });
+      createdId = created.id;
+    } catch (error) {
+      if ((error as { code?: string })?.code === 'P2002') return 'duplicate';
+      throw error;
+    }
+
+    const lastMessageAt = conversation.last_message_at;
+    await this.prisma.crm_conversations.update({
+      where: { id: conversation.id },
+      data: {
+        last_message_at:
+          lastMessageAt && lastMessageAt > sentAt ? lastMessageAt : sentAt,
+      },
+    });
+
+    await this.events.publish({
+      type: 'crm.message',
+      store_id: channel.store_id,
+      conversation_id: conversation.id,
+      assigned_user_id: conversation.assigned_user_id ?? null,
+      message_id: createdId,
+      status: 'sent',
+      direction: 'outbound',
+    });
+    return 'created';
+  }
+
+  /**
+   * `account_update`: the merchant (or Meta) disconnected the number. Matches
+   * by `waba_info.waba_id` only: `entry.id` is the partner business id here,
+   * not the WABA. The worker has no tenant context, so the lookup is
+   * unscoped, like the phone lookup of the other fields.
+   */
+  private async handleAccountUpdate(
+    value: any,
+  ): Promise<
+    | { handled: true; disconnected: number }
+    | { handled: false; disconnected: 0; reason: string }
+  > {
+    const event = typeof value?.event === 'string' ? value.event : null;
+    const wabaId = value?.waba_info?.waba_id;
+    if (!wabaId) {
+      return {
+        handled: false,
+        disconnected: 0,
+        reason: 'account_update without waba_info.waba_id',
+      };
+    }
+    if (event === 'ACCOUNT_RECONNECTED') {
+      // Restoring the token needs a new onboarding from Vendix.
+      this.logger.log(`WhatsApp account ${event} for WABA ${wabaId}`);
+      return { handled: true, disconnected: 0 };
+    }
+    if (!event || !DISCONNECT_EVENTS.includes(event)) {
+      return {
+        handled: false,
+        disconnected: 0,
+        reason: `account_update event ${event ?? 'unknown'} is not handled`,
+      };
+    }
+
+    const info = {
+      event,
+      reason: value.disconnection_info?.reason ?? null,
+      initiated_by: value.disconnection_info?.initiated_by ?? null,
+    };
+    const channels = await this.prisma.social_channels.findMany({
+      where: {
+        provider: PROVIDER,
+        channel_type: 'whatsapp',
+        waba_id: String(wabaId),
+        status: { not: 'disconnected' },
+      },
+      select: { id: true, store_id: true, metadata: true },
+    });
+
+    let disconnected = 0;
+    for (const channel of channels) {
+      const result = await this.prisma.social_channels.updateMany({
+        where: {
+          id: channel.id,
+          provider: PROVIDER,
+          channel_type: 'whatsapp',
+          status: { not: 'disconnected' },
+        },
+        data: buildWhatsappDisconnectData(
+          channel.metadata as Record<string, unknown> | null,
+          {
+            last_error: resolveWhatsappDisconnectionMessage(info),
+            disconnection: { ...info, at: new Date().toISOString() },
+          },
+        ),
+      });
+      if (result.count > 0) {
+        disconnected++;
+        this.logger.log(
+          `WhatsApp channel ${channel.id} (store ${channel.store_id}) disconnected by ${event}`,
+        );
+      }
+    }
+    if (disconnected === 0) {
+      return {
+        handled: false,
+        disconnected: 0,
+        reason: 'No connected WhatsApp channel for waba_id',
+      };
+    }
+    return { handled: true, disconnected };
   }
 
   private async findOrCreateConversation(
@@ -649,12 +879,20 @@ export class MetaWhatsappInboundService {
     }
   }
 
-  private extractValues(payload: unknown): any[] {
+  private extractChanges(
+    payload: unknown,
+  ): Array<{ field: WebhookField; value: any }> {
     const entries = this.asArray((payload as { entry?: unknown })?.entry);
     return entries.flatMap((entry: any) =>
       this.asArray(entry?.changes)
-        .filter((change: any) => change?.field === 'messages' && change.value)
-        .map((change: any) => change.value),
+        .filter(
+          (change: any) =>
+            HANDLED_FIELDS.includes(change?.field) && change.value,
+        )
+        .map((change: any) => ({
+          field: change.field as WebhookField,
+          value: change.value,
+        })),
     );
   }
 

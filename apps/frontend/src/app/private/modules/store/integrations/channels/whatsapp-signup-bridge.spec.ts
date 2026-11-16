@@ -205,6 +205,28 @@ describe('whatsapp signup bridge: panel waits for the answer', () => {
     });
   });
 
+  it('forwards finish_event and still drops unknown fields', async () => {
+    const popup = fakePopup();
+    const waiting = settle(
+      waitForSignupBridgeResult(popup, BRIDGE, NONCE, FAST),
+    );
+    post(
+      BRIDGE,
+      valid({
+        result: {
+          code: 'meta-code',
+          finish_event: 'FINISH_WHATSAPP_BUSINESS_APP_ONBOARDING',
+          admin: true,
+        },
+      }),
+    );
+    const { value } = await waiting;
+    expect(value).toEqual({
+      code: 'meta-code',
+      finish_event: 'FINISH_WHATSAPP_BUSINESS_APP_ONBOARDING',
+    });
+  });
+
   it('drops fields the complete endpoint does not accept', async () => {
     const popup = fakePopup();
     const waiting = settle(
