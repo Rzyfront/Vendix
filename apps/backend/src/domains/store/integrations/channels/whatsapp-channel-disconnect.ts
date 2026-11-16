@@ -38,7 +38,7 @@ export function buildWhatsappDisconnectData(
       ...(options.disconnection
         ? { disconnection: options.disconnection }
         : {}),
-    } as Prisma.InputJsonObject,
+    } as unknown as Prisma.InputJsonObject,
   };
 }
 

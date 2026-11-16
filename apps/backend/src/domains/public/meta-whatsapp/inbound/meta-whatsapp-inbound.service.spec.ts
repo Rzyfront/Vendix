@@ -45,7 +45,11 @@ function setup(payloadName: string, overrides: { eventStatus?: string } = {}) {
       }),
       update: jest.fn().mockResolvedValue({}),
     },
-    social_channels: { findFirst: jest.fn().mockResolvedValue(channelRow) },
+    social_channels: {
+      findFirst: jest.fn().mockResolvedValue(channelRow),
+      findMany: jest.fn().mockResolvedValue([]),
+      updateMany: jest.fn().mockResolvedValue({ count: 1 }),
+    },
     stores: {
       findUnique: jest.fn().mockResolvedValue({
         id: 10,
