@@ -176,12 +176,12 @@
         inputmode="decimal"
         autocomplete="off"
         class="w-full rounded-xl border bg-background px-3 py-2 text-sm text-text-primary"
-        [class]="scalarErrors()[field.key] ? 'border-error' : 'border-border'"
-        [value]="scalars()[field.key]"
+        [class]="scalarError(field.key) ? 'border-error' : 'border-border'"
+        [value]="scalarValue(field.key)"
         [disabled]="!canWrite()"
         (input)="updateScalar(field.key, valueOf($event))"
       />
-      @if (scalarErrors()[field.key]; as msg) {
+      @if (scalarError(field.key); as msg) {
         <p class="text-xs text-error">{{ msg }}</p>
       }
     }

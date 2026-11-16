@@ -243,6 +243,15 @@ export class MessagingPricesComponent {
     this.unmark(key);
   }
 
+  /** Typed accessors: the scalar ng-template context (`let-field`) is untyped. */
+  scalarValue(key: ScalarKey): string {
+    return this.scalars()[key];
+  }
+
+  scalarError(key: ScalarKey): string | undefined {
+    return this.scalarErrors()[key];
+  }
+
   updateScalar(key: ScalarKey, value: string): void {
     this.scalars.update((s) => ({ ...s, [key]: value }));
     this.unmark(key);
