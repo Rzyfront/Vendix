@@ -69,6 +69,22 @@ describe('MessagingPricesComponent', () => {
     expect(formatUsd(0.1)).toBe('0,10');
   });
 
+  it('rejects a number that overflows to Infinity instead of saving it as "use fallback"', () => {
+    const huge = '1' + '0'.repeat(400);
+    expect(Number.isNaN(parseDecimal(huge))).toBe(true);
+
+    const c = setUp();
+    c.updateScalar('sms_max_price_usd', huge);
+    expect(c.scalarErrors().sms_max_price_usd).toBeDefined();
+    expect(c.canSave()).toBe(false);
+
+    c.addRow('whatsapp_price_table');
+    const row = c.rows.whatsapp_price_table().at(-1)!;
+    c.updateRow('whatsapp_price_table', row.id, 'country', '57');
+    c.updateRow('whatsapp_price_table', row.id, 'price', huge);
+    expect(c.tableErrors.whatsapp_price_table().errors[row.id].price).toBeDefined();
+  });
+
   it('loads the view on init and fills the drafts', () => {
     const c = setUp();
     expect(service.getPrices).toHaveBeenCalledTimes(1);

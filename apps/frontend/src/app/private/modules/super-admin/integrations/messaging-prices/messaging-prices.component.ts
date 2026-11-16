@@ -42,11 +42,13 @@ export const SOURCE_LABELS: Record<MessagingPriceSource, string> = {
   default: 'Por defecto',
 };
 
-/** Parses a user-typed decimal ("0.0509" or "0,0509"); NaN when invalid. */
+/** Parses a user-typed decimal ("0.0509" or "0,0509"); NaN when invalid or not finite. */
 export function parseDecimal(raw: string): number {
   const text = raw.trim().replace(',', '.');
   if (!text || !/^\d*\.?\d+$|^\d+\.$/.test(text)) return NaN;
-  return Number(text);
+  const value = Number(text);
+  // A huge digit string overflows to Infinity, which JSON sends as null ("use fallback").
+  return Number.isFinite(value) ? value : NaN;
 }
 
 /** USD with up to 4 decimals and es-CO separators (never store currency). */
