@@ -24,6 +24,7 @@ import { SupportDocumentService } from '../../services/support-document.service'
 import { SuppliersService } from '../../../inventory/services/suppliers.service';
 import type {
   CreateSupportDocumentDto,
+  SupportDocumentAdjustmentSource,
   SupportDocumentRow,
   SupportDocumentType,
 } from '../../interfaces/support-document.interface';
@@ -69,7 +70,7 @@ import { Subscription } from 'rxjs';
     <app-modal
       [(isOpen)]="isOpenModel"
       (cancel)="onClose()"
-      title="Nuevo documento soporte"
+      [title]="modalTitle()"
       size="lg"
       [dialog]="true"
       [canClose]="canCloseModal"
@@ -120,6 +121,11 @@ import { Subscription } from 'rxjs';
             [required]="true"
             min="1"
           ></app-input>
+          @if (adjustmentOf(); as original) {
+            <p class="text-xs text-text-secondary" role="note">
+              Corrige el documento soporte {{ original.invoice_number }} (ID {{ original.id }}), aceptado por la DIAN.
+            </p>
+          }
         }
 
         <div class="grid grid-cols-1 md:grid-cols-2 gap-3">
@@ -284,6 +290,16 @@ export class SupportDocumentCreateComponent {
 
   /** ID inicial del proveedor (si el padre lo trae, ej: desde la pantalla del proveedor). */
   readonly initialSupplierId = input<number | null>(null);
+
+  /**
+   * Documento soporte aceptado a corregir (QUI-683). Si llega, el form abre
+   * como nota de ajuste con el original y su proveedor prellenados.
+   */
+  readonly adjustmentOf = input<SupportDocumentAdjustmentSource | null>(null);
+
+  readonly modalTitle = computed(() =>
+    this.adjustmentOf() ? 'Nueva nota de ajuste' : 'Nuevo documento soporte',
+  );
 
   readonly created = output<SupportDocumentRow>();
 
@@ -529,10 +545,13 @@ export class SupportDocumentCreateComponent {
   }
 
   private reset(): void {
+    // Con un original a corregir, el form abre como nota de ajuste: el cambio
+    // de `invoice_type` (primer control) activa la validación del original.
+    const original = this.adjustmentOf();
     this.form.reset({
-      invoice_type: 'support_document',
-      supplier_id: this.initialSupplierId() ?? null,
-      related_invoice_id: null,
+      invoice_type: original ? 'support_adjustment_note' : 'support_document',
+      supplier_id: original?.supplier_id ?? this.initialSupplierId() ?? null,
+      related_invoice_id: original?.id ?? null,
       issue_date: toLocalDateString(),
       due_date: '',
       withholding_amount: 0,
