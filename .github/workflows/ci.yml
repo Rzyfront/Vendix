@@ -723,6 +723,7 @@ jobs:
           --include='**/shared/constants/module-industries.spec.ts'
           --include='**/core/services/plan-paywall.service.spec.ts'
           --include='**/subscription/pages/plans/plan-catalog.preselect.spec.ts'
+          --include='**/subscription/pages/my-subscription/my-subscription.component.spec.ts'
           --include='**/core/interceptors/subscription-paywall.interceptor.spec.ts'
           --include='**/core/services/subscription-access.service.spec.ts'
           --include='**/workflows/components/workflow-access-panel/workflow-access-panel.component.spec.ts'

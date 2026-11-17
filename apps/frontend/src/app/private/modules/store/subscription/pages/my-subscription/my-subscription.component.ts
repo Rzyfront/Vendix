@@ -914,6 +914,16 @@ export class MySubscriptionComponent implements OnInit {
     return !!end && new Date(end).getTime() <= Date.now();
   });
 
+  /**
+   * QUI-693 — the row is still `active` (inside its plan's grace, or the
+   * state engine has not escalated it yet) but the paid cycle already ended.
+   * The status badge must say so instead of "Activa" next to "Ciclo vencido":
+   * both read `current_period_end` through `cycleIsOverdue()`.
+   */
+  readonly isActiveButOverdue = computed(
+    () => this.status() === 'active' && this.cycleIsOverdue(),
+  );
+
   readonly cycleOverdueLabel = computed(() => {
     const end = this.current()?.current_period_end;
     if (!end) return '0 h';
@@ -1105,6 +1115,7 @@ export class MySubscriptionComponent implements OnInit {
   readonly badgeColor = computed<StickyHeaderBadgeColor>(() => {
     const s = this.status();
     if (this.currentPlanUnavailable()) return 'red';
+    if (this.isActiveButOverdue()) return 'yellow';
     if (s === 'active') return 'green';
     if (s === 'trial' || s === 'trialing') return 'yellow';
     if (
@@ -1451,6 +1462,12 @@ export class MySubscriptionComponent implements OnInit {
   }
 
   getStatusLabel(): string {
+    // QUI-693 — an `active` row whose cycle already ended is not "Activa":
+    // same `current_period_end` the CICLO card reads. Checked before the
+    // override below, which must not resurrect "Activa" on an overdue cycle.
+    if (this.isActiveButOverdue()) {
+      return 'Vencida';
+    }
     // RNC-PaidPlan — `pending_change_abandoned` keeps the paid plan active;
     // the canonical label is "Activa". This override ensures the badge does
     // not flip to "Pago Pendiente" while the user still holds their plan.
