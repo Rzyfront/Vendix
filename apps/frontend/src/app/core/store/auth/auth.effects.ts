@@ -404,6 +404,8 @@ export class AuthEffects {
                 user: parsedState.user,
                 user_settings: parsedState.user_settings,
                 store_settings: parsedState.store_settings,
+                // restoreAuthState no hereda del estado previo (QUI-563).
+                default_panel_ui: parsedState.default_panel_ui,
                 tokens: parsedState.tokens,
                 permissions: parsedState.permissions || [],
                 roles: parsedState.roles || [],

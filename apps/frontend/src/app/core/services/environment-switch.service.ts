@@ -8,6 +8,7 @@ import { AuthFacade } from '../../core/store/auth/auth.facade';
 import { AuthService } from './auth.service';
 import { AppConfigService } from './app-config.service';
 import { RouteManagerService } from './route-manager.service';
+import { ToastService } from '../../shared/components/toast/toast.service';
 import { environment } from '../../../environments/environment';
 
 export interface SwitchEnvironmentRequest {
@@ -49,6 +50,7 @@ export class EnvironmentSwitchService {
   private authService = inject(AuthService);
   private appConfigService = inject(AppConfigService);
   private routeManager = inject(RouteManagerService);
+  private toastService = inject(ToastService);
   private router = inject(Router);
   private location = inject(Location);
 
@@ -134,6 +136,17 @@ export class EnvironmentSwitchService {
         (!response_data?.access_token && !response_data?.tokens)
       ) {
         throw new Error(response?.message || 'Invalid response from server');
+      }
+
+      // QUI-563: a store session needs the target store's settings (currency,
+      // timezone, branding, panel_ui). Without them the app would keep running
+      // on the previous store's data, so the switch is not applied: the
+      // current session stays untouched and the user is told.
+      if (targetEnvironment === 'STORE_ADMIN' && !response_data.store_settings) {
+        this.toastService.error(
+          'No se pudo cargar la configuración de la tienda. Sigues en el entorno actual; intenta de nuevo.',
+        );
+        throw new Error('Store switch response is missing store_settings');
       }
 
       const updated_environment =

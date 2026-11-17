@@ -9,6 +9,7 @@ import { AuthFacade } from '../store/auth/auth.facade';
 import { AuthService } from './auth.service';
 import { AppConfigService } from './app-config.service';
 import { RouteManagerService } from './route-manager.service';
+import { ToastService } from '../../shared/components/toast/toast.service';
 
 /**
  * QUI-981: el cambio de entorno no debe volver a montar el <router-outlet>
@@ -21,12 +22,14 @@ describe('EnvironmentSwitchService (QUI-981)', () => {
   let log: string[];
   let restoreAuthState: jasmine.Spy;
   let navigateResult: boolean;
+  let toastError: jasmine.Spy;
 
   const storeConfig = { routes: [{ path: 'admin' }] } as any;
 
   beforeEach(() => {
     log = [];
     navigateResult = true;
+    toastError = jasmine.createSpy('toastError');
     restoreAuthState = jasmine
       .createSpy('restoreAuthState')
       .and.callFake(() => log.push('restoreAuthState'));
@@ -42,6 +45,7 @@ describe('EnvironmentSwitchService (QUI-981)', () => {
           useValue: { restoreAuthState, isAuthenticated: () => true },
         },
         { provide: AuthService, useValue: { getToken: () => 'org-token' } },
+        { provide: ToastService, useValue: { error: toastError } },
         {
           provide: AppConfigService,
           useValue: {
@@ -88,6 +92,11 @@ describe('EnvironmentSwitchService (QUI-981)', () => {
       refresh_token: 'refresh',
       permissions: [],
       roles: [],
+      // Contexto de la tienda destino: el backend lo envía en todo switch
+      // (EnvironmentSwitchService) igual que en el login.
+      user_settings: { app_type: 'STORE_ADMIN', config: { panel_ui: {} } },
+      store_settings: { general: { currency: 'USD' } },
+      default_panel_ui: { STORE_ADMIN: { dashboard: true } },
       updated_environment: 'STORE_ADMIN',
     },
   };
@@ -129,5 +138,52 @@ describe('EnvironmentSwitchService (QUI-981)', () => {
 
     expect(log).toEqual([]);
     expect(restoreAuthState).not.toHaveBeenCalled();
+  });
+
+  // QUI-563 Fase 0 — el switch entrega el contexto de la tienda destino y el
+  // estado de auth lo toma tal cual; sin él, el switch no se aplica.
+  it('hands the target store context to the auth state as received', async () => {
+    switchResponds(okResponse);
+
+    await service.performEnvironmentSwitch('STORE_ADMIN', 'tienda-demo');
+
+    const args = restoreAuthState.calls.mostRecent().args;
+    expect(args[4]).toEqual(okResponse.data.user_settings);
+    expect(args[5]).toEqual(okResponse.data.store_settings);
+    expect(args[6]).toEqual(okResponse.data.default_panel_ui);
+  });
+
+  it('fails visibly and keeps the current session when a store switch arrives without store_settings', async () => {
+    const { store_settings, ...withoutStoreSettings } = okResponse.data;
+    switchResponds({ success: true, data: withoutStoreSettings });
+
+    await expectAsync(
+      service.performEnvironmentSwitch('STORE_ADMIN', 'tienda-demo'),
+    ).toBeRejected();
+
+    expect(toastError).toHaveBeenCalledTimes(1);
+    expect(restoreAuthState).not.toHaveBeenCalled();
+    expect(log).toEqual([]);
+    expect(localStorage.setItem).not.toHaveBeenCalled();
+  });
+
+  it('accepts an organization switch without store_settings', async () => {
+    spyOn(service, 'switchToOrganization').and.returnValue(
+      of({
+        success: true,
+        data: {
+          ...okResponse.data,
+          store_settings: null,
+          updated_environment: 'ORG_ADMIN',
+        },
+      }),
+    );
+
+    await expectAsync(
+      service.performEnvironmentSwitch('ORG_ADMIN'),
+    ).toBeResolvedTo(true);
+
+    expect(toastError).not.toHaveBeenCalled();
+    expect(restoreAuthState.calls.mostRecent().args[5]).toBeNull();
   });
 });

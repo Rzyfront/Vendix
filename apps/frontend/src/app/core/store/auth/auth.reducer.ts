@@ -205,12 +205,16 @@ export const authReducer = createReducer(
   on(
     AuthActions.restoreAuthState,
     (state, { user, user_settings, store_settings, default_panel_ui, tokens, permissions, roles }) => {
+      // QUI-563: this action carries a complete session (store switch or
+      // rehydration), so its context replaces the current one. Falling back to
+      // `state` would keep the previous store's settings or panel_ui after a
+      // switch; a missing value stays null instead.
       const newState = {
         ...state,
         user,
-        user_settings,
-        store_settings,
-        default_panel_ui: default_panel_ui || state.default_panel_ui,
+        user_settings: user_settings ?? null,
+        store_settings: store_settings ?? null,
+        default_panel_ui: default_panel_ui ?? null,
         tokens,
         permissions: permissions || [],
         roles: roles || [],
