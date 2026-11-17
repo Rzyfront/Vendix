@@ -13,6 +13,8 @@ import { S3Service } from '@common/services/s3.service';
 import { EventEmitter2 } from '@nestjs/event-emitter';
 import { VendixHttpException } from 'src/common/errors';
 import * as bcrypt from 'bcrypt';
+import { EnvironmentSwitchService } from './environment-switch.service';
+import { mergeStoreSettingsWithDefaults } from '../store/settings/defaults/default-store-settings';
 
 /**
  * F-194: el servicio migró de `UnauthorizedException` (Nest) a
@@ -48,6 +50,8 @@ describe('AuthService Login Flow', () => {
     user_settings: {
       findUnique: jest.fn(),
       update: jest.fn(),
+      // El cambio de entorno (EnvironmentSwitchService) fija app_type con upsert.
+      upsert: jest.fn(),
     },
     organizations: {
       findUnique: jest.fn(),
@@ -730,6 +734,137 @@ describe('AuthService Login Flow', () => {
 
       expect(result.user.avatar_url).toBe(SIGNED);
       expect(result.access_token).toBe('a');
+    });
+  });
+
+  /**
+   * QUI-563 Fase 0: `POST /auth/switch-environment` lo atiende
+   * `EnvironmentSwitchService` (auth.controller.ts), no `AuthService`. Tras el
+   * switch el frontend reemplaza su contexto de tienda con lo que trae la
+   * respuesta, así que ese contexto tiene que ser el mismo que daría un login
+   * directo a la tienda destino. Si alguno de los tres campos faltara o
+   * difiriera, la app operaría con datos de la tienda anterior.
+   */
+  describe('switch-environment devuelve el mismo contexto operativo que el login (QUI-563)', () => {
+    const STORE_SETTINGS_ROW = {
+      general: { currency: 'USD', timezone: 'America/New_York' },
+      pos: { allow_discount: false },
+    };
+    const PANEL_UI = { STORE_ADMIN: { dashboard: true, pos: true } };
+    const OWNER_ROLE = {
+      store_id: null,
+      roles: {
+        name: 'owner',
+        role_permissions: [{ permissions: { name: 'store:settings:read' } }],
+      },
+    };
+    const USER_SETTINGS_ROW = {
+      id: 5,
+      user_id: 1,
+      app_type: 'STORE_ADMIN',
+      config: { panel_ui: { STORE_ADMIN: { dashboard: false } } },
+    };
+    const STORE_ROW = {
+      id: 10,
+      name: 'Tienda A',
+      slug: 'store-a',
+      organization_id: 1,
+      logo_url: null,
+      organizations: { id: 1, slug: 'org-a' },
+      domain_settings: [],
+      store_settings: { settings: STORE_SETTINGS_ROW },
+      store_users: [{ user_id: 1, store_id: 10 }],
+    };
+
+    beforeEach(async () => {
+      mockDefaultPanelUIService.generatePanelUI.mockReturnValue({
+        panel_ui: PANEL_UI,
+      });
+      mockPrismaService.users.findMany.mockResolvedValue([
+        accountRow({
+          password: await bcrypt.hash('123', 4),
+          user_roles: [OWNER_ROLE],
+        }),
+      ]);
+      mockPrismaService.users.findUnique.mockResolvedValue({
+        id: 1,
+        email: 'test@test.com',
+        password: 'hashed',
+        organization_id: 1,
+        main_store_id: 10,
+        user_roles: [OWNER_ROLE],
+        organizations: { id: 1, slug: 'org-a' },
+      });
+      mockPrismaService.users.update.mockResolvedValue({});
+      mockPrismaService.user_settings.findUnique.mockResolvedValue(
+        USER_SETTINGS_ROW,
+      );
+      mockPrismaService.user_settings.upsert.mockResolvedValue(
+        USER_SETTINGS_ROW,
+      );
+      mockPrismaService.stores.findFirst.mockResolvedValue(STORE_ROW);
+      mockPrismaService.stores.findUnique.mockResolvedValue(STORE_ROW);
+      mockPrismaService.store_users.findFirst.mockResolvedValue({
+        store: STORE_ROW,
+      });
+      mockPrismaService.user_roles.findMany.mockResolvedValue([OWNER_ROLE]);
+      mockPrismaService.refresh_tokens.create.mockResolvedValue({});
+    });
+
+    afterEach(() => {
+      mockDefaultPanelUIService.generatePanelUI.mockReturnValue({});
+      mockPrismaService.user_roles.findMany.mockResolvedValue([]);
+    });
+
+    function switchService(): EnvironmentSwitchService {
+      return new EnvironmentSwitchService(
+        mockPrismaService as any,
+        mockJwtService as any,
+        mockConfigService as any,
+        { log: jest.fn() } as any,
+        mockDefaultPanelUIService as any,
+        mockS3Service as any,
+      );
+    }
+
+    it('store_settings, user_settings, default_panel_ui y permisos coinciden campo por campo', async () => {
+      const login: any = await service.login({
+        email: 'test@test.com',
+        password: '123',
+        store_slug: 'store-a',
+      });
+      const switched: any = await switchService().switchEnvironment(
+        1,
+        'STORE_ADMIN',
+        'store-a',
+      );
+
+      // El contexto es el de la tienda destino, ya mezclado con los defaults.
+      expect(login.store_settings).toEqual(
+        mergeStoreSettingsWithDefaults(STORE_SETTINGS_ROW),
+      );
+      expect(login.default_panel_ui).toEqual(PANEL_UI);
+
+      expect(switched.store_settings).toEqual(login.store_settings);
+      expect(switched.user_settings).toEqual(login.user_settings);
+      expect(switched.default_panel_ui).toEqual(login.default_panel_ui);
+      expect(switched.permissions).toEqual(login.permissions);
+      expect(switched.user.store.id).toBe(login.user.store.id);
+    });
+
+    it('el switch a la organización no arrastra store_settings de ninguna tienda', async () => {
+      mockPrismaService.organizations.findUnique.mockResolvedValue({
+        account_type: 'MULTI_STORE',
+      });
+
+      const switched: any = await switchService().switchEnvironment(
+        1,
+        'ORG_ADMIN',
+      );
+
+      expect(switched.store_settings).toBeNull();
+      expect(switched.default_panel_ui).toEqual(PANEL_UI);
+      expect(switched.user_settings).not.toBeNull();
     });
   });
 });
