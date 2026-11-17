@@ -2,6 +2,7 @@ import {
   SubscriptionStateService,
   LOCK_REASON_PLAN_RETIRED,
   LOCK_REASON_PAST_DUE,
+  resolveDunningEscalationPath,
 } from './subscription-state.service';
 import { FREE_PLAN_LAPSE_REASON } from '../contracts/free-plan-lapse.contract';
 
@@ -869,6 +870,293 @@ describe('SubscriptionStateService', () => {
       const evt = prismaMock.subscription_events.create.mock.calls[0][0].data;
       expect(evt.payload.previous_lock_reason).toBe(LOCK_REASON_PLAN_RETIRED);
       expect(evt.payload.lock_reason).toBe(LOCK_REASON_PLAN_RETIRED);
+    });
+  });
+
+  // ----------------------------------------------------------------------
+  // QUI-693 — a subscription several rungs behind reaches its target rung
+  // through legal hops instead of throwing SUBSCRIPTION_010 and staying active
+  // ----------------------------------------------------------------------
+
+  describe('QUI-693 — dunning catch-up walks the ladder', () => {
+    const DAY = 24 * 60 * 60 * 1000;
+
+    /** Live row behind the mocks: every hop is validated against it. */
+    let row: { state: string; lock_reason: string | null };
+
+    /**
+     * Primes a PAID subscription whose period lapsed `daysPastPeriodEnd` ago,
+     * on the plan's default cadence (5/10/14/45, `schema.prisma` defaults).
+     * `transition()` really runs: its FOR UPDATE read and its update both go
+     * through `row`, so an illegal hop would throw exactly as in production.
+     */
+    function primeOverdue(opts: {
+      state: string;
+      daysPastPeriodEnd: number;
+      lockReason?: string | null;
+      planState?: string;
+      archivedAt?: Date | null;
+    }) {
+      row = { state: opts.state, lock_reason: opts.lockReason ?? null };
+      const periodEnd = new Date(Date.now() - opts.daysPastPeriodEnd * DAY);
+
+      prismaMock.store_subscriptions.findUnique.mockImplementation(
+        async () => ({
+          id: 1,
+          store_id: 10,
+          state: row.state,
+          lock_reason: row.lock_reason,
+          metadata: null,
+          trial_ends_at: null,
+          cancelled_at: null,
+          updated_at: new Date(),
+          current_period_end: periodEnd,
+          effective_price: 89000,
+          partner_margin_amount: null,
+          auto_renew: true,
+          promotional_plan_id: null,
+          promotional_plan: null,
+          plan: {
+            state: opts.planState ?? 'active',
+            archived_at: opts.archivedAt ?? null,
+            is_promotional: false,
+            grace_period_soft_days: 5,
+            grace_period_hard_days: 10,
+            suspension_day: 14,
+            cancellation_day: 45,
+          },
+        }),
+      );
+      prismaMock.$queryRaw.mockImplementation(async () => [
+        { id: 1, state: row.state },
+      ]);
+      prismaMock.store_subscriptions.findUniqueOrThrow.mockImplementation(
+        async () => ({ id: 1, ...row }),
+      );
+      prismaMock.store_subscriptions.update.mockImplementation(
+        async ({ data }: any) => {
+          row.state = data.state;
+          // transition() contract: `undefined` leaves the column intact.
+          if (data.lock_reason !== undefined)
+            row.lock_reason = data.lock_reason;
+          return { id: 1, ...row };
+        },
+      );
+    }
+
+    /** `from → to` of every audit row written, in order. */
+    function walkedHops(): string[] {
+      return prismaMock.subscription_events.create.mock.calls.map(
+        ([arg]: any[]) => `${arg.data.from_state}→${arg.data.to_state}`,
+      );
+    }
+
+    it('active with 20 days overdue reaches suspended through every intermediate rung, without SUBSCRIPTION_010', async () => {
+      primeOverdue({ state: 'active', daysPastPeriodEnd: 20 });
+
+      await expect(
+        service.evaluateAndTransitionForSubscription(1),
+      ).resolves.toBeUndefined();
+
+      expect(row.state).toBe('suspended');
+      expect(walkedHops()).toEqual([
+        'active→grace_soft',
+        'grace_soft→grace_hard',
+        'grace_hard→suspended',
+      ]);
+      // Every hop keeps the side effects of an ordinary transition.
+      expect(accessServiceMock.invalidateCache).toHaveBeenCalledTimes(3);
+      const stateEvents = eventEmitterMock.emit.mock.calls.filter(
+        ([name]: any[]) => name === 'subscription.state.changed',
+      );
+      expect(stateEvents.map(([, p]: any[]) => p.toState)).toEqual([
+        'grace_soft',
+        'grace_hard',
+        'suspended',
+      ]);
+      // The ordinary impago motive is stamped on the suspension rung only.
+      const updates = prismaMock.store_subscriptions.update.mock.calls.map(
+        ([arg]: any[]) => arg.data,
+      );
+      expect(updates.map((d: any) => d.lock_reason)).toEqual([
+        undefined,
+        undefined,
+        LOCK_REASON_PAST_DUE,
+      ]);
+      expect(row.lock_reason).toBe(LOCK_REASON_PAST_DUE);
+      // Grace windows persisted on their own rungs, like the daily path.
+      expect(updates[0].grace_soft_until).toBeInstanceOf(Date);
+      expect(updates[1].grace_hard_until).toBeInstanceOf(Date);
+      // The audit trail names the walk; the landing rung keeps the plain reason.
+      const payloads = prismaMock.subscription_events.create.mock.calls.map(
+        ([arg]: any[]) => arg.data.payload,
+      );
+      expect(payloads.map((p: any) => p.dunning_target)).toEqual([
+        'suspended',
+        'suspended',
+        'suspended',
+      ]);
+      expect(payloads.map((p: any) => p.dunning_step)).toEqual([1, 2, 3]);
+      expect(payloads[2].reason).toBe('Past suspension day');
+      expect(payloads[0].reason).toContain('towards suspended');
+      expect(
+        prismaMock.subscription_events.create.mock.calls.every(
+          ([arg]: any[]) =>
+            arg.data.triggered_by_job === 'subscription-state-engine',
+        ),
+      ).toBe(true);
+    });
+
+    it('active with 12 days overdue lands on grace_hard via grace_soft', async () => {
+      primeOverdue({ state: 'active', daysPastPeriodEnd: 12 });
+
+      await service.evaluateAndTransitionForSubscription(1);
+
+      expect(row.state).toBe('grace_hard');
+      expect(walkedHops()).toEqual([
+        'active→grace_soft',
+        'grace_soft→grace_hard',
+      ]);
+    });
+
+    it('active with 3 days overdue stays active (inside the 5-day soft grace)', async () => {
+      primeOverdue({ state: 'active', daysPastPeriodEnd: 3 });
+
+      await service.evaluateAndTransitionForSubscription(1);
+
+      expect(row.state).toBe('active');
+      expect(prismaMock.$transaction).not.toHaveBeenCalled();
+      expect(prismaMock.subscription_events.create).not.toHaveBeenCalled();
+    });
+
+    it('active with 6 days overdue moves to grace_soft in a single hop', async () => {
+      primeOverdue({ state: 'active', daysPastPeriodEnd: 6 });
+
+      await service.evaluateAndTransitionForSubscription(1);
+
+      expect(row.state).toBe('grace_soft');
+      expect(walkedHops()).toEqual(['active→grace_soft']);
+      const payload =
+        prismaMock.subscription_events.create.mock.calls[0][0].data.payload;
+      expect(payload.reason).toBe('Past soft grace period');
+      expect(payload.dunning_steps).toBe(1);
+    });
+
+    it('re-evaluating a row already escalated does nothing', async () => {
+      primeOverdue({ state: 'active', daysPastPeriodEnd: 20 });
+      await service.evaluateAndTransitionForSubscription(1);
+      const hopsAfterFirstRun = walkedHops().length;
+      prismaMock.$transaction.mockClear();
+
+      await service.evaluateAndTransitionForSubscription(1);
+
+      expect(row.state).toBe('suspended');
+      expect(walkedHops()).toHaveLength(hopsAfterFirstRun);
+      expect(prismaMock.$transaction).not.toHaveBeenCalled();
+    });
+
+    it('never walks backwards: a row past its target rung is left untouched', async () => {
+      // Suspended by hand at day 12, when the cadence only asks for grace_hard.
+      primeOverdue({
+        state: 'suspended',
+        daysPastPeriodEnd: 12,
+        lockReason: 'admin_manual',
+      });
+
+      await expect(
+        service.evaluateAndTransitionForSubscription(1),
+      ).resolves.toBeUndefined();
+
+      expect(row.state).toBe('suspended');
+      expect(prismaMock.$transaction).not.toHaveBeenCalled();
+    });
+
+    it('past the cancellation day keeps the single direct active → cancelled transition', async () => {
+      primeOverdue({ state: 'active', daysPastPeriodEnd: 50 });
+
+      await service.evaluateAndTransitionForSubscription(1);
+
+      expect(row.state).toBe('cancelled');
+      expect(walkedHops()).toEqual(['active→cancelled']);
+    });
+
+    it('a retired-plan motive is stamped at the origin and survives every rung of the walk', async () => {
+      primeOverdue({
+        state: 'active',
+        daysPastPeriodEnd: 20,
+        planState: 'archived',
+        archivedAt: new Date(Date.now() - 30 * DAY),
+      });
+
+      await service.evaluateAndTransitionForSubscription(1);
+
+      const updates = prismaMock.store_subscriptions.update.mock.calls.map(
+        ([arg]: any[]) => arg.data,
+      );
+      expect(updates.map((d: any) => d.state)).toEqual([
+        'grace_soft',
+        'grace_hard',
+        'suspended',
+      ]);
+      expect(updates.map((d: any) => d.lock_reason)).toEqual([
+        LOCK_REASON_PLAN_RETIRED,
+        LOCK_REASON_PLAN_RETIRED,
+        LOCK_REASON_PLAN_RETIRED,
+      ]);
+      const payloads = prismaMock.subscription_events.create.mock.calls.map(
+        ([arg]: any[]) => arg.data.payload,
+      );
+      expect(payloads.map((p: any) => p.previous_lock_reason)).toEqual([
+        null,
+        LOCK_REASON_PLAN_RETIRED,
+        LOCK_REASON_PLAN_RETIRED,
+      ]);
+    });
+
+    describe('resolveDunningEscalationPath', () => {
+      it('every consecutive rung of the ladder is a legal hop in the matrix', () => {
+        const ladder = [
+          'active',
+          'grace_soft',
+          'grace_hard',
+          'suspended',
+          'cancelled',
+        ] as const;
+        for (let i = 0; i < ladder.length - 1; i++) {
+          expect(service.isLegalTransition(ladder[i], ladder[i + 1])).toBe(
+            true,
+          );
+        }
+      });
+
+      it.each([
+        ['active', 'grace_soft', ['grace_soft']],
+        ['active', 'grace_hard', ['grace_soft', 'grace_hard']],
+        ['active', 'suspended', ['grace_soft', 'grace_hard', 'suspended']],
+        ['grace_soft', 'suspended', ['grace_hard', 'suspended']],
+        ['active', 'cancelled', ['cancelled']],
+        ['grace_soft', 'cancelled', ['cancelled']],
+        ['suspended', 'suspended', []],
+        ['suspended', 'grace_hard', []],
+        ['grace_hard', 'grace_soft', []],
+      ])('%s → %s walks %j', (from, to, expected) => {
+        expect(resolveDunningEscalationPath(from as any, to as any)).toEqual(
+          expected,
+        );
+      });
+
+      it.each([
+        ['pending_payment', 'grace_hard'],
+        ['blocked', 'suspended'],
+        ['trial', 'grace_soft'],
+      ])(
+        '%s is off the ladder: no path, the caller keeps its direct transition',
+        (from, to) => {
+          expect(
+            resolveDunningEscalationPath(from as any, to as any),
+          ).toBeNull();
+        },
+      );
     });
   });
 

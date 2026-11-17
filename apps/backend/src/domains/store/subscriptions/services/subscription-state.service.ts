@@ -130,6 +130,64 @@ const TRANSITIONS: Record<State, readonly State[]> = {
   no_plan: ['pending_payment', 'active', 'cancelled'],
 };
 
+/**
+ * QUI-693 — the dunning ladder, in escalation order.
+ *
+ * `evaluateAndTransitionForSubscription` derives the target rung from the days
+ * elapsed since `current_period_end`. When that target sits more than one rung
+ * ahead of the current state (a row the cron did not evaluate for several
+ * days, or a plan with a compressed cadence), the direct jump is illegal in
+ * `TRANSITIONS` (`active -> grace_hard`, `active -> suspended`,
+ * `grace_soft -> suspended`): `transition()` threw SUBSCRIPTION_010, the cron
+ * swallowed it, and the store kept operating as `active` until the
+ * cancellation day — the only rung reachable in one hop.
+ *
+ * The engine walks the ladder instead of widening the matrix: every hop is an
+ * ordinary legal transition, so each one keeps its own audit row, lock_reason
+ * stamp, cache invalidation and `subscription.state.changed` event.
+ */
+const DUNNING_LADDER: readonly State[] = [
+  'active',
+  'grace_soft',
+  'grace_hard',
+  'suspended',
+  'cancelled',
+];
+
+/**
+ * Legal hops that take a subscription from `from` to `to` along the dunning
+ * ladder, in order.
+ *
+ * - `[]` when `from` already sits on `to` or past it. The engine never
+ *   de-escalates (recovery belongs to the payment paths, and every backward
+ *   hop is illegal anyway), so re-evaluating an escalated row is a no-op.
+ * - Jumps straight to `to` as soon as that hop is legal. `* -> cancelled` is
+ *   legal from every rung, so cancellation keeps its single transition.
+ * - Otherwise advances one rung at a time.
+ * - `null` when either state is off the ladder (`pending_payment`, `blocked`,
+ *   `trial`...): the caller keeps its single direct transition, unchanged.
+ */
+export function resolveDunningEscalationPath(
+  from: State,
+  to: State,
+): State[] | null {
+  const fromRung = DUNNING_LADDER.indexOf(from);
+  const toRung = DUNNING_LADDER.indexOf(to);
+  if (fromRung === -1 || toRung === -1) return null;
+
+  const path: State[] = [];
+  let position = from;
+  for (let rung = fromRung + 1; rung <= toRung; rung++) {
+    if (TRANSITIONS[position].includes(to)) {
+      path.push(to);
+      return path;
+    }
+    position = DUNNING_LADDER[rung];
+    path.push(position);
+  }
+  return path;
+}
+
 export interface TransitionOptions {
   reason: string;
   triggeredByUserId?: number;
@@ -1473,7 +1531,8 @@ export class SubscriptionStateService {
    *     `blocked` otherwise.
    *  3. Period expiry — compute soft/hard/suspension/cancellation deadlines
    *     from `current_period_end` + plan dunning offsets and transition to
-   *     the deepest crossed deadline.
+   *     the deepest crossed deadline, one legal rung at a time when it sits
+   *     several rungs ahead (QUI-693, `resolveDunningEscalationPath`).
    *
    * Cache invalidation and event emission are handled by `transition()`.
    */
@@ -1685,34 +1744,69 @@ export class SubscriptionStateService {
         const originLockReason =
           existingLockReason ??
           (planUnavailable ? LOCK_REASON_PLAN_RETIRED : null);
-        const dunningLockReason =
-          targetState === 'suspended'
-            ? (originLockReason ?? LOCK_REASON_PAST_DUE)
-            : (originLockReason ?? undefined);
 
-        await this.transition(sub.store_id, targetState, {
-          reason,
-          triggeredByJob: 'subscription-state-engine',
-          // transition() persists this only for grace_soft / grace_hard /
-          // suspended / blocked; on the cancellation rung it is ignored.
-          lockReason: dunningLockReason,
-          graceSoftUntil: softDeadline,
-          graceHardUntil: hardDeadline,
-          payload: {
-            current_period_end: sub.current_period_end,
-            soft_deadline: softDeadline.toISOString(),
-            hard_deadline: hardDeadline.toISOString(),
-            suspend_deadline: suspendDeadline.toISOString(),
-            cancel_deadline: cancelDeadline.toISOString(),
-            plan_unavailable: planUnavailable,
-            plan_state: plan?.state ?? null,
-            plan_archived_at: plan?.archived_at?.toISOString() ?? null,
-            // Auditable trace of the motive decision: what the row carried
-            // before the rung and what this rung persisted (null = intact).
-            previous_lock_reason: existingLockReason,
-            lock_reason: dunningLockReason ?? null,
-          },
-        });
+        // QUI-693: reach the target through legal hops (see DUNNING_LADDER).
+        // Off-ladder states keep the single direct transition they always had.
+        const path = resolveDunningEscalationPath(
+          currentState,
+          targetState,
+        ) ?? [targetState];
+
+        if (path.length === 0) {
+          this.logger.debug(
+            `evaluateAndTransitionForSubscription: sub ${subscriptionId} already at or past '${targetState}' (state=${currentState}), nothing to escalate`,
+          );
+        } else if (path.length > 1) {
+          this.logger.log(
+            `DUNNING_CATCH_UP sub=${subscriptionId} store=${sub.store_id} from=${currentState} to=${targetState} path=${path.join('>')}`,
+          );
+        }
+
+        // Each hop commits on its own: if a later one fails (or a payment
+        // recovers the store mid-walk and makes it illegal), the rungs
+        // already walked stay applied and the next evaluation resumes from
+        // there. `transition()` re-checks legality under the row lock, so a
+        // hop never lands on a row that moved underneath the walk.
+        let previousLockReason = existingLockReason;
+        for (const [index, rung] of path.entries()) {
+          const dunningLockReason =
+            rung === 'suspended'
+              ? (originLockReason ?? LOCK_REASON_PAST_DUE)
+              : (originLockReason ?? undefined);
+          const isTargetRung = rung === targetState;
+
+          const updated = await this.transition(sub.store_id, rung, {
+            reason: isTargetRung
+              ? reason
+              : `${reason} — catch-up rung ${index + 1}/${path.length} towards ${targetState}`,
+            triggeredByJob: 'subscription-state-engine',
+            // transition() persists this only for grace_soft / grace_hard /
+            // suspended / blocked; on the cancellation rung it is ignored.
+            lockReason: dunningLockReason,
+            graceSoftUntil: softDeadline,
+            graceHardUntil: hardDeadline,
+            payload: {
+              current_period_end: sub.current_period_end,
+              soft_deadline: softDeadline.toISOString(),
+              hard_deadline: hardDeadline.toISOString(),
+              suspend_deadline: suspendDeadline.toISOString(),
+              cancel_deadline: cancelDeadline.toISOString(),
+              plan_unavailable: planUnavailable,
+              plan_state: plan?.state ?? null,
+              plan_archived_at: plan?.archived_at?.toISOString() ?? null,
+              // Auditable trace of the motive decision: what the row carried
+              // before the rung and what this rung persisted (null = intact).
+              previous_lock_reason: previousLockReason,
+              lock_reason: dunningLockReason ?? null,
+              // Where the walk is heading; a single-hop escalation reads
+              // step 1/1 with `dunning_target` equal to `to_state`.
+              dunning_target: targetState,
+              dunning_step: index + 1,
+              dunning_steps: path.length,
+            },
+          });
+          previousLockReason = updated?.lock_reason ?? null;
+        }
       }
     }
 
