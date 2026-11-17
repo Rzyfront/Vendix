@@ -33,9 +33,25 @@ export const CLIENT_REGISTERED_UPLOAD_TYPES = [
   'dispatch_notes',
 ] as const;
 
-export const BULK_UPLOAD_STATUSES = ['completed', 'partial', 'failed'] as const;
+/**
+ * `queued` y `running` solo existen mientras un trabajo durable (QUI-1009) está
+ * en el servidor; la columna es VarChar(16) validada aquí, sin enum de BD.
+ */
+export const BULK_UPLOAD_STATUSES = [
+  'queued',
+  'running',
+  'completed',
+  'partial',
+  'failed',
+] as const;
 
 export type BulkUploadStatus = (typeof BULK_UPLOAD_STATUSES)[number];
+
+/** Estados con los que termina una carga (los que calcula `resolveBulkUploadStatus`). */
+export type BulkUploadFinalStatus = Exclude<
+  BulkUploadStatus,
+  'queued' | 'running'
+>;
 
 /**
  * Permiso que ya autoriza cada carga. Consultar si un archivo está repetido o
@@ -86,7 +102,7 @@ export interface BulkUploadCounts {
 export function resolveBulkUploadStatus(
   counts: Pick<BulkUploadCounts, 'successful_rows' | 'failed_rows'>,
   forcePartial = false,
-): BulkUploadStatus {
+): BulkUploadFinalStatus {
   if (counts.successful_rows === 0 && counts.failed_rows > 0) return 'failed';
   if (counts.failed_rows > 0 || forcePartial) return 'partial';
   return 'completed';

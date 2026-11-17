@@ -2176,7 +2176,7 @@ export class ProductsBulkService {
     storeId: number,
     user: any,
     page?: { offset?: number; limit?: number },
-    options: { initialLoadAck?: boolean } = {},
+    options: { initialLoadAck?: boolean; keepSessionFile?: boolean } = {},
   ): Promise<BulkUploadResultDto | BulkUploadSessionResultDto> {
     const s3Key = `tmp/bulk-products/${storeId}/${sessionId}.xlsx`;
 
@@ -2228,7 +2228,9 @@ export class ProductsBulkService {
         },
       );
       const done = offset + limit >= total;
-      if (done) {
+      // `keepSessionFile` (trabajo durable QUI-1009): el trabajo borra el
+      // archivo al terminar, para conservarlo si el lote se reintenta a mano.
+      if (done && !options.keepSessionFile) {
         try {
           await this.s3Service.deleteFile(s3Key);
           if (initialLoadLocationId !== undefined) {

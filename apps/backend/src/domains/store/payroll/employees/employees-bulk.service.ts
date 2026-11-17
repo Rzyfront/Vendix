@@ -603,6 +603,7 @@ export class EmployeesBulkService {
     storeId: number,
     user: any,
     page?: { offset?: number; limit?: number },
+    options: { keepSessionFile?: boolean } = {},
   ): Promise<BulkEmployeeUploadResultDto | BulkEmployeeUploadSessionResultDto> {
     const s3Key = `tmp/bulk-employees/${storeId}/${sessionId}.xlsx`;
 
@@ -639,7 +640,9 @@ export class EmployeesBulkService {
         user,
       );
       const done = offset + limit >= total;
-      if (done) {
+      // `keepSessionFile` (trabajo durable QUI-1009): el trabajo borra el
+      // archivo al terminar, para conservarlo si el lote se reintenta a mano.
+      if (done && !options.keepSessionFile) {
         try {
           await this.s3Service.deleteFile(s3Key);
         } catch (e) {
