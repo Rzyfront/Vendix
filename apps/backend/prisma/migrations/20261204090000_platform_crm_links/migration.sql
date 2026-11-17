@@ -118,13 +118,22 @@ VALUES
    CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)
 ON CONFLICT DO NOTHING;
 
--- 7. Rol "Comercial Vendix" de la org plataforma (org-wide, no de sistema)
+-- 7. Rol "Comercial Vendix" de la org plataforma (org-wide, no de sistema).
+-- NOT EXISTS explícito: con store_id NULL el ON CONFLICT solo deduplica si el
+-- único de roles es NULLS NOT DISTINCT (20260725000000), y una base armada con
+-- `migrate diff` no lo tiene.
 INSERT INTO "roles" ("name", "description", "is_system_role", "organization_id", "store_id", "created_at", "updated_at")
 SELECT 'Comercial Vendix',
        'Equipo comercial de Vendix: enlaza prospectos del CRM con organizaciones cliente',
        FALSE, o."id", NULL, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP
 FROM "organizations" o
 WHERE o."is_platform" = TRUE
+  AND NOT EXISTS (
+    SELECT 1 FROM "roles" r
+    WHERE r."name" = 'Comercial Vendix'
+      AND r."organization_id" = o."id"
+      AND r."store_id" IS NULL
+  )
 ON CONFLICT DO NOTHING;
 
 INSERT INTO "role_permissions" ("role_id", "permission_id", "granted", "created_at")
