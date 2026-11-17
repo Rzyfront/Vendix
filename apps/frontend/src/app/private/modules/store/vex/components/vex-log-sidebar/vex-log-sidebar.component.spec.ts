@@ -277,6 +277,33 @@ describe('VexLogSidebarComponent (Bitácora empresarial)', () => {
     expect(chip(root, 'Hechos').textContent).toContain('130');
   });
 
+  it('opens an available linked record (query included) and marks an unavailable one', async () => {
+    api.rows[0].link = {
+      type: 'invoice',
+      type_label: 'Factura',
+      id: 91,
+      label: 'FV-91',
+      available: true,
+      url: '/admin/invoicing/invoices?invoiceId=91',
+    };
+    api.rows[1].link = {
+      type: 'product',
+      type_label: 'Producto',
+      id: 9,
+      label: 'Leche entera',
+      available: false,
+      url: null,
+    };
+    const root = await render();
+
+    const invoice = Array.from(root.querySelectorAll('a')).find((a) => a.textContent!.includes('FV-91'));
+    expect(invoice?.getAttribute('href')).toBe('/admin/invoicing/invoices?invoiceId=91');
+    expect(text(invoice!)).toContain('Factura · FV-91');
+    expect(Array.from(root.querySelectorAll('a')).some((a) => a.textContent!.includes('Leche entera'))).toBe(false);
+    // Separate flex items (spaced by the gap), so no text space between them.
+    expect(text(root)).toMatch(/Producto · Leche entera\s*\(no disponible\)/);
+  });
+
   it('links to the dashboard Bitácora to manage reminders', async () => {
     const root = await render();
     const link = Array.from(root.querySelectorAll('a')).find((a) => a.textContent!.includes('Gestionar en el panel'))!;
