@@ -414,6 +414,18 @@ export class InvoicingController {
   }
 
   /**
+   * QUI-683 — consulta en vivo a la DIAN por la llave fiscal guardada (CUDS en
+   * el documento soporte). Sólo lectura: no cambia el estado del documento.
+   * Un id de otra tienda responde 404 (búsqueda con alcance de tienda).
+   */
+  @Get(':id/dian-status')
+  @Permissions('invoicing:read')
+  async getDianStatus(@Param('id', ParseIntPipe) id: number) {
+    const result = await this.invoice_flow_service.getDianStatus(id);
+    return this.response_service.success(result);
+  }
+
+  /**
    * NC/ND de una factura, para las cards de la orden
    * (CP-nc-nd-auto-orden-reembolso, A.2). Lectura: quien revisa no siempre emite.
    */

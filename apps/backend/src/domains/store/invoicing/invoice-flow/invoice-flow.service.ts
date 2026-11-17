@@ -220,13 +220,17 @@ const VALID_TRANSITIONS: Record<InvoiceStatus, InvoiceStatus[]> = {
  * - `credit_note` — la DIAN lo ACEPTÓ. Existe. No se borra ni se anula: se
  *   reversa con una nota crédito, que es un documento nuevo con su propio
  *   consecutivo. Ver la guarda explícita al principio de `void()`.
+ * - `adjustment_note` — lo mismo que `credit_note`, pero para el documento
+ *   soporte (QUI-683): uno aceptado por la DIAN se corrige con una nota de
+ *   ajuste al documento soporte (tipo 95), que referencia su CUDS. La nota
+ *   crédito es de la factura de venta y no aplica sobre un CUDS.
  */
 export interface InvoiceDiscardRoute {
   /**
    * La acción que SÍ funciona sobre este documento ahora mismo, o `null` cuando
    * el estado es terminal y no hay nada que deshacer.
    */
-  action: 'cancel' | 'void' | 'credit_note' | null;
+  action: 'cancel' | 'void' | 'credit_note' | 'adjustment_note' | null;
   /** Rótulo exacto que el panel debe pintar en el botón. */
   label: string;
   /** Por qué ésa y no otra, en español y sin nombres de enum. */
@@ -298,6 +302,70 @@ const DISCARD_ROUTES: Record<InvoiceStatus, InvoiceDiscardRoute> = {
     releases_source_document: true,
   },
 };
+
+/** Tipos que la DIAN identifica por CUDS y que se corrigen con nota de ajuste. */
+const SUPPORT_DOCUMENT_TYPES: ReadonlySet<string> = new Set([
+  'purchase_invoice',
+  'support_document',
+  'support_adjustment_note',
+]);
+
+/**
+ * La salida de un documento soporte ACEPTADO (QUI-683). Política de producto:
+ * un soporte aceptado no se anula, se corrige con nota de ajuste. Los demás
+ * estados del soporte comparten la tabla de arriba: descartar un borrador o
+ * anular un rechazo son idénticos para cualquier tipo.
+ */
+const SUPPORT_ACCEPTED_DISCARD_ROUTE: InvoiceDiscardRoute = {
+  action: 'adjustment_note',
+  label: 'Emitir nota de ajuste',
+  reason:
+    'La DIAN aceptó este documento soporte, así que existe fiscalmente y no se anula ni se borra: se corrige con una nota de ajuste al documento soporte, que referencia su CUDS y consume su propio consecutivo.',
+  releases_source_document: false,
+};
+
+/**
+ * La salida de ESTE documento: la de su estado, salvo el soporte aceptado, que
+ * se corrige con nota de ajuste en vez de nota crédito. Es la única entrada a
+ * `DISCARD_ROUTES` — leer la tabla directo devolvía «nota crédito» sobre un
+ * CUDS.
+ */
+export function resolveDiscardRoute(invoice: {
+  status: string;
+  invoice_type?: string | null;
+}): InvoiceDiscardRoute {
+  if (
+    invoice.status === 'accepted' &&
+    SUPPORT_DOCUMENT_TYPES.has(String(invoice.invoice_type ?? ''))
+  ) {
+    return SUPPORT_ACCEPTED_DISCARD_ROUTE;
+  }
+  return DISCARD_ROUTES[invoice.status as InvoiceStatus];
+}
+
+/**
+ * Respuesta de `GET store/invoicing/:id/dian-status` (QUI-683): lo que la DIAN
+ * contesta HOY sobre la llave fiscal guardada, sin tocar la fila. `local_status`
+ * va al lado para que la pantalla pueda señalar una diferencia.
+ */
+export interface InvoiceDianStatusReport {
+  invoice_id: number;
+  invoice_number: string;
+  invoice_type: string;
+  /** CUDS, CUFE o CUDE según el tipo — la columna `invoices.cufe`. */
+  document_key: string;
+  document_key_label: 'CUDS' | 'CUFE' | 'CUDE';
+  local_status: string;
+  /**
+   * `unavailable` cuando la DIAN no respondió (timeout o respuesta ilegible):
+   * no es un rechazo y no se pinta como tal.
+   */
+  dian_status: 'accepted' | 'rejected' | 'pending' | 'unavailable';
+  dian_status_code: string | null;
+  message: string | null;
+  rules: Array<{ code: string; text: string; severity: string }>;
+  checked_at: string;
+}
 
 /**
  * Un motivo de rechazo tal como lo publica la DIAN: el código de la regla
@@ -2015,7 +2083,7 @@ export class InvoiceFlowService {
       status: invoice.status,
       has_items: (invoice.invoice_items?.length ?? 0) > 0,
       valid_transitions: this.getValidTransitions(invoice.status),
-      discard_route: DISCARD_ROUTES[invoice.status as InvoiceStatus],
+      discard_route: resolveDiscardRoute(invoice),
     };
   }
 
@@ -5096,6 +5164,112 @@ export class InvoiceFlowService {
     return updated;
   }
 
+  /**
+   * QUI-683 — `GET store/invoicing/:id/dian-status`: qué contesta la DIAN HOY
+   * sobre la llave fiscal guardada (CUDS en el documento soporte).
+   *
+   * Sólo lectura: no sincroniza la fila. Reutiliza el `checkStatus` del
+   * proveedor (GetStatus) con la configuración DIAN del tipo de documento —el
+   * soporte firma con la habilitación `support_document`, no con la de
+   * facturación—. La búsqueda va por el cliente con alcance de tienda, así que
+   * un id de otra tienda es un 404 y la DIAN ni se consulta.
+   */
+  async getDianStatus(id: number): Promise<InvoiceDianStatusReport> {
+    const invoice = await this.prisma.invoices.findFirst({
+      where: { id },
+      select: {
+        id: true,
+        invoice_number: true,
+        invoice_type: true,
+        status: true,
+        cufe: true,
+      },
+    });
+    if (!invoice) {
+      throw new VendixHttpException(ErrorCodes.INVOICING_FIND_001);
+    }
+
+    const invoice_type = String(invoice.invoice_type);
+    const document_key_label: InvoiceDianStatusReport['document_key_label'] =
+      SUPPORT_DOCUMENT_TYPES.has(invoice_type)
+        ? 'CUDS'
+        : invoice_type === 'sales_invoice' || invoice_type === 'export_invoice'
+          ? 'CUFE'
+          : 'CUDE';
+
+    if (!invoice.cufe) {
+      throw new VendixHttpException(
+        ErrorCodes.INVOICING_STATUS_002,
+        `Este documento todavía no tiene ${document_key_label}: no se ha transmitido a la DIAN, así que no hay estado que consultar.`,
+        { invoice_id: id, invoice_status: invoice.status },
+      );
+    }
+
+    const configuration_type = this.configurationType(invoice_type);
+    const provider = await this.resolver.resolve({ configuration_type });
+
+    let status: StatusResponse;
+    try {
+      status = await provider.checkStatus(invoice.cufe, { configuration_type });
+    } catch (error) {
+      if (error instanceof VendixHttpException) {
+        throw error;
+      }
+      const cause = error instanceof Error ? error.message : String(error);
+      throw new VendixHttpException(
+        ErrorCodes.INVOICING_PROVIDER_001,
+        `No fue posible consultar el estado en la DIAN: ${cause}`
+          .trim()
+          .slice(0, PROVIDER_MESSAGE_MAX_LENGTH),
+        { invoice_id: id },
+      );
+    }
+
+    const provider_data = (status.provider_data ?? {}) as {
+      dian_status_code?: unknown;
+      rule_messages?: unknown;
+      timed_out?: unknown;
+    };
+    const dian_status_code =
+      typeof provider_data.dian_status_code === 'string'
+        ? provider_data.dian_status_code
+        : null;
+    // Sin respuesta legible no hay veredicto: `checkStatus` reporta `rejected`
+    // cuando el parseo falla, y pintar eso como rechazo mentiría.
+    const dian_status: InvoiceDianStatusReport['dian_status'] =
+      status.status === 'error' ||
+      provider_data.timed_out === true ||
+      dian_status_code === 'PARSE_ERROR'
+        ? 'unavailable'
+        : status.status;
+    const rules = Array.isArray(provider_data.rule_messages)
+      ? provider_data.rule_messages
+          .filter(
+            (rule): rule is { code: unknown; text: unknown; severity: unknown } =>
+              typeof rule === 'object' && rule !== null,
+          )
+          .map((rule) => ({
+            code: String(rule.code ?? ''),
+            text: String(rule.text ?? ''),
+            severity: String(rule.severity ?? ''),
+          }))
+      : [];
+
+    return {
+      invoice_id: invoice.id,
+      invoice_number: invoice.invoice_number,
+      invoice_type,
+      document_key: invoice.cufe,
+      document_key_label,
+      local_status: String(invoice.status),
+      dian_status,
+      dian_status_code,
+      message: status.message?.trim() || null,
+      rules,
+      checked_at: new Date().toISOString(),
+    };
+  }
+
   private async queryStatusSafely(
     provider: any,
     fiscal_key: string | undefined,
@@ -5297,7 +5471,7 @@ export class InvoiceFlowService {
     if (
       !VALID_TRANSITIONS[invoice.status as InvoiceStatus]?.includes('cancelled')
     ) {
-      const route = DISCARD_ROUTES[invoice.status as InvoiceStatus];
+      const route = resolveDiscardRoute(invoice);
       throw new VendixHttpException(
         ErrorCodes.INVOICING_STATUS_001,
         route?.action && route.action !== 'cancel'
@@ -5345,15 +5519,19 @@ export class InvoiceFlowService {
     // pero mudo sobre qué hacer—, y con el período cerrado ganaría el error de
     // período, que aquí es una respuesta a la pregunta equivocada: la factura
     // no se anula ni con el período abierto. Quien pregunta necesita saber que
-    // el camino es una nota crédito, no que la transición no existe.
+    // el camino es una nota crédito (o, en un documento soporte, una nota de
+    // ajuste), no que la transición no existe.
     if (invoice.status === 'accepted') {
+      const route = resolveDiscardRoute(invoice);
       throw new VendixHttpException(
         ErrorCodes.INVOICING_STATUS_002,
-        'Un documento aceptado por la DIAN no se anula: emite una nota crédito que lo corrija o lo revierta. La anulación sólo aplica a documentos que la DIAN nunca aceptó.',
+        route.action === 'adjustment_note'
+          ? 'Un documento soporte aceptado por la DIAN no se anula: emite una nota de ajuste al documento soporte que lo corrija. La anulación sólo aplica a documentos que la DIAN nunca aceptó.'
+          : 'Un documento aceptado por la DIAN no se anula: emite una nota crédito que lo corrija o lo revierta. La anulación sólo aplica a documentos que la DIAN nunca aceptó.',
         {
           invoice_id: id,
           invoice_status: invoice.status,
-          discard_route: DISCARD_ROUTES.accepted,
+          discard_route: route,
         },
       );
     }
@@ -5371,7 +5549,7 @@ export class InvoiceFlowService {
     // Se resuelve ANTES de `validateTransition` para que el mensaje dirigido
     // gane sobre el genérico, igual que hace la guarda de `accepted` de arriba.
     if (!VALID_TRANSITIONS[invoice.status as InvoiceStatus]?.includes('voided')) {
-      const route = DISCARD_ROUTES[invoice.status as InvoiceStatus];
+      const route = resolveDiscardRoute(invoice);
       throw new VendixHttpException(
         ErrorCodes.INVOICING_STATUS_001,
         route?.action === 'cancel'
