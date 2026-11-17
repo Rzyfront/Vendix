@@ -677,6 +677,7 @@ jobs:
           --include='**/ecommerce/pages/account/order-detail/order-detail.component.spec.ts'
           --include='**/reports/services/reports-data.service.spec.ts'
           --include='**/reports/state/reports.effects.spec.ts'
+          --include='**/reports/pages/support-documents/support-documents-report-page.component.spec.ts'
           --include='**/shared/directives/pull-to-refresh.directive.spec.ts'
           --include='**/reviews/review-summary.component.spec.ts'
           --include='**/products/utils/variant-stock-requirements.util.spec.ts'

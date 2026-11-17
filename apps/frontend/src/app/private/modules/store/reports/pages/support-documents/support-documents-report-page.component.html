@@ -1,0 +1,85 @@
+<h1 class="sr-only">Reporte de documentos soporte</h1>
+<div class="w-full space-y-4">
+  <div class="stats-container sticky top-0 z-20 bg-background md:static md:bg-transparent">
+    <app-stats
+      title="Documentos"
+      [value]="summary()?.document_count ?? 0"
+      [smallText]="countText()"
+      iconName="file-text"
+      [loading]="loadingSummary()"
+    ></app-stats>
+    <app-stats
+      title="Subtotal neto"
+      [value]="formatMoney(summary()?.net?.subtotal_amount)"
+      smallText="Soporte − ajustes, sin anulados"
+      iconName="receipt"
+      [loading]="loadingSummary()"
+    ></app-stats>
+    <app-stats
+      title="Impuestos netos"
+      [value]="formatMoney(summary()?.net?.tax_amount)"
+      [smallText]="taxText()"
+      iconName="percent"
+      [loading]="loadingSummary()"
+    ></app-stats>
+    <app-stats
+      title="Total neto"
+      [value]="formatMoney(summary()?.net?.total_amount)"
+      [smallText]="totalText()"
+      iconName="wallet"
+      [loading]="loadingSummary()"
+    ></app-stats>
+  </div>
+
+  <app-card [responsive]="true" [padding]="false" customClasses="md:min-h-[500px]">
+    <div class="sticky top-[99px] z-10 bg-background px-2 py-1.5 -mt-[5px] md:mt-0 md:static md:bg-transparent md:px-6 md:py-4 md:border-b md:border-border">
+      <div class="flex flex-col gap-2 md:flex-row md:justify-between md:items-center md:gap-4">
+        <h2 class="text-[13px] font-bold text-gray-600 tracking-wide md:text-lg md:font-semibold md:text-text-primary">
+          Documentos soporte ({{ totalItems() }})
+        </h2>
+        <div class="flex items-center gap-2 w-full md:w-auto">
+          <vendix-date-range-filter
+            class="flex-1 md:flex-none md:max-w-md"
+            [value]="dateRange()"
+            (valueChange)="onDateRangeChange($event)"
+          ></vendix-date-range-filter>
+          <app-options-dropdown
+            class="shadow-[0_2px_8px_rgba(0,0,0,0.07)] md:shadow-none rounded-[10px]"
+            [filters]="filterConfigs()"
+            [filterValues]="filterValues()"
+            [actions]="dropdownActions()"
+            [isLoading]="loading()"
+            (filterChange)="onFilterChange($event)"
+            (clearAllFilters)="onClearAll()"
+            (actionClick)="onActionClick($event)"
+          ></app-options-dropdown>
+        </div>
+      </div>
+    </div>
+
+    <div class="px-2 pb-2 pt-3 md:p-4">
+      <app-responsive-data-view
+        [data]="viewRows()"
+        [columns]="columns"
+        [cardConfig]="cardConfig"
+        [loading]="loading()"
+        [sortable]="true"
+        emptyIcon="file-text"
+        emptyMessage="No hay documentos soporte para los filtros seleccionados"
+        emptyTitle="Sin documentos soporte"
+        emptyDescription="Ajusta el período o los filtros para ver documentos."
+        [showEmptyClearFilters]="hasFilters()"
+        (emptyClearFiltersClick)="onClearAll()"
+        (sort)="onSort($event)"
+      ></app-responsive-data-view>
+
+      <app-pagination
+        [currentPage]="page()"
+        [totalPages]="totalPages()"
+        [total]="totalItems()"
+        [limit]="limit"
+        (pageChange)="onPageChange($event)"
+      ></app-pagination>
+    </div>
+  </app-card>
+</div>

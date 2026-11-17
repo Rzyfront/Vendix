@@ -68,7 +68,7 @@ export const REPORT_DEFINITIONS: ReportDefinition[] = [
     dataEndpoint: 'store/analytics/overview/summary',
   },
 
-  // ─── COMPRAS (4) ─────────────────────────────────────────────────────────────────
+  // ─── COMPRAS (5) ─────────────────────────────────────────────────────────────────
 
   {
     id: 'purchase-summary',
@@ -242,6 +242,50 @@ export const REPORT_DEFINITIONS: ReportDefinition[] = [
     ],
     dataEndpoint: 'store/analytics/purchases/payable-aging',
     exportEndpoint: 'store/analytics/purchases/payable-aging/export',
+  },
+
+  {
+    // QUI-684: página propia (`pages/support-documents/`) con filtros de tipo,
+    // estado y proveedor y totales soporte vs ajuste. NO usa el viewer
+    // genérico; el registry aporta catálogo + endpoints.
+    id: 'support-documents',
+    category: 'purchases',
+    title: 'Documentos Soporte',
+    description:
+      'Documentos soporte y notas de ajuste por período, proveedor, estado y tipo.',
+    detailedDescription:
+      'Totales de subtotal, impuestos y total separando documentos soporte y notas de ajuste (las notas restan); los anulados y cancelados se listan pero no suman. Exporta el detalle completo a XLSX.',
+    icon: 'file-text',
+    route: '/admin/reports/purchases/support-documents',
+    requiresDateRange: true,
+    requiresFiscalPeriod: false,
+    type: 'list' as ReportType,
+    trackKey: 'id',
+    serverPagination: true,
+    columns: [
+      { key: 'issue_date', header: 'Fecha emisión', type: 'date-only' },
+      { key: 'type_label', header: 'Tipo', type: 'text' },
+      { key: 'invoice_number', header: 'Número', type: 'text' },
+      { key: 'supplier_name', header: 'Proveedor', type: 'text' },
+      { key: 'supplier_tax_id', header: 'NIT / Documento', type: 'text' },
+      { key: 'status', header: 'Estado', type: 'text' },
+      { key: 'related_invoice_number', header: 'Documento original', type: 'text' },
+      { key: 'subtotal_amount', header: 'Subtotal', type: 'currency' },
+      { key: 'tax_amount', header: 'Impuestos', type: 'currency' },
+      { key: 'withholding_amount', header: 'Retenciones', type: 'currency' },
+      { key: 'total_amount', header: 'Total', type: 'currency' },
+      { key: 'accepted_at', header: 'Aceptado DIAN', type: 'date' },
+      { key: 'counts_label', header: 'En totales', type: 'text' },
+    ],
+    exportFilename: 'documentos_soporte',
+    stats: [
+      { key: 'document_count', label: 'Documentos', type: 'number', icon: 'file-text' },
+      { key: 'net_subtotal', label: 'Subtotal neto', type: 'currency', icon: 'receipt' },
+      { key: 'net_tax', label: 'Impuestos netos', type: 'currency', icon: 'percent' },
+      { key: 'net_total', label: 'Total neto', type: 'currency', icon: 'wallet' },
+    ],
+    dataEndpoint: 'store/analytics/support-documents',
+    exportEndpoint: 'store/analytics/support-documents/export',
   },
 
   // ─── RESEÑAS (2) ──────────────────────────────────────────────────────────────────
