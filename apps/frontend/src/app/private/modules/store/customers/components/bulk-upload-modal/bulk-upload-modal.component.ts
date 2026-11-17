@@ -1,7 +1,15 @@
 import {Component, inject, input, output, signal, computed, DestroyRef} from '@angular/core';
 import { takeUntilDestroyed } from '@angular/core/rxjs-interop';
+import { HttpErrorResponse } from '@angular/common/http';
 import { Subscription } from 'rxjs';
-import { runChunked, ChunkProgress, MAX_BULK_RECORDS } from '../../../../../../shared/utils/run-chunked';
+import {
+  runChunked,
+  ChunkProgress,
+  MAX_BULK_RECORDS,
+  DEFAULT_BULK_CHUNK_SIZE,
+} from '../../../../../../shared/utils/run-chunked';
+import { BatchProgressClock } from '../../../../../../shared/utils/batch-progress-clock';
+import { isTransientHttpError } from '../../../../../../core/utils/async-job-poll.util';
 // `import type` deja el namespace disponible para las anotaciones sin meter
 // los 7,2 MB de xlsx en el chunk: el runtime llega por `await import('xlsx')`
 // dentro del handler, que es el unico momento en que hay un archivo que leer.
@@ -73,6 +81,17 @@ function groupCustomerRows(rows: Record<string, any>[]): CustomerGroup[] {
     }
   }
   return [...groups.values()];
+}
+
+/** «Fila N — Columna: X — Valor: "v" — Motivo — 💡 Sugerencia» de un `BulkRowError`. */
+function formatBulkRowError(e: any): string {
+  if (typeof e === 'string') return e;
+  const row = e?.row ? `Fila ${e.row}` : 'Fila ?';
+  const column = e?.column ? `Columna: ${e.column}` : null;
+  const value = e?.value != null && e.value !== '' ? `Valor: "${e.value}"` : null;
+  const reason = e?.message ?? 'Error';
+  const suggestion = e?.suggestion ? `💡 ${e.suggestion}` : null;
+  return [row, column, value, reason, suggestion].filter(Boolean).join(' — ');
 }
 
 @Component({
@@ -273,7 +292,10 @@ function groupCustomerRows(rows: Record<string, any>[]): CustomerGroup[] {
               @if (uploadProgress().total > 0) {
                 <div class="w-full rounded-lg border border-primary/30 bg-primary/5 px-3 py-2">
                   <div class="flex items-center justify-between text-[11px] text-gray-600">
-                    <span>Guardando {{ uploadProgress().processed }} de {{ uploadProgress().total }}</span>
+                    <span>
+                      Lote {{ clock.currentBatch() }}/{{ clock.totalBatches() }} · Guardando
+                      {{ uploadProgress().processed }} de {{ uploadProgress().total }}
+                    </span>
                     <span class="font-semibold text-primary">{{ progressPercent() }}%</span>
                   </div>
                   <div class="mt-1.5 h-1.5 w-full overflow-hidden rounded-full bg-gray-200">
@@ -282,19 +304,69 @@ function groupCustomerRows(rows: Record<string, any>[]): CustomerGroup[] {
                       [style.width.%]="progressPercent()"
                     ></div>
                   </div>
+                  <div class="mt-1.5 flex items-center justify-between text-[11px] text-gray-500">
+                    <span class="flex items-center gap-1">
+                      <app-icon name="timer" [size]="12"></app-icon>
+                      Transcurrido {{ clock.elapsedLabel() }}
+                    </span>
+                    <span>
+                      @if (clock.remainingLabel(); as remaining) {
+                        Restante {{ remaining }}
+                      } @else {
+                        Calculando tiempo restante…
+                      }
+                    </span>
+                  </div>
                 </div>
               }
             </div>
           }
 
-          <!-- Lote fallido: resumen parcial + reintento -->
+          <!-- Lote fallido: problema técnico (reintento manual con advertencia) o error de datos -->
           @if (!isUploading() && failedAt() !== null) {
-            <div class="bg-yellow-50 p-4 rounded-lg border border-yellow-100 text-yellow-800 text-sm flex items-center justify-between gap-3">
-              <span>Se guardaron {{ uploadProgress().processed }} de {{ uploadProgress().total }}. El envío se interrumpió en la fila {{ failedAt()! + 1 }} de la lista.</span>
-              <app-button variant="primary" size="sm" (clicked)="retryUpload()">
-                Reintentar desde la fila {{ failedAt()! + 1 }}
-              </app-button>
-            </div>
+            @if (failureKind() === 'technical') {
+              <div class="bg-yellow-50 p-4 rounded-lg border border-yellow-100 text-yellow-800 text-sm space-y-2" role="alert">
+                <p class="font-medium flex items-center gap-2">
+                  <app-icon name="alert-triangle" [size]="16"></app-icon>
+                  Problema técnico de la plataforma, no de tu archivo
+                </p>
+                <p>
+                  {{ uploadError() }} Se guardaron {{ uploadProgress().processed }} de
+                  {{ uploadProgress().total }}; el envío se detuvo en el lote que empieza en la fila
+                  {{ failedAt()! + 1 }} de la lista.
+                </p>
+                <p class="text-xs">
+                  No lo reintentamos solo: si el servidor alcanzó a guardar parte de ese lote,
+                  reenviarlo puede duplicar los clientes sin correo ni documento, y los que sí los
+                  tienen aparecerán como «ya existe». Revisa el listado de clientes antes de reintentar.
+                </p>
+                <div class="flex justify-end">
+                  <app-button variant="primary" size="sm" (clicked)="retryUpload()">
+                    Reintentar lote
+                  </app-button>
+                </div>
+              </div>
+            } @else {
+              <div class="bg-red-50 p-4 rounded-lg border border-red-100 text-red-700 text-sm space-y-2" role="alert">
+                <p class="font-medium flex items-center gap-2">
+                  <app-icon name="alert-circle" [size]="16"></app-icon>
+                  Corrige tu archivo: el lote que empieza en la fila {{ failedAt()! + 1 }} de la lista fue rechazado
+                </p>
+                <p>{{ uploadError() }}</p>
+                @if (failureDetails().length > 0) {
+                  <ul class="list-disc list-inside space-y-1 max-h-40 overflow-y-auto text-xs">
+                    @for (msg of failureDetails(); track $index) {
+                      <li>{{ msg }}</li>
+                    }
+                  </ul>
+                }
+                <p class="text-xs">
+                  Se guardaron {{ uploadProgress().processed }} de {{ uploadProgress().total }}. Reenviar
+                  el mismo lote devuelve el mismo error: corrige esas filas y carga de nuevo solo las que
+                  faltan.
+                </p>
+              </div>
+            }
           }
 
           <!-- Results -->
@@ -486,6 +558,16 @@ export class CustomerBulkUploadModalComponent {
   warnings = signal<string[]>([]);
   uploadProgress = signal<{ processed: number; total: number }>({ processed: 0, total: 0 });
   failedAt = signal<number | null>(null);
+  /**
+   * Por qué se cortó el envío (QUI-1009): `technical` = red o 5xx, ofrece
+   * «Reintentar lote» con advertencia; `data` = el backend rechazó el lote por
+   * su contenido y reenviarlo devuelve el mismo error.
+   */
+  readonly failureKind = signal<'technical' | 'data' | null>(null);
+  /** Filas rechazadas por datos en el lote que cortó el envío. */
+  readonly failureDetails = signal<string[]>([]);
+  /** Cronómetro, estimado por ritmo real y «lote x/y» (QUI-1009). */
+  readonly clock = new BatchProgressClock();
   readonly progressPercent = computed(() => {
     const p = this.uploadProgress();
     return p.total > 0 ? Math.round((p.processed / p.total) * 100) : 0;
@@ -529,17 +611,7 @@ export class CustomerBulkUploadModalComponent {
     const r = this.uploadResults();
     const ve = r?.validationErrors;
     if (Array.isArray(ve) && ve.length > 0) {
-      return ve.map((e: any) => {
-        if (typeof e === 'string') return e;
-        const row = e?.row ? `Fila ${e.row}` : 'Fila ?';
-        const column = e?.column ? `Columna: ${e.column}` : null;
-        const value = e?.value != null && e.value !== '' ? `Valor: "${e.value}"` : null;
-        const reason = e?.message ?? 'Error';
-        const suggestion = e?.suggestion ? `💡 ${e.suggestion}` : null;
-        return [row, column, value, reason, suggestion]
-          .filter(Boolean)
-          .join(' — ');
-      });
+      return ve.map(formatBulkRowError);
     }
     const err = this.uploadError();
     if (Array.isArray(err)) return err.map((e: any) => String(e));
@@ -609,6 +681,10 @@ export class CustomerBulkUploadModalComponent {
     return Array.isArray(this.uploadError());
   }
 
+  constructor() {
+    this.destroyRef.onDestroy(() => this.clock.dispose());
+  }
+
   onCancel() {
     this.uploadSub?.unsubscribe();
     this.uploadSub = null;
@@ -627,6 +703,9 @@ export class CustomerBulkUploadModalComponent {
     this.warnings.set([]);
     this.uploadProgress.set({ processed: 0, total: 0 });
     this.failedAt.set(null);
+    this.failureKind.set(null);
+    this.failureDetails.set([]);
+    this.clock.reset();
     this.payload = [];
     this.accumulated = null;
     this.fileName = '';
@@ -842,14 +921,24 @@ export class CustomerBulkUploadModalComponent {
     this.payload = sanitizedData;
     this.accumulated = { success: true, total_processed: 0, successful: 0, failed: 0, locations_added: 0, warnings: 0, results: [] };
     this.failedAt.set(null);
+    this.failureKind.set(null);
+    this.failureDetails.set([]);
     this.uploadProgress.set({ processed: 0, total: sanitizedData.length });
     this.runUpload(0);
   }
 
+  /**
+   * «Reintentar lote» tras un problema técnico: reenvía desde el lote que
+   * falló. Nunca es automático: la carga de clientes NO es idempotente (una
+   * fila sin correo ni documento se crea de nuevo), así que lo decide la
+   * persona tras leer la advertencia. Un rechazo de datos no se reintenta.
+   */
   retryUpload() {
     const offset = this.failedAt();
-    if (offset === null || this.isUploading()) return;
+    if (offset === null || this.isUploading() || this.failureKind() !== 'technical') return;
     this.failedAt.set(null);
+    this.failureKind.set(null);
+    this.failureDetails.set([]);
     this.uploadError.set(null);
     this.isUploading.set(true);
     this.runUpload(offset);
@@ -860,6 +949,10 @@ export class CustomerBulkUploadModalComponent {
     const items = this.payload.slice(base);
     const acc = this.accumulated;
     let lastCount = 0;
+    const size = DEFAULT_BULK_CHUNK_SIZE;
+    const totalBatches = Math.max(1, Math.ceil(this.payload.length / size));
+    const baseBatches = Math.floor(base / size);
+    this.clock.start(totalBatches, baseBatches);
     this.uploadSub?.unsubscribe();
     this.uploadSub = runChunked(items, (chunk) =>
       this.customersService.uploadBulkCustomersJson(chunk),
@@ -879,16 +972,38 @@ export class CustomerBulkUploadModalComponent {
         lastCount = p.results.length;
         this.uploadProgress.set({ processed: base + p.processed, total: this.payload.length });
         this.uploadResults.set({ ...acc, results: [...acc.results] });
+        if (p.failedAt === undefined) {
+          this.clock.recordBatch(baseBatches + p.chunkIndex + 1, totalBatches);
+        }
         if (!p.done) return;
 
         this.isUploading.set(false);
+        this.clock.stop();
         if (p.failedAt !== undefined) {
-          const err: any = p.error;
           this.failedAt.set(base + p.failedAt);
-          this.uploadError.set(err?.error?.message || 'Error en la carga masiva');
-          this.toastService.error(
-            `Se guardaron ${base + p.processed} de ${this.payload.length}. Puedes reintentar.`,
-          );
+          const saved = `Se guardaron ${base + p.processed} de ${this.payload.length}.`;
+          if (isTransientHttpError(p.error)) {
+            const status = (p.error as HttpErrorResponse).status;
+            this.failureKind.set('technical');
+            this.failureDetails.set([]);
+            this.uploadError.set(
+              status === 0
+                ? 'Sin conexión con el servidor.'
+                : `El servidor respondió con un error HTTP ${status}.`,
+            );
+            this.toastService.error(`Problema técnico de la plataforma. ${saved}`);
+          } else {
+            const body = (p.error as HttpErrorResponse | undefined)?.error as
+              | { message?: string; details?: { validationErrors?: unknown[] } }
+              | undefined;
+            const rowErrors = body?.details?.validationErrors;
+            this.failureKind.set('data');
+            this.failureDetails.set(
+              Array.isArray(rowErrors) ? rowErrors.map(formatBulkRowError) : [],
+            );
+            this.uploadError.set(body?.message || 'Error en la carga masiva');
+            this.toastService.error(`${saved} Corrige el archivo: un lote fue rechazado por sus datos.`);
+          }
         } else if (acc.failed > 0) {
           this.registerUpload(acc);
           this.toastService.warning('La carga se completó con algunos errores.');
