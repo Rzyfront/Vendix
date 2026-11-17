@@ -342,6 +342,62 @@ describe('BulkUploadJobRunnerService', () => {
     expect(lastLog().data).toMatchObject({ status: 'partial', created_rows: 110, total_rows: 250 });
   });
 
+  it('keeps row_error flat (the screen reads column, value and suggestion) and drops nested objects like customer', async () => {
+    register('customers', false);
+    handler.runPage.mockResolvedValueOnce(
+      page({
+        total: 1,
+        successful: 0,
+        failed: 1,
+        rows: [
+          {
+            row_number: 2,
+            status: 'error',
+            customer: { id: 5, password: 'hash' },
+            row_error: {
+              column: 'Correo',
+              value: 'ana@',
+              message: 'Correo inválido',
+              suggestion: 'Revisa el formato',
+              meta: { internal: true },
+            },
+          },
+        ],
+      }),
+    );
+
+    await runner.run(handle(makeData({}, 'customers')));
+
+    const stored = JSON.parse(hashes.get('bulk-upload:job:7:results')!.get('0')!);
+    expect(stored).toEqual([
+      {
+        row_number: 2,
+        status: 'error',
+        row_error: {
+          column: 'Correo',
+          value: 'ana@',
+          message: 'Correo inválido',
+          suggestion: 'Revisa el formato',
+        },
+      },
+    ]);
+  });
+
+  it('if the database fails while recording a technical failure, the error surfaces but the lock is released', async () => {
+    register('customers', false);
+    handler.runPage.mockRejectedValueOnce(new Error('connection reset'));
+    updateMany.mockImplementation(async (args: { data: { status: string } }) => {
+      if (args.data.status === 'failed') throw new Error('db down');
+      return { count: 1 };
+    });
+
+    await expect(runner.run(handle(makeData({}, 'customers')))).rejects.toThrow('db down');
+
+    expect(report).toHaveBeenCalledTimes(1);
+    expect(release).toHaveBeenCalledTimes(1);
+    expect(release).toHaveBeenCalledWith(9, 'customers', 7);
+  });
+
   it('re-running a batch overwrites its hash field instead of duplicating rows', async () => {
     handler.runPage
       .mockRejectedValueOnce(new Error('blip'))
@@ -373,6 +429,6 @@ describe('BulkUploadJobRunnerService', () => {
     );
     const job = handle(makeData());
     expect(await empty.run(job)).toBe('failed_technical');
-    expect(job.data.error?.kind).toBe('technical');
+    expect(job.data.error).toMatchObject({ kind: 'technical', code: 'BULK_JOB_NO_HANDLER' });
   });
 });

@@ -8,9 +8,8 @@ import { RequestContextService } from '@common/context/request-context.service';
 import { ResponseService } from '@common/responses/response.service';
 import { DefaultPanelUIService } from '../../../../common/services/default-panel-ui.service';
 import { StaffProvisioningService } from '../../../../common/services/staff-provisioning.service';
-import { S3Service } from '@common/services/s3.service';
+import { S3Service, isS3NotFoundError } from '@common/services/s3.service';
 import { VendixHttpException, ErrorCodes } from '@common/errors';
-import { isS3ObjectMissing } from '../../bulk-uploads/bulk-upload-job.util';
 import {
   BulkEmployeeUploadDto,
   BulkEmployeeItemDto,
@@ -613,7 +612,7 @@ export class EmployeesBulkService {
       fileBuffer = await this.s3Service.downloadImage(s3Key);
     } catch (error) {
       // Solo «no existe» es sesion vencida (dato); un fallo de S3 es tecnico.
-      if (isS3ObjectMissing(error)) {
+      if (isS3NotFoundError(error)) {
         throw new VendixHttpException(ErrorCodes.BULK_PROD_SESSION_EXPIRED);
       }
       throw error;

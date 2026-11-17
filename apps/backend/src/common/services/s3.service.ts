@@ -34,6 +34,25 @@ import {
 import { S3PathHelper } from '../helpers/s3-path.helper';
 
 /**
+ * `true` only when S3 says the object does not exist (`NoSuchKey` on GET,
+ * `NotFound` on HEAD, or HTTP 404). Any other failure (network, throttling,
+ * 5xx, credentials) is a technical error, not a missing object.
+ */
+export function isS3NotFoundError(error: unknown): boolean {
+  const e = error as {
+    name?: unknown;
+    Code?: unknown;
+    $metadata?: { httpStatusCode?: unknown };
+  };
+  return (
+    e?.name === 'NoSuchKey' ||
+    e?.name === 'NotFound' ||
+    e?.Code === 'NoSuchKey' ||
+    e?.$metadata?.httpStatusCode === 404
+  );
+}
+
+/**
  * Raised when a PWA icon cannot be derived from a tenant logo
  * (missing/corrupt source, unreadable key, sharp failure).
  *
@@ -463,6 +482,25 @@ export class S3Service {
       return true;
     } catch {
       return false;
+    }
+  }
+
+  /**
+   * Like `objectExists`, but only a real "not found" answer is `false`: any
+   * other failure (network, throttling, 5xx, credentials) is rethrown, so the
+   * caller can tell "the object is gone" from "S3 is unreachable".
+   */
+  async objectExistsStrict(key: string | null | undefined): Promise<boolean> {
+    if (!key || !isSafeS3Key(key)) return false;
+
+    try {
+      await this.s3Client.send(
+        new HeadObjectCommand({ Bucket: this.bucketName, Key: key }),
+      );
+      return true;
+    } catch (error) {
+      if (isS3NotFoundError(error)) return false;
+      throw error;
     }
   }
 

@@ -35,19 +35,35 @@ import {
 const defaultSleep = (ms: number) =>
   new Promise<void>((resolve) => setTimeout(resolve, ms));
 
-/** Quita los objetos anidados pesados (`product`, `customer`, …) de una fila de resultado. */
+/**
+ * Detalles de fila que la pantalla lee como objeto (columna, valor, sugerencia).
+ * Se guardan planos, solo con sus campos primitivos.
+ */
+const FLAT_DETAIL_KEYS = new Set(['row_error']);
+
+const isPrimitive = (value: unknown) =>
+  value === null || typeof value !== 'object';
+
+/**
+ * Quita los objetos anidados pesados (`product`, `customer`, …) de una fila de
+ * resultado. Esos objetos pueden traer datos internos: solo sobreviven los
+ * detalles de `FLAT_DETAIL_KEYS`, aplanados.
+ */
 export function stripNestedResultRow(
   row: Record<string, unknown>,
 ): Record<string, unknown> {
   const out: Record<string, unknown> = {};
   for (const [key, value] of Object.entries(row ?? {})) {
-    if (value === null || typeof value !== 'object') {
+    if (isPrimitive(value)) {
       out[key] = value;
-    } else if (
-      Array.isArray(value) &&
-      value.every((v) => v === null || typeof v !== 'object')
-    ) {
-      out[key] = value;
+    } else if (Array.isArray(value)) {
+      if (value.every(isPrimitive)) out[key] = value;
+    } else if (FLAT_DETAIL_KEYS.has(key)) {
+      out[key] = Object.fromEntries(
+        Object.entries(value as Record<string, unknown>).filter(([, v]) =>
+          isPrimitive(v),
+        ),
+      );
     }
   }
   return out;
@@ -86,7 +102,7 @@ export class BulkUploadJobRunnerService {
         job,
         undefined,
         new Error(`No handler for bulk upload type ${job.data.upload_type}`),
-        'BULK_JOB_NO_HANDLER',
+        ErrorCodes.BULK_JOB_NO_HANDLER.code,
       );
     }
 
@@ -216,14 +232,17 @@ export class BulkUploadJobRunnerService {
       successful_rows: cursor.successful,
       failed_rows: cursor.failed,
     });
-    await this.writeLog(job.data, status);
-    await this.patch(job, {
-      finished_at: new Date(this.now()).toISOString(),
-      retry: null,
-      error: null,
-    });
-    await this.safely('cleanup', () => handler.cleanup(job.data));
-    await this.safely('release lock', () => this.release(job.data));
+    try {
+      await this.writeLog(job.data, status);
+      await this.patch(job, {
+        finished_at: new Date(this.now()).toISOString(),
+        retry: null,
+        error: null,
+      });
+      await this.safely('cleanup', () => handler.cleanup(job.data));
+    } finally {
+      await this.safely('release lock', () => this.release(job.data));
+    }
     return 'completed';
   }
 
@@ -240,14 +259,17 @@ export class BulkUploadJobRunnerService {
     this.logger.warn(
       `[BulkJob ${job.data.log_id}] failed (data): ${failure.code ?? ''} ${failure.message}`,
     );
-    await this.patch(job, {
-      error: failure,
-      retry: null,
-      finished_at: new Date(this.now()).toISOString(),
-    });
-    await this.writeLog(job.data, 'failed');
-    await this.safely('cleanup', () => handler.cleanup(job.data));
-    await this.safely('release lock', () => this.release(job.data));
+    try {
+      await this.patch(job, {
+        error: failure,
+        retry: null,
+        finished_at: new Date(this.now()).toISOString(),
+      });
+      await this.writeLog(job.data, 'failed');
+      await this.safely('cleanup', () => handler.cleanup(job.data));
+    } finally {
+      await this.safely('release lock', () => this.release(job.data));
+    }
     return 'failed_data';
   }
 
@@ -268,14 +290,20 @@ export class BulkUploadJobRunnerService {
       message: bulkErrorMessage(error),
       stack: (error as Error)?.stack,
     });
-    await this.patch(job, {
-      error: { kind: 'technical', code, message: BULK_JOB_TECHNICAL_MESSAGE },
-      retry: null,
-      incident_ticket_number: ticket,
-      finished_at: new Date(this.now()).toISOString(),
-    });
-    await this.writeLog(job.data, 'failed', ticket);
-    await this.safely('release lock', () => this.release(job.data));
+    // Si falla la base o Redis, el error sube (el trabajo queda `failed` en
+    // BullMQ y la lectura lo reconcilia), pero el lock se libera siempre: no
+    // debe bloquear la siguiente carga de la tienda hasta que venza.
+    try {
+      await this.patch(job, {
+        error: { kind: 'technical', code, message: BULK_JOB_TECHNICAL_MESSAGE },
+        retry: null,
+        incident_ticket_number: ticket,
+        finished_at: new Date(this.now()).toISOString(),
+      });
+      await this.writeLog(job.data, 'failed', ticket);
+    } finally {
+      await this.safely('release lock', () => this.release(job.data));
+    }
     return 'failed_technical';
   }
 

@@ -5324,6 +5324,11 @@ export const ErrorCodes = {
     httpStatus: 500,
     devMessage: 'La carga se interrumpió mientras se procesaba un lote.',
   },
+  BULK_JOB_NO_HANDLER: {
+    code: 'BULK_JOB_NO_HANDLER',
+    httpStatus: 500,
+    devMessage: 'No hay procesador registrado para este tipo de carga.',
+  },
   BULK_PROD_UPLOAD_FAILED: {
     code: 'BULK_PROD_UPLOAD_FAILED',
     httpStatus: 500,

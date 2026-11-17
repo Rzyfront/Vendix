@@ -1,14 +1,16 @@
 import { Injectable } from '@nestjs/common';
 import { S3Service } from '@common/services/s3.service';
 import { RequestContextService } from '@common/context/request-context.service';
-import { ErrorCodes, VendixHttpException } from '@common/errors';
 import type {
   BulkJobPageResult,
   BulkJobType,
   BulkUploadJobData,
   BulkUploadJobHandler,
 } from '../../bulk-uploads/bulk-upload-job.types';
-import { toBulkJobPage } from '../../bulk-uploads/bulk-upload-job.util';
+import {
+  assertBulkSessionFile,
+  toBulkJobPage,
+} from '../../bulk-uploads/bulk-upload-job.util';
 import { EmployeesBulkService } from './employees-bulk.service';
 
 /**
@@ -25,12 +27,13 @@ export class EmployeesBulkJobHandler implements BulkUploadJobHandler {
     private readonly s3: S3Service,
   ) {}
 
+  /** Sesión vencida (no existe en S3) → error de datos; S3 caído → 503 técnico. */
   async assertSessionExists(sessionId: string): Promise<void> {
     const storeId = RequestContextService.getStoreId();
-    const key = `tmp/bulk-employees/${storeId}/${sessionId}.xlsx`;
-    if (!(await this.s3.objectExists(key))) {
-      throw new VendixHttpException(ErrorCodes.BULK_PROD_SESSION_EXPIRED);
-    }
+    await assertBulkSessionFile(
+      this.s3,
+      `tmp/bulk-employees/${storeId}/${sessionId}.xlsx`,
+    );
   }
 
   async runPage(

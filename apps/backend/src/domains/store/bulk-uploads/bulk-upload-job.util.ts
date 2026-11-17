@@ -1,7 +1,12 @@
+import { Logger } from '@nestjs/common';
+import { ErrorCodes, VendixHttpException } from '@common/errors';
+import type { S3Service } from '@common/services/s3.service';
 import type {
   BulkJobPageResult,
   BulkJobUserSnapshot,
 } from './bulk-upload-job.types';
+
+const logger = new Logger('BulkUploadJob');
 
 /**
  * Foto del usuario autenticado para el worker (`validateStoreAccess` lee
@@ -56,20 +61,25 @@ export function toBulkJobPage(
 }
 
 /**
- * `true` solo cuando S3 dice que el objeto no existe (`NoSuchKey` / 404): la
- * sesión de análisis venció o ya se limpió, que es un error de datos. Cualquier
- * otro fallo de la descarga (red, throttling, 5xx) es técnico y debe relanzarse
- * tal cual para que el trabajo lo reintente.
+ * Al encolar, el archivo de la sesión de análisis debe seguir en S3. Solo un
+ * «no existe» es sesión vencida (error de datos: hay que volver a subirlo). Si
+ * S3 no responde, la carga no se puede iniciar ahora (503) y el archivo sigue
+ * sirviendo para intentarlo de nuevo.
  */
-export function isS3ObjectMissing(error: unknown): boolean {
-  const e = error as {
-    name?: unknown;
-    Code?: unknown;
-    $metadata?: { httpStatusCode?: unknown };
-  };
-  return (
-    e?.name === 'NoSuchKey' ||
-    e?.Code === 'NoSuchKey' ||
-    e?.$metadata?.httpStatusCode === 404
-  );
+export async function assertBulkSessionFile(
+  s3: Pick<S3Service, 'objectExistsStrict'>,
+  key: string,
+): Promise<void> {
+  let exists: boolean;
+  try {
+    exists = await s3.objectExistsStrict(key);
+  } catch (error) {
+    logger.warn(
+      `Session file ${key} could not be checked: ${(error as Error)?.message}`,
+    );
+    throw new VendixHttpException(ErrorCodes.BULK_JOB_ENQUEUE_FAILED);
+  }
+  if (!exists) {
+    throw new VendixHttpException(ErrorCodes.BULK_PROD_SESSION_EXPIRED);
+  }
 }

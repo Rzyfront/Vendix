@@ -1,6 +1,6 @@
 import { Injectable } from '@nestjs/common';
 import { randomUUID } from 'crypto';
-import { S3Service } from '@common/services/s3.service';
+import { S3Service, isS3NotFoundError } from '@common/services/s3.service';
 import { RequestContextService } from '@common/context/request-context.service';
 import { ErrorCodes, VendixHttpException } from '@common/errors';
 import {
@@ -84,9 +84,9 @@ export class CustomersBulkJobHandler implements BulkUploadJobHandler {
     let buffer: Buffer;
     try {
       buffer = await this.s3.downloadFile(key);
-    } catch (error: any) {
+    } catch (error) {
       // Solo «no existe» es dato vencido; cualquier otro fallo de S3 es técnico.
-      if (error?.name === 'NoSuchKey' || error?.$metadata?.httpStatusCode === 404) {
+      if (isS3NotFoundError(error)) {
         throw new VendixHttpException(ErrorCodes.BULK_PROD_SESSION_EXPIRED);
       }
       throw error;

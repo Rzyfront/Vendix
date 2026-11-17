@@ -4,10 +4,9 @@ import { StorePrismaService } from '../../../prisma/services/store-prisma.servic
 import { ProductsService } from './products.service';
 import { assertVariantsAllowed } from './services/tiers-variants-exclusive.util';
 import { AccessValidationService } from '@common/services/access-validation.service';
-import { S3Service } from '@common/services/s3.service';
+import { S3Service, isS3NotFoundError } from '@common/services/s3.service';
 import { VendixHttpException, ErrorCodes } from '@common/errors';
 import { RequestContextService } from '@common/context/request-context.service';
-import { isS3ObjectMissing } from '../bulk-uploads/bulk-upload-job.util';
 import { InventoryAdjustmentsService } from '../inventory/adjustments/inventory-adjustments.service';
 import { LocationsService } from '../inventory/locations/locations.service';
 import {
@@ -2186,7 +2185,7 @@ export class ProductsBulkService {
       fileBuffer = await this.s3Service.downloadImage(s3Key);
     } catch (error) {
       // Solo «no existe» es sesión vencida (dato); un fallo de S3 es técnico.
-      if (isS3ObjectMissing(error)) {
+      if (isS3NotFoundError(error)) {
         throw new VendixHttpException(ErrorCodes.BULK_PROD_SESSION_EXPIRED);
       }
       throw error;
