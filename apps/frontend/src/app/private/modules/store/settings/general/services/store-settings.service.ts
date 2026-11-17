@@ -9,6 +9,7 @@ import {
   StoreSettings,
 } from '../../../../../../core/models/store-settings.interface';
 import * as AuthActions from '../../../../../../core/store/auth/auth.actions';
+import { selectAccessToken } from '../../../../../../core/store/auth/auth.selectors';
 import { CurrencyFormatService } from '../../../../../../shared/pipes';
 
 export type StoreFiscalNitType =
@@ -39,6 +40,22 @@ export interface StoreSettingsRequestOptions {
   forceRefresh?: boolean;
 }
 
+export interface StoreSettingsSaveOptions {
+  /**
+   * QUI-563: store the form was loaded under. The backend answers 409
+   * `STORE_SETTINGS_STORE_MISMATCH_001` when it differs from the token store,
+   * so settings loaded in store A can never overwrite store B.
+   */
+  expected_store_id?: number | null;
+}
+
+/** Settings response tied to the store whose token requested it (QUI-563). */
+interface StoreSettingsCacheEntry {
+  store_id: number | null;
+  response: ApiResponse<StoreSettings>;
+  cached_at: number;
+}
+
 @Injectable({
   providedIn: 'root',
 })
@@ -48,24 +65,53 @@ export class StoreSettingsService {
   private currencyFormatService = inject(CurrencyFormatService);
   private readonly api_base_url = `${environment.apiUrl}/store`;
   private readonly settings_cache_ttl_ms = 60 * 1000;
-  private settings_cache: ApiResponse<StoreSettings> | null = null;
-  private settings_cache_time = 0;
-  private settings_request$?: Observable<ApiResponse<StoreSettings>>;
+  private settings_cache: StoreSettingsCacheEntry | null = null;
+  private settings_request?: {
+    store_id: number | null;
+    request$: Observable<ApiResponse<StoreSettings>>;
+  };
+  private readonly access_token = this.store.selectSignal(selectAccessToken);
+
+  /**
+   * QUI-563: the store the backend will scope the next request to, read from
+   * the `store_id` claim of the active access token. A store switch replaces
+   * the token without reloading the app, so the tenant resolved by domain can
+   * still point at the previous store; the token cannot.
+   */
+  getActiveStoreId(): number | null {
+    const payload = this.access_token()?.split('.')[1];
+    if (!payload) return null;
+    try {
+      const claims = JSON.parse(
+        atob(payload.replace(/-/g, '+').replace(/_/g, '/')),
+      ) as { store_id?: unknown };
+      return typeof claims.store_id === 'number' ? claims.store_id : null;
+    } catch {
+      return null;
+    }
+  }
 
   getSettings(
     options: StoreSettingsRequestOptions = {},
   ): Observable<ApiResponse<StoreSettings>> {
-    const now = Date.now();
+    // The service outlives a store switch, so the cache and the in-flight
+    // request are only reused for the store they were requested under.
+    const store_id = this.getActiveStoreId();
+    const cached = this.cachedSettingsFor(store_id);
     if (
       !options.forceRefresh &&
-      this.settings_cache &&
-      now - this.settings_cache_time < this.settings_cache_ttl_ms
+      cached &&
+      Date.now() - cached.cached_at < this.settings_cache_ttl_ms
     ) {
-      return of(this.settings_cache);
+      return of(cached.response);
     }
 
-    if (!options.forceRefresh && this.settings_request$) {
-      return this.settings_request$;
+    if (
+      !options.forceRefresh &&
+      this.settings_request &&
+      this.settings_request.store_id === store_id
+    ) {
+      return this.settings_request.request$;
     }
 
     const request$ = this.http
@@ -73,29 +119,34 @@ export class StoreSettingsService {
       .pipe(
         map((response) => response || { success: true, data: null }),
         tap((response) => {
-          this.cacheSettingsResponse(response);
+          this.cacheSettingsResponse(response, store_id);
           this.publishStoreSettings(response);
         }),
-        catchError((error) => this.handleSettingsReadError(error)),
+        catchError((error) => this.handleSettingsReadError(error, store_id)),
         finalize(() => {
-          if (this.settings_request$ === request$) {
-            this.settings_request$ = undefined;
+          if (this.settings_request?.request$ === request$) {
+            this.settings_request = undefined;
           }
         }),
         shareReplay({ bufferSize: 1, refCount: false }),
       );
 
-    this.settings_request$ = request$;
+    this.settings_request = { store_id, request$ };
     return request$;
   }
 
   saveSettingsNow(
     settings: Partial<StoreSettings>,
+    options: StoreSettingsSaveOptions = {},
   ): Observable<ApiResponse<StoreSettings>> {
-    return this.update_settings_api(settings);
+    const { expected_store_id } = options;
+    return this.update_settings_api(
+      expected_store_id == null ? settings : { ...settings, expected_store_id },
+    );
   }
 
   resetToDefault(): Observable<ApiResponse<StoreSettings>> {
+    const store_id = this.getActiveStoreId();
     return this.http
       .post<
         ApiResponse<StoreSettings>
@@ -103,7 +154,7 @@ export class StoreSettingsService {
       .pipe(
         map((response) => response || { success: true, data: null }),
         tap((response) => {
-          this.cacheSettingsResponse(response);
+          this.cacheSettingsResponse(response, store_id);
           this.publishStoreSettings(response);
         }),
         catchError(this.handleError),
@@ -147,6 +198,7 @@ export class StoreSettingsService {
   }
 
   applyTemplate(template_name: string): Observable<ApiResponse<StoreSettings>> {
+    const store_id = this.getActiveStoreId();
     return this.http
       .post<
         ApiResponse<StoreSettings>
@@ -154,7 +206,7 @@ export class StoreSettingsService {
       .pipe(
         map((response) => response || { success: true, data: null }),
         tap((response) => {
-          this.cacheSettingsResponse(response);
+          this.cacheSettingsResponse(response, store_id);
           this.publishStoreSettings(response);
         }),
         catchError(this.handleError),
@@ -216,8 +268,9 @@ export class StoreSettingsService {
   }
 
   private update_settings_api(
-    settings: Partial<StoreSettings>,
+    settings: Partial<StoreSettings> & StoreSettingsSaveOptions,
   ): Observable<ApiResponse<StoreSettings>> {
+    const store_id = this.getActiveStoreId();
     return this.http
       .patch<
         ApiResponse<StoreSettings>
@@ -225,7 +278,7 @@ export class StoreSettingsService {
       .pipe(
         map((response) => response || { success: true, data: null }),
         tap((response) => {
-          this.cacheSettingsResponse(response);
+          this.cacheSettingsResponse(response, store_id);
 
           const store_settings = response?.data;
           if (!store_settings) return;
@@ -239,9 +292,19 @@ export class StoreSettingsService {
       );
   }
 
-  private cacheSettingsResponse(response: ApiResponse<StoreSettings>): void {
-    this.settings_cache = response;
-    this.settings_cache_time = Date.now();
+  private cacheSettingsResponse(
+    response: ApiResponse<StoreSettings>,
+    store_id: number | null,
+  ): void {
+    this.settings_cache = { store_id, response, cached_at: Date.now() };
+  }
+
+  private cachedSettingsFor(
+    store_id: number | null,
+  ): StoreSettingsCacheEntry | null {
+    return this.settings_cache?.store_id === store_id
+      ? this.settings_cache
+      : null;
   }
 
   private publishStoreSettings(response: ApiResponse<StoreSettings>): void {
@@ -259,15 +322,22 @@ export class StoreSettingsService {
     void this.currencyFormatService.loadCurrencyForCode(currencyCode);
   }
 
+  /**
+   * QUI-563: the cached fallback is only valid for the store that failed to
+   * load. A read error right after switching to store B must surface, never
+   * hand back store A's settings as if they were B's.
+   */
   private handleSettingsReadError(
-    error: any,
+    error: unknown,
+    store_id: number | null,
   ): Observable<ApiResponse<StoreSettings>> {
-    if (this.settings_cache) {
+    const cached = this.cachedSettingsFor(store_id);
+    if (cached) {
       console.warn(
         'StoreSettingsService: using cached settings after read error',
         error,
       );
-      return of(this.settings_cache);
+      return of(cached.response);
     }
 
     return this.handleError(error);
