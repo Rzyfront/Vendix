@@ -74,6 +74,16 @@ export const METRIC_TYPE_LABEL = 'Métrica';
 const contains = (q: string) => ({ contains: q, mode: 'insensitive' as const });
 const newestFirst = { id: 'desc' as const };
 
+/**
+ * Suppliers the store's own supplier profile can open: its own and the
+ * organization-wide ones (`store_id NULL`), never a sibling store's (same rule
+ * as `SuppliersService.findSupplierForProfile`).
+ */
+const supplierScope = (organizationId: number, storeId: number) => ({
+  organization_id: organizationId,
+  OR: [{ store_id: storeId }, { store_id: null }],
+});
+
 const customerName = (
   userId: number,
   user: { first_name: string | null; last_name: string | null } | null,
@@ -117,7 +127,7 @@ export const REMINDER_RECORD_TYPES: Record<ReminderRecordType, RecordTypeSpec> =
         where: { store_id: scope.store_id, id: { in: ids } },
         select: { id: true, order_number: true },
       });
-      return rows.map((r) => ({ id: r.id, label: `Orden ${r.order_number}` }));
+      return rows.map((r) => ({ id: r.id, label: r.order_number }));
     },
     async search(db, scope, q, take) {
       const rows = await db.orders.findMany({
@@ -126,7 +136,7 @@ export const REMINDER_RECORD_TYPES: Record<ReminderRecordType, RecordTypeSpec> =
         orderBy: newestFirst,
         take,
       });
-      return rows.map((r) => ({ id: r.id, label: `Orden ${r.order_number}` }));
+      return rows.map((r) => ({ id: r.id, label: r.order_number }));
     },
   },
   customer: {
@@ -169,7 +179,7 @@ export const REMINDER_RECORD_TYPES: Record<ReminderRecordType, RecordTypeSpec> =
       if (scope.organization_id === null) return [];
       const rows = await db.suppliers.findMany({
         where: {
-          organization_id: scope.organization_id,
+          ...supplierScope(scope.organization_id, scope.store_id),
           id: { in: ids },
           state: { not: 'archived' },
         },
@@ -181,9 +191,9 @@ export const REMINDER_RECORD_TYPES: Record<ReminderRecordType, RecordTypeSpec> =
       if (scope.organization_id === null) return [];
       const rows = await db.suppliers.findMany({
         where: {
-          organization_id: scope.organization_id,
+          ...supplierScope(scope.organization_id, scope.store_id),
           state: { not: 'archived' },
-          OR: [{ name: contains(q) }, { code: contains(q) }],
+          AND: [{ OR: [{ name: contains(q) }, { code: contains(q) }] }],
         },
         select: { id: true, name: true },
         orderBy: newestFirst,
@@ -201,7 +211,7 @@ export const REMINDER_RECORD_TYPES: Record<ReminderRecordType, RecordTypeSpec> =
         where: { location: { store_id: scope.store_id }, id: { in: ids } },
         select: { id: true, order_number: true },
       });
-      return rows.map((r) => ({ id: r.id, label: `Orden de compra ${r.order_number}` }));
+      return rows.map((r) => ({ id: r.id, label: r.order_number }));
     },
     async search(db, scope, q, take) {
       const rows = await db.purchase_orders.findMany({
@@ -210,19 +220,20 @@ export const REMINDER_RECORD_TYPES: Record<ReminderRecordType, RecordTypeSpec> =
         orderBy: newestFirst,
         take,
       });
-      return rows.map((r) => ({ id: r.id, label: `Orden de compra ${r.order_number}` }));
+      return rows.map((r) => ({ id: r.id, label: r.order_number }));
     },
   },
   quotation: {
     type_label: 'Cotización',
-    permissions: ['store:quotations:read'],
+    // The quotation detail (`GET quotations/:id`) requires `read:one`, not the list permission.
+    permissions: ['store:quotations:read:one'],
     route: (id) => `/admin/orders/quotations/${id}`,
     async find(db, scope, ids) {
       const rows = await db.quotations.findMany({
         where: { store_id: scope.store_id, id: { in: ids } },
         select: { id: true, quotation_number: true },
       });
-      return rows.map((r) => ({ id: r.id, label: `Cotización ${r.quotation_number}` }));
+      return rows.map((r) => ({ id: r.id, label: r.quotation_number }));
     },
     async search(db, scope, q, take) {
       const rows = await db.quotations.findMany({
@@ -231,7 +242,7 @@ export const REMINDER_RECORD_TYPES: Record<ReminderRecordType, RecordTypeSpec> =
         orderBy: newestFirst,
         take,
       });
-      return rows.map((r) => ({ id: r.id, label: `Cotización ${r.quotation_number}` }));
+      return rows.map((r) => ({ id: r.id, label: r.quotation_number }));
     },
   },
   invoice: {
@@ -244,7 +255,7 @@ export const REMINDER_RECORD_TYPES: Record<ReminderRecordType, RecordTypeSpec> =
         where: { store_id: scope.store_id, id: { in: ids } },
         select: { id: true, invoice_number: true },
       });
-      return rows.map((r) => ({ id: r.id, label: `Factura ${r.invoice_number ?? `#${r.id}`}` }));
+      return rows.map((r) => ({ id: r.id, label: r.invoice_number ?? `#${r.id}` }));
     },
     async search(db, scope, q, take) {
       const rows = await db.invoices.findMany({
@@ -253,7 +264,7 @@ export const REMINDER_RECORD_TYPES: Record<ReminderRecordType, RecordTypeSpec> =
         orderBy: newestFirst,
         take,
       });
-      return rows.map((r) => ({ id: r.id, label: `Factura ${r.invoice_number ?? `#${r.id}`}` }));
+      return rows.map((r) => ({ id: r.id, label: r.invoice_number ?? `#${r.id}` }));
     },
   },
 };

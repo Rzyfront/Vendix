@@ -364,6 +364,30 @@ describe('RemindersLogComponent (dashboard Bitácora)', () => {
     expect(rowTitles()).toContain('Llamar al proveedor de lácteos');
   });
 
+  it('an invoice link keeps its query string, in the list and in the detail', async () => {
+    const invoiceUrl = '/admin/invoicing/invoices?invoiceId=91';
+    api.items = [
+      ...api.items,
+      reminder(4, {
+        title: 'Cobrar factura',
+        link: { type: 'invoice', type_label: 'Factura', id: 91, label: 'FV-91', available: true, url: invoiceUrl },
+      }),
+    ];
+    buttonByText('Ver hechos').click();
+    await settle();
+
+    const chip = Array.from(
+      root().querySelectorAll<HTMLAnchorElement>('a[data-testid="reminder-link"]'),
+    ).find((a) => a.textContent?.includes('FV-91'));
+    expect(chip?.getAttribute('href')).toBe(invoiceUrl);
+
+    fixture.componentInstance.openDetail(api.items[3]);
+    await settle();
+    expect(document.querySelector('[data-testid="reminder-detail-link"]')?.getAttribute('href')).toBe(
+      invoiceUrl,
+    );
+  });
+
   it('links the record picked in the search and sends it on create', async () => {
     buttonByText('Nuevo').click();
     await settle();

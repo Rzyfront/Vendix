@@ -225,7 +225,7 @@ const ALL_LINK_PERMISSIONS = [
   'store:customers:read',
   'store:inventory:suppliers:read',
   'store:orders:purchase_orders:read',
-  'store:quotations:read',
+  'store:quotations:read:one',
   'invoicing:read',
 ];
 
@@ -257,9 +257,13 @@ const TWO_STORES: FakeLinkRecords = {
       user: { first_name: 'Leonor', last_name: 'Gómez', email: 'leonor2@x.co', document_number: '3', user_roles: [{ roles: { name: 'customer' } }] },
     },
   ],
+  // Store-scope organizations keep one supplier list per store; `store_id: null`
+  // is organization-wide. Store 3 is store 1's sibling in organization 1.
   suppliers: [
-    { id: 31, organization_id: 1, name: 'Lechería del Valle', code: 'LV', state: 'active' },
-    { id: 41, organization_id: 2, name: 'Lechería del Valle', code: 'LV', state: 'active' },
+    { id: 31, organization_id: 1, store_id: 1, name: 'Lechería del Valle', code: 'LV', state: 'active' },
+    { id: 32, organization_id: 1, store_id: 3, name: 'Lechería Hermana', code: 'LH', state: 'active' },
+    { id: 33, organization_id: 1, store_id: null, name: 'Lechería Central', code: 'LC', state: 'active' },
+    { id: 41, organization_id: 2, store_id: 2, name: 'Lechería del Valle', code: 'LV', state: 'active' },
   ],
   purchase_orders: [
     { id: 51, location: { store_id: 1 }, order_number: 'LE-OC-1' },
@@ -308,13 +312,14 @@ describe('RemindersService — link search and link availability (QUI-580 c)', (
         'purchase_order:51',
         'quotation:71',
         'supplier:31',
+        'supplier:33',
       ].sort(),
     );
     expect(hits.find((h) => h.type === 'purchase_order')).toEqual({
       type: 'purchase_order',
       type_label: 'Orden de compra',
       id: 51,
-      label: 'Orden de compra LE-OC-1',
+      label: 'LE-OC-1',
       url: '/admin/orders/purchase-orders/51',
     });
     expect(hits.find((h) => h.type === 'invoice')?.url).toBe('/admin/invoicing/invoices?invoiceId=91');
@@ -350,11 +355,32 @@ describe('RemindersService — link search and link availability (QUI-580 c)', (
     expect(prisma.user_reminders.create).not.toHaveBeenCalled();
   });
 
+  it("never links a supplier of a sibling store, only the store's own or organization-wide ones", async () => {
+    const { service } = linkSetup();
+    asUser(1, 1, ['store:inventory:suppliers:read']);
+
+    await expect(
+      service.create(ANA_S1, { title: 'x', link_type: 'supplier', link_id: 32 }),
+    ).rejects.toMatchObject({ errorCode: 'REMINDER_LINK_001' });
+    const own = await service.create(ANA_S1, { title: 'Propio', link_type: 'supplier', link_id: 31 });
+    const shared = await service.create(ANA_S1, { title: 'Central', link_type: 'supplier', link_id: 33 });
+    expect([own.link?.label, shared.link?.label]).toEqual(['Lechería del Valle', 'Lechería Central']);
+  });
+
+  it('a quotation opens only with the permission its detail requires', async () => {
+    const { service } = linkSetup();
+    asUser(1, 1, ['store:quotations:read']);
+    expect(await service.searchLinks(ANA_S1, 'le')).toEqual([]);
+
+    asUser(1, 1, ['store:quotations:read:one']);
+    expect((await service.searchLinks(ANA_S1, 'le')).map((h) => h.id)).toEqual([71]);
+  });
+
   it('links a new record type and marks deleted or forbidden links as not available', async () => {
     const { service } = linkSetup([
-      { id: 1, store_id: 1, user_id: 10, title: 'OC', link_type: 'purchase_order', link_id: 51, link_label: 'Orden de compra LE-OC-1' },
+      { id: 1, store_id: 1, user_id: 10, title: 'OC', link_type: 'purchase_order', link_id: 51, link_label: 'LE-OC-1' },
       { id: 2, store_id: 1, user_id: 10, title: 'Borrado', link_type: 'product', link_id: 502, link_label: 'Leche vieja' },
-      { id: 3, store_id: 1, user_id: 10, title: 'Sin permiso', link_type: 'invoice', link_id: 91, link_label: 'Factura LE-FV-1' },
+      { id: 3, store_id: 1, user_id: 10, title: 'Sin permiso', link_type: 'invoice', link_id: 91, link_label: 'LE-FV-1' },
       { id: 4, store_id: 1, user_id: 10, title: 'Métrica', link_type: 'metric', link_label: 'Ventas del mes' },
     ]);
     asUser(1, 1, ['store:products:read', 'store:orders:purchase_orders:read']);
@@ -367,7 +393,7 @@ describe('RemindersService — link search and link availability (QUI-580 c)', (
       type: 'purchase_order',
       type_label: 'Orden de compra',
       id: 51,
-      label: 'Orden de compra LE-OC-1',
+      label: 'LE-OC-1',
       available: true,
       url: '/admin/orders/purchase-orders/51',
     });
@@ -380,7 +406,7 @@ describe('RemindersService — link search and link availability (QUI-580 c)', (
       link_type: 'purchase_order',
       link_id: 51,
     });
-    expect(created.link).toMatchObject({ label: 'Orden de compra LE-OC-1', available: true });
+    expect(created.link).toMatchObject({ label: 'LE-OC-1', available: true });
     // The other store's purchase order with the same number is not linkable.
     await expect(
       service.create(ANA_S1, { title: 'x', link_type: 'purchase_order', link_id: 61 }),

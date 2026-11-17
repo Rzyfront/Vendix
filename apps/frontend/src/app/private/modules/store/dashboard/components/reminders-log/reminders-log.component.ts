@@ -10,7 +10,7 @@ import {
 import { isPlatformBrowser } from '@angular/common';
 import { takeUntilDestroyed, toSignal } from '@angular/core/rxjs-interop';
 import { FormControl, FormGroup, ReactiveFormsModule, Validators } from '@angular/forms';
-import { RouterLink } from '@angular/router';
+import { Router, RouterLink, UrlTree } from '@angular/router';
 import { Subject, catchError, of, switchMap } from 'rxjs';
 
 import { ButtonComponent } from '../../../../../../shared/components/button/button.component';
@@ -41,6 +41,8 @@ import {
 export interface ReminderRow {
   item: Reminder;
   progress: ReminderProgress | null;
+  /** Parsed route of an available link: a plain string would encode `?invoiceId=`. */
+  linkTree: UrlTree | null;
 }
 
 /** How often the time bars move forward. */
@@ -152,9 +154,9 @@ function toStoreWallClock(iso: string, tz: string): string {
                     {{ row.item.remind_at ? formatDate(row.item.remind_at) : 'Sin fecha' }}
                   </p>
                   @if (row.item.link; as link) {
-                    @if (link.available && link.url) {
+                    @if (row.linkTree) {
                       <a
-                        [routerLink]="link.url"
+                        [routerLink]="row.linkTree"
                         class="mt-1 inline-flex max-w-full items-center gap-1 text-xs font-medium text-primary hover:underline"
                         [attr.aria-label]="'Abrir ' + link.type_label + ': ' + link.label"
                         data-testid="reminder-link"
@@ -260,9 +262,9 @@ function toStoreWallClock(iso: string, tz: string): string {
               <p class="flex flex-wrap items-center gap-1.5">
                 <app-icon name="link" [size]="14"></app-icon>
                 <span class="text-text-secondary">{{ item.link.type_label }}:</span>
-                @if (item.link.available && item.link.url) {
+                @if (detailLinkTree(); as linkTree) {
                   <a
-                    [routerLink]="item.link.url"
+                    [routerLink]="linkTree"
                     class="text-primary hover:underline"
                     data-testid="reminder-detail-link"
                     (click)="detailOpen.set(false)"
@@ -398,6 +400,7 @@ function toStoreWallClock(iso: string, tz: string): string {
 })
 export class RemindersLogComponent implements OnInit {
   private readonly remindersService = inject(RemindersService);
+  private readonly router = inject(Router);
   private readonly toast = inject(ToastService);
   private readonly dialog = inject(DialogService);
   private readonly destroyRef = inject(DestroyRef);
@@ -467,6 +470,7 @@ export class RemindersLogComponent implements OnInit {
     return sortReminders(this.items()).map((item) => ({
       item,
       progress: reminderProgress(item, now),
+      linkTree: this.linkTree(item),
     }));
   });
 
@@ -478,6 +482,11 @@ export class RemindersLogComponent implements OnInit {
   readonly detailProgress = computed(() => {
     const item = this.detail();
     return item ? reminderProgress(item, this.now()) : null;
+  });
+
+  readonly detailLinkTree = computed(() => {
+    const item = this.detail();
+    return item ? this.linkTree(item) : null;
   });
 
   constructor() {
@@ -522,6 +531,12 @@ export class RemindersLogComponent implements OnInit {
 
   ngOnInit(): void {
     this.load();
+  }
+
+  /** The server answers a URL only for links the user may open; it may carry a query. */
+  private linkTree(item: Reminder): UrlTree | null {
+    const url = item.link?.available ? item.link.url : null;
+    return url ? this.router.parseUrl(url) : null;
   }
 
   formatDate(iso: string): string {
