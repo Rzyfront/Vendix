@@ -130,8 +130,18 @@ export class BillingHistoryComponent implements OnInit {
   private router = inject(Router);
   private facade = inject(SubscriptionFacade);
 
+  /**
+   * QUI-693 — same rule as Mi Suscripción: an `active` row whose paid cycle
+   * already ended (`current_period_end` in the past) is not "Activa".
+   */
+  private readonly isActiveButOverdue = computed(() => {
+    const end = this.facade.current()?.current_period_end;
+    return this.facade.status() === 'active' && !!end && new Date(end).getTime() <= Date.now();
+  });
+
   readonly headerBadgeText = computed(() => {
     const s = this.facade.status();
+    if (this.isActiveButOverdue()) return 'Vencida';
     const labels: Record<string, string> = {
       active: 'Activa',
       trial: 'Prueba',
@@ -149,6 +159,7 @@ export class BillingHistoryComponent implements OnInit {
 
   readonly headerBadgeColor = computed(() => {
     const s = this.facade.status();
+    if (this.isActiveButOverdue()) return 'yellow';
     if (s === 'active' || s === 'trial' || s === 'trialing') return 'green';
     if (s === 'past_due' || s === 'grace_soft' || s === 'grace_hard') return 'yellow';
     if (s === 'blocked') return 'red';
