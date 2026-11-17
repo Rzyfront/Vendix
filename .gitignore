@@ -67,6 +67,9 @@ GITHUB_SECRET_INSTRUCTIONS.txt
 # Playwright MCP session artifacts (snapshots, console, network logs)
 .playwright-mcp/
 
+# QA evidence packages (verify-ticket-prod): screenshots + report per ticket
+.qa-evidence/
+
 # Compose override local. Es el nombre reservado que Compose fusiona solo, sin
 # flag ni opt-in, así que commitearlo cambia el arranque de todo el equipo.
 # Para compartir una variante usar `docker-compose.no-watch.yml` con -f.
