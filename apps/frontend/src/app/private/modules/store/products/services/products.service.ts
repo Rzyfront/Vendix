@@ -770,7 +770,14 @@ export class ProductsService {
       );
   }
 
-  /** Commit paginado de la sesión (máx. 100 filas por página). */
+  /**
+   * Commit paginado de la sesión (máx. 100 filas por página).
+   *
+   * Devuelve el `HttpErrorResponse` tal cual, sin `handleError`: el modal de
+   * carga masiva necesita el status para reintentar los fallos técnicos (red,
+   * 5xx) y no los rechazos de datos (QUI-1009). Re-suscribir reenvía la página;
+   * el backend la aplica de forma idempotente por SKU.
+   */
   uploadProductsFromSessionPage(
     sessionId: string,
     offset: number,
@@ -788,10 +795,7 @@ export class ProductsService {
         ...(initialLoadAck ? { initial_load_ack: true } : {}),
         ...this.fileInfoBody(fileInfo),
       })
-      .pipe(
-        map((response) => response.data),
-        catchError(this.handleError),
-      );
+      .pipe(map((response) => response.data));
   }
 
   /** QUI-1004: file name/hash so the backend records the upload. */

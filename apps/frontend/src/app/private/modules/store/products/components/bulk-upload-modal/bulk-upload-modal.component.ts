@@ -11,10 +11,16 @@ import {
 } from '@angular/core';
 import { takeUntilDestroyed } from '@angular/core/rxjs-interop';
 import { NgClass, CurrencyPipe } from '@angular/common';
+import { HttpErrorResponse } from '@angular/common/http';
 import { EMPTY, Subscription, expand, of } from 'rxjs';
 import { catchError, tap } from 'rxjs/operators';
 import { RouterLink } from '@angular/router';
 import { ProductsService } from '../../services/products.service';
+import {
+  isTransientHttpError,
+  retryTransientWithBackoff,
+} from '../../../../../../core/utils/async-job-poll.util';
+import { BatchProgressClock } from '../../../../../../shared/utils/batch-progress-clock';
 import { BulkUploadLogService } from '../../../bulk-uploads/services/bulk-upload-log.service';
 import { BulkUploadFileInfo } from '../../../bulk-uploads/bulk-upload-log.interface';
 import {
@@ -1366,7 +1372,7 @@ import {
                       class="flex items-center justify-between text-[11px] text-gray-600"
                     >
                       <span>
-                        Procesando lote {{ progress().doneBatches }}/{{
+                        Procesando lote {{ clock.currentBatch() }}/{{
                           progress().totalBatches
                         }}
                         ({{ progress().doneRows }}/{{ progress().totalRows }}
@@ -1384,6 +1390,30 @@ import {
                         [style.width.%]="progressPercent()"
                       ></div>
                     </div>
+                    <div
+                      class="mt-1.5 flex items-center justify-between text-[11px] text-gray-500"
+                    >
+                      <span class="flex items-center gap-1">
+                        <app-icon name="timer" [size]="12"></app-icon>
+                        Transcurrido {{ clock.elapsedLabel() }}
+                      </span>
+                      <span>
+                        @if (clock.remainingLabel(); as remaining) {
+                          Restante {{ remaining }}
+                        } @else {
+                          Calculando tiempo restante…
+                        }
+                      </span>
+                    </div>
+                    @if (retryNotice(); as notice) {
+                      <p
+                        class="mt-1.5 flex items-center gap-1 text-[11px] font-medium text-amber-700"
+                        role="status"
+                      >
+                        <app-icon name="refresh-cw" [size]="12"></app-icon>
+                        {{ notice }}
+                      </p>
+                    }
                   </div>
                 }
                 <p class="text-xs text-gray-500">
@@ -1666,6 +1696,13 @@ export class BulkUploadModalComponent {
   private readonly appliedRows = signal(0);
   private uploadSub: Subscription | null = null;
 
+  /** Reintentos automáticos de un lote ante red/5xx (QUI-1009). */
+  static readonly BATCH_MAX_RETRIES = 3;
+  /** Cronómetro, estimado por ritmo real y «lote x/y» (QUI-1009). */
+  readonly clock = new BatchProgressClock();
+  /** «Problema técnico, reintentando (n/3)» mientras un lote espera reintento. */
+  readonly retryNotice = signal<string | null>(null);
+
   // Error state
   readonly uploadError = signal<string | null>(null);
 
@@ -1675,6 +1712,7 @@ export class BulkUploadModalComponent {
   private toastService = inject(ToastService);
 
   constructor() {
+    this.destroyRef.onDestroy(() => this.clock.dispose());
     effect(() => {
       const open = this.isOpen();
       if (open) {
@@ -1863,6 +1901,8 @@ export class BulkUploadModalComponent {
     this.uploadSub?.unsubscribe();
     this.uploadSub = null;
     this.appliedRows.set(0);
+    this.clock.reset();
+    this.retryNotice.set(null);
     this.progressState.set({
       phase: 'idle',
       totalBatches: 0,
@@ -2026,11 +2066,18 @@ export class BulkUploadModalComponent {
       totalRows: total,
       doneRows: 0,
     });
+    this.retryNotice.set(null);
+    this.clock.start(Math.max(1, Math.ceil(total / limit)));
 
+    // Red/5xx: la página se reintenta sola (1→2→4 s). Es seguro porque el
+    // backend aplica cada página de forma idempotente: upsert por SKU y carga
+    // inicial con cantidad absoluta (QUI-1009, Paso 0). Un 4xx es un rechazo
+    // de datos y no se reintenta.
     // catchError DENTRO de cada página: la degrada a "todas sus filas fallaron"
     // y la cadena continúa con la siguiente.
-    const fetchPage = (offset: number) =>
-      this.productsService
+    const fetchPage = (offset: number) => {
+      let retried = false;
+      return this.productsService
         .uploadProductsFromSessionPage(
           sessionId,
           offset,
@@ -2039,11 +2086,19 @@ export class BulkUploadModalComponent {
           this.fileInfo,
         )
         .pipe(
-          catchError((error) => {
-            const message =
-              typeof error === 'string'
-                ? error
-                : error?.error?.message || error?.message || 'Error en el lote';
+          retryTransientWithBackoff<BulkProductUploadPage>({
+            maxRetries: BulkUploadModalComponent.BATCH_MAX_RETRIES,
+            onRetry: ({ attempt, maxRetries }) => {
+              retried = true;
+              this.retryNotice.set(
+                `Problema técnico, reintentando (${attempt}/${maxRetries})…`,
+              );
+            },
+          }),
+          tap(() => this.retryNotice.set(null)),
+          catchError((error: unknown) => {
+            this.retryNotice.set(null);
+            const message = describeBatchError(error, retried);
             const rows = Math.max(0, Math.min(limit, total - offset));
             const page: BulkProductUploadPage = {
               success: false,
@@ -2065,6 +2120,7 @@ export class BulkUploadModalComponent {
             return of(page);
           }),
         );
+    };
 
     // Al destruir el componente se corta la cadena sin pasar por `complete`.
     this.destroyRef.onDestroy(() => this.uploadSub?.unsubscribe());
@@ -2092,11 +2148,15 @@ export class BulkUploadModalComponent {
             doneBatches: p.doneBatches + 1,
             doneRows: Math.min(total, p.doneRows + (page.total_processed ?? 0)),
           }));
+          const p = this.progressState();
+          this.clock.recordBatch(p.doneBatches, p.totalBatches);
         }),
       )
       .subscribe({
         complete: () => {
           this.uploadSub = null;
+          this.clock.stop();
+          this.retryNotice.set(null);
           // Si la última página falló, el backend no borró el archivo de S3.
           if (!doneSeen) this.cancelSessionSilently(sessionId);
           const result: BulkProductUploadResult = {
@@ -2129,4 +2189,37 @@ export class BulkUploadModalComponent {
     if (bytes < 1024 * 1024) return (bytes / 1024).toFixed(1) + ' KB';
     return (bytes / (1024 * 1024)).toFixed(1) + ' MB';
   }
+}
+
+/**
+ * Motivo legible del fallo de un lote. Distingue el problema técnico (red o
+ * 5xx, ya reintentado) del rechazo de datos que trae el backend.
+ */
+function describeBatchError(error: unknown, retried: boolean): string {
+  const retries = BulkUploadModalComponent.BATCH_MAX_RETRIES;
+  if (isTransientHttpError(error)) {
+    const status = (error as HttpErrorResponse).status;
+    const cause = status === 0 ? 'sin conexión con el servidor' : `HTTP ${status}`;
+    return (
+      `problema técnico de la plataforma (${cause}) tras ${retries} reintentos. ` +
+      'No es un error de tu archivo: vuelve a cargarlo más tarde; las filas ya ' +
+      'aplicadas se actualizan, no se duplican.'
+    );
+  }
+  const backend =
+    error instanceof HttpErrorResponse
+      ? (error.error as { message?: unknown } | null)?.message
+      : undefined;
+  const message =
+    typeof error === 'string'
+      ? error
+      : typeof backend === 'string' && backend
+        ? backend
+        : (error as { message?: string } | null)?.message || 'Error en el lote';
+  // Tras un fallo técnico el servidor pudo aplicar el intento anterior (p. ej.
+  // la última página borra el archivo temporal y el reintento ve la sesión
+  // vencida): avisarlo evita que el usuario repita la carga a ciegas.
+  return retried
+    ? `${message} (un intento anterior que falló por un problema técnico pudo haberse aplicado; revisa el historial de cargas)`
+    : message;
 }
