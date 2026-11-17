@@ -30,10 +30,12 @@ describe('StoreSettingsService cache per store (QUI-563)', () => {
 
   let service: StoreSettingsService;
   let http: HttpTestingController;
+  let dispatch: jasmine.Spy;
   const accessToken = signal<string | null>(tokenFor(10));
 
   beforeEach(() => {
     accessToken.set(tokenFor(10));
+    dispatch = jasmine.createSpy('dispatch');
     TestBed.configureTestingModule({
       providers: [
         StoreSettingsService,
@@ -42,7 +44,7 @@ describe('StoreSettingsService cache per store (QUI-563)', () => {
         {
           provide: Store,
           useValue: {
-            dispatch: jasmine.createSpy('dispatch'),
+            dispatch,
             selectSignal: () => accessToken,
           },
         },
@@ -120,6 +122,28 @@ describe('StoreSettingsService cache per store (QUI-563)', () => {
 
     expect(received).toBeUndefined();
     expect((failed as { status: number }).status).toBe(403);
+  });
+
+  it('a store A read that lands after switching to store B is not published', () => {
+    service.getSettings().subscribe();
+    accessToken.set(tokenFor(20));
+    http.expectOne(url).flush(settingsA);
+
+    expect(dispatch).not.toHaveBeenCalled();
+  });
+
+  it('a store A save that lands after switching to store B is not published', () => {
+    service.saveSettingsNow({}).subscribe();
+    accessToken.set(tokenFor(20));
+    http.expectOne(url).flush(settingsA);
+
+    expect(dispatch).not.toHaveBeenCalled();
+  });
+
+  it('a read for the active store is still published', () => {
+    loadStoreA();
+
+    expect(dispatch).toHaveBeenCalledTimes(1);
   });
 
   it('a read error for the same store still falls back to its own cache', () => {

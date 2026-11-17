@@ -455,6 +455,14 @@ export class GeneralSettingsStore {
    * reintenta el guardado: aplicarlo pisaría la tienda activa con valores ajenos.
    */
   private discardForeignDraft(): void {
+    // Los datos en pantalla son de la tienda anterior: se vacían y se muestra la
+    // carga, para que ni un fallo de la recarga deje ver la tienda anterior.
+    // `loadedStoreId` se conserva: sigue bloqueando el guardado hasta que la
+    // tienda activa cargue.
+    this.isLoading.set(true);
+    this.settingsLoaded.set(false);
+    this.settings.set({} as StoreSettings);
+    this.servicesValue.set(null);
     this.hasUnsavedChanges.set(false);
     this.lastSaved.set(null);
     this.pendingAppLogo.set(null);

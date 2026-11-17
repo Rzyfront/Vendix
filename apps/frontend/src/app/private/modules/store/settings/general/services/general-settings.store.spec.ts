@@ -114,6 +114,21 @@ describe('GeneralSettingsStore store switch (QUI-563)', () => {
     expect(store.settings()).toEqual(settingsB);
   });
 
+  it('if reloading the active store fails, the previous store settings are not shown', async () => {
+    editBeforeSwitch();
+    activeStoreId = 20;
+    settingsService.getSettings.and.returnValue(
+      throwError(() => new HttpErrorResponse({ status: 500 })),
+    );
+
+    await store.saveAllSettings();
+
+    expect(settingsService.saveSettingsNow).not.toHaveBeenCalled();
+    expect(store.settings()).toEqual({} as StoreSettings);
+    expect(store.servicesValue()).toBeNull();
+    expect(store.settingsLoaded()).toBeFalse();
+  });
+
   it('a 409 store mismatch from the backend drops the draft and reloads', async () => {
     settingsService.saveSettingsNow.and.returnValue(throwError(() => mismatch));
     store.onSectionChange('general', { name: 'Editado en A' });

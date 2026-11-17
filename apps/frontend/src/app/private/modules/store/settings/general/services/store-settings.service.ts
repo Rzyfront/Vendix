@@ -120,7 +120,7 @@ export class StoreSettingsService {
         map((response) => response || { success: true, data: null }),
         tap((response) => {
           this.cacheSettingsResponse(response, store_id);
-          this.publishStoreSettings(response);
+          this.publishStoreSettings(response, store_id);
         }),
         catchError((error) => this.handleSettingsReadError(error, store_id)),
         finalize(() => {
@@ -155,7 +155,7 @@ export class StoreSettingsService {
         map((response) => response || { success: true, data: null }),
         tap((response) => {
           this.cacheSettingsResponse(response, store_id);
-          this.publishStoreSettings(response);
+          this.publishStoreSettings(response, store_id);
         }),
         catchError(this.handleError),
       );
@@ -207,7 +207,7 @@ export class StoreSettingsService {
         map((response) => response || { success: true, data: null }),
         tap((response) => {
           this.cacheSettingsResponse(response, store_id);
-          this.publishStoreSettings(response);
+          this.publishStoreSettings(response, store_id);
         }),
         catchError(this.handleError),
       );
@@ -281,7 +281,7 @@ export class StoreSettingsService {
           this.cacheSettingsResponse(response, store_id);
 
           const store_settings = response?.data;
-          if (!store_settings) return;
+          if (!store_settings || !this.isActiveStore(store_id)) return;
 
           this.store.dispatch(
             AuthActions.updateStoreSettingsSuccess({ store_settings }),
@@ -307,9 +307,21 @@ export class StoreSettingsService {
       : null;
   }
 
-  private publishStoreSettings(response: ApiResponse<StoreSettings>): void {
+  /**
+   * QUI-563: a response that lands after a store switch belongs to the previous
+   * store. It stays cached under that store, but must not reach the session
+   * (NgRx + persisted auth state) of the store that is active now.
+   */
+  private isActiveStore(store_id: number | null): boolean {
+    return store_id === this.getActiveStoreId();
+  }
+
+  private publishStoreSettings(
+    response: ApiResponse<StoreSettings>,
+    store_id: number | null,
+  ): void {
     const store_settings = response?.data;
-    if (!store_settings) return;
+    if (!store_settings || !this.isActiveStore(store_id)) return;
 
     this.store.dispatch(AuthActions.updateStoreSettings({ store_settings }));
     this.syncCurrencyFromSettings(store_settings);
