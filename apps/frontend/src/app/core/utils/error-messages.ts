@@ -191,6 +191,10 @@ export const ERROR_MESSAGES: Record<string, string> = {
   STORE_VALIDATE_001: 'La validacion de la tienda fallo.',
   STORE_PERM_001: 'No tiene permisos para acceder a esta tienda.',
   STORE_CONTEXT_001: 'Debe seleccionar una tienda.',
+  // QUI-563: la configuración se cargó en otra tienda (se cambió de tienda con
+  // la pantalla abierta). El guardado se rechaza para no pisar la tienda activa.
+  STORE_SETTINGS_STORE_MISMATCH_001:
+    'Cambiaste de tienda con la configuración abierta. Descartamos los cambios sin guardar y cargamos la configuración de la tienda actual.',
   ADDR_PRIMARY_REQUIRES_CUSTOMER_001:
     'Selecciona un cliente antes de marcar su dirección como predeterminada.',
   ADDR_CUSTOMER_NOT_IN_STORE_001:

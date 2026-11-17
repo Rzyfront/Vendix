@@ -24,6 +24,10 @@ import type {
 import { ConfigFacade } from '../../../../../../core/store/config';
 import { AuthFacade } from '../../../../../../core/store/auth/auth.facade';
 import { parseApiError } from '../../../../../../core/utils/parse-api-error';
+import { ERROR_MESSAGES } from '../../../../../../core/utils/error-messages';
+
+/** QUI-563: the settings in the form were loaded under another store. */
+const STORE_MISMATCH_CODE = 'STORE_SETTINGS_STORE_MISMATCH_001';
 
 /**
  * Estado compartido de Configuración General.
@@ -322,6 +326,9 @@ export class GeneralSettingsStore {
   }
 
   loadSettings(options: StoreSettingsRequestOptions = {}): void {
+    // The service only serves this store's cache or request, so the response
+    // belongs to the store active right now.
+    const store_id = this.settingsService.getActiveStoreId();
     this.settingsService
       .getSettings(options)
       .pipe(takeUntilDestroyed(this.destroyRef))
@@ -332,6 +339,7 @@ export class GeneralSettingsStore {
             delete (data as any).shipping;
           }
           this.settings.set(data);
+          this.loadedStoreId = store_id;
           this.isLoading.set(false);
           this.hasUnsavedChanges.set(false);
           this.settingsLoaded.set(true);
@@ -390,16 +398,26 @@ export class GeneralSettingsStore {
    * valor rechazado que se quedara ahí haría fallar todos los que siguen.
    */
   saveSectionNow(section: keyof StoreSettings, value: StoreSettings[keyof StoreSettings]): void {
+    if (this.storeChangedSinceLoad()) {
+      this.discardForeignDraft();
+      return;
+    }
     if (!this.confirmedSections.has(section)) {
       this.confirmedSections.set(section, this.settings()[section]);
     }
     this.settings.update((s) => ({ ...s, [section]: value }));
     this.settingsService
-      .saveSettingsNow({ [section]: value } as Partial<StoreSettings>)
+      .saveSettingsNow({ [section]: value } as Partial<StoreSettings>, {
+        expected_store_id: this.loadedStoreId,
+      })
       .pipe(takeUntilDestroyed(this.destroyRef))
       .subscribe({
         next: () => this.confirmedSections.set(section, value),
         error: (error) => {
+          if (parseApiError(error).errorCode === STORE_MISMATCH_CODE) {
+            this.discardForeignDraft();
+            return;
+          }
           const confirmed = this.confirmedSections.get(section);
           this.settings.update((s) => ({ ...s, [section]: confirmed }));
           this.toastService.error(parseApiError(error).userMessage);
@@ -409,6 +427,42 @@ export class GeneralSettingsStore {
 
   /** Último valor de cada sección autoguardada que el servidor aceptó. */
   private readonly confirmedSections = new Map<keyof StoreSettings, unknown>();
+
+  /**
+   * QUI-563: tienda dueña de lo que hay en `settings()`. Solo cambia cuando una
+   * lectura tiene éxito, así que sigue diciendo de quién son los datos aunque
+   * la recarga de la tienda nueva falle. Viaja como `expected_store_id` para
+   * que el backend rechace (409) un guardado cargado bajo otra tienda.
+   */
+  private loadedStoreId: number | null = null;
+
+  /**
+   * El usuario cambió de tienda con Configuración abierta: los datos y el
+   * borrador en memoria son de la tienda anterior. Sin ids conocidos no hay
+   * nada que comparar y decide el backend.
+   */
+  private storeChangedSinceLoad(): boolean {
+    const active = this.settingsService.getActiveStoreId();
+    return (
+      this.loadedStoreId !== null &&
+      active !== null &&
+      active !== this.loadedStoreId
+    );
+  }
+
+  /**
+   * Descarta lo pendiente de la tienda anterior y carga la activa. Nunca se
+   * reintenta el guardado: aplicarlo pisaría la tienda activa con valores ajenos.
+   */
+  private discardForeignDraft(): void {
+    this.hasUnsavedChanges.set(false);
+    this.lastSaved.set(null);
+    this.pendingAppLogo.set(null);
+    this.pendingAppFavicon.set(null);
+    this.confirmedSections.clear();
+    this.toastService.warning(ERROR_MESSAGES[STORE_MISMATCH_CODE]);
+    this.loadSettings({ forceRefresh: true });
+  }
 
   /**
    * La sección Recibos edita `pos.auto_print_receipt`, que pertenece al bloque
@@ -487,6 +541,11 @@ export class GeneralSettingsStore {
   }
 
   async saveAllSettings(): Promise<void> {
+    // Antes de subir logo o favicon: también se escribirían en la tienda activa.
+    if (this.storeChangedSinceLoad()) {
+      this.discardForeignDraft();
+      return;
+    }
     this.isSaving.set(true);
 
     // Validación del GeneralSettingsForm (que embebe el sub-formulario de
@@ -608,7 +667,9 @@ export class GeneralSettingsStore {
       // re-lectura, salir y volver re-montaría el GeneralSettingsForm con el
       // valor en memoria, que puede estar rancio si el backend normalizó algo.
       this.settingsService
-        .saveSettingsNow(sanitizedSettings)
+        .saveSettingsNow(sanitizedSettings, {
+          expected_store_id: this.loadedStoreId,
+        })
         .pipe(takeUntilDestroyed(this.destroyRef))
         .subscribe({
           next: () => {
@@ -629,6 +690,10 @@ export class GeneralSettingsStore {
             // `error_code`, así que un rechazo del guard de transición llegaba al
             // usuario como "Error saving settings" y sin decirle qué hacer.
             const parsed = parseApiError(error);
+            if (parsed.errorCode === STORE_MISMATCH_CODE) {
+              this.discardForeignDraft();
+              return;
+            }
             console.error(
               `Error saving settings [${parsed.errorCode ?? 'sin código'}]:`,
               parsed.devMessage ?? error,
