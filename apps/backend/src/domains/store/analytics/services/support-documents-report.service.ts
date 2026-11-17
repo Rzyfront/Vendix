@@ -158,7 +158,7 @@ export class SupportDocumentsReportService {
     return {
       store_id: storeId,
       invoice_type: { in: types },
-      issue_date: { gte: startDate, lte: endDate },
+      issue_date: { gte: startDate, lte: endDate }, // tz-audit:date-only — business-date; ventana de resolveLocalDateOnlyRange
       ...(query.status?.length ? { status: { in: query.status } } : {}),
       ...(query.supplier_id ? { supplier_id: query.supplier_id } : {}),
     };
