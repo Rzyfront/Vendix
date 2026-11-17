@@ -34,6 +34,43 @@ export function normalizePricingCycle(cycle: string | null | undefined): Pricing
 }
 const VIEW_MODE_STORAGE_KEY = 'pricingViewMode';
 
+/**
+ * SEO-OPS-18: vigencia de la oferta publicada. Responsable comercial: Adel Toro
+ * (registrado en el seguimiento del plan SEO, 17-nov-2026). Cambiar esta fecha cada
+ * vez que cambien los precios publicados.
+ */
+export const PRICING_VALID_FROM = '2026-11-12';
+export const PRICING_VALID_FROM_LABEL = 'Precios vigentes desde el 12 de noviembre de 2026.';
+const PRICING_JSON_LD_ID = 'vendix-pricing-offers';
+
+/**
+ * SEO-OPS-18: datos estructurados de las ofertas, armados con los mismos planes de la
+ * API que pintan las tarjetas, para que el schema y el texto digan lo mismo.
+ */
+export function buildPricingJsonLd(plans: readonly PublicPlan[], validFrom = PRICING_VALID_FROM): object | null {
+  const offers = plans
+    .map((p) => ({ p, cycle: normalizePricingCycle(p.billing_cycle) }))
+    .filter(({ p, cycle }) => cycle !== null && Number.isFinite(Number(p.base_price)) && !!p.currency)
+    .map(({ p, cycle }) => ({
+      '@type': 'Offer',
+      name: `${p.name} · ${PRICING_CYCLES.find((c) => c.value === cycle)!.label}`,
+      price: String(Number(p.base_price)),
+      priceCurrency: String(p.currency).toUpperCase(),
+      validFrom,
+      url: 'https://vendix.online/pricing',
+      availability: 'https://schema.org/InStock',
+    }));
+  if (offers.length === 0) return null;
+  return {
+    '@context': 'https://schema.org',
+    '@type': 'Product',
+    name: 'Vendix',
+    description: 'Software de punto de venta, inventario, tienda en línea y facturación electrónica para negocios en Colombia.',
+    brand: { '@type': 'Brand', name: 'Vendix' },
+    offers,
+  };
+}
+
 @Component({
   selector: 'app-pricing',
   standalone: true,
@@ -51,6 +88,12 @@ export class PricingComponent {
   );
   private readonly marketingMetadataCleanup = inject(DestroyRef).onDestroy(
     this.restoreMarketingMetadata,
+  );
+
+  private readonly document = inject(DOCUMENT);
+  readonly validFromLabel = PRICING_VALID_FROM_LABEL;
+  private readonly removeJsonLd = inject(DestroyRef).onDestroy(() =>
+    this.document.getElementById(PRICING_JSON_LD_ID)?.remove(),
   );
 
   private publicPlansService = inject(PublicPlansService);
@@ -103,6 +146,20 @@ export class PricingComponent {
   } as PricingCardPlan;
 
   constructor() {
+    // SEO-OPS-18: JSON-LD de ofertas con los mismos datos que las tarjetas.
+    effect(() => {
+      const data = buildPricingJsonLd(this.plans());
+      const head = this.document.head;
+      let script = this.document.getElementById(PRICING_JSON_LD_ID) as HTMLScriptElement | null;
+      if (!data) { script?.remove(); return; }
+      if (!script) {
+        script = this.document.createElement('script');
+        script.type = 'application/ld+json';
+        script.id = PRICING_JSON_LD_ID;
+        head.appendChild(script);
+      }
+      script.textContent = JSON.stringify(data);
+    });
     // Persist view mode preference across visits
     effect(() => {
       const mode = this.viewMode();
