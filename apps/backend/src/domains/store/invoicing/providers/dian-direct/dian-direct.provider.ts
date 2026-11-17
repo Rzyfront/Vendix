@@ -13,6 +13,7 @@ import {
   InvoiceProviderAdapter,
   ProviderInvoiceData,
   ProviderResponse,
+  StatusQueryOptions,
   StatusResponse,
 } from '../invoice-provider.interface';
 import { DianSecretEnvelopeService } from '../../../../../common/services/dian-secret-envelope.service';
@@ -1350,8 +1351,16 @@ export class DianDirectProvider implements InvoiceProviderAdapter {
     });
   }
 
-  async checkStatus(tracking_id: string): Promise<StatusResponse> {
-    const config = await this.loadConfig();
+  async checkStatus(
+    tracking_id: string,
+    options?: StatusQueryOptions,
+  ): Promise<StatusResponse> {
+    // Sin opción ⇒ 'invoicing', como siempre: el envío (REGLA 90, timeout) no
+    // la pasa y su comportamiento no cambia. La consulta en vivo del documento
+    // soporte (QUI-683) sí la pasa, porque su habilitación es otra fila.
+    const config = await this.loadConfig(
+      options?.configuration_type ?? 'invoicing',
+    );
 
     // Load WS-Security credentials for SOAP envelope
     const ws_credentials = await this.loadWsCredentials(config);

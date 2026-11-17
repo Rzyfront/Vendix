@@ -366,3 +366,185 @@ describe('DianDirectProvider — mensaje y checkStatus con reglas estructuradas'
     expect(res.provider_data.timed_out).toBe(true);
   });
 });
+
+// ─────────────────────────────────────────────────────────────────────────────
+// QUI-683 — el ENVÍO de la nota de ajuste al documento soporte (no sólo el
+// builder): lo que se firma y transmite es un tipo 95 que referencia el CUDS
+// del original, y sin ese CUDS no sale nada hacia la DIAN.
+// ─────────────────────────────────────────────────────────────────────────────
+
+describe('DianDirectProvider.sendSupportAdjustmentNote — tipo 95 y CUDS del original', () => {
+  const ORIGINAL_CUDS = 'ab'.repeat(48);
+
+  const buyer = {
+    document_type: '31',
+    nit: '900123456',
+    nit_dv: '7',
+    legal_name: 'Vendix SAS',
+    trade_name: 'Vendix',
+    address_line: 'Calle 1 # 2-3',
+    city_code: '11001',
+    city_name: 'Bogota',
+    department_code: '11',
+    department_name: 'Bogota',
+    country_code: 'CO',
+    postal_code: '110111',
+    email: 'contabilidad@vendix.test',
+    tax_regime: '1',
+    tax_scheme: 'O-48',
+  };
+  const seller = {
+    document_type: 'CC',
+    document_number: '123456789',
+    verification_digit: null,
+    legal_name: 'Proveedor No Obligado',
+    address_line: 'Carrera 4 # 5-6',
+    city_code: '11001',
+    city_name: 'Bogota',
+    department_code: '11',
+    department_name: 'Bogota',
+    country_code: 'CO',
+    tax_regime: '2',
+    tax_responsibilities: ['R-99-PN'],
+    person_type: 'NATURAL',
+    ciiu_code: null,
+  };
+
+  const adjustment = (overrides: Record<string, unknown> = {}) => ({
+    invoice_number: 'NASVS1',
+    invoice_type: 'support_adjustment_note',
+    issue_date: '2026-03-12',
+    issue_time: '10:00:00-05:00',
+    customer_name: 'Proveedor No Obligado',
+    customer_tax_id: '123456789',
+    subtotal_amount: '1000.00',
+    discount_amount: '0.00',
+    tax_amount: '0.00',
+    withholding_amount: '0.00',
+    total_amount: '1000.00',
+    currency: 'COP',
+    items: [
+      {
+        description: 'Ajuste servicio',
+        quantity: '1',
+        unit_price: '1000.00',
+        discount_amount: '0.00',
+        tax_amount: '0.00',
+        total_amount: '1000.00',
+      },
+    ],
+    taxes: [],
+    original_invoice_number: 'DS100',
+    original_invoice_cufe: ORIGINAL_CUDS,
+    original_invoice_issue_date: '2026-03-10',
+    ...overrides,
+  });
+
+  const makeSendProvider = () => {
+    const soap = {
+      sendBillSync: jest.fn().mockResolvedValue({
+        raw_response:
+          '<s:Envelope xmlns:s="s" xmlns:b="b"><s:Body><b:IsValid>true</b:IsValid><b:StatusCode>00</b:StatusCode><b:StatusDescription>Procesado Correctamente.</b:StatusDescription></s:Body></s:Envelope>',
+        timed_out: false,
+      }),
+    };
+    const provider = new DianDirectProvider(
+      null as any,
+      null as any,
+      null as any,
+      soap as any,
+      null as any,
+      new DianResponseParserService(),
+      null as any,
+      null as any,
+    );
+    const p = provider as any;
+    p.loadConfig = jest.fn().mockResolvedValue({
+      id: 1,
+      environment: 'test',
+      software_id: 'software-1',
+      software_pin: '12345',
+      nit: '900123456',
+      operation_mode: 'own_software',
+    });
+    p.validateCertificateExpiry = jest.fn();
+    p.loadIssuerData = jest.fn().mockResolvedValue(buyer);
+    p.buildCustomerData = jest.fn().mockResolvedValue(seller);
+    p.signXml = jest.fn(async (xml: string) => xml);
+    p.compressToZipBase64 = jest.fn().mockResolvedValue('zip');
+    p.loadWsCredentials = jest.fn().mockResolvedValue(undefined);
+    p.createAuditLog = jest.fn().mockResolvedValue(undefined);
+    return { provider, soap, signXml: p.signXml as jest.Mock, loadConfig: p.loadConfig as jest.Mock };
+  };
+
+  it('firma y transmite una nota tipo 95 que referencia el CUDS del documento soporte original', async () => {
+    const { provider, soap, signXml, loadConfig } = makeSendProvider();
+
+    const response = await provider.sendSupportAdjustmentNote(adjustment() as any);
+
+    expect(loadConfig).toHaveBeenCalledWith('support_document');
+    expect(soap.sendBillSync).toHaveBeenCalledTimes(1);
+    const signed: string = signXml.mock.calls[0][0];
+    expect(signed).toContain('<cbc:CreditNoteTypeCode>95</cbc:CreditNoteTypeCode>');
+    const billing = signed.slice(
+      signed.indexOf('<cac:BillingReference>'),
+      signed.indexOf('</cac:BillingReference>'),
+    );
+    expect(billing).toContain('<cbc:ID>DS100</cbc:ID>');
+    expect(billing).toContain(
+      `<cbc:UUID schemeName="CUDS-SHA384">${ORIGINAL_CUDS}</cbc:UUID>`,
+    );
+    expect(billing).toContain('<cbc:IssueDate>2026-03-10</cbc:IssueDate>');
+    // La nota lleva su PROPIO CUDS, distinto del original que referencia.
+    expect(response.success).toBe(true);
+    expect(response.cuds).toBeTruthy();
+    expect(response.cuds).not.toBe(ORIGINAL_CUDS);
+  });
+
+  it('sin el CUDS del original no firma ni transmite: la nota falla antes de salir', async () => {
+    const { provider, soap, signXml } = makeSendProvider();
+
+    await expect(
+      provider.sendSupportAdjustmentNote(
+        adjustment({ original_invoice_cufe: undefined }) as any,
+      ),
+    ).rejects.toThrow(/CUDS/);
+    expect(signXml).not.toHaveBeenCalled();
+    expect(soap.sendBillSync).not.toHaveBeenCalled();
+  });
+});
+
+describe('DianDirectProvider.checkStatus — habilitación consultada', () => {
+  const makeProvider = () => {
+    const soap = {
+      getStatus: jest.fn().mockResolvedValue({ raw_response: '', timed_out: true }),
+    };
+    const provider = new DianDirectProvider(
+      null as any,
+      null as any,
+      null as any,
+      soap as any,
+      null as any,
+      new DianResponseParserService(),
+      null as any,
+      null as any,
+    );
+    (provider as any).loadConfig = jest
+      .fn()
+      .mockResolvedValue({ id: 1, environment: 'test' });
+    (provider as any).loadWsCredentials = jest.fn().mockResolvedValue(undefined);
+    return { provider, loadConfig: (provider as any).loadConfig as jest.Mock };
+  };
+
+  it('sin opciones sigue usando la configuración de facturación (flujo de envío intacto)', async () => {
+    const { provider, loadConfig } = makeProvider();
+    await provider.checkStatus('CUFE123');
+    expect(loadConfig).toHaveBeenCalledWith('invoicing');
+  });
+
+  it('con configuration_type consulta con la habilitación del documento soporte', async () => {
+    const { provider, loadConfig } = makeProvider();
+    await provider.checkStatus('CUDS123', { configuration_type: 'support_document' });
+    expect(loadConfig).toHaveBeenCalledWith('support_document');
+  });
+});

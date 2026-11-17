@@ -104,3 +104,48 @@ export interface SupportDocumentQuery {
 
 /** Helper para que la lista sepa qué filas mostrar — un sub-tipo de `Invoice`. */
 export type SupportDocumentRow = Invoice;
+
+/**
+ * Documento soporte con la relación `supplier` que `GET /store/invoicing/:id`
+ * incluye (`INVOICE_INCLUDE`). El snapshot (`customer_name`/`customer_tax_id`)
+ * es lo que viajó a la DIAN; la ficha del proveedor es la de hoy.
+ */
+export type SupportDocumentDetail = SupportDocumentRow & {
+  supplier?: {
+    id: number;
+    name: string;
+    tax_id?: string | null;
+  } | null;
+};
+
+/**
+ * Respuesta de `GET /store/invoicing/:id/dian-status` (QUI-683): la consulta
+ * EN VIVO a la DIAN por la llave fiscal guardada (CUDS en los documentos
+ * soporte). Es de solo lectura: no cambia el estado local del documento.
+ *
+ * `unavailable` = la DIAN no respondió o la respuesta no se pudo leer; no es
+ * un rechazo y la pantalla no debe pintarlo como tal.
+ */
+export interface SupportDocumentDianStatus {
+  invoice_id: number;
+  invoice_number: string;
+  invoice_type: string;
+  document_key: string;
+  document_key_label: 'CUDS' | 'CUFE' | 'CUDE';
+  local_status: string;
+  dian_status: 'accepted' | 'rejected' | 'pending' | 'unavailable';
+  dian_status_code: string | null;
+  message: string | null;
+  rules: Array<{ code: string; text: string; severity: string }>;
+  checked_at: string;
+}
+
+/**
+ * Documento soporte aceptado que se va a corregir con una nota de ajuste: el
+ * detalle se lo pasa al form de creación para abrirlo prellenado (QUI-683).
+ */
+export interface SupportDocumentAdjustmentSource {
+  id: number;
+  invoice_number: string;
+  supplier_id: number | null;
+}
