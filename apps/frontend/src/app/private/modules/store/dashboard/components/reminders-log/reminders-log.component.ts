@@ -11,18 +11,26 @@ import { isPlatformBrowser } from '@angular/common';
 import { takeUntilDestroyed, toSignal } from '@angular/core/rxjs-interop';
 import { FormControl, FormGroup, ReactiveFormsModule, Validators } from '@angular/forms';
 import { RouterLink } from '@angular/router';
+import { Subject, catchError, of, switchMap } from 'rxjs';
 
 import { ButtonComponent } from '../../../../../../shared/components/button/button.component';
 import { EmptyStateComponent } from '../../../../../../shared/components/empty-state/empty-state.component';
 import { IconComponent } from '../../../../../../shared/components/icon/icon.component';
 import { InputComponent } from '../../../../../../shared/components/input/input.component';
+import { InputsearchComponent } from '../../../../../../shared/components/inputsearch/inputsearch.component';
 import { ModalComponent } from '../../../../../../shared/components/modal/modal.component';
 import { TextareaComponent } from '../../../../../../shared/components/textarea/textarea.component';
 import { ToastService } from '../../../../../../shared/components/toast/toast.service';
 import { DialogService } from '../../../../../../shared/components/dialog/dialog.service';
 import { formatStoreDateTime } from '../../../../../../shared/utils/date.util';
 import { extractApiError } from '../../../../../../shared/utils/http-error.util';
-import { Reminder, RemindersService } from '../../services/reminders.service';
+import {
+  CreateReminderPayload,
+  Reminder,
+  ReminderLinkOption,
+  ReminderLinkType,
+  RemindersService,
+} from '../../services/reminders.service';
 import {
   ReminderProgress,
   ReminderTimeTone,
@@ -37,6 +45,24 @@ export interface ReminderRow {
 
 /** How often the time bars move forward. */
 export const REMINDERS_CLOCK_MS = 60_000;
+
+/** The link search starts at this many characters (the API requires it too). */
+export const LINK_SEARCH_MIN_CHARS = 2;
+
+/** The record chosen in the form: a search result, or the current link on edit. */
+export interface ReminderLinkChoice {
+  type: ReminderLinkType;
+  type_label: string;
+  id: number | null;
+  label: string;
+}
+
+function sameLink(
+  a: { type: ReminderLinkType; id: number | null } | null,
+  b: { type: ReminderLinkType; id: number | null } | null,
+): boolean {
+  return (a?.type ?? null) === (b?.type ?? null) && (a?.id ?? null) === (b?.id ?? null);
+}
 
 /** Store-local wall clock `YYYY-MM-DDTHH:mm` of a UTC instant (for datetime-local inputs). */
 function toStoreWallClock(iso: string, tz: string): string {
@@ -69,6 +95,7 @@ function toStoreWallClock(iso: string, tz: string): string {
     EmptyStateComponent,
     IconComponent,
     InputComponent,
+    InputsearchComponent,
     ModalComponent,
     TextareaComponent,
   ],
@@ -124,6 +151,25 @@ function toStoreWallClock(iso: string, tz: string): string {
                     <app-icon name="clock" [size]="12"></app-icon>
                     {{ row.item.remind_at ? formatDate(row.item.remind_at) : 'Sin fecha' }}
                   </p>
+                  @if (row.item.link; as link) {
+                    @if (link.available && link.url) {
+                      <a
+                        [routerLink]="link.url"
+                        class="mt-1 inline-flex max-w-full items-center gap-1 text-xs font-medium text-primary hover:underline"
+                        [attr.aria-label]="'Abrir ' + link.type_label + ': ' + link.label"
+                        data-testid="reminder-link"
+                      >
+                        <app-icon name="link" [size]="12"></app-icon>
+                        <span class="truncate">{{ link.type_label }} · {{ link.label }}</span>
+                      </a>
+                    } @else {
+                      <p class="mt-1 flex items-center gap-1 text-xs text-text-secondary" data-testid="reminder-link">
+                        <app-icon name="link" [size]="12"></app-icon>
+                        <span class="truncate">{{ link.type_label }} · {{ link.label }}</span>
+                        <span class="shrink-0 italic">(no disponible)</span>
+                      </p>
+                    }
+                  }
                 </div>
                 <button
                   type="button"
@@ -211,9 +257,10 @@ function toStoreWallClock(iso: string, tz: string): string {
           @if (item.link) {
             <div>
               <p class="text-xs text-text-secondary mb-1">Vinculado a</p>
-              <p class="flex items-center gap-1.5">
+              <p class="flex flex-wrap items-center gap-1.5">
                 <app-icon name="link" [size]="14"></app-icon>
-                @if (item.link.url) {
+                <span class="text-text-secondary">{{ item.link.type_label }}:</span>
+                @if (item.link.available && item.link.url) {
                   <a
                     [routerLink]="item.link.url"
                     class="text-primary hover:underline"
@@ -222,6 +269,7 @@ function toStoreWallClock(iso: string, tz: string): string {
                   >{{ item.link.label }}</a>
                 } @else {
                   <span class="text-text-primary">{{ item.link.label }}</span>
+                  <span class="text-xs italic text-text-secondary">(no disponible)</span>
                 }
               </p>
             </div>
@@ -251,33 +299,92 @@ function toStoreWallClock(iso: string, tz: string): string {
       [title]="editing() ? 'Editar recordatorio' : 'Nuevo recordatorio'"
       size="md"
     >
-      <!-- formControlName carries the value (CVA); [control] only paints the errors. -->
-      <form [formGroup]="form" class="space-y-4" (ngSubmit)="save()">
-        <app-input
-          label="Título"
-          placeholder="Ej: Llamar al proveedor de lácteos"
-          [required]="true"
-          [maxlength]="200"
-          formControlName="title"
-          [control]="form.controls.title"
-          [error]="titleError()"
-        />
-        <app-textarea
-          label="Nota"
-          placeholder="Detalles opcionales"
-          [rows]="3"
-          formControlName="note"
-          [control]="form.controls.note"
-          [error]="noteError()"
-        />
-        <app-input
-          label="Fecha y hora"
-          type="datetime-local"
-          helperText="Opcional. Hora de la tienda."
-          formControlName="remind_at"
-          [control]="form.controls.remind_at"
-        />
-      </form>
+      <div class="space-y-4">
+        <!-- formControlName carries the value (CVA); [control] only paints the errors. -->
+        <form [formGroup]="form" class="space-y-4" (ngSubmit)="save()">
+          <app-input
+            label="Título"
+            placeholder="Ej: Llamar al proveedor de lácteos"
+            [required]="true"
+            [maxlength]="200"
+            formControlName="title"
+            [control]="form.controls.title"
+            [error]="titleError()"
+          />
+          <app-textarea
+            label="Nota"
+            placeholder="Detalles opcionales"
+            [rows]="3"
+            formControlName="note"
+            [control]="form.controls.note"
+            [error]="noteError()"
+          />
+          <app-input
+            label="Fecha y hora"
+            type="datetime-local"
+            helperText="Opcional. Hora de la tienda."
+            formControlName="remind_at"
+            [control]="form.controls.remind_at"
+          />
+        </form>
+
+        <!-- Outside the form: Enter in the search must not save the reminder. -->
+        <div class="space-y-2" data-testid="reminder-link-field">
+          <p class="text-sm font-medium text-text-primary">Vincular a</p>
+          @if (selectedLink(); as link) {
+            <div
+              class="flex items-center gap-2 rounded-lg border border-border bg-surface p-2.5 text-sm"
+              data-testid="reminder-link-selected"
+            >
+              <app-icon name="link" [size]="14"></app-icon>
+              <span class="flex-1 min-w-0 truncate text-text-primary">{{ link.type_label }} · {{ link.label }}</span>
+              <button
+                type="button"
+                class="shrink-0 min-h-[36px] px-2 rounded-lg text-xs font-medium text-text-secondary hover:text-error hover:bg-error/10 transition-colors flex items-center gap-1"
+                [attr.aria-label]="'Quitar el vínculo con ' + link.label"
+                (click)="clearLink()"
+              >
+                <app-icon name="x" [size]="14"></app-icon>
+                Quitar
+              </button>
+            </div>
+          } @else {
+            <app-inputsearch
+              placeholder="Buscar producto, orden, cliente, proveedor…"
+              ariaLabel="Buscar un registro para vincular"
+              (searchChange)="searchLink($event)"
+            />
+            @if (linkQuery().length < linkSearchMinChars) {
+              <p class="text-xs text-text-secondary">Opcional. Escribe al menos 2 letras para buscar.</p>
+            } @else if (linkSearching()) {
+              <p class="text-xs text-text-secondary">Buscando…</p>
+            } @else if (linkResults().length === 0) {
+              <p class="text-xs text-text-secondary" data-testid="reminder-link-empty">Sin resultados en esta tienda.</p>
+            } @else {
+              <ul
+                class="max-h-56 overflow-y-auto rounded-lg border border-border divide-y divide-border"
+                aria-label="Registros para vincular"
+              >
+                @for (option of linkResults(); track option.type + ':' + option.id) {
+                  <li>
+                    <button
+                      type="button"
+                      class="w-full min-h-[44px] px-3 py-2 flex items-center gap-2 text-left text-sm hover:bg-primary/5 transition-colors"
+                      data-testid="reminder-link-option"
+                      (click)="selectLink(option)"
+                    >
+                      <span class="shrink-0 text-[11px] font-semibold px-2 py-0.5 rounded-full bg-primary/10 text-primary">
+                        {{ option.type_label }}
+                      </span>
+                      <span class="flex-1 min-w-0 truncate text-text-primary">{{ option.label }}</span>
+                    </button>
+                  </li>
+                }
+              </ul>
+            }
+          }
+        </div>
+      </div>
       <div slot="footer" class="flex justify-end gap-3">
         <app-button variant="outline" (clicked)="modalOpen.set(false)" [disabled]="saving()">
           Cancelar
@@ -310,6 +417,13 @@ export class RemindersLogComponent implements OnInit {
   /** Current instant; ticks every minute so the time bars advance. */
   readonly now = signal(Date.now());
   private readonly confirming = signal(false);
+
+  readonly linkSearchMinChars = LINK_SEARCH_MIN_CHARS;
+  readonly linkQuery = signal('');
+  readonly linkResults = signal<ReminderLinkOption[]>([]);
+  readonly linkSearching = signal(false);
+  readonly selectedLink = signal<ReminderLinkChoice | null>(null);
+  private readonly linkSearch$ = new Subject<string>(); // LEGÍTIMO — switchMap drops stale link searches
 
   readonly toneBar: Record<ReminderTimeTone, string> = {
     far: 'bg-success',
@@ -371,6 +485,24 @@ export class RemindersLogComponent implements OnInit {
       const timer = setInterval(() => this.now.set(Date.now()), REMINDERS_CLOCK_MS);
       this.destroyRef.onDestroy(() => clearInterval(timer));
     }
+    this.linkSearch$
+      .pipe(
+        switchMap((q) =>
+          q.length < LINK_SEARCH_MIN_CHARS
+            ? of<ReminderLinkOption[]>([])
+            : this.remindersService.searchLinks(q).pipe(
+                catchError((err) => {
+                  this.toast.error(extractApiError(err).message ?? 'No se pudo buscar el registro');
+                  return of<ReminderLinkOption[]>([]);
+                }),
+              ),
+        ),
+        takeUntilDestroyed(this.destroyRef),
+      )
+      .subscribe((results) => {
+        this.linkResults.set(results);
+        this.linkSearching.set(false);
+      });
   }
 
   readonly titleError = computed(() => {
@@ -441,6 +573,8 @@ export class RemindersLogComponent implements OnInit {
     this.editing.set(null);
     this.submitted.set(false);
     this.form.reset({ title: '', note: '', remind_at: '' });
+    this.selectedLink.set(null);
+    this.resetLinkSearch();
     this.modalOpen.set(true);
   }
 
@@ -452,7 +586,44 @@ export class RemindersLogComponent implements OnInit {
       note: item.note ?? '',
       remind_at: item.remind_at ? toStoreWallClock(item.remind_at, this.timezone()) : '',
     });
+    this.selectedLink.set(
+      item.link
+        ? { type: item.link.type, type_label: item.link.type_label, id: item.link.id, label: item.link.label }
+        : null,
+    );
+    this.resetLinkSearch();
     this.modalOpen.set(true);
+  }
+
+  /** Called by the search box (already debounced). */
+  searchLink(raw: string): void {
+    const q = raw.trim();
+    this.linkQuery.set(q);
+    this.linkSearching.set(q.length >= LINK_SEARCH_MIN_CHARS);
+    this.linkSearch$.next(q);
+  }
+
+  selectLink(option: ReminderLinkOption): void {
+    this.selectedLink.set({
+      type: option.type,
+      type_label: option.type_label,
+      id: option.id,
+      label: option.label,
+    });
+    this.resetLinkSearch();
+  }
+
+  clearLink(): void {
+    this.selectedLink.set(null);
+    this.resetLinkSearch();
+  }
+
+  /** Empties the search and drops any request still in flight. */
+  private resetLinkSearch(): void {
+    this.linkQuery.set('');
+    this.linkResults.set([]);
+    this.linkSearching.set(false);
+    this.linkSearch$.next('');
   }
 
   save(): void {
@@ -462,7 +633,7 @@ export class RemindersLogComponent implements OnInit {
       return;
     }
     const raw = this.form.getRawValue();
-    const payload = {
+    const payload: CreateReminderPayload = {
       title: raw.title.trim(),
       note: raw.note.trim() || null,
       remind_at: raw.remind_at || null,
@@ -472,6 +643,12 @@ export class RemindersLogComponent implements OnInit {
       return;
     }
     const current = this.editing();
+    const link = this.selectedLink();
+    // On edit an untouched link is omitted (stays as is); a removed one is sent as null.
+    if (current ? !sameLink(link, current.link) : link !== null) {
+      payload.link_type = link?.type ?? null;
+      payload.link_id = link?.id ?? null;
+    }
     this.saving.set(true);
     const request$ = current
       ? this.remindersService.update(current.id, payload)
