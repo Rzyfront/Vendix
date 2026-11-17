@@ -278,12 +278,8 @@ export const REPORT_DEFINITIONS: ReportDefinition[] = [
       { key: 'counts_label', header: 'En totales', type: 'text' },
     ],
     exportFilename: 'documentos_soporte',
-    stats: [
-      { key: 'document_count', label: 'Documentos', type: 'number', icon: 'file-text' },
-      { key: 'net_subtotal', label: 'Subtotal neto', type: 'currency', icon: 'receipt' },
-      { key: 'net_tax', label: 'Impuestos netos', type: 'currency', icon: 'percent' },
-      { key: 'net_total', label: 'Total neto', type: 'currency', icon: 'wallet' },
-    ],
+    // Sin `stats`: los totales son anidados (`net.*`, `support.*`) y los pinta
+    // la página propia; el visor genérico solo lee claves planas.
     dataEndpoint: 'store/analytics/support-documents',
     exportEndpoint: 'store/analytics/support-documents/export',
   },
