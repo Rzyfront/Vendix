@@ -1,6 +1,6 @@
-import { Component, signal, inject, input, output, DestroyRef, computed, viewChild } from '@angular/core';
+import { Component, signal, inject, input, output, DestroyRef, computed, viewChild, effect, untracked } from '@angular/core';
 import { takeUntilDestroyed } from '@angular/core/rxjs-interop';
-import { EMPTY, expand } from 'rxjs';
+import { Observable, Subscription } from 'rxjs';
 
 import { FormsModule } from '@angular/forms';
 
@@ -23,7 +23,18 @@ import {
 
 import { InventoryService } from '../../services';
 import { BulkUploadLogService } from '../../../bulk-uploads/services/bulk-upload-log.service';
-import { BulkUploadFileInfo } from '../../../bulk-uploads/bulk-upload-log.interface';
+import {
+  BulkUploadFileInfo,
+  BulkUploadJobResultRow,
+  BulkUploadJobView,
+} from '../../../bulk-uploads/bulk-upload-log.interface';
+import {
+  BulkUploadJobService,
+  isBulkUploadJobNotFound,
+  isBulkUploadJobTerminal,
+} from '../../../bulk-uploads/services/bulk-upload-job.service';
+import { BatchProgressClock } from '../../../../../../shared/utils/batch-progress-clock';
+import { parseApiError } from '../../../../../../core/utils/parse-api-error';
 
 interface BulkResultItem {
   row_number: number;
@@ -37,8 +48,6 @@ interface BulkResultItem {
   quantity_change?: number;
 }
 
-/** Máximo de filas por página del commit (contrato del backend). */
-const BULK_ADJUSTMENT_PAGE_SIZE = 100;
 const BULK_ADJUSTMENT_MAX_FILE_MB = 20;
 
 interface BulkAnalysisResult {
@@ -57,13 +66,6 @@ interface BulkAnalysisResult {
     name: string;
     quantity: number;
   }[];
-}
-
-interface BulkUploadPage extends BulkUploadResult {
-  total: number;
-  offset: number;
-  limit: number;
-  done: boolean;
 }
 
 interface BulkUploadResult {
@@ -98,17 +100,27 @@ interface BulkUploadResult {
       title="Ajuste Masivo de Inventario"
       subtitle="Ajusta el inventario de múltiples productos desde un archivo Excel o CSV"
     >
+      <!-- Buscando cargas en curso -->
+      @if (isResuming()) {
+        <div class="flex flex-col items-center justify-center py-10 gap-3">
+          <app-spinner size="lg" [center]="true"></app-spinner>
+          <p class="text-sm text-gray-900">Buscando cargas en curso…</p>
+        </div>
+      }
+
       <!-- Steps Line -->
-      <div class="mb-4">
-        <app-steps-line
-          [steps]="steps"
-          [currentStep]="step() - 1"
-          size="sm"
-        ></app-steps-line>
-      </div>
+      @if (!isResuming()) {
+        <div class="mb-4">
+          <app-steps-line
+            [steps]="steps"
+            [currentStep]="step() - 1"
+            size="sm"
+          ></app-steps-line>
+        </div>
+      }
 
       <!-- STEP 1: Configuración -->
-      @if (step() === 1) {
+      @if (!isResuming() && step() === 1) {
         <div class="space-y-3">
           <!-- Info banner -->
           <div
@@ -363,6 +375,18 @@ interface BulkUploadResult {
       <!-- STEP 3: Revisión -->
       @if (step() === 3 && analysis()) {
         <div class="space-y-3">
+          @if (uploadError()) {
+            <div
+              class="bg-red-50 px-3 py-2 rounded-lg border border-red-100 text-red-700 text-xs flex items-start gap-2"
+            >
+              <app-icon
+                name="alert-circle"
+                [size]="14"
+                class="shrink-0 mt-0.5"
+              ></app-icon>
+              <p>{{ uploadError() }}</p>
+            </div>
+          }
           <!-- Summary stats cards -->
           <div
             class="flex overflow-x-auto gap-2 pb-1 md:grid md:gap-3 md:overflow-visible"
@@ -498,7 +522,7 @@ interface BulkUploadResult {
 
           <p class="text-xs text-gray-500">
             Se aplicarán las {{ analysis()!.valid }} filas válidas en lotes de
-            {{ pageSize }}.
+            100.
           </p>
         </div>
       }
@@ -510,53 +534,104 @@ interface BulkUploadResult {
             <div class="flex flex-col items-center justify-center py-8 gap-3">
               <app-spinner size="lg" [center]="true"></app-spinner>
               <p class="text-sm text-gray-900 font-medium">
-                Aplicando ajustes... {{ progress().doneRows }} de
-                {{ progress().totalRows }}
+                {{ progressLabel() }}
               </p>
-              <div
-                class="w-full rounded-lg border border-primary/30 bg-primary/5 px-3 py-2"
-              >
+              @if (job()?.status === 'running') {
                 <div
-                  class="flex items-center justify-between text-[11px] text-gray-600"
-                >
-                  <span>Lotes de {{ pageSize }} filas</span>
-                  <span class="font-semibold text-primary"
-                    >{{ progressPercent() }}%</span
-                  >
-                </div>
-                <div
-                  class="mt-1.5 h-1.5 w-full overflow-hidden rounded-full bg-gray-200"
+                  class="w-full rounded-lg border border-primary/30 bg-primary/5 px-3 py-2"
                 >
                   <div
-                    class="h-full rounded-full bg-primary transition-all"
-                    [style.width.%]="progressPercent()"
-                  ></div>
+                    class="flex items-center justify-between text-[11px] text-gray-600"
+                  >
+                    <span>
+                      Transcurrido {{ clock.elapsedLabel() }} ·
+                      @if (clock.remainingLabel(); as remaining) {
+                        Restante {{ remaining }}
+                      } @else {
+                        Restante calculando…
+                      }
+                    </span>
+                    <span class="font-semibold text-primary"
+                      >{{ progressPercent() }}%</span
+                    >
+                  </div>
+                  <div
+                    class="mt-1.5 h-1.5 w-full overflow-hidden rounded-full bg-gray-200"
+                  >
+                    <div
+                      class="h-full rounded-full bg-primary transition-all"
+                      [style.width.%]="progressPercent()"
+                    ></div>
+                  </div>
                 </div>
-              </div>
-              <p class="text-xs text-gray-500">
-                Se procesa en lotes. Si cierras, los lotes ya confirmados quedan
-                aplicados.
+              }
+              @if (retryNotice(); as notice) {
+                <p
+                  class="w-full px-3 py-2 rounded-lg border border-amber-200 bg-amber-50 text-amber-800 text-xs"
+                >
+                  {{ notice }}
+                </p>
+              }
+              <p class="text-xs text-gray-500 text-center">
+                La carga sigue en el servidor; puedes cerrar esta ventana y volver luego.
               </p>
             </div>
           }
 
-          @if (uploadError() && !isUploading()) {
+          @if (technicalFailure() && !isUploading()) {
             <div
-              class="bg-red-50 px-3 py-2 rounded-lg border border-red-100 text-red-700 text-xs flex flex-col sm:flex-row sm:items-start gap-2"
+              class="bg-amber-50 px-3 py-2 rounded-lg border border-amber-200 text-amber-800 text-xs flex flex-col sm:flex-row sm:items-start gap-2"
             >
               <div class="flex items-start gap-2 flex-1">
                 <app-icon
-                  name="alert-circle"
+                  name="alert-triangle"
                   [size]="14"
                   class="shrink-0 mt-0.5"
                 ></app-icon>
-                <p>{{ uploadError() }}</p>
+                <div class="space-y-1">
+                  <p class="font-medium">
+                    Estamos revisando un problema técnico, tu carga no se perdió.
+                  </p>
+                  @if (job()?.incident_ticket_number; as ticket) {
+                    <p>Ticket {{ ticket }}</p>
+                  }
+                  <p>
+                    {{ job()?.processed_rows ?? 0 }} de {{ job()?.total_rows ?? 0 }} filas
+                    procesadas hasta ahora.
+                  </p>
+                </div>
               </div>
-              @if (retryOffset() !== null) {
-                <app-button variant="outline" size="sm" (clicked)="retryUpload()">
-                  Reintentar desde la fila {{ retryOffset()! + 2 }}
+              @if (job()?.can_retry) {
+                <app-button variant="outline" size="sm" (clicked)="retryJob()">
+                  Reanudar carga
                 </app-button>
               }
+            </div>
+          }
+
+          @if (dataFailure() && !isUploading()) {
+            <div
+              class="bg-red-50 px-3 py-2 rounded-lg border border-red-100 text-red-700 text-xs flex items-start gap-2"
+            >
+              <app-icon
+                name="alert-circle"
+                [size]="14"
+                class="shrink-0 mt-0.5"
+              ></app-icon>
+              <p>Corrige tu archivo: {{ job()?.error?.message }}</p>
+            </div>
+          }
+
+          @if (uploadError() && !isUploading() && job()) {
+            <div
+              class="bg-red-50 px-3 py-2 rounded-lg border border-red-100 text-red-700 text-xs flex items-start gap-2"
+            >
+              <app-icon
+                name="alert-circle"
+                [size]="14"
+                class="shrink-0 mt-0.5"
+              ></app-icon>
+              <p>{{ uploadError() }}</p>
             </div>
           }
 
@@ -665,16 +740,14 @@ interface BulkUploadResult {
         slot="footer"
         class="flex justify-end gap-2 pt-4 border-t border-gray-200 mt-4"
       >
-        @if (step() > 1 && step() < 4 && !isAnalyzing()) {
+        @if (!isResuming() && step() > 1 && step() < 4 && !isAnalyzing()) {
           <app-button variant="outline" (clicked)="previousStep()">Atrás</app-button>
         }
-        @if (step() < 4 || !isUploading()) {
-          <app-button variant="outline" (clicked)="onClose()">{{
-            step() === 4 ? 'Cerrar' : 'Cancelar'
-          }}</app-button>
-        }
+        <app-button variant="outline" (clicked)="onClose()">{{
+          step() === 4 || isResuming() ? 'Cerrar' : 'Cancelar'
+        }}</app-button>
 
-        @if (step() === 1) {
+        @if (!isResuming() && step() === 1) {
           <app-button
             variant="primary"
             [disabled]="!selectedLocationId()"
@@ -723,6 +796,7 @@ export class BulkAdjustmentModalComponent {
 
   private inventory_service = inject(InventoryService);
   private bulkUploadLog = inject(BulkUploadLogService);
+  private jobs = inject(BulkUploadJobService);
   private fileInfo: BulkUploadFileInfo = {};
   private toast_service = inject(ToastService);
   private destroyRef = inject(DestroyRef);
@@ -750,17 +824,44 @@ export class BulkAdjustmentModalComponent {
   readonly isAnalyzing = signal(false);
   readonly analysis = signal<BulkAnalysisResult | null>(null);
   readonly uploadError = signal<string | null>(null);
-  readonly pageSize = BULK_ADJUSTMENT_PAGE_SIZE;
-  private readonly progressState = signal({ doneRows: 0, totalRows: 0 });
-  readonly progress = this.progressState.asReadonly();
+
+  // Trabajo de carga en el servidor (QUI-1009)
+  /** Buscando una carga en curso al abrir el modal. */
+  readonly isResuming = signal(false);
+  readonly job = signal<BulkUploadJobView | null>(null);
+  readonly clock = new BatchProgressClock();
+  private clockStarted = false;
+  private lastBatch = 0;
+  private completionEmitted = false;
+  private watchSub: Subscription | null = null;
+
+  readonly progressLabel = computed(() => {
+    const j = this.job();
+    if (!j || j.status === 'queued') return 'En cola…';
+    const total = j.batch_total ?? 0;
+    const batch = Math.min(j.batch_current + 1, total);
+    return `Procesando lote ${batch}/${total} (${j.processed_rows}/${j.total_rows})`;
+  });
   readonly progressPercent = computed(() => {
-    const p = this.progressState();
-    return p.totalRows > 0
-      ? Math.min(100, Math.round((p.doneRows / p.totalRows) * 100))
+    const j = this.job();
+    return j && j.total_rows > 0
+      ? Math.min(100, Math.round((j.processed_rows / j.total_rows) * 100))
       : 0;
   });
-  /** Offset (base 0) desde el que se puede reintentar tras una página fallida. */
-  readonly retryOffset = signal<number | null>(null);
+  readonly retryNotice = computed(() => {
+    const r = this.job()?.retry;
+    return r
+      ? `Problema técnico, reintentando (${r.attempt}/${r.max_attempts})…`
+      : null;
+  });
+  readonly technicalFailure = computed(() => {
+    const j = this.job();
+    return j?.status === 'failed' && j.error?.kind === 'technical';
+  });
+  readonly dataFailure = computed(() => {
+    const j = this.job();
+    return j?.status === 'failed' && j.error?.kind === 'data';
+  });
   private sessionId: string | null = null;
 
   readonly failedItems = computed<BulkResultItem[]>(() => {
@@ -776,6 +877,32 @@ export class BulkAdjustmentModalComponent {
     { value: 'theft', label: 'Robo / Hurto' },
     { value: 'expiration', label: 'Vencimiento' },
   ];
+
+  constructor() {
+    effect(() => {
+      if (this.isOpen()) untracked(() => this.onModalOpen());
+    });
+    this.destroyRef.onDestroy(() => {
+      this.stopWatching();
+      this.clock.dispose();
+    });
+  }
+
+  /** Al abrir: busca una carga en curso (o terminada sin mostrar) de este navegador. */
+  private onModalOpen(): void {
+    if (this.job()) return;
+    this.isResuming.set(true);
+    this.jobs
+      .findResumable('inventory_adjustments')
+      .pipe(takeUntilDestroyed(this.destroyRef))
+      .subscribe({
+        next: (view) => {
+          this.isResuming.set(false);
+          if (view) this.watchJob(view);
+        },
+        error: () => this.isResuming.set(false),
+      });
+  }
 
   nextStep(): void {
     if (this.step() < 2) this.step.set(this.step() + 1);
@@ -896,7 +1023,7 @@ export class BulkAdjustmentModalComponent {
       });
   }
 
-  /** Paso 3 -> 4: commit paginado de 100 en 100. */
+  /** Paso 3 -> 4: encola el trabajo en el servidor y sigue su avance. */
   async confirmUpload(): Promise<void> {
     // QUI-1004: warn about a repeated file before any commit call.
     if (!(await this.bulkUploadLog.confirmDuplicate(this.fileInfo.duplicate_of))) {
@@ -906,107 +1033,179 @@ export class BulkAdjustmentModalComponent {
       this.initialLoadAckBlock()?.requestAttention();
       return;
     }
-    this.uploadResult.set(null);
-    this.progressState.set({
-      doneRows: 0,
-      totalRows: this.analysis()?.total ?? 0,
-    });
-    this.runCommit(0);
-  }
-
-  retryUpload(): void {
-    const offset = this.retryOffset();
-    if (offset === null) return;
-    this.runCommit(offset);
-  }
-
-  private runCommit(startOffset: number): void {
     const sessionId = this.sessionId;
     const locId = this.selectedLocationId();
     if (!sessionId || !locId) return;
 
-    const location_id = Number(locId);
-    const type = this.selectedAdjustmentType() || 'count_variance';
-    const desc = this.description() || undefined;
-    const initialLoadAck =
-      this.analysis()?.requires_initial_load_ack === true ? true : undefined;
-    const limit = BULK_ADJUSTMENT_PAGE_SIZE;
-    let nextOffset = startOffset;
-    let lastDone = false;
-
-    this.isUploading.set(true);
+    this.uploadResult.set(null);
     this.uploadError.set(null);
-    this.retryOffset.set(null);
+    this.job.set(null);
+    this.completionEmitted = false;
+    this.isUploading.set(true);
     this.step.set(4);
 
-    const fetchPage = (offset: number) =>
-      this.inventory_service.uploadBulkAdjustmentsSessionPage(
-        sessionId,
-        location_id,
-        offset,
-        limit,
-        type,
-        desc,
-        initialLoadAck,
-        this.fileInfo,
-      );
-
-    fetchPage(startOffset)
-      .pipe(
-        expand((response) => {
-          const page = response.data as BulkUploadPage;
-          return page.done ? EMPTY : fetchPage(page.offset + page.limit);
-        }),
-        takeUntilDestroyed(this.destroyRef),
-      )
+    this.jobs
+      .enqueue('inventory_adjustments', {
+        session_id: sessionId,
+        location_id: Number(locId),
+        adjustment_type: this.selectedAdjustmentType() || 'count_variance',
+        description: this.description() || undefined,
+        initial_load_ack:
+          this.analysis()?.requires_initial_load_ack === true ? true : undefined,
+        file_name: this.fileInfo.file_name ?? this.selectedFile()?.name ?? '',
+        file_hash: this.fileInfo.file_hash ?? '',
+      })
+      .pipe(takeUntilDestroyed(this.destroyRef))
       .subscribe({
-        next: (response) => {
-          const page = response.data as BulkUploadPage;
-          lastDone = page.done;
-          nextOffset = page.offset + page.limit;
-          this.progressState.update((p) => ({
-            totalRows: page.total > 0 ? page.total : p.totalRows,
-            doneRows: Math.min(page.total, nextOffset),
-          }));
-          const prev = this.uploadResult();
-          this.uploadResult.set({
-            success: (prev?.success ?? true) && (page.failed ?? 0) === 0,
-            total_processed:
-              (prev?.total_processed ?? 0) + (page.total_processed ?? 0),
-            successful: (prev?.successful ?? 0) + (page.successful ?? 0),
-            failed: (prev?.failed ?? 0) + (page.failed ?? 0),
-            results: [...(prev?.results ?? []), ...(page.results ?? [])],
-          });
+        next: (view) => this.watchJob(view),
+        error: (error: unknown) => this.onEnqueueError(error),
+      });
+  }
+
+  /** Reanuda un fallo técnico desde el lote que falló. */
+  retryJob(): void {
+    const job = this.job();
+    if (!job?.can_retry) return;
+    this.uploadError.set(null);
+    this.jobs
+      .retry(job.id)
+      .pipe(takeUntilDestroyed(this.destroyRef))
+      .subscribe({
+        next: (view) => {
+          this.uploadResult.set(null);
+          this.completionEmitted = false;
+          this.isUploading.set(true);
+          this.watchJob(view);
         },
-        error: (err) => {
-          this.isUploading.set(false);
-          this.retryOffset.set(nextOffset);
-          this.uploadError.set(
-            `Se detuvo en la fila ${nextOffset + 2}: ${
-              typeof err === 'string' ? err : err?.message || 'error de red'
-            }`,
-          );
-          this.toast_service.error('Error al aplicar los ajustes');
-          if ((this.uploadResult()?.successful ?? 0) > 0) this.completed.emit();
-        },
-        complete: () => {
-          this.isUploading.set(false);
-          const result = this.uploadResult();
-          if (!lastDone) return;
-          // Respuesta final recibida: ya no se necesita reintentar esta sesión.
-          this.cancelSession();
-          if (result?.failed === 0) {
-            this.toast_service.success(
-              `${result.successful} ajustes aplicados exitosamente`,
-            );
-          } else {
-            this.toast_service.warning(
-              `${result?.successful ?? 0} exitosos, ${result?.failed ?? 0} con errores`,
-            );
-          }
-          this.completed.emit();
+        error: (error: unknown) => {
+          this.uploadError.set(parseApiError(error).userMessage);
         },
       });
+  }
+
+  private onEnqueueError(error: unknown): void {
+    const parsed = parseApiError(error);
+    if (parsed.errorCode === 'BULK_JOB_ALREADY_ACTIVE') {
+      this.toast_service.warning('Ya hay una carga de ajustes de inventario en curso');
+      const jobId = Number((parsed.details as { job_id?: unknown } | null)?.job_id);
+      const load$: Observable<BulkUploadJobView | null> =
+        Number.isInteger(jobId) && jobId > 0
+          ? this.jobs.get(jobId)
+          : this.jobs.findResumable('inventory_adjustments');
+      load$.pipe(takeUntilDestroyed(this.destroyRef)).subscribe({
+        next: (view) => {
+          if (view) this.watchJob(view);
+          else this.backToReview('Ya hay una carga de ajustes de inventario en curso');
+        },
+        error: () =>
+          this.backToReview('Ya hay una carga de ajustes de inventario en curso'),
+      });
+      return;
+    }
+    this.backToReview(parsed.userMessage);
+  }
+
+  private backToReview(message: string): void {
+    this.isUploading.set(false);
+    this.step.set(3);
+    this.uploadError.set(message);
+  }
+
+  private stopWatching(): void {
+    this.watchSub?.unsubscribe();
+    this.watchSub = null;
+  }
+
+  /** Sigue el trabajo hasta un estado final; el trabajo no depende de esta pestaña. */
+  private watchJob(view: BulkUploadJobView): void {
+    this.stopWatching();
+    this.step.set(4);
+    this.clockStarted = false;
+    this.applyView(view);
+    if (isBulkUploadJobTerminal(view)) {
+      this.finishJob(view);
+      return;
+    }
+    this.isUploading.set(true);
+    this.watchSub = this.jobs
+      .watch(view.id, (v) => this.applyView(v))
+      .subscribe({
+        next: (finalView) => this.finishJob(finalView),
+        error: (error: unknown) => {
+          this.clock.stop();
+          this.isUploading.set(false);
+          if (isBulkUploadJobNotFound(error)) this.jobs.forget('inventory_adjustments');
+          this.uploadError.set(parseApiError(error).userMessage);
+        },
+      });
+  }
+
+  private applyView(view: BulkUploadJobView): void {
+    this.job.set(view);
+    if (view.status !== 'running') return;
+    if (!this.clockStarted) {
+      this.clockStarted = true;
+      this.lastBatch = view.batch_current;
+      this.clock.resumeFrom(
+        Date.parse(view.started_at ?? view.created_at),
+        view.batch_total ?? 0,
+        view.batch_current,
+      );
+    } else if (view.batch_current !== this.lastBatch) {
+      this.lastBatch = view.batch_current;
+      this.clock.recordBatch(view.batch_current, view.batch_total ?? 0);
+    }
+  }
+
+  private finishJob(view: BulkUploadJobView): void {
+    this.job.set(view);
+    this.clock.stop();
+    this.isUploading.set(false);
+    this.jobs
+      .getResults(view.id)
+      .pipe(takeUntilDestroyed(this.destroyRef))
+      .subscribe({
+        next: (rows) => this.showResults(view, rows),
+        error: () => {
+          this.toast_service.warning('No pudimos traer el detalle por producto');
+          this.showResults(view, []);
+        },
+      });
+  }
+
+  private showResults(view: BulkUploadJobView, rows: BulkUploadJobResultRow[]): void {
+    this.uploadResult.set({
+      success: view.status === 'completed' && view.failed_rows === 0,
+      total_processed: view.processed_rows,
+      successful: view.successful_rows,
+      failed: view.failed_rows,
+      results: rows.map(
+        (row): BulkResultItem => ({
+          row_number: Number(row.row_number ?? 0),
+          sku: String(row['sku'] ?? ''),
+          product_name: row['product_name'] as string | undefined,
+          status: row.status === 'success' ? 'success' : 'error',
+          message: row.message ?? undefined,
+          warnings: row['warnings'] as string[] | undefined,
+          quantity_before: row['quantity_before'] as number | undefined,
+          quantity_after: row['quantity_after'] as number | undefined,
+          quantity_change: row['quantity_change'] as number | undefined,
+        }),
+      ),
+    });
+    if (view.status === 'completed' || view.status === 'partial') {
+      if (view.failed_rows === 0) {
+        this.toast_service.success(`${view.successful_rows} ajustes aplicados exitosamente`);
+      } else {
+        this.toast_service.warning(
+          `${view.successful_rows} exitosos, ${view.failed_rows} con errores`,
+        );
+      }
+    }
+    if (view.successful_rows > 0 && !this.completionEmitted) {
+      this.completionEmitted = true;
+      this.completed.emit();
+    }
   }
 
   private cancelSession(): void {
@@ -1030,8 +1229,18 @@ export class BulkAdjustmentModalComponent {
   }
 
   onClose(): void {
-    // Cierre antes de confirmar o con reintento pendiente: libera el archivo temporal.
-    this.cancelSession();
+    const job = this.job();
+    this.stopWatching();
+    if (job) {
+      // El trabajo vive en el servidor; un fallo técnico reanudable se conserva
+      // para poder reanudarlo al volver.
+      if (isBulkUploadJobTerminal(job) && !job.can_retry) {
+        this.jobs.forget('inventory_adjustments');
+      }
+    } else {
+      // Cierre antes de confirmar: libera el archivo temporal.
+      this.cancelSession();
+    }
     this.resetState();
     this.isOpenChange.emit(false);
   }
@@ -1044,8 +1253,12 @@ export class BulkAdjustmentModalComponent {
     this.initialLoadAck.set(false);
     this.templateMode.set('existing');
     this.uploadError.set(null);
-    this.retryOffset.set(null);
-    this.progressState.set({ doneRows: 0, totalRows: 0 });
+    this.job.set(null);
+    this.clock.reset();
+    this.clockStarted = false;
+    this.lastBatch = 0;
+    this.completionEmitted = false;
+    this.isResuming.set(false);
     this.isAnalyzing.set(false);
     this.isUploading.set(false);
     this.isDownloading.set(false);

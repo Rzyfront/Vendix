@@ -745,6 +745,9 @@ jobs:
           --include='**/shared/utils/batch-progress-clock.spec.ts'
           --include='**/products/components/bulk-upload-modal/bulk-upload-modal.component.spec.ts'
           --include='**/customers/components/bulk-upload-modal/bulk-upload-modal.component.spec.ts'
+          --include='**/bulk-uploads/services/bulk-upload-job.service.spec.ts'
+          --include='**/employees/bulk-upload-modal/employee-bulk-upload-modal.component.spec.ts'
+          --include='**/inventory/operations/components/bulk-adjustment-modal.component.spec.ts'
 
   mobile:
     name: Mobile

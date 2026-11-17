@@ -7,22 +7,28 @@ import {
   signal,
   computed,
   DestroyRef,
+  untracked,
   viewChild,
 } from '@angular/core';
 import { takeUntilDestroyed } from '@angular/core/rxjs-interop';
 import { NgClass, CurrencyPipe } from '@angular/common';
-import { HttpErrorResponse } from '@angular/common/http';
-import { EMPTY, Subscription, expand, of } from 'rxjs';
-import { catchError, tap } from 'rxjs/operators';
+import { EMPTY, Observable, Subscription, of } from 'rxjs';
+import { catchError } from 'rxjs/operators';
 import { RouterLink } from '@angular/router';
 import { ProductsService } from '../../services/products.service';
-import {
-  isTransientHttpError,
-  retryTransientWithBackoff,
-} from '../../../../../../core/utils/async-job-poll.util';
+import { parseApiError } from '../../../../../../core/utils/parse-api-error';
 import { BatchProgressClock } from '../../../../../../shared/utils/batch-progress-clock';
 import { BulkUploadLogService } from '../../../bulk-uploads/services/bulk-upload-log.service';
-import { BulkUploadFileInfo } from '../../../bulk-uploads/bulk-upload-log.interface';
+import {
+  BulkUploadJobService,
+  isBulkUploadJobNotFound,
+  isBulkUploadJobTerminal,
+} from '../../../bulk-uploads/services/bulk-upload-job.service';
+import {
+  BulkUploadFileInfo,
+  BulkUploadJobResultRow,
+  BulkUploadJobView,
+} from '../../../bulk-uploads/bulk-upload-log.interface';
 import {
   ModalComponent,
   ButtonComponent,
@@ -40,10 +46,7 @@ import {
   BulkProductAnalysisItem,
   BulkProductAnalysisResult,
   BulkProductUploadItemResult,
-  BulkProductUploadPage,
   BulkProductUploadResult,
-  BulkUploadProgress,
-  BULK_UPLOAD_PAGE_SIZE,
   BulkValidationMessage,
   BulkVariantAnalysisItem,
 } from '../../interfaces/bulk-product-analysis.interface';
@@ -73,6 +76,13 @@ import {
       (closed)="onCancel()"
       subtitle="Importa productos o servicios desde un archivo Excel o CSV"
     >
+      @if (checkingResume()) {
+        <p class="mb-3 flex items-center gap-2 text-xs text-gray-500" role="status">
+          <app-spinner size="sm"></app-spinner>
+          Buscando cargas en curso…
+        </p>
+      }
+
       <!-- INTRO SCREEN -->
       @if (showingIntro()) {
         <div class="space-y-3">
@@ -248,6 +258,20 @@ import {
             size="sm"
           ></app-steps-line>
         </div>
+
+        @if (currentStep() === 1 && uploadError()) {
+          <div
+            class="mb-3 bg-red-50 px-3 py-2 rounded-lg border border-red-100 text-red-700 text-xs flex items-start gap-2"
+            role="alert"
+          >
+            <app-icon
+              name="alert-circle"
+              [size]="14"
+              class="shrink-0 mt-0.5"
+            ></app-icon>
+            <p>{{ uploadError() }}</p>
+          </div>
+        }
 
         <!-- STEP 0: Preparar -->
         @if (currentStep() === 0) {
@@ -1357,70 +1381,118 @@ import {
         <!-- STEP 2: Resultados -->
         @if (currentStep() === 2) {
           <div class="space-y-3">
-            <!-- Loading state -->
+            @if (jobNotice(); as notice) {
+              <p
+                class="bg-blue-50 px-3 py-2 rounded-lg border border-blue-100 text-blue-800 text-xs"
+                role="status"
+              >
+                {{ notice }}
+              </p>
+            }
+
+            <!-- Progress del trabajo del servidor -->
             @if (isUploading()) {
               <div class="flex flex-col items-center justify-center py-8 gap-3">
                 <app-spinner size="lg" [center]="true"></app-spinner>
-                <p class="text-sm text-gray-900 font-medium">
-                  Cargando conceptos...
-                </p>
-                @if (progress().phase !== 'idle') {
+                @if (job(); as j) {
                   <div
                     class="w-full rounded-lg border border-primary/30 bg-primary/5 px-3 py-2"
                   >
-                    <div
-                      class="flex items-center justify-between text-[11px] text-gray-600"
-                    >
-                      <span>
-                        Procesando lote {{ clock.currentBatch() }}/{{
-                          progress().totalBatches
-                        }}
-                        ({{ progress().doneRows }}/{{ progress().totalRows }}
-                        filas)
-                      </span>
-                      <span class="font-semibold text-primary"
-                        >{{ progressPercent() }}%</span
-                      >
-                    </div>
-                    <div
-                      class="mt-1.5 h-1.5 w-full overflow-hidden rounded-full bg-gray-200"
-                    >
+                    @if (j.status === 'queued') {
+                      <p class="text-sm font-medium text-gray-900">En cola…</p>
+                    } @else {
                       <div
-                        class="h-full rounded-full bg-primary transition-all"
-                        [style.width.%]="progressPercent()"
-                      ></div>
-                    </div>
-                    <div
-                      class="mt-1.5 flex items-center justify-between text-[11px] text-gray-500"
-                    >
-                      <span class="flex items-center gap-1">
-                        <app-icon name="timer" [size]="12"></app-icon>
-                        Transcurrido {{ clock.elapsedLabel() }}
-                      </span>
-                      <span>
-                        @if (clock.remainingLabel(); as remaining) {
-                          Restante {{ remaining }}
-                        } @else {
-                          Calculando tiempo restante…
-                        }
-                      </span>
-                    </div>
-                    @if (retryNotice(); as notice) {
+                        class="flex items-center justify-between text-[11px] text-gray-600"
+                      >
+                        <span>Procesando lote {{ currentBatch() }}/{{ j.batch_total ?? 0 }} ({{ j.processed_rows }}/{{ j.total_rows }})</span>
+                        <span class="font-semibold text-primary"
+                          >{{ progressPercent() }}%</span
+                        >
+                      </div>
+                      <div
+                        class="mt-1.5 h-1.5 w-full overflow-hidden rounded-full bg-gray-200"
+                      >
+                        <div
+                          class="h-full rounded-full bg-primary transition-all"
+                          [style.width.%]="progressPercent()"
+                        ></div>
+                      </div>
+                      <div
+                        class="mt-1.5 flex items-center justify-between text-[11px] text-gray-500"
+                      >
+                        <span class="flex items-center gap-1">
+                          <app-icon name="timer" [size]="12"></app-icon>
+                          Transcurrido {{ clock.elapsedLabel() }}
+                        </span>
+                        <span>
+                          @if (clock.remainingLabel(); as remaining) {
+                            Restante {{ remaining }}
+                          } @else {
+                            Calculando tiempo restante…
+                          }
+                        </span>
+                      </div>
+                    }
+                    @if (j.retry; as r) {
                       <p
                         class="mt-1.5 flex items-center gap-1 text-[11px] font-medium text-amber-700"
                         role="status"
                       >
                         <app-icon name="refresh-cw" [size]="12"></app-icon>
-                        {{ notice }}
+                        Problema técnico, reintentando ({{ r.attempt }}/{{ r.max_attempts }})…
                       </p>
                     }
                   </div>
+                } @else {
+                  <p class="text-sm text-gray-900 font-medium">Iniciando carga…</p>
                 }
                 <p class="text-xs text-gray-500">
-                  Se procesa en lotes de {{ pageSize }} filas. Si cierras, los
-                  lotes ya confirmados quedan aplicados.
+                  La carga sigue en el servidor; puedes cerrar esta ventana y volver luego.
                 </p>
               </div>
+            }
+
+            <!-- Fallo del trabajo -->
+            @if (failedJob(); as f) {
+              @if (f.error?.kind === 'data') {
+                <div
+                  class="bg-red-50 px-3 py-2 rounded-lg border border-red-100 text-red-700 text-xs flex items-start gap-2"
+                  role="alert"
+                >
+                  <app-icon
+                    name="alert-circle"
+                    [size]="14"
+                    class="shrink-0 mt-0.5"
+                  ></app-icon>
+                  <p>Corrige tu archivo: {{ f.error?.message }}</p>
+                </div>
+              } @else {
+                <div
+                  class="bg-amber-50 px-3 py-2 rounded-lg border border-amber-200 text-amber-800 text-xs space-y-1"
+                  role="alert"
+                >
+                  <p class="font-medium">
+                    Estamos revisando un problema técnico, tu carga no se perdió.
+                  </p>
+                  @if (f.incident_ticket_number) {
+                    <p>Ticket {{ f.incident_ticket_number }}</p>
+                  }
+                  <p>
+                    Guardado hasta ahora: {{ f.successful_rows }} exitosas, {{ f.failed_rows }} con error y {{ f.skipped_rows }} omitidas.
+                  </p>
+                  @if (f.can_retry) {
+                    <app-button
+                      variant="outline"
+                      size="sm"
+                      [disabled]="retrying()"
+                      (clicked)="retryJob()"
+                    >
+                      <app-icon name="refresh-cw" [size]="14" slot="icon"></app-icon>
+                      Reanudar carga
+                    </app-button>
+                  }
+                </div>
+              }
             }
 
             <!-- Upload Error -->
@@ -1528,9 +1600,7 @@ import {
                           <td
                             class="px-3 py-2 text-sm text-gray-900 max-w-[150px] truncate"
                           >
-                            {{
-                              result.product_name || result.product?.name || '—'
-                            }}
+                            {{ result.product_name || '—' }}
                           </td>
                           <td
                             class="px-3 py-2 whitespace-nowrap text-sm font-mono text-xs text-gray-600"
@@ -1610,14 +1680,18 @@ import {
             >Cancelar</app-button
           >
           @if (analysisResult() && canProceed()) {
-            <app-button variant="primary" (clicked)="proceedWithUpload()">
+            <app-button
+              variant="primary"
+              [disabled]="enqueueing()"
+              (clicked)="proceedWithUpload()"
+            >
               <app-icon name="upload" [size]="16" slot="icon" ></app-icon>
               Cargar {{ totalProductsToUpload() }} Conceptos
             </app-button>
           }
         }
         <!-- Step 2 -->
-        @if (!showingIntro() && currentStep() === 2 && !isUploading()) {
+        @if (!showingIntro() && currentStep() === 2) {
           <app-button variant="outline" (clicked)="onCancel()"
             >Cerrar</app-button
           >
@@ -1674,49 +1748,63 @@ export class BulkUploadModalComponent {
     'initialLoadAckBlock',
   );
 
-  // Upload state
-  readonly isUploading = signal(false);
+  // Estado del trabajo de servidor (QUI-1009)
+  readonly job = signal<BulkUploadJobView | null>(null);
   readonly uploadResults = signal<BulkProductUploadResult | null>(null);
-  readonly pageSize = BULK_UPLOAD_PAGE_SIZE;
-  private readonly progressState = signal<BulkUploadProgress>({
-    phase: 'idle',
-    totalBatches: 0,
-    doneBatches: 0,
-    totalRows: 0,
-    doneRows: 0,
+  readonly enqueueing = signal(false);
+  readonly checkingResume = signal(false);
+  readonly retrying = signal(false);
+  /** Aviso informativo del paso de progreso (p. ej. ya había una carga). */
+  readonly jobNotice = signal<string | null>(null);
+  /** Hay carga en cola o en curso (o se está encolando). */
+  readonly isUploading = computed(() => {
+    const j = this.job();
+    return this.enqueueing() || (j !== null && !isBulkUploadJobTerminal(j));
   });
-  readonly progress = this.progressState.asReadonly();
+  /** Trabajo terminado en `failed` (el paso de resultados explica el motivo). */
+  readonly failedJob = computed(() => {
+    const j = this.job();
+    return j !== null && j.status === 'failed' ? j : null;
+  });
   readonly progressPercent = computed(() => {
-    const p = this.progressState();
-    return p.totalRows > 0
-      ? Math.min(100, Math.round((p.doneRows / p.totalRows) * 100))
+    const j = this.job();
+    return j && j.total_rows > 0
+      ? Math.min(100, Math.round((j.processed_rows / j.total_rows) * 100))
       : 0;
   });
-  /** Filas aplicadas hasta ahora (acumulado de todas las páginas). */
-  private readonly appliedRows = signal(0);
-  private uploadSub: Subscription | null = null;
+  /** Lote en curso (1-based, acotado al total). */
+  readonly currentBatch = computed(() => {
+    const j = this.job();
+    if (!j) return 1;
+    const next = j.batch_current + 1;
+    return j.batch_total ? Math.min(next, j.batch_total) : next;
+  });
+  private watchSub: Subscription | null = null;
+  private clockStarted = false;
+  private lastBatchSeen = 0;
 
-  /** Reintentos automáticos de un lote ante red/5xx (QUI-1009). */
-  static readonly BATCH_MAX_RETRIES = 3;
-  /** Cronómetro, estimado por ritmo real y «lote x/y» (QUI-1009). */
+  /** Cronómetro y estimado por ritmo real, alimentados por el trabajo. */
   readonly clock = new BatchProgressClock();
-  /** «Problema técnico, reintentando (n/3)» mientras un lote espera reintento. */
-  readonly retryNotice = signal<string | null>(null);
 
   // Error state
   readonly uploadError = signal<string | null>(null);
 
   private productsService = inject(ProductsService);
   private bulkUploadLog = inject(BulkUploadLogService);
+  private jobs = inject(BulkUploadJobService);
   private fileInfo: BulkUploadFileInfo = {};
   private toastService = inject(ToastService);
 
   constructor() {
-    this.destroyRef.onDestroy(() => this.clock.dispose());
+    this.destroyRef.onDestroy(() => {
+      this.stopWatching();
+      this.clock.dispose();
+    });
     effect(() => {
       const open = this.isOpen();
       if (open) {
         this.onModalOpen();
+        untracked(() => this.checkResumable());
       } else {
         this.clearIntroTimer();
       }
@@ -1850,23 +1938,15 @@ export class BulkUploadModalComponent {
 
   // Cancel/Close
   onCancel() {
-    const pending = this.isUploading();
-    if (pending) {
-      // Detiene la cadena de páginas pendientes (no hay más peticiones).
-      this.uploadSub?.unsubscribe();
-      this.uploadSub = null;
-    }
-    if (this.sessionId && !this.uploadResults()) {
+    // Cerrar solo deja de mirar: el trabajo sigue en el servidor.
+    this.stopWatching();
+    const job = this.job();
+    if (job && isBulkUploadJobTerminal(job)) {
+      // Un fallo técnico reanudable se conserva para ofrecer «Reanudar carga»
+      // al volver; lo demás ya se mostró y se olvida.
+      if (!job.can_retry) this.jobs.forget('products');
+    } else if (!job && this.sessionId && !this.uploadResults()) {
       this.cancelSessionSilently(this.sessionId);
-    }
-    const applied = this.uploadResults()?.successful ?? this.appliedRows();
-    if (pending && applied > 0) {
-      this.toastService.warning(
-        `Carga interrumpida: ${applied} fila(s) ya quedaron aplicadas.`,
-      );
-    }
-    if (applied > 0) {
-      this.uploadComplete.emit();
     }
     this.isOpenChange.emit(false);
     this.resetState();
@@ -1895,21 +1975,17 @@ export class BulkUploadModalComponent {
     this.initialLoadAck.set(false);
     this.sessionId = null;
     this.fileInfo = {};
-    this.isUploading.set(false);
+    this.stopWatching();
+    this.job.set(null);
+    this.enqueueing.set(false);
+    this.checkingResume.set(false);
+    this.retrying.set(false);
+    this.jobNotice.set(null);
     this.uploadResults.set(null);
     this.uploadError.set(null);
-    this.uploadSub?.unsubscribe();
-    this.uploadSub = null;
-    this.appliedRows.set(0);
     this.clock.reset();
-    this.retryNotice.set(null);
-    this.progressState.set({
-      phase: 'idle',
-      totalBatches: 0,
-      doneBatches: 0,
-      totalRows: 0,
-      doneRows: 0,
-    });
+    this.clockStarted = false;
+    this.lastBatchSeen = 0;
   }
 
   // Step 0: File operations
@@ -2029,10 +2105,10 @@ export class BulkUploadModalComponent {
       });
   }
 
-  // Step 1 -> 2: Upload (páginas de 100 en serie, sin abortar por una fallida)
+  // Step 1 -> 2: encola el trabajo de servidor y sigue su avance
   async proceedWithUpload() {
     const sessionId = this.sessionId;
-    if (!sessionId) return;
+    if (!sessionId || this.isUploading()) return;
 
     const requiresAck =
       this.analysisResult()?.initial_load?.requires_ack === true;
@@ -2045,142 +2121,186 @@ export class BulkUploadModalComponent {
     if (!(await this.bulkUploadLog.confirmDuplicate(this.fileInfo.duplicate_of))) {
       return;
     }
-    const initialLoadAck = requiresAck ? true : undefined;
 
-    const limit = BULK_UPLOAD_PAGE_SIZE;
-    let total = this.analysisResult()?.total_products ?? 0;
-    let doneSeen = false;
-    const results: BulkProductUploadItemResult[] = [];
-    let successful = 0;
-    let failed = 0;
-    let skipped = 0;
-
-    this.isUploading.set(true);
     this.uploadError.set(null);
-    this.currentStep.set(2);
-    this.appliedRows.set(0);
-    this.progressState.set({
-      phase: 'uploading',
-      totalBatches: Math.max(1, Math.ceil(total / limit)),
-      doneBatches: 0,
-      totalRows: total,
-      doneRows: 0,
-    });
-    this.retryNotice.set(null);
-    this.clock.start(Math.max(1, Math.ceil(total / limit)));
-
-    // Red/5xx: la página se reintenta sola (1→2→4 s). Es seguro porque el
-    // backend aplica cada página de forma idempotente: upsert por SKU y carga
-    // inicial con cantidad absoluta (QUI-1009, Paso 0). Un 4xx es un rechazo
-    // de datos y no se reintenta.
-    // catchError DENTRO de cada página: la degrada a "todas sus filas fallaron"
-    // y la cadena continúa con la siguiente.
-    const fetchPage = (offset: number) => {
-      let retried = false;
-      return this.productsService
-        .uploadProductsFromSessionPage(
-          sessionId,
-          offset,
-          limit,
-          initialLoadAck,
-          this.fileInfo,
-        )
-        .pipe(
-          retryTransientWithBackoff<BulkProductUploadPage>({
-            maxRetries: BulkUploadModalComponent.BATCH_MAX_RETRIES,
-            onRetry: ({ attempt, maxRetries }) => {
-              retried = true;
-              this.retryNotice.set(
-                `Problema técnico, reintentando (${attempt}/${maxRetries})…`,
-              );
-            },
-          }),
-          tap(() => this.retryNotice.set(null)),
-          catchError((error: unknown) => {
-            this.retryNotice.set(null);
-            const message = describeBatchError(error, retried);
-            const rows = Math.max(0, Math.min(limit, total - offset));
-            const page: BulkProductUploadPage = {
-              success: false,
-              total,
-              offset,
-              limit,
-              done: false,
-              total_processed: rows,
-              successful: 0,
-              failed: rows,
-              skipped: 0,
-              results: Array.from({ length: rows }, (_, i) => ({
-                row_number: offset + i + 2,
-                product: null,
-                status: 'error' as const,
-                message: `Lote de filas ${offset + 2}-${offset + rows + 1} falló: ${message}`,
-              })),
-            };
-            return of(page);
-          }),
-        );
-    };
-
-    // Al destruir el componente se corta la cadena sin pasar por `complete`.
-    this.destroyRef.onDestroy(() => this.uploadSub?.unsubscribe());
-    this.uploadSub = fetchPage(0)
-      .pipe(
-        expand((page) => {
-          const next = page.offset + limit;
-          return page.done || next >= total ? EMPTY : fetchPage(next);
-        }),
-        tap((page) => {
-          // Si el servidor informa el total (página real), es la verdad.
-          if (page.success !== false || page.done) {
-            if (page.total > 0) total = page.total;
-          }
-          if (page.done) doneSeen = true;
-          results.push(...(page.results ?? []));
-          successful += page.successful ?? 0;
-          failed += page.failed ?? 0;
-          skipped += page.skipped ?? 0;
-          this.appliedRows.set(successful);
-          this.progressState.update((p) => ({
-            ...p,
-            totalRows: total,
-            totalBatches: Math.max(1, Math.ceil(total / limit)),
-            doneBatches: p.doneBatches + 1,
-            doneRows: Math.min(total, p.doneRows + (page.total_processed ?? 0)),
-          }));
-          const p = this.progressState();
-          this.clock.recordBatch(p.doneBatches, p.totalBatches);
-        }),
-      )
+    this.jobNotice.set(null);
+    this.enqueueing.set(true);
+    this.jobs
+      .enqueue('products', {
+        session_id: sessionId,
+        initial_load_ack: requiresAck ? true : undefined,
+        file_name: this.fileInfo.file_name ?? this.selectedFile()?.name ?? '',
+        file_hash: this.fileInfo.file_hash ?? '',
+      })
+      .pipe(takeUntilDestroyed(this.destroyRef))
       .subscribe({
-        complete: () => {
-          this.uploadSub = null;
-          this.clock.stop();
-          this.retryNotice.set(null);
-          // Si la última página falló, el backend no borró el archivo de S3.
-          if (!doneSeen) this.cancelSessionSilently(sessionId);
-          const result: BulkProductUploadResult = {
-            success: failed === 0,
-            total_processed: results.length,
-            successful,
-            failed,
-            skipped,
-            results,
-          };
-          this.progressState.update((p) => ({ ...p, phase: 'done' }));
-          this.isUploading.set(false);
-          this.uploadResults.set(result);
-
-          if (failed > 0 || skipped > 0) {
-            this.toastService.warning(
-              'La carga se completó con algunos errores u omisiones.',
-            );
-          } else {
-            this.toastService.success(
-              `${successful} concepto(s) cargados exitosamente`,
-            );
-          }
+        next: (view) => {
+          this.enqueueing.set(false);
+          if (!this.isOpen()) return;
+          this.currentStep.set(2);
+          this.watchJob(view);
         },
+        error: (error: unknown) => {
+          this.enqueueing.set(false);
+          this.onEnqueueError(error);
+        },
+      });
+  }
+
+  private onEnqueueError(error: unknown) {
+    const parsed = parseApiError(error);
+    if (parsed.errorCode === 'BULK_JOB_ALREADY_ACTIVE') {
+      const message = 'Ya hay una carga de productos en curso';
+      const id = Number(parsed.details?.job_id);
+      const load$: Observable<BulkUploadJobView | null> =
+        Number.isInteger(id) && id > 0
+          ? this.jobs.get(id)
+          : this.jobs.findResumable('products');
+      load$.pipe(takeUntilDestroyed(this.destroyRef)).subscribe({
+        next: (view) => {
+          if (!view) return this.failEnqueue(message);
+          this.toastService.warning(message);
+          this.jobNotice.set(message);
+          this.currentStep.set(2);
+          this.watchJob(view);
+        },
+        error: () => this.failEnqueue(message),
+      });
+      return;
+    }
+    this.failEnqueue(parsed.userMessage);
+  }
+
+  private failEnqueue(message: string) {
+    this.uploadError.set(message);
+    this.toastService.error(message);
+  }
+
+  /** Al abrir: retoma la carga en curso (o el resultado de la que lanzó este navegador). */
+  private checkResumable() {
+    this.checkingResume.set(true);
+    this.jobs
+      .findResumable('products')
+      .pipe(takeUntilDestroyed(this.destroyRef))
+      .subscribe({
+        next: (view) => {
+          this.checkingResume.set(false);
+          if (!view || !this.isOpen()) return;
+          this.clearIntroTimer();
+          this.showingIntro.set(false);
+          this.currentStep.set(2);
+          this.watchJob(view);
+        },
+        error: () => this.checkingResume.set(false),
+      });
+  }
+
+  /** «Reanudar carga»: reintento manual de un fallo técnico. */
+  retryJob() {
+    const job = this.job();
+    if (!job || !job.can_retry || this.retrying()) return;
+    this.retrying.set(true);
+    this.jobs
+      .retry(job.id)
+      .pipe(takeUntilDestroyed(this.destroyRef))
+      .subscribe({
+        next: (view) => {
+          this.retrying.set(false);
+          this.uploadResults.set(null);
+          this.uploadError.set(null);
+          this.clock.reset();
+          this.clockStarted = false;
+          this.watchJob(view);
+        },
+        error: (error: unknown) => {
+          this.retrying.set(false);
+          this.toastService.error(parseApiError(error).userMessage);
+        },
+      });
+  }
+
+  private watchJob(view: BulkUploadJobView) {
+    this.stopWatching();
+    this.applyView(view);
+    if (isBulkUploadJobTerminal(view)) {
+      this.finishJob(view);
+      return;
+    }
+    this.watchSub = this.jobs
+      .watch(view.id, (v) => this.applyView(v))
+      .pipe(takeUntilDestroyed(this.destroyRef))
+      .subscribe({
+        next: (final) => {
+          this.applyView(final);
+          this.finishJob(final);
+        },
+        error: (error: unknown) => {
+          this.clock.stop();
+          this.job.set(null);
+          if (isBulkUploadJobNotFound(error)) this.jobs.forget('products');
+          this.uploadError.set(parseApiError(error).userMessage);
+        },
+      });
+  }
+
+  private stopWatching() {
+    this.watchSub?.unsubscribe();
+    this.watchSub = null;
+  }
+
+  private applyView(view: BulkUploadJobView) {
+    this.job.set(view);
+    if (view.status !== 'running') return;
+    const total = view.batch_total ?? 0;
+    if (!this.clockStarted) {
+      const started = Date.parse(view.started_at ?? view.created_at);
+      this.clock.resumeFrom(
+        Number.isFinite(started) ? started : Date.now(),
+        total,
+        view.batch_current,
+      );
+      this.clockStarted = true;
+      this.lastBatchSeen = view.batch_current;
+    } else if (view.batch_current !== this.lastBatchSeen) {
+      this.clock.recordBatch(view.batch_current, total);
+      this.lastBatchSeen = view.batch_current;
+    }
+  }
+
+  /** Estado final: trae las filas y arma el resumen (también para `failed`). */
+  private finishJob(view: BulkUploadJobView) {
+    this.clock.stop();
+    this.jobs
+      .getResults(view.id)
+      .pipe(
+        catchError((error: unknown) => {
+          if (view.status !== 'failed') {
+            this.uploadError.set(parseApiError(error).userMessage);
+          }
+          return of<BulkUploadJobResultRow[]>([]);
+        }),
+        takeUntilDestroyed(this.destroyRef),
+      )
+      .subscribe((rows) => {
+        const results = mapResultRows(rows);
+        this.uploadResults.set({
+          success: view.status === 'completed',
+          total_processed: view.processed_rows,
+          successful: view.successful_rows,
+          failed: view.failed_rows,
+          skipped: view.skipped_rows,
+          results,
+        });
+        if (view.successful_rows > 0) this.uploadComplete.emit();
+        if (view.status === 'completed') {
+          this.toastService.success(
+            `${view.successful_rows} concepto(s) cargados exitosamente`,
+          );
+        } else if (view.status === 'partial') {
+          this.toastService.warning(
+            'La carga se completó con algunos errores u omisiones.',
+          );
+        }
       });
   }
 
@@ -2191,35 +2311,21 @@ export class BulkUploadModalComponent {
   }
 }
 
-/**
- * Motivo legible del fallo de un lote. Distingue el problema técnico (red o
- * 5xx, ya reintentado) del rechazo de datos que trae el backend.
- */
-function describeBatchError(error: unknown, retried: boolean): string {
-  const retries = BulkUploadModalComponent.BATCH_MAX_RETRIES;
-  if (isTransientHttpError(error)) {
-    const status = (error as HttpErrorResponse).status;
-    const cause = status === 0 ? 'sin conexión con el servidor' : `HTTP ${status}`;
-    return (
-      `problema técnico de la plataforma (${cause}) tras ${retries} reintentos. ` +
-      'No es un error de tu archivo: vuelve a cargarlo más tarde; las filas ya ' +
-      'aplicadas se actualizan, no se duplican.'
-    );
-  }
-  const backend =
-    error instanceof HttpErrorResponse
-      ? (error.error as { message?: unknown } | null)?.message
-      : undefined;
-  const message =
-    typeof error === 'string'
-      ? error
-      : typeof backend === 'string' && backend
-        ? backend
-        : (error as { message?: string } | null)?.message || 'Error en el lote';
-  // Tras un fallo técnico el servidor pudo aplicar el intento anterior (p. ej.
-  // la última página borra el archivo temporal y el reintento ve la sesión
-  // vencida): avisarlo evita que el usuario repita la carga a ciegas.
-  return retried
-    ? `${message} (un intento anterior que falló por un problema técnico pudo haberse aplicado; revisa el historial de cargas)`
-    : message;
+/** Filas del servidor (sin objetos anidados) a la tabla de resultados. */
+function mapResultRows(
+  rows: BulkUploadJobResultRow[],
+): BulkProductUploadItemResult[] {
+  return rows.map((r) => {
+    const name = r['product_name'];
+    const sku = r['sku'];
+    return {
+      product_name: typeof name === 'string' ? name : undefined,
+      sku: typeof sku === 'string' ? sku : undefined,
+      row_number: typeof r.row_number === 'number' ? r.row_number : undefined,
+      product: null,
+      status:
+        r.status === 'success' || r.status === 'skipped' ? r.status : 'error',
+      message: r.message ?? '',
+    };
+  });
 }

@@ -1,220 +1,380 @@
 import { HttpErrorResponse } from '@angular/common/http';
 import { ComponentFixture, TestBed } from '@angular/core/testing';
-import { Observable, defer, map, of, throwError, timer } from 'rxjs';
+import { provideRouter } from '@angular/router';
+import { NEVER, of, throwError } from 'rxjs';
 
 import { BulkUploadModalComponent } from './bulk-upload-modal.component';
 import { ProductsService } from '../../services/products.service';
 import { BulkUploadLogService } from '../../../bulk-uploads/services/bulk-upload-log.service';
+import { BulkUploadJobService } from '../../../bulk-uploads/services/bulk-upload-job.service';
+import type { BulkUploadJobView } from '../../../bulk-uploads/bulk-upload-log.interface';
 import { ToastService } from '../../../../../../shared/components';
-import type {
-  BulkProductAnalysisResult,
-  BulkProductUploadPage,
-} from '../../interfaces/bulk-product-analysis.interface';
+import { parseApiError } from '../../../../../../core/utils/parse-api-error';
+import type { BulkProductAnalysisResult } from '../../interfaces/bulk-product-analysis.interface';
 
 /**
- * QUI-1009 — el commit por lotes se reintenta solo ante red/5xx (el backend es
- * idempotente por SKU), nunca ante un rechazo de datos, y muestra cronómetro,
- * estimado por ritmo real y «lote x/y».
+ * QUI-1009 — la carga de productos corre como trabajo de servidor: el modal
+ * encola, sigue el avance, lo retoma al reabrir y explica el fallo técnico o
+ * de datos.
  */
-describe('BulkUploadModalComponent — progreso y reintentos (QUI-1009)', () => {
-  const TOTAL = 250; // 3 lotes de 100
+describe('BulkUploadModalComponent — carga durable (QUI-1009)', () => {
+  const INTRO_KEY = 'vendix_bulk_product_intro_dismissed';
   let fixture: ComponentFixture<BulkUploadModalComponent>;
   let component: BulkUploadModalComponent;
-  let calls: Record<number, number>;
-  let respond: (offset: number, attempt: number) => Observable<BulkProductUploadPage>;
+
   const toast = jasmine.createSpyObj<ToastService>('ToastService', [
     'success',
     'warning',
     'error',
     'info',
   ]);
+  const jobs = jasmine.createSpyObj<BulkUploadJobService>('BulkUploadJobService', [
+    'enqueue',
+    'findResumable',
+    'watch',
+    'getResults',
+    'retry',
+    'get',
+    'forget',
+  ]);
+  const products = jasmine.createSpyObj<ProductsService>('ProductsService', [
+    'analyzeBulkProducts',
+    'cancelBulkProductSession',
+    'getBulkUploadTemplate',
+  ]);
 
-  function page(offset: number): BulkProductUploadPage {
-    const rows = Math.min(100, TOTAL - offset);
+  function view(overrides: Partial<BulkUploadJobView> = {}): BulkUploadJobView {
     return {
-      success: true,
-      total: TOTAL,
-      offset,
-      limit: 100,
-      done: offset + 100 >= TOTAL,
-      total_processed: rows,
-      successful: rows,
-      failed: 0,
-      skipped: 0,
-      results: Array.from({ length: rows }, (_, i) => ({
-        row_number: offset + i + 2,
-        product: null,
-        status: 'success' as const,
-        message: 'Producto creado exitosamente',
-      })),
+      id: 7,
+      upload_type: 'products',
+      status: 'running',
+      file_name: 'productos.csv',
+      user_id: 1,
+      total_rows: 500,
+      processed_rows: 200,
+      successful_rows: 200,
+      failed_rows: 0,
+      skipped_rows: 0,
+      created_rows: 200,
+      batch_current: 2,
+      batch_total: 5,
+      retry: null,
+      error: null,
+      incident_ticket_number: null,
+      can_retry: false,
+      auto_retry: true,
+      created_at: '2026-11-17T09:50:00Z',
+      started_at: '2026-11-17T09:51:00Z',
+      finished_at: null,
+      deadline_at: null,
+      ...overrides,
     };
   }
 
-  const http = (status: number, error: unknown = null) =>
-    new HttpErrorResponse({ status, error, url: '/api/store/products/bulk/upload-session' });
+  const text = () =>
+    ((fixture.nativeElement as HTMLElement).textContent ?? '').replace(/\s+/g, ' ');
+
+  function open() {
+    fixture.componentRef.setInput('isOpen', true);
+    fixture.detectChanges();
+    fixture.detectChanges();
+  }
+
+  const analysis = {
+    session_id: 'sess-1',
+    file_name: 'productos.csv',
+    file_hash: 'hash-abc',
+    total_products: 3,
+    ready: 3,
+    with_warnings: 0,
+    with_errors: 0,
+    products: [],
+    initial_load: { rows_with_quantity: 3, total_units: 9, requires_ack: true },
+  } as unknown as BulkProductAnalysisResult;
+
+  /** Sube un archivo y llega al paso de revisión con el análisis listo. */
+  function analyze() {
+    products.analyzeBulkProducts.and.returnValue(of(analysis));
+    component.selectedFile.set(new File(['x'], 'productos.csv'));
+    component.analyzeFile();
+    component.initialLoadAck.set(true);
+    fixture.detectChanges();
+  }
 
   beforeEach(async () => {
     jasmine.clock().install();
     jasmine.clock().mockDate(new Date('2026-11-17T10:00:00Z'));
-    calls = {};
-    respond = (offset) => of(page(offset));
-    toast.success.calls.reset();
-    toast.warning.calls.reset();
-    toast.error.calls.reset();
+    localStorage.setItem(INTRO_KEY, 'true');
+    [toast.success, toast.warning, toast.error].forEach((s) => s.calls.reset());
+    Object.values(jobs).forEach((s) => (s as jasmine.Spy).calls.reset());
+    jobs.findResumable.and.returnValue(of(null));
+    jobs.watch.and.returnValue(NEVER);
+    jobs.getResults.and.returnValue(of([]));
+    products.cancelBulkProductSession.calls.reset();
+    products.cancelBulkProductSession.and.returnValue(of<void>(undefined));
 
     await TestBed.configureTestingModule({
       imports: [BulkUploadModalComponent],
       providers: [
-        {
-          provide: ProductsService,
-          useValue: {
-            // Fuente fría como HttpClient: cada suscripción es un envío nuevo.
-            uploadProductsFromSessionPage: (_s: string, offset: number) =>
-              defer(() => {
-                calls[offset] = (calls[offset] ?? 0) + 1;
-                return respond(offset, calls[offset]);
-              }),
-            cancelBulkProductSession: () => of(null),
-          },
-        },
+        provideRouter([]),
+        { provide: ProductsService, useValue: products },
+        { provide: BulkUploadJobService, useValue: jobs },
         {
           provide: BulkUploadLogService,
           useValue: { confirmDuplicate: () => Promise.resolve(true) },
         },
         { provide: ToastService, useValue: toast },
       ],
-    })
-      .overrideComponent(BulkUploadModalComponent, {
-        set: { template: '', imports: [] },
-      })
-      .compileComponents();
+    }).compileComponents();
 
     fixture = TestBed.createComponent(BulkUploadModalComponent);
     component = fixture.componentInstance;
-    component.sessionId = 'sess-1';
-    component.analysisResult.set({
-      session_id: 'sess-1',
-      total_products: TOTAL,
-      ready: TOTAL,
-      with_warnings: 0,
-      with_errors: 0,
-      products: [],
-    } as unknown as BulkProductAnalysisResult);
   });
 
   afterEach(() => {
     fixture.destroy();
+    localStorage.removeItem(INTRO_KEY);
     jasmine.clock().uninstall();
   });
 
-  it('un 5xx en un lote se reintenta solo, avisa «reintentando (n/3)» y la carga continúa', async () => {
-    respond = (offset, attempt) =>
-      offset === 100 && attempt === 1 ? throwError(() => http(502)) : of(page(offset));
+  it('al reabrir con una carga corriendo en el servidor muestra su avance sin encolar otra', () => {
+    jobs.findResumable.and.returnValue(of(view()));
+
+    open();
+
+    expect(jobs.findResumable).toHaveBeenCalledOnceWith('products');
+    expect(jobs.enqueue).not.toHaveBeenCalled();
+    expect(jobs.watch).toHaveBeenCalledWith(7, jasmine.any(Function));
+    expect(component.currentStep()).toBe(2);
+    expect(text()).toContain('Procesando lote 3/5 (200/500)');
+    expect(text()).toContain('40%');
+    expect(text()).toContain(
+      'La carga sigue en el servidor; puedes cerrar esta ventana y volver luego.',
+    );
+    expect(text()).not.toContain('Buscando cargas en curso');
+  });
+
+  it('una carga en cola se muestra como «En cola…»', () => {
+    jobs.findResumable.and.returnValue(
+      of(view({ status: 'queued', processed_rows: 0, batch_current: 0, started_at: null })),
+    );
+
+    open();
+
+    expect(text()).toContain('En cola…');
+    expect(text()).not.toContain('Procesando lote');
+  });
+
+  it('Cargar encola con sesión, confirmación y archivo; al terminar muestra las filas y avisa', async () => {
+    const completed = view({
+      status: 'completed',
+      total_rows: 3,
+      processed_rows: 3,
+      successful_rows: 3,
+      batch_current: 1,
+      batch_total: 1,
+      finished_at: '2026-11-17T10:00:05Z',
+    });
+    jobs.enqueue.and.returnValue(of(view({ status: 'queued', processed_rows: 0 })));
+    jobs.watch.and.callFake((_id, onProgress) => {
+      onProgress(view({ total_rows: 3, processed_rows: 1, batch_current: 0, batch_total: 1 }));
+      onProgress(completed);
+      return of(completed);
+    });
+    jobs.getResults.and.returnValue(
+      of([
+        {
+          row_number: 2,
+          status: 'success',
+          product_name: 'Camiseta Básica',
+          sku: 'CAM-001',
+          message: 'Producto creado exitosamente',
+        },
+        {
+          row_number: 3,
+          status: 'error',
+          product_name: 'Gorra',
+          sku: 'GOR-001',
+          message: 'Precio inválido',
+        },
+      ]),
+    );
+    const emitted = jasmine.createSpy('uploadComplete');
+    component.uploadComplete.subscribe(emitted);
+    open();
+    analyze();
 
     await component.proceedWithUpload();
+    fixture.detectChanges();
 
-    expect(calls[100]).toBe(1);
-    expect(component.retryNotice()).toBe('Problema técnico, reintentando (1/3)…');
-    expect(component.progress().doneBatches).toBe(1);
-    expect(component.clock.currentBatch()).toBe(2);
-    expect(component.isUploading()).toBeTrue();
-
-    jasmine.clock().tick(1_000);
-
-    expect(calls).toEqual({ 0: 1, 100: 2, 200: 1 });
-    expect(component.retryNotice()).toBeNull();
-    expect(component.isUploading()).toBeFalse();
-    expect(component.uploadResults()?.successful).toBe(TOTAL);
-    expect(component.uploadResults()?.failed).toBe(0);
+    expect(jobs.enqueue).toHaveBeenCalledOnceWith('products', {
+      session_id: 'sess-1',
+      initial_load_ack: true,
+      file_name: 'productos.csv',
+      file_hash: 'hash-abc',
+    });
+    expect(jobs.getResults).toHaveBeenCalledOnceWith(7);
+    expect(component.currentStep()).toBe(2);
+    expect(text()).toContain('Resumen de Carga');
+    expect(text()).toContain('Camiseta Básica');
+    expect(text()).toContain('CAM-001');
+    expect(text()).toContain('Precio inválido');
+    expect(emitted).toHaveBeenCalledTimes(1);
     expect(toast.success).toHaveBeenCalled();
-  });
-
-  it('un error de datos (4xx) no se reintenta y marca sus filas con el motivo del backend', async () => {
-    respond = (offset) =>
-      offset === 100
-        ? throwError(() => http(400, { message: 'El offset (100) está fuera del archivo' }))
-        : of(page(offset));
-
-    await component.proceedWithUpload();
-    jasmine.clock().tick(30_000);
-
-    expect(calls).toEqual({ 0: 1, 100: 1, 200: 1 });
-    const results = component.uploadResults()!;
-    expect(results.failed).toBe(100);
-    expect(results.successful).toBe(150);
-    const failedRow = results.results.find((r) => r.status === 'error')!;
-    expect(failedRow.message).toBe(
-      'Lote de filas 102-201 falló: El offset (100) está fuera del archivo',
-    );
-    expect(failedRow.message).not.toContain('problema técnico');
-    expect(component.retryNotice()).toBeNull();
-    expect(toast.warning).toHaveBeenCalled();
-  });
-
-  it('agotados los 3 reintentos, el lote queda como problema técnico y la carga sigue', async () => {
-    respond = (offset) => (offset === 0 ? throwError(() => http(503)) : of(page(offset)));
-
-    await component.proceedWithUpload();
-    expect(component.retryNotice()).toBe('Problema técnico, reintentando (1/3)…');
-    jasmine.clock().tick(1_000);
-    expect(component.retryNotice()).toBe('Problema técnico, reintentando (2/3)…');
-    jasmine.clock().tick(2_000);
-    expect(component.retryNotice()).toBe('Problema técnico, reintentando (3/3)…');
-    jasmine.clock().tick(4_000);
-
-    expect(calls).toEqual({ 0: 4, 100: 1, 200: 1 });
-    const results = component.uploadResults()!;
-    expect(results.failed).toBe(100);
-    expect(results.successful).toBe(150);
-    expect(results.results[0].message).toContain(
-      'problema técnico de la plataforma (HTTP 503) tras 3 reintentos',
-    );
-    expect(results.results[0].message).toContain('No es un error de tu archivo');
-    expect(component.retryNotice()).toBeNull();
-  });
-
-  it('si el reintento choca con un rechazo, avisa que el intento anterior pudo aplicarse', async () => {
-    respond = (offset, attempt) => {
-      if (offset !== 200) return of(page(offset));
-      return attempt === 1
-        ? throwError(() => http(504))
-        : throwError(() => http(410, { message: 'La sesión de carga expiró' }));
-    };
-
-    await component.proceedWithUpload();
-    jasmine.clock().tick(1_000);
-
-    expect(calls[200]).toBe(2);
-    const failed = component.uploadResults()!.results.filter((r) => r.status === 'error');
-    expect(failed.length).toBe(50);
-    expect(failed[0].message).toContain('La sesión de carga expiró');
-    expect(failed[0].message).toContain('pudo haberse aplicado');
-  });
-
-  it('el cronómetro y el estimado se actualizan con el ritmo real de los lotes', async () => {
-    // Cada lote tarda 2 s en responder.
-    respond = (offset) => timer(2_000).pipe(map(() => page(offset)));
-
-    await component.proceedWithUpload();
-    expect(component.clock.elapsedLabel()).toBe('0 s');
-    expect(component.clock.remainingLabel()).toBeNull();
-    expect(component.clock.currentBatch()).toBe(1);
-    expect(component.clock.totalBatches()).toBe(3);
-
-    jasmine.clock().tick(2_000);
-    expect(component.clock.currentBatch()).toBe(2);
-    expect(component.clock.elapsedLabel()).toBe('2 s');
-    expect(component.clock.remainingMs()).toBe(4_000);
-
-    jasmine.clock().tick(1_000);
-    expect(component.clock.elapsedLabel()).toBe('3 s');
-    expect(component.clock.remainingMs()).toBe(3_000);
-
-    jasmine.clock().tick(3_000);
-    expect(component.isUploading()).toBeFalse();
     expect(component.clock.running()).toBeFalse();
-    expect(component.clock.elapsedMs()).toBe(6_000);
-    jasmine.clock().tick(5_000);
-    expect(component.clock.elapsedMs()).toBe(6_000);
+  });
+
+  it('un fallo técnico que el servidor reintenta solo muestra «reintentando (1/3)»', () => {
+    jobs.findResumable.and.returnValue(
+      of(
+        view({
+          retry: {
+            attempt: 1,
+            max_attempts: 3,
+            next_retry_at: '2026-11-17T10:00:02Z',
+            message: 'timeout',
+          },
+        }),
+      ),
+    );
+
+    open();
+
+    expect(text()).toContain('Problema técnico, reintentando (1/3)…');
+  });
+
+  it('failed técnico explica que la carga no se perdió, muestra el ticket y «Reanudar carga» la retoma', () => {
+    jobs.findResumable.and.returnValue(
+      of(
+        view({
+          status: 'failed',
+          error: { kind: 'technical', code: 'BULK_JOB_TIMEOUT', message: 'tiempo agotado' },
+          incident_ticket_number: 'INC-20261117-AB12CD',
+          can_retry: true,
+          finished_at: '2026-11-17T10:00:00Z',
+        }),
+      ),
+    );
+    jobs.retry.and.returnValue(of(view({ status: 'queued', processed_rows: 200 })));
+
+    open();
+
+    expect(text()).toContain('tu carga no se perdió');
+    expect(text()).toContain('Ticket INC-20261117-AB12CD');
+    expect(text()).toContain('200 exitosas');
+    expect(text()).not.toContain('Corrige tu archivo');
+    const resume = Array.from(
+      (fixture.nativeElement as HTMLElement).querySelectorAll('button'),
+    ).find((b) => (b.textContent ?? '').includes('Reanudar carga'));
+    expect(resume).toBeDefined();
+
+    resume!.click();
+    fixture.detectChanges();
+
+    expect(jobs.retry).toHaveBeenCalledOnceWith(7);
+    expect(jobs.watch).toHaveBeenCalledWith(7, jasmine.any(Function));
+    expect(text()).toContain('En cola…');
+    expect(text()).not.toContain('tu carga no se perdió');
+  });
+
+  it('failed de datos pide corregir el archivo y no ofrece reanudar', () => {
+    jobs.findResumable.and.returnValue(
+      of(
+        view({
+          status: 'failed',
+          error: {
+            kind: 'data',
+            code: 'BULK_SESSION_EXPIRED',
+            message: 'La sesión de carga expiró',
+          },
+          can_retry: false,
+          finished_at: '2026-11-17T10:00:00Z',
+        }),
+      ),
+    );
+
+    open();
+
+    expect(text()).toContain('Corrige tu archivo: La sesión de carga expiró');
+    expect(text()).not.toContain('tu carga no se perdió');
+    expect(text()).not.toContain('Reanudar carga');
+  });
+
+  it('409 BULK_JOB_ALREADY_ACTIVE carga el trabajo activo en vez de mostrar un error', async () => {
+    jobs.enqueue.and.returnValue(
+      throwError(
+        () =>
+          new HttpErrorResponse({
+            status: 409,
+            error: { error_code: 'BULK_JOB_ALREADY_ACTIVE', details: { job_id: 7 } },
+          }),
+      ),
+    );
+    jobs.get.and.returnValue(of(view()));
+    open();
+    analyze();
+
+    await component.proceedWithUpload();
+    fixture.detectChanges();
+
+    expect(jobs.get).toHaveBeenCalledOnceWith(7);
+    expect(jobs.watch).toHaveBeenCalledWith(7, jasmine.any(Function));
+    expect(toast.warning).toHaveBeenCalledWith('Ya hay una carga de productos en curso');
+    expect(toast.error).not.toHaveBeenCalled();
+    expect(component.currentStep()).toBe(2);
+    expect(component.uploadError()).toBeNull();
+    expect(text()).toContain('Ya hay una carga de productos en curso');
+    expect(text()).toContain('Procesando lote 3/5 (200/500)');
+  });
+
+  it('otro error al encolar muestra su mensaje y se queda en la revisión', async () => {
+    const error = new HttpErrorResponse({
+      status: 503,
+      error: { error_code: 'BULK_JOB_ENQUEUE_FAILED', message: 'cola caída' },
+    });
+    jobs.enqueue.and.returnValue(throwError(() => error));
+    open();
+    analyze();
+
+    await component.proceedWithUpload();
+    fixture.detectChanges();
+
+    expect(component.currentStep()).toBe(1);
+    expect(component.uploadError()).toBe(parseApiError(error).userMessage);
+    expect(toast.error).toHaveBeenCalledWith(parseApiError(error).userMessage);
+    expect(text()).toContain(parseApiError(error).userMessage);
+    expect(jobs.watch).not.toHaveBeenCalled();
+  });
+
+  it('cerrar con la carga corriendo solo deja de mirar: no cancela la sesión ni olvida el trabajo', () => {
+    jobs.findResumable.and.returnValue(of(view()));
+    const closed = jasmine.createSpy('isOpenChange');
+    component.isOpenChange.subscribe(closed);
+    open();
+
+    component.onCancel();
+
+    expect(closed).toHaveBeenCalledOnceWith(false);
+    expect(jobs.forget).not.toHaveBeenCalled();
+    expect(products.cancelBulkProductSession).not.toHaveBeenCalled();
+    expect(component.job()).toBeNull();
+  });
+
+  it('cerrar tras un resultado terminado olvida el trabajo recordado', () => {
+    jobs.findResumable.and.returnValue(
+      of(
+        view({
+          status: 'completed',
+          processed_rows: 500,
+          successful_rows: 500,
+          finished_at: '2026-11-17T10:00:00Z',
+        }),
+      ),
+    );
+    open();
+
+    component.onCancel();
+
+    expect(jobs.forget).toHaveBeenCalledOnceWith('products');
   });
 });

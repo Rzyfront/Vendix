@@ -1,21 +1,35 @@
-import {Component, inject, input, output, signal, computed, DestroyRef} from '@angular/core';
-import { takeUntilDestroyed } from '@angular/core/rxjs-interop';
-import { HttpErrorResponse } from '@angular/common/http';
-import { Subscription } from 'rxjs';
 import {
-  runChunked,
-  ChunkProgress,
-  MAX_BULK_RECORDS,
-  DEFAULT_BULK_CHUNK_SIZE,
-} from '../../../../../../shared/utils/run-chunked';
+  Component,
+  inject,
+  input,
+  output,
+  signal,
+  computed,
+  effect,
+  untracked,
+  DestroyRef,
+} from '@angular/core';
+import { takeUntilDestroyed } from '@angular/core/rxjs-interop';
+import { Subscription, catchError, of } from 'rxjs';
+import { MAX_BULK_RECORDS } from '../../../../../../shared/utils/run-chunked';
 import { BatchProgressClock } from '../../../../../../shared/utils/batch-progress-clock';
-import { isTransientHttpError } from '../../../../../../core/utils/async-job-poll.util';
+import { parseApiError } from '../../../../../../core/utils/parse-api-error';
 // `import type` deja el namespace disponible para las anotaciones sin meter
 // los 7,2 MB de xlsx en el chunk: el runtime llega por `await import('xlsx')`
 // dentro del handler, que es el unico momento en que hay un archivo que leer.
 import type * as XLSX from 'xlsx';
 import { CustomersService } from '../../services/customers.service';
 import { BulkUploadLogService } from '../../../bulk-uploads/services/bulk-upload-log.service';
+import {
+  BulkUploadJobService,
+  isBulkUploadJobNotFound,
+  isBulkUploadJobTerminal,
+} from '../../../bulk-uploads/services/bulk-upload-job.service';
+import {
+  BulkUploadJobResultRow,
+  BulkUploadJobView,
+} from '../../../bulk-uploads/bulk-upload-log.interface';
+import { DialogService } from '../../../../../../shared/components/dialog/dialog.service';
 import {
   ModalComponent,
   ButtonComponent,
@@ -83,15 +97,19 @@ function groupCustomerRows(rows: Record<string, any>[]): CustomerGroup[] {
   return [...groups.values()];
 }
 
-/** «Fila N — Columna: X — Valor: "v" — Motivo — 💡 Sugerencia» de un `BulkRowError`. */
-function formatBulkRowError(e: any): string {
-  if (typeof e === 'string') return e;
-  const row = e?.row ? `Fila ${e.row}` : 'Fila ?';
-  const column = e?.column ? `Columna: ${e.column}` : null;
-  const value = e?.value != null && e.value !== '' ? `Valor: "${e.value}"` : null;
-  const reason = e?.message ?? 'Error';
-  const suggestion = e?.suggestion ? `💡 ${e.suggestion}` : null;
-  return [row, column, value, reason, suggestion].filter(Boolean).join(' — ');
+/** Fila del resultado tal como la devuelve el servidor (forma de la página de clientes). */
+interface CustomerUploadRow extends BulkUploadJobResultRow {
+  row_number?: number | null;
+  row_error?: { column?: string; value?: unknown; message?: string; suggestion?: string };
+}
+
+interface CustomerUploadResults {
+  total_processed: number;
+  successful: number;
+  failed: number;
+  locations_added: number;
+  warnings: number;
+  results: CustomerUploadRow[];
 }
 
 @Component({
@@ -116,7 +134,12 @@ function formatBulkRowError(e: any): string {
       ></app-steps-line>
 
       <!-- ═══ STEP 0: Cargar Datos ═══ -->
-      @if (currentStep() === 0) {
+      @if (checkingResumable()) {
+        <div class="flex flex-col items-center justify-center py-10 gap-3">
+          <app-icon name="loader" [size]="36" class="text-primary animate-spin"></app-icon>
+          <p class="text-sm text-gray-900 font-medium">Buscando cargas en curso…</p>
+        </div>
+      } @else if (currentStep() === 0) {
       <div class="space-y-5 mt-2">
         <!-- Template Download -->
         <div
@@ -205,7 +228,7 @@ function formatBulkRowError(e: any): string {
       }  <!-- end @if step 0 -->
 
       <!-- ═══ STEP 1: Verificar ═══ -->
-      @if (currentStep() === 1 && parsedData()) {
+      @if (!checkingResumable() && currentStep() === 1 && parsedData()) {
         <div class="space-y-4 mt-2">
           <div class="bg-green-50 p-4 rounded-lg border border-green-100 flex items-center justify-between gap-3">
             <div class="flex items-center">
@@ -264,6 +287,12 @@ function formatBulkRowError(e: any): string {
             }
           </div>
 
+          @if (uploadError()) {
+            <div class="bg-red-50 p-3 rounded-lg border border-red-100 text-red-700 text-sm" role="alert">
+              {{ uploadError() }}
+            </div>
+          }
+
           <!-- Warnings -->
           @if (warnings().length > 0) {
             <div class="bg-yellow-50 p-3 rounded-lg border border-yellow-100 text-yellow-800 text-xs">
@@ -281,21 +310,18 @@ function formatBulkRowError(e: any): string {
         </div>
       }
 
-      <!-- ═══ STEP 2: Resultados ═══ -->
-      @if (currentStep() === 2) {
+      <!-- ═══ STEP 2: Progreso y resultados (trabajo del servidor) ═══ -->
+      @if (!checkingResumable() && currentStep() === 2) {
         <div class="space-y-5 mt-2">
-          <!-- Uploading state -->
-          @if (isUploading()) {
+          <!-- En cola / en curso -->
+          @if (isActive()) {
             <div class="flex flex-col items-center justify-center py-8 gap-3">
               <app-icon name="loader" [size]="36" class="text-primary animate-spin"></app-icon>
-              <p class="text-sm text-gray-900 font-medium">Procesando {{ customerGroups().length }} clientes...</p>
-              @if (uploadProgress().total > 0) {
+              <p class="text-sm text-gray-900 font-medium">{{ progressLabel() }}</p>
+              @if (job()!.status === 'running') {
                 <div class="w-full rounded-lg border border-primary/30 bg-primary/5 px-3 py-2">
                   <div class="flex items-center justify-between text-[11px] text-gray-600">
-                    <span>
-                      Lote {{ clock.currentBatch() }}/{{ clock.totalBatches() }} · Guardando
-                      {{ uploadProgress().processed }} de {{ uploadProgress().total }}
-                    </span>
+                    <span>Guardando {{ job()!.processed_rows }} de {{ job()!.total_rows }}</span>
                     <span class="font-semibold text-primary">{{ progressPercent() }}%</span>
                   </div>
                   <div class="mt-1.5 h-1.5 w-full overflow-hidden rounded-full bg-gray-200">
@@ -319,77 +345,68 @@ function formatBulkRowError(e: any): string {
                   </div>
                 </div>
               }
+              <p class="text-xs text-gray-500 text-center">
+                La carga sigue en el servidor; puedes cerrar esta ventana y volver luego.
+              </p>
             </div>
           }
 
-          <!-- Lote fallido: problema técnico (reintento manual con advertencia) o error de datos -->
-          @if (!isUploading() && failedAt() !== null) {
-            @if (failureKind() === 'technical') {
-              <div class="bg-yellow-50 p-4 rounded-lg border border-yellow-100 text-yellow-800 text-sm space-y-2" role="alert">
-                <p class="font-medium flex items-center gap-2">
-                  <app-icon name="alert-triangle" [size]="16"></app-icon>
-                  Problema técnico de la plataforma, no de tu archivo
-                </p>
-                <p>
-                  {{ uploadError() }} Se guardaron {{ uploadProgress().processed }} de
-                  {{ uploadProgress().total }}; el envío se detuvo en el lote que empieza en la fila
-                  {{ failedAt()! + 1 }} de la lista.
-                </p>
-                <p class="text-xs">
-                  No lo reintentamos solo: si el servidor alcanzó a guardar parte de ese lote,
-                  reenviarlo puede duplicar los clientes sin correo ni documento, y los que sí los
-                  tienen aparecerán como «ya existe». Revisa el listado de clientes antes de reintentar.
-                </p>
-                <div class="flex justify-end">
-                  <app-button variant="primary" size="sm" (clicked)="retryUpload()">
-                    Reintentar lote
-                  </app-button>
+          <!-- Falló el trabajo: problema técnico (reintento manual con advertencia) o error de datos -->
+          @if (job(); as j) {
+            @if (j.status === 'failed' && j.error) {
+              @if (j.error.kind === 'technical') {
+                <div class="bg-yellow-50 p-4 rounded-lg border border-yellow-100 text-yellow-800 text-sm space-y-2" role="alert">
+                  <p class="font-medium flex items-center gap-2">
+                    <app-icon name="alert-triangle" [size]="16"></app-icon>
+                    Estamos revisando un problema técnico, tu carga no se perdió.
+                  </p>
+                  @if (j.incident_ticket_number) {
+                    <p class="text-xs font-mono">Ticket {{ j.incident_ticket_number }}</p>
+                  }
+                  <p>
+                    Se guardaron {{ j.processed_rows }} de {{ j.total_rows }} filas antes de detenerse.
+                  </p>
+                  @if (j.can_retry) {
+                    <p class="text-xs">
+                      No lo reintentamos solo: si el servidor alcanzó a guardar parte de ese lote,
+                      reenviarlo puede duplicar los clientes sin correo ni documento, y los que sí los
+                      tienen aparecerán como «ya existe». Revisa el listado de clientes antes de reintentar.
+                    </p>
+                    <div class="flex justify-end">
+                      <app-button variant="primary" size="sm" (clicked)="retryUpload()">
+                        Reintentar lote
+                      </app-button>
+                    </div>
+                  }
                 </div>
-              </div>
-            } @else if (failureKind() === 'data') {
-              <div class="bg-red-50 p-4 rounded-lg border border-red-100 text-red-700 text-sm space-y-2" role="alert">
-                <p class="font-medium flex items-center gap-2">
-                  <app-icon name="alert-circle" [size]="16"></app-icon>
-                  Corrige tu archivo: el lote que empieza en la fila {{ failedAt()! + 1 }} de la lista fue rechazado
-                </p>
-                <p>{{ uploadError() }}</p>
-                @if (failureDetails().length > 0) {
-                  <ul class="list-disc list-inside space-y-1 max-h-40 overflow-y-auto text-xs">
-                    @for (msg of failureDetails(); track $index) {
-                      <li>{{ msg }}</li>
-                    }
-                  </ul>
-                }
-                <p class="text-xs">
-                  Se guardaron {{ uploadProgress().processed }} de {{ uploadProgress().total }}. Reenviar
-                  el mismo lote devuelve el mismo error: corrige esas filas y carga de nuevo solo las que
-                  faltan.
-                </p>
-              </div>
-            } @else {
-              <div class="bg-gray-50 p-4 rounded-lg border border-gray-200 text-gray-700 text-sm space-y-2" role="alert">
-                <p class="font-medium flex items-center gap-2">
-                  <app-icon name="alert-circle" [size]="16"></app-icon>
-                  El servidor no aceptó el lote que empieza en la fila {{ failedAt()! + 1 }} de la lista
-                </p>
-                <p>
-                  {{ uploadError() }} Se guardaron {{ uploadProgress().processed }} de
-                  {{ uploadProgress().total }}.
-                </p>
-                <p class="text-xs">
-                  Si tu sesión venció o te faltan permisos, resuélvelo y reintenta desde ese lote.
-                </p>
-                <div class="flex justify-end">
-                  <app-button variant="primary" size="sm" (clicked)="retryUpload()">
-                    Reintentar lote
-                  </app-button>
+              } @else {
+                <div class="bg-red-50 p-4 rounded-lg border border-red-100 text-red-700 text-sm space-y-2" role="alert">
+                  <p class="font-medium flex items-center gap-2">
+                    <app-icon name="alert-circle" [size]="16"></app-icon>
+                    Corrige tu archivo: {{ j.error.message }}
+                  </p>
+                  <p class="text-xs">
+                    Se guardaron {{ j.processed_rows }} de {{ j.total_rows }} filas. Reenviar el mismo
+                    lote devuelve el mismo error: corrige esas filas y carga de nuevo solo las que faltan.
+                  </p>
                 </div>
-              </div>
+              }
             }
           }
 
+          <!-- Error al seguir el trabajo -->
+          @if (!isActive() && uploadError()) {
+            <div class="bg-red-50 p-4 rounded-lg border border-red-100 text-red-700 text-sm">
+              <div class="font-medium flex items-center mb-1">
+                <app-icon name="alert-circle" [size]="16" class="mr-2"></app-icon>
+                Error en la carga
+              </div>
+              <p class="mt-1">{{ uploadError() }}</p>
+            </div>
+          }
+
           <!-- Results -->
-          @if (!isUploading() && hasBulkResults()) {
+          @if (!isActive() && hasBulkResults()) {
             <div class="space-y-5">
               <div class="bg-surface border rounded-lg overflow-hidden">
                 <div class="bg-gray-50 p-4 border-b flex justify-between items-center">
@@ -477,7 +494,7 @@ function formatBulkRowError(e: any): string {
                                 <div>{{ result.row_error?.message || result.message }}</div>
                                 @if (result.row_error?.suggestion) {
                                   <div class="mt-1 text-xs text-gray-600 italic">
-                                    💡 {{ result.row_error.suggestion }}
+                                    💡 {{ result.row_error?.suggestion }}
                                   </div>
                                 }
                               </td>
@@ -489,23 +506,6 @@ function formatBulkRowError(e: any): string {
                   </div>
                 </div>
               }
-            </div>
-          }
-
-          <!-- Validation / generic error (no renderable results, e.g. 400) -->
-          @if (!isUploading() && !hasBulkResults() && stepErrorMessages().length > 0) {
-            <div class="bg-red-50 p-4 rounded-lg border border-red-100 text-red-700 text-sm">
-              <div class="font-medium flex items-center mb-1">
-                <app-icon name="alert-circle" [size]="16" class="mr-2"></app-icon>
-                Error en la carga
-              </div>
-              <div class="mt-2">
-                <ul class="list-disc list-inside space-y-1 max-h-60 overflow-y-auto">
-                  @for (msg of stepErrorMessages(); track msg) {
-                    <li>{{ msg }}</li>
-                  }
-                </ul>
-              </div>
             </div>
           }
         </div>
@@ -532,7 +532,7 @@ function formatBulkRowError(e: any): string {
             (clicked)="onCancel()"
             [disabled]="isUploading()"
           >
-            {{ currentStep() === 2 && uploadResults() ? 'Cerrar' : 'Cancelar' }}
+            {{ currentStep() === 2 ? 'Cerrar' : 'Cancelar' }}
           </app-button>
           @if (currentStep() === 1 && parsedData()) {
             <app-button
@@ -570,27 +570,33 @@ export class CustomerBulkUploadModalComponent {
   // State
   isProcessingFile = signal(false);
   isDragging = signal(false);
+  /** Solo mientras se encola el trabajo; el avance lo da `job()`. */
   isUploading = signal(false);
-  uploadError = signal<any>(null);
-  parsedData = signal<any[] | null>(null);
-  uploadResults = signal<any>(null);
+  /** Consultando si hay una carga en curso o sin mostrar al abrir. */
+  readonly checkingResumable = signal(false);
+  uploadError = signal<string | string[] | null>(null);
+  parsedData = signal<Record<string, any>[] | null>(null);
+  uploadResults = signal<CustomerUploadResults | null>(null);
   warnings = signal<string[]>([]);
-  uploadProgress = signal<{ processed: number; total: number }>({ processed: 0, total: 0 });
-  failedAt = signal<number | null>(null);
-  /**
-   * Por qué se cortó el envío (QUI-1009): `technical` = red, 408, 429 o 5xx,
-   * ofrece «Reintentar lote» con advertencia; `data` = 400/422 o filas
-   * rechazadas, reenviarlo devuelve el mismo error; `rejected` = otro rechazo
-   * (sesión, permisos, plan): mensaje neutro que conserva «Reintentar lote».
-   */
-  readonly failureKind = signal<'technical' | 'data' | 'rejected' | null>(null);
-  /** Filas rechazadas por datos en el lote que cortó el envío. */
-  readonly failureDetails = signal<string[]>([]);
+  /** Última lectura del trabajo del servidor (QUI-1009). */
+  readonly job = signal<BulkUploadJobView | null>(null);
   /** Cronómetro, estimado por ritmo real y «lote x/y» (QUI-1009). */
   readonly clock = new BatchProgressClock();
+  readonly isActive = computed(() => {
+    const j = this.job();
+    return !!j && !isBulkUploadJobTerminal(j);
+  });
+  readonly progressLabel = computed(() => {
+    const j = this.job();
+    if (!j) return '';
+    if (j.status === 'queued') return 'En cola…';
+    const total = j.batch_total ?? 0;
+    const current = total > 0 ? Math.min(j.batch_current + 1, total) : j.batch_current + 1;
+    return `Procesando lote ${current}/${total} (${j.processed_rows}/${j.total_rows})`;
+  });
   readonly progressPercent = computed(() => {
-    const p = this.uploadProgress();
-    return p.total > 0 ? Math.round((p.processed / p.total) * 100) : 0;
+    const j = this.job();
+    return j && j.total_rows > 0 ? Math.round((j.processed_rows / j.total_rows) * 100) : 0;
   });
   // Una entrada por cliente: filas con el mismo documento = un cliente con N ubicaciones.
   readonly customerGroups = computed<CustomerGroup[]>(() =>
@@ -601,50 +607,26 @@ export class CustomerBulkUploadModalComponent {
   );
   readonly resultWarnings = computed<{ row_number: number; message: string }[]>(() => {
     const r = this.uploadResults();
-    if (!r || !Array.isArray(r.results)) return [];
+    if (!r) return [];
     return r.results
-      .filter((x: any) => x?.status === 'warning')
-      .map((x: any) => ({ row_number: x.row_number, message: x.message }));
+      .filter((x) => x.status === 'warning')
+      .map((x) => ({ row_number: x.row_number ?? 0, message: x.message ?? '' }));
   });
-  private uploadSub: Subscription | null = null;
-  private payload: Record<string, any>[] = [];
-  private accumulated: any = null;
+  private watchSub: Subscription | null = null;
+  private resumeSub: Subscription | null = null;
+  private clockStarted = false;
+  private lastBatch = -1;
 
-  // ¿La respuesta tiene forma de resultado de carga masiva (con conteos o results[])?
-  // Distingue una respuesta real (éxito total o parcial) de un payload de error de
-  // validación 400 (`{ validationErrors: [...] }`) que NO debe pintar el resumen 0/0/0.
-  readonly hasBulkResults = computed<boolean>(() => {
-    const r = this.uploadResults();
-    if (!r) return false;
-    return (
-      Array.isArray(r.results) ||
-      typeof r.total_processed === 'number' ||
-      typeof r.successful === 'number' ||
-      typeof r.failed === 'number'
-    );
-  });
-
-  // Mensajes de error legibles para el paso Resultados cuando NO hay results[]:
-  // prioriza los validationErrors del backend, si no cae al mensaje de uploadError.
-  // Formato: "Fila N — Columna: <col> — Motivo: <msg> — 💡 <suggestion>".
-  readonly stepErrorMessages = computed<string[]>(() => {
-    const r = this.uploadResults();
-    const ve = r?.validationErrors;
-    if (Array.isArray(ve) && ve.length > 0) {
-      return ve.map(formatBulkRowError);
-    }
-    const err = this.uploadError();
-    if (Array.isArray(err)) return err.map((e: any) => String(e));
-    if (err) return [String(err)];
-    return [];
-  });
+  // ¿Hay resultado de carga que pintar (con conteos o filas)?
+  readonly hasBulkResults = computed<boolean>(() => this.uploadResults() !== null);
 
   private customersService = inject(CustomersService);
   private bulkUploadLog = inject(BulkUploadLogService);
-  // QUI-1004: the browser parses this file, so it computes the hash and registers the upload.
+  private jobs = inject(BulkUploadJobService);
+  private dialog = inject(DialogService);
+  // QUI-1004: the browser parses this file, so it computes the hash for the duplicate check.
   private fileName = '';
   private fileHashPromise: Promise<string | null> = Promise.resolve(null);
-  private uploadRegistered = false;
   private toastService = inject(ToastService);
 
   // Mapeo de encabezados en español a claves del DTO
@@ -702,12 +684,29 @@ export class CustomerBulkUploadModalComponent {
   }
 
   constructor() {
-    this.destroyRef.onDestroy(() => this.clock.dispose());
+    this.destroyRef.onDestroy(() => {
+      this.watchSub?.unsubscribe();
+      this.resumeSub?.unsubscribe();
+      this.clock.dispose();
+    });
+    // QUI-1009: al abrir, retoma la carga en curso (o el resultado sin ver).
+    effect(() => {
+      if (this.isOpen()) untracked(() => this.checkResumable());
+    });
   }
 
   onCancel() {
-    this.uploadSub?.unsubscribe();
-    this.uploadSub = null;
+    // Cerrar mientras corre solo deja de mirar: el trabajo sigue en el servidor.
+    this.watchSub?.unsubscribe();
+    this.watchSub = null;
+    this.resumeSub?.unsubscribe();
+    this.resumeSub = null;
+    const j = this.job();
+    // Un fallo técnico reanudable se conserva para ofrecer «Reintentar lote» al
+    // volver; lo demás ya se mostró y se olvida.
+    if (j && isBulkUploadJobTerminal(j) && !j.can_retry) {
+      this.jobs.forget('customers');
+    }
     this.isOpenChange.emit(false);
     this.resetState();
   }
@@ -717,20 +716,17 @@ export class CustomerBulkUploadModalComponent {
     this.isProcessingFile.set(false);
     this.isDragging.set(false);
     this.isUploading.set(false);
+    this.checkingResumable.set(false);
     this.uploadError.set(null);
     this.uploadResults.set(null);
     this.parsedData.set(null);
     this.warnings.set([]);
-    this.uploadProgress.set({ processed: 0, total: 0 });
-    this.failedAt.set(null);
-    this.failureKind.set(null);
-    this.failureDetails.set([]);
+    this.job.set(null);
     this.clock.reset();
-    this.payload = [];
-    this.accumulated = null;
+    this.clockStarted = false;
+    this.lastBatch = -1;
     this.fileName = '';
     this.fileHashPromise = Promise.resolve(null);
-    this.uploadRegistered = false;
   }
 
   goToStep(step: number) {
@@ -801,7 +797,6 @@ export class CustomerBulkUploadModalComponent {
     this.uploadError.set(null);
     this.warnings.set([]);
     this.fileName = file.name;
-    this.uploadRegistered = false;
     this.fileHashPromise = this.bulkUploadLog.fingerprint(file);
 
     const reader: FileReader = new FileReader();
@@ -912,22 +907,34 @@ export class CustomerBulkUploadModalComponent {
     reader.readAsBinaryString(file);
   }
 
+  /** Al abrir: una carga en curso (o terminal lanzada desde este navegador) abre en el progreso. */
+  private checkResumable() {
+    if (this.job() || this.parsedData() || this.checkingResumable()) return;
+    this.checkingResumable.set(true);
+    this.resumeSub?.unsubscribe();
+    this.resumeSub = this.jobs.findResumable('customers').subscribe({
+      next: (view) => {
+        this.checkingResumable.set(false);
+        if (view) this.track(view);
+      },
+      // Sin respuesta se muestra el primer paso normal.
+      error: () => this.checkingResumable.set(false),
+    });
+  }
+
   async confirmUpload() {
-    if (!this.parsedData()) return;
+    const rows = this.parsedData();
+    if (!rows || this.isUploading()) return;
 
     // QUI-1004: warn about a repeated file before uploading anything.
     const fileHash = await this.fileHashPromise;
     if (!(await this.bulkUploadLog.confirmFileIsNew('customers', fileHash))) return;
 
-    this.currentStep.set(2);
-    this.isUploading.set(true);
-    this.uploadError.set(null);
-
     // Sanear payload: las filas sin correo no deben enviar `email: ""`.
     // El backend valida el formato de email y `""` dispara un 400. Producimos
     // copias saneadas (no mutamos el signal `parsedData`): si el email está
     // vacío/espacios se elimina la clave; si tiene valor se recorta.
-    const sanitizedData = this.parsedData()!.map((item) => {
+    const customers = rows.map((item) => {
       const sanitized: Record<string, any> = { ...item };
       const email = sanitized['email'];
       if (email == null || String(email).trim() === '') {
@@ -938,151 +945,184 @@ export class CustomerBulkUploadModalComponent {
       return sanitized;
     });
 
-    this.payload = sanitizedData;
-    this.accumulated = { success: true, total_processed: 0, successful: 0, failed: 0, locations_added: 0, warnings: 0, results: [] };
-    this.failedAt.set(null);
-    this.failureKind.set(null);
-    this.failureDetails.set([]);
-    this.uploadProgress.set({ processed: 0, total: sanitizedData.length });
-    this.runUpload(0);
-  }
-
-  /**
-   * «Reintentar lote» tras un problema técnico: reenvía desde el lote que
-   * falló. Nunca es automático: la carga de clientes NO es idempotente (una
-   * fila sin correo ni documento se crea de nuevo), así que lo decide la
-   * persona tras leer la advertencia. Un rechazo de datos no se reintenta.
-   */
-  retryUpload() {
-    const offset = this.failedAt();
-    if (offset === null || this.isUploading() || this.failureKind() === 'data') return;
-    this.failedAt.set(null);
-    this.failureKind.set(null);
-    this.failureDetails.set([]);
-    this.uploadError.set(null);
     this.isUploading.set(true);
-    this.runUpload(offset);
+    this.uploadError.set(null);
+    this.jobs
+      .enqueue('customers', {
+        customers,
+        file_name: this.fileName,
+        // Sin huella (el navegador no pudo calcularla) el servidor usa la de las filas.
+        ...(fileHash ? { file_hash: fileHash } : {}),
+      })
+      .pipe(takeUntilDestroyed(this.destroyRef))
+      .subscribe({
+        next: (view) => {
+          this.isUploading.set(false);
+          this.track(view);
+        },
+        error: (error: unknown) => {
+          this.isUploading.set(false);
+          this.onEnqueueError(error);
+        },
+      });
   }
 
-  // Envía payload.slice(base) en lotes de 100 (en serie) y acumula resultados.
-  private runUpload(base: number) {
-    const items = this.payload.slice(base);
-    const acc = this.accumulated;
-    let lastCount = 0;
-    const size = DEFAULT_BULK_CHUNK_SIZE;
-    const totalBatches = Math.max(1, Math.ceil(this.payload.length / size));
-    const baseBatches = Math.floor(base / size);
-    this.clock.start(totalBatches, baseBatches);
-    this.uploadSub?.unsubscribe();
-    this.uploadSub = runChunked(items, (chunk) =>
-      this.customersService.uploadBulkCustomersJson(chunk),
-    )
-      .pipe(takeUntilDestroyed(this.destroyRef))
-      .subscribe((p: ChunkProgress<any>) => {
-        // Acumula solo los lotes nuevos de este progreso
-        for (const r of p.results.slice(lastCount)) {
-          const d = r?.data || r;
-          acc.successful += d?.successful || 0;
-          acc.failed += d?.failed || 0;
-          acc.locations_added += d?.locations_added || 0;
-          acc.warnings += d?.warnings || 0;
-          acc.total_processed += d?.total_processed || 0;
-          if (Array.isArray(d?.results)) acc.results.push(...d.results);
-        }
-        lastCount = p.results.length;
-        this.uploadProgress.set({ processed: base + p.processed, total: this.payload.length });
-        this.uploadResults.set({ ...acc, results: [...acc.results] });
-        if (p.failedAt === undefined) {
-          this.clock.recordBatch(baseBatches + p.chunkIndex + 1, totalBatches);
-        }
-        if (!p.done) return;
+  private onEnqueueError(error: unknown) {
+    const parsed = parseApiError(error);
+    if (parsed.errorCode !== 'BULK_JOB_ALREADY_ACTIVE') {
+      this.uploadError.set(parsed.userMessage);
+      return;
+    }
+    this.toastService.info('Ya hay una carga de clientes en curso');
+    const rawId = Number((parsed.details as { job_id?: unknown } | null)?.job_id);
+    const resumable$ = this.jobs.findResumable('customers');
+    const load$ =
+      Number.isInteger(rawId) && rawId > 0
+        ? this.jobs.get(rawId).pipe(catchError(() => resumable$))
+        : resumable$;
+    load$.pipe(takeUntilDestroyed(this.destroyRef)).subscribe({
+      next: (view) => {
+        if (view) this.track(view);
+        else this.uploadError.set(parsed.userMessage);
+      },
+      error: () => this.uploadError.set(parsed.userMessage),
+    });
+  }
 
-        this.isUploading.set(false);
-        this.clock.stop();
-        if (p.failedAt !== undefined) {
-          this.failedAt.set(base + p.failedAt);
-          const saved = `Se guardaron ${base + p.processed} de ${this.payload.length}.`;
-          const httpError = p.error instanceof HttpErrorResponse ? p.error : undefined;
-          const status = httpError?.status;
-          const body = httpError?.error as
-            | { message?: string; details?: { validationErrors?: unknown[] } }
-            | undefined;
-          const rowErrors = body?.details?.validationErrors;
-          this.failureDetails.set([]);
-          if (isTransientHttpError(p.error)) {
-            this.failureKind.set('technical');
-            this.uploadError.set(
-              status === 0
-                ? 'Sin conexión con el servidor.'
-                : status === 429
-                  ? 'El servidor recibió demasiadas peticiones seguidas (HTTP 429); espera un minuto.'
-                  : `El servidor respondió con un error HTTP ${status}.`,
-            );
-            this.toastService.error(`Problema técnico de la plataforma. ${saved}`);
-          } else if (
-            !httpError ||
-            status === 400 ||
-            status === 422 ||
-            Array.isArray(rowErrors)
-          ) {
-            this.failureKind.set('data');
-            this.failureDetails.set(
-              Array.isArray(rowErrors) ? rowErrors.map(formatBulkRowError) : [],
-            );
-            this.uploadError.set(body?.message || 'Error en la carga masiva');
-            this.toastService.error(`${saved} Corrige el archivo: un lote fue rechazado por sus datos.`);
-          } else {
-            this.failureKind.set('rejected');
-            this.uploadError.set(
-              body?.message || `El servidor rechazó el lote (HTTP ${status}).`,
-            );
-            this.toastService.error(`El servidor no aceptó un lote. ${saved}`);
-          }
-        } else if (acc.failed > 0) {
-          this.registerUpload(acc);
+  /** Muestra el trabajo en el paso de progreso y, si sigue vivo, lo sigue hasta el final. */
+  private track(view: BulkUploadJobView) {
+    this.currentStep.set(2);
+    this.job.set(view);
+    this.watchSub?.unsubscribe();
+    this.watchSub = null;
+    if (isBulkUploadJobTerminal(view)) {
+      this.finish(view, false);
+      return;
+    }
+    this.syncClock(view);
+    this.watchSub = this.jobs
+      .watch(view.id, (v) => {
+        this.job.set(v);
+        this.syncClock(v);
+      })
+      .pipe(takeUntilDestroyed(this.destroyRef))
+      .subscribe({
+        next: (final) => this.finish(final, true),
+        error: (error: unknown) => {
+          this.clock.stop();
+          if (isBulkUploadJobNotFound(error)) this.jobs.forget('customers');
+          this.job.set(null);
+          this.uploadError.set(parseApiError(error).userMessage);
+        },
+      });
+  }
+
+  private syncClock(view: BulkUploadJobView) {
+    if (view.status !== 'running') return;
+    if (!this.clockStarted) {
+      this.clockStarted = true;
+      this.lastBatch = view.batch_current;
+      this.clock.resumeFrom(
+        Date.parse(view.started_at ?? view.created_at),
+        view.batch_total ?? 0,
+        view.batch_current,
+      );
+    } else if (view.batch_current !== this.lastBatch) {
+      this.lastBatch = view.batch_current;
+      this.clock.recordBatch(view.batch_current, view.batch_total ?? 0);
+    }
+  }
+
+  /** Estado final: trae las filas guardadas y avisa a la página. */
+  private finish(view: BulkUploadJobView, notify: boolean) {
+    this.clock.stop();
+    this.job.set(view);
+    this.jobs
+      .getResults(view.id)
+      .pipe(
+        catchError(() => {
+          this.toastService.warning('No pudimos traer el detalle por fila de la carga.');
+          return of([] as BulkUploadJobResultRow[]);
+        }),
+        takeUntilDestroyed(this.destroyRef),
+      )
+      .subscribe((rows) => {
+        const results = rows as CustomerUploadRow[];
+        this.uploadResults.set({
+          total_processed: view.processed_rows,
+          successful: view.successful_rows,
+          failed: view.failed_rows,
+          locations_added: results.filter((r) => r.status === 'location_added').length,
+          warnings: results.filter((r) => r.status === 'warning').length,
+          results,
+        });
+        if (view.successful_rows > 0) this.uploadComplete.emit();
+        if (!notify) return;
+        if (view.status === 'completed') {
+          this.toastService.success(`${view.successful_rows} filas cargadas exitosamente`);
+        } else if (view.status === 'partial') {
           this.toastService.warning('La carga se completó con algunos errores.');
+        } else if (view.error?.kind === 'technical') {
+          this.toastService.error(
+            `Problema técnico de la plataforma. Se guardaron ${view.processed_rows} de ${view.total_rows}.`,
+          );
         } else {
-          this.registerUpload(acc);
-          const locs = acc.locations_added > 0 ? ` (${acc.locations_added} ubicaciones)` : '';
-          this.toastService.success(`${acc.successful} filas cargadas exitosamente${locs}`);
-          this.uploadComplete.emit();
+          this.toastService.error('Corrige el archivo: la carga fue rechazada por sus datos.');
         }
       });
   }
 
-  /** Registers the finished upload once (all pages done); never blocks the UI. */
-  private registerUpload(acc: { successful: number; failed: number }) {
-    if (this.uploadRegistered) return;
-    this.uploadRegistered = true;
-    const fileName = this.fileName;
-    const total = this.payload.length;
-    void this.fileHashPromise.then((fileHash) => {
-      if (!fileHash) return;
-      this.bulkUploadLog
-        .register({
-          upload_type: 'customers',
-          file_name: fileName,
-          file_hash: fileHash,
-          total_rows: total,
-          successful_rows: acc.successful,
-          failed_rows: acc.failed,
-          skipped_rows: 0,
-        })
-        .pipe(takeUntilDestroyed(this.destroyRef))
-        .subscribe();
-    });
+  /**
+   * «Reintentar lote» tras un problema técnico. Nunca es automático: la carga
+   * de clientes NO es idempotente (una fila sin correo ni documento se crea de
+   * nuevo), así que lo decide la persona tras leer la advertencia.
+   */
+  async retryUpload() {
+    const j = this.job();
+    if (!j || !j.can_retry || j.error?.kind !== 'technical' || this.isUploading()) return;
+    const confirmed = await this.dialog.confirm(
+      {
+        title: 'Reintentar lote',
+        message:
+          'Si el servidor alcanzó a guardar parte del lote que falló, reenviarlo puede duplicar los clientes sin correo ni documento. Revisa el listado de clientes antes de reintentar. ¿Reintentar de todos modos?',
+        confirmText: 'Reintentar',
+        cancelText: 'Cancelar',
+        confirmVariant: 'primary',
+      },
+      { size: 'sm' },
+    );
+    if (!confirmed) return;
+    this.isUploading.set(true);
+    this.jobs
+      .retry(j.id)
+      .pipe(takeUntilDestroyed(this.destroyRef))
+      .subscribe({
+        next: (view) => {
+          this.isUploading.set(false);
+          this.uploadResults.set(null);
+          this.uploadError.set(null);
+          this.clock.reset();
+          this.clockStarted = false;
+          this.lastBatch = -1;
+          this.track(view);
+        },
+        error: (error: unknown) => {
+          this.isUploading.set(false);
+          this.toastService.error(parseApiError(error).userMessage);
+        },
+      });
   }
 
-  getCustomerLabel(result: any, index: number): string {
+  getCustomerLabel(result: CustomerUploadRow, index: number): string {
     // Buscar por número de fila: con lotes de 100 el índice del resultado no
     // coincide con la posición en el archivo a partir del segundo lote.
     const rows = this.parsedData() ?? [];
     const parsed =
-      rows.find((r: any) => r?.row_number === result?.row_number) ?? rows[index];
+      rows.find((r) => r['row_number'] === result.row_number) ?? rows[index];
     if (parsed) {
-      const name = parsed.legal_name || [parsed.first_name, parsed.last_name].filter(Boolean).join(' ');
+      const name = parsed['legal_name'] || [parsed['first_name'], parsed['last_name']].filter(Boolean).join(' ');
       if (name) return name;
     }
-    return `Cliente ${index + 1}`;
+    return `Cliente ${result.row_number ?? index + 1}`;
   }
 }
