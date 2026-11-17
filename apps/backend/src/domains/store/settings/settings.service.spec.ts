@@ -132,6 +132,70 @@ describe('SettingsService — guard de transición de caja (QUI-560)', () => {
     });
   });
 
+  // ------------------------------------------- updateSettings — expected_store_id
+
+  /**
+   * QUI-563 Fase 3: el formulario recuerda la tienda de la que se cargó y la
+   * envía como `expected_store_id`. Si el token ya es de otra tienda, aplicar
+   * el PATCH escribiría la configuración de A encima de B: se rechaza con 409.
+   */
+  describe('updateSettings — expected_store_id (QUI-563)', () => {
+    const payload = { inventory: { low_stock_threshold: 5 } };
+
+    it('responde 409 y NO persiste si expected_store_id no es la tienda del token', async () => {
+      const error = await service
+        .updateSettings({ ...payload, expected_store_id: STORE_ID + 1 })
+        .catch((e) => e);
+
+      expect(error).toBeInstanceOf(VendixHttpException);
+      expect(error.errorCode).toBe('STORE_SETTINGS_STORE_MISMATCH_001');
+      expect(error.getStatus()).toBe(409);
+      expect(error.getResponse()).toMatchObject({
+        details: { expected_store_id: STORE_ID + 1, active_store_id: STORE_ID },
+      });
+      expect(prisma.store_settings.upsert).not.toHaveBeenCalled();
+    });
+
+    it('un valor no numérico también se rechaza: nunca se ignora en silencio', async () => {
+      await expect(
+        service.updateSettings({ ...payload, expected_store_id: 'abc' }),
+      ).rejects.toMatchObject({
+        errorCode: 'STORE_SETTINGS_STORE_MISMATCH_001',
+      });
+      expect(prisma.store_settings.upsert).not.toHaveBeenCalled();
+    });
+
+    it('persiste si coincide, sin guardar la clave ni registrarla como descartada', async () => {
+      const warn = jest.spyOn((service as any).logger, 'warn');
+
+      await service.updateSettings({ ...payload, expected_store_id: STORE_ID });
+
+      expect(prisma.store_settings.upsert).toHaveBeenCalledTimes(1);
+      const persisted = (prisma.store_settings.upsert as jest.Mock).mock
+        .calls[0][0].update.settings;
+      expect(persisted.inventory.low_stock_threshold).toBe(5);
+      expect(persisted).not.toHaveProperty('expected_store_id');
+      expect(warn).not.toHaveBeenCalledWith(
+        expect.stringContaining('expected_store_id'),
+      );
+    });
+
+    it('sin expected_store_id (clientes actuales) persiste igual que antes', async () => {
+      await service.updateSettings(payload);
+
+      expect(prisma.store_settings.upsert).toHaveBeenCalledTimes(1);
+      const persisted = (prisma.store_settings.upsert as jest.Mock).mock
+        .calls[0][0].update.settings;
+      expect(persisted.inventory.low_stock_threshold).toBe(5);
+    });
+
+    it('expected_store_id null cuenta como ausente', async () => {
+      await service.updateSettings({ ...payload, expected_store_id: null });
+
+      expect(prisma.store_settings.upsert).toHaveBeenCalledTimes(1);
+    });
+  });
+
   // ---------------------------------------------------------------- resetToDefault
 
   describe('resetToDefault', () => {

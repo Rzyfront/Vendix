@@ -80,10 +80,16 @@ export class SettingsController {
     status: 200,
     description: 'Settings updated successfully',
   })
+  @ApiResponse({
+    status: 409,
+    description:
+      'STORE_SETTINGS_STORE_MISMATCH_001: optional body field `expected_store_id` does not match the store in the token',
+  })
   // Body intentionally typed as a plain record so deprecated keys are not
   // rejected by the global ValidationPipe before reaching the service.
   // The service runs `sanitizeAndValidate(raw)` to drop unknown keys and
-  // validate retained sections against `UpdateSettingsDto`.
+  // validate retained sections against `UpdateSettingsDto`. The optional
+  // `expected_store_id` field (QUI-563) is checked before that.
   async updateSettings(@Body() raw: Record<string, unknown>) {
     await this.settingsService.updateSettings(raw);
     // Re-read via getSettings() to return the full projection (including app from branding)

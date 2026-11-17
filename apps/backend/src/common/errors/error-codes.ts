@@ -1060,6 +1060,15 @@ export const ErrorCodes = {
     httpStatus: 400,
     devMessage: 'Store context required',
   },
+  // QUI-563: the settings form was loaded under another store than the one in
+  // the token (the user switched stores with the form open). Applying it would
+  // overwrite the active store's settings with the previous store's values.
+  STORE_SETTINGS_STORE_MISMATCH_001: {
+    code: 'STORE_SETTINGS_STORE_MISMATCH_001',
+    httpStatus: 409,
+    devMessage:
+      'Settings were loaded under a different store than the active one',
+  },
   ADDR_PRIMARY_REQUIRES_CUSTOMER_001: {
     code: 'ADDR_PRIMARY_REQUIRES_CUSTOMER_001',
     httpStatus: 400,

@@ -235,6 +235,28 @@ export class SettingsService {
   }
 
   /**
+   * QUI-563: refuses a settings write whose form was loaded under another
+   * store. Absent (`undefined`/`null`) keeps the previous behavior for clients
+   * that do not send it. Any other value must equal the token's store: a
+   * malformed one is rejected too, never ignored, because ignoring it would
+   * report success for a check that never ran.
+   */
+  private assertExpectedStore(expected: unknown, store_id: number): void {
+    if (expected === undefined || expected === null) return;
+    const parsed =
+      typeof expected === 'number' || typeof expected === 'string'
+        ? Number(expected)
+        : Number.NaN;
+    if (parsed === store_id) return;
+
+    throw new VendixHttpException(
+      ErrorCodes.STORE_SETTINGS_STORE_MISMATCH_001,
+      undefined,
+      { expected_store_id: expected, active_store_id: store_id },
+    );
+  }
+
+  /**
    * Filter unknown top-level keys, validate retained sections against
    * `UpdateSettingsDto` (with whitelist + skipMissingProperties), and return
    * the sanitized DTO. Known-section validation errors are surfaced via
@@ -479,12 +501,18 @@ export class SettingsService {
       throw new VendixHttpException(ErrorCodes.STORE_CONTEXT_001);
     }
 
+    // QUI-563: `expected_store_id` is the store the client loaded the form
+    // from. It is a request guard, not a setting, so it is taken out before
+    // sanitizing (otherwise it would be logged as a dropped deprecated key).
+    const { expected_store_id, ...sections } = (raw ?? {}) as Record<
+      string,
+      unknown
+    >;
+    this.assertExpectedStore(expected_store_id, store_id);
+
     // Sanitize unknown top-level keys and validate retained sections.
     // This replaces the previous, ineffective controller-side ValidationPipe.
-    const dto: UpdateSettingsDto = this.sanitizeAndValidate(
-      raw as Record<string, unknown>,
-      store_id,
-    );
+    const dto: UpdateSettingsDto = this.sanitizeAndValidate(sections, store_id);
 
     // La configuración de Vexi es exclusiva de propietario y administrador, y eso
     // tiene que decidirse acá. `store:settings:update` — el permiso que protege
