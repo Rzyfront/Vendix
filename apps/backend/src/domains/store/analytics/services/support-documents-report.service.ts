@@ -20,7 +20,7 @@ export const SUPPORT_DOCUMENTS_EXPORT_LIMIT = 10000;
 
 /**
  * Estados que NO suman en los totales: el documento anulado (`voided`) y el
- * descartado antes de transmitir (`cancelled`) no tienen efecto fiscal. Siguen
+ * cancelado antes de transmitir (`cancelled`) no tienen efecto fiscal. Siguen
  * apareciendo en la tabla y en el XLSX, marcados como fuera de totales.
  */
 export const SUPPORT_REPORT_EXCLUDED_STATUSES: readonly invoice_status_enum[] = [
@@ -65,9 +65,9 @@ export interface SupportDocumentsTypeTotals extends SupportDocumentsAmounts {
 }
 
 export interface SupportDocumentsSummary {
-  /** Documentos que suman (soporte + ajustes, sin anulados ni descartados). */
+  /** Documentos que suman (soporte + ajustes, sin anulados ni cancelados). */
   document_count: number;
-  /** Anulados o descartados: se listan pero no suman. */
+  /** Anulados o cancelados: se listan pero no suman. */
   excluded_count: number;
   support: SupportDocumentsTypeTotals;
   adjustment: SupportDocumentsTypeTotals;

@@ -25,7 +25,7 @@ export const SUPPORT_STATUS_LABELS: Record<string, string> = {
   sent: 'Enviado',
   accepted: 'Aceptado',
   rejected: 'Rechazado',
-  cancelled: 'Descartado',
+  cancelled: 'Cancelado',
   voided: 'Anulado',
 };
 
@@ -109,7 +109,7 @@ export class SupportDocumentsReportController {
       withholding_amount: r.withholding_amount,
       total_amount: r.total_amount,
       accepted_at: r.accepted_at,
-      counts_label: r.counts_in_totals ? 'Sí' : 'No (anulado o descartado)',
+      counts_label: r.counts_in_totals ? 'Sí' : 'No (anulado o cancelado)',
     }));
 
     const summaryColumns: ReportColumn[] = [
@@ -122,7 +122,7 @@ export class SupportDocumentsReportController {
       { concept: 'Documentos soporte', ...summary.support },
       { concept: 'Notas de ajuste (restan)', ...summary.adjustment },
       {
-        concept: 'Anulados o descartados (fuera de totales)',
+        concept: 'Anulados o cancelados (fuera de totales)',
         count: summary.excluded_count,
       },
     ];

@@ -205,7 +205,7 @@ describe('Support documents report (QUI-684)', () => {
   }
 
   describe('totales', () => {
-    it('separa soporte y ajuste, la nota resta y los anulados/descartados no suman', async () => {
+    it('separa soporte y ajuste, la nota resta y los anulados/cancelados no suman', async () => {
       const summary = await service.getSummary(NOVEMBER);
 
       expect(summary.support).toEqual({ count: 3, subtotal_amount: 1600.75, tax_amount: 304.15, withholding_amount: 25, total_amount: 1904.9 });
@@ -345,8 +345,8 @@ describe('Support documents report (QUI-684)', () => {
       // Fila 5: el anulado aparece, marcado fuera de totales.
       expect(sheet.getCell('C5').value).toBe('DS-3');
       expect(sheet.getCell('F5').value).toBe('Anulado');
-      expect(sheet.getCell('N5').value).toBe('No (anulado o descartado)');
-      expect(sheet.getCell('F4').value).toBe('Descartado');
+      expect(sheet.getCell('N5').value).toBe('No (anulado o cancelado)');
+      expect(sheet.getCell('F4').value).toBe('Cancelado');
 
       const screen = await service.getSummary(NOVEMBER);
       expect(sheet.getCell('B8').value).toBe('TOTAL NETO (soporte − ajustes, sin anulados)');
