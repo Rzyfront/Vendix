@@ -14,6 +14,8 @@ import { DispatchAnalyticsService } from './services/dispatch-analytics.service'
 import { SalesDimensionAnalyticsService } from './services/sales-dimension-analytics.service';
 import { PaymentsAnalyticsService } from './services/payments-analytics.service';
 import { PaymentsAnalyticsController } from './payments-analytics.controller';
+import { SupportDocumentsReportService } from './services/support-documents-report.service';
+import { SupportDocumentsReportController } from './support-documents-report.controller';
 import { FinancialAnalyticsCacheInvalidationListener } from './listeners/financial-analytics-cache-invalidation.listener';
 import { ResponseModule } from '../../../common/responses/response.module';
 import { S3Module } from '@common/services/s3.module';
@@ -22,7 +24,11 @@ import { PrismaModule } from '../../../prisma/prisma.module';
 
 @Module({
   imports: [ResponseModule, PrismaModule, S3Module],
-  controllers: [AnalyticsController, PaymentsAnalyticsController],
+  controllers: [
+    AnalyticsController,
+    PaymentsAnalyticsController,
+    SupportDocumentsReportController,
+  ],
   providers: [
     SalesAnalyticsService,
     InventoryAnalyticsService,
@@ -34,6 +40,7 @@ import { PrismaModule } from '../../../prisma/prisma.module';
     ReviewsAnalyticsService,
     DispatchAnalyticsService,
     PaymentsAnalyticsService,
+    SupportDocumentsReportService,
     SalesDimensionAnalyticsService,
     FinancialAnalyticsCacheInvalidationListener,
   ],
