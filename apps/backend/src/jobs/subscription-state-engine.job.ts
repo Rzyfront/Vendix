@@ -9,6 +9,9 @@ import { SubscriptionGateConfig } from '../domains/store/subscriptions/config/su
 
 const DAY_MS = 24 * 60 * 60 * 1000;
 
+/** Rows per keyset page of the daily evaluation (QUI-693). */
+export const STATE_ENGINE_BATCH_SIZE = 500;
+
 /**
  * Dunning rung → BullMQ job name routed by `EmailNotificationsProcessor`.
  *
@@ -54,7 +57,9 @@ export const DUNNING_EMAIL_JOBS: Partial<
  * The escalation is detected by comparing the state BEFORE the evaluation with
  * the state re-read AFTER it. That is deliberate: it keeps the state machine's
  * signature untouched, and it makes the notification a strict consequence of a
- * committed transition — no transition, no email, ever.
+ * committed transition — no transition, no email, ever. A catch-up walk over
+ * several rungs (QUI-693, e.g. `active → grace_soft → grace_hard → suspended`)
+ * therefore sends ONE email, for the rung it lands on.
  *
  * Ordering invariant: the transition is the truth of the system, the email is
  * only a notification. The enqueue therefore happens AFTER the transition
@@ -88,61 +93,105 @@ export class SubscriptionStateEngineJob {
 
     this.isRunning = true;
 
+    let scanned = 0;
+    let failed = 0;
     try {
-      const subscriptions = await this.prisma.store_subscriptions.findMany({
-        where: {
-          // RNC-39: also exclude no_plan rows (no period/plan to evaluate).
-          state: { notIn: ['cancelled', 'expired', 'draft', 'no_plan'] },
-          // FIX membership 500: only pick subscriptions past their period.
-          // Without this filter, `take: 50` is meaningless: every run pays
-          // for healthy subs that will never transition, and stores
-          // beyond the first 50 (e.g. `multimarcas ever`) never reach
-          // evaluateAndTransitionForSubscription.
-          current_period_end: { lt: new Date() },
-        },
-        select: { id: true, state: true },
-        take: 500,
-      });
+      // One cut-off for the whole run, so every page answers the same
+      // question; a period that lapses while the run is paging is picked up
+      // by tomorrow's run.
+      const cutoff = new Date();
+      // QUI-693: keyset pagination over `id`. A single `take: 500` left every
+      // row past the 500th unevaluated forever, and OFFSET paging would skip
+      // rows because the evaluation itself moves some of them out of the
+      // filter (→ cancelled). `id > lastId` visits each candidate once.
+      let lastId = 0;
+      for (;;) {
+        const page = await this.prisma.store_subscriptions.findMany({
+          where: {
+            // RNC-39: also exclude no_plan rows (no period/plan to evaluate).
+            state: { notIn: ['cancelled', 'expired', 'draft', 'no_plan'] },
+            // FIX membership 500: only pick subscriptions past their period;
+            // healthy subs never transition and must not consume the batch.
+            current_period_end: { lt: cutoff },
+            id: { gt: lastId },
+          },
+          select: { id: true, state: true },
+          orderBy: { id: 'asc' },
+          take: STATE_ENGINE_BATCH_SIZE,
+        });
 
-      if (subscriptions.length === 0) {
-        return;
+        for (const sub of page) {
+          scanned++;
+          if (!(await this.processCandidate(sub))) {
+            failed++;
+          }
+        }
+
+        if (page.length < STATE_ENGINE_BATCH_SIZE) {
+          break;
+        }
+        lastId = page[page.length - 1].id;
       }
 
-      for (const sub of subscriptions) {
-        if (this.gateConfig.isCronDryRun()) {
-          this.logger.log({
-            msg: 'DRY_RUN_SKIP',
-            job: 'subscription-state-engine',
-            wouldProcess: { subscriptionId: sub.id, fromState: sub.state },
-            // No transition is applied in dry-run, so no dunning email is
-            // enqueued either: the email always follows a committed
-            // escalation, it never precedes it.
-            wouldEnqueueDunningEmail: false,
-          });
-          continue;
-        }
-
-        try {
-          await this.stateService.evaluateAndTransitionForSubscription(sub.id);
-        } catch (error: any) {
-          this.logger.error(
-            `Failed to process subscription ${sub.id}: ${error?.message ?? error}`,
-          );
-        }
-
-        // Deliberately OUTSIDE the catch above: an evaluation that degraded the
-        // store and only then failed on a later rule still degraded it, and the
-        // customer must still be told. `notifyEscalation` compares the re-read
-        // state against `sub.state`, so "nothing changed" simply sends nothing.
-        await this.notifyEscalation(sub.id, sub.state);
+      if (scanned > 0) {
+        this.logger.log(
+          `SUBSCRIPTION_STATE_ENGINE_DONE scanned=${scanned} failed=${failed}`,
+        );
       }
     } catch (error: any) {
       this.logger.error(
-        `Subscription state engine failed: ${error?.message ?? error}`,
+        `Subscription state engine failed after scanned=${scanned} failed=${failed}: ${error?.message ?? error}`,
+        error?.stack,
       );
     } finally {
       this.isRunning = false;
     }
+  }
+
+  /**
+   * Evaluate one candidate and notify its escalation, if any.
+   *
+   * Returns `false` when the evaluation threw. The failure is logged with the
+   * subscription id, its state and the error code so an engine that keeps
+   * failing on a row (e.g. SUBSCRIPTION_010, an illegal transition) is visible
+   * instead of silently leaving the store where it was; the batch goes on.
+   */
+  private async processCandidate(sub: {
+    id: number;
+    state: store_subscription_state_enum;
+  }): Promise<boolean> {
+    if (this.gateConfig.isCronDryRun()) {
+      this.logger.log({
+        msg: 'DRY_RUN_SKIP',
+        job: 'subscription-state-engine',
+        wouldProcess: { subscriptionId: sub.id, fromState: sub.state },
+        // No transition is applied in dry-run, so no dunning email is
+        // enqueued either: the email always follows a committed
+        // escalation, it never precedes it.
+        wouldEnqueueDunningEmail: false,
+      });
+      return true;
+    }
+
+    let ok = true;
+    try {
+      await this.stateService.evaluateAndTransitionForSubscription(sub.id);
+    } catch (error: any) {
+      ok = false;
+      this.logger.error(
+        `SUBSCRIPTION_STATE_ENGINE_ROW_FAILED sub=${sub.id} state=${sub.state} ` +
+          `code=${error?.errorCode ?? 'unknown'}: ${error?.message ?? error}`,
+        error?.stack,
+      );
+    }
+
+    // Deliberately OUTSIDE the catch above: an evaluation that degraded the
+    // store and only then failed on a later rule (or a later rung of the
+    // ladder walk) still degraded it, and the customer must still be told.
+    // `notifyEscalation` compares the re-read state against `sub.state`, so
+    // "nothing changed" simply sends nothing.
+    await this.notifyEscalation(sub.id, sub.state);
+    return ok;
   }
 
   /**

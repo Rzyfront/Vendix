@@ -3,6 +3,7 @@ import { getQueueToken } from '@nestjs/bullmq';
 import {
   SubscriptionStateEngineJob,
   DUNNING_EMAIL_JOBS,
+  STATE_ENGINE_BATCH_SIZE,
 } from './subscription-state-engine.job';
 import { GlobalPrismaService } from '../prisma/services/global-prisma.service';
 import { SubscriptionStateService } from '../domains/store/subscriptions/services/subscription-state.service';
@@ -290,5 +291,125 @@ describe('SubscriptionStateEngineJob', () => {
       stateService.evaluateAndTransitionForSubscription,
     ).not.toHaveBeenCalled();
     expect(emailQueue.add).not.toHaveBeenCalled();
+  });
+
+  // ----------------------------------------------------------------------
+  // QUI-693 — every overdue row is evaluated, not just the first page
+  // ----------------------------------------------------------------------
+
+  describe('QUI-693 — keyset pagination', () => {
+    /**
+     * Serves `rows` the way Postgres would answer the job's query: ordered by
+     * id, after the `id > lastId` cursor, at most `take` rows per page.
+     */
+    function serveOverdueRows(rows: Array<{ id: number; state: string }>) {
+      prisma.store_subscriptions.findMany.mockImplementation(
+        async (args: any) => {
+          const afterId: number = args?.where?.id?.gt ?? 0;
+          return rows
+            .filter((r) => r.id > afterId)
+            .sort((a, b) => a.id - b.id)
+            .slice(0, args?.take ?? rows.length);
+        },
+      );
+    }
+
+    it('501 overdue subscriptions: all 501 are evaluated, each exactly once', async () => {
+      const rows = Array.from({ length: 501 }, (_, i) => ({
+        id: i + 1,
+        state: 'active',
+      }));
+      serveOverdueRows(rows);
+      // Nothing escalated: this test is about coverage, not notifications.
+      prisma.store_subscriptions.findUnique.mockResolvedValue(
+        afterRow('active'),
+      );
+
+      await job.handleStateTransitions();
+
+      const evaluated =
+        stateService.evaluateAndTransitionForSubscription.mock.calls.map(
+          ([id]: [number]) => id,
+        );
+      expect(evaluated).toHaveLength(501);
+      expect(new Set(evaluated).size).toBe(501);
+      expect(evaluated[500]).toBe(501);
+
+      // Two pages of at most 500, the second one after the first page's last id.
+      const pages = prisma.store_subscriptions.findMany.mock.calls.map(
+        ([args]: any[]) => args,
+      );
+      expect(pages).toHaveLength(2);
+      expect(pages.map((a: any) => a.take)).toEqual([
+        STATE_ENGINE_BATCH_SIZE,
+        STATE_ENGINE_BATCH_SIZE,
+      ]);
+      expect(pages.map((a: any) => a.where.id.gt)).toEqual([0, 500]);
+      expect(pages[0].orderBy).toEqual({ id: 'asc' });
+      // Same cut-off on every page, and still only overdue, evaluable rows.
+      expect(pages[1].where.current_period_end).toEqual(
+        pages[0].where.current_period_end,
+      );
+      expect(pages[0].where.state).toEqual({
+        notIn: ['cancelled', 'expired', 'draft', 'no_plan'],
+      });
+    });
+
+    it('exactly one full page still asks for the next one and stops on the empty page', async () => {
+      serveOverdueRows(
+        Array.from({ length: STATE_ENGINE_BATCH_SIZE }, (_, i) => ({
+          id: i + 1,
+          state: 'active',
+        })),
+      );
+      prisma.store_subscriptions.findUnique.mockResolvedValue(
+        afterRow('active'),
+      );
+
+      await job.handleStateTransitions();
+
+      expect(
+        stateService.evaluateAndTransitionForSubscription,
+      ).toHaveBeenCalledTimes(STATE_ENGINE_BATCH_SIZE);
+      expect(prisma.store_subscriptions.findMany).toHaveBeenCalledTimes(2);
+    });
+
+    it('a failing row is logged with its id and error code, and the batch goes on', async () => {
+      serveOverdueRows([
+        { id: 1, state: 'active' },
+        { id: 2, state: 'active' },
+      ]);
+      prisma.store_subscriptions.findUnique.mockResolvedValue(
+        afterRow('active'),
+      );
+      const illegal = Object.assign(
+        new Error('Illegal transition active -> suspended'),
+        { errorCode: 'SUBSCRIPTION_010' },
+      );
+      stateService.evaluateAndTransitionForSubscription
+        .mockRejectedValueOnce(illegal)
+        .mockResolvedValueOnce(undefined);
+      const errorSpy = jest
+        .spyOn((job as any).logger, 'error')
+        .mockImplementation(() => undefined);
+      const logSpy = jest
+        .spyOn((job as any).logger, 'log')
+        .mockImplementation(() => undefined);
+
+      await expect(job.handleStateTransitions()).resolves.toBeUndefined();
+
+      expect(
+        stateService.evaluateAndTransitionForSubscription,
+      ).toHaveBeenNthCalledWith(2, 2);
+      const rowFailure = errorSpy.mock.calls
+        .map(([msg]) => String(msg))
+        .find((msg) => msg.includes('SUBSCRIPTION_STATE_ENGINE_ROW_FAILED'));
+      expect(rowFailure).toContain('sub=1');
+      expect(rowFailure).toContain('code=SUBSCRIPTION_010');
+      expect(rowFailure).toContain('Illegal transition active -> suspended');
+      expect(logSpy.mock.calls.map(([msg]) => String(msg))).toContain(
+        'SUBSCRIPTION_STATE_ENGINE_DONE scanned=2 failed=1',
+      );
+    });
   });
 });
