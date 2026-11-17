@@ -741,6 +741,10 @@ jobs:
           --include='**/super-admin/subscriptions/pages/plans/workflow-limits.util.spec.ts'
           --include='**/super-admin/workflows-ops/**/*.spec.ts'
           --include='**/organization/stores/utils/collect-all-pages.util.spec.ts'
+          --include='**/core/utils/async-job-poll.util.spec.ts'
+          --include='**/shared/utils/batch-progress-clock.spec.ts'
+          --include='**/products/components/bulk-upload-modal/bulk-upload-modal.component.spec.ts'
+          --include='**/customers/components/bulk-upload-modal/bulk-upload-modal.component.spec.ts'
 
   mobile:
     name: Mobile
