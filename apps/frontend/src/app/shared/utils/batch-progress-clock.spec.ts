@@ -69,6 +69,25 @@ describe('BatchProgressClock (QUI-1009)', () => {
     expect(clock.remainingMs()).toBe(3 * 2_000);
   });
 
+  it('resumeFrom cuenta desde el inicio real del trabajo y usa todos sus lotes', () => {
+    // El trabajo arrancó en el servidor hace 40 s y ya hizo 2 de 6 lotes.
+    clock.resumeFrom(Date.now() - 40_000, 6, 2);
+    expect(clock.elapsedMs()).toBe(40_000);
+    expect(clock.currentBatch()).toBe(3);
+    // 20 s por lote × 4 lotes que faltan.
+    expect(clock.remainingMs()).toBe(80_000);
+
+    jasmine.clock().tick(5_000);
+    expect(clock.elapsedMs()).toBe(45_000);
+    expect(clock.remainingMs()).toBe(75_000);
+  });
+
+  it('resumeFrom sin lotes hechos no inventa estimado', () => {
+    clock.resumeFrom(Date.now() - 3_000, 6, 0);
+    expect(clock.elapsedMs()).toBe(3_000);
+    expect(clock.remainingMs()).toBeNull();
+  });
+
   it('estimateRemainingMs nunca devuelve negativo', () => {
     expect(
       estimateRemainingMs({

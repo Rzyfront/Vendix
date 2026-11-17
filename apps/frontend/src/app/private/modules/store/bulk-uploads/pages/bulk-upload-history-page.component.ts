@@ -1,5 +1,6 @@
 import { Component, DestroyRef, computed, inject, signal } from '@angular/core';
 import { takeUntilDestroyed } from '@angular/core/rxjs-interop';
+import { Subscription, timer } from 'rxjs';
 
 import { BulkUploadLogService } from '../services/bulk-upload-log.service';
 import {
@@ -28,7 +29,12 @@ import { formatStoreDateTime } from '../../../../../shared/utils/date.util';
 
 const PAGE_LIMIT = 20;
 
+/** Mientras haya cargas en cola o en curso, la lista se refresca sola. */
+const ACTIVE_REFRESH_MS = 10_000;
+
 const STATUS_COLORS: Record<BulkUploadStatus, string> = {
+  queued: '#94a3b8',
+  running: '#3b82f6',
   completed: '#22c55e',
   partial: '#eab308',
   failed: '#ef4444',
@@ -73,6 +79,12 @@ const STATUS_COLORS: Record<BulkUploadStatus, string> = {
           ></app-options-dropdown>
         </div>
 
+        @if (hasActiveUploads()) {
+          <div class="mx-2 mt-3 rounded-lg bg-blue-50 p-3 text-sm text-blue-700 md:mx-4">
+            Hay cargas en curso en el servidor; esta lista se actualiza sola.
+          </div>
+        }
+
         @if (listError()) {
           <div class="mx-2 mt-3 rounded-lg bg-red-50 p-3 text-sm text-red-700 md:mx-4">
             {{ listError() }}
@@ -104,6 +116,9 @@ const STATUS_COLORS: Record<BulkUploadStatus, string> = {
 export class BulkUploadHistoryPageComponent {
   private readonly logService = inject(BulkUploadLogService);
   private readonly destroyRef = inject(DestroyRef);
+  private refreshSub: Subscription | null = null;
+  /** Hay filas en cola o en curso: la lista se actualiza sola. */
+  readonly hasActiveUploads = signal(false);
   private readonly settingsFacade = inject(StoreSettingsFacade);
 
   readonly limit = PAGE_LIMIT;
@@ -222,8 +237,10 @@ export class BulkUploadHistoryPageComponent {
     this.load();
   }
 
-  load(): void {
-    this.loading.set(true);
+  /** `silent`: el refresco automático no muestra el cargando. */
+  load(silent = false): void {
+    this.refreshSub?.unsubscribe();
+    if (!silent) this.loading.set(true);
     this.listError.set(null);
     this.logService
       .list(this.query())
@@ -234,6 +251,7 @@ export class BulkUploadHistoryPageComponent {
           this.totalItems.set(res.total);
           this.currentPage.set(res.page);
           this.loading.set(false);
+          this.scheduleActiveRefresh(res.data);
         },
         error: () => {
           this.uploads.set([]);
@@ -242,6 +260,22 @@ export class BulkUploadHistoryPageComponent {
           this.loading.set(false);
         },
       });
+  }
+
+  /**
+   * QUI-1009 — una carga del servidor aparece «En cola»/«En curso» y sus
+   * conteos avanzan mientras procesa; la lista se vuelve a pedir sola hasta
+   * que ninguna fila visible siga activa.
+   */
+  private scheduleActiveRefresh(rows: BulkUploadLog[]): void {
+    const hasActive = rows.some(
+      (row) => row.status === 'queued' || row.status === 'running',
+    );
+    this.hasActiveUploads.set(hasActive);
+    if (!hasActive) return;
+    this.refreshSub = timer(ACTIVE_REFRESH_MS)
+      .pipe(takeUntilDestroyed(this.destroyRef))
+      .subscribe(() => this.load(true));
   }
 
   onFilterChange(values: FilterValues): void {

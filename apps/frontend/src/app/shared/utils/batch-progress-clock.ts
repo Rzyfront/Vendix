@@ -73,6 +73,25 @@ export class BatchProgressClock {
     this.tickId = setInterval(() => this.now.set(Date.now()), 1_000);
   }
 
+  /**
+   * Retoma la medición de un trabajo que corre en el servidor desde que
+   * arrancó allí (`startedAtMs`), p. ej. al reabrir el modal tras recargar: el
+   * transcurrido cuenta desde el inicio real y el ritmo usa todos los lotes ya
+   * hechos. Sin lotes hechos el estimado sigue en «calculando».
+   */
+  resumeFrom(startedAtMs: number, totalBatches: number, doneBatches = 0): void {
+    this.clearTick();
+    const t = Date.now();
+    this.now.set(t);
+    this.startedAt.set(Math.min(startedAtMs, t));
+    this.stoppedAt.set(null);
+    this.lastBatchAt.set(doneBatches > 0 ? t : null);
+    this.batchesAtStart.set(0);
+    this.doneBatches.set(Math.max(0, doneBatches));
+    this.totalBatchesState.set(Math.max(0, totalBatches));
+    this.tickId = setInterval(() => this.now.set(Date.now()), 1_000);
+  }
+
   /** Registra que ya van `doneBatches` lotes terminados de `totalBatches`. */
   recordBatch(doneBatches: number, totalBatches = this.totalBatchesState()): void {
     if (this.startedAt() === null) return;
