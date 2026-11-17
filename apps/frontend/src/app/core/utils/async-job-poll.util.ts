@@ -198,14 +198,18 @@ export function backoffDelayMs(
 }
 
 /**
- * ¿Es un fallo técnico que vale la pena reintentar? Solo red (`status 0`, la
- * petición no obtuvo respuesta) y 5xx (incluye los 502/504 de nginx). Un 4xx
- * es un rechazo del contenido: reenviarlo devuelve lo mismo.
+ * ¿Es un fallo técnico que vale la pena reintentar? Red (`status 0`, la
+ * petición no obtuvo respuesta), 408 (timeout), 429 (el throttler global
+ * frenó la ráfaga) y 5xx (incluye los 502/504 de nginx). El resto de 4xx no
+ * cambia al reenviar: rechazo del contenido, sesión o permisos.
  */
 export function isTransientHttpError(error: unknown): boolean {
   return (
     error instanceof HttpErrorResponse &&
-    (error.status === 0 || error.status >= 500)
+    (error.status === 0 ||
+      error.status === 408 ||
+      error.status === 429 ||
+      error.status >= 500)
   );
 }
 

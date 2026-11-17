@@ -56,13 +56,18 @@ describe('async-job-poll.util — backoff (QUI-1009)', () => {
   });
 
   describe('isTransientHttpError', () => {
-    it('solo red (status 0) y 5xx son transitorios', () => {
+    it('red (status 0), 408, 429 y 5xx son transitorios; el resto de 4xx no', () => {
       expect(isTransientHttpError(http(0))).toBeTrue();
+      expect(isTransientHttpError(http(408))).toBeTrue();
+      expect(isTransientHttpError(http(429))).toBeTrue();
       expect(isTransientHttpError(http(500))).toBeTrue();
       expect(isTransientHttpError(http(502))).toBeTrue();
       expect(isTransientHttpError(http(504))).toBeTrue();
       expect(isTransientHttpError(http(400))).toBeFalse();
+      expect(isTransientHttpError(http(401))).toBeFalse();
+      expect(isTransientHttpError(http(403))).toBeFalse();
       expect(isTransientHttpError(http(409))).toBeFalse();
+      expect(isTransientHttpError(http(422))).toBeFalse();
       expect(isTransientHttpError('Error del servidor')).toBeFalse();
       expect(isTransientHttpError(new Error('boom'))).toBeFalse();
     });

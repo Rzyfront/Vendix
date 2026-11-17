@@ -346,7 +346,7 @@ function formatBulkRowError(e: any): string {
                   </app-button>
                 </div>
               </div>
-            } @else {
+            } @else if (failureKind() === 'data') {
               <div class="bg-red-50 p-4 rounded-lg border border-red-100 text-red-700 text-sm space-y-2" role="alert">
                 <p class="font-medium flex items-center gap-2">
                   <app-icon name="alert-circle" [size]="16"></app-icon>
@@ -365,6 +365,25 @@ function formatBulkRowError(e: any): string {
                   el mismo lote devuelve el mismo error: corrige esas filas y carga de nuevo solo las que
                   faltan.
                 </p>
+              </div>
+            } @else {
+              <div class="bg-gray-50 p-4 rounded-lg border border-gray-200 text-gray-700 text-sm space-y-2" role="alert">
+                <p class="font-medium flex items-center gap-2">
+                  <app-icon name="alert-circle" [size]="16"></app-icon>
+                  El servidor no aceptó el lote que empieza en la fila {{ failedAt()! + 1 }} de la lista
+                </p>
+                <p>
+                  {{ uploadError() }} Se guardaron {{ uploadProgress().processed }} de
+                  {{ uploadProgress().total }}.
+                </p>
+                <p class="text-xs">
+                  Si tu sesión venció o te faltan permisos, resuélvelo y reintenta desde ese lote.
+                </p>
+                <div class="flex justify-end">
+                  <app-button variant="primary" size="sm" (clicked)="retryUpload()">
+                    Reintentar lote
+                  </app-button>
+                </div>
               </div>
             }
           }
@@ -559,11 +578,12 @@ export class CustomerBulkUploadModalComponent {
   uploadProgress = signal<{ processed: number; total: number }>({ processed: 0, total: 0 });
   failedAt = signal<number | null>(null);
   /**
-   * Por qué se cortó el envío (QUI-1009): `technical` = red o 5xx, ofrece
-   * «Reintentar lote» con advertencia; `data` = el backend rechazó el lote por
-   * su contenido y reenviarlo devuelve el mismo error.
+   * Por qué se cortó el envío (QUI-1009): `technical` = red, 408, 429 o 5xx,
+   * ofrece «Reintentar lote» con advertencia; `data` = 400/422 o filas
+   * rechazadas, reenviarlo devuelve el mismo error; `rejected` = otro rechazo
+   * (sesión, permisos, plan): mensaje neutro que conserva «Reintentar lote».
    */
-  readonly failureKind = signal<'technical' | 'data' | null>(null);
+  readonly failureKind = signal<'technical' | 'data' | 'rejected' | null>(null);
   /** Filas rechazadas por datos en el lote que cortó el envío. */
   readonly failureDetails = signal<string[]>([]);
   /** Cronómetro, estimado por ritmo real y «lote x/y» (QUI-1009). */
@@ -935,7 +955,7 @@ export class CustomerBulkUploadModalComponent {
    */
   retryUpload() {
     const offset = this.failedAt();
-    if (offset === null || this.isUploading() || this.failureKind() !== 'technical') return;
+    if (offset === null || this.isUploading() || this.failureKind() === 'data') return;
     this.failedAt.set(null);
     this.failureKind.set(null);
     this.failureDetails.set([]);
@@ -982,27 +1002,41 @@ export class CustomerBulkUploadModalComponent {
         if (p.failedAt !== undefined) {
           this.failedAt.set(base + p.failedAt);
           const saved = `Se guardaron ${base + p.processed} de ${this.payload.length}.`;
+          const httpError = p.error instanceof HttpErrorResponse ? p.error : undefined;
+          const status = httpError?.status;
+          const body = httpError?.error as
+            | { message?: string; details?: { validationErrors?: unknown[] } }
+            | undefined;
+          const rowErrors = body?.details?.validationErrors;
+          this.failureDetails.set([]);
           if (isTransientHttpError(p.error)) {
-            const status = (p.error as HttpErrorResponse).status;
             this.failureKind.set('technical');
-            this.failureDetails.set([]);
             this.uploadError.set(
               status === 0
                 ? 'Sin conexión con el servidor.'
-                : `El servidor respondió con un error HTTP ${status}.`,
+                : status === 429
+                  ? 'El servidor recibió demasiadas peticiones seguidas (HTTP 429); espera un minuto.'
+                  : `El servidor respondió con un error HTTP ${status}.`,
             );
             this.toastService.error(`Problema técnico de la plataforma. ${saved}`);
-          } else {
-            const body = (p.error as HttpErrorResponse | undefined)?.error as
-              | { message?: string; details?: { validationErrors?: unknown[] } }
-              | undefined;
-            const rowErrors = body?.details?.validationErrors;
+          } else if (
+            !httpError ||
+            status === 400 ||
+            status === 422 ||
+            Array.isArray(rowErrors)
+          ) {
             this.failureKind.set('data');
             this.failureDetails.set(
               Array.isArray(rowErrors) ? rowErrors.map(formatBulkRowError) : [],
             );
             this.uploadError.set(body?.message || 'Error en la carga masiva');
             this.toastService.error(`${saved} Corrige el archivo: un lote fue rechazado por sus datos.`);
+          } else {
+            this.failureKind.set('rejected');
+            this.uploadError.set(
+              body?.message || `El servidor rechazó el lote (HTTP ${status}).`,
+            );
+            this.toastService.error(`El servidor no aceptó un lote. ${saved}`);
           }
         } else if (acc.failed > 0) {
           this.registerUpload(acc);

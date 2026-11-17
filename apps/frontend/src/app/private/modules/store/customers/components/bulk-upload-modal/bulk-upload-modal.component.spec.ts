@@ -153,6 +153,48 @@ describe('CustomerBulkUploadModalComponent — progreso y fallos por lote (QUI-1
     expect(component.failedAt()).toBe(0);
   });
 
+  it('un 429 del throttler es problema técnico, no de datos, y conserva el reintento', async () => {
+    respond = (chunk, call) =>
+      call === 2 ? throwError(() => http(429, { message: 'ThrottlerException' })) : of(ok(chunk));
+
+    await component.confirmUpload();
+    jasmine.clock().tick(60_000);
+
+    expect(sent).toEqual([2, 102]);
+    expect(component.failureKind()).toBe('technical');
+    expect(component.uploadError()).toBe(
+      'El servidor recibió demasiadas peticiones seguidas (HTTP 429); espera un minuto.',
+    );
+    expect(toast.error).toHaveBeenCalledWith(
+      'Problema técnico de la plataforma. Se guardaron 100 de 250.',
+    );
+
+    component.retryUpload();
+    expect(sent).toEqual([2, 102, 102, 202]);
+    expect(component.uploadResults().successful).toBe(TOTAL);
+  });
+
+  it('un 403 no se presenta como error de datos y conserva «Reintentar lote»', async () => {
+    respond = (chunk, call) =>
+      call === 2
+        ? throwError(() => http(403, { message: 'No tienes permiso para crear clientes' }))
+        : of(ok(chunk));
+
+    await component.confirmUpload();
+    jasmine.clock().tick(60_000);
+
+    expect(sent).toEqual([2, 102]);
+    expect(component.failureKind()).toBe('rejected');
+    expect(component.failureDetails()).toEqual([]);
+    expect(component.uploadError()).toBe('No tienes permiso para crear clientes');
+    expect(toast.error).toHaveBeenCalledWith('El servidor no aceptó un lote. Se guardaron 100 de 250.');
+
+    component.retryUpload();
+    expect(sent).toEqual([2, 102, 102, 202]);
+    expect(component.failureKind()).toBeNull();
+    expect(component.uploadResults().successful).toBe(TOTAL);
+  });
+
   it('el cronómetro, el estimado y el «lote x/y» se actualizan con el ritmo real', async () => {
     respond = (chunk) => timer(3_000).pipe(map(() => ok(chunk)));
 
