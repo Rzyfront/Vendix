@@ -1042,6 +1042,30 @@ describe('SubscriptionStateService', () => {
       expect(payload.dunning_steps).toBe(1);
     });
 
+    it('a hop that fails mid-walk keeps the rungs already applied and the next evaluation resumes from there', async () => {
+      primeOverdue({ state: 'active', daysPastPeriodEnd: 20 });
+      const applyHop =
+        prismaMock.store_subscriptions.update.getMockImplementation();
+      prismaMock.store_subscriptions.update
+        .mockImplementationOnce(applyHop)
+        .mockRejectedValueOnce(new Error('serialization failure'));
+
+      await expect(
+        service.evaluateAndTransitionForSubscription(1),
+      ).rejects.toThrow('serialization failure');
+      expect(row.state).toBe('grace_soft');
+      expect(walkedHops()).toEqual(['active→grace_soft']);
+
+      await service.evaluateAndTransitionForSubscription(1);
+
+      expect(row.state).toBe('suspended');
+      expect(walkedHops()).toEqual([
+        'active→grace_soft',
+        'grace_soft→grace_hard',
+        'grace_hard→suspended',
+      ]);
+    });
+
     it('re-evaluating a row already escalated does nothing', async () => {
       primeOverdue({ state: 'active', daysPastPeriodEnd: 20 });
       await service.evaluateAndTransitionForSubscription(1);

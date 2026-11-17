@@ -180,7 +180,7 @@ export class SubscriptionStateEngineJob {
       ok = false;
       this.logger.error(
         `SUBSCRIPTION_STATE_ENGINE_ROW_FAILED sub=${sub.id} state=${sub.state} ` +
-          `code=${error?.errorCode ?? 'unknown'}: ${error?.message ?? error}`,
+          `code=${error?.errorCode ?? error?.code ?? 'unknown'}: ${error?.message ?? error}`,
         error?.stack,
       );
     }

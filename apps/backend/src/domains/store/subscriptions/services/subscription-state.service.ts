@@ -1765,8 +1765,12 @@ export class SubscriptionStateService {
         // Each hop commits on its own: if a later one fails (or a payment
         // recovers the store mid-walk and makes it illegal), the rungs
         // already walked stay applied and the next evaluation resumes from
-        // there. `transition()` re-checks legality under the row lock, so a
-        // hop never lands on a row that moved underneath the walk.
+        // there. `transition()` re-checks legality against the locked row,
+        // not the rung the walk expects to start from: a row that moved
+        // mid-walk (e.g. a checkout opened it to `pending_payment`) still
+        // takes the next hop when the matrix allows it. That is the same
+        // window the single-hop path always had between its read and
+        // `transition()`; the walk only widens it by a few milliseconds.
         let previousLockReason = existingLockReason;
         for (const [index, rung] of path.entries()) {
           const dunningLockReason =
