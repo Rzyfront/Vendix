@@ -73,7 +73,12 @@ var MARKETING_PAGES = {
   '/pqr': true,
   '/legal/terminos': true,
   '/legal/privacidad': true,
-  '/legal/cookies': true
+  '/legal/cookies': true,
+  // Páginas comerciales aprobadas el 2026-11-17 (SEO-OPS-15, 17, 19 y 20).
+  '/soluciones/software-pos': true,
+  '/sectores/restaurantes': true,
+  '/implementacion': true,
+  '/migracion': true
 };
 // Prefijos de la app en vendix.online: rutas con parámetros (/pqr/consultar/:n),
 // guías, autenticación y paneles privados (super admin, organización, tienda,

@@ -47,10 +47,14 @@ describe('PublicSeoService (VENDIX_LANDING)', () => {
       'https://vendix.online/pricing',
       'https://vendix.online/legal/terminos',
       'https://vendix.online/legal/privacidad',
+      'https://vendix.online/soluciones/software-pos',
+      'https://vendix.online/sectores/restaurantes',
+      'https://vendix.online/implementacion',
+      'https://vendix.online/migracion',
     ]);
     const document = new DOMParser().parseFromString(xml, 'application/xml');
     expect(document.documentElement.namespaceURI).toBe('http://www.sitemaps.org/schemas/sitemap/0.9');
-    expect(document.getElementsByTagName('loc').length).toBe(4);
+    expect(document.getElementsByTagName('loc').length).toBe(8);
     expect(document.getElementsByTagName('parsererror').length).toBe(0);
     expect(findMany).not.toHaveBeenCalled();
   });

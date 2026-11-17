@@ -156,8 +156,8 @@ export const MARKETING_PAGES = {
     title: 'Implementación de Vendix: cómo empezamos con tu negocio',
     description:
       'Conoce las etapas para empezar con Vendix: diagnóstico, configuración, carga de datos, capacitación y soporte. Qué aportas tú y qué hace el equipo.',
-    // SEO-OPS-19: noindex y sin canonical hasta la aprobación de Ventas y Producto (G4).
-    robots: 'noindex, follow',
-    canonicalPath: null,
+    // SEO-OPS-19: aprobada por Adel (Producto y Ventas) el 17-nov-2026.
+    robots: 'index, follow',
+    canonicalPath: '/implementacion',
   },
 } satisfies Record<string, MarketingPageMetadata>;

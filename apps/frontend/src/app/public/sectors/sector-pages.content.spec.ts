@@ -15,10 +15,10 @@ describe('SECTOR_PAGES (SEO-TECH-08 / SEO-OPS-17)', () => {
       ...p.faqs.map((f) => f.text),
     ]);
 
-  it('mantiene cada página en noindex y sin canonical hasta la firma (G4)', () => {
+  it('las páginas aprobadas (17-nov) son indexables con canonical a su propia ruta', () => {
     for (const page of SECTOR_PAGES) {
-      expect(page.metadata.robots).withContext(page.path).toBe('noindex, follow');
-      expect(page.metadata.canonicalPath).withContext(page.path).toBeNull();
+      expect(page.metadata.robots).withContext(page.path).toBe('index, follow');
+      expect(page.metadata.canonicalPath).withContext(page.path).toBe('/' + page.path);
     }
   });
 

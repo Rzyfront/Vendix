@@ -97,7 +97,7 @@ for (const host of STORE_HOSTS) {
   for (const uri of storeIndexable) assert.notStrictEqual(result(handler(event(uri, host))), '/noindex/index.html', `${host}${uri} indexable`);
 }
 // En vendix.online las páginas comerciales indexables no reciben noindex; los archivos nunca.
-for (const uri of ['/', '/pricing', '/legal/terminos', '/legal/privacidad', '/legal/cookies', '/guias/cierre-de-caja', '/ayudax', '/authors'])
+for (const uri of ['/', '/pricing', '/legal/terminos', '/legal/privacidad', '/legal/cookies', '/soluciones/software-pos', '/sectores/restaurantes', '/implementacion', '/migracion', '/guias/cierre-de-caja', '/ayudax', '/authors'])
   assert.notStrictEqual(result(handler(event(uri, 'vendix.online'))), '/noindex/index.html', `vendix.online${uri}`);
 for (const [uri, host] of [['/auth/app.js', 'vendix.online'], ['/cart/logo.png', 'mesura.beauty'], ['/.well-known/x', 'mesura.beauty']])
   assert.notStrictEqual(result(handler(event(uri, host))), '/noindex/index.html', `${host}${uri} archivo`);
