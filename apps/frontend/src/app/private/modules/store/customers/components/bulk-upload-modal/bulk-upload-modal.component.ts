@@ -596,7 +596,9 @@ export class CustomerBulkUploadModalComponent {
     if (!j) return '';
     if (j.status === 'queued') return 'En cola…';
     const total = j.batch_total ?? 0;
-    const current = total > 0 ? Math.min(j.batch_current + 1, total) : j.batch_current + 1;
+    // Hasta terminar el primer lote el servidor no conoce el total.
+    if (total === 0) return 'Preparando el primer lote…';
+    const current = Math.min(j.batch_current + 1, total);
     return `Procesando lote ${current}/${total} (${j.processed_rows}/${j.total_rows})`;
   });
   readonly progressPercent = computed(() => {

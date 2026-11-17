@@ -79,6 +79,7 @@ describe('EmployeeBulkUploadModalComponent — trabajo durable (QUI-1009)', () =
     );
     toast.success.calls.reset();
     toast.warning.calls.reset();
+    payroll.cancelBulkEmployeeSession.calls.reset();
     jobs.findResumable.and.returnValue(of(null));
     jobs.getResults.and.returnValue(of([]));
     jobs.watch.and.returnValue(NEVER);
@@ -311,5 +312,47 @@ describe('EmployeeBulkUploadModalComponent — trabajo durable (QUI-1009)', () =
     openModal();
     component.onCancel();
     expect(jobs.forget).toHaveBeenCalledWith('employees');
+  });
+
+  it('cerrar con el encolado en vuelo no borra el archivo que el trabajo va a usar', async () => {
+    jobs.enqueue.and.returnValue(NEVER);
+    await analyzeAndUpload();
+
+    component.onCancel();
+
+    expect(payroll.cancelBulkEmployeeSession).not.toHaveBeenCalled();
+  });
+
+  it('cerrar tras analizar y antes de cargar sigue liberando el archivo temporal', () => {
+    component.selectedFile.set(new File(['x'], 'empleados.xlsx'));
+    component.analyzeFile();
+
+    component.onCancel();
+
+    expect(payroll.cancelBulkEmployeeSession).toHaveBeenCalledOnceWith('sess-1');
+  });
+
+  it('doble clic en «Reanudar carga» manda un solo reintento', () => {
+    jobs.findResumable.and.returnValue(
+      of(makeView({ status: 'failed', error: { kind: 'technical', code: 'BULK_JOB_TIMEOUT', message: 'x' }, can_retry: true })),
+    );
+    jobs.retry.and.returnValue(NEVER);
+    openModal();
+
+    component.retryJob();
+    component.retryJob();
+
+    expect(jobs.retry).toHaveBeenCalledTimes(1);
+    expect(component.retrying()).toBeTrue();
+  });
+
+  it('antes de terminar el primer lote muestra «Preparando el primer lote…», no «0/0»', () => {
+    jobs.findResumable.and.returnValue(
+      of(makeView({ status: 'running', batch_total: 0, total_rows: 0 })),
+    );
+
+    openModal();
+
+    expect(component.progressLabel()).toBe('Preparando el primer lote…');
   });
 });

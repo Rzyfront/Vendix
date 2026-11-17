@@ -771,7 +771,12 @@ import {
                 </div>
                 <div class="flex flex-wrap gap-2">
                   @if (job()?.can_retry) {
-                    <app-button variant="outline" size="sm" (clicked)="retryJob()">
+                    <app-button
+                      variant="outline"
+                      size="sm"
+                      [disabled]="retrying()"
+                      (clicked)="retryJob()"
+                    >
                       Reanudar carga
                     </app-button>
                   }
@@ -1087,6 +1092,8 @@ export class EmployeeBulkUploadModalComponent {
   // Trabajo de carga en el servidor (QUI-1009)
   /** Buscando una carga en curso al abrir el modal. */
   readonly isResuming = signal(false);
+  /** «Reanudar carga» en vuelo: evita un segundo POST por doble clic. */
+  readonly retrying = signal(false);
   readonly job = signal<BulkUploadJobView | null>(null);
   readonly clock = new BatchProgressClock();
   private clockStarted = false;
@@ -1098,6 +1105,8 @@ export class EmployeeBulkUploadModalComponent {
     const j = this.job();
     if (!j || j.status === 'queued') return 'En cola…';
     const total = j.batch_total ?? 0;
+    // Hasta terminar el primer lote el servidor no conoce el total.
+    if (total === 0) return 'Preparando el primer lote…';
     const batch = Math.min(j.batch_current + 1, total);
     return `Procesando lote ${batch}/${total} (${j.processed_rows}/${j.total_rows})`;
   });
@@ -1267,7 +1276,8 @@ export class EmployeeBulkUploadModalComponent {
       if (isBulkUploadJobTerminal(job) && !job.can_retry) {
         this.jobs.forget('employees');
       }
-    } else if (this.sessionId()) {
+    } else if (this.sessionId() && !this.isUploading()) {
+      // Con el encolado en vuelo el archivo temporal ya puede ser del trabajo.
       this.payrollService
         .cancelBulkEmployeeSession(this.sessionId()!)
         .pipe(takeUntilDestroyed(this.destroyRef))
@@ -1292,6 +1302,7 @@ export class EmployeeBulkUploadModalComponent {
     this.clearIntroTimer();
     this.showingIntro.set(false);
     this.isResuming.set(false);
+    this.retrying.set(false);
     this.introProgress.set(0);
     this.introElapsed = 0;
     this.currentStep.set(0);
@@ -1451,19 +1462,22 @@ export class EmployeeBulkUploadModalComponent {
   /** Reanuda un fallo técnico desde el lote que falló. */
   retryJob() {
     const job = this.job();
-    if (!job?.can_retry) return;
+    if (!job?.can_retry || this.retrying()) return;
+    this.retrying.set(true);
     this.uploadError.set(null);
     this.jobs
       .retry(job.id)
       .pipe(takeUntilDestroyed(this.destroyRef))
       .subscribe({
         next: (view) => {
+          this.retrying.set(false);
           this.uploadResults.set(null);
           this.completionEmitted = false;
           this.isUploading.set(true);
           this.watchJob(view);
         },
         error: (error: unknown) => {
+          this.retrying.set(false);
           this.uploadError.set(parseApiError(error).userMessage);
         },
       });

@@ -1404,7 +1404,7 @@ import {
                       <div
                         class="flex items-center justify-between text-[11px] text-gray-600"
                       >
-                        <span>Procesando lote {{ currentBatch() }}/{{ j.batch_total ?? 0 }} ({{ j.processed_rows }}/{{ j.total_rows }})</span>
+                        <span>{{ batchLabel() }}</span>
                         <span class="font-semibold text-primary"
                           >{{ progressPercent() }}%</span
                         >
@@ -1789,6 +1789,12 @@ export class BulkUploadModalComponent {
     const next = j.batch_current + 1;
     return j.batch_total ? Math.min(next, j.batch_total) : next;
   });
+  /** «Procesando lote x/y (filas)»; hasta terminar el primer lote el servidor no conoce el total. */
+  readonly batchLabel = computed(() => {
+    const j = this.job();
+    if (!j?.batch_total) return 'Preparando el primer lote…';
+    return `Procesando lote ${this.currentBatch()}/${j.batch_total} (${j.processed_rows}/${j.total_rows})`;
+  });
   private watchSub: Subscription | null = null;
   private clockStarted = false;
   private lastBatchSeen = 0;
@@ -1955,7 +1961,13 @@ export class BulkUploadModalComponent {
       // Un fallo técnico reanudable se conserva para ofrecer «Reanudar carga»
       // al volver; lo demás ya se mostró y se olvida.
       if (!job.can_retry) this.jobs.forget('products');
-    } else if (!job && this.sessionId && !this.uploadResults()) {
+    } else if (
+      !job &&
+      this.sessionId &&
+      !this.uploadResults() &&
+      !this.enqueueing()
+    ) {
+      // Con el encolado en vuelo el archivo temporal ya puede ser del trabajo.
       this.cancelSessionSilently(this.sessionId);
     }
     this.isOpenChange.emit(false);

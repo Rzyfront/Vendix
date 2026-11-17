@@ -1,6 +1,7 @@
 import { plainToInstance } from 'class-transformer';
 import { validate } from 'class-validator';
 import { RequestContextService } from '@common/context/request-context.service';
+import { VendixHttpException } from '@common/errors';
 import { CustomersBulkJobHandler } from './customers-bulk-job.handler';
 import { CustomersBulkController } from './customers-bulk.controller';
 import { BulkCustomersJobDto } from './dto/bulk-customers-job.dto';
@@ -51,6 +52,23 @@ describe('CustomersBulkJobHandler (QUI-1009)', () => {
       key,
       'application/json',
     );
+  });
+
+  it('S3 down while staging the rows -> 503 BULK_JOB_ENQUEUE_FAILED, not a raw 500', async () => {
+    const s3 = makeS3({
+      uploadFile: jest.fn().mockRejectedValue(
+        Object.assign(new Error('socket hang up'), { name: 'TimeoutError' }),
+      ),
+    });
+    const handler = new CustomersBulkJobHandler({} as any, s3 as any);
+
+    const error = await RequestContextService.run({ store_id: 5 } as any, () =>
+      handler.stageRows(rows as any),
+    ).catch((e: unknown) => e);
+
+    expect(error).toBeInstanceOf(VendixHttpException);
+    expect((error as VendixHttpException).getStatus()).toBe(503);
+    expect((error as VendixHttpException).errorCode).toBe('BULK_JOB_ENQUEUE_FAILED');
   });
 
   it('runs the page window over the staged rows, downloading the file once', async () => {

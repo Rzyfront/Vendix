@@ -1,4 +1,4 @@
-import { Injectable } from '@nestjs/common';
+import { Injectable, Logger } from '@nestjs/common';
 import { randomUUID } from 'crypto';
 import { S3Service, isS3NotFoundError } from '@common/services/s3.service';
 import { RequestContextService } from '@common/context/request-context.service';
@@ -28,6 +28,7 @@ export class CustomersBulkJobHandler implements BulkUploadJobHandler {
   readonly type: BulkJobType = 'customers';
   readonly autoRetry = false;
 
+  private readonly logger = new Logger(CustomersBulkJobHandler.name);
   private readonly cache = new Map<string, BulkCustomerItemDto[]>();
 
   constructor(
@@ -39,11 +40,20 @@ export class CustomersBulkJobHandler implements BulkUploadJobHandler {
   async stageRows(rows: BulkCustomerItemDto[]): Promise<string> {
     const storeId = RequestContextService.getStoreId();
     const key = `tmp/bulk-customers/${storeId}/${randomUUID()}.json`;
-    await this.s3.uploadFile(
-      Buffer.from(JSON.stringify(rows)),
-      key,
-      'application/json',
-    );
+    try {
+      await this.s3.uploadFile(
+        Buffer.from(JSON.stringify(rows)),
+        key,
+        'application/json',
+      );
+    } catch (error) {
+      // S3 no responde: la carga no se puede iniciar ahora (503), como al
+      // comprobar el archivo de los demás tipos. No es un error de las filas.
+      this.logger.warn(
+        `Bulk customers rows could not be staged at ${key}: ${(error as Error)?.message}`,
+      );
+      throw new VendixHttpException(ErrorCodes.BULK_JOB_ENQUEUE_FAILED);
+    }
     return key;
   }
 

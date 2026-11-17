@@ -8,6 +8,7 @@ import {
   retryTransientWithBackoff,
 } from '../../../../../core/utils/async-job-poll.util';
 import { ERROR_MESSAGES } from '../../../../../core/utils/error-messages';
+import { TenantFacade } from '../../../../../core/store/tenant/tenant.facade';
 import {
   BulkUploadJobRequestMap,
   BulkUploadJobResultRow,
@@ -90,6 +91,7 @@ export function localizeBulkUploadJob(view: BulkUploadJobView): BulkUploadJobVie
 @Injectable({ providedIn: 'root' })
 export class BulkUploadJobService {
   private readonly http = inject(HttpClient);
+  private readonly tenant = inject(TenantFacade);
   private readonly apiUrl = environment.apiUrl;
   private readonly jobsUrl = `${environment.apiUrl}/store/bulk-uploads/jobs`;
 
@@ -185,9 +187,18 @@ export class BulkUploadJobService {
     );
   }
 
+  /**
+   * Por tienda y tipo: quien administra varias tiendas no debe perder el
+   * resultado de una al consultarlo desde otra (allí responde 404).
+   */
+  private storageKey(type: BulkUploadJobType): string {
+    const storeId = this.tenant.getCurrentStoreId();
+    return `${STORAGE_PREFIX}${storeId ?? 'none'}:${type}`;
+  }
+
   remember(type: BulkUploadJobType, id: number): void {
     try {
-      localStorage.setItem(STORAGE_PREFIX + type, String(id));
+      localStorage.setItem(this.storageKey(type), String(id));
     } catch {
       // Sin almacenamiento (modo privado): solo se pierde el aviso al volver.
     }
@@ -195,7 +206,7 @@ export class BulkUploadJobService {
 
   recall(type: BulkUploadJobType): number | null {
     try {
-      const raw = localStorage.getItem(STORAGE_PREFIX + type);
+      const raw = localStorage.getItem(this.storageKey(type));
       const id = raw === null ? NaN : Number(raw);
       return Number.isInteger(id) && id > 0 ? id : null;
     } catch {
@@ -205,7 +216,7 @@ export class BulkUploadJobService {
 
   forget(type: BulkUploadJobType): void {
     try {
-      localStorage.removeItem(STORAGE_PREFIX + type);
+      localStorage.removeItem(this.storageKey(type));
     } catch {
       // nada que limpiar
     }

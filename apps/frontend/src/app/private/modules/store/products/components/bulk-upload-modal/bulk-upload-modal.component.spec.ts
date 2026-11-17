@@ -407,4 +407,35 @@ describe('BulkUploadModalComponent — carga durable (QUI-1009)', () => {
 
     expect(jobs.forget).toHaveBeenCalledOnceWith('products');
   });
+
+  it('cerrar con el encolado en vuelo no cancela la sesión que el trabajo va a usar', async () => {
+    jobs.enqueue.and.returnValue(NEVER);
+    open();
+    analyze();
+
+    await component.proceedWithUpload();
+    component.onCancel();
+
+    expect(products.cancelBulkProductSession).not.toHaveBeenCalled();
+  });
+
+  it('cerrar tras analizar y antes de cargar sigue cancelando la sesión', () => {
+    open();
+    analyze();
+
+    component.onCancel();
+
+    expect(products.cancelBulkProductSession).toHaveBeenCalledOnceWith('sess-1');
+  });
+
+  it('antes de terminar el primer lote muestra «Preparando el primer lote…», no «0/0»', () => {
+    jobs.findResumable.and.returnValue(
+      of(view({ status: 'running', batch_current: 0, batch_total: 0, total_rows: 0, processed_rows: 0 })),
+    );
+
+    open();
+
+    expect(text()).toContain('Preparando el primer lote…');
+    expect(text()).not.toContain('Procesando lote');
+  });
 });

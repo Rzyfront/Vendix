@@ -254,10 +254,16 @@ export class BulkUploadHistoryPageComponent {
           this.scheduleActiveRefresh(res.data);
         },
         error: () => {
+          this.loading.set(false);
+          if (silent) {
+            // Un fallo pasajero del refresco automático no vacía la lista:
+            // se conserva lo último visto y se vuelve a intentar.
+            this.scheduleActiveRefresh(this.uploads());
+            return;
+          }
           this.uploads.set([]);
           this.totalItems.set(0);
           this.listError.set('No se pudo cargar el historial de cargas.');
-          this.loading.set(false);
         },
       });
   }

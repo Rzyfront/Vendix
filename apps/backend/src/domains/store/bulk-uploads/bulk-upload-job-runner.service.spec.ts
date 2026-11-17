@@ -398,6 +398,41 @@ describe('BulkUploadJobRunnerService', () => {
     expect(release).toHaveBeenCalledWith(9, 'customers', 7);
   });
 
+  it('if the database fails while marking the job running, it fails technical: incident, view error and lock released', async () => {
+    updateMany.mockRejectedValueOnce(new Error('db down at start'));
+    const job = handle(makeData());
+
+    const outcome = await runner.run(job);
+
+    expect(outcome).toBe('failed_technical');
+    expect(handler.runPage).not.toHaveBeenCalled();
+    expect(report).toHaveBeenCalledTimes(1);
+    expect(job.data.error).toMatchObject({ kind: 'technical' });
+    expect(job.data.incident_ticket_number).toBe('INC-20261117-ABC123');
+    expect(lastLog().data).toMatchObject({ status: 'failed', result_reference: 'INC-20261117-ABC123' });
+    expect(release).toHaveBeenCalledWith(9, 'products', 7);
+  });
+
+  it('customers: if Redis fails while marking the batch in flight, it fails technical and releases the lock', async () => {
+    register('customers', false);
+    const job = handle(makeData({ upload_type: 'customers', cursor: emptyCursor(250) }, 'customers'));
+    const updateData = job.updateData as jest.Mock;
+    const original = updateData.getMockImplementation()!;
+    updateData.mockImplementation(async (next: BulkUploadJobData) => {
+      if (next.cursor.in_flight_offset != null && next.error == null) {
+        throw new Error('redis down');
+      }
+      return original(next);
+    });
+
+    const outcome = await runner.run(job);
+
+    expect(outcome).toBe('failed_technical');
+    expect(handler.runPage).not.toHaveBeenCalled();
+    expect(report).toHaveBeenCalledTimes(1);
+    expect(release).toHaveBeenCalledWith(9, 'customers', 7);
+  });
+
   it('re-running a batch overwrites its hash field instead of duplicating rows', async () => {
     handler.runPage
       .mockRejectedValueOnce(new Error('blip'))

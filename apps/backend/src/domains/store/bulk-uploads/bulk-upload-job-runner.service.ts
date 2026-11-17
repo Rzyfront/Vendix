@@ -106,13 +106,19 @@ export class BulkUploadJobRunnerService {
       );
     }
 
-    await this.patch(job, {
-      started_at: job.data.started_at ?? new Date(this.now()).toISOString(),
-      finished_at: null,
-      retry: null,
-      error: null,
-    });
-    await this.writeLog(job.data, 'running');
+    try {
+      await this.patch(job, {
+        started_at: job.data.started_at ?? new Date(this.now()).toISOString(),
+        finished_at: null,
+        retry: null,
+        error: null,
+      });
+      await this.writeLog(job.data, 'running');
+    } catch (error) {
+      // Base o Redis caídos al arrancar: también es un fallo técnico (incidente
+      // y lock liberado), no un `failed` mudo hasta que alguien abra el modal.
+      return this.failTechnical(job, handler, error);
+    }
 
     if (!handler.autoRetry && job.data.cursor.in_flight_offset != null) {
       // Un lote pudo aplicarse a medias: no se re-ejecuta solo.
@@ -132,13 +138,13 @@ export class BulkUploadJobRunnerService {
         );
       }
       const offset = job.data.cursor.offset;
-      if (!handler.autoRetry) {
-        await this.patch(job, {
-          cursor: { ...job.data.cursor, in_flight_offset: offset },
-        });
-      }
       let page: BulkJobPageResult;
       try {
+        if (!handler.autoRetry) {
+          await this.patch(job, {
+            cursor: { ...job.data.cursor, in_flight_offset: offset },
+          });
+        }
         page = await this.runBatch(job, handler, offset);
       } catch (error) {
         return classifyBulkError(error) === 'data'

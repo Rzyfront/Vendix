@@ -7,13 +7,16 @@ import {
 import { environment } from '../../../../../../environments/environment';
 import { BulkUploadJobView } from '../bulk-upload-log.interface';
 import { BulkUploadJobService } from './bulk-upload-job.service';
+import { TenantFacade } from '../../../../../core/store/tenant/tenant.facade';
 
 /** QUI-1009 — cliente del trabajo de carga masiva del servidor. */
 describe('BulkUploadJobService (QUI-1009)', () => {
   let service: BulkUploadJobService;
   let http: HttpTestingController;
   const jobsUrl = `${environment.apiUrl}/store/bulk-uploads/jobs`;
-  const storageKey = 'vendix:bulk-upload-job:products';
+  const storageKey = 'vendix:bulk-upload-job:9:products';
+  const otherStoreKey = 'vendix:bulk-upload-job:12:products';
+  let storeId = 9;
 
   function view(overrides: Partial<BulkUploadJobView> = {}): BulkUploadJobView {
     return {
@@ -44,9 +47,15 @@ describe('BulkUploadJobService (QUI-1009)', () => {
   }
 
   beforeEach(() => {
+    storeId = 9;
     localStorage.removeItem(storageKey);
+    localStorage.removeItem(otherStoreKey);
     TestBed.configureTestingModule({
-      providers: [provideHttpClient(), provideHttpClientTesting()],
+      providers: [
+        provideHttpClient(),
+        provideHttpClientTesting(),
+        { provide: TenantFacade, useValue: { getCurrentStoreId: () => storeId } },
+      ],
     });
     service = TestBed.inject(BulkUploadJobService);
     http = TestBed.inject(HttpTestingController);
@@ -55,6 +64,19 @@ describe('BulkUploadJobService (QUI-1009)', () => {
   afterEach(() => {
     http.verify();
     localStorage.removeItem(storageKey);
+    localStorage.removeItem(otherStoreKey);
+  });
+
+  it('recuerda la carga por tienda: otra tienda no la ve ni la olvida', () => {
+    service.remember('products', 41);
+
+    storeId = 12;
+    expect(service.recall('products')).toBeNull();
+    service.forget('products');
+
+    storeId = 9;
+    expect(service.recall('products')).toBe(41);
+    expect(localStorage.getItem(storageKey)).toBe('41');
   });
 
   it('encola en la ruta del tipo y recuerda el trabajo en este navegador', () => {

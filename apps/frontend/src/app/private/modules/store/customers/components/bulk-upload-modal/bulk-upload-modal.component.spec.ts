@@ -145,6 +145,15 @@ describe('CustomerBulkUploadModalComponent — carga durable en servidor (QUI-10
     expect(jobs.watch).toHaveBeenCalledWith(7, jasmine.any(Function));
   });
 
+  it('antes de terminar el primer lote muestra «Preparando el primer lote…», no «1/0»', () => {
+    jobs.findResumable.and.returnValue(
+      of(view({ batch_current: 0, batch_total: 0, processed_rows: 0, total_rows: 0 })),
+    );
+    jobs.watch.and.returnValue(new Observable<BulkUploadJobView>());
+    open();
+    expect(component.progressLabel()).toBe('Preparando el primer lote…');
+  });
+
   it('un trabajo en cola muestra «En cola…»', () => {
     jobs.findResumable.and.returnValue(of(view({ status: 'queued' })));
     jobs.watch.and.returnValue(new Observable<BulkUploadJobView>());
