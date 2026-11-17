@@ -109,6 +109,18 @@ describe('PlatformIncidentService', () => {
     expect(text).toContain(tickets[0].ticket_number);
   });
 
+  it('internalDetails go only into the e-mail, never into the ticket the organization sees', async () => {
+    const raw = 'Invalid `prisma.products.upsert()` invocation: connect ECONNREFUSED db-prod.internal:5432';
+    await build().report(input({ internalDetails: { Mensaje: raw } }));
+    expect(tickets[0].description).toContain('Archivo: productos.xlsx');
+    expect(tickets[0].description).not.toContain('Mensaje');
+    expect(tickets[0].description).not.toContain('db-prod.internal');
+    const [, , html, text] = sendEmail.mock.calls[0];
+    expect(text).toContain(`Mensaje: ${raw}`);
+    expect(text).toContain('Archivo: productos.xlsx');
+    expect(html).toContain('db-prod.internal:5432');
+  });
+
   it('warning severity maps to P2', async () => {
     await build().report(input({ severity: 'warning' }));
     expect(tickets[0].priority).toBe('P2');

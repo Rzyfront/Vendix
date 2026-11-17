@@ -20,6 +20,7 @@ import type { ReportColumn } from '@common/reports/report-column.types';
 import * as XLSX from 'xlsx';
 import { v4 as uuidv4 } from 'uuid';
 import { S3Service } from '@common/services/s3.service';
+import { isS3ObjectMissing } from '../../bulk-uploads/bulk-upload-job.util';
 import { parseMoneyCell } from '@common/money-kernel';
 import { generateSlug } from '@common/utils/slug.util';
 import { StoreSkuGeneratorService } from './store-sku-generator.service';
@@ -326,7 +327,11 @@ export class InventoryAdjustmentsBulkService {
     try {
       file_buffer = await this.s3Service.downloadImage(s3_key);
     } catch (error) {
-      throw new VendixHttpException(ErrorCodes.BULK_PROD_SESSION_EXPIRED);
+      // Solo «no existe» es sesión vencida (dato); un fallo de S3 es técnico.
+      if (isS3ObjectMissing(error)) {
+        throw new VendixHttpException(ErrorCodes.BULK_PROD_SESSION_EXPIRED);
+      }
+      throw error;
     }
 
     if (page && (page.offset !== undefined || page.limit !== undefined)) {

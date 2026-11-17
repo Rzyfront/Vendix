@@ -253,6 +253,34 @@ describe('CustomerBulkUploadModalComponent — carga durable en servidor (QUI-10
     expect(component.uploadResults()).toBeNull();
   });
 
+  it('falla técnica recordada: «Subir otro archivo» la olvida y vuelve al inicio sin reenviar el lote', () => {
+    jobs.findResumable.and.returnValue(
+      of(
+        view({
+          status: 'failed',
+          processed_rows: 100,
+          error: { kind: 'technical', code: 'X', message: 'Falla de plataforma' },
+          can_retry: true,
+        }),
+      ),
+    );
+    jobs.getResults.and.returnValue(of(rows(100)));
+    const closed = spyOn(component.isOpenChange, 'emit');
+    open();
+    fixture.detectChanges();
+
+    // La plantilla está vacía en este spec: se prueba el manejador del botón.
+    component.discardJob();
+    fixture.detectChanges();
+
+    expect(jobs.forget).toHaveBeenCalledOnceWith('customers');
+    expect(dialog.confirm).not.toHaveBeenCalled();
+    expect(jobs.retry).not.toHaveBeenCalled();
+    expect(component.job()).toBeNull();
+    expect(component.currentStep()).toBe(0);
+    expect(closed).not.toHaveBeenCalled();
+  });
+
   it('cancelar la confirmación no reintenta', async () => {
     jobs.findResumable.and.returnValue(
       of(

@@ -277,6 +277,36 @@ describe('BulkUploadModalComponent — carga durable (QUI-1009)', () => {
     expect(text()).not.toContain('tu carga no se perdió');
   });
 
+  it('failed técnico recordado: «Subir otro archivo» lo olvida y vuelve al inicio sin cerrar el modal', () => {
+    jobs.findResumable.and.returnValue(
+      of(
+        view({
+          status: 'failed',
+          error: { kind: 'technical', code: 'BULK_JOB_TIMEOUT', message: 'tiempo agotado' },
+          can_retry: true,
+          finished_at: '2026-11-17T10:00:00Z',
+        }),
+      ),
+    );
+    const closed = spyOn(component.isOpenChange, 'emit');
+    open();
+
+    const discard = Array.from(
+      (fixture.nativeElement as HTMLElement).querySelectorAll('button'),
+    ).find((b) => (b.textContent ?? '').includes('Subir otro archivo'));
+    expect(discard).toBeDefined();
+
+    discard!.click();
+    fixture.detectChanges();
+
+    expect(jobs.forget).toHaveBeenCalledOnceWith('products');
+    expect(jobs.retry).not.toHaveBeenCalled();
+    expect(component.job()).toBeNull();
+    expect(component.currentStep()).toBe(0);
+    expect(closed).not.toHaveBeenCalled();
+    expect(text()).not.toContain('tu carga no se perdió');
+  });
+
   it('failed de datos pide corregir el archivo y no ofrece reanudar', () => {
     jobs.findResumable.and.returnValue(
       of(

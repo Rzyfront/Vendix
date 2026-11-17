@@ -7,6 +7,7 @@ import {
   pollAsyncJob,
   retryTransientWithBackoff,
 } from '../../../../../core/utils/async-job-poll.util';
+import { ERROR_MESSAGES } from '../../../../../core/utils/error-messages';
 import {
   BulkUploadJobRequestMap,
   BulkUploadJobResultRow,
@@ -66,6 +67,18 @@ export function isBulkUploadJobNotFound(error: unknown): boolean {
 }
 
 /**
+ * El servidor guarda en `error.message` el texto técnico del error (por
+ * ejemplo el `devMessage` en inglés de `BULK_PROD_SESSION_EXPIRED`). Si el
+ * código tiene traducción en `ERROR_MESSAGES`, el usuario ve esa.
+ */
+export function localizeBulkUploadJob(view: BulkUploadJobView): BulkUploadJobView {
+  const code = view?.error?.code;
+  const translated = code ? ERROR_MESSAGES[code] : undefined;
+  if (!view?.error || !translated) return view;
+  return { ...view, error: { ...view.error, message: translated } };
+}
+
+/**
  * QUI-1009 — cliente del trabajo de carga masiva del servidor.
  *
  * El navegador ya no conduce los lotes: encola (`POST …/bulk/jobs`), sigue el
@@ -88,7 +101,7 @@ export class BulkUploadJobService {
     return this.http
       .post<ApiEnvelope<BulkUploadJobView>>(`${this.apiUrl}/${ENQUEUE_PATHS[type]}`, body)
       .pipe(
-        map((res) => res.data),
+        map((res) => localizeBulkUploadJob(res.data)),
         tap((view) => this.remember(type, view.id)),
       );
   }
@@ -98,13 +111,13 @@ export class BulkUploadJobService {
     const params = new HttpParams().set('upload_type', type);
     return this.http
       .get<ApiEnvelope<BulkUploadJobView | null>>(`${this.jobsUrl}/active`, { params })
-      .pipe(map((res) => res.data ?? null));
+      .pipe(map((res) => (res.data ? localizeBulkUploadJob(res.data) : null)));
   }
 
   get(id: number): Observable<BulkUploadJobView> {
     return this.http
       .get<ApiEnvelope<BulkUploadJobView>>(`${this.jobsUrl}/${id}`)
-      .pipe(map((res) => res.data));
+      .pipe(map((res) => localizeBulkUploadJob(res.data)));
   }
 
   /** Filas del resultado en el orden del archivo. */
@@ -118,15 +131,16 @@ export class BulkUploadJobService {
   retry(id: number): Observable<BulkUploadJobView> {
     return this.http
       .post<ApiEnvelope<BulkUploadJobView>>(`${this.jobsUrl}/${id}/retry`, {})
-      .pipe(map((res) => res.data));
+      .pipe(map((res) => localizeBulkUploadJob(res.data)));
   }
 
   /**
    * Sigue el trabajo hasta un estado final con espera progresiva 1→2→4→10 s.
    * `onProgress` recibe cada lectura (también la final) para pintar el avance;
    * el observable emite UNA vez, con la vista final. Un corte de red o un 5xx
-   * en una consulta se reintenta sin cortar el seguimiento: el trabajo sigue en
-   * el servidor aunque el navegador pierda una respuesta.
+   * en una consulta se reintenta sin cortar el seguimiento (la consulta es un
+   * GET idempotente): el trabajo sigue en el servidor aunque el navegador
+   * pierda respuestas. Lo único que corta es el `timeoutMs` del sondeo.
    */
   watch(
     id: number,
@@ -135,7 +149,7 @@ export class BulkUploadJobService {
     return pollAsyncJob<BulkUploadJobView>(
       () =>
         this.get(id).pipe(
-          retryTransientWithBackoff<BulkUploadJobView>(),
+          retryTransientWithBackoff<BulkUploadJobView>({ maxRetries: Infinity }),
           tap((view) => onProgress(view)),
           map((view) => ({ status: toAsyncJobState(view.status), result: view })),
         ),

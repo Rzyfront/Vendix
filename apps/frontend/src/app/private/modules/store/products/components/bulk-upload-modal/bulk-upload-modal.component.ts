@@ -1480,17 +1480,27 @@ import {
                   <p>
                     Guardado hasta ahora: {{ f.successful_rows }} exitosas, {{ f.failed_rows }} con error y {{ f.skipped_rows }} omitidas.
                   </p>
-                  @if (f.can_retry) {
+                  <div class="flex flex-wrap gap-2">
+                    @if (f.can_retry) {
+                      <app-button
+                        variant="outline"
+                        size="sm"
+                        [disabled]="retrying()"
+                        (clicked)="retryJob()"
+                      >
+                        <app-icon name="refresh-cw" [size]="14" slot="icon"></app-icon>
+                        Reanudar carga
+                      </app-button>
+                    }
                     <app-button
                       variant="outline"
                       size="sm"
                       [disabled]="retrying()"
-                      (clicked)="retryJob()"
+                      (clicked)="discardJob()"
                     >
-                      <app-icon name="refresh-cw" [size]="14" slot="icon"></app-icon>
-                      Reanudar carga
+                      Subir otro archivo
                     </app-button>
-                  }
+                  </div>
                 </div>
               }
             }
@@ -2193,6 +2203,17 @@ export class BulkUploadModalComponent {
         },
         error: () => this.checkingResume.set(false),
       });
+  }
+
+  /**
+   * «Subir otro archivo»: deja de ofrecer el fallo técnico recordado y vuelve
+   * al inicio del modal. El trabajo sigue en el historial de cargas; el
+   * servidor ya liberó el candado, así que se puede encolar otra carga.
+   */
+  discardJob() {
+    this.stopWatching();
+    this.jobs.forget('products');
+    this.resetState();
   }
 
   /** «Reanudar carga»: reintento manual de un fallo técnico. */

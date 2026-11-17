@@ -178,7 +178,10 @@ describe('BulkUploadJobRunnerService', () => {
       storeId: 9,
       userId: 42,
       correlationId: expect.stringContaining('bulk-upload-7'),
+      // The raw technical message only goes to the e-mail, never to the ticket.
+      internalDetails: { Mensaje: 'S3 down' },
     });
+    expect(Object.values(report.mock.calls[0][0].details ?? {})).not.toContain('S3 down');
     expect(job.data.incident_ticket_number).toBe('INC-20261117-ABC123');
     expect(job.data.error).toMatchObject({ kind: 'technical' });
     expect(job.data.finished_at).not.toBeNull();

@@ -372,12 +372,17 @@ interface CustomerUploadResults {
                       reenviarlo puede duplicar los clientes sin correo ni documento, y los que sí los
                       tienen aparecerán como «ya existe». Revisa el listado de clientes antes de reintentar.
                     </p>
-                    <div class="flex justify-end">
+                  }
+                  <div class="flex flex-wrap justify-end gap-2">
+                    <app-button variant="outline" size="sm" (clicked)="discardJob()">
+                      Subir otro archivo
+                    </app-button>
+                    @if (j.can_retry) {
                       <app-button variant="primary" size="sm" (clicked)="retryUpload()">
                         Reintentar lote
                       </app-button>
-                    </div>
-                  }
+                    }
+                  </div>
                 </div>
               } @else {
                 <div class="bg-red-50 p-4 rounded-lg border border-red-100 text-red-700 text-sm space-y-2" role="alert">
@@ -708,6 +713,20 @@ export class CustomerBulkUploadModalComponent {
       this.jobs.forget('customers');
     }
     this.isOpenChange.emit(false);
+    this.resetState();
+  }
+
+  /**
+   * «Subir otro archivo»: deja de ofrecer el fallo técnico recordado y vuelve
+   * al inicio del modal sin reenviar nada. El trabajo sigue en el historial de
+   * cargas; el servidor ya liberó el candado, así que se puede encolar otra.
+   */
+  discardJob() {
+    this.watchSub?.unsubscribe();
+    this.watchSub = null;
+    this.resumeSub?.unsubscribe();
+    this.resumeSub = null;
+    this.jobs.forget('customers');
     this.resetState();
   }
 

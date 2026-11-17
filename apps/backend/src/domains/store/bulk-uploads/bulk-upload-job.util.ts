@@ -54,3 +54,22 @@ export function toBulkJobPage(
     done: result?.done === true,
   };
 }
+
+/**
+ * `true` solo cuando S3 dice que el objeto no existe (`NoSuchKey` / 404): la
+ * sesión de análisis venció o ya se limpió, que es un error de datos. Cualquier
+ * otro fallo de la descarga (red, throttling, 5xx) es técnico y debe relanzarse
+ * tal cual para que el trabajo lo reintente.
+ */
+export function isS3ObjectMissing(error: unknown): boolean {
+  const e = error as {
+    name?: unknown;
+    Code?: unknown;
+    $metadata?: { httpStatusCode?: unknown };
+  };
+  return (
+    e?.name === 'NoSuchKey' ||
+    e?.Code === 'NoSuchKey' ||
+    e?.$metadata?.httpStatusCode === 404
+  );
+}

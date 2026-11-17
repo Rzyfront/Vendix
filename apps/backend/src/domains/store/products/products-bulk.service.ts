@@ -7,6 +7,7 @@ import { AccessValidationService } from '@common/services/access-validation.serv
 import { S3Service } from '@common/services/s3.service';
 import { VendixHttpException, ErrorCodes } from '@common/errors';
 import { RequestContextService } from '@common/context/request-context.service';
+import { isS3ObjectMissing } from '../bulk-uploads/bulk-upload-job.util';
 import { InventoryAdjustmentsService } from '../inventory/adjustments/inventory-adjustments.service';
 import { LocationsService } from '../inventory/locations/locations.service';
 import {
@@ -2184,7 +2185,11 @@ export class ProductsBulkService {
     try {
       fileBuffer = await this.s3Service.downloadImage(s3Key);
     } catch (error) {
-      throw new VendixHttpException(ErrorCodes.BULK_PROD_SESSION_EXPIRED);
+      // Solo «no existe» es sesión vencida (dato); un fallo de S3 es técnico.
+      if (isS3ObjectMissing(error)) {
+        throw new VendixHttpException(ErrorCodes.BULK_PROD_SESSION_EXPIRED);
+      }
+      throw error;
     }
 
     // Modo paginado: el cliente recorre el archivo en páginas de <=100 filas.

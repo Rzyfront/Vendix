@@ -1964,10 +1964,27 @@ describe('ProductsBulkService', () => {
     });
 
     it('sesión inexistente sigue devolviendo BULK_PROD_SESSION_EXPIRED', async () => {
-      s3.downloadImage.mockRejectedValueOnce(new Error('nope'));
+      s3.downloadImage.mockRejectedValueOnce(
+        Object.assign(new Error('The specified key does not exist.'), {
+          name: 'NoSuchKey',
+          $metadata: { httpStatusCode: 404 },
+        }),
+      );
       await expect(
         service.uploadProductsFromSession('sid', 1, mockUser, { offset: 0, limit: 100 }),
       ).rejects.toMatchObject({ errorCode: 'BULK_PROD_SESSION_EXPIRED' });
+    });
+
+    it('fallo técnico de S3 al descargar se relanza tal cual, no como sesión vencida', async () => {
+      const s3Down = Object.assign(new Error('socket hang up'), {
+        name: 'TimeoutError',
+        $metadata: { httpStatusCode: 503 },
+      });
+      s3.downloadImage.mockRejectedValueOnce(s3Down);
+      await expect(
+        service.uploadProductsFromSession('sid', 1, mockUser, { offset: 0, limit: 100 }),
+      ).rejects.toBe(s3Down);
+      expect(s3.deleteFile).not.toHaveBeenCalled();
     });
 
     it('BulkUploadSessionDto valida limit<=100 y offset>=0', async () => {

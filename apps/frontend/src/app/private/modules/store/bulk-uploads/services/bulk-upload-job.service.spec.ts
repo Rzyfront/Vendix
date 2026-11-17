@@ -175,5 +175,74 @@ describe('BulkUploadJobService (QUI-1009)', () => {
       expect(failed).toBeFalse();
       expect(final?.status).toBe('failed');
     });
+
+    it('una caída de la API más larga que 3 reintentos tampoco corta el seguimiento', () => {
+      let final: BulkUploadJobView | undefined;
+      let failed = false;
+      service.watch(41, () => undefined).subscribe({
+        next: (v) => (final = v),
+        error: () => (failed = true),
+      });
+
+      const down = () =>
+        http
+          .expectOne(`${jobsUrl}/41`)
+          .flush({}, { status: 503, statusText: 'Service Unavailable' });
+      down();
+      for (const waitMs of [1_000, 2_000, 4_000, 10_000, 10_000]) {
+        jasmine.clock().tick(waitMs);
+        down();
+      }
+      expect(failed).toBeFalse();
+
+      jasmine.clock().tick(10_000);
+      http.expectOne(`${jobsUrl}/41`).flush({
+        success: true,
+        data: view({ status: 'completed', batch_current: 3, processed_rows: 300 }),
+      });
+
+      expect(failed).toBeFalse();
+      expect(final?.status).toBe('completed');
+    });
+  });
+
+  describe('mensaje del error', () => {
+    it('traduce el mensaje técnico del servidor por su código', () => {
+      let result: BulkUploadJobView | undefined;
+      service.get(41).subscribe((v) => (result = v));
+
+      http.expectOne(`${jobsUrl}/41`).flush({
+        success: true,
+        data: view({
+          status: 'failed',
+          error: {
+            kind: 'data',
+            code: 'BULK_PROD_SESSION_EXPIRED',
+            message: 'Analysis session not found or expired',
+          },
+        }),
+      });
+
+      expect(result?.error).toEqual({
+        kind: 'data',
+        code: 'BULK_PROD_SESSION_EXPIRED',
+        message: 'La sesion de analisis expiro. Suba el archivo nuevamente.',
+      });
+    });
+
+    it('sin traducción para el código conserva el mensaje del servidor', () => {
+      let result: BulkUploadJobView | null | undefined;
+      service.getActive('products').subscribe((v) => (result = v));
+
+      http.expectOne(`${jobsUrl}/active?upload_type=products`).flush({
+        success: true,
+        data: view({
+          status: 'failed',
+          error: { kind: 'data', code: 'CODIGO_SIN_TRADUCCION', message: 'Fila 3 inválida' },
+        }),
+      });
+
+      expect(result?.error?.message).toBe('Fila 3 inválida');
+    });
   });
 });

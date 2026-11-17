@@ -183,7 +183,7 @@ export class PlatformIncidentService {
     return `INC-${day}-${suffix.toUpperCase()}`;
   }
 
-  /** Visible to the organization: never the stack. */
+  /** Visible to the organization: never the stack nor `internalDetails`. */
   private buildDescription(input: PlatformIncidentInput): string {
     const lines = [input.summary, ''];
     for (const [label, value] of Object.entries(input.details ?? {})) {
@@ -234,7 +234,7 @@ export class PlatformIncidentService {
     const lines = [
       ticketNumber ? `Ticket: ${ticketNumber}` : 'Ticket: no se pudo crear',
       input.summary,
-      ...Object.entries(input.details ?? {})
+      ...Object.entries({ ...input.details, ...input.internalDetails })
         .filter(([, v]) => v !== null && v !== undefined && v !== '')
         .map(([k, v]) => `${k}: ${v}`),
       ...(input.errorCode ? [`Código de error: ${input.errorCode}`] : []),

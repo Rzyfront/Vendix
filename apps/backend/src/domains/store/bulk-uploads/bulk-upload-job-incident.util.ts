@@ -13,7 +13,8 @@ export const BULK_JOB_TECHNICAL_MESSAGE =
 
 /**
  * Avisa a Vendix de un fallo técnico del trabajo: UN ticket por trabajo
- * (`dedupeKey` = id de la fila). Nunca lanza. El stack va solo al correo.
+ * (`dedupeKey` = id de la fila). Nunca lanza. La organización ve el ticket,
+ * así que el mensaje técnico crudo y el stack van solo al correo.
  */
 export async function reportBulkJobIncident(
   incidents: PlatformIncidentService,
@@ -32,8 +33,8 @@ export async function reportBulkJobIncident(
       'Usuario (id)': data.user_id ?? null,
       'Tipo de carga': label,
       Archivo: data.file_name,
-      Mensaje: failure.message,
     },
+    internalDetails: { Mensaje: failure.message },
     stack: failure.stack,
     tags: ['bulk_upload', data.upload_type],
     organizationId: data.organization_id ?? 0,

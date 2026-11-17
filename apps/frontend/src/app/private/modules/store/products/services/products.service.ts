@@ -35,7 +35,6 @@ import {
 } from '../interfaces/bulk-image-analysis.interface';
 import {
   BulkProductAnalysisResult,
-  BulkProductUploadPage,
   BulkProductUploadResult,
 } from '../interfaces/bulk-product-analysis.interface';
 import { PRODUCT_SAVE_ERROR_MAP } from '../utils/product-save-requirements';
@@ -768,34 +767,6 @@ export class ProductsService {
         map((response) => response.data),
         catchError(this.handleError),
       );
-  }
-
-  /**
-   * Commit paginado de la sesión (máx. 100 filas por página).
-   *
-   * Devuelve el `HttpErrorResponse` tal cual, sin `handleError`: el modal de
-   * carga masiva necesita el status para reintentar los fallos técnicos (red,
-   * 5xx) y no los rechazos de datos (QUI-1009). Re-suscribir reenvía la página;
-   * el backend la aplica de forma idempotente por SKU.
-   */
-  uploadProductsFromSessionPage(
-    sessionId: string,
-    offset: number,
-    limit: number,
-    initialLoadAck?: boolean,
-    fileInfo?: Pick<BulkUploadFileInfo, 'file_name' | 'file_hash'>,
-  ): Observable<BulkProductUploadPage> {
-    return this.http
-      .post<
-        ApiResponse<BulkProductUploadPage>
-      >(`${this.apiUrl}/store/products/bulk/upload-session`, {
-        session_id: sessionId,
-        offset,
-        limit,
-        ...(initialLoadAck ? { initial_load_ack: true } : {}),
-        ...this.fileInfoBody(fileInfo),
-      })
-      .pipe(map((response) => response.data));
   }
 
   /** QUI-1004: file name/hash so the backend records the upload. */

@@ -15,6 +15,11 @@ export interface PlatformIncidentInput {
   summary: string;
   /** Label -> value lines for the ticket description (visible to the organization: no secrets, no stack). */
   details?: Record<string, string | number | boolean | null | undefined>;
+  /**
+   * Label -> value lines that only go into the e-mail to Vendix, never into the
+   * ticket: raw technical messages (Prisma invocations, hosts, paths) belong here.
+   */
+  internalDetails?: Record<string, string | number | boolean | null | undefined>;
   /** Only goes into the e-mail to Vendix (first 10 lines). Never into the ticket. */
   stack?: string | null;
   tags?: string[];

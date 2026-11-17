@@ -10,6 +10,7 @@ import { DefaultPanelUIService } from '../../../../common/services/default-panel
 import { StaffProvisioningService } from '../../../../common/services/staff-provisioning.service';
 import { S3Service } from '@common/services/s3.service';
 import { VendixHttpException, ErrorCodes } from '@common/errors';
+import { isS3ObjectMissing } from '../../bulk-uploads/bulk-upload-job.util';
 import {
   BulkEmployeeUploadDto,
   BulkEmployeeItemDto,
@@ -611,7 +612,11 @@ export class EmployeesBulkService {
     try {
       fileBuffer = await this.s3Service.downloadImage(s3Key);
     } catch (error) {
-      throw new VendixHttpException(ErrorCodes.BULK_PROD_SESSION_EXPIRED);
+      // Solo «no existe» es sesion vencida (dato); un fallo de S3 es tecnico.
+      if (isS3ObjectMissing(error)) {
+        throw new VendixHttpException(ErrorCodes.BULK_PROD_SESSION_EXPIRED);
+      }
+      throw error;
     }
 
     // Modo paginado: el cliente recorre el archivo en paginas de <=100 filas.

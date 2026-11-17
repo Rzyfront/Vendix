@@ -270,6 +270,33 @@ describe('BulkAdjustmentModalComponent — trabajo durable (QUI-1009)', () => {
     expect(jobs.watch).toHaveBeenCalledWith(52, jasmine.any(Function));
   });
 
+  it('failed técnico recordado: «Subir otro archivo» lo olvida y vuelve al inicio sin cerrar el modal', () => {
+    jobs.findResumable.and.returnValue(
+      of(
+        makeView({
+          status: 'failed',
+          processed_rows: 200,
+          error: { kind: 'technical', code: 'BULK_JOB_TIMEOUT', message: 'Tiempo agotado' },
+          can_retry: true,
+        }),
+      ),
+    );
+    const closed = spyOn(component.isOpenChange, 'emit');
+    openModal();
+    fixture.detectChanges();
+
+    // La plantilla está vacía en este spec: se prueba el manejador del botón.
+    component.discardJob();
+    fixture.detectChanges();
+
+    expect(jobs.forget).toHaveBeenCalledOnceWith('inventory_adjustments');
+    expect(jobs.retry).not.toHaveBeenCalled();
+    expect(component.job()).toBeNull();
+    expect(component.technicalFailure()).toBeFalse();
+    expect(component.step()).toBe(1);
+    expect(closed).not.toHaveBeenCalled();
+  });
+
   it('failed de datos: «Corrige tu archivo» con el motivo y sin reanudar', () => {
     jobs.findResumable.and.returnValue(
       of(

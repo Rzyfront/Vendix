@@ -601,11 +601,16 @@ interface BulkUploadResult {
                   </p>
                 </div>
               </div>
-              @if (job()?.can_retry) {
-                <app-button variant="outline" size="sm" (clicked)="retryJob()">
-                  Reanudar carga
+              <div class="flex flex-wrap gap-2">
+                @if (job()?.can_retry) {
+                  <app-button variant="outline" size="sm" (clicked)="retryJob()">
+                    Reanudar carga
+                  </app-button>
+                }
+                <app-button variant="outline" size="sm" (clicked)="discardJob()">
+                  Subir otro archivo
                 </app-button>
-              }
+              </div>
             </div>
           }
 
@@ -1243,6 +1248,17 @@ export class BulkAdjustmentModalComponent {
     }
     this.resetState();
     this.isOpenChange.emit(false);
+  }
+
+  /**
+   * «Subir otro archivo»: deja de ofrecer el fallo técnico recordado y vuelve
+   * al inicio del modal. El trabajo sigue en el historial de cargas; el
+   * servidor ya liberó el candado, así que se puede encolar otra carga.
+   */
+  discardJob(): void {
+    this.stopWatching();
+    this.jobs.forget('inventory_adjustments');
+    this.resetState();
   }
 
   private resetState(): void {
