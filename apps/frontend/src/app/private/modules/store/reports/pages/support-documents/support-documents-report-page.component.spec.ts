@@ -1,7 +1,7 @@
 import { CUSTOM_ELEMENTS_SCHEMA, provideZonelessChangeDetection } from '@angular/core';
 import { ComponentFixture, TestBed } from '@angular/core/testing';
 import { By } from '@angular/platform-browser';
-import { provideMockStore } from '@ngrx/store/testing';
+import { MockStore, provideMockStore } from '@ngrx/store/testing';
 import { of, throwError } from 'rxjs';
 
 import { SupportDocumentsReportPageComponent } from './support-documents-report-page.component';
@@ -124,6 +124,11 @@ describe('SupportDocumentsReportPageComponent', () => {
     component = fixture.componentInstance;
     fixture.detectChanges();
   });
+
+  // `selectors` de provideMockStore sobrescribe el selector memoizado global:
+  // sin soltarlo, los specs siguientes del bundle (p. ej. ReportsEffects) leen
+  // este rango falso.
+  afterEach(() => TestBed.inject(MockStore).resetSelectors());
 
   it('carga lista y totales con el período compartido de Compras (preset por nombre)', () => {
     expect(service.getList).toHaveBeenCalledTimes(1);
