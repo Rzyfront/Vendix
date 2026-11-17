@@ -5,6 +5,8 @@ import { environment } from '../../../../../../environments/environment';
 import type { ApiResponse, InvoiceListResponse } from '../interfaces/invoice.interface';
 import type {
   CreateSupportDocumentDto,
+  SupportDocumentDetail,
+  SupportDocumentDianStatus,
   SupportDocumentQuery,
   SupportDocumentRow,
 } from '../interfaces/support-document.interface';
@@ -47,9 +49,9 @@ export class SupportDocumentService {
     return this.http.get<InvoiceListResponse>(this.getApiUrl(''), { params });
   }
 
-  /** Detalle de un documento soporte por id. */
-  getById(id: number): Observable<ApiResponse<SupportDocumentRow>> {
-    return this.http.get<ApiResponse<SupportDocumentRow>>(this.getApiUrl(`${id}`));
+  /** Detalle de un documento soporte por id (incluye la ficha del proveedor). */
+  getById(id: number): Observable<ApiResponse<SupportDocumentDetail>> {
+    return this.http.get<ApiResponse<SupportDocumentDetail>>(this.getApiUrl(`${id}`));
   }
 
   /**
@@ -64,5 +66,34 @@ export class SupportDocumentService {
     dto: CreateSupportDocumentDto,
   ): Observable<ApiResponse<SupportDocumentRow>> {
     return this.http.post<ApiResponse<SupportDocumentRow>>(this.getApiUrl(''), dto);
+  }
+
+  /**
+   * Consulta en vivo el estado del documento en la DIAN por su CUDS (QUI-683).
+   * Solo lectura: no sincroniza el estado local.
+   */
+  getDianStatus(id: number): Observable<ApiResponse<SupportDocumentDianStatus>> {
+    return this.http.get<ApiResponse<SupportDocumentDianStatus>>(
+      this.getApiUrl(`${id}/dian-status`),
+    );
+  }
+
+  /**
+   * Anula un documento que la DIAN rechazó (`PATCH :id/void`). Un documento
+   * soporte ACEPTADO no se anula: se corrige con nota de ajuste.
+   */
+  voidDocument(id: number): Observable<ApiResponse<SupportDocumentRow>> {
+    return this.http.patch<ApiResponse<SupportDocumentRow>>(
+      this.getApiUrl(`${id}/void`),
+      {},
+    );
+  }
+
+  /** Descarta un borrador o un documento validado que nunca salió (`PATCH :id/cancel`). */
+  cancelDocument(id: number): Observable<ApiResponse<SupportDocumentRow>> {
+    return this.http.patch<ApiResponse<SupportDocumentRow>>(
+      this.getApiUrl(`${id}/cancel`),
+      {},
+    );
   }
 }
