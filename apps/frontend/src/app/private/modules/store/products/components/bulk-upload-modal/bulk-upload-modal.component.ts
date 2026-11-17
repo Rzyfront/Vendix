@@ -1798,6 +1798,8 @@ export class BulkUploadModalComponent {
   private watchSub: Subscription | null = null;
   private clockStarted = false;
   private lastBatchSeen = 0;
+  /** Último trabajo terminado del que ya se avisó al padre (`uploadComplete`). */
+  private notifiedJobId: number | null = null;
 
   /** Cronómetro y estimado por ritmo real, alimentados por el trabajo. */
   readonly clock = new BatchProgressClock();
@@ -1961,6 +1963,12 @@ export class BulkUploadModalComponent {
       // Un fallo técnico reanudable se conserva para ofrecer «Reanudar carga»
       // al volver; lo demás ya se mostró y se olvida.
       if (!job.can_retry) this.jobs.forget('products');
+      // El padre cierra el modal al recibir `uploadComplete`: se avisa al
+      // cerrar (no al terminar, o taparía el resumen) y una vez por trabajo.
+      if (job.successful_rows > 0 && this.notifiedJobId !== job.id) {
+        this.notifiedJobId = job.id;
+        this.uploadComplete.emit();
+      }
     } else if (
       !job &&
       this.sessionId &&
@@ -2324,7 +2332,6 @@ export class BulkUploadModalComponent {
           skipped: view.skipped_rows,
           results,
         });
-        if (view.successful_rows > 0) this.uploadComplete.emit();
         if (view.status === 'completed') {
           this.toastService.success(
             `${view.successful_rows} concepto(s) cargados exitosamente`,

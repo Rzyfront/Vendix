@@ -219,9 +219,43 @@ describe('BulkUploadModalComponent — carga durable (QUI-1009)', () => {
     expect(text()).toContain('Camiseta Básica');
     expect(text()).toContain('CAM-001');
     expect(text()).toContain('Precio inválido');
-    expect(emitted).toHaveBeenCalledTimes(1);
+    // El padre cierra el modal al recibir `uploadComplete`: avisar antes de
+    // que la persona lo cierre taparía el resumen recién pintado.
+    expect(emitted).not.toHaveBeenCalled();
     expect(toast.success).toHaveBeenCalled();
     expect(component.clock.running()).toBeFalse();
+
+    component.onCancel();
+
+    expect(emitted).toHaveBeenCalledTimes(1);
+  });
+
+  it('un failed técnico con filas guardadas avisa al padre una sola vez aunque se reabra', () => {
+    jobs.findResumable.and.returnValue(
+      of(
+        view({
+          status: 'failed',
+          error: { kind: 'technical', code: 'BULK_JOB_TIMEOUT', message: 'tiempo agotado' },
+          incident_ticket_number: 'INC-20261117-AB12CD',
+          can_retry: true,
+          finished_at: '2026-11-17T10:00:00Z',
+        }),
+      ),
+    );
+    const emitted = jasmine.createSpy('uploadComplete');
+    component.uploadComplete.subscribe(emitted);
+
+    open();
+    expect(emitted).not.toHaveBeenCalled();
+    expect(text()).toContain('Ticket INC-20261117-AB12CD');
+
+    component.onCancel();
+    fixture.componentRef.setInput('isOpen', false);
+    fixture.detectChanges();
+    open();
+    component.onCancel();
+
+    expect(emitted).toHaveBeenCalledTimes(1);
   });
 
   it('un fallo técnico que el servidor reintenta solo muestra «reintentando (1/3)»', () => {
