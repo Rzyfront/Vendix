@@ -9,6 +9,7 @@ import { CurrencyFormatService } from '../../../../../../shared/pipes/currency/c
 import { DialogService } from '../../../../../../shared/components/dialog/dialog.service';
 import { ToastService } from '../../../../../../shared/components/toast/toast.service';
 import {
+  CreateReminderPayload,
   Reminder,
   RemindersList,
   RemindersService,
@@ -98,11 +99,22 @@ describe('reminders-log util', () => {
 
 class FakeRemindersService {
   items: Reminder[] = [];
+  creates: CreateReminderPayload[] = [];
   updates: { id: number; payload: UpdateReminderPayload }[] = [];
 
   list(status: 'pending' | 'done' | 'all'): Observable<RemindersList> {
     const items = status === 'all' ? this.items : this.items.filter((r) => r.status === status);
     return of({ items, timezone: 'America/Bogota' });
+  }
+
+  create(payload: CreateReminderPayload): Observable<Reminder> {
+    this.creates.push(payload);
+    const created = reminder(100 + this.creates.length, {
+      title: payload.title,
+      note: payload.note ?? null,
+    });
+    this.items = [...this.items, created];
+    return of(created);
   }
 
   update(id: number, payload: UpdateReminderPayload): Observable<Reminder> {
@@ -126,6 +138,45 @@ describe('RemindersLogComponent (dashboard Bitácora)', () => {
     return Array.from(root().querySelectorAll('[data-testid="reminder-title"]')).map(
       (el) => el.textContent?.trim() ?? '',
     );
+  }
+
+  async function settle(): Promise<void> {
+    fixture.detectChanges();
+    await fixture.whenStable();
+    fixture.detectChanges();
+  }
+
+  function buttonByText(text: string): HTMLButtonElement {
+    const button = Array.from(root().querySelectorAll<HTMLButtonElement>('button')).find(
+      (el) => el.textContent?.trim() === text,
+    );
+    if (!button) throw new Error(`Button "${text}" is not rendered`);
+    return button;
+  }
+
+  /** The reminder form fields as the user sees them (real DOM elements). */
+  function formFields(): {
+    title: HTMLInputElement;
+    note: HTMLTextAreaElement;
+    remindAt: HTMLInputElement;
+  } {
+    const form = root().querySelector('form');
+    if (!form) throw new Error('Reminder form is not rendered');
+    return {
+      title: form.querySelector<HTMLInputElement>('input[placeholder^="Ej: Llamar"]')!,
+      note: form.querySelector<HTMLTextAreaElement>('textarea')!,
+      remindAt: form.querySelector<HTMLInputElement>('input[type="datetime-local"]')!,
+    };
+  }
+
+  function typeInto(el: HTMLInputElement | HTMLTextAreaElement, value: string): void {
+    el.value = value;
+    el.dispatchEvent(new Event('input'));
+  }
+
+  /** America/Bogota is UTC-5 all year (no DST): its wall clock is a fixed shift. */
+  function bogotaWallClock(isoInstant: string): string {
+    return new Date(Date.parse(isoInstant) - 5 * HOUR).toISOString().slice(0, 16);
   }
 
   beforeEach(async () => {
@@ -240,5 +291,74 @@ describe('RemindersLogComponent (dashboard Bitácora)', () => {
     expect(api.updates).toEqual([{ id: 3, payload: { status: 'done' } }]);
     // The pending list no longer has it ("Ver hechos" is off), so the detail closes.
     expect(component.detailOpen()).toBe(false);
+  });
+
+  it('creates the reminder with what the user typed in the form', async () => {
+    buttonByText('Nuevo').click();
+    await settle();
+
+    const fields = formFields();
+    typeInto(fields.title, 'Llamar al proveedor de lácteos');
+    typeInto(fields.note, 'Pedir leche y queso');
+    typeInto(fields.remindAt, '2026-11-18T09:00');
+    await settle();
+
+    buttonByText('Guardar').click();
+    await settle();
+
+    expect(api.creates).toEqual([
+      {
+        title: 'Llamar al proveedor de lácteos',
+        note: 'Pedir leche y queso',
+        remind_at: '2026-11-18T09:00',
+      },
+    ]);
+    expect(root().textContent).not.toContain('El título es obligatorio');
+    expect(fixture.componentInstance.modalOpen()).toBe(false);
+    expect(rowTitles()).toContain('Llamar al proveedor de lácteos');
+  });
+
+  it('still blocks saving without a title and shows the error', async () => {
+    buttonByText('Nuevo').click();
+    await settle();
+
+    buttonByText('Guardar').click();
+    await settle();
+
+    expect(api.creates).toEqual([]);
+    expect(fixture.componentInstance.modalOpen()).toBe(true);
+    expect(root().querySelector('form')!.textContent).toContain('El título es obligatorio');
+  });
+
+  it('prefills the edit form and sends the edited values in the PATCH', async () => {
+    const vencido = api.items.find((r) => r.id === 3)!;
+    root().querySelectorAll<HTMLButtonElement>('[data-testid="reminder-detail-button"]')[0].click();
+    await settle();
+    buttonByText('Editar').click();
+    await settle();
+
+    const fields = formFields();
+    expect(fields.title.value).toBe('Vencido');
+    expect(fields.note.value).toBe('Pagar al proveedor');
+    expect(fields.remindAt.value).toBe(bogotaWallClock(vencido.remind_at!));
+
+    typeInto(fields.title, 'Pagar al proveedor de lácteos');
+    typeInto(fields.remindAt, '2026-11-21T09:30');
+    await settle();
+
+    buttonByText('Guardar').click();
+    await settle();
+
+    expect(api.updates).toEqual([
+      {
+        id: 3,
+        payload: {
+          title: 'Pagar al proveedor de lácteos',
+          note: 'Pagar al proveedor',
+          remind_at: '2026-11-21T09:30',
+        },
+      },
+    ]);
+    expect(api.creates).toEqual([]);
   });
 });

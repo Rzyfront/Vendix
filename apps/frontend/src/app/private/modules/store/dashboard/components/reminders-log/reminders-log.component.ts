@@ -251,12 +251,14 @@ function toStoreWallClock(iso: string, tz: string): string {
       [title]="editing() ? 'Editar recordatorio' : 'Nuevo recordatorio'"
       size="md"
     >
+      <!-- formControlName carries the value (CVA); [control] only paints the errors. -->
       <form [formGroup]="form" class="space-y-4" (ngSubmit)="save()">
         <app-input
           label="Título"
           placeholder="Ej: Llamar al proveedor de lácteos"
           [required]="true"
           [maxlength]="200"
+          formControlName="title"
           [control]="form.controls.title"
           [error]="titleError()"
         />
@@ -264,6 +266,7 @@ function toStoreWallClock(iso: string, tz: string): string {
           label="Nota"
           placeholder="Detalles opcionales"
           [rows]="3"
+          formControlName="note"
           [control]="form.controls.note"
           [error]="noteError()"
         />
@@ -271,6 +274,7 @@ function toStoreWallClock(iso: string, tz: string): string {
           label="Fecha y hora"
           type="datetime-local"
           helperText="Opcional. Hora de la tienda."
+          formControlName="remind_at"
           [control]="form.controls.remind_at"
         />
       </form>
