@@ -27,7 +27,11 @@ const NO_REFUND_NOTICE_HTML = `
   </div>
 `;
 
-function wrapHtml(title: string, bodyHtml: string): string {
+/**
+ * Vendix-branded e-mail layout. `title` is inserted as-is: pass fixed copy or
+ * escaped text, never raw user input. Also used by the reminder due e-mail.
+ */
+export function wrapHtml(title: string, bodyHtml: string): string {
   return `<!DOCTYPE html>
 <html lang="es">
 <head>

@@ -8203,7 +8203,7 @@ export const ErrorCodes = {
     code: 'REMINDER_LINK_001',
     httpStatus: 400,
     devMessage:
-      'El dato vinculado no existe en esta tienda o el vínculo está incompleto.',
+      'El dato vinculado no existe en esta tienda, no tienes permiso para verlo o el vínculo está incompleto.',
   },
   REMINDER_DATE_001: {
     code: 'REMINDER_DATE_001',

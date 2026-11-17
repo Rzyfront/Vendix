@@ -49,16 +49,16 @@ const LINK_PROPERTIES = {
     type: 'string',
     enum: [...REMINDER_LINK_TYPES],
     description:
-      'Vínculo opcional a un dato de la tienda: product, order, customer, supplier (exigen link_id; resuélvelo antes con la herramienta de búsqueda del dominio) o metric (solo link_label, p. ej. "Ventas del mes").',
+      'Vínculo opcional a un dato de la tienda: product, order, customer, supplier, purchase_order (orden de compra), quotation (cotización), invoice (factura) (exigen link_id; resuélvelo antes con la herramienta de búsqueda del dominio) o metric (solo link_label, p. ej. "Ventas del mes").',
   },
   link_id: {
     type: 'number',
-    description: 'ID del producto/orden/cliente/proveedor vinculado.',
+    description: 'ID del registro vinculado (producto, orden, cliente, proveedor, orden de compra, cotización o factura).',
   },
   link_label: {
     type: 'string',
     description:
-      'Etiqueta legible del vínculo. Si se omite en product/order/customer/supplier se toma el nombre del dato.',
+      'Etiqueta legible del vínculo. Si se omite en un registro (todo menos metric) se toma el nombre o número del dato.',
   },
 } as const;
 

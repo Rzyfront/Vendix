@@ -13,6 +13,7 @@ import { ResponseService } from '@common/responses/response.service';
 import { RemindersService } from './reminders.service';
 import {
   CreateReminderDto,
+  ReminderLinkSearchDto,
   RemindersQueryDto,
   UpdateReminderDto,
 } from './dto/reminders.dto';
@@ -23,6 +24,7 @@ import {
  * session's store AND user (see `RemindersService`).
  *
  *   GET    /store/reminders        ?status=pending|done|all&due=overdue|today|upcoming|no_date&limit
+ *   GET    /store/reminders/link-search?q=   records to link (store + READ permission of each type)
  *   GET    /store/reminders/:id
  *   POST   /store/reminders
  *   PATCH  /store/reminders/:id    (title, note, remind_at, status, link)
@@ -39,6 +41,13 @@ export class RemindersController {
   async list(@Query() query: RemindersQueryDto) {
     const actor = this.service.actorFromRequest();
     return this.response.success(await this.service.list(actor, query));
+  }
+
+  /** Declared before `:id` so the literal path wins. */
+  @Get('link-search')
+  async searchLinks(@Query() query: ReminderLinkSearchDto) {
+    const actor = this.service.actorFromRequest();
+    return this.response.success(await this.service.searchLinks(actor, query.q));
   }
 
   @Get(':id')
