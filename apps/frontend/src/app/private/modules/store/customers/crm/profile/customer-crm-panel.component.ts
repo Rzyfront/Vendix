@@ -47,6 +47,8 @@ import {
 } from '../shared/crm.utils';
 import { TaskFormModalComponent } from '../shared/task-form-modal.component';
 import { CustomerSectionComponent, CustomerSectionEmptyComponent } from '../../components/customer-section/customer-section.component';
+import { VendixAccountBlockComponent } from '../../../platform-crm/vendix-account-block.component';
+import { canSeeVendixAccount } from '../../../platform-crm/platform-crm.interface';
 
 const TIMELINE_PAGE = 20;
 /** Pending follow-ups listed in the profile; the rest live in Tareas. */
@@ -89,6 +91,7 @@ const TAG_CHIP = `${CHIP} border-border bg-surface text-text-secondary`;
     TaskFormModalComponent,
     CustomerSectionComponent,
     CustomerSectionEmptyComponent,
+    VendixAccountBlockComponent,
   ],
   template: `
     @if (loading() && !profile()) {
@@ -189,6 +192,13 @@ const TAG_CHIP = `${CHIP} border-border bg-surface text-text-secondary`;
             </div>
           </div>
         </app-customer-section>
+
+        <!-- Cuenta Vendix: solo Vendix Platform (permiso de sistema); el chunk ni se descarga sin él. -->
+        @if (canSeeVendixAccount()) {
+          @defer {
+            <app-vendix-account-block [customerId]="customerId()"></app-vendix-account-block>
+          }
+        }
 
         <div class="grid grid-cols-1 gap-4 md:gap-6 lg:grid-cols-2">
           <!-- Board -->
@@ -738,6 +748,8 @@ export class CustomerCrmPanelComponent {
   protected readonly canReadPipeline = computed(
     () => this.auth.isOwner() || this.auth.hasPermission('store:crm_pipeline:read'),
   );
+  /** Sin atajo por owner: `platform:crm_link:read` es de sistema (solo Vendix Platform). */
+  protected readonly canSeeVendixAccount = computed(() => canSeeVendixAccount(this.auth));
   protected readonly canManagePipeline = computed(
     () => this.auth.isOwner() || this.auth.hasPermission('store:crm_pipeline:manage'),
   );
