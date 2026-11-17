@@ -356,6 +356,9 @@ export class GeneralSettingsStore {
           // autoritativa — el backend firma la clave S3 aquí —, así que cada
           // lectura canónica (montaje, post-guardado, post-reset) resincroniza el
           // snapshot. `null` es válido: significa que la tienda quedó sin logo.
+          // QUI-563: una lectura que termina tras cambiar de tienda es de la
+          // anterior; su logo no debe llegar al sidebar de la tienda activa.
+          if (store_id !== this.settingsService.getActiveStoreId()) return;
           this.authFacade.updateStoreLogo(data.general?.logo_url ?? null);
         },
         error: (error) => {

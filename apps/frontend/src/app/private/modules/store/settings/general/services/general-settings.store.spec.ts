@@ -1,7 +1,7 @@
 import { signal } from '@angular/core';
 import { TestBed } from '@angular/core/testing';
 import { HttpErrorResponse } from '@angular/common/http';
-import { of, throwError } from 'rxjs';
+import { Subject, of, throwError } from 'rxjs';
 
 import { GeneralSettingsStore } from './general-settings.store';
 import { StoreSettingsService } from './store-settings.service';
@@ -158,6 +158,20 @@ describe('GeneralSettingsStore store switch (QUI-563)', () => {
 
     expect(settingsService.saveSettingsNow).not.toHaveBeenCalled();
     expect(store.settings()).toEqual(settingsB);
+  });
+
+  it('a store A read that lands after switching to store B does not touch the session logo', () => {
+    const updateStoreLogo = TestBed.inject(AuthFacade)
+      .updateStoreLogo as jasmine.Spy;
+    updateStoreLogo.calls.reset();
+    const lateRead = new Subject<{ success: boolean; data: StoreSettings }>();
+    settingsService.getSettings.and.returnValue(lateRead);
+
+    store.loadSettings();
+    activeStoreId = 20;
+    lateRead.next({ success: true, data: settingsA });
+
+    expect(updateStoreLogo).not.toHaveBeenCalled();
   });
 
   it('section autosave sends expected_store_id for the same store', () => {
