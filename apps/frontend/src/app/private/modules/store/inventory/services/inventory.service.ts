@@ -3,6 +3,7 @@ import { HttpClient, HttpParams } from '@angular/common/http';
 import { Observable, catchError, throwError } from 'rxjs';
 import { tap, shareReplay } from 'rxjs/operators';
 import { environment } from '../../../../../../environments/environment';
+import { registerStoreSwitchReset } from '../../../../../core/utils/store-scoped-cache';
 import { extractApiErrorMessage } from '../../../../../core/utils/api-error-handler';
 import { AuthFacade } from '../../../../../core/store/auth/auth.facade';
 import {
@@ -38,6 +39,11 @@ let inventoryStatsCache: CacheEntry<Observable<ApiResponse<InventoryStats>>> | n
 // la URL no identifica de quién son los números. Sin este scope, un admin
 // multi-tienda que cambia de tienda dentro del TTL ve las cifras anteriores.
 let inventoryStatsScope: number | null | undefined;
+// QUI-1021: a store switch empties it, so a return to a store fetches again.
+registerStoreSwitchReset(() => {
+  inventoryStatsCache = null;
+  inventoryStatsScope = undefined;
+});
 
 @Injectable({
   providedIn: 'root',

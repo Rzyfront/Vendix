@@ -10,6 +10,11 @@ import {
 import { tap, shareReplay } from 'rxjs/operators';
 import { toObservable } from '@angular/core/rxjs-interop';
 import { environment } from '../../../../../../../environments/environment';
+import { AuthFacade } from '../../../../../../core/store/auth/auth.facade';
+import {
+  StoreScopedCache,
+  activeStoreId,
+} from '../../../../../../core/utils/store-scoped-cache';
 import {
   StoreRole,
   StoreRoleStats,
@@ -22,13 +27,12 @@ import {
   RemoveRoleFromUserResult,
 } from '../interfaces/store-role.interface';
 
-// Cache estatico global (persiste entre instancias del servicio)
-interface CacheEntry<T> {
-  observable: T;
-  lastFetch: number;
-}
-
-let storeRolesStatsCache: CacheEntry<Observable<StoreRoleStats>> | null = null;
+/**
+ * Stats cards cache, one entry per store and emptied on every store switch
+ * (QUI-1021): the backend resolves the store from the session, so the URL
+ * alone does not say whose stats a response holds.
+ */
+const storeRolesStatsCache = new StoreScopedCache<StoreRoleStats>(30_000);
 
 /**
  * Servicio ÚNICO del catálogo de roles de tienda y de la dirección
@@ -48,8 +52,8 @@ let storeRolesStatsCache: CacheEntry<Observable<StoreRoleStats>> | null = null;
 })
 export class StoreRolesService {
   private http = inject(HttpClient);
+  private readonly authFacade = inject(AuthFacade);
   private baseUrl = `${environment.apiUrl}/store/roles`;
-  private readonly CACHE_TTL = 30000; // 30 segundos
 
   // Estado de carga — Signals (Angular 20 Zoneless)
   readonly isLoading = signal(false);
@@ -82,13 +86,10 @@ export class StoreRolesService {
    * Obtener estadisticas de roles de la tienda
    */
   getStats(): Observable<StoreRoleStats> {
-    const now = Date.now();
-
-    if (
-      storeRolesStatsCache &&
-      now - storeRolesStatsCache.lastFetch < this.CACHE_TTL
-    ) {
-      return storeRolesStatsCache.observable;
+    const storeId = activeStoreId(this.authFacade);
+    const cached = storeRolesStatsCache.get(storeId);
+    if (cached) {
+      return cached;
     }
 
     const observable$ = this.http
@@ -96,21 +97,14 @@ export class StoreRolesService {
       .pipe(
         shareReplay({ bufferSize: 1, refCount: false }),
         map((response) => response.data),
-        tap(() => {
-          if (storeRolesStatsCache) {
-            storeRolesStatsCache.lastFetch = Date.now();
-          }
-        }),
+        tap(() => storeRolesStatsCache.touch(storeId)),
         catchError((error) => {
           console.error('Error getting store roles stats:', error);
           return throwError(() => error);
         }),
       );
 
-    storeRolesStatsCache = {
-      observable: observable$,
-      lastFetch: Date.now(),
-    };
+    storeRolesStatsCache.set(storeId, observable$);
 
     return observable$;
   }
@@ -293,6 +287,6 @@ export class StoreRolesService {
    * Invalida el cache de estadisticas
    */
   invalidateCache(): void {
-    storeRolesStatsCache = null;
+    storeRolesStatsCache.clear();
   }
 }

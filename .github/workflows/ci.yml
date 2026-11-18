@@ -601,6 +601,8 @@ jobs:
           --include='**/core/store/auth/auth.reducer.spec.ts'
           --include='**/core/store/notifications/notifications.effects.spec.ts'
           --include='**/core/services/environment-switch.service.spec.ts'
+          --include='**/core/utils/store-scoped-cache.spec.ts'
+          --include='**/store/store-scoped-stats-caches.spec.ts'
           --include='**/core/services/breadcrumb.service.super-admin.spec.ts'
           --include='**/legal/document-viewer/legal-document-metadata.spec.ts'
           --include='**/pos/utils/document-format-hint.util.spec.ts'

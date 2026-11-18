@@ -7,20 +7,25 @@ import { ReportDataAdapterService } from './report-data-adapter.service';
 import { getReportById } from '../config/report-registry';
 import { environment } from '../../../../../../environments/environment';
 import { ReportAdaptedData, ReportDefinition } from '../interfaces/report.interface';
+import { AuthFacade } from '../../../../../core/store/auth/auth.facade';
+import { resetStoreScopedCaches } from '../../../../../core/utils/store-scoped-cache';
 
 describe('ReportsDataService real HTTP filters and complete exports', () => {
   let service: ReportsDataService;
   let http: HttpTestingController;
   let report: ReportDefinition;
+  let activeStore: { id: number } | null;
   const dates = { start_date: '2026-07-01', end_date: '2026-07-31' };
   const filters = { category_id: '7', sort_by: 'name', sort_direction: 'desc' };
 
   beforeEach(() => {
     jasmine.clock().install();
     jasmine.clock().mockDate(new Date('2026-07-08T15:00:00Z'));
+    activeStore = { id: 1 };
     TestBed.configureTestingModule({ providers: [
       provideZonelessChangeDetection(), provideHttpClient(), provideHttpClientTesting(),
       ReportsDataService, ReportDataAdapterService,
+      { provide: AuthFacade, useValue: { userStore: () => activeStore } },
     ] });
     service = TestBed.inject(ReportsDataService);
     service.clearCache();
@@ -115,6 +120,29 @@ describe('ReportsDataService real HTTP filters and complete exports', () => {
     http.expectOne(at(report.dataEndpoint)).flush({ data: [{ product_id: 2 }] });
     service.fetchReportData(report.dataEndpoint, report).subscribe();
     http.expectNone(at(report.dataEndpoint));
+  });
+
+  // QUI-1021: the backend resolves the store from the session, so the same URL
+  // returns another store's rows after a switch without reload.
+  it('does not serve the cached data of store A to store B inside the TTL', () => {
+    let rows: unknown[] | undefined;
+    service.fetchReportData(report.dataEndpoint, report).subscribe();
+    http.expectOne(at(report.dataEndpoint)).flush({ data: [{ product_id: 1 }] });
+
+    activeStore = { id: 2 };
+    service.fetchReportData(report.dataEndpoint, report).subscribe(value => rows = value.data);
+    http.expectOne(at(report.dataEndpoint)).flush({ data: [{ product_id: 2 }, { product_id: 3 }] });
+    expect(rows?.length).toBe(2);
+  });
+
+  it('fetches again after an environment switch, even back to the same store', () => {
+    service.fetchReportData(report.dataEndpoint, report).subscribe();
+    http.expectOne(at(report.dataEndpoint)).flush({ data: [] });
+
+    resetStoreScopedCaches();
+
+    service.fetchReportData(report.dataEndpoint, report).subscribe();
+    http.expectOne(at(report.dataEndpoint)).flush({ data: [] });
   });
 
   it('expires cached snapshot data at the established 30s TTL', () => {

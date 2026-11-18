@@ -1,8 +1,13 @@
-import { Injectable } from '@angular/core';
+import { Injectable, inject } from '@angular/core';
 import { HttpClient } from '@angular/common/http';
 import { Observable, throwError } from 'rxjs';
 import { catchError, map, shareReplay, tap } from 'rxjs/operators';
 import { environment } from '../../../../../../../environments/environment';
+import { AuthFacade } from '../../../../../../core/store/auth/auth.facade';
+import {
+  StoreScopedCache,
+  activeStoreId,
+} from '../../../../../../core/utils/store-scoped-cache';
 import {
   StockTransfer,
   TransferQuery,
@@ -12,14 +17,19 @@ import {
   TransferableProduct,
 } from '../interfaces';
 
-let transferStatsCache: { observable: Observable<TransferStats>; lastFetch: number } | null = null;
+/**
+ * Stats cards cache, one entry per store and emptied on every store switch
+ * (QUI-1021): the backend resolves the store from the session, so the URL
+ * alone does not say whose stats a response holds.
+ */
+const transferStatsCache = new StoreScopedCache<TransferStats>(30_000);
 
 @Injectable({
   providedIn: 'root',
 })
 export class TransfersService {
   private readonly apiUrl = `${environment.apiUrl}/store/stock-transfers`;
-  private readonly CACHE_TTL = 30000;
+  private readonly authFacade = inject(AuthFacade);
 
   constructor(private http: HttpClient) {}
 
@@ -38,22 +48,21 @@ export class TransfersService {
   }
 
   getStats(): Observable<TransferStats> {
-    const now = Date.now();
-    if (transferStatsCache && now - transferStatsCache.lastFetch < this.CACHE_TTL) {
-      return transferStatsCache.observable;
+    const storeId = activeStoreId(this.authFacade);
+    const cached = transferStatsCache.get(storeId);
+    if (cached) {
+      return cached;
     }
     const observable$ = this.http.get<any>(`${this.apiUrl}/stats`).pipe(
       map((r) => r.data || r),
       shareReplay({ bufferSize: 1, refCount: false }),
-      tap(() => {
-        if (transferStatsCache) transferStatsCache.lastFetch = Date.now();
-      }),
+      tap(() => transferStatsCache.touch(storeId)),
       catchError((error) => {
-        transferStatsCache = null;
+        transferStatsCache.delete(storeId);
         return throwError(() => new Error('Failed to fetch transfer stats'));
       }),
     );
-    transferStatsCache = { observable: observable$, lastFetch: now };
+    transferStatsCache.set(storeId, observable$);
     return observable$;
   }
 
@@ -138,7 +147,7 @@ export class TransfersService {
   }
 
   invalidateCache(): void {
-    transferStatsCache = null;
+    transferStatsCache.clear();
   }
 
   private extractErrorMessage(error: any): string {
