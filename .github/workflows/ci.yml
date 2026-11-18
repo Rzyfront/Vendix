@@ -773,6 +773,8 @@ jobs:
           --include='**/employees/bulk-upload-modal/employee-bulk-upload-modal.component.spec.ts'
           --include='**/inventory/operations/components/bulk-adjustment-modal.component.spec.ts'
           --include='**/bulk-uploads/pages/bulk-upload-history-page.component.spec.ts'
+          --include='**/super-admin/monitoring/services/monitoring-alerts.service.spec.ts'
+          --include='**/super-admin/monitoring/pages/alerts/monitoring-alerts.page.spec.ts'
 
   mobile:
     name: Mobile

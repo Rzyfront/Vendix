@@ -56,6 +56,7 @@ export class MonitoringLayoutComponent {
     { id: 'infrastructure', route: 'infrastructure', label: 'Infraestructura', shortLabel: 'Infra', icon: 'server' },
     { id: 'performance', route: 'performance', label: 'Performance', shortLabel: 'Perf', icon: 'zap' },
     { id: 'health', route: 'health', label: 'Salud', icon: 'heart-pulse' },
+    { id: 'alerts', route: 'alerts', label: 'Alertas', icon: 'bell-ring' },
   ];
 
   constructor() {
