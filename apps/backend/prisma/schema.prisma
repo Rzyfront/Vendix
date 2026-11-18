@@ -17192,3 +17192,44 @@ model platform_crm_links {
   @@index([store_id, customer_id])
   @@index([organization_id])
 }
+
+/// QUI-1010 — bot de monitoreo de la API. Una fila por episodio de una falla
+/// agrupada por `fingerprint` (origen + proceso + tipo): las repeticiones suben
+/// `occurrences` en vez de crear filas. Solo puede haber UNA fila `open` por
+/// huella (índice único parcial `platform_alerts_open_fingerprint_key`, creado
+/// en la migración porque Prisma no expresa índices parciales).
+/// Sin FKs a propósito: es un registro de plataforma que debe sobrevivir a la
+/// tienda u organización afectada, y nunca debe arrastrar ni frenar su borrado.
+/// `severity`: info | warning | critical. `status`: open | resolved.
+/// `message` y `details` llegan ya saneados (sin cuerpos, cabeceras ni PII).
+model platform_alerts {
+  id                   Int       @id @default(autoincrement())
+  fingerprint          String    @db.VarChar(64)
+  source               String    @db.VarChar(40)
+  process              String    @db.VarChar(255)
+  error_type           String    @db.VarChar(120)
+  severity             String    @db.VarChar(16)
+  status               String    @default("open") @db.VarChar(16)
+  title                String    @db.VarChar(255)
+  message              String?   @db.Text
+  details              Json?
+  organization_id      Int?
+  store_id             Int?
+  affected_store_ids   Int[]     @default([])
+  occurrences          Int       @default(1)
+  notified_occurrences Int       @default(0)
+  first_seen_at        DateTime  @default(now()) @db.Timestamp(6)
+  last_seen_at         DateTime  @default(now()) @db.Timestamp(6)
+  escalated_at         DateTime? @db.Timestamp(6)
+  resolved_at          DateTime? @db.Timestamp(6)
+  resolution           String?   @db.VarChar(32)
+  resolved_by_user_id  Int?
+  ticket_number        String?   @db.VarChar(40)
+  telegram_message_id  String?   @db.VarChar(32)
+  created_at           DateTime  @default(now()) @db.Timestamp(6)
+  updated_at           DateTime  @default(now()) @updatedAt @db.Timestamp(6)
+
+  @@index([status, severity])
+  @@index([last_seen_at])
+  @@index([fingerprint])
+}

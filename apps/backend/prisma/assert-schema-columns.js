@@ -244,6 +244,9 @@ const REQUIRED_TABLES = [
   'production_order_lines',
   'manufacturing_settings',
   'store_sequences',
+  // QUI-1010 — bot de monitoreo (migración 20261205100000_platform_alerts): el
+  // filtro global de errores y el barrido de colas escriben aquí en caliente.
+  'platform_alerts',
 ];
 
 /** Tipos enum que el schema referencia y la base debe conocer. */
