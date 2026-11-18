@@ -4238,6 +4238,7 @@ model purchase_orders {
   receptions              purchase_order_receptions[]
   purchase_vat_contributions purchase_vat_contributions[]
   dispatch_notes          dispatch_notes[]                   @relation("dispatch_notes_purchase_order")
+  support_documents       invoices[]                         @relation("invoices_purchase_order")
   received_document_links received_document_links[]          @relation("received_document_link_purchase_order")
   received_document_match_allocations received_document_match_allocations[]
 
@@ -7696,6 +7697,13 @@ model invoices {
   customer_person_type             persona_type_enum?
   order_id                         Int?
   sales_order_id                   Int?
+  /// QUI-684 — orden de compra de la que se generó este DOCUMENTO SOPORTE.
+  /// Sólo la escribe `POST /store/invoicing/purchase-orders/:id/support-document`;
+  /// el POST genérico de facturación no la acepta. Una OC admite un único
+  /// documento soporte vigente (todo estado salvo `cancelled`/`voided`): lo
+  /// impone el único parcial `invoices_po_active_support_document_key`,
+  /// mantenido en SQL (Prisma no expresa índices parciales).
+  purchase_order_id                Int?
   related_invoice_id               Int?
   /// CP-REFUND-FLOW-REDESIGN paso 7 — reembolso que esta NOTA CRÉDITO
   /// acredita. Sólo `invoice_type = 'credit_note'` lo puebla, vía
@@ -7784,6 +7792,7 @@ model invoices {
   supplier                 suppliers?                 @relation(fields: [supplier_id], references: [id], onDelete: Restrict, onUpdate: NoAction)
   order                    orders?                    @relation(fields: [order_id], references: [id], onDelete: Restrict, onUpdate: NoAction)
   sales_order              sales_orders?              @relation(fields: [sales_order_id], references: [id], onDelete: Restrict, onUpdate: NoAction)
+  purchase_order           purchase_orders?           @relation("invoices_purchase_order", fields: [purchase_order_id], references: [id], onDelete: Restrict, onUpdate: NoAction)
   contract                 contracts?                 @relation(fields: [contract_id], references: [id], onDelete: Restrict, onUpdate: NoAction)
   related_invoice          invoices?                  @relation("invoice_credit_debit_notes", fields: [related_invoice_id], references: [id], onDelete: Restrict, onUpdate: NoAction)
   credit_debit_notes       invoices[]                 @relation("invoice_credit_debit_notes")
@@ -7809,6 +7818,7 @@ model invoices {
   @@unique([accounting_entity_id, invoice_type, invoice_number])
   @@index([profile_id, profile_version])
   @@index([store_id, status])
+  @@index([purchase_order_id])
   @@index([accounting_entity_id])
   @@index([organization_id, accounting_entity_id])
   @@index([accounting_entity_id, fiscal_document_type])

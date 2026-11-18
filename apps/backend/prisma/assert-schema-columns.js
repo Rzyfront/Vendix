@@ -75,6 +75,7 @@ const REQUIRED_COLUMNS = [
   'invoices.exchange_rate',
   'invoices.contingency_deadline',
   'invoices.xml_document',
+  'invoices.purchase_order_id',
   'invoice_items.unit_code',
   'invoice_items.account_code',
   'invoice_items.aiu_component',
