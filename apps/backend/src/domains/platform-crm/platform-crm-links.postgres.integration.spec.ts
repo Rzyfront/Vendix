@@ -52,6 +52,7 @@ describeDestructiveE2E('platform_crm_links contra Postgres real', () => {
 
   let platformOrgId: number;
   let ctx: PlatformCrmContext;
+  let tenantOrgId: number;
   let tenantStoreId: number;
   let customerRoleId: number;
   let planName: string;
@@ -85,7 +86,13 @@ describeDestructiveE2E('platform_crm_links contra Postgres real', () => {
     return store.id;
   }
 
-  async function createCustomer(store_id: number, organization_id: number, label: string) {
+  /** `roleStoreId`: tienda a la que queda atado el rol `customer` (por defecto, la misma). */
+  async function createCustomer(
+    store_id: number,
+    organization_id: number,
+    label: string,
+    roleStoreId: number | null = store_id,
+  ) {
     const user = await db.users.create({
       data: {
         username: `pcrm-${label}-${run}`,
@@ -98,7 +105,7 @@ describeDestructiveE2E('platform_crm_links contra Postgres real', () => {
     });
     await db.store_users.create({ data: { store_id, user_id: user.id } });
     await db.user_roles.create({
-      data: { user_id: user.id, role_id: customerRoleId, store_id },
+      data: { user_id: user.id, role_id: customerRoleId, store_id: roleStoreId },
     });
     return user.id;
   }
@@ -117,7 +124,7 @@ describeDestructiveE2E('platform_crm_links contra Postgres real', () => {
 
     platformOrgId = await createOrg('platform', true);
     const platformStoreId = await createStore(platformOrgId, 'platform');
-    const tenantOrgId = await createOrg('tenant');
+    tenantOrgId = await createOrg('tenant');
     tenantStoreId = await createStore(tenantOrgId, 'tenant');
 
     const seller = await db.users.create({
@@ -397,6 +404,52 @@ describeDestructiveE2E('platform_crm_links contra Postgres real', () => {
       service.link(ctx, ownCustomer, { organization_id: platformOrgId }),
     ).rejects.toMatchObject({ errorCode: 'PLATFORM_CRM_002' });
     expect(await db.platform_crm_links.count()).toBe(before);
+  });
+
+  it('solo un cliente de la tienda plataforma es prospecto: empleado, otra org o rol de otra tienda → 404 sin escribir nada', async () => {
+    const orgId = await newClientOrg('not-prospect');
+    const staffRole = await db.roles.create({
+      data: { name: `pcrm-staff-${run}`, organization_id: platformOrgId },
+      select: { id: true },
+    });
+
+    // Empleado de la tienda plataforma que además es cliente de otra tienda:
+    // rol `customer` org-wide (como lo deja el registro) + vínculo con ambas.
+    const employee = await createCustomer(tenantStoreId, platformOrgId, 'employee', null);
+    await db.store_users.create({ data: { store_id: ctx.store_id, user_id: employee } });
+    await db.user_roles.create({
+      data: { user_id: employee, role_id: staffRole.id, store_id: ctx.store_id },
+    });
+    // Vinculado a la tienda plataforma, pero es usuario de otra organización.
+    const otherOrgUser = await createCustomer(ctx.store_id, tenantOrgId, 'other-org');
+    // Su rol de cliente está atado a otra tienda.
+    const foreignRole = await createCustomer(ctx.store_id, platformOrgId, 'foreign-role', tenantStoreId);
+    const before = await db.platform_crm_links.count();
+
+    for (const customerId of [employee, otherOrgUser, foreignRole]) {
+      await expect(
+        service.link(ctx, customerId, { organization_id: orgId }),
+      ).rejects.toMatchObject({ errorCode: 'PLATFORM_CRM_001' });
+      await expect(service.getLink(ctx, customerId)).rejects.toMatchObject({
+        errorCode: 'PLATFORM_CRM_001',
+      });
+    }
+    expect(await db.platform_crm_links.count()).toBe(before);
+
+    // Control: el cliente de la tienda plataforma, con el rol org-wide del
+    // registro o atado a esa tienda, sí es prospecto.
+    for (const roleStoreId of [null, ctx.store_id]) {
+      const prospect = await createCustomer(
+        ctx.store_id,
+        platformOrgId,
+        `prospect-${roleStoreId ?? 'org'}`,
+        roleStoreId,
+      );
+      await expect(service.getLink(ctx, prospect)).resolves.toEqual({
+        link: null,
+        organization: null,
+      });
+    }
   });
 
   it('la búsqueda excluye la org plataforma, encuentra por NIT y devuelve solo id, nombre, slug y fecha', async () => {

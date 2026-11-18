@@ -223,8 +223,13 @@ export class PlatformCrmLinksService {
   }
 
   /**
-   * El cliente debe ser cliente (`customer`) de la tienda plataforma del
-   * contexto. Un id de otra tienda responde igual que uno inexistente.
+   * Prospecto = cliente de la tienda plataforma del contexto, y nada más:
+   * - usuario de la org plataforma y vinculado a esa tienda (`store_users`);
+   * - con el rol `customer` org-wide (como lo deja el registro) o atado a esa
+   *   misma tienda, nunca a otra;
+   * - sin ningún otro rol: `customer` es la marca de «esta cuenta no es staff»,
+   *   así que un empleado de la tienda que compró en otra no es prospecto.
+   * Cualquier otro id responde igual que uno inexistente.
    */
   private async assertPlatformCustomer(
     ctx: PlatformCrmContext,
@@ -233,8 +238,15 @@ export class PlatformCrmLinksService {
     const customer = await this.db.users.findFirst({
       where: {
         id: customerId,
+        organization_id: ctx.organization_id,
         store_users: { some: { store_id: ctx.store_id } },
-        user_roles: { some: { roles: { name: 'customer' } } },
+        user_roles: {
+          some: {
+            roles: { name: 'customer' },
+            OR: [{ store_id: null }, { store_id: ctx.store_id }],
+          },
+          none: { roles: { name: { not: 'customer' } } },
+        },
       },
       select: { id: true },
     });
