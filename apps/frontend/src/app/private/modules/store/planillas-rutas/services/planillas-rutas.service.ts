@@ -323,6 +323,17 @@ export class PlanillasRutasService {
     );
   }
 
+  /** Re-attaches to a scan started before a reload; `null` if none (QUI-1020). */
+  resumeScan(
+    routeId: number,
+    opts?: Parameters<AiScanJobService['resume']>[1],
+  ): Observable<RouteSheetScanResult> | null {
+    return this.aiScanJobs.resume<RouteSheetScanResult>(
+      `route_sheet:${routeId}`,
+      opts,
+    );
+  }
+
   /**
    * Match the extracted rows against the route's real stops.
    * `POST /store/dispatch-routes/:id/scan/match` (JSON body: the scan result).

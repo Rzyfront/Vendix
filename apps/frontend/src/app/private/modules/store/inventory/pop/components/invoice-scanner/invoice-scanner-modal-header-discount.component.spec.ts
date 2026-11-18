@@ -3,6 +3,7 @@ import { of } from 'rxjs';
 
 import { InvoiceScannerModalComponent } from './invoice-scanner-modal.component';
 import { InvoiceScannerService } from '../../services/invoice-scanner.service';
+import { AiScanJobService } from '../../../../../../../core/services/ai-scan-job.service';
 import { UomService } from '../../../services/uom.service';
 import { ToastService } from '../../../../../../../shared/components/toast/toast.service';
 import { SuppliersService } from '../../../services/suppliers.service';
@@ -88,7 +89,11 @@ describe('InvoiceScannerModalComponent — QUI-855 descuento general en una sola
         {
           provide: InvoiceScannerService,
           useValue: {
-            scanInvoiceAndWait: () => of(scanned),
+            scanEnqueueUrl: () => '/scan/async',
+            scanStatusUrl: (id: string) => `/scan/async/${id}`,
+            scanFormData: () => new FormData(),
+            revalidateEnqueueUrl: () => '/scan/revalidate',
+            revalidateStatusUrl: (id: string) => `/scan/revalidate/${id}`,
             matchProducts: () =>
               of({
                 success: true,
@@ -100,6 +105,7 @@ describe('InvoiceScannerModalComponent — QUI-855 descuento general en una sola
               }),
           },
         },
+        { provide: AiScanJobService, useValue: { enqueueAndWait: () => of(scanned), resume: () => null } },
         { provide: UomService, useValue: { getCatalog: () => of({ data: [] }), peekCatalog: () => null } },
         { provide: ToastService, useValue: { success: () => undefined, error: () => undefined } },
         { provide: SuppliersService, useValue: { getSuppliers: () => of({ data: [] }) } },

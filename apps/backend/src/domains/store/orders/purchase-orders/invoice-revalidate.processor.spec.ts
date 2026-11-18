@@ -4,6 +4,7 @@ import {
   mimeFromBytes,
 } from './invoice-revalidate.processor';
 import { InvoiceScannerService } from './invoice-scanner.service';
+import { LEGACY_AI_SOURCES } from '@common/ai-scan-jobs/ai-scan-sources';
 
 function build(aiContent: string | { success: false; error: string }) {
   const aiEngine = {
@@ -27,8 +28,18 @@ function build(aiContent: string | { success: false; error: string }) {
     null as any,
   );
   const s3 = { downloadFile: jest.fn().mockResolvedValue(Buffer.from('doc')) };
-  const processor = new InvoiceRevalidateProcessor(scanner, s3 as any);
-  return { processor, aiEngine, s3 };
+  const monitor = {
+    runAiWork: jest.fn((_job: unknown, _source: unknown, work: () => unknown) =>
+      work(),
+    ),
+    onFailed: jest.fn().mockResolvedValue(undefined),
+  };
+  const processor = new InvoiceRevalidateProcessor(
+    scanner,
+    s3 as any,
+    monitor as any,
+  );
+  return { processor, aiEngine, s3, monitor };
 }
 
 const job = (over: Record<string, unknown> = {}) =>
@@ -188,8 +199,39 @@ describe('InvoiceRevalidateProcessor', () => {
   it('fallo de la IA => se relanza (BullMQ reintenta)', async () => {
     const { processor } = build({ success: false, error: 'boom' });
     const p = processor.process(job());
-    await expect(p).rejects.toThrow(/revalidar/);
+    await expect(p).rejects.toThrow('INV_SCAN_AI_FAIL');
     await expect(p).rejects.not.toBeInstanceOf(UnrecoverableError);
+  });
+
+  it('JSON inválido => failedReason es el CODIGO INV_SCAN_PARSE_FAIL', async () => {
+    const { processor } = build('esto no es json');
+    await expect(processor.process(job())).rejects.toMatchObject({
+      message: 'INV_SCAN_PARSE_FAIL',
+    });
+  });
+
+  it('envuelve la IA en runAiWork con la fuente invoice-revalidate', async () => {
+    const { processor, monitor } = build(
+      JSON.stringify({ consolidated: {}, report: {} }),
+    );
+    const j = job();
+    await processor.process(j).catch(() => undefined);
+    expect(monitor.runAiWork).toHaveBeenCalledWith(
+      j,
+      LEGACY_AI_SOURCES.invoiceRevalidate,
+      expect.any(Function),
+    );
+  });
+
+  it('onFailed delega en el monitor con la fuente y el dueño del job', async () => {
+    const { processor, monitor } = build('x');
+    const j = job();
+    await processor.onFailed(j);
+    expect(monitor.onFailed).toHaveBeenCalledWith(
+      j,
+      LEGACY_AI_SOURCES.invoiceRevalidate,
+      j.data,
+    );
   });
 });
 

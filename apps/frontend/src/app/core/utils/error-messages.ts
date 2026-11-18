@@ -484,6 +484,12 @@ export const ERROR_MESSAGES: Record<string, string> = {
   AI_CONFIG_001: 'Configuracion de IA no encontrada.',
   AI_PROVIDER_001: 'No se pudo conectar con el proveedor de IA.',
   AI_PROVIDER_002: 'No hay un proveedor de IA configurado por defecto.',
+  // QUI-1020: el proveedor rechazó por saldo/cuota o siguió limitando tras
+  // los reintentos. No es culpa del documento y Vendix ya fue avisado.
+  AI_PROVIDER_003:
+    'El servicio de IA no está disponible en este momento (sin créditos). Ya avisamos al equipo de Vendix; intenta más tarde.',
+  AI_PROVIDER_004:
+    'El servicio de IA está saturado en este momento. Ya avisamos al equipo de Vendix; intenta de nuevo en unos minutos.',
   AI_REQUEST_001: 'La solicitud al proveedor de IA fallo.',
   AI_CONFIG_002: 'Ya existe una configuracion con ese proveedor y modelo.',
   AI_APP_001: 'Aplicacion de IA no encontrada.',
@@ -890,6 +896,21 @@ export const ERROR_MESSAGES: Record<string, string> = {
     'La IA no pudo leer la resolución. Intenta con una foto más nítida o escribe los datos a mano.',
   RESOLUTION_SCAN_PARSE_FAIL:
     'La IA respondió algo que no se pudo interpretar. Intenta de nuevo o escribe los datos a mano.',
+  // Escáner IA de planillas de ruta y de socios (QUI-1020: no tenían texto).
+  RTSCAN_NO_FILE: 'Sube una foto o un PDF de la planilla.',
+  RTSCAN_INVALID_FILE: 'Formato no soportado. Usa JPG, PNG, WebP o PDF.',
+  RTSCAN_AI_FAIL:
+    'No se pudo analizar la planilla por un problema del servicio. Intenta de nuevo.',
+  RTSCAN_PARSE_FAIL:
+    'No pudimos leer la planilla. Intenta con una foto más nítida y completa.',
+  RTSCAN_MATCH_001:
+    'Una fila de la planilla no coincide con ninguna parada de la ruta. Revisa que sea la planilla correcta.',
+  MEMBER_SCAN_NO_FILE: 'Sube una foto o un PDF con la lista de socios.',
+  MEMBER_SCAN_INVALID_FILE: 'Formato no soportado. Usa una imagen o un PDF.',
+  MEMBER_SCAN_AI_FAIL:
+    'No se pudo analizar la lista por un problema del servicio. Intenta de nuevo.',
+  MEMBER_SCAN_PARSE_FAIL:
+    'No pudimos leer la lista de socios. Intenta con un archivo más nítido.',
   RUT_SCAN_NO_FILE: 'Sube una foto o un PDF del RUT.',
   RUT_SCAN_INVALID_FILE: 'Formato no soportado. Usa JPG, PNG, WebP o PDF.',
   RUT_SCAN_AI_FAIL:

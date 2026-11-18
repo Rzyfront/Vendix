@@ -1,8 +1,11 @@
-import { Processor, WorkerHost } from '@nestjs/bullmq';
+import { OnWorkerEvent, Processor, WorkerHost } from '@nestjs/bullmq';
 import { Logger } from '@nestjs/common';
 import { Job } from 'bullmq';
 import { randomUUID } from 'crypto';
 import { RequestContextService } from '@common/context/request-context.service';
+import { AiJobMonitorService } from '@common/ai-scan-jobs/ai-job-monitor.service';
+import { LEGACY_AI_SOURCES } from '@common/ai-scan-jobs/ai-scan-sources';
+import { toAiJobFailure } from '@common/ai-scan-jobs/ai-job-failure.util';
 import { CrmGenerationService } from '../services/crm-generation.service';
 import { CrmLandingJob } from '../interfaces/crm-landing-job.interface';
 
@@ -20,11 +23,14 @@ import { CrmLandingJob } from '../interfaces/crm-landing-job.interface';
 export class CrmLandingProcessor extends WorkerHost {
   private readonly logger = new Logger(CrmLandingProcessor.name);
 
-  constructor(private readonly crmGenerationService: CrmGenerationService) {
+  constructor(
+    private readonly crmGenerationService: CrmGenerationService,
+    private readonly monitor: AiJobMonitorService,
+  ) {
     super();
   }
 
-  async process(job: Job<CrmLandingJob>): Promise<void> {
+  async process(job: Job<CrmLandingJob>): Promise<{ ready: true }> {
     const { store_id, context } = job.data;
 
     this.logger.log(
@@ -46,11 +52,28 @@ export class CrmLandingProcessor extends WorkerHost {
           user_id: context?.user_id,
           request_id: requestId,
         },
-        () => this.crmGenerationService.generateLanding(store_id),
+        () =>
+          this.monitor.runAiWork(job, LEGACY_AI_SOURCES.crmLanding, () =>
+            this.crmGenerationService.generateLanding(store_id),
+          ),
       );
+      // The shared AI job client needs a non-empty result to finish.
+      return { ready: true };
     } catch (error: any) {
       this.logger.error(`crm-landing job ${job.id} failed: ${error?.message}`);
-      throw error;
+      // `failedReason` reaches the user: propagate the CODE.
+      throw toAiJobFailure(error, { retryCodes: ['CRM_LANDING_003'] });
     }
+  }
+
+  /** QUI-1020: a job that fails for good alerts Vendix once (deduplicated). */
+  @OnWorkerEvent('failed')
+  async onFailed(job: Job<CrmLandingJob> | undefined): Promise<void> {
+    if (!job) return;
+    await this.monitor.onFailed(
+      job,
+      LEGACY_AI_SOURCES.crmLanding,
+      job.data?.context,
+    );
   }
 }

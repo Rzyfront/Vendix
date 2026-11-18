@@ -312,6 +312,7 @@ export class OpenAICompatibleProvider implements AIProvider {
       return {
         success: false,
         error: error.message || 'OpenAI-compatible image generation failed',
+        ...providerFailureMetadata(error),
       };
     }
   }

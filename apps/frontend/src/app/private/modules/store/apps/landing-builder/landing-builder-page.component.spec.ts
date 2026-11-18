@@ -3,6 +3,8 @@ import { ComponentFixture, TestBed } from '@angular/core/testing';
 import { provideRouter } from '@angular/router';
 import { of } from 'rxjs';
 
+import { AiScanJobService } from '../../../../../core/services/ai-scan-job.service';
+
 import { AuthFacade } from '../../../../../core/store/auth/auth.facade';
 import type { CrmLandingDocument } from '../../../../../public/dynamic-landing/blocks/landing-blocks.types';
 import { ToastService } from '../../../../../shared/components/toast/toast.service';
@@ -69,10 +71,14 @@ describe('LandingBuilderPageComponent (F6-A)', () => {
   let crm: jasmine.SpyObj<CrmService>;
   let apps: jasmine.SpyObj<StoreAppsService>;
   let calls: string[];
+  let aiJobs: jasmine.SpyObj<AiScanJobService>;
 
   async function render(state = crmState(), detail = appDetail()): Promise<void> {
     calls = [];
-    crm = jasmine.createSpyObj('CrmService', ['getLanding', 'saveDraft', 'publish', 'activate', 'getGenerationJobStatus', 'getPreviewContext']);
+    aiJobs = jasmine.createSpyObj('AiScanJobService', ['enqueueAndWait', 'resume']);
+    aiJobs.resume.and.returnValue(null);
+    aiJobs.enqueueAndWait.and.returnValue(of({ ready: true }) as never);
+    crm = jasmine.createSpyObj('CrmService', ['getLanding', 'saveDraft', 'publish', 'activate', 'getPreviewContext']);
     apps = jasmine.createSpyObj('StoreAppsService', [
       'get',
       'activate',
@@ -114,6 +120,7 @@ describe('LandingBuilderPageComponent (F6-A)', () => {
         provideZonelessChangeDetection(),
         provideRouter([]),
         { provide: CrmService, useValue: crm },
+        { provide: AiScanJobService, useValue: aiJobs },
         { provide: StoreAppsService, useValue: apps },
         { provide: ProductsService, useValue: jasmine.createSpyObj('ProductsService', ['getProducts', 'getProductById']) },
         { provide: AuthFacade, useValue: { userStoreName: signal('Mi Tienda'), userStore: signal({ logo_url: null }) } },
@@ -289,5 +296,27 @@ describe('LandingBuilderPageComponent (F6-A)', () => {
     page.setSeo({});
     expect('seo' in page.draft()).toBeFalse();
     expect(page.dirty()).toBeFalse();
+  });
+  it('QUI-1020: regenerar con IA espera el trabajo compartido con la barra y recarga el contenido', async () => {
+    await render();
+    crm.getLanding.calls.reset();
+
+    page.regenerate();
+
+    expect(aiJobs.enqueueAndWait).toHaveBeenCalledTimes(1);
+    const [url, , opts] = aiJobs.enqueueAndWait.calls.mostRecent().args;
+    expect(url).toBe(crm.activateUrl);
+    expect(opts?.resumeKey).toBe('crm_landing:generation');
+    expect(opts?.progress).toBe(page.generationProgress);
+    expect(opts?.statusUrl).toEqual(jasmine.any(Function));
+    // Al terminar recarga la landing generada.
+    expect(crm.getLanding).toHaveBeenCalledTimes(1);
+  });
+
+  it('QUI-1020: al abrir retoma la generación que seguía corriendo', async () => {
+    await render();
+    expect(aiJobs.resume).toHaveBeenCalledWith('crm_landing:generation', jasmine.objectContaining({
+      progress: page.generationProgress,
+    }));
   });
 });

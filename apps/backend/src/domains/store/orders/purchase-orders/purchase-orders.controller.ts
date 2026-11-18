@@ -55,6 +55,11 @@ import { ResponseService } from '@common/responses/response.service';
 import { VendixHttpException, ErrorCodes } from '@common/errors';
 import { RequestContextService } from '@common/context/request-context.service';
 import {
+  AiJobMonitorService,
+  AiJobStatusMeta,
+} from '@common/ai-scan-jobs/ai-job-monitor.service';
+import { LEGACY_AI_SOURCES } from '@common/ai-scan-jobs/ai-scan-sources';
+import {
   PaymentReceiptScanJob,
   PaymentReceiptScanJobStatusResult,
 } from './payment-receipt-scan-job.interface';
@@ -139,6 +144,10 @@ export class PurchaseOrdersController {
     // args y TestingModule sin este provider); en la app real Nest lo inyecta.
     @Optional()
     private readonly receiveQueueService?: PurchaseOrderReceiveQueueService,
+    // QUI-1020: AI job monitor (global module). @Optional only so the specs
+    // that build the controller by hand keep compiling; Nest always injects it.
+    @Optional()
+    private readonly aiJobMonitor?: AiJobMonitorService,
   ) {}
 
   @Post()
@@ -417,7 +426,7 @@ export class PurchaseOrdersController {
   @Permissions('store:orders:purchase_orders:create')
   async getInvoiceScanStatus(
     @Param('jobId') jobId: string,
-  ): Promise<InvoiceScanJobStatusResult> {
+  ): Promise<InvoiceScanJobStatusResult & Partial<AiJobStatusMeta>> {
     const job = await this.invoiceScanQueue.getJob(jobId);
 
     // 🔒 IDOR: job.returnvalue viene de Redis (no scoped-prisma). Mismo 404 que
@@ -433,10 +442,19 @@ export class PurchaseOrdersController {
       throw new VendixHttpException(ErrorCodes.AI_QUEUE_002);
     }
 
+    const state = await job.getState();
     return {
-      status: (await job.getState()) as any,
+      status: state as any,
       result: (job.returnvalue as any) ?? undefined,
       error: job.failedReason ?? undefined,
+      // QUI-1020: additive progress/timing/failure-class fields.
+      ...(await this.aiJobMonitor?.describe(
+        job,
+        state,
+        LEGACY_AI_SOURCES.invoiceScan,
+        job.data,
+        this.invoiceScanQueue,
+      )),
     };
   }
 
@@ -519,7 +537,7 @@ export class PurchaseOrdersController {
   @Permissions('store:orders:purchase_orders:create')
   async getInvoiceRevalidateStatus(
     @Param('jobId') jobId: string,
-  ): Promise<InvoiceRevalidateJobStatusResult> {
+  ): Promise<InvoiceRevalidateJobStatusResult & Partial<AiJobStatusMeta>> {
     const job = await this.invoiceRevalidateQueue.getJob(jobId);
 
     // 🔒 IDOR: job.returnvalue viene de Redis (no scoped-prisma). Mismo 404 que
@@ -535,10 +553,19 @@ export class PurchaseOrdersController {
       throw new VendixHttpException(ErrorCodes.AI_QUEUE_002);
     }
 
+    const state = await job.getState();
     return {
-      status: (await job.getState()) as any,
+      status: state as any,
       result: (job.returnvalue as any) ?? undefined,
       error: job.failedReason ?? undefined,
+      // QUI-1020: additive progress/timing/failure-class fields.
+      ...(await this.aiJobMonitor?.describe(
+        job,
+        state,
+        LEGACY_AI_SOURCES.invoiceRevalidate,
+        job.data,
+        this.invoiceRevalidateQueue,
+      )),
     };
   }
 
@@ -920,7 +947,7 @@ export class PurchaseOrdersController {
   async getPaymentReceiptScanStatus(
     @Param('id') purchaseOrderId: string,
     @Param('jobId') jobId: string,
-  ): Promise<PaymentReceiptScanJobStatusResult> {
+  ): Promise<PaymentReceiptScanJobStatusResult & Partial<AiJobStatusMeta>> {
     const job = await this.paymentReceiptScanQueue.getJob(jobId);
 
     // 🔒 IDOR (MANDATORY per vendix-ai-queue v2.2). job.returnvalue NO está
@@ -937,10 +964,19 @@ export class PurchaseOrdersController {
       throw new VendixHttpException(ErrorCodes.AI_QUEUE_002);
     }
 
+    const state = await job.getState();
     return {
-      status: (await job.getState()) as any,
+      status: state as any,
       result: (job.returnvalue as any) ?? undefined,
       error: job.failedReason ?? undefined,
+      // QUI-1020: additive progress/timing/failure-class fields.
+      ...(await this.aiJobMonitor?.describe(
+        job,
+        state,
+        LEGACY_AI_SOURCES.paymentReceiptScan,
+        job.data?.context,
+        this.paymentReceiptScanQueue,
+      )),
     };
   }
 

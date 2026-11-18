@@ -49,6 +49,20 @@ export class ResolutionScannerService {
       .pipe(map((result) => ({ success: true, data: result })));
   }
 
+  /** Re-attach to a scan remembered under `dian_resolution:${scope}` (QUI-1020). */
+  resume(
+    scope: ResolutionScannerScope,
+    opts?: Omit<AiScanJobOptions, 'resumeKey' | 'onEnqueued'>,
+  ): Observable<ResolutionScanApiResponse> | null {
+    const resumed = this.aiScanJobs.resume<DianResolutionScanResult>(
+      `dian_resolution:${scope}`,
+      opts,
+    );
+    return resumed
+      ? resumed.pipe(map((result) => ({ success: true, data: result })))
+      : null;
+  }
+
   private scanUrl(scope: ResolutionScannerScope): string {
     const path =
       scope === 'platform'

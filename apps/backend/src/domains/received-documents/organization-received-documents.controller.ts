@@ -16,6 +16,7 @@ import {
   UploadedFile,
   UseGuards,
   UseInterceptors,
+  Optional,
 } from '@nestjs/common';
 import { FileInterceptor } from '@nestjs/platform-express';
 import type { Response } from 'express';
@@ -32,6 +33,11 @@ import {
 import { ReceivedDocumentsService } from './received-documents.service';
 import { ReceivedDocumentsContextService } from './services/received-documents-context.service';
 import { ReceivedDocumentScanQueueService } from './services/received-document-scan-queue.service';
+import { withReceivedScanAiMeta } from './services/received-document-scan-ai-meta.util';
+import { AiJobMonitorService } from '@common/ai-scan-jobs/ai-job-monitor.service';
+import { InjectQueue } from '@nestjs/bullmq';
+import { Queue } from 'bullmq';
+import type { ReceivedDocumentScanJob } from './interfaces/received-document-scan-job.interface';
 import { ReceivedDocumentMatchCandidatesService } from './services/received-document-match-candidates.service';
 import { ReceivedDocumentMatchAllocationsService } from './services/received-document-match-allocations.service';
 import { ReceivedDocumentMatchExpensesService } from './services/received-document-match-expenses.service';
@@ -70,6 +76,12 @@ export class OrganizationReceivedDocumentsController {
     private readonly matchExpenses: ReceivedDocumentMatchExpensesService,
     private readonly buyerEvents: ReceivedBuyerEventEnablementService,
     private readonly buyerEventDispatch: ReceivedBuyerEventDispatchService,
+    // QUI-1020: optional so specs that build the controller by hand still compile.
+    @Optional()
+    @InjectQueue('received-document-scan')
+    private readonly scanQueue?: Queue<ReceivedDocumentScanJob>,
+    @Optional()
+    private readonly aiMonitor?: AiJobMonitorService,
   ) {}
 
   @Get('buyer-event-enablement')
@@ -157,7 +169,10 @@ export class OrganizationReceivedDocumentsController {
     @Query() scope: ReceivedDocumentContextQueryDto,
   ) {
     const context = await this.contexts.resolveOrganization(scope.store_id);
-    return this.responses.success(await this.scans.getStatus(context, jobId));
+    const status = await this.scans.getStatus(context, jobId);
+    return this.responses.success(
+      await withReceivedScanAiMeta(status, jobId, this.scanQueue, this.aiMonitor),
+    );
   }
 
   @Get(':id/match-candidates')

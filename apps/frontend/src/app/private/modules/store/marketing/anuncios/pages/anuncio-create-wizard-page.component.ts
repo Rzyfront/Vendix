@@ -10,6 +10,9 @@ import { Router } from '@angular/router';
 import { takeUntilDestroyed } from '@angular/core/rxjs-interop';
 import { firstValueFrom } from 'rxjs';
 
+import { AiJobProgressComponent } from '../../../../../../shared/components/ai-job-progress/ai-job-progress.component';
+import { injectAiJobProgress } from '../../../../../../shared/utils/ai-job-progress';
+
 import { extractApiErrorMessage } from '../../../../../../core/utils/api-error-handler';
 import { StoreSettingsFacade } from '../../../../../../core/store/store-settings/store-settings.facade';
 import {
@@ -80,6 +83,7 @@ interface SelectedResourcePreview {
   imports: [
     CommonModule,
     ReactiveFormsModule,
+    AiJobProgressComponent,
     AlertBannerComponent,
     ButtonComponent,
     CardComponent,
@@ -258,6 +262,7 @@ interface SelectedResourcePreview {
                         Generar anuncio
                       </app-button>
                     </div>
+                    <app-ai-job-progress [progress]="suggestProgress" />
                   </section>
                 }
 
@@ -302,6 +307,8 @@ interface SelectedResourcePreview {
                         </div>
                       </div>
                     </header>
+
+                    <app-ai-job-progress [progress]="generationProgress" />
 
                     <div class="ai-result-grid">
                       <div class="ai-result-grid__image">
@@ -1808,6 +1815,13 @@ export class AnuncioCreateWizardPageComponent {
   protected readonly generating = signal(false);
   protected readonly generatingPostCopy = signal(false);
   protected readonly suggestingPrompt = signal(false);
+  /** Time-based bars (no queue job): «sugerir prompt» and the SSE generation (QUI-1020). */
+  protected readonly suggestProgress = injectAiJobProgress({
+    kind: 'ad_prompt_suggest',
+  });
+  protected readonly generationProgress = injectAiJobProgress({
+    kind: 'ad_generation',
+  });
   protected readonly suggestionNotes = signal('');
   protected readonly suggestedTitle = signal('');
   protected readonly generationMessage = signal('Preparando recursos...');
@@ -2176,6 +2190,7 @@ export class AnuncioCreateWizardPageComponent {
     if (this.suggestingPrompt()) return;
     this.suggestingPrompt.set(true);
     this.suggestionNotes.set('');
+    this.suggestProgress.start({ phase: 'processing' });
     try {
       const raw = this.form.getRawValue();
       const response = await firstValueFrom(
@@ -2196,7 +2211,10 @@ export class AnuncioCreateWizardPageComponent {
       this.form.controls.prompt.setValue(suggestion.suggested_prompt || '');
       this.suggestedTitle.set(suggestion.suggested_title || '');
       this.suggestionNotes.set(suggestion.notes || '');
+      this.suggestProgress.onCompleted();
     } catch (error: any) {
+      // The form (brief, prompt) is kept untouched.
+      this.suggestProgress.onFailed(error);
       this.toastService.error(extractApiErrorMessage(error));
     } finally {
       this.suggestingPrompt.set(false);
@@ -2418,6 +2436,8 @@ export class AnuncioCreateWizardPageComponent {
     // a single invocation per ad creation, gated by submitDisabled().
     this.generating.set(true);
     this.generationMessage.set('Preparando recursos...');
+    this.generationProgress.reset();
+    this.generationProgress.start({ phase: 'processing' });
 
     this.anunciosService
       .streamGenerate(id, correction)
@@ -2455,10 +2475,14 @@ export class AnuncioCreateWizardPageComponent {
             this.generationMessage.set('Anuncio listo.');
           }
           if (event.type === 'done') {
+            this.generationProgress.onCompleted();
             this.generating.set(false);
             this.generatingPostCopy.set(false);
           }
           if (event.type === 'error') {
+            this.generationProgress.onFailed(
+              new Error(event.error || 'No se pudo generar la imagen.'),
+            );
             this.generating.set(false);
             this.generatingPostCopy.set(false);
             this.generationError.set(
@@ -2467,12 +2491,15 @@ export class AnuncioCreateWizardPageComponent {
             this.currentStep.set(1);
           }
         },
-        error: () => {
+        error: (err: unknown) => {
+          this.generationProgress.onFailed(err);
           this.generating.set(false);
           this.generatingPostCopy.set(false);
           this.generationError.set('No se pudo conectar con la generacion.');
           this.currentStep.set(1);
         },
+        // The stream closed without `done`: do not leave the bar running.
+        complete: () => this.generationProgress.onCompleted(),
       });
   }
 

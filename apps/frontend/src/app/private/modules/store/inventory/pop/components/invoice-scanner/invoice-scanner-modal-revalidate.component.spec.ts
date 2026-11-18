@@ -1,8 +1,9 @@
 import { ComponentFixture, TestBed } from '@angular/core/testing';
-import { of, Subject } from 'rxjs';
+import { Subject, catchError, of, throwError } from 'rxjs';
 
 import { InvoiceScannerModalComponent } from './invoice-scanner-modal.component';
 import { InvoiceScannerService } from '../../services/invoice-scanner.service';
+import { AiScanJobService } from '../../../../../../../core/services/ai-scan-job.service';
 import { UomService } from '../../../services/uom.service';
 import { ToastService } from '../../../../../../../shared/components/toast/toast.service';
 import { SuppliersService } from '../../../services/suppliers.service';
@@ -95,14 +96,40 @@ describe('InvoiceScannerModalComponent — QUI-855 paso 8b revalidación con IA'
 
   beforeEach(() => {
     revalidate$ = new Subject<InvoiceRevalidateResult>();
-    revalidateSpy = jasmine.createSpy('revalidateAndWait').and.callFake(() => revalidate$.asObservable());
+    revalidateSpy = jasmine
+      .createSpy('enqueueAndWait')
+      .and.callFake(
+        (
+          _url: string,
+          _body: unknown,
+          opts?: { progress?: { onUploadStart?: () => void; onFailed?: (e: unknown) => void } },
+        ) => {
+          // Como el servicio real: la barra arranca al lanzar la subida y
+          // recibe el fallo antes que el consumidor.
+          opts?.progress?.onUploadStart?.();
+          return revalidate$.asObservable().pipe(
+            catchError((err: unknown) => {
+              opts?.progress?.onFailed?.(err);
+              return throwError(() => err);
+            }),
+          );
+        },
+      );
     TestBed.configureTestingModule({
       imports: [InvoiceScannerModalComponent],
       providers: [
         {
           provide: InvoiceScannerService,
-          useValue: { scanInvoiceAndWait: () => of(null), matchProducts: () => of(null), revalidateAndWait: revalidateSpy },
+          useValue: {
+            scanEnqueueUrl: () => '/scan/async',
+            scanStatusUrl: (id: string) => `/scan/async/${id}`,
+            scanFormData: () => new FormData(),
+            revalidateEnqueueUrl: () => '/scan/revalidate',
+            revalidateStatusUrl: (id: string) => `/scan/revalidate/${id}`,
+            matchProducts: () => of(null),
+          },
         },
+        { provide: AiScanJobService, useValue: { enqueueAndWait: revalidateSpy, resume: () => null } },
         { provide: UomService, useValue: { getCatalog: () => of({ data: [] }), peekCatalog: () => null } },
         { provide: ToastService, useValue: { success: () => undefined, error: () => undefined } },
         { provide: SuppliersService, useValue: { getSuppliers: () => of({ data: [] }) } },
@@ -186,7 +213,7 @@ describe('InvoiceScannerModalComponent — QUI-855 paso 8b revalidación con IA'
     fixture.detectChanges();
 
     expect(revalidateSpy).toHaveBeenCalledTimes(1);
-    const arg = revalidateSpy.calls.mostRecent().args[0];
+    const arg = revalidateSpy.calls.mostRecent().args[1];
     expect(arg.scan_attachment_key).toBe('scans/a.pdf');
     expect(arg.note).toBe('la cantidad es 5');
     expect(arg.order_type).toBe('retail');
