@@ -149,3 +149,113 @@ export interface SupportDocumentAdjustmentSource {
   invoice_number: string;
   supplier_id: number | null;
 }
+
+// ── Documento soporte desde una orden de compra (QUI-684) ───────────────────
+
+/** Resumen de la OC que devuelven los endpoints de soporte por OC. */
+export interface PoSummary {
+  id: number;
+  order_number: string | null;
+  status: string;
+  supplier_id: number | null;
+  total_amount: number;
+  /** Informativo: la OC ya trae una factura de compra adjunta. No bloquea. */
+  has_supplier_invoice: boolean;
+  supplier_invoice_number: string | null;
+  supplier_invoice_date: string | null;
+  invoice_attachments_count: number;
+}
+
+/** Documento soporte ligado a la OC (más reciente primero, incluye historial anulado). */
+export interface PoSupportDocument {
+  id: number;
+  invoice_type: string;
+  invoice_number: string;
+  cufe: string | null;
+  status: string;
+  dian_status: string | null;
+  transmission_status: string | null;
+  issue_date: string;
+  total_amount: number;
+  accepted_at: string | null;
+}
+
+/** `GET /store/invoicing/purchase-orders/:id/support-documents`. */
+export interface PurchaseOrderSupportContext {
+  enabled: boolean;
+  purchase_order: PoSummary;
+  active_document_id: number | null;
+  documents: PoSupportDocument[];
+}
+
+/** Dato que le falta a la OC para emitir; `label` ya viene en español. */
+export interface SupportMissingField {
+  code: string;
+  field: string;
+  label: string;
+  /** `review` se corrige en el modal; `supplier` en el proveedor; `purchase_order` bloquea. */
+  target: 'supplier' | 'review' | 'purchase_order';
+}
+
+export interface PurchaseOrderSupportDraftItem {
+  description: string;
+  quantity: number;
+  unit_price: number;
+  discount_amount: number;
+  tax_amount: number;
+  product_id?: number;
+  product_variant_id?: number;
+}
+
+/** `GET /store/invoicing/purchase-orders/:id/support-document-draft`. */
+export interface PurchaseOrderSupportDraft {
+  purchase_order: PoSummary;
+  active_document: {
+    id: number;
+    invoice_number: string;
+    status: string;
+  } | null;
+  supplier: {
+    id: number;
+    name: string;
+    document_type: string | null;
+    tax_id: string | null;
+    verification_digit: string | null;
+    address_line1: string | null;
+    city: string | null;
+    municipality_code: string | null;
+  };
+  draft: {
+    supplier_id: number;
+    issue_date: string;
+    due_date: string | null;
+    payment_form: '1' | '2' | null;
+    notes: string;
+    withholding_amount: number;
+    items: PurchaseOrderSupportDraftItem[];
+  };
+  missing: SupportMissingField[];
+  can_emit: boolean;
+}
+
+/** Cuerpo de `POST /store/invoicing/purchase-orders/:id/support-document`. */
+export interface CreatePurchaseOrderSupportDocumentDto {
+  issue_date: string;
+  due_date?: string;
+  payment_form: '1' | '2';
+  payment_means_code?: string;
+  notes?: string;
+  withholding_amount?: number;
+  items: SupportDocumentItemDto[];
+  client_request_id?: string;
+  emit_immediately?: boolean;
+}
+
+/** Resultado de la emisión inmediata (`emission` del 201). */
+export interface SupportDocumentEmissionOutcome {
+  attempted: boolean;
+  success: boolean;
+  status: string | null;
+  error_code: string | null;
+  message: string | null;
+}
