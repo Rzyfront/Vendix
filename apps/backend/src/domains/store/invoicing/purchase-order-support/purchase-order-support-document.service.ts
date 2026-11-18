@@ -276,10 +276,11 @@ export class PurchaseOrderSupportDocumentService {
     // Reintento del mismo envío (misma clave): `createIdempotently` lo devuelve
     // como replay. Solo otra clave frente a un documento vigente es conflicto.
     const active = await this.findActiveDocument(po.id);
+    // Misma normalización que `createIdempotently` (clave en minúsculas).
     const is_retry =
       active != null &&
       dto.client_request_id != null &&
-      active.client_request_id === dto.client_request_id;
+      active.client_request_id === dto.client_request_id.toLowerCase();
     if (active && !is_retry) throw this.conflict(active);
 
     const invoice_dto = {

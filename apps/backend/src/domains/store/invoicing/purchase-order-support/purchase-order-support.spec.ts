@@ -679,6 +679,21 @@ describe('PurchaseOrderSupportDocumentService (QUI-684)', () => {
       expect(invoicingCreateIdem).toHaveBeenCalledTimes(1);
     });
 
+    it('la clave se compara como la guarda createIdempotently: en minúsculas', async () => {
+      invoicesFindFirst.mockResolvedValue({
+        id: 77,
+        invoice_number: 'DS-1',
+        status: 'sent',
+        client_request_id: '3dd5fe96-659c-4ef7-b489-753007e411ca',
+      });
+      invoicingCreateIdem.mockResolvedValue({ invoice: { id: 77 }, replayed: true });
+      const result = await service.createFromPurchaseOrder(
+        40,
+        body({ client_request_id: '3DD5FE96-659C-4EF7-B489-753007E411CA' }) as any,
+      );
+      expect(result).toEqual({ invoice: { id: 77 }, replayed: true });
+    });
+
     it('otro client_request_id frente a un documento vigente sigue siendo 409', async () => {
       invoicesFindFirst.mockResolvedValue({
         id: 77,
