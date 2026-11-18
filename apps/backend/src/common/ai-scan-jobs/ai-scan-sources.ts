@@ -22,3 +22,46 @@ export function aiScanSource(kind: AiScanKind | string): AiJobSource {
     label: AI_SCAN_KIND_LABELS[kind as AiScanKind] ?? `proceso de IA (${kind})`,
   };
 }
+
+/**
+ * The per-domain AI queues that predate `ai-scan` (QUI-1020). Their
+ * processors and status endpoints report through `AiJobMonitorService` with
+ * these sources, so incidents and dedupe keys name the right process.
+ */
+export const LEGACY_AI_SOURCES = {
+  invoiceScan: {
+    queue: 'invoice-scan',
+    kind: 'purchase_invoice',
+    label: 'escaneo de factura de compra',
+  },
+  invoiceRevalidate: {
+    queue: 'invoice-revalidate',
+    kind: 'purchase_invoice_revalidate',
+    label: 'revalidación de factura de compra',
+  },
+  paymentReceiptScan: {
+    queue: 'payment-receipt-scan',
+    kind: 'payment_receipt',
+    label: 'escaneo de comprobante de pago',
+  },
+  expenseScan: {
+    queue: 'expense-scan',
+    kind: 'expense',
+    label: 'escaneo de factura de gasto',
+  },
+  receiptScan: {
+    queue: 'receipt-scan',
+    kind: 'dispatch_receipt',
+    label: 'escaneo de remisión',
+  },
+  receivedDocumentScan: {
+    queue: 'received-document-scan',
+    kind: 'received_document',
+    label: 'escaneo de documento recibido',
+  },
+  crmLanding: {
+    queue: 'crm-landing',
+    kind: 'crm_landing',
+    label: 'generación de landing con IA',
+  },
+} as const satisfies Record<string, AiJobSource>;
