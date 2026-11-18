@@ -7,14 +7,18 @@ import {
   input,
   output,
   signal,
+  untracked,
   viewChild,
 } from '@angular/core';
 import { takeUntilDestroyed } from '@angular/core/rxjs-interop';
 import { CommonModule } from '@angular/common';
 import { FormsModule } from '@angular/forms';
 import { HttpErrorResponse } from '@angular/common/http';
-import { Subscription, catchError, of, switchMap, tap } from 'rxjs';
+import { Observable, Subscription, catchError, of, switchMap, tap } from 'rxjs';
 import { parseApiError } from '../../../../../../../core/utils/parse-api-error';
+import { AiScanJobError } from '../../../../../../../core/utils/ai-job-error';
+import { AiJobProgressComponent } from '../../../../../../../shared/components/ai-job-progress/ai-job-progress.component';
+import { injectAiJobProgress } from '../../../../../../../shared/utils/ai-job-progress';
 
 import {
   AiReviewAckComponent,
@@ -104,6 +108,7 @@ const ACCEPTED_MIMETYPES = [
     IconComponent,
     InputComponent,
     SpinnerComponent,
+    AiJobProgressComponent,
     StepsLineComponent,
     CurrencyPipe,
     AiReviewAckComponent,
@@ -269,19 +274,17 @@ const ACCEPTED_MIMETYPES = [
             </div>
           }
           <div class="flex-1 flex flex-col items-center justify-center gap-4">
-            <app-spinner size="lg" text="Analizando documento..."></app-spinner>
-            <p class="text-sm text-text-secondary text-center max-w-sm">
-              La IA extrae socios y planes, los cruza contra los existentes y
-              clasifica cada fila como <strong>OK</strong>, <strong>Revisar</strong>
-              o <strong>Error</strong>.
-            </p>
-            <p class="text-xs text-text-secondary text-center max-w-sm">
-              @if (scanStalled()) {
-                Está tardando más de lo normal; seguimos procesando.
-              } @else {
-                Esto puede tardar unos minutos. No cierres la ventana.
-              }
-            </p>
+            <app-ai-job-progress
+              class="w-full"
+              [progress]="aiProgress"
+              [showRetry]="!!selectedFile()"
+              (retry)="startScan()"
+            />
+            @if (aiProgress.error()) {
+              <app-button variant="outline" (clicked)="backToUpload()">
+                Elegir otro archivo
+              </app-button>
+            }
           </div>
         </div>
       }
@@ -666,8 +669,9 @@ export class MemberBulkScannerModalComponent {
 
   /** 1 = upload, 2 = analyze, 3 = review. */
   readonly currentStep = signal<1 | 2 | 3>(1);
-  /** true cuando el job lleva más de ~60 s sin terminar. */
-  readonly scanStalled = signal(false);
+  /** Shared AI progress bar (QUI-1020). */
+  readonly aiProgress = injectAiJobProgress({ kind: 'member_roster' });
+  private static readonly RESUME_KEY = 'member_roster:bulk';
   private scanSub: Subscription | null = null;
 
   /**
@@ -739,6 +743,7 @@ export class MemberBulkScannerModalComponent {
       const open = this.isOpen();
       if (open) {
         this.resetWizard();
+        untracked(() => this.tryResume());
       }
     });
   }
@@ -847,15 +852,34 @@ export class MemberBulkScannerModalComponent {
     if (!file) return;
 
     this.currentStep.set(2);
-
-    this.scanSub?.unsubscribe();
-    this.scanStalled.set(false);
     this.fileInfo = {};
-    this.scanSub = this.service
-      .scanRoster(file, {
-        onStall: () => this.scanStalled.set(true),
+    this.aiProgress.setSize(1);
+    this.followScan(
+      this.service.scanRoster(file, {
+        progress: this.aiProgress,
+        resumeKey: MemberBulkScannerModalComponent.RESUME_KEY,
         onEnqueued: (data) => (this.fileInfo = toBulkUploadFileInfo(data)),
-      })
+      }),
+    );
+  }
+
+  /** Re-attaches to a scan started before a reload (QUI-1020). */
+  private tryResume(): void {
+    const resumed = this.service.resumeScan(
+      MemberBulkScannerModalComponent.RESUME_KEY,
+      { progress: this.aiProgress },
+    );
+    if (!resumed) return;
+    this.currentStep.set(2);
+    this.followScan(resumed);
+  }
+
+  /** scan -> analyze with the same handlers for a fresh or a resumed job. */
+  private followScan(
+    scan$: Observable<{ success: boolean; data: RosterScanResult; message?: string }>,
+  ): void {
+    this.scanSub?.unsubscribe();
+    this.scanSub = scan$
       .pipe(
         switchMap((res) => {
           if (!res.success || !res.data) {
@@ -872,18 +896,28 @@ export class MemberBulkScannerModalComponent {
           this.currentStep.set(3);
         }),
         catchError((err: unknown) => {
-          const display =
-            err instanceof HttpErrorResponse
-              ? parseApiError(err).userMessage
-              : (err as Error | null)?.message ||
-                'Error al procesar el documento';
-          this.toast.error(display);
-          this.currentStep.set(1);
+          // The progress panel already explains scan failures by category;
+          // the selected file is kept so the user can retry.
+          if (!(err instanceof AiScanJobError)) {
+            const display =
+              err instanceof HttpErrorResponse
+                ? parseApiError(err).userMessage
+                : (err as Error | null)?.message ||
+                  'Error al procesar el documento';
+            this.toast.error(display);
+          }
+          if (!this.aiProgress.error()) this.aiProgress.onFailed(err);
           return of(null);
         }),
         takeUntilDestroyed(this.destroyRef),
       )
       .subscribe();
+  }
+
+  /** Back to the upload step after a failure, keeping the selected file. */
+  backToUpload(): void {
+    this.aiProgress.reset();
+    this.currentStep.set(1);
   }
 
   /**
@@ -1237,7 +1271,7 @@ export class MemberBulkScannerModalComponent {
   resetWizard(): void {
     this.scanSub?.unsubscribe();
     this.scanSub = null;
-    this.scanStalled.set(false);
+    this.aiProgress.reset();
     this.currentStep.set(1);
     this.selectedFile.set(null);
     this.filePreviewUrl.set(null);

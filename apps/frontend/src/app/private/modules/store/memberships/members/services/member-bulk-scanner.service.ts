@@ -61,6 +61,18 @@ export class MemberBulkScannerService {
       .pipe(map((result) => ({ success: true, data: result })));
   }
 
+  /** Re-attaches to a scan started before a reload; `null` if none (QUI-1020). */
+  resumeScan(
+    resumeKey: string,
+    opts?: Parameters<AiScanJobService['resume']>[1],
+  ): Observable<ApiResponse<RosterScanResult>> | null {
+    return (
+      this.aiScanJobs
+        .resume<RosterScanResult>(resumeKey, opts)
+        ?.pipe(map((result) => ({ success: true, data: result }))) ?? null
+    );
+  }
+
   /**
    * Run reconciliation: fuzzy-match detected plans against existing store
    * plans, detect already-onboarded customers, classify each member row as

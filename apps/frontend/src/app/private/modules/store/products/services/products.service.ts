@@ -83,6 +83,13 @@ const storeProductsStatsCache = new Map<
   CacheEntry<Observable<ProductStats>>
 >();
 
+interface AiImageJobResult {
+  image_key: string;
+  image_url?: string;
+  revised_prompt?: string;
+  model?: string;
+}
+
 @Injectable({
   providedIn: 'root',
 })
@@ -421,41 +428,51 @@ export class ProductsService {
     );
   }
 
+  /**
+   * Re-attaches to an image job started before the modal was closed or the
+   * page reloaded; `null` if none (QUI-1020). Same result transformation as
+   * `enhanceProductImage` / `generateProductImage`.
+   */
+  resumeProductImage(
+    resumeKey: string,
+    opts?: Parameters<AiScanJobService['resume']>[1],
+  ): Observable<ProductImageEnhancementResult> | null {
+    const job$ = this.aiScanJobs.resume<AiImageJobResult>(resumeKey, opts);
+    return job$ ? job$.pipe(switchMap((r) => this.fetchAiImage(r))) : null;
+  }
+
   private runImageJob(
     url: string,
     body: object,
     opts?: AiScanJobOptions,
   ): Observable<ProductImageEnhancementResult> {
     return this.aiScanJobs
-      .enqueueAndWait<{
-        image_key: string;
-        image_url?: string;
-        revised_prompt?: string;
-        model?: string;
-      }>(url, body, opts)
+      .enqueueAndWait<AiImageJobResult>(url, body, opts)
+      .pipe(switchMap((result) => this.fetchAiImage(result)));
+  }
+
+  private fetchAiImage(
+    result: AiImageJobResult,
+  ): Observable<ProductImageEnhancementResult> {
+    if (!result?.image_key) {
+      return throwError(
+        () => new Error('La IA terminó sin devolver una imagen.'),
+      );
+    }
+    return this.http
+      .get(`${this.apiUrl}/store/products/ai-image`, {
+        params: { key: result.image_key },
+        responseType: 'blob',
+      })
       .pipe(
-        switchMap((result) => {
-          if (!result?.image_key) {
-            return throwError(
-              () => new Error('La IA terminó sin devolver una imagen.'),
-            );
-          }
-          return this.http
-            .get(`${this.apiUrl}/store/products/ai-image`, {
-              params: { key: result.image_key },
-              responseType: 'blob',
-            })
-            .pipe(
-              switchMap((blob) => this.blobToDataUri(blob)),
-              map(
-                (dataUri): ProductImageEnhancementResult => ({
-                  image_url: dataUri,
-                  revised_prompt: result.revised_prompt,
-                  model: result.model,
-                }),
-              ),
-            );
-        }),
+        switchMap((blob) => this.blobToDataUri(blob)),
+        map(
+          (dataUri): ProductImageEnhancementResult => ({
+            image_url: dataUri,
+            revised_prompt: result.revised_prompt,
+            model: result.model,
+          }),
+        ),
       );
   }
 

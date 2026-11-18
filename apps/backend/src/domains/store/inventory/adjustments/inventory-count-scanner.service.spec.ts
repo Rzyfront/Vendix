@@ -96,6 +96,6 @@ describe('InventoryCountScannerService', () => {
     const spy = jest.spyOn(service, 'scanCountFromFiles');
     const files = [scanFile()];
     await handler({ files, params: { location_id: '5' }, context: {} });
-    expect(spy).toHaveBeenCalledWith(files, 5);
+    expect(spy).toHaveBeenCalledWith(files, 5, undefined);
   });
 });

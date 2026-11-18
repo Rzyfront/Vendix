@@ -31,6 +31,7 @@ export class InventoryScannerService {
   ): Observable<ApiResponse<InventoryCountScanResponse>> {
     const fd = new FormData();
     fd.append('file', file);
+    if (opts?.resumeKey) rememberScanLocation(opts.resumeKey, locationId);
     return this.aiScanJobs
       .enqueueAndWait<InventoryCountScanResponse>(
         `${this.base_url}/adjustments/scan/async?location_id=${locationId}`,
@@ -38,5 +39,50 @@ export class InventoryScannerService {
         opts,
       )
       .pipe(map((result) => ({ success: true, data: result })));
+  }
+
+  /**
+   * Re-attaches to a count scan started before a reload (QUI-1020). The
+   * location chosen at launch is remembered with the job because the review
+   * step needs it to confirm; `null` when there is nothing to resume.
+   */
+  resumeScan(
+    resumeKey: string,
+    opts?: Parameters<AiScanJobService['resume']>[1],
+  ): {
+    locationId: number;
+    result$: Observable<ApiResponse<InventoryCountScanResponse>>;
+  } | null {
+    const locationId = readScanLocation(resumeKey);
+    if (!locationId) return null;
+    const result$ = this.aiScanJobs.resume<InventoryCountScanResponse>(
+      resumeKey,
+      opts,
+    );
+    if (!result$) return null;
+    return {
+      locationId,
+      result$: result$.pipe(map((result) => ({ success: true, data: result }))),
+    };
+  }
+}
+
+const LOCATION_KEY_PREFIX = 'vendix:inventory-count-scan-location:';
+
+function rememberScanLocation(resumeKey: string, locationId: number): void {
+  try {
+    localStorage.setItem(LOCATION_KEY_PREFIX + resumeKey, String(locationId));
+  } catch {
+    // Without storage there is no resume, but the scan still works.
+  }
+}
+
+function readScanLocation(resumeKey: string): number | null {
+  try {
+    const raw = localStorage.getItem(LOCATION_KEY_PREFIX + resumeKey);
+    const parsed = raw ? Number(raw) : NaN;
+    return Number.isFinite(parsed) && parsed > 0 ? parsed : null;
+  } catch {
+    return null;
   }
 }

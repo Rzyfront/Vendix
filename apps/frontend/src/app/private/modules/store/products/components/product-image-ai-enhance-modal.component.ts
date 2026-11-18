@@ -8,10 +8,11 @@ import {
   model,
   output,
   signal,
+  untracked,
 } from '@angular/core';
 import { takeUntilDestroyed } from '@angular/core/rxjs-interop';
 import { HttpErrorResponse } from '@angular/common/http';
-import { Subscription } from 'rxjs';
+import { Observable, Subscription } from 'rxjs';
 import {
   ButtonComponent,
   IconComponent,
@@ -19,12 +20,17 @@ import {
   ToastService,
 } from '../../../../../shared/components';
 import { parseApiError } from '../../../../../core/utils/parse-api-error';
-import { ProductsService } from '../services/products.service';
+import { AiJobProgressComponent } from '../../../../../shared/components/ai-job-progress/ai-job-progress.component';
+import { injectAiJobProgress } from '../../../../../shared/utils/ai-job-progress';
+import {
+  ProductImageEnhancementResult,
+  ProductsService,
+} from '../services/products.service';
 
 @Component({
   selector: 'app-product-image-ai-enhance-modal',
   standalone: true,
-  imports: [ModalComponent, ButtonComponent, IconComponent],
+  imports: [ModalComponent, ButtonComponent, IconComponent, AiJobProgressComponent],
   template: `
     <app-modal
       [(isOpen)]="isOpen"
@@ -137,47 +143,22 @@ import { ProductsService } from '../services/products.service';
                 <div class="ai-result-stage__icon">
                   <app-icon name="sparkles" size="38"></app-icon>
                 </div>
-                <p class="ai-result-stage__caption">
-                  {{ generationMessage() }}
-                </p>
-                <p class="relative z-[3] mt-1 text-center text-xs text-text-secondary">
-                  @if (generationStalled()) {
-                    Está tardando más de lo normal; seguimos procesando.
-                  } @else {
-                    Esto puede tardar unos minutos. No cierres la ventana.
-                  }
-                </p>
+                <app-ai-job-progress
+                  class="relative z-[3] w-full"
+                  [progress]="aiProgress()"
+                />
               </div>
               <div class="ai-result-stage__shimmer"></div>
               <div class="ai-result-stage__scan"></div>
               <div class="ai-result-stage__prism"></div>
-            } @else if (errorMessage(); as error) {
+            } @else if (errorMessage()) {
               <div class="ai-result-stage__error-state">
-                <div class="ai-result-stage__error-icon">
-                  <app-icon name="alert-triangle" size="30"></app-icon>
-                </div>
-                <p class="ai-result-stage__error-title">
-                  {{
-                    mode() === 'generate'
-                      ? 'No se pudo generar la imagen'
-                      : 'No se pudo mejorar la imagen'
-                  }}
-                </p>
-                <p class="ai-result-stage__error-text">{{ error }}</p>
-                <app-button
-                  variant="outline-danger"
-                  size="sm"
-                  (clicked)="retryGeneration()"
-                  [disabled]="!canRetry()"
-                  customClasses="!rounded-lg"
-                >
-                  <app-icon
-                    slot="icon"
-                    name="refresh-cw"
-                    size="14"
-                  ></app-icon>
-                  Reintentar
-                </app-button>
+                <app-ai-job-progress
+                  class="relative z-[3] w-full"
+                  [progress]="aiProgress()"
+                  [showRetry]="canRetry()"
+                  (retry)="retryGeneration()"
+                />
               </div>
             } @else if (mode() === 'enhance') {
               @if (sourceImageUrl(); as sourceUrl) {
@@ -231,36 +212,6 @@ import { ProductsService } from '../services/products.service';
             </p>
           }
         </div>
-
-        @if (errorMessage(); as error) {
-          <div
-            class="flex flex-col gap-2 rounded-lg border border-red-100 bg-red-50 px-3 py-2 text-sm text-red-700 sm:flex-row sm:items-center sm:justify-between"
-          >
-            <div class="flex min-w-0 items-start gap-2">
-              <app-icon
-                name="alert-triangle"
-                size="16"
-                class="mt-0.5 shrink-0"
-              ></app-icon>
-              <div>
-                <p class="font-semibold">
-                  {{ mode() === 'generate' ? 'No se pudo completar la generación.' : 'La imagen original no cambió.' }}
-                </p>
-                <p>{{ error }}</p>
-              </div>
-            </div>
-            <app-button
-              variant="outline-danger"
-              size="sm"
-              (clicked)="retryGeneration()"
-              [disabled]="!canRetry()"
-              customClasses="!rounded-lg"
-            >
-              <app-icon slot="icon" name="refresh-cw" size="14"></app-icon>
-              Reintentar
-            </app-button>
-          </div>
-        }
 
         @if (revisedPrompt()) {
           <div
@@ -696,22 +647,14 @@ export class ProductImageAiEnhanceModalComponent {
   private readonly productsService = inject(ProductsService);
   private readonly toastService = inject(ToastService);
   private readonly destroyRef = inject(DestroyRef);
-  private readonly enhanceSteps = [
-    'Preparando la imagen de referencia...',
-    'Analizando luz, fondo y encuadre...',
-    'Aplicando la mejora con IA...',
-    'Refinando detalles comerciales...',
-    'Esperando la versión final...',
-  ];
-  private readonly generateSteps = [
-    'Interpretando la descripción comercial...',
-    'Componiendo la escena en formato 1:1...',
-    'Generando iluminación y textura de producto...',
-    'Aplicando acabado de catálogo...',
-    'Esperando la versión final...',
-  ];
+  /** One tracker per action so each keeps its own duration history. */
+  private readonly enhanceProgress = injectAiJobProgress({
+    kind: 'product_image_enhance',
+  });
+  private readonly generateProgress = injectAiJobProgress({
+    kind: 'product_image_generate',
+  });
   private generationSub: Subscription | null = null;
-  private generationIntervalId: ReturnType<typeof setInterval> | null = null;
 
   readonly mode = input<'enhance' | 'generate'>('enhance');
   readonly isOpen = model(false);
@@ -720,6 +663,13 @@ export class ProductImageAiEnhanceModalComponent {
   readonly productType = input<'physical' | 'service'>('physical');
   readonly description = input('');
   readonly remainingSlots = input(0);
+  /** Product the image belongs to; scopes the re-attach key (QUI-1020). */
+  readonly productId = input<number | string | null>(null);
+
+  /** Shared AI progress bar of the current action (QUI-1020). */
+  readonly aiProgress = computed(() =>
+    this.mode() === 'generate' ? this.generateProgress : this.enhanceProgress,
+  );
 
   readonly replace = output<string>();
   readonly keep = output<string>();
@@ -742,10 +692,6 @@ export class ProductImageAiEnhanceModalComponent {
   readonly revisedPrompt = signal<string | null>(null);
   readonly errorMessage = signal<string | null>(null);
   readonly isGenerating = signal(false);
-  /** true cuando el job lleva más de ~60 s sin terminar. */
-  readonly generationStalled = signal(false);
-  readonly generationMessage = signal(this.enhanceSteps[0]);
-  readonly generationStepIndex = signal(0);
   readonly comparePosition = signal(50);
 
   readonly canGenerate = computed(() => {
@@ -767,111 +713,109 @@ export class ProductImageAiEnhanceModalComponent {
     effect(() => {
       if (!this.isOpen()) {
         this.reset();
+      } else {
+        untracked(() => this.tryResume());
       }
     });
+  }
 
-    this.destroyRef.onDestroy(() => this.stopGenerationEffects());
+  private resumeKey(): string {
+    return `product_image_${this.mode()}:${this.productId() ?? 'new'}`;
   }
 
   generate(): void {
     if (!this.canGenerate()) return;
 
+    const progress = this.aiProgress();
+    const opts = { progress, resumeKey: this.resumeKey() };
+    let request$: Observable<ProductImageEnhancementResult>;
+
     if (this.mode() === 'enhance') {
       const imageUrl = this.sourceImageUrl();
       if (!imageUrl) return;
-
-      this.isGenerating.set(true);
-      this.errorMessage.set(null);
-      this.generatedImageUrl.set(null);
-      this.revisedPrompt.set(null);
-      this.startGenerationEffects();
-
-      this.generationSub?.unsubscribe();
-      this.generationSub = this.productsService
-        .enhanceProductImage(
-          {
-            image_url: imageUrl,
-            prompt: this.prompt().trim(),
-            product_name: this.productName(),
-            product_type: this.productType(),
-            description: this.description(),
-          },
-          { onStall: () => this.generationStalled.set(true) },
-        )
-        .pipe(takeUntilDestroyed(this.destroyRef))
-        .subscribe({
-          next: (result) => {
-            if (!result?.image_url) {
-              this.failGeneration(
-                'La IA terminó sin devolver una imagen. Intenta con una instrucción más específica.',
-              );
-              return;
-            }
-
-            this.stopGenerationEffects();
-            this.generatedImageUrl.set(result.image_url);
-            this.revisedPrompt.set(result.revised_prompt || null);
-            this.generationMessage.set('Imagen lista.');
-            this.isGenerating.set(false);
-            this.toastService.success('Imagen mejorada correctamente');
-          },
-          error: (error) => {
-            const message = this.resolveGenerationError(error);
-            this.failGeneration(message);
-            this.toastService.error(
-              message,
-              'No se pudo mejorar la imagen',
-              3500,
-            );
-          },
-        });
+      request$ = this.productsService.enhanceProductImage(
+        {
+          image_url: imageUrl,
+          prompt: this.prompt().trim(),
+          product_name: this.productName(),
+          product_type: this.productType(),
+          description: this.description(),
+        },
+        opts,
+      );
     } else {
-      this.isGenerating.set(true);
-      this.errorMessage.set(null);
-      this.generatedImageUrl.set(null);
-      this.revisedPrompt.set(null);
-      this.startGenerationEffects();
-
-      this.generationSub?.unsubscribe();
-      this.generationSub = this.productsService
-        .generateProductImage(
-          {
-            prompt: this.prompt().trim(),
-            aspect_ratio: '1:1',
-            product_name: this.productName(),
-            product_type: this.productType(),
-            description: this.description(),
-          },
-          { onStall: () => this.generationStalled.set(true) },
-        )
-        .pipe(takeUntilDestroyed(this.destroyRef))
-        .subscribe({
-          next: (result) => {
-            if (!result?.image_url) {
-              this.failGeneration(
-                'La IA terminó sin devolver una imagen. Intenta con una instrucción más específica.',
-              );
-              return;
-            }
-
-            this.stopGenerationEffects();
-            this.generatedImageUrl.set(result.image_url);
-            this.revisedPrompt.set(result.revised_prompt || null);
-            this.generationMessage.set('Imagen lista.');
-            this.isGenerating.set(false);
-            this.toastService.success('Imagen generada correctamente');
-          },
-          error: (error) => {
-            const message = this.resolveGenerationError(error);
-            this.failGeneration(message);
-            this.toastService.error(
-              message,
-              'No se pudo generar la imagen',
-              3500,
-            );
-          },
-        });
+      request$ = this.productsService.generateProductImage(
+        {
+          prompt: this.prompt().trim(),
+          aspect_ratio: '1:1',
+          product_name: this.productName(),
+          product_type: this.productType(),
+          description: this.description(),
+        },
+        opts,
+      );
     }
+
+    this.beginGeneration();
+    this.followGeneration(request$);
+  }
+
+  /** Re-attaches to an image job started before a close or reload. */
+  private tryResume(): void {
+    if (this.isGenerating() || this.generatedImageUrl()) return;
+    const resumed = this.productsService.resumeProductImage(this.resumeKey(), {
+      progress: this.aiProgress(),
+    });
+    if (!resumed) return;
+    this.beginGeneration();
+    this.followGeneration(resumed);
+  }
+
+  private beginGeneration(): void {
+    this.isGenerating.set(true);
+    this.errorMessage.set(null);
+    this.generatedImageUrl.set(null);
+    this.revisedPrompt.set(null);
+  }
+
+  /** Same success/error handlers for a fresh or a resumed job. */
+  private followGeneration(
+    request$: Observable<ProductImageEnhancementResult>,
+  ): void {
+    const isGenerate = this.mode() === 'generate';
+    this.generationSub?.unsubscribe();
+    this.generationSub = request$
+      .pipe(takeUntilDestroyed(this.destroyRef))
+      .subscribe({
+        next: (result) => {
+          if (!result?.image_url) {
+            this.failGeneration(
+              'La IA terminó sin devolver una imagen. Intenta con una instrucción más específica.',
+            );
+            return;
+          }
+
+          this.generatedImageUrl.set(result.image_url);
+          this.revisedPrompt.set(result.revised_prompt || null);
+          this.isGenerating.set(false);
+          this.toastService.success(
+            isGenerate
+              ? 'Imagen generada correctamente'
+              : 'Imagen mejorada correctamente',
+          );
+        },
+        error: (error) => {
+          const message = this.resolveGenerationError(error);
+          this.failGeneration(message);
+          this.toastService.error(
+            message,
+            isGenerate
+              ? 'No se pudo generar la imagen'
+              : 'No se pudo mejorar la imagen',
+            3500,
+          );
+        },
+      });
   }
 
   retryGeneration(): void {
@@ -918,49 +862,25 @@ export class ProductImageAiEnhanceModalComponent {
   private reset(): void {
     this.generationSub?.unsubscribe();
     this.generationSub = null;
-    this.stopGenerationEffects();
-    this.generationStalled.set(false);
+    this.enhanceProgress.reset();
+    this.generateProgress.reset();
     this.prompt.set('');
     this.generatedImageUrl.set(null);
     this.revisedPrompt.set(null);
     this.errorMessage.set(null);
     this.isGenerating.set(false);
-    this.generationStepIndex.set(0);
     this.comparePosition.set(50);
-    this.generationMessage.set(this.getCurrentSteps()[0]);
-  }
-
-  private getCurrentSteps(): string[] {
-    return this.mode() === 'generate' ? this.generateSteps : this.enhanceSteps;
-  }
-
-  private startGenerationEffects(): void {
-    this.stopGenerationEffects();
-    this.generationStalled.set(false);
-    const steps = this.getCurrentSteps();
-    this.generationStepIndex.set(0);
-    this.generationMessage.set(steps[0]);
-    this.generationIntervalId = setInterval(() => {
-      const nextIndex =
-        (this.generationStepIndex() + 1) % steps.length;
-      this.generationStepIndex.set(nextIndex);
-      this.generationMessage.set(steps[nextIndex]);
-    }, 1800);
-  }
-
-  private stopGenerationEffects(): void {
-    if (!this.generationIntervalId) return;
-    clearInterval(this.generationIntervalId);
-    this.generationIntervalId = null;
   }
 
   private failGeneration(message: string): void {
-    this.stopGenerationEffects();
     this.generatedImageUrl.set(null);
     this.revisedPrompt.set(null);
     this.errorMessage.set(message);
-    this.generationMessage.set('No se pudo procesar la imagen.');
     this.isGenerating.set(false);
+    // Failures raised after the job (empty result, image download) never
+    // reached the bar through the job service.
+    const progress = this.aiProgress();
+    if (!progress.error()) progress.onFailed(new Error(message));
   }
 
   private resolveGenerationError(error: unknown): string {

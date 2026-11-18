@@ -7,14 +7,18 @@ import {
   input,
   output,
   signal,
+  untracked,
   viewChild,
 } from '@angular/core';
 import { takeUntilDestroyed } from '@angular/core/rxjs-interop';
 import { CommonModule } from '@angular/common';
 import { FormsModule } from '@angular/forms';
 import { HttpErrorResponse } from '@angular/common/http';
-import { Subscription, catchError, of, switchMap, tap } from 'rxjs';
+import { Observable, Subscription, catchError, of, switchMap, tap } from 'rxjs';
 import { parseApiError } from '../../../../../../core/utils/parse-api-error';
+import { AiScanJobError } from '../../../../../../core/utils/ai-job-error';
+import { AiJobProgressComponent } from '../../../../../../shared/components/ai-job-progress/ai-job-progress.component';
+import { injectAiJobProgress } from '../../../../../../shared/utils/ai-job-progress';
 import {
   AiDiscardToggleComponent,
   AiReviewAckComponent,
@@ -25,7 +29,6 @@ import {
   IconComponent,
   InputComponent,
   ModalComponent,
-  SpinnerComponent,
   StepsLineComponent,
   ToastService,
 } from '../../../../../../shared/components/index';
@@ -36,6 +39,7 @@ import {
   CommitCustomerOutcome,
   CustomerAiImportService,
   CustomerImportAnalysis,
+  CustomerImportScanResult,
   ImportCommitAction,
   ImportCustomerMatch,
   ImportLocation,
@@ -128,7 +132,7 @@ interface EditableCustomer {
     CardComponent,
     IconComponent,
     InputComponent,
-    SpinnerComponent,
+    AiJobProgressComponent,
     StepsLineComponent,
     AiReviewAckComponent,
     AiDiscardToggleComponent,
@@ -226,17 +230,17 @@ interface EditableCustomer {
       <!-- ============ Paso 2: analizando ============ -->
       @if (currentStep() === 2) {
         <div class="flex flex-col items-center justify-center gap-4 min-h-[260px]">
-          <app-spinner size="lg" text="Analizando documento..."></app-spinner>
-          <p class="text-sm text-text-secondary text-center max-w-sm">
-            La IA extrae los clientes y sus ubicaciones y los cruza con los que ya existen.
-          </p>
-          <p class="text-xs text-text-secondary text-center max-w-sm">
-            @if (scanStalled()) {
-              Está tardando más de lo normal; seguimos procesando.
-            } @else {
-              Esto puede tardar unos minutos. No cierres la ventana.
-            }
-          </p>
+          <app-ai-job-progress
+            class="w-full"
+            [progress]="aiProgress"
+            [showRetry]="!!selectedFile()"
+            (retry)="startScan()"
+          />
+          @if (aiProgress.error()) {
+            <app-button variant="outline" (clicked)="backToUpload()">
+              Elegir otro archivo
+            </app-button>
+          }
         </div>
       }
 
@@ -637,7 +641,9 @@ export class CustomerAiImportModalComponent {
   readonly selectedFile = signal<File | null>(null);
   readonly fileError = signal<string | null>(null);
   readonly isDragging = signal(false);
-  readonly scanStalled = signal(false);
+  /** Shared AI progress bar (QUI-1020). */
+  readonly aiProgress = injectAiJobProgress({ kind: 'customer_import' });
+  private static readonly RESUME_KEY = 'customer_import:bulk';
   readonly analysis = signal<{ warnings: string[] } | null>(null);
   readonly customers = signal<EditableCustomer[]>([]);
   readonly committing = signal(false);
@@ -677,7 +683,10 @@ export class CustomerAiImportModalComponent {
 
   constructor() {
     effect(() => {
-      if (this.isOpen()) this.resetWizard();
+      if (this.isOpen()) {
+        this.resetWizard();
+        untracked(() => this.tryResume());
+      }
     });
   }
 
@@ -752,16 +761,39 @@ export class CustomerAiImportModalComponent {
     if (!file) return;
 
     this.currentStep.set(2);
-    this.scanSub?.unsubscribe();
-    this.scanStalled.set(false);
-
-    let scanWarnings: string[] = [];
     this.fileInfo = {};
-    this.scanSub = this.service
-      .scan(file, {
-        onStall: () => this.scanStalled.set(true),
+    this.aiProgress.setSize(1);
+    this.followScan(
+      this.service.scan(file, {
+        progress: this.aiProgress,
+        resumeKey: CustomerAiImportModalComponent.RESUME_KEY,
         onEnqueued: (data) => (this.fileInfo = toBulkUploadFileInfo(data)),
-      })
+      }),
+    );
+  }
+
+  /** Re-attaches to a scan started before a reload (QUI-1020). */
+  private tryResume(): void {
+    const resumed = this.service.resumeScan(
+      CustomerAiImportModalComponent.RESUME_KEY,
+      { progress: this.aiProgress },
+    );
+    if (!resumed) return;
+    this.currentStep.set(2);
+    this.followScan(resumed);
+  }
+
+  /** scan -> analyze with the same handlers for a fresh or a resumed job. */
+  private followScan(
+    scan$: Observable<{
+      success: boolean;
+      data: CustomerImportScanResult;
+      message?: string;
+    }>,
+  ): void {
+    let scanWarnings: string[] = [];
+    this.scanSub?.unsubscribe();
+    this.scanSub = scan$
       .pipe(
         switchMap((res) => {
           if (!res.success || !res.data) {
@@ -769,7 +801,10 @@ export class CustomerAiImportModalComponent {
           }
           scanWarnings = res.data.warnings ?? [];
           if (!res.data.customers?.length) {
-            throw new Error('No se detectaron clientes en el documento.');
+            throw new AiScanJobError(
+              'No se detectaron clientes en el documento.',
+              'document',
+            );
           }
           return this.service.analyze(res.data.customers);
         }),
@@ -781,18 +816,28 @@ export class CustomerAiImportModalComponent {
           this.currentStep.set(3);
         }),
         catchError((err: unknown) => {
-          const display =
-            err instanceof HttpErrorResponse
-              ? parseApiError(err).userMessage
-              : (err as Error | null)?.message ||
-                'Error al procesar el documento';
-          this.toast.error(display);
-          this.currentStep.set(1);
+          // The progress panel already explains the failure by category;
+          // the selected file is kept so the user can retry.
+          if (!(err instanceof AiScanJobError)) {
+            const display =
+              err instanceof HttpErrorResponse
+                ? parseApiError(err).userMessage
+                : (err as Error | null)?.message ||
+                  'Error al procesar el documento';
+            this.toast.error(display);
+          }
+          if (!this.aiProgress.error()) this.aiProgress.onFailed(err);
           return of(null);
         }),
         takeUntilDestroyed(this.destroyRef),
       )
       .subscribe();
+  }
+
+  /** Back to the upload step after a failure, keeping the selected file. */
+  backToUpload(): void {
+    this.aiProgress.reset();
+    this.currentStep.set(1);
   }
 
   private seedEditableState(a: CustomerImportAnalysis, warnings: string[]): void {
@@ -1046,7 +1091,7 @@ export class CustomerAiImportModalComponent {
   resetWizard(): void {
     this.scanSub?.unsubscribe();
     this.scanSub = null;
-    this.scanStalled.set(false);
+    this.aiProgress.reset();
     this.currentStep.set(1);
     this.selectedFile.set(null);
     this.fileError.set(null);
