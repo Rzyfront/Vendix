@@ -193,7 +193,7 @@ const TAG_CHIP = `${CHIP} border-border bg-surface text-text-secondary`;
           </div>
         </app-customer-section>
 
-        <!-- Cuenta Vendix: solo Vendix Platform (permiso de sistema); el chunk ni se descarga sin él. -->
+        <!-- Cuenta Vendix: solo en una tienda de la org plataforma y con el permiso de sistema; si no, el chunk ni se descarga. -->
         @if (canSeeVendixAccount()) {
           @defer {
             <app-vendix-account-block [customerId]="customerId()"></app-vendix-account-block>

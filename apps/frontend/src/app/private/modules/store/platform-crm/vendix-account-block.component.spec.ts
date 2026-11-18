@@ -21,6 +21,10 @@ import { CurrencyFormatService } from '../../../../shared/pipes/currency/currenc
  * la enlazo o la desenlazo (con confirmación); fuera de la tienda plataforma
  * el bloque no existe.
  */
+/** `user.store` de la sesión en la tienda de Vendix Platform y en una ajena. */
+const PLATFORM_STORE = { id: 1, organizations: { id: 1, is_platform: true } };
+const TENANT_STORE = { id: 70, organizations: { id: 7, is_platform: false } };
+
 describe('VendixAccountBlockComponent', () => {
   const linkedView = (): PlatformCrmLinkView => ({
     link: {
@@ -83,7 +87,10 @@ describe('VendixAccountBlockComponent', () => {
         },
         {
           provide: AuthFacade,
-          useValue: { hasPermission: (name: string) => permissions.includes(name) },
+          useValue: {
+            hasPermission: (name: string) => permissions.includes(name),
+            userStore: () => PLATFORM_STORE,
+          },
         },
       ],
     });
@@ -227,19 +234,36 @@ describe('VendixAccountBlockComponent', () => {
 });
 
 describe('canSeeVendixAccount / canManageVendixAccount', () => {
-  const auth = (perms: string[], owner = false) => ({
+  const ALL = [PLATFORM_CRM_PERMISSIONS.READ, PLATFORM_CRM_PERMISSIONS.MANAGE];
+  const auth = (perms: string[], store: unknown = PLATFORM_STORE, owner = false) => ({
     hasPermission: (name: string) => perms.includes(name),
+    userStore: () => store,
     isOwner: () => owner,
   });
 
   it('un owner de tienda sin el permiso de sistema no ve el bloque', () => {
-    expect(canSeeVendixAccount(auth(['store:crm_pipeline:read'], true))).toBeFalse();
-    expect(canManageVendixAccount(auth(['store:crm_pipeline:manage'], true))).toBeFalse();
+    expect(canSeeVendixAccount(auth(['store:crm_pipeline:read'], TENANT_STORE, true))).toBeFalse();
+    expect(canManageVendixAccount(auth(['store:crm_pipeline:manage'], TENANT_STORE, true))).toBeFalse();
   });
 
   it('con `platform:crm_link:read` lo ve; gestionar exige `platform:crm_link:manage`', () => {
     expect(canSeeVendixAccount(auth([PLATFORM_CRM_PERMISSIONS.READ]))).toBeTrue();
     expect(canManageVendixAccount(auth([PLATFORM_CRM_PERMISSIONS.READ]))).toBeFalse();
     expect(canManageVendixAccount(auth([PLATFORM_CRM_PERMISSIONS.MANAGE]))).toBeTrue();
+  });
+
+  it('super admin con todos los permisos en una tienda ajena no ve ni gestiona el bloque', () => {
+    expect(canSeeVendixAccount(auth(ALL, TENANT_STORE))).toBeFalse();
+    expect(canManageVendixAccount(auth(ALL, TENANT_STORE))).toBeFalse();
+  });
+
+  it('sin el dato de la organización de la tienda no se muestra (falla cerrado)', () => {
+    const stores = [null, undefined, { id: 1 }, { id: 1, organizations: {} }, { id: 1, organizations: { is_platform: 'true' } }];
+    for (const store of stores) {
+      // Sesión armada aquí: `auth(ALL, undefined)` caería en la tienda por defecto.
+      const session = { hasPermission: () => true, userStore: () => store };
+      expect(canSeeVendixAccount(session)).withContext(String(JSON.stringify(store))).toBeFalse();
+      expect(canManageVendixAccount(session)).withContext(String(JSON.stringify(store))).toBeFalse();
+    }
   });
 });

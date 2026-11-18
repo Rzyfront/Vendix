@@ -43,15 +43,40 @@ export interface PlatformCrmLinkView {
   organization: PlatformOrganizationSummary | null;
 }
 
-/**
- * El bloque solo se monta con `platform:crm_link:read` y SIN atajo por owner
- * ni super admin: fuera de la tienda de Vendix Platform nadie tiene ese
- * permiso (es de sistema) y el componente ni se descarga.
- */
-export function canSeeVendixAccount(auth: { hasPermission(name: string): boolean }): boolean {
-  return auth.hasPermission(PLATFORM_CRM_PERMISSIONS.READ);
+/** Lo que leen las compuertas del bloque de la sesión (`AuthFacade`). */
+export interface VendixAccountSession {
+  hasPermission(name: string): boolean;
+  /** Tienda activa: `user.store` del login o del cambio de entorno. */
+  userStore(): unknown;
 }
 
-export function canManageVendixAccount(auth: { hasPermission(name: string): boolean }): boolean {
-  return auth.hasPermission(PLATFORM_CRM_PERMISSIONS.MANAGE);
+/**
+ * La tienda activa es de la organización plataforma. El login y el cambio de
+ * entorno ya sirven la fila de su organización en `user.store.organizations`,
+ * `is_platform` incluido: no hace falta pedir nada. Sin el dato → `false`.
+ */
+export function isPlatformStoreSession(store: unknown): boolean {
+  const organization = (store as { organizations?: { is_platform?: unknown } } | null | undefined)
+    ?.organizations;
+  return organization?.is_platform === true;
+}
+
+/**
+ * El bloque solo se monta en una tienda de la org plataforma Y con
+ * `platform:crm_link:read`. El permiso solo no basta: super admin lo recibe
+ * (recibe todos) aunque esté en una tienda ajena. Fuera de la tienda de Vendix
+ * Platform el componente ni se descarga ni consulta el backend.
+ */
+export function canSeeVendixAccount(session: VendixAccountSession): boolean {
+  return (
+    isPlatformStoreSession(session.userStore()) &&
+    session.hasPermission(PLATFORM_CRM_PERMISSIONS.READ)
+  );
+}
+
+export function canManageVendixAccount(session: VendixAccountSession): boolean {
+  return (
+    isPlatformStoreSession(session.userStore()) &&
+    session.hasPermission(PLATFORM_CRM_PERMISSIONS.MANAGE)
+  );
 }
