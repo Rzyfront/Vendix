@@ -18,6 +18,8 @@ import {
   SelectorComponent,
   StickyHeaderComponent,
 } from '../../../../../../shared/components/index';
+import { AiJobProgressComponent } from '../../../../../../shared/components/ai-job-progress/ai-job-progress.component';
+import { injectAiJobProgress } from '../../../../../../shared/utils/ai-job-progress';
 import type { SelectorOption } from '../../../../../../shared/components/selector/selector.component';
 import {
   WorkflowAiUsage,
@@ -52,6 +54,7 @@ const MONTHS_BACK = 12;
     StickyHeaderComponent,
     CardComponent,
     ChartComponent,
+    AiJobProgressComponent,
     AlertBannerComponent,
     ButtonComponent,
     SelectorComponent,
@@ -262,6 +265,8 @@ const MONTHS_BACK = 12;
           }
         </div>
 
+        <app-ai-job-progress [progress]="generateProgress" />
+
         @if (generateMessage(); as message) {
           <app-alert-banner variant="info" icon="info">{{
             message
@@ -395,6 +400,10 @@ export class InsightsPageComponent implements OnInit {
   readonly summariesLoading = signal(true);
   readonly summariesError = signal('');
   readonly generating = signal(false);
+  /** Time-based bar (the summary is generated synchronously, QUI-1020). */
+  readonly generateProgress = injectAiJobProgress({
+    kind: 'workflow_summary',
+  });
   readonly generateMessage = signal('');
   readonly historyOpen = signal(false);
 
@@ -455,12 +464,14 @@ export class InsightsPageComponent implements OnInit {
     if (!this.canGenerate()) return;
     this.generating.set(true);
     this.generateMessage.set('');
+    this.generateProgress.start();
     this.api
       .generateSummary()
       .pipe(takeUntilDestroyed(this.destroyRef))
       .subscribe({
         next: (summary) => {
           this.generating.set(false);
+          this.generateProgress.onCompleted();
           if (summary.status === 'skipped_quota') {
             this.generateMessage.set(SKIPPED_MESSAGE);
           }
@@ -469,6 +480,7 @@ export class InsightsPageComponent implements OnInit {
         },
         error: (err) => {
           this.generating.set(false);
+          this.generateProgress.onFailed(err);
           const error = toWorkflowError(err);
           const limited =
             error.status === 429 ||

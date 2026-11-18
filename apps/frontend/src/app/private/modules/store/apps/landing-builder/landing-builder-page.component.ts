@@ -1,9 +1,10 @@
 import { ChangeDetectionStrategy, Component, DestroyRef, computed, inject, signal } from '@angular/core';
 import { takeUntilDestroyed } from '@angular/core/rxjs-interop';
-import { Observable, forkJoin, interval, of } from 'rxjs';
-import { catchError, map, switchMap, take, takeWhile } from 'rxjs/operators';
+import { Observable, forkJoin, of } from 'rxjs';
+import { catchError, map, switchMap } from 'rxjs/operators';
 
 import { AuthFacade } from '../../../../../core/store/auth/auth.facade';
+import { AiScanJobService } from '../../../../../core/services/ai-scan-job.service';
 import { parseApiError } from '../../../../../core/utils/parse-api-error';
 import {
   CRM_LANDING_SCHEMA_VERSION,
@@ -22,8 +23,10 @@ import {
 } from '../../../../../shared/components/sticky-header/sticky-header.component';
 import { ToastService } from '../../../../../shared/components/toast/toast.service';
 import { IconComponent } from '../../../../../shared/components/icon/icon.component';
+import { AiJobProgressComponent } from '../../../../../shared/components/ai-job-progress/ai-job-progress.component';
+import { injectAiJobProgress } from '../../../../../shared/utils/ai-job-progress';
 import type { CrmLandingState } from '../../crm/models/crm.model';
-import { CrmService } from '../../crm/services/crm.service';
+import { CRM_LANDING_RESUME_KEY, CrmService } from '../../crm/services/crm.service';
 import { ProductsService } from '../../products/services/products.service';
 import {
   AppStatus,
@@ -115,6 +118,7 @@ function readDocument(content: unknown): CrmLandingDocument {
     LandingGeneralPanelComponent,
     LandingStylePanelComponent,
     LandingSeoPanelComponent,
+    AiJobProgressComponent,
   ],
   changeDetection: ChangeDetectionStrategy.OnPush,
   host: {
@@ -198,6 +202,12 @@ function readDocument(content: unknown): CrmLandingDocument {
 
         @if (tab() === 'general') {
           <div class="mx-auto max-w-3xl p-3 md:px-6 md:py-4">
+            <app-ai-job-progress
+              class="mb-3"
+              [progress]="generationProgress"
+              [showRetry]="true"
+              (retry)="regenerate()"
+            />
             <app-landing-general-panel
               [detail]="detail()"
               [generation]="generation()"
@@ -240,6 +250,7 @@ export class LandingBuilderPageComponent {
   private readonly auth = inject(AuthFacade);
   private readonly toast = inject(ToastService);
   private readonly destroyRef = inject(DestroyRef);
+  private readonly aiJobs = inject(AiScanJobService);
 
   readonly catalogRoute = APPS_ROUTE;
   readonly catalog = LANDING_BUILDER_CATALOG;
@@ -252,7 +263,9 @@ export class LandingBuilderPageComponent {
   readonly loaded = signal(false);
   readonly loadError = signal<string | null>(null);
   readonly busy = signal(false);
-  readonly generating = signal(false);
+  /** Progress bar of the AI generation (QUI-1020); shared job with the CRM page. */
+  readonly generationProgress = injectAiJobProgress({ kind: 'crm_landing' });
+  readonly generating = computed(() => this.generationProgress.running());
 
   readonly detail = signal<StoreAppDetail | null>(null);
   readonly crm = signal<CrmLandingState | null>(null);
@@ -378,6 +391,7 @@ export class LandingBuilderPageComponent {
 
   constructor() {
     this.load();
+    this.resumeGeneration();
   }
 
   // ── Navigation and shortcuts ──────────────────────────────────────────
@@ -592,39 +606,44 @@ export class LandingBuilderPageComponent {
     this.generate();
   }
 
-  /** `POST /store/crm/activate` (idempotent) enqueues the generation; poll it while the view is open. */
+  /**
+   * `POST /store/crm/activate` (idempotent) enqueues the generation; the shared
+   * AI job client waits on it with the progress bar (QUI-1020).
+   */
   private generate(): void {
-    this.generating.set(true);
-    this.crmService
-      .activate()
-      .pipe(
-        switchMap((res) => {
-          this.crm.set(res.data);
-          const jobId = res.data.last_job_id;
-          if (!jobId) return of(null);
-          return interval(3000).pipe(
-            take(40),
-            switchMap(() => this.crmService.getGenerationJobStatus(jobId)),
-            takeWhile((job) => job.data?.status !== 'completed' && job.data?.status !== 'failed', true),
-          );
-        }),
-        takeUntilDestroyed(this.destroyRef),
-      )
-      .subscribe({
-        next: (job) => {
-          const status = job?.data?.status;
-          if (status === 'completed') this.toast.success('Tu landing está lista');
-          if (status === 'failed') this.toast.error(job?.data?.error || 'La generación con IA terminó con error');
+    this.waitForGeneration(
+      this.aiJobs.enqueueAndWait<{ ready: boolean }>(
+        this.crmService.activateUrl,
+        {},
+        {
+          progress: this.generationProgress,
+          resumeKey: CRM_LANDING_RESUME_KEY,
+          statusUrl: (id) => this.crmService.generationStatusUrl(id),
+          // The activate response is the landing state plus `job_id`.
+          onEnqueued: (data) => this.crm.set(data as unknown as CrmLandingState),
         },
-        error: (err) => {
-          this.generating.set(false);
-          this.toast.error(parseApiError(err).userMessage ?? 'No se pudo generar la landing.');
-        },
-        complete: () => {
-          this.generating.set(false);
-          this.reloadContent();
-        },
-      });
+      ),
+    );
+  }
+
+  /** Re-attaches to a generation that kept running while the builder was closed. */
+  private resumeGeneration(): void {
+    const resumed = this.aiJobs.resume<{ ready: boolean }>(CRM_LANDING_RESUME_KEY, {
+      progress: this.generationProgress,
+      statusUrl: (id) => this.crmService.generationStatusUrl(id),
+    });
+    if (resumed) this.waitForGeneration(resumed);
+  }
+
+  private waitForGeneration(job$: Observable<{ ready: boolean }>): void {
+    job$.pipe(takeUntilDestroyed(this.destroyRef)).subscribe({
+      next: () => {
+        this.toast.success('Tu landing está lista');
+        this.reloadContent();
+      },
+      // The bar shows the categorized error and its retry; refresh the persisted status.
+      error: () => this.reloadContent(),
+    });
   }
 
   // ── Loading ────────────────────────────────────────────────────────────

@@ -36,6 +36,11 @@
         <span class="text-sm font-medium">Cargando estado de la landing de captación…</span>
       </div>
     } @else if (landing(); as state) {
+      <app-ai-job-progress
+        [progress]="generationProgress"
+        [showRetry]="true"
+        (retry)="regenerate()"
+      />
       @switch (tab()) {
         @case ('estado') {
           <!-- Bloque de Estado & KPIs -->

@@ -1,8 +1,11 @@
 import { Component, computed, inject, signal, DestroyRef } from '@angular/core';
 import { takeUntilDestroyed } from '@angular/core/rxjs-interop';
-import { interval, switchMap, take, takeWhile } from 'rxjs';
+import { Observable } from 'rxjs';
 import { CommonModule } from '@angular/common';
-import { CrmService } from '../../services/crm.service';
+import {
+  CRM_LANDING_RESUME_KEY,
+  CrmService,
+} from '../../services/crm.service';
 import {
   CrmLandingState,
   CrmGenerationStatus,
@@ -13,6 +16,9 @@ import {
 import { ToastService } from '../../../../../../shared/components';
 import { IconComponent } from '../../../../../../shared/components/icon/icon.component';
 import { ButtonComponent } from '../../../../../../shared/components/button/button.component';
+import { AiScanJobService } from '../../../../../../core/services/ai-scan-job.service';
+import { AiJobProgressComponent } from '../../../../../../shared/components/ai-job-progress/ai-job-progress.component';
+import { injectAiJobProgress } from '../../../../../../shared/utils/ai-job-progress';
 import { AuthFacade } from '../../../../../../core/store/auth/auth.facade';
 import {
   StickyHeaderActionButton,
@@ -37,6 +43,7 @@ type CrmTab = 'estado' | 'diseno';
     IconComponent,
     ButtonComponent,
     CrmEditorComponent,
+    AiJobProgressComponent,
   ],
   templateUrl: './crm-main-page.component.html',
   styleUrl: './crm-main-page.component.scss',
@@ -46,6 +53,11 @@ export class CrmMainPageComponent {
   private readonly authFacade = inject(AuthFacade);
   private readonly toast = inject(ToastService);
   private readonly destroyRef = inject(DestroyRef);
+  private readonly aiJobs = inject(AiScanJobService);
+
+  /** Progress bar of the AI landing generation (QUI-1020). */
+  readonly generationProgress = injectAiJobProgress({ kind: 'crm_landing' });
+  private readonly resumeKey = CRM_LANDING_RESUME_KEY;
 
   readonly storeDomainHostname = this.authFacade.userDomainHostname;
   readonly landing = signal<CrmLandingState | null>(null);
@@ -161,6 +173,7 @@ export class CrmMainPageComponent {
 
   constructor() {
     this.loadLanding();
+    this.resumeGeneration();
   }
 
   setTab(tab: CrmTab): void {
@@ -280,18 +293,25 @@ export class CrmMainPageComponent {
 
   activate(): void {
     this.busy.set(true);
-    this.crmService.activate().subscribe({
-      next: (res) => {
-        this.landing.set(res.data);
-        this.busy.set(false);
-        this.toast.success('Landing de captación activada: generando tu landing…');
-        this.pollGeneration(res.data.last_job_id);
-      },
-      error: () => {
-        this.busy.set(false);
-        this.toast.error('No pudimos activar la landing de captación');
-      },
-    });
+    this.waitForGeneration(
+      this.aiJobs.enqueueAndWait<{ ready: boolean }>(
+        this.crmService.activateUrl,
+        {},
+        {
+          progress: this.generationProgress,
+          resumeKey: this.resumeKey,
+          statusUrl: (id) => this.crmService.generationStatusUrl(id),
+          onEnqueued: (data) => {
+            // The activate response is the landing state plus `job_id`.
+            this.landing.set(data as unknown as CrmLandingState);
+            this.busy.set(false);
+            this.toast.success(
+              'Landing de captación activada: generando tu landing…',
+            );
+          },
+        },
+      ),
+    );
   }
 
   deactivate(): void {
@@ -309,43 +329,29 @@ export class CrmMainPageComponent {
     });
   }
 
-  /**
-   * Poll ligero del job de generación mientras la página está abierta:
-   * termina cuando el estado deja de ser pending/generating, tras ~2 min
-   * (presupuesto mayor al retry del backend), o al desmontar el componente.
-   */
-  private pollGeneration(jobId?: string | null): void {
-    if (!jobId) {
-      this.loadLanding();
-      return;
-    }
-    interval(3000)
-      .pipe(
-        take(40),
-        takeUntilDestroyed(this.destroyRef),
-        switchMap(() => this.crmService.getGenerationJobStatus(jobId)),
-        takeWhile((res) => {
-          const status = res.data?.status;
-          return status !== 'completed' && status !== 'failed';
-        }, true),
-      )
-      .subscribe({
-        next: (res) => {
-          const status = res.data?.status;
-          if (status === 'completed' || status === 'failed') {
-            this.loadLanding();
-            if (status === 'completed') {
-              this.toast.success('¡Tu landing está lista!');
-              this.tab.set('diseno');
-            } else {
-              this.toast.error(
-                res.data?.error || 'La generación terminó con error',
-              );
-            }
-          }
-        },
-        error: () => this.loadLanding(),
-      });
+  /** Re-attaches to a generation that kept running while the page was closed. */
+  private resumeGeneration(): void {
+    const resumed = this.aiJobs.resume<{ ready: boolean }>(this.resumeKey, {
+      progress: this.generationProgress,
+      statusUrl: (id) => this.crmService.generationStatusUrl(id),
+    });
+    if (resumed) this.waitForGeneration(resumed);
+  }
+
+  /** Reacts to the end of a generation; the bar and the retry live in the shared client. */
+  private waitForGeneration(job$: Observable<{ ready: boolean }>): void {
+    job$.pipe(takeUntilDestroyed(this.destroyRef)).subscribe({
+      next: () => {
+        this.loadLanding();
+        this.toast.success('¡Tu landing está lista!');
+        this.tab.set('diseno');
+      },
+      error: () => {
+        // The bar shows the categorized error with its retry button.
+        this.busy.set(false);
+        this.loadLanding();
+      },
+    });
   }
 
   regenerate(): void {
