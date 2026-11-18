@@ -24,7 +24,7 @@ const sectorGuideRoutes: Routes = SECTOR_GUIDES_ENABLED
   : [];
 
 // SEO-OPS-17 / SEO-TECH-08: páginas de sector desde la plantilla. Solo existen con el
-// interruptor encendido (apagado en producción). Al publicar una, agregarla a MARKETING_PAGES
+// interruptor encendido (encendido en producción desde el 17-nov-2026). Al publicar una, agregarla a MARKETING_PAGES
 // de infra/cloudfront/spa-rewrite.js, al sitemap del backend y al smoke SEO.
 const sectorPageRoutes: Routes = SECTOR_PAGES_ENABLED
   ? SECTOR_PAGE_PATHS.map((path) => ({
@@ -35,7 +35,7 @@ const sectorPageRoutes: Routes = SECTOR_PAGES_ENABLED
     }))
   : [];
 
-// SEO-OPS-19: la ruta solo existe con el interruptor encendido (apagado en producción).
+// SEO-OPS-19: la ruta solo existe con el interruptor encendido (encendido en producción desde el 17-nov-2026).
 const implementationRoutes: Routes = IMPLEMENTATION_PAGE_ENABLED
   ? [
       {
