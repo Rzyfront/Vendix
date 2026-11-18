@@ -2190,7 +2190,7 @@ export class AnuncioCreateWizardPageComponent {
     if (this.suggestingPrompt()) return;
     this.suggestingPrompt.set(true);
     this.suggestionNotes.set('');
-    this.suggestProgress.start();
+    this.suggestProgress.start({ phase: 'processing' });
     try {
       const raw = this.form.getRawValue();
       const response = await firstValueFrom(
@@ -2437,7 +2437,7 @@ export class AnuncioCreateWizardPageComponent {
     this.generating.set(true);
     this.generationMessage.set('Preparando recursos...');
     this.generationProgress.reset();
-    this.generationProgress.start();
+    this.generationProgress.start({ phase: 'processing' });
 
     this.anunciosService
       .streamGenerate(id, correction)

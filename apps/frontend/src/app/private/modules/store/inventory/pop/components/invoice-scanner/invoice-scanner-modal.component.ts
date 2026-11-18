@@ -2797,6 +2797,9 @@ export class InvoiceScannerModalComponent {
         {
           progress: this.scanProgress,
           resumeKey: this.SCAN_RESUME_KEY,
+          // The profile the scan was launched with: a resume must read the
+          // result under that one, not under the one the modal opens with.
+          resumeMeta: { profile: this.scanProfile() },
           timeoutMs: InvoiceScannerService.SCAN_TIMEOUT_MS,
           statusUrl: (jobId) => this.invoiceScannerService.scanStatusUrl(jobId),
         },
@@ -2820,6 +2823,13 @@ export class InvoiceScannerModalComponent {
       },
     );
     if (!resumed$) return;
+    // Read the result under the profile the scan was launched with.
+    const profile = this.aiScanJobs.pendingResume<{ profile?: string }>(
+      this.SCAN_RESUME_KEY,
+    )?.meta?.profile;
+    if (profile === 'retail' || profile === 'ingredient') {
+      this.scanProfile.set(profile);
+    }
     this.currentStep.set(2);
     this.isScanning.set(true);
     this.loadUomCatalog();

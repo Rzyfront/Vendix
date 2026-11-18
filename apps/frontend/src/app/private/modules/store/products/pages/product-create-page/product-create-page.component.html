@@ -4442,6 +4442,7 @@
   [mode]="variantAiModalMode()"
   [sourceImageUrl]="variantAiSourceImageUrl()"
   [productId]="'variant-' + (productId ?? 'new')"
+  [targetKey]="'variant:' + (editingVariantIndex() ?? 'new')"
   [productName]="productForm.get('name')?.value || ''"
   [productType]="isService ? 'service' : 'physical'"
   [description]="productForm.get('description')?.value || ''"

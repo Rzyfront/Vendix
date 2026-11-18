@@ -109,11 +109,24 @@ const ERROR_LOOK: Readonly<
             </p>
           } @else if (p.overtime()) {
             <p class="text-xs text-text-secondary">
-              Tarda más de lo habitual. Puedes cerrar esta ventana: al volver
-              retomamos el estado real.
+              Tarda más de lo habitual.
+              @if (p.resumable()) {
+                <span data-testid="ai-job-resumable">
+                  Puedes cerrar esta ventana: al volver retomamos el estado
+                  real.
+                </span>
+              }
             </p>
           } @else if (hint()) {
             <p class="text-xs text-text-secondary">{{ hint() }}</p>
+          }
+          @if (p.resumable() && !p.overtime() && !p.stalled()) {
+            <p
+              class="text-xs text-text-secondary"
+              data-testid="ai-job-resumable"
+            >
+              Puedes cerrar esta ventana: al volver retomamos el estado real.
+            </p>
           }
         </div>
       }

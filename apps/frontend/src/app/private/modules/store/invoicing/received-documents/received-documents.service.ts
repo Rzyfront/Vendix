@@ -173,10 +173,14 @@ export class ReceivedDocumentsService {
         statusUrl: this.scanStatusUrl(scope, storeId),
         resumeKey: this.scanResumeKey(scope, storeId),
         // Already-processed document: nothing to wait for, open it directly.
-        resultWithoutJob: (data) =>
-          data['already_processed'] === true && typeof data['document_id'] === 'number'
-            ? { document_id: data['document_id'] }
-            : undefined,
+        resultWithoutJob: (data) => {
+          if (data['already_processed'] === true && typeof data['document_id'] === 'number') {
+            return { document_id: data['document_id'] };
+          }
+          // The document was saved but the scan has no read id: say so (and
+          // point to the inbox) instead of the generic «No se pudo iniciar».
+          throw new Error('El documento se guardó, pero no se recibió un identificador de lectura. Consulta la bandeja.');
+        },
       },
     );
   }

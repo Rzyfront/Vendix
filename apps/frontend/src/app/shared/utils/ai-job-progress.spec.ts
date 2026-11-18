@@ -153,6 +153,25 @@ describe('AiJobProgress (QUI-1020)', () => {
       expect(localStorage.getItem(HISTORY_KEY)).toBeNull();
     });
 
+    it('start({ phase: processing }) salta la subida y aplica la variante de sobretiempo', () => {
+      progress.start({ phase: 'processing' });
+      expect(progress.phase()).toBe('processing');
+      expect(progress.label()).toBe('Analizando con IA…');
+      jasmine.clock().tick(40_000);
+      expect(progress.overtime()).toBeTrue();
+      expect(progress.label()).toBe('Sigue procesando…');
+    });
+
+    it('resumable es false por defecto, se activa con onResumable y start() lo reinicia', () => {
+      expect(progress.resumable()).toBeFalse();
+      progress.onUploadStart();
+      progress.onResumable();
+      expect(progress.resumable()).toBeTrue();
+      progress.onFailed(new Error('boom'));
+      progress.start();
+      expect(progress.resumable()).toBeFalse();
+    });
+
     it('reset vuelve a cero para un nuevo intento', () => {
       progress.onUploadStart();
       progress.onFailed(new Error('boom'));

@@ -238,8 +238,20 @@ export interface PoPaymentModalOrder {
               <h4 class="text-sm font-semibold text-text-primary">Escanear comprobante con IA</h4>
             </div>
             <p class="text-xs text-text-muted mb-3">
-              Sube la foto del recibo/transferencia y pre-rellenaremos los campos. El documento se adjuntará al pago.
+              Sube la foto del recibo/transferencia y pre-rellenaremos los campos.
+              @if (scannedFile()) {
+                <span data-testid="po-scan-attach-note">El documento se adjuntará al pago.</span>
+              }
             </p>
+            @if (needsReattach()) {
+              <p
+                class="text-xs text-warning mb-3 p-2 rounded-md border border-warning/30 bg-warning-light"
+                role="status"
+                data-testid="po-scan-reattach-warning"
+              >
+                Recuperamos la lectura del comprobante, pero el archivo no se conserva al recargar. Adjúntalo de nuevo para guardarlo con el pago.
+              </p>
+            }
 
             <app-file-upload-dropzone
               label="Comprobante de pago"
@@ -770,6 +782,15 @@ export class PoPaymentModalComponent {
   readonly scanConfidence = signal<number | null>(null);
   /** Archivo pendiente de subir (con o sin OCR exitoso). */
   readonly scannedFile = signal<File | null>(null);
+  /** The read came back from a resume: the file itself was not kept. */
+  private readonly resumedScan = signal(false);
+  /** Resumed reading without its file: the user must re-attach it. */
+  readonly needsReattach = computed(
+    () =>
+      this.resumedScan() &&
+      this.scanConfidence() !== null &&
+      !this.scannedFile(),
+  );
 
   /**
    * Verificación obligatoria de los datos precargados por la IA. Solo aplica
@@ -977,6 +998,7 @@ export class PoPaymentModalComponent {
     this.cancelScan();
     this.aiProgress.reset();
     this.scannedFile.set(null);
+    this.resumedScan.set(false);
     this.scanConfidence.set(null);
     this.isScanning.set(false);
     this.aiAck.set(false);
@@ -1111,7 +1133,15 @@ export class PoPaymentModalComponent {
 
   // ── AI scan (vista `pay`) ──────────────────────────────────────────
   onScanFileSelected(file: File): void {
+    // Read before storing the file: once it is set, needsReattach() is false.
+    const reattaching = this.needsReattach();
     this.scannedFile.set(file);
+    // Re-attaching the file of a resumed reading: the form is already filled,
+    // so just keep the file for the payment, without a new scan.
+    if (reattaching) {
+      this.resumedScan.set(false);
+      return;
+    }
     this.runScan(file);
   }
 
@@ -1133,6 +1163,7 @@ export class PoPaymentModalComponent {
     const o = this.order();
     if (!o) return;
     this.cancelScan();
+    this.resumedScan.set(false);
     this.isScanning.set(true);
     this.scanConfidence.set(null);
     this.aiAck.set(false);
@@ -1160,6 +1191,7 @@ export class PoPaymentModalComponent {
       },
     );
     if (!resumed$) return;
+    this.resumedScan.set(true);
     this.isScanning.set(true);
     this.scanSub = resumed$
       .pipe(takeUntilDestroyed(this.destroyRef))
@@ -1192,6 +1224,7 @@ export class PoPaymentModalComponent {
     this.cancelScan();
     this.aiProgress.reset();
     this.scannedFile.set(null);
+    this.resumedScan.set(false);
     this.scanConfidence.set(null);
     this.isScanning.set(false);
     // Sin esto, un segundo escaneo mostraría el bloque con el check ya

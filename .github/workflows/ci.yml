@@ -761,6 +761,7 @@ jobs:
           --include='**/core/services/ai-scan-job.service.spec.ts'
           --include='**/shared/utils/ai-job-progress.spec.ts'
           --include='**/shared/components/ai-job-progress/ai-job-progress.component.spec.ts'
+          --include='**/crm/pages/crm-main-page/crm-main-page.component.spec.ts'
           --include='**/fiscal-activation-wizard/components/rut-scanner-modal.component.spec.ts'
           --include='**/invoice-create/invoice-draft-scan-modal.component.spec.ts'
           --include='**/invoicing/services/invoice-draft-scanner.service.spec.ts'

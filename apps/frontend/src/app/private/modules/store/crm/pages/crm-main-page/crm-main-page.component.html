@@ -177,6 +177,7 @@
                   variant="primary"
                   size="md"
                   [loading]="busy()"
+                  [disabled]="busy() || generationProgress.running()"
                   (click)="activate()"
                 >
                   Activar landing ahora

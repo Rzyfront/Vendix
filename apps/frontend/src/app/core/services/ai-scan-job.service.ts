@@ -33,6 +33,8 @@ import {
  */
 export interface AiJobProgressListener {
   onUploadStart?(): void;
+  /** The wait is remembered (`resumeKey`): closing the screen loses nothing. */
+  onResumable?(): void;
   onEnqueued?(jobId: string): void;
   onResumed?(startedAtMs: number): void;
   onStatus?(status: AiJobStatus): void;
@@ -66,6 +68,12 @@ export interface AiScanJobOptions {
    */
   resumeKey?: string;
   /**
+   * JSON-serializable context stored with the remembered job (target image,
+   * profile, location…), read back with {@link AiScanJobService.pendingResume}
+   * so the screen can decide whether the job still applies to what it shows.
+   */
+  resumeMeta?: Record<string, unknown>;
+  /**
    * Endpoint de estado de una cola propia del dominio (gastos, remisiones,
    * compras…) en vez de `GET /ai-scan-jobs/:id`. Acepta la respuesta pelada o
    * dentro del envelope `{ success, data }`.
@@ -88,6 +96,8 @@ interface EnqueueEnvelope {
 /** Lo último que dijo el servidor del trabajo, para explicar un timeout. */
 interface PollWatch {
   stalled: boolean;
+  /** Job this wait is following, so it only forgets its own key. */
+  jobId?: string;
 }
 
 interface StatusEnvelope<T> {
@@ -98,6 +108,9 @@ interface StatusEnvelope<T> {
 interface RememberedJob {
   jobId: string;
   startedAt: number;
+  /** Enqueue response `data`; empty for entries saved by older versions. */
+  data: Record<string, unknown>;
+  meta: Record<string, unknown> | null;
 }
 
 const STORAGE_PREFIX = 'vendix:ai-scan-job:';
@@ -131,6 +144,7 @@ export class AiScanJobService {
 
     return defer(() => {
       opts?.progress?.onUploadStart?.();
+      if (opts?.resumeKey) opts.progress?.onResumable?.();
       return this.http.post<EnqueueEnvelope>(url, body);
     }).pipe(
       switchMap((response) => {
@@ -144,7 +158,9 @@ export class AiScanJobService {
           return of(direct as T);
         }
         opts?.onEnqueued?.(data);
-        if (opts?.resumeKey) this.remember(opts.resumeKey, jobId);
+        if (opts?.resumeKey) {
+          this.remember(opts.resumeKey, jobId, data, opts.resumeMeta ?? null);
+        }
         opts?.progress?.onEnqueued?.(jobId);
         return this.waitFor<T>(jobId, watch, opts);
       }),
@@ -164,7 +180,7 @@ export class AiScanJobService {
    */
   resume<T>(
     resumeKey: string,
-    opts?: Omit<AiScanJobOptions, 'resumeKey' | 'onEnqueued'>,
+    opts?: Omit<AiScanJobOptions, 'resumeKey' | 'resumeMeta'>,
   ): Observable<T> | null {
     const saved = this.recall(resumeKey);
     if (!saved) return null;
@@ -173,6 +189,9 @@ export class AiScanJobService {
     const watch: PollWatch = { stalled: false };
     return defer(() => {
       options.progress?.onResumed?.(saved.startedAt);
+      options.progress?.onResumable?.();
+      // Same `data` the enqueue response had (e.g. QUI-1004 file hash).
+      options.onEnqueued?.(saved.data);
       return this.waitFor<T>(saved.jobId, watch, options);
     }).pipe(
       timeout({
@@ -190,10 +209,33 @@ export class AiScanJobService {
     return this.recall(resumeKey) !== null;
   }
 
-  /** Descarta el trabajo recordado (el usuario empezó otro o lo descartó). */
-  forget(resumeKey: string): void {
+  /**
+   * Lee lo guardado con el trabajo recordado SIN retomarlo: `data` del encolado
+   * y el `resumeMeta` del que lo lanzó. `null` si no hay nada vigente.
+   */
+  pendingResume<M = Record<string, unknown>>(
+    resumeKey: string,
+  ): { data: Record<string, unknown>; meta: M | null } | null {
+    const saved = this.recall(resumeKey);
+    if (!saved) return null;
+    return { data: saved.data, meta: saved.meta as M | null };
+  }
+
+  /**
+   * Descarta el trabajo recordado (el usuario empezó otro o lo descartó). Con
+   * `jobId` solo lo borra si sigue siendo ESE trabajo: la espera de un trabajo
+   * viejo no debe borrar la clave de uno más nuevo.
+   */
+  forget(resumeKey: string, jobId?: string): void {
     try {
-      localStorage.removeItem(this.storageKey(resumeKey));
+      const key = this.storageKey(resumeKey);
+      if (jobId !== undefined) {
+        const raw = localStorage.getItem(key);
+        if (raw && (JSON.parse(raw) as { jobId?: unknown })?.jobId !== jobId) {
+          return;
+        }
+      }
+      localStorage.removeItem(key);
     } catch {
       // Storage no disponible: no hay nada que olvidar.
     }
@@ -205,6 +247,7 @@ export class AiScanJobService {
     opts?: AiScanJobOptions,
   ): Observable<T> {
     const progress = opts?.progress;
+    watch.jobId = jobId;
     const url =
       opts?.statusUrl?.(jobId) ?? `${environment.apiUrl}/ai-scan-jobs/${jobId}`;
     const poll = () =>
@@ -218,6 +261,16 @@ export class AiScanJobService {
           tap((status) => {
             watch.stalled = status.stalled === true;
             progress?.onStatus?.(status);
+            // Dead worker or a job active too long (the backend decides): stop
+            // waiting, but keep the resume key: reopening re-attaches to the
+            // real job, which may still finish.
+            if (
+              watch.stalled &&
+              status.status !== 'completed' &&
+              status.status !== 'failed'
+            ) {
+              throw aiJobStalledError(true);
+            }
           }),
         );
 
@@ -232,7 +285,7 @@ export class AiScanJobService {
       onStall: opts?.onStall ? () => opts.onStall?.() : undefined,
     }).pipe(
       map((s) => {
-        if (opts?.resumeKey) this.forget(opts.resumeKey);
+        if (opts?.resumeKey) this.forget(opts.resumeKey, jobId);
         const status = s as AiJobStatus<T>;
         if (status.status === 'failed') throw aiJobErrorFromStatus(status);
         if (status.result === undefined || status.result === null) {
@@ -244,15 +297,19 @@ export class AiScanJobService {
         return status.result as T;
       }),
       catchError((err: unknown) =>
-        throwError(() => this.pollFailure(err, opts)),
+        throwError(() => this.pollFailure(err, opts, jobId)),
       ),
     );
   }
 
   /** Un poll que no se recuperó: el trabajo ya no se puede retomar. */
-  private pollFailure(err: unknown, opts?: AiScanJobOptions): unknown {
+  private pollFailure(
+    err: unknown,
+    opts: AiScanJobOptions | undefined,
+    jobId: string,
+  ): unknown {
     if (!(err instanceof HttpErrorResponse)) return err;
-    if (opts?.resumeKey) this.forget(opts.resumeKey);
+    if (opts?.resumeKey) this.forget(opts.resumeKey, jobId);
     if (err.status === 404) {
       return new AiScanJobError(
         'El escaneo ya no está disponible. Vuelve a intentarlo.',
@@ -273,7 +330,9 @@ export class AiScanJobService {
    * colgado, el equipo fue avisado y el mensaje lo dice.
    */
   private timedOut(watch: PollWatch, opts?: AiScanJobOptions): AiScanJobError {
-    if (opts?.resumeKey) this.forget(opts.resumeKey);
+    if (opts?.resumeKey && watch.jobId) {
+      this.forget(opts.resumeKey, watch.jobId);
+    }
     return aiJobStalledError(watch.stalled);
   }
 
@@ -297,12 +356,24 @@ export class AiScanJobService {
     return `${STORAGE_PREFIX}${storeId ?? 'none'}:${resumeKey}`;
   }
 
-  private remember(resumeKey: string, jobId: string): void {
-    const value: RememberedJob = { jobId, startedAt: Date.now() };
+  private remember(
+    resumeKey: string,
+    jobId: string,
+    data: Record<string, unknown>,
+    meta: Record<string, unknown> | null,
+  ): void {
+    const value: RememberedJob = { jobId, startedAt: Date.now(), data, meta };
+    const key = this.storageKey(resumeKey);
     try {
-      localStorage.setItem(this.storageKey(resumeKey), JSON.stringify(value));
+      localStorage.setItem(key, JSON.stringify(value));
     } catch {
-      // Sin storage no hay reenganche, pero el escaneo sigue.
+      // A large enqueue response (e.g. a whole landing state) may not fit:
+      // keep at least the job so the screen can still re-attach.
+      try {
+        localStorage.setItem(key, JSON.stringify({ ...value, data: {} }));
+      } catch {
+        // Sin storage no hay reenganche, pero el escaneo sigue.
+      }
     }
   }
 
@@ -319,7 +390,14 @@ export class AiScanJobService {
         this.forget(resumeKey);
         return null;
       }
-      return { jobId: parsed.jobId, startedAt: parsed.startedAt };
+      const isObject = (v: unknown): v is Record<string, unknown> =>
+        !!v && typeof v === 'object' && !Array.isArray(v);
+      return {
+        jobId: parsed.jobId,
+        startedAt: parsed.startedAt,
+        data: isObject(parsed.data) ? parsed.data : {},
+        meta: isObject(parsed.meta) ? parsed.meta : null,
+      };
     } catch {
       return null;
     }

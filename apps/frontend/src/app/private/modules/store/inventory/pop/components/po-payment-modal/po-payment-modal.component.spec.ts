@@ -245,6 +245,48 @@ describe('PoPaymentModalComponent — payment plan unified modal', () => {
       expect(component.isScanning()).toBe(true);
     });
 
+    describe('lectura retomada sin archivo', () => {
+      const el = () => fixture.nativeElement as HTMLElement;
+
+      function openWithResumedScan(): void {
+        aiScanJobsStub.resume.and.returnValue(scanJob$.asObservable());
+        // Re-open so the modal tries to resume.
+        fixture.componentRef.setInput('isOpen', false);
+        fixture.detectChanges();
+        fixture.componentRef.setInput('isOpen', true);
+        fixture.detectChanges();
+        scanJob$.next({ amount: 300, payment_method: 'cash', confidence: 90 });
+        fixture.detectChanges();
+      }
+
+      it('sin archivo no promete adjuntar y avisa que hay que volver a adjuntarlo', () => {
+        openWithResumedScan();
+        expect(component.scannedFile()).toBeNull();
+        expect(component.amountValue()).toBe(300);
+        expect(component.needsReattach()).toBeTrue();
+        expect(el().querySelector('[data-testid="po-scan-attach-note"]')).toBeNull();
+        expect(
+          el().querySelector('[data-testid="po-scan-reattach-warning"]')?.textContent,
+        ).toContain('el archivo no se conserva al recargar');
+      });
+
+      it('al adjuntar el archivo no vuelve a escanear y el documento viaja con el pago', () => {
+        openWithResumedScan();
+        const file = new File(['x'], 'recibo.png', { type: 'image/png' });
+        component.onScanFileSelected(file);
+        fixture.detectChanges();
+
+        expect(aiScanJobsStub.enqueueAndWait).not.toHaveBeenCalled();
+        expect(component.scannedFile()).toBe(file);
+        expect(component.needsReattach()).toBeFalse();
+        expect(component.scanConfidence()).toBe(90);
+        expect(el().querySelector('[data-testid="po-scan-reattach-warning"]')).toBeNull();
+        expect(
+          el().querySelector('[data-testid="po-scan-attach-note"]')?.textContent,
+        ).toContain('El documento se adjuntará al pago.');
+      });
+    });
+
     it('(h) view="pay" + amount > remaining → no dispatch (isPayValid=false)', () => {
       component.amountValue.set(5000); // > total=1000
       fixture.detectChanges();

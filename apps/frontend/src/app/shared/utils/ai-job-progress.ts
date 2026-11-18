@@ -50,6 +50,11 @@ export interface AiJobProgressOptions {
 export interface AiJobStartOptions {
   /** Input size (files, pages, MB, rows) that scales the expected duration. */
   sizeUnits?: number;
+  /**
+   * Skip the upload step: for time-only bars that upload nothing, so the label
+   * is the processing one and the overtime variant applies.
+   */
+  phase?: 'processing';
 }
 
 /**
@@ -133,6 +138,7 @@ export class AiJobProgress {
   private readonly realState = signal<AiJobRealProgress | null>(null);
   private readonly stalledState = signal(false);
   private readonly errorState = signal<AiJobErrorView | null>(null);
+  private readonly resumableState = signal(false);
   private sizeUnits = 1;
   private tickId: ReturnType<typeof setInterval> | null = null;
 
@@ -141,6 +147,8 @@ export class AiJobProgress {
   /** The server flagged the job as stuck (the team was alerted). */
   readonly stalled = this.stalledState.asReadonly();
   readonly error = this.errorState.asReadonly();
+  /** The wait is remembered: the user may close the screen and come back. */
+  readonly resumable = this.resumableState.asReadonly();
 
   readonly running = computed(() => {
     const p = this.phaseState();
@@ -218,11 +226,12 @@ export class AiJobProgress {
     this.realState.set(null);
     this.stalledState.set(false);
     this.errorState.set(null);
+    this.resumableState.set(false);
     this.expectedState.set(
       this.options.expectedMs ??
         expectedAiJobMs(this.options.kind, this.sizeUnits),
     );
-    this.phaseState.set('uploading');
+    this.phaseState.set(opts.phase ?? 'uploading');
     this.startTick();
   }
 
@@ -233,6 +242,11 @@ export class AiJobProgress {
 
   onUploadStart(): void {
     this.start();
+  }
+
+  /** The service remembered the wait (`resumeKey`). */
+  onResumable(): void {
+    this.resumableState.set(true);
   }
 
   onEnqueued(): void {

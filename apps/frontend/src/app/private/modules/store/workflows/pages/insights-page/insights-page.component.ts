@@ -464,7 +464,7 @@ export class InsightsPageComponent implements OnInit {
     if (!this.canGenerate()) return;
     this.generating.set(true);
     this.generateMessage.set('');
-    this.generateProgress.start();
+    this.generateProgress.start({ phase: 'processing' });
     this.api
       .generateSummary()
       .pipe(takeUntilDestroyed(this.destroyRef))

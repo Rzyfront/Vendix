@@ -55,6 +55,7 @@ describe('AiScanJobService (QUI-1020)', () => {
   function listener(): jasmine.SpyObj<Required<AiJobProgressListener>> {
     return jasmine.createSpyObj('progress', [
       'onUploadStart',
+      'onResumable',
       'onEnqueued',
       'onResumed',
       'onStatus',
@@ -196,7 +197,7 @@ describe('AiScanJobService (QUI-1020)', () => {
     expect(out).toEqual([{ ok: true }]);
   });
 
-  it('se rinde al tope y lo reporta como atascado; si el servidor lo marcó, el equipo ya sabe', () => {
+  it('se rinde al tope del cliente y lo reporta como atascado', () => {
     let err: AiScanJobError | undefined;
     service
       .enqueueAndWait(URL, {}, { timeoutMs: 4_500, pollIntervalMs: 1_000 })
@@ -204,13 +205,30 @@ describe('AiScanJobService (QUI-1020)', () => {
     enqueue();
     jasmine.clock().tick(0);
     for (let i = 0; i < 4; i++) {
-      http.expectOne(POLL).flush({ status: 'active', stalled: true });
+      http.expectOne(POLL).flush({ status: 'active' });
       jasmine.clock().tick(1_000);
     }
     jasmine.clock().tick(500);
     expect(err?.category).toBe('stalled');
+    expect(err?.teamNotified).toBeFalse();
+  });
+
+  it('un poll con stalled:true deja de esperar, avisa que el equipo ya sabe y CONSERVA la clave de reenganche', () => {
+    const progress = listener();
+    let err: AiScanJobError | undefined;
+    service
+      .enqueueAndWait(URL, {}, { resumeKey: 'rut', progress })
+      .subscribe({ error: (e) => (err = e) });
+    enqueue();
+    http.expectOne(POLL).flush({ status: 'active', stalled: true });
+    expect(err?.category).toBe('stalled');
     expect(err?.teamNotified).toBeTrue();
     expect(err?.message).toContain('ya avisamos al equipo');
+    expect(progress.onFailed).toHaveBeenCalledWith(err);
+    expect(service.hasPending('rut')).toBeTrue();
+    // No further polls are scheduled.
+    jasmine.clock().tick(20_000);
+    http.expectNone(POLL);
   });
 
   it('dispara onStall una sola vez', () => {
@@ -339,6 +357,94 @@ describe('AiScanJobService (QUI-1020)', () => {
       http.expectOne(POLL).flush({}, { status: 404, statusText: 'Not Found' });
       expect(err).toEqual(jasmine.any(AiScanJobError));
       expect(localStorage.getItem(RESUME_KEY)).toBeNull();
+    });
+
+    it('guarda el data del encolado y el resumeMeta; pendingResume los lee sin retomar', () => {
+      service
+        .enqueueAndWait(URL, {}, {
+          resumeKey: 'rut',
+          resumeMeta: { target: 'img-3' },
+        })
+        .subscribe();
+      enqueue({ job_id: 'job-1', duplicate_of: null, file_hash: 'abc' });
+      http.expectOne(POLL).flush({ status: 'active' });
+      expect(
+        service.pendingResume<{ target: string }>('rut'),
+      ).toEqual({
+        data: { job_id: 'job-1', duplicate_of: null, file_hash: 'abc' },
+        meta: { target: 'img-3' },
+      });
+      http.expectNone(POLL);
+    });
+
+    it('una entrada antigua (sin data ni meta) da data vacío y meta null', () => {
+      localStorage.setItem(
+        RESUME_KEY,
+        JSON.stringify({ jobId: 'job-1', startedAt: Date.now() }),
+      );
+      expect(service.pendingResume('rut')).toEqual({ data: {}, meta: null });
+      expect(service.pendingResume('otra')).toBeNull();
+    });
+
+    it('resume() llama onEnqueued con el data guardado antes de esperar', () => {
+      localStorage.setItem(
+        RESUME_KEY,
+        JSON.stringify({
+          jobId: 'job-1',
+          startedAt: Date.now(),
+          data: { job_id: 'job-1', file_hash: 'abc' },
+          meta: null,
+        }),
+      );
+      const onEnqueued = jasmine.createSpy('onEnqueued');
+      service.resume('rut', { onEnqueued })!.subscribe();
+      expect(onEnqueued).toHaveBeenCalledWith({ job_id: 'job-1', file_hash: 'abc' });
+      http.expectOne(POLL).flush({ status: 'active' });
+    });
+
+    it('la espera del trabajo A no borra la clave de un trabajo B más nuevo', () => {
+      service.enqueueAndWait(URL, {}, { resumeKey: 'rut' }).subscribe();
+      enqueue();
+      const pollA = http.expectOne(POLL);
+      // The user launches another job under the same key.
+      service
+        .enqueueAndWait(URL, {}, { resumeKey: 'rut' })
+        .subscribe();
+      enqueue({ job_id: 'job-2' });
+      pollA.flush({ status: 'completed', result: {} });
+      expect(JSON.parse(localStorage.getItem(RESUME_KEY) ?? '{}').jobId).toBe('job-2');
+      http.expectOne(`${environment.apiUrl}/ai-scan-jobs/job-2`).flush({ status: 'active' });
+    });
+
+    it('forget(key) sin jobId sigue borrando la clave', () => {
+      service.enqueueAndWait(URL, {}, { resumeKey: 'rut' }).subscribe();
+      enqueue();
+      http.expectOne(POLL).flush({ status: 'active' });
+      service.forget('rut');
+      expect(service.hasPending('rut')).toBeFalse();
+    });
+
+    it('avisa a la barra que la espera es retomable (enqueueAndWait y resume), y solo con resumeKey', () => {
+      const withKey = listener();
+      service.enqueueAndWait(URL, {}, { resumeKey: 'rut', progress: withKey }).subscribe();
+      expect(withKey.onResumable).toHaveBeenCalledTimes(1);
+      enqueue();
+      http.expectOne(POLL).flush({ status: 'completed', result: {} });
+
+      const without = listener();
+      service.enqueueAndWait(URL, {}, { progress: without }).subscribe();
+      expect(without.onResumable).not.toHaveBeenCalled();
+      enqueue();
+      http.expectOne(POLL).flush({ status: 'completed', result: {} });
+
+      localStorage.setItem(
+        RESUME_KEY,
+        JSON.stringify({ jobId: 'job-1', startedAt: Date.now() }),
+      );
+      const resumed = listener();
+      service.resume('rut', { progress: resumed })!.subscribe();
+      expect(resumed.onResumable).toHaveBeenCalledTimes(1);
+      http.expectOne(POLL).flush({ status: 'completed', result: {} });
     });
 
     it('un fallo final también olvida el trabajo', () => {

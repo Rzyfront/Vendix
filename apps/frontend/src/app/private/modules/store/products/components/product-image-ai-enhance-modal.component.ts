@@ -665,6 +665,11 @@ export class ProductImageAiEnhanceModalComponent {
   readonly remainingSlots = input(0);
   /** Product the image belongs to; scopes the re-attach key (QUI-1020). */
   readonly productId = input<number | string | null>(null);
+  /**
+   * What the result will be applied to (e.g. the variant index); a remembered
+   * job is only resumed when it was launched for the same target.
+   */
+  readonly targetKey = input<string | null>(null);
 
   /** Shared AI progress bar of the current action (QUI-1020). */
   readonly aiProgress = computed(() =>
@@ -723,11 +728,22 @@ export class ProductImageAiEnhanceModalComponent {
     return `product_image_${this.mode()}:${this.productId() ?? 'new'}`;
   }
 
+  /** Identifies the image/slot the current job applies to. */
+  private resumeTarget(): string {
+    return this.mode() === 'enhance'
+      ? `source:${imageFingerprint(this.sourceImageUrl() ?? '')}`
+      : `target:${this.targetKey() ?? 'new'}`;
+  }
+
   generate(): void {
     if (!this.canGenerate()) return;
 
     const progress = this.aiProgress();
-    const opts = { progress, resumeKey: this.resumeKey() };
+    const opts = {
+      progress,
+      resumeKey: this.resumeKey(),
+      resumeMeta: { target: this.resumeTarget() },
+    };
     let request$: Observable<ProductImageEnhancementResult>;
 
     if (this.mode() === 'enhance') {
@@ -763,6 +779,12 @@ export class ProductImageAiEnhanceModalComponent {
   /** Re-attaches to an image job started before a close or reload. */
   private tryResume(): void {
     if (this.isGenerating() || this.generatedImageUrl()) return;
+    // A job launched for another image/slot stays untouched: «Reemplazar»
+    // would apply it to the wrong target.
+    const pending = this.productsService.pendingProductImage<{
+      target?: string;
+    }>(this.resumeKey());
+    if (!pending || pending.meta?.target !== this.resumeTarget()) return;
     const resumed = this.productsService.resumeProductImage(this.resumeKey(), {
       progress: this.aiProgress(),
     });
@@ -893,4 +915,14 @@ export class ProductImageAiEnhanceModalComponent {
       'No se pudo procesar la imagen. Revisa la conexión o intenta con otra instrucción.'
     );
   }
+}
+
+/** Cheap stable id of an image source (a cropped data URI can be MBs long). */
+function imageFingerprint(url: string): string {
+  if (url.length <= 200) return url;
+  let hash = 5381;
+  for (let i = 0; i < url.length; i++) {
+    hash = ((hash << 5) + hash + url.charCodeAt(i)) | 0;
+  }
+  return `${url.length}:${hash}`;
 }

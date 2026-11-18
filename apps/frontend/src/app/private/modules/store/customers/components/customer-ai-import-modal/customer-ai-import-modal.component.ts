@@ -776,7 +776,11 @@ export class CustomerAiImportModalComponent {
   private tryResume(): void {
     const resumed = this.service.resumeScan(
       CustomerAiImportModalComponent.RESUME_KEY,
-      { progress: this.aiProgress },
+      {
+        progress: this.aiProgress,
+        // Same file info the enqueue gave (QUI-1004: duplicate check + hash).
+        onEnqueued: (data) => (this.fileInfo = toBulkUploadFileInfo(data)),
+      },
     );
     if (!resumed) return;
     this.currentStep.set(2);

@@ -1,6 +1,6 @@
 import { Component, computed, inject, signal, DestroyRef } from '@angular/core';
 import { takeUntilDestroyed } from '@angular/core/rxjs-interop';
-import { Observable } from 'rxjs';
+import { Observable, Subscription } from 'rxjs';
 import { CommonModule } from '@angular/common';
 import {
   CRM_LANDING_RESUME_KEY,
@@ -58,6 +58,8 @@ export class CrmMainPageComponent {
   /** Progress bar of the AI landing generation (QUI-1020). */
   readonly generationProgress = injectAiJobProgress({ kind: 'crm_landing' });
   private readonly resumeKey = CRM_LANDING_RESUME_KEY;
+  /** The wait of the generation in flight; a new one replaces it. */
+  private generationSub: Subscription | null = null;
 
   readonly storeDomainHostname = this.authFacade.userDomainHostname;
   readonly landing = signal<CrmLandingState | null>(null);
@@ -92,6 +94,8 @@ export class CrmMainPageComponent {
     const currentTab = this.tab();
     const state = this.landing();
     const isBusy = this.busy();
+    // A second generation must not start while the first one runs.
+    const isGenerating = this.generationProgress.running();
 
     if (currentTab === 'estado') {
       if (!state?.enabled) {
@@ -102,7 +106,7 @@ export class CrmMainPageComponent {
             variant: 'primary',
             icon: 'sparkles',
             loading: isBusy,
-            disabled: isBusy,
+            disabled: isBusy || isGenerating,
           },
         ];
       }
@@ -113,7 +117,7 @@ export class CrmMainPageComponent {
           variant: 'outline',
           icon: 'refresh-cw',
           loading: isBusy,
-          disabled: isBusy,
+          disabled: isBusy || isGenerating,
         },
         {
           id: 'edit_design',
@@ -292,6 +296,7 @@ export class CrmMainPageComponent {
   }
 
   activate(): void {
+    if (this.generationProgress.running()) return;
     this.busy.set(true);
     this.waitForGeneration(
       this.aiJobs.enqueueAndWait<{ ready: boolean }>(
@@ -340,7 +345,8 @@ export class CrmMainPageComponent {
 
   /** Reacts to the end of a generation; the bar and the retry live in the shared client. */
   private waitForGeneration(job$: Observable<{ ready: boolean }>): void {
-    job$.pipe(takeUntilDestroyed(this.destroyRef)).subscribe({
+    this.generationSub?.unsubscribe();
+    this.generationSub = job$.pipe(takeUntilDestroyed(this.destroyRef)).subscribe({
       next: () => {
         this.loadLanding();
         this.toast.success('¡Tu landing está lista!');

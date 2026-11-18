@@ -441,6 +441,13 @@ export class ProductsService {
     return job$ ? job$.pipe(switchMap((r) => this.fetchAiImage(r))) : null;
   }
 
+  /** Metadata of the remembered image job, without resuming it. */
+  pendingProductImage<M = Record<string, unknown>>(
+    resumeKey: string,
+  ): { data: Record<string, unknown>; meta: M | null } | null {
+    return this.aiScanJobs.pendingResume<M>(resumeKey);
+  }
+
   private runImageJob(
     url: string,
     body: object,

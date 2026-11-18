@@ -830,6 +830,9 @@ export class ExpenseScannerModalComponent {
   /** Back to the upload step keeping nothing from the failed attempt. */
   backToUpload(): void {
     this.scanSub?.unsubscribe();
+    // The user discarded this scan: reopening must not re-attach to it (a
+    // stalled job keeps its resume key until now).
+    this.expenseScannerService.forgetScan();
     this.aiProgress.reset();
     this.isScanning.set(false);
     this.currentStep.set(0);

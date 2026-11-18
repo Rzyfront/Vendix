@@ -259,6 +259,7 @@ describe('InvoiceScannerModalComponent — QUI-1020 barra, reintento y reenganch
   let jobs: {
     enqueueAndWait: jasmine.Spy;
     resume: jasmine.Spy;
+    pendingResume: jasmine.Spy;
   };
 
   const FILE = () => new File(['x'], 'factura.pdf', { type: 'application/pdf' });
@@ -290,6 +291,9 @@ describe('InvoiceScannerModalComponent — QUI-1020 barra, reintento y reenganch
     jobs = {
       enqueueAndWait: jasmine.createSpy('enqueueAndWait'),
       resume: jasmine.createSpy('resume').and.returnValue(null),
+      pendingResume: jasmine
+        .createSpy('pendingResume')
+        .and.returnValue({ data: {}, meta: { profile: 'ingredient' } }),
     };
   });
 
@@ -347,5 +351,23 @@ describe('InvoiceScannerModalComponent — QUI-1020 barra, reintento y reenganch
     expect(component.selectedFile()).toBeNull();
     expect(component.currentStep()).toBe(3);
     expect(component.scanResult()).toEqual(buildScan());
+  });
+
+  it('al retomar usa el perfil con el que se lanzó el escaneo, no el del input actual', () => {
+    jobs.resume.and.callFake(
+      (): Observable<InvoiceScanResult> => of(buildScan()),
+    );
+    // The modal opens as `retail`, the remembered scan was `ingredient`.
+    setup();
+    expect(component.scanProfile()).toBe('ingredient');
+  });
+
+  it('un escaneo nuevo guarda su perfil en resumeMeta', () => {
+    jobs.enqueueAndWait.and.returnValue(of(buildScan()));
+    setup();
+    component.selectedFile.set(FILE());
+    component.startScan();
+    const opts = jobs.enqueueAndWait.calls.mostRecent().args[2];
+    expect(opts.resumeMeta).toEqual({ profile: component.scanProfile() });
   });
 });

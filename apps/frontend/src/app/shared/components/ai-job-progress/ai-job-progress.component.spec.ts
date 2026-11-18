@@ -61,6 +61,20 @@ describe('AiJobProgressComponent (QUI-1020)', () => {
     );
   });
 
+  it('«Puedes cerrar esta ventana» solo aparece cuando la espera es retomable', () => {
+    progress.onUploadStart();
+    progress.onStatus({ status: 'active' });
+    jasmine.clock().tick(40_000);
+    fixture.detectChanges();
+    expect(el().textContent).not.toContain('Puedes cerrar esta ventana');
+
+    progress.onResumable();
+    fixture.detectChanges();
+    expect(el().textContent).toContain(
+      'Puedes cerrar esta ventana: al volver retomamos el estado real.',
+    );
+  });
+
   it('un fallo reemplaza la barra por el panel de su categoría y ofrece reintentar', () => {
     let retries = 0;
     fixture.componentRef.setInput('showRetry', true);
