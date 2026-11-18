@@ -1,4 +1,5 @@
 import { Component, inject, signal, viewChild } from '@angular/core';
+import { ActivatedRoute, Router } from '@angular/router';
 import { Store } from '@ngrx/store';
 import { toSignal } from '@angular/core/rxjs-interop';
 
@@ -64,6 +65,7 @@ import type { Invoice } from '../../interfaces/invoice.interface';
           [(isOpen)]="isDetailModalOpen"
           [documentId]="detailDocumentId()"
           (adjust)="openAdjustmentNote($event)"
+          (openRelated)="openDocumentById($event)"
           (changed)="reloadList()"
         ></app-support-document-detail>
       }
@@ -86,6 +88,8 @@ import type { Invoice } from '../../interfaces/invoice.interface';
 })
 export class SupportDocumentsPageComponent {
   private store = inject(Store);
+  private route = inject(ActivatedRoute);
+  private router = inject(Router);
 
   /** Modal compartido de requisitos fiscales (accedido desde el template). */
   readonly fiscalReq = inject(FiscalRequirementsService);
@@ -124,6 +128,32 @@ export class SupportDocumentsPageComponent {
     // `selectDianConfigStatus` queda en su `initialValue` (no configurado) y
     // el gate abre el modal "missing" al primer clic en "Nuevo".
     this.store.dispatch(loadDianConfigs());
+
+    this.openDeepLinkedDocument();
+  }
+
+  /** Abre otro documento en el mismo modal (nota de ajuste u original). */
+  openDocumentById(id: number): void {
+    this.detailDocumentId.set(id);
+    this.isDetailModalOpen.set(true);
+  }
+
+  /**
+   * `?document=<id>` (p. ej. desde la OC): abre el detalle una sola vez y limpia
+   * el parámetro por el Router —no con `replaceState`, que no actualiza
+   * `ActivatedRoute`— para que recargar la página no lo reabra.
+   */
+  private openDeepLinkedDocument(): void {
+    const raw = this.route.snapshot.queryParamMap.get('document');
+    if (raw == null) return;
+    const id = Number(raw);
+    if (Number.isInteger(id) && id > 0) this.openDocumentById(id);
+    void this.router.navigate([], {
+      relativeTo: this.route,
+      queryParams: { document: null },
+      queryParamsHandling: 'merge',
+      replaceUrl: true,
+    });
   }
 
   openCreateModal(): void {

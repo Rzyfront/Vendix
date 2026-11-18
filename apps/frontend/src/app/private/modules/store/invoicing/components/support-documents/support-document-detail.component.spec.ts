@@ -1,9 +1,11 @@
 import { provideZonelessChangeDetection } from '@angular/core';
 import { ComponentFixture, TestBed } from '@angular/core/testing';
-import { of } from 'rxjs';
+import { provideRouter } from '@angular/router';
+import { of, throwError } from 'rxjs';
 
 import { SupportDocumentDetailComponent } from './support-document-detail.component';
 import { SupportDocumentService } from '../../services/support-document.service';
+import { InvoicingService } from '../../services/invoicing.service';
 import { DialogService } from '../../../../../../shared/components/index';
 import { ToastService } from '../../../../../../shared/components/toast/toast.service';
 import { CurrencyFormatService } from '../../../../../../shared/pipes/currency/currency.pipe';
@@ -64,6 +66,12 @@ describe('SupportDocumentDetailComponent — acciones según el estado', () => {
     voidDocument: jasmine.Spy;
     cancelDocument: jasmine.Spy;
   };
+  let invoicing: {
+    validateInvoice: jasmine.Spy;
+    sendInvoice: jasmine.Spy;
+    listNotes: jasmine.Spy;
+    getInvoicePdfUrl: jasmine.Spy;
+  };
   let dialog: { confirm: jasmine.Spy };
 
   const setup = (doc: SupportDocumentDetail): ComponentFixture<SupportDocumentDetailComponent> => {
@@ -77,13 +85,27 @@ describe('SupportDocumentDetailComponent — acciones según el estado', () => {
         .createSpy('cancelDocument')
         .and.returnValue(of({ success: true, data: { ...doc, status: 'cancelled' } })),
     };
+    invoicing = {
+      validateInvoice: jasmine
+        .createSpy('validateInvoice')
+        .and.returnValue(of({ success: true, data: { ...doc, status: 'validated' } })),
+      sendInvoice: jasmine
+        .createSpy('sendInvoice')
+        .and.returnValue(of({ success: true, data: { ...doc, status: 'sent' } })),
+      listNotes: jasmine.createSpy('listNotes').and.returnValue(of({ success: true, data: [] })),
+      getInvoicePdfUrl: jasmine.createSpy('getInvoicePdfUrl'),
+    };
     dialog = { confirm: jasmine.createSpy('confirm').and.resolveTo(true) };
 
+    // Algunos casos montan varios documentos en el mismo `it`.
+    TestBed.resetTestingModule();
     TestBed.configureTestingModule({
       imports: [SupportDocumentDetailComponent],
       providers: [
         provideZonelessChangeDetection(),
+        provideRouter([]),
         { provide: SupportDocumentService, useValue: service },
+        { provide: InvoicingService, useValue: invoicing },
         { provide: DialogService, useValue: dialog },
         {
           provide: ToastService,
@@ -240,5 +262,149 @@ describe('SupportDocumentDetailComponent — acciones según el estado', () => {
     expect(dialog.confirm).toHaveBeenCalled();
     expect(service.voidDocument).toHaveBeenCalledWith(100);
     expect(changed).toBe(1);
+  });
+
+  it('muestra la OC de origen con enlace al detalle de la OC cuando existe', () => {
+    const fixture = setup(baseDocument({ purchase_order: { id: 7, order_number: 'OC-0007' } }));
+
+    const link = query(fixture, 'po-link') as HTMLAnchorElement | null;
+    expect(link?.textContent).toContain('OC-0007');
+    expect(link?.getAttribute('href')).toBe('/admin/orders/purchase-orders/7');
+    expect(text(fixture)).toContain('Orden de compra de origen');
+  });
+
+  it('oculta la OC de origen cuando el documento no viene de una OC', () => {
+    const fixture = setup(baseDocument({ purchase_order: null }));
+
+    expect(query(fixture, 'po-link')).toBeNull();
+    expect(text(fixture)).not.toContain('Orden de compra de origen');
+  });
+
+  it('lista las notas de ajuste del documento y abre su detalle', () => {
+    const fixture = setup(baseDocument());
+    invoicing.listNotes.and.returnValue(
+      of({
+        success: true,
+        data: [
+          { id: 201, invoice_number: 'NA201', invoice_type: 'support_adjustment_note', status: 'accepted', total_amount: '500.00' },
+        ],
+      }),
+    );
+    fixture.componentInstance.reload();
+    fixture.detectChanges();
+    fixture.detectChanges();
+
+    expect(invoicing.listNotes).toHaveBeenCalledWith(100);
+    const rows = (fixture.nativeElement as HTMLElement).ownerDocument.body.querySelectorAll('[data-testid="note-row"]');
+    expect(rows.length).toBe(1);
+    expect(rows[0].textContent).toContain('NA201');
+    expect(rows[0].textContent).toContain('Aceptado');
+    const opened: number[] = [];
+    fixture.componentInstance.openRelated.subscribe((id) => opened.push(id));
+    (query(fixture, 'note-open')?.querySelector('button') as HTMLButtonElement).click();
+    expect(opened).toEqual([201]);
+  });
+
+  it('una nota de ajuste no consulta ni muestra notas propias', () => {
+    const fixture = setup(
+      baseDocument({ invoice_type: 'support_adjustment_note' as never, related_invoice_id: 90 }),
+    );
+
+    expect(invoicing.listNotes).not.toHaveBeenCalled();
+    expect(query(fixture, 'notes-section')).toBeNull();
+  });
+
+  it('«Emitir a la DIAN» solo aparece en borrador o validado', () => {
+    expect(query(setup(baseDocument({ status: 'draft' })), 'action-emit')).not.toBeNull();
+    expect(query(setup(baseDocument({ status: 'validated' })), 'action-emit')).not.toBeNull();
+    expect(query(setup(baseDocument({ status: 'accepted' })), 'action-emit')).toBeNull();
+    expect(query(setup(baseDocument({ status: 'sent' })), 'action-emit')).toBeNull();
+  });
+
+  it('emitir un borrador valida y luego envía', () => {
+    const fixture = setup(baseDocument({ status: 'draft', cufe: undefined }));
+
+    fixture.componentInstance.emitToDian();
+
+    expect(invoicing.validateInvoice).toHaveBeenCalledWith(100);
+    expect(invoicing.sendInvoice).toHaveBeenCalledWith(100);
+    expect(invoicing.validateInvoice.calls.count()).toBe(1);
+  });
+
+  it('emitir un documento ya validado solo envía', () => {
+    const fixture = setup(baseDocument({ status: 'validated', cufe: undefined }));
+
+    fixture.componentInstance.emitToDian();
+
+    expect(invoicing.validateInvoice).not.toHaveBeenCalled();
+    expect(invoicing.sendInvoice).toHaveBeenCalledWith(100);
+  });
+
+  it('un rechazo de la DIAN al emitir se muestra en el panel', () => {
+    const fixture = setup(baseDocument({ status: 'validated', cufe: undefined }));
+    invoicing.sendInvoice.and.returnValue(
+      throwError(() => ({
+        status: 422,
+        error: {
+          error_code: 'INVOICING_PROVIDER_004',
+          message: 'rechazo',
+          details: { invoice_id: 100, dian_errors: [{ code: 'FAB10a', message: 'Valor del CUDS incorrecto' }] },
+        },
+      })),
+    );
+
+    fixture.componentInstance.emitToDian();
+    fixture.detectChanges();
+
+    expect(text(fixture)).toContain('FAB10a');
+  });
+
+  it('el PDF se oculta en la nota de ajuste y se ofrece en el documento soporte', () => {
+    expect(query(setup(baseDocument()), 'action-pdf')).not.toBeNull();
+    expect(
+      query(setup(baseDocument({ invoice_type: 'support_adjustment_note' as never })), 'action-pdf'),
+    ).toBeNull();
+  });
+
+  it('«Descargar PDF» pide la URL firmada al endpoint de la factura', () => {
+    const fixture = setup(baseDocument());
+    invoicing.getInvoicePdfUrl.and.returnValue(of({ success: true, data: { url: 'https://s3/doc.pdf' } }));
+    const open = spyOn(window, 'open').and.returnValue({} as Window);
+
+    fixture.componentInstance.downloadPdf();
+
+    expect(invoicing.getInvoicePdfUrl).toHaveBeenCalledWith(100);
+    expect(open).toHaveBeenCalledWith('https://s3/doc.pdf', '_blank', 'noopener');
+  });
+
+  it('el botón de XML solo existe cuando hay xml_document', () => {
+    expect(query(setup(baseDocument({ xml_document: '<Invoice/>' })), 'action-xml')).not.toBeNull();
+    expect(query(setup(baseDocument({ xml_document: null })), 'action-xml')).toBeNull();
+  });
+
+  it('muestra el rechazo persistido de la DIAN con el mismo texto que la factura', () => {
+    const fixture = setup(
+      baseDocument({
+        status: 'rejected',
+        dian_status: 'rejected',
+        provider_response: {
+          provider_data: { dian_errors: [{ code: 'FAD06', message: 'NIT no coincide' }] },
+        },
+      } as Partial<SupportDocumentDetail>),
+    );
+
+    const panel = query(fixture, 'dian-rejection')?.textContent ?? '';
+    expect(panel).toContain('La DIAN rechazó el documento');
+    expect(panel).toContain('FAD06');
+  });
+
+  it('pinta las celdas fiscales con el helper de la factura', () => {
+    const fixture = setup(
+      baseDocument({ transmission_status: 'accepted', dian_status: 'accepted' } as Partial<SupportDocumentDetail>),
+    );
+
+    const cells = query(fixture, 'fiscal-cells')?.textContent ?? '';
+    expect(cells).toContain('Transmisión');
+    expect(cells).toContain('Aceptado por la DIAN');
   });
 });
