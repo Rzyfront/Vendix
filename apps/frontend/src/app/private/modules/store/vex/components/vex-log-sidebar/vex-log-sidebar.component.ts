@@ -1,10 +1,11 @@
 import {
   ChangeDetectionStrategy,
   Component,
+  computed,
   inject,
   model,
 } from '@angular/core';
-import { RouterLink } from '@angular/router';
+import { Router, RouterLink, UrlTree } from '@angular/router';
 import { IconComponent } from '../../../../../../shared/components/icon/icon.component';
 import { formatStoreDateTime } from '../../../../../../shared/utils/date.util';
 import { Reminder } from '../../../dashboard/services/reminders.service';
@@ -173,12 +174,13 @@ export const VEX_LOG_DASHBOARD_QUERY = { tab: 'bitacora' } as const;
                     @if (item.link) {
                       <span class="flex items-center gap-1 min-w-0">
                         <app-icon name="link" [size]="12" />
-                        @if (item.link.url) {
-                          <a [routerLink]="item.link.url" class="text-[var(--color-primary)] hover:underline truncate">
-                            {{ item.link.label }}
+                        @if (linkTrees().get(item.id); as linkTree) {
+                          <a [routerLink]="linkTree" class="text-[var(--color-primary)] hover:underline truncate">
+                            {{ item.link.type_label }} · {{ item.link.label }}
                           </a>
                         } @else {
-                          <span class="truncate">{{ item.link.label }}</span>
+                          <span class="truncate">{{ item.link.type_label }} · {{ item.link.label }}</span>
+                          <span class="shrink-0 italic">(no disponible)</span>
                         }
                       </span>
                     }
@@ -209,12 +211,27 @@ export const VEX_LOG_DASHBOARD_QUERY = { tab: 'bitacora' } as const;
 })
 export class VexLogSidebarComponent {
   readonly store = inject(VexLogStore);
+  private readonly router = inject(Router);
 
   readonly collapsed = model<boolean>(false);
 
   readonly filters = VEX_REMINDER_FILTERS;
   readonly dashboardLink = VEX_LOG_DASHBOARD_LINK;
   readonly dashboardQuery = VEX_LOG_DASHBOARD_QUERY;
+
+  /**
+   * Parsed routes of the links the user may open, by reminder id. A plain
+   * string in `routerLink` would encode a query such as `?invoiceId=`.
+   */
+  readonly linkTrees = computed(() => {
+    const trees = new Map<number, UrlTree>();
+    for (const item of this.store.filtered()) {
+      if (item.link?.available && item.link.url) {
+        trees.set(item.id, this.router.parseUrl(item.link.url));
+      }
+    }
+    return trees;
+  });
 
   /** Due instants render in the store zone, the same clock as the dashboard Bitácora. */
   formatDue(remind_at: string): string {
