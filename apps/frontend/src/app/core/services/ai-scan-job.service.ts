@@ -5,6 +5,7 @@ import {
   TimeoutError,
   defer,
   map,
+  of,
   switchMap,
   tap,
   throwError,
@@ -70,6 +71,12 @@ export interface AiScanJobOptions {
    * dentro del envelope `{ success, data }`.
    */
   statusUrl?: (jobId: string) => string;
+  /**
+   * El encolado respondió sin `job_id` porque no hay nada que esperar (p. ej.
+   * el documento ya estaba procesado). Devuelve el resultado final para
+   * terminar de inmediato, o `undefined` para tratarlo como fallo.
+   */
+  resultWithoutJob?: (data: Record<string, unknown>) => unknown;
 }
 
 interface EnqueueEnvelope {
@@ -126,15 +133,21 @@ export class AiScanJobService {
       opts?.progress?.onUploadStart?.();
       return this.http.post<EnqueueEnvelope>(url, body);
     }).pipe(
-      map((response) => {
-        const jobId = response?.data?.job_id;
-        if (!jobId) throw new Error('No se pudo iniciar el escaneo');
-        opts?.onEnqueued?.(response.data ?? {});
+      switchMap((response) => {
+        const data = response?.data ?? {};
+        const jobId = data.job_id;
+        if (!jobId) {
+          const direct = opts?.resultWithoutJob?.(data);
+          if (direct === undefined) {
+            throw new Error('No se pudo iniciar el escaneo');
+          }
+          return of(direct as T);
+        }
+        opts?.onEnqueued?.(data);
         if (opts?.resumeKey) this.remember(opts.resumeKey, jobId);
         opts?.progress?.onEnqueued?.(jobId);
-        return jobId;
+        return this.waitFor<T>(jobId, watch, opts);
       }),
-      switchMap((jobId) => this.waitFor<T>(jobId, watch, opts)),
       timeout({
         first: timeoutMs,
         with: () => throwError(() => this.timedOut(watch, opts)),

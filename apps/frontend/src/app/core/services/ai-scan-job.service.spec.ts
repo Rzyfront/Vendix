@@ -105,6 +105,35 @@ describe('AiScanJobService (QUI-1020)', () => {
     expect(err?.message).toBe('No se pudo iniciar el escaneo');
   });
 
+  it('sin job_id y con resultWithoutJob (documento ya procesado) termina de inmediato sin sondear', () => {
+    const progress = listener();
+    const out: unknown[] = [];
+    service
+      .enqueueAndWait(URL, {}, {
+        progress,
+        resumeKey: 'rut',
+        resultWithoutJob: (d) => (d['already_processed'] ? { document_id: d['document_id'] } : undefined),
+      })
+      .subscribe((r) => out.push(r));
+    enqueue({ job_id: null, already_processed: true, document_id: 7 });
+
+    expect(out).toEqual([{ document_id: 7 }]);
+    expect(progress.onCompleted).toHaveBeenCalledTimes(1);
+    expect(progress.onEnqueued).not.toHaveBeenCalled();
+    expect(service.hasPending('rut')).toBeFalse();
+    jasmine.clock().tick(10_000);
+    http.expectNone(() => true);
+  });
+
+  it('sin job_id y resultWithoutJob devuelve undefined: sigue siendo un fallo', () => {
+    let err: Error | undefined;
+    service
+      .enqueueAndWait(URL, {}, { resultWithoutJob: () => undefined })
+      .subscribe({ error: (e) => (err = e) });
+    enqueue({ job_id: null });
+    expect(err?.message).toBe('No se pudo iniciar el escaneo');
+  });
+
   describe('categoría del fallo', () => {
     function failWith(status: Record<string, unknown>): AiScanJobError {
       let err: AiScanJobError | undefined;
