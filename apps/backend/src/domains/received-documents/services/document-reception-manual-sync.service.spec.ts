@@ -70,7 +70,10 @@ describe('DocumentReceptionManualSyncService', () => {
       idempotency_key: `manual:${requestDto.idempotency_key}`,
       expected_version: 4,
     });
-    expect(h.queue.enqueue).toHaveBeenCalledWith(71);
+    expect(h.queue.enqueue).toHaveBeenCalledWith(
+      71,
+      'http:documentos-recibidos/sincronizar',
+    );
   });
 
   it('rejects manager-like actorless contexts before subscription or claim', async () => {
@@ -120,7 +123,10 @@ describe('DocumentReceptionManualSyncService', () => {
         connection: { organization_id: 1, accounting_entity_id: 30, store_id: 10 },
       },
     }));
-    expect(h.queue.enqueue).toHaveBeenCalledWith(70);
+    expect(h.queue.enqueue).toHaveBeenCalledWith(
+      70,
+      'http:documentos-recibidos/sincronizar',
+    );
   });
 
   it('does not reveal foreign runs and rejects stale, non-retryable, or actively leased runs', async () => {

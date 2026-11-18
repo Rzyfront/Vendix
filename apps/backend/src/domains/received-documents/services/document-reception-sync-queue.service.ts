@@ -1,3 +1,4 @@
+import { withJobOrigin, JobOriginSource } from '../../../common/queue/job-origin';
 import { InjectQueue } from '@nestjs/bullmq';
 import { BadRequestException, Injectable, ServiceUnavailableException } from '@nestjs/common';
 import { Queue } from 'bullmq';
@@ -12,7 +13,10 @@ export class DocumentReceptionSyncQueueService {
     @InjectQueue(QUEUE_NAME) private readonly queue: Queue<DocumentReceptionSyncJob>,
   ) {}
 
-  async enqueue(runId: number): Promise<{ run_id: number; job_id: string }> {
+  async enqueue(
+    runId: number,
+    source: JobOriginSource = 'system:recepcion-documentos',
+  ): Promise<{ run_id: number; job_id: string }> {
     if (!Number.isSafeInteger(runId) || runId <= 0) {
       throw new BadRequestException('run_id debe ser un entero positivo.');
     }
@@ -29,7 +33,7 @@ export class DocumentReceptionSyncQueueService {
         await existing.remove();
       }
 
-      const job = await this.queue.add('sync', { run_id: runId }, {
+      const job = await this.queue.add('sync', withJobOrigin({ run_id: runId }, source), {
         jobId,
         attempts: 3,
         backoff: { type: 'exponential', delay: 5000 },

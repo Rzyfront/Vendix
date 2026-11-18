@@ -1,3 +1,4 @@
+import { withJobOrigin } from '../queue/job-origin';
 import { Injectable, Logger } from '@nestjs/common';
 import { InjectQueue } from '@nestjs/bullmq';
 import { Queue } from 'bullmq';
@@ -83,7 +84,7 @@ export class AiScanJobService {
     }
 
     const job: AiScanJob = { kind, context, file_keys, params };
-    const added = await this.queue.add(kind, job, {
+    const added = await this.queue.add(kind, withJobOrigin(job, `http:escaneo-ia/${kind}`), {
       attempts: 2,
       backoff: { type: 'exponential', delay: 2000 },
       // QUI-1020: the web re-attaches to the job after a reload, so the result

@@ -1,3 +1,4 @@
+import { jobOrigin } from '../../../../common/queue/job-origin';
 import { PermissionsGuard } from '../../../auth/guards/permissions.guard';
 import { Permissions } from '../../../auth/decorators/permissions.decorator';
 import {
@@ -405,6 +406,7 @@ export class PurchaseOrdersController {
           scan_attachment_key: scanAttachment.key,
           scan_attachment: scanAttachment,
           order_type: orderType === 'ingredient' ? 'ingredient' : 'retail',
+          ...jobOrigin('http:compras/escanear-factura'),
         },
         {
           attempts: 2,
@@ -516,6 +518,7 @@ export class PurchaseOrdersController {
           order_type: dto.order_type === 'ingredient' ? 'ingredient' : 'retail',
           consolidated: dto.consolidated,
           note: dto.note,
+          ...jobOrigin('http:compras/revalidar-factura'),
         },
         {
           attempts: 2,
@@ -580,7 +583,11 @@ export class PurchaseOrdersController {
     @Param('id') id: string,
     @Body() dto: ReceivePurchaseOrderAsyncDto,
   ) {
-    const result = await this.receiveQueueService!.enqueueReceive(+id, dto);
+    const result = await this.receiveQueueService!.enqueueReceive(
+      +id,
+      dto,
+      'http:compras/recibir-por-lotes',
+    );
     return this.responseService.success(result, 'Recepción encolada');
   }
 
@@ -925,6 +932,7 @@ export class PurchaseOrdersController {
           dataUri,
           mimeType,
           context: { store_id, organization_id, user_id, request_id },
+          ...jobOrigin('http:compras/escanear-comprobante-pago'),
         },
         {
           attempts: 3,

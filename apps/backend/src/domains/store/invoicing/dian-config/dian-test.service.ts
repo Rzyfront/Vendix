@@ -1,3 +1,4 @@
+import { withJobOrigin } from '../../../../common/queue/job-origin';
 import { Injectable, Logger } from '@nestjs/common';
 import { InjectQueue } from '@nestjs/bullmq';
 import { Queue } from 'bullmq';
@@ -574,7 +575,7 @@ export class DianTestService {
       }
     }
 
-    const job = await this.testSetQueue.add('run', payload, {
+    const job = await this.testSetQueue.add('run', withJobOrigin(payload, 'http:facturacion/set-de-pruebas-dian'), {
       // `attempts: 1` — sin reintento, a diferencia del resto de las colas del
       // repo. Cada intento reservaría un bloque NUEVO de consecutivos
       // autorizados y enviaría otro lote que la DIAN rechazaría como duplicado.

@@ -48,6 +48,8 @@ describe('EmbeddingEventsListener - products.bulk_updated', () => {
         entity_type: 'product',
         entity_id: 1,
         content: 'Harina. Fina. Category: Despensa',
+        triggered_by_user_id: null,
+        source: 'event:products.bulk_updated',
       },
       opts: expect.objectContaining({
         attempts: 2,

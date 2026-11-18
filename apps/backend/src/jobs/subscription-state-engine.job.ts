@@ -1,3 +1,4 @@
+import { jobOrigin } from '../common/queue/job-origin';
 import { Injectable, Logger } from '@nestjs/common';
 import { Cron } from '@nestjs/schedule';
 import { InjectQueue } from '@nestjs/bullmq';
@@ -207,6 +208,7 @@ export class SubscriptionStateEngineJob {
           planName: after.plan?.name ?? null,
           periodEndsAt: periodEndIso,
           daysOverdue,
+          ...jobOrigin('cron:subscription-state-engine'),
         },
         {
           jobId: `dunning:${subscriptionId}:${after.state}:${cycleKey}`,

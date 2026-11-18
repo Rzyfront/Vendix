@@ -2,9 +2,20 @@ import { Injectable } from '@nestjs/common';
 import type { Prisma } from '@prisma/client';
 import { VendixHttpException, ErrorCodes } from '../../../../common/errors';
 import { PlatformIncidentService } from '../../../../common/incidents/platform-incident.service';
+import { PlatformAlertContextService } from '../../../../common/platform-alerts/platform-alert-context.service';
+import {
+  alertKindLabel,
+  displayDetails,
+  fallbackContext,
+  isPlanLimitAlert,
+} from '../../../../common/platform-alerts/platform-alert-format';
 import { PlatformAlertService } from '../../../../common/platform-alerts/platform-alert.service';
 import { TelegramNotifierService } from '../../../../common/platform-alerts/telegram-notifier.service';
-import type { PlatformAlertRow } from '../../../../common/platform-alerts/platform-alert.types';
+import type {
+  AlertContextLine,
+  PlatformAlertRow,
+  ResolvedAlertContext,
+} from '../../../../common/platform-alerts/platform-alert.types';
 import { GlobalPrismaService } from '../../../../prisma/services/global-prisma.service';
 import type {
   PlatformAlertsQueryDto,
@@ -21,7 +32,19 @@ export interface PlatformAlertView {
   status: string;
   title: string;
   message: string | null;
+  /** Detalles técnicos, sin el contexto interno (`_context`). */
   details: unknown;
+  /**
+   * QUI-1031: las mismas líneas que Telegram y el correo (Tienda,
+   * Organización, Usuario, Módulo, Acción, Registro, Origen, Plan, Cupo).
+   */
+  context: AlertContextLine[];
+  /** «Vendix Granizzo (testbalmes, id 105)», o la organización, o «Plataforma (sin tienda)». */
+  scope_label: string;
+  /** `plan_limit`: límite del plan de la tienda, no un fallo técnico. */
+  category: 'plan_limit' | null;
+  /** «Límite de plan», «Trabajo en segundo plano fallido»… */
+  kind_label: string;
   organization_id: number | null;
   store_id: number | null;
   affected_store_ids: number[];
@@ -63,6 +86,7 @@ export class PlatformAlertsAdminService {
     private readonly alerts: PlatformAlertService,
     private readonly telegram: TelegramNotifierService,
     private readonly incidents: PlatformIncidentService,
+    private readonly alertContext: PlatformAlertContextService,
   ) {}
 
   async list(
@@ -164,7 +188,11 @@ export class PlatformAlertsAdminService {
     const statusOf = new Map(
       tickets.map((t) => [t.ticket_number, String(t.status)]),
     );
-    return rows.map((row) => ({
+    // Los nombres nunca tumban la lista: si el resolutor falla, van los ids.
+    const contexts: ResolvedAlertContext[] = await this.alertContext
+      .resolveMany(rows)
+      .catch(() => rows.map((row) => fallbackContext(row)));
+    return rows.map((row, index) => ({
       id: row.id,
       source: row.source,
       process: row.process,
@@ -173,7 +201,11 @@ export class PlatformAlertsAdminService {
       status: row.status,
       title: row.title,
       message: row.message,
-      details: row.details ?? null,
+      details: row.details ? displayDetails(row.details) : null,
+      context: contexts[index].lines,
+      scope_label: contexts[index].scopeLabel,
+      category: isPlanLimitAlert(row) ? 'plan_limit' : null,
+      kind_label: alertKindLabel(row),
       organization_id: row.organization_id,
       store_id: row.store_id,
       affected_store_ids: row.affected_store_ids ?? [],

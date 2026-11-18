@@ -453,7 +453,9 @@ describe('CrmConversationsService', () => {
       expect(message).toMatchObject({ status: 'queued', body: 'Hola', direction: 'outbound', channel: 'whatsapp' });
       const row = prisma.crm_messages.rows.find((r) => r.id === message.id)!;
       expect(row).toMatchObject({ store_id: STORE_A, provider: 'meta_cloud', sent_by_user_id: OWNER_A });
-      expect(outbound.enqueue).toHaveBeenCalledWith(message.id);
+      expect(outbound.enqueue).toHaveBeenCalledWith(message.id, {
+        source: 'http:crm/enviar-mensaje',
+      });
       expect(events.publish).toHaveBeenCalledWith(
         expect.objectContaining({ type: 'crm.message', store_id: STORE_A, conversation_id: 1, message_id: message.id, status: 'queued', assigned_user_id: SELLER_A }),
       );
@@ -478,7 +480,9 @@ describe('CrmConversationsService', () => {
       });
       const row = prisma.crm_messages.rows.find((r) => r.id === message.id)!;
       expect(row).toMatchObject({ template_name: 'recordatorio', template_language: 'es', template_variables: ['Ana'], body: null });
-      expect(outbound.enqueue).toHaveBeenCalledWith(message.id);
+      expect(outbound.enqueue).toHaveBeenCalledWith(message.id, {
+        source: 'http:crm/enviar-mensaje',
+      });
       expect(prisma.crm_conversations.rows.find((c) => c.id === 4)).toMatchObject({ status: 'open', closed_at: null });
     });
 
@@ -505,7 +509,9 @@ describe('CrmConversationsService', () => {
       const message = await service.send(6, { body: 'hola', client_request_id: 'req-00000021' });
       const row = prisma.crm_messages.rows.find((r) => r.id === message.id)!;
       expect(row).toMatchObject({ channel: 'sms', provider: 'sns_sms', status: 'queued' });
-      expect(outbound.enqueue).toHaveBeenCalledWith(message.id);
+      expect(outbound.enqueue).toHaveBeenCalledWith(message.id, {
+        source: 'http:crm/enviar-mensaje',
+      });
       expect(smsSpend.assertAvailable).toHaveBeenCalledWith(STORE_A);
     });
 

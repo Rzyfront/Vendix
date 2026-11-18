@@ -156,7 +156,7 @@ export class VexiTaskService {
         permissions: context?.permissions,
         roles: context?.roles,
         app_key: 'chat_assistant',
-      });
+      }, 'http:vexi/tarea-en-segundo-plano');
 
       const updated = await this.prisma.ai_agent_tasks.update({
         where: { id: task.id },

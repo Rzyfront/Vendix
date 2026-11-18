@@ -1,3 +1,4 @@
+import { withJobOrigin, JobOriginSource } from '../../common/queue/job-origin';
 import { InjectQueue } from '@nestjs/bullmq';
 import { Injectable } from '@nestjs/common';
 import { Queue } from 'bullmq';
@@ -23,11 +24,14 @@ export class CrmOutboundQueue {
    */
   async enqueue(
     messageId: number,
-    options: { delayMs?: number } = {},
+    options: { delayMs?: number; source?: JobOriginSource } = {},
   ): Promise<void> {
     await this.queue.add(
       'send',
-      { message_id: messageId },
+      withJobOrigin(
+        { message_id: messageId },
+        options.source ?? 'system:crm-mensajes',
+      ),
       {
         jobId: `crm-outbound-${messageId}`,
         ...(options.delayMs && options.delayMs > 0

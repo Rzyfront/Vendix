@@ -112,7 +112,10 @@ export class DocumentReceptionSyncSchedulerService {
       const context = await this.contextIfAllowed(connection);
       if (!context) continue;
       try {
-        await this.queue.enqueue(run.id);
+        await this.queue.enqueue(
+          run.id,
+          'cron:recepcion-documentos-sync',
+        );
       } catch {
         // The DB run remains pending/queued/running and is discovered again.
         this.logger.warn(`Document reception outbox enqueue deferred run_id=${run.id} status=${run.status}.`);
@@ -175,7 +178,10 @@ export class DocumentReceptionSyncSchedulerService {
           expected_version: connection.version,
         });
         try {
-          await this.queue.enqueue(claimed.run_id);
+          await this.queue.enqueue(
+            claimed.run_id,
+            'cron:recepcion-documentos-sync',
+          );
         } catch {
           // `claim` committed a durable pending run; the next tick repairs the queue enqueue.
           this.logger.warn(`Due document reception enqueue deferred run_id=${claimed.run_id} status=pending.`);

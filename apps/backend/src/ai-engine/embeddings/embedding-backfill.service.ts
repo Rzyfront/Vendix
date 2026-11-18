@@ -1,3 +1,4 @@
+import { jobOrigin } from '../../common/queue/job-origin';
 import { Injectable, Logger } from '@nestjs/common';
 import { InjectQueue } from '@nestjs/bullmq';
 import { Queue } from 'bullmq';
@@ -341,6 +342,7 @@ export class EmbeddingBackfillService {
             entity_type: entityType,
             entity_id: record.id,
             content: record.content,
+            ...jobOrigin('http:vexi/reindexar-busqueda'),
           },
           {
             attempts: 2,

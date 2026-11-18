@@ -67,17 +67,26 @@ export function summarizeError(error: unknown, max = 300): string {
   return sanitizeAlertText(reason ? `${error.name}: ${reason}` : error.name, max);
 }
 
-/** Ids numéricos de tienda y organización del `data` de un job; nada más. */
+/**
+ * Ids numéricos de tienda y organización del `data` de un job; nada más.
+ * Algunas colas los guardan en `data.context` (asientos, CRM, IA).
+ */
 export function tenantIdsOf(data: unknown): {
   organizationId: number | null;
   storeId: number | null;
 } {
   const record =
     data && typeof data === 'object' ? (data as Record<string, unknown>) : {};
+  const nested =
+    record.context && typeof record.context === 'object'
+      ? (record.context as Record<string, unknown>)
+      : {};
   const pick = (...keys: string[]): number | null => {
-    for (const key of keys) {
-      const value = Number(record[key]);
-      if (Number.isInteger(value) && value > 0) return value;
+    for (const source of [record, nested]) {
+      for (const key of keys) {
+        const value = Number(source[key]);
+        if (Number.isInteger(value) && value > 0) return value;
+      }
     }
     return null;
   };

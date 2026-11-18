@@ -79,6 +79,8 @@ describe('SubscriptionPaymentBillingWarningListener', () => {
       invoiceId: undefined,
       amount: null,
       dueAt: null,
+      triggered_by_user_id: null,
+      source: 'event:subscription.payment.no_credential',
     });
   });
 

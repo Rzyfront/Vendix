@@ -149,7 +149,12 @@ describe('BillingWarningProcessor', () => {
       expect(emailQueueAdd).toHaveBeenCalledTimes(1);
       const [jobName, jobData, opts] = emailQueueAdd.mock.calls[0];
       expect(jobName).toBe('subscription.billing.renewal-failed.email');
-      expect(jobData).toEqual({ storeId: 10, subscriptionId: 999 });
+      expect(jobData).toEqual({
+        storeId: 10,
+        subscriptionId: 999,
+        triggered_by_user_id: null,
+        source: 'job:billing-warning',
+      });
       expect(opts.attempts).toBe(3);
       expect(opts.backoff).toEqual({ type: 'exponential', delay: 5000 });
     });

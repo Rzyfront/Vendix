@@ -1,3 +1,4 @@
+import { withJobOrigin } from '../../../../common/queue/job-origin';
 import { Injectable, Logger } from '@nestjs/common';
 import { InjectQueue } from '@nestjs/bullmq';
 import { Queue } from 'bullmq';
@@ -71,7 +72,7 @@ export class CrmGenerationService {
     };
 
     try {
-      const job = await this.crmLandingQueue.add('generate', payload, {
+      const job = await this.crmLandingQueue.add('generate', withJobOrigin(payload, 'http:crm/generar-landing'), {
         attempts: 3,
         backoff: { type: 'exponential', delay: 2000 },
         removeOnComplete: { count: 100 },

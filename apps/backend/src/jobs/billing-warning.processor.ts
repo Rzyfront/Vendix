@@ -1,3 +1,4 @@
+import { jobOrigin } from '../common/queue/job-origin';
 import { Processor, WorkerHost, InjectQueue } from '@nestjs/bullmq';
 import { Logger } from '@nestjs/common';
 import { OnEvent } from '@nestjs/event-emitter';
@@ -103,6 +104,7 @@ export class BillingWarningProcessor extends WorkerHost {
         invoiceId: payload.invoiceId ?? null,
         paymentId: payload.paymentId,
         storeSubscriptionId: payload.subscriptionId ?? null,
+        ...jobOrigin('event:subscription.payment.retry.failed'),
       });
     } catch (err: any) {
       this.logger.error(
@@ -370,6 +372,7 @@ export class BillingWarningProcessor extends WorkerHost {
         {
           storeId,
           subscriptionId: storeSubscriptionId,
+          ...jobOrigin('job:billing-warning'),
         },
         {
           attempts: 3,
