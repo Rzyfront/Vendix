@@ -337,6 +337,10 @@ export class AiJobMonitorService {
         ],
         organizationId,
         storeId: platformOrgId === null ? (owner?.store_id ?? null) : null,
+        affected: {
+          organizationId: owner?.organization_id ?? null,
+          storeId: owner?.store_id ?? null,
+        },
         userId: null,
         errorCode: incident.code ?? null,
         correlationId: `${source.queue}:${job.id}${owner?.request_id ? ` / ${owner.request_id}` : ''}`,

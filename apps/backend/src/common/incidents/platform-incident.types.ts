@@ -31,6 +31,24 @@ export interface PlatformIncidentInput {
   correlationId?: string | null;
   /** Defaults to 7 days. */
   dedupeTtlSeconds?: number;
+  /**
+   * Tenant the failure hit, when it differs from `organizationId`/`storeId`
+   * (the AI monitor files its tickets in the platform organization). Only read
+   * by the monitoring bot (QUI-1010); never written to the ticket.
+   */
+  affected?: { organizationId?: number | null; storeId?: number | null };
+}
+
+/**
+ * Emitted after EVERY `PlatformIncidentService.report` call (opened, deduped or
+ * failed). The API monitoring bot (QUI-1010) listens to it to log the incident
+ * and send it to Telegram without opening a second ticket or e-mail.
+ */
+export const PLATFORM_INCIDENT_REPORTED_EVENT = 'platform.incident.reported';
+
+export interface PlatformIncidentReportedEvent {
+  input: PlatformIncidentInput;
+  result: PlatformIncidentResult;
 }
 
 export interface PlatformIncidentResult {

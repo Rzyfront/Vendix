@@ -113,3 +113,60 @@ describe('AllExceptionsFilter — transacción vencida y pool agotado (S4)', () 
     expect(res.body.error_code).toBe('SYS_INTERNAL_001');
   });
 });
+
+describe('AllExceptionsFilter — bot de monitoreo (QUI-1010)', () => {
+  let consoleError: jest.SpyInstance;
+  beforeEach(() => {
+    consoleError = jest.spyOn(console, 'error').mockImplementation(() => undefined);
+  });
+  afterEach(() => consoleError.mockRestore());
+
+  const hostFor = (req: Record<string, unknown>) => {
+    const { host, res } = makeHost();
+    host.switchToHttp = () => ({ getResponse: () => res, getRequest: () => req });
+    return { host, res };
+  };
+
+  it('cada 5xx llega al bot con la ruta sin valores y sin cuerpo ni cabeceras', () => {
+    const sink = { captureHttpFailure: jest.fn() };
+    const filter = new AllExceptionsFilter(sink);
+    const { host, res } = hostFor({
+      method: 'POST',
+      originalUrl: '/api/store/orders/123?email=a@b.co',
+      body: { password: 'x' },
+      headers: { authorization: 'Bearer y' },
+    });
+
+    filter.catch(new Error('boom'), host as any);
+
+    expect(res.statusCode).toBe(500);
+    expect(sink.captureHttpFailure).toHaveBeenCalledTimes(1);
+    const input = sink.captureHttpFailure.mock.calls[0][0];
+    expect(input).toMatchObject({ method: 'POST', route: '/api/store/orders/:id', status: 500 });
+    expect(JSON.stringify(input)).not.toContain('a@b.co');
+    expect(input).not.toHaveProperty('body');
+    expect(input).not.toHaveProperty('headers');
+  });
+
+  it('los 4xx no se reportan', () => {
+    const sink = { captureHttpFailure: jest.fn() };
+    const { host } = hostFor({ method: 'GET', url: '/api/x' });
+    new AllExceptionsFilter(sink).catch(
+      new VendixHttpException(ErrorCodes.SYS_NOT_FOUND_001),
+      host as any,
+    );
+    expect(sink.captureHttpFailure).not.toHaveBeenCalled();
+  });
+
+  it('si el bot lanza, la respuesta al cliente no cambia', () => {
+    const sink = {
+      captureHttpFailure: jest.fn(() => {
+        throw new Error('sink down');
+      }),
+    };
+    const { host, res } = hostFor({ method: 'GET', url: '/api/x' });
+    new AllExceptionsFilter(sink).catch(new Error('boom'), host as any);
+    expect(res.statusCode).toBe(500);
+    expect(res.body.error_code).toBeDefined();
+  });
+});

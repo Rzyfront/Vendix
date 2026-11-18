@@ -4,10 +4,12 @@ import {
   ExecutionContext,
   CallHandler,
   HttpException,
+  Optional,
 } from '@nestjs/common';
 import { Observable } from 'rxjs';
 import { tap, catchError } from 'rxjs/operators';
 import { PerformanceCollectorService } from '../services/performance-collector.service';
+import { PlatformAlertService } from '../../../../common/platform-alerts/platform-alert.service';
 
 const EXCLUDED_PATHS = [
   '/health',
@@ -22,7 +24,11 @@ const NUMERIC_ID_REGEX = /\/\d+(?=\/|$)/g;
 
 @Injectable()
 export class PerformanceInterceptor implements NestInterceptor {
-  constructor(private readonly collector: PerformanceCollectorService) {}
+  constructor(
+    private readonly collector: PerformanceCollectorService,
+    // QUI-1010: respuestas lentas → alerta informativa del bot de monitoreo.
+    @Optional() private readonly alerts?: PlatformAlertService,
+  ) {}
 
   intercept(context: ExecutionContext, next: CallHandler): Observable<any> {
     const req = context.switchToHttp().getRequest();
@@ -45,6 +51,12 @@ export class PerformanceInterceptor implements NestInterceptor {
         const statusCode = context.switchToHttp().getResponse().statusCode;
         this.collector.record({ method, path, statusCode, duration });
         this.collector.trackActiveRequest(-1);
+        this.alerts?.captureSlowRequest({
+          method,
+          route: path,
+          durationMs: duration,
+          statusCode,
+        });
       }),
       catchError((err) => {
         const duration = Number(process.hrtime.bigint() - start) / 1_000_000;
