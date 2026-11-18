@@ -1,5 +1,7 @@
 import { Module, OnModuleInit } from '@nestjs/common';
 import { BulkUploadsModule } from '../bulk-uploads/bulk-uploads.module';
+import { BulkUploadHandlerRegistry } from '../bulk-uploads/bulk-upload-handler.registry';
+import { EmployeesBulkJobHandler } from './employees/employees-bulk-job.handler';
 import { AIToolRegistry } from '../../../ai-engine/tools/ai-tool-registry';
 import { createPayrollTools } from '../../../ai-engine/tools/domains/payroll.tools';
 import { ResponseModule } from '../../../common/responses/response.module';
@@ -58,6 +60,7 @@ import { DaviviendaBatchBuilder } from './bank-export/builders/davivienda-batch.
     EmployeesService,
     EmployeeFiscalProfileService,
     EmployeesBulkService,
+    EmployeesBulkJobHandler,
     PayrollRunsService,
     PayrollFlowService,
     PayrollCalculationService,
@@ -105,6 +108,8 @@ export class PayrollModule implements OnModuleInit {
     private readonly settlementsService: SettlementsService,
     private readonly settlementFlowService: SettlementFlowService,
     private readonly payrollBankExportService: PayrollBankExportService,
+    private readonly bulkJobRegistry: BulkUploadHandlerRegistry,
+    private readonly employeesBulkJobHandler: EmployeesBulkJobHandler,
   ) {}
 
   /**
@@ -115,6 +120,9 @@ export class PayrollModule implements OnModuleInit {
    * módulo no importa nada extra.
    */
   onModuleInit(): void {
+    // QUI-1009: carga masiva durable de empleados.
+    this.bulkJobRegistry.register(this.employeesBulkJobHandler);
+
     this.toolRegistry.registerMany(
       createPayrollTools({
         payrollRunsService: this.payrollRunsService,

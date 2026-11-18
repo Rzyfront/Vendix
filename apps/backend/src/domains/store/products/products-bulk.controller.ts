@@ -15,11 +15,17 @@ import {
   Query,
   Res,
   Logger,
+  HttpCode,
+  Optional,
 } from '@nestjs/common';
 import { Response } from 'express';
 import { FileInterceptor } from '@nestjs/platform-express';
 import { ProductsBulkService } from './products-bulk.service';
 import { BulkUploadLogsService } from '../bulk-uploads/bulk-upload-logs.service';
+import { BulkUploadJobsService } from '../bulk-uploads/bulk-upload-jobs.service';
+import { snapshotBulkJobUser } from '../bulk-uploads/bulk-upload-job.util';
+import { ProductsBulkJobHandler } from './products-bulk-job.handler';
+import { BulkProductsJobDto } from './dto/bulk-products-job.dto';
 import { ResponseService } from '@common/responses/response.service';
 import { VendixHttpException, ErrorCodes } from '@common/errors';
 import { PermissionsGuard } from '../../auth/guards/permissions.guard';
@@ -44,6 +50,9 @@ export class ProductsBulkController {
     private readonly productsBulkService: ProductsBulkService,
     private readonly responseService: ResponseService,
     private readonly bulkUploadLogs: BulkUploadLogsService,
+    // @Optional: los specs existentes del controlador no proveen estos dos.
+    @Optional() private readonly bulkJobs?: BulkUploadJobsService,
+    @Optional() private readonly jobHandler?: ProductsBulkJobHandler,
   ) {}
 
   /**
@@ -347,5 +356,32 @@ export class ProductsBulkController {
     await this.productsBulkService.cancelSession(sessionId, storeId);
 
     return this.responseService.success(null, 'Sesión cancelada');
+  }
+
+  /**
+   * QUI-1009 — encola la carga de una sesión analizada como trabajo durable.
+   * Responde 202 con la vista del trabajo; el progreso se consulta en
+   * `GET store/bulk-uploads/jobs/:id`.
+   */
+  @ApiOperation({ summary: 'Encolar la carga masiva de productos (durable)' })
+  @Post('jobs')
+  @HttpCode(202)
+  @Permissions('store:products:create')
+  async enqueueUploadJob(
+    @Body() body: BulkProductsJobDto,
+    @Req() req: AuthenticatedRequest,
+  ) {
+    await this.jobHandler!.assertSessionExists(body.session_id);
+    const view = await this.bulkJobs!.enqueue({
+      upload_type: 'products',
+      file_name: body.file_name,
+      file_hash: body.file_hash,
+      params: {
+        session_id: body.session_id,
+        initial_load_ack: body.initial_load_ack === true,
+      },
+      user: snapshotBulkJobUser(req.user),
+    });
+    return this.responseService.success(view, 'Carga encolada');
   }
 }

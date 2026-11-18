@@ -430,37 +430,6 @@ export class InventoryService {
       .pipe(catchError(this.handleError));
   }
 
-  /** Una página (<=100 filas) del commit de sesión de ajustes. */
-  uploadBulkAdjustmentsSessionPage(
-    session_id: string,
-    location_id: number,
-    offset: number,
-    limit: number,
-    adjustment_type?: string,
-    description?: string,
-    initial_load_ack?: boolean,
-    file_info?: { file_name?: string; file_hash?: string },
-  ): Observable<ApiResponse<any>> {
-    const body: Record<string, unknown> = {
-      session_id,
-      location_id,
-      offset,
-      limit,
-    };
-    if (adjustment_type) body['adjustment_type'] = adjustment_type;
-    if (description) body['description'] = description;
-    if (initial_load_ack) body['initial_load_ack'] = true;
-    if (file_info?.file_name) body['file_name'] = file_info.file_name;
-    if (file_info?.file_hash) body['file_hash'] = file_info.file_hash;
-
-    return this.http
-      .post<ApiResponse<any>>(
-        `${this.base_url}/adjustments/bulk/upload-session`,
-        body,
-      )
-      .pipe(catchError(this.handleError));
-  }
-
   cancelBulkAdjustmentSession(session_id: string): Observable<ApiResponse<any>> {
     return this.http
       .delete<ApiResponse<any>>(
