@@ -1,4 +1,4 @@
-import { Processor, WorkerHost } from '@nestjs/bullmq';
+import { OnWorkerEvent, Processor, WorkerHost } from '@nestjs/bullmq';
 import { Logger } from '@nestjs/common';
 import { Job, UnrecoverableError } from 'bullmq';
 import { randomUUID } from 'crypto';
@@ -8,6 +8,8 @@ import { VendixHttpException } from '@common/errors';
 import { mimeFromKey } from '../../domains/store/orders/purchase-orders/invoice-revalidate.processor';
 import { AiScanHandlerRegistry } from './ai-scan-handler.registry';
 import { AiScanFile, AiScanJob } from './interfaces/ai-scan-job.interface';
+import { AiJobMonitorService } from './ai-job-monitor.service';
+import { aiScanSource } from './ai-scan-sources';
 
 /**
  * Processor de la cola generica `ai-scan`. Despacha por `job.data.kind` al
@@ -21,6 +23,7 @@ export class AiScanProcessor extends WorkerHost {
   constructor(
     private readonly registry: AiScanHandlerRegistry,
     private readonly s3Service: S3Service,
+    private readonly monitor: AiJobMonitorService,
   ) {
     super();
   }
@@ -69,11 +72,22 @@ export class AiScanProcessor extends WorkerHost {
               size: buffer.length,
             });
           }
-          return handler({
-            files,
-            params: data.params ?? {},
-            context: ctx,
-          });
+          return this.monitor.runAiWork(job, aiScanSource(data.kind), () =>
+            handler({
+              files,
+              params: data.params ?? {},
+              context: ctx,
+              reportProgress: async (progress) => {
+                try {
+                  await job.updateProgress(progress);
+                } catch (err: any) {
+                  this.logger.warn(
+                    `[AiScan] job=${job.id} progress not stored: ${err?.message ?? err}`,
+                  );
+                }
+              },
+            }),
+          );
         },
       );
     } catch (error: any) {
@@ -89,5 +103,19 @@ export class AiScanProcessor extends WorkerHost {
       }
       throw error;
     }
+  }
+
+  /**
+   * QUI-1020: a job that fails for good (no retry left) and is not the
+   * document's fault alerts Vendix once (ticket + e-mail, deduplicated).
+   */
+  @OnWorkerEvent('failed')
+  async onFailed(job: Job<AiScanJob> | undefined): Promise<void> {
+    if (!job) return;
+    await this.monitor.onFailed(
+      job,
+      aiScanSource(job.data?.kind),
+      job.data?.context,
+    );
   }
 }

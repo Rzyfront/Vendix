@@ -1,3 +1,5 @@
+import type { AiJobProgress, AiJobStatusMeta } from '../ai-job-monitor.service';
+
 /**
  * Contratos de la cola generica `ai-scan` (escaneos IA async: 202 + job_id + poll).
  * Los handlers por `kind` los registra cada dominio en `AiScanHandlerRegistry`.
@@ -30,10 +32,15 @@ export interface AiScanJob {
   params: Record<string, unknown>;
 }
 
-export interface AiScanJobStatus<T = unknown> {
+/**
+ * `{status, result?, error?}` is the contract mobile reads; the rest is
+ * additive (QUI-1020): timestamps, real progress, stall and failure class.
+ */
+export interface AiScanJobStatus<T = unknown> extends Partial<AiJobStatusMeta> {
   status: 'waiting' | 'active' | 'completed' | 'failed' | 'delayed';
   result?: T;
   error?: string;
+  kind?: AiScanKind;
 }
 
 export interface AiScanFile {
@@ -47,4 +54,9 @@ export type AiScanHandler<T = unknown> = (input: {
   files: AiScanFile[];
   params: Record<string, unknown>;
   context: AiScanJobContext;
+  /**
+   * Real progress (pages, rows, steps) for the bar in the web (QUI-1020).
+   * Optional to call; never throws.
+   */
+  reportProgress?: (progress: AiJobProgress) => Promise<void>;
 }) => Promise<T>;

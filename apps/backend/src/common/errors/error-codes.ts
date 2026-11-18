@@ -2304,6 +2304,21 @@ export const ErrorCodes = {
     httpStatus: 400,
     devMessage: 'No default AI provider configured',
   },
+  // QUI-1020: the provider refused for billing (402, insufficient_quota, credit
+  // balance too low). 4xx on purpose: the AI job queues treat it as final (a
+  // retry never refills the balance) and alert Vendix once.
+  AI_PROVIDER_003: {
+    code: 'AI_PROVIDER_003',
+    httpStatus: 402,
+    devMessage: 'AI provider has no credits or quota left',
+  },
+  // QUI-1020: the provider kept answering 429 after the job's retries. 429 on
+  // purpose: the AI job queues retry it like any rate limit before giving up.
+  AI_PROVIDER_004: {
+    code: 'AI_PROVIDER_004',
+    httpStatus: 429,
+    devMessage: 'AI provider rate limit kept refusing the request',
+  },
   AI_REQUEST_001: {
     code: 'AI_REQUEST_001',
     httpStatus: 500,
