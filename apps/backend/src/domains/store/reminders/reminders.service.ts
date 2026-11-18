@@ -18,12 +18,26 @@ import {
   RemindersQueryDto,
   UpdateReminderDto,
 } from './dto/reminders.dto';
+import {
+  ReminderLinkAccess,
+  ReminderLinkOption,
+  ReminderLinkScope,
+  accessFromContext,
+  canOpenLink,
+  findLinkedRecords,
+  linkKey,
+  linkRoute,
+  linkTypeLabel,
+  searchLinkableRecords,
+} from './reminder-links';
 
 export const REMINDER_DUE_NOTIFICATION = 'reminder_due';
 /** The dashboard opens its "Bitácora" tab with this query param. */
 export const REMINDERS_ROUTE = '/admin/dashboard?tab=bitacora';
 
 const DEFAULT_LIMIT = 100;
+/** Link search: hits per record type. */
+const LINK_SEARCH_PER_TYPE = 5;
 /** A date without time ("el viernes") reminds at this store-local hour. */
 const DATE_ONLY_HOUR = 8;
 const MINUTE_MS = 60_000;
@@ -47,8 +61,15 @@ export type ReminderBucket = 'overdue' | 'today' | 'upcoming' | 'no_date' | 'don
 
 export interface ReminderLink {
   type: ReminderLinkType;
+  /** Readable type, e.g. "Orden de compra". */
+  type_label: string;
   id: number | null;
   label: string;
+  /**
+   * False when the record was deleted (or archived) or the user may not open
+   * its module: the UI shows "no disponible" and `url` is null.
+   */
+  available: boolean;
   url: string | null;
 }
 
@@ -83,14 +104,6 @@ const BUCKET_ORDER: Record<ReminderBucket, number> = {
   upcoming: 2,
   no_date: 3,
   done: 4,
-};
-
-const LINK_ROUTES: Record<ReminderLinkType, (id: number | null) => string | null> = {
-  product: (id) => (id ? `/admin/products/${id}` : null),
-  order: (id) => (id ? `/admin/orders/${id}` : null),
-  customer: (id) => (id ? `/admin/customers/${id}` : null),
-  supplier: (id) => (id ? `/admin/inventory/suppliers/${id}` : null),
-  metric: () => '/admin/dashboard',
 };
 
 /**
@@ -131,9 +144,9 @@ export class RemindersService {
       ],
       take: query.limit ?? DEFAULT_LIMIT,
     });
-    const items = rows
-      .map((row) => this.toView(row, window))
-      .sort((a, b) => BUCKET_ORDER[a.bucket] - BUCKET_ORDER[b.bucket]);
+    const items = (await this.toViews(actor, rows, window)).sort(
+      (a, b) => BUCKET_ORDER[a.bucket] - BUCKET_ORDER[b.bucket],
+    );
     return {
       items,
       timezone: window.tz,
@@ -143,7 +156,21 @@ export class RemindersService {
 
   async findOne(actor: ReminderActor, id: number): Promise<ReminderView> {
     const row = await this.findOwned(actor, id);
-    return this.toView(row, await this.dayWindow(actor.store_id));
+    return this.toOneView(actor, row, await this.dayWindow(actor.store_id));
+  }
+
+  /**
+   * Records the actor may link, found by number or name: only the store of
+   * the session and only the types whose READ permission the user holds.
+   */
+  async searchLinks(actor: ReminderActor, q: string): Promise<ReminderLinkOption[]> {
+    return searchLinkableRecords(
+      this.prisma,
+      this.linkScope(actor),
+      this.access(),
+      q.trim(),
+      LINK_SEARCH_PER_TYPE,
+    );
   }
 
   async create(
@@ -153,6 +180,7 @@ export class RemindersService {
   ): Promise<ReminderView> {
     const window = await this.dayWindow(actor.store_id);
     const link = await this.resolveLink(
+      actor,
       dto.link_type ?? null,
       dto.link_id ?? null,
       dto.link_label ?? null,
@@ -170,7 +198,7 @@ export class RemindersService {
         link_label: link?.label ?? null,
       },
     });
-    return this.toView(row, window);
+    return this.toOneView(actor, row, window);
   }
 
   async update(
@@ -204,6 +232,7 @@ export class RemindersService {
       data.link_label = null;
     } else if (dto.link_type !== undefined) {
       const link = await this.resolveLink(
+        actor,
         dto.link_type,
         dto.link_id ?? null,
         dto.link_label ?? null,
@@ -222,7 +251,7 @@ export class RemindersService {
       });
       if (!result.count) throw new VendixHttpException(ErrorCodes.REMINDER_001);
     }
-    return this.toView(await this.findOwned(actor, id), window);
+    return this.toOneView(actor, await this.findOwned(actor, id), window);
   }
 
   async remove(
@@ -235,6 +264,19 @@ export class RemindersService {
     });
     if (!result.count) throw new VendixHttpException(ErrorCodes.REMINDER_001);
     return { id: current.id, title: current.title };
+  }
+
+  /** Store (and its organization, for suppliers) the link lookups are bound to. */
+  private linkScope(actor: ReminderActor): ReminderLinkScope {
+    return {
+      store_id: actor.store_id,
+      organization_id: RequestContextService.getContext()?.organization_id ?? null,
+    };
+  }
+
+  /** READ permissions of the session user (HTTP request or Vex context). */
+  private access(): ReminderLinkAccess {
+    return accessFromContext(RequestContextService.getContext());
   }
 
   /** Ownership filter applied to EVERY query: store AND user of the actor. */
@@ -304,66 +346,32 @@ export class RemindersService {
   }
 
   /**
-   * Validates that the linked record exists in the CONTEXT store (scoped
-   * Prisma) and fills the readable label when none was given.
+   * Validates that the linked record exists in the actor's store and that the
+   * user may open its module, and fills the readable label when none was
+   * given. A record without permission answers exactly like a missing one,
+   * so a link by id never reveals a label the user could not read.
    */
   private async resolveLink(
+    actor: ReminderActor,
     type: ReminderLinkType | null,
     id: number | null,
     label: string | null,
-  ): Promise<ReminderLink | null> {
+  ): Promise<{ type: ReminderLinkType; id: number | null; label: string } | null> {
     if (!type) {
       if (id || label) throw new VendixHttpException(ErrorCodes.REMINDER_LINK_001);
       return null;
     }
     if (type === 'metric') {
       if (!label) throw new VendixHttpException(ErrorCodes.REMINDER_LINK_001);
-      return { type, id: null, label, url: LINK_ROUTES.metric(null) };
+      return { type, id: null, label };
     }
-    if (!id) throw new VendixHttpException(ErrorCodes.REMINDER_LINK_001);
-    const found = await this.linkedLabel(type, id);
-    if (found === null) throw new VendixHttpException(ErrorCodes.REMINDER_LINK_001);
-    return { type, id, label: label || found, url: LINK_ROUTES[type](id) };
-  }
-
-  private async linkedLabel(
-    type: Exclude<ReminderLinkType, 'metric'>,
-    id: number,
-  ): Promise<string | null> {
-    switch (type) {
-      case 'product': {
-        const row = await this.prisma.products.findFirst({
-          where: { id },
-          select: { name: true },
-        });
-        return row ? row.name : null;
-      }
-      case 'order': {
-        const row = await this.prisma.orders.findFirst({
-          where: { id },
-          select: { order_number: true },
-        });
-        return row ? `Orden ${row.order_number}` : null;
-      }
-      case 'customer': {
-        const row = await this.prisma.store_users.findFirst({
-          where: { user_id: id },
-          select: { user: { select: { first_name: true, last_name: true } } },
-        });
-        if (!row) return null;
-        return (
-          [row.user?.first_name, row.user?.last_name].filter(Boolean).join(' ') ||
-          `Cliente #${id}`
-        );
-      }
-      case 'supplier': {
-        const row = await this.prisma.suppliers.findFirst({
-          where: { id },
-          select: { name: true },
-        });
-        return row ? row.name : null;
-      }
+    if (!id || !canOpenLink(type, this.access())) {
+      throw new VendixHttpException(ErrorCodes.REMINDER_LINK_001);
     }
+    const found = await findLinkedRecords(this.prisma, this.linkScope(actor), [{ type, id }]);
+    const current = found.get(linkKey(type, id));
+    if (current === undefined) throw new VendixHttpException(ErrorCodes.REMINDER_LINK_001);
+    return { type, id, label: label || current };
   }
 
   private async dayWindow(storeId: number): Promise<DayWindow> {
@@ -383,8 +391,40 @@ export class RemindersService {
     return 'upcoming';
   }
 
-  private toView(row: ReminderRow, window: DayWindow): ReminderView {
-    const type = row.link_type as ReminderLinkType | null;
+  private async toOneView(
+    actor: ReminderActor,
+    row: ReminderRow,
+    window: DayWindow,
+  ): Promise<ReminderView> {
+    return (await this.toViews(actor, [row], window))[0];
+  }
+
+  /**
+   * Views of the rows, with each link checked on read: the record must still
+   * exist in the store (one query per linked type) and the user must be
+   * allowed to open it; otherwise the link is "no disponible".
+   */
+  private async toViews(
+    actor: ReminderActor,
+    rows: ReminderRow[],
+    window: DayWindow,
+  ): Promise<ReminderView[]> {
+    const links = rows.flatMap((row) =>
+      row.link_type ? [{ type: row.link_type as ReminderLinkType, id: row.link_id }] : [],
+    );
+    const existing = links.length
+      ? await findLinkedRecords(this.prisma, this.linkScope(actor), links)
+      : new Map<string, string>();
+    const access = this.access();
+    return rows.map((row) => this.toView(row, window, existing, access));
+  }
+
+  private toView(
+    row: ReminderRow,
+    window: DayWindow,
+    existing: Map<string, string>,
+    access: ReminderLinkAccess,
+  ): ReminderView {
     return {
       id: row.id,
       title: row.title,
@@ -395,19 +435,31 @@ export class RemindersService {
         : null,
       status: row.status,
       bucket: this.bucket(row, window),
-      link:
-        type && row.link_label
-          ? {
-              type,
-              id: row.link_id,
-              label: row.link_label,
-              url: LINK_ROUTES[type]?.(row.link_id) ?? null,
-            }
-          : null,
+      link: this.linkView(row, existing, access),
       source: row.source,
       completed_at: row.completed_at,
       created_at: row.created_at,
       updated_at: row.updated_at,
+    };
+  }
+
+  private linkView(
+    row: ReminderRow,
+    existing: Map<string, string>,
+    access: ReminderLinkAccess,
+  ): ReminderLink | null {
+    const type = row.link_type as ReminderLinkType | null;
+    if (!type || !row.link_label) return null;
+    const available =
+      canOpenLink(type, access) &&
+      (type === 'metric' || (!!row.link_id && existing.has(linkKey(type, row.link_id))));
+    return {
+      type,
+      type_label: linkTypeLabel(type),
+      id: row.link_id,
+      label: row.link_label,
+      available,
+      url: available ? linkRoute(type, row.link_id) : null,
     };
   }
 }

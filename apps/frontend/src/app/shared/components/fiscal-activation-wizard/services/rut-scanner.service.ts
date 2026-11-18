@@ -54,6 +54,23 @@ export class RutScannerService {
   }
 
   /**
+   * Re-attach to a scan remembered under `rut:${scope}` (QUI-1020). `null`
+   * when there is nothing to resume.
+   */
+  resume(
+    scope?: RutScannerScope,
+    opts?: Omit<AiScanJobOptions, 'resumeKey' | 'onEnqueued'>,
+  ): Observable<RutScanApiResponse> | null {
+    const resumed = this.aiScanJobs.resume<RutScanResult>(
+      `rut:${scope ?? 'auto'}`,
+      opts,
+    );
+    return resumed
+      ? resumed.pipe(map((result) => ({ success: true, data: result })))
+      : null;
+  }
+
+  /**
    * `store` y `organization` cuelgan de `{scope}/settings/rut-scanner`, pero la
    * plataforma no: su namespace es `super-admin/fiscal`, igual que hace
    * `FiscalOperationsService.baseUrl()`. Interpolar el scope crudo producía

@@ -8,7 +8,7 @@ import { RequestContextService } from '@common/context/request-context.service';
 import { ResponseService } from '@common/responses/response.service';
 import { DefaultPanelUIService } from '../../../../common/services/default-panel-ui.service';
 import { StaffProvisioningService } from '../../../../common/services/staff-provisioning.service';
-import { S3Service } from '@common/services/s3.service';
+import { S3Service, isS3NotFoundError } from '@common/services/s3.service';
 import { VendixHttpException, ErrorCodes } from '@common/errors';
 import {
   BulkEmployeeUploadDto,
@@ -603,6 +603,7 @@ export class EmployeesBulkService {
     storeId: number,
     user: any,
     page?: { offset?: number; limit?: number },
+    options: { keepSessionFile?: boolean } = {},
   ): Promise<BulkEmployeeUploadResultDto | BulkEmployeeUploadSessionResultDto> {
     const s3Key = `tmp/bulk-employees/${storeId}/${sessionId}.xlsx`;
 
@@ -610,7 +611,11 @@ export class EmployeesBulkService {
     try {
       fileBuffer = await this.s3Service.downloadImage(s3Key);
     } catch (error) {
-      throw new VendixHttpException(ErrorCodes.BULK_PROD_SESSION_EXPIRED);
+      // Solo «no existe» es sesion vencida (dato); un fallo de S3 es tecnico.
+      if (isS3NotFoundError(error)) {
+        throw new VendixHttpException(ErrorCodes.BULK_PROD_SESSION_EXPIRED);
+      }
+      throw error;
     }
 
     // Modo paginado: el cliente recorre el archivo en paginas de <=100 filas.
@@ -639,7 +644,9 @@ export class EmployeesBulkService {
         user,
       );
       const done = offset + limit >= total;
-      if (done) {
+      // `keepSessionFile` (trabajo durable QUI-1009): el trabajo borra el
+      // archivo al terminar, para conservarlo si el lote se reintenta a mano.
+      if (done && !options.keepSessionFile) {
         try {
           await this.s3Service.deleteFile(s3Key);
         } catch (e) {

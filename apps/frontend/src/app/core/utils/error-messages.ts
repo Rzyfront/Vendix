@@ -283,6 +283,19 @@ export const ERROR_MESSAGES: Record<string, string> = {
   BULK_PROD_VALIDATE_001:
     'Uno de los valores tiene un formato invalido. Verifique campos como marca o categoria.',
 
+  // Bulk upload jobs (QUI-1009)
+  BULK_JOB_ALREADY_ACTIVE:
+    'Ya hay una carga de este tipo en curso en la tienda. Espera a que termine.',
+  BULK_JOB_NOT_FOUND: 'No encontramos esa carga.',
+  BULK_JOB_NOT_RETRYABLE:
+    'Esta carga ya no se puede reanudar. Sube el archivo de nuevo.',
+  BULK_JOB_ENQUEUE_FAILED:
+    'No pudimos iniciar la carga por un problema técnico. Intenta de nuevo en unos minutos.',
+  BULK_JOB_TIMEOUT:
+    'La carga superó el tiempo máximo. Estamos revisando el problema técnico.',
+  BULK_JOB_INTERRUPTED:
+    'La carga se interrumpió en el servidor. Estamos revisando el problema técnico.',
+
   // Orders
   ORD_FIND_001: 'Orden no encontrada.',
   ORD_CREATE_001: 'Error al crear la orden.',
@@ -471,6 +484,12 @@ export const ERROR_MESSAGES: Record<string, string> = {
   AI_CONFIG_001: 'Configuracion de IA no encontrada.',
   AI_PROVIDER_001: 'No se pudo conectar con el proveedor de IA.',
   AI_PROVIDER_002: 'No hay un proveedor de IA configurado por defecto.',
+  // QUI-1020: el proveedor rechazó por saldo/cuota o siguió limitando tras
+  // los reintentos. No es culpa del documento y Vendix ya fue avisado.
+  AI_PROVIDER_003:
+    'El servicio de IA no está disponible en este momento (sin créditos). Ya avisamos al equipo de Vendix; intenta más tarde.',
+  AI_PROVIDER_004:
+    'El servicio de IA está saturado en este momento. Ya avisamos al equipo de Vendix; intenta de nuevo en unos minutos.',
   AI_REQUEST_001: 'La solicitud al proveedor de IA fallo.',
   AI_CONFIG_002: 'Ya existe una configuracion con ese proveedor y modelo.',
   AI_APP_001: 'Aplicacion de IA no encontrada.',
@@ -877,6 +896,21 @@ export const ERROR_MESSAGES: Record<string, string> = {
     'La IA no pudo leer la resolución. Intenta con una foto más nítida o escribe los datos a mano.',
   RESOLUTION_SCAN_PARSE_FAIL:
     'La IA respondió algo que no se pudo interpretar. Intenta de nuevo o escribe los datos a mano.',
+  // Escáner IA de planillas de ruta y de socios (QUI-1020: no tenían texto).
+  RTSCAN_NO_FILE: 'Sube una foto o un PDF de la planilla.',
+  RTSCAN_INVALID_FILE: 'Formato no soportado. Usa JPG, PNG, WebP o PDF.',
+  RTSCAN_AI_FAIL:
+    'No se pudo analizar la planilla por un problema del servicio. Intenta de nuevo.',
+  RTSCAN_PARSE_FAIL:
+    'No pudimos leer la planilla. Intenta con una foto más nítida y completa.',
+  RTSCAN_MATCH_001:
+    'Una fila de la planilla no coincide con ninguna parada de la ruta. Revisa que sea la planilla correcta.',
+  MEMBER_SCAN_NO_FILE: 'Sube una foto o un PDF con la lista de socios.',
+  MEMBER_SCAN_INVALID_FILE: 'Formato no soportado. Usa una imagen o un PDF.',
+  MEMBER_SCAN_AI_FAIL:
+    'No se pudo analizar la lista por un problema del servicio. Intenta de nuevo.',
+  MEMBER_SCAN_PARSE_FAIL:
+    'No pudimos leer la lista de socios. Intenta con un archivo más nítido.',
   RUT_SCAN_NO_FILE: 'Sube una foto o un PDF del RUT.',
   RUT_SCAN_INVALID_FILE: 'Formato no soportado. Usa JPG, PNG, WebP o PDF.',
   RUT_SCAN_AI_FAIL:
@@ -1361,6 +1395,13 @@ export const ERROR_MESSAGES: Record<string, string> = {
   // reintente, y a quién avisar.
   PRINT_TOKEN_SYNTAX_001:
     'La venta quedó registrada, pero el formato de impresión tiene un error en su plantilla y el documento no se puede generar. Reintentar no lo resuelve: avisa al administrador para que corrija la plantilla.',
+
+  // Vendix Platform · enlace CRM ↔ organización cliente (solo tienda plataforma).
+  PLATFORM_CRM_001: 'Este cliente ya no está en el CRM de Vendix Platform.',
+  PLATFORM_CRM_002: 'La organización no existe o no se puede enlazar.',
+  PLATFORM_CRM_003: 'Este cliente ya tiene una cuenta Vendix enlazada. Recarga la ficha.',
+  PLATFORM_CRM_004: 'Esa organización ya está enlazada a otro cliente del CRM.',
+  PLATFORM_CRM_005: 'Este cliente ya no tiene una cuenta Vendix enlazada. Recarga la ficha.',
 };
 
 export const EMPTY_CART_MESSAGE = 'El carrito está vacío.';

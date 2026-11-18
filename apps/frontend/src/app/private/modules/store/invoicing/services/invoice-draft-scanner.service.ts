@@ -39,6 +39,11 @@ export const INVOICE_DRAFT_SCAN_STORE_PATH = 'store/invoicing/scan-draft/async';
 export const INVOICE_DRAFT_SCAN_PLATFORM_PATH =
   'superadmin/subscriptions/fiscal/sales-invoices/scan-draft/async';
 
+/** Remembered-job key of the scanner for a given route (QUI-1020). */
+export function invoiceDraftResumeKey(path: string): string {
+  return `invoice_draft:${String(path || INVOICE_DRAFT_SCAN_STORE_PATH).replace(/^\/+/, '')}`;
+}
+
 /**
  * Cliente del escáner IA de «Nueva factura».
  *
@@ -68,5 +73,21 @@ export class InvoiceDraftScannerService {
       buildInvoiceDraftScanFormData(files, note),
       opts,
     );
+  }
+
+  /** Re-attach to an analysis remembered for this route, or `null`. */
+  resume(
+    path: string = INVOICE_DRAFT_SCAN_STORE_PATH,
+    opts?: Omit<AiScanJobOptions, 'resumeKey' | 'onEnqueued'>,
+  ): Observable<InvoiceDraftScanResult> | null {
+    return this.aiScanJobs.resume<InvoiceDraftScanResult>(
+      invoiceDraftResumeKey(path),
+      opts,
+    );
+  }
+
+  /** Discards the remembered analysis of this route. */
+  forget(path: string = INVOICE_DRAFT_SCAN_STORE_PATH): void {
+    this.aiScanJobs.forget(invoiceDraftResumeKey(path));
   }
 }

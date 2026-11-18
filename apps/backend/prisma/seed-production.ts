@@ -9,6 +9,7 @@
 import { getPrismaClient, disconnectPrisma } from './seeds/shared/client';
 import { seedDefaultTemplates } from './seeds/default-templates.seed';
 import { seedPermissionsAndRoles } from './seeds/permissions-roles.seed';
+import { seedPlatformCrmRole } from './seeds/platform-crm-role.seed';
 import { seedDefaultAccountMappings } from './seeds/default-account-mappings.seed';
 import { seedDefaultPayrollRules } from './seeds/default-payroll-rules.seed';
 import { seedAIEngineApps } from './seeds/ai-engine-apps.seed';
@@ -19,6 +20,7 @@ import { seedSubscriptionPlans } from './seeds/subscription-plans.seed';
 const seeds = [
   { name: 'Default Templates', fn: seedDefaultTemplates },
   { name: 'Permissions & Roles', fn: seedPermissionsAndRoles },
+  { name: 'Vendix Platform CRM Role', fn: seedPlatformCrmRole },
   { name: 'Default Account Mappings', fn: seedDefaultAccountMappings },
   { name: 'Default Payroll Rules', fn: seedDefaultPayrollRules },
   { name: 'AI Engine Applications', fn: seedAIEngineApps },

@@ -8,6 +8,9 @@ datasource db {
 }
 
 model users {
+  platform_crm_links_as_customer platform_crm_links[] @relation("platform_crm_links_customer")
+  platform_crm_links_linked      platform_crm_links[] @relation("platform_crm_links_linked_by")
+  platform_crm_links_unlinked    platform_crm_links[] @relation("platform_crm_links_unlinked_by")
   bulk_upload_logs             bulk_upload_logs[]
   workflow_definitions_created workflow_definitions[] @relation("workflow_definitions_created_by")
   workflow_instance_comments   workflow_instance_comments[]
@@ -656,6 +659,7 @@ model order_events {
 }
 
 model organizations {
+  platform_crm_links   platform_crm_links[]
   workflow_definitions workflow_definitions[]
   workflow_instance_comments workflow_instance_comments[]
   workflow_public_links workflow_public_links[]
@@ -965,6 +969,7 @@ model organization_payment_policies {
 }
 
 model stores {
+  platform_crm_links         platform_crm_links[]
   workflow_definitions       workflow_definitions[]
   workflow_versions          workflow_versions[]
   work_groups                work_groups[]
@@ -4238,6 +4243,7 @@ model purchase_orders {
   receptions              purchase_order_receptions[]
   purchase_vat_contributions purchase_vat_contributions[]
   dispatch_notes          dispatch_notes[]                   @relation("dispatch_notes_purchase_order")
+  support_documents       invoices[]                         @relation("invoices_purchase_order")
   received_document_links received_document_links[]          @relation("received_document_link_purchase_order")
   received_document_match_allocations received_document_match_allocations[]
 
@@ -7696,6 +7702,13 @@ model invoices {
   customer_person_type             persona_type_enum?
   order_id                         Int?
   sales_order_id                   Int?
+  /// QUI-684 — orden de compra de la que se generó este DOCUMENTO SOPORTE.
+  /// Sólo la escribe `POST /store/invoicing/purchase-orders/:id/support-document`;
+  /// el POST genérico de facturación no la acepta. Una OC admite un único
+  /// documento soporte vigente (todo estado salvo `cancelled`/`voided`): lo
+  /// impone el único parcial `invoices_po_active_support_document_key`,
+  /// mantenido en SQL (Prisma no expresa índices parciales).
+  purchase_order_id                Int?
   related_invoice_id               Int?
   /// CP-REFUND-FLOW-REDESIGN paso 7 — reembolso que esta NOTA CRÉDITO
   /// acredita. Sólo `invoice_type = 'credit_note'` lo puebla, vía
@@ -7784,6 +7797,7 @@ model invoices {
   supplier                 suppliers?                 @relation(fields: [supplier_id], references: [id], onDelete: Restrict, onUpdate: NoAction)
   order                    orders?                    @relation(fields: [order_id], references: [id], onDelete: Restrict, onUpdate: NoAction)
   sales_order              sales_orders?              @relation(fields: [sales_order_id], references: [id], onDelete: Restrict, onUpdate: NoAction)
+  purchase_order           purchase_orders?           @relation("invoices_purchase_order", fields: [purchase_order_id], references: [id], onDelete: Restrict, onUpdate: NoAction)
   contract                 contracts?                 @relation(fields: [contract_id], references: [id], onDelete: Restrict, onUpdate: NoAction)
   related_invoice          invoices?                  @relation("invoice_credit_debit_notes", fields: [related_invoice_id], references: [id], onDelete: Restrict, onUpdate: NoAction)
   credit_debit_notes       invoices[]                 @relation("invoice_credit_debit_notes")
@@ -7809,6 +7823,7 @@ model invoices {
   @@unique([accounting_entity_id, invoice_type, invoice_number])
   @@index([profile_id, profile_version])
   @@index([store_id, status])
+  @@index([purchase_order_id])
   @@index([accounting_entity_id])
   @@index([organization_id, accounting_entity_id])
   @@index([accounting_entity_id, fiscal_document_type])
@@ -17146,4 +17161,85 @@ model workflow_exports {
 
   @@index([store_id, created_at])
   @@index([status, created_at])
+}
+
+// ============================================
+// Vendix Platform · enlace prospecto CRM ↔ organización cliente
+// (odd/tasks/vendix-platform-crm-enlace.md). Solo la tienda de la org
+// `is_platform` escribe aquí: lo impone el guard del módulo `platform-crm` y,
+// en la base, el trigger `platform_crm_links_platform_store_guard`.
+// Unicidad (un enlace activo por cliente y por organización) en índices únicos
+// PARCIALES `WHERE status = 'linked'` que Prisma no puede expresar: viven solo
+// en la migración 20261204090000_platform_crm_links.
+// ============================================
+
+enum platform_crm_link_status_enum {
+  linked
+  unlinked
+}
+
+/// Enlace prospecto/cliente del CRM de Vendix Platform ↔ organización cliente.
+/// Solo filas de tiendas de la org `is_platform` (trigger). Nunca fusiona cuentas
+/// ni escribe en la organización enlazada. Desenlazar cambia `status`, no borra.
+model platform_crm_links {
+  id                  Int                           @id @default(autoincrement())
+  store_id            Int
+  customer_id         Int
+  organization_id     Int
+  status              platform_crm_link_status_enum @default(linked)
+  note                String?                       @db.VarChar(300)
+  linked_by_user_id   Int
+  linked_at           DateTime                      @default(now()) @db.Timestamp(6)
+  unlinked_by_user_id Int?
+  unlinked_at         DateTime?                     @db.Timestamp(6)
+
+  store        stores        @relation(fields: [store_id], references: [id], onDelete: Restrict, onUpdate: NoAction)
+  customer     users         @relation("platform_crm_links_customer", fields: [customer_id], references: [id], onDelete: Restrict, onUpdate: NoAction)
+  organization organizations @relation(fields: [organization_id], references: [id], onDelete: Restrict, onUpdate: NoAction)
+  linked_by    users         @relation("platform_crm_links_linked_by", fields: [linked_by_user_id], references: [id], onDelete: Restrict, onUpdate: NoAction)
+  unlinked_by  users?        @relation("platform_crm_links_unlinked_by", fields: [unlinked_by_user_id], references: [id], onDelete: SetNull, onUpdate: NoAction)
+
+  @@index([store_id, customer_id])
+  @@index([organization_id])
+}
+
+/// QUI-1010 — bot de monitoreo de la API. Una fila por episodio de una falla
+/// agrupada por `fingerprint` (origen + proceso + tipo): las repeticiones suben
+/// `occurrences` en vez de crear filas. Solo puede haber UNA fila `open` por
+/// huella (índice único parcial `platform_alerts_open_fingerprint_key`, creado
+/// en la migración porque Prisma no expresa índices parciales).
+/// Sin FKs a propósito: es un registro de plataforma que debe sobrevivir a la
+/// tienda u organización afectada, y nunca debe arrastrar ni frenar su borrado.
+/// `severity`: info | warning | critical. `status`: open | resolved.
+/// `message` y `details` llegan ya saneados (sin cuerpos, cabeceras ni PII).
+model platform_alerts {
+  id                   Int       @id @default(autoincrement())
+  fingerprint          String    @db.VarChar(64)
+  source               String    @db.VarChar(40)
+  process              String    @db.VarChar(255)
+  error_type           String    @db.VarChar(120)
+  severity             String    @db.VarChar(16)
+  status               String    @default("open") @db.VarChar(16)
+  title                String    @db.VarChar(255)
+  message              String?   @db.Text
+  details              Json?
+  organization_id      Int?
+  store_id             Int?
+  affected_store_ids   Int[]     @default([])
+  occurrences          Int       @default(1)
+  notified_occurrences Int       @default(0)
+  first_seen_at        DateTime  @default(now()) @db.Timestamp(6)
+  last_seen_at         DateTime  @default(now()) @db.Timestamp(6)
+  escalated_at         DateTime? @db.Timestamp(6)
+  resolved_at          DateTime? @db.Timestamp(6)
+  resolution           String?   @db.VarChar(32)
+  resolved_by_user_id  Int?
+  ticket_number        String?   @db.VarChar(40)
+  telegram_message_id  String?   @db.VarChar(32)
+  created_at           DateTime  @default(now()) @db.Timestamp(6)
+  updated_at           DateTime  @default(now()) @updatedAt @db.Timestamp(6)
+
+  @@index([status, severity])
+  @@index([last_seen_at])
+  @@index([fingerprint])
 }

@@ -5,6 +5,7 @@ import { parseAiJson } from '../../../../ai-engine/utils/ai-json.util';
 import { StorePrismaService } from '../../../../prisma/services/store-prisma.service';
 import { VendixHttpException, ErrorCodes } from '@common/errors';
 import { AiScanFile } from '@common/ai-scan-jobs/interfaces/ai-scan-job.interface';
+import type { AiJobProgress } from '@common/ai-scan-jobs/ai-job-monitor.service';
 import { AiScanHandlerRegistry } from '@common/ai-scan-jobs/ai-scan-handler.registry';
 import {
   InventoryCountItem,
@@ -30,8 +31,12 @@ export class InventoryCountScannerService implements OnModuleInit {
   onModuleInit(): void {
     this.aiScanRegistry.register<InventoryCountScanResponse>(
       'inventory_count',
-      ({ files, params }) =>
-        this.scanCountFromFiles(files, Number(params?.location_id)),
+      ({ files, params, reportProgress }) =>
+        this.scanCountFromFiles(
+          files,
+          Number(params?.location_id),
+          reportProgress,
+        ),
     );
   }
 
@@ -46,6 +51,7 @@ export class InventoryCountScannerService implements OnModuleInit {
   async scanCountFromFiles(
     files: AiScanFile[],
     locationId: number,
+    reportProgress?: (progress: AiJobProgress) => Promise<void>,
   ): Promise<InventoryCountScanResponse> {
     const file = files?.[0];
     this.assertValidScanFile(file);
@@ -53,6 +59,7 @@ export class InventoryCountScannerService implements OnModuleInit {
     const { matched_products, warnings } = await this.matchProducts(
       scan,
       locationId,
+      reportProgress,
     );
     return { scan, matched_products, warnings };
   }
@@ -161,11 +168,21 @@ export class InventoryCountScannerService implements OnModuleInit {
   private async matchProducts(
     scan: InventoryCountScanResult,
     locationId: number,
+    reportProgress?: (progress: AiJobProgress) => Promise<void>,
   ): Promise<{ matched_products: MatchedCountProduct[]; warnings: string[] }> {
     const warnings: string[] = [];
     const matched_products: MatchedCountProduct[] = [];
 
-    for (let idx = 0; idx < scan.counted_items.length; idx++) {
+    const total = scan.counted_items.length;
+    for (let idx = 0; idx < total; idx++) {
+      // Real progress for the web bar, throttled to every 5th line.
+      if (idx % 5 === 0) {
+        await reportProgress?.({
+          done: idx,
+          total,
+          stage: 'Cruzando los productos contados con tu inventario',
+        });
+      }
       const item = scan.counted_items[idx];
 
       try {

@@ -63,6 +63,26 @@ export interface SupportDocumentItemDto {
   unit_price: number;
   discount_amount?: number;
   tax_amount?: number;
+  /**
+   * Tarifas de la línea. Sin `taxable_amount` ni `tax_amount`: el servidor
+   * calcula la cuota sobre la base de la línea, la que el usuario haya editado.
+   */
+  taxes?: SupportDocumentLineRate[];
+  is_inclusive?: boolean;
+}
+
+/** Tarifa por línea que viaja en el POST (alineada con `CreateInvoiceTaxDto`). */
+export interface SupportDocumentLineRate {
+  tax_name: string;
+  /** Porcentaje (ej: 19 para 19%). */
+  tax_rate: number;
+  tax_type?: string;
+}
+
+/** Impuesto de una línea del borrador de la OC (filas `purchase_order_item_taxes`). */
+export interface PurchaseOrderSupportDraftTax extends SupportDocumentLineRate {
+  taxable_amount?: number;
+  tax_amount: number;
 }
 
 /** Renglón de impuesto en `invoice_taxes` (alineado con `CreateInvoiceTaxDto`). */
@@ -104,3 +124,161 @@ export interface SupportDocumentQuery {
 
 /** Helper para que la lista sepa qué filas mostrar — un sub-tipo de `Invoice`. */
 export type SupportDocumentRow = Invoice;
+
+/**
+ * Documento soporte con la relación `supplier` que `GET /store/invoicing/:id`
+ * incluye (`INVOICE_INCLUDE`). El snapshot (`customer_name`/`customer_tax_id`)
+ * es lo que viajó a la DIAN; la ficha del proveedor es la de hoy.
+ */
+export type SupportDocumentDetail = SupportDocumentRow & {
+  supplier?: {
+    id: number;
+    name: string;
+    tax_id?: string | null;
+  } | null;
+};
+
+/**
+ * Respuesta de `GET /store/invoicing/:id/dian-status` (QUI-683): la consulta
+ * EN VIVO a la DIAN por la llave fiscal guardada (CUDS en los documentos
+ * soporte). Es de solo lectura: no cambia el estado local del documento.
+ *
+ * `unavailable` = la DIAN no respondió o la respuesta no se pudo leer; no es
+ * un rechazo y la pantalla no debe pintarlo como tal.
+ */
+export interface SupportDocumentDianStatus {
+  invoice_id: number;
+  invoice_number: string;
+  invoice_type: string;
+  document_key: string;
+  document_key_label: 'CUDS' | 'CUFE' | 'CUDE';
+  local_status: string;
+  dian_status: 'accepted' | 'rejected' | 'pending' | 'unavailable';
+  dian_status_code: string | null;
+  message: string | null;
+  rules: Array<{ code: string; text: string; severity: string }>;
+  checked_at: string;
+}
+
+/**
+ * Documento soporte aceptado que se va a corregir con una nota de ajuste: el
+ * detalle se lo pasa al form de creación para abrirlo prellenado (QUI-683).
+ */
+export interface SupportDocumentAdjustmentSource {
+  id: number;
+  invoice_number: string;
+  supplier_id: number | null;
+}
+
+// ── Documento soporte desde una orden de compra (QUI-684) ───────────────────
+
+/** Resumen de la OC que devuelven los endpoints de soporte por OC. */
+export interface PoSummary {
+  id: number;
+  order_number: string | null;
+  status: string;
+  supplier_id: number | null;
+  total_amount: number;
+  /** Informativo: la OC ya trae una factura de compra adjunta. No bloquea. */
+  has_supplier_invoice: boolean;
+  supplier_invoice_number: string | null;
+  supplier_invoice_date: string | null;
+  invoice_attachments_count: number;
+}
+
+/** Documento soporte ligado a la OC (más reciente primero, incluye historial anulado). */
+export interface PoSupportDocument {
+  id: number;
+  invoice_type: string;
+  invoice_number: string;
+  cufe: string | null;
+  status: string;
+  dian_status: string | null;
+  transmission_status: string | null;
+  issue_date: string;
+  total_amount: number;
+  accepted_at: string | null;
+}
+
+/** `GET /store/invoicing/purchase-orders/:id/support-documents`. */
+export interface PurchaseOrderSupportContext {
+  enabled: boolean;
+  purchase_order: PoSummary;
+  active_document_id: number | null;
+  documents: PoSupportDocument[];
+}
+
+/** Dato que le falta a la OC para emitir; `label` ya viene en español. */
+export interface SupportMissingField {
+  code: string;
+  field: string;
+  label: string;
+  /** `review` se corrige en el modal; `supplier` en el proveedor; `purchase_order` bloquea. */
+  target: 'supplier' | 'review' | 'purchase_order';
+}
+
+export interface PurchaseOrderSupportDraftItem {
+  description: string;
+  quantity: number;
+  unit_price: number;
+  discount_amount: number;
+  tax_amount: number;
+  product_id?: number;
+  product_variant_id?: number;
+  /** Tarifas de la línea de la OC; sin ellas la línea va sin impuesto. */
+  taxes?: PurchaseOrderSupportDraftTax[];
+  is_inclusive?: boolean;
+}
+
+/** `GET /store/invoicing/purchase-orders/:id/support-document-draft`. */
+export interface PurchaseOrderSupportDraft {
+  purchase_order: PoSummary;
+  active_document: {
+    id: number;
+    invoice_number: string;
+    status: string;
+  } | null;
+  supplier: {
+    id: number;
+    name: string;
+    document_type: string | null;
+    tax_id: string | null;
+    verification_digit: string | null;
+    address_line1: string | null;
+    city: string | null;
+    municipality_code: string | null;
+  };
+  draft: {
+    supplier_id: number;
+    issue_date: string;
+    due_date: string | null;
+    payment_form: '1' | '2' | null;
+    notes: string;
+    withholding_amount: number;
+    items: PurchaseOrderSupportDraftItem[];
+  };
+  missing: SupportMissingField[];
+  can_emit: boolean;
+}
+
+/** Cuerpo de `POST /store/invoicing/purchase-orders/:id/support-document`. */
+export interface CreatePurchaseOrderSupportDocumentDto {
+  issue_date: string;
+  due_date?: string;
+  payment_form: '1' | '2';
+  payment_means_code?: string;
+  notes?: string;
+  withholding_amount?: number;
+  items: SupportDocumentItemDto[];
+  client_request_id?: string;
+  emit_immediately?: boolean;
+}
+
+/** Resultado de la emisión inmediata (`emission` del 201). */
+export interface SupportDocumentEmissionOutcome {
+  attempted: boolean;
+  success: boolean;
+  status: string | null;
+  error_code: string | null;
+  message: string | null;
+}

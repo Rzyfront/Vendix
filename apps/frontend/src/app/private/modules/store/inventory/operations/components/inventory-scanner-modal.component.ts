@@ -6,14 +6,27 @@ import {
   output,
   signal,
   computed,
+  effect,
+  untracked,
   viewChild,
 } from '@angular/core';
 import { takeUntilDestroyed } from '@angular/core/rxjs-interop';
 import { NgTemplateOutlet } from '@angular/common';
 import { FormsModule } from '@angular/forms';
 import { HttpErrorResponse } from '@angular/common/http';
-import { Subject, Subscription, switchMap, catchError, map, of } from 'rxjs';
+import {
+  Observable,
+  Subject,
+  Subscription,
+  switchMap,
+  catchError,
+  map,
+  of,
+} from 'rxjs';
 import { parseApiError } from '../../../../../../core/utils/parse-api-error';
+import { AiScanJobError } from '../../../../../../core/utils/ai-job-error';
+import { AiJobProgressComponent } from '../../../../../../shared/components/ai-job-progress/ai-job-progress.component';
+import { injectAiJobProgress } from '../../../../../../shared/utils/ai-job-progress';
 
 import {
   ModalComponent,
@@ -34,6 +47,7 @@ import {
 
 import { InventoryService, InventoryScannerService } from '../../services';
 import {
+  ApiResponse,
   InventoryCountScanResponse,
   MatchedCountProduct,
   BatchCreateAdjustmentsRequest,
@@ -64,6 +78,7 @@ interface EditableCountRow extends MatchedCountProduct {
     StepsLineComponent,
     BadgeComponent,
     SpinnerComponent,
+    AiJobProgressComponent,
     InputsearchComponent,
     AiReviewAckComponent,
     AiDiscardToggleComponent,
@@ -226,17 +241,17 @@ interface EditableCountRow extends MatchedCountProduct {
           }
 
           <div class="flex-1 flex flex-col items-center justify-center gap-4">
-            <app-spinner size="lg" text="Procesando hoja de reconteo con IA..."></app-spinner>
-            <p class="text-sm text-text-secondary text-center">
-              Extrayendo productos contados y comparando contra el stock actual...
-            </p>
-            <p class="text-xs text-text-secondary text-center">
-              @if (scanStalled()) {
-                Está tardando más de lo normal; seguimos procesando.
-              } @else {
-                Esto puede tardar unos minutos. No cierres la ventana.
-              }
-            </p>
+            <app-ai-job-progress
+              class="w-full"
+              [progress]="aiProgress"
+              [showRetry]="!!selectedFile()"
+              (retry)="startScan()"
+            />
+            @if (aiProgress.error()) {
+              <app-button variant="outline" type="button" (clicked)="backToUpload()">
+                Elegir otro archivo
+              </app-button>
+            }
           </div>
         </div>
       }
@@ -629,7 +644,8 @@ export class InventoryScannerModalComponent {
   readonly isDragging = signal(false);
   readonly isScanning = signal(false);
   /** true cuando el job lleva más de ~60 s sin terminar. */
-  readonly scanStalled = signal(false);
+  /** Shared AI progress bar (QUI-1020). */
+  readonly aiProgress = injectAiJobProgress({ kind: 'inventory_count' });
   private scanSub: Subscription | null = null;
   readonly isProcessingFile = signal(false);
   readonly submitting = signal(false);
@@ -709,6 +725,11 @@ export class InventoryScannerModalComponent {
   private readonly MAX_FILE_SIZE = 10 * 1024 * 1024; // 10MB
 
   constructor() {
+    // Re-attach to a count scan still running when the modal opens.
+    effect(() => {
+      if (this.isOpen()) untracked(() => this.tryResume());
+    });
+
     // Búsqueda de catálogo por línea (cancelable con switchMap), misma
     // llamada HTTP que usa el picker de adjustment-create-modal
     // (InventoryService.searchAdjustableProducts) — no se duplica endpoint.
@@ -849,45 +870,76 @@ export class InventoryScannerModalComponent {
 
     this.currentStep.set(1);
     this.isScanning.set(true);
+    this.aiProgress.setSize(1);
+    this.followScan(
+      this.inventoryScannerService.scanCount(file, locationId, {
+        progress: this.aiProgress,
+        resumeKey: 'inventory_count:new',
+      }),
+    );
+  }
 
+  /** Re-attaches to a scan started before a reload (QUI-1020). */
+  private tryResume(): void {
+    if (this.isScanning() || this.currentStep() !== 0 || this.selectedFile()) {
+      return;
+    }
+    const resumed = this.inventoryScannerService.resumeScan(
+      'inventory_count:new',
+      { progress: this.aiProgress },
+    );
+    if (!resumed) return;
+    this.selectedLocationId.set(resumed.locationId);
+    this.currentStep.set(1);
+    this.isScanning.set(true);
+    this.followScan(resumed.result$);
+  }
+
+  /** Same success/error handlers for a fresh or a resumed scan. */
+  private followScan(
+    scan$: Observable<ApiResponse<InventoryCountScanResponse>>,
+  ): void {
     this.scanSub?.unsubscribe();
-    this.scanStalled.set(false);
-    this.scanSub = this.inventoryScannerService
-      .scanCount(file, locationId, {
-        onStall: () => this.scanStalled.set(true),
-      })
-      .pipe(takeUntilDestroyed(this.destroyRef))
-      .subscribe({
-        next: (response) => {
-          this.isScanning.set(false);
-          if (!response.success || !response.data) {
-            this.toastService.error(
-              response.message || 'Error al escanear la hoja de reconteo',
-            );
-            this.currentStep.set(0);
-            return;
-          }
-
-          this.scanResponse.set(response.data);
-          this.editableItems.set(
-            response.data.matched_products.map((item) => ({
-              ...item,
-              note: 'Reconteo por IA',
-            })),
+    this.scanSub = scan$.pipe(takeUntilDestroyed(this.destroyRef)).subscribe({
+      next: (response) => {
+        this.isScanning.set(false);
+        if (!response.success || !response.data) {
+          this.toastService.error(
+            response.message || 'Error al escanear la hoja de reconteo',
           );
-          this.currentStep.set(2);
-        },
-        error: (err) => {
-          this.isScanning.set(false);
+          this.aiProgress.onFailed(new Error(response.message));
+          return;
+        }
+
+        this.scanResponse.set(response.data);
+        this.editableItems.set(
+          response.data.matched_products.map((item) => ({
+            ...item,
+            note: 'Reconteo por IA',
+          })),
+        );
+        this.currentStep.set(2);
+      },
+      error: (err) => {
+        this.isScanning.set(false);
+        // The progress panel already explains the failure by category and
+        // the selected file is kept so the user can retry.
+        if (!(err instanceof AiScanJobError)) {
           const message =
             err instanceof HttpErrorResponse
               ? parseApiError(err).userMessage
               : (err as Error | null)?.message ||
                 'Error al procesar la hoja de reconteo';
           this.toastService.error(message);
-          this.currentStep.set(0);
-        },
-      });
+        }
+      },
+    });
+  }
+
+  /** Back to the upload step after a failure, keeping file and location. */
+  backToUpload(): void {
+    this.aiProgress.reset();
+    this.currentStep.set(0);
   }
 
   // ============================================================
@@ -1146,7 +1198,7 @@ export class InventoryScannerModalComponent {
   resetWizard(): void {
     this.scanSub?.unsubscribe();
     this.scanSub = null;
-    this.scanStalled.set(false);
+    this.aiProgress.reset();
     // QUI-644: el descarte no debe sobrevivir al siguiente escaneo.
     this.discardedIndexes.set(new Set());
     this.currentStep.set(0);

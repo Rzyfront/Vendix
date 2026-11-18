@@ -37,7 +37,7 @@
       }
       @if (hasPlans()) {
         <p class="text-center text-sm text-[var(--color-text-secondary)] mb-6" data-testid="pricing-terms">
-          {{ currencyNote() }}{{ cycleNote() }}. Prueba gratis sin tarjeta.
+          {{ currencyNote() }}{{ cycleNote() }}. Prueba gratis sin tarjeta. {{ validFromLabel }}
         </p>
       }
 

@@ -75,6 +75,7 @@ const REQUIRED_COLUMNS = [
   'invoices.exchange_rate',
   'invoices.contingency_deadline',
   'invoices.xml_document',
+  'invoices.purchase_order_id',
   'invoice_items.unit_code',
   'invoice_items.account_code',
   'invoice_items.aiu_component',
@@ -244,6 +245,9 @@ const REQUIRED_TABLES = [
   'production_order_lines',
   'manufacturing_settings',
   'store_sequences',
+  // QUI-1010 — bot de monitoreo (migración 20261205100000_platform_alerts): el
+  // filtro global de errores y el barrido de colas escriben aquí en caliente.
+  'platform_alerts',
 ];
 
 /** Tipos enum que el schema referencia y la base debe conocer. */

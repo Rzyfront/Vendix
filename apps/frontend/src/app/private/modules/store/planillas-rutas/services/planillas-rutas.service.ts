@@ -3,6 +3,11 @@ import { HttpClient } from '@angular/common/http';
 import { Observable, of, throwError } from 'rxjs';
 import { catchError, map, shareReplay, tap } from 'rxjs/operators';
 import { environment } from '../../../../../../environments/environment';
+import { AuthFacade } from '../../../../../core/store/auth/auth.facade';
+import {
+  StoreScopedCache,
+  activeStoreId,
+} from '../../../../../core/utils/store-scoped-cache';
 import {
   AiScanJobOptions,
   AiScanJobService,
@@ -30,15 +35,19 @@ import {
   VoidDispatchRouteDto,
 } from '../interfaces/planilla.interface';
 
-let statsCache$: Observable<DispatchRouteStats> | null = null;
-let statsCacheTime = 0;
-const CACHE_TTL = 30_000;
+/**
+ * Stats cards cache, one entry per store and emptied on every store switch
+ * (QUI-1021): the backend resolves the store from the session, so the URL
+ * alone does not say whose stats a response holds.
+ */
+const statsCache = new StoreScopedCache<DispatchRouteStats>(30_000);
 
 @Injectable({ providedIn: 'root' })
 export class PlanillasRutasService {
   private readonly apiUrl = environment.apiUrl;
   private readonly http = inject(HttpClient);
   private readonly aiScanJobs = inject(AiScanJobService);
+  private readonly authFacade = inject(AuthFacade);
 
   list(query: DispatchRouteQuery = {}): Observable<PaginatedDispatchRoutesResponse> {
     const params = new URLSearchParams();
@@ -122,23 +131,24 @@ export class PlanillasRutasService {
   }
 
   getStats(): Observable<DispatchRouteStats> {
-    const now = Date.now();
-    if (statsCache$ && now - statsCacheTime < CACHE_TTL) {
-      return statsCache$;
+    const storeId = activeStoreId(this.authFacade);
+    const cached = statsCache.get(storeId);
+    if (cached) {
+      return cached;
     }
-    statsCache$ = this.http
+    const stats$ = this.http
       .get<any>(`${this.apiUrl}/store/dispatch-routes/stats`)
       .pipe(
         map((r) => r.data as DispatchRouteStats),
         shareReplay({ bufferSize: 1, refCount: false }),
-        tap(() => (statsCacheTime = Date.now())),
+        tap(() => statsCache.touch(storeId)),
       );
-    return statsCache$;
+    statsCache.set(storeId, stats$);
+    return stats$;
   }
 
   invalidateStatsCache() {
-    statsCache$ = null;
-    statsCacheTime = 0;
+    statsCache.clear();
   }
 
   create(dto: CreateDispatchRouteDto): Observable<DispatchRoute> {
@@ -309,6 +319,17 @@ export class PlanillasRutasService {
     return this.aiScanJobs.enqueueAndWait<RouteSheetScanResult>(
       `${this.apiUrl}/store/dispatch-routes/${routeId}/scan/async`,
       formData,
+      opts,
+    );
+  }
+
+  /** Re-attaches to a scan started before a reload; `null` if none (QUI-1020). */
+  resumeScan(
+    routeId: number,
+    opts?: Parameters<AiScanJobService['resume']>[1],
+  ): Observable<RouteSheetScanResult> | null {
+    return this.aiScanJobs.resume<RouteSheetScanResult>(
+      `route_sheet:${routeId}`,
       opts,
     );
   }

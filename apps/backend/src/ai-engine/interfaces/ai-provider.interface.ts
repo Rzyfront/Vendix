@@ -100,11 +100,19 @@ export interface AIImageRequestOptions {
   referenceImages?: AIImageReference[];
 }
 
+/**
+ * Why a provider refused, when the SDK says so: `credits` (402, insufficient
+ * quota, credit balance too low) or `rate_limited` (429). QUI-1020: the AI job
+ * queues turn these into "IA sin créditos / no disponible" and alert Vendix.
+ */
+export type AIProviderFailureReason = 'credits' | 'rate_limited';
+
 export interface AIResponse {
   success: boolean;
   /** Optional D0 transport classification, not a new retry policy. */
   error_code?: string;
   retryable?: boolean;
+  failure_reason?: AIProviderFailureReason;
   content?: string;
   usage?: {
     promptTokens: number;
@@ -249,6 +257,9 @@ export interface AIStreamChunk {
 
 export interface AIImageResponse {
   success: boolean;
+  error_code?: string;
+  retryable?: boolean;
+  failure_reason?: AIProviderFailureReason;
   imageBase64?: string;
   revisedPrompt?: string;
   model?: string;

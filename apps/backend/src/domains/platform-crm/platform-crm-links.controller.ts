@@ -1,0 +1,89 @@
+import {
+  Body,
+  Controller,
+  Delete,
+  Get,
+  Param,
+  ParseIntPipe,
+  Post,
+  Query,
+  UseGuards,
+} from '@nestjs/common';
+import { PermissionsGuard } from '../auth/guards/permissions.guard';
+import { Permissions } from '../auth/decorators/permissions.decorator';
+import { ResponseService } from '@common/responses/response.service';
+import { PLATFORM_CRM_LINK_PERMISSIONS } from '../../common/constants/platform-permissions.constant';
+import { SkipSubscriptionGate } from '../store/subscriptions/decorators/skip-subscription-gate.decorator';
+import { PlatformCrmLinksService } from './platform-crm-links.service';
+import {
+  PlatformCrmContext,
+  PlatformCrmCtx,
+  PlatformStoreGuard,
+} from './platform-store.guard';
+import {
+  LinkPlatformCustomerDto,
+  SearchPlatformOrganizationsQueryDto,
+  UnlinkPlatformCustomerDto,
+} from './dto/platform-crm-links.dto';
+
+/**
+ * Vendix Platform · enlace prospecto CRM ↔ organización cliente.
+ *
+ * Bajo `store/*` a propósito: el `DomainScopeGuard` global ya exige un token
+ * de STORE_ADMIN. `PlatformStoreGuard` corre ANTES que `PermissionsGuard`: una
+ * tienda ajena recibe 404 sin llegar a la verificación de permisos (que sí
+ * revelaría la función con un 403).
+ *
+ * `@SkipSubscriptionGate()`: sin él, una tienda ajena con la suscripción
+ * bloqueada recibiría el error del gate (en POST/DELETE) en vez del 404.
+ */
+@Controller('store/platform-crm')
+@UseGuards(PlatformStoreGuard, PermissionsGuard)
+@SkipSubscriptionGate()
+export class PlatformCrmLinksController {
+  constructor(
+    private readonly service: PlatformCrmLinksService,
+    private readonly response: ResponseService,
+  ) {}
+
+  @Get('organizations/search')
+  @Permissions(PLATFORM_CRM_LINK_PERMISSIONS.MANAGE)
+  async searchOrganizations(@Query() query: SearchPlatformOrganizationsQueryDto) {
+    return this.response.success(await this.service.searchOrganizations(query.q));
+  }
+
+  @Get('customers/:customerId/link')
+  @Permissions(PLATFORM_CRM_LINK_PERMISSIONS.READ)
+  async getLink(
+    @PlatformCrmCtx() ctx: PlatformCrmContext,
+    @Param('customerId', ParseIntPipe) customerId: number,
+  ) {
+    return this.response.success(await this.service.getLink(ctx, customerId));
+  }
+
+  @Post('customers/:customerId/link')
+  @Permissions(PLATFORM_CRM_LINK_PERMISSIONS.MANAGE)
+  async link(
+    @PlatformCrmCtx() ctx: PlatformCrmContext,
+    @Param('customerId', ParseIntPipe) customerId: number,
+    @Body() dto: LinkPlatformCustomerDto,
+  ) {
+    return this.response.success(
+      await this.service.link(ctx, customerId, dto),
+      'Cliente enlazado con su cuenta Vendix',
+    );
+  }
+
+  @Delete('customers/:customerId/link')
+  @Permissions(PLATFORM_CRM_LINK_PERMISSIONS.MANAGE)
+  async unlink(
+    @PlatformCrmCtx() ctx: PlatformCrmContext,
+    @Param('customerId', ParseIntPipe) customerId: number,
+    @Body() dto: UnlinkPlatformCustomerDto,
+  ) {
+    return this.response.success(
+      await this.service.unlink(ctx, customerId, dto),
+      'Enlace deshecho',
+    );
+  }
+}

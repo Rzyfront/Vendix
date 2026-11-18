@@ -1,9 +1,9 @@
-import {Component, input, output, signal, computed, effect, viewChild, DestroyRef, Injector, afterNextRender, inject} from '@angular/core';
+import {Component, input, output, signal, computed, effect, untracked, viewChild, DestroyRef, Injector, afterNextRender, inject} from '@angular/core';
 import { takeUntilDestroyed } from '@angular/core/rxjs-interop';
 import { NgTemplateOutlet } from '@angular/common';
 import { HttpErrorResponse } from '@angular/common/http';
 import { FormsModule } from '@angular/forms';
-import { switchMap, catchError, of, Subject, Subscription } from 'rxjs';
+import { switchMap, catchError, of, Subject, Subscription, Observable } from 'rxjs';
 
 import { AiReviewAckComponent } from '../../../../../../../shared/components/ai-review-ack/ai-review-ack.component';
 import {
@@ -14,6 +14,9 @@ import { ModalComponent } from '../../../../../../../shared/components/modal/mod
 import { ButtonComponent } from '../../../../../../../shared/components/button/button.component';
 import { BadgeComponent } from '../../../../../../../shared/components/badge/badge.component';
 import { SpinnerComponent } from '../../../../../../../shared/components/spinner/spinner.component';
+import { AiJobProgressComponent } from '../../../../../../../shared/components/ai-job-progress/ai-job-progress.component';
+import { injectAiJobProgress } from '../../../../../../../shared/utils/ai-job-progress';
+import { AiScanJobService } from '../../../../../../../core/services/ai-scan-job.service';
 import { IconComponent } from '../../../../../../../shared/components/icon/icon.component';
 import { InputComponent } from '../../../../../../../shared/components/input/input.component';
 import { ToggleComponent } from '../../../../../../../shared/components/toggle/toggle.component';
@@ -73,6 +76,7 @@ import {
     ButtonComponent,
     BadgeComponent,
     SpinnerComponent,
+    AiJobProgressComponent,
     IconComponent,
     InputComponent,
     ToggleComponent,
@@ -257,15 +261,14 @@ import {
 
           <!-- Processing indicator -->
           <div class="flex-1 flex flex-col items-center justify-center gap-4">
-            <app-spinner size="lg" text="Analizando factura..."></app-spinner>
-            <p class="text-sm text-text-secondary text-center">
-              Extrayendo datos y buscando coincidencias con tus productos...
-            </p>
-            @if (scanStalled()) {
-              <p class="text-sm text-text-secondary text-center">
-                Esto puede tardar unos minutos. No cierres la ventana.
-              </p>
-            }
+            <div class="w-full max-w-md">
+              <app-ai-job-progress
+                [progress]="scanProgress"
+                [showRetry]="!!selectedFile()"
+                hint="Extrayendo datos y buscando coincidencias con tus productos..."
+                (retry)="startScan()"
+              />
+            </div>
           </div>
         </div>
       }
@@ -1231,19 +1234,20 @@ import {
             }
             @case ('loading') {
               <div class="flex flex-col items-center justify-center gap-4 min-h-[240px]" data-testid="revalidate-loading">
-                <app-spinner size="lg"></app-spinner>
-                <p class="text-sm text-text-secondary text-center">
-                  La IA está releyendo el documento original…
-                </p>
+                <div class="w-full max-w-md">
+                  <app-ai-job-progress
+                    [progress]="revalidateProgress"
+                    hint="La IA está releyendo el documento original…"
+                  />
+                </div>
               </div>
             }
             @case ('error') {
-              <div class="rounded-lg border border-red-200 bg-red-50 p-4 flex items-start gap-3" data-testid="revalidate-error">
-                <app-icon name="alert-circle" [size]="20" class="text-red-600 shrink-0"></app-icon>
-                <div>
-                  <p class="text-sm font-semibold text-red-800">No se pudo revalidar</p>
-                  <p class="text-xs text-red-700 mt-1">{{ revalidateError() }}</p>
-                </div>
+              <div data-testid="revalidate-error">
+                <app-ai-job-progress
+                  [progress]="revalidateProgress"
+                  [showRetry]="false"
+                />
               </div>
             }
             @case ('result') {
@@ -1376,6 +1380,11 @@ import {
           <app-button variant="outline" (clicked)="onCancel()">
             Cancelar
           </app-button>
+          @if (currentStep() === 2 && scanProgress.phase() === 'failed') {
+            <app-button variant="outline" (clicked)="backToFileSelection()">
+              Volver
+            </app-button>
+          }
           @if (currentStep() === 1) {
             <app-button
               variant="primary"
@@ -1622,6 +1631,14 @@ export class InvoiceScannerModalComponent {
   readonly revalidateResult = signal<InvoiceRevalidateResult | null>(null);
   readonly revalidateError = signal<string | null>(null);
   private revalidateSub: Subscription | null = null;
+  private readonly aiScanJobs = inject(AiScanJobService);
+  /** Barras de carga de la IA (QUI-1020): escaneo y revalidación. */
+  readonly scanProgress = injectAiJobProgress({ kind: 'purchase_invoice' });
+  readonly revalidateProgress = injectAiJobProgress({
+    kind: 'purchase_invoice_revalidate',
+  });
+  /** Clave de reenganche del escaneo; la tienda la pone el servicio. */
+  private readonly SCAN_RESUME_KEY = 'po_invoice_scan:new';
   private scanSub: Subscription | null = null;
   /** Posición en `editableItems()` de cada línea enviada (las no descartadas). */
   private revalidateSentIndexes: number[] = [];
@@ -1684,13 +1701,25 @@ export class InvoiceScannerModalComponent {
     this.cancelRevalidateRequest();
     this.revalidateError.set(null);
     this.revalidateView.set('loading');
-    this.revalidateSub = this.invoiceScannerService
-      .revalidateAndWait({
-        scan_attachment_key: key,
-        order_type: this.scanProfile(),
-        consolidated,
-        ...(note ? { note } : {}),
-      })
+    this.revalidateProgress.setSize(indexes.length);
+    // Sin resumeKey: reabrir la revalidación exige la edición en curso
+    // (líneas y descartes), que no sobrevive a una recarga.
+    this.revalidateSub = this.aiScanJobs
+      .enqueueAndWait<InvoiceRevalidateResult>(
+        this.invoiceScannerService.revalidateEnqueueUrl(),
+        {
+          scan_attachment_key: key,
+          order_type: this.scanProfile(),
+          consolidated,
+          ...(note ? { note } : {}),
+        },
+        {
+          progress: this.revalidateProgress,
+          timeoutMs: InvoiceScannerService.REVALIDATE_TIMEOUT_MS,
+          statusUrl: (jobId) =>
+            this.invoiceScannerService.revalidateStatusUrl(jobId),
+        },
+      )
       .pipe(takeUntilDestroyed(this.destroyRef))
       .subscribe({
         next: (result) => {
@@ -1793,12 +1822,13 @@ export class InvoiceScannerModalComponent {
   private cancelScanRequest(): void {
     this.scanSub?.unsubscribe();
     this.scanSub = null;
-    this.scanStalled.set(false);
+    this.scanProgress.reset();
   }
 
   private cancelRevalidateRequest(): void {
     this.revalidateSub?.unsubscribe();
     this.revalidateSub = null;
+    this.revalidateProgress.reset();
   }
 
   /** Nº de línea (base 1) tal como la ve el operador en la tabla. */
@@ -1837,7 +1867,6 @@ export class InvoiceScannerModalComponent {
   fileError = signal<string | null>(null);
   isDragging = signal(false);
   isScanning = signal(false);
-  readonly scanStalled = signal(false);
   isProcessingFile = signal(false);
 
   readonly isImageFile = computed(() => {
@@ -2505,6 +2534,7 @@ export class InvoiceScannerModalComponent {
         this.modalInitialized = true;
         this.scanProfile.set(this.orderType());
         this.loadSuppliers();
+        untracked(() => this.resumePendingScan());
       } else if (!open) {
         this.modalInitialized = false;
       }
@@ -2757,20 +2787,77 @@ export class InvoiceScannerModalComponent {
     this.loadUomCatalog();
 
     this.cancelScanRequest();
-    this.scanStalled.set(false);
-    this.scanSub = this.invoiceScannerService
-      .scanInvoiceAndWait(file, this.scanProfile(), {
-        onStall: () => this.scanStalled.set(true),
-      })
+    this.scanProgress.setSize(1);
+    // La espera (backoff, reenganche, errores por categoría) es de
+    // `AiScanJobService`; la barra se pinta con `scanProgress`.
+    this.consumeScan(
+      this.aiScanJobs.enqueueAndWait<InvoiceScanResult>(
+        this.invoiceScannerService.scanEnqueueUrl(this.scanProfile()),
+        this.invoiceScannerService.scanFormData(file),
+        {
+          progress: this.scanProgress,
+          resumeKey: this.SCAN_RESUME_KEY,
+          // The profile the scan was launched with: a resume must read the
+          // result under that one, not under the one the modal opens with.
+          resumeMeta: { profile: this.scanProfile() },
+          timeoutMs: InvoiceScannerService.SCAN_TIMEOUT_MS,
+          statusUrl: (jobId) => this.invoiceScannerService.scanStatusUrl(jobId),
+        },
+      ),
+    );
+  }
+
+  /**
+   * QUI-1020: al abrir el modal retoma el escaneo que sigue en curso (recarga
+   * o modal cerrado a mitad). No hay archivo que reintentar, pero sí el
+   * resultado real del trabajo.
+   */
+  private resumePendingScan(): void {
+    if (this.isScanning() || this.currentStep() !== 1) return;
+    const resumed$ = this.aiScanJobs.resume<InvoiceScanResult>(
+      this.SCAN_RESUME_KEY,
+      {
+        progress: this.scanProgress,
+        timeoutMs: InvoiceScannerService.SCAN_TIMEOUT_MS,
+        statusUrl: (jobId) => this.invoiceScannerService.scanStatusUrl(jobId),
+      },
+    );
+    if (!resumed$) return;
+    // Read the result under the profile the scan was launched with.
+    const profile = this.aiScanJobs.pendingResume<{ profile?: string }>(
+      this.SCAN_RESUME_KEY,
+    )?.meta?.profile;
+    if (profile === 'retail' || profile === 'ingredient') {
+      this.scanProfile.set(profile);
+    }
+    this.currentStep.set(2);
+    this.isScanning.set(true);
+    this.loadUomCatalog();
+    this.consumeScan(resumed$);
+  }
+
+  /** Vuelve a elegir archivo tras un fallo del escaneo (el archivo se conserva). */
+  backToFileSelection(): void {
+    this.cancelScanRequest();
+    this.isScanning.set(false);
+    this.currentStep.set(1);
+  }
+
+  private consumeScan(scan$: Observable<InvoiceScanResult>): void {
+    this.scanSub = scan$
       .pipe(
         switchMap((scan) => {
           this.scanResult.set(scan);
           return this.invoiceScannerService.matchProducts(scan);
         }),
         catchError((err) => {
-          // El `message` del backend es el devMessage en inglés
-          // («AI OCR response parsed but is missing required fields»), que
-          // llegaba tal cual al toast. parseApiError aplica la aduana de
+          this.isScanning.set(false);
+          if (this.scanProgress.phase() === 'failed') {
+            // El escaneo falló: la barra explica por qué (documento, Vendix o
+            // IA) y ofrece reintentar con el mismo archivo.
+            return of(null);
+          }
+          // Falló el emparejamiento (HTTP). parseApiError aplica la aduana de
           // idioma y cae al copy curado por `error_code`.
           this.toastService.error(
             err instanceof HttpErrorResponse
@@ -2778,14 +2865,11 @@ export class InvoiceScannerModalComponent {
               : (err as Error)?.message || 'No se pudo escanear la factura',
           );
           this.currentStep.set(1);
-          this.isScanning.set(false);
-          this.scanStalled.set(false);
           return of(null);
         }),
       )
       .pipe(takeUntilDestroyed(this.destroyRef)).subscribe((matchResponse) => {
         this.isScanning.set(false);
-        this.scanStalled.set(false);
         if (!matchResponse) return;
 
         if (matchResponse.success && matchResponse.data) {

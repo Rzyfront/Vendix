@@ -100,6 +100,7 @@ describe('Facturación manual — idempotencia de creación', () => {
       { createIdempotently: jest.fn().mockResolvedValue({ invoice, replayed: true }) } as any,
       {} as any, {} as any, {} as any, {} as any,
       { success: (data: unknown) => data } as any, {} as any, { emitCreated } as any,
+      {} as any,
     );
     const result = await controller.create({ client_request_id: KEY, emit_immediately: true } as any);
     expect(result).toEqual({ ...invoice, idempotency_replayed: true });

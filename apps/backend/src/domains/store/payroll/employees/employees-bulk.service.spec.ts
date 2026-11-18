@@ -106,7 +106,12 @@ describe('EmployeesBulkService — sesion paginada y tope', () => {
   });
 
   it('sesion expirada: error claro', async () => {
-    mockS3.downloadImage.mockRejectedValue(new Error('NoSuchKey'));
+    mockS3.downloadImage.mockRejectedValue(
+      Object.assign(new Error('The specified key does not exist.'), {
+        name: 'NoSuchKey',
+        $metadata: { httpStatusCode: 404 },
+      }),
+    );
 
     await expect(
       service.uploadFromSession('sid', 3, {}, { offset: 0, limit: 100 }),
@@ -115,6 +120,19 @@ describe('EmployeesBulkService — sesion paginada y tope', () => {
         error_code: 'BULK_PROD_SESSION_EXPIRED',
       }),
     });
+  });
+
+  it('fallo tecnico de S3 al descargar se relanza tal cual, no como sesion vencida', async () => {
+    const s3Down = Object.assign(new Error('socket hang up'), {
+      name: 'TimeoutError',
+      $metadata: { httpStatusCode: 503 },
+    });
+    mockS3.downloadImage.mockRejectedValue(s3Down);
+
+    await expect(
+      service.uploadFromSession('sid', 3, {}, { offset: 0, limit: 100 }),
+    ).rejects.toBe(s3Down);
+    expect(mockS3.deleteFile).not.toHaveBeenCalled();
   });
 
   it('sin offset/limit: modo legacy completo y borra el archivo', async () => {

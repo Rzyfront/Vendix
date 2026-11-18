@@ -1,6 +1,7 @@
 import { AiScanJobService } from './ai-scan-job.service';
 import { RequestContextService } from '@common/context/request-context.service';
 import { VendixHttpException } from '@common/errors';
+import { AiJobMonitorService } from './ai-job-monitor.service';
 
 const ctx = (o: any = {}) => ({
   is_super_admin: false,
@@ -15,6 +16,7 @@ describe('AiScanJobService', () => {
   let queue: { add: jest.Mock; getJob: jest.Mock };
   let s3: { uploadFile: jest.Mock };
   let service: AiScanJobService;
+  let incidents: { report: jest.Mock };
 
   const run = <T>(c: any, fn: () => Promise<T>) =>
     RequestContextService.run(c, fn);
@@ -22,7 +24,11 @@ describe('AiScanJobService', () => {
   beforeEach(() => {
     queue = { add: jest.fn().mockResolvedValue({ id: 99 }), getJob: jest.fn() };
     s3 = { uploadFile: jest.fn().mockImplementation(async (_b, k) => k) };
-    service = new AiScanJobService(queue as any, s3 as any);
+    incidents = { report: jest.fn().mockResolvedValue({}) };
+    const monitor = new AiJobMonitorService(incidents as any, {
+      getPlatformOrganizationId: jest.fn().mockResolvedValue(1),
+    } as any);
+    service = new AiScanJobService(queue as any, s3 as any, monitor);
   });
 
   describe('enqueue', () => {
@@ -51,6 +57,9 @@ describe('AiScanJobService', () => {
         is_super_admin: false,
       });
       expect(opts.attempts).toBe(2);
+      // QUI-1020: el resultado sobrevive para reengancharse tras recargar.
+      expect(opts.removeOnComplete).toEqual({ age: 7200, count: 1000 });
+      expect(opts.removeOnFail).toEqual({ age: 86400, count: 1000 });
     });
 
     it('usa platform/org sin tienda ni org', async () => {
@@ -84,11 +93,18 @@ describe('AiScanJobService', () => {
   });
 
   describe('getStatus', () => {
-    const job = (over: any = {}, state = 'completed') => ({
-      data: { context: { user_id: 7, organization_id: 2, store_id: 5 } , ...over },
+    const job = (over: any = {}, state = 'completed', extra: any = {}) => ({
+      id: '1',
+      data: { kind: 'rut', context: { user_id: 7, organization_id: 2, store_id: 5 } , ...over },
       getState: jest.fn().mockResolvedValue(state),
       returnvalue: { ok: true },
       failedReason: 'CODE_X',
+      timestamp: Date.now() - 4_000,
+      processedOn: Date.now() - 3_000,
+      finishedOn: state === 'completed' || state === 'failed' ? Date.now() : undefined,
+      attemptsMade: 1,
+      opts: { attempts: 2 },
+      ...extra,
     });
     const expect404 = async (c: any) => {
       let err: any;
@@ -127,17 +143,65 @@ describe('AiScanJobService', () => {
     });
     it('propio completed -> result', async () => {
       queue.getJob.mockResolvedValue(job());
-      await expect(run(ctx(), () => service.getStatus('1'))).resolves.toEqual({
+      const out = await run(ctx(), () => service.getStatus('1'));
+      expect(out).toMatchObject({
         status: 'completed',
+        kind: 'rut',
         result: { ok: true },
+        attempts_made: 1,
+        max_attempts: 2,
+        stalled: false,
+        progress: null,
       });
+      // Marcas del servidor: la UI mide lo transcurrido tras recargar con ellas.
+      expect(out.queued_at).toEqual(expect.any(String));
+      expect(out.started_at).toEqual(expect.any(String));
+      expect(out.finished_at).toEqual(expect.any(String));
+      expect(out.server_time).toEqual(expect.any(String));
+      expect(out).not.toHaveProperty('error');
     });
     it('propio failed -> error', async () => {
       queue.getJob.mockResolvedValue(job({}, 'failed'));
-      await expect(run(ctx(), () => service.getStatus('1'))).resolves.toEqual({
+      await expect(run(ctx(), () => service.getStatus('1'))).resolves.toMatchObject({
         status: 'failed',
         error: 'CODE_X',
+        error_category: 'technical',
       });
+    });
+    it('failed por documento ilegible -> error_category document', async () => {
+      queue.getJob.mockResolvedValue(
+        job({}, 'failed', { failedReason: 'RUT_SCAN_PARSE_FAIL' }),
+      );
+      await expect(run(ctx(), () => service.getStatus('1'))).resolves.toMatchObject({
+        error: 'RUT_SCAN_PARSE_FAIL',
+        error_category: 'document',
+      });
+    });
+    it('failed por IA sin créditos -> ai_unavailable/credits', async () => {
+      queue.getJob.mockResolvedValue(
+        job({}, 'failed', { failedReason: 'AI_PROVIDER_003' }),
+      );
+      await expect(run(ctx(), () => service.getStatus('1'))).resolves.toMatchObject({
+        error_category: 'ai_unavailable',
+        error_reason: 'credits',
+      });
+    });
+    it('en cola sin worker más de 2 min -> stalled y aviso al equipo', async () => {
+      queue.getJob.mockResolvedValue(
+        job({}, 'waiting', {
+          timestamp: Date.now() - 3 * 60_000,
+          processedOn: undefined,
+        }),
+      );
+      await expect(run(ctx(), () => service.getStatus('1'))).resolves.toMatchObject({
+        status: 'waiting',
+        stalled: true,
+      });
+      await new Promise((r) => setImmediate(r));
+      expect(incidents.report).toHaveBeenCalledTimes(1);
+      expect(incidents.report.mock.calls[0][0].dedupeKey).toBe(
+        'ai-job:stalled:waiting:ai-scan',
+      );
     });
     it('normaliza org/store ausentes (undefined -> null)', async () => {
       queue.getJob.mockResolvedValue(
@@ -147,7 +211,7 @@ describe('AiScanJobService', () => {
         run(ctx({ organization_id: undefined, store_id: undefined }), () =>
           service.getStatus('1'),
         ),
-      ).resolves.toEqual({ status: 'active' });
+      ).resolves.toMatchObject({ status: 'active', stalled: false });
     });
   });
 });

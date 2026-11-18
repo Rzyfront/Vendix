@@ -5,6 +5,9 @@ import {
   Get,
   UseGuards,
   Res,
+  Req,
+  HttpCode,
+  Optional,
 } from '@nestjs/common';
 import { Response } from 'express';
 import { CustomersBulkService } from './customers-bulk.service';
@@ -12,6 +15,12 @@ import { ResponseService } from '@common/responses/response.service';
 import { PermissionsGuard } from '../../auth/guards/permissions.guard';
 import { Permissions } from '../../auth/decorators/permissions.decorator';
 import { BulkCustomerUploadDto } from './dto/bulk-customer.dto';
+import { BulkUploadJobsService } from '../bulk-uploads/bulk-upload-jobs.service';
+import { snapshotBulkJobUser } from '../bulk-uploads/bulk-upload-job.util';
+import { sha256Hex } from '../bulk-uploads/bulk-file-fingerprint.util';
+import { CustomersBulkJobHandler } from './customers-bulk-job.handler';
+import { BulkCustomersJobDto } from './dto/bulk-customers-job.dto';
+import { AuthenticatedRequest } from '@common/interfaces/authenticated-request.interface';
 
 @Controller('store/customers/bulk')
 @UseGuards(PermissionsGuard)
@@ -19,6 +28,8 @@ export class CustomersBulkController {
   constructor(
     private readonly customersBulkService: CustomersBulkService,
     private readonly responseService: ResponseService,
+    @Optional() private readonly bulkJobs?: BulkUploadJobsService,
+    @Optional() private readonly jobHandler?: CustomersBulkJobHandler,
   ) {}
 
   /**
@@ -83,6 +94,35 @@ export class CustomersBulkController {
         error.message,
         error.status || 400,
       );
+    }
+  }
+
+  /**
+   * QUI-1009 — guarda las filas en S3 y encola la carga como trabajo durable
+   * (202). Si encolar falla, el archivo temporal se descarta.
+   */
+  @Post('jobs')
+  @HttpCode(202)
+  @Permissions('store:customers:create')
+  async enqueueUploadJob(
+    @Body() body: BulkCustomersJobDto,
+    @Req() req: AuthenticatedRequest,
+  ) {
+    const s3Key = await this.jobHandler!.stageRows(body.customers);
+    try {
+      const view = await this.bulkJobs!.enqueue({
+        upload_type: 'customers',
+        file_name: body.file_name,
+        // Sin huella del navegador, la de las filas: el historial la exige.
+        file_hash: body.file_hash ?? sha256Hex(JSON.stringify(body.customers)),
+        params: { s3_key: s3Key },
+        total_rows: body.customers.length,
+        user: snapshotBulkJobUser(req.user),
+      });
+      return this.responseService.success(view, 'Carga encolada');
+    } catch (error) {
+      await this.jobHandler!.discardStaged(s3Key);
+      throw error;
     }
   }
 }

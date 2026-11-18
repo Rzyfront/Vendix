@@ -1,4 +1,7 @@
 import { BulkUploadsModule } from '../bulk-uploads/bulk-uploads.module';
+import { BulkUploadHandlerRegistry } from '../bulk-uploads/bulk-upload-handler.registry';
+import { CustomersBulkJobHandler } from './customers-bulk-job.handler';
+import { S3Module } from '@common/services/s3.module';
 import { Module, OnModuleInit } from '@nestjs/common';
 import { AIToolRegistry } from '../../../ai-engine/tools/ai-tool-registry';
 import { createCustomerTools } from '../../../ai-engine/tools/domains/customers.tools';
@@ -31,6 +34,7 @@ import { AddressesModule } from '../addresses/addresses.module';
     EmailModule,
     AddressesModule,
     BulkUploadsModule,
+    S3Module,
   ],
   controllers: [
     CustomersController,
@@ -48,6 +52,7 @@ import { AddressesModule } from '../addresses/addresses.module';
     RntSource,
     ExternalIdentityLookupService,
     CustomersBulkService,
+    CustomersBulkJobHandler,
     CustomerHistoryService,
     CustomerEmailListener,
     CustomerAiImportService,
@@ -65,6 +70,8 @@ export class CustomersModule implements OnModuleInit {
   constructor(
     private readonly toolRegistry: AIToolRegistry,
     private readonly customersService: CustomersService,
+    private readonly bulkJobRegistry: BulkUploadHandlerRegistry,
+    private readonly customersBulkJobHandler: CustomersBulkJobHandler,
   ) {}
 
   /**
@@ -75,6 +82,9 @@ export class CustomersModule implements OnModuleInit {
    * domain to the engine and this module imports nothing extra.
    */
   onModuleInit(): void {
+    // QUI-1009: carga masiva durable de clientes.
+    this.bulkJobRegistry.register(this.customersBulkJobHandler);
+
     this.toolRegistry.registerMany(
       createCustomerTools({
         customersService: this.customersService,

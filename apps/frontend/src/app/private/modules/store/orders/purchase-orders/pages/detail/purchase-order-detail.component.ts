@@ -55,6 +55,11 @@ import { SerialBulkLoadModalComponent } from '../../../../serial-numbers/compone
 import { BulkBackfillItem } from '../../../../serial-numbers/services/serial-numbers.service';
 import { WorkflowEntityLinkComponent } from '../../../../workflows/components/workflow-entity-link/workflow-entity-link.component';
 import { extractApiErrorMessage } from '../../../../../../../core/utils/api-error-handler';
+// QUI-684: documento soporte generado desde la OC.
+import { SupportDocumentService } from '../../../../invoicing/services/support-document.service';
+import { SupportDocumentCreateComponent } from '../../../../invoicing/components/support-documents/support-document-create.component';
+import type { PurchaseOrderSupportContext } from '../../../../invoicing/interfaces/support-document.interface';
+import { PurchaseOrderSupportDocumentCardComponent } from './purchase-order-support-document-card.component';
 
 const STATUS_LABELS: Record<PurchaseOrderStatus, string> = {
   draft: 'Borrador',
@@ -138,6 +143,8 @@ interface ReceiveLine {
     SerialBulkLoadModalComponent,
     FiscalExplanationPanelComponent,
     WorkflowEntityLinkComponent,
+    SupportDocumentCreateComponent,
+    PurchaseOrderSupportDocumentCardComponent,
   ],
   template: `
     <div class="w-full min-h-screen">
@@ -680,6 +687,11 @@ interface ReceiveLine {
                 }
               </app-card>
 
+              <!-- QUI-684 — Documento soporte ligado a la OC (solo con la función habilitada) -->
+              @if (supportContext(); as ctx) {
+                <app-purchase-order-support-document-card [documents]="ctx.documents" />
+              }
+
               <!-- Attachments -->
               <app-card>
                 <h2 class="text-xs font-bold text-text-primary uppercase tracking-wider mb-3">Adjuntos</h2>
@@ -737,6 +749,16 @@ interface ReceiveLine {
       (close)="onPaymentModalClose()"
       (saved)="onPaymentSaved()"
     />
+
+    <!-- QUI-684 — Modal de documento soporte en modo OC -->
+    @if (supportContext()) {
+      <app-support-document-create
+        [(isOpen)]="showSupportModal"
+        [purchaseOrderId]="po()?.id ?? null"
+        (created)="onSupportDocumentCreated()"
+        (viewDocument)="onViewSupportDocument($event)"
+      />
+    }
 
     <!-- QUI-431 serial capture modal (collect mode) -->
     <app-serial-bulk-load-modal
@@ -799,6 +821,12 @@ export class StorePurchaseOrderDetailComponent {
 
   // Payment modal
   readonly showPaymentModal = signal(false);
+
+  // QUI-684: documento soporte desde la OC. `null` = función oculta (no
+  // habilitada, sin permiso de facturación o la consulta falló).
+  private readonly supportService = inject(SupportDocumentService);
+  readonly supportContext = signal<PurchaseOrderSupportContext | null>(null);
+  readonly showSupportModal = signal(false);
 
   // QUI-431 serial capture state
   readonly serialsByLine = signal<Map<number, string[]>>(new Map());
@@ -1063,6 +1091,11 @@ export class StorePurchaseOrderDetailComponent {
     if (this.canCancel()) {
       acts.push({ id: 'cancel', label: 'Cancelar', variant: 'outline-danger', icon: 'x-circle', loading, disabled: loading, visible: true });
     }
+    // QUI-684 (S6.1): siempre que la tienda tenga habilitado el documento
+    // soporte, sin importar el estado de la OC ni si ya trae factura adjunta.
+    if (this.supportContext()?.enabled) {
+      acts.push({ id: 'support-doc', label: 'Generar documento soporte', variant: 'outline', icon: 'file-text', disabled: loading, visible: true });
+    }
     acts.push({ id: 'print', label: 'Imprimir', variant: 'outline', icon: 'printer', disabled: loading, visible: true });
     return acts;
   });
@@ -1099,12 +1132,42 @@ export class StorePurchaseOrderDetailComponent {
           // calcula sobre lo pendiente, que sale justamente de ellas.
           this.loadCostPreview(order);
           this.loading.set(false);
+          this.loadSupportContext(id);
         },
         error: (err) => {
           this.errorMessage.set(typeof err === 'string' ? err : 'No se pudo cargar la orden.');
           this.loading.set(false);
         },
       });
+  }
+
+  /**
+   * Contexto de documento soporte de la OC (QUI-684). Va aparte del `forkJoin`
+   * de la página: un fallo (p. ej. 403 sin permiso de facturación) solo oculta
+   * la función y nunca rompe el detalle de la OC.
+   */
+  private loadSupportContext(id: number): void {
+    this.supportService
+      .getPurchaseOrderContext(id)
+      .pipe(takeUntilDestroyed(this.destroyRef))
+      .subscribe({
+        next: (res) => {
+          const ctx = res?.data ?? null;
+          this.supportContext.set(ctx?.enabled ? ctx : null);
+        },
+        error: () => this.supportContext.set(null),
+      });
+  }
+
+  onSupportDocumentCreated(): void {
+    const id = this.po()?.id;
+    if (id) this.loadSupportContext(id);
+  }
+
+  onViewSupportDocument(documentId: number): void {
+    void this.router.navigate(['/admin/invoicing/support-documents'], {
+      queryParams: { document: documentId },
+    });
   }
 
   private reload(): void {
@@ -1308,6 +1371,7 @@ export class StorePurchaseOrderDetailComponent {
         this.openPaymentModal('pay');
         break;
       case 'cancel': void this.cancel(); break;
+      case 'support-doc': this.showSupportModal.set(true); break;
       case 'print': this.print(); break;
     }
   }

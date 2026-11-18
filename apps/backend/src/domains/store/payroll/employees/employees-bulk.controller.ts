@@ -13,11 +13,17 @@ import {
   MaxFileSizeValidator,
   BadRequestException,
   Res,
+  HttpCode,
+  Optional,
 } from '@nestjs/common';
 import { Response } from 'express';
 import { FileInterceptor } from '@nestjs/platform-express';
 import { EmployeesBulkService } from './employees-bulk.service';
 import { BulkUploadLogsService } from '../../bulk-uploads/bulk-upload-logs.service';
+import { BulkUploadJobsService } from '../../bulk-uploads/bulk-upload-jobs.service';
+import { snapshotBulkJobUser } from '../../bulk-uploads/bulk-upload-job.util';
+import { EmployeesBulkJobHandler } from './employees-bulk-job.handler';
+import { BulkEmployeesJobDto } from './dto/bulk-employees-job.dto';
 import { ResponseService } from '@common/responses/response.service';
 import { PermissionsGuard } from '../../../auth/guards/permissions.guard';
 import { Permissions } from '../../../auth/decorators/permissions.decorator';
@@ -35,6 +41,8 @@ export class EmployeesBulkController {
     private readonly employeesBulkService: EmployeesBulkService,
     private readonly responseService: ResponseService,
     private readonly bulkUploadLogs: BulkUploadLogsService,
+    @Optional() private readonly bulkJobs?: BulkUploadJobsService,
+    @Optional() private readonly jobHandler?: EmployeesBulkJobHandler,
   ) {}
 
   @Post('upload')
@@ -235,5 +243,24 @@ export class EmployeesBulkController {
     await this.employeesBulkService.cancelSession(sessionId, storeId);
 
     return this.responseService.success(null, 'Sesion cancelada');
+  }
+
+  /** QUI-1009 — encola la carga de empleados como trabajo durable (202). */
+  @Post('jobs')
+  @HttpCode(202)
+  @Permissions('store:payroll:employees:bulk:upload')
+  async enqueueUploadJob(
+    @Body() body: BulkEmployeesJobDto,
+    @Req() req: AuthenticatedRequest,
+  ) {
+    await this.jobHandler!.assertSessionExists(body.session_id);
+    const view = await this.bulkJobs!.enqueue({
+      upload_type: 'employees',
+      file_name: body.file_name,
+      file_hash: body.file_hash,
+      params: { session_id: body.session_id },
+      user: snapshotBulkJobUser(req.user),
+    });
+    return this.responseService.success(view, 'Carga encolada');
   }
 }

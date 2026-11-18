@@ -36,9 +36,9 @@ describe('ImplementationPageComponent (SEO-OPS-19)', () => {
     expect(text).toContain('Visitas presenciales o capacitación en sitio.');
   });
 
-  it('stays noindex without canonical until it is approved', () => {
-    expect(MARKETING_PAGES.implementation.robots).toBe('noindex, follow');
-    expect(MARKETING_PAGES.implementation.canonicalPath).toBeNull();
+  it('is indexable with its own canonical since the 2026-11-17 approval', () => {
+    expect(MARKETING_PAGES.implementation.robots).toBe('index, follow');
+    expect(MARKETING_PAGES.implementation.canonicalPath).toBe('/implementacion');
   });
 
   it('sends the WhatsApp CTA without personal data', () => {

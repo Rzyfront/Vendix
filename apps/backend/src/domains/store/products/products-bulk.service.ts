@@ -4,7 +4,7 @@ import { StorePrismaService } from '../../../prisma/services/store-prisma.servic
 import { ProductsService } from './products.service';
 import { assertVariantsAllowed } from './services/tiers-variants-exclusive.util';
 import { AccessValidationService } from '@common/services/access-validation.service';
-import { S3Service } from '@common/services/s3.service';
+import { S3Service, isS3NotFoundError } from '@common/services/s3.service';
 import { VendixHttpException, ErrorCodes } from '@common/errors';
 import { RequestContextService } from '@common/context/request-context.service';
 import { InventoryAdjustmentsService } from '../inventory/adjustments/inventory-adjustments.service';
@@ -2176,7 +2176,7 @@ export class ProductsBulkService {
     storeId: number,
     user: any,
     page?: { offset?: number; limit?: number },
-    options: { initialLoadAck?: boolean } = {},
+    options: { initialLoadAck?: boolean; keepSessionFile?: boolean } = {},
   ): Promise<BulkUploadResultDto | BulkUploadSessionResultDto> {
     const s3Key = `tmp/bulk-products/${storeId}/${sessionId}.xlsx`;
 
@@ -2184,7 +2184,11 @@ export class ProductsBulkService {
     try {
       fileBuffer = await this.s3Service.downloadImage(s3Key);
     } catch (error) {
-      throw new VendixHttpException(ErrorCodes.BULK_PROD_SESSION_EXPIRED);
+      // Solo «no existe» es sesión vencida (dato); un fallo de S3 es técnico.
+      if (isS3NotFoundError(error)) {
+        throw new VendixHttpException(ErrorCodes.BULK_PROD_SESSION_EXPIRED);
+      }
+      throw error;
     }
 
     // Modo paginado: el cliente recorre el archivo en páginas de <=100 filas.
@@ -2228,7 +2232,9 @@ export class ProductsBulkService {
         },
       );
       const done = offset + limit >= total;
-      if (done) {
+      // `keepSessionFile` (trabajo durable QUI-1009): el trabajo borra el
+      // archivo al terminar, para conservarlo si el lote se reintenta a mano.
+      if (done && !options.keepSessionFile) {
         try {
           await this.s3Service.deleteFile(s3Key);
           if (initialLoadLocationId !== undefined) {

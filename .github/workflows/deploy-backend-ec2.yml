@@ -158,6 +158,10 @@ jobs:
           # documentado (feature deshabilitada / cap 5000) sin romper el deploy.
           GOOGLE_GEOCODING_API_KEY=\$(echo "\$APP_SECRETS" | python3 -c "import sys, json; data=json.load(sys.stdin); print(data.get('GOOGLE_GEOCODING_API_KEY', ''))")
           GOOGLE_GEOCODING_MONTHLY_CAP=\$(echo "\$APP_SECRETS" | python3 -c "import sys, json; data=json.load(sys.stdin); print(data.get('GOOGLE_GEOCODING_MONTHLY_CAP', ''))")
+          # QUI-1010 bot de monitoreo: opcionales. Vacías = canal Telegram apagado, no rompe el arranque.
+          MONITOR_TELEGRAM_BOT_TOKEN=\$(echo "\$APP_SECRETS" | python3 -c "import sys, json; data=json.load(sys.stdin); print(data.get('MONITOR_TELEGRAM_BOT_TOKEN', ''))")
+          MONITOR_TELEGRAM_CHAT_ID=\$(echo "\$APP_SECRETS" | python3 -c "import sys, json; data=json.load(sys.stdin); print(data.get('MONITOR_TELEGRAM_CHAT_ID', ''))")
+          MONITOR_TELEGRAM_MAX_PER_MINUTE=\$(echo "\$APP_SECRETS" | python3 -c "import sys, json; data=json.load(sys.stdin); print(data.get('MONITOR_TELEGRAM_MAX_PER_MINUTE', ''))")
 
           # Email reception P0: independent pilot flag, default disabled; no provisioning here.
           EMAIL_RECEPTION_ENABLED=\$(echo "\$APP_SECRETS" | python3 -c "import sys, json; data=json.load(sys.stdin); print(str(data.get('EMAIL_RECEPTION_ENABLED', 'false')).lower())")
@@ -315,6 +319,9 @@ jobs:
               -e TRUST_PROXY_HOPS="\$TRUST_PROXY_HOPS" \\
               -e GOOGLE_GEOCODING_API_KEY="\$GOOGLE_GEOCODING_API_KEY" \\
               -e GOOGLE_GEOCODING_MONTHLY_CAP="\$GOOGLE_GEOCODING_MONTHLY_CAP" \\
+              -e MONITOR_TELEGRAM_BOT_TOKEN="\$MONITOR_TELEGRAM_BOT_TOKEN" \\
+              -e MONITOR_TELEGRAM_CHAT_ID="\$MONITOR_TELEGRAM_CHAT_ID" \\
+              -e MONITOR_TELEGRAM_MAX_PER_MINUTE="\$MONITOR_TELEGRAM_MAX_PER_MINUTE" \\
               -e EMAIL_RECEPTION_ENABLED="\$EMAIL_RECEPTION_ENABLED" \\
               -e EMAIL_RECEPTION_STORE_ALLOWLIST="\$EMAIL_RECEPTION_STORE_ALLOWLIST" \\
               -e EMAIL_RECEPTION_ENVIRONMENT="\$EMAIL_RECEPTION_ENVIRONMENT" \\
@@ -524,6 +531,9 @@ jobs:
               -e NODE_ENV="\$NODE_ENV" \\
               -e GOOGLE_GEOCODING_API_KEY="\$GOOGLE_GEOCODING_API_KEY" \\
               -e GOOGLE_GEOCODING_MONTHLY_CAP="\$GOOGLE_GEOCODING_MONTHLY_CAP" \\
+              -e MONITOR_TELEGRAM_BOT_TOKEN="\$MONITOR_TELEGRAM_BOT_TOKEN" \\
+              -e MONITOR_TELEGRAM_CHAT_ID="\$MONITOR_TELEGRAM_CHAT_ID" \\
+              -e MONITOR_TELEGRAM_MAX_PER_MINUTE="\$MONITOR_TELEGRAM_MAX_PER_MINUTE" \\
               -e EMAIL_RECEPTION_ENABLED="\$EMAIL_RECEPTION_ENABLED" \\
               -e EMAIL_RECEPTION_STORE_ALLOWLIST="\$EMAIL_RECEPTION_STORE_ALLOWLIST" \\
               -e EMAIL_RECEPTION_ENVIRONMENT="\$EMAIL_RECEPTION_ENVIRONMENT" \\

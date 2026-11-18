@@ -35,8 +35,39 @@ export class InventoryScannerService {
       .enqueueAndWait<InventoryCountScanResponse>(
         `${this.base_url}/adjustments/scan/async?location_id=${locationId}`,
         fd,
-        opts,
+        // The location travels with the remembered job (same entry).
+        opts?.resumeKey
+          ? { ...opts, resumeMeta: { ...opts.resumeMeta, locationId } }
+          : opts,
       )
       .pipe(map((result) => ({ success: true, data: result })));
+  }
+
+  /**
+   * Re-attaches to a count scan started before a reload (QUI-1020). The
+   * location chosen at launch is remembered with the job because the review
+   * step needs it to confirm; `null` when there is nothing to resume.
+   */
+  resumeScan(
+    resumeKey: string,
+    opts?: Parameters<AiScanJobService['resume']>[1],
+  ): {
+    locationId: number;
+    result$: Observable<ApiResponse<InventoryCountScanResponse>>;
+  } | null {
+    const locationId = Number(
+      this.aiScanJobs.pendingResume<{ locationId?: number }>(resumeKey)?.meta
+        ?.locationId,
+    );
+    if (!Number.isFinite(locationId) || locationId <= 0) return null;
+    const result$ = this.aiScanJobs.resume<InventoryCountScanResponse>(
+      resumeKey,
+      opts,
+    );
+    if (!result$) return null;
+    return {
+      locationId,
+      result$: result$.pipe(map((result) => ({ success: true, data: result }))),
+    };
   }
 }

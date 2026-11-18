@@ -1,13 +1,23 @@
-import { Processor, WorkerHost } from '@nestjs/bullmq';
+import { OnWorkerEvent, Processor, WorkerHost } from '@nestjs/bullmq';
 import { Logger } from '@nestjs/common';
 import { Job } from 'bullmq';
 import { randomUUID } from 'crypto';
 import { InvoiceScannerService } from './invoice-scanner.service';
 import { RequestContextService } from '@common/context/request-context.service';
+import { AiJobMonitorService } from '@common/ai-scan-jobs/ai-job-monitor.service';
+import { LEGACY_AI_SOURCES } from '@common/ai-scan-jobs/ai-scan-sources';
+import { toAiJobFailure } from '@common/ai-scan-jobs/ai-job-failure.util';
 import {
   PaymentReceiptScanJob,
   PaymentReceiptScanResult,
 } from './payment-receipt-scan-job.interface';
+import { ErrorCodes } from '@common/errors';
+
+/** Model read/parse failures: non-deterministic, so BullMQ keeps retrying them. */
+const PAYMENT_SCAN_RETRY_CODES = [
+  ErrorCodes.INV_SCAN_AI_FAIL.code,
+  ErrorCodes.INV_SCAN_PARSE_FAIL.code,
+];
 
 /**
  * Track B2 — async processor for the payment-receipt OCR scan queue.
@@ -25,7 +35,10 @@ import {
 export class PaymentReceiptScanProcessor extends WorkerHost {
   private readonly logger = new Logger(PaymentReceiptScanProcessor.name);
 
-  constructor(private readonly invoiceScanner: InvoiceScannerService) {
+  constructor(
+    private readonly invoiceScanner: InvoiceScannerService,
+    private readonly monitor: AiJobMonitorService,
+  ) {
     super();
   }
 
@@ -47,14 +60,30 @@ export class PaymentReceiptScanProcessor extends WorkerHost {
           user_id: context.user_id,
           request_id: requestId,
         },
-        () => this.invoiceScanner.scanPaymentFromImage(dataUri, mimeType),
+        () =>
+          this.monitor.runAiWork(job, LEGACY_AI_SOURCES.paymentReceiptScan, () =>
+            this.invoiceScanner.scanPaymentFromImage(dataUri, mimeType),
+          ),
       );
       return result;
     } catch (error: any) {
       this.logger.error(
         `[PaymentReceiptScan] job=${job.id} failed: ${error?.message ?? error}`,
       );
-      throw error; // let BullMQ retry
+      // Vendix errors keep their CODE as `failedReason`; model read/parse
+      // failures stay retryable, the rest of the 4xx are final.
+      throw toAiJobFailure(error, { retryCodes: PAYMENT_SCAN_RETRY_CODES });
     }
+  }
+
+  /** QUI-1020: a final, non-document failure alerts Vendix once. */
+  @OnWorkerEvent('failed')
+  async onFailed(job: Job<PaymentReceiptScanJob> | undefined): Promise<void> {
+    if (!job) return;
+    await this.monitor.onFailed(
+      job,
+      LEGACY_AI_SOURCES.paymentReceiptScan,
+      job.data?.context,
+    );
   }
 }

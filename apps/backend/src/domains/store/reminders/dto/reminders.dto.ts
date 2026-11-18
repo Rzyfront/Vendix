@@ -8,6 +8,7 @@ import {
   Max,
   MaxLength,
   Min,
+  MinLength,
 } from 'class-validator';
 
 export const REMINDER_STATUSES = ['pending', 'done'] as const;
@@ -26,12 +27,18 @@ export const REMINDER_DUE_FILTERS = [
 ] as const;
 export type ReminderDueFilter = (typeof REMINDER_DUE_FILTERS)[number];
 
-/** Store records a reminder can point at; `metric` only carries a label. */
+/**
+ * Store records a reminder can point at; `metric` only carries a label.
+ * `user_reminders.link_type` is VarChar(20): keep every value within it.
+ */
 export const REMINDER_LINK_TYPES = [
   'product',
   'order',
   'customer',
   'supplier',
+  'purchase_order',
+  'quotation',
+  'invoice',
   'metric',
 ] as const;
 export type ReminderLinkType = (typeof REMINDER_LINK_TYPES)[number];
@@ -62,6 +69,15 @@ export class RemindersQueryDto {
   @Min(1)
   @Max(200)
   limit?: number;
+}
+
+/** `GET /store/reminders/link-search?q=`: records to link, at least 2 characters. */
+export class ReminderLinkSearchDto {
+  @Transform(({ value }) => (typeof value === 'string' ? value.trim() : value))
+  @IsString()
+  @MinLength(2)
+  @MaxLength(80)
+  q!: string;
 }
 
 export class CreateReminderDto {

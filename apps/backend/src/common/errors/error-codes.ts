@@ -1551,6 +1551,15 @@ export const ErrorCodes = {
     devMessage:
       'Una orden con mercancía recibida se revierte con una devolución a proveedor, no cancelándola',
   },
+  // QUI-684 — `invoices.purchase_order_id` es FK ON DELETE RESTRICT: la traza
+  // fiscal (incluso de un documento anulado) sobrevive al borrador. Sin esta
+  // guarda el borrado chocaba con la FK y salía como 500 (P2003).
+  PO_DELETE_SUPPORT_DOCUMENT_001: {
+    code: 'PO_DELETE_SUPPORT_DOCUMENT_001',
+    httpStatus: 409,
+    devMessage:
+      'La orden de compra tiene un documento soporte asociado y no se puede eliminar; cancélala si ya no la necesitas',
+  },
   PO_FIND_001: {
     code: 'PO_FIND_001',
     httpStatus: 404,
@@ -2303,6 +2312,21 @@ export const ErrorCodes = {
     code: 'AI_PROVIDER_002',
     httpStatus: 400,
     devMessage: 'No default AI provider configured',
+  },
+  // QUI-1020: the provider refused for billing (402, insufficient_quota, credit
+  // balance too low). 4xx on purpose: the AI job queues treat it as final (a
+  // retry never refills the balance) and alert Vendix once.
+  AI_PROVIDER_003: {
+    code: 'AI_PROVIDER_003',
+    httpStatus: 402,
+    devMessage: 'AI provider has no credits or quota left',
+  },
+  // QUI-1020: the provider kept answering 429 after the job's retries. 429 on
+  // purpose: the AI job queues retry it like any rate limit before giving up.
+  AI_PROVIDER_004: {
+    code: 'AI_PROVIDER_004',
+    httpStatus: 429,
+    devMessage: 'AI provider rate limit kept refusing the request',
   },
   AI_REQUEST_001: {
     code: 'AI_REQUEST_001',
@@ -3822,6 +3846,29 @@ export const ErrorCodes = {
     devMessage: 'Sale was charged without an issued fiscal document',
   },
   /**
+   * QUI-684 — la OC no tiene todos los datos que exige el documento soporte.
+   * El detalle viaja en `details.missing` (`{ code, field, label, target }[]`)
+   * para que el modal liste exactamente qué falta. 422: el cuerpo es válido,
+   * lo que falla es el estado de la compra/proveedor. No se crea nada.
+   */
+  INVOICING_SUPPORT_PO_001: {
+    code: 'INVOICING_SUPPORT_PO_001',
+    httpStatus: 422,
+    devMessage:
+      'La orden de compra no tiene todos los datos obligatorios para el documento soporte',
+  },
+  /**
+   * QUI-684 — la OC ya tiene un documento soporte vigente (no anulado). Una OC
+   * solo puede tener uno; el índice único parcial
+   * `invoices_po_active_support_document_key` lo garantiza también ante dos
+   * POST concurrentes. `details.active_document` = `{ id, invoice_number, status }`.
+   */
+  INVOICING_SUPPORT_PO_002: {
+    code: 'INVOICING_SUPPORT_PO_002',
+    httpStatus: 409,
+    devMessage: 'La orden de compra ya tiene un documento soporte vigente',
+  },
+  /**
    * IDENTIDAD FISCAL DEL EMISOR INCOMPLETA — lo lanza el resolvedor estricto
    * (`resolveTenantFiscalIdentity`) cuando falta `legal_name`,
    * `municipality_code` o `department`.
@@ -5293,6 +5340,43 @@ export const ErrorCodes = {
     code: 'BULK_LOG_NOT_FOUND',
     httpStatus: 404,
     devMessage: 'No se encontró la carga masiva en esta tienda.',
+  },
+  BULK_JOB_ALREADY_ACTIVE: {
+    code: 'BULK_JOB_ALREADY_ACTIVE',
+    httpStatus: 409,
+    devMessage:
+      'Ya hay una carga de este tipo en curso en la tienda. Espera a que termine.',
+  },
+  BULK_JOB_NOT_FOUND: {
+    code: 'BULK_JOB_NOT_FOUND',
+    httpStatus: 404,
+    devMessage: 'No encontramos esa carga.',
+  },
+  BULK_JOB_NOT_RETRYABLE: {
+    code: 'BULK_JOB_NOT_RETRYABLE',
+    httpStatus: 409,
+    devMessage: 'Esta carga ya no se puede reanudar. Sube el archivo de nuevo.',
+  },
+  BULK_JOB_ENQUEUE_FAILED: {
+    code: 'BULK_JOB_ENQUEUE_FAILED',
+    httpStatus: 503,
+    devMessage:
+      'No pudimos iniciar la carga por un problema técnico. Intenta de nuevo en unos minutos.',
+  },
+  BULK_JOB_TIMEOUT: {
+    code: 'BULK_JOB_TIMEOUT',
+    httpStatus: 504,
+    devMessage: 'La carga superó el tiempo máximo de procesamiento.',
+  },
+  BULK_JOB_INTERRUPTED: {
+    code: 'BULK_JOB_INTERRUPTED',
+    httpStatus: 500,
+    devMessage: 'La carga se interrumpió mientras se procesaba un lote.',
+  },
+  BULK_JOB_NO_HANDLER: {
+    code: 'BULK_JOB_NO_HANDLER',
+    httpStatus: 500,
+    devMessage: 'No hay procesador registrado para este tipo de carga.',
   },
   BULK_PROD_UPLOAD_FAILED: {
     code: 'BULK_PROD_UPLOAD_FAILED',
@@ -8203,7 +8287,7 @@ export const ErrorCodes = {
     code: 'REMINDER_LINK_001',
     httpStatus: 400,
     devMessage:
-      'El dato vinculado no existe en esta tienda o el vínculo está incompleto.',
+      'El dato vinculado no existe en esta tienda, no tienes permiso para verlo o el vínculo está incompleto.',
   },
   REMINDER_DATE_001: {
     code: 'REMINDER_DATE_001',
@@ -8511,6 +8595,35 @@ export const ErrorCodes = {
     code: 'TIP_NOT_SUGGESTED_001',
     httpStatus: 422,
     devMessage: 'La propina debe ser la sugerida por la tienda.',
+  },
+
+  // ===== VENDIX PLATFORM · enlace CRM ↔ organización cliente =====
+  // (odd/tasks/vendix-platform-crm-enlace.md). Solo los ve la tienda de la
+  // org plataforma: cualquier otra tienda recibe un 404 genérico del guard.
+  PLATFORM_CRM_001: {
+    code: 'PLATFORM_CRM_001',
+    httpStatus: 404,
+    devMessage: 'El cliente no existe en el CRM de Vendix Platform.',
+  },
+  PLATFORM_CRM_002: {
+    code: 'PLATFORM_CRM_002',
+    httpStatus: 404,
+    devMessage: 'La organización no existe o no se puede enlazar.',
+  },
+  PLATFORM_CRM_003: {
+    code: 'PLATFORM_CRM_003',
+    httpStatus: 409,
+    devMessage: 'Este cliente ya tiene una cuenta Vendix enlazada.',
+  },
+  PLATFORM_CRM_004: {
+    code: 'PLATFORM_CRM_004',
+    httpStatus: 409,
+    devMessage: 'Esta organización ya está enlazada a otro cliente del CRM.',
+  },
+  PLATFORM_CRM_005: {
+    code: 'PLATFORM_CRM_005',
+    httpStatus: 404,
+    devMessage: 'Este cliente no tiene una cuenta Vendix enlazada.',
   },
 } as const satisfies Record<string, ErrorCodeEntry>;
 

@@ -11,6 +11,7 @@ import {
   hashTraceValue,
 } from './observability/agent-trace.service';
 import { ProviderAttemptObserver } from './provider-attempt-observer';
+import { noteProviderOutcome } from './provider-failure-recorder';
 import {
   canonicalAgentTools,
   reportedAgentUsage,
@@ -623,6 +624,7 @@ export class AIEngineService implements OnModuleInit {
 
           logStatus = 'success';
           logResponse = lastResponse;
+          noteProviderOutcome(lastResponse, appKey);
           return lastResponse;
         }
 
@@ -647,6 +649,7 @@ export class AIEngineService implements OnModuleInit {
         `AI app "${appKey}" failed after ${maxRetries + 1} attempts: ${this.safeProviderError(lastResponse.error)}`,
       );
       logResponse = lastResponse;
+      noteProviderOutcome(lastResponse, appKey);
       return lastResponse;
     } catch (error: any) {
       logResponse = { success: false, error: error.message };
@@ -1238,6 +1241,7 @@ export class AIEngineService implements OnModuleInit {
       );
 
       logResponse = response;
+      noteProviderOutcome(response, appKey);
       if (response.success) {
         logStatus = 'success';
         await this.consumeSubscriptionQuota(app.ai_feature_category, 1, {

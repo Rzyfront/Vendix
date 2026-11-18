@@ -166,7 +166,7 @@ describe('CreditNotesService issue/notes (CP-nc-nd-auto-orden-reembolso)', () =>
     expect(prisma.invoices.findMany).not.toHaveBeenCalled();
   });
 
-  it('notes filtra por entidad del padre y solo NC/ND ordenadas', async () => {
+  it('notes filtra por entidad del padre y solo NC/ND o notas de ajuste de soporte, ordenadas', async () => {
     const notes = [{ id: 21, invoice_type: 'credit_note' }];
     const findMany = jest.fn().mockResolvedValue(notes);
     const { service } = createService({
@@ -184,7 +184,9 @@ describe('CreditNotesService issue/notes (CP-nc-nd-auto-orden-reembolso)', () =>
         where: {
           related_invoice_id: 12,
           accounting_entity_id: 3,
-          invoice_type: { in: ['credit_note', 'debit_note'] },
+          invoice_type: {
+            in: ['credit_note', 'debit_note', 'support_adjustment_note'],
+          },
         },
         orderBy: { id: 'asc' },
       }),

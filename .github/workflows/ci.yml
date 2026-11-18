@@ -559,6 +559,18 @@ jobs:
           npx jest --ci --runInBand --forceExit --config jest.isolated.config.js --runTestsByPath
           src/domains/store/workflows/engine/workflow-postgres.integration.spec.ts
           src/domains/store/workflows/gates/approval-gate.postgres.integration.spec.ts
+      # Vendix Platform · enlace CRM ↔ organización cliente: guard de tienda
+      # plataforma (404 a cualquier otra tienda), permisos de sistema y, contra
+      # Postgres, el trigger del candado, los únicos parciales y la carrera.
+      - name: Jest — enlace CRM de Vendix Platform
+        working-directory: apps/backend
+        run: >-
+          npx jest --ci --runInBand --forceExit --config jest.isolated.config.js --runTestsByPath
+          src/domains/platform-crm/platform-crm-links.controller.spec.ts
+          src/domains/platform-crm/platform-crm.seed.spec.ts
+          src/domains/platform-crm/platform-permission-assignment.spec.ts
+          src/domains/organization/onboarding/onboarding-wizard-org-admin-role.spec.ts
+          src/domains/platform-crm/platform-crm-links.postgres.integration.spec.ts
 
   frontend:
     name: Frontend
@@ -589,6 +601,8 @@ jobs:
           --include='**/core/store/auth/auth.reducer.spec.ts'
           --include='**/core/store/notifications/notifications.effects.spec.ts'
           --include='**/core/services/environment-switch.service.spec.ts'
+          --include='**/core/utils/store-scoped-cache.spec.ts'
+          --include='**/store/store-scoped-stats-caches.spec.ts'
           --include='**/core/services/breadcrumb.service.super-admin.spec.ts'
           --include='**/legal/document-viewer/legal-document-metadata.spec.ts'
           --include='**/pos/utils/document-format-hint.util.spec.ts'
@@ -677,6 +691,7 @@ jobs:
           --include='**/ecommerce/pages/account/order-detail/order-detail.component.spec.ts'
           --include='**/reports/services/reports-data.service.spec.ts'
           --include='**/reports/state/reports.effects.spec.ts'
+          --include='**/reports/pages/support-documents/support-documents-report-page.component.spec.ts'
           --include='**/shared/directives/pull-to-refresh.directive.spec.ts'
           --include='**/reviews/review-summary.component.spec.ts'
           --include='**/products/utils/variant-stock-requirements.util.spec.ts'
@@ -741,6 +756,37 @@ jobs:
           --include='**/super-admin/subscriptions/pages/plans/workflow-limits.util.spec.ts'
           --include='**/super-admin/workflows-ops/**/*.spec.ts'
           --include='**/organization/stores/utils/collect-all-pages.util.spec.ts'
+          --include='**/invoicing/components/support-documents/support-document-detail.component.spec.ts'
+          --include='**/invoicing/components/support-documents/support-document-create.component.spec.ts'
+          --include='**/invoicing/components/support-documents/support-document-list.component.spec.ts'
+          --include='**/invoicing/components/support-documents/support-document-status.util.spec.ts'
+          --include='**/invoicing/components/support-documents/support-documents-page.component.spec.ts'
+          --include='**/invoicing/services/support-document.service.spec.ts'
+          --include='**/orders/purchase-orders/pages/detail/purchase-order-detail.support-action.spec.ts'
+          --include='**/orders/purchase-orders/pages/detail/purchase-order-support-document-card.component.spec.ts'
+          --include='**/inventory/suppliers/components/supplier-form-modal.component.spec.ts'
+          --include='**/dashboard/components/reminders-log/reminders-log.component.spec.ts'
+          --include='**/store/platform-crm/*.spec.ts'
+          --include='**/core/utils/async-job-poll.util.spec.ts'
+          --include='**/core/utils/ai-job-error.spec.ts'
+          --include='**/core/services/ai-scan-job.service.spec.ts'
+          --include='**/shared/utils/ai-job-progress.spec.ts'
+          --include='**/shared/components/ai-job-progress/ai-job-progress.component.spec.ts'
+          --include='**/crm/pages/crm-main-page/crm-main-page.component.spec.ts'
+          --include='**/fiscal-activation-wizard/components/rut-scanner-modal.component.spec.ts'
+          --include='**/invoice-create/invoice-draft-scan-modal.component.spec.ts'
+          --include='**/invoicing/services/invoice-draft-scanner.service.spec.ts'
+          --include='**/apps/landing-builder/landing-builder-page.component.spec.ts'
+          --include='**/shared/utils/batch-progress-clock.spec.ts'
+          --include='**/products/components/bulk-upload-modal/bulk-upload-modal.component.spec.ts'
+          --include='**/customers/components/bulk-upload-modal/bulk-upload-modal.component.spec.ts'
+          --include='**/bulk-uploads/services/bulk-upload-job.service.spec.ts'
+          --include='**/employees/bulk-upload-modal/employee-bulk-upload-modal.component.spec.ts'
+          --include='**/inventory/operations/components/bulk-adjustment-modal.component.spec.ts'
+          --include='**/bulk-uploads/pages/bulk-upload-history-page.component.spec.ts'
+          --include='**/super-admin/monitoring/services/monitoring-alerts.service.spec.ts'
+          --include='**/super-admin/monitoring/pages/alerts/monitoring-alerts.page.spec.ts'
+          --include='**/store/platform-crm/*.spec.ts'
 
   mobile:
     name: Mobile

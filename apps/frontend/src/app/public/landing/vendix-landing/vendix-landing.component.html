@@ -1617,6 +1617,7 @@
             <li><button (click)="scrollToSection('sectores')" class="hover:text-emerald-300 transition-colors">Comandero Mesas</button></li>
             <!-- Enlace rastreable a la página de precios (SEO-TECH-09): el menú solo tiene botones de scroll. -->
             <li><a routerLink="/pricing" class="hover:text-emerald-300 transition-colors">Planes y precios</a></li>
+            <li><a routerLink="/soluciones/software-pos" class="hover:text-emerald-300 transition-colors">Software POS</a></li>
           </ul>
         </div>
 
@@ -1624,7 +1625,7 @@
           <p class="text-xs font-bold text-white uppercase tracking-wider mb-4">Sectores</p>
           <ul class="flex flex-col gap-2.5 text-xs text-emerald-100/70">
             <li><button (click)="setIndustry('retail'); scrollToSection('sectores')" class="hover:text-emerald-300 transition-colors">Comercio Retail</button></li>
-            <li><button (click)="setIndustry('restaurant'); scrollToSection('sectores')" class="hover:text-emerald-300 transition-colors">Restaurantes y Bares</button></li>
+            <li><a routerLink="/sectores/restaurantes" class="hover:text-emerald-300 transition-colors">Restaurantes y Bares</a></li>
             <li><button (click)="setIndustry('gym'); scrollToSection('sectores')" class="hover:text-emerald-300 transition-colors">Gimnasios & Fitness</button></li>
             <li><button (click)="setIndustry('service'); scrollToSection('sectores')" class="hover:text-emerald-300 transition-colors">Servicios & Asesoría</button></li>
             <li><button (click)="setIndustry('manufacturing'); scrollToSection('sectores')" class="hover:text-emerald-300 transition-colors">Manufactura & Producción</button></li>
@@ -1638,6 +1639,8 @@
             <li><button (click)="scrollToSection('roi')" class="hover:text-emerald-300 transition-colors">Calculadora Ahorro</button></li>
             <li><button (click)="scrollToSection('faq')" class="hover:text-emerald-300 transition-colors">Centro de Ayuda</button></li>
             <li><button (click)="showDemo()" class="hover:text-emerald-300 transition-colors">Video Demostración</button></li>
+            <li><a routerLink="/implementacion" class="hover:text-emerald-300 transition-colors">Cómo empezamos</a></li>
+            <li><a routerLink="/migracion" class="hover:text-emerald-300 transition-colors">Migrar tus datos</a></li>
             <li><a [href]="'mailto:' + socialLinks.email" class="hover:text-emerald-300 transition-colors">Estado del Sistema</a></li>
           </ul>
         </div>

@@ -1,13 +1,14 @@
 import { Component, inject, signal, viewChild } from '@angular/core';
+import { ActivatedRoute, Router } from '@angular/router';
 import { Store } from '@ngrx/store';
 import { toSignal } from '@angular/core/rxjs-interop';
 
 import { SupportDocumentListComponent } from './support-document-list.component';
 import { SupportDocumentCreateComponent } from './support-document-create.component';
+import { SupportDocumentDetailComponent } from './support-document-detail.component';
 import { InvoicingNotConfiguredComponent } from '../invoicing-not-configured/invoicing-not-configured.component';
 import { SaveRequirementsModalComponent } from '../../../../../../shared/components/index';
 import { FiscalRequirementsService } from '../../../../../../shared/services/fiscal-requirements.service';
-import { ToastService } from '../../../../../../shared/components/toast/toast.service';
 import {
   selectDianConfigsLoading,
   selectDianConfigStatus,
@@ -15,7 +16,10 @@ import {
   type DianGateReason,
 } from '../../state/selectors/invoicing.selectors';
 import { loadDianConfigs } from '../../state/actions/invoicing.actions';
-import type { SupportDocumentRow } from '../../interfaces/support-document.interface';
+import type {
+  SupportDocumentAdjustmentSource,
+  SupportDocumentRow,
+} from '../../interfaces/support-document.interface';
 import type { Invoice } from '../../interfaces/invoice.interface';
 
 /**
@@ -26,7 +30,9 @@ import type { Invoice } from '../../interfaces/invoice.interface';
  * `docs/plans/qui-308-scope-report.md` D.1): cuando se intente crear, se abre
  * `InvoicingNotConfiguredComponent` con CTA al wizard de configuración.
  *
- * El detalle + ajuste + anulación llegan en QUI-683 (mismo árbol).
+ * Detalle, consulta DIAN, nota de ajuste y anulación: QUI-683. La fila abre
+ * `SupportDocumentDetailComponent`; su «Nota de ajuste» abre este mismo form de
+ * creación prellenado con el original aceptado.
  */
 @Component({
   selector: 'app-support-documents-page',
@@ -34,6 +40,7 @@ import type { Invoice } from '../../interfaces/invoice.interface';
   imports: [
     SupportDocumentListComponent,
     SupportDocumentCreateComponent,
+    SupportDocumentDetailComponent,
     InvoicingNotConfiguredComponent,
     SaveRequirementsModalComponent,
   ],
@@ -48,8 +55,19 @@ import type { Invoice } from '../../interfaces/invoice.interface';
       @defer (when isCreateModalOpen()) {
         <app-support-document-create
           [(isOpen)]="isCreateModalOpen"
+          [adjustmentOf]="adjustmentOf()"
           (created)="onCreated($event)"
         ></app-support-document-create>
+      }
+
+      @defer (when isDetailModalOpen()) {
+        <app-support-document-detail
+          [(isOpen)]="isDetailModalOpen"
+          [documentId]="detailDocumentId()"
+          (adjust)="openAdjustmentNote($event)"
+          (openRelated)="openDocumentById($event)"
+          (changed)="reloadList()"
+        ></app-support-document-detail>
       }
 
       @defer (when isNotConfiguredModalOpen()) {
@@ -70,7 +88,8 @@ import type { Invoice } from '../../interfaces/invoice.interface';
 })
 export class SupportDocumentsPageComponent {
   private store = inject(Store);
-  private toast = inject(ToastService);
+  private route = inject(ActivatedRoute);
+  private router = inject(Router);
 
   /** Modal compartido de requisitos fiscales (accedido desde el template). */
   readonly fiscalReq = inject(FiscalRequirementsService);
@@ -81,6 +100,10 @@ export class SupportDocumentsPageComponent {
   // Estado de los modales
   readonly isCreateModalOpen = signal(false);
   readonly isNotConfiguredModalOpen = signal(false);
+  readonly isDetailModalOpen = signal(false);
+  readonly detailDocumentId = signal<number | null>(null);
+  /** Original aceptado que la próxima creación corrige (null = documento nuevo). */
+  readonly adjustmentOf = signal<SupportDocumentAdjustmentSource | null>(null);
   readonly notConfiguredReason = signal<DianGateReason>('missing');
 
   // Gate DIAN — reutilizamos el selector ya existente: si la tienda tiene
@@ -105,9 +128,53 @@ export class SupportDocumentsPageComponent {
     // `selectDianConfigStatus` queda en su `initialValue` (no configurado) y
     // el gate abre el modal "missing" al primer clic en "Nuevo".
     this.store.dispatch(loadDianConfigs());
+
+    this.openDeepLinkedDocument();
+  }
+
+  /** Abre otro documento en el mismo modal (nota de ajuste u original). */
+  openDocumentById(id: number): void {
+    this.detailDocumentId.set(id);
+    this.isDetailModalOpen.set(true);
+  }
+
+  /**
+   * `?document=<id>` (p. ej. desde la OC): abre el detalle una sola vez y limpia
+   * el parámetro por el Router —no con `replaceState`, que no actualiza
+   * `ActivatedRoute`— para que recargar la página no lo reabra.
+   */
+  private openDeepLinkedDocument(): void {
+    const raw = this.route.snapshot.queryParamMap.get('document');
+    if (raw == null) return;
+    const id = Number(raw);
+    if (Number.isInteger(id) && id > 0) this.openDocumentById(id);
+    void this.router.navigate([], {
+      relativeTo: this.route,
+      queryParams: { document: null },
+      queryParamsHandling: 'merge',
+      replaceUrl: true,
+    });
   }
 
   openCreateModal(): void {
+    this.openCreate(null);
+  }
+
+  viewDocument(row: SupportDocumentRow): void {
+    this.detailDocumentId.set(row.id);
+    this.isDetailModalOpen.set(true);
+  }
+
+  /**
+   * «Nota de ajuste» desde el detalle: un documento soporte aceptado no se
+   * anula, se corrige. Abre la creación con el original y su proveedor
+   * prellenados, pasando por el mismo gate DIAN que «Nuevo».
+   */
+  openAdjustmentNote(original: SupportDocumentAdjustmentSource): void {
+    this.openCreate(original);
+  }
+
+  private openCreate(original: SupportDocumentAdjustmentSource | null): void {
     if (this.dianConfigsLoading()) return;
 
     const status = this.dianStatus();
@@ -116,27 +183,18 @@ export class SupportDocumentsPageComponent {
       this.isNotConfiguredModalOpen.set(true);
       return;
     }
+    this.adjustmentOf.set(original);
     this.isCreateModalOpen.set(true);
-  }
-
-  viewDocument(row: SupportDocumentRow): void {
-    // El detalle real llega en QUI-683. Mientras tanto, mostramos un toast
-    // para que la fila no parezca muerta y deje claro que la acción es
-    // intencional. Evita añadir un modal nuevo y abre solo cuando el usuario
-    // interactúa con la fila.
-    this.toast.show({
-      title: 'Detalle en construcción',
-      description: `El detalle del documento ${row.invoice_number ?? row.id} llega en QUI-683.`,
-      variant: 'info',
-    });
   }
 
   onCreated(_invoice: Invoice | SupportDocumentRow): void {
     // Tras un create exitoso, el form ya emite el documento por `created` y se
     // cierra. El listado debe re-cargar para mostrar la nueva fila.
-    const list = this.listRef();
-    if (list) {
-      list.load();
-    }
+    this.adjustmentOf.set(null);
+    this.reloadList();
+  }
+
+  reloadList(): void {
+    this.listRef()?.load();
   }
 }
