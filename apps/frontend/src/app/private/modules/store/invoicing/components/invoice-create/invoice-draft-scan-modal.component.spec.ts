@@ -2,18 +2,14 @@ import { ComponentFixture, TestBed } from '@angular/core/testing';
 import { By } from '@angular/platform-browser';
 import { Subject } from 'rxjs';
 
-import {
-  FACTURIA_PROGRESS_INTERVAL_MS,
-  FACTURIA_PROGRESS_MESSAGES,
-  InvoiceDraftScanModalComponent,
-} from './invoice-draft-scan-modal.component';
+import { InvoiceDraftScanModalComponent } from './invoice-draft-scan-modal.component';
 import { InvoiceDraftScannerService } from '../../services/invoice-draft-scanner.service';
 import { ButtonComponent } from '../../../../../../shared/components/button/button.component';
 import type { InvoiceDraftScanResult } from '../../interfaces/invoice-draft-scan.interface';
 
 /**
- * FacturIA: textos del modal (sin «borrador»), CTA con estilo IA y progreso
- * rotativo con setInterval que se limpia al terminar, cancelar o destruir.
+ * FacturIA: textos del modal (sin «borrador»), CTA con estilo IA y barra de
+ * progreso compartida (QUI-1020) que se detiene al terminar o cancelar.
  *
  * El escáner se dobla con un Subject: el job queda «en curso» hasta que el
  * spec decide su desenlace.
@@ -37,7 +33,11 @@ describe('InvoiceDraftScanModalComponent · FacturIA', () => {
       providers: [
         {
           provide: InvoiceDraftScannerService,
-          useValue: { scanDraft: () => job.asObservable() },
+          useValue: {
+            scanDraft: () => job.asObservable(),
+            resume: () => null,
+            forget: () => undefined,
+          },
         },
       ],
     }).compileComponents();
@@ -75,38 +75,36 @@ describe('InvoiceDraftScanModalComponent · FacturIA', () => {
     expect(text()).not.toContain('Cargar documentos');
   });
 
-  it('el progreso rota cada ~2.2 s con los cuatro mensajes y vuelve a empezar', () => {
+  it('al lanzar el análisis muestra la barra compartida con el archivo conservado', () => {
     component.files.set([pdf()]);
     component.startScan();
     fixture.detectChanges();
 
-    const message = () =>
-      (fixture.nativeElement as HTMLElement)
-        .querySelector('[data-testid="facturia-progress-message"]')
-        ?.textContent?.trim();
     const stage = (fixture.nativeElement as HTMLElement).querySelector(
       '[data-testid="facturia-progress"]',
     );
-    expect(stage?.classList).toContain('vx-ai-stage');
-    expect(stage?.classList).toContain('is-analyzing');
-    expect(message()).toBe('Leyendo documentos…');
-
-    const seen: (string | undefined)[] = [];
-    for (let i = 0; i < FACTURIA_PROGRESS_MESSAGES.length; i++) {
-      jasmine.clock().tick(FACTURIA_PROGRESS_INTERVAL_MS);
-      fixture.detectChanges();
-      seen.push(message());
-    }
-    expect(seen).toEqual([
-      'Identificando al adquiriente…',
-      'Extrayendo líneas de cobro…',
-      'Completando la factura…',
-      'Leyendo documentos…',
-    ]);
+    expect(stage).not.toBeNull();
+    expect(stage?.querySelector('app-ai-job-progress')).not.toBeNull();
+    expect(component.scanning()).toBeTrue();
     expect(text().toLowerCase()).not.toContain('borrador');
   });
 
-  it('al terminar el análisis el intervalo se detiene y sale el resultado', () => {
+  it('al fallar conserva los archivos y deja la barra con su error para reintentar', () => {
+    component.files.set([pdf()]);
+    component.startScan();
+    job.error(new Error('fallo'));
+    fixture.detectChanges();
+
+    expect(component.scanning()).toBeFalse();
+    expect(component.failed()).toBeTrue();
+    expect(component.files().length).toBe(1);
+
+    component.backToFiles();
+    expect(component.failed()).toBeFalse();
+    expect(component.files().length).toBe(1);
+  });
+
+  it('al terminar el análisis sale el resultado', () => {
     const results: InvoiceDraftScanResult[] = [];
     component.scanned.subscribe((result) => results.push(result));
     component.files.set([pdf()]);
@@ -115,21 +113,16 @@ describe('InvoiceDraftScanModalComponent · FacturIA', () => {
     job.next({} as InvoiceDraftScanResult);
     job.complete();
     expect(results.length).toBe(1);
-
-    const before = component.progressIndex();
-    jasmine.clock().tick(FACTURIA_PROGRESS_INTERVAL_MS * 3);
-    expect(component.progressIndex()).toBe(before);
+    expect(component.scanning()).toBeFalse();
   });
 
-  it('cancelar el análisis detiene la rotación', () => {
+  it('cancelar el análisis vuelve al formulario y descarta el trabajo recordado', () => {
     component.files.set([pdf()]);
     component.startScan();
-    jasmine.clock().tick(FACTURIA_PROGRESS_INTERVAL_MS);
-    expect(component.progressIndex()).toBe(1);
+    expect(component.scanning()).toBeTrue();
 
     component.cancelScan();
-    jasmine.clock().tick(FACTURIA_PROGRESS_INTERVAL_MS * 3);
-    expect(component.progressIndex()).toBe(1);
     expect(component.scanning()).toBeFalse();
+    expect(component.failed()).toBeFalse();
   });
 });
