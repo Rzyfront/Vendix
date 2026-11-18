@@ -1,3 +1,4 @@
+import { withJobOrigin, JobOriginSource } from '../../../../common/queue/job-origin';
 import { Injectable, Logger } from '@nestjs/common';
 import { InjectQueue } from '@nestjs/bullmq';
 import { Queue } from 'bullmq';
@@ -311,10 +312,13 @@ export class AccountingEntryFailureService {
     }
   }
 
-  async enqueueRetry(failure_id: number): Promise<void> {
+  async enqueueRetry(
+    failure_id: number,
+    source: JobOriginSource = 'system:asientos-automaticos',
+  ): Promise<void> {
     await this.retry_queue.add(
       'retry',
-      { failure_id } as AccountingEntryRetryJob,
+      withJobOrigin({ failure_id } as AccountingEntryRetryJob, source),
       {
         attempts: 5,
         backoff: { type: 'exponential', delay: 5000 },

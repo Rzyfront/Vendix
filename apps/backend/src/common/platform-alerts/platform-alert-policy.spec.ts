@@ -1,6 +1,8 @@
 import {
   QUEUES_WITH_OWN_INCIDENTS,
   canEscalate,
+  classifyPlanLimit,
+  planLimitPeriod,
   positiveInt,
   readMonitorConfig,
   severityOfHttpFailure,
@@ -66,5 +68,32 @@ describe('platform-alert-policy (S3: grave = ventas, pagos, DIAN, cargas masivas
     expect(read()).toMatchObject({ enabled: false, slowRequestMs: 10_000, envLabel: 'staging' });
     expect(positiveInt('12.7', 1)).toBe(12);
     expect(positiveInt('abc', 4)).toBe(4);
+  });
+});
+
+describe('clasificación «Límite de plan» (QUI-1031, S5)', () => {
+  it('reconoce el cupo de IA agotado por el mensaje que guarda BullMQ, por el código o por el tipo', () => {
+    const quota = { code: 'SUBSCRIPTION_006', label: 'la tienda agotó el cupo de IA de su plan en el periodo' };
+    expect(classifyPlanLimit('job_failed', 'Error: AI quota exceeded for this billing period')).toEqual(quota);
+    expect(classifyPlanLimit('HTTP_500', 'falló con SUBSCRIPTION_006 en el proveedor')).toEqual(quota);
+    expect(classifyPlanLimit('SUBSCRIPTION_006', null)).toEqual(quota);
+    expect(classifyPlanLimit('job_failed', 'Error: Feature not included in your current plan')?.code).toBe(
+      'SUBSCRIPTION_005',
+    );
+    expect(classifyPlanLimit('WORKFLOW_PLAN_LIMIT_REACHED', '')?.code).toBe('WORKFLOW_PLAN_LIMIT_REACHED');
+  });
+
+  it('un fallo técnico no es límite de plan (ni un código parecido)', () => {
+    expect(classifyPlanLimit('job_failed', 'Error: connect ECONNREFUSED 10.0.0.1:5432')).toBeNull();
+    expect(classifyPlanLimit('HTTP_500', 'SUBSCRIPTION_0060 no existe')).toBeNull();
+    expect(classifyPlanLimit('SUBSCRIPTION_007', 'otra cosa')).toBeNull();
+    expect(classifyPlanLimit(null, null)).toBeNull();
+  });
+
+  it('periodo en UTC: mes para los cupos mensuales, día para el chat', () => {
+    const at = new Date('2026-11-30T23:30:00-05:00'); // ya es 1 de diciembre en UTC
+    expect(planLimitPeriod(at, 'rag_embeddings')).toBe('202612');
+    expect(planLimitPeriod(at)).toBe('202612');
+    expect(planLimitPeriod(at, 'streaming_chat')).toBe('20261201');
   });
 });

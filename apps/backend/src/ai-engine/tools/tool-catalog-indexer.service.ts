@@ -1,3 +1,4 @@
+import { withJobOrigin } from '../../common/queue/job-origin';
 import { RecipeRepository } from '../memory/recipe.repository';
 import { RecipeQualityService } from '../memory/recipe-quality.service';
 import { AgentRecipe } from '../memory/recipe.interface';
@@ -105,10 +106,13 @@ export class ToolCatalogIndexerService implements OnApplicationBootstrap {
       if (previous && (await previous.isFailed())) await previous.remove();
       await this.queue.add(
         'index-knowledge',
-        {
-          release_hash: manifest.hash,
-          documents,
-        } satisfies AIKnowledgeIndexJob,
+        withJobOrigin(
+          {
+            release_hash: manifest.hash,
+            documents,
+          } satisfies AIKnowledgeIndexJob,
+          'system:tool-catalog-indexer',
+        ),
         {
           jobId,
           attempts: 2,

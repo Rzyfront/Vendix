@@ -1,5 +1,9 @@
+import { RequestContextService } from '../context/request-context.service';
+import { withJobOrigin } from '../queue/job-origin';
+import { contextLines, scopeLabelOf, type AlertNames } from './platform-alert-format';
+import { jobContext } from './platform-alert-job-watcher.service';
 import { PlatformAlertService } from './platform-alert.service';
-import type { PlatformAlertRow } from './platform-alert.types';
+import type { PlatformAlertRow, PlatformAlertEvent } from './platform-alert.types';
 
 type Row = PlatformAlertRow & { created_at?: Date; updated_at?: Date };
 
@@ -13,6 +17,7 @@ function fakePrisma() {
       if (cond && typeof cond === 'object' && !(cond instanceof Date)) {
         if ('lt' in cond) return typeof value === 'number' || value instanceof Date ? value < cond.lt : false;
         if ('in' in cond) return cond.in.includes(value);
+        if ('notIn' in cond) return !cond.notIn.includes(value);
         if ('not' in cond) return value !== cond.not;
       }
       return value === cond;
@@ -81,6 +86,43 @@ function fakePrisma() {
   };
 }
 
+/**
+ * Redis con `SET NX` real solo para la llave del «Límite de plan»; el resto
+ * (ventana de edición de Telegram) siempre gana, como antes.
+ */
+function fakeRedis() {
+  const keys = new Set<string>();
+  return {
+    keys,
+    set: jest.fn(async (key: string) => {
+      if (!key.startsWith('monitor:plan-limit:')) return 'OK';
+      if (keys.has(key)) return null;
+      keys.add(key);
+      return 'OK';
+    }),
+  };
+}
+
+/** Resolutor de nombres de prueba: los nombres de `names`, el resto con ids. */
+function fakeContext(names: AlertNames) {
+  return {
+    resolve: jest.fn(async (alert: PlatformAlertRow) => ({
+      lines: contextLines(alert, names),
+      scopeLabel: scopeLabelOf(alert, names),
+      superadminUrl: `https://vendix.com/super-admin/monitoring/alerts?alert=${alert.id}`,
+    })),
+  };
+}
+
+const NAMES: AlertNames = {
+  stores: new Map([[105, { name: 'Vendix Granizzo', slug: 'testbalmes' }]]),
+  organizations: new Map([[82, 'Demo Vendix']]),
+  users: new Map([[7, { name: 'Ana Pérez', email: 'ana.perez@vendix.test' }]]),
+  entityName: 'Kit de freno NKD',
+  plan: 'Pro (pro) · estado active',
+  quota: '1.000 de 1.000 indexación para la búsqueda con IA (este mes)',
+};
+
 describe('PlatformAlertService', () => {
   let prisma: ReturnType<typeof fakePrisma>;
   let report: jest.Mock;
@@ -88,6 +130,8 @@ describe('PlatformAlertService', () => {
   let edit: jest.Mock;
   let env: Record<string, string>;
   let ticketSeq: number;
+  let redis: ReturnType<typeof fakeRedis>;
+  let alertContext: { resolve: jest.Mock };
 
   const build = () =>
     new PlatformAlertService(
@@ -96,7 +140,8 @@ describe('PlatformAlertService', () => {
       { getPlatformOrganizationId: jest.fn().mockResolvedValue(1) } as never,
       { send, edit, isEnabled: () => true } as never,
       { get: (k: string) => env[k] } as never,
-      { set: jest.fn().mockResolvedValue('OK') } as never,
+      redis as never,
+      alertContext as never,
     );
 
   const http500 = (route = '/api/store/orders/:id', over: Record<string, unknown> = {}) => ({
@@ -123,6 +168,8 @@ describe('PlatformAlertService', () => {
     });
     send = jest.fn().mockResolvedValue('555');
     edit = jest.fn().mockResolvedValue(true);
+    redis = fakeRedis();
+    alertContext = fakeContext({});
   });
 
   it('falla leve: registra con proceso, tipo y gravedad y avisa solo por Telegram (sin ticket ni correo)', async () => {
@@ -338,5 +385,174 @@ describe('PlatformAlertService', () => {
     const service = build();
     expect(() => service.captureHttpFailure(http500())).not.toThrow();
     await expect(service.flush()).resolves.toBeUndefined();
+  });
+  describe('QUI-1031: contexto legible y «Límite de plan»', () => {
+    /** El trabajo real del ticket: ai-embedding/embed de un producto, tienda 105, sin cupo. */
+    const quotaJob = (over: Partial<PlatformAlertEvent> = {}, data: Record<string, unknown> = {}): PlatformAlertEvent => {
+      const jobData = withJobOrigin(
+        { store_id: 105, organization_id: 82, entity_type: 'product', entity_id: 123, ...data },
+        'event:product.updated',
+        7,
+      );
+      return {
+        source: 'job',
+        process: 'cola ai-embedding · embed',
+        errorType: 'job_failed',
+        severity: 'warning',
+        title: 'Trabajo fallido en la cola ai-embedding',
+        message: 'Error: AI quota exceeded for this billing period',
+        details: { Cola: 'ai-embedding', Trabajo: 'embed' },
+        storeId: 105,
+        organizationId: 82,
+        context: jobContext('ai-embedding', { name: 'embed', data: jobData }),
+        occurredAt: new Date('2026-11-10T15:00:00Z'),
+        ...over,
+      };
+    };
+
+    it('el cupo de IA agotado llega como «Límite de plan» informativo, con nombres, módulo, registro, plan y cupo; sin ticket', async () => {
+      alertContext = fakeContext(NAMES);
+      const service = build();
+      service.capture(quotaJob());
+      await service.flush();
+
+      expect(prisma.rows).toHaveLength(1);
+      expect(prisma.rows[0]).toMatchObject({
+        severity: 'info',
+        error_type: 'SUBSCRIPTION_006',
+        title: 'Límite de plan: la tienda agotó el cupo de IA de su plan en el periodo',
+      });
+      expect(report).not.toHaveBeenCalled();
+      const text: string = send.mock.calls[0][0];
+      expect(text).toContain('<b>LÍMITE DE PLAN</b> · Informativa');
+      expect(text).not.toContain('LEVE');
+      expect(text).toContain('<b>Tienda:</b> Vendix Granizzo (testbalmes, id 105)');
+      expect(text).toContain('<b>Organización:</b> Demo Vendix (id 82)');
+      expect(text).toContain('<b>Usuario:</b> Ana Pérez · ana.perez@vendix.test (id 7)');
+      expect(text).toContain('<b>Módulo:</b> Productos');
+      expect(text).toContain('<b>Acción:</b> indexar el producto para la búsqueda con IA');
+      expect(text).toContain('<b>Registro:</b> producto «Kit de freno NKD» (id 123)');
+      expect(text).toContain('<b>Origen:</b> Evento product.updated');
+      expect(text).toContain('<b>Plan:</b> Pro (pro) · estado active');
+      expect(text).toContain('<b>Cupo:</b> 1.000 de 1.000');
+      expect(text).toContain('href="https://vendix.com/super-admin/monitoring/alerts?alert=1"');
+      // Solo ids en la base: los nombres se resuelven al mostrar.
+      expect(prisma.rows[0].details).toMatchObject({
+        _context: {
+          userId: 7,
+          module: 'Productos',
+          entityType: 'product',
+          entityId: 123,
+          category: 'plan_limit',
+          planLimitCode: 'SUBSCRIPTION_006',
+          aiFeature: 'rag_embeddings',
+          period: '202611',
+        },
+        'Error original': 'Error: AI quota exceeded for this billing period',
+      });
+      expect(JSON.stringify(prisma.rows[0])).not.toContain('Granizzo');
+    });
+
+    it('una vez por tienda y periodo: no escala, no se cierra a los 30 min, no reavisa al reabrirse; otra tienda u otro mes sí', async () => {
+      env.MONITOR_ESCALATE_AFTER = '3';
+      const service = build();
+      for (let i = 0; i < 5; i++) {
+        service.capture(quotaJob({}, { entity_type: i % 2 ? 'customer' : 'product' }));
+        await service.flush();
+      }
+      expect(prisma.rows).toHaveLength(1);
+      expect(prisma.rows[0]).toMatchObject({ severity: 'info', occurrences: 5, escalated_at: null });
+      expect(send).toHaveBeenCalledTimes(1);
+      expect(report).not.toHaveBeenCalled();
+
+      await service.sweepOpenAlerts(new Date('2026-11-10T16:00:00Z'));
+      expect(prisma.rows[0].status).toBe('open');
+
+      await service.resolve(1, 'manual', 9);
+      service.capture(quotaJob());
+      await service.flush();
+      expect(prisma.rows).toHaveLength(2);
+      expect(send.mock.calls.filter(([text]) => text.includes('LÍMITE DE PLAN'))).toHaveLength(1);
+
+      service.capture(quotaJob({ storeId: 106 }));
+      service.capture(quotaJob({ occurredAt: new Date('2026-12-01T00:10:00Z') }));
+      await service.flush();
+      expect(send.mock.calls.filter(([text]) => text.includes('LÍMITE DE PLAN'))).toHaveLength(3);
+
+      await service.sweepOpenAlerts(new Date('2026-12-02T00:00:00Z'));
+      const novemberOpen = prisma.rows.filter(
+        (r) => r.status === 'open' && (r.details as any)._context.period === '202611',
+      );
+      expect(novemberOpen).toHaveLength(0);
+      expect(prisma.rows.find((r) => (r.details as any)._context.period === '202612')!.status).toBe('open');
+    });
+
+    it('HTTP: usuario de la petición y módulo/acción de la ruta, con el mismo formato en Telegram y en el ticket', async () => {
+      alertContext = fakeContext(NAMES);
+      const service = build();
+      RequestContextService.runIsolated(
+        { user_id: 7, store_id: 105, organization_id: 82, is_super_admin: false, is_owner: true },
+        () => service.captureHttpFailure(http500('/api/store/orders/:id/payments')),
+      );
+      await service.flush();
+
+      const text: string = send.mock.calls[0][0];
+      for (const line of [
+        '<b>Tienda:</b> Vendix Granizzo (testbalmes, id 105)',
+        '<b>Usuario:</b> Ana Pérez · ana.perez@vendix.test (id 7)',
+        '<b>Módulo:</b> Ventas',
+        '<b>Acción:</b> crear pagos',
+      ]) {
+        expect(text).toContain(line);
+      }
+      const details = report.mock.calls[0][0].details;
+      expect(details).toMatchObject({
+        Tienda: 'Vendix Granizzo (testbalmes, id 105)',
+        Organización: 'Demo Vendix (id 82)',
+        Usuario: 'Ana Pérez · ana.perez@vendix.test (id 7)',
+        Módulo: 'Ventas',
+        Acción: 'crear pagos',
+        'Ver en Superadmin': 'https://vendix.com/super-admin/monitoring/alerts?alert=1',
+      });
+      expect(Object.keys(details).slice(0, 2)).toEqual(['Tienda', 'Organización']);
+      expect(details).not.toHaveProperty('Afecta a');
+    });
+
+    it('si la resolución de nombres falla, la alerta sale igual con ids (Telegram y ticket)', async () => {
+      alertContext = { resolve: jest.fn().mockRejectedValue(new Error('db lenta')) };
+      const service = build();
+      RequestContextService.runIsolated(
+        { user_id: 7, store_id: 105, organization_id: 82, is_super_admin: false, is_owner: true },
+        () => service.captureHttpFailure(http500()),
+      );
+      await service.flush();
+
+      expect(prisma.rows).toHaveLength(1);
+      const text: string = send.mock.calls[0][0];
+      expect(text).toContain('<b>Tienda:</b> id 105');
+      expect(text).toContain('<b>Usuario:</b> id 7');
+      expect(text).toContain('<b>Módulo:</b> Ventas');
+      expect(report.mock.calls[0][0].details).toMatchObject({ Tienda: 'id 105', 'Ver en Superadmin': null });
+    });
+
+    it('incidente de carga masiva: módulo y usuario del incidente', async () => {
+      const service = build();
+      service.onIncidentReported({
+        input: {
+          dedupeKey: 'bulk-upload-job:8',
+          source: 'bulk_upload_job',
+          severity: 'critical',
+          title: 'Carga masiva de productos falló',
+          summary: 'x',
+          organizationId: 3,
+          storeId: 9,
+          userId: 11,
+          tags: ['bulk_upload', 'products'],
+        },
+        result: { ticketNumber: 'INC-BULK', created: true, emailed: 1 },
+      });
+      await service.flush();
+      expect(prisma.rows[0].details).toMatchObject({ _context: { userId: 11, module: 'Cargas masivas' } });
+    });
   });
 });

@@ -342,6 +342,7 @@ export class DispatchNoteEventsListener {
       const { job_id } = await this.poReceiveQueue.enqueueReceive(
         purchaseOrderId,
         { items: receiveItems, notes: receiveNotes },
+        'event:dispatch_note.received',
       );
       this.logger.log(
         `[received] Dispatch note #${dispatchNumber}: ${receiveItems.length} line(s) > ${PURCHASE_ORDER_RECEIVE_BATCH_SIZE} — queued PO #${purchaseOrderId} receive job ${job_id}`,

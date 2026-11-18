@@ -1,3 +1,5 @@
+import type { AlertEntityType } from './platform-alert-catalog';
+
 /**
  * QUI-1010 — bot de monitoreo de la API.
  *
@@ -56,6 +58,36 @@ export type PlatformAlertDetails = Record<
   string | number | boolean | null | undefined
 >;
 
+/**
+ * QUI-1031 — contexto legible de la falla. Se guarda en `details._context`
+ * (sin migración) y SOLO con ids, módulo, acción y origen: los nombres de
+ * tienda, organización, usuario y registro se resuelven al mostrar la alerta
+ * (`PlatformAlertContextService`), porque el saneo taparía los correos y un
+ * nombre guardado envejece.
+ */
+export interface PlatformAlertContext {
+  /** Usuario que disparó la petición o encoló el trabajo. */
+  userId?: number | null;
+  /** Módulo de Vendix («Productos»). */
+  module?: string | null;
+  /** Lo que se estaba haciendo («indexar el producto para la búsqueda con IA»). */
+  action?: string | null;
+  /** Origen del trabajo, `<tipo>:<detalle>` (`event:product.updated`). */
+  origin?: string | null;
+  entityType?: AlertEntityType | null;
+  entityId?: number | null;
+  /** `plan_limit`: la tienda llegó a un límite de su plan; no es fallo técnico. */
+  category?: 'plan_limit' | null;
+  planLimitCode?: string | null;
+  /** Funcionalidad de IA cuyo cupo se agotó (`rag_embeddings`…). */
+  aiFeature?: string | null;
+  /** Periodo del cupo (`YYYYMM` o `YYYYMMDD`, UTC). */
+  period?: string | null;
+}
+
+/** Clave de `details` donde vive el contexto (no se muestra como detalle). */
+export const ALERT_CONTEXT_KEY = '_context';
+
 /** Una falla observada. Se sanea antes de guardarse o enviarse. */
 export interface PlatformAlertEvent {
   source: PlatformAlertSource;
@@ -70,6 +102,7 @@ export interface PlatformAlertEvent {
   details?: PlatformAlertDetails;
   organizationId?: number | null;
   storeId?: number | null;
+  context?: PlatformAlertContext;
   /**
    * Clave de agrupación cuando no basta origen + proceso + tipo. La misma
    * clave suma ocurrencias a la alerta abierta en vez de abrir otra.
@@ -119,4 +152,19 @@ export interface PlatformAlertRecordResult {
   alert: PlatformAlertRow;
   /** `true` si esta llamada abrió el episodio. */
   opened: boolean;
+}
+
+/** Una línea legible de la alerta: igual en Telegram, correo y Superadmin. */
+export interface AlertContextLine {
+  label: string;
+  value: string;
+  href?: string | null;
+}
+
+export interface ResolvedAlertContext {
+  lines: AlertContextLine[];
+  /** «Vendix Granizzo (testbalmes, id 105)», o «Plataforma (sin tienda)». */
+  scopeLabel: string;
+  /** Detalle de la alerta en Superadmin, si hay `FRONTEND_URL`. */
+  superadminUrl: string | null;
 }

@@ -93,8 +93,8 @@ describe('LodgingTraService — cola TRA idempotente (H4.1)', () => {
       skipDuplicates: true,
     });
     expect(queue.add).toHaveBeenCalledTimes(2);
-    expect(queue.add).toHaveBeenCalledWith('send', { submission_id: 70 }, expect.objectContaining({ jobId: 'tra-70', attempts: 5 }));
-    expect(queue.add).toHaveBeenCalledWith('send', { submission_id: 71 }, expect.objectContaining({ jobId: 'tra-71' }));
+    expect(queue.add).toHaveBeenCalledWith('send', expect.objectContaining({ submission_id: 70 }), expect.objectContaining({ jobId: 'tra-70', attempts: 5 }));
+    expect(queue.add).toHaveBeenCalledWith('send', expect.objectContaining({ submission_id: 71 }), expect.objectContaining({ jobId: 'tra-71' }));
   });
 
   it('con la TRA apagada en Configuración no registra nada', async () => {

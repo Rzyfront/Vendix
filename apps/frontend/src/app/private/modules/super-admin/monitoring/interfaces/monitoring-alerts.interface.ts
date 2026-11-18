@@ -8,6 +8,14 @@ export type PlatformAlertResolution =
 
 export type PlatformAlertStatusFilter = PlatformAlertStatus | 'all';
 
+export type PlatformAlertCategory = 'plan_limit';
+
+export interface PlatformAlertContextLine {
+  label: string;
+  value: string;
+  href?: string | null;
+}
+
 export interface PlatformAlertView {
   id: number;
   source: string;
@@ -30,6 +38,10 @@ export interface PlatformAlertView {
   ticket_number: string | null;
   ticket_status: string | null;
   telegram_sent: boolean;
+  context: PlatformAlertContextLine[];
+  scope_label: string;
+  category: PlatformAlertCategory | null;
+  kind_label: string;
 }
 
 export interface PlatformAlertsFilters {

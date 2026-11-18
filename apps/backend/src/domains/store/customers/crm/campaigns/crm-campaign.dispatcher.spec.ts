@@ -152,9 +152,9 @@ describe('CrmCampaignDispatcher', () => {
     });
     // Two per second: 0 s, 0 s, 1 s.
     expect(outbound.enqueue.mock.calls).toEqual([
-      [100, { delayMs: 0 }],
-      [101, { delayMs: 0 }],
-      [102, { delayMs: 1000 }],
+      [100, { delayMs: 0, source: 'system:crm-campanas' }],
+      [101, { delayMs: 0, source: 'system:crm-campanas' }],
+      [102, { delayMs: 1000, source: 'system:crm-campanas' }],
     ]);
   });
 
@@ -197,7 +197,7 @@ describe('CrmCampaignDispatcher', () => {
       data: { recipients_total: 2 },
     });
     expect(prisma.crm_messages.create).not.toHaveBeenCalled();
-    expect(outbound.enqueue.mock.calls).toEqual([[8, { delayMs: 0 }]]);
+    expect(outbound.enqueue.mock.calls).toEqual([[8, { delayMs: 0, source: 'system:crm-campanas' }]]);
   });
 
   it('fails the campaign when the cost grew beyond the confirmed margin, without sending anything', async () => {
@@ -256,7 +256,7 @@ describe('CrmCampaignDispatcher', () => {
     prisma.crm_messages.count.mockResolvedValue(1);
     // An empty audience only closes the campaign when nothing was created before.
     await dispatcher.dispatch(30, NOW);
-    expect(outbound.enqueue.mock.calls).toEqual([[7, { delayMs: 0 }]]);
+    expect(outbound.enqueue.mock.calls).toEqual([[7, { delayMs: 0, source: 'system:crm-campanas' }]]);
     expect(prisma.crm_campaigns.updateMany).toHaveBeenCalledWith({
       where: { id: 30, status: 'sending' },
       data: { recipients_total: 1 },
@@ -267,7 +267,7 @@ describe('CrmCampaignDispatcher', () => {
     partial.prisma.crm_messages.findMany.mockResolvedValue([{ id: 7 }]);
     partial.prisma.crm_messages.count.mockResolvedValue(2);
     await partial.dispatcher.dispatch(30, NOW);
-    expect(partial.outbound.enqueue.mock.calls).toEqual([[7, { delayMs: 0 }]]);
+    expect(partial.outbound.enqueue.mock.calls).toEqual([[7, { delayMs: 0, source: 'system:crm-campanas' }]]);
   });
 
   it('fails an email campaign instead of sending without a production unsubscribe secret', async () => {

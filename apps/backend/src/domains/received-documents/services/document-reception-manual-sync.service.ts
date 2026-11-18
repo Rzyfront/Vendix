@@ -42,7 +42,10 @@ export class DocumentReceptionManualSyncService {
     });
 
     try {
-      await this.queue.enqueue(claim.run_id);
+      await this.queue.enqueue(
+        claim.run_id,
+        'http:documentos-recibidos/sincronizar',
+      );
       return { run_id: claim.run_id, duplicate: claim.duplicate, queued: true };
     } catch {
       // The DB run is durable; scheduler/outbox recovery can enqueue it later.
@@ -100,7 +103,10 @@ export class DocumentReceptionManualSyncService {
     }
 
     try {
-      await this.queue.enqueue(run.id);
+      await this.queue.enqueue(
+        run.id,
+        'http:documentos-recibidos/sincronizar',
+      );
     } catch {
       throw new ServiceUnavailableException('No se pudo programar el reintento.');
     }

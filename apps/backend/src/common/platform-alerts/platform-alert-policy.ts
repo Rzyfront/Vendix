@@ -1,4 +1,5 @@
 import { LEGACY_AI_SOURCES } from '../ai-scan-jobs/ai-scan-sources';
+import { findErrorCodeEntry } from '../errors/error-codes';
 import { BULK_UPLOAD_JOBS_QUEUE } from '../../domains/store/bulk-uploads/bulk-upload-job.types';
 import type {
   PlatformAlertSeverity,
@@ -101,6 +102,67 @@ export function severityOfHttpFailure(
 
 export function severityOfQueue(queue: string): PlatformAlertSeverity {
   return CRITICAL_QUEUE_PATTERN.test(queue) ? 'critical' : 'warning';
+}
+
+/**
+ * LÍMITES DE PLAN (QUI-1031). Que una tienda agote el cupo de IA o use algo que
+ * su plan no incluye es un límite de negocio, no un fallo de Vendix: la alerta
+ * es informativa («Límite de plan»), sin ticket ni correo, nunca sube a grave
+ * y se avisa una vez por tienda, código y periodo.
+ */
+export const PLAN_LIMIT_CODES: Readonly<Record<string, string>> = {
+  SUBSCRIPTION_004: 'la tienda no tiene una suscripción activa para usar IA',
+  SUBSCRIPTION_005: 'la función no está incluida en el plan de la tienda',
+  SUBSCRIPTION_006: 'la tienda agotó el cupo de IA de su plan en el periodo',
+  SUBSCRIPTION_008: 'la suscripción está suspendida por saldo pendiente',
+  SUBSCRIPTION_009: 'la suscripción está bloqueada por facturación',
+  SUBSCRIPTION_011: 'el plan de la tienda fue retirado',
+  WORKFLOW_PLAN_LIMIT_REACHED: 'la tienda llegó al límite de Flujos de su plan',
+  PLAN_MODULE_NOT_INCLUDED: 'el módulo no está incluido en el plan de la tienda',
+};
+
+export interface PlanLimitMatch {
+  code: string;
+  label: string;
+}
+
+/**
+ * Reconoce un límite de plan por su código (tipo de error o dentro del
+ * mensaje) o por el mensaje del código: BullMQ guarda en `failedReason` el
+ * MENSAJE de la excepción («AI quota exceeded for this billing period»), no
+ * el código.
+ */
+export function classifyPlanLimit(
+  errorType: string | null | undefined,
+  message: string | null | undefined,
+): PlanLimitMatch | null {
+  const type = (errorType ?? '').trim();
+  const text = message ?? '';
+  for (const [code, label] of Object.entries(PLAN_LIMIT_CODES)) {
+    if (type === code || new RegExp(`\\b${code}\\b`).test(text)) {
+      return { code, label };
+    }
+    const devMessage = findErrorCodeEntry(code)?.devMessage;
+    if (devMessage && (type === devMessage || text.includes(devMessage))) {
+      return { code, label };
+    }
+  }
+  return null;
+}
+
+/** Cupos de IA que se reinician cada día; el resto es mensual. */
+const DAILY_AI_FEATURES: ReadonlySet<string> = new Set(['streaming_chat']);
+
+/**
+ * Periodo del límite en UTC, la misma llave que el contador de cupo
+ * (`YYYYMM`, o `YYYYMMDD` para un cupo diario).
+ */
+export function planLimitPeriod(at: Date, aiFeature?: string | null): string {
+  const iso = at.toISOString();
+  const month = `${iso.slice(0, 4)}${iso.slice(5, 7)}`;
+  return aiFeature && DAILY_AI_FEATURES.has(aiFeature)
+    ? `${month}${iso.slice(8, 10)}`
+    : month;
 }
 
 /** Configuración del bot (variables `MONITOR_*`). */

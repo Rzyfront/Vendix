@@ -1,3 +1,4 @@
+import { withJobOrigin } from '../../../common/queue/job-origin';
 import { PermissionsGuard } from '../../auth/guards/permissions.guard';
 import { Permissions } from '../../auth/decorators/permissions.decorator';
 import { UseGuards, UseInterceptors, UploadedFile } from '@nestjs/common';
@@ -148,7 +149,7 @@ export class ExpensesController {
     };
 
     try {
-      const job = await this.expense_scan_queue.add('scan', payload, {
+      const job = await this.expense_scan_queue.add('scan', withJobOrigin(payload, 'http:gastos/escanear-recibo'), {
         attempts: 3,
         backoff: { type: 'exponential', delay: 2000 },
         removeOnComplete: { count: 100 },

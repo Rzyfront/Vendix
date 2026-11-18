@@ -81,6 +81,47 @@ describe('PlatformAlertJobWatcherService', () => {
     expect(JSON.stringify(event)).not.toContain('a@b.co');
   });
 
+  it('QUI-1031: el fallido lleva módulo, acción, registro, usuario y origen del trabajo (solo ids)', async () => {
+    const failed = [
+      {
+        id: '9',
+        name: 'embed',
+        finishedOn: 1000,
+        failedReason: 'AI quota exceeded for this billing period',
+        attemptsMade: 1,
+        data: {
+          store_id: 105,
+          organization_id: 82,
+          entity_type: 'product',
+          entity_id: 123,
+          content: 'Kit de freno NKD',
+          triggered_by_user_id: 7,
+          source: 'event:product.updated',
+        },
+      },
+    ];
+    queues = [fakeQueue('ai-embedding', { getFailed: jest.fn().mockResolvedValue(failed) })];
+    const watcher = build();
+    await watcher.sweepQueues(5000);
+    failed.unshift({ ...failed[0], id: '10', finishedOn: 2000 });
+    await watcher.sweepQueues(6000);
+
+    expect(capture.mock.calls[0][0]).toMatchObject({
+      storeId: 105,
+      organizationId: 82,
+      context: {
+        userId: 7,
+        module: 'Productos',
+        action: 'indexar el producto para la búsqueda con IA',
+        origin: 'event:product.updated',
+        entityType: 'product',
+        entityId: 123,
+        aiFeature: 'rag_embeddings',
+      },
+    });
+    expect(JSON.stringify(capture.mock.calls[0][0])).not.toContain('Kit de freno');
+  });
+
   it('job activo colgado: cuenta una vez y los barridos siguientes solo lo mantienen abierto', async () => {
     const now = 60 * 60_000;
     const active = [{ id: '9', name: 'send', processedOn: now - 20 * 60_000, data: {} }];

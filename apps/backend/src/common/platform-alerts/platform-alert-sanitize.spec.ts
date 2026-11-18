@@ -74,6 +74,14 @@ describe('platform-alert-sanitize (S7: sin contraseñas, tokens ni datos de clie
     expect(tenantIdsOf(null)).toEqual({ organizationId: null, storeId: null });
   });
 
+  it('tenantIdsOf también lee los ids anidados en data.context (QUI-1031); el nivel superior gana', () => {
+    expect(tenantIdsOf({ context: { store_id: 105, organization_id: 82 } })).toEqual({
+      organizationId: 82,
+      storeId: 105,
+    });
+    expect(tenantIdsOf({ store_id: 1, context: { store_id: 2 } }).storeId).toBe(1);
+  });
+
   it('routeKeyOf usa el patrón de Express; si no hay, normaliza ids, UUIDs y tokens', () => {
     expect(routeKeyOf({ baseUrl: '/api', route: { path: '/store/orders/:id' } })).toBe(
       '/api/store/orders/:id',

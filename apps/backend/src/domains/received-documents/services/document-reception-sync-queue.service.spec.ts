@@ -21,7 +21,7 @@ describe('DocumentReceptionSyncQueueService', () => {
   it('enqueues only a positive run id with stable ID, bounded retries, and cleanup', async () => {
     const h = harness();
     await expect(h.service.enqueue(42)).resolves.toEqual({ run_id: 42, job_id: 'dr-sync-42' });
-    expect(h.queue.add).toHaveBeenCalledWith('sync', { run_id: 42 }, {
+    expect(h.queue.add).toHaveBeenCalledWith('sync', expect.objectContaining({ run_id: 42 }), {
       jobId: 'dr-sync-42',
       attempts: 3,
       backoff: { type: 'exponential', delay: 5000 },
@@ -29,7 +29,7 @@ describe('DocumentReceptionSyncQueueService', () => {
       removeOnFail: true,
     });
     const [, data] = h.queue.add.mock.calls[0];
-    expect(Object.keys(data)).toEqual(['run_id']);
+    expect(Object.keys(data)).toEqual(['run_id', 'triggered_by_user_id', 'source']);
   });
 
   it.each(['waiting', 'active', 'delayed'])(

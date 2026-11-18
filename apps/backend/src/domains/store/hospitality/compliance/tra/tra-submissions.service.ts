@@ -1,3 +1,4 @@
+import { withJobOrigin, JobOriginSource } from '../../../../../common/queue/job-origin';
 import { Inject, Injectable, Logger } from '@nestjs/common';
 import { InjectQueue } from '@nestjs/bullmq';
 import { Queue } from 'bullmq';
@@ -77,14 +78,17 @@ export class LodgingTraService {
       where: { store_id, reservation_id, authority: TRA_AUTHORITY, status: 'pending', event: { in: events } },
       select: { id: true },
     });
-    await this.enqueue(rows.map((row) => row.id));
+    await this.enqueue(rows.map((row) => row.id), 'system:tra-registrar-huesped');
     return rows.length;
   }
 
   /** One job per row; the jobId keeps a row from being queued twice at once. */
-  async enqueue(ids: number[]): Promise<void> {
+  async enqueue(
+    ids: number[],
+    source: JobOriginSource = 'system:tra-registrar-huesped',
+  ): Promise<void> {
     for (const id of ids) {
-      await this.queue.add('send', { submission_id: id } as TraJob, {
+      await this.queue.add('send', withJobOrigin({ submission_id: id } as TraJob, source), {
         jobId: `tra-${id}`,
         attempts: 5,
         backoff: { type: 'exponential', delay: 60_000 },
@@ -334,7 +338,10 @@ export class LodgingTraService {
         where: { id: { in: rows.map((r) => r.id) }, status: 'failed' },
         data: { status: 'pending', updated_at: new Date() },
       });
-      await this.enqueue(rows.map((r) => r.id));
+      await this.enqueue(
+        rows.map((r) => r.id),
+        'http:hospedaje/reintentar-tra',
+      );
     }
     return { queued: rows.length };
   }
@@ -430,7 +437,10 @@ export class LodgingTraService {
       select: { id: true },
       take: 500,
     });
-    await this.enqueue(rows.map((r) => r.id)).catch((error: unknown) =>
+    await this.enqueue(
+      rows.map((r) => r.id),
+      'http:hospedaje/token-tra',
+    ).catch((error: unknown) =>
       this.logger.warn(`TRA re-enqueue failed: ${error instanceof Error ? error.message : error}`),
     );
   }

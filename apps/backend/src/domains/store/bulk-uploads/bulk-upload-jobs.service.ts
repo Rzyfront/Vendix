@@ -1,3 +1,4 @@
+import { withJobOrigin } from '../../../common/queue/job-origin';
 import { Inject, Injectable, Logger } from '@nestjs/common';
 import { InjectQueue } from '@nestjs/bullmq';
 import type { Queue } from 'bullmq';
@@ -146,7 +147,7 @@ export class BulkUploadJobsService {
       incident_ticket_number: null,
     };
     try {
-      await this.queue.add('run', data, {
+      await this.queue.add('run', withJobOrigin(data, `http:cargas-masivas/${input.upload_type}`), {
         jobId: bulkJobId(row.id),
         // Los reintentos son por lote, dentro del procesador.
         attempts: 1,

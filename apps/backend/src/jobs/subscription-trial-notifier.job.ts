@@ -1,3 +1,4 @@
+import { jobOrigin } from '../common/queue/job-origin';
 import { Injectable, Logger } from '@nestjs/common';
 import { Cron } from '@nestjs/schedule';
 import { InjectQueue } from '@nestjs/bullmq';
@@ -110,6 +111,7 @@ export class SubscriptionTrialNotifierJob {
             storeId: sub.store_id,
             bucket,
             trialEndsAt: sub.trial_ends_at.toISOString(),
+            ...jobOrigin('cron:subscription-trial-notifier'),
           },
           {
             attempts: 3,
