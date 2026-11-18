@@ -263,6 +263,17 @@ describe('SupportDocumentCreateComponent — OC mode (QUI-684)', () => {
     expect(text(f)).toContain('aceptado por la DIAN');
   });
 
+  it('a document only sent (not yet accepted) is not announced as accepted by the DIAN', () => {
+    const f = setup(draftFixture());
+    service.createFromPurchaseOrder.and.returnValue(
+      of({ success: true, data: { id: 1, emission: { attempted: true, success: true, status: 'sent' } } }),
+    );
+    f.componentInstance.onSubmit();
+    f.detectChanges();
+    expect(text(f)).toContain('se envió a la DIAN');
+    expect(text(f)).not.toContain('aceptado por la DIAN');
+  });
+
   it('derives the read-only IVA from the order rates and follows quantity edits', () => {
     const f = setup(draftFixture());
     const c = f.componentInstance;

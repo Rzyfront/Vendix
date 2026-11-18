@@ -428,7 +428,12 @@ const DUE_DATE_CODES = new Set(['DUE_DATE_REQUIRED', 'DUE_DATE_BEFORE_ISSUE']);
             <app-icon [name]="result.success ? 'check-circle' : 'alert-circle'" [size]="16"></app-icon>
             <span>
               @if (result.success) {
-                El documento soporte fue aceptado por la DIAN.
+                <!-- El envío puede terminar en «sent» (la DIAN aún procesa): solo «accepted» es aceptado. -->
+                @if (result.status === 'accepted') {
+                  El documento soporte fue aceptado por la DIAN.
+                } @else {
+                  El documento soporte se envió a la DIAN. Consulta su estado en el detalle del documento.
+                }
               } @else {
                 El documento soporte se creó, pero la DIAN no lo aceptó{{ result.message ? ': ' + result.message : '.' }} Puedes revisarlo y reintentar desde el detalle del documento.
               }
