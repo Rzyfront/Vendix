@@ -55,6 +55,7 @@ import { BlocklistModule } from './common/services/blocklist/blocklist.module';
 import { RateLimitModule } from './common/services/rate-limit/rate-limit.module';
 import { AiScanJobsModule } from './common/ai-scan-jobs';
 import { PlatformIncidentsModule } from './common/incidents/platform-incidents.module';
+import { PlatformAlertsModule } from './common/platform-alerts/platform-alerts.module';
 import { InventoryCostingModule } from './domains/store/inventory/shared/inventory-costing.module';
 
 /**
@@ -187,6 +188,7 @@ function resolveThrottleSetting(
     RateLimitModule,
     AiScanJobsModule,
     PlatformIncidentsModule,
+    PlatformAlertsModule,
   ],
   controllers: [AppController],
   providers: [

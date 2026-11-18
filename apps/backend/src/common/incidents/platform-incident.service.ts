@@ -1,13 +1,15 @@
 import { randomBytes } from 'crypto';
-import { Inject, Injectable, Logger } from '@nestjs/common';
+import { Inject, Injectable, Logger, Optional } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
+import { EventEmitter2 } from '@nestjs/event-emitter';
 import type Redis from 'ioredis';
 import { REDIS_CLIENT } from '@common/redis/redis.module';
 import { EmailService } from '../../email/email.service';
 import { GlobalPrismaService } from '../../prisma/services/global-prisma.service';
-import type {
-  PlatformIncidentInput,
-  PlatformIncidentResult,
+import {
+  PLATFORM_INCIDENT_REPORTED_EVENT,
+  type PlatformIncidentInput,
+  type PlatformIncidentResult,
 } from './platform-incident.types';
 
 export const INCIDENT_DEDUPE_KEY_PREFIX = 'incidents:dedupe:';
@@ -43,9 +45,30 @@ export class PlatformIncidentService {
     private readonly email: EmailService,
     private readonly config: ConfigService,
     @Inject(REDIS_CLIENT) private readonly redis: Redis,
+    @Optional() private readonly events?: EventEmitter2,
   ) {}
 
+  /**
+   * Reports the incident and then announces it with
+   * `PLATFORM_INCIDENT_REPORTED_EVENT` (the QUI-1010 bot logs it and sends it
+   * to Telegram). Every call is announced, deduped or not: the bot counts
+   * repetitions.
+   */
   async report(input: PlatformIncidentInput): Promise<PlatformIncidentResult> {
+    const result = await this.reportOnce(input);
+    try {
+      this.events?.emit(PLATFORM_INCIDENT_REPORTED_EVENT, { input, result });
+    } catch (error) {
+      this.logger.warn(
+        `Incident ${input.dedupeKey} not announced: ${(error as Error)?.message}`,
+      );
+    }
+    return result;
+  }
+
+  private async reportOnce(
+    input: PlatformIncidentInput,
+  ): Promise<PlatformIncidentResult> {
     const key = `${INCIDENT_DEDUPE_KEY_PREFIX}${input.dedupeKey}`;
     try {
       const ttl = input.dedupeTtlSeconds ?? INCIDENT_DEDUPE_TTL_SECONDS;

@@ -19,6 +19,7 @@ import {
 } from './app.module';
 import { DocumentBuilder, SwaggerModule } from '@nestjs/swagger';
 import { AllExceptionsFilter } from '@common/filters/http-exception.filter';
+import { PlatformAlertService } from './common/platform-alerts/platform-alert.service';
 import { DomainConfigService } from '@common/config/domain.config';
 import { GlobalPrismaService } from './prisma/services/global-prisma.service';
 import { PublicSeoService } from './domains/public/seo/public-seo.service';
@@ -284,8 +285,11 @@ async function bootstrapApi(role: VendixProcessRole) {
   // Initialize domain configuration
   DomainConfigService.initialize();
 
-  // Apply the global exception filter
-  app.useGlobalFilters(new AllExceptionsFilter());
+  // Apply the global exception filter. QUI-1010: cada 5xx alimenta al bot de
+  // monitoreo (Telegram, y en graves correo + ticket).
+  app.useGlobalFilters(
+    new AllExceptionsFilter(app.get(PlatformAlertService, { strict: false })),
+  );
 
   // Enable validation pipes globally
   app.useGlobalPipes(

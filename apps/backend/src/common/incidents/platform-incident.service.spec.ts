@@ -201,4 +201,43 @@ describe('PlatformIncidentService', () => {
       emailed: 0,
     });
   });
+  it('announces every report (opened and deduped) with PLATFORM_INCIDENT_REPORTED_EVENT for the monitoring bot', async () => {
+    const emit = jest.fn();
+    const service = new PlatformIncidentService(
+      {
+        support_tickets: { create: createTicket },
+        users: { findMany: findUsers, findFirst: findFirstUser },
+      } as never,
+      { sendEmail } as never,
+      { get: (k: string) => env[k] } as never,
+      redis as never,
+      { emit } as never,
+    );
+    const first = await service.report(input());
+    const second = await service.report(input());
+    expect(emit).toHaveBeenCalledTimes(2);
+    expect(emit).toHaveBeenNthCalledWith(1, 'platform.incident.reported', {
+      input: expect.objectContaining({ dedupeKey: 'bulk-upload-job:7' }),
+      result: first,
+    });
+    expect(emit.mock.calls[1][1].result).toEqual(second);
+    expect(tickets).toHaveLength(1);
+  });
+
+  it('a listener that throws never breaks the report', async () => {
+    const emit = jest.fn(() => {
+      throw new Error('listener down');
+    });
+    const service = new PlatformIncidentService(
+      {
+        support_tickets: { create: createTicket },
+        users: { findMany: findUsers, findFirst: findFirstUser },
+      } as never,
+      { sendEmail } as never,
+      { get: (k: string) => env[k] } as never,
+      redis as never,
+      { emit } as never,
+    );
+    await expect(service.report(input())).resolves.toMatchObject({ created: true });
+  });
 });

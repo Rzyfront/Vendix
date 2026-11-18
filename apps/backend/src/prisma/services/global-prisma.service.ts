@@ -386,6 +386,11 @@ export class GlobalPrismaService extends BasePrismaService {
     return this.baseClient.support_tickets;
   }
 
+  // QUI-1010 — bot de monitoreo (registro de plataforma, sin tenant).
+  get platform_alerts() {
+    return this.baseClient.platform_alerts;
+  }
+
   get support_attachments() {
     return this.baseClient.support_attachments;
   }
