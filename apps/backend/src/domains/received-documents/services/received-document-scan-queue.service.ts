@@ -1,3 +1,4 @@
+import { jobOrigin } from '../../../common/queue/job-origin';
 import {
   BadRequestException,
   ConflictException,
@@ -27,6 +28,21 @@ const MAX_FILE_BYTES = 10 * 1024 * 1024;
 const ALLOWED_MIME_TYPES = new Set(['application/pdf', 'image/png', 'image/jpeg', 'image/webp']);
 const MAX_EVENT_JSON_BYTES = 2 * 1024 * 1024;
 const INTAKE_SOURCES = new Set(['manual', 'api', 'email', 'automated']);
+
+/** Origen del trabajo según el canal por el que llegó el documento. */
+function scanJobOrigin(source: 'manual' | 'api' | 'email' | 'automated') {
+  if (source === 'email') {
+    return jobOrigin('webhook:recepcion-documentos', null);
+  }
+  if (source === 'automated') {
+    return jobOrigin('job:recepcion-documentos', null);
+  }
+  return jobOrigin(
+    source === 'api'
+      ? 'http:documentos-recibidos/api'
+      : 'http:documentos-recibidos/escanear',
+  );
+}
 
 @Injectable()
 export class ReceivedDocumentScanQueueService {
@@ -78,6 +94,7 @@ export class ReceivedDocumentScanQueueService {
     }
     const jobId = this.jobId(ctx, document.id, document.version);
     const data: ReceivedDocumentScanJob = {
+      ...scanJobOrigin(source),
       document_id: document.id,
       file_id: original.id,
       context: {

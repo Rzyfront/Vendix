@@ -358,12 +358,15 @@ describe('F private procedural memory', () => {
         'verifier_failed',
       );
       await s.memory.completed(objectiveId);
-      expect(s.queue.enqueueRecipeMining).toHaveBeenCalledWith({
-        objective_id: objectiveId,
-        store_id: 7,
-        organization_id: 3,
-        user_id: 11,
-      });
+      expect(s.queue.enqueueRecipeMining).toHaveBeenCalledWith(
+        {
+          objective_id: objectiveId,
+          store_id: 7,
+          organization_id: 3,
+          user_id: 11,
+        },
+        'system:ia-recetas-minado',
+      );
     }));
   it('publication requires signed sequential human review, never candidate->approved', () =>
     scoped(async () => {

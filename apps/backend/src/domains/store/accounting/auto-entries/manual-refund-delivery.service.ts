@@ -50,7 +50,10 @@ export class ManualRefundDeliveryService {
   }
 
   async enqueue(failureId: number): Promise<void> {
-    await this.failures.enqueueRetry(failureId);
+    await this.failures.enqueueRetry(
+      failureId,
+      'system:reembolsos-manuales',
+    );
   }
 
   async deliver(failureId: number): Promise<void> {

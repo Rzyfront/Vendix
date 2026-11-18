@@ -1,3 +1,4 @@
+import { withJobOrigin } from '../../../common/queue/job-origin';
 import {
   Injectable,
   NotFoundException,
@@ -261,7 +262,7 @@ export class DispatchNotesService {
     };
 
     try {
-      const job = await this.receiptScanQueue.add('scan', payload, {
+      const job = await this.receiptScanQueue.add('scan', withJobOrigin(payload, 'http:remisiones/escanear-recibo'), {
         attempts: 3,
         backoff: { type: 'exponential', delay: 2000 },
         removeOnComplete: { count: 100 },

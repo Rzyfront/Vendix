@@ -1,3 +1,4 @@
+import { jobOrigin } from '../common/queue/job-origin';
 import { Injectable, Logger } from '@nestjs/common';
 import { Cron } from '@nestjs/schedule';
 import { ConfigService } from '@nestjs/config';
@@ -488,6 +489,7 @@ export class SubscriptionRenewalBillingJob {
           subscriptionId,
           storeId,
           attempt: 1,
+          ...jobOrigin('cron:subscription-renewal-billing'),
         },
         {
           delay: BACKOFF_DELAYS[0],
@@ -541,6 +543,7 @@ export class SubscriptionRenewalBillingJob {
           invoiceId,
           paymentId: payment?.id ?? invoiceId,
           storeSubscriptionId: subscriptionId,
+          ...jobOrigin('cron:subscription-renewal-billing'),
         },
         {
           attempts: 3,

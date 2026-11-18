@@ -1,3 +1,4 @@
+import { jobOrigin } from '../../../../common/queue/job-origin';
 import { Injectable, Logger } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { EventEmitter2 } from '@nestjs/event-emitter';
@@ -210,7 +211,7 @@ export class SubscriptionPaymentService {
     try {
       await this.commissionQueue.add(
         'accrual',
-        { invoiceId },
+        { invoiceId, ...jobOrigin('webhook:wompi') },
         {
           attempts: 5,
           backoff: { type: 'exponential', delay: 5000 },
@@ -1822,6 +1823,7 @@ export class SubscriptionPaymentService {
             last_four: pm.last4 ?? null,
             brand: pm.brand ?? null,
             consecutive_failures: next,
+            ...jobOrigin('system:cobro-suscripcion'),
           },
           {
             attempts: 3,
@@ -2300,7 +2302,7 @@ export class SubscriptionPaymentService {
           try {
             await this.commissionQueue.add(
               'accrual',
-              { invoiceId },
+              { invoiceId, ...jobOrigin('system:cobro-suscripcion') },
               {
                 attempts: 5,
                 backoff: { type: 'exponential', delay: 5000 },

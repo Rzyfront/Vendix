@@ -62,7 +62,10 @@ export class EntryFailuresController {
         'Auto-entry failure already resolved',
       );
     }
-    await this.failure_service.enqueueRetry(+id);
+    await this.failure_service.enqueueRetry(
+      +id,
+      'http:contabilidad/reintentar-asiento',
+    );
     return this.response_service.success(
       failure,
       'Auto-entry retry enqueued',

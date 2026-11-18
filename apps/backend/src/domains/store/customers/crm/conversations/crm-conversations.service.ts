@@ -229,7 +229,9 @@ export class CrmConversationsService {
         'EX',
         SEND_IDEMPOTENCY_TTL_SECONDS,
       );
-      await this.outbound.enqueue(created.id);
+      await this.outbound.enqueue(created.id, {
+        source: 'http:crm/enviar-mensaje',
+      });
     } catch (error) {
       this.logger.error(
         `Could not queue crm message ${message?.id ?? '(not created)'} of conversation ${id}: ${(error as Error)?.message}`,

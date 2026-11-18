@@ -132,6 +132,8 @@ describe('SubscriptionRenewalBillingJob', () => {
       subscriptionId: subRow.id,
       storeId: subRow.store_id,
       attempt: 1,
+      triggered_by_user_id: null,
+      source: 'cron:subscription-renewal-billing',
     });
     expect(opts.delay).toBe(BACKOFF_DELAYS[0]);
     expect(opts.attempts).toBe(MAX_ATTEMPTS);
@@ -201,6 +203,8 @@ describe('SubscriptionRenewalBillingJob', () => {
       subscriptionId: subRow.id,
       storeId: subRow.store_id,
       attempt: 1,
+      triggered_by_user_id: null,
+      source: 'cron:subscription-renewal-billing',
     });
     expect(opts.delay).toBe(BACKOFF_DELAYS[0]);
     expect(opts.attempts).toBe(MAX_ATTEMPTS);

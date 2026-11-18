@@ -1,3 +1,4 @@
+import { jobOrigin, JobOriginSource } from '../../../../common/queue/job-origin';
 import { Injectable } from '@nestjs/common';
 import { InjectQueue } from '@nestjs/bullmq';
 import { Queue } from 'bullmq';
@@ -75,6 +76,7 @@ export class PurchaseOrderReceiveQueueService {
   async enqueueReceive(
     purchaseOrderId: number,
     input: EnqueueReceiveInput,
+    source: JobOriginSource = 'http:compras/recibir-por-lotes',
   ): Promise<{ job_id: string; total_lines: number; batches_total: number }> {
     const ctx = RequestContextService.getContext() as any;
     const store_id = ctx?.store_id ?? undefined;
@@ -101,6 +103,7 @@ export class PurchaseOrderReceiveQueueService {
           supplier_invoice_date: input.supplier_invoice_date,
           total_lines,
           batches_total,
+          ...jobOrigin(source),
         },
         {
           // Sin reintento automático: un reintento re-recibiría lotes ya

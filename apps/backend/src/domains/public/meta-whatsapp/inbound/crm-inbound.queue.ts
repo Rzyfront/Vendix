@@ -1,3 +1,4 @@
+import { withJobOrigin } from '../../../../common/queue/job-origin';
 import { InjectQueue } from '@nestjs/bullmq';
 import { Injectable } from '@nestjs/common';
 import { Queue } from 'bullmq';
@@ -17,7 +18,7 @@ export class CrmInboundQueue {
   async enqueue(eventId: number): Promise<void> {
     await this.queue.add(
       'process',
-      { event_id: eventId },
+      withJobOrigin({ event_id: eventId }, 'webhook:meta-whatsapp'),
       {
         jobId: `crm-inbound-${eventId}`,
         attempts: 5,

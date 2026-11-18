@@ -1,3 +1,4 @@
+import { withJobOrigin, JobOriginSource } from '../../common/queue/job-origin';
 import { RecipeMiningJob } from '../memory/recipe.interface';
 import { catalogHash } from '../tools/tool-catalog';
 import { Injectable, Logger, Optional } from '@nestjs/common';
@@ -26,13 +27,16 @@ export class AIQueueService {
     private readonly recipeQueue?: Queue,
   ) {}
 
-  async enqueueGeneration(params: AIGenerationJob): Promise<Job> {
+  async enqueueGeneration(
+    params: AIGenerationJob,
+    source: JobOriginSource = 'system:ia-generacion',
+  ): Promise<Job> {
     try {
       const enriched: AIGenerationJob = {
         ...params,
         request_id: this.resolveRequestId(params.request_id),
       };
-      const job = await this.generationQueue.add('generate', enriched, {
+      const job = await this.generationQueue.add('generate', withJobOrigin(enriched, source), {
         attempts: 3,
         backoff: { type: 'exponential', delay: 2000 },
         removeOnComplete: { count: 100 },
@@ -48,9 +52,12 @@ export class AIQueueService {
     }
   }
 
-  async enqueueEmbedding(params: AIEmbeddingJob): Promise<Job> {
+  async enqueueEmbedding(
+    params: AIEmbeddingJob,
+    source: JobOriginSource = 'system:ia-embeddings',
+  ): Promise<Job> {
     try {
-      const job = await this.embeddingQueue.add('embed', params, {
+      const job = await this.embeddingQueue.add('embed', withJobOrigin(params, source), {
         attempts: 2,
         backoff: { type: 'exponential', delay: 3000 },
         removeOnComplete: { count: 500 },
@@ -66,13 +73,16 @@ export class AIQueueService {
     }
   }
 
-  async enqueueAgentTask(params: AIAgentJob): Promise<Job> {
+  async enqueueAgentTask(
+    params: AIAgentJob,
+    source: JobOriginSource = 'system:ia-agente',
+  ): Promise<Job> {
     try {
       const enriched: AIAgentJob = {
         ...params,
         request_id: this.resolveRequestId(params.request_id),
       };
-      const job = await this.agentQueue.add('agent-task', enriched, {
+      const job = await this.agentQueue.add('agent-task', withJobOrigin(enriched, source), {
         attempts: 1,
         removeOnComplete: { count: 50 },
         removeOnFail: { count: 25 },
@@ -87,17 +97,23 @@ export class AIQueueService {
     }
   }
 
-  async enqueueRecipeMining(params: RecipeMiningJob): Promise<void> {
+  async enqueueRecipeMining(
+    params: RecipeMiningJob,
+    source: JobOriginSource = 'system:ia-recetas',
+  ): Promise<void> {
     if (!this.recipeQueue) return;
     // Identity only. No goal, args, trace text, results or bearer in Redis.
     await this.recipeQueue.add(
       'mine-recipe',
-      {
-        objective_id: params.objective_id,
-        store_id: params.store_id,
-        organization_id: params.organization_id,
-        user_id: params.user_id,
-      },
+      withJobOrigin(
+        {
+          objective_id: params.objective_id,
+          store_id: params.store_id,
+          organization_id: params.organization_id,
+          user_id: params.user_id,
+        },
+        source,
+      ),
       {
         jobId: `recipe-mine-${catalogHash([params.objective_id, params.store_id, params.organization_id, params.user_id])}`,
         attempts: 2,
@@ -113,9 +129,9 @@ export class AIQueueService {
     store_id?: number;
     organization_id?: number;
     user_id?: number;
-  }): Promise<void> {
+  }, source: JobOriginSource = 'system:ia-recetas'): Promise<void> {
     if (!this.recipeQueue) return;
-    await this.recipeQueue.add('index-recipe', params, {
+    await this.recipeQueue.add('index-recipe', withJobOrigin(params, source), {
       jobId: `recipe-index-${catalogHash(params)}`,
       attempts: 2,
       backoff: { type: 'exponential', delay: 3000 },

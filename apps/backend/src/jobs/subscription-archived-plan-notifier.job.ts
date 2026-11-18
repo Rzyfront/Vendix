@@ -1,3 +1,4 @@
+import { jobOrigin } from '../common/queue/job-origin';
 import { Injectable, Logger } from '@nestjs/common';
 import { Cron } from '@nestjs/schedule';
 import { InjectQueue } from '@nestjs/bullmq';
@@ -199,6 +200,7 @@ export class SubscriptionArchivedPlanNotifierJob {
             bucket,
             planName: sub.plan?.name ?? null,
             periodEndsAt: periodEndIso,
+            ...jobOrigin('cron:subscription-archived-plan-notifier'),
           },
           {
             // Deterministic id — BullMQ drops a duplicate add while the job is

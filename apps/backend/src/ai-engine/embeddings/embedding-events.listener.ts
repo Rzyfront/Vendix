@@ -1,3 +1,4 @@
+import { jobOrigin, JobOriginSource } from '../../common/queue/job-origin';
 import { Injectable, Logger } from '@nestjs/common';
 import { OnEvent } from '@nestjs/event-emitter';
 import { InjectQueue } from '@nestjs/bullmq';
@@ -76,7 +77,12 @@ export class EmbeddingEventsListener {
     description?: string;
     category?: string;
   }) {
-    await this.enqueueEmbedding(event, 'product', event.product_id);
+    await this.enqueueEmbedding(
+      event,
+      'product',
+      event.product_id,
+      'event:product.created',
+    );
   }
 
   @OnEvent('product.updated')
@@ -88,7 +94,12 @@ export class EmbeddingEventsListener {
     description?: string;
     category?: string;
   }) {
-    await this.enqueueEmbedding(event, 'product', event.product_id);
+    await this.enqueueEmbedding(
+      event,
+      'product',
+      event.product_id,
+      'event:product.updated',
+    );
   }
 
   /**
@@ -138,6 +149,7 @@ export class EmbeddingEventsListener {
               description: product.description,
               category: product.product_categories[0]?.categories?.name,
             }),
+            ...jobOrigin('event:products.bulk_updated'),
           },
           opts: EMBED_JOB_OPTIONS,
         }))
@@ -162,6 +174,7 @@ export class EmbeddingEventsListener {
           store_id: event.store_id,
           entity_type: 'product',
           entity_id: event.product_id,
+          ...jobOrigin('event:product.deleted'),
         },
         { removeOnComplete: { count: 100 } },
       );
@@ -186,7 +199,7 @@ export class EmbeddingEventsListener {
     store_id: number;
     customer_id: number;
   }) {
-    await this.indexEntity('customer', event.customer_id, event.store_id, async () => {
+    await this.indexEntity('customer', event.customer_id, event.store_id, 'event:customer.created', async () => {
       const customer = await this.prisma.users.findFirst({
         where: { id: event.customer_id },
         select: {
@@ -225,7 +238,7 @@ export class EmbeddingEventsListener {
    */
   @OnEvent('order.created')
   async handleOrderCreated(event: { store_id: number; order_id: number }) {
-    await this.indexEntity('order', event.order_id, event.store_id, async () => {
+    await this.indexEntity('order', event.order_id, event.store_id, 'event:order.created', async () => {
       const order = await this.prisma.orders.findFirst({
         where: { id: event.order_id },
         select: {
@@ -278,7 +291,7 @@ export class EmbeddingEventsListener {
   @OnEvent('expense.approved')
   @OnEvent('expense.paid')
   async handleExpenseSettled(event: { store_id: number; expense_id: number }) {
-    await this.indexEntity('expense', event.expense_id, event.store_id, async () => {
+    await this.indexEntity('expense', event.expense_id, event.store_id, 'event:expense.approved|paid', async () => {
       const expense = await this.prisma.expenses.findFirst({
         where: { id: event.expense_id },
         select: {
@@ -324,6 +337,7 @@ export class EmbeddingEventsListener {
       'supplier',
       event.supplier_id,
       event.store_id,
+      'event:supplier.created',
       async () => {
         const supplier = await this.prisma.suppliers.findFirst({
           where: { id: event.supplier_id },
@@ -368,6 +382,7 @@ export class EmbeddingEventsListener {
     entityType: string,
     entityId: number,
     storeId: number,
+    source: JobOriginSource,
     load: () => Promise<{
       organization_id?: number;
       content: string;
@@ -385,6 +400,7 @@ export class EmbeddingEventsListener {
         },
         entityType,
         entityId,
+        source,
       );
     } catch (error: any) {
       // Indexing is an enrichment, never a precondition of the write that
@@ -406,6 +422,7 @@ export class EmbeddingEventsListener {
     },
     entityType: string,
     entityId: number,
+    source: JobOriginSource,
   ): Promise<void> {
     const content = composeProductEmbeddingContent(event);
 
@@ -418,6 +435,7 @@ export class EmbeddingEventsListener {
           entity_type: entityType,
           entity_id: entityId,
           content,
+          ...jobOrigin(source),
         },
         EMBED_JOB_OPTIONS,
       );

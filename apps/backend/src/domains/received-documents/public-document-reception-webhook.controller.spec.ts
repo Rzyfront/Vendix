@@ -44,7 +44,10 @@ describe('PublicDocumentReceptionWebhookController', () => {
       timestamp: headers['x-vendix-timestamp'], event_id: headers['x-vendix-event-id'], signature: headers['x-vendix-signature'],
     }, rawBody);
     expect(h.webhook.accept.mock.calls[0][2]).toBe(rawBody);
-    expect(h.syncQueue.enqueue).toHaveBeenCalledWith(42);
+    expect(h.syncQueue.enqueue).toHaveBeenCalledWith(
+      42,
+      'webhook:recepcion-documentos',
+    );
     expect(result).toEqual({ success: true, data: { run_id: 42, duplicate: false, queued: true }, message: 'Webhook received' });
     const serialized = JSON.stringify(result);
     for (const privateValue of [token, headers['x-vendix-signature'], 'must-not-echo', 'dr-sync-42']) {

@@ -1,3 +1,4 @@
+import { jobOrigin } from '../../../../common/queue/job-origin';
 import { Injectable, Logger, Optional } from '@nestjs/common';
 import { InjectQueue } from '@nestjs/bullmq';
 import { Queue } from 'bullmq';
@@ -275,6 +276,10 @@ export class DunningService {
         invoiceId: invoice.id,
         subscriptionId: sub.id,
         attempt: 0,
+        ...jobOrigin(
+          'http:superadmin/suscripciones/reintentar-cobro',
+          triggeredByUserId ?? undefined,
+        ),
       },
       {
         // No backoff delay — superadmin manual trigger fires immediately

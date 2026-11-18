@@ -1,3 +1,4 @@
+import { jobOrigin } from '../common/queue/job-origin';
 import { Injectable, Logger } from '@nestjs/common';
 import { Cron } from '@nestjs/schedule';
 import { InjectQueue } from '@nestjs/bullmq';
@@ -72,6 +73,7 @@ export class EmbeddingSyncJob {
             entity_type: 'product',
             entity_id: product.id,
             content,
+            ...jobOrigin('cron:embedding-sync'),
           },
           {
             attempts: 2,

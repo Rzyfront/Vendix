@@ -247,7 +247,10 @@ export class CrmCampaignDispatcher {
 
     const rate = this.ratePerStore();
     for (const [index, { id }] of queued.entries()) {
-      await this.outbound.enqueue(id, { delayMs: Math.floor(index / rate) * 1000 });
+      await this.outbound.enqueue(id, {
+        delayMs: Math.floor(index / rate) * 1000,
+        source: 'system:crm-campanas',
+      });
     }
 
     // Marks the campaign materialized only after everything is enqueued, so a
