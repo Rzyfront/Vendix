@@ -1,9 +1,12 @@
-import { Processor, WorkerHost } from '@nestjs/bullmq';
+import { OnWorkerEvent, Processor, WorkerHost } from '@nestjs/bullmq';
 import { Logger } from '@nestjs/common';
 import { Job } from 'bullmq';
 import { randomUUID } from 'crypto';
 import { InvoiceScannerService } from './invoice-scanner.service';
 import { RequestContextService } from '@common/context/request-context.service';
+import { AiJobMonitorService } from '@common/ai-scan-jobs/ai-job-monitor.service';
+import { LEGACY_AI_SOURCES } from '@common/ai-scan-jobs/ai-scan-sources';
+import { toAiJobFailure } from '@common/ai-scan-jobs/ai-job-failure.util';
 import {
   PaymentReceiptScanJob,
   PaymentReceiptScanResult,
@@ -25,7 +28,10 @@ import {
 export class PaymentReceiptScanProcessor extends WorkerHost {
   private readonly logger = new Logger(PaymentReceiptScanProcessor.name);
 
-  constructor(private readonly invoiceScanner: InvoiceScannerService) {
+  constructor(
+    private readonly invoiceScanner: InvoiceScannerService,
+    private readonly monitor: AiJobMonitorService,
+  ) {
     super();
   }
 
@@ -47,14 +53,29 @@ export class PaymentReceiptScanProcessor extends WorkerHost {
           user_id: context.user_id,
           request_id: requestId,
         },
-        () => this.invoiceScanner.scanPaymentFromImage(dataUri, mimeType),
+        () =>
+          this.monitor.runAiWork(job, LEGACY_AI_SOURCES.paymentReceiptScan, () =>
+            this.invoiceScanner.scanPaymentFromImage(dataUri, mimeType),
+          ),
       );
       return result;
     } catch (error: any) {
       this.logger.error(
         `[PaymentReceiptScan] job=${job.id} failed: ${error?.message ?? error}`,
       );
-      throw error; // let BullMQ retry
+      // Vendix errors keep their CODE as `failedReason`; the rest is retried.
+      throw toAiJobFailure(error);
     }
+  }
+
+  /** QUI-1020: a final, non-document failure alerts Vendix once. */
+  @OnWorkerEvent('failed')
+  async onFailed(job: Job<PaymentReceiptScanJob> | undefined): Promise<void> {
+    if (!job) return;
+    await this.monitor.onFailed(
+      job,
+      LEGACY_AI_SOURCES.paymentReceiptScan,
+      job.data?.context,
+    );
   }
 }

@@ -14,7 +14,7 @@ import { formatDate } from '@angular/common';
 import { extractApiErrorMessage } from '../../../../../../../core/utils/api-error-handler';
 import { DestroyRef } from '@angular/core';
 import { takeUntilDestroyed, toSignal } from '@angular/core/rxjs-interop';
-import { merge } from 'rxjs';
+import { Subscription, merge } from 'rxjs';
 import { scan } from 'rxjs/operators';
 import {
   FormArray,
@@ -31,6 +31,10 @@ import { AiReviewAckComponent } from '../../../../../../../shared/components/ai-
 import { IconComponent } from '../../../../../../../shared/components/icon/icon.component';
 import { InputComponent } from '../../../../../../../shared/components/input/input.component';
 import { InputButtonsComponent } from '../../../../../../../shared/components/input-buttons/input-buttons.component';
+import { AiJobProgressComponent } from '../../../../../../../shared/components/ai-job-progress/ai-job-progress.component';
+import { injectAiJobProgress } from '../../../../../../../shared/utils/ai-job-progress';
+import { AiScanJobService } from '../../../../../../../core/services/ai-scan-job.service';
+import { environment } from '../../../../../../../../environments/environment';
 import { CurrencyFormatService } from '../../../../../../../shared/pipes/currency/currency.pipe';
 import { ToastService } from '../../../../../../../shared/components/toast/toast.service';
 import { StoreSettingsFacade } from '../../../../../../../core/store/store-settings/store-settings.facade';
@@ -103,6 +107,7 @@ export interface PoPaymentModalOrder {
     IconComponent,
     InputComponent,
     InputButtonsComponent,
+    AiJobProgressComponent,
   ],
   template: `
     <app-modal
@@ -246,12 +251,13 @@ export interface PoPaymentModalOrder {
               (fileRemoved)="onScanFileRemoved()"
             ></app-file-upload-dropzone>
 
-            @if (isScanning()) {
-              <div class="po-scan-progress mt-3 flex items-center gap-2 text-xs text-text-muted">
-                <app-icon name="loader-2" [size]="14" class="animate-spin"></app-icon>
-                <span>Extrayendo datos del comprobante...</span>
-              </div>
-            }
+            <div class="po-scan-progress mt-3">
+              <app-ai-job-progress
+                [progress]="aiProgress"
+                [showRetry]="!!scannedFile()"
+                (retry)="retryScan()"
+              />
+            </div>
 
             @if (scanConfidence() !== null) {
               <div class="po-scan-result mt-3 p-3 rounded-md border border-success/30 bg-success/5">
@@ -707,6 +713,10 @@ export class PoPaymentModalComponent {
   private readonly currencyService = inject(CurrencyFormatService);
   private readonly storeSettings = inject(StoreSettingsFacade);
   private readonly destroyRef = inject(DestroyRef);
+  private readonly aiScanJobs = inject(AiScanJobService);
+  /** Barra de carga del escaneo del comprobante (QUI-1020). */
+  readonly aiProgress = injectAiJobProgress({ kind: 'payment_receipt' });
+  private scanSub: Subscription | null = null;
 
   // ── Constantes del template ─────────────────────────────────────────
   readonly modeOptions = POP_PAYMENT_MODE_OPTIONS;
@@ -759,7 +769,7 @@ export class PoPaymentModalComponent {
   readonly isScanning = signal(false);
   readonly scanConfidence = signal<number | null>(null);
   /** Archivo pendiente de subir (con o sin OCR exitoso). */
-  private readonly scannedFile = signal<File | null>(null);
+  readonly scannedFile = signal<File | null>(null);
 
   /**
    * Verificación obligatoria de los datos precargados por la IA. Solo aplica
@@ -964,10 +974,14 @@ export class PoPaymentModalComponent {
     }
 
     // Estado OCR limpio al abrir.
+    this.cancelScan();
+    this.aiProgress.reset();
     this.scannedFile.set(null);
     this.scanConfidence.set(null);
     this.isScanning.set(false);
     this.aiAck.set(false);
+    // QUI-1020: un escaneo en curso (recarga o modal cerrado) se retoma.
+    this.resumeScan(order);
   }
 
   onModalClose(value: boolean): void {
@@ -1097,40 +1111,86 @@ export class PoPaymentModalComponent {
 
   // ── AI scan (vista `pay`) ──────────────────────────────────────────
   onScanFileSelected(file: File): void {
+    this.scannedFile.set(file);
+    this.runScan(file);
+  }
+
+  /** Reintenta con el mismo comprobante, sin volver a elegirlo. */
+  retryScan(): void {
+    const file = this.scannedFile();
+    if (file) this.runScan(file);
+  }
+
+  private scanBaseUrl(poId: number): string {
+    return `${environment.apiUrl}/store/orders/purchase-orders/${poId}/payments/scan`;
+  }
+
+  private scanResumeKey(poId: number): string {
+    return `po_payment_receipt:${poId}`;
+  }
+
+  private runScan(file: File): void {
     const o = this.order();
     if (!o) return;
-    this.scannedFile.set(file);
+    this.cancelScan();
     this.isScanning.set(true);
     this.scanConfidence.set(null);
+    this.aiAck.set(false);
 
-    this.purchaseOrdersService
-      .scanPaymentReceipt(o.id, file)
+    const formData = new FormData();
+    formData.append('file', file);
+    this.aiProgress.setSize(1);
+    this.scanSub = this.aiScanJobs
+      .enqueueAndWait<PaymentScanResult>(this.scanBaseUrl(o.id), formData, {
+        progress: this.aiProgress,
+        resumeKey: this.scanResumeKey(o.id),
+        statusUrl: (jobId) => `${this.scanBaseUrl(o.id)}/${jobId}`,
+      })
       .pipe(takeUntilDestroyed(this.destroyRef))
-      .subscribe({
-        next: (result: PaymentScanResult) => {
-          this.applyScanResult(result);
-          this.isScanning.set(false);
-          this.scanConfidence.set(result.confidence ?? null);
-          this.toastService.success('Datos del comprobante extraídos');
-        },
-        error: (err: any) => {
-          this.isScanning.set(false);
-          this.scanConfidence.set(null);
-          // Errores suaves — el modal sigue usable manualmente y el archivo
-          // queda adjunto. Ver skill vendix-ai-queue.
-          const code = err?.message ?? '';
-          if (code === 'scan_payment_timeout') {
-            this.toastService.error('Tiempo agotado extrayendo datos. Puedes llenar el formulario manualmente.');
-          } else if (code === 'scan_payment_not_found') {
-            this.toastService.error('La extracción expiró del caché. Puedes llenar el formulario manualmente.');
-          } else {
-            this.toastService.error('No se pudo escanear el comprobante. Puedes llenar el formulario manualmente.');
-          }
-        },
-      });
+      .subscribe(this.scanObserver());
+  }
+
+  /** Retoma el trabajo recordado de esta OC, si lo hay. */
+  private resumeScan(order: PoPaymentModalOrder): void {
+    const resumed$ = this.aiScanJobs.resume<PaymentScanResult>(
+      this.scanResumeKey(order.id),
+      {
+        progress: this.aiProgress,
+        statusUrl: (jobId) => `${this.scanBaseUrl(order.id)}/${jobId}`,
+      },
+    );
+    if (!resumed$) return;
+    this.isScanning.set(true);
+    this.scanSub = resumed$
+      .pipe(takeUntilDestroyed(this.destroyRef))
+      .subscribe(this.scanObserver());
+  }
+
+  private scanObserver() {
+    return {
+      next: (result: PaymentScanResult) => {
+        this.applyScanResult(result);
+        this.isScanning.set(false);
+        this.scanConfidence.set(result.confidence ?? null);
+        this.toastService.success('Datos del comprobante extraídos');
+      },
+      // Error suave: la barra explica la causa por categoría, el archivo
+      // queda cargado para reintentar y el formulario sigue usable a mano.
+      error: () => {
+        this.isScanning.set(false);
+        this.scanConfidence.set(null);
+      },
+    };
+  }
+
+  private cancelScan(): void {
+    this.scanSub?.unsubscribe();
+    this.scanSub = null;
   }
 
   onScanFileRemoved(): void {
+    this.cancelScan();
+    this.aiProgress.reset();
     this.scannedFile.set(null);
     this.scanConfidence.set(null);
     this.isScanning.set(false);

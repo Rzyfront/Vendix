@@ -2,9 +2,12 @@ import { ComponentFixture, TestBed } from '@angular/core/testing';
 import { provideHttpClient } from '@angular/common/http';
 import { HttpTestingController, provideHttpClientTesting } from '@angular/common/http/testing';
 
+import { Observable, Subject } from 'rxjs';
+
 import { PoPaymentModalComponent } from './po-payment-modal.component';
 import { CurrencyFormatService } from '../../../../../../../shared/pipes/currency/currency.pipe';
 import { ToastService } from '../../../../../../../shared/components/toast/toast.service';
+import { AiScanJobService } from '../../../../../../../core/services/ai-scan-job.service';
 import { StoreSettingsFacade } from '../../../../../../../core/store/store-settings/store-settings.facade';
 
 const buildCurrencyStub = () =>
@@ -39,6 +42,16 @@ const buildToastStub = () =>
   }) as unknown as ToastService;
 
 /**
+ * `AiScanJobService` doble (QUI-1020): la espera real se prueba en su propio
+ * spec. `enqueueAndWait` devuelve el Subject que cada caso controla.
+ */
+let scanJob$: Subject<unknown>;
+const aiScanJobsStub = {
+  enqueueAndWait: jasmine.createSpy('enqueueAndWait'),
+  resume: jasmine.createSpy('resume'),
+};
+
+/**
  * Contrato del PoPaymentModal unificado — refactor UX del OC detail.
  *
  * El modal ahora integra selector de modo + campos condicionales y dispatcha
@@ -59,9 +72,20 @@ describe('PoPaymentModalComponent — payment plan unified modal', () => {
   };
 
   beforeEach(() => {
+    scanJob$ = new Subject<unknown>();
+    aiScanJobsStub.enqueueAndWait.calls.reset();
+    aiScanJobsStub.enqueueAndWait.and.callFake(
+      (_url: string, _body: unknown, opts?: { progress?: { onUploadStart?: () => void } }): Observable<unknown> => {
+        opts?.progress?.onUploadStart?.();
+        return scanJob$.asObservable();
+      },
+    );
+    aiScanJobsStub.resume.calls.reset();
+    aiScanJobsStub.resume.and.returnValue(null);
     TestBed.configureTestingModule({
       imports: [PoPaymentModalComponent],
       providers: [
+        { provide: AiScanJobService, useValue: aiScanJobsStub },
         provideHttpClient(),
         provideHttpClientTesting(),
         { provide: CurrencyFormatService, useFactory: buildCurrencyStub },
@@ -185,6 +209,40 @@ describe('PoPaymentModalComponent — payment plan unified modal', () => {
       expect(body.payment_method).toBe('cash');
       expect(typeof body.payment_date).toBe('string');
       req.flush({ data: { id: 99, amount: 500, payment_date: body.payment_date } });
+    });
+
+    it('escanear: encola por AiScanJobService con barra, resumeKey y statusUrl de la OC', () => {
+      const file = new File(['x'], 'recibo.png', { type: 'image/png' });
+      component.onScanFileSelected(file);
+
+      expect(aiScanJobsStub.enqueueAndWait).toHaveBeenCalledTimes(1);
+      const [url, , opts] = aiScanJobsStub.enqueueAndWait.calls.mostRecent().args;
+      expect(url).toMatch(/\/purchase-orders\/1\/payments\/scan$/);
+      expect(opts.resumeKey).toBe('po_payment_receipt:1');
+      expect(opts.statusUrl('5')).toMatch(/\/purchase-orders\/1\/payments\/scan\/5$/);
+      expect(opts.progress).toBe(component.aiProgress);
+      expect(component.isScanning()).toBe(true);
+      expect(component.aiProgress.phase()).toBe('uploading');
+
+      scanJob$.next({ amount: 300, payment_method: 'cash', confidence: 90 });
+      expect(component.amountValue()).toBe(300);
+      expect(component.scanConfidence()).toBe(90);
+      expect(component.isScanning()).toBe(false);
+    });
+
+    it('si el escaneo falla conserva el archivo y permite reintentar sin volver a subirlo', () => {
+      const file = new File(['x'], 'recibo.png', { type: 'image/png' });
+      component.onScanFileSelected(file);
+      scanJob$.error(new Error('boom'));
+
+      expect(component.isScanning()).toBe(false);
+      expect(component.scanConfidence()).toBeNull();
+      expect(component.scannedFile()).toBe(file);
+
+      scanJob$ = new Subject<unknown>();
+      component.retryScan();
+      expect(aiScanJobsStub.enqueueAndWait).toHaveBeenCalledTimes(2);
+      expect(component.isScanning()).toBe(true);
     });
 
     it('(h) view="pay" + amount > remaining → no dispatch (isPayValid=false)', () => {

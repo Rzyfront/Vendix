@@ -1,11 +1,13 @@
-import { Processor, WorkerHost } from '@nestjs/bullmq';
+import { OnWorkerEvent, Processor, WorkerHost } from '@nestjs/bullmq';
 import { Logger } from '@nestjs/common';
-import { Job, UnrecoverableError } from 'bullmq';
+import { Job } from 'bullmq';
 import { randomUUID } from 'crypto';
 import { InvoiceScannerService } from './invoice-scanner.service';
 import { S3Service } from '@common/services/s3.service';
 import { RequestContextService } from '@common/context/request-context.service';
-import { VendixHttpException, ErrorCodes } from '@common/errors';
+import { AiJobMonitorService } from '@common/ai-scan-jobs/ai-job-monitor.service';
+import { LEGACY_AI_SOURCES } from '@common/ai-scan-jobs/ai-scan-sources';
+import { toAiJobFailure } from '@common/ai-scan-jobs/ai-job-failure.util';
 import {
   InvoiceRevalidateJob,
   InvoiceRevalidateResult,
@@ -55,7 +57,7 @@ export function mimeFromKey(key: string, buffer?: Buffer): string {
  *    `InvoiceScannerService.revalidateInvoice`;
  *  - errores DETERMINISTAS (respuesta ilegible / incompleta) => UnrecoverableError
  *    (sin reintentos); un fallo de la IA/S3 se relanza para que BullMQ reintente.
- *  El mensaje del error viaja a `failedReason` y llega al usuario en espanol.
+ *  El CODIGO del error viaja a `failedReason` (el frontend lo traduce).
  */
 @Processor('invoice-revalidate')
 export class InvoiceRevalidateProcessor extends WorkerHost {
@@ -64,6 +66,7 @@ export class InvoiceRevalidateProcessor extends WorkerHost {
   constructor(
     private readonly invoiceScanner: InvoiceScannerService,
     private readonly s3Service: S3Service,
+    private readonly monitor: AiJobMonitorService,
   ) {
     super();
   }
@@ -100,27 +103,37 @@ export class InvoiceRevalidateProcessor extends WorkerHost {
               'No se pudo leer el documento original guardado. Intenta de nuevo.',
             );
           }
-          return this.invoiceScanner.revalidateInvoice({
-            fileBuffer: buffer,
-            mimeType: mimeFromKey(data.scan_attachment_key, buffer),
-            consolidated: data.consolidated,
-            note: data.note,
-            orderType: data.order_type,
-          });
+          return this.monitor.runAiWork(
+            job,
+            LEGACY_AI_SOURCES.invoiceRevalidate,
+            () =>
+              this.invoiceScanner.revalidateInvoice({
+                fileBuffer: buffer,
+                mimeType: mimeFromKey(data.scan_attachment_key, buffer),
+                consolidated: data.consolidated,
+                note: data.note,
+                orderType: data.order_type,
+              }),
+          );
         },
       );
     } catch (error: any) {
       this.logger.error(
         `[InvoiceRevalidate] job=${job.id} failed: ${error?.message ?? error}`,
       );
-      if (
-        error instanceof VendixHttpException &&
-        (error.errorCode === ErrorCodes.INV_SCAN_PARSE_FAIL.code ||
-          error.errorCode === ErrorCodes.INV_SCAN_INCOMPLETE.code)
-      ) {
-        throw new UnrecoverableError(error.message);
-      }
-      throw error; // BullMQ reintenta
+      // `failedReason` carries the Vendix error CODE (QUI-1020).
+      throw toAiJobFailure(error);
     }
+  }
+
+  /** QUI-1020: a final, non-document failure alerts Vendix once. */
+  @OnWorkerEvent('failed')
+  async onFailed(job: Job<InvoiceRevalidateJob> | undefined): Promise<void> {
+    if (!job) return;
+    await this.monitor.onFailed(
+      job,
+      LEGACY_AI_SOURCES.invoiceRevalidate,
+      job.data,
+    );
   }
 }
