@@ -1,7 +1,10 @@
-import { Processor, WorkerHost } from '@nestjs/bullmq';
+import { OnWorkerEvent, Processor, WorkerHost } from '@nestjs/bullmq';
 import { Logger } from '@nestjs/common';
 import { Job } from 'bullmq';
 import { RequestContextService } from '../../../common/context/request-context.service';
+import { AiJobMonitorService } from '../../../common/ai-scan-jobs/ai-job-monitor.service';
+import { LEGACY_AI_SOURCES } from '../../../common/ai-scan-jobs/ai-scan-sources';
+import { toAiJobFailure } from '../../../common/ai-scan-jobs/ai-job-failure.util';
 import { ExpenseScannerService } from './expense-scanner.service';
 import { ExpenseScanResponse } from './dto/scan-expense.dto';
 import { ExpenseScanJob } from './expense-scan-job.interface';
@@ -24,7 +27,10 @@ import { ExpenseScanJob } from './expense-scan-job.interface';
 export class ExpenseScanProcessor extends WorkerHost {
   private readonly logger = new Logger(ExpenseScanProcessor.name);
 
-  constructor(private readonly scannerService: ExpenseScannerService) {
+  constructor(
+    private readonly scannerService: ExpenseScannerService,
+    private readonly monitor: AiJobMonitorService,
+  ) {
     super();
   }
 
@@ -45,14 +51,29 @@ export class ExpenseScanProcessor extends WorkerHost {
           user_id: context.user_id,
           request_id: context.request_id,
         },
-        () => this.scannerService.scanFromImage(dataUri, mimeType),
+        () =>
+          this.monitor.runAiWork(job, LEGACY_AI_SOURCES.expenseScan, () =>
+            this.scannerService.scanFromImage(dataUri, mimeType),
+          ),
       );
     } catch (error: any) {
       this.logger.error(
         `Expense-scan job ${job.id} failed: ${error?.message}`,
       );
-      // Re-lanzar para que BullMQ registre failedReason y aplique reintentos.
-      throw error;
+      // Re-lanzar para que BullMQ registre failedReason (el CODIGO de Vendix)
+      // y aplique reintentos.
+      throw toAiJobFailure(error);
     }
+  }
+
+  /** QUI-1020: a job that fails for good alerts Vendix once (deduplicated). */
+  @OnWorkerEvent('failed')
+  async onFailed(job: Job<ExpenseScanJob> | undefined): Promise<void> {
+    if (!job) return;
+    await this.monitor.onFailed(
+      job,
+      LEGACY_AI_SOURCES.expenseScan,
+      job.data?.context,
+    );
   }
 }

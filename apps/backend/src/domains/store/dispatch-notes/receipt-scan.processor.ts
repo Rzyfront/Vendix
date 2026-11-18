@@ -1,8 +1,11 @@
-import { Processor, WorkerHost } from '@nestjs/bullmq';
+import { OnWorkerEvent, Processor, WorkerHost } from '@nestjs/bullmq';
 import { Logger } from '@nestjs/common';
 import { Job } from 'bullmq';
 import { randomUUID } from 'crypto';
 import { RequestContextService } from '@common/context/request-context.service';
+import { AiJobMonitorService } from '@common/ai-scan-jobs/ai-job-monitor.service';
+import { LEGACY_AI_SOURCES } from '@common/ai-scan-jobs/ai-scan-sources';
+import { toAiJobFailure } from '@common/ai-scan-jobs/ai-job-failure.util';
 import { DispatchNotesService } from './dispatch-notes.service';
 import { ScanReceiptResult } from './dto/scan-receipt.dto';
 import { ReceiptScanJob } from './receipt-scan-job.interface';
@@ -26,7 +29,10 @@ import { ReceiptScanJob } from './receipt-scan-job.interface';
 export class ReceiptScanProcessor extends WorkerHost {
   private readonly logger = new Logger(ReceiptScanProcessor.name);
 
-  constructor(private readonly dispatchNotesService: DispatchNotesService) {
+  constructor(
+    private readonly dispatchNotesService: DispatchNotesService,
+    private readonly monitor: AiJobMonitorService,
+  ) {
     super();
   }
 
@@ -54,14 +60,29 @@ export class ReceiptScanProcessor extends WorkerHost {
           user_id: context?.user_id,
           request_id: requestId,
         },
-        () => this.dispatchNotesService.scanReceiptFromImage(dataUri, mimeType),
+        () =>
+          this.monitor.runAiWork(job, LEGACY_AI_SOURCES.receiptScan, () =>
+            this.dispatchNotesService.scanReceiptFromImage(dataUri, mimeType),
+          ),
       );
     } catch (error: any) {
       this.logger.error(
         `Receipt-scan job ${job.id} failed: ${error?.message}`,
       );
-      // Re-throw so BullMQ marks the job failed / retries per the enqueue policy.
-      throw error;
+      // Re-throw so BullMQ marks the job failed / retries per the enqueue
+      // policy. `failedReason` carries the Vendix error CODE (QUI-1020).
+      throw toAiJobFailure(error);
     }
+  }
+
+  /** QUI-1020: a job that fails for good alerts Vendix once (deduplicated). */
+  @OnWorkerEvent('failed')
+  async onFailed(job: Job<ReceiptScanJob> | undefined): Promise<void> {
+    if (!job) return;
+    await this.monitor.onFailed(
+      job,
+      LEGACY_AI_SOURCES.receiptScan,
+      job.data?.context,
+    );
   }
 }

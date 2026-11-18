@@ -14,7 +14,7 @@ import {
   FormsModule,
   ReactiveFormsModule,
 } from '@angular/forms';
-import { forkJoin, of } from 'rxjs';
+import { Observable, Subscription, forkJoin, of } from 'rxjs';
 import { catchError, map } from 'rxjs/operators';
 // Solo tipos: el runtime de xlsx (7,2 MB) entra por `await import` dentro del
 // handler, que es el unico camino que lo necesita.
@@ -32,7 +32,6 @@ import {
 } from '../../../../../../shared/components';
 import type { SelectorOption } from '../../../../../../shared/components';
 import { CurrencyPipe } from '../../../../../../shared/pipes/currency/currency.pipe';
-import { extractApiError } from '../../../../../../shared/utils/http-error.util';
 import { toLocalDateString } from '../../../../../../shared/utils/date.util';
 import { PosProductService, Product } from '../../../pos/services/pos-product.service';
 import { LocationsService } from '../../../inventory/services/locations.service';
@@ -40,7 +39,9 @@ import type {
   ApiResponse,
   InventoryLocation,
 } from '../../../inventory/interfaces';
-import { ReceiptScanItem } from '../../interfaces/dispatch-note.interface';
+import { ReceiptScanItem, ReceiptScanResult } from '../../interfaces/dispatch-note.interface';
+import { injectAiJobProgress } from '../../../../../../shared/utils/ai-job-progress';
+import { AiJobProgressComponent } from '../../../../../../shared/components/ai-job-progress/ai-job-progress.component';
 import { DispatchNotesService } from '../../services/dispatch-notes.service';
 import { BulkUploadLogService } from '../../../bulk-uploads/services/bulk-upload-log.service';
 import {
@@ -115,6 +116,7 @@ interface PendingLink {
     ReactiveFormsModule,
     WizardStepSectionComponent,
     AiReviewAckComponent,
+    AiJobProgressComponent,
   ],
   template: `
     <div class="space-y-4">
@@ -282,21 +284,34 @@ interface PendingLink {
             class="hidden"
             (change)="onAiSelected($event, aiInput)"
           />
-          <button
-            type="button"
-            class="w-full border-2 border-dashed border-[var(--color-border)] rounded-lg p-5 text-center
-                   hover:border-[var(--color-primary)] transition-colors"
-            [disabled]="scanning()"
-            (click)="aiInput.click()"
-          >
-            @if (scanning()) {
-              <div class="flex flex-col items-center gap-2">
-                <div
-                  class="w-6 h-6 border-2 border-[var(--color-primary)] border-t-transparent rounded-full animate-spin"
-                ></div>
-                <span class="text-sm text-[var(--color-text-secondary)]">Escaneando recibo con IA...</span>
-              </div>
-            } @else {
+          @if (aiProgress.visible()) {
+            <div class="w-full rounded-lg border border-[var(--color-border)] p-4 space-y-3">
+              <app-ai-job-progress
+                [progress]="aiProgress"
+                [showRetry]="!!lastAiFile()"
+                (retry)="retryAiScan()"
+              />
+              @if (aiProgress.running()) {
+                <p class="text-xs text-[var(--color-text-muted)]">
+                  Escaneando el recibo con IA. Si recargas la página, retomamos el estado real.
+                </p>
+              } @else {
+                <button
+                  type="button"
+                  class="text-xs font-medium text-[var(--color-primary)] hover:underline"
+                  (click)="aiInput.click()"
+                >
+                  Elegir otro archivo
+                </button>
+              }
+            </div>
+          } @else {
+            <button
+              type="button"
+              class="w-full border-2 border-dashed border-[var(--color-border)] rounded-lg p-5 text-center
+                     hover:border-[var(--color-primary)] transition-colors"
+              (click)="aiInput.click()"
+            >
               <app-icon name="sparkles" [size]="28" color="var(--color-primary)" class="mx-auto"></app-icon>
               <p class="mt-2 text-sm font-medium text-[var(--color-text-primary)]">
                 Sube una foto o PDF del recibo
@@ -304,8 +319,8 @@ interface PendingLink {
               <p class="text-xs text-[var(--color-text-muted)] mt-0.5">
                 La IA detectará los productos y cantidades
               </p>
-            }
-          </button>
+            </button>
+          }
         }
 
         <!-- Import feedback (detected supplier / warnings) -->
@@ -638,6 +653,11 @@ export class ItemPickerStepComponent {
   // --- Import state ---
   readonly parsing = signal(false);
   readonly scanning = signal(false);
+  /** Shared AI progress bar (QUI-1020). */
+  readonly aiProgress = injectAiJobProgress({ kind: 'dispatch_receipt' });
+  /** Last receipt picked: kept after a failure so retrying needs no new upload. */
+  readonly lastAiFile = signal<File | null>(null);
+  private aiScanSub: Subscription | null = null;
   readonly detectedSupplierName = signal<string | null>(null);
   readonly importWarnings = signal<string[]>([]);
 
@@ -706,6 +726,7 @@ export class ItemPickerStepComponent {
     this.seedDetailsForm();
     this.loadLocations();
     this.syncFormToService();
+    this.resumeAiScan();
 
     // El botón "Siguiente" vive en el wizard padre, así que la petición de
     // atención llega por el contador del servicio en vez de un viewChild.
@@ -881,62 +902,92 @@ export class ItemPickerStepComponent {
   }
 
   // ==========================================================================
-  // IA — receipt scan (async: enqueue → poll)
+  // IA — receipt scan (async: enqueue → wait with progress bar)
   // ==========================================================================
 
   /**
-   * Sube el recibo y lo escanea con IA. `scanReceipt` ahora OCULTA un flujo
-   * ASÍNCRONO (encola job → polling), pero sigue emitiendo UNA sola vez el
-   * `ReceiptScanResult` final: por eso `scanning()` permanece activo durante
-   * TODO el poll y este `next` se dispara una única vez al terminar. Los casos
-   * `failed`, timeout de guarda y 404 tardío por evicción llegan al `error`
-   * handler y se traducen con `extractApiError`. `takeUntilDestroyed` corta el
-   * poll si el paso se destruye a mitad.
+   * Sube el recibo y lo escanea con IA. `AiScanJobService` encola el job y
+   * espera con backoff, alimenta la barra compartida y emite UNA sola vez el
+   * `ReceiptScanResult`; `scanning()` permanece activo durante todo el proceso.
+   * Si falla, la barra explica la causa por categoría y el archivo se conserva
+   * para reintentar. `takeUntilDestroyed` corta la espera si el paso se destruye.
    */
   onAiSelected(event: Event, input: HTMLInputElement): void {
     const file = input.files?.[0];
     input.value = '';
     if (!file) return;
+    this.lastAiFile.set(file);
+    this.runAiScan(file);
+  }
 
+  /** Retries the last receipt without asking for the file again. */
+  retryAiScan(): void {
+    const file = this.lastAiFile();
+    if (file) this.runAiScan(file);
+  }
+
+  private runAiScan(file: File): void {
+    this.trackAiScan(
+      this.dispatchService.scanReceipt(file, { progress: this.aiProgress }),
+    );
+  }
+
+  /** QUI-1020: re-attaches to a scan that was running before a reload. */
+  private resumeAiScan(): void {
+    if (!this.importEnabled()) return;
+    const resumed = this.dispatchService.resumeReceiptScan({
+      progress: this.aiProgress,
+    });
+    if (!resumed) return;
+    this.mode.set('ai');
+    this.trackAiScan(resumed);
+  }
+
+  private trackAiScan(scan$: Observable<ReceiptScanResult>): void {
     this.scanning.set(true);
-    this.dispatchService
-      .scanReceipt(file)
+    this.aiScanSub?.unsubscribe();
+    this.aiScanSub = scan$
       .pipe(takeUntilDestroyed(this.destroyRef))
       .subscribe({
         next: (result) => {
           this.scanning.set(false);
-          this.detectedSupplierName.set(result.supplier_name ?? null);
-          this.importWarnings.set(result.warnings ?? []);
-          const suggestions = (result.items ?? []).map(
-            (it: ReceiptScanItem): ReceiptSuggestion => ({
-              product_name: it.product_name,
-              sku: it.sku,
-              quantity: it.quantity,
-              unit_price: it.unit_price,
-              matched_product_id: it.matched_product_id,
-              matched_variant_id: it.matched_variant_id,
-              confidence: it.match_confidence,
-            }),
-          );
-          // IA carries backend matches; unmatched go straight to "por vincular".
-          this.ingest(suggestions, { autoMatchBySku: false });
-          const total = suggestions.length;
-          if (total === 0) {
-            this.toast.warning('El recibo no arrojó líneas de producto.');
-          } else {
-            this.toast.success(`Recibo escaneado: ${total} línea(s) detectada(s).`);
-            // Exige verificación humana antes de avanzar. Se reinicia el check
-            // porque estos son datos nuevos: un escaneo previo ya verificado no
-            // debe dar por buenos los ítems que acaban de llegar.
-            this.wizardService.aiPrefilled.set(true);
-            this.wizardService.aiAck.set(false);
-          }
+          this.lastAiFile.set(null);
+          this.aiProgress.reset();
+          this.applyScanResult(result);
         },
-        error: (err) => {
-          this.scanning.set(false);
-          this.toast.error(extractApiError(err).message || 'No se pudo escanear el recibo.');
-        },
+        // The panel explains the failure by category and offers «Intentar de
+        // nuevo»; the picked file stays in `lastAiFile`.
+        error: () => this.scanning.set(false),
       });
+  }
+
+  private applyScanResult(result: ReceiptScanResult): void {
+    this.detectedSupplierName.set(result.supplier_name ?? null);
+    this.importWarnings.set(result.warnings ?? []);
+    const suggestions = (result.items ?? []).map(
+      (it: ReceiptScanItem): ReceiptSuggestion => ({
+        product_name: it.product_name,
+        sku: it.sku,
+        quantity: it.quantity,
+        unit_price: it.unit_price,
+        matched_product_id: it.matched_product_id,
+        matched_variant_id: it.matched_variant_id,
+        confidence: it.match_confidence,
+      }),
+    );
+    // IA carries backend matches; unmatched go straight to "por vincular".
+    this.ingest(suggestions, { autoMatchBySku: false });
+    const total = suggestions.length;
+    if (total === 0) {
+      this.toast.warning('El recibo no arrojó líneas de producto.');
+    } else {
+      this.toast.success(`Recibo escaneado: ${total} línea(s) detectada(s).`);
+      // Exige verificación humana antes de avanzar. Se reinicia el check
+      // porque estos son datos nuevos: un escaneo previo ya verificado no
+      // debe dar por buenos los ítems que acaban de llegar.
+      this.wizardService.aiPrefilled.set(true);
+      this.wizardService.aiAck.set(false);
+    }
   }
 
   // ==========================================================================

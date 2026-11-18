@@ -16,6 +16,8 @@ import {
 import { FileInterceptor } from '@nestjs/platform-express';
 import { InjectQueue } from '@nestjs/bullmq';
 import { Queue } from 'bullmq';
+import { AiJobMonitorService } from '../../../common/ai-scan-jobs/ai-job-monitor.service';
+import { LEGACY_AI_SOURCES } from '../../../common/ai-scan-jobs/ai-scan-sources';
 import { ExpensesService } from './expenses.service';
 import { ExpenseFlowService } from './expense-flow/expense-flow.service';
 import { ExpenseScannerService } from './expense-scanner.service';
@@ -43,6 +45,7 @@ export class ExpensesController {
     @InjectQueue('expense-scan')
     private readonly expense_scan_queue: Queue<ExpenseScanJob>,
     private readonly response_service: ResponseService,
+    private readonly ai_monitor: AiJobMonitorService,
   ) {}
 
   @Get()
@@ -186,7 +189,16 @@ export class ExpensesController {
       result: job.returnvalue ?? undefined,
       error: job.failedReason ?? undefined,
     };
-    return this.response_service.success(status);
+    // QUI-1020: additive AI-job meta (progress, timestamps, stall, failure class).
+    return this.response_service.success({
+      ...status,
+      ...this.ai_monitor.describe(
+        job,
+        state,
+        LEGACY_AI_SOURCES.expenseScan,
+        job.data?.context,
+      ),
+    });
   }
 
   // --- Parameter Routes (MUST be last) ---
