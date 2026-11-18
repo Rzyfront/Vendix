@@ -63,6 +63,26 @@ export interface SupportDocumentItemDto {
   unit_price: number;
   discount_amount?: number;
   tax_amount?: number;
+  /**
+   * Tarifas de la línea. Sin `taxable_amount` ni `tax_amount`: el servidor
+   * calcula la cuota sobre la base de la línea, la que el usuario haya editado.
+   */
+  taxes?: SupportDocumentLineRate[];
+  is_inclusive?: boolean;
+}
+
+/** Tarifa por línea que viaja en el POST (alineada con `CreateInvoiceTaxDto`). */
+export interface SupportDocumentLineRate {
+  tax_name: string;
+  /** Porcentaje (ej: 19 para 19%). */
+  tax_rate: number;
+  tax_type?: string;
+}
+
+/** Impuesto de una línea del borrador de la OC (filas `purchase_order_item_taxes`). */
+export interface PurchaseOrderSupportDraftTax extends SupportDocumentLineRate {
+  taxable_amount?: number;
+  tax_amount: number;
 }
 
 /** Renglón de impuesto en `invoice_taxes` (alineado con `CreateInvoiceTaxDto`). */
@@ -205,6 +225,9 @@ export interface PurchaseOrderSupportDraftItem {
   tax_amount: number;
   product_id?: number;
   product_variant_id?: number;
+  /** Tarifas de la línea de la OC; sin ellas la línea va sin impuesto. */
+  taxes?: PurchaseOrderSupportDraftTax[];
+  is_inclusive?: boolean;
 }
 
 /** `GET /store/invoicing/purchase-orders/:id/support-document-draft`. */

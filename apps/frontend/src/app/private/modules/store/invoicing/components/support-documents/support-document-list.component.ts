@@ -178,7 +178,7 @@ export class SupportDocumentListComponent {
 
   constructor() {
     this.suppliersService
-      .getSuppliers({ limit: 100 })
+      .getSuppliers({ limit: 500 })
       .pipe(takeUntilDestroyed(this.destroyRef))
       .subscribe({
         next: (response) =>

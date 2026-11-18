@@ -65,6 +65,11 @@ describe('SupportDocumentCreateComponent — OC mode (QUI-684)', () => {
           unit_price: 10000,
           discount_amount: 0,
           tax_amount: 19000,
+          // Shape the backend draft really returns for a taxed OC line.
+          taxes: [
+            { tax_name: 'IVA', tax_rate: 19, tax_type: 'iva', taxable_amount: 100000, tax_amount: 19000 },
+          ],
+          is_inclusive: false,
         },
       ],
     },
@@ -242,11 +247,103 @@ describe('SupportDocumentCreateComponent — OC mode (QUI-684)', () => {
     expect(dto.emit_immediately).toBeTrue();
     expect(dto.payment_form).toBe('1');
     expect(dto.client_request_id).toEqual(jasmine.any(String));
-    expect(dto.items[0].description).toBe('Cemento gris');
+    // The server derives the quota from the rates: without `taxes` it rejects a
+    // bare `tax_amount` (INVOICING_CALC_001) and no document is issued.
+    expect(dto.items[0]).toEqual({
+      description: 'Cemento gris',
+      quantity: 10,
+      unit_price: 10000,
+      discount_amount: 0,
+      taxes: [{ tax_name: 'IVA', tax_rate: 19, tax_type: 'iva' }],
+      is_inclusive: false,
+    });
     expect(created.length).toBe(1);
     expect(c.emissionResult()?.success).toBeTrue();
     f.detectChanges();
     expect(text(f)).toContain('aceptado por la DIAN');
+  });
+
+  it('derives the read-only IVA from the order rates and follows quantity edits', () => {
+    const f = setup(draftFixture());
+    const c = f.componentInstance;
+    const line = c.itemsArray.at(0);
+    expect(line.get('tax_amount')?.value).toBe(19000);
+
+    line.get('quantity')?.setValue(5);
+    f.detectChanges();
+
+    expect(line.get('tax_amount')?.value).toBe(9500);
+    expect(c.documentTotal()).toBe(59500);
+    const ivaInput = (f.nativeElement as HTMLElement).querySelector(
+      'input[readonly]',
+    ) as HTMLInputElement | null;
+    expect(ivaInput).not.toBeNull();
+    expect(text(f)).toContain('Según las tarifas de la OC');
+  });
+
+  it('a line without order rates is sent without tax', () => {
+    const base = draftFixture();
+    const f = setup(
+      draftFixture({
+        draft: {
+          ...base.draft,
+          items: [{ description: 'Flete', quantity: 1, unit_price: 8000, discount_amount: 0, tax_amount: 0 }],
+        },
+      }),
+    );
+    f.componentInstance.onSubmit();
+    const [, dto] = service.createFromPurchaseOrder.calls.mostRecent().args;
+    expect(dto.items[0]).toEqual({
+      description: 'Flete',
+      quantity: 1,
+      unit_price: 8000,
+      discount_amount: 0,
+      tax_amount: 0,
+    });
+  });
+
+  it('credit without a due date (or due before issue) is listed and blocks submit until fixed', () => {
+    const base = draftFixture();
+    const f = setup(
+      draftFixture({
+        draft: { ...base.draft, payment_form: '2', due_date: null },
+        missing: [
+          missing(
+            'DUE_DATE_REQUIRED',
+            'review',
+            'La compra es a crédito y falta la fecha de vencimiento',
+            'due_date',
+          ),
+        ],
+        can_emit: false,
+      }),
+    );
+    const c = f.componentInstance;
+    expect(c.effectiveMissing().map((m) => m.code)).toEqual(['DUE_DATE_REQUIRED']);
+    expect(text(f)).toContain('falta la fecha de vencimiento');
+    expect(c.submitDisabled()).toBeTrue();
+
+    c.form.controls['due_date'].setValue('2026-11-10');
+    f.detectChanges();
+    expect(c.effectiveMissing().map((m) => m.code)).toEqual(['DUE_DATE_BEFORE_ISSUE']);
+    expect(c.submitDisabled()).toBeTrue();
+
+    c.form.controls['due_date'].setValue('2026-12-01');
+    f.detectChanges();
+    expect(c.effectiveMissing()).toEqual([]);
+    expect(c.submitDisabled()).toBeFalse();
+  });
+
+  it('switching a cash draft to credit asks for the due date', () => {
+    const f = setup(draftFixture());
+    const c = f.componentInstance;
+    expect(c.submitDisabled()).toBeFalse();
+
+    c.form.controls['payment_form'].setValue('2');
+    f.detectChanges();
+
+    expect(c.effectiveMissing().map((m) => m.code)).toEqual(['DUE_DATE_REQUIRED']);
+    expect(c.submitDisabled()).toBeTrue();
   });
 
   it('reuses the same client_request_id when the user retries after an error', () => {

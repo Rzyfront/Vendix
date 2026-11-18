@@ -31,7 +31,10 @@ import type {
 import type {
   CreateSupportDocumentDto,
   PurchaseOrderSupportDraft,
+  PurchaseOrderSupportDraftItem,
+  PurchaseOrderSupportDraftTax,
   SupportDocumentAdjustmentSource,
+  SupportDocumentItemDto,
   SupportDocumentEmissionOutcome,
   SupportDocumentRow,
   SupportDocumentType,
@@ -50,6 +53,58 @@ import type { SelectorOption } from '../../../../../../shared/components/selecto
 import { toLocalDateString } from '../../../../../../shared/utils/date.util';
 import { CurrencyFormatService, CurrencyPipe } from '../../../../../../shared/pipes/currency';
 import { Subscription } from 'rxjs';
+
+const round2 = (n: number): number => Math.round(n * 100) / 100;
+
+/**
+ * Cuota de la línea con las tarifas de la OC sobre la base editada (impuesto
+ * adicional, como `is_inclusive: false`). Es la misma que calcula el servidor;
+ * él tiene la última palabra.
+ */
+function lineTaxFromRates(
+  line: { quantity?: unknown; unit_price?: unknown; discount_amount?: unknown },
+  rates: readonly PurchaseOrderSupportDraftTax[],
+): number {
+  const base =
+    (Number(line.quantity) || 0) * (Number(line.unit_price) || 0) -
+    (Number(line.discount_amount) || 0);
+  return round2(
+    rates.reduce((acc, t) => acc + round2((base * (Number(t.tax_rate) || 0)) / 100), 0),
+  );
+}
+
+/** Mismas reglas de vencimiento que el backend (`DUE_DATE_*`), evaluadas en vivo. */
+function dueDateGaps(form: {
+  issue_date?: unknown;
+  due_date?: unknown;
+  payment_form?: unknown;
+}): SupportMissingField[] {
+  const issue = String(form.issue_date ?? '').slice(0, 10);
+  const due = String(form.due_date ?? '').slice(0, 10);
+  if (form.payment_form === '2' && !due) {
+    return [
+      {
+        code: 'DUE_DATE_REQUIRED',
+        field: 'due_date',
+        label: 'La compra es a crédito y falta la fecha de vencimiento',
+        target: 'review',
+      },
+    ];
+  }
+  if (due && issue && due < issue) {
+    return [
+      {
+        code: 'DUE_DATE_BEFORE_ISSUE',
+        field: 'due_date',
+        label: 'La fecha de vencimiento es anterior a la fecha de emisión',
+        target: 'review',
+      },
+    ];
+  }
+  return [];
+}
+
+const DUE_DATE_CODES = new Set(['DUE_DATE_REQUIRED', 'DUE_DATE_BEFORE_ISSUE']);
 
 /**
  * Form de creación de un documento soporte o nota de ajuste (QUI-682).
@@ -299,6 +354,8 @@ import { Subscription } from 'rxjs';
                     [currency]="true"
                     formControlName="tax_amount"
                     [control]="item.get('tax_amount')"
+                    [readonly]="isPoMode()"
+                    [helperText]="isPoMode() ? 'Según las tarifas de la OC' : ''"
                   ></app-input>
                 </div>
               </div>
@@ -483,9 +540,14 @@ export class SupportDocumentCreateComponent {
    */
   readonly effectiveMissing = computed<SupportMissingField[]>(() => {
     this.formTick();
-    return this.serverMissing().filter((m) =>
-      m.target !== 'review' ? true : this.reviewStillMissing(m),
+    // El vencimiento depende de la forma de pago que el usuario puede cambiar:
+    // se evalúa en vivo en lugar de confiar en la foto del servidor.
+    const server = this.serverMissing().filter((m) =>
+      m.target !== 'review'
+        ? true
+        : !DUE_DATE_CODES.has(m.code) && this.reviewStillMissing(m),
     );
+    return [...server, ...dueDateGaps(this.form.getRawValue())];
   });
 
   readonly documentTotal = computed(() => {
@@ -554,7 +616,10 @@ export class SupportDocumentCreateComponent {
 
     this.form.valueChanges
       .pipe(takeUntilDestroyed(this.destroyRef))
-      .subscribe(() => this.formTick.update((n) => n + 1));
+      .subscribe(() => {
+        this.syncDerivedTaxes();
+        this.formTick.update((n) => n + 1);
+      });
 
     // Cuando cambia a nota de ajuste, related_invoice_id se vuelve obligatorio.
     this.form.controls['invoice_type'].valueChanges
@@ -692,22 +757,48 @@ export class SupportDocumentCreateComponent {
     this.itemsArray.push(this.buildItemGroup());
   }
 
-  private buildItemGroup(
-    v?: Partial<{
-      description: string;
-      quantity: number;
-      unit_price: number;
-      discount_amount: number;
-      tax_amount: number;
-    }>,
-  ): FormGroup {
+  private buildItemGroup(v?: Partial<PurchaseOrderSupportDraftItem>): FormGroup {
     return this.fb.group({
       description: [v?.description ?? '', [Validators.required, Validators.minLength(2)]],
       quantity: [v?.quantity ?? 1, [Validators.required, Validators.min(1)]],
       unit_price: [v?.unit_price ?? 0, [Validators.required, Validators.min(0)]],
       discount_amount: [v?.discount_amount ?? 0],
       tax_amount: [v?.tax_amount ?? 0],
+      // Tarifas de la OC (modo OC). Sin ellas el servidor rechaza la cuota.
+      taxes: this.fb.control<PurchaseOrderSupportDraftTax[]>(v?.taxes ?? []),
     });
+  }
+
+  /**
+   * Modo OC: el IVA de cada línea es de solo lectura y sale de sus tarifas sobre
+   * la base editada; así no queda una cuota vieja si cambian cantidad o precio.
+   */
+  private syncDerivedTaxes(): void {
+    if (!this.isPoMode()) return;
+    for (const group of this.itemsArray.controls) {
+      const line = group.getRawValue() as Record<string, unknown>;
+      const rates = (line['taxes'] as PurchaseOrderSupportDraftTax[] | null) ?? [];
+      const derived = lineTaxFromRates(line, rates);
+      if (Number(line['tax_amount']) !== derived) {
+        group.get('tax_amount')?.setValue(derived, { emitEvent: false });
+      }
+    }
+  }
+
+  /** Línea del POST en modo OC: lleva las tarifas, no una cuota fija. */
+  private toPurchaseOrderItem(it: Record<string, unknown>): SupportDocumentItemDto {
+    const rates = ((it['taxes'] as PurchaseOrderSupportDraftTax[] | null) ?? []).map((t) => ({
+      tax_name: t.tax_name,
+      tax_rate: Number(t.tax_rate),
+      ...(t.tax_type ? { tax_type: t.tax_type } : {}),
+    }));
+    return {
+      description: String(it['description'] ?? ''),
+      quantity: Number(it['quantity']),
+      unit_price: Number(it['unit_price']),
+      discount_amount: Number(it['discount_amount']) || 0,
+      ...(rates.length > 0 ? { taxes: rates, is_inclusive: false } : { tax_amount: 0 }),
+    };
   }
 
   removeItem(index: number): void {
@@ -964,13 +1055,9 @@ export class SupportDocumentCreateComponent {
         payment_form: raw.payment_form,
         withholding_amount: Number(raw.withholding_amount) || 0,
         notes: raw.notes || undefined,
-        items: raw.items.map((it: any) => ({
-          description: it.description,
-          quantity: Number(it.quantity),
-          unit_price: Number(it.unit_price),
-          discount_amount: Number(it.discount_amount) || 0,
-          tax_amount: Number(it.tax_amount) || 0,
-        })),
+        items: (raw.items as Record<string, unknown>[]).map((it) =>
+          this.toPurchaseOrderItem(it),
+        ),
         client_request_id: this.clientRequestId ?? undefined,
         emit_immediately: true,
       })
