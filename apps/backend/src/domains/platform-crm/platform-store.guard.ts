@@ -21,6 +21,21 @@ export interface PlatformCrmContext {
 
 export const PLATFORM_CRM_REQUEST_KEY = 'platformCrm';
 
+/**
+ * El MISMO 404 que da Nest a una ruta inexistente. `RoutesResolver` lanza
+ * `NotFoundException(`Cannot ${method} ${url}`)` con el método y la
+ * `originalUrl` que devuelve `ExpressAdapter`, y `AllExceptionsFilter` arma el
+ * cuerpo igual en los dos casos. Un `NotFoundException()` vacío respondería
+ * `"Not Found"` y una tienda ajena distinguiría que la función existe.
+ */
+export function routeNotFound(
+  request: { method?: string; originalUrl?: string; url?: string } | undefined,
+): NotFoundException {
+  return new NotFoundException(
+    `Cannot ${request?.method} ${request?.originalUrl ?? request?.url}`,
+  );
+}
+
 /** Inyecta el {@link PlatformCrmContext} que dejó el guard en el request. */
 export const PlatformCrmCtx = createParamDecorator(
   (_data: unknown, ctx: ExecutionContext): PlatformCrmContext => {
@@ -29,7 +44,7 @@ export const PlatformCrmCtx = createParamDecorator(
       | PlatformCrmContext
       | undefined;
     // Sin guard no hay contexto: falla cerrado igual que el guard.
-    if (!resolved) throw new NotFoundException();
+    if (!resolved) throw routeNotFound(request);
     return resolved;
   },
 );
@@ -57,8 +72,8 @@ function strictPositiveInt(value: unknown): number | null {
  * - el usuario pertenece a esa misma organización.
  *
  * No hay bypass por super admin ni por owner. Cualquier otro caso responde
- * `NotFoundException` (404), igual que una ruta inexistente: ninguna tienda
- * ajena puede distinguir que la función existe.
+ * {@link routeNotFound}: el mismo 404, con el mismo cuerpo, que una ruta
+ * inexistente. Ninguna tienda ajena puede distinguir que la función existe.
  */
 @Injectable()
 export class PlatformStoreGuard implements CanActivate {
@@ -84,6 +99,7 @@ export class PlatformStoreGuard implements CanActivate {
       reason = 'resolution_error';
       this.logger.error(
         `platform-crm guard resolution failed: ${(error as Error)?.message}`,
+        (error as Error)?.stack,
       );
     }
 
@@ -98,7 +114,7 @@ export class PlatformStoreGuard implements CanActivate {
           path: request?.route?.path ?? request?.url,
         }),
       );
-      throw new NotFoundException();
+      throw routeNotFound(request);
     }
 
     request[PLATFORM_CRM_REQUEST_KEY] = resolved;

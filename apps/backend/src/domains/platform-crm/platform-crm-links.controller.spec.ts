@@ -1,9 +1,28 @@
-import { INestApplication, ValidationPipe } from '@nestjs/common';
+import {
+  Controller,
+  Get,
+  INestApplication,
+  Logger,
+  Post,
+  Type,
+  ValidationPipe,
+} from '@nestjs/common';
+import { APP_GUARD } from '@nestjs/core';
 import { Test } from '@nestjs/testing';
 import * as request from 'supertest';
 import { ResponseService } from '@common/responses/response.service';
 import { GlobalPrismaService } from '../../prisma/services/global-prisma.service';
 import { PlatformOrgService } from '../../common/services/platform-org.service';
+import { AllExceptionsFilter } from '../../common/filters/http-exception.filter';
+import { DomainScopeGuard } from '../../common/guards/domain-scope.guard';
+import { AccessAuditLogger } from '../../common/access/access-audit.logger';
+import { AccessGateModeService } from '../../common/access/access-gate-mode.service';
+import { PLAN_MODULE_API_ROUTES } from '../../common/access/plan-modules';
+import { StoreOperationsGuard } from '../store/subscriptions/guards/store-operations.guard';
+import { PlanAccessGuard } from '../store/subscriptions/guards/plan-access.guard';
+import { SubscriptionAccessService } from '../store/subscriptions/services/subscription-access.service';
+import { SubscriptionGateConfig } from '../store/subscriptions/config/subscription-gate.config';
+import { PlanAccessService } from '../store/subscriptions/services/plan-access.service';
 import { PlatformCrmLinksController } from './platform-crm-links.controller';
 import { PlatformCrmLinksService } from './platform-crm-links.service';
 import { PlatformStoreGuard } from './platform-store.guard';
@@ -19,10 +38,19 @@ import { PlatformStoreGuard } from './platform-store.guard';
  * Como comercial de Vendix en la tienda Vendix Platform, quiero que las rutas
  * respondan 403 si no tengo el permiso y 200 si lo tengo.
  *
- * App Nest REAL con prefijo `api`, `PlatformStoreGuard` y `PermissionsGuard`
- * reales y `PlatformOrgService` real sobre un doble de la base. Solo el
- * servicio de negocio es un doble (se comprueba que nunca se alcanza en un
- * rechazo). `req.user` imita lo que deja `JwtStrategy`.
+ * App Nest REAL con prefijo `api`, el filtro global de `main.ts`
+ * (`AllExceptionsFilter`) y la cadena de guards de `app.module.ts` en su orden:
+ * `DomainScopeGuard` → `StoreOperationsGuard` (gate de suscripción) →
+ * `PlanAccessGuard` → `PlatformStoreGuard` → `PermissionsGuard`. Los servicios
+ * de los guards globales son dobles: la tienda ajena tiene la suscripción
+ * BLOQUEADA y un plan que no incluye ningún módulo, con el gate en `enforce`.
+ * `JwtAuthGuard` lo reemplaza un middleware que deja en `req.user` lo mismo que
+ * `JwtStrategy` (el token ya validado). Solo el servicio de negocio es un doble
+ * (se comprueba que nunca se alcanza en un rechazo).
+ *
+ * «Indistinguible» se mide contra una app GEMELA, idéntica pero sin el módulo:
+ * cada rechazo debe dar el mismo status, el mismo content-type y el mismo
+ * cuerpo (salvo `timestamp`) que esa app da a la misma petición.
  */
 
 const PLATFORM_ORG = 1;
@@ -43,6 +71,7 @@ type TestUser = {
   id: number;
   organization_id: number;
   store_id: number | null;
+  app_type: 'STORE_ADMIN' | 'ORG_ADMIN';
   roles: string[];
   permissions: typeof ALL_PERMISSIONS;
 };
@@ -52,6 +81,7 @@ const USERS = {
     id: 700,
     organization_id: TENANT_ORG,
     store_id: TENANT_STORE,
+    app_type: 'STORE_ADMIN',
     roles: ['owner'],
     permissions: ALL_PERMISSIONS,
   },
@@ -59,6 +89,7 @@ const USERS = {
     id: 700,
     organization_id: TENANT_ORG,
     store_id: TENANT_STORE,
+    app_type: 'STORE_ADMIN',
     roles: ['cashier'],
     permissions: ALL_PERMISSIONS.filter((p) => !p.name.startsWith('platform:')),
   },
@@ -66,6 +97,7 @@ const USERS = {
     id: 101,
     organization_id: PLATFORM_ORG,
     store_id: TENANT_STORE,
+    app_type: 'STORE_ADMIN',
     roles: ['super_admin'],
     permissions: [],
   },
@@ -73,6 +105,7 @@ const USERS = {
     id: 700,
     organization_id: TENANT_ORG,
     store_id: PLATFORM_STORE,
+    app_type: 'STORE_ADMIN',
     roles: ['owner'],
     permissions: ALL_PERMISSIONS,
   },
@@ -80,6 +113,7 @@ const USERS = {
     id: 100,
     organization_id: PLATFORM_ORG,
     store_id: PLATFORM_STORE,
+    app_type: 'STORE_ADMIN',
     roles: ['seller'],
     permissions: ALL_PERMISSIONS.filter((p) => !p.name.startsWith('platform:')),
   },
@@ -87,6 +121,7 @@ const USERS = {
     id: 102,
     organization_id: PLATFORM_ORG,
     store_id: PLATFORM_STORE,
+    app_type: 'STORE_ADMIN',
     roles: ['seller'],
     permissions: ALL_PERMISSIONS.filter((p) => p.name === 'platform:crm_link:read'),
   },
@@ -94,6 +129,7 @@ const USERS = {
     id: 100,
     organization_id: PLATFORM_ORG,
     store_id: PLATFORM_STORE,
+    app_type: 'STORE_ADMIN',
     roles: ['seller'],
     permissions: ALL_PERMISSIONS,
   },
@@ -101,6 +137,7 @@ const USERS = {
     id: 100,
     organization_id: PLATFORM_ORG,
     store_id: PLATFORM_STORE_INACTIVE,
+    app_type: 'STORE_ADMIN',
     roles: ['seller'],
     permissions: ALL_PERMISSIONS,
   },
@@ -108,7 +145,17 @@ const USERS = {
     id: 100,
     organization_id: PLATFORM_ORG,
     store_id: null,
+    app_type: 'STORE_ADMIN',
     roles: ['seller'],
+    permissions: ALL_PERMISSIONS,
+  },
+  /** Solo para comprobar que `DomainScopeGuard` está montado. */
+  tenantOrgAdminToken: {
+    id: 700,
+    organization_id: TENANT_ORG,
+    store_id: TENANT_STORE,
+    app_type: 'ORG_ADMIN',
+    roles: ['owner'],
     permissions: ALL_PERMISSIONS,
   },
 } satisfies Record<string, TestUser>;
@@ -120,8 +167,27 @@ const ROUTES = [
   { method: 'delete', url: '/api/store/platform-crm/customers/5/link', body: {} },
 ] as const;
 
+/** Sondas que prueban que el gate y el plan de verdad bloquean en este test. */
+@Controller('store/gate-probe')
+class GateProbeController {
+  @Post()
+  write() {
+    return { ok: true };
+  }
+}
+
+@Controller('store/accounting/plan-probe')
+class PlanProbeController {
+  @Get()
+  read() {
+    return { ok: true };
+  }
+}
+
 describe('PlatformCrmLinksController · aislamiento por tienda (candados 1, 4 y 5)', () => {
   let app: INestApplication;
+  /** La misma app sin `PlatformCrmLinksController`: la vara de «ruta inexistente». */
+  let bareApp: INestApplication;
   const ORIGINAL_ENV = process.env.VENDIX_PLATFORM_ORG_ID;
   /** Org que la «base» marca is_platform (lo que lee PlatformOrgService). */
   let platformOrgInDb: number | null;
@@ -176,10 +242,43 @@ describe('PlatformCrmLinksController · aislamiento por tienda (candados 1, 4 y 
   const serviceCalls = () =>
     Object.values(service).reduce((sum, fn) => sum + fn.mock.calls.length, 0);
 
-  beforeAll(async () => {
+  // Guards globales: la tienda ajena tiene la suscripción bloqueada y un plan
+  // que no incluye nada, con ambos gates en `enforce`.
+  const subscriptionAccess = {
+    canUseModule: jest.fn(async (storeId: number) =>
+      storeId === TENANT_STORE
+        ? {
+            allowed: false,
+            mode: 'block',
+            reason: 'SUBSCRIPTION_004',
+            subscription_state: 'blocked',
+            plan_id: null,
+            has_record: true,
+          }
+        : { allowed: true, mode: 'allow', subscription_state: 'active', has_record: true },
+    ),
+  };
+  const planAccess = {
+    blockedForStore: jest.fn(async (storeId: number) => ({
+      current: null,
+      blocked: storeId === TENANT_STORE ? Object.keys(PLAN_MODULE_API_ROUTES) : [],
+    })),
+    denial: jest.fn(async () => ({})),
+  };
+
+  async function createApp(controllers: Type<unknown>[]): Promise<INestApplication> {
     const moduleRef = await Test.createTestingModule({
-      controllers: [PlatformCrmLinksController],
+      controllers: [...controllers, GateProbeController, PlanProbeController],
       providers: [
+        // Mismo orden que app.module.ts (JwtAuthGuard → middleware de abajo).
+        { provide: APP_GUARD, useClass: DomainScopeGuard },
+        { provide: APP_GUARD, useClass: StoreOperationsGuard },
+        { provide: APP_GUARD, useClass: PlanAccessGuard },
+        { provide: SubscriptionAccessService, useValue: subscriptionAccess },
+        { provide: SubscriptionGateConfig, useValue: { isEnforce: () => true } },
+        { provide: PlanAccessService, useValue: planAccess },
+        { provide: AccessGateModeService, useValue: { planModeForStore: async () => 'enforce' } },
+        { provide: AccessAuditLogger, useValue: { record: jest.fn() } },
         PlatformStoreGuard,
         PlatformOrgService,
         { provide: GlobalPrismaService, useValue: { withoutScope: () => db } },
@@ -191,15 +290,16 @@ describe('PlatformCrmLinksController · aislamiento por tienda (candados 1, 4 y 
       ],
     }).compile();
 
-    app = moduleRef.createNestApplication();
-    app.setGlobalPrefix('api');
+    const nestApp = moduleRef.createNestApplication();
+    nestApp.setGlobalPrefix('api');
+    nestApp.useGlobalFilters(new AllExceptionsFilter());
     // Lo que deja JwtStrategy en req.user (el token ya validado).
-    app.use((req: any, _res: unknown, next: () => void) => {
+    nestApp.use((req: any, _res: unknown, next: () => void) => {
       const raw = req.headers['x-test-user'];
       if (typeof raw === 'string') req.user = JSON.parse(raw);
       next();
     });
-    app.useGlobalPipes(
+    nestApp.useGlobalPipes(
       new ValidationPipe({
         whitelist: true,
         forbidNonWhitelisted: true,
@@ -207,11 +307,18 @@ describe('PlatformCrmLinksController · aislamiento por tienda (candados 1, 4 y 
         transformOptions: { enableImplicitConversion: true },
       }),
     );
-    await app.init();
+    await nestApp.init();
+    return nestApp;
+  }
+
+  beforeAll(async () => {
+    app = await createApp([PlatformCrmLinksController]);
+    bareApp = await createApp([]);
   });
 
   afterAll(async () => {
     await app.close();
+    await bareApp.close();
     if (ORIGINAL_ENV === undefined) delete process.env.VENDIX_PLATFORM_ORG_ID;
     else process.env.VENDIX_PLATFORM_ORG_ID = ORIGINAL_ENV;
   });
@@ -223,33 +330,67 @@ describe('PlatformCrmLinksController · aislamiento por tienda (candados 1, 4 y 
     dbFails = false;
   });
 
-  function call(route: (typeof ROUTES)[number], user: TestUser) {
-    const req = request(app.getHttpServer())
+  function call(
+    route: (typeof ROUTES)[number],
+    user: TestUser,
+    target: INestApplication = app,
+  ) {
+    const req = request(target.getHttpServer())
       [route.method](route.url)
       .set('x-test-user', JSON.stringify(user));
     return 'body' in route ? req.send(route.body) : req;
   }
 
+  /** Todo lo que ve el cliente salvo la hora: status, content-type y cuerpo. */
+  function observable(res: request.Response) {
+    const { timestamp, ...body } = res.body ?? {};
+    expect(typeof timestamp).toBe('string');
+    return { status: res.status, contentType: res.headers['content-type'], body };
+  }
+
+  /**
+   * Cada ruta responde lo MISMO que la app gemela sin el módulo, es decir, el
+   * 404 de una ruta inexistente: `Cannot <METHOD> <url>` con el cuerpo que arma
+   * `AllExceptionsFilter`. Y el servicio nunca se alcanza.
+   */
   async function expectAll404(user: TestUser) {
     for (const route of ROUTES) {
-      const res = await call(route, user);
-      expect({ route: `${route.method} ${route.url}`, status: res.status }).toEqual({
-        route: `${route.method} ${route.url}`,
-        status: 404,
-      });
-      // Indistinguible de una ruta inexistente: nada menciona la función.
-      expect(JSON.stringify(res.body)).not.toMatch(/platform|crm|permis/i);
+      const label = `${route.method} ${route.url}`;
+      const real = await call(route, user);
+      const missing = await call(route, user, bareApp);
+      expect(missing.status).toBe(404);
+      expect(missing.body.message).toBe(`Cannot ${route.method.toUpperCase()} ${route.url}`);
+      expect({ label, ...observable(real) }).toEqual({ label, ...observable(missing) });
     }
     expect(serviceCalls()).toBe(0);
   }
 
-  it('a ruta inexistente y una ruta real responden el mismo 404 a una tienda ajena', async () => {
-    const missing = await request(app.getHttpServer())
-      .get('/api/store/platform-crm/does-not-exist')
-      .set('x-test-user', JSON.stringify(USERS.tenantOwner));
-    const real = await call(ROUTES[1], USERS.tenantOwner);
-    expect(real.status).toBe(missing.status);
-    expect(real.body.statusCode).toBe(missing.body.statusCode);
+  it('los guards globales del test de verdad bloquean (si no, los 404 de abajo no prueban nada)', async () => {
+    const probe = (method: 'get' | 'post', url: string, user: TestUser) =>
+      request(app.getHttpServer())[method](url).set('x-test-user', JSON.stringify(user));
+
+    // DomainScopeGuard: un token que no es de tienda no entra a /store.
+    const scope = await probe('post', '/api/store/gate-probe', USERS.tenantOrgAdminToken);
+    expect(scope.status).toBe(403);
+    // Gate de suscripción: la tienda ajena está bloqueada para escribir.
+    const gate = await probe('post', '/api/store/gate-probe', USERS.tenantOwner);
+    expect({ status: gate.status, code: gate.body.error_code }).toEqual({
+      status: 403,
+      code: 'SUBSCRIPTION_004',
+    });
+    // Plan: su plan no incluye ningún módulo mapeado.
+    const plan = await probe('get', '/api/store/accounting/plan-probe', USERS.tenantOwner);
+    expect({ status: plan.status, code: plan.body.error_code }).toEqual({
+      status: 403,
+      code: 'PLAN_MODULE_NOT_INCLUDED',
+    });
+  });
+
+  it('tienda ajena con la suscripción bloqueada y un plan sin módulos → el 404 de una ruta inexistente, nunca el error del gate', async () => {
+    // Fija `@SkipSubscriptionGate()` y que ningún guard global responda antes
+    // que `PlatformStoreGuard`: sin el decorador, POST y DELETE darían el 403
+    // SUBSCRIPTION_004 de la sonda de arriba.
+    await expectAll404(USERS.tenantOwner);
   });
 
   it('dueño de una tienda normal con todos los permisos → 404 en las cuatro rutas', async () => {
@@ -324,8 +465,17 @@ describe('PlatformCrmLinksController · aislamiento por tienda (candados 1, 4 y 
     await expectAll404(USERS.platformSeller);
   });
 
-  it('un fallo leyendo la base no abre la ruta → 404', async () => {
-    dbFails = true;
-    await expectAll404(USERS.platformSeller);
+  it('un fallo leyendo la base no abre la ruta → 404, y el log guarda el stack', async () => {
+    const logError = jest.spyOn(Logger.prototype, 'error').mockImplementation(() => undefined);
+    try {
+      dbFails = true;
+      await expectAll404(USERS.platformSeller);
+      expect(logError).toHaveBeenCalledWith(
+        expect.stringContaining('connection reset'),
+        expect.stringMatching(/^Error: connection reset\n\s+at /),
+      );
+    } finally {
+      logError.mockRestore();
+    }
   });
 });
