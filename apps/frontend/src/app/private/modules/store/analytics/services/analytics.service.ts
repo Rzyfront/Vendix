@@ -3,6 +3,7 @@ import { HttpClient, HttpParams } from '@angular/common/http';
 import { Observable } from 'rxjs';
 import { shareReplay, tap } from 'rxjs/operators';
 import { environment } from '../../../../../../environments/environment';
+import { registerStoreSwitchReset } from '../../../../../core/utils/store-scoped-cache';
 import { AuthFacade } from '../../../../../core/store/auth/auth.facade';
 import {
   ApiResponse,
@@ -448,6 +449,11 @@ const analyticsCache = new Map<string, CacheEntry<Observable<any>>>();
 
 /** Store scope the cache currently holds; a change wipes it (see `withCache`). */
 let lastCachedScope: string | null = null;
+// QUI-1021: a store switch empties it, so a return to a store fetches again.
+registerStoreSwitchReset(() => {
+  analyticsCache.clear();
+  lastCachedScope = null;
+});
 
 /**
  * Flag de invalidación cross-service: cuando un servicio externo (ej. Products

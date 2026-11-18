@@ -5,6 +5,7 @@ import { HttpTestingController } from '@angular/common/http/testing';
 import { environment } from '../../../../../../environments/environment';
 import { of } from 'rxjs';
 import { QuotationsService } from './quotations.service';
+import { AuthFacade } from '../../../../../core/store/auth/auth.facade';
 import { Quotation } from '../interfaces/quotation.interface';
 
 describe('QuotationsService — complete-conversion destination gate', () => {
@@ -17,7 +18,10 @@ describe('QuotationsService — complete-conversion destination gate', () => {
   });
 
   beforeEach(() => {
-    TestBed.configureTestingModule({ providers: [provideHttpClient(), provideHttpClientTesting()] });
+    TestBed.configureTestingModule({ providers: [
+      provideHttpClient(), provideHttpClientTesting(),
+      { provide: AuthFacade, useValue: { userStore: () => ({ id: 1 }) } },
+    ] });
     service = TestBed.inject(QuotationsService);
     http = TestBed.inject(HttpTestingController);
     spyOn(service, 'convertToOrder').and.returnValue(of(quote('sale', 'converted')));

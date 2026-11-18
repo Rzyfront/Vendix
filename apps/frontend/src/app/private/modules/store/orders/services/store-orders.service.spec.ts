@@ -7,6 +7,7 @@ import { provideHttpClient } from '@angular/common/http';
 
 import { StoreOrdersService } from './store-orders.service';
 import { StoreContextService } from '../../../../../core/services/store-context.service';
+import { AuthFacade } from '../../../../../core/store/auth/auth.facade';
 import { environment } from '../../../../../../environments/environment';
 
 /**
@@ -36,6 +37,7 @@ describe('StoreOrdersService — typed error contract', () => {
           provide: StoreContextService,
           useValue: { getStoreId: () => 1, storeId: () => 1 },
         },
+        { provide: AuthFacade, useValue: { userStore: () => ({ id: 1 }) } },
       ],
     });
 
@@ -206,6 +208,7 @@ describe('StoreOrdersService — success:false nunca es éxito (QUI-650)', () =>
         provideHttpClient(),
         provideHttpClientTesting(),
         { provide: StoreContextService, useValue: { getStoreId: () => 1, storeId: () => 1 } },
+        { provide: AuthFacade, useValue: { userStore: () => ({ id: 1 }) } },
       ],
     });
     service = TestBed.inject(StoreOrdersService);

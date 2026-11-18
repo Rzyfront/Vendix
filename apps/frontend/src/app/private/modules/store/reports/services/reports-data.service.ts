@@ -2,6 +2,11 @@ import { Injectable, inject } from '@angular/core';
 import { HttpClient, HttpParams } from '@angular/common/http';
 import { Observable, map, shareReplay } from 'rxjs';
 import { environment } from '../../../../../../environments/environment';
+import { AuthFacade } from '../../../../../core/store/auth/auth.facade';
+import {
+  activeStoreId,
+  registerStoreSwitchReset,
+} from '../../../../../core/utils/store-scoped-cache';
 import { DateRangeFilter as DateRange } from '../../analytics/interfaces/analytics.interface';
 import { ReportDataAdapterService } from './report-data-adapter.service';
 import { ReportDefinition, ReportAdaptedData } from '../interfaces/report.interface';
@@ -14,12 +19,31 @@ interface CacheEntry<T> {
 const reportsCache = new Map<string, CacheEntry<Observable<any>>>();
 const lastRangePerReport = new Map<string, string>();
 
+/**
+ * Store whose report data the cache holds (QUI-1021). The backend resolves the
+ * store from the session, so the cache key does not say whose rows an entry
+ * holds; a read under another store empties the cache first, and so does every
+ * store switch.
+ */
+let reportsCacheStoreId: number | null = null;
+
+function clearReportsCache(): void {
+  reportsCache.clear();
+  lastRangePerReport.clear();
+}
+
+registerStoreSwitchReset(() => {
+  clearReportsCache();
+  reportsCacheStoreId = null;
+});
+
 @Injectable({
   providedIn: 'root',
 })
 export class ReportsDataService {
   private http = inject(HttpClient);
   private adapter = inject(ReportDataAdapterService);
+  private authFacade = inject(AuthFacade);
   /**
    * Global cache TTL for report datasets (30 seconds).
    *
@@ -84,6 +108,12 @@ export class ReportsDataService {
       extraParams?: Record<string, string>;
     },
   ): Observable<ReportAdaptedData> {
+    const storeId = activeStoreId(this.authFacade);
+    if (storeId !== reportsCacheStoreId) {
+      clearReportsCache();
+      reportsCacheStoreId = storeId;
+    }
+
     const url = `${environment.apiUrl}/${dataEndpoint}`;
     let params = new HttpParams();
 
@@ -147,8 +177,7 @@ export class ReportsDataService {
       }
       lastRangePerReport.delete(reportId);
     } else {
-      reportsCache.clear();
-      lastRangePerReport.clear();
+      clearReportsCache();
     }
   }
 

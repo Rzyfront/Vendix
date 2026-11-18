@@ -9,6 +9,7 @@ import { AuthFacade } from '../store/auth/auth.facade';
 import { AuthService } from './auth.service';
 import { AppConfigService } from './app-config.service';
 import { RouteManagerService } from './route-manager.service';
+import { registerStoreSwitchReset } from '../utils/store-scoped-cache';
 
 /**
  * QUI-981: el cambio de entorno no debe volver a montar el <router-outlet>
@@ -109,6 +110,31 @@ describe('EnvironmentSwitchService (QUI-981)', () => {
     ]);
   });
 
+  // QUI-1021: module-level caches of the previous store are emptied once the
+  // new session is in place, before the new environment's pages mount.
+  it('empties the store-scoped caches right after installing the new session', async () => {
+    const unregister = registerStoreSwitchReset(() => log.push('resetStoreCaches'));
+    switchResponds(okResponse);
+
+    try {
+      await expectAsync(
+        service.performEnvironmentSwitch('STORE_ADMIN', 'tienda-demo'),
+      ).toBeResolvedTo(true);
+    } finally {
+      unregister();
+    }
+
+    expect(log).toEqual([
+      'suspendOutlet',
+      'restoreAuthState',
+      'resetStoreCaches',
+      'config:STORE_ADMIN',
+      'replaceRoutes',
+      'navigate:/admin/dashboard',
+      'resumeOutlet',
+    ]);
+  });
+
   it('remounts the outlet when the switch fails after it was suspended', async () => {
     switchResponds(okResponse);
     restoreAuthState.and.throwError('boom');
@@ -129,5 +155,21 @@ describe('EnvironmentSwitchService (QUI-981)', () => {
 
     expect(log).toEqual([]);
     expect(restoreAuthState).not.toHaveBeenCalled();
+  });
+
+  it('keeps the store-scoped caches when the backend rejects the switch', async () => {
+    const reset = jasmine.createSpy('reset');
+    const unregister = registerStoreSwitchReset(reset);
+    switchResponds({ success: false, message: 'Forbidden' });
+
+    try {
+      await expectAsync(
+        service.performEnvironmentSwitch('STORE_ADMIN', 'tienda-demo'),
+      ).toBeRejected();
+    } finally {
+      unregister();
+    }
+
+    expect(reset).not.toHaveBeenCalled();
   });
 });
