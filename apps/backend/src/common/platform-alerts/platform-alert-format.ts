@@ -202,12 +202,17 @@ export function contextLines(
   const context = readStoredContext(alert.details);
   const lines: AlertContextLine[] = [];
   if (alert.store_id) {
-    lines.push({ label: 'Tienda', value: storeLabel(alert.store_id, names.stores?.get(alert.store_id)) });
+    lines.push({
+      label: 'Tienda',
+      value: storeLabel(alert.store_id, names.stores?.get(alert.store_id)),
+      href: `/super-admin/stores/${alert.store_id}`,
+    });
   }
   if (alert.organization_id) {
     lines.push({
       label: 'Organización',
       value: organizationLabel(alert.organization_id, names.organizations?.get(alert.organization_id)),
+      href: `/super-admin/organizations/${alert.organization_id}`,
     });
   }
   if (!alert.store_id && !alert.organization_id) {

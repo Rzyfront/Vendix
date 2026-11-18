@@ -97,23 +97,20 @@ export class AIQueueService {
     }
   }
 
-  async enqueueRecipeMining(
-    params: RecipeMiningJob,
-    source: JobOriginSource = 'system:ia-recetas',
-  ): Promise<void> {
+  // Sin withJobOrigin (QUI-1031): la cola de recetas es «identity only» por el
+  // contrato del sandbox (recipe-miner.processor.spec). La alerta toma el usuario
+  // de `user_id` (readJobOrigin) y módulo/acción del catálogo de la cola.
+  async enqueueRecipeMining(params: RecipeMiningJob): Promise<void> {
     if (!this.recipeQueue) return;
     // Identity only. No goal, args, trace text, results or bearer in Redis.
     await this.recipeQueue.add(
       'mine-recipe',
-      withJobOrigin(
-        {
-          objective_id: params.objective_id,
-          store_id: params.store_id,
-          organization_id: params.organization_id,
-          user_id: params.user_id,
-        },
-        source,
-      ),
+      {
+        objective_id: params.objective_id,
+        store_id: params.store_id,
+        organization_id: params.organization_id,
+        user_id: params.user_id,
+      },
       {
         jobId: `recipe-mine-${catalogHash([params.objective_id, params.store_id, params.organization_id, params.user_id])}`,
         attempts: 2,
@@ -129,9 +126,9 @@ export class AIQueueService {
     store_id?: number;
     organization_id?: number;
     user_id?: number;
-  }, source: JobOriginSource = 'system:ia-recetas'): Promise<void> {
+  }): Promise<void> {
     if (!this.recipeQueue) return;
-    await this.recipeQueue.add('index-recipe', withJobOrigin(params, source), {
+    await this.recipeQueue.add('index-recipe', params, {
       jobId: `recipe-index-${catalogHash(params)}`,
       attempts: 2,
       backoff: { type: 'exponential', delay: 3000 },

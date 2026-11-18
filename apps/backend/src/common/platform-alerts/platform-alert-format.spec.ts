@@ -57,8 +57,8 @@ const NAMES: AlertNames = {
 describe('formato de alertas (QUI-1031)', () => {
   it('con nombres: tienda, organización, usuario, módulo, acción, registro y origen; el id al final', () => {
     expect(contextLines(row(), NAMES)).toEqual([
-      { label: 'Tienda', value: 'Vendix Granizzo (testbalmes, id 105)' },
-      { label: 'Organización', value: 'Demo Vendix (id 82)' },
+      { label: 'Tienda', value: 'Vendix Granizzo (testbalmes, id 105)', href: '/super-admin/stores/105' },
+      { label: 'Organización', value: 'Demo Vendix (id 82)', href: '/super-admin/organizations/82' },
       { label: 'Usuario', value: 'Ana Pérez · ana.perez@vendix.test (id 7)' },
       { label: 'Módulo', value: 'Productos' },
       { label: 'Acción', value: 'indexar el producto para la búsqueda con IA' },
@@ -69,8 +69,8 @@ describe('formato de alertas (QUI-1031)', () => {
 
   it('sin nombres (búsqueda caída o registro borrado): las mismas líneas con ids', () => {
     expect(contextLines(row())).toEqual([
-      { label: 'Tienda', value: 'id 105' },
-      { label: 'Organización', value: 'id 82' },
+      { label: 'Tienda', value: 'id 105', href: '/super-admin/stores/105' },
+      { label: 'Organización', value: 'id 82', href: '/super-admin/organizations/82' },
       { label: 'Usuario', value: 'id 7' },
       { label: 'Módulo', value: 'Productos' },
       { label: 'Acción', value: 'indexar el producto para la búsqueda con IA' },

@@ -150,8 +150,8 @@ describe('PlatformAlertsAdminService (S5: vista en Superadmin)', () => {
     });
     expect(view.details).not.toHaveProperty('_context');
     expect(view.context.slice(0, 4)).toEqual([
-      { label: 'Tienda', value: 'Vendix Granizzo (testbalmes, id 9)' },
-      { label: 'Organización', value: 'Demo Vendix (id 3)' },
+      { label: 'Tienda', value: 'Vendix Granizzo (testbalmes, id 9)', href: '/super-admin/stores/9' },
+      { label: 'Organización', value: 'Demo Vendix (id 3)', href: '/super-admin/organizations/3' },
       { label: 'Usuario', value: 'Ana Pérez · ana.perez@vendix.test (id 7)' },
       { label: 'Módulo', value: 'Productos' },
     ]);
@@ -161,6 +161,6 @@ describe('PlatformAlertsAdminService (S5: vista en Superadmin)', () => {
     resolveMany.mockRejectedValue(new Error('db lenta'));
     const result = await build().list({});
     expect(result.data[0]).toMatchObject({ scope_label: 'id 9', category: null, kind_label: 'Petición fallida' });
-    expect(result.data[0].context[0]).toEqual({ label: 'Tienda', value: 'id 9' });
+    expect(result.data[0].context[0]).toEqual({ label: 'Tienda', value: 'id 9', href: '/super-admin/stores/9' });
   });
 });

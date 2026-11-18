@@ -322,13 +322,10 @@ export class ProceduralMemoryService {
     if (objective.semantic_status !== 'completed_verified') return;
     for (const pin of await this.recipes.loadedPins(objectiveId))
       await this.recipes.event(pin.id, pin.hash, objectiveId, 'success');
-    await this.queue?.enqueueRecipeMining(
-      {
-        objective_id: objectiveId,
-        ...requireObjectiveScope(),
-      },
-      'system:ia-recetas-minado',
-    );
+    await this.queue?.enqueueRecipeMining({
+      objective_id: objectiveId,
+      ...requireObjectiveScope(),
+    });
   }
   /** Operator service methods: NEVER registered as tools or exposed through bridge endpoints. */
   async applyReview(id: number, review: RecipeReview): Promise<void> {
@@ -390,14 +387,11 @@ export class ProceduralMemoryService {
         review,
       );
     if (approve)
-      await this.queue?.enqueueRecipeIndex(
-        {
-          id,
-          hash: recipe.content_hash,
-          ...(global ? {} : requireObjectiveScope()),
-        },
-        'system:ia-recetas-indexar',
-      );
+      await this.queue?.enqueueRecipeIndex({
+        id,
+        hash: recipe.content_hash,
+        ...(global ? {} : requireObjectiveScope()),
+      });
   }
   async prepareGlobal(id: number): Promise<number> {
     const source = await this.recipes.systemGet(id);

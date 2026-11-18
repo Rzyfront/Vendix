@@ -80,8 +80,8 @@ describe('PlatformAlertContextService (QUI-1031)', () => {
   it('nombra tienda (nombre + slug), organización, usuario (nombre + correo) y registro, con el id al final, y enlaza a Superadmin', async () => {
     const resolved = await build().resolve(alert());
     expect(resolved.lines).toEqual([
-      { label: 'Tienda', value: 'Vendix Granizzo (testbalmes, id 105)' },
-      { label: 'Organización', value: 'Demo Vendix (id 82)' },
+      { label: 'Tienda', value: 'Vendix Granizzo (testbalmes, id 105)', href: '/super-admin/stores/105' },
+      { label: 'Organización', value: 'Demo Vendix (id 82)', href: '/super-admin/organizations/82' },
       { label: 'Usuario', value: 'Ana Pérez · ana.perez@vendix.test (id 7)' },
       { label: 'Módulo', value: 'Productos' },
       { label: 'Acción', value: 'indexar el producto para la búsqueda con IA' },
@@ -109,7 +109,7 @@ describe('PlatformAlertContextService (QUI-1031)', () => {
     prisma.products.findFirst.mockRejectedValueOnce(new Error('db caída'));
     const service = build();
     const resolved = await service.resolve(alert());
-    expect(resolved.lines[0]).toEqual({ label: 'Tienda', value: 'id 105' });
+    expect(resolved.lines[0]).toEqual({ label: 'Tienda', value: 'id 105', href: '/super-admin/stores/105' });
     expect(resolved.lines.find((l) => l.label === 'Registro')?.value).toBe('producto (id 123)');
     expect(resolved.lines.find((l) => l.label === 'Organización')?.value).toBe('Demo Vendix (id 82)');
 
@@ -124,7 +124,7 @@ describe('PlatformAlertContextService (QUI-1031)', () => {
       const pending = build().resolve(alert());
       await jest.advanceTimersByTimeAsync(1_600);
       const resolved = await pending;
-      expect(resolved.lines[0]).toEqual({ label: 'Tienda', value: 'id 105' });
+      expect(resolved.lines[0]).toEqual({ label: 'Tienda', value: 'id 105', href: '/super-admin/stores/105' });
     } finally {
       jest.useRealTimers();
     }
