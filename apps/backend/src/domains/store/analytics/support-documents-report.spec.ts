@@ -44,10 +44,11 @@ interface FakeInvoice {
   accepted_at: Date | null;
   supplier: { name: string; tax_id: string | null } | null;
   related_invoice: { invoice_number: string | null } | null;
+  purchase_order: { id: number; order_number: string } | null;
 }
 
 type Where = Record<string, any>;
-const KNOWN_WHERE_KEYS = ['store_id', 'invoice_type', 'status', 'supplier_id', 'issue_date'];
+const KNOWN_WHERE_KEYS = ['store_id', 'invoice_type', 'status', 'dian_status', 'supplier_id', 'issue_date'];
 
 function matches(doc: FakeInvoice, where: Where): boolean {
   for (const key of Object.keys(where)) {
@@ -56,6 +57,7 @@ function matches(doc: FakeInvoice, where: Where): boolean {
   if (where.store_id !== undefined && doc.store_id !== where.store_id) return false;
   if (where.invoice_type?.in && !where.invoice_type.in.includes(doc.invoice_type)) return false;
   if (where.status?.in && !where.status.in.includes(doc.status)) return false;
+  if (where.dian_status?.in && !where.dian_status.in.includes(doc.dian_status)) return false;
   if (where.supplier_id !== undefined && doc.supplier_id !== where.supplier_id) return false;
   if (where.issue_date?.gte && doc.issue_date < where.issue_date.gte) return false;
   if (where.issue_date?.lte && doc.issue_date > where.issue_date.lte) return false;
@@ -98,6 +100,7 @@ function doc(partial: Partial<FakeInvoice> & Pick<FakeInvoice, 'id'>): FakeInvoi
     accepted_at: null,
     supplier: { name: 'Proveedor Uno (ficha)', tax_id: '900123456' },
     related_invoice: null,
+    purchase_order: null,
     ...partial,
   };
 }
@@ -111,7 +114,7 @@ const money = (subtotal: string, tax: string, wh: string, total: string) => ({
 
 /** Noviembre 2026, tienda 1, más ruido que el reporte NO debe contar. */
 const DATASET: FakeInvoice[] = [
-  doc({ id: 1, issue_date: day('2026-11-01'), accepted_at: new Date('2026-11-02T03:00:00.000Z'), ...money('1000.50', '190.10', '25.00', '1190.60') }),
+  doc({ id: 1, issue_date: day('2026-11-01'), accepted_at: new Date('2026-11-02T03:00:00.000Z'), purchase_order: { id: 77, order_number: 'OC-0077' }, ...money('1000.50', '190.10', '25.00', '1190.60') }),
   doc({ id: 2, issue_date: day('2026-11-15'), status: 'sent', dian_status: 'pending', ...money('500.25', '95.05', '0', '595.30') }),
   doc({ id: 3, issue_date: day('2026-11-16'), status: 'voided', dian_status: 'rejected', ...money('9000', '1710', '0', '10710') }),
   doc({ id: 4, issue_date: day('2026-11-17'), status: 'cancelled', dian_status: 'not_applicable', cufe: null, ...money('300', '57', '0', '357') }),
@@ -130,11 +133,19 @@ const DATASET: FakeInvoice[] = [
   doc({ id: 10, store_id: 2, customer_name: 'Proveedor Ajeno', ...money('99999', '0', '0', '99999') }),
 ];
 
+/** Fichas de proveedor (org de la tienda 1); el reporte toma nombre y NIT de aquí. */
+const SUPPLIERS = [
+  { id: 10, name: 'Proveedor Uno (ficha)', tax_id: '900123456' },
+  { id: 11, name: 'Proveedor Dos (ficha)', tax_id: '800555111' },
+];
+
 const NOVEMBER: SupportDocumentsReportQueryDto = { date_from: '2026-11-01', date_to: '2026-11-30' };
 
 describe('Support documents report (QUI-684)', () => {
   let tz: string;
+  let data: FakeInvoice[];
   let invoices: Record<'findMany' | 'count' | 'groupBy', jest.Mock>;
+  let suppliers: { findMany: jest.Mock };
   let service: SupportDocumentsReportService;
   let controller: SupportDocumentsReportController;
   let headers: Record<string, string>;
@@ -148,25 +159,26 @@ describe('Support documents report (QUI-684)', () => {
     jest.setSystemTime(new Date('2026-12-01T03:00:00.000Z'));
     jest.spyOn(RequestContextService, 'getContext').mockReturnValue({ store_id: 1, organization_id: 1, is_super_admin: false, is_owner: false });
     tz = 'America/Bogota';
+    data = [...DATASET];
 
     invoices = {
       findMany: jest.fn(async (args: any) => {
-        const rows = sortDocs(DATASET.filter((d) => matches(d, args.where)), args.orderBy);
+        const rows = sortDocs(data.filter((d) => matches(d, args.where)), args.orderBy);
         const skip = args.skip ?? 0;
         return rows.slice(skip, args.take !== undefined ? skip + args.take : undefined);
       }),
-      count: jest.fn(async (args: any) => DATASET.filter((d) => matches(d, args.where)).length),
+      count: jest.fn(async (args: any) => data.filter((d) => matches(d, args.where)).length),
       groupBy: jest.fn(async (args: any) => {
         const groups = new Map<string, FakeInvoice[]>();
-        for (const d of DATASET.filter((x) => matches(x, args.where))) {
-          const key = `${d.invoice_type}|${d.status}`;
+        const by: Array<keyof FakeInvoice> = args.by;
+        for (const d of data.filter((x) => matches(x, args.where))) {
+          const key = by.map((field) => String(d[field])).join('|');
           groups.set(key, [...(groups.get(key) ?? []), d]);
         }
         const sum = (list: FakeInvoice[], field: keyof FakeInvoice) =>
           list.reduce((acc, d) => acc.plus(d[field] as Prisma.Decimal), dec('0'));
         return [...groups.values()].map((list) => ({
-          invoice_type: list[0].invoice_type,
-          status: list[0].status,
+          ...Object.fromEntries(by.map((field) => [field, list[0][field]])),
           _count: { _all: list.length },
           _sum: {
             subtotal_amount: sum(list, 'subtotal_amount'),
@@ -177,8 +189,14 @@ describe('Support documents report (QUI-684)', () => {
         }));
       }),
     };
+    suppliers = {
+      findMany: jest.fn(async (args: any) =>
+        SUPPLIERS.filter((s) => args.where.id.in.includes(s.id)),
+      ),
+    };
     const prisma = {
       invoices,
+      suppliers,
       store_settings: { findFirst: jest.fn(async () => ({ stores: { timezone: tz }, settings: {} })) },
     } as unknown as StorePrismaService;
 
@@ -236,6 +254,83 @@ describe('Support documents report (QUI-684)', () => {
       const supplier = await service.getList({ ...NOVEMBER, supplier_id: 11 });
       expect(supplier.data.map((r) => r.id)).toEqual([6]);
       expect(supplier.data[0].supplier_name).toBe('Proveedor Dos');
+    });
+  });
+
+  describe('por proveedor y estado DIAN (H4)', () => {
+    it('agrupa por proveedor con NIT, cantidad y total neto; la suma de grupos es el neto', async () => {
+      const summary = await service.getSummary(NOVEMBER);
+
+      expect(summary.by_supplier).toEqual([
+        {
+          supplier_id: 10, supplier_name: 'Proveedor Uno (ficha)', supplier_tax_id: '900123456',
+          document_count: 3, excluded_count: 2,
+          subtotal_amount: 1300.45, tax_amount: 247.09, withholding_amount: 20, total_amount: 1547.54,
+        },
+        {
+          supplier_id: 11, supplier_name: 'Proveedor Dos (ficha)', supplier_tax_id: '800555111',
+          document_count: 1, excluded_count: 0,
+          subtotal_amount: 100, tax_amount: 19, withholding_amount: 0, total_amount: 119,
+        },
+      ]);
+      const sum = (key: 'subtotal_amount' | 'tax_amount' | 'withholding_amount' | 'total_amount') =>
+        Math.round(summary.by_supplier.reduce((acc, g) => acc + g[key], 0) * 100) / 100;
+      expect(sum('subtotal_amount')).toBe(summary.net.subtotal_amount);
+      expect(sum('tax_amount')).toBe(summary.net.tax_amount);
+      expect(sum('withholding_amount')).toBe(summary.net.withholding_amount);
+      expect(sum('total_amount')).toBe(summary.net.total_amount);
+      expect(summary.by_supplier.reduce((acc, g) => acc + g.document_count, 0)).toBe(summary.document_count);
+      // Un único groupBy (proveedor × tipo × estado) alimenta totales y grupos.
+      expect(invoices.groupBy).toHaveBeenCalledTimes(1);
+      expect(invoices.groupBy.mock.calls[0][0].by).toEqual(['supplier_id', 'invoice_type', 'status']);
+      expect(suppliers.findMany.mock.calls[0][0].where).toEqual({ id: { in: [10, 11] } });
+    });
+
+    it('agrupa en «Sin proveedor» los documentos sin proveedor enlazado', async () => {
+      data.push(doc({ id: 20, supplier_id: null, supplier: null, customer_name: 'Snapshot', ...money('10', '0', '0', '10') }));
+      const summary = await service.getSummary(NOVEMBER);
+      const loose = summary.by_supplier.find((g) => g.supplier_id === null);
+
+      expect(loose).toEqual(expect.objectContaining({ supplier_name: 'Sin proveedor', supplier_tax_id: null, document_count: 1, total_amount: 10 }));
+      expect(suppliers.findMany.mock.calls[0][0].where.id.in).not.toContain(null);
+    });
+
+    it('filtra por estado DIAN en lista, totales y agrupación', async () => {
+      const query = { ...NOVEMBER, dian_status: ['pending' as const] };
+      const list = await service.getList(query);
+      const summary = await service.getSummary(query);
+
+      expect(list.data.map((r) => r.id)).toEqual([2]);
+      expect(summary.document_count).toBe(1);
+      expect(summary.net.total_amount).toBe(595.3);
+      expect(summary.by_supplier.map((g) => g.supplier_id)).toEqual([10]);
+      expect(invoices.findMany.mock.calls[0][0].where.dian_status).toEqual({ in: ['pending'] });
+    });
+
+    it('el reporte cuadra con su listado del mismo período (sin anulados, ajustes restan)', async () => {
+      const list = await service.getList({ ...NOVEMBER, limit: 200 });
+      const summary = await service.getSummary(NOVEMBER);
+      const net = list.data
+        .filter((r) => r.counts_in_totals)
+        .reduce((acc, r) => acc + (r.invoice_type === 'support_adjustment_note' ? -r.total_amount : r.total_amount), 0);
+
+      expect(list.total).toBe(summary.document_count + summary.excluded_count);
+      expect(Math.round(net * 100) / 100).toBe(summary.net.total_amount);
+    });
+
+    it('expone la OC de origen en cada fila', async () => {
+      const list = await service.getList({ ...NOVEMBER, limit: 200 });
+      const first = list.data.find((r) => r.id === 1)!;
+      expect(first.purchase_order_id).toBe(77);
+      expect(first.purchase_order_number).toBe('OC-0077');
+      expect(list.data.find((r) => r.id === 2)!.purchase_order_number).toBeNull();
+    });
+
+    it('otra tienda solo ve la agrupación de sus proveedores', async () => {
+      jest.spyOn(RequestContextService, 'getContext').mockReturnValue({ store_id: 2, organization_id: 1, is_super_admin: false, is_owner: false });
+      const summary = await service.getSummary(NOVEMBER);
+      expect(summary.by_supplier).toHaveLength(1);
+      expect(summary.by_supplier[0]).toEqual(expect.objectContaining({ supplier_id: 10, total_amount: 99999, document_count: 1 }));
     });
   });
 
@@ -325,6 +420,7 @@ describe('Support documents report (QUI-684)', () => {
       expect(sheet.getRow(1).values).toEqual([
         undefined, 'Fecha emisión', 'Tipo', 'Número', 'Proveedor', 'NIT / Documento', 'Estado',
         'Documento original', 'CUDS', 'Subtotal', 'Impuestos', 'Retenciones', 'Total', 'Aceptado DIAN', 'En totales',
+        'OC de origen',
       ]);
       expect(sheet.getCell('A1').font.bold).toBe(true);
       // 6 documentos del rango (page/limit se ignoran) + fila de totales.
@@ -347,6 +443,10 @@ describe('Support documents report (QUI-684)', () => {
       expect(sheet.getCell('F5').value).toBe('Anulado');
       expect(sheet.getCell('N5').value).toBe('No (anulado o cancelado)');
       expect(sheet.getCell('F4').value).toBe('Cancelado');
+      // Fila 7: documento 1, generado desde la OC-0077 (QUI-684 H2).
+      expect(sheet.getCell('C7').value).toBe('DS-1');
+      expect(sheet.getCell('O7').value).toBe('OC-0077');
+      expect(sheet.getCell('O2').value).toBe('');
 
       const screen = await service.getSummary(NOVEMBER);
       expect(sheet.getCell('B8').value).toBe('TOTAL NETO (soporte − ajustes, sin anulados)');
@@ -367,6 +467,34 @@ describe('Support documents report (QUI-684)', () => {
       expect(resumen.getCell('F4').value).toBeNull();
       expect(resumen.getCell('B5').value).toBe(4);
       expect(resumen.getCell('F5').value).toBeCloseTo(1666.54, 2);
+    });
+
+    it('hoja «Por proveedor» con las mismas cifras que las tarjetas', async () => {
+      await controller.exportSupportDocuments(NOVEMBER, res);
+      const book = await workbook();
+      const screen = await service.getSummary(NOVEMBER);
+      const sheet = book.getWorksheet('Por proveedor')!;
+
+      expect(book.worksheets.map((w) => w.name)).toEqual(['Documentos soporte', 'Por proveedor', 'Resumen']);
+      expect(sheet.getRow(1).values).toEqual([
+        undefined, 'Proveedor', 'NIT / Documento', 'Documentos', 'Subtotal', 'Impuestos', 'Retenciones', 'Total',
+        'Anulados/cancelados (fuera)',
+      ]);
+      expect(sheet.getCell('A2').value).toBe('Proveedor Uno (ficha)');
+      expect(sheet.getCell('B2').value).toBe('900123456');
+      expect(sheet.getCell('C2').value).toBe(3);
+      expect(sheet.getCell('G2').value).toBeCloseTo(1547.54, 2);
+      expect(sheet.getCell('H2').value).toBe(2);
+      expect(sheet.getCell('A3').value).toBe('Proveedor Dos (ficha)');
+      expect(sheet.getCell('G3').value).toBeCloseTo(119, 2);
+      // Fila de totales = tarjetas.
+      expect(sheet.getCell('A4').value).toBe('TOTAL NETO (soporte − ajustes, sin anulados)');
+      expect(sheet.getCell('C4').value).toBe(screen.document_count);
+      expect(sheet.getCell('D4').value).toBeCloseTo(screen.net.subtotal_amount, 2);
+      expect(sheet.getCell('E4').value).toBeCloseTo(screen.net.tax_amount, 2);
+      expect(sheet.getCell('F4').value).toBeCloseTo(screen.net.withholding_amount, 2);
+      expect(sheet.getCell('G4').value).toBeCloseTo(screen.net.total_amount, 2);
+      expect(sheet.getCell('H4').value).toBe(screen.excluded_count);
     });
 
     it('fechas: emisión sin correrse y aceptación DIAN en la zona de la tienda', async () => {

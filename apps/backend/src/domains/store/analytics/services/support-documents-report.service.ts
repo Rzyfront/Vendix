@@ -43,6 +43,9 @@ export interface SupportDocumentReportRow {
   cuds: string | null;
   /** Número del documento soporte que corrige una nota de ajuste. */
   related_invoice_number: string | null;
+  /** Orden de compra de la que se generó el documento (QUI-684 H2). */
+  purchase_order_id: number | null;
+  purchase_order_number: string | null;
   subtotal_amount: number;
   tax_amount: number;
   withholding_amount: number;
@@ -64,6 +67,21 @@ export interface SupportDocumentsTypeTotals extends SupportDocumentsAmounts {
   count: number;
 }
 
+/**
+ * Agrupación por proveedor. Montos NETOS (soporte − ajustes) y sin anulados ni
+ * cancelados, igual que `net`: la suma de todas las filas es `summary.net`.
+ */
+export interface SupportDocumentsSupplierGroup extends SupportDocumentsAmounts {
+  /** `null` agrupa los documentos sin proveedor enlazado. */
+  supplier_id: number | null;
+  supplier_name: string;
+  supplier_tax_id: string | null;
+  /** Documentos que suman (soporte + ajustes). */
+  document_count: number;
+  /** Anulados o cancelados del proveedor: no suman. */
+  excluded_count: number;
+}
+
 export interface SupportDocumentsSummary {
   /** Documentos que suman (soporte + ajustes, sin anulados ni cancelados). */
   document_count: number;
@@ -73,7 +91,12 @@ export interface SupportDocumentsSummary {
   adjustment: SupportDocumentsTypeTotals;
   /** Soporte − ajustes (la nota de ajuste resta, igual que en las declaraciones). */
   net: SupportDocumentsAmounts;
+  /** Mismos totales netos repartidos por proveedor, de mayor a menor total. */
+  by_supplier: SupportDocumentsSupplierGroup[];
 }
+
+/** Etiqueta de la fila de documentos sin proveedor enlazado. */
+export const SUPPORT_REPORT_NO_SUPPLIER_LABEL = 'Sin proveedor';
 
 /** Columna de orden permitida -> campo Prisma (lista blanca). */
 const SORT_FIELDS: Record<
@@ -105,6 +128,7 @@ const REPORT_SELECT = {
   accepted_at: true,
   supplier: { select: { name: true, tax_id: true } },
   related_invoice: { select: { invoice_number: true } },
+  purchase_order: { select: { id: true, order_number: true } },
 } satisfies Prisma.invoicesSelect;
 
 type ReportInvoice = Prisma.invoicesGetPayload<{ select: typeof REPORT_SELECT }>;
@@ -160,6 +184,9 @@ export class SupportDocumentsReportService {
       invoice_type: { in: types },
       issue_date: { gte: startDate, lte: endDate }, // tz-audit:date-only — business-date; ventana de resolveLocalDateOnlyRange
       ...(query.status?.length ? { status: { in: query.status } } : {}),
+      ...(query.dian_status?.length
+        ? { dian_status: { in: query.dian_status } }
+        : {}),
       ...(query.supplier_id ? { supplier_id: query.supplier_id } : {}),
     };
   }
@@ -210,13 +237,18 @@ export class SupportDocumentsReportService {
     return rows.map(toReportRow);
   }
 
-  /** Totales del rango completo (no de la página): misma fuente que el XLSX. */
+  /**
+   * Totales del rango completo (no de la página): misma fuente que el XLSX.
+   * Un solo `groupBy` (proveedor × tipo × estado) alimenta los totales por
+   * tipo y la agrupación por proveedor, así que ambas cuadran por
+   * construcción.
+   */
   async getSummary(
     query: SupportDocumentsReportQueryDto,
   ): Promise<SupportDocumentsSummary> {
     const where = await this.buildWhere(query);
     const groups = await this.prisma.invoices.groupBy({
-      by: ['invoice_type', 'status'],
+      by: ['supplier_id', 'invoice_type', 'status'],
       where,
       _count: { _all: true },
       _sum: {
@@ -230,20 +262,40 @@ export class SupportDocumentsReportService {
     const support = emptyTotals();
     const adjustment = emptyTotals();
     let excluded = 0;
+    const bySupplier = new Map<number | null, SupplierAccumulator>();
 
     for (const group of groups) {
       const count = group._count?._all ?? 0;
+      const supplierKey = group.supplier_id ?? null;
+      const supplierAcc =
+        bySupplier.get(supplierKey) ?? emptySupplierAccumulator();
+      bySupplier.set(supplierKey, supplierAcc);
+
       if (SUPPORT_REPORT_EXCLUDED_STATUSES.includes(group.status)) {
         excluded += count;
+        supplierAcc.excluded_count += count;
         continue;
       }
-      const target =
-        group.invoice_type === 'support_adjustment_note' ? adjustment : support;
+      const isAdjustment = group.invoice_type === 'support_adjustment_note';
+      const target = isAdjustment ? adjustment : support;
+      const sign = isAdjustment ? -1 : 1;
+      const amounts = {
+        subtotal_amount: toNum(group._sum?.subtotal_amount),
+        tax_amount: toNum(group._sum?.tax_amount),
+        withholding_amount: toNum(group._sum?.withholding_amount),
+        total_amount: toNum(group._sum?.total_amount),
+      };
       target.count += count;
-      target.subtotal_amount += toNum(group._sum?.subtotal_amount);
-      target.tax_amount += toNum(group._sum?.tax_amount);
-      target.withholding_amount += toNum(group._sum?.withholding_amount);
-      target.total_amount += toNum(group._sum?.total_amount);
+      target.subtotal_amount += amounts.subtotal_amount;
+      target.tax_amount += amounts.tax_amount;
+      target.withholding_amount += amounts.withholding_amount;
+      target.total_amount += amounts.total_amount;
+
+      supplierAcc.document_count += count;
+      supplierAcc.subtotal_amount += sign * amounts.subtotal_amount;
+      supplierAcc.tax_amount += sign * amounts.tax_amount;
+      supplierAcc.withholding_amount += sign * amounts.withholding_amount;
+      supplierAcc.total_amount += sign * amounts.total_amount;
     }
 
     const rounded = (t: SupportDocumentsTypeTotals): SupportDocumentsTypeTotals => ({
@@ -267,9 +319,70 @@ export class SupportDocumentsReportService {
         ),
         total_amount: round2(support.total_amount - adjustment.total_amount),
       },
+      by_supplier: await this.toSupplierGroups(bySupplier),
     };
   }
+
+  /**
+   * Nombre y NIT salen de la ficha del proveedor (cliente con scope de la
+   * organización; los ids vienen de documentos de ESTA tienda).
+   */
+  private async toSupplierGroups(
+    bySupplier: Map<number | null, SupplierAccumulator>,
+  ): Promise<SupportDocumentsSupplierGroup[]> {
+    const ids = [...bySupplier.keys()].filter(
+      (id): id is number => id !== null,
+    );
+    // Tipo explícito: la unión con `[]` deja la fila como `{}` para tsc.
+    type SupplierRef = { id: number; name: string; tax_id: string | null };
+    const suppliers: SupplierRef[] = ids.length
+      ? await this.prisma.suppliers.findMany({
+          where: { id: { in: ids } },
+          select: { id: true, name: true, tax_id: true },
+        })
+      : [];
+    const byId = new Map(suppliers.map((s) => [s.id, s]));
+
+    return [...bySupplier.entries()]
+      .map(([supplierId, acc]) => {
+        const supplier = supplierId === null ? undefined : byId.get(supplierId);
+        return {
+          supplier_id: supplierId,
+          supplier_name:
+            supplier?.name ??
+            (supplierId === null
+              ? SUPPORT_REPORT_NO_SUPPLIER_LABEL
+              : `Proveedor #${supplierId}`),
+          supplier_tax_id: supplier?.tax_id ?? null,
+          document_count: acc.document_count,
+          excluded_count: acc.excluded_count,
+          subtotal_amount: round2(acc.subtotal_amount),
+          tax_amount: round2(acc.tax_amount),
+          withholding_amount: round2(acc.withholding_amount),
+          total_amount: round2(acc.total_amount),
+        };
+      })
+      .sort(
+        (a, b) =>
+          b.total_amount - a.total_amount ||
+          a.supplier_name.localeCompare(b.supplier_name, 'es'),
+      );
+  }
 }
+
+interface SupplierAccumulator extends SupportDocumentsAmounts {
+  document_count: number;
+  excluded_count: number;
+}
+
+const emptySupplierAccumulator = (): SupplierAccumulator => ({
+  document_count: 0,
+  excluded_count: 0,
+  subtotal_amount: 0,
+  tax_amount: 0,
+  withholding_amount: 0,
+  total_amount: 0,
+});
 
 function toReportRow(row: ReportInvoice): SupportDocumentReportRow {
   return {
@@ -285,6 +398,8 @@ function toReportRow(row: ReportInvoice): SupportDocumentReportRow {
     supplier_tax_id: row.customer_tax_id || row.supplier?.tax_id || null,
     cuds: row.cufe ?? null,
     related_invoice_number: row.related_invoice?.invoice_number ?? null,
+    purchase_order_id: row.purchase_order?.id ?? null,
+    purchase_order_number: row.purchase_order?.order_number ?? null,
     subtotal_amount: round2(toNum(row.subtotal_amount)),
     tax_amount: round2(toNum(row.tax_amount)),
     withholding_amount: round2(toNum(row.withholding_amount)),

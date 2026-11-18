@@ -44,6 +44,8 @@ import {
   SupportDocumentsReportQuery,
   SupportDocumentsSortBy,
   SupportDocumentsSummary,
+  SupportDocumentsSupplierGroup,
+  SupportReportDianStatus,
   SupportReportDocumentType,
   SupportReportStatus,
 } from '../../interfaces/support-documents-report.interface';
@@ -64,12 +66,24 @@ export const SUPPORT_STATUS_LABELS: Record<SupportReportStatus, string> = {
   voided: 'Anulado',
 };
 
+/** Mismas etiquetas que la celda «DIAN» del detalle de facturación. */
+export const SUPPORT_DIAN_STATUS_LABELS: Record<SupportReportDianStatus, string> = {
+  pending: 'Pendiente de validación',
+  accepted: 'Aceptado',
+  rejected: 'Rechazado',
+  error: 'Error',
+  not_applicable: 'No aplica',
+};
+
 export const SUPPORT_TYPE_LABELS: Record<SupportReportDocumentType, string> = {
   support_document: 'Documento soporte',
   support_adjustment_note: 'Nota de ajuste',
 };
 
-/** Mismos colores que el listado de documentos soporte (facturación). */
+/**
+ * Mismos colores que el listado de facturación (`INVOICE_STATUS_COLORS`):
+ * cancelado en gris y anulado en ámbar.
+ */
 const STATUS_BADGE: NonNullable<TableColumn['badgeConfig']> = {
   type: 'custom',
   size: 'sm',
@@ -79,8 +93,8 @@ const STATUS_BADGE: NonNullable<TableColumn['badgeConfig']> = {
     sent: 'var(--color-info)',
     accepted: 'var(--color-success)',
     rejected: 'var(--color-error)',
-    cancelled: 'var(--color-warning)',
-    voided: 'var(--color-text-muted)',
+    cancelled: 'var(--color-text-muted)',
+    voided: 'var(--color-warning)',
   },
 };
 
@@ -101,6 +115,7 @@ interface SupportDocumentViewRow {
   supplier_tax_id: string;
   status: SupportReportStatus;
   related_invoice_number: string;
+  purchase_order_number: string;
   subtotal_amount: number;
   tax_amount: number;
   withholding_amount: number;
@@ -111,6 +126,8 @@ interface SupportDocumentViewRow {
 
 const isStatus = (v: string): v is SupportReportStatus =>
   Object.prototype.hasOwnProperty.call(SUPPORT_STATUS_LABELS, v);
+const isDianStatus = (v: string): v is SupportReportDianStatus =>
+  Object.prototype.hasOwnProperty.call(SUPPORT_DIAN_STATUS_LABELS, v);
 const isType = (v: string): v is SupportReportDocumentType =>
   Object.prototype.hasOwnProperty.call(SUPPORT_TYPE_LABELS, v);
 const asArray = (v: FilterValues[string]): string[] =>
@@ -119,8 +136,9 @@ const asArray = (v: FilterValues[string]): string[] =>
 /**
  * Reporte «Documentos soporte» (STORE_ADMIN, categoría Compras): documentos
  * soporte y notas de ajuste con filtros de período (zona de la tienda),
- * proveedor, estado y tipo; totales soporte vs ajuste sin anulados ni
- * cancelados; tabla paginada en servidor y export XLSX del dataset completo.
+ * proveedor, estado, estado DIAN y tipo; totales soporte vs ajuste sin anulados
+ * ni cancelados; agrupación por proveedor; tabla paginada en servidor y export
+ * XLSX del dataset completo.
  */
 @Component({
   selector: 'vendix-support-documents-report-page',
@@ -155,6 +173,7 @@ export class SupportDocumentsReportPageComponent {
     this.store.selectSignal(selectDateRange)() ?? getDefaultDateRange(),
   );
   readonly statuses = signal<SupportReportStatus[]>([]);
+  readonly dianStatuses = signal<SupportReportDianStatus[]>([]);
   readonly types = signal<SupportReportDocumentType[]>([]);
   readonly supplierId = signal<number | null>(null);
   readonly page = signal(1);
@@ -175,6 +194,7 @@ export class SupportDocumentsReportPageComponent {
     const supplier = this.supplierId();
     return {
       status: [...this.statuses()],
+      dian_status: [...this.dianStatuses()],
       invoice_type: [...this.types()],
       supplier_id: supplier ? String(supplier) : null,
     };
@@ -183,6 +203,7 @@ export class SupportDocumentsReportPageComponent {
   readonly hasFilters = computed(
     () =>
       this.statuses().length > 0 ||
+      this.dianStatuses().length > 0 ||
       this.types().length > 0 ||
       this.supplierId() !== null ||
       this.dateRange().preset !== 'thisMonth',
@@ -205,6 +226,16 @@ export class SupportDocumentsReportPageComponent {
       type: 'multi-select',
       placeholder: 'Todos los estados',
       options: Object.entries(SUPPORT_STATUS_LABELS).map(([value, label]) => ({
+        value,
+        label,
+      })),
+    },
+    {
+      key: 'dian_status',
+      label: 'Estado DIAN',
+      type: 'multi-select',
+      placeholder: 'Todos los estados DIAN',
+      options: Object.entries(SUPPORT_DIAN_STATUS_LABELS).map(([value, label]) => ({
         value,
         label,
       })),
@@ -241,6 +272,7 @@ export class SupportDocumentsReportPageComponent {
       supplier_tax_id: r.supplier_tax_id ?? '',
       status: r.status,
       related_invoice_number: r.related_invoice_number ?? '',
+      purchase_order_number: r.purchase_order_number ?? '',
       subtotal_amount: r.subtotal_amount,
       tax_amount: r.tax_amount,
       withholding_amount: r.withholding_amount,
@@ -296,6 +328,7 @@ export class SupportDocumentsReportPageComponent {
       transform: this.statusLabel,
     },
     { key: 'related_invoice_number', label: 'Documento original', priority: 3, transform: this.dash },
+    { key: 'purchase_order_number', label: 'OC de origen', priority: 3, transform: this.dash },
     { key: 'subtotal_amount', label: 'Subtotal', align: 'right', priority: 2, transform: this.money },
     { key: 'tax_amount', label: 'Impuestos', align: 'right', priority: 2, transform: this.money },
     { key: 'withholding_amount', label: 'Retenciones', align: 'right', priority: 3, transform: this.money },
@@ -316,6 +349,30 @@ export class SupportDocumentsReportPageComponent {
       { key: 'total_amount', label: 'Total', icon: 'wallet', transform: this.money },
       { key: 'issue_date', label: 'Fecha', icon: 'calendar', transform: this.issueDate },
       { key: 'counts_label', label: 'En totales', icon: 'percent' },
+    ],
+  };
+
+  /** Agrupación por proveedor: misma respuesta que las tarjetas. */
+  readonly supplierGroups = computed<SupportDocumentsSupplierGroup[]>(
+    () => this.summary()?.by_supplier ?? [],
+  );
+
+  readonly supplierColumns: TableColumn[] = [
+    { key: 'supplier_name', label: 'Proveedor', priority: 1, transform: this.dash },
+    { key: 'supplier_tax_id', label: 'NIT / Documento', priority: 2, transform: this.dash },
+    { key: 'document_count', label: 'Documentos', align: 'center', priority: 1 },
+    { key: 'subtotal_amount', label: 'Subtotal neto', align: 'right', priority: 3, transform: this.money },
+    { key: 'tax_amount', label: 'Impuestos netos', align: 'right', priority: 3, transform: this.money },
+    { key: 'withholding_amount', label: 'Retenciones netas', align: 'right', priority: 3, transform: this.money },
+    { key: 'total_amount', label: 'Total neto', align: 'right', priority: 1, transform: this.money },
+  ];
+
+  readonly supplierCardConfig: ItemListCardConfig = {
+    titleKey: 'supplier_name',
+    subtitleKey: 'supplier_tax_id',
+    detailKeys: [
+      { key: 'document_count', label: 'Documentos', icon: 'file-text' },
+      { key: 'total_amount', label: 'Total neto', icon: 'wallet', transform: this.money },
     ],
   };
 
@@ -392,6 +449,7 @@ export class SupportDocumentsReportPageComponent {
       query.date_to = range.end_date;
     }
     if (this.statuses().length) query.status = [...this.statuses()];
+    if (this.dianStatuses().length) query.dian_status = [...this.dianStatuses()];
     if (this.types().length) query.invoice_type = [...this.types()];
     const supplier = this.supplierId();
     if (supplier) query.supplier_id = supplier;
@@ -426,6 +484,7 @@ export class SupportDocumentsReportPageComponent {
 
   onFilterChange(values: FilterValues): void {
     this.statuses.set(asArray(values['status']).filter(isStatus));
+    this.dianStatuses.set(asArray(values['dian_status']).filter(isDianStatus));
     this.types.set(asArray(values['invoice_type']).filter(isType));
     const supplier = Number(values['supplier_id']);
     this.supplierId.set(Number.isInteger(supplier) && supplier > 0 ? supplier : null);
@@ -435,6 +494,7 @@ export class SupportDocumentsReportPageComponent {
   onClearAll(): void {
     this.dateRange.set(getDefaultDateRange());
     this.statuses.set([]);
+    this.dianStatuses.set([]);
     this.types.set([]);
     this.supplierId.set(null);
     this.reloadAll();

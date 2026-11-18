@@ -82,4 +82,25 @@
       ></app-pagination>
     </div>
   </app-card>
+
+  <app-card [responsive]="true" [padding]="false">
+    <div class="px-2 py-1.5 md:px-6 md:py-4 md:border-b md:border-border">
+      <h2 class="text-[13px] font-bold text-gray-600 tracking-wide md:text-lg md:font-semibold md:text-text-primary">
+        Por proveedor ({{ supplierGroups().length }})
+      </h2>
+      <p class="text-xs text-text-secondary">Totales netos del período: las notas de ajuste restan y los anulados no suman.</p>
+    </div>
+    <div class="px-2 pb-2 pt-3 md:p-4">
+      <app-responsive-data-view
+        [data]="supplierGroups()"
+        [columns]="supplierColumns"
+        [cardConfig]="supplierCardConfig"
+        [loading]="loadingSummary()"
+        emptyIcon="users"
+        emptyMessage="Sin proveedores para los filtros seleccionados"
+        emptyTitle="Sin proveedores"
+        emptyDescription="Ajusta el período o los filtros."
+      ></app-responsive-data-view>
+    </div>
+  </app-card>
 </div>

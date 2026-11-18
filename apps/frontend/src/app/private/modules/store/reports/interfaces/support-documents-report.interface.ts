@@ -15,6 +15,14 @@ export type SupportReportStatus =
   | 'cancelled'
   | 'voided';
 
+/** Estados de `dian_document_status_enum` (estado del documento ante la DIAN). */
+export type SupportReportDianStatus =
+  | 'pending'
+  | 'accepted'
+  | 'rejected'
+  | 'error'
+  | 'not_applicable';
+
 export type SupportDocumentsSortBy =
   | 'issue_date'
   | 'total_amount'
@@ -35,6 +43,9 @@ export interface SupportDocumentReportRow {
   supplier_tax_id: string | null;
   cuds: string | null;
   related_invoice_number: string | null;
+  /** Orden de compra de la que se generó el documento. */
+  purchase_order_id: number | null;
+  purchase_order_number: string | null;
   subtotal_amount: number;
   tax_amount: number;
   withholding_amount: number;
@@ -57,6 +68,19 @@ export interface SupportDocumentsTypeTotals extends SupportDocumentsAmounts {
   count: number;
 }
 
+/**
+ * Agrupación por proveedor: montos netos (soporte − ajustes) sin anulados ni
+ * cancelados. La suma de las filas es `SupportDocumentsSummary.net`.
+ */
+export interface SupportDocumentsSupplierGroup extends SupportDocumentsAmounts {
+  /** `null` agrupa los documentos sin proveedor enlazado. */
+  supplier_id: number | null;
+  supplier_name: string;
+  supplier_tax_id: string | null;
+  document_count: number;
+  excluded_count: number;
+}
+
 /** `GET /store/analytics/support-documents/summary`. */
 export interface SupportDocumentsSummary {
   document_count: number;
@@ -65,6 +89,8 @@ export interface SupportDocumentsSummary {
   adjustment: SupportDocumentsTypeTotals;
   /** Soporte − ajustes (la nota de ajuste resta). */
   net: SupportDocumentsAmounts;
+  /** Mismos totales netos por proveedor, de mayor a menor total. */
+  by_supplier: SupportDocumentsSupplierGroup[];
 }
 
 export interface SupportDocumentsListResponse {
@@ -83,6 +109,7 @@ export interface SupportDocumentsReportQuery {
   date_from?: string;
   date_to?: string;
   status?: SupportReportStatus[];
+  dian_status?: SupportReportDianStatus[];
   invoice_type?: SupportReportDocumentType[];
   supplier_id?: number;
   page?: number;

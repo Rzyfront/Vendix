@@ -1,6 +1,6 @@
 import { IsEnum, IsIn, IsInt, IsOptional, Min } from 'class-validator';
 import { Transform, Type } from 'class-transformer';
-import { invoice_status_enum } from '@prisma/client';
+import { dian_document_status_enum, invoice_status_enum } from '@prisma/client';
 import { AnalyticsQueryDto } from './analytics-query.dto';
 import { normalizeMultiValue } from './payments-analytics-query.dto';
 
@@ -25,15 +25,21 @@ export type SupportDocumentsSortField =
  * Filtros del reporte de documentos soporte y notas de ajuste.
  *
  * El rango (`date_from`/`date_to`/`date_preset`) se resuelve sobre
- * `invoices.issue_date` en el calendario LOCAL de la tienda. `status` e
- * `invoice_type` aceptan varios valores (CSV o parámetro repetido); sin ellos
- * entran todos los estados y ambos tipos.
+ * `invoices.issue_date` en el calendario LOCAL de la tienda. `status`,
+ * `dian_status` e `invoice_type` aceptan varios valores (CSV o parámetro
+ * repetido); sin ellos entran todos los estados y ambos tipos.
  */
 export class SupportDocumentsReportQueryDto extends AnalyticsQueryDto {
   @IsOptional()
   @Transform(normalizeMultiValue)
   @IsEnum(invoice_status_enum, { each: true })
   status?: invoice_status_enum[];
+
+  /** Estado del documento ante la DIAN (`invoices.dian_status`). */
+  @IsOptional()
+  @Transform(normalizeMultiValue)
+  @IsEnum(dian_document_status_enum, { each: true })
+  dian_status?: dian_document_status_enum[];
 
   @IsOptional()
   @Transform(normalizeMultiValue)

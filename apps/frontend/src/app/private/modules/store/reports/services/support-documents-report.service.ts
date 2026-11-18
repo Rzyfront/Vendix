@@ -41,6 +41,9 @@ export class SupportDocumentsReportService {
     set('date_from', query.date_from);
     set('date_to', query.date_to);
     if (query.status?.length) set('status', query.status.join(','));
+    if (query.dian_status?.length) {
+      set('dian_status', query.dian_status.join(','));
+    }
     if (query.invoice_type?.length) {
       set('invoice_type', query.invoice_type.join(','));
     }

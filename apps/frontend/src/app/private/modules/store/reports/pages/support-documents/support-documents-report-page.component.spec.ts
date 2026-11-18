@@ -34,6 +34,8 @@ const row = (over: Partial<SupportDocumentReportRow> = {}): SupportDocumentRepor
   supplier_tax_id: '900111',
   cuds: 'abc',
   related_invoice_number: null,
+  purchase_order_id: 40,
+  purchase_order_number: 'OC-40',
   subtotal_amount: 1000,
   tax_amount: 190,
   withholding_amount: 25,
@@ -56,6 +58,19 @@ const summary: SupportDocumentsSummary = {
   support: { count: 1, subtotal_amount: 1000, tax_amount: 190, withholding_amount: 25, total_amount: 1190 },
   adjustment: { count: 1, subtotal_amount: 100, tax_amount: 19, withholding_amount: 0, total_amount: 119 },
   net: { subtotal_amount: 900, tax_amount: 171, withholding_amount: 25, total_amount: 1071 },
+  by_supplier: [
+    {
+      supplier_id: 11,
+      supplier_name: 'Proveedor Uno',
+      supplier_tax_id: '900111',
+      document_count: 2,
+      excluded_count: 1,
+      subtotal_amount: 900,
+      tax_amount: 171,
+      withholding_amount: 25,
+      total_amount: 1071,
+    },
+  ],
 };
 
 describe('SupportDocumentsReportPageComponent', () => {
@@ -170,9 +185,36 @@ describe('SupportDocumentsReportPageComponent', () => {
     expect(lastSummaryQuery()).toEqual(expected);
     expect(component.filterValues()).toEqual({
       status: ['accepted', 'rejected'],
+      dian_status: [],
       invoice_type: ['support_adjustment_note'],
       supplier_id: '11',
     });
+  });
+
+  it('el filtro «Estado DIAN» viaja a lista y totales y descarta valores ajenos', () => {
+    dropdown().triggerEventHandler('filterChange', {
+      status: [],
+      dian_status: ['rejected', 'bogus'],
+      invoice_type: [],
+      supplier_id: null,
+    });
+
+    const expected: SupportDocumentsReportQuery = {
+      page: 1,
+      limit: 25,
+      date_preset: 'lastMonth',
+      dian_status: ['rejected'],
+    };
+    expect(lastListQuery()).toEqual(expected);
+    expect(lastSummaryQuery()).toEqual(expected);
+    expect(component.hasFilters()).toBeTrue();
+  });
+
+  it('la tabla «Por proveedor» sale de la misma respuesta que las tarjetas y la fila muestra la OC', () => {
+    expect(component.supplierGroups()).toEqual(summary.by_supplier);
+    const net = component.supplierGroups().reduce((acc, g) => acc + g.total_amount, 0);
+    expect(net).toBe(summary.net.total_amount);
+    expect(component.viewRows()[0].purchase_order_number).toBe('OC-40');
   });
 
   it('un rango propio viaja como fechas explícitas (custom)', () => {

@@ -93,6 +93,8 @@ export class SupportDocumentsReportController {
       ...amountColumns,
       { key: 'accepted_at', header: 'Aceptado DIAN', type: 'date', tz },
       { key: 'counts_label', header: 'En totales', type: 'text' },
+      // Al final para no correr las columnas de quien ya consume el archivo.
+      { key: 'purchase_order_number', header: 'OC de origen', type: 'text' },
     ];
 
     const detailRows = rows.map((r) => ({
@@ -103,6 +105,7 @@ export class SupportDocumentsReportController {
       supplier_tax_id: r.supplier_tax_id ?? '',
       status_label: SUPPORT_STATUS_LABELS[r.status] ?? r.status,
       related_invoice_number: r.related_invoice_number ?? '',
+      purchase_order_number: r.purchase_order_number ?? '',
       cuds: r.cuds ?? '',
       subtotal_amount: r.subtotal_amount,
       tax_amount: r.tax_amount,
@@ -129,6 +132,19 @@ export class SupportDocumentsReportController {
 
     const netLabel = 'TOTAL NETO (soporte − ajustes, sin anulados)';
 
+    // Por proveedor: mismos montos netos; la suma de las filas es el neto.
+    const supplierColumns: ReportColumn[] = [
+      { key: 'supplier_name', header: 'Proveedor', type: 'text', width: 36 },
+      { key: 'supplier_tax_id', header: 'NIT / Documento', type: 'text' },
+      { key: 'document_count', header: 'Documentos', type: 'number' },
+      ...amountColumns,
+      { key: 'excluded_count', header: 'Anulados/cancelados (fuera)', type: 'number' },
+    ];
+    const supplierRows = summary.by_supplier.map((g) => ({
+      ...g,
+      supplier_tax_id: g.supplier_tax_id ?? '',
+    }));
+
     const buffer = await buildReportBuffer({
       sheets: [
         {
@@ -136,6 +152,18 @@ export class SupportDocumentsReportController {
           columns: detailColumns,
           rows: detailRows,
           totals: { type_label: netLabel, ...summary.net },
+          tz,
+        },
+        {
+          name: 'Por proveedor',
+          columns: supplierColumns,
+          rows: supplierRows,
+          totals: {
+            supplier_name: netLabel,
+            document_count: summary.document_count,
+            excluded_count: summary.excluded_count,
+            ...summary.net,
+          },
           tz,
         },
         {
