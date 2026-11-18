@@ -8512,6 +8512,35 @@ export const ErrorCodes = {
     httpStatus: 422,
     devMessage: 'La propina debe ser la sugerida por la tienda.',
   },
+
+  // ===== VENDIX PLATFORM · enlace CRM ↔ organización cliente =====
+  // (odd/tasks/vendix-platform-crm-enlace.md). Solo los ve la tienda de la
+  // org plataforma: cualquier otra tienda recibe un 404 genérico del guard.
+  PLATFORM_CRM_001: {
+    code: 'PLATFORM_CRM_001',
+    httpStatus: 404,
+    devMessage: 'El cliente no existe en el CRM de Vendix Platform.',
+  },
+  PLATFORM_CRM_002: {
+    code: 'PLATFORM_CRM_002',
+    httpStatus: 404,
+    devMessage: 'La organización no existe o no se puede enlazar.',
+  },
+  PLATFORM_CRM_003: {
+    code: 'PLATFORM_CRM_003',
+    httpStatus: 409,
+    devMessage: 'Este cliente ya tiene una cuenta Vendix enlazada.',
+  },
+  PLATFORM_CRM_004: {
+    code: 'PLATFORM_CRM_004',
+    httpStatus: 409,
+    devMessage: 'Esta organización ya está enlazada a otro cliente del CRM.',
+  },
+  PLATFORM_CRM_005: {
+    code: 'PLATFORM_CRM_005',
+    httpStatus: 404,
+    devMessage: 'Este cliente no tiene una cuenta Vendix enlazada.',
+  },
 } as const satisfies Record<string, ErrorCodeEntry>;
 
 export const FiscalScopeBlockerCodes = {

@@ -4,6 +4,7 @@ import { seedPrintTemplates } from './seeds/print-templates.seed';
 import { seedPermissionsAndRoles } from './seeds/permissions-roles.seed';
 import { seedOrganizationsAndStores } from './seeds/organizations-stores.seed';
 import { seedVendixPlatformOrg } from './seeds/vendix-platform-org.seed';
+import { seedPlatformCrmRole } from './seeds/platform-crm-role.seed';
 import { seedSystemPaymentMethods } from './seeds/system-payment-methods.seed';
 import { seedSystemShippingMethods } from './seeds/system-shipping-methods.seed';
 import { seedLegalDocuments } from './seeds/legal-documents.seed';
@@ -87,6 +88,12 @@ const seedModules = [
     fn: seedVendixPlatformOrg,
     description:
       'Claim Vendix Corp as is_platform=true org with consolidated accounting entity, PUC, fiscal period, and DIAN placeholder',
+  },
+  {
+    name: 'Vendix Platform CRM Role',
+    fn: seedPlatformCrmRole,
+    description:
+      'Rol "Comercial Vendix" de la org plataforma con platform:crm_link:* (enlace prospecto CRM ↔ organización)',
   },
   {
     name: 'Legal Documents',

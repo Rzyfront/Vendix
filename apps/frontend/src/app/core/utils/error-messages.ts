@@ -1361,6 +1361,13 @@ export const ERROR_MESSAGES: Record<string, string> = {
   // reintente, y a quién avisar.
   PRINT_TOKEN_SYNTAX_001:
     'La venta quedó registrada, pero el formato de impresión tiene un error en su plantilla y el documento no se puede generar. Reintentar no lo resuelve: avisa al administrador para que corrija la plantilla.',
+
+  // Vendix Platform · enlace CRM ↔ organización cliente (solo tienda plataforma).
+  PLATFORM_CRM_001: 'Este cliente ya no está en el CRM de Vendix Platform.',
+  PLATFORM_CRM_002: 'La organización no existe o no se puede enlazar.',
+  PLATFORM_CRM_003: 'Este cliente ya tiene una cuenta Vendix enlazada. Recarga la ficha.',
+  PLATFORM_CRM_004: 'Esa organización ya está enlazada a otro cliente del CRM.',
+  PLATFORM_CRM_005: 'Este cliente ya no tiene una cuenta Vendix enlazada. Recarga la ficha.',
 };
 
 export const EMPTY_CART_MESSAGE = 'El carrito está vacío.';
