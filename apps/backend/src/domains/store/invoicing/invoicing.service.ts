@@ -166,6 +166,8 @@ const RETRY_ELIGIBLE_TRANSMISSION_STATUSES = [
 const INVOICE_INCLUDE = {
   invoice_items: true,
   invoice_taxes: true,
+  // QUI-684 — OC de origen del documento soporte (null en el resto).
+  purchase_order: { select: { id: true, order_number: true } },
   resolution: { select: RESOLUTION_PUBLIC_SELECT },
   customer: {
     select: {
@@ -1746,6 +1748,7 @@ export class InvoicingService {
       cuds,
       supplier_id,
       contract_id,
+      purchase_order_id,
     } = query;
 
     const skip = (page - 1) * limit;
@@ -1776,10 +1779,13 @@ export class InvoicingService {
       // D.2 (FB-09) — filtro por contrato origen. Paridad con `customer_id` /
       // `supplier_id`: solo entra al `where` cuando el query lo trae.
       ...(contract_id && { contract_id }),
+      // QUI-684 — documentos soporte generados desde una OC.
+      ...(purchase_order_id && { purchase_order_id }),
       ...(trimmed_cuds && { cufe: trimmed_cuds }),
-      ...(date_from && {
+      // `date_to` solo también filtra (antes se ignoraba sin `date_from`).
+      ...((date_from || date_to) && {
         issue_date: {
-          gte: new Date(date_from),
+          ...(date_from && { gte: new Date(date_from) }),
           ...(date_to && { lte: new Date(date_to) }),
         },
       }),
@@ -1807,6 +1813,7 @@ export class InvoicingService {
           created_by_user: {
             select: { id: true, first_name: true, last_name: true },
           },
+          purchase_order: { select: { id: true, order_number: true } },
         },
       }),
       this.prisma.invoices.count({ where }),
@@ -1901,7 +1908,7 @@ export class InvoicingService {
   /** El índice único es la autoridad también ante dos POST concurrentes. */
   async createIdempotently(
     dto: CreateInvoiceDto,
-    options: { require_acquirer_email?: boolean } = {},
+    options: { require_acquirer_email?: boolean; purchase_order_id?: number } = {},
   ) {
     const context = this.getContext();
     const key = dto.client_request_id?.toLowerCase();
@@ -1962,7 +1969,13 @@ export class InvoicingService {
 
   async create(
     dto: CreateInvoiceDto,
-    options: { require_acquirer_email?: boolean; transaction?: Prisma.TransactionClient; defer_created_event?: boolean } = {},
+    options: {
+      require_acquirer_email?: boolean;
+      transaction?: Prisma.TransactionClient;
+      defer_created_event?: boolean;
+      /** QUI-684 — solo lo fija `PurchaseOrderSupportDocumentService`; el DTO genérico no lo acepta. */
+      purchase_order_id?: number;
+    } = {},
   ) {
     const prisma = options.transaction ?? this.prisma;
     this.assertNoteUsesSpecificRoute(dto.invoice_type);
@@ -2184,6 +2197,9 @@ export class InvoicingService {
         status: 'draft',
         customer_id: resolved_customer_id,
         supplier_id: dto.supplier_id,
+        ...(options.purchase_order_id != null && {
+          purchase_order_id: options.purchase_order_id,
+        }),
         // Task E — con `customer_id` vinculado, el snapshot sale de la FICHA
         // cuando el DTO no trae el campo explícito (el frontend normalmente
         // sólo manda `customer_id`, no cada columna a mano). Sin ficha

@@ -10,6 +10,7 @@ import {
 } from 'rxjs';
 import { tap, shareReplay } from 'rxjs/operators';
 import { environment } from '../../../../../../environments/environment';
+import { registerStoreSwitchReset } from '../../../../../core/utils/store-scoped-cache';
 import {
   AiScanJobOptions,
   AiScanJobService,
@@ -82,6 +83,8 @@ const storeProductsStatsCache = new Map<
   number,
   CacheEntry<Observable<ProductStats>>
 >();
+// QUI-1021: a store switch empties it, so a return to a store fetches again.
+registerStoreSwitchReset(() => storeProductsStatsCache.clear());
 
 interface AiImageJobResult {
   image_key: string;

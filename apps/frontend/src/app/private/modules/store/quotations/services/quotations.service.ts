@@ -1,8 +1,13 @@
-import { Injectable } from '@angular/core';
+import { Injectable, inject } from '@angular/core';
 import { HttpClient } from '@angular/common/http';
 import { Observable, of, throwError } from 'rxjs';
 import { catchError, concatMap, map, shareReplay, tap } from 'rxjs/operators';
 import { environment } from '../../../../../../environments/environment';
+import { AuthFacade } from '../../../../../core/store/auth/auth.facade';
+import {
+  StoreScopedCache,
+  activeStoreId,
+} from '../../../../../core/utils/store-scoped-cache';
 import { extractApiErrorMessage } from '../../../../../core/utils/api-error-handler';
 import {
   Quotation,
@@ -17,14 +22,19 @@ import type {
   ContractQuotationEconomicSnapshot,
 } from '../interfaces/quotation-contract-economics.interface';
 
-let quotationStatsCache: { observable: Observable<any>; lastFetch: number } | null = null;
+/**
+ * Stats cards cache, one entry per store and emptied on every store switch
+ * (QUI-1021): the backend resolves the store from the session, so the URL
+ * alone does not say whose stats a response holds.
+ */
+const quotationStatsCache = new StoreScopedCache<QuotationStats>(30_000);
 
 @Injectable({
   providedIn: 'root',
 })
 export class QuotationsService {
   private readonly apiUrl = environment.apiUrl;
-  private readonly CACHE_TTL = 30000;
+  private readonly authFacade = inject(AuthFacade);
 
   constructor(private http: HttpClient) {}
 
@@ -46,23 +56,22 @@ export class QuotationsService {
   }
 
   getQuotationStats(): Observable<QuotationStats> {
-    const now = Date.now();
-    if (quotationStatsCache && now - quotationStatsCache.lastFetch < this.CACHE_TTL) {
-      return quotationStatsCache.observable;
+    const storeId = activeStoreId(this.authFacade);
+    const cached = quotationStatsCache.get(storeId);
+    if (cached) {
+      return cached;
     }
     const url = `${this.apiUrl}/store/quotations/stats`;
     const observable$ = this.http.get<any>(url).pipe(
       map((r) => r.data || r),
       shareReplay({ bufferSize: 1, refCount: false }),
-      tap(() => {
-        if (quotationStatsCache) quotationStatsCache.lastFetch = Date.now();
-      }),
+      tap(() => quotationStatsCache.touch(storeId)),
       catchError((error) => {
         console.error('Error fetching quotation stats:', error);
         return throwError(() => new Error('Failed to fetch quotation stats'));
       }),
     );
-    quotationStatsCache = { observable: observable$, lastFetch: now };
+    quotationStatsCache.set(storeId, observable$);
     return observable$;
   }
 
@@ -212,7 +221,7 @@ export class QuotationsService {
   }
 
   invalidateCache(): void {
-    quotationStatsCache = null;
+    quotationStatsCache.clear();
   }
 
   private extractErrorMessage(error: any): string {

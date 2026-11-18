@@ -48,6 +48,10 @@ export interface Supplier {
   mobile?: string;
   website?: string;
   tax_id?: string;
+  /** Código DIAN del tipo de documento ('31' = NIT). */
+  document_type?: string | null;
+  /** DV del NIT; solo aplica cuando `document_type` es '31'. */
+  verification_digit?: string | null;
   // Fiscal classification (Colombian withholdings — "el QUIEN")
   tax_regime?: string;
   person_type?: string;
@@ -69,11 +73,40 @@ export interface Supplier {
    * Antes no estaba en la interface; el PO detail ahora la pinta en grid.
    */
   address?: Address;
+  /** Dirección fiscal tal como la devuelve la API (relación `addresses`). */
+  addresses?: SupplierFiscalAddress | null;
   created_at?: string;
   updated_at?: string;
 }
 
+/** Fila de `addresses` del proveedor (columnas del backend). */
+export interface SupplierFiscalAddress {
+  id?: number;
+  address_line1: string;
+  address_line2?: string | null;
+  city: string;
+  state_province?: string | null;
+  country_code?: string | null;
+  postal_code?: string | null;
+  /** Código DIAN/DIVIPOLA del municipio. */
+  municipality_code?: string | null;
+}
+
+/** Dirección que se envía al guardar un proveedor (se crea o se actualiza en sitio). */
+export interface SupplierAddressInput {
+  address_line1: string;
+  address_line2?: string;
+  city: string;
+  state_province?: string;
+  country_code?: string;
+  postal_code?: string;
+  municipality_code?: string;
+}
+
 export interface CreateSupplierDto {
+  document_type?: string;
+  verification_digit?: string;
+  address?: SupplierAddressInput;
   organization_id?: number;
   name: string;
   code: string;

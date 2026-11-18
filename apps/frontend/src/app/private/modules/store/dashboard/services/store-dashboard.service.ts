@@ -3,6 +3,7 @@ import { HttpClient } from '@angular/common/http';
 import { Observable, catchError, throwError, map } from 'rxjs';
 import { tap, shareReplay } from 'rxjs/operators';
 import { environment } from '../../../../../../environments/environment';
+import { registerStoreSwitchReset } from '../../../../../core/utils/store-scoped-cache';
 import { AuthFacade } from '../../../../../core/store/auth/auth.facade';
 
 export interface StoreDashboardStats {
@@ -54,6 +55,11 @@ interface CacheEntry<T> {
 // Map para caché por storeId
 const storeDashboardCache = new Map<string, CacheEntry<Observable<StoreDashboardStats>>>();
 const storeProductsStatsCache = new Map<string, CacheEntry<Observable<any>>>();
+// QUI-1021: a store switch empties both, so a return to a store fetches again.
+registerStoreSwitchReset(() => {
+  storeDashboardCache.clear();
+  storeProductsStatsCache.clear();
+});
 
 @Injectable({
   providedIn: 'root',

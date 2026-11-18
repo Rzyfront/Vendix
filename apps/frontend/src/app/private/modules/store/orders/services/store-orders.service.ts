@@ -1,4 +1,4 @@
-import { Injectable } from '@angular/core';
+import { Injectable, inject } from '@angular/core';
 import { HttpClient } from '@angular/common/http';
 import { Observable } from 'rxjs';
 import { catchError, map } from 'rxjs/operators';
@@ -6,6 +6,11 @@ import { throwError, of } from 'rxjs';
 import { tap, shareReplay } from 'rxjs/operators';
 import { environment } from '../../../../../../environments/environment';
 import { StoreContextService } from '../../../../../core/services/store-context.service';
+import { AuthFacade } from '../../../../../core/store/auth/auth.facade';
+import {
+  StoreScopedCache,
+  activeStoreId,
+} from '../../../../../core/utils/store-scoped-cache';
 import { parseApiError } from '../../../../../core/utils/parse-api-error';
 import {
   Order,
@@ -156,20 +161,19 @@ export interface UpdateAddressPayload {
   longitude?: string;
 }
 
-// Caché estático global (persiste entre instancias del servicio)
-interface CacheEntry<T> {
-  observable: T;
-  lastFetch: number;
-}
-
-let storeOrdersStatsCache: CacheEntry<Observable<OrderStats>> | null = null;
+/**
+ * Stats cards cache, one entry per store and emptied on every store switch
+ * (QUI-1021): the backend resolves the store from the session, so the URL
+ * alone does not say whose stats a response holds.
+ */
+const storeOrdersStatsCache = new StoreScopedCache<OrderStats>(30_000);
 
 @Injectable({
   providedIn: 'root',
 })
 export class StoreOrdersService {
   private readonly apiUrl = environment.apiUrl;
-  private readonly CACHE_TTL = 30000; // 30 segundos
+  private readonly authFacade = inject(AuthFacade);
 
   constructor(
     private http: HttpClient,
@@ -311,30 +315,23 @@ export class StoreOrdersService {
   }
 
   getOrderStats(): Observable<OrderStats> {
-    const now = Date.now();
-
-    if (storeOrdersStatsCache && (now - storeOrdersStatsCache.lastFetch) < this.CACHE_TTL) {
-      return storeOrdersStatsCache.observable;
+    const storeId = activeStoreId(this.authFacade);
+    const cached = storeOrdersStatsCache.get(storeId);
+    if (cached) {
+      return cached;
     }
 
     const url = `${this.apiUrl}/store/orders/stats`;
     const observable$ = this.http.get<OrderStats>(url).pipe(
       shareReplay({ bufferSize: 1, refCount: false }),
-      tap(() => {
-        if (storeOrdersStatsCache) {
-          storeOrdersStatsCache.lastFetch = Date.now();
-        }
-      }),
+      tap(() => storeOrdersStatsCache.touch(storeId)),
       catchError((error) => {
         console.error('Error fetching order stats:', error);
         return throwError(() => this.buildApiError(error));
       }),
     );
 
-    storeOrdersStatsCache = {
-      observable: observable$,
-      lastFetch: now,
-    };
+    storeOrdersStatsCache.set(storeId, observable$);
 
     return observable$;
   }
@@ -942,7 +939,7 @@ export class StoreOrdersService {
    * Útil después de crear/editar/eliminar órdenes
    */
   invalidateCache(): void {
-    storeOrdersStatsCache = null;
+    storeOrdersStatsCache.clear();
   }
 
   getPaymentReceiptUrl(

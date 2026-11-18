@@ -3,6 +3,11 @@ import { HttpClient } from '@angular/common/http';
 import { Observable, throwError } from 'rxjs';
 import { catchError, map, shareReplay, tap } from 'rxjs/operators';
 import { environment } from '../../../../../../environments/environment';
+import { AuthFacade } from '../../../../../core/store/auth/auth.facade';
+import {
+  StoreScopedCache,
+  activeStoreId,
+} from '../../../../../core/utils/store-scoped-cache';
 import {
   AiScanJobOptions,
   AiScanJobService,
@@ -93,14 +98,19 @@ export interface CreateFromOrdersBatchResult {
 /** Remembers the running receipt scan so a reload re-attaches to it (QUI-1020). */
 const RECEIPT_SCAN_RESUME_KEY = 'dispatch_receipt';
 
-let dispatchNoteStatsCache: { observable: Observable<any>; lastFetch: number } | null = null;
+/**
+ * Stats cards cache, one entry per store and emptied on every store switch
+ * (QUI-1021): the backend resolves the store from the session, so the URL
+ * alone does not say whose stats a response holds.
+ */
+const dispatchNoteStatsCache = new StoreScopedCache<DispatchNoteStats>(30_000);
 
 @Injectable({
   providedIn: 'root',
 })
 export class DispatchNotesService {
   private readonly apiUrl = environment.apiUrl;
-  private readonly CACHE_TTL = 30000;
+  private readonly authFacade = inject(AuthFacade);
 
   private readonly aiScanJobs = inject(AiScanJobService);
 
@@ -125,24 +135,23 @@ export class DispatchNotesService {
   }
 
   getStats(): Observable<DispatchNoteStats> {
-    const now = Date.now();
-    if (dispatchNoteStatsCache && now - dispatchNoteStatsCache.lastFetch < this.CACHE_TTL) {
-      return dispatchNoteStatsCache.observable;
+    const storeId = activeStoreId(this.authFacade);
+    const cached = dispatchNoteStatsCache.get(storeId);
+    if (cached) {
+      return cached;
     }
     const url = `${this.apiUrl}/store/dispatch-notes/stats`;
     const observable$ = this.http.get<any>(url).pipe(
       map((r) => r.data || r),
       shareReplay({ bufferSize: 1, refCount: false }),
-      tap(() => {
-        if (dispatchNoteStatsCache) dispatchNoteStatsCache.lastFetch = Date.now();
-      }),
+      tap(() => dispatchNoteStatsCache.touch(storeId)),
       catchError((error) => {
         console.error('Error fetching dispatch note stats:', error);
         // Re-lanza crudo (preserva error_code/status); el componente traduce.
         return throwError(() => error);
       }),
     );
-    dispatchNoteStatsCache = { observable: observable$, lastFetch: now };
+    dispatchNoteStatsCache.set(storeId, observable$);
     return observable$;
   }
 
@@ -416,6 +425,6 @@ export class DispatchNotesService {
     `${this.apiUrl}/store/dispatch-notes/receipt-scan/${jobId}`;
 
   invalidateCache(): void {
-    dispatchNoteStatsCache = null;
+    dispatchNoteStatsCache.clear();
   }
 }

@@ -519,6 +519,11 @@ export class GlobalPrismaService extends BasePrismaService {
     return this.baseClient.invoices;
   }
 
+  /** QUI-580 — the reminder due job resolves quotation links (explicit store predicate). */
+  get quotations() {
+    return this.baseClient.quotations;
+  }
+
   get accounting_entries() {
     return this.baseClient.accounting_entries;
   }

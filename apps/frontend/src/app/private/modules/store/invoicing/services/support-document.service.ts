@@ -4,7 +4,10 @@ import { Observable } from 'rxjs';
 import { environment } from '../../../../../../environments/environment';
 import type { ApiResponse, InvoiceListResponse } from '../interfaces/invoice.interface';
 import type {
+  CreatePurchaseOrderSupportDocumentDto,
   CreateSupportDocumentDto,
+  PurchaseOrderSupportContext,
+  PurchaseOrderSupportDraft,
   SupportDocumentDetail,
   SupportDocumentDianStatus,
   SupportDocumentQuery,
@@ -94,6 +97,35 @@ export class SupportDocumentService {
     return this.http.patch<ApiResponse<SupportDocumentRow>>(
       this.getApiUrl(`${id}/cancel`),
       {},
+    );
+  }
+
+  /** Contexto de soporte de una OC: habilitación, documentos ligados y vigente (QUI-684). */
+  getPurchaseOrderContext(
+    poId: number,
+  ): Observable<ApiResponse<PurchaseOrderSupportContext>> {
+    return this.http.get<ApiResponse<PurchaseOrderSupportContext>>(
+      this.getApiUrl(`purchase-orders/${poId}/support-documents`),
+    );
+  }
+
+  /** Borrador precargado desde la OC con la lista de datos faltantes (QUI-684). */
+  getPurchaseOrderDraft(
+    poId: number,
+  ): Observable<ApiResponse<PurchaseOrderSupportDraft>> {
+    return this.http.get<ApiResponse<PurchaseOrderSupportDraft>>(
+      this.getApiUrl(`purchase-orders/${poId}/support-document-draft`),
+    );
+  }
+
+  /** Crea (y emite, si se pide) el documento soporte de la OC; el proveedor es el de la OC. */
+  createFromPurchaseOrder(
+    poId: number,
+    dto: CreatePurchaseOrderSupportDocumentDto,
+  ): Observable<ApiResponse<SupportDocumentRow>> {
+    return this.http.post<ApiResponse<SupportDocumentRow>>(
+      this.getApiUrl(`purchase-orders/${poId}/support-document`),
+      dto,
     );
   }
 }
