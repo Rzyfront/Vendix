@@ -743,6 +743,14 @@ jobs:
           --include='**/super-admin/workflows-ops/**/*.spec.ts'
           --include='**/organization/stores/utils/collect-all-pages.util.spec.ts'
           --include='**/invoicing/components/support-documents/support-document-detail.component.spec.ts'
+          --include='**/invoicing/components/support-documents/support-document-create.component.spec.ts'
+          --include='**/invoicing/components/support-documents/support-document-list.component.spec.ts'
+          --include='**/invoicing/components/support-documents/support-document-status.util.spec.ts'
+          --include='**/invoicing/components/support-documents/support-documents-page.component.spec.ts'
+          --include='**/invoicing/services/support-document.service.spec.ts'
+          --include='**/orders/purchase-orders/pages/detail/purchase-order-detail.support-action.spec.ts'
+          --include='**/orders/purchase-orders/pages/detail/purchase-order-support-document-card.component.spec.ts'
+          --include='**/inventory/suppliers/components/supplier-form-modal.component.spec.ts'
           --include='**/dashboard/components/reminders-log/reminders-log.component.spec.ts'
 
   mobile:
