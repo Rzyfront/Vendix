@@ -559,6 +559,18 @@ jobs:
           npx jest --ci --runInBand --forceExit --config jest.isolated.config.js --runTestsByPath
           src/domains/store/workflows/engine/workflow-postgres.integration.spec.ts
           src/domains/store/workflows/gates/approval-gate.postgres.integration.spec.ts
+      # Vendix Platform · enlace CRM ↔ organización cliente: guard de tienda
+      # plataforma (404 a cualquier otra tienda), permisos de sistema y, contra
+      # Postgres, el trigger del candado, los únicos parciales y la carrera.
+      - name: Jest — enlace CRM de Vendix Platform
+        working-directory: apps/backend
+        run: >-
+          npx jest --ci --runInBand --forceExit --config jest.isolated.config.js --runTestsByPath
+          src/domains/platform-crm/platform-crm-links.controller.spec.ts
+          src/domains/platform-crm/platform-crm.seed.spec.ts
+          src/domains/platform-crm/platform-permission-assignment.spec.ts
+          src/domains/organization/onboarding/onboarding-wizard-org-admin-role.spec.ts
+          src/domains/platform-crm/platform-crm-links.postgres.integration.spec.ts
 
   frontend:
     name: Frontend
@@ -751,6 +763,7 @@ jobs:
           --include='**/employees/bulk-upload-modal/employee-bulk-upload-modal.component.spec.ts'
           --include='**/inventory/operations/components/bulk-adjustment-modal.component.spec.ts'
           --include='**/bulk-uploads/pages/bulk-upload-history-page.component.spec.ts'
+          --include='**/store/platform-crm/*.spec.ts'
 
   mobile:
     name: Mobile

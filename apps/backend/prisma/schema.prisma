@@ -8,6 +8,9 @@ datasource db {
 }
 
 model users {
+  platform_crm_links_as_customer platform_crm_links[] @relation("platform_crm_links_customer")
+  platform_crm_links_linked      platform_crm_links[] @relation("platform_crm_links_linked_by")
+  platform_crm_links_unlinked    platform_crm_links[] @relation("platform_crm_links_unlinked_by")
   bulk_upload_logs             bulk_upload_logs[]
   workflow_definitions_created workflow_definitions[] @relation("workflow_definitions_created_by")
   workflow_instance_comments   workflow_instance_comments[]
@@ -656,6 +659,7 @@ model order_events {
 }
 
 model organizations {
+  platform_crm_links   platform_crm_links[]
   workflow_definitions workflow_definitions[]
   workflow_instance_comments workflow_instance_comments[]
   workflow_public_links workflow_public_links[]
@@ -965,6 +969,7 @@ model organization_payment_policies {
 }
 
 model stores {
+  platform_crm_links         platform_crm_links[]
   workflow_definitions       workflow_definitions[]
   workflow_versions          workflow_versions[]
   work_groups                work_groups[]
@@ -17146,4 +17151,44 @@ model workflow_exports {
 
   @@index([store_id, created_at])
   @@index([status, created_at])
+}
+
+// ============================================
+// Vendix Platform · enlace prospecto CRM ↔ organización cliente
+// (odd/tasks/vendix-platform-crm-enlace.md). Solo la tienda de la org
+// `is_platform` escribe aquí: lo impone el guard del módulo `platform-crm` y,
+// en la base, el trigger `platform_crm_links_platform_store_guard`.
+// Unicidad (un enlace activo por cliente y por organización) en índices únicos
+// PARCIALES `WHERE status = 'linked'` que Prisma no puede expresar: viven solo
+// en la migración 20261204090000_platform_crm_links.
+// ============================================
+
+enum platform_crm_link_status_enum {
+  linked
+  unlinked
+}
+
+/// Enlace prospecto/cliente del CRM de Vendix Platform ↔ organización cliente.
+/// Solo filas de tiendas de la org `is_platform` (trigger). Nunca fusiona cuentas
+/// ni escribe en la organización enlazada. Desenlazar cambia `status`, no borra.
+model platform_crm_links {
+  id                  Int                           @id @default(autoincrement())
+  store_id            Int
+  customer_id         Int
+  organization_id     Int
+  status              platform_crm_link_status_enum @default(linked)
+  note                String?                       @db.VarChar(300)
+  linked_by_user_id   Int
+  linked_at           DateTime                      @default(now()) @db.Timestamp(6)
+  unlinked_by_user_id Int?
+  unlinked_at         DateTime?                     @db.Timestamp(6)
+
+  store        stores        @relation(fields: [store_id], references: [id], onDelete: Restrict, onUpdate: NoAction)
+  customer     users         @relation("platform_crm_links_customer", fields: [customer_id], references: [id], onDelete: Restrict, onUpdate: NoAction)
+  organization organizations @relation(fields: [organization_id], references: [id], onDelete: Restrict, onUpdate: NoAction)
+  linked_by    users         @relation("platform_crm_links_linked_by", fields: [linked_by_user_id], references: [id], onDelete: Restrict, onUpdate: NoAction)
+  unlinked_by  users?        @relation("platform_crm_links_unlinked_by", fields: [unlinked_by_user_id], references: [id], onDelete: SetNull, onUpdate: NoAction)
+
+  @@index([store_id, customer_id])
+  @@index([organization_id])
 }

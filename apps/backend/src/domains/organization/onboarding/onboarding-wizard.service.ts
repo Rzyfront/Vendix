@@ -30,6 +30,7 @@ import { OrgLocationsService } from '../inventory/locations/org-locations.servic
 import { SettingsService } from '../../store/settings/settings.service';
 import { SettingsService as OrgSettingsService } from '../settings/settings.service';
 import { BASE_SYSTEM_PAYMENT_METHOD_NAMES } from './base-payment-methods.const';
+import { PLATFORM_PERMISSION_PREFIX } from '../../../common/constants/platform-permissions.constant';
 import {
   normalizeFiscalStatusBlock,
   type FiscalStatusBlock,
@@ -2371,9 +2372,14 @@ export class OnboardingWizardService {
       return;
     }
 
-    // Get all system permissions for org-level access
+    // Get all system permissions for org-level access.
+    // Vendix Platform (candado 3): `platform:*` también es de sistema pero
+    // pertenece solo a la org plataforma; ningún ORG_ADMIN nuevo lo recibe.
     const allPermissions = await this.prismaService.permissions.findMany({
-      where: { is_system_permission: true },
+      where: {
+        is_system_permission: true,
+        NOT: { name: { startsWith: PLATFORM_PERMISSION_PREFIX } },
+      },
     });
 
     // Create the ORG_ADMIN role
