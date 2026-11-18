@@ -283,6 +283,19 @@ export const ERROR_MESSAGES: Record<string, string> = {
   BULK_PROD_VALIDATE_001:
     'Uno de los valores tiene un formato invalido. Verifique campos como marca o categoria.',
 
+  // Bulk upload jobs (QUI-1009)
+  BULK_JOB_ALREADY_ACTIVE:
+    'Ya hay una carga de este tipo en curso en la tienda. Espera a que termine.',
+  BULK_JOB_NOT_FOUND: 'No encontramos esa carga.',
+  BULK_JOB_NOT_RETRYABLE:
+    'Esta carga ya no se puede reanudar. Sube el archivo de nuevo.',
+  BULK_JOB_ENQUEUE_FAILED:
+    'No pudimos iniciar la carga por un problema técnico. Intenta de nuevo en unos minutos.',
+  BULK_JOB_TIMEOUT:
+    'La carga superó el tiempo máximo. Estamos revisando el problema técnico.',
+  BULK_JOB_INTERRUPTED:
+    'La carga se interrumpió en el servidor. Estamos revisando el problema técnico.',
+
   // Orders
   ORD_FIND_001: 'Orden no encontrada.',
   ORD_CREATE_001: 'Error al crear la orden.',

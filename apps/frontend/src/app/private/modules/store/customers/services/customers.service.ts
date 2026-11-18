@@ -310,13 +310,6 @@ export class CustomersService {
         });
     }
 
-    /**
-     * Sube clientes en formato JSON para carga masiva
-     */
-    uploadBulkCustomersJson(customers: any[]): Observable<any> {
-        return this.http.post(`${this.apiUrl}/bulk/upload`, { customers });
-    }
-
     // ── Direcciones de envío del cliente ──────────────────────
 
     /**

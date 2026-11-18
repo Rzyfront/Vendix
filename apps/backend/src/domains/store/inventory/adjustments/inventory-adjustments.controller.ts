@@ -15,6 +15,8 @@ import {
   UploadedFile,
   ParseFilePipe,
   MaxFileSizeValidator,
+  Req,
+  Optional,
 } from '@nestjs/common';
 import { Response } from 'express';
 import { FileInterceptor } from '@nestjs/platform-express';
@@ -27,6 +29,11 @@ import {
 } from '@nestjs/swagger';
 import { InventoryAdjustmentsService } from './inventory-adjustments.service';
 import { BulkUploadLogsService } from '../../bulk-uploads/bulk-upload-logs.service';
+import { BulkUploadJobsService } from '../../bulk-uploads/bulk-upload-jobs.service';
+import { snapshotBulkJobUser } from '../../bulk-uploads/bulk-upload-job.util';
+import { InventoryAdjustmentsBulkJobHandler } from './inventory-adjustments-bulk-job.handler';
+import { BulkAdjustmentsJobDto } from './dto/bulk-adjustments-job.dto';
+import { AuthenticatedRequest } from '@common/interfaces/authenticated-request.interface';
 import { InventoryAdjustmentsBulkService } from './inventory-adjustments-bulk.service';
 import { InventoryCountScannerService } from './inventory-count-scanner.service';
 import { AiScanJobService } from '@common/ai-scan-jobs/ai-scan-job.service';
@@ -57,6 +64,9 @@ export class InventoryAdjustmentsController {
     private readonly aiScanJobs: AiScanJobService,
     private readonly responseService: ResponseService,
     private readonly bulkUploadLogs: BulkUploadLogsService,
+    @Optional() private readonly bulkJobs?: BulkUploadJobsService,
+    @Optional()
+    private readonly jobHandler?: InventoryAdjustmentsBulkJobHandler,
   ) {}
 
   @Get('bulk/template/download')
@@ -458,5 +468,31 @@ export class InventoryAdjustmentsController {
       null,
       'Adjustment deleted successfully',
     );
+  }
+
+  /** QUI-1009 — encola el ajuste masivo como trabajo durable (202). */
+  @Post('bulk/jobs')
+  @HttpCode(HttpStatus.ACCEPTED)
+  @ApiOperation({ summary: 'Enqueue a durable bulk inventory adjustment' })
+  @RequirePermissions('store:inventory:adjustments:create')
+  async enqueueBulkAdjustmentJob(
+    @Body() body: BulkAdjustmentsJobDto,
+    @Req() req: AuthenticatedRequest,
+  ) {
+    await this.jobHandler!.assertSessionExists(body.session_id);
+    const view = await this.bulkJobs!.enqueue({
+      upload_type: 'inventory_adjustments',
+      file_name: body.file_name,
+      file_hash: body.file_hash,
+      params: {
+        session_id: body.session_id,
+        location_id: body.location_id,
+        adjustment_type: body.adjustment_type,
+        description: body.description,
+        initial_load_ack: body.initial_load_ack === true,
+      },
+      user: snapshotBulkJobUser(req.user),
+    });
+    return this.responseService.success(view, 'Carga encolada');
   }
 }

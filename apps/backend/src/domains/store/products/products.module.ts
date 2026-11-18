@@ -1,5 +1,7 @@
 import { Module, OnModuleInit } from '@nestjs/common';
 import { BulkUploadsModule } from '../bulk-uploads/bulk-uploads.module';
+import { BulkUploadHandlerRegistry } from '../bulk-uploads/bulk-upload-handler.registry';
+import { ProductsBulkJobHandler } from './products-bulk-job.handler';
 import { AIToolRegistry } from '../../../ai-engine/tools/ai-tool-registry';
 import { createProductTools } from '../../../ai-engine/tools/domains/products.tools';
 import { createVariantTools } from '../../../ai-engine/tools/domains/variants.tools';
@@ -68,6 +70,7 @@ import { AccountingModule } from '../accounting/accounting.module';
   providers: [
     ProductsService,
     ProductsBulkService,
+    ProductsBulkJobHandler,
     ProductsBulkImageService,
     ProductsBulkEditService,
     ProductVariantService,
@@ -92,6 +95,8 @@ export class ProductsModule implements OnModuleInit {
     private readonly settingsService: SettingsService,
     private readonly priceTiersService: PriceTiersService,
     private readonly aiScanRegistry: AiScanHandlerRegistry,
+    private readonly bulkJobRegistry: BulkUploadHandlerRegistry,
+    private readonly productsBulkJobHandler: ProductsBulkJobHandler,
   ) {}
 
   /**
@@ -102,6 +107,9 @@ export class ProductsModule implements OnModuleInit {
    * domain to the engine and this module imports nothing extra.
    */
   onModuleInit(): void {
+    // QUI-1009: carga masiva durable de productos.
+    this.bulkJobRegistry.register(this.productsBulkJobHandler);
+
     // Cola genérica `ai-scan`: mejora/generación de imagen de producto. El
     // resultado se sube a S3 y el job devuelve key + URL firmada (sin base64).
     for (const kind of [

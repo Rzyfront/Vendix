@@ -91,23 +91,3 @@ export interface BulkProductUploadResult {
   skipped: number;
   results: BulkProductUploadItemResult[];
 }
-
-/** Máximo de filas por página del commit de sesión (contrato del backend). */
-export const BULK_UPLOAD_PAGE_SIZE = 100;
-
-/** Respuesta de una página del commit de sesión paginado. */
-export interface BulkProductUploadPage extends BulkProductUploadResult {
-  total: number;
-  offset: number;
-  limit: number;
-  done: boolean;
-}
-
-/** Progreso determinista del commit por lotes (clon de BulkEditProgress). */
-export interface BulkUploadProgress {
-  phase: 'idle' | 'uploading' | 'done';
-  totalBatches: number;
-  doneBatches: number;
-  totalRows: number;
-  doneRows: number;
-}

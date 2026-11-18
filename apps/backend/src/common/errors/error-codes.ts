@@ -5294,6 +5294,43 @@ export const ErrorCodes = {
     httpStatus: 404,
     devMessage: 'No se encontró la carga masiva en esta tienda.',
   },
+  BULK_JOB_ALREADY_ACTIVE: {
+    code: 'BULK_JOB_ALREADY_ACTIVE',
+    httpStatus: 409,
+    devMessage:
+      'Ya hay una carga de este tipo en curso en la tienda. Espera a que termine.',
+  },
+  BULK_JOB_NOT_FOUND: {
+    code: 'BULK_JOB_NOT_FOUND',
+    httpStatus: 404,
+    devMessage: 'No encontramos esa carga.',
+  },
+  BULK_JOB_NOT_RETRYABLE: {
+    code: 'BULK_JOB_NOT_RETRYABLE',
+    httpStatus: 409,
+    devMessage: 'Esta carga ya no se puede reanudar. Sube el archivo de nuevo.',
+  },
+  BULK_JOB_ENQUEUE_FAILED: {
+    code: 'BULK_JOB_ENQUEUE_FAILED',
+    httpStatus: 503,
+    devMessage:
+      'No pudimos iniciar la carga por un problema técnico. Intenta de nuevo en unos minutos.',
+  },
+  BULK_JOB_TIMEOUT: {
+    code: 'BULK_JOB_TIMEOUT',
+    httpStatus: 504,
+    devMessage: 'La carga superó el tiempo máximo de procesamiento.',
+  },
+  BULK_JOB_INTERRUPTED: {
+    code: 'BULK_JOB_INTERRUPTED',
+    httpStatus: 500,
+    devMessage: 'La carga se interrumpió mientras se procesaba un lote.',
+  },
+  BULK_JOB_NO_HANDLER: {
+    code: 'BULK_JOB_NO_HANDLER',
+    httpStatus: 500,
+    devMessage: 'No hay procesador registrado para este tipo de carga.',
+  },
   BULK_PROD_UPLOAD_FAILED: {
     code: 'BULK_PROD_UPLOAD_FAILED',
     httpStatus: 500,
