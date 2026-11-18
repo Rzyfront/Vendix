@@ -101,7 +101,7 @@ describe('PlatformAlertContextService (QUI-1031)', () => {
     const fresh = build();
     await fresh.resolveMany([alert(), alert({ id: 43, store_id: 106, affected_store_ids: [106] })]);
     expect(prisma.stores.findMany).toHaveBeenCalledTimes(2);
-    expect(prisma.stores.findMany.mock.calls[1][0].where.id.in.sort()).toEqual([105, 106]);
+    expect(((prisma.stores.findMany.mock.calls as any[])[1][0] as any).where.id.in.sort()).toEqual([105, 106]);
   });
 
   it('si la base falla, la alerta sale con ids y el fallo no queda en caché', async () => {
