@@ -46,6 +46,8 @@ import {
 } from './credit-notes/dto/create-credit-note.dto';
 import { RegisterDianEventDto } from './dto/register-dian-event.dto';
 import { NoteContextQueryDto } from './credit-notes/dto/note-context-query.dto';
+import { PurchaseOrderSupportDocumentService } from './purchase-order-support/purchase-order-support-document.service';
+import { CreatePurchaseOrderSupportDocumentDto } from './dto/create-purchase-order-support-document.dto';
 
 /*
  * NOTA sobre el guard: hasta este cambio la clase no declaraba `PermissionsGuard`,
@@ -70,6 +72,7 @@ export class InvoicingController {
     private readonly response_service: ResponseService,
     private readonly one_shot_emission: OneShotEmissionService,
     private readonly manual_emission: ManualInvoiceEmissionService,
+    private readonly po_support_document: PurchaseOrderSupportDocumentService,
   ) {}
 
   @Get()
@@ -161,6 +164,69 @@ export class InvoicingController {
   async getAiuSettings() {
     const result = await this.invoicing_service.getAiuSettingsView();
     return this.response_service.success(result);
+  }
+
+  // --- Documento soporte desde la orden de compra (QUI-684) ---
+  // Rutas de 3+ segmentos bajo `purchase-orders/`: no chocan con `:id`, pero se
+  // declaran con las estáticas para que ningún `:id/...` futuro las tape.
+
+  @Get('purchase-orders/:purchaseOrderId/support-documents')
+  @Permissions('invoicing:read')
+  async getPurchaseOrderSupportDocuments(
+    @Param('purchaseOrderId', ParseIntPipe) purchase_order_id: number,
+  ) {
+    const result =
+      await this.po_support_document.getContextForPurchaseOrder(
+        purchase_order_id,
+      );
+    return this.response_service.success(result);
+  }
+
+  @Get('purchase-orders/:purchaseOrderId/support-document-draft')
+  @Permissions('invoicing:read')
+  async getPurchaseOrderSupportDocumentDraft(
+    @Param('purchaseOrderId', ParseIntPipe) purchase_order_id: number,
+  ) {
+    const result = await this.po_support_document.getDraft(purchase_order_id);
+    return this.response_service.success(result);
+  }
+
+  @Post('purchase-orders/:purchaseOrderId/support-document')
+  @Permissions('invoicing:write')
+  @HttpCode(HttpStatus.CREATED)
+  async createPurchaseOrderSupportDocument(
+    @Param('purchaseOrderId', ParseIntPipe) purchase_order_id: number,
+    @Body() create_dto: CreatePurchaseOrderSupportDocumentDto,
+  ) {
+    const { invoice, replayed } =
+      await this.po_support_document.createFromPurchaseOrder(
+        purchase_order_id,
+        create_dto,
+      );
+
+    // Igual que `POST /store/invoicing`: recuperar nunca vuelve a emitir.
+    if (replayed) {
+      return this.response_service.success(
+        { ...invoice, idempotency_replayed: true },
+        'Documento soporte existente recuperado; consulta su estado antes de reintentar la emisión.',
+      );
+    }
+
+    if (create_dto.emit_immediately === true) {
+      const { invoice: emitted, emission } =
+        await this.manual_emission.emitCreated(invoice);
+      return this.response_service.success(
+        { ...emitted, emission },
+        emission.success
+          ? 'Support document created and issued successfully'
+          : 'Support document created; immediate emission failed',
+      );
+    }
+
+    return this.response_service.success(
+      invoice,
+      'Support document created successfully',
+    );
   }
 
   @Post()

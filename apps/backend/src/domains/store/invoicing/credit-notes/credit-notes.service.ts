@@ -301,7 +301,11 @@ export class CreditNotesService {
       where: {
         related_invoice_id: parent.id,
         accounting_entity_id: parent.accounting_entity_id,
-        invoice_type: { in: ['credit_note', 'debit_note'] },
+        // Las notas de ajuste del documento soporte cuelgan del soporte por
+        // `related_invoice_id`, igual que NC/ND de una factura de venta.
+        invoice_type: {
+          in: ['credit_note', 'debit_note', 'support_adjustment_note'],
+        },
       },
       select: {
         id: true,

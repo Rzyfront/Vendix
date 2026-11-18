@@ -3822,6 +3822,29 @@ export const ErrorCodes = {
     devMessage: 'Sale was charged without an issued fiscal document',
   },
   /**
+   * QUI-684 — la OC no tiene todos los datos que exige el documento soporte.
+   * El detalle viaja en `details.missing` (`{ code, field, label, target }[]`)
+   * para que el modal liste exactamente qué falta. 422: el cuerpo es válido,
+   * lo que falla es el estado de la compra/proveedor. No se crea nada.
+   */
+  INVOICING_SUPPORT_PO_001: {
+    code: 'INVOICING_SUPPORT_PO_001',
+    httpStatus: 422,
+    devMessage:
+      'La orden de compra no tiene todos los datos obligatorios para el documento soporte',
+  },
+  /**
+   * QUI-684 — la OC ya tiene un documento soporte vigente (no anulado). Una OC
+   * solo puede tener uno; el índice único parcial
+   * `invoices_po_active_support_document_key` lo garantiza también ante dos
+   * POST concurrentes. `details.active_document` = `{ id, invoice_number, status }`.
+   */
+  INVOICING_SUPPORT_PO_002: {
+    code: 'INVOICING_SUPPORT_PO_002',
+    httpStatus: 409,
+    devMessage: 'La orden de compra ya tiene un documento soporte vigente',
+  },
+  /**
    * IDENTIDAD FISCAL DEL EMISOR INCOMPLETA — lo lanza el resolvedor estricto
    * (`resolveTenantFiscalIdentity`) cuando falta `legal_name`,
    * `municipality_code` o `department`.
