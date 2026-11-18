@@ -8,6 +8,13 @@ import { toAiJobFailure } from '../../../common/ai-scan-jobs/ai-job-failure.util
 import { ExpenseScannerService } from './expense-scanner.service';
 import { ExpenseScanResponse } from './dto/scan-expense.dto';
 import { ExpenseScanJob } from './expense-scan-job.interface';
+import { ErrorCodes } from '../../../common/errors';
+
+/** Model read/parse failures: non-deterministic, so BullMQ keeps retrying them. */
+const EXPENSE_SCAN_RETRY_CODES = [
+  ErrorCodes.INV_SCAN_AI_FAIL.code,
+  ErrorCodes.INV_SCAN_PARSE_FAIL.code,
+];
 
 /**
  * Worker de la cola `expense-scan`. Ejecuta la parte pesada del escaneo de
@@ -62,7 +69,7 @@ export class ExpenseScanProcessor extends WorkerHost {
       );
       // Re-lanzar para que BullMQ registre failedReason (el CODIGO de Vendix)
       // y aplique reintentos.
-      throw toAiJobFailure(error);
+      throw toAiJobFailure(error, { retryCodes: EXPENSE_SCAN_RETRY_CODES });
     }
   }
 

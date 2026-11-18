@@ -192,12 +192,13 @@ export class ExpensesController {
     // QUI-1020: additive AI-job meta (progress, timestamps, stall, failure class).
     return this.response_service.success({
       ...status,
-      ...this.ai_monitor.describe(
+      ...(await this.ai_monitor.describe(
         job,
         state,
         LEGACY_AI_SOURCES.expenseScan,
         job.data?.context,
-      ),
+        this.expense_scan_queue,
+      )),
     });
   }
 

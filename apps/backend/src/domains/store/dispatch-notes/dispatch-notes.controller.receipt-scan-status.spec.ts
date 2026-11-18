@@ -9,7 +9,7 @@ function build(job: unknown) {
   };
   const queue = { getJob: jest.fn().mockResolvedValue(job) };
   const monitor = {
-    describe: jest.fn().mockReturnValue({ progress: null, stalled: true }),
+    describe: jest.fn().mockResolvedValue({ progress: null, stalled: true }),
   };
   const response = { success: jest.fn((data) => ({ data })) };
   const controller = new DispatchNotesController(
@@ -20,13 +20,13 @@ function build(job: unknown) {
     queue as any,
     monitor as any,
   );
-  return { controller, service, monitor };
+  return { controller, service, monitor, queue };
 }
 
 describe('DispatchNotesController GET receipt-scan/:jobId', () => {
   it('adds the AI job meta to the state the service validated', async () => {
     const job = { id: '5', data: { context: { store_id: 11, request_id: 'r1' } } };
-    const { controller, monitor } = build(job);
+    const { controller, monitor, queue } = build(job);
 
     const res = await controller.receiptScanStatus('5');
 
@@ -38,6 +38,7 @@ describe('DispatchNotesController GET receipt-scan/:jobId', () => {
       'active',
       LEGACY_AI_SOURCES.receiptScan,
       job.data.context,
+      queue,
     );
   });
 
@@ -48,5 +49,24 @@ describe('DispatchNotesController GET receipt-scan/:jobId', () => {
 
     expect(res).toEqual({ data: { status: 'active', result: undefined, error: undefined } });
     expect(monitor.describe).not.toHaveBeenCalled();
+  });
+
+  it('without queue and monitor (optional deps) returns the plain status', async () => {
+    const service = {
+      getReceiptScanJobStatus: jest
+        .fn()
+        .mockResolvedValue({ status: 'active', result: undefined, error: undefined }),
+    };
+    const response = { success: jest.fn((data) => ({ data })) };
+    const controller = new DispatchNotesController(
+      service as any,
+      {} as any,
+      {} as any,
+      response as any,
+    );
+
+    await expect(controller.receiptScanStatus('5')).resolves.toEqual({
+      data: { status: 'active', result: undefined, error: undefined },
+    });
   });
 });

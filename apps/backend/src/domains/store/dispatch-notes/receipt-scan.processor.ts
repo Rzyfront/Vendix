@@ -9,6 +9,13 @@ import { toAiJobFailure } from '@common/ai-scan-jobs/ai-job-failure.util';
 import { DispatchNotesService } from './dispatch-notes.service';
 import { ScanReceiptResult } from './dto/scan-receipt.dto';
 import { ReceiptScanJob } from './receipt-scan-job.interface';
+import { ErrorCodes } from '@common/errors';
+
+/** Model read/parse failures: non-deterministic, so BullMQ keeps retrying them. */
+const RECEIPT_SCAN_RETRY_CODES = [
+  ErrorCodes.DISPATCH_RECEIPT_SCAN_AI_FAIL.code,
+  ErrorCodes.DISPATCH_RECEIPT_SCAN_PARSE_FAIL.code,
+];
 
 /**
  * Async worker for the purchase-receipt OCR scanner (`receipt-scan` queue).
@@ -71,7 +78,7 @@ export class ReceiptScanProcessor extends WorkerHost {
       );
       // Re-throw so BullMQ marks the job failed / retries per the enqueue
       // policy. `failedReason` carries the Vendix error CODE (QUI-1020).
-      throw toAiJobFailure(error);
+      throw toAiJobFailure(error, { retryCodes: RECEIPT_SCAN_RETRY_CODES });
     }
   }
 

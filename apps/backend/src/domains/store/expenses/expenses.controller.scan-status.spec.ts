@@ -5,7 +5,7 @@ import { LEGACY_AI_SOURCES } from '@common/ai-scan-jobs/ai-scan-sources';
 function build(job: unknown) {
   const queue = { getJob: jest.fn().mockResolvedValue(job) };
   const monitor = {
-    describe: jest.fn().mockReturnValue({ progress: { done: 1, total: 2 }, stalled: false }),
+    describe: jest.fn().mockResolvedValue({ progress: { done: 1, total: 2 }, stalled: false }),
   };
   const response = { success: jest.fn((data) => ({ data })) };
   const controller = new ExpensesController(
@@ -16,7 +16,7 @@ function build(job: unknown) {
     response as any,
     monitor as any,
   );
-  return { controller, monitor };
+  return { controller, monitor, queue };
 }
 
 const ctx = (store_id: number) => ({
@@ -39,7 +39,7 @@ describe('ExpensesController GET scan/:jobId', () => {
 
   it('adds the AI job meta without removing the existing fields', async () => {
     const j = job();
-    const { controller, monitor } = build(j);
+    const { controller, monitor, queue } = build(j);
 
     const res = await RequestContextService.run(ctx(11), () => controller.getScanStatus('5'));
 
@@ -57,6 +57,7 @@ describe('ExpensesController GET scan/:jobId', () => {
       'active',
       LEGACY_AI_SOURCES.expenseScan,
       j.data.context,
+      queue,
     );
   });
 

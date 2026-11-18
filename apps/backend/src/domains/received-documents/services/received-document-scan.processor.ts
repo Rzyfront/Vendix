@@ -8,6 +8,7 @@ import { LEGACY_AI_SOURCES } from '@common/ai-scan-jobs/ai-scan-sources';
 import { toAiJobFailure } from '@common/ai-scan-jobs/ai-job-failure.util';
 import { ReceivedDocumentScanJob, ReceivedDocumentScanResult } from '../interfaces/received-document-scan-job.interface';
 import { ReceivedDocumentScanQueueService } from './received-document-scan-queue.service';
+import { ErrorCodes } from '@common/errors';
 
 /** Maps the job's tenant snapshot to the owner the AI monitor reports. */
 export function receivedDocumentScanOwner(
@@ -22,6 +23,12 @@ export function receivedDocumentScanOwner(
     request_id: context.request_id,
   };
 }
+
+/** Model read/parse failures: non-deterministic, so BullMQ keeps retrying them. */
+const RECEIVED_SCAN_RETRY_CODES = [
+  ErrorCodes.INV_SCAN_AI_FAIL.code,
+  ErrorCodes.INV_SCAN_PARSE_FAIL.code,
+];
 
 @Processor('received-document-scan', { concurrency: 1 })
 export class ReceivedDocumentScanProcessor extends WorkerHost {
@@ -39,7 +46,7 @@ export class ReceivedDocumentScanProcessor extends WorkerHost {
       );
     } catch (error) {
       // `failedReason` carries the Vendix error CODE (QUI-1020).
-      throw toAiJobFailure(error);
+      throw toAiJobFailure(error, { retryCodes: RECEIVED_SCAN_RETRY_CODES });
     }
   }
 

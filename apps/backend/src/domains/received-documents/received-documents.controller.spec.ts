@@ -266,7 +266,7 @@ describe('received-document route controllers', () => {
     for (const Controller of [StoreReceivedDocumentsController, OrganizationReceivedDocumentsController]) {
       const deps = dependencies();
       const queue = { getJob: jest.fn().mockResolvedValue(job) };
-      const monitor = { describe: jest.fn().mockReturnValue(meta) };
+      const monitor = { describe: jest.fn().mockResolvedValue(meta) };
       const controller = new Controller(
         deps.documents as unknown as ReceivedDocumentsService,
         deps.contexts as unknown as ReceivedDocumentsContextService,
@@ -292,6 +292,7 @@ describe('received-document route controllers', () => {
         'active',
         expect.objectContaining({ queue: 'received-document-scan' }),
         { store_id: 21, organization_id: 3, user_id: 9, request_id: 'req-1' },
+        queue,
       );
     }
   });
@@ -320,7 +321,7 @@ describe('received-document route controllers', () => {
       deps.buyerEvents as unknown as ReceivedBuyerEventEnablementService,
       {} as never,
       { getJob: jest.fn().mockResolvedValue(job) } as never,
-      { describe: jest.fn().mockReturnValue({ error_category: 'ai_unavailable' }) } as never,
+      { describe: jest.fn().mockResolvedValue({ error_category: 'ai_unavailable' }) } as never,
     );
 
     await expect(controller.getScanStatus('scan-job-1')).resolves.toEqual({

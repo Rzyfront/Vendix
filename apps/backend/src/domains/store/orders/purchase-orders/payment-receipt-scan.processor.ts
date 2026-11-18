@@ -11,6 +11,13 @@ import {
   PaymentReceiptScanJob,
   PaymentReceiptScanResult,
 } from './payment-receipt-scan-job.interface';
+import { ErrorCodes } from '@common/errors';
+
+/** Model read/parse failures: non-deterministic, so BullMQ keeps retrying them. */
+const PAYMENT_SCAN_RETRY_CODES = [
+  ErrorCodes.INV_SCAN_AI_FAIL.code,
+  ErrorCodes.INV_SCAN_PARSE_FAIL.code,
+];
 
 /**
  * Track B2 — async processor for the payment-receipt OCR scan queue.
@@ -63,8 +70,9 @@ export class PaymentReceiptScanProcessor extends WorkerHost {
       this.logger.error(
         `[PaymentReceiptScan] job=${job.id} failed: ${error?.message ?? error}`,
       );
-      // Vendix errors keep their CODE as `failedReason`; the rest is retried.
-      throw toAiJobFailure(error);
+      // Vendix errors keep their CODE as `failedReason`; model read/parse
+      // failures stay retryable, the rest of the 4xx are final.
+      throw toAiJobFailure(error, { retryCodes: PAYMENT_SCAN_RETRY_CODES });
     }
   }
 

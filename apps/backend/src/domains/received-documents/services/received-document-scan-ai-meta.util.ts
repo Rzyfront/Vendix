@@ -28,11 +28,12 @@ export async function withReceivedScanAiMeta<T extends { status: string }>(
   return {
     ...status,
     ...(failedCode ? { error: failedCode } : {}),
-    ...monitor.describe(
+    ...(await monitor.describe(
       job,
       state,
       LEGACY_AI_SOURCES.receivedDocumentScan,
       receivedDocumentScanOwner(job),
-    ),
+      queue,
+    )),
   };
 }

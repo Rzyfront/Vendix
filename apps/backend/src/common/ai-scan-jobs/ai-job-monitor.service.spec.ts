@@ -40,12 +40,13 @@ describe('AiJobMonitorService (QUI-1020)', () => {
   });
 
   describe('describe', () => {
-    it('entrega marcas de tiempo del servidor, intentos y progreso real', () => {
-      const meta = monitor.describe(
+    it('entrega marcas de tiempo del servidor, intentos y progreso real', async () => {
+      const meta = await monitor.describe(
         job({ progress: { done: 2, total: 5, stage: 'Leyendo páginas' } }),
         'active',
         SOURCE,
         OWNER,
+        undefined,
         NOW,
       );
       expect(meta).toEqual({
@@ -61,22 +62,23 @@ describe('AiJobMonitorService (QUI-1020)', () => {
       expect(incidents.report).not.toHaveBeenCalled();
     });
 
-    it('fallido -> clase del fallo (documento, técnico, IA sin créditos)', () => {
+    it('fallido -> clase del fallo (documento, técnico, IA sin créditos)', async () => {
       const failed = (failedReason: string) =>
         monitor.describe(
           job({ failedReason, finishedOn: NOW }),
           'failed',
           SOURCE,
           OWNER,
+          undefined,
           NOW,
         );
-      expect(failed('RUT_SCAN_PARSE_FAIL')).toMatchObject({
+      expect(await failed('RUT_SCAN_PARSE_FAIL')).toMatchObject({
         error_category: 'document',
       });
-      expect(failed('RUT_SCAN_AI_FAIL')).toMatchObject({
+      expect(await failed('RUT_SCAN_AI_FAIL')).toMatchObject({
         error_category: 'technical',
       });
-      expect(failed('AI_PROVIDER_003')).toMatchObject({
+      expect(await failed('AI_PROVIDER_003')).toMatchObject({
         error_category: 'ai_unavailable',
         error_reason: 'credits',
       });
@@ -87,7 +89,7 @@ describe('AiJobMonitorService (QUI-1020)', () => {
         timestamp: NOW - AI_JOB_WAITING_STALL_MS - 1,
         processedOn: undefined,
       });
-      const meta = monitor.describe(stuck, 'waiting', SOURCE, OWNER, NOW);
+      const meta = await monitor.describe(stuck, 'waiting', SOURCE, OWNER, undefined, NOW);
       expect(meta.stalled).toBe(true);
       await new Promise((r) => setImmediate(r));
       expect(incidents.report).toHaveBeenCalledTimes(1);
@@ -100,12 +102,13 @@ describe('AiJobMonitorService (QUI-1020)', () => {
       });
     });
 
-    it('en cola dentro del umbral no está colgado', () => {
-      const meta = monitor.describe(
+    it('en cola dentro del umbral no está colgado', async () => {
+      const meta = await monitor.describe(
         job({ timestamp: NOW - AI_JOB_WAITING_STALL_MS + 1_000, processedOn: undefined }),
         'waiting',
         SOURCE,
         OWNER,
+        undefined,
         NOW,
       );
       expect(meta.stalled).toBe(false);
@@ -113,11 +116,12 @@ describe('AiJobMonitorService (QUI-1020)', () => {
     });
 
     it('activo más allá del umbral -> colgado por tipo de proceso', async () => {
-      const meta = monitor.describe(
+      const meta = await monitor.describe(
         job({ processedOn: NOW - AI_JOB_ACTIVE_STALL_MS - 1 }),
         'active',
         SOURCE,
         OWNER,
+        undefined,
         NOW,
       );
       expect(meta.stalled).toBe(true);
@@ -127,15 +131,63 @@ describe('AiJobMonitorService (QUI-1020)', () => {
       );
     });
 
-    it('reintento en espera (ya empezó antes) no cuenta como cola sin worker', () => {
-      const meta = monitor.describe(
+    it('reintento en espera (ya empezó antes) no cuenta como cola sin worker', async () => {
+      const meta = await monitor.describe(
         job({ timestamp: NOW - AI_JOB_WAITING_STALL_MS * 3, processedOn: NOW - 5_000 }),
         'delayed',
         SOURCE,
         OWNER,
+        undefined,
         NOW,
       );
       expect(meta.stalled).toBe(false);
+    });
+    describe('cola con trabajo en curso (backlog)', () => {
+      const stuck = () =>
+        job({
+          timestamp: NOW - AI_JOB_WAITING_STALL_MS - 1,
+          processedOn: undefined,
+        });
+
+      it('en cola > umbral con 0 activos -> colgado e incidente', async () => {
+        const queue = { getActiveCount: jest.fn().mockResolvedValue(0) };
+        const meta = await monitor.describe(stuck(), 'waiting', SOURCE, OWNER, queue, NOW);
+        expect(meta.stalled).toBe(true);
+        await new Promise((r) => setImmediate(r));
+        expect(incidents.report).toHaveBeenCalledTimes(1);
+      });
+
+      it('en cola > umbral con activos > 0 -> backlog: no colgado y sin incidente', async () => {
+        const queue = { getActiveCount: jest.fn().mockResolvedValue(1) };
+        const meta = await monitor.describe(stuck(), 'waiting', SOURCE, OWNER, queue, NOW);
+        expect(meta.stalled).toBe(false);
+        await new Promise((r) => setImmediate(r));
+        expect(incidents.report).not.toHaveBeenCalled();
+      });
+
+      it('sin cola -> conserva el umbral por tiempo (colgado)', async () => {
+        const meta = await monitor.describe(stuck(), 'waiting', SOURCE, OWNER, undefined, NOW);
+        expect(meta.stalled).toBe(true);
+      });
+
+      it('getActiveCount falla -> conserva el umbral por tiempo (colgado)', async () => {
+        const queue = { getActiveCount: jest.fn().mockRejectedValue(new Error('redis')) };
+        const meta = await monitor.describe(stuck(), 'waiting', SOURCE, OWNER, queue, NOW);
+        expect(meta.stalled).toBe(true);
+      });
+
+      it('no consulta Redis si el umbral por tiempo no se cumple', async () => {
+        const queue = { getActiveCount: jest.fn().mockResolvedValue(0) };
+        await monitor.describe(
+          job({ timestamp: NOW - 1_000, processedOn: undefined }),
+          'waiting',
+          SOURCE,
+          OWNER,
+          queue,
+          NOW,
+        );
+        expect(queue.getActiveCount).not.toHaveBeenCalled();
+      });
     });
   });
 
@@ -227,6 +279,55 @@ describe('AiJobMonitorService (QUI-1020)', () => {
         'Respuesta del proveedor': '402 Insufficient Balance',
       });
       expect(JSON.stringify(input.details)).not.toContain('Insufficient');
+    });
+
+    it('la nota del proveedor de un intento fallido no sobrevive a un reintento exitoso', async () => {
+      const retried = job({ id: '88' });
+      await expect(
+        monitor.runAiWork(retried, SOURCE, async () => {
+          noteProviderOutcome(
+            { success: false, failure_reason: 'rate_limited', error: '429 Too Many Requests' },
+            'rut_scanner',
+          );
+          throw new VendixHttpException(ErrorCodes.RUT_SCAN_AI_FAIL);
+        }),
+      ).rejects.toMatchObject({ errorCode: 'AI_PROVIDER_004' });
+      // Non-final failure: BullMQ will retry, the note stays for that failure.
+      await monitor.onFailed(retried, SOURCE, OWNER);
+      await expect(
+        monitor.runAiWork(retried, SOURCE, async () => 'ok'),
+      ).resolves.toBe('ok');
+
+      // A later, unrelated final failure of the same job key must not carry the old 429.
+      retried.failedReason = 'RUT_SCAN_AI_FAIL';
+      retried.finishedOn = NOW;
+      await monitor.onFailed(retried, SOURCE, OWNER);
+      const input = incidents.report.mock.calls[0][0];
+      expect(input.internalDetails).toMatchObject({
+        'App de IA': null,
+        'Respuesta del proveedor': null,
+      });
+    });
+
+    it('una nota previa se borra al empezar un nuevo intento aunque este falle sin proveedor', async () => {
+      const retried = job({ id: '89' });
+      await expect(
+        monitor.runAiWork(retried, SOURCE, async () => {
+          noteProviderOutcome({ success: false, failure_reason: 'credits', error: 'old' }, 'x');
+          throw new VendixHttpException(ErrorCodes.RUT_SCAN_AI_FAIL);
+        }),
+      ).rejects.toMatchObject({ errorCode: 'AI_PROVIDER_003' });
+      await expect(
+        monitor.runAiWork(retried, SOURCE, async () => {
+          throw new VendixHttpException(ErrorCodes.RUT_SCAN_AI_FAIL);
+        }),
+      ).rejects.toMatchObject({ errorCode: 'RUT_SCAN_AI_FAIL' });
+      retried.failedReason = 'RUT_SCAN_AI_FAIL';
+      retried.finishedOn = NOW;
+      await monitor.onFailed(retried, SOURCE, OWNER);
+      expect(incidents.report.mock.calls[0][0].internalDetails).toMatchObject({
+        'Respuesta del proveedor': null,
+      });
     });
 
     it('nunca lanza aunque el servicio de incidentes falle', async () => {

@@ -62,6 +62,21 @@ describe('ExpenseScanProcessor', () => {
     await expect(p).rejects.toMatchObject({ message: 'INV_SCAN_INVALID_FILE' });
   });
 
+  it.each(['INV_SCAN_AI_FAIL', 'INV_SCAN_PARSE_FAIL'])(
+    'a model read/parse failure stays retryable (plain Error with the code): %s',
+    async (code) => {
+      const { processor, scanner } = build();
+      scanner.scanFromImage.mockRejectedValue(
+        new VendixHttpException(
+          ErrorCodes[code as keyof typeof ErrorCodes] as any,
+        ),
+      );
+      const p = processor.process(job());
+      await expect(p).rejects.not.toBeInstanceOf(UnrecoverableError);
+      await expect(p).rejects.toMatchObject({ message: code });
+    },
+  );
+
   it('any other error is rethrown untouched so BullMQ retries', async () => {
     const { processor, scanner } = build();
     const boom = new Error('boom');

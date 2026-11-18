@@ -1155,7 +1155,7 @@ export class InvoiceScannerService {
       this.logger.error(
         `[PaymentReceiptScan] aiEngine.run failed: ${response?.error ?? 'unknown'}`,
       );
-      throw new Error('AI scan failed');
+      throw new VendixHttpException(ErrorCodes.INV_SCAN_AI_FAIL);
     }
 
     let parsed: any;
@@ -1170,7 +1170,7 @@ export class InvoiceScannerService {
       this.logger.error(
         `[PaymentReceiptScan] JSON parse failed: ${err?.message} (raw=${String(raw).slice(0, 200)})`,
       );
-      throw new Error('OCR parse failed');
+      throw new VendixHttpException(ErrorCodes.INV_SCAN_PARSE_FAIL);
     }
 
     return {

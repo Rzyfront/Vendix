@@ -1,5 +1,5 @@
 import { Injectable, Logger } from '@nestjs/common';
-import type { Job } from 'bullmq';
+import type { Job, Queue } from 'bullmq';
 import { ErrorCodes, VendixHttpException } from '@common/errors';
 import { PlatformIncidentService } from '@common/incidents/platform-incident.service';
 import { PlatformOrgService } from '@common/services/platform-org.service';
@@ -111,7 +111,11 @@ export class AiJobMonitorService {
   ): Promise<T> {
     return runRecordingProviderFailures(async () => {
       try {
-        return await work();
+        // A note left by an earlier attempt must not outlive it.
+        this.providerNotes.delete(noteKey(source, job));
+        const result = await work();
+        this.providerNotes.delete(noteKey(source, job));
+        return result;
       } catch (error) {
         const recorded = lastRecordedProviderFailure();
         if (!recorded) throw error;
@@ -133,22 +137,33 @@ export class AiJobMonitorService {
 
   /**
    * Status metadata of a job in `state`. When the job is stalled it also opens
-   * (once, deduplicated) the incident, without waiting for it.
+   * (once, deduplicated) the incident, without waiting for it. A waiting job
+   * is stalled only when no worker is busy on the queue (otherwise it is just
+   * a backlog); without `queue` (or if it cannot be asked) the time threshold
+   * alone decides.
    */
-  describe(
+  async describe(
     job: Job,
     state: string,
     source: AiJobSource,
     owner?: AiJobOwner | null,
+    queue?: Pick<Queue, 'getActiveCount'>,
     now: number = Date.now(),
-  ): AiJobStatusMeta {
+  ): Promise<AiJobStatusMeta> {
     const startedAt = job.processedOn ?? null;
     const finishedAt = job.finishedOn ?? null;
     const waiting = ['waiting', 'prioritized', 'waiting-children', 'delayed'];
-    const stalledWaiting =
+    let stalledWaiting =
       waiting.includes(state) &&
       startedAt === null &&
       now - job.timestamp > AI_JOB_WAITING_STALL_MS;
+    if (stalledWaiting && queue) {
+      try {
+        stalledWaiting = (await queue.getActiveCount()) === 0;
+      } catch {
+        // Keep the time-threshold verdict.
+      }
+    }
     const stalledActive =
       state === 'active' &&
       startedAt !== null &&
@@ -185,8 +200,8 @@ export class AiJobMonitorService {
     owner?: AiJobOwner | null,
   ): Promise<void> {
     if (!job) return;
-    const note = this.providerNotes.get(noteKey(source, job));
     if (!job.finishedOn) return; // BullMQ will retry it
+    const note = this.providerNotes.get(noteKey(source, job));
     this.providerNotes.delete(noteKey(source, job));
     const failure = classifyAiJobFailure(job.failedReason);
     if (!failureNeedsIncident(failure)) return;

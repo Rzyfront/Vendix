@@ -81,8 +81,34 @@ describe('toAiJobFailure', () => {
     expect((limited as Error).message).toBe('AI_PROVIDER_004');
   });
 
+  it('un 4xx listado en retryCodes -> reintentable (Error plano) con el código', () => {
+    const out = toAiJobFailure(
+      new VendixHttpException(ErrorCodes.RUT_SCAN_PARSE_FAIL),
+      { retryCodes: ['RUT_SCAN_PARSE_FAIL'] },
+    );
+    expect(out).not.toBeInstanceOf(UnrecoverableError);
+    expect(out).toBeInstanceOf(Error);
+    expect((out as Error).message).toBe('RUT_SCAN_PARSE_FAIL');
+  });
+
+  it('un 4xx fuera de retryCodes sigue siendo definitivo', () => {
+    const out = toAiJobFailure(
+      new VendixHttpException(ErrorCodes.RUT_SCAN_PARSE_FAIL),
+      { retryCodes: ['OTHER_CODE'] },
+    );
+    expect(out).toBeInstanceOf(UnrecoverableError);
+  });
+
   it('cualquier otro error pasa intacto', () => {
     const boom = new Error('boom');
     expect(toAiJobFailure(boom)).toBe(boom);
+  });
+});
+
+describe('CRM_LANDING_003 classification', () => {
+  it('es técnico (incidente), no del documento', () => {
+    expect(classifyAiJobFailure('CRM_LANDING_003')).toEqual({
+      category: 'technical',
+    });
   });
 });

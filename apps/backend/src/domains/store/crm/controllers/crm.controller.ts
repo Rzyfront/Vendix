@@ -90,11 +90,12 @@ export class CrmController {
     const job = await this.crmLandingQueue.getJob(jobId);
     const meta =
       job && this.aiJobMonitor
-        ? this.aiJobMonitor.describe(
+        ? await this.aiJobMonitor.describe(
             job,
             result.status,
             LEGACY_AI_SOURCES.crmLanding,
             job.data?.context,
+            this.crmLandingQueue,
           )
         : undefined;
     return this.responseService.success({

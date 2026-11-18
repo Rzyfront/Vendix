@@ -65,6 +65,21 @@ describe('PaymentReceiptScanProcessor', () => {
     await expect(p).rejects.toMatchObject({ message: 'INV_SCAN_INVALID_FILE' });
   });
 
+  it.each(['INV_SCAN_AI_FAIL', 'INV_SCAN_PARSE_FAIL'])(
+    'un fallo de lectura/parseo del modelo se reintenta (Error plano con el código): %s',
+    async (code) => {
+      const { processor, scanner } = build();
+      scanner.scanPaymentFromImage.mockRejectedValue(
+        new VendixHttpException(
+          ErrorCodes[code as keyof typeof ErrorCodes] as any,
+        ),
+      );
+      const p = processor.process(job());
+      await expect(p).rejects.not.toBeInstanceOf(UnrecoverableError);
+      await expect(p).rejects.toMatchObject({ message: code });
+    },
+  );
+
   it('un error cualquiera se relanza tal cual (BullMQ reintenta)', async () => {
     const { processor, scanner } = build();
     const boom = new Error('boom');

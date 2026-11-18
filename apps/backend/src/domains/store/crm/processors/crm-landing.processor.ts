@@ -62,7 +62,7 @@ export class CrmLandingProcessor extends WorkerHost {
     } catch (error: any) {
       this.logger.error(`crm-landing job ${job.id} failed: ${error?.message}`);
       // `failedReason` reaches the user: propagate the CODE.
-      throw toAiJobFailure(error);
+      throw toAiJobFailure(error, { retryCodes: ['CRM_LANDING_003'] });
     }
   }
 

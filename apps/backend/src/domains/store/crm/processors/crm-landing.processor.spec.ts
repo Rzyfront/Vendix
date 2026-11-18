@@ -56,6 +56,16 @@ describe('CrmLandingProcessor (QUI-1020)', () => {
     await expect(p).rejects.toMatchObject({ message: 'AI_QUEUE_002' });
   });
 
+  it('CRM_LANDING_003 (model returned unusable JSON) is retryable with the code as failedReason', async () => {
+    const { processor, generation } = build();
+    generation.generateLanding.mockRejectedValue(
+      new VendixHttpException(ErrorCodes.CRM_LANDING_003),
+    );
+    const p = processor.process(job());
+    await expect(p).rejects.not.toBeInstanceOf(UnrecoverableError);
+    await expect(p).rejects.toMatchObject({ message: 'CRM_LANDING_003' });
+  });
+
   it('any other error is rethrown untouched so BullMQ retries', async () => {
     const { processor, generation } = build();
     const boom = new Error('boom');

@@ -43,6 +43,8 @@ const TECHNICAL_4XX_CODES: ReadonlySet<string> = new Set([
   'UPLOAD_STORE_CONTEXT_001',
   'AI_QUEUE_001',
   'AI_QUEUE_002',
+  // The model returned unusable JSON for the landing: nothing the user did.
+  'CRM_LANDING_003',
 ]);
 
 /**
@@ -89,11 +91,20 @@ export function failureNeedsIncident(failure: AiJobFailureClass): boolean {
  * What an AI job worker throws so BullMQ keeps the Vendix error CODE as
  * `failedReason` (the status endpoint classifies it and the client maps it to
  * a message): a 4xx other than 429 is the input's fault and is not retried;
- * any other Vendix error is retried. Anything else passes through untouched.
+ * any other Vendix error is retried. `retryCodes` lists 4xx codes that are
+ * model failures, not input faults, and stay retryable. Anything else passes through untouched.
  */
-export function toAiJobFailure(error: unknown): unknown {
+export function toAiJobFailure(
+  error: unknown,
+  opts?: { retryCodes?: readonly string[] },
+): unknown {
   if (error instanceof VendixHttpException) {
     const status = error.getStatus();
+    // Non-deterministic model failures (parse/AI read) are worth a retry even
+    // though they carry a 4xx status.
+    if (opts?.retryCodes?.includes(error.errorCode)) {
+      return new Error(error.errorCode);
+    }
     if (status >= 400 && status < 500 && status !== 429) {
       return new UnrecoverableError(error.errorCode);
     }

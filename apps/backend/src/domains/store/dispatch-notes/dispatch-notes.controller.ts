@@ -16,6 +16,7 @@ import {
   HttpCode,
   HttpStatus,
   forwardRef,
+  Optional,
 } from '@nestjs/common';
 import { FileInterceptor } from '@nestjs/platform-express';
 import { InjectQueue } from '@nestjs/bullmq';
@@ -78,9 +79,11 @@ export class DispatchNotesController {
     @Inject(forwardRef(() => PrintGatewayService))
     private readonly printGatewayService: PrintGatewayService,
     private readonly responseService: ResponseService,
+    @Optional()
     @InjectQueue('receipt-scan')
-    private readonly receiptScanQueue: Queue<ReceiptScanJob>,
-    private readonly aiMonitor: AiJobMonitorService,
+    private readonly receiptScanQueue?: Queue<ReceiptScanJob>,
+    @Optional()
+    private readonly aiMonitor?: AiJobMonitorService,
   ) {}
 
   @Get()
@@ -347,16 +350,17 @@ export class DispatchNotesController {
       await this.dispatchNotesService.getReceiptScanJobStatus(job_id);
     // QUI-1020: additive AI-job meta. The service already validated the
     // tenant (404 for another store's job), so this never widens access.
-    const job = await this.receiptScanQueue.getJob(job_id);
+    const job = await this.receiptScanQueue?.getJob(job_id);
     const result = job
       ? {
           ...status,
-          ...this.aiMonitor.describe(
+          ...(await this.aiMonitor?.describe(
             job,
             status.status,
             LEGACY_AI_SOURCES.receiptScan,
             job.data?.context,
-          ),
+            this.receiptScanQueue,
+          )),
         }
       : status;
     return this.responseService.success(

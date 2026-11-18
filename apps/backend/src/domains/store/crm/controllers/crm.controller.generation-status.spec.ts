@@ -36,7 +36,7 @@ describe('CrmController generation (QUI-1020)', () => {
     crmService.getGenerationJobStatus.mockResolvedValue({ status: 'completed' });
     const job = { returnvalue: { ready: true }, data: { context: { store_id: 11 } } };
     queue.getJob.mockResolvedValue(job);
-    monitor.describe.mockReturnValue({ kind: 'crm_landing', stalled: false });
+    monitor.describe.mockResolvedValue({ kind: 'crm_landing', stalled: false });
 
     const res: any = await controller.getGenerationStatus('21');
 
@@ -51,6 +51,7 @@ describe('CrmController generation (QUI-1020)', () => {
       'completed',
       LEGACY_AI_SOURCES.crmLanding,
       { store_id: 11 },
+      queue,
     );
   });
 

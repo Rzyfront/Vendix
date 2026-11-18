@@ -641,7 +641,7 @@ describe('PurchaseOrdersController — estado de colas de IA con AiJobMonitorSer
     const paymentQueue = { add: jest.fn(), getJob: jest.fn() };
     const revalidateQueue = { add: jest.fn(), getJob: jest.fn() };
     const scanQueue = { add: jest.fn(), getJob: jest.fn() };
-    const monitor = { describe: jest.fn().mockReturnValue(META) };
+    const monitor = { describe: jest.fn().mockResolvedValue(META) };
     const controller = new PurchaseOrdersController(
       {} as any,
       {} as any,
@@ -693,6 +693,7 @@ describe('PurchaseOrdersController — estado de colas de IA con AiJobMonitorSer
       'active',
       expect.objectContaining({ queue: 'invoice-scan' }),
       job.data,
+      scanQueue,
     );
   });
 
@@ -709,6 +710,7 @@ describe('PurchaseOrdersController — estado de colas de IA con AiJobMonitorSer
       'active',
       expect.objectContaining({ queue: 'invoice-revalidate' }),
       job.data,
+      revalidateQueue,
     );
   });
 
@@ -727,6 +729,7 @@ describe('PurchaseOrdersController — estado de colas de IA con AiJobMonitorSer
       'active',
       expect.objectContaining({ queue: 'payment-receipt-scan' }),
       job.data.context,
+      paymentQueue,
     );
   });
 

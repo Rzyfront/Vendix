@@ -135,12 +135,13 @@ export class AiScanJobService {
       const out: AiScanJobStatus = {
         status,
         kind: (job.data as AiScanJob).kind,
-        ...this.monitor.describe(
+        ...(await this.monitor.describe(
           job,
           state,
           aiScanSource((job.data as AiScanJob).kind),
           owner,
-        ),
+          this.queue,
+        )),
       };
       if (status === 'completed') out.result = job.returnvalue;
       if (status === 'failed') out.error = job.failedReason;

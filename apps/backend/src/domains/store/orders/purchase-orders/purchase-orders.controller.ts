@@ -448,12 +448,13 @@ export class PurchaseOrdersController {
       result: (job.returnvalue as any) ?? undefined,
       error: job.failedReason ?? undefined,
       // QUI-1020: additive progress/timing/failure-class fields.
-      ...this.aiJobMonitor?.describe(
+      ...(await this.aiJobMonitor?.describe(
         job,
         state,
         LEGACY_AI_SOURCES.invoiceScan,
         job.data,
-      ),
+        this.invoiceScanQueue,
+      )),
     };
   }
 
@@ -558,12 +559,13 @@ export class PurchaseOrdersController {
       result: (job.returnvalue as any) ?? undefined,
       error: job.failedReason ?? undefined,
       // QUI-1020: additive progress/timing/failure-class fields.
-      ...this.aiJobMonitor?.describe(
+      ...(await this.aiJobMonitor?.describe(
         job,
         state,
         LEGACY_AI_SOURCES.invoiceRevalidate,
         job.data,
-      ),
+        this.invoiceRevalidateQueue,
+      )),
     };
   }
 
@@ -968,12 +970,13 @@ export class PurchaseOrdersController {
       result: (job.returnvalue as any) ?? undefined,
       error: job.failedReason ?? undefined,
       // QUI-1020: additive progress/timing/failure-class fields.
-      ...this.aiJobMonitor?.describe(
+      ...(await this.aiJobMonitor?.describe(
         job,
         state,
         LEGACY_AI_SOURCES.paymentReceiptScan,
         job.data?.context,
-      ),
+        this.paymentReceiptScanQueue,
+      )),
     };
   }
 
