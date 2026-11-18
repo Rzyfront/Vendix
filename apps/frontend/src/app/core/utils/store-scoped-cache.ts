@@ -81,9 +81,11 @@ export class StoreScopedCache<T> {
   }
 
   /**
-   * Restarts the TTL of the entry of `storeId` (call it when the response
-   * arrives). No-op when the entry was dropped meanwhile, so a late response
-   * of a store the user already left does not bring its entry back.
+   * Restarts the TTL of the entry of `storeId`. Callers tap it after
+   * `shareReplay`, so it runs when the response arrives and again on every
+   * replay to a new subscriber (a sliding window, as before QUI-1021).
+   * No-op when the entry was dropped meanwhile, so a late response of a store
+   * the user already left does not bring its entry back.
    */
   touch(storeId: number | null): void {
     if (storeId === null) return;
