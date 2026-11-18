@@ -7,9 +7,11 @@ import {
 } from '@nestjs/common';
 import { DiscoveryService } from '@nestjs/core';
 import { Cron, CronExpression } from '@nestjs/schedule';
-import { Queue } from 'bullmq';
+import { Job, Queue } from 'bullmq';
 import type Redis from 'ioredis';
+import { readJobOrigin } from '../queue/job-origin';
 import { REDIS_CLIENT } from '../redis/redis.module';
+import { describeJob } from './platform-alert-catalog';
 import { formatDateTime } from './platform-alert-format';
 import { QUEUES_WITH_OWN_INCIDENTS, severityOfQueue } from './platform-alert-policy';
 import {
@@ -18,6 +20,7 @@ import {
   tenantIdsOf,
 } from './platform-alert-sanitize';
 import { PlatformAlertService } from './platform-alert.service';
+import type { PlatformAlertContext } from './platform-alert.types';
 
 export const WORKER_HEARTBEAT_KEY = 'monitor:worker:heartbeat';
 export const WORKER_GROUP_KEY = 'worker|heartbeat';
@@ -205,6 +208,7 @@ export class PlatformAlertJobWatcherService
         },
         organizationId: tenant.organizationId,
         storeId: tenant.storeId,
+        context: jobContext(queue.name, job),
         occurredAt: job.finishedOn ? new Date(job.finishedOn) : undefined,
       });
     }
@@ -248,6 +252,7 @@ export class PlatformAlertJobWatcherService
         },
         organizationId: tenant.organizationId,
         storeId: tenant.storeId,
+        context: jobContext(queue.name, job),
         groupKey,
         alreadyCounted: first !== 'OK',
       });
@@ -293,6 +298,7 @@ export class PlatformAlertJobWatcherService
       title: `La cola ${queue.name} no está procesando`,
       message: `${waiting} trabajos esperando; el más antiguo lleva ${Math.round((now - readyAt) / 60_000)} min. ${paused ? 'La cola está en pausa.' : 'Ningún worker los está tomando.'}`,
       details: { Cola: queue.name, Esperando: waiting, 'En pausa': paused },
+      context: { module: describeJob(queue.name, '', null).module },
       groupKey,
       alreadyCounted: true,
     });
@@ -320,4 +326,22 @@ export class PlatformAlertJobWatcherService
 /** Misma lectura que `resolveVendixProcessRole` (app.module.ts): solo `api` exacto. */
 function isApiOnlyProcess(): boolean {
   return (process.env.VENDIX_PROCESS_ROLE ?? '').trim().toLowerCase() === 'api';
+}
+
+/**
+ * QUI-1031: módulo, acción y registro del trabajo (catálogo) más quién y
+ * desde dónde lo encoló (`withJobOrigin`).
+ */
+export function jobContext(queueName: string, job: Pick<Job, 'name' | 'data'>): PlatformAlertContext {
+  const described = describeJob(queueName, job.name, job.data);
+  const origin = readJobOrigin(job.data);
+  return {
+    userId: origin.userId,
+    module: described.module,
+    action: described.action,
+    origin: origin.source,
+    entityType: described.entity?.type ?? null,
+    entityId: described.entity?.id ?? null,
+    aiFeature: described.aiFeature,
+  };
 }

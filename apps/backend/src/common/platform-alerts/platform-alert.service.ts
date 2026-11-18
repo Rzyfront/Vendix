@@ -7,8 +7,10 @@ import {
 } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { OnEvent } from '@nestjs/event-emitter';
+import type { Prisma } from '@prisma/client';
 import type Redis from 'ioredis';
 import { RequestContextService } from '../context/request-context.service';
+import { currentRequestUserId } from '../queue/job-origin';
 import { PlatformIncidentService } from '../incidents/platform-incident.service';
 import {
   PLATFORM_INCIDENT_REPORTED_EVENT,
@@ -17,21 +19,29 @@ import {
 import { REDIS_CLIENT } from '../redis/redis.module';
 import { PlatformOrgService } from '../services/platform-org.service';
 import { GlobalPrismaService } from '../../prisma/services/global-prisma.service';
+import { describeHttpRoute, describeJob } from './platform-alert-catalog';
+import { PlatformAlertContextService } from './platform-alert-context.service';
 import {
+  PLAN_LIMIT_LABEL,
   SOURCE_LABELS,
+  fallbackContext,
   formatAlertMessage,
   formatDateTime,
   formatEscalationMessage,
   formatResolutionMessage,
+  isPlanLimitAlert,
   severityOf,
-  tenantLabel,
 } from './platform-alert-format';
 import {
+  PLAN_LIMIT_CODES,
   canEscalate,
+  classifyPlanLimit,
+  planLimitPeriod,
   readMonitorConfig,
   severityOfHttpFailure,
   stripApiPrefix,
   type MonitorConfig,
+  type PlanLimitMatch,
 } from './platform-alert-policy';
 import {
   fingerprintOf,
@@ -40,12 +50,15 @@ import {
   summarizeError,
 } from './platform-alert-sanitize';
 import { TelegramNotifierService } from './telegram-notifier.service';
-import type {
-  PlatformAlertEvent,
-  PlatformAlertRecordResult,
-  PlatformAlertResolution,
-  PlatformAlertRow,
-  PlatformAlertSeverity,
+import {
+  ALERT_CONTEXT_KEY,
+  type PlatformAlertContext,
+  type PlatformAlertEvent,
+  type PlatformAlertRecordResult,
+  type PlatformAlertResolution,
+  type PlatformAlertRow,
+  type PlatformAlertSeverity,
+  type ResolvedAlertContext,
 } from './platform-alert.types';
 
 /** `source` de los incidentes que abre el propio bot (su evento se ignora). */
@@ -58,7 +71,14 @@ const MAX_AFFECTED_STORES = 50;
 /** Una edición del mensaje de Telegram por alerta cada tanto (límites de Telegram). */
 const TELEGRAM_EDIT_THROTTLE_SECONDS = 30;
 const EDIT_THROTTLE_KEY_PREFIX = 'monitor:alert:edit:';
+/**
+ * Un «Límite de plan» se avisa por Telegram una vez por tienda y periodo
+ * (QUI-1031): la llave vive más que el periodo más largo (un mes).
+ */
+const PLAN_LIMIT_NOTIFIED_KEY_PREFIX = 'monitor:plan-limit:notified:';
+const PLAN_LIMIT_NOTIFIED_TTL_SECONDS = 40 * 24 * 60 * 60;
 const SWEEP_BATCH = 100;
+const PLAN_LIMIT_ERROR_TYPES = Object.keys(PLAN_LIMIT_CODES);
 
 const SEVERITY_RANK: Record<PlatformAlertSeverity, number> = {
   info: 0,
@@ -126,6 +146,7 @@ export class PlatformAlertService implements OnModuleInit, OnModuleDestroy {
     private readonly telegram: TelegramNotifierService,
     config: ConfigService,
     @Inject(REDIS_CLIENT) private readonly redis: Redis,
+    private readonly alertContext: PlatformAlertContextService,
   ) {
     this.settings = readMonitorConfig(config);
   }
@@ -177,6 +198,7 @@ export class PlatformAlertService implements OnModuleInit, OnModuleDestroy {
     const context = RequestContextService.asyncLocalStorage.getStore();
     const { severity, area } = severityOfHttpFailure(input.route, input.status);
     const process = `${input.method.toUpperCase()} ${stripApiPrefix(input.route)}`;
+    const described = describeHttpRoute(input.method, input.route);
     this.capture({
       source: 'http',
       process,
@@ -193,6 +215,11 @@ export class PlatformAlertService implements OnModuleInit, OnModuleDestroy {
       },
       organizationId: context?.organization_id ?? null,
       storeId: context?.store_id ?? null,
+      context: {
+        userId: currentRequestUserId(),
+        module: described.module,
+        action: described.action,
+      },
     });
   }
 
@@ -215,6 +242,7 @@ export class PlatformAlertService implements OnModuleInit, OnModuleDestroy {
     const context = RequestContextService.asyncLocalStorage.getStore();
     const process = `${input.method.toUpperCase()} ${path}`;
     const durationMs = Math.round(input.durationMs);
+    const described = describeHttpRoute(input.method, input.route);
     this.capture({
       source: 'latency',
       process,
@@ -229,6 +257,11 @@ export class PlatformAlertService implements OnModuleInit, OnModuleDestroy {
       },
       organizationId: context?.organization_id ?? null,
       storeId: context?.store_id ?? null,
+      context: {
+        userId: currentRequestUserId(),
+        module: described.module,
+        action: described.action,
+      },
     });
   }
 
@@ -245,6 +278,7 @@ export class PlatformAlertService implements OnModuleInit, OnModuleDestroy {
       storeId: input.storeId,
     };
     const process = input.details?.['Proceso'];
+    const described = describeIncident(input.source, input.details, input.tags);
     this.capture({
       source: 'incident',
       process:
@@ -258,6 +292,11 @@ export class PlatformAlertService implements OnModuleInit, OnModuleDestroy {
       details: { Origen: input.source, ...input.details },
       organizationId: affected.organizationId ?? null,
       storeId: affected.storeId ?? null,
+      context: {
+        userId: input.userId ?? numberOrNull(input.details?.['Usuario (id)']),
+        module: described?.module ?? null,
+        action: described?.action ?? null,
+      },
       groupKey: ['incident', input.source, input.errorCode ?? '', input.title].join('|'),
       incidentHandled: true,
       ticketNumber: payload.result?.ticketNumber ?? null,
@@ -315,6 +354,12 @@ export class PlatformAlertService implements OnModuleInit, OnModuleDestroy {
         ? 'Disparada a mano para comprobar Telegram, el correo a soporte y el ticket en Superadmin.'
         : 'Disparada a mano para comprobar el aviso por Telegram.',
       details: { 'Disparada por (usuario id)': userId },
+      context: {
+        userId,
+        module: 'Superadmin · Monitoreo',
+        action: 'enviar una alerta de prueba',
+        origin: 'http:superadmin/monitoreo/alerta-de-prueba',
+      },
     });
   }
 
@@ -398,12 +443,31 @@ export class PlatformAlertService implements OnModuleInit, OnModuleDestroy {
       now.getTime() - this.settings.resolveAfterMinutes * 60_000,
     );
     const quiet = await this.prisma.platform_alerts.findMany({
-      where: { status: 'open', last_seen_at: { lt: cutoff } },
+      where: {
+        status: 'open',
+        last_seen_at: { lt: cutoff },
+        error_type: { notIn: PLAN_LIMIT_ERROR_TYPES },
+      },
       select: { id: true },
       orderBy: { last_seen_at: 'asc' },
       take: SWEEP_BATCH,
     });
     for (const { id } of quiet) await this.resolve(id, 'auto_quiet');
+
+    // Un «Límite de plan» sigue abierto mientras dure su periodo (una alerta
+    // por tienda y periodo) y se cierra cuando cambia el mes.
+    const monthStart = new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), 1));
+    const pastPeriods = await this.prisma.platform_alerts.findMany({
+      where: {
+        status: 'open',
+        last_seen_at: { lt: monthStart },
+        error_type: { in: PLAN_LIMIT_ERROR_TYPES },
+      },
+      select: { id: true },
+      orderBy: { last_seen_at: 'asc' },
+      take: SWEEP_BATCH,
+    });
+    for (const { id } of pastPeriods) await this.resolve(id, 'auto_quiet');
 
     const withTicket = await this.prisma.platform_alerts.findMany({
       where: { status: 'open', ticket_number: { not: null } },
@@ -443,7 +507,10 @@ export class PlatformAlertService implements OnModuleInit, OnModuleDestroy {
   // Interno
   // ---------------------------------------------------------------------------
 
-  private toObservation(event: PlatformAlertEvent): Observation {
+  private toObservation(raw: PlatformAlertEvent): Observation {
+    const planLimit =
+      raw.source === 'test' ? null : classifyPlanLimit(raw.errorType, raw.message);
+    const event = planLimit ? toPlanLimitEvent(raw, planLimit) : raw;
     const sanitized: PlatformAlertEvent = {
       ...event,
       process: sanitizeAlertText(event.process, 255) || 'desconocido',
@@ -451,6 +518,7 @@ export class PlatformAlertService implements OnModuleInit, OnModuleDestroy {
       title: sanitizeAlertText(event.title, 255) || 'Falla sin título',
       message: sanitizeAlertText(event.message, 500) || null,
       details: sanitizeAlertDetails(event.details),
+      context: sanitizeContext(event.context),
     };
     const fingerprint = fingerprintOf(
       event.groupKey ??
@@ -495,7 +563,12 @@ export class PlatformAlertService implements OnModuleInit, OnModuleDestroy {
     observation: Observation,
   ): Promise<PlatformAlertRecordResult> {
     const { fingerprint, event, count, lastAt } = observation;
-    const details = event.details as Record<string, string | number | boolean>;
+    const details: Prisma.InputJsonObject = {
+      ...(event.details as Record<string, string | number | boolean>),
+      ...(event.context && Object.keys(event.context).length > 0
+        ? { [ALERT_CONTEXT_KEY]: event.context as Prisma.InputJsonObject }
+        : {}),
+    };
     let alert = await this.findOpen(fingerprint);
     let opened = false;
     let previousSeverity: PlatformAlertSeverity = event.severity;
@@ -602,9 +675,11 @@ export class PlatformAlertService implements OnModuleInit, OnModuleDestroy {
     }
 
     if (state.opened) {
-      const messageId = await this.telegram.send(
-        formatAlertMessage(alert, this.settings.envLabel),
-      );
+      const messageId = (await this.shouldNotifyOpening(alert))
+        ? await this.telegram.send(
+            formatAlertMessage(alert, this.settings.envLabel, await this.contextOf(alert)),
+          )
+        : null;
       if (messageId) {
         updates.telegram_message_id = messageId;
         updates.notified_occurrences = alert.occurrences;
@@ -651,24 +726,25 @@ export class PlatformAlertService implements OnModuleInit, OnModuleDestroy {
       .getPlatformOrganizationId()
       .catch(() => null);
     const source = SOURCE_LABELS[alert.source] ?? alert.source;
+    const context = await this.contextOf(alert);
     const result = await this.incidents.report({
       dedupeKey: `api-monitor:alert:${alert.id}`,
       source: API_MONITOR_INCIDENT_SOURCE,
       severity: 'critical',
       title: alert.title,
       summary: `${source} detectada por el bot de monitoreo (${this.settings.envLabel}).${alert.escalated_at ? ' Subió a grave por repetirse.' : ''}`,
+      // Las mismas líneas que Telegram y Superadmin (S6), luego lo técnico.
       details: {
+        ...Object.fromEntries(context.lines.map((line) => [line.label, line.value])),
         Proceso: alert.process,
         'Tipo de error': alert.error_type,
         Gravedad: 'Grave',
-        'Afecta a': tenantLabel(alert),
-        'Organización afectada (id)': alert.organization_id,
-        'Tienda afectada (id)': alert.store_id,
         'Primera vez': formatDateTime(alert.first_seen_at),
         Repeticiones: alert.occurrences,
         Mensaje: alert.message,
         Entorno: this.settings.envLabel,
         'Alerta (id)': alert.id,
+        'Ver en Superadmin': context.superadminUrl,
       },
       tags: [alert.source],
       // Como QUI-1020: el ticket vive en la organización de plataforma
@@ -716,13 +792,43 @@ export class PlatformAlertService implements OnModuleInit, OnModuleDestroy {
     if (!force && !(await this.takeEditSlot(alert.id))) return;
     const edited = await this.telegram.edit(
       alert.telegram_message_id,
-      formatAlertMessage(alert, this.settings.envLabel),
+      formatAlertMessage(alert, this.settings.envLabel, await this.contextOf(alert)),
     );
     if (!edited) return;
     await this.prisma.platform_alerts.updateMany({
       where: { id: alert.id, notified_occurrences: { lt: alert.occurrences } },
       data: { notified_occurrences: alert.occurrences },
     });
+  }
+
+  /** Nombres de la alerta; si el resolutor falla, la alerta sale con ids. */
+  private async contextOf(alert: PlatformAlertRow): Promise<ResolvedAlertContext> {
+    try {
+      return await this.alertContext.resolve(alert);
+    } catch (error) {
+      this.logger.warn(`Alerta #${alert.id} sin nombres: ${(error as Error)?.message}`);
+      return fallbackContext(alert);
+    }
+  }
+
+  /**
+   * Un «Límite de plan» abre un mensaje por tienda y periodo aunque el
+   * episodio se cierre y se vuelva a abrir. Si Redis falla, se avisa.
+   */
+  private async shouldNotifyOpening(alert: PlatformAlertRow): Promise<boolean> {
+    if (!isPlanLimitAlert(alert)) return true;
+    try {
+      const won = await this.redis.set(
+        `${PLAN_LIMIT_NOTIFIED_KEY_PREFIX}${alert.fingerprint}`,
+        String(alert.id),
+        'EX',
+        PLAN_LIMIT_NOTIFIED_TTL_SECONDS,
+        'NX',
+      );
+      return won === 'OK';
+    } catch {
+      return true;
+    }
   }
 
   private async takeEditSlot(alertId: number): Promise<boolean> {
@@ -745,6 +851,87 @@ export class PlatformAlertService implements OnModuleInit, OnModuleDestroy {
       where: { fingerprint, status: 'open' },
     });
   }
+}
+
+function numberOrNull(value: unknown): number | null {
+  const id = Number(value);
+  return Number.isInteger(id) && id > 0 ? id : null;
+}
+
+/** Módulo y acción de los incidentes de cargas masivas y procesos de IA. */
+function describeIncident(
+  source: string,
+  details: Record<string, unknown> | undefined,
+  tags: readonly string[] | undefined,
+): { module: string; action: string } | null {
+  if (source === 'bulk_upload_job') {
+    return describeJob('bulk-upload-jobs', 'run', { upload_type: tags?.[1] });
+  }
+  const queue = details?.['Cola'];
+  if (typeof queue === 'string' && queue) {
+    const kind = typeof details?.['Tipo'] === 'string' ? (details['Tipo'] as string) : '';
+    return describeJob(queue, kind, { kind });
+  }
+  return null;
+}
+
+/** Contexto que se guarda: textos saneados, ids enteros y nada vacío. */
+function sanitizeContext(
+  context: PlatformAlertContext | undefined,
+): PlatformAlertContext | undefined {
+  if (!context) return undefined;
+  const out: Record<string, string | number> = {};
+  for (const [key, value] of Object.entries(context)) {
+    if (value === null || value === undefined || value === '') continue;
+    if (typeof value === 'number') {
+      if (Number.isInteger(value) && value > 0) out[key] = value;
+      continue;
+    }
+    // El periodo son solo dígitos: el saneo lo taparía como un número largo.
+    if (key === 'period') {
+      if (/^\d{6}(\d{2})?$/.test(String(value))) out[key] = String(value);
+      continue;
+    }
+    const text = sanitizeAlertText(String(value), 160);
+    if (text) out[key] = text;
+  }
+  return out as PlatformAlertContext;
+}
+
+/**
+ * QUI-1031 (S5): un límite del plan de la tienda no es un fallo técnico.
+ * Informativa, sin ticket ni escalado, agrupada por tienda y periodo.
+ */
+function toPlanLimitEvent(
+  event: PlatformAlertEvent,
+  match: PlanLimitMatch,
+): PlatformAlertEvent {
+  const at = event.occurredAt ?? new Date();
+  const aiFeature = event.context?.aiFeature ?? null;
+  const period = planLimitPeriod(at, aiFeature);
+  const scope = event.storeId
+    ? `tienda:${event.storeId}`
+    : event.organizationId
+      ? `organizacion:${event.organizationId}`
+      : 'plataforma';
+  return {
+    ...event,
+    severity: 'info',
+    errorType: match.code,
+    title: `${PLAN_LIMIT_LABEL}: ${match.label}`,
+    message: `${match.label.charAt(0).toUpperCase()}${match.label.slice(1)}. No es un fallo técnico: la tienda necesita más cupo o un plan mayor.`,
+    details: {
+      ...event.details,
+      'Error original': event.message ?? null,
+    },
+    context: {
+      ...event.context,
+      category: 'plan_limit',
+      planLimitCode: match.code,
+      period,
+    },
+    groupKey: ['plan_limit', match.code, scope, period].join('|'),
+  };
 }
 
 function maxSeverity(

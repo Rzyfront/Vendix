@@ -1,6 +1,7 @@
 import { Global, Module } from '@nestjs/common';
 import { DiscoveryModule } from '@nestjs/core';
 import { PlatformOrgService } from '../services/platform-org.service';
+import { PlatformAlertContextService } from './platform-alert-context.service';
 import { PlatformAlertJobWatcherService } from './platform-alert-job-watcher.service';
 import { PlatformAlertService } from './platform-alert.service';
 import { TelegramNotifierService } from './telegram-notifier.service';
@@ -17,9 +18,10 @@ import { TelegramNotifierService } from './telegram-notifier.service';
   providers: [
     PlatformOrgService,
     TelegramNotifierService,
+    PlatformAlertContextService,
     PlatformAlertService,
     PlatformAlertJobWatcherService,
   ],
-  exports: [PlatformAlertService, TelegramNotifierService],
+  exports: [PlatformAlertService, PlatformAlertContextService, TelegramNotifierService],
 })
 export class PlatformAlertsModule {}
