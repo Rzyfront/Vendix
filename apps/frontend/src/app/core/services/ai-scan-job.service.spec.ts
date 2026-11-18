@@ -231,6 +231,26 @@ describe('AiScanJobService (QUI-1020)', () => {
     expect(progress.onCompleted).not.toHaveBeenCalled();
   });
 
+  it('cola propia del dominio: sondea su statusUrl y desenvuelve { success, data }', () => {
+    const legacyPoll = `${environment.apiUrl}/store/expenses/scan/job-1`;
+    const out: unknown[] = [];
+    const progress = listener();
+    service
+      .enqueueAndWait(URL, {}, {
+        statusUrl: (id) => `${environment.apiUrl}/store/expenses/scan/${id}`,
+        progress,
+      })
+      .subscribe((r) => out.push(r));
+    enqueue();
+    http.expectOne(legacyPoll).flush({ success: true, data: { status: 'active' } });
+    expect(progress.onStatus).toHaveBeenCalledWith(jasmine.objectContaining({ status: 'active' }));
+    jasmine.clock().tick(1_000);
+    http
+      .expectOne(legacyPoll)
+      .flush({ success: true, data: { status: 'completed', result: { total: 5 } } });
+    expect(out).toEqual([{ total: 5 }]);
+  });
+
   describe('reenganche (resumeKey)', () => {
     it('recuerda el trabajo por tienda mientras corre y lo olvida al terminar', () => {
       service.enqueueAndWait(URL, {}, { resumeKey: 'rut' }).subscribe();

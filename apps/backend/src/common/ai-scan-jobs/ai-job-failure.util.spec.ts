@@ -1,4 +1,10 @@
-import { classifyAiJobFailure, failureNeedsIncident } from './ai-job-failure.util';
+import { UnrecoverableError } from 'bullmq';
+import { ErrorCodes, VendixHttpException } from '@common/errors';
+import {
+  classifyAiJobFailure,
+  failureNeedsIncident,
+  toAiJobFailure,
+} from './ai-job-failure.util';
 
 describe('classifyAiJobFailure (QUI-1020)', () => {
   it.each([
@@ -56,5 +62,27 @@ describe('failureNeedsIncident', () => {
     expect(
       failureNeedsIncident({ category: 'ai_unavailable', reason: 'plan_quota' }),
     ).toBe(false);
+  });
+});
+
+describe('toAiJobFailure', () => {
+  it('error del documento (4xx) -> no reintentable, con el código como failedReason', () => {
+    const out = toAiJobFailure(new VendixHttpException(ErrorCodes.RUT_SCAN_PARSE_FAIL));
+    expect(out).toBeInstanceOf(UnrecoverableError);
+    expect((out as Error).message).toBe('RUT_SCAN_PARSE_FAIL');
+  });
+
+  it('5xx o 429 -> reintentable, con el código', () => {
+    const ai = toAiJobFailure(new VendixHttpException(ErrorCodes.RUT_SCAN_AI_FAIL));
+    expect(ai).not.toBeInstanceOf(UnrecoverableError);
+    expect((ai as Error).message).toBe('RUT_SCAN_AI_FAIL');
+    const limited = toAiJobFailure(new VendixHttpException(ErrorCodes.AI_PROVIDER_004));
+    expect(limited).not.toBeInstanceOf(UnrecoverableError);
+    expect((limited as Error).message).toBe('AI_PROVIDER_004');
+  });
+
+  it('cualquier otro error pasa intacto', () => {
+    const boom = new Error('boom');
+    expect(toAiJobFailure(boom)).toBe(boom);
   });
 });

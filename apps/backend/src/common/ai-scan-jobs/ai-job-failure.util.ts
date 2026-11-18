@@ -1,4 +1,5 @@
-import { findErrorCodeEntry } from '@common/errors';
+import { UnrecoverableError } from 'bullmq';
+import { VendixHttpException, findErrorCodeEntry } from '@common/errors';
 
 /**
  * Who is to blame for a failed AI job (QUI-1020). The user sees a different
@@ -82,4 +83,21 @@ export function failureNeedsIncident(failure: AiJobFailureClass): boolean {
     return failure.reason !== 'plan_quota';
   }
   return true;
+}
+
+/**
+ * What an AI job worker throws so BullMQ keeps the Vendix error CODE as
+ * `failedReason` (the status endpoint classifies it and the client maps it to
+ * a message): a 4xx other than 429 is the input's fault and is not retried;
+ * any other Vendix error is retried. Anything else passes through untouched.
+ */
+export function toAiJobFailure(error: unknown): unknown {
+  if (error instanceof VendixHttpException) {
+    const status = error.getStatus();
+    if (status >= 400 && status < 500 && status !== 429) {
+      return new UnrecoverableError(error.errorCode);
+    }
+    return new Error(error.errorCode);
+  }
+  return error;
 }

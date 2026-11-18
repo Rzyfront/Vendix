@@ -64,6 +64,12 @@ export interface AiScanJobOptions {
    * llegar a un estado final.
    */
   resumeKey?: string;
+  /**
+   * Endpoint de estado de una cola propia del dominio (gastos, remisiones,
+   * compras…) en vez de `GET /ai-scan-jobs/:id`. Acepta la respuesta pelada o
+   * dentro del envelope `{ success, data }`.
+   */
+  statusUrl?: (jobId: string) => string;
 }
 
 interface EnqueueEnvelope {
@@ -75,6 +81,11 @@ interface EnqueueEnvelope {
 /** Lo último que dijo el servidor del trabajo, para explicar un timeout. */
 interface PollWatch {
   stalled: boolean;
+}
+
+interface StatusEnvelope<T> {
+  success?: boolean;
+  data?: AiJobStatus<T>;
 }
 
 interface RememberedJob {
@@ -181,10 +192,13 @@ export class AiScanJobService {
     opts?: AiScanJobOptions,
   ): Observable<T> {
     const progress = opts?.progress;
+    const url =
+      opts?.statusUrl?.(jobId) ?? `${environment.apiUrl}/ai-scan-jobs/${jobId}`;
     const poll = () =>
       this.http
-        .get<AiJobStatus<T>>(`${environment.apiUrl}/ai-scan-jobs/${jobId}`)
+        .get<AiJobStatus<T> | StatusEnvelope<T>>(url)
         .pipe(
+          map((body) => unwrapStatus(body)),
           // 404 = el trabajo ya no existe (o es de otro usuario): no se
           // reintenta. Red, 429 y 5xx sí, con la misma escalera.
           retryTransientWithBackoff({ maxRetries: 3 }),
@@ -216,7 +230,29 @@ export class AiScanJobService {
         }
         return status.result as T;
       }),
+      catchError((err: unknown) =>
+        throwError(() => this.pollFailure(err, opts)),
+      ),
     );
+  }
+
+  /** Un poll que no se recuperó: el trabajo ya no se puede retomar. */
+  private pollFailure(err: unknown, opts?: AiScanJobOptions): unknown {
+    if (!(err instanceof HttpErrorResponse)) return err;
+    if (opts?.resumeKey) this.forget(opts.resumeKey);
+    if (err.status === 404) {
+      return new AiScanJobError(
+        'El escaneo ya no está disponible. Vuelve a intentarlo.',
+        'technical',
+      );
+    }
+    if (isTransientHttpError(err)) {
+      return new AiScanJobError(
+        'Perdimos la conexión con Vendix mientras se analizaba. Tu archivo sigue cargado: vuelve a intentarlo.',
+        'technical',
+      );
+    }
+    return err;
   }
 
   /**
@@ -229,35 +265,15 @@ export class AiScanJobService {
   }
 
   private fail(err: unknown, opts?: AiScanJobOptions): Observable<never> {
-    const normalized = this.normalizeError(err, opts);
+    const normalized = this.normalizeError(err);
     opts?.progress?.onFailed?.(normalized);
     return throwError(() => normalized);
   }
 
-  private normalizeError(
-    err: unknown,
-    opts?: AiScanJobOptions,
-  ): Error | HttpErrorResponse {
-    if (err instanceof HttpErrorResponse) {
-      if (err.url?.includes('/ai-scan-jobs/')) {
-        // Un poll que no se recuperó: el trabajo no se puede retomar.
-        if (opts?.resumeKey) this.forget(opts.resumeKey);
-        if (err.status === 404) {
-          return new AiScanJobError(
-            'El escaneo ya no está disponible. Vuelve a intentarlo.',
-            'technical',
-          );
-        }
-        if (isTransientHttpError(err)) {
-          return new AiScanJobError(
-            'Perdimos la conexión con Vendix mientras se analizaba. Tu archivo sigue cargado: vuelve a intentarlo.',
-            'technical',
-          );
-        }
-      }
-      // Sin envolver: el consumidor aplica parseApiError.
-      return err;
-    }
+  private normalizeError(err: unknown): Error | HttpErrorResponse {
+    // Un HttpErrorResponse aquí es del encolado: sin envolver, el consumidor
+    // aplica parseApiError.
+    if (err instanceof HttpErrorResponse) return err;
     if (err instanceof TimeoutError) return aiJobStalledError(false);
     if (err instanceof Error) return err;
     return new Error('No se pudo procesar el documento. Intenta nuevamente.');
@@ -295,4 +311,13 @@ export class AiScanJobService {
       return null;
     }
   }
+}
+
+function unwrapStatus<T>(
+  body: AiJobStatus<T> | StatusEnvelope<T> | null,
+): AiJobStatus<T> {
+  if (body && !('status' in body) && 'data' in body && body.data) {
+    return body.data;
+  }
+  return body as AiJobStatus<T>;
 }

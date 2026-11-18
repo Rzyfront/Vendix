@@ -4,12 +4,12 @@ import { Job, UnrecoverableError } from 'bullmq';
 import { randomUUID } from 'crypto';
 import { S3Service } from '@common/services/s3.service';
 import { RequestContextService } from '@common/context/request-context.service';
-import { VendixHttpException } from '@common/errors';
 import { mimeFromKey } from '../../domains/store/orders/purchase-orders/invoice-revalidate.processor';
 import { AiScanHandlerRegistry } from './ai-scan-handler.registry';
 import { AiScanFile, AiScanJob } from './interfaces/ai-scan-job.interface';
 import { AiJobMonitorService } from './ai-job-monitor.service';
 import { aiScanSource } from './ai-scan-sources';
+import { toAiJobFailure } from './ai-job-failure.util';
 
 /**
  * Processor de la cola generica `ai-scan`. Despacha por `job.data.kind` al
@@ -94,14 +94,8 @@ export class AiScanProcessor extends WorkerHost {
       this.logger.error(
         `[AiScan] job=${job.id} kind=${data.kind} failed: ${error?.message ?? error}`,
       );
-      if (error instanceof VendixHttpException) {
-        // `failedReason` llega al usuario: se propaga el CODIGO.
-        if (error.getStatus() >= 400 && error.getStatus() < 500 && error.getStatus() !== 429) {
-          throw new UnrecoverableError(error.errorCode);
-        }
-        throw new Error(error.errorCode); // reintentable
-      }
-      throw error;
+      // `failedReason` llega al usuario: se propaga el CODIGO.
+      throw toAiJobFailure(error);
     }
   }
 
