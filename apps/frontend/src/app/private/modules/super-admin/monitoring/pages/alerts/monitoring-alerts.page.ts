@@ -8,6 +8,7 @@ import {
   signal,
 } from '@angular/core';
 import { takeUntilDestroyed } from '@angular/core/rxjs-interop';
+import { ActivatedRoute } from '@angular/router';
 import { timer } from 'rxjs';
 import { filter } from 'rxjs/operators';
 import {
@@ -98,20 +99,11 @@ export function formatAlertDateTime(iso: string | null | undefined): string {
   return date.toLocaleString('es-CO', { dateStyle: 'short', timeStyle: 'short' });
 }
 
-export function alertScopeLabel(alert: {
-  store_id: number | null;
-  organization_id: number | null;
-}): string {
-  if (alert.store_id !== null) return `Tienda #${alert.store_id}`;
-  if (alert.organization_id !== null) return `Organización #${alert.organization_id}`;
-  return 'Plataforma';
-}
-
 interface AlertRow extends PlatformAlertView {
-  scope_label: string;
   severity_key: string;
   status_key: string;
   ticket_label: string;
+  kind_column: string;
 }
 
 interface DetailEntry {
@@ -231,6 +223,9 @@ interface DetailEntry {
             <app-badge [variant]="alert.status === 'open' ? 'warning' : 'success'">
               {{ alert.status === 'open' ? 'Abierta' : 'Resuelta' }}
             </app-badge>
+            @if (alert.category === 'plan_limit') {
+              <app-badge variant="neutral">Límite de plan</app-badge>
+            }
           </div>
 
           <div>
@@ -241,6 +236,31 @@ interface DetailEntry {
               >{{ alert.message }}</pre
             >
           </div>
+
+          @if (alert.context.length > 0) {
+            <dl class="rounded-lg border border-border divide-y divide-border">
+              @for (line of alert.context; track line.label + line.value) {
+                <div class="flex flex-col sm:flex-row sm:gap-3 px-3 py-2 text-sm">
+                  <dt class="text-xs font-medium text-text-secondary sm:w-40 shrink-0">
+                    {{ line.label }}
+                  </dt>
+                  <dd class="text-text-primary break-words">
+                    @if (line.href) {
+                      <a
+                        [href]="line.href"
+                        target="_blank"
+                        rel="noopener"
+                        class="text-primary underline"
+                        >{{ line.value }}</a
+                      >
+                    } @else {
+                      {{ line.value }}
+                    }
+                  </dd>
+                </div>
+              }
+            </dl>
+          }
 
           <dl class="grid grid-cols-1 sm:grid-cols-2 gap-x-4 gap-y-3 text-sm">
             @for (field of detailFields(); track field.key) {
@@ -310,6 +330,7 @@ export class MonitoringAlertsPage implements OnInit {
   private readonly monitoring = inject(MonitoringService);
   private readonly toast = inject(ToastService);
   private readonly destroyRef = inject(DestroyRef);
+  private readonly route = inject(ActivatedRoute);
 
   readonly pageSize = PAGE_SIZE;
 
@@ -358,10 +379,10 @@ export class MonitoringAlertsPage implements OnInit {
   readonly rows = computed<AlertRow[]>(() =>
     this.alerts().map((a) => ({
       ...a,
-      scope_label: alertScopeLabel(a),
       severity_key: SEVERITY_TABLE_KEY[a.severity] ?? 'draft',
       status_key: STATUS_TABLE_KEY[a.status] ?? 'pending',
       ticket_label: a.ticket_number ?? '—',
+      kind_column: a.kind_label || (SOURCE_LABELS[a.source] ?? a.source),
     })),
   );
 
@@ -409,12 +430,7 @@ export class MonitoringAlertsPage implements OnInit {
     return [
       { key: 'Proceso', value: a.process },
       { key: 'Tipo de error', value: a.error_type },
-      { key: 'Origen', value: SOURCE_LABELS[a.source] ?? a.source },
-      { key: 'Tienda / organización', value: alertScopeLabel(a) },
-      {
-        key: 'Tiendas afectadas',
-        value: a.affected_store_ids.length ? a.affected_store_ids.join(', ') : '—',
-      },
+      { key: 'Clase', value: a.kind_label || (SOURCE_LABELS[a.source] ?? a.source) },
       { key: 'Veces', value: String(a.occurrences) },
       { key: 'Primera vez', value: formatAlertDateTime(a.first_seen_at) },
       { key: 'Última vez', value: formatAlertDateTime(a.last_seen_at) },
@@ -458,8 +474,9 @@ export class MonitoringAlertsPage implements OnInit {
     },
     { key: 'title', label: 'Título', priority: 1 },
     { key: 'process', label: 'Proceso', priority: 2 },
+    { key: 'kind_column', label: 'Clase', priority: 3 },
     { key: 'error_type', label: 'Tipo', priority: 3 },
-    { key: 'scope_label', label: 'Tienda / organización', priority: 3 },
+    { key: 'scope_label', label: 'Tienda', priority: 3 },
     { key: 'occurrences', label: 'Veces', priority: 2, align: 'right' },
     {
       key: 'status_key',
@@ -484,8 +501,9 @@ export class MonitoringAlertsPage implements OnInit {
         label: 'Última vez',
         transform: (v: string) => formatAlertDateTime(v),
       },
+      { key: 'kind_column', label: 'Clase' },
       { key: 'error_type', label: 'Tipo' },
-      { key: 'scope_label', label: 'Tienda / organización' },
+      { key: 'scope_label', label: 'Tienda' },
       { key: 'occurrences', label: 'Veces' },
       {
         key: 'status_key',
@@ -505,6 +523,14 @@ export class MonitoringAlertsPage implements OnInit {
     this.monitoring.manualRefresh$
       .pipe(takeUntilDestroyed(this.destroyRef))
       .subscribe(() => this.refresh());
+
+    // Deep link: ?alert=<id> opens that alert's detail (used by "Ver en Superadmin").
+    this.route.queryParamMap
+      .pipe(takeUntilDestroyed(this.destroyRef))
+      .subscribe((params) => {
+        const id = Number(params.get('alert'));
+        if (Number.isInteger(id) && id > 0) this.openById(id);
+      });
 
     timer(AUTO_REFRESH_MS, AUTO_REFRESH_MS)
       .pipe(
@@ -565,6 +591,19 @@ export class MonitoringAlertsPage implements OnInit {
           if (this.selected()?.id === full.id) this.selected.set(full);
         },
         error: () => this.toast.error('No se pudo cargar el detalle de la alerta'),
+      });
+  }
+
+  openById(id: number): void {
+    this.alertsService
+      .getById(id)
+      .pipe(takeUntilDestroyed(this.destroyRef))
+      .subscribe({
+        next: (full) => {
+          this.selected.set(full);
+          this.detailOpen.set(true);
+        },
+        error: () => this.toast.error('No se pudo cargar la alerta indicada'),
       });
   }
 

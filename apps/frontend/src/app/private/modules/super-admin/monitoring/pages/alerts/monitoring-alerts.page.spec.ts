@@ -1,5 +1,6 @@
 import { provideZonelessChangeDetection, signal } from '@angular/core';
 import { ComponentFixture, TestBed } from '@angular/core/testing';
+import { ActivatedRoute, convertToParamMap } from '@angular/router';
 import { Subject, of } from 'rxjs';
 import { ToastService } from '../../../../../../shared/components/index';
 import {
@@ -7,10 +8,7 @@ import {
   PlatformAlertsStats,
 } from '../../interfaces';
 import { MonitoringAlertsService, MonitoringService } from '../../services';
-import {
-  MonitoringAlertsPage,
-  alertScopeLabel,
-} from './monitoring-alerts.page';
+import { MonitoringAlertsPage } from './monitoring-alerts.page';
 
 const alert = (over: Partial<PlatformAlertView> = {}): PlatformAlertView => ({
   id: 5,
@@ -34,6 +32,10 @@ const alert = (over: Partial<PlatformAlertView> = {}): PlatformAlertView => ({
   ticket_number: 'INC-10',
   ticket_status: 'open',
   telegram_sent: true,
+  context: [{ label: 'Tienda', value: 'Tienda 9 (id 9)' }],
+  scope_label: 'Tienda 9 (id 9)',
+  category: null,
+  kind_label: 'Petición fallida',
   ...over,
 });
 
@@ -86,6 +88,10 @@ describe('MonitoringAlertsPage', () => {
           useValue: { manualRefresh$: new Subject<void>(), autoRefresh: signal(false) },
         },
         { provide: ToastService, useValue: toast },
+        {
+          provide: ActivatedRoute,
+          useValue: { queryParamMap: of(convertToParamMap({})) },
+        },
       ],
     });
   });
@@ -155,9 +161,27 @@ describe('MonitoringAlertsPage', () => {
     expect(api.list).toHaveBeenCalledTimes(2);
   });
 
-  it('labels the scope as Plataforma when there is no store or organization', () => {
-    expect(alertScopeLabel({ store_id: null, organization_id: null })).toBe('Plataforma');
-    expect(alertScopeLabel({ store_id: 3, organization_id: 1 })).toBe('Tienda #3');
-    expect(alertScopeLabel({ store_id: null, organization_id: 1 })).toBe('Organización #1');
+  it('?alert=<id> (enlace "Ver en Superadmin") abre el detalle con las líneas de contexto', async () => {
+    TestBed.overrideProvider(ActivatedRoute, {
+      useValue: { queryParamMap: of(convertToParamMap({ alert: '5' })) },
+    });
+    api.getById.and.returnValue(
+      of(
+        alert({
+          category: 'plan_limit',
+          kind_label: 'Límite de plan',
+          context: [
+            { label: 'Tienda', value: 'Vendix Granizzo (testbalmes, id 105)' },
+            { label: 'Módulo', value: 'Productos' },
+          ],
+        }),
+      ),
+    );
+    const cmp = await create();
+    fixture.detectChanges();
+    expect(api.getById).toHaveBeenCalledWith(5);
+    expect(cmp.detailOpen()).toBeTrue();
+    expect(cmp.selected()?.category).toBe('plan_limit');
   });
 });
+
