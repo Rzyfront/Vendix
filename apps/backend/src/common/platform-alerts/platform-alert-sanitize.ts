@@ -12,6 +12,7 @@ import { redactSensitiveRoute } from '../utils/sensitive-route.util';
  */
 
 const UUID = /[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}/gi;
+const EXACT_UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 
 type Replacement = string | ((match: string) => string);
 
@@ -93,8 +94,13 @@ export function sanitizeAlertDetails(
   const out: Record<string, string | number | boolean> = {};
   for (const [key, value] of Object.entries(details ?? {})) {
     if (value === null || value === undefined || value === '') continue;
+    // Un UUID (id de petición) no es dato sensible y sirve para buscar en logs.
     out[sanitizeAlertText(key, 60)] =
-      typeof value === 'string' ? sanitizeAlertText(value, 200) : value;
+      typeof value !== 'string'
+        ? value
+        : EXACT_UUID.test(value.trim())
+          ? value.trim()
+          : sanitizeAlertText(value, 200);
   }
   return out;
 }

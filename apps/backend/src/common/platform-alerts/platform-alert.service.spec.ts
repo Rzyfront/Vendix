@@ -312,6 +312,19 @@ describe('PlatformAlertService', () => {
     });
   });
 
+  it('al apagar vacía también lo capturado durante un vaciado en curso', async () => {
+    const service = build();
+    service.captureHttpFailure(http500('/api/store/products/:id'));
+    const inFlight = service.flush();
+    service.captureHttpFailure(http500('/api/store/customers/:id'));
+    await service.onModuleDestroy();
+    await inFlight;
+    expect(prisma.rows.map((r) => r.process).sort()).toEqual([
+      'POST /store/customers/:id',
+      'POST /store/products/:id',
+    ]);
+  });
+
   it('MONITOR_ENABLED=false no captura nada', async () => {
     env.MONITOR_ENABLED = 'false';
     const service = build();

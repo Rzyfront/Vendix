@@ -142,7 +142,11 @@ export class PlatformAlertService implements OnModuleInit, OnModuleDestroy {
   async onModuleDestroy(): Promise<void> {
     if (this.timer) clearInterval(this.timer);
     this.timer = null;
-    await this.flush();
+    // Lo capturado durante un vaciado en curso queda en el búfer nuevo: se
+    // vacía hasta que no quede nada (los 5xx de un apagado son los que importan).
+    do {
+      await this.flush();
+    } while (this.buffer.size > 0 || this.flushing);
   }
 
   // ---------------------------------------------------------------------------

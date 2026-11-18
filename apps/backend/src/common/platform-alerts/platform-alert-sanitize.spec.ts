@@ -58,6 +58,13 @@ describe('platform-alert-sanitize (S7: sin contraseñas, tokens ni datos de clie
     ).toEqual({ Correo: '[correo]', Intentos: 3, Pausa: false });
   });
 
+  it('details: un UUID (id de petición) se conserva para buscarlo en los logs', () => {
+    const id = '550e8400-e29b-41d4-a716-446655440000';
+    const out = sanitizeAlertDetails({ 'Petición (id)': id, Otro: 'tel 3001234567' });
+    expect(out['Petición (id)']).toBe(id);
+    expect(out.Otro).toBe('tel [número]');
+  });
+
   it('tenantIdsOf solo toma ids numéricos positivos del data del job', () => {
     expect(tenantIdsOf({ store_id: '7', organizationId: 3, email: 'x@y.co' })).toEqual({
       organizationId: 3,
