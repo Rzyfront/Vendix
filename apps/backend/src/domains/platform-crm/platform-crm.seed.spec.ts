@@ -9,7 +9,6 @@ import {
 import {
   PLATFORM_CRM_LINK_PERMISSIONS,
   PLATFORM_PERMISSION_PREFIX,
-  isPlatformPermissionName,
 } from '../../common/constants/platform-permissions.constant';
 
 /**
@@ -150,9 +149,10 @@ describe('Vendix Platform · seed de permisos platform:*', () => {
 
   it('keeps the seed prefix and the backend constant in agreement', () => {
     expect(PLATFORM_PERMISSION_PREFIX).toBe('platform:');
+    expect(isPlatformPermission(`${PLATFORM_PERMISSION_PREFIX}any:thing`)).toBe(true);
     for (const name of Object.values(PLATFORM_CRM_LINK_PERMISSIONS)) {
+      expect(name.startsWith(PLATFORM_PERMISSION_PREFIX)).toBe(true);
       expect(isPlatformPermission(name)).toBe(true);
-      expect(isPlatformPermissionName(name)).toBe(true);
     }
     expect(isPlatformPermission('store:customers:read')).toBe(false);
     expect(isPlatformPermission('superadmin:stores:read')).toBe(false);

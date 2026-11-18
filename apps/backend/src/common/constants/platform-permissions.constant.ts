@@ -10,7 +10,8 @@
  *     (`createDefaultOrgAdminRole`), aunque reciba los demás de sistema.
  *   - el seed lo excluye de owner/admin/manager (`isPlatformPermission` en
  *     `prisma/seeds/permissions-roles.seed.ts`, copia local porque la imagen de
- *     producción no trae `src/` salvo archivos puntuales).
+ *     producción no trae `src/` salvo archivos puntuales). `platform-crm.seed.spec.ts`
+ *     falla si ese prefijo y este dejan de coincidir.
  */
 export const PLATFORM_PERMISSION_PREFIX = 'platform:';
 
@@ -18,7 +19,3 @@ export const PLATFORM_CRM_LINK_PERMISSIONS = {
   MANAGE: 'platform:crm_link:manage',
   READ: 'platform:crm_link:read',
 } as const;
-
-export function isPlatformPermissionName(name: string): boolean {
-  return name.startsWith(PLATFORM_PERMISSION_PREFIX);
-}
