@@ -18,6 +18,11 @@ export const MARKETING_SITEMAP_PAGES: readonly MarketingSitemapPage[] = [
   // indexable per the 2026-10-22 decision. /legal/cookies has no active document.
   { path: '/legal/terminos', priority: '0.3', changefreq: 'monthly', editorialRevision: 1 },
   { path: '/legal/privacidad', priority: '0.3', changefreq: 'monthly', editorialRevision: 1 },
+  // Approved by Adel (Product and Sales) on 2026-11-17: SEO-OPS-15, 17, 19 and 20.
+  { path: '/soluciones/software-pos', priority: '0.8', changefreq: 'monthly', editorialRevision: 1 },
+  { path: '/sectores/restaurantes', priority: '0.8', changefreq: 'monthly', editorialRevision: 1 },
+  { path: '/implementacion', priority: '0.6', changefreq: 'monthly', editorialRevision: 1 },
+  { path: '/migracion', priority: '0.6', changefreq: 'monthly', editorialRevision: 1 },
 ];
 
 export function marketingSitemapVersion(

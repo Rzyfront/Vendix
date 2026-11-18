@@ -6,10 +6,10 @@ export const environment = {
   commercialAnalyticsId: 'G-1N43GNPS5Q',
   // Editorial preview: activation requires a separate publication review.
   sectorGuidesEnabled: false,
-  // SEO-OPS-17: páginas de sector (/sectores/*); apagadas hasta la firma de Producto y Ventas.
-  sectorPagesEnabled: false,
-  // SEO-OPS-19: página /implementacion, apagada en producción hasta la aprobación de Ventas y Producto.
-  implementationPageEnabled: false,
+  // SEO-OPS-15, 17 y 20: páginas de la plantilla de sector, aprobadas por Adel (Producto y Ventas) el 17-nov-2026.
+  sectorPagesEnabled: true,
+  // SEO-OPS-19: página /implementacion, aprobada por Adel (Producto y Ventas) el 17-nov-2026.
+  implementationPageEnabled: true,
 
   // Configuración para producción
   debugDomainDetection: false,
