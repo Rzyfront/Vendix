@@ -25,7 +25,9 @@ export type SupportGapCode =
   | 'ITEM_QUANTITY_REQUIRED'
   | 'ITEM_UNIT_PRICE_REQUIRED'
   | 'ISSUE_DATE_REQUIRED'
-  | 'PAYMENT_FORM_REQUIRED';
+  | 'PAYMENT_FORM_REQUIRED'
+  | 'DUE_DATE_REQUIRED'
+  | 'DUE_DATE_BEFORE_ISSUE';
 
 export interface SupportGap {
   code: SupportGapCode;
@@ -58,6 +60,7 @@ export interface SupportCandidateItem {
 
 export interface SupportCandidateDraft {
   issue_date?: string | null;
+  due_date?: string | null;
   payment_form?: string | null;
   items?: SupportCandidateItem[] | null;
 }
@@ -192,6 +195,28 @@ export function computeSupportGaps(input: {
       code: 'PAYMENT_FORM_REQUIRED',
       field: 'payment_form',
       label: 'No se pudo determinar la forma de pago (contado o crédito)',
+      target: 'review',
+    });
+  }
+  // Mismas reglas que `InvoicingService.resolveDueDate`, pero ANTES de numerar:
+  // allí se descubren después de tomar el consecutivo y cada intento lo gasta.
+  if (draft.payment_form === '2' && blank(draft.due_date)) {
+    gaps.push({
+      code: 'DUE_DATE_REQUIRED',
+      field: 'due_date',
+      label: 'La compra es a crédito y falta la fecha de vencimiento',
+      target: 'review',
+    });
+  }
+  if (
+    !blank(draft.due_date) &&
+    !blank(draft.issue_date) &&
+    String(draft.due_date).slice(0, 10) < String(draft.issue_date).slice(0, 10)
+  ) {
+    gaps.push({
+      code: 'DUE_DATE_BEFORE_ISSUE',
+      field: 'due_date',
+      label: 'La fecha de vencimiento es anterior a la fecha de emisión',
       target: 'review',
     });
   }

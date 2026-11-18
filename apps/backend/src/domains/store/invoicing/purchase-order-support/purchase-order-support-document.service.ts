@@ -112,7 +112,12 @@ export class PurchaseOrderSupportDocumentService {
         invoice_type: 'support_document',
         status: { notIn: [...INACTIVE_DOCUMENT_STATUSES] },
       },
-      select: { id: true, invoice_number: true, status: true },
+      select: {
+        id: true,
+        invoice_number: true,
+        status: true,
+        client_request_id: true,
+      },
     });
   }
 
@@ -255,6 +260,7 @@ export class PurchaseOrderSupportDocumentService {
       supplier: po.suppliers,
       draft: {
         issue_date: dto.issue_date,
+        due_date: dto.due_date,
         payment_form: dto.payment_form,
         items: dto.items,
       },
@@ -267,8 +273,14 @@ export class PurchaseOrderSupportDocumentService {
       );
     }
 
+    // Reintento del mismo envío (misma clave): `createIdempotently` lo devuelve
+    // como replay. Solo otra clave frente a un documento vigente es conflicto.
     const active = await this.findActiveDocument(po.id);
-    if (active) throw this.conflict(active);
+    const is_retry =
+      active != null &&
+      dto.client_request_id != null &&
+      active.client_request_id === dto.client_request_id;
+    if (active && !is_retry) throw this.conflict(active);
 
     const invoice_dto = {
       invoice_type: 'support_document',

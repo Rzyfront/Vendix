@@ -260,6 +260,29 @@ describe('PurchaseOrderSupportDocumentService (QUI-684)', () => {
       ]);
     });
 
+    it('crédito sin vencimiento ni cuotas -> DUE_DATE_REQUIRED (target review)', async () => {
+      const codes = await missingCodes(
+        purchaseOrder({
+          payment_plan: 'partial',
+          payment_status: 'unpaid',
+          payment_due_date: null,
+          payment_schedules: [],
+        }),
+      );
+      expect(codes).toEqual(['DUE_DATE_REQUIRED']);
+    });
+
+    it('vencimiento de la OC ya pasado -> DUE_DATE_BEFORE_ISSUE', async () => {
+      const codes = await missingCodes(
+        purchaseOrder({
+          payment_plan: 'deferred',
+          payment_status: 'unpaid',
+          payment_due_date: new Date('2020-01-01T12:00:00Z'),
+        }),
+      );
+      expect(codes).toEqual(['DUE_DATE_BEFORE_ISSUE']);
+    });
+
     it('con documento vigente: can_emit false y active_document informado', async () => {
       invoicesFindFirst.mockResolvedValue({
         id: 77,
@@ -601,6 +624,73 @@ describe('PurchaseOrderSupportDocumentService (QUI-684)', () => {
       expect(error.getResponse().details.missing.map((m: any) => m.code)).toEqual([
         'ITEMS_REQUIRED',
       ]);
+    });
+
+    // El vencimiento se valida en el borrador: `resolveDueDate` corre después
+    // de numerar, así que un crédito sin fecha gastaba un consecutivo DS.
+    it('crédito sin vencimiento: 422 DUE_DATE_REQUIRED y nada se crea', async () => {
+      const error: any = await service
+        .createFromPurchaseOrder(40, body({ payment_form: '2', due_date: undefined }) as any)
+        .catch((e) => e);
+      expect(error.errorCode).toBe('INVOICING_SUPPORT_PO_001');
+      expect(error.getResponse().details.missing).toEqual([
+        expect.objectContaining({ code: 'DUE_DATE_REQUIRED', field: 'due_date', target: 'review' }),
+      ]);
+      expect(invoicingCreate).not.toHaveBeenCalled();
+      expect(invoicingCreateIdem).not.toHaveBeenCalled();
+    });
+
+    it('vencimiento anterior a la emisión: 422 DUE_DATE_BEFORE_ISSUE y nada se crea', async () => {
+      const error: any = await service
+        .createFromPurchaseOrder(
+          40,
+          body({ payment_form: '2', due_date: '2026-11-16' }) as any,
+        )
+        .catch((e) => e);
+      expect(error.errorCode).toBe('INVOICING_SUPPORT_PO_001');
+      expect(error.getResponse().details.missing.map((m: any) => m.code)).toEqual([
+        'DUE_DATE_BEFORE_ISSUE',
+      ]);
+      expect(invoicingCreate).not.toHaveBeenCalled();
+    });
+
+    it('crédito con vencimiento el mismo día de la emisión se crea', async () => {
+      await service.createFromPurchaseOrder(
+        40,
+        body({ payment_form: '2', due_date: '2026-11-17' }) as any,
+      );
+      expect(invoicingCreate).toHaveBeenCalledTimes(1);
+    });
+
+    it('reintento con el client_request_id del documento vigente: replay de createIdempotently, no 409', async () => {
+      const key = '3dd5fe96-659c-4ef7-b489-753007e411ca';
+      invoicesFindFirst.mockResolvedValue({
+        id: 77,
+        invoice_number: 'DS-1',
+        status: 'sent',
+        client_request_id: key,
+      });
+      invoicingCreateIdem.mockResolvedValue({ invoice: { id: 77 }, replayed: true });
+      const result = await service.createFromPurchaseOrder(
+        40,
+        body({ client_request_id: key }) as any,
+      );
+      expect(result).toEqual({ invoice: { id: 77 }, replayed: true });
+      expect(invoicingCreateIdem).toHaveBeenCalledTimes(1);
+    });
+
+    it('otro client_request_id frente a un documento vigente sigue siendo 409', async () => {
+      invoicesFindFirst.mockResolvedValue({
+        id: 77,
+        invoice_number: 'DS-1',
+        status: 'sent',
+        client_request_id: 'otra-pestana',
+      });
+      const error: any = await service
+        .createFromPurchaseOrder(40, body({ client_request_id: 'esta-pestana' }) as any)
+        .catch((e) => e);
+      expect(error.errorCode).toBe('INVOICING_SUPPORT_PO_002');
+      expect(invoicingCreateIdem).not.toHaveBeenCalled();
     });
 
     it('con documento vigente: 409 INVOICING_SUPPORT_PO_002 con details.active_document', async () => {
