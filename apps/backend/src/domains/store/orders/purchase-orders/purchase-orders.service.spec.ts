@@ -549,6 +549,7 @@ describe('PurchaseOrdersService.receive()', () => {
           deleteMany: jest.fn().mockResolvedValue({ count: 0 }),
         },
         product_variants: { findMany: jest.fn().mockResolvedValue([]) },
+        invoices: { findFirst: jest.fn().mockResolvedValue(null) },
       };
       (prismaService.$transaction as jest.Mock).mockImplementation(
         async (callback: any) => callback(tx),
@@ -700,6 +701,31 @@ describe('PurchaseOrdersService.receive()', () => {
       expect(tx.purchase_orders.delete).toHaveBeenCalledWith({
         where: { id: PO_ID },
       });
+    });
+
+    // QUI-684 — `invoices.purchase_order_id` es FK RESTRICT: sin esta guarda el
+    // borrado de un borrador con documento soporte salía como 500 (P2003).
+    it('remove() de un BORRADOR con documento soporte responde PO_DELETE_SUPPORT_DOCUMENT_001 y no borra nada', async () => {
+      const tx = mockOrderInStatus('draft');
+      tx.invoices.findFirst.mockResolvedValue({
+        id: 12,
+        invoice_number: 'DS-12',
+        status: 'voided',
+      });
+
+      const error: any = await service.remove(PO_ID).catch((e) => e);
+      expect(error.errorCode).toBe('PO_DELETE_SUPPORT_DOCUMENT_001');
+      expect(error.getStatus()).toBe(409);
+      expect(error.getResponse().details).toEqual({
+        invoice_id: 12,
+        invoice_number: 'DS-12',
+      });
+
+      expect(tx.invoices.findFirst).toHaveBeenCalledWith(
+        expect.objectContaining({ where: { purchase_order_id: PO_ID } }),
+      );
+      expect(tx.purchase_order_item_taxes.deleteMany).not.toHaveBeenCalled();
+      expect(tx.purchase_orders.delete).not.toHaveBeenCalled();
     });
 
     it('receive() sobre una orden CANCELADA responde PO_STATUS_001', async () => {

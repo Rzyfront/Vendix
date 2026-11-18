@@ -8,12 +8,17 @@ import {
   output,
   signal,
   untracked,
+  viewChild,
+  TemplateRef,
 } from '@angular/core';
 import { takeUntilDestroyed } from '@angular/core/rxjs-interop';
 import { FormsModule } from '@angular/forms';
+import { RouterLink } from '@angular/router';
 import { EMPTY, Subject, catchError, switchMap } from 'rxjs';
 
 import { SupportDocumentService } from '../../services/support-document.service';
+import { SuppliersService } from '../../../inventory/services/suppliers.service';
+import { supportStatusLabel, supportTypeLabel } from './support-document-status.util';
 import type {
   SupportDocumentQuery,
   SupportDocumentRow,
@@ -21,6 +26,7 @@ import type {
   SupportDocumentType,
 } from '../../interfaces/support-document.interface';
 import type {
+  SelectorOption,
   DropdownAction,
   FilterConfig,
   FilterValues,
@@ -60,6 +66,7 @@ interface SupportDocumentFilters {
   standalone: true,
   imports: [
     FormsModule,
+    RouterLink,
     CardComponent,
     ButtonComponent,
     InputComponent,
@@ -81,10 +88,15 @@ export class SupportDocumentListComponent {
   readonly view = output<SupportDocumentRow>();
 
   private readonly service = inject(SupportDocumentService);
+  private readonly suppliersService = inject(SuppliersService);
   private readonly currencyService = inject(CurrencyFormatService);
   private readonly destroyRef = inject(DestroyRef);
   private readonly requests = new Subject<SupportDocumentQuery>();
 
+  /** Celda «OC de origen»: enlace al detalle de la orden de compra. */
+  readonly purchaseOrderTemplate = viewChild<TemplateRef<unknown>>('purchaseOrderTemplate');
+  /** Proveedores para el filtro; si la carga falla el filtro queda sin opciones. */
+  readonly supplierOptions = signal<SelectorOption[]>([]);
   readonly loading = signal(false);
   readonly error = signal<string | null>(null);
   readonly rows = signal<SupportDocumentRow[]>([]);
@@ -108,6 +120,7 @@ export class SupportDocumentListComponent {
     return {
       status: filters.status || null,
       invoice_type: filters.invoice_type,
+      supplier_id: filters.supplier_id != null ? String(filters.supplier_id) : null,
       date_from: filters.date_from || null,
       date_to: filters.date_to || null,
     };
@@ -122,7 +135,7 @@ export class SupportDocumentListComponent {
     this.filters.update((current) => ({ ...current, search: term }));
   }
 
-  readonly filterConfigs: FilterConfig[] = [
+  readonly filterConfigs = computed<FilterConfig[]>(() => [
     {
       key: 'status',
       label: 'Estado',
@@ -148,9 +161,15 @@ export class SupportDocumentListComponent {
       ],
       defaultValue: 'support_document',
     },
+    {
+      key: 'supplier_id',
+      label: 'Proveedor',
+      type: 'select',
+      options: [{ value: '', label: 'Todos los proveedores' }, ...this.supplierOptions()],
+    },
     { key: 'date_from', label: 'Desde', type: 'date' },
     { key: 'date_to', label: 'Hasta', type: 'date' },
-  ];
+  ]);
 
   readonly dropdownActions: DropdownAction[] = [
     { label: 'Nuevo documento soporte', icon: 'plus', action: 'create', variant: 'primary' },
@@ -158,6 +177,27 @@ export class SupportDocumentListComponent {
   ];
 
   constructor() {
+    this.suppliersService
+      .getSuppliers({ limit: 500 })
+      .pipe(takeUntilDestroyed(this.destroyRef))
+      .subscribe({
+        next: (response) =>
+          this.supplierOptions.set(
+            (response?.data ?? []).map((supplier) => ({
+              value: String(supplier.id),
+              label: supplier.name,
+            })),
+          ),
+        error: () => this.supplierOptions.set([]),
+      });
+
+    // La plantilla de la celda se engancha a la columna cuando la vista la resuelve.
+    effect(() => {
+      const template = this.purchaseOrderTemplate();
+      const column = this.columns.find((col) => col.key === 'purchase_order');
+      if (template && column) column.template = template;
+    });
+
     this.requests
       .pipe(
         switchMap((query) =>
@@ -258,6 +298,7 @@ export class SupportDocumentListComponent {
       ...current,
       status,
       invoice_type: invoiceType,
+      supplier_id: this.supplierFromFilter(values['supplier_id']),
       date_from: this.stringFilterValue(values['date_from']),
       date_to: this.stringFilterValue(values['date_to']),
       page: 1,
@@ -276,6 +317,12 @@ export class SupportDocumentListComponent {
     return typeof value === 'string'
       ? statuses.find((status) => status === value) ?? ''
       : '';
+  }
+
+  private supplierFromFilter(value: FilterValues[string]): number | null {
+    if (typeof value !== 'string' || value === '') return null;
+    const id = Number(value);
+    return Number.isInteger(id) && id > 0 ? id : null;
   }
 
   private typeFromFilter(value: FilterValues[string]): SupportDocumentType {
@@ -340,6 +387,13 @@ export class SupportDocumentListComponent {
         (typeof value === 'string' && value) || row?.customer_name || 'Sin proveedor',
     },
     {
+      key: 'purchase_order',
+      label: 'OC de origen',
+      priority: 2,
+      // Texto de respaldo; la celda real es el enlace de #purchaseOrderTemplate.
+      transform: (value: unknown) => this.purchaseOrderNumber(value),
+    },
+    {
       key: 'cufe',
       label: 'CUDS',
       priority: 3,
@@ -375,8 +429,8 @@ export class SupportDocumentListComponent {
           sent: 'var(--color-info)',
           accepted: 'var(--color-success)',
           rejected: 'var(--color-error)',
-          cancelled: 'var(--color-warning)',
-          voided: 'var(--color-text-muted)',
+          cancelled: 'var(--color-text-muted)',
+          voided: 'var(--color-warning)',
         },
       },
       transform: (value: unknown) => this.getStatusLabel(String(value)),
@@ -397,8 +451,8 @@ export class SupportDocumentListComponent {
         sent: 'var(--color-info)',
         accepted: 'var(--color-success)',
         rejected: 'var(--color-error)',
-        cancelled: 'var(--color-warning)',
-        voided: 'var(--color-text-muted)',
+        cancelled: 'var(--color-text-muted)',
+        voided: 'var(--color-warning)',
       },
     },
     badgeTransform: (value: unknown) => this.getStatusLabel(String(value)),
@@ -420,6 +474,12 @@ export class SupportDocumentListComponent {
         label: 'Tipo',
         icon: 'file-text',
         transform: (value: unknown) => this.getTypeLabel(String(value)),
+      },
+      {
+        key: 'purchase_order',
+        label: 'OC de origen',
+        icon: 'shopping-cart',
+        transform: (value: unknown) => this.purchaseOrderNumber(value),
       },
       {
         key: 'cufe',
@@ -467,25 +527,19 @@ export class SupportDocumentListComponent {
   }
 
   getStatusLabel(status: string): string {
-    const labels: Record<string, string> = {
-      draft: 'Borrador',
-      validated: 'Validado',
-      sent: 'Enviado',
-      accepted: 'Aceptado',
-      rejected: 'Rechazado',
-      cancelled: 'Cancelado',
-      voided: 'Anulado',
-    };
-    return labels[status] || status;
+    return supportStatusLabel(status);
   }
 
   getTypeLabel(type: string): string {
-    const labels: Record<string, string> = {
-      support_document: 'Documento soporte',
-      support_adjustment_note: 'Nota de ajuste',
-      purchase_invoice: 'Factura de compra',
-    };
-    return labels[type] || type;
+    return supportTypeLabel(type, true);
+  }
+
+  /** `order_number` de la OC de origen, o «—» cuando el documento no viene de una OC. */
+  purchaseOrderNumber(value: unknown): string {
+    if (value && typeof value === 'object' && 'order_number' in value) {
+      return String((value as { order_number: unknown }).order_number) || '—';
+    }
+    return '—';
   }
 
   /** CUDS: el backend lo guarda en `cufe`; mostrar sólo el final en listas. */

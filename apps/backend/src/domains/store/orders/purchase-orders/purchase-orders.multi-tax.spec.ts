@@ -721,6 +721,7 @@ describe('PurchaseOrdersService — multi-impuesto de compra (QUI-855)', () => {
           return Promise.resolve({ id: PO_ID });
         }),
       },
+      invoices: { findFirst: jest.fn().mockResolvedValue(null) },
       purchase_order_item_taxes: {
         deleteMany: jest.fn().mockImplementation(() => {
           order.push('taxes');
@@ -744,6 +745,7 @@ describe('PurchaseOrdersService — multi-impuesto de compra (QUI-855)', () => {
         }),
         delete: jest.fn().mockResolvedValue({ id: PO_ID }),
       },
+      invoices: { findFirst: jest.fn().mockResolvedValue(null) },
       purchase_order_item_taxes: {
         deleteMany: jest.fn().mockResolvedValue({ count: 2 }),
       },

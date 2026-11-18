@@ -1,8 +1,11 @@
 import { Injectable } from '@nestjs/common';
 import { EventEmitter2 } from '@nestjs/event-emitter';
-import { supplier_state_enum } from '@prisma/client';
+import { Prisma, supplier_state_enum } from '@prisma/client';
 import { StorePrismaService } from '../../../../prisma/services/store-prisma.service';
-import { CreateInventorySupplierDto } from './dto/create-supplier.dto';
+import {
+  CreateInventorySupplierDto,
+  SupplierAddressDto,
+} from './dto/create-supplier.dto';
 import { UpdateSupplierDto } from './dto/update-supplier.dto';
 import { SupplierQueryDto } from './dto/supplier-query.dto';
 import { RequestContextService } from '@common/context/request-context.service';
@@ -60,12 +63,25 @@ export class SuppliersService {
     if (!context?.organization_id) {
       throw new BadRequestException('Organization context is missing');
     }
+    const organization_id = context.organization_id;
     const scopeWhere = await this.getSupplierScopeWhere();
+    const { address, ...supplierFields } = createSupplierDto;
 
     const supplier = await this.prisma.$transaction(async (tx) => {
+    // La dirección va primero (FK `suppliers.address_id`), igual que en locations.
+    const newAddress = address
+      ? await tx.addresses.create({
+          data: this.toAddressData(
+            address,
+            organization_id,
+            scopeWhere.store_id ?? context.store_id ?? null,
+          ),
+        })
+      : null;
     const created = await tx.suppliers.create({
       data: {
-        ...createSupplierDto,
+        ...supplierFields,
+        ...(newAddress ? { address_id: newAddress.id } : {}),
         organization_id: context.organization_id,
         store_id: scopeWhere.store_id,
       },
@@ -657,11 +673,67 @@ export class SuppliersService {
     return { data: enriched, total, page, limit };
   }
 
+  /** Mapea el DTO de dirección a columnas de `addresses` (country_code por defecto 'CO'). */
+  private toAddressData(
+    address: SupplierAddressDto,
+    organization_id: number,
+    store_id: number | null,
+  ) {
+    return {
+      address_line1: address.address_line1,
+      address_line2: address.address_line2,
+      city: address.city,
+      state_province: address.state_province,
+      country_code: address.country_code || 'CO',
+      postal_code: address.postal_code,
+      municipality_code: address.municipality_code,
+      organization_id,
+      store_id,
+    };
+  }
+
   async update(id: number, updateSupplierDto: UpdateSupplierDto) {
-    await this.findOne(id);
+    const existing = await this.findOne(id);
+    const { address, ...supplierFields } = updateSupplierDto;
+    const data: Prisma.suppliersUncheckedUpdateInput = { ...supplierFields };
+
+    if (address) {
+      if (existing.address_id) {
+        // Actualiza la dirección existente en lugar de crear duplicados. El
+        // proveedor ya pasó por `findOne` (scope de la org/tienda); la dirección
+        // de un proveedor de organización puede pertenecer a otra tienda, por eso
+        // se actualiza por id + organización sin el scope de tienda.
+        await this.prisma.withoutScope().addresses.update({
+          where: {
+            id: existing.address_id,
+            organization_id: existing.organization_id,
+          },
+          data: {
+            address_line1: address.address_line1,
+            address_line2: address.address_line2 ?? null,
+            city: address.city,
+            state_province: address.state_province ?? null,
+            country_code: address.country_code || 'CO',
+            postal_code: address.postal_code ?? null,
+            municipality_code: address.municipality_code ?? null,
+          },
+        });
+      } else {
+        const context = RequestContextService.getContext();
+        const created = await this.prisma.addresses.create({
+          data: this.toAddressData(
+            address,
+            existing.organization_id,
+            existing.store_id ?? context?.store_id ?? null,
+          ),
+        });
+        data.address_id = created.id;
+      }
+    }
+
     return this.prisma.suppliers.update({
       where: { id },
-      data: updateSupplierDto,
+      data,
       include: {
         addresses: true,
         supplier_products: {

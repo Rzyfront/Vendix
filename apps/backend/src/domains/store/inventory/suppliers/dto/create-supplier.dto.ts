@@ -9,10 +9,18 @@ import {
   IsBoolean,
   ValidateIf,
   MaxLength,
+  Matches,
+  ValidateNested,
 } from 'class-validator';
-import { Transform } from 'class-transformer';
+import { Transform, Type } from 'class-transformer';
 import { ApiProperty, ApiPropertyOptional } from '@nestjs/swagger';
 import { supplier_category_enum, supplier_state_enum } from '@prisma/client';
+import { DIAN_IDENTIFICATION_TYPES } from '../../../invoicing/validators/customer-fiscal-identity.validator';
+
+/** Códigos DIAN del Anexo 19: el mismo catálogo que usa la identidad fiscal de clientes. */
+const DIAN_DOCUMENT_TYPE_CODES: string[] = DIAN_IDENTIFICATION_TYPES.map(
+  (t) => t.code,
+);
 
 /**
  * Convierte `null` en `undefined` para que Prisma omita el campo y aplique el
@@ -26,6 +34,54 @@ import { supplier_category_enum, supplier_state_enum } from '@prisma/client';
  */
 const nullToUndefined = () =>
   Transform(({ value }) => (value === null ? undefined : value));
+
+/**
+ * Dirección fiscal del proveedor (tabla `addresses`). `municipality_code` es el
+ * código DIVIPOLA/DANE que exige el documento soporte.
+ */
+export class SupplierAddressDto {
+  @ApiProperty({ description: 'Address line 1' })
+  @IsString()
+  @IsNotEmpty()
+  @MaxLength(255)
+  address_line1: string;
+
+  @ApiPropertyOptional({ description: 'Address line 2' })
+  @IsOptional()
+  @IsString()
+  @MaxLength(255)
+  address_line2?: string;
+
+  @ApiProperty({ description: 'City / municipality name' })
+  @IsString()
+  @IsNotEmpty()
+  @MaxLength(100)
+  city: string;
+
+  @ApiPropertyOptional({ description: 'State / department' })
+  @IsOptional()
+  @IsString()
+  @MaxLength(100)
+  state_province?: string;
+
+  @ApiPropertyOptional({ description: 'ISO country code', default: 'CO' })
+  @IsOptional()
+  @IsString()
+  @MaxLength(3)
+  country_code?: string;
+
+  @ApiPropertyOptional({ description: 'Postal code' })
+  @IsOptional()
+  @IsString()
+  @MaxLength(20)
+  postal_code?: string;
+
+  @ApiPropertyOptional({ description: 'DIAN municipality code (DIVIPOLA)' })
+  @IsOptional()
+  @IsString()
+  @MaxLength(10)
+  municipality_code?: string;
+}
 
 export class CreateInventorySupplierDto {
   @ApiProperty({ description: 'Organization ID' })
@@ -72,6 +128,31 @@ export class CreateInventorySupplierDto {
   @IsString()
   @IsOptional()
   tax_id?: string;
+
+  @ApiPropertyOptional({
+    description: 'DIAN identification document type code (e.g. 31 = NIT)',
+    enum: DIAN_DOCUMENT_TYPE_CODES,
+  })
+  @IsOptional()
+  @nullToUndefined()
+  @IsIn(DIAN_DOCUMENT_TYPE_CODES)
+  document_type?: string;
+
+  @ApiPropertyOptional({ description: 'NIT verification digit (single digit)' })
+  @IsOptional()
+  @nullToUndefined()
+  @Matches(/^\d$/, { message: 'verification_digit must be a single digit' })
+  verification_digit?: string;
+
+  @ApiPropertyOptional({
+    description: 'Fiscal address; created or updated in place',
+    type: () => SupplierAddressDto,
+  })
+  @IsOptional()
+  @nullToUndefined()
+  @ValidateNested()
+  @Type(() => SupplierAddressDto)
+  address?: SupplierAddressDto;
 
   @ApiPropertyOptional({ description: 'Tax regime (fiscal classification)' })
   @IsOptional()

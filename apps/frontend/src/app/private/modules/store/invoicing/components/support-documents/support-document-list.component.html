@@ -29,7 +29,7 @@
           </app-button>
 
           <app-options-dropdown
-            [filters]="filterConfigs"
+            [filters]="filterConfigs()"
             [filterValues]="filterValues()"
             [actions]="dropdownActions"
             [isLoading]="loading()"
@@ -98,3 +98,19 @@
     </div>
   </app-card>
 </div>
+
+<!-- Celda «OC de origen»: enlace al detalle de la OC sin abrir el detalle del documento. -->
+<ng-template #purchaseOrderTemplate let-item>
+  @if (item.purchase_order; as po) {
+    <a
+      class="text-sm font-medium text-primary hover:underline"
+      data-testid="po-link"
+      [routerLink]="['/admin/orders/purchase-orders', po.id]"
+      (click)="$event.stopPropagation()"
+    >
+      {{ po.order_number }}
+    </a>
+  } @else {
+    <span class="text-text-secondary">—</span>
+  }
+</ng-template>

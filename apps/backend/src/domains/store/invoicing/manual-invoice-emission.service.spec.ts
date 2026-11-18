@@ -185,6 +185,7 @@ describe('InvoicingController.create — emit_immediately', () => {
       { success: jest.fn((data, message) => ({ success: true, data, message })) } as any,
       {} as any,
       manual,
+      {} as any,
     );
 
   it('sin el flag: no emite y la respuesta es idéntica a la de siempre', async () => {
