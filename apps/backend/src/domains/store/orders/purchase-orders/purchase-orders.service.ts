@@ -7465,6 +7465,22 @@ export class PurchaseOrdersService {
     return this.prisma.$transaction(async (tx) => {
       const order = await this.loadOrderOrFail(tx, id);
       this.assertMutable(order, 'eliminar');
+      // QUI-684 — un documento soporte (vigente o anulado) es traza fiscal y
+      // su FK a la orden es RESTRICT: se nombra el bloqueo antes de borrar.
+      const support_document = await tx.invoices.findFirst({
+        where: { purchase_order_id: id },
+        select: { id: true, invoice_number: true },
+      });
+      if (support_document) {
+        throw new VendixHttpException(
+          ErrorCodes.PO_DELETE_SUPPORT_DOCUMENT_001,
+          `La orden ${order.order_number} tiene el documento soporte ${support_document.invoice_number ?? `#${support_document.id}`}: no se puede eliminar. Cancélala si ya no la necesitas.`,
+          {
+            invoice_id: support_document.id,
+            invoice_number: support_document.invoice_number,
+          },
+        );
+      }
       // QUI-855 — la FK de las filas de impuestos a la línea es RESTRICT y la
       // línea cae en cascada con la orden: sin borrarlas antes, el delete falla.
       await tx.purchase_order_item_taxes.deleteMany({

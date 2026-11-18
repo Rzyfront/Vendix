@@ -1551,6 +1551,15 @@ export const ErrorCodes = {
     devMessage:
       'Una orden con mercancía recibida se revierte con una devolución a proveedor, no cancelándola',
   },
+  // QUI-684 — `invoices.purchase_order_id` es FK ON DELETE RESTRICT: la traza
+  // fiscal (incluso de un documento anulado) sobrevive al borrador. Sin esta
+  // guarda el borrado chocaba con la FK y salía como 500 (P2003).
+  PO_DELETE_SUPPORT_DOCUMENT_001: {
+    code: 'PO_DELETE_SUPPORT_DOCUMENT_001',
+    httpStatus: 409,
+    devMessage:
+      'La orden de compra tiene un documento soporte asociado y no se puede eliminar; cancélala si ya no la necesitas',
+  },
   PO_FIND_001: {
     code: 'PO_FIND_001',
     httpStatus: 404,
