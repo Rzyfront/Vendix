@@ -8,6 +8,7 @@ import {
   ScheduledOrdersPayload,
   ScheduledOrdersSettingsForm,
 } from './scheduled-orders-settings-form.component';
+import { ProductOptionsSettings } from '../../../../../../../core/models/store-settings.interface';
 
 /** Config de pedidos programados: sin «Tipos de entrega» y con días plegables. */
 describe('ScheduledOrdersSettingsForm', () => {
@@ -108,5 +109,44 @@ describe('ScheduledOrdersSettingsForm', () => {
     component.onReminderLeadChange(0, 4);
     component.onReminderLeadChange(0, 10081);
     expect(emitted.length).toBe(0);
+  });
+
+  /** QUI-1005 — «Permitir adiciones en la tienda en línea». */
+  describe('adiciones en la tienda en línea (QUI-1005)', () => {
+    const ONLINE_LABEL = 'Permitir adiciones en la tienda en línea';
+
+    function buildWithOptions(productOptions: ProductOptionsSettings | undefined) {
+      const built = build();
+      built.fixture.componentRef.setInput('productOptions', productOptions);
+      built.fixture.detectChanges();
+      const options: ProductOptionsSettings[] = [];
+      built.component.productOptionsChange.subscribe((v) => options.push(v));
+      const text = () => (built.fixture.nativeElement as HTMLElement).textContent ?? '';
+      return { ...built, options, text };
+    }
+
+    it('con adiciones apagadas no muestra el flag de la tienda en línea', () => {
+      const { text } = buildWithOptions({ enabled: false });
+      expect(text()).not.toContain(ONLINE_LABEL);
+    });
+
+    it('con adiciones activas lo muestra permitido por defecto (tienda que guardó sin el flag)', () => {
+      const { component, text } = buildWithOptions({ enabled: true });
+      expect(text()).toContain(ONLINE_LABEL);
+      expect(component.optionsAllowOnline()).toBeTrue();
+    });
+
+    it('apagarlo emite la sección completa con allow_online en false', () => {
+      const { component, options } = buildWithOptions({ enabled: true });
+      component.onOptionsAllowOnlineChange(false);
+      expect(options).toEqual([{ enabled: true, allow_online: false }]);
+    });
+
+    it('mover el interruptor «Adiciones» conserva allow_online', () => {
+      const { component, options } = buildWithOptions({ enabled: true, allow_online: false });
+      expect(component.optionsAllowOnline()).toBeFalse();
+      component.onOptionsEnabledChange(false);
+      expect(options).toEqual([{ enabled: false, allow_online: false }]);
+    });
   });
 });

@@ -317,6 +317,11 @@ export interface CreditRemindersSettings {
 /** Mirrors backend `store_settings.settings.product_options`. */
 export interface ProductOptionsSettings {
   enabled: boolean;
+  /**
+   * QUI-1005 — «Permitir adiciones en la tienda en línea». Default `true`
+   * (ausente ⇒ permitidas): se lee con `!== false`. Solo la tienda en línea.
+   */
+  allow_online?: boolean;
 }
 
 export interface ReservationsSettings {
