@@ -11,6 +11,10 @@ import { ResponseModule } from '../../../../common/responses/response.module';
 import { StoreBootstrapHelper } from '../../../../common/helpers/store-bootstrap.helper';
 import { CustomersModule } from '../customers.module';
 import { NotificationsModule } from '../../notifications/notifications.module';
+import { S3Module } from '../../../../common/services/s3.module';
+import { DataCollectionModule } from '../../data-collection/data-collection.module';
+import { CustomerDataSheetController } from './data-sheet/customer-data-sheet.controller';
+import { CustomerDataSheetService } from './data-sheet/customer-data-sheet.service';
 import { CustomerCrmController } from './profile/customer-crm.controller';
 import { CustomerCrmService } from './profile/customer-crm.service';
 import { CrmTagsController } from './tags/crm-tags.controller';
@@ -20,6 +24,7 @@ import { CrmTasksService } from './tasks/crm-tasks.service';
 import { CrmTaskDueJob } from './tasks/crm-task-due.job';
 import { CrmPipelineController } from './pipeline/crm-pipeline.controller';
 import { CrmPipelineService } from './pipeline/crm-pipeline.service';
+import { CrmStageTemplatesService } from './pipeline/crm-stage-templates.service';
 import { CrmQuotationListener } from './pipeline/crm-quotation.listener';
 import { CrmSegmentsController } from './segments/crm-segments.controller';
 import { CrmSegmentsService } from './segments/crm-segments.service';
@@ -39,9 +44,16 @@ import { CrmUnsubscribeService } from './campaigns/crm-unsubscribe.service';
  * are global.
  */
 @Module({
-  imports: [ResponseModule, CustomersModule, NotificationsModule],
+  imports: [
+    ResponseModule,
+    CustomersModule,
+    NotificationsModule,
+    S3Module,
+    DataCollectionModule,
+  ],
   controllers: [
     CustomerCrmController,
+    CustomerDataSheetController,
     CrmTagsController,
     CrmTasksController,
     CrmPipelineController,
@@ -56,6 +68,8 @@ import { CrmUnsubscribeService } from './campaigns/crm-unsubscribe.service';
     CrmTasksService,
     CrmTaskDueJob,
     CrmPipelineService,
+    CrmStageTemplatesService,
+    CustomerDataSheetService,
     CrmQuotationListener,
     CrmSegmentQueryService,
     CrmSegmentsService,

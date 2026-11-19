@@ -293,6 +293,73 @@ describe('CrmPipelineService', () => {
     expect(await codeOf(service.win(600))).toBe('CRM_OPPORTUNITY_001');
   });
 
+  describe('remove (QUI-1043 H2)', () => {
+    it('deletes the opportunity, audits its snapshot and the customer follows its latest remaining one', async () => {
+      as('owner');
+      const { service, prisma, audit } = setup();
+      prisma.crm_opportunities.deleteMany = jest.fn(async (..._args: any[]) => ({ count: 1 }));
+      prisma.crm_opportunities.findFirst
+        .mockResolvedValueOnce(opportunity())
+        .mockResolvedValueOnce({ stage_id: 102 });
+
+      await expect(service.remove(500)).resolves.toEqual({ id: 500 });
+
+      expect(prisma.crm_opportunities.deleteMany).toHaveBeenCalledWith({ where: { id: 500 } });
+      expect(audit.log).toHaveBeenCalledWith(
+        expect.objectContaining({
+          userId: OWNER,
+          storeId: STORE,
+          action: 'DELETE',
+          resource: 'crm_opportunities',
+          resourceId: 500,
+          oldValues: expect.objectContaining({
+            id: 500,
+            title: 'Dotación oficina',
+            amount: '1500000',
+            stage_id: 101,
+            customer: expect.objectContaining({ id: CUSTOMER }),
+          }),
+        }),
+      );
+      expect(prisma.crm_opportunities.findFirst).toHaveBeenLastCalledWith(
+        expect.objectContaining({ where: { customer_id: CUSTOMER } }),
+      );
+      expect(prisma.store_users.updateMany).toHaveBeenCalledWith({
+        where: { user_id: CUSTOMER },
+        data: { crm_stage_id: 102 },
+      });
+    });
+
+    it('with no opportunity left the customer keeps the stage it reached', async () => {
+      as('owner');
+      const { service, prisma } = setup();
+      prisma.crm_opportunities.deleteMany = jest.fn(async (..._args: any[]) => ({ count: 1 }));
+      prisma.crm_opportunities.findFirst
+        .mockResolvedValueOnce(opportunity())
+        .mockResolvedValueOnce(null);
+
+      await service.remove(500);
+
+      expect(prisma.store_users.updateMany).not.toHaveBeenCalled();
+    });
+
+    it('an opportunity the seller cannot see answers 404 and nothing is deleted or audited', async () => {
+      as('seller');
+      const { service, prisma, audit } = setup();
+      prisma.crm_opportunities.deleteMany = jest.fn(async (..._args: any[]) => ({ count: 1 }));
+      prisma.crm_opportunities.findFirst.mockResolvedValueOnce(null);
+
+      expect(await codeOf(service.remove(600))).toBe('CRM_OPPORTUNITY_001');
+      expect(prisma.crm_opportunities.findFirst).toHaveBeenCalledWith(
+        expect.objectContaining({
+          where: { AND: [{ id: 600 }, { owner_user_id: SELLER }] },
+        }),
+      );
+      expect(prisma.crm_opportunities.deleteMany).not.toHaveBeenCalled();
+      expect(audit.log).not.toHaveBeenCalled();
+    });
+  });
+
   it('only see-all edits stages, and an active stage with open cards cannot be deactivated', async () => {
     as('seller');
     const seller = setup();

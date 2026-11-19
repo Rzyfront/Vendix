@@ -39,6 +39,13 @@ const { Client } = require('pg');
  * Formato: 'tabla.columna'.
  */
 const REQUIRED_COLUMNS = [
+  // --- CRM: plantillas de etapas y planilla del cliente (20261209090000, QUI-1043) ---
+  // Toda lectura de data_collection_templates (listado, editor, reservas) trae
+  // is_crm_default; la ficha del cliente y el detalle de la oportunidad leen
+  // store_users.crm_data_template_id; el pipeline lee crm_stage_templates.
+  'data_collection_templates.is_crm_default',
+  'store_users.crm_data_template_id',
+  'crm_stage_templates.stages',
   // --- Manufactura: varias plantas (20261208090000, QUI-1013) ---
   // Toda lectura de production_orders trae plant_id (restaurante incluido): sin
   // ella cocina, Planta y pedidos programados dan 500. La planta resuelve las
