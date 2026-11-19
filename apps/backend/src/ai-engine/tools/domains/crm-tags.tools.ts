@@ -73,6 +73,7 @@ interface TagCustomersPlan {
     name: string;
     before: string[];
     after: string[];
+    beforeIds: number[];
     mergedIds: number[];
     changed: boolean;
   }>;
@@ -192,6 +193,7 @@ async function planTagCustomers(
       name,
       before: before.map(nameOf),
       after: merged.map(nameOf),
+      beforeIds: before,
       mergedIds: merged,
       changed,
     };
@@ -593,7 +595,7 @@ export function createCrmTagTools(deps: CrmTagToolDeps): RegisteredTool[] {
           customer_ids: {
             type: 'array',
             items: { type: 'number' },
-            description: `IDs de los clientes (1 a ${CRM_BULK_CUSTOMER_CAP}); también se acepta un solo número.`,
+            description: `IDs de los clientes (1 a ${CRM_BULK_CUSTOMER_CAP}).`,
           },
           add_tag_ids: {
             type: 'array',
@@ -676,6 +678,10 @@ export function createCrmTagTools(deps: CrmTagToolDeps): RegisteredTool[] {
           }
           const { plan } = result;
           const applied: Array<{ customer_id: number; name: string }> = [];
+          // Per applied customer, tag ids before and after: a bulk removal
+          // must be reconstructible from the audit row alone.
+          const beforeById: Record<number, number[]> = {};
+          const afterById: Record<number, number[]> = {};
           const failed: Array<{
             customer_id: number;
             name: string;
@@ -686,6 +692,8 @@ export function createCrmTagTools(deps: CrmTagToolDeps): RegisteredTool[] {
             try {
               await deps.customerCrmService.setTags(row.id, row.mergedIds);
               applied.push({ customer_id: row.id, name: row.name });
+              beforeById[row.id] = row.beforeIds;
+              afterById[row.id] = row.mergedIds;
             } catch (error) {
               failed.push({
                 customer_id: row.id,
@@ -707,12 +715,19 @@ export function createCrmTagTools(deps: CrmTagToolDeps): RegisteredTool[] {
             tool: 'tag_customers',
             action: 'BULK_UPDATE',
             resource: 'crm_customer_tags',
+            oldValues: { tag_ids_by_customer: beforeById },
             newValues: {
-              customer_ids: plan.customerIds,
+              customer_ids: applied.map((a) => a.customer_id),
               add_tag_ids: plan.addIds,
               remove_tag_ids: plan.removeIds,
+              tag_ids_by_customer: afterById,
             },
-            metadata: { applied: applied.length, failed: failed.length },
+            metadata: {
+              requested: plan.customerIds.length,
+              applied: applied.length,
+              unchanged: plan.unchangedCount,
+              failed: failed.length,
+            },
           });
           return crmToolSuccess(
             `Etiquetas actualizadas en ${applied.length} clientes${failed.length ? `; fallaron ${failed.length}` : ''}.`,

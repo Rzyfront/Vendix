@@ -378,7 +378,9 @@ export function createInventoryWriteTools(
     const adjustmentType = rawType as AdjustmentType;
 
     const product: any =
-      await adjustmentsService.findProductForStockAdjustmentForAgent(productId);
+      await adjustmentsService.findProductForStockAdjustmentForAgent(
+        productId,
+      );
 
     if (!product) {
       return failure(
@@ -2401,8 +2403,7 @@ export function createOrderWriteTools(
           const transition = resolved.value;
 
           const reason =
-            cleanString(args.reason) ??
-            'Cambio de estado solicitado al asistente IA';
+            cleanString(args.reason) ?? 'Cambio de estado solicitado al asistente IA';
 
           await orderFlowService.forceOrderState(
             transition.orderId,

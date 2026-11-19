@@ -279,13 +279,18 @@ describe('crm-tags.tools · etiquetas del CRM', () => {
         expect.objectContaining({
           action: 'BULK_UPDATE',
           resource: 'crm_customer_tags',
+          // Only the applied customers, with their tags before and after.
+          oldValues: { tag_ids_by_customer: { 1: [1, 2], 3: [1] } },
           newValues: {
-            customer_ids: [1, 2, 3],
+            customer_ids: [1, 3],
             add_tag_ids: [3],
             remove_tag_ids: [2],
+            tag_ids_by_customer: { 1: [1, 3], 3: [1, 3] },
           },
           metadata: expect.objectContaining({
+            requested: 3,
             applied: 2,
+            unchanged: 1,
             failed: 0,
             source: 'ai_agent',
           }),
@@ -293,7 +298,7 @@ describe('crm-tags.tools · etiquetas del CRM', () => {
       );
     });
 
-    it('acepta un solo número en customer_ids', async () => {
+    it('el handler tolera un solo número en customer_ids (el registro exige lista)', async () => {
       const { deps, byName } = buildTools();
       await run(byName.tag_customers, { customer_ids: 5, add_tag_ids: [1] });
       expect(deps.customerCrmService.setTags).toHaveBeenCalledWith(5, [1]);

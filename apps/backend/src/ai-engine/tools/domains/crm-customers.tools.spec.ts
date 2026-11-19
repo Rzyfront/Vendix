@@ -1,5 +1,6 @@
 import { ErrorCodes, VendixHttpException } from '../../../common/errors';
 import { RegisteredTool } from '../interfaces/tool.interface';
+import { validateToolArgs } from '../tool-args.validator';
 import {
   createCrmCustomerTools,
   CrmCustomerToolDeps,
@@ -52,6 +53,10 @@ describe('crm-customers.tools · ficha, archivo, responsable y notas', () => {
           rfm: { segment: 'champions' },
         }),
         updateProfile: jest.fn().mockResolvedValue({}),
+        ownersOf: jest.fn(async (ids: number[]) => ({
+          can_assign: true,
+          owners: new Map(ids.map((id) => [id, null])),
+        })),
         listNotes: jest.fn().mockResolvedValue({
           data: [
             {
@@ -263,21 +268,19 @@ describe('crm-customers.tools · ficha, archivo, responsable y notas', () => {
       expect(p.message).toContain(
         'Estos ids no son clientes de esta tienda: 500.',
       );
-      expect(deps.customerCrmService.getProfile).not.toHaveBeenCalled();
+      expect(deps.customerCrmService.ownersOf).not.toHaveBeenCalled();
     });
 
     it('preview: filas from → to y conteo de sin cambio', async () => {
       const { deps, byName } = buildTools();
-      deps.customerCrmService.getProfile.mockImplementation(
-        async (id: number) => ({
-          owner:
-            id === 1
-              ? { id: 8, first_name: 'Laura', last_name: 'R' }
-              : id === 2
-                ? { id: 5, first_name: 'Pedro', last_name: 'S' }
-                : null,
-        }),
-      );
+      deps.customerCrmService.ownersOf.mockResolvedValue({
+        can_assign: true,
+        owners: new Map<number, any>([
+          [1, { id: 8, first_name: 'Laura', last_name: 'R' }],
+          [2, { id: 5, first_name: 'Pedro', last_name: 'S' }],
+          [3, null],
+        ]),
+      });
       const p = await preview(byName.assign_customer_owner, {
         customer_ids: [1, 2, 3],
         owner_user_id: 8,
@@ -305,9 +308,8 @@ describe('crm-customers.tools · ficha, archivo, responsable y notas', () => {
 
     it('preview: todos sin cambio es error', async () => {
       const { deps, byName } = buildTools();
-      deps.customerCrmService.getProfile.mockResolvedValue({ owner: null });
       const p = await preview(byName.assign_customer_owner, {
-        customer_ids: 1,
+        customer_ids: [1],
         owner_user_id: null,
       });
       expect(p.status).toBe('error');
@@ -318,7 +320,6 @@ describe('crm-customers.tools · ficha, archivo, responsable y notas', () => {
 
     it('preview: limita filas y avisa cuántas se muestran', async () => {
       const { deps, byName } = buildTools();
-      deps.customerCrmService.getProfile.mockResolvedValue({ owner: null });
       const ids = Array.from({ length: 40 }, (_, i) => i + 1);
       const p = await preview(byName.assign_customer_owner, {
         customer_ids: ids,
@@ -330,7 +331,6 @@ describe('crm-customers.tools · ficha, archivo, responsable y notas', () => {
 
     it('handler: updateProfile por cliente con {owner_user_id} y auditoría resumen', async () => {
       const { deps, byName } = buildTools();
-      deps.customerCrmService.getProfile.mockResolvedValue({ owner: null });
       const out = await run(byName.assign_customer_owner, {
         customer_ids: [1, 2],
         owner_user_id: 8,
@@ -359,9 +359,8 @@ describe('crm-customers.tools · ficha, archivo, responsable y notas', () => {
 
     it('handler: un solo cliente no escribe auditoría resumen', async () => {
       const { deps, byName } = buildTools();
-      deps.customerCrmService.getProfile.mockResolvedValue({ owner: null });
       await run(byName.assign_customer_owner, {
-        customer_ids: 1,
+        customer_ids: [1],
         owner_user_id: 7,
       });
       expect(deps.customerCrmService.updateProfile).toHaveBeenCalledWith(
@@ -373,7 +372,6 @@ describe('crm-customers.tools · ficha, archivo, responsable y notas', () => {
 
     it('handler: reporta fallo parcial sin lanzar', async () => {
       const { deps, byName } = buildTools();
-      deps.customerCrmService.getProfile.mockResolvedValue({ owner: null });
       deps.customerCrmService.updateProfile
         .mockResolvedValueOnce({})
         .mockRejectedValueOnce(
@@ -394,7 +392,6 @@ describe('crm-customers.tools · ficha, archivo, responsable y notas', () => {
 
     it('handler: CRM_PROFILE_001 se vuelve una negativa legible', async () => {
       const { deps, byName } = buildTools();
-      deps.customerCrmService.getProfile.mockResolvedValue({ owner: null });
       deps.customerCrmService.updateProfile.mockRejectedValue(
         new VendixHttpException(ErrorCodes.CRM_PROFILE_001),
       );
@@ -417,6 +414,95 @@ describe('crm-customers.tools · ficha, archivo, responsable y notas', () => {
         'Estos ids no son clientes de esta tienda: 500.',
       );
       expect(deps.customerCrmService.updateProfile).not.toHaveBeenCalled();
+    });
+    it('el registro acepta owner_user_id null (quitar responsable) y pide el campo si falta', async () => {
+      const { byName } = buildTools();
+      const tool = byName.assign_customer_owner;
+      expect(
+        validateToolArgs(tool.name, tool.parameters, {
+          customer_ids: [5],
+          owner_user_id: null,
+        }),
+      ).toEqual({ ok: true });
+      const p = await preview(tool, { customer_ids: [5], owner_user_id: null });
+      expect(p.status).toBe('error'); // ya está sin responsable
+      expect(p.message).toContain('Sin responsable');
+
+      const absent = { customer_ids: [5] };
+      expect(validateToolArgs(tool.name, tool.parameters, absent).ok).toBe(
+        true,
+      );
+      const q = await preview(tool, absent);
+      expect(q.status).toBe('error');
+      expect(q.message).toContain('Falta owner_user_id');
+    });
+
+    it('quitar el responsable: null pasa de vendedor a Sin responsable', async () => {
+      const { deps, byName } = buildTools();
+      deps.customerCrmService.ownersOf.mockResolvedValue({
+        can_assign: true,
+        owners: new Map<number, any>([
+          [1, { id: 8, first_name: 'Laura', last_name: 'R' }],
+        ]),
+      });
+      const p = await preview(byName.assign_customer_owner, {
+        customer_ids: [1],
+        owner_user_id: null,
+      });
+      expect(p.status).toBe('ok');
+      expect(p.changes[1]).toMatchObject({
+        from: 'Laura R',
+        to: 'Sin responsable',
+      });
+      const out = await run(byName.assign_customer_owner, {
+        customer_ids: [1],
+        owner_user_id: null,
+      });
+      expect(deps.customerCrmService.updateProfile).toHaveBeenCalledWith(
+        1,
+        expect.objectContaining({ owner_user_id: null }),
+      );
+      expect(out.data.applied).toHaveLength(1);
+    });
+
+    it('preview: un vendedor sin permiso de asignar recibe la negativa antes de aprobar', async () => {
+      const { deps, byName } = buildTools();
+      deps.customerCrmService.ownersOf.mockResolvedValue({
+        can_assign: false,
+        owners: new Map([[1, null]]),
+      });
+      const p = await preview(byName.assign_customer_owner, {
+        customer_ids: [1],
+        owner_user_id: 8,
+      });
+      expect(p.status).toBe('error');
+      expect(p.message).toContain('Tu rol no permite cambiar el responsable');
+    });
+
+    it('handler: un vendedor sin permiso de asignar no escribe nada', async () => {
+      const { deps, byName } = buildTools();
+      deps.customerCrmService.ownersOf.mockResolvedValue({
+        can_assign: false,
+        owners: new Map([[1, null]]),
+      });
+      const out = await run(byName.assign_customer_owner, {
+        customer_ids: [1],
+        owner_user_id: 8,
+      });
+      expect(out.error).toContain('Tu rol no permite cambiar el responsable');
+      expect(deps.customerCrmService.updateProfile).not.toHaveBeenCalled();
+      expect(deps.auditService.log).not.toHaveBeenCalled();
+    });
+
+    it('lee responsables en una sola consulta, sin cargar la ficha completa', async () => {
+      const { deps, byName } = buildTools();
+      await preview(byName.assign_customer_owner, {
+        customer_ids: [1, 2, 3],
+        owner_user_id: 8,
+      });
+      expect(deps.customerCrmService.ownersOf).toHaveBeenCalledTimes(1);
+      expect(deps.customerCrmService.ownersOf).toHaveBeenCalledWith([1, 2, 3]);
+      expect(deps.customerCrmService.getProfile).not.toHaveBeenCalled();
     });
   });
 

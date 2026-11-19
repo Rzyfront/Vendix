@@ -142,6 +142,12 @@ describe('crm-segments.tools · segmentos CRM', () => {
       expect(out.data.count).toBe(ids.length);
       expect(out.data.customer_ids).toHaveLength(CRM_BULK_CUSTOMER_CAP);
       expect(out.data.truncated).toBe(true);
+      // No offset exists: the model is told to narrow the filter, not to
+      // repeat the same call expecting the next batch.
+      expect(out.next_step).toContain(
+        'Repetir este mismo filtro no trae los siguientes',
+      );
+      expect(out.next_step).not.toContain('repite por tandas');
       expect(out.data.sample[0]).toEqual({
         id: 1,
         name: 'Ana Gómez',

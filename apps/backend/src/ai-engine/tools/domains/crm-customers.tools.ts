@@ -43,7 +43,6 @@ const ARCHIVED_STATE = 'archived';
 const NOTE_EXCERPT_CHARS = 120;
 const NOTES_DEFAULT_LIMIT = 20;
 const NOTES_MAX_LIMIT = 50;
-const PROFILE_READ_BATCH = 10;
 const NO_OWNER_LABEL = 'Sin responsable';
 const NEXT_STEP_FIND_CUSTOMER =
   'Usa find_customer para obtener el customer_id correcto de esta tienda.';
@@ -104,31 +103,22 @@ export function createCrmCustomerTools(
     }
   }
 
-  /** Current owner per customer; unreadable profiles come back in `missing`. */
+  /**
+   * Current owner per customer plus whether the user may assign, in one
+   * store-scoped read (`CustomerCrmService.ownersOf`). Ids without a store
+   * membership come back in `missing`.
+   */
   async function readOwners(ids: number[]): Promise<{
+    canAssign: boolean;
     owners: Map<number, OwnerRef | null>;
     missing: number[];
   }> {
-    const owners = new Map<number, OwnerRef | null>();
-    const missing: number[] = [];
-    for (let i = 0; i < ids.length; i += PROFILE_READ_BATCH) {
-      const batch = ids.slice(i, i + PROFILE_READ_BATCH);
-      const results = await Promise.all(
-        batch.map(async (id) => {
-          try {
-            const profile: any = await customerCrmService.getProfile(id);
-            return { id, owner: (profile?.owner ?? null) as OwnerRef | null };
-          } catch {
-            return { id, owner: undefined };
-          }
-        }),
-      );
-      for (const r of results) {
-        if (r.owner === undefined) missing.push(r.id);
-        else owners.set(r.id, r.owner);
-      }
-    }
-    return { owners, missing };
+    const { can_assign, owners } = await customerCrmService.ownersOf(ids);
+    return {
+      canAssign: can_assign,
+      owners: owners as Map<number, OwnerRef | null>,
+      missing: ids.filter((id) => !owners.has(id)),
+    };
   }
 
   /** `owner_user_id` arg: positive int, explicit null (unassign) or invalid. */
@@ -369,15 +359,18 @@ export function createCrmCustomerTools(
           minItems: 1,
           maxItems: CRM_BULK_CUSTOMER_CAP,
           items: { type: 'number' },
-          description: `Ids de los clientes (máximo ${CRM_BULK_CUSTOMER_CAP}). También acepta un solo número.`,
+          description: `Ids de los clientes (máximo ${CRM_BULK_CUSTOMER_CAP}).`,
         },
         owner_user_id: {
           type: ['number', 'null'],
           description:
-            'Id del usuario vendedor (de list_store_users) o null para dejar al cliente sin responsable.',
+            'Id del usuario vendedor (de list_store_users) o null para dejar al cliente sin responsable. Siempre explícito: sin este campo no se cambia nada.',
         },
       },
-      required: ['customer_ids', 'owner_user_id'],
+      // `owner_user_id` is not listed: the registry validator reads null on a
+      // required field as missing, and null is how the owner is removed.
+      // `parseOwner` still refuses the call when the field is absent.
+      required: ['customer_ids'],
     },
     discovery: {
       synonyms: [
@@ -417,7 +410,12 @@ export function createCrmCustomerTools(
             `Estos ids no son clientes de esta tienda: ${missing.join(', ')}. ${NEXT_STEP_FIND_CUSTOMER}`,
           );
         }
-        const { owners, missing: unreadable } = await readOwners(ids);
+        const {
+          canAssign,
+          owners,
+          missing: unreadable,
+        } = await readOwners(ids);
+        if (!canAssign) return crmPreviewError(target, PROFILE_REFUSAL);
         if (unreadable.length) {
           return crmPreviewError(
             target,
@@ -479,9 +477,7 @@ export function createCrmCustomerTools(
         const { code, message } = describeError(error);
         return crmPreviewError(
           target,
-          code === 'CRM_PROFILE_001'
-            ? PROFILE_REFUSAL
-            : `No se pudo preparar la asignación${code ? ` (${code})` : ''}: ${message}`,
+          `No se pudo preparar la asignación${code ? ` (${code})` : ''}: ${message}`,
         );
       }
     },
@@ -516,7 +512,13 @@ export function createCrmCustomerTools(
             NEXT_STEP_FIND_CUSTOMER,
           );
         }
-        const { owners } = await readOwners(ids);
+        const { canAssign, owners } = await readOwners(ids);
+        if (!canAssign) {
+          return crmToolError(
+            PROFILE_REFUSAL,
+            'Pide al dueño o a un administrador que haga la asignación.',
+          );
+        }
         const applied: Array<{ customer_id: number; name: string }> = [];
         const unchanged: number[] = [];
         const failed: Array<{

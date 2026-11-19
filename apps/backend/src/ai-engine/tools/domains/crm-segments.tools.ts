@@ -621,7 +621,7 @@ export function createCrmSegmentTools(
               })),
             },
             truncated
-              ? `Hay más de ${CRM_BULK_CUSTOMER_CAP} clientes: la acción en lote cubre ${CRM_BULK_CUSTOMER_CAP} por tanda. Afina el filtro o repite por tandas.`
+              ? `Hay más de ${CRM_BULK_CUSTOMER_CAP} clientes y una acción en lote cubre ${CRM_BULK_CUSTOMER_CAP}. Repetir este mismo filtro no trae los siguientes: afínalo (por ejemplo, agrega {"field":"tag","cmp":"neq","value":<id de la etiqueta ya aplicada>} para excluir a los que ya la tienen) y vuelve a consultar.`
               : 'Pasa customer_ids a la acción en lote (tag_customers, update_segment_members, assign_customer_owner).',
           );
         } catch (error) {
