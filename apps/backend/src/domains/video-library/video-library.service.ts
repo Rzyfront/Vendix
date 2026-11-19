@@ -7,6 +7,7 @@ import {
   tokenizeQuery,
   calculateRelevance,
 } from '../../common/helpers/keywords.helper';
+import { buildVideoSearchWhere } from './video-search.helper';
 
 @Injectable()
 export class VideoLibraryService {
@@ -27,24 +28,7 @@ export class VideoLibraryService {
           : { OR: [{ slug: category }, { id: Number(category) }] },
       }),
       ...(module && { module }),
-      ...(search && (() => {
-        const cleanSearch = search.trim();
-        const tokens = tokenizeQuery(cleanSearch);
-        return {
-          OR: [
-            { title: { contains: cleanSearch, mode: 'insensitive' as const } },
-            { summary: { contains: cleanSearch, mode: 'insensitive' as const } },
-            { tags: { has: cleanSearch.toLowerCase() } },
-            { keywords: { has: cleanSearch.toLowerCase() } },
-            ...tokens.flatMap((t) => [
-              { title: { contains: t, mode: 'insensitive' as const } },
-              { summary: { contains: t, mode: 'insensitive' as const } },
-              { tags: { has: t } },
-              { keywords: { has: t } },
-            ]),
-          ],
-        };
-      })()),
+      ...(search && buildVideoSearchWhere(search)),
     };
 
     const [data, total] = await Promise.all([
