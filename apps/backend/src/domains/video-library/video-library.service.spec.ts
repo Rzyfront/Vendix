@@ -4,6 +4,7 @@ import { VideoLibraryService } from './video-library.service';
 describe('VideoLibraryService', () => {
   let service: VideoLibraryService;
   let prisma: {
+    $queryRaw: jest.Mock;
     videos: {
       findUnique: jest.Mock;
       update: jest.Mock;
@@ -20,6 +21,7 @@ describe('VideoLibraryService', () => {
 
   beforeEach(() => {
     prisma = {
+      $queryRaw: jest.fn().mockResolvedValue([]),
       videos: {
         findUnique: jest.fn(),
         update: jest.fn(),

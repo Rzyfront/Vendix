@@ -14,10 +14,13 @@ import {
 import { Prisma } from '@prisma/client';
 import {
   normalizeKeywords,
-  tokenizeQuery,
   calculateRelevance,
 } from '../../../common/helpers/keywords.helper';
-import { buildVideoSearchWhere } from '../../video-library/video-search.helper';
+import {
+  buildVideoSearchWhere,
+  findVideoIdsIgnoringAccents,
+  videoRankingTokens,
+} from '../../video-library/video-search.helper';
 
 /** Thumbnail generated from a YouTube video ID (not uploaded by hand). */
 const AUTO_YOUTUBE_THUMBNAIL = /^https?:\/\/img\.youtube\.com\/vi\//;
@@ -36,6 +39,9 @@ export class VideoLibraryAdminService {
   async findAllVideos(query: AdminVideoQueryDto) {
     const { page = 1, limit = 20, status, video_source, category, search } = query;
     const skip = (page - 1) * limit;
+    const accentInsensitiveIds = search
+      ? await findVideoIdsIgnoringAccents(this.globalPrisma, search)
+      : [];
 
     const where: Prisma.videosWhereInput = {
       ...(status && { status: status as any }),
@@ -45,7 +51,7 @@ export class VideoLibraryAdminService {
           ? { slug: category }
           : { OR: [{ slug: category }, { id: Number(category) }] },
       }),
-      ...(search && buildVideoSearchWhere(search)),
+      ...(search && buildVideoSearchWhere(search, accentInsensitiveIds)),
     };
 
     const [data, total] = await Promise.all([
@@ -72,7 +78,7 @@ export class VideoLibraryAdminService {
     );
 
     if (search) {
-      const tokens = tokenizeQuery(search);
+      const tokens = videoRankingTokens(search);
       signedData.sort(
         (a, b) => calculateRelevance(b, tokens) - calculateRelevance(a, tokens),
       );

@@ -1,5 +1,6 @@
 import { VideoLibraryAdminService } from './video-library-admin.service';
 import { VideoSourceTypeEnum } from './dto';
+import { buildUnaccentedPatterns } from '../../video-library/video-search.helper';
 
 const OLD_ID = 'dQw4w9WgXcQ';
 const NEW_ID = 'kJQP7kiw5Fk';
@@ -17,6 +18,7 @@ const storedVideo = {
 describe('VideoLibraryAdminService', () => {
   let service: VideoLibraryAdminService;
   let prisma: {
+    $queryRaw: jest.Mock;
     videos: {
       findUnique: jest.Mock;
       findFirst: jest.Mock;
@@ -29,6 +31,7 @@ describe('VideoLibraryAdminService', () => {
 
   beforeEach(() => {
     prisma = {
+      $queryRaw: jest.fn().mockResolvedValue([]),
       videos: {
         findUnique: jest.fn().mockResolvedValue(storedVideo),
         findFirst: jest.fn().mockResolvedValue(null),
@@ -142,6 +145,24 @@ describe('VideoLibraryAdminService', () => {
     });
   });
 
+  describe('buildUnaccentedPatterns', () => {
+    it('lowercases and strips accents from the full phrase', () => {
+      expect(buildUnaccentedPatterns('Cómo s')).toEqual(['%como s%']);
+    });
+
+    it('adds each meaningful word without accents', () => {
+      expect(buildUnaccentedPatterns('Configuración de tu Tienda')).toEqual([
+        '%configuracion de tu tienda%',
+        '%configuracion%',
+        '%tienda%',
+      ]);
+    });
+
+    it('escapes LIKE wildcards typed by the user', () => {
+      expect(buildUnaccentedPatterns('50%_off')).toEqual(['%50\\%\\_off%', '%50%', '%off%']);
+    });
+  });
+
   describe('findAllVideos — search', () => {
     const titlesOf = (result: { data: { title: string }[] }) => result.data.map((v) => v.title);
     const searchOr = () => prisma.videos.findMany.mock.calls[0][0].where.OR as unknown[];
@@ -172,6 +193,17 @@ describe('VideoLibraryAdminService', () => {
       expect(titlesOf(result)[0]).toBe('Configuración Inicial de tu Tienda en Vendix');
     });
 
+    it('ranks by the phrase when every word is a stopword ("Como")', async () => {
+      prisma.videos.findMany.mockResolvedValue([
+        { id: 5, title: 'hola', summary: 'como funciona', tags: [], keywords: [] },
+        { id: 4, title: 'Como crear clientes', tags: [], keywords: [] },
+      ]);
+
+      const result = await service.findAllVideos({ search: 'Como' });
+
+      expect(titlesOf(result)[0]).toBe('Como crear clientes');
+    });
+
     it('keeps status and category filters alongside the search', async () => {
       await service.findAllVideos({ search: 'crear cliente', status: 'PUBLISHED', category: 'ventas' } as any);
 
@@ -181,6 +213,15 @@ describe('VideoLibraryAdminService', () => {
       expect(where.OR).toEqual(
         expect.arrayContaining([{ title: { contains: 'crear cliente', mode: 'insensitive' } }]),
       );
+    });
+
+    it('finds a title with accents from a partial query without them ("como s" → "Cómo subir…")', async () => {
+      prisma.$queryRaw.mockResolvedValue([{ id: 7 }]);
+
+      await service.findAllVideos({ search: 'como s' });
+
+      expect(prisma.$queryRaw).toHaveBeenCalledTimes(1);
+      expect(searchOr()).toContainEqual({ id: { in: [7] } });
     });
 
     it('keeps the default order when there is no search', async () => {

@@ -7,7 +7,11 @@ import {
   tokenizeQuery,
   calculateRelevance,
 } from '../../common/helpers/keywords.helper';
-import { buildVideoSearchWhere } from './video-search.helper';
+import {
+  buildVideoSearchWhere,
+  findVideoIdsIgnoringAccents,
+  videoRankingTokens,
+} from './video-search.helper';
 
 @Injectable()
 export class VideoLibraryService {
@@ -19,6 +23,9 @@ export class VideoLibraryService {
   async findAll(query: VideoQueryDto) {
     const { page = 1, limit = 20, category, module, search } = query;
     const skip = (page - 1) * limit;
+    const accentInsensitiveIds = search
+      ? await findVideoIdsIgnoringAccents(this.globalPrisma, search)
+      : [];
 
     const where: Prisma.videosWhereInput = {
       status: 'PUBLISHED',
@@ -28,7 +35,7 @@ export class VideoLibraryService {
           : { OR: [{ slug: category }, { id: Number(category) }] },
       }),
       ...(module && { module }),
-      ...(search && buildVideoSearchWhere(search)),
+      ...(search && buildVideoSearchWhere(search, accentInsensitiveIds)),
     };
 
     const [data, total] = await Promise.all([
@@ -59,7 +66,7 @@ export class VideoLibraryService {
     );
 
     if (search) {
-      const tokens = tokenizeQuery(search);
+      const tokens = videoRankingTokens(search);
       signedData.sort(
         (a, b) => calculateRelevance(b, tokens) - calculateRelevance(a, tokens),
       );
