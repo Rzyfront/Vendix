@@ -199,7 +199,11 @@ export class CrmTasksService {
       assignee,
     );
     if (dto.move_to_stage_id) {
-      await this.assertTargetStage(dto.opportunity_id, dto.move_to_stage_id);
+      await this.assertTargetStage(
+        viewer,
+        dto.opportunity_id,
+        dto.move_to_stage_id,
+      );
     }
 
     const created = await this.prisma.crm_tasks.create({
@@ -262,6 +266,7 @@ export class CrmTasksService {
     ) {
       if (dto.move_to_stage_id !== null) {
         await this.assertTargetStage(
+          viewer,
           current.opportunity_id,
           dto.move_to_stage_id,
         );
@@ -418,14 +423,7 @@ export class CrmTasksService {
       throw new VendixHttpException(ErrorCodes.CRM_CUSTOMER_001);
     }
     if (dto.opportunity_id) {
-      // Same visibility as the pipeline: a seller links only their own.
-      const found = await this.prisma.crm_opportunities.count({
-        where: {
-          id: dto.opportunity_id,
-          ...(viewer.can_see_all ? {} : { owner_user_id: viewer.user_id }),
-        },
-      });
-      if (!found) throw new VendixHttpException(ErrorCodes.CRM_OPPORTUNITY_001);
+      await this.assertOpportunityVisible(viewer, dto.opportunity_id);
     }
     if (dto.conversation_id) {
       const found = await this.prisma.crm_conversations.count({
@@ -474,12 +472,33 @@ export class CrmTasksService {
     };
   }
 
-  /** The target stage needs a linked opportunity and must be of its board. */
+  /** Same visibility as the pipeline: a seller only reaches their own. */
+  private async assertOpportunityVisible(
+    viewer: CrmViewer,
+    opportunityId: number,
+  ): Promise<void> {
+    const found = await this.prisma.crm_opportunities.count({
+      where: {
+        id: opportunityId,
+        ...(viewer.can_see_all ? {} : { owner_user_id: viewer.user_id }),
+      },
+    });
+    if (!found) throw new VendixHttpException(ErrorCodes.CRM_OPPORTUNITY_001);
+  }
+
+  /**
+   * The target stage needs a linked opportunity and must be of its board.
+   * Choosing it decides where the opportunity goes when anyone completes the
+   * task, so only who sees that opportunity on the board may choose it (a
+   * support person of someone else's task may not).
+   */
   private async assertTargetStage(
+    viewer: CrmViewer,
     opportunityId: number | null | undefined,
     stageId: number,
   ): Promise<void> {
     if (!opportunityId) throw new VendixHttpException(ErrorCodes.CRM_TASK_002);
+    await this.assertOpportunityVisible(viewer, opportunityId);
     await this.pipeline.assertTaskTargetStage(opportunityId, stageId);
   }
 

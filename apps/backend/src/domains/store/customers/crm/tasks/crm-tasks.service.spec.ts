@@ -514,6 +514,30 @@ describe('CrmTasksService', () => {
       expect(pipeline.moveForTask).not.toHaveBeenCalled();
     });
 
+    it('only who sees the opportunity on the board can choose where the task moves it', async () => {
+      // The seller helps on a task linked to someone else's opportunity.
+      as('seller');
+      const { service, prisma, pipeline } = setup({
+        task: { opportunity_id: 500, move_to_stage_id: 102 },
+      });
+      prisma.crm_opportunities.count.mockResolvedValueOnce(0);
+
+      expect(await codeOf(service.update(50, { move_to_stage_id: 104 }))).toBe(
+        'CRM_OPPORTUNITY_001',
+      );
+      expect(prisma.crm_opportunities.count).toHaveBeenCalledWith({
+        where: { id: 500, owner_user_id: SELLER },
+      });
+      expect(pipeline.assertTaskTargetStage).not.toHaveBeenCalled();
+      expect(prisma.crm_tasks.updateMany).not.toHaveBeenCalled();
+
+      // Clearing the target moves nothing, so it stays open to them.
+      await service.update(50, { move_to_stage_id: null });
+      expect(prisma.crm_tasks.updateMany.mock.calls[0][0].data).toEqual({
+        move_to_stage_id: null,
+      });
+    });
+
     it('a task without opportunity cannot get a target stage on edit', async () => {
       as('seller');
       const { service, prisma } = setup();
