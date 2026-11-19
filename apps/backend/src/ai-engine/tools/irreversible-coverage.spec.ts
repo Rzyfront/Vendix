@@ -17,6 +17,11 @@ import { createReturnTools } from './domains/returns.tools';
 import { createSubscriptionTools } from './domains/subscriptions.tools';
 import { createVariantTools } from './domains/variants.tools';
 import { createWithholdingTools } from './domains/withholding.tools';
+import { createCrmCustomerTools } from './domains/crm-customers.tools';
+import { createCrmTagTools } from './domains/crm-tags.tools';
+import { createCrmSegmentTools } from './domains/crm-segments.tools';
+import { createCrmPipelineTools } from './domains/crm-pipeline.tools';
+import { createCrmTaskCampaignTools } from './domains/crm-tasks-campaigns.tools';
 
 /**
  * Paso 1 (remediación Vex) — cobertura de irreversibilidad.
@@ -102,9 +107,9 @@ describe('irreversible-coverage · Paso 1 remediación Vex', () => {
   it('close_cash_session porta la marca (ancla del test negativo)', () => {
     // Si se retira `irreversible` de close_cash_session, este caso y el
     // barrido de arriba fallan: verificado revirtiendo esa línea.
-    expect(
-      buildStep1Registry().get('close_cash_session')?.irreversible,
-    ).toBe(true);
+    expect(buildStep1Registry().get('close_cash_session')?.irreversible).toBe(
+      true,
+    );
   });
 
   it('run_close_checks sigue excluido solo mientras prometa que no cierra', () => {
@@ -241,11 +246,14 @@ describe('irreversible-coverage · REQUIRED_IRREVERSIBLE (R3-A)', () => {
     return registry;
   }
 
-  it.each(REQUIRED_IRREVERSIBLE)('%s existe y porta irreversible: true', (name) => {
-    const tool = buildFullRegistry().get(name);
-    expect(tool).toBeDefined();
-    expect(tool?.irreversible).toBe(true);
-  });
+  it.each(REQUIRED_IRREVERSIBLE)(
+    '%s existe y porta irreversible: true',
+    (name) => {
+      const tool = buildFullRegistry().get(name);
+      expect(tool).toBeDefined();
+      expect(tool?.irreversible).toBe(true);
+    },
+  );
 
   it('run_close_checks sigue sin marca (exclusión fijada)', () => {
     expect(buildFullRegistry().get('run_close_checks')?.irreversible).not.toBe(
@@ -268,6 +276,47 @@ describe('irreversible-coverage · REQUIRED_IRREVERSIBLE (R3-A)', () => {
           IRREVERSIBLE_NAME_PATTERN.test(t.name) ||
           IRREVERSIBLE_NAME_PATTERN.test(t.domain ?? ''),
       )
+      .filter((t) => t.irreversible !== true)
+      .map((t) => `${t.domain}/${t.name}`);
+    expect(violators).toEqual([]);
+  });
+});
+
+describe('irreversible-coverage · familia CRM (QUI-1042)', () => {
+  // The CRM family lives in the `customers` domain, which is NOT irreversible
+  // as a whole (creating a note or a tag is undoable), so explicit pins plus
+  // the name net are the only defense: archiving a customer, deleting a tag
+  // or a segment and sending a campaign must always get their own card.
+  function buildCrmRegistry(): AIToolRegistry {
+    const deps = {} as any;
+    const registry = new AIToolRegistry(deps);
+    registry.registerMany(createCrmCustomerTools(deps));
+    registry.registerMany(createCrmTagTools(deps));
+    registry.registerMany(createCrmSegmentTools(deps));
+    registry.registerMany(createCrmPipelineTools(deps));
+    registry.registerMany(createCrmTaskCampaignTools(deps));
+    return registry;
+  }
+
+  it.each([
+    'archive_customer',
+    'delete_crm_tag',
+    'delete_crm_segment',
+    'send_crm_campaign',
+  ])('%s porta irreversible: true', (name) => {
+    expect(buildCrmRegistry().get(name)?.irreversible).toBe(true);
+  });
+
+  it('ningún write CRM con nombre irreversible queda sin marca', () => {
+    const violators = buildCrmRegistry()
+      .getAll()
+      .filter(
+        (t) =>
+          t.requiresConfirmation === true &&
+          t.readOnly !== true &&
+          t.clientSide !== true,
+      )
+      .filter((t) => IRREVERSIBLE_NAME_PATTERN.test(t.name))
       .filter((t) => t.irreversible !== true)
       .map((t) => `${t.domain}/${t.name}`);
     expect(violators).toEqual([]);

@@ -1,4 +1,12 @@
-import { Module } from '@nestjs/common';
+import { Module, OnModuleInit } from '@nestjs/common';
+import { AuditService } from '../../../../common/audit/audit.service';
+import { AIToolRegistry } from '../../../../ai-engine/tools/ai-tool-registry';
+import { createCrmCustomerTools } from '../../../../ai-engine/tools/domains/crm-customers.tools';
+import { createCrmTagTools } from '../../../../ai-engine/tools/domains/crm-tags.tools';
+import { createCrmSegmentTools } from '../../../../ai-engine/tools/domains/crm-segments.tools';
+import { createCrmPipelineTools } from '../../../../ai-engine/tools/domains/crm-pipeline.tools';
+import { createCrmTaskCampaignTools } from '../../../../ai-engine/tools/domains/crm-tasks-campaigns.tools';
+import { CustomersService } from '../customers.service';
 import { ResponseModule } from '../../../../common/responses/response.module';
 import { StoreBootstrapHelper } from '../../../../common/helpers/store-bootstrap.helper';
 import { CustomersModule } from '../customers.module';
@@ -61,4 +69,63 @@ import { CrmUnsubscribeService } from './campaigns/crm-unsubscribe.service';
   // CustomerCrmService: the Flujos action "asignar etiqueta" uses setTags.
   exports: [CrmTasksService, CustomerCrmService],
 })
-export class CustomerCrmModule {}
+export class CustomerCrmModule implements OnModuleInit {
+  constructor(
+    private readonly toolRegistry: AIToolRegistry,
+    private readonly auditService: AuditService,
+    private readonly customersService: CustomersService,
+    private readonly customerCrmService: CustomerCrmService,
+    private readonly crmTagsService: CrmTagsService,
+    private readonly crmTasksService: CrmTasksService,
+    private readonly crmPipelineService: CrmPipelineService,
+    private readonly crmSegmentsService: CrmSegmentsService,
+    private readonly segmentQueryService: CrmSegmentQueryService,
+    private readonly segmentMembersService: CrmSegmentMembersService,
+    private readonly crmCampaignsService: CrmCampaignsService,
+  ) {}
+
+  /**
+   * QUI-1042: CRM tool family for Vex and Vexi (customer card, archive,
+   * owner, notes, tags, segments, pipeline, tasks, campaigns, bulk actions).
+   * Registered here because this module owns the CRM services; the
+   * `AIToolRegistry` comes from the `@Global()` engine module, so no new
+   * module edge is created (same pattern as `CustomersModule`).
+   */
+  onModuleInit(): void {
+    const { auditService, customersService } = this;
+    this.toolRegistry.registerMany([
+      ...createCrmCustomerTools({
+        customersService,
+        customerCrmService: this.customerCrmService,
+        segmentMembersService: this.segmentMembersService,
+        auditService,
+      }),
+      ...createCrmTagTools({
+        crmTagsService: this.crmTagsService,
+        customerCrmService: this.customerCrmService,
+        segmentMembersService: this.segmentMembersService,
+        customersService,
+        auditService,
+      }),
+      ...createCrmSegmentTools({
+        crmSegmentsService: this.crmSegmentsService,
+        segmentQueryService: this.segmentQueryService,
+        segmentMembersService: this.segmentMembersService,
+        customersService,
+        auditService,
+      }),
+      ...createCrmPipelineTools({
+        crmPipelineService: this.crmPipelineService,
+        customersService,
+        auditService,
+      }),
+      ...createCrmTaskCampaignTools({
+        crmTasksService: this.crmTasksService,
+        crmCampaignsService: this.crmCampaignsService,
+        crmSegmentsService: this.crmSegmentsService,
+        customersService,
+        auditService,
+      }),
+    ]);
+  }
+}
