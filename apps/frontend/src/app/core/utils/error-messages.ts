@@ -590,6 +590,7 @@ export const ERROR_MESSAGES: Record<string, string> = {
     'No se puede eliminar una plantilla que tiene formularios enviados.',
   DCOL_PRODUCT_001: 'El formulario de recepción solo se puede vincular a servicios de esta tienda.',
   DCOL_CRM_001: 'Solo una plantilla activa de tipo Cliente puede usarse en el CRM.',
+  DCOL_CRM_002: 'Otra plantilla se marcó como predeterminada del CRM al mismo tiempo. Intenta de nuevo.',
   // CRM pipeline: stage templates and customer data sheet (QUI-1043).
   CRM_PIPELINE_006: 'Una etapa que sobra tiene oportunidades abiertas. Muévelas antes de desactivarla o de aplicar la plantilla.',
   CRM_PIPELINE_007: 'Solo el dueño o un administrador puede configurar pipelines y etapas.',
@@ -597,10 +598,11 @@ export const ERROR_MESSAGES: Record<string, string> = {
   CRM_PIPELINE_009: 'Ya existe un pipeline con ese nombre.',
   CRM_STAGE_TEMPLATE_001: 'La plantilla de etapas no existe.',
   CRM_STAGE_TEMPLATE_002: 'Ya existe una plantilla de etapas con ese nombre.',
-  CRM_STAGE_TEMPLATE_003: 'La plantilla necesita al menos una etapa abierta y nombres de etapa sin repetir.',
+  CRM_STAGE_TEMPLATE_003: 'La plantilla necesita al menos una etapa abierta, una ganada y una perdida, con nombres de etapa sin repetir.',
   CRM_OPPORTUNITY_001: 'La oportunidad no existe o no tienes acceso a ella.',
   CRM_DATA_SHEET_001: 'Ese campo no pertenece a la plantilla de datos del cliente.',
   CRM_DATA_SHEET_002: 'El archivo no pertenece a la ficha de este cliente. Súbelo de nuevo.',
+  CRM_DATA_SHEET_003: 'Ese tipo de archivo no se permite. Sube una imagen, un PDF o un documento de Office, texto o CSV.',
   // Rejections a customer meets when booking a station online.
   STATION_001: 'El servicio, el profesional y la estación elegidos no son compatibles.',
   STATION_002: 'Ese horario de la estación ya fue tomado. Elige otro horario.',

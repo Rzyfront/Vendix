@@ -623,7 +623,7 @@ interface Selection {
                     [ngModel]="formData().is_default"
                     (ngModelChange)="updateFormData('is_default', $event)"
                   />
-                  @if (formData().entity_type === 'customer') {
+                  @if (canBeCrmDefault()) {
                     <app-setting-toggle
                       label="Predeterminada del CRM"
                       description="Es la planilla del cliente en el pipeline y en su ficha."
@@ -1113,6 +1113,10 @@ export class TemplateEditorComponent implements OnInit {
   });
 
   templateName = computed(() => this.formData().name || 'Nueva plantilla');
+  /** Same rule as the backend (DCOL_CRM_001): active customer templates only. */
+  readonly canBeCrmDefault = computed(
+    () => this.formData().entity_type === 'customer' && this.formData().status === 'active',
+  );
 
   /**
    * Pantalla que abrió el editor (p. ej. Estaciones de servicio al diseñar la
@@ -1388,7 +1392,10 @@ export class TemplateEditorComponent implements OnInit {
       station_type: fd.entity_type === 'service_session' ? fd.station_type || null : undefined,
       status: fd.status,
       is_default: fd.is_default,
-      is_crm_default: fd.entity_type === 'customer' ? fd.is_crm_default : false,
+      // Only an active customer template can be the CRM default: archiving or
+      // deactivating it from here sends false, so the backend unmarks it.
+      is_crm_default:
+        fd.entity_type === 'customer' && fd.status === 'active' ? fd.is_crm_default : false,
       checkin_show_budget: fd.entity_type === 'service_session' ? fd.checkin_show_budget : undefined,
       checkin_show_products: fd.entity_type === 'service_session' ? fd.checkin_show_products : undefined,
       checkin_show_notes: fd.entity_type === 'service_session' ? fd.checkin_show_notes : undefined,

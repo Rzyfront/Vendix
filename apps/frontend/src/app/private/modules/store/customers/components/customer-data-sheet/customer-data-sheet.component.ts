@@ -1,10 +1,11 @@
 import {
   ChangeDetectionStrategy,
   Component,
-  DestroyRef,
   computed,
+  DestroyRef,
   inject,
   input,
+  linkedSignal,
   output,
   signal,
 } from '@angular/core';
@@ -382,6 +383,7 @@ function originalControlValue(
                   #fileInput
                   type="file"
                   class="hidden"
+                  accept=".jpg,.jpeg,.png,.webp,.gif,.pdf,.doc,.docx,.xls,.xlsx,.ppt,.pptx,.txt,.csv"
                   (change)="onFileSelected(vi, fileInput)"
                 />
                 <app-button
@@ -458,7 +460,14 @@ export class CustomerDataSheetComponent {
   readonly loadError = signal<string | null>(null);
   readonly saving = signal(false);
   readonly switchingTemplate = signal(false);
-  readonly otherOpen = signal(false);
+  /**
+   * "Otros datos" starts open when there is no template: before QUI-1043 the
+   * profile showed these answers directly, so they must not hide by default.
+   */
+  readonly otherOpen = linkedSignal({
+    source: () => !this.sheet()?.template,
+    computation: (noTemplate: boolean) => noTemplate,
+  });
   readonly activeTabId = signal<number | null>(null);
 
   /** Changed controls only, keyed by field id. */

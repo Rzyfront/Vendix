@@ -519,7 +519,7 @@ export class StageTemplatesModalComponent {
     return { key: this.nextKey++, ...stage };
   }
 
-  /** Mirrors the backend rules: 1-20 stages, unique names, at least one open. */
+  /** Mirrors the backend rules: 1-20 stages, unique names, one open, one won and one lost. */
   private validate(): string | null {
     if (this.mode() !== 'edit') return null;
     if (!this.draftName().trim()) return 'Escribe el nombre de la plantilla.';
@@ -537,6 +537,9 @@ export class StageTemplatesModalComponent {
       }
     }
     if (!rows.some((r) => r.kind === 'open')) return 'Incluye al menos una etapa de tipo Abierta.';
+    // Win and lose need an active closing stage in the pipeline.
+    if (!rows.some((r) => r.kind === 'won')) return 'Incluye al menos una etapa de tipo Ganada.';
+    if (!rows.some((r) => r.kind === 'lost')) return 'Incluye al menos una etapa de tipo Perdida.';
     return null;
   }
 }
