@@ -1,5 +1,15 @@
 import { AuthFacade } from '../../../../../../core/store/auth/auth.facade';
-import { CrmConsent, CrmCustomerSource, CrmTimelineType } from './crm.interface';
+import {
+  CrmConsent,
+  CrmCustomerSource,
+  CrmOpenOpportunity,
+  CrmPerson,
+  CrmStage,
+  CrmTask,
+  CrmTaskMoveSkipReason,
+  CrmTimelineType,
+  personName,
+} from './crm.interface';
 
 /** Owner/admin (`store:crm_inbox:assign`) see and assign the whole store. */
 export function crmCanSeeAll(auth: AuthFacade): boolean {
@@ -70,4 +80,69 @@ export function formatDateOnly(value: string | null | undefined): string {
     month: 'short',
     year: 'numeric',
   });
+}
+
+/** Support people one task admits (same cap as the API). */
+export const CRM_TASK_MAX_SUPPORTERS = 10;
+
+/**
+ * Stages a task can move its opportunity to: the active stages of its board
+ * except the current one and the `lost` ones (losing asks for a reason, and
+ * that stays on the board).
+ */
+export function taskTargetStages(opportunity: CrmOpenOpportunity | null): CrmStage[] {
+  if (!opportunity) return [];
+  return opportunity.stages.filter(
+    (stage) => stage.kind !== 'lost' && stage.id !== opportunity.stage?.id,
+  );
+}
+
+/** `Cotización X · Ventas · Propuesta`, as the task form lists it. */
+export function openOpportunityLabel(opportunity: CrmOpenOpportunity): string {
+  return [opportunity.title, opportunity.pipeline.name, opportunity.stage?.name]
+    .filter(Boolean)
+    .join(' · ');
+}
+
+/** The viewer helps with the task without being its assignee. */
+export function isTaskSupporter(task: CrmTask, userId: number | null): boolean {
+  if (userId == null || task.assigned_user?.id === userId) return false;
+  return (task.support_users ?? []).some((person) => person.id === userId);
+}
+
+/** `Apoyo: Luis, Marta +1`: up to `max` support names, then how many more. */
+export function supportLine(people: CrmPerson[] | null | undefined, max = 2): string {
+  const list = people ?? [];
+  if (!list.length) return '';
+  const names = list.slice(0, max).map((person) => personName(person)).join(', ');
+  const more = list.length - max;
+  return `Apoyo: ${names}${more > 0 ? ` +${more}` : ''}`;
+}
+
+/** `Mueve «Oportunidad» → «Etapa»`, or empty when the task moves nothing. */
+export function taskMoveLine(task: CrmTask): string {
+  if (!task.opportunity || !task.move_to_stage) return '';
+  return `Mueve «${task.opportunity.title}» → «${task.move_to_stage.name}»`;
+}
+
+const MOVE_SKIP_MESSAGES: Record<CrmTaskMoveSkipReason, string> = {
+  opportunity_missing: 'la oportunidad ya no existe',
+  opportunity_closed: 'la oportunidad ya está cerrada',
+  already_in_stage: 'la oportunidad ya estaba en esa etapa',
+  stage_unavailable: 'la etapa ya no está disponible',
+  failed: 'no se pudo mover la oportunidad',
+};
+
+/**
+ * Toast after completing a task. A task that moves its opportunity always
+ * says `Tarea completada · …` with what happened; any other one says
+ * `fallback` (the customer panel calls tasks "seguimientos").
+ */
+export function taskCompletedMessage(task: CrmTask, fallback = 'Tarea completada'): string {
+  const move = task.opportunity_move;
+  if (!move) return fallback;
+  if (move.moved && move.stage) {
+    return `Tarea completada · oportunidad movida a «${move.stage.name}»`;
+  }
+  return `Tarea completada · ${MOVE_SKIP_MESSAGES[move.reason ?? 'failed']}`;
 }

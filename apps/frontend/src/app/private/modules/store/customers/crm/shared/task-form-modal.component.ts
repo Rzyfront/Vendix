@@ -1,4 +1,14 @@
-import { Component, effect, inject, input, model, output, signal, untracked } from '@angular/core';
+import {
+  Component,
+  computed,
+  effect,
+  inject,
+  input,
+  model,
+  output,
+  signal,
+  untracked,
+} from '@angular/core';
 import { FormsModule } from '@angular/forms';
 import { firstValueFrom } from 'rxjs';
 import {
@@ -7,19 +17,37 @@ import {
   type CustomerSelectOption,
   InputComponent,
   ModalComponent,
+  SelectorComponent,
+  type SelectorOption,
+  StoreUserMultiSelectComponent,
   StoreUserSelectComponent,
   TextareaComponent,
   ToastService,
+  ToggleComponent,
 } from '../../../../../../shared/components';
+import type { StoreUserOption } from '../../../../../../shared/services/store-user-lookup.service';
 import { AuthFacade } from '../../../../../../core/store/auth/auth.facade';
 import { parseApiError } from '../../../../../../core/utils/parse-api-error';
 import { CrmService } from './crm.service';
-import { CrmPerson, CrmTask, personName } from './crm.interface';
-import { crmCanSeeAll, fromLocalInput, toLocalInput } from './crm.utils';
+import { CrmOpenOpportunity, CrmPerson, CrmTask, SaveCrmTask, personName } from './crm.interface';
+import {
+  CRM_TASK_MAX_SUPPORTERS,
+  crmCanSeeAll,
+  fromLocalInput,
+  openOpportunityLabel,
+  taskTargetStages,
+  toLocalInput,
+} from './crm.utils';
 
 /**
  * Create or edit a CRM task. A seller can only assign to themselves (the API
- * answers CRM_ASSIGN_001 otherwise), so the assignee picker is hidden for them.
+ * answers CRM_ASSIGN_001 otherwise), so the assignee picker is hidden for them;
+ * anyone can add support people.
+ *
+ * With a customer, a new task detects its open opportunities: one is
+ * preselected, several are offered, none is said. A linked opportunity can be
+ * moved to another stage when the task is completed. The opportunity of a
+ * saved task cannot be changed (the API has no such field), only its stage.
  */
 @Component({
   selector: 'app-crm-task-form-modal',
@@ -30,8 +58,11 @@ import { crmCanSeeAll, fromLocalInput, toLocalInput } from './crm.utils';
     CustomerSelectComponent,
     InputComponent,
     ModalComponent,
+    SelectorComponent,
+    StoreUserMultiSelectComponent,
     StoreUserSelectComponent,
     TextareaComponent,
+    ToggleComponent,
   ],
   template: `
     <app-modal
@@ -70,6 +101,57 @@ import { crmCanSeeAll, fromLocalInput, toLocalInput } from './crm.utils';
           </p>
         }
 
+        @if (task(); as editing) {
+          @if (editing.opportunity) {
+            <p class="text-sm text-[var(--color-text-secondary)]">
+              Oportunidad: <strong>{{ editing.opportunity.title }}</strong>
+            </p>
+          }
+        } @else if (opportunitiesLoaded()) {
+          @if (opportunities().length === 0) {
+            <p class="text-sm text-[var(--color-text-secondary)]">
+              Este cliente no tiene oportunidades abiertas
+            </p>
+          } @else {
+            <app-selector
+              label="Oportunidad"
+              placeholder="Sin oportunidad"
+              [options]="opportunityOptions()"
+              [ngModel]="opportunityId() ?? ''"
+              (ngModelChange)="selectOpportunity($event ? +$event : null)"
+            ></app-selector>
+          }
+        }
+
+        @if (selectedOpportunity(); as opportunity) {
+          @if (opportunity.stage; as stage) {
+            <p class="flex items-center gap-2 text-xs text-[var(--color-text-secondary)]">
+              <span
+                class="inline-block h-2.5 w-2.5 rounded-full"
+                [style.background]="stage.color || 'var(--color-primary)'"
+              ></span>
+              {{ opportunity.pipeline.name }} · etapa actual: {{ stage.name }}
+            </p>
+          }
+          <app-toggle
+            label="Esta tarea mueve la oportunidad"
+            [checked]="movesOpportunity()"
+            (changed)="setMovesOpportunity($event)"
+          ></app-toggle>
+          @if (movesOpportunity()) {
+            <app-selector
+              label="Mover a la etapa"
+              placeholder="Elige la etapa"
+              helpText="Se mueve cuando la tarea se marque como hecha."
+              [required]="true"
+              [errorText]="targetStageId() ? '' : 'Elige la etapa destino'"
+              [options]="stageOptions()"
+              [ngModel]="targetStageId() ?? ''"
+              (ngModelChange)="targetStageId.set($event ? +$event : null)"
+            ></app-selector>
+          }
+        }
+
         @if (canSeeAll()) {
           <div class="flex flex-col gap-1">
             <span class="text-sm font-medium text-[var(--color-text-primary)]">Responsable</span>
@@ -83,6 +165,23 @@ import { crmCanSeeAll, fromLocalInput, toLocalInput } from './crm.utils';
           </div>
         }
 
+        <div class="flex flex-col gap-1">
+          <span class="text-sm font-medium text-[var(--color-text-primary)]">
+            Personas de apoyo (opcional)
+          </span>
+          <app-store-user-multi-select
+            placeholder="Buscar persona del equipo..."
+            lookupMode="staff"
+            [excludeIds]="supportExcludedIds()"
+            [knownUsers]="knownSupporters()"
+            [ngModel]="supporters()"
+            (ngModelChange)="supporters.set($event)"
+          ></app-store-user-multi-select>
+          <span [class]="supportHintClass()">
+            Ven la tarea y pueden marcarla hecha. Máximo {{ maxSupporters }}.
+          </span>
+        </div>
+
         <app-textarea
           label="Detalle (opcional)"
           [ngModel]="description()"
@@ -95,7 +194,7 @@ import { crmCanSeeAll, fromLocalInput, toLocalInput } from './crm.utils';
         <app-button
           variant="primary"
           size="md"
-          [disabled]="!title().trim()"
+          [disabled]="!canSave()"
           [loading]="saving()"
           (clicked)="save()"
         >
@@ -128,6 +227,63 @@ export class TaskFormModalComponent {
   protected readonly canSeeAll = () => crmCanSeeAll(this.auth);
   protected readonly fixedCustomerName = () => personName(this.fixedCustomer());
 
+  /** Open opportunities of the customer (create) or the linked one (edit). */
+  protected readonly opportunities = signal<CrmOpenOpportunity[]>([]);
+  /** Whether the detection answered, so "none" is never said while loading. */
+  protected readonly opportunitiesLoaded = signal(false);
+  protected readonly opportunityId = signal<number | null>(null);
+  protected readonly movesOpportunity = signal(false);
+  protected readonly targetStageId = signal<number | null>(null);
+  protected readonly supporters = signal<number[]>([]);
+  /** Names of the saved supporters; the staff lookup cannot resolve an id. */
+  protected readonly knownSupporters = signal<StoreUserOption[]>([]);
+  protected readonly maxSupporters = CRM_TASK_MAX_SUPPORTERS;
+  /** Discards answers of a customer that is no longer the chosen one. */
+  private opportunityRequest = 0;
+
+  private readonly customerId = computed(
+    () => this.fixedCustomer()?.id ?? this.customer()?.id ?? null,
+  );
+  protected readonly selectedOpportunity = computed(
+    () => this.opportunities().find((item) => item.id === this.opportunityId()) ?? null,
+  );
+  protected readonly opportunityOptions = computed<SelectorOption[]>(() => [
+    { value: '', label: 'Sin oportunidad' },
+    ...this.opportunities().map((item) => ({
+      value: item.id,
+      label: openOpportunityLabel(item),
+    })),
+  ]);
+  protected readonly stageOptions = computed<SelectorOption[]>(() =>
+    taskTargetStages(this.selectedOpportunity()).map((stage) => ({
+      value: stage.id,
+      label: stage.name,
+    })),
+  );
+  /** The assignee is never a supporter too (the API drops it anyway). */
+  protected readonly supportExcludedIds = computed(() => {
+    const assignee = this.assignee();
+    return assignee ? [assignee] : [];
+  });
+  private readonly supportIds = computed(() => {
+    const assignee = this.assignee();
+    return this.supporters().filter((id) => id !== assignee);
+  });
+  protected readonly tooManySupporters = computed(
+    () => this.supportIds().length > CRM_TASK_MAX_SUPPORTERS,
+  );
+  protected readonly supportHintClass = computed(() =>
+    this.tooManySupporters()
+      ? 'text-xs text-[var(--color-error)]'
+      : 'text-xs text-[var(--color-text-secondary)]',
+  );
+  protected readonly canSave = computed(
+    () =>
+      !!this.title().trim() &&
+      !this.tooManySupporters() &&
+      (!this.movesOpportunity() || !!this.targetStageId()),
+  );
+
   constructor() {
     effect(() => {
       if (!this.isOpen()) return;
@@ -145,13 +301,92 @@ export class TaskFormModalComponent {
             ? { id: task.customer.id, name: personName(task.customer) }
             : null,
         );
+        const support = task?.support_users ?? [];
+        this.knownSupporters.set(
+          support.map((person) => ({ id: person.id, name: personName(person) })),
+        );
+        this.supporters.set(support.map((person) => person.id));
+        this.opportunityId.set(task?.opportunity?.id ?? null);
+        this.movesOpportunity.set(!!task?.move_to_stage);
+        this.targetStageId.set(task?.move_to_stage?.id ?? null);
       });
     });
+
+    // A new task detects the open opportunities of its customer, again on
+    // every customer change. A saved one only loads the stages of its own.
+    effect(() => {
+      if (!this.isOpen()) return;
+      const task = this.task();
+      const customerId = task
+        ? task.opportunity
+          ? (task.customer?.id ?? this.fixedCustomer()?.id ?? null)
+          : null
+        : this.customerId();
+      untracked(() => void this.loadOpportunities(customerId, task));
+    });
+  }
+
+  protected selectOpportunity(id: number | null): void {
+    this.opportunityId.set(id);
+    this.movesOpportunity.set(false);
+    this.targetStageId.set(null);
+  }
+
+  protected setMovesOpportunity(on: boolean): void {
+    this.movesOpportunity.set(on);
+    if (!on) this.targetStageId.set(null);
+  }
+
+  private async loadOpportunities(
+    customerId: number | null,
+    task: CrmTask | null,
+  ): Promise<void> {
+    const request = ++this.opportunityRequest;
+    if (!task) this.selectOpportunity(null);
+    this.opportunities.set([]);
+    this.opportunitiesLoaded.set(false);
+    if (!customerId) return;
+    try {
+      const list = await firstValueFrom(this.crm.openOpportunities(customerId));
+      if (request !== this.opportunityRequest) return;
+      this.opportunities.set(list);
+      this.opportunitiesLoaded.set(true);
+      if (!task && list.length === 1) this.opportunityId.set(list[0].id);
+    } catch {
+      // Without pipeline access the task is simply saved without opportunity.
+      if (request === this.opportunityRequest) this.opportunities.set([]);
+    }
+  }
+
+  /** Opportunity fields of the body; only what the form can really change. */
+  private opportunityBody(task: CrmTask | null): SaveCrmTask {
+    const opportunity = this.selectedOpportunity();
+    const stageId = opportunity && this.movesOpportunity() ? this.targetStageId() : null;
+    if (!task) {
+      if (!opportunity) return {};
+      return {
+        opportunity_id: opportunity.id,
+        ...(stageId ? { move_to_stage_id: stageId } : {}),
+      };
+    }
+    // An opportunity that is no longer open offers no stages: leave it as is.
+    if (!opportunity || stageId === (task.move_to_stage?.id ?? null)) return {};
+    return { move_to_stage_id: stageId };
+  }
+
+  /** Support set of the body; an edit only sends it when it changed. */
+  private supportBody(task: CrmTask | null): SaveCrmTask {
+    const ids = this.supportIds();
+    if (!task) return ids.length ? { support_user_ids: ids } : {};
+    const before = (task.support_users ?? []).map((person) => person.id);
+    const same =
+      before.length === ids.length && before.every((id) => ids.includes(id));
+    return same ? {} : { support_user_ids: ids };
   }
 
   async save(): Promise<void> {
     const title = this.title().trim();
-    if (!title || this.saving()) return;
+    if (!title || this.saving() || !this.canSave()) return;
     this.saving.set(true);
     const task = this.task();
     const customerId = this.fixedCustomer()?.id ?? this.customer()?.id;
@@ -161,6 +396,8 @@ export class TaskFormModalComponent {
         description: this.description().trim() || null,
         due_at: fromLocalInput(this.dueAt()),
         ...(this.canSeeAll() ? { assigned_user_id: this.assignee() } : {}),
+        ...this.opportunityBody(task),
+        ...this.supportBody(task),
       };
       const result = task
         ? await firstValueFrom(this.crm.updateTask(task.id, body))

@@ -6,6 +6,7 @@ import {
   CrmBoard,
   CrmBoardQuery,
   CrmNote,
+  CrmOpenOpportunity,
   CrmOpportunity,
   CrmPipeline,
   CrmStageTemplate,
@@ -255,6 +256,15 @@ export class CrmService {
         params: toParams(query),
       })
       .pipe(map((r) => r.data));
+  }
+
+  /** Open opportunities of one customer the viewer sees (task form). */
+  openOpportunities(customerId: number): Observable<CrmOpenOpportunity[]> {
+    return this.http
+      .get<ApiResponse<CrmOpenOpportunity[]>>(`${this.base}/crm/opportunities/open`, {
+        params: toParams({ customer_id: customerId }),
+      })
+      .pipe(map((r) => r.data ?? []));
   }
 
   createOpportunity(body: SaveCrmOpportunity): Observable<CrmOpportunity> {

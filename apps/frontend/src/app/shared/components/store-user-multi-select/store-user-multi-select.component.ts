@@ -191,6 +191,17 @@ export class StoreUserMultiSelectComponent
    * full store-user list.
    */
   readonly excludeRole = input<string | null>(null);
+  /**
+   * `'staff'` searches only the store staff (`staff-lookup`), as the single
+   * `app-store-user-select` does. Opt-in — defaults to `'default'`.
+   */
+  readonly lookupMode = input<'default' | 'staff'>('default');
+  /**
+   * Users whose name is already known (e.g. the ones saved on a record), so
+   * an incoming id never renders as `Usuario #id`: the staff lookup has no
+   * single-user route.
+   */
+  readonly knownUsers = input<StoreUserOption[]>([]);
 
   // Signal UI state (zoneless-safe)
   readonly query = signal<string>('');
@@ -229,6 +240,7 @@ export class StoreUserMultiSelectComponent
             .search(term, {
               excludeIds: this.excludeIds(),
               excludeRole: this.excludeRole() ?? undefined,
+              mode: this.lookupMode(),
             })
             .pipe(catchError(() => of([] as StoreUserOption[]))),
         ),
@@ -247,8 +259,14 @@ export class StoreUserMultiSelectComponent
       this.selected.set([]);
       return;
     }
-    // Resolve name/avatar for each incoming id.
-    forkJoin(ids.map((id) => this.lookup.getById(id)))
+    // Resolve name/avatar for each incoming id; known users skip the lookup.
+    const known = new Map(this.knownUsers().map((user) => [user.id, user]));
+    forkJoin(
+      ids.map((id) => {
+        const user = known.get(id);
+        return user ? of(user) : this.lookup.getById(id, { mode: this.lookupMode() });
+      }),
+    )
       .pipe(takeUntilDestroyed(this.destroyRef))
       .subscribe((resolved) => {
         this.selected.set(
