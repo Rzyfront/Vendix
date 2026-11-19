@@ -6,6 +6,7 @@ import {
   computed,
   effect,
   inject,
+  input,
   signal,
   untracked,
   viewChild,
@@ -90,7 +91,7 @@ const NO_TIME_KEY = 'no-time';
         subtitle="Lo que hay que producir en el día, ordenado por hora de entrega"
         icon="clipboard-list"
         variant="glass"
-        [actions]="headerActions"
+        [actions]="headerActions()"
         (actionClicked)="onHeaderAction($event)"
       />
 
@@ -270,7 +271,7 @@ const NO_TIME_KEY = 'no-time';
 
                               <div class="flex flex-wrap items-center gap-1.5">
                                 <a
-                                  [routerLink]="[detailBase, po.id]"
+                                  [routerLink]="[detailBase(), po.id]"
                                   class="inline-flex h-8 items-center gap-1 rounded-[10px] px-2 text-xs font-medium text-primary hover:bg-primary/10"
                                 >
                                   <app-icon name="arrow-right" [size]="14"></app-icon>
@@ -367,40 +368,70 @@ export class ProductionDayListComponent {
    * - `consolidatedPath`: printable list of consolidated ingredients.
    */
   private readonly routeData = this.route.snapshot.data;
-  readonly detailBase: string =
-    (this.routeData['detailBase'] as string | undefined) ??
-    '/admin/restaurant-ops/production/orders';
-  readonly activeBase: string | null =
-    (this.routeData['activeBase'] as string | undefined) ?? null;
+
+  /**
+   * Optional inputs for embedding (e.g. the store "Panel Principal"). They take
+   * precedence over route data; without them the routed behaviour is unchanged.
+   */
+  readonly detailBaseInput = input<string | undefined>(undefined, { alias: 'detailBase' });
+  readonly activeBaseInput = input<string | null | undefined>(undefined, { alias: 'activeBase' });
+  readonly consolidatedPathInput = input<string | null | undefined>(undefined, {
+    alias: 'consolidatedPath',
+  });
+  readonly embeddedInput = input(false, { alias: 'embedded' });
+
+  /** Mounted outside its own routes (no route data) or flagged `embedded`. */
+  readonly embedded = computed(
+    () => this.embeddedInput() || this.routeData['detailBase'] === undefined,
+  );
+
+  readonly detailBase = computed<string>(
+    () =>
+      this.detailBaseInput() ??
+      (this.routeData['detailBase'] as string | undefined) ??
+      '/admin/restaurant-ops/production/orders',
+  );
+  readonly activeBase = computed<string | null>(() => {
+    const input = this.activeBaseInput();
+    if (input !== undefined) return input;
+    const fromRoute = this.routeData['activeBase'] as string | undefined;
+    if (fromRoute !== undefined) return fromRoute;
+    // Embedded without route data: restaurant-ops default.
+    return this.routeData['detailBase'] === undefined
+      ? '/admin/restaurant-ops/production/active'
+      : null;
+  });
   readonly manageInline: boolean = this.routeData['manageInline'] !== false;
   /** Planta routes read through the manufacturing API (its own industry guard). */
   readonly apiScope: ProductionApiScope =
     this.routeData['apiScope'] === 'manufacturing' ? 'manufacturing' : 'restaurant';
-  readonly consolidatedPath: string | null =
-    (this.routeData['consolidatedPath'] as string | undefined) ?? null;
+  readonly consolidatedPath = computed<string | null>(
+    () =>
+      this.consolidatedPathInput() ??
+      (this.routeData['consolidatedPath'] as string | undefined) ??
+      null,
+  );
 
-  readonly headerActions: StickyHeaderActionButton[] = [
-    ...(this.consolidatedPath
-      ? [
-          {
-            id: 'consolidated',
-            label: 'Insumos consolidados',
-            icon: 'clipboard-list',
-            variant: 'outline' as const,
-          },
-        ]
-      : []),
-    ...(this.activeBase
-      ? [
-          {
-            id: 'active',
-            label: 'Iniciar producción del día',
-            icon: 'play',
-            variant: 'primary' as const,
-          },
-        ]
-      : []),
-  ];
+  readonly headerActions = computed<StickyHeaderActionButton[]>(() => {
+    const actions: StickyHeaderActionButton[] = [];
+    if (this.consolidatedPath()) {
+      actions.push({
+        id: 'consolidated',
+        label: 'Insumos consolidados',
+        icon: 'clipboard-list',
+        variant: 'outline' as const,
+      });
+    }
+    if (this.activeBase()) {
+      actions.push({
+        id: 'active',
+        label: 'Iniciar producción del día',
+        icon: 'play',
+        variant: 'primary' as const,
+      });
+    }
+    return actions;
+  });
 
   // --- day selection (?date=) ------------------------------------------
   private readonly queryDate = toSignal(
@@ -408,8 +439,10 @@ export class ProductionDayListComponent {
     { initialValue: this.route.snapshot.queryParamMap.get('date') },
   );
   readonly today = computed(() => storeToday(this.settings.timezone()));
+  /** Day selected while embedded: local state, the URL is left untouched. */
+  private readonly localDate = signal<string | null>(null);
   readonly date = computed(() => {
-    const q = this.queryDate();
+    const q = this.embedded() ? this.localDate() : this.queryDate();
     return q && YMD_RE.test(q) ? q : this.today();
   });
   readonly isToday = computed(() => this.date() === this.today());
@@ -499,6 +532,10 @@ export class ProductionDayListComponent {
 
   // --- navigation -------------------------------------------------------
   private setDate(ymd: string): void {
+    if (this.embedded()) {
+      this.localDate.set(ymd);
+      return;
+    }
     void this.router.navigate([], {
       relativeTo: this.route,
       queryParams: { date: ymd },
@@ -520,7 +557,12 @@ export class ProductionDayListComponent {
   }
 
   onHeaderAction(id: string): void {
-    const target = id === 'active' ? this.activeBase : id === 'consolidated' ? this.consolidatedPath : null;
+    const target =
+      id === 'active'
+        ? this.activeBase()
+        : id === 'consolidated'
+          ? this.consolidatedPath()
+          : null;
     if (target) {
       void this.router.navigate([target], { queryParams: { date: this.date() } });
     }
@@ -528,7 +570,7 @@ export class ProductionDayListComponent {
 
   openDetail(po: ProductionDayOrder): void {
     if (!this.manageInline) {
-      void this.router.navigate([this.detailBase, po.id]);
+      void this.router.navigate([this.detailBase(), po.id]);
       return;
     }
     this.detailId.set(po.id);

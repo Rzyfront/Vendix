@@ -117,10 +117,12 @@ export const storeAdminRoutes: Routes = [
       {
         path: 'dashboard',
         canActivate: [storeDashboardGuard], // QUI-418
+        // QUI-967: the store's Panel Principal (configured panels as tabs; the
+        // "Resumen" is the former dashboard, unchanged).
         loadComponent: () =>
-          import('../../private/modules/store/dashboard/dashboard.component').then(
-            (c) => c.DashboardComponent,
-          ),
+          import(
+            '../../private/modules/store/dashboard/home-panels/home-panel-host.component'
+          ).then((c) => c.HomePanelHostComponent),
       },
       // POS Routes
       {

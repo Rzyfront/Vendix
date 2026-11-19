@@ -74,10 +74,11 @@ export class StoresService {
     });
 
     // Always create store_settings with defaults or provided settings
-    const baseSettings: Record<string, any> =
+    const baseSettings = (
       settings && Object.keys(settings).length > 0
         ? settings
-        : getDefaultStoreSettings();
+        : getDefaultStoreSettings()
+    ) as Record<string, any>;
     // QUI-967 — a new store opens on the panel suggested for its industries
     // unless the payload already chose one.
     const settingsToCreate = {

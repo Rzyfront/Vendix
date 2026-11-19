@@ -11,6 +11,7 @@ import {
   DASHBOARD_TRUSTED_ROLES,
   DASHBOARD_REQUIRED_PERMISSIONS,
 } from '../utils/dashboard-access.util';
+import { HomePanelService } from '../../private/modules/store/dashboard/home-panels/home-panel.service';
 
 // Re-export for backward compatibility
 export {
@@ -43,6 +44,12 @@ export const storeDashboardGuard: CanActivateFn = () => {
   const menuFilter = inject(MenuFilterService);
 
   if (canUserAccessDashboard(authFacade)) {
+    return true;
+  }
+
+  // QUI-967: a user without dashboard permissions still enters when the
+  // store's Panel Principal has at least one panel visible to them.
+  if (inject(HomePanelService).canEnterDashboard()) {
     return true;
   }
 

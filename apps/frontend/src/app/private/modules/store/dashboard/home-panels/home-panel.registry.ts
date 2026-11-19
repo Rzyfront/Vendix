@@ -4,6 +4,7 @@ import {
   HomePanelId,
 } from '../../../../../shared/constants/home-panels';
 import { StoreSettings } from '../../../../../core/models/store-settings.interface';
+import { IconName } from '../../../../../shared/components/icon/icons.registry';
 
 /**
  * QUI-967 — curated panel of the store "Panel Principal". Closed catalog: each
@@ -14,7 +15,7 @@ export interface HomePanelDefinition {
   /** Tab and card title. */
   title: string;
   /** Lucide icon name registered in `icons.registry.ts`. */
-  icon: string;
+  icon: IconName;
   /** Short description shown in the settings cards. */
   description: string;
   /**
