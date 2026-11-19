@@ -3,6 +3,7 @@ import { EventEmitter2, OnEvent } from '@nestjs/event-emitter';
 import { Prisma } from '@prisma/client';
 import { StorePrismaService } from '../../../prisma/services/store-prisma.service';
 import { OrderSequenceService } from '../manufacturing/orders/order-sequence.service';
+import { findMainPlantId } from '../manufacturing/plants/plant-resolution.util';
 import { StockLevelManager } from '../inventory/shared/services/stock-level-manager.service';
 import { StockValidatorService } from '../inventory/shared/services/stock-validator.service';
 import { RecipesService } from '../recipes/recipes.service';
@@ -546,6 +547,9 @@ export class ProductionSaleLinkService {
           existing.map((o) => [keyOf(o.product_id, o.product_variant_id ?? null), o]),
         );
         const result: { id: number }[] = [];
+        // QUI-1013: orders born from a sale go to the store's main plant (the
+        // only one, or the first active one); NULL when the store has no plant.
+        let mainPlantId: number | null | undefined;
 
         for (const [key, { product_id, variant_id, qty, items }] of planned) {
           const current = byKey.get(key);
@@ -559,6 +563,9 @@ export class ProductionSaleLinkService {
               continue;
             }
             const order_number = await this.sequences.next(tx, sale.store_id);
+            if (mainPlantId === undefined) {
+              mainPlantId = await findMainPlantId(tx, sale.store_id);
+            }
             const requirements = await this.plannedRequirements(tx, { recipe, qty, items });
             const created = await tx.production_orders.create({
               data: {
@@ -573,6 +580,7 @@ export class ProductionSaleLinkService {
                 priority: 'normal',
                 order_number,
                 due_date,
+                plant_id: mainPlantId,
                 // S1: born with its planned supplies (consumed_qty = 0).
                 lines: { create: plannedLinesCreate(requirements) },
               },

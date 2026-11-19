@@ -456,6 +456,13 @@ export class StockValidatorService {
     demands: StockDemandLine[],
     opts: {
       locationId?: number;
+      /**
+       * QUI-1013 — the location the caller will actually consume from (a
+       * manufacturing plant's input location). Availability is read ONLY
+       * there, even when it is not a sellable location (central warehouse,
+       * production floor): that is where the stock leaves from.
+       */
+      consumeLocationId?: number;
       tx?: Prisma.TransactionClient;
       allowIngredientOveruse?: boolean;
     } = {},
@@ -493,6 +500,8 @@ export class StockValidatorService {
     opts: {
       orderId?: number;
       locationId?: number;
+      /** See {@link assertIngredientsAvailable}: exact consumption location. */
+      consumeLocationId?: number;
       tx?: Prisma.TransactionClient;
       kind: 'product' | 'ingredient';
       /** Unused here — accepted so callers can spread their own opts object as-is. */
@@ -599,12 +608,24 @@ export class StockValidatorService {
       const effectiveTracking = this.resolveEffectiveTracking(product, variant);
       if (effectiveTracking === false) continue;
 
-      const levels = await this.sellableStockAllocator.getSellableLevels(
-        product.store_id,
-        entry.product_id,
-        entry.product_variant_id ?? undefined,
-        opts.tx,
-      );
+      // QUI-1013: an exact consumption location is honoured even when it is
+      // not sellable (`includeLocationIds` + `restrictToLocationIds` = only it).
+      const levels =
+        opts.consumeLocationId != null
+          ? await this.sellableStockAllocator.getSellableLevels(
+              product.store_id,
+              entry.product_id,
+              entry.product_variant_id ?? undefined,
+              opts.tx,
+              [opts.consumeLocationId],
+              [opts.consumeLocationId],
+            )
+          : await this.sellableStockAllocator.getSellableLevels(
+              product.store_id,
+              entry.product_id,
+              entry.product_variant_id ?? undefined,
+              opts.tx,
+            );
       const scopedLevels =
         opts.locationId != null
           ? levels.filter((l) => l.location_id === opts.locationId)
