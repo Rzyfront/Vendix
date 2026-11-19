@@ -5,6 +5,7 @@ import { StorePrismaService } from '../../../prisma/services/store-prisma.servic
 import { RequestContextService } from '@common/context/request-context.service';
 import { VendixHttpException, ErrorCodes } from '../../../common/errors';
 import { mergeStoreSettingsWithDefaults } from '../settings/defaults/default-store-settings';
+import { industryAllowsKey } from '../../../common/access/module-industries';
 import { ProductOptionGroupInputDto } from './dto/product-options.dto';
 
 const GROUP_INCLUDE = {
@@ -62,9 +63,17 @@ export class ProductOptionsService {
    * Las adiciones solo se venden en pedidos programados (las descuenta la
    * producción), así que sin `scheduled_orders.enabled` no existen para la
    * venta: el POS y la tienda en línea no muestran el selector.
+   *
+   * QUI-1001: Adiciones are a restaurant-only module. Outside restaurant they
+   * do not exist for sale whatever the settings say: no groups and any option
+   * id is rejected (`OPT_DISABLED`), drafts included. Stored groups stay.
    */
   async isEnabled(store_id: number): Promise<boolean> {
-    const settings = await this.readSettings(store_id);
+    const row = await this.readSettingsRow(store_id);
+    if (!industryAllowsKey('products_option_groups', row?.stores?.industries ?? [])) {
+      return false;
+    }
+    const settings = mergeStoreSettingsWithDefaults(row?.settings);
     return !!settings.product_options?.enabled && !!settings.scheduled_orders?.enabled;
   }
 
@@ -74,16 +83,16 @@ export class ProductOptionsService {
    * `true`: se lee con `!== false`. No sustituye a `isEnabled`, se suma.
    */
   async isAllowedOnline(store_id: number): Promise<boolean> {
-    const settings = await this.readSettings(store_id);
-    return settings.product_options?.allow_online !== false;
+    const row = await this.readSettingsRow(store_id);
+    return mergeStoreSettingsWithDefaults(row?.settings).product_options?.allow_online !== false;
   }
 
-  private async readSettings(store_id: number) {
+  private async readSettingsRow(store_id: number) {
     const row = await this.prisma.store_settings.findFirst({
       where: { store_id },
-      select: { settings: true },
+      select: { settings: true, stores: { select: { industries: true } } },
     });
-    return mergeStoreSettingsWithDefaults(row?.settings);
+    return row;
   }
 
   private async present(group: GroupWithOptions, withCost = true) {
