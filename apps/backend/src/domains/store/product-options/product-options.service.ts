@@ -64,12 +64,26 @@ export class ProductOptionsService {
    * venta: el POS y la tienda en línea no muestran el selector.
    */
   async isEnabled(store_id: number): Promise<boolean> {
+    const settings = await this.readSettings(store_id);
+    return !!settings.product_options?.enabled && !!settings.scheduled_orders?.enabled;
+  }
+
+  /**
+   * QUI-1005 — «Permitir adiciones en la tienda en línea». Solo lo leen la
+   * vitrina y el checkout público; el POS sigue con `isEnabled`. Default
+   * `true`: se lee con `!== false`. No sustituye a `isEnabled`, se suma.
+   */
+  async isAllowedOnline(store_id: number): Promise<boolean> {
+    const settings = await this.readSettings(store_id);
+    return settings.product_options?.allow_online !== false;
+  }
+
+  private async readSettings(store_id: number) {
     const row = await this.prisma.store_settings.findFirst({
       where: { store_id },
       select: { settings: true },
     });
-    const settings = mergeStoreSettingsWithDefaults(row?.settings);
-    return !!settings.product_options?.enabled && !!settings.scheduled_orders?.enabled;
+    return mergeStoreSettingsWithDefaults(row?.settings);
   }
 
   private async present(group: GroupWithOptions, withCost = true) {

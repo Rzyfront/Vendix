@@ -621,6 +621,59 @@ describe('SettingsService — guard de transición de caja (QUI-560)', () => {
     );
   });
 
+  // ------------------- QUI-1005: adiciones en la tienda en línea (product_options)
+
+  /**
+   * «Permitir adiciones en la tienda en línea» (`product_options.allow_online`)
+   * vive junto al interruptor «Adiciones» (`product_options.enabled`). Merge por
+   * clave, como `vex`: un PATCH que solo trae `enabled` no puede devolver la
+   * tienda en línea a «permitidas» sin que el dueño lo pida.
+   */
+  describe('updateSettings — adiciones en la tienda en línea (QUI-1005)', () => {
+    let stored: any;
+
+    beforeEach(() => {
+      sessionsService.countOpenSessions.mockResolvedValue(NO_OPEN_SESSIONS);
+      jest
+        .spyOn(RequestContextService, 'getRoles')
+        .mockReturnValue(['owner'] as any);
+
+      stored = {
+        ...STORED_WITH_CASH_REGISTER_ON,
+        product_options: { enabled: true, allow_online: false },
+      };
+
+      prisma.store_settings.findUnique.mockImplementation(async () => ({
+        store_id: STORE_ID,
+        settings: stored,
+      }));
+      prisma.store_settings.upsert.mockImplementation(
+        async ({ update }: any) => {
+          stored = update?.settings ?? stored;
+          return { store_id: STORE_ID, settings: stored };
+        },
+      );
+    });
+
+    it('el flag se mueve en ambas direcciones', async () => {
+      await service.updateSettings({ product_options: { allow_online: true } });
+      expect(stored.product_options).toEqual({ enabled: true, allow_online: true });
+
+      await service.updateSettings({ product_options: { allow_online: false } });
+      expect(stored.product_options).toEqual({ enabled: true, allow_online: false });
+    });
+
+    it('un PATCH que solo trae enabled conserva allow_online en false', async () => {
+      await service.updateSettings({ product_options: { enabled: false } });
+      expect(stored.product_options).toEqual({ enabled: false, allow_online: false });
+    });
+
+    it('un PATCH que no menciona product_options lo conserva', async () => {
+      await service.updateSettings({ inventory: { low_stock_threshold: 5 } });
+      expect(stored.product_options).toEqual({ enabled: true, allow_online: false });
+    });
+  });
+
   // ------------------------------------------------ sección hotelería (H0.5)
 
   /**

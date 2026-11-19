@@ -725,6 +725,17 @@ export class SettingsService {
       };
     }
 
+    // `product_options` se mezcla por clave, como `vex` (QUI-1005): el
+    // interruptor «Adiciones» manda `{ enabled }` y «Permitir adiciones en la
+    // tienda en línea» manda `{ allow_online }`; con reemplazo de sección, el
+    // primero devolvería la tienda en línea a «permitidas» sin avisar.
+    if (dto.product_options !== undefined) {
+      (updatedSettings as any).product_options = {
+        ...((currentSettings as any).product_options ?? {}),
+        ...dto.product_options,
+      };
+    }
+
     // `invoicing` también se mezcla por clave, y una clave MÁS ADENTRO que
     // `vexi`, porque su contenido está anidado dos niveles: la sección sólo
     // contiene `aiu`, y `aiu` contiene cuatro parámetros que la pantalla fiscal
