@@ -1982,7 +1982,12 @@ export class CustomersService {
         where,
         skip,
         take: limit,
-        orderBy: { created_at: 'desc' },
+        // Último editado primero; `updated_at` arranca igual a `created_at`,
+        // así que un cliente nunca editado queda en su orden de creación.
+        orderBy: [
+          { updated_at: { sort: 'desc', nulls: 'last' } },
+          { id: 'desc' },
+        ],
         omit: CUSTOMER_PRIVATE_COLUMNS,
         include: {
           addresses: CUSTOMER_ADDRESSES_INCLUDE,
@@ -2567,6 +2572,9 @@ export class CustomersService {
         // Email opcional: si viene en el payload lo normalizamos (null cuando
         // queda vacío, sin placeholders). Si no viene (undefined) no se toca.
         email: effectiveEmail,
+        // La columna no tiene @updatedAt: se marca a mano para que el listado
+        // pueda ordenarse por el último cliente editado.
+        updated_at: new Date(),
       },
       omit: CUSTOMER_PRIVATE_COLUMNS,
     });
