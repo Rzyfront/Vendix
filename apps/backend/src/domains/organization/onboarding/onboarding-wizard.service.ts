@@ -45,6 +45,26 @@ interface WizardValidation {
 export class OnboardingWizardService {
   private readonly logger = new Logger(OnboardingWizardService.name);
 
+  /**
+   * Filtro que deja fuera el dominio core de la plataforma (`vendix_core` /
+   * `VENDIX_LANDING`). El wizard solo administra dominios de organización,
+   * tienda y e-commerce; el core lo gestiona únicamente el superadmin.
+   */
+  static readonly NOT_CORE_DOMAIN = {
+    domain_type: { not: 'vendix_core' as const },
+    app_type: { not: 'VENDIX_LANDING' as const },
+  };
+
+  static isCoreDomain(domain: {
+    domain_type?: string | null;
+    app_type?: string | null;
+  }): boolean {
+    return (
+      domain.domain_type === 'vendix_core' ||
+      domain.app_type === 'VENDIX_LANDING'
+    );
+  }
+
   constructor(
     private readonly prismaService: OrganizationPrismaService,
     private readonly globalPrisma: GlobalPrismaService,
@@ -1136,6 +1156,10 @@ export class OnboardingWizardService {
         where: {
           organization_id: user.organization_id,
           // Removed ownership constraint to find any active/inactive org domain
+          // El dominio core de la plataforma (vendix.online, VENDIX_LANDING)
+          // también cuelga de su organización: el wizard NUNCA puede tomarlo
+          // como «auto-dominio» y renombrarlo, o la landing pública se cae.
+          ...OnboardingWizardService.NOT_CORE_DOMAIN,
         },
       });
 
@@ -1226,6 +1250,8 @@ export class OnboardingWizardService {
           organization_id: user.organization_id,
           domain_type: 'organization',
           status: 'active',
+          // Nunca desactivar el dominio core de la plataforma.
+          app_type: OnboardingWizardService.NOT_CORE_DOMAIN.app_type,
         },
         data: {
           status: 'disabled',
@@ -1546,6 +1572,17 @@ export class OnboardingWizardService {
           },
         },
       );
+
+      // El dominio core de la plataforma no se reutiliza como dominio propio,
+      // aunque pertenezca a la misma organización.
+      if (
+        existingCustom &&
+        OnboardingWizardService.isCoreDomain(existingCustom)
+      ) {
+        throw new ConflictException(
+          `The domain ${customDomain} is reserved by the platform.`,
+        );
+      }
 
       if (
         existingCustom &&
