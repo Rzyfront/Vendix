@@ -12,6 +12,20 @@ import { toSignal } from '@angular/core/rxjs-interop';
 import { ActivatedRoute, RouterLink } from '@angular/router';
 import { Meta, Title } from '@angular/platform-browser';
 import { SECTOR_GUIDES } from './sector-guides.content';
+import {
+  ROUTED_SECTOR_GUIDES,
+  SECTOR_GUIDES_ENABLED,
+  isPublishedSectorGuide,
+} from './sector-guides.config';
+import { applyMarketingPageMetadata } from '../../marketing-page-metadata';
+
+/** Enlaces del bloque «Sigue preparando tu operación», en este orden. */
+const RELATED_GUIDES: ReadonlyArray<{ key: string; label: string }> = [
+  { key: 'comandas-restaurantes', label: 'Comandas para restaurantes' },
+  { key: 'ventas-mayoristas-al-detal', label: 'Ventas mayoristas y al detal' },
+  { key: 'pasar-productos-excel-a-pos', label: 'Pasar tus productos de Excel a un POS' },
+  { key: 'preparar-demostracion', label: 'Preparar una demostración' },
+];
 
 @Component({
   selector: 'app-sector-guide',
@@ -33,8 +47,17 @@ export class SectorGuideComponent {
   private readonly fragment = toSignal(this.route.fragment, {
     initialValue: this.route.snapshot.fragment,
   });
-  readonly guide = computed(
-    () => SECTOR_GUIDES[this.data()['guideKey']] ?? null,
+  private readonly guideKey = computed(() => String(this.data()['guideKey'] ?? ''));
+  readonly guide = computed(() => SECTOR_GUIDES[this.guideKey()] ?? null);
+  /** SEO-OPS-36: guía aprobada y servida en producción (indexable, sin rótulo de borrador). */
+  readonly published = computed(() => isPublishedSectorGuide(this.guideKey()));
+  /** La sección de guías de la portada solo existe en vista previa. */
+  readonly guidesIndexAvailable = SECTOR_GUIDES_ENABLED;
+  /** Solo enlaza guías con ruta, nunca la actual. */
+  readonly relatedGuides = computed(() =>
+    RELATED_GUIDES.filter(
+      (item) => item.key !== this.guideKey() && ROUTED_SECTOR_GUIDES.includes(item.key),
+    ),
   );
 
   constructor() {
@@ -42,6 +65,23 @@ export class SectorGuideComponent {
       const fragment = this.fragment();
       if (fragment) this.scroller.scrollToAnchor(fragment);
     });
+    // Guía publicada: metadatos de página comercial (index, canonical propio, OG) solo
+    // en el host comercial; se restauran al salir (SEO-OPS-36).
+    if (isPublishedSectorGuide(String(this.route.snapshot.data['guideKey'] ?? ''))) {
+      effect((onCleanup) => {
+        const guide = this.guide();
+        if (!guide) return;
+        onCleanup(
+          applyMarketingPageMetadata(this.document, this.title, this.meta, {
+            title: `${guide.title} | Vendix`,
+            description: guide.description,
+            robots: 'index, follow',
+            canonicalPath: `/guias/${this.guideKey()}`,
+          }),
+        );
+      });
+      return;
+    }
     const previousTitle = this.title.getTitle();
     const previousDescription = this.meta.getTag('name="description"')?.content;
     const previousRobots = this.meta.getTag('name="robots"')?.content;

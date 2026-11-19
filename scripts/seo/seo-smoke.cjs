@@ -51,6 +51,10 @@ const KNOWN = [
   { path: '/sectores/restaurantes', index: true },
   { path: '/implementacion', index: true },
   { path: '/migracion', index: true },
+  // Guías piloto publicadas el 19-nov-2026 (SEO-OPS-36).
+  { path: '/guias/comandas-restaurantes', index: true },
+  { path: '/guias/ventas-mayoristas-al-detal', index: true },
+  { path: '/guias/pasar-productos-excel-a-pos', index: true },
   { path: '/pqr', index: false },
   { path: '/auth/login', index: false },
   { path: '/auth/register', index: false },

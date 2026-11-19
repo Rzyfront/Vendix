@@ -43,14 +43,42 @@ test('Angular parses both templates with no syntax errors', async () => {
     assert.equal(parsed.errors, null, JSON.stringify(parsed.errors));
   }
 });
-test('guide routes are gated and absent from other public app route files', () => {
+const configSrc = () => fs.readFileSync(path.join(dir, 'sector-guides.config.ts'), 'utf8');
+const listIn = (src, name) => {
+  const m = src.match(new RegExp('export const ' + name + '[^=]*=\\s*\\[([^\\]]*)\\]'));
+  assert.ok(m, name + ' list not found');
+  return [...m[1].matchAll(/'([a-z-]+)'/g)].map((x) => x[1]);
+};
+test('guide routes come from the config gate and are absent from other public app route files', () => {
   const routes = path.resolve(front, 'app/routes/public');
   const marketing = fs.readFileSync(path.join(routes, 'vendix_landing.public.routes.ts'), 'utf8');
-  for (const key of GUIDE_KEYS) assert.match(marketing, new RegExp("'" + key + "'"));
-  assert.match(marketing, /sectorGuideRoutes:\s*Routes\s*=\s*SECTOR_GUIDES_ENABLED\s*\?/);
+  assert.match(marketing, /sectorGuideRoutes:\s*Routes\s*=\s*ROUTED_SECTOR_GUIDES\.map\(/);
+  assert.deepEqual(listIn(configSrc(), 'SECTOR_GUIDE_KEYS').sort(), [...GUIDE_KEYS].sort());
   for (const file of fs.readdirSync(routes).filter(f => f.endsWith('.ts') && f !== 'vendix_landing.public.routes.ts')) {
     assert.doesNotMatch(fs.readFileSync(path.join(routes, file), 'utf8'), /sectorGuideRoutes|sector-guide\.component/);
   }
+});
+test('production routes only the published pilot guides (SEO-OPS-36)', () => {
+  const src = configSrc();
+  assert.match(src, /ROUTED_SECTOR_GUIDES[^=]*=\s*SECTOR_GUIDES_ENABLED\s*\?\s*SECTOR_GUIDE_KEYS\s*:\s*PUBLISHED_SECTOR_GUIDES/);
+  const published = listIn(src, 'PUBLISHED_SECTOR_GUIDES');
+  assert.deepEqual(published, ['comandas-restaurantes', 'ventas-mayoristas-al-detal', 'pasar-productos-excel-a-pos']);
+  for (const key of published) assert.ok(GUIDE_KEYS.includes(key));
+  const repo = path.resolve(front, '../../..');
+  const sitemap = fs.readFileSync(path.join(repo, 'apps/backend/src/domains/public/seo/marketing-sitemap.registry.ts'), 'utf8');
+  const smoke = fs.readFileSync(path.join(repo, 'scripts/seo/seo-smoke.cjs'), 'utf8');
+  const sitemapGuides = [...sitemap.matchAll(/path: '\/guias\/([a-z-]+)'/g)].map((m) => m[1]);
+  assert.deepEqual(sitemapGuides, published, 'sitemap lists exactly the published guides');
+  for (const key of published) assert.match(smoke, new RegExp("path: '/guias/" + key + "', index: true"));
+});
+test('published guides carry a dated proof and no draft label', () => {
+  const guides = load();
+  for (const key of listIn(configSrc(), 'PUBLISHED_SECTOR_GUIDES')) {
+    assert.match(JSON.stringify(guides[key]), /de (octubre|noviembre) de 2026/, key + ' needs a dated proof');
+  }
+  const html = fs.readFileSync(path.join(dir, 'sector-guide.component.html'), 'utf8');
+  assert.match(html, /@if \(!published\(\)\)\s*\{\s*<p class="preview-label">/);
+  assert.doesNotMatch(html, /routerLink="\/guias\/preparar-demostracion"/, 'related links must come from routed guides');
 });
 test('all seven guides exist and avoid unverified or forbidden claims', () => {
   const guides = load();
@@ -66,10 +94,4 @@ test('all seven guides exist and avoid unverified or forbidden claims', () => {
     if (/Empresarial Pro/.test(text)) assert.match(text, /IA Business/, key);
     for (const m of text.matchAll(/\/guias\/[a-z-]+/g)) assert.ok(guides[m[0].slice(7)], 'broken link ' + m[0]);
   }
-});
-test('new guide routes stay inside the gated ternary', () => {
-  const routes = path.resolve(front, 'app/routes/public/vendix_landing.public.routes.ts');
-  const src = fs.readFileSync(routes, 'utf8');
-  const gated = src.slice(src.indexOf('= SECTOR_GUIDES_ENABLED'), src.indexOf('  : [];'));
-  for (const key of ['elegir-software-pos', 'pasar-productos-excel-a-pos']) assert.ok(gated.includes("'" + key + "'"));
 });

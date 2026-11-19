@@ -4,13 +4,17 @@
     ><img src="/vlogo-128.png" alt="" width="32" height="32" />Vendix</a
   >
   <nav aria-label="Navegación de guías">
-    <a routerLink="/" fragment="guias">Todas las guías</a>
-    <a routerLink="/" fragment="precios-section">Planes y precios</a>
+    @if (guidesIndexAvailable) {
+      <a routerLink="/" fragment="guias">Todas las guías</a>
+    }
+    <a routerLink="/pricing">Planes y precios</a>
   </nav>
 </header>
 <main id="guide-content" class="guide-content">
   @if (guide(); as article) {
-    <p class="preview-label">Borrador para revisión · Sin publicar</p>
+    @if (!published()) {
+      <p class="preview-label">Borrador para revisión · Sin publicar</p>
+    }
     <p class="guide-category">{{ article.category }}</p>
     <h1>{{ article.title }}</h1>
     <p class="guide-intro">{{ article.intro }}</p>
@@ -58,21 +62,23 @@
         deben confirmarse para tu plan y operación.
       </p>
     </section>
-    <aside class="related-guides" aria-label="Otras guías">
-      <h2>Sigue preparando tu operación</h2>
-      <a routerLink="/guias/comandas-restaurantes"
-        >Comandas para restaurantes</a
-      >
-      <a routerLink="/guias/ventas-mayoristas-al-detal"
-        >Ventas mayoristas y al detal</a
-      >
-      <a routerLink="/guias/preparar-demostracion">Preparar una demostración</a>
-    </aside>
+    @if (relatedGuides().length) {
+      <aside class="related-guides" aria-label="Otras guías">
+        <h2>Sigue preparando tu operación</h2>
+        @for (item of relatedGuides(); track item.key) {
+          <a [routerLink]="'/guias/' + item.key">{{ item.label }}</a>
+        }
+      </aside>
+    }
   } @else {
     <h1>Guía no disponible</h1>
     <p>Consulta las guías disponibles para preparar tu operación.</p>
   }
-  <a class="guide-back" routerLink="/" fragment="guias"
-    >Volver a las guías de Vendix</a
-  >
+  @if (guidesIndexAvailable) {
+    <a class="guide-back" routerLink="/" fragment="guias"
+      >Volver a las guías de Vendix</a
+    >
+  } @else {
+    <a class="guide-back" routerLink="/">Volver a Vendix</a>
+  }
 </main>
