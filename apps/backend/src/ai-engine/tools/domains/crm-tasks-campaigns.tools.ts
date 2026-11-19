@@ -282,7 +282,7 @@ export function createCrmTaskCampaignTools(
     version: '1',
     domain: CRM_TOOL_DOMAIN,
     description:
-      'Crea una tarea de CRM (llamar, hacer seguimiento, recordar algo) opcionalmente ligada a un cliente u oportunidad. Úsala para «recuérdame llamar a Ana el viernes». Si hay cliente, obtén antes su customer_id con find_customer. Convierte fechas habladas («el viernes a las 3») a ISO 8601 en la zona horaria de la tienda (ej. 2026-11-20T15:00:00-05:00). Sin assigned_user_id queda asignada a quien la pide; un vendedor solo puede asignársela a sí mismo.',
+      'Crea una tarea de CRM (llamar, hacer seguimiento, recordar algo) opcionalmente ligada a un cliente u oportunidad. Úsala para «recuérdame llamar a Ana el viernes». Si hay cliente, obtén antes su customer_id con find_customer. Convierte fechas habladas («el viernes a las 3») a ISO 8601 en la zona horaria de la tienda (ej. 2026-11-20T15:00:00 con el desfase de la tienda). Sin assigned_user_id queda asignada a quien la pide; un vendedor solo puede asignársela a sí mismo.',
     parameters: {
       type: 'object',
       properties: {
