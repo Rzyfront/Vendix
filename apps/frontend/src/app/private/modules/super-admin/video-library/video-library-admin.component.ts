@@ -218,7 +218,7 @@ export class VideoLibraryAdminComponent implements OnInit {
     {
       key: 'title',
       label: 'Video',
-      width: '30%',
+      width: '28%',
     },
     {
       key: 'category',
@@ -252,16 +252,17 @@ export class VideoLibraryAdminComponent implements OnInit {
     {
       key: 'status',
       label: 'Estado',
-      width: '14%',
+      width: '16%',
       badge: true,
       transform: (status: string) =>
         status === 'PUBLISHED' ? 'Publicado' : status === 'DRAFT' ? 'Borrador' : 'Archivado',
+      // The table paints custom badges with inline colors: it needs CSS colors, not Tailwind classes.
       badgeConfig: {
         type: 'custom',
         colorMap: {
-          PUBLISHED: 'bg-emerald-100 text-emerald-800',
-          DRAFT: 'bg-amber-100 text-amber-800',
-          ARCHIVED: 'bg-gray-100 text-gray-800',
+          PUBLISHED: '#059669',
+          DRAFT: '#d97706',
+          ARCHIVED: '#6b7280',
         },
       },
     },
