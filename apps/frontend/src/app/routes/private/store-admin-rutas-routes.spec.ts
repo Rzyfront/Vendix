@@ -32,7 +32,7 @@ function stubbed(routes: Routes): Routes {
   return (routes as Route[]).map((route) =>
     route.redirectTo !== undefined
       ? { path: route.path, pathMatch: route.pathMatch, redirectTo: route.redirectTo }
-      : { path: route.path, pathMatch: route.pathMatch, component: StubPageComponent },
+      : { path: route.path, pathMatch: route.pathMatch, data: route.data, component: StubPageComponent },
   );
 }
 
