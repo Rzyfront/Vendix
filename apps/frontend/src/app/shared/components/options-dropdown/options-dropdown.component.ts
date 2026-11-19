@@ -96,6 +96,13 @@ export class OptionsDropdownComponent {
    */
   readonly headerPin = input<HeaderPinConfig | null>(null);
 
+  /**
+   * Opt-in: con exactamente una acción, mantiene el trigger "Acciones" y la
+   * muestra dentro del menú en vez de como botón directo con su etiqueta.
+   * `false` (default) conserva el modo botón de "Una sola acción".
+   */
+  readonly singleActionAsMenu = input<boolean>(false);
+
   /** Emits when filter values change (after debounce) */
   readonly filterChange = output<FilterValues>();
 
@@ -400,8 +407,12 @@ export class OptionsDropdownComponent {
     return this.showActions() && this.actions().length > 0;
   }
 
-  /** The only action when there is exactly one: rendered as a direct button, not a menu. */
+  /**
+   * The only action when there is exactly one: rendered as a direct button, not a menu.
+   * `null` when `singleActionAsMenu` is on, so the action stays inside the Acciones menu.
+   */
   readonly singleAction = computed<DropdownAction | null>(() => {
+    if (this.singleActionAsMenu()) return null;
     const actions = this.actions();
     return actions.length === 1 ? actions[0] : null;
   });
