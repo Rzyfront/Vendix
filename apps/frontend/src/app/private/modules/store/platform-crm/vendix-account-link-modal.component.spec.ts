@@ -87,6 +87,20 @@ describe('VendixAccountLinkModalComponent', () => {
     expect(modal['searching']()).toBeFalse();
   });
 
+  it('escribir en el campo real del DOM consulta el servicio tras el debounce', async () => {
+    const input = (fixture.nativeElement as HTMLElement).querySelector('input');
+    expect(input).withContext('campo de búsqueda del modal').not.toBeNull();
+
+    input!.value = 'pan';
+    input!.dispatchEvent(new Event('input'));
+    await wait(350);
+    fixture.detectChanges();
+    await fixture.whenStable();
+
+    expect(service.searchOrganizations).toHaveBeenCalledOnceWith('pan');
+    expect((fixture.nativeElement as HTMLElement).textContent).toContain(ORG.name);
+  });
+
   it('enlazar exige elegir una organización', () => {
     expect(modal['canSubmit']()).toBeFalse();
     modal['selected'].set(ORG);
