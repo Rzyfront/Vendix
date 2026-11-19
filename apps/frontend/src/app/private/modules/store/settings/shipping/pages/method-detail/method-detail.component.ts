@@ -975,7 +975,7 @@ export class MethodDetailComponent implements OnInit {
   goToCreateRoute(): void {
     const m = this.method();
     if (!m) return;
-    this.router.navigate(['/admin/orders/planillas'], {
+    this.router.navigate(['/admin/orders/rutas'], {
       queryParams: { shipping_method_id: m.id, prefill: 1 },
     });
   }

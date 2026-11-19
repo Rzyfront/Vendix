@@ -1820,7 +1820,7 @@ export const REPORT_DEFINITIONS: ReportDefinition[] = [
     detailedDescription:
       'Una línea por ruta: conductor, placa, paradas, total por recaudar vs recaudado, efectivo declarado y diferencia de caja. Útil para liquidar rutas y detectar descuadres.',
     icon: 'clipboard-list',
-    route: '/admin/reports/dispatch/dispatch-planillas',
+    route: '/admin/reports/dispatch/dispatch-rutas',
     requiresDateRange: true,
     requiresFiscalPeriod: false,
     type: 'list' as ReportType,

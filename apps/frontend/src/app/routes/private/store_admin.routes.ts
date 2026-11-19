@@ -418,27 +418,39 @@ export const storeAdminRoutes: Routes = [
                 (c) => c.DispatchNoteDetailPageComponent,
               ),
           },
+          // Módulo "Rutas" (QUI-1024). Las URLs canónicas son `rutas/*`; las
+          // viejas `planillas/*` redirigen conservando el `:id` (y los query
+          // params, por ser redirecciones relativas) para no romper enlaces
+          // guardados. Todas van ANTES de `:id` de órdenes, que si no las
+          // captura como id de orden.
           {
-            path: 'planillas',
+            path: 'rutas',
             loadComponent: () =>
               import('../../private/modules/store/planillas-rutas/planillas-rutas.component').then(
                 (c) => c.PlanillasRutasComponent,
               ),
           },
           {
-            path: 'planillas/:id/recorrido',
+            path: 'rutas/:id/recorrido',
             loadComponent: () =>
               import('../../private/modules/store/planillas-rutas/pages/planilla-route-view-page/planilla-route-view-page.component').then(
                 (c) => c.PlanillaRouteViewPageComponent,
               ),
           },
           {
-            path: 'planillas/:id',
+            path: 'rutas/:id',
             loadComponent: () =>
               import('../../private/modules/store/planillas-rutas/pages/planilla-detail-page/planilla-detail-page.component').then(
                 (c) => c.PlanillaDetailPageComponent,
               ),
           },
+          { path: 'planillas', pathMatch: 'full', redirectTo: 'rutas' },
+          {
+            path: 'planillas/:id/recorrido',
+            pathMatch: 'full',
+            redirectTo: 'rutas/:id/recorrido',
+          },
+          { path: 'planillas/:id', pathMatch: 'full', redirectTo: 'rutas/:id' },
           {
             path: 'fleet',
             loadComponent: () =>

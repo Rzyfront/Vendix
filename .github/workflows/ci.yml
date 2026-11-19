@@ -742,6 +742,7 @@ jobs:
           --include='**/public/store-home/store-home.component.spec.ts'
           --include='**/public/dynamic-landing/**/*.spec.ts'
           --include='**/routes/private/route-gate-coverage.spec.ts'
+          --include='**/routes/private/store-admin-rutas-routes.spec.ts'
           --include='**/shared/constants/module-industries.spec.ts'
           --include='**/core/services/plan-paywall.service.spec.ts'
           --include='**/subscription/pages/plans/plan-catalog.preselect.spec.ts'
