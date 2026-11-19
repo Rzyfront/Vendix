@@ -452,8 +452,10 @@ describe('FinancialAnalyticsService', () => {
     const sqlOf = (args: unknown[]): string => {
       const [first, ...values] = args;
       if (!Array.isArray(first)) return (first as { sql: string }).sql;
-      return Prisma.sql(first as TemplateStringsArray, ...(values as never[]))
-        .sql;
+      return Prisma.sql(
+        first as unknown as TemplateStringsArray,
+        ...(values as never[]),
+      ).sql;
     };
 
     /** Evalúa la fórmula de COGS que el SQL usa sobre filas en memoria. */
