@@ -161,7 +161,7 @@ const USERS = {
 } satisfies Record<string, TestUser>;
 
 const ROUTES = [
-  { method: 'get', url: '/api/store/platform-crm/organizations/search?q=acme' },
+  { method: 'get', url: '/api/store/platform-crm/accounts/search?q=acme' },
   { method: 'get', url: '/api/store/platform-crm/customers/5/link' },
   { method: 'post', url: '/api/store/platform-crm/customers/5/link', body: { organization_id: 9 } },
   { method: 'delete', url: '/api/store/platform-crm/customers/5/link', body: {} },
@@ -234,7 +234,7 @@ describe('PlatformCrmLinksController · aislamiento por tienda (candados 1, 4 y 
     },
   };
   const service = {
-    searchOrganizations: jest.fn().mockResolvedValue([]),
+    searchAccounts: jest.fn().mockResolvedValue({ organizations: [], stores: [] }),
     getLink: jest.fn().mockResolvedValue({ link: null, organization: null }),
     link: jest.fn().mockResolvedValue({ link: null, organization: null }),
     unlink: jest.fn().mockResolvedValue({ link: null, organization: null }),
@@ -430,11 +430,42 @@ describe('PlatformCrmLinksController · aislamiento por tienda (candados 1, 4 y 
     }
     // POST conserva el 201 por defecto de Nest (crea la fila del enlace).
     expect(statuses).toEqual([200, 200, 201, 200]);
-    expect(service.searchOrganizations).toHaveBeenCalledWith('acme');
+    expect(service.searchAccounts).toHaveBeenCalledWith('acme');
     const ctx = { store_id: PLATFORM_STORE, organization_id: PLATFORM_ORG, user_id: 100 };
     expect(service.getLink).toHaveBeenCalledWith(ctx, 5);
     expect(service.link).toHaveBeenCalledWith(ctx, 5, expect.objectContaining({ organization_id: 9 }));
     expect(service.unlink).toHaveBeenCalledWith(ctx, 5, expect.any(Object));
+  });
+
+  it('enlazar a una tienda: `linked_store_id` llega al servicio; las dos, ninguna o un id inválido → 400 sin tocarlo', async () => {
+    const post = (body: object) =>
+      request(app.getHttpServer())
+        .post('/api/store/platform-crm/customers/5/link')
+        .set('x-test-user', JSON.stringify(USERS.platformSeller))
+        .send(body);
+
+    expect((await post({ linked_store_id: 7, note: 'Solo la sede norte' })).status).toBe(201);
+    const ctx = { store_id: PLATFORM_STORE, organization_id: PLATFORM_ORG, user_id: 100 };
+    expect(service.link).toHaveBeenCalledTimes(1);
+    const [calledCtx, calledCustomer, dto] = service.link.mock.calls[0];
+    expect([calledCtx, calledCustomer]).toEqual([ctx, 5]);
+    expect(dto).toMatchObject({ linked_store_id: 7, note: 'Solo la sede norte' });
+    expect(dto.organization_id).toBeUndefined();
+
+    const rejected = [
+      {},
+      { note: 'sin destino' },
+      { organization_id: 9, linked_store_id: 7 },
+      { linked_store_id: 0 },
+      { linked_store_id: 'siete' },
+    ];
+    for (const body of rejected) {
+      const res = await post(body);
+      expect({ body, status: res.status }).toEqual({ body, status: 400 });
+    }
+    const both = await post({ organization_id: 9, linked_store_id: 7 });
+    expect(JSON.stringify(both.body)).toContain('solo uno de los dos');
+    expect(service.link).toHaveBeenCalledTimes(1);
   });
 
   it('solo platform:crm_link:read: ve el enlace, no puede buscar, enlazar ni desenlazar', async () => {

@@ -8625,6 +8625,22 @@ export const ErrorCodes = {
     httpStatus: 404,
     devMessage: 'Este cliente no tiene una cuenta Vendix enlazada.',
   },
+  PLATFORM_CRM_006: {
+    code: 'PLATFORM_CRM_006',
+    httpStatus: 404,
+    devMessage: 'La tienda no existe o no se puede enlazar.',
+  },
+  PLATFORM_CRM_007: {
+    code: 'PLATFORM_CRM_007',
+    httpStatus: 409,
+    devMessage: 'Esta tienda ya está enlazada a otro cliente del CRM.',
+  },
+  PLATFORM_CRM_008: {
+    code: 'PLATFORM_CRM_008',
+    httpStatus: 409,
+    devMessage:
+      'Una tienda de esta organización ya está enlazada a otro cliente del CRM.',
+  },
 } as const satisfies Record<string, ErrorCodeEntry>;
 
 export const FiscalScopeBlockerCodes = {

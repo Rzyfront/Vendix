@@ -12,8 +12,27 @@ export interface PlatformOrganizationSearchItem {
   id: number;
   name: string;
   slug: string;
+  state: string;
   created_at: string | null;
 }
+
+export interface PlatformStoreSearchItem {
+  id: number;
+  name: string;
+  slug: string;
+  organization: { id: number; name: string };
+  plan_name: string | null;
+  subscription_state: string | null;
+}
+
+/** `GET store/platform-crm/accounts/search?q=` */
+export interface PlatformAccountSearchResult {
+  organizations: PlatformOrganizationSearchItem[];
+  stores: PlatformStoreSearchItem[];
+}
+
+/** El enlace va a la organización entera O a una tienda, nunca a las dos. */
+export type PlatformCrmLinkTarget = { organization_id: number } | { linked_store_id: number };
 
 export interface PlatformOrganizationSubscription {
   store_name: string;
@@ -36,11 +55,44 @@ export interface PlatformCrmLink {
   note: string | null;
   linked_at: string;
   linked_by: { id: number; first_name: string | null; last_name: string | null };
+  /** Tienda concreta del enlace; `null` = la organización completa. */
+  linked_store: { id: number; name: string } | null;
 }
 
 export interface PlatformCrmLinkView {
   link: PlatformCrmLink | null;
   organization: PlatformOrganizationSummary | null;
+}
+
+const SUBSCRIPTION_STATE_LABELS: Record<string, string> = {
+  draft: 'Borrador',
+  trial: 'En prueba',
+  active: 'Activa',
+  grace_soft: 'En gracia',
+  grace_hard: 'En gracia (final)',
+  suspended: 'Suspendida',
+  blocked: 'Bloqueada',
+  cancelled: 'Cancelada',
+  expired: 'Vencida',
+  pending_payment: 'Pago pendiente',
+};
+
+const ORGANIZATION_STATE_LABELS: Record<string, string> = {
+  active: 'Activa',
+  inactive: 'Inactiva',
+  suspended: 'Suspendida',
+  archived: 'Archivada',
+  draft: 'Borrador',
+};
+
+/** Etiqueta del estado de una suscripción; sin estado → ''. */
+export function subscriptionStateLabel(state: string | null | undefined): string {
+  return state ? (SUBSCRIPTION_STATE_LABELS[state] ?? state) : '';
+}
+
+/** Etiqueta del estado de una organización; sin estado → ''. */
+export function organizationStateLabel(state: string | null | undefined): string {
+  return state ? (ORGANIZATION_STATE_LABELS[state] ?? state) : '';
 }
 
 /** Lo que leen las compuertas del bloque de la sesión (`AuthFacade`). */

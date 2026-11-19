@@ -969,7 +969,8 @@ model organization_payment_policies {
 }
 
 model stores {
-  platform_crm_links         platform_crm_links[]
+  platform_crm_links         platform_crm_links[]                  @relation("platform_crm_links_store")
+  platform_crm_links_linked_store platform_crm_links[]             @relation("platform_crm_links_linked_store")
   workflow_definitions       workflow_definitions[]
   workflow_versions          workflow_versions[]
   work_groups                work_groups[]
@@ -17168,9 +17169,12 @@ model workflow_exports {
 // (odd/tasks/vendix-platform-crm-enlace.md). Solo la tienda de la org
 // `is_platform` escribe aquí: lo impone el guard del módulo `platform-crm` y,
 // en la base, el trigger `platform_crm_links_platform_store_guard`.
-// Unicidad (un enlace activo por cliente y por organización) en índices únicos
-// PARCIALES `WHERE status = 'linked'` que Prisma no puede expresar: viven solo
-// en la migración 20261204090000_platform_crm_links.
+// Unicidad en índices únicos PARCIALES `WHERE status = 'linked'` que Prisma no
+// puede expresar: un enlace activo por cliente, por organización cuando el
+// enlace es a la org entera y por tienda cuando es a una tienda. Viven solo en
+// las migraciones 20261204090000_platform_crm_links y
+// 20261207090000_platform_crm_links_linked_store (con el trigger que exige que
+// la tienda enlazada sea de la organización enlazada).
 // ============================================
 
 enum platform_crm_link_status_enum {
@@ -17192,8 +17196,11 @@ model platform_crm_links {
   linked_at           DateTime                      @default(now()) @db.Timestamp(6)
   unlinked_by_user_id Int?
   unlinked_at         DateTime?                     @db.Timestamp(6)
+  /// Tienda concreta de la org cliente; NULL = la organización entera.
+  linked_store_id     Int?
 
-  store        stores        @relation(fields: [store_id], references: [id], onDelete: Restrict, onUpdate: NoAction)
+  store        stores        @relation("platform_crm_links_store", fields: [store_id], references: [id], onDelete: Restrict, onUpdate: NoAction)
+  linked_store stores?       @relation("platform_crm_links_linked_store", fields: [linked_store_id], references: [id], onDelete: Restrict, onUpdate: NoAction)
   customer     users         @relation("platform_crm_links_customer", fields: [customer_id], references: [id], onDelete: Restrict, onUpdate: NoAction)
   organization organizations @relation(fields: [organization_id], references: [id], onDelete: Restrict, onUpdate: NoAction)
   linked_by    users         @relation("platform_crm_links_linked_by", fields: [linked_by_user_id], references: [id], onDelete: Restrict, onUpdate: NoAction)

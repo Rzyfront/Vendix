@@ -39,6 +39,10 @@ const { Client } = require('pg');
  * Formato: 'tabla.columna'.
  */
 const REQUIRED_COLUMNS = [
+  // --- CRM Vendix Platform: enlace a una tienda (20261207090000) ---
+  // Toda lectura y escritura de platform_crm_links la selecciona: sin ella el
+  // bloque «Cuenta Vendix» de la ficha del prospecto da 500.
+  'platform_crm_links.linked_store_id',
   // --- Registro de cargas masivas (20261202090000, QUI-1004) ---
   // El historial y el aviso de archivo repetido lo leen en cada carga.
   'bulk_upload_logs.file_hash',

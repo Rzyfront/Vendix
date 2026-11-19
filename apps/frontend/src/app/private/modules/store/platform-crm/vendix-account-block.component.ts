@@ -17,29 +17,10 @@ import {
   PlatformCrmLinkView,
   PlatformOrganizationSubscription,
   canManageVendixAccount,
+  organizationStateLabel,
+  subscriptionStateLabel,
 } from './platform-crm.interface';
 import { VendixAccountLinkModalComponent } from './vendix-account-link-modal.component';
-
-const SUBSCRIPTION_STATE_LABELS: Record<string, string> = {
-  draft: 'Borrador',
-  trial: 'En prueba',
-  active: 'Activa',
-  grace_soft: 'En gracia',
-  grace_hard: 'En gracia (final)',
-  suspended: 'Suspendida',
-  blocked: 'Bloqueada',
-  cancelled: 'Cancelada',
-  expired: 'Vencida',
-  pending_payment: 'Pago pendiente',
-};
-
-const ORGANIZATION_STATE_LABELS: Record<string, string> = {
-  active: 'Activa',
-  inactive: 'Inactiva',
-  suspended: 'Suspendida',
-  archived: 'Archivada',
-  draft: 'Borrador',
-};
 
 /** Fecha de un instante (fin de periodo o de trial) en hora de Colombia. */
 function formatInstantDate(iso: string | null): string {
@@ -77,7 +58,7 @@ type BlockState = 'loading' | 'ready' | 'error' | 'hidden';
       <app-customer-section
         title="Cuenta Vendix"
         icon="building-2"
-        hint="Organización que este cliente creó y paga en Vendix."
+        hint="Organización o tienda que este cliente creó y paga en Vendix."
       >
         @if (state() === 'loading') {
           <div class="flex justify-center py-4"><app-spinner size="sm"></app-spinner></div>
@@ -93,6 +74,16 @@ type BlockState = 'loading' | 'ready' | 'error' | 'hidden';
               <span class="font-semibold text-text-primary">{{ view()!.organization!.name }}</span>
               <app-badge variant="neutral" size="xs">{{ organizationState() }}</app-badge>
             </div>
+
+            <p class="text-sm text-text-secondary" data-testid="vendix-account-scope">
+              @if (view()!.link!.linked_store; as store) {
+                Enlazado a la tienda
+                <span class="font-medium text-text-primary">{{ store.name }}</span>
+                de esta organización.
+              } @else {
+                Enlazado a la organización completa.
+              }
+            </p>
 
             @for (sub of view()!.organization!.subscriptions; track $index) {
               <div class="flex flex-wrap items-center gap-x-3 gap-y-1 text-sm">
@@ -159,10 +150,9 @@ export class VendixAccountBlockComponent {
   protected readonly modalOpen = signal(false);
   protected readonly unlinking = signal(false);
   protected readonly canManage = computed(() => canManageVendixAccount(this.auth));
-  protected readonly organizationState = computed(() => {
-    const state = this.view()?.organization?.state ?? '';
-    return ORGANIZATION_STATE_LABELS[state] ?? state;
-  });
+  protected readonly organizationState = computed(() =>
+    organizationStateLabel(this.view()?.organization?.state),
+  );
 
   constructor() {
     effect(() => {
@@ -220,7 +210,7 @@ export class VendixAccountBlockComponent {
   }
 
   protected subscriptionState(sub: PlatformOrganizationSubscription): string {
-    return sub.state ? (SUBSCRIPTION_STATE_LABELS[sub.state] ?? sub.state) : '';
+    return subscriptionStateLabel(sub.state);
   }
 
   protected renewalText(sub: PlatformOrganizationSubscription): string {

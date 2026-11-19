@@ -22,7 +22,7 @@ import {
 } from './platform-store.guard';
 import {
   LinkPlatformCustomerDto,
-  SearchPlatformOrganizationsQueryDto,
+  SearchPlatformAccountsQueryDto,
   UnlinkPlatformCustomerDto,
 } from './dto/platform-crm-links.dto';
 
@@ -46,10 +46,11 @@ export class PlatformCrmLinksController {
     private readonly response: ResponseService,
   ) {}
 
-  @Get('organizations/search')
+  /** Organizaciones cliente y sus tiendas, para enlazar la org entera o una tienda. */
+  @Get('accounts/search')
   @Permissions(PLATFORM_CRM_LINK_PERMISSIONS.MANAGE)
-  async searchOrganizations(@Query() query: SearchPlatformOrganizationsQueryDto) {
-    return this.response.success(await this.service.searchOrganizations(query.q));
+  async searchAccounts(@Query() query: SearchPlatformAccountsQueryDto) {
+    return this.response.success(await this.service.searchAccounts(query.q));
   }
 
   @Get('customers/:customerId/link')
