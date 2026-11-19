@@ -401,9 +401,11 @@ export class CheckoutService {
       });
       restaurant = storeIsRestaurant(store?.industries);
     }
+    // QUI-1005: tienda en línea → respeta «Permitir adiciones en la tienda en línea».
     return this.optionPricingService.resolve(store_id, item.product_id, option_ids, Number(item.quantity) || 1, {
       scheduled,
       restaurant,
+      channel: 'ecommerce',
     });
   }
 

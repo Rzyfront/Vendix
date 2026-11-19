@@ -107,6 +107,17 @@ describe('ProductOptionsService.isEnabled', () => {
       await build({ product_options: { enabled: false }, scheduled_orders: { enabled: true } }).isEnabled(1),
     ).toBe(false);
   });
+
+  // QUI-1005: «Permitir adiciones en la tienda en línea» only gates the online
+  // store; the counter keeps reading `isEnabled`.
+  it('QUI-1005: la tienda en línea vende adiciones salvo que el dueño lo apague', async () => {
+    const on = { product_options: { enabled: true }, scheduled_orders: { enabled: true } };
+    expect(await build(on).isAllowedOnline(1)).toBe(true);
+    expect(await build({ ...on, product_options: { enabled: true, allow_online: true } }).isAllowedOnline(1)).toBe(true);
+    const off = { ...on, product_options: { enabled: true, allow_online: false } };
+    expect(await build(off).isAllowedOnline(1)).toBe(false);
+    expect(await build(off).isEnabled(1)).toBe(true);
+  });
 });
 
 /** QUI-994: cada adición muestra la imagen del producto al que apunta. */

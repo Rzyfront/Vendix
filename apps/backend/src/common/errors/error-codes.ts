@@ -41,6 +41,8 @@ export const ErrorCodes = {
   OPT_ASSIGNMENT_TARGET: { code: 'OPT_ASSIGNMENT_TARGET', httpStatus: 400, devMessage: 'El grupo se engancha a un producto o a una categoría, no a ambos.' },
   OPT_REQUIRES_SCHEDULE: { code: 'OPT_REQUIRES_SCHEDULE', httpStatus: 400, devMessage: 'Las adiciones solo se venden en pedidos programados: agenda el pedido o quita las adiciones.' },
   OPT_SELECTION_INVALID: { code: 'OPT_SELECTION_INVALID', httpStatus: 400, devMessage: 'Las adiciones elegidas no cumplen las reglas del producto.' },
+  // QUI-1005: «Permitir adiciones en la tienda en línea» apagado. Solo el canal en línea.
+  OPT_ONLINE_DISABLED: { code: 'OPT_ONLINE_DISABLED', httpStatus: 400, devMessage: 'Esta tienda no permite adiciones en la tienda en línea: quita las adiciones del producto para continuar.' },
   OPT_DRAFT_LINE_LOCKED: { code: 'OPT_DRAFT_LINE_LOCKED', httpStatus: 409, devMessage: 'Esta línea del borrador tiene adiciones y no se puede cambiar aquí: quítala y vuelve a agregarla con sus adiciones.' },
   OPT_DRAFT_ADD_LOCKED: { code: 'OPT_DRAFT_ADD_LOCKED', httpStatus: 409, devMessage: 'Este pedido ya está guardado: no se le pueden agregar productos con adiciones. Cóbralo o cancélalo y registra las adiciones en un pedido nuevo.' },
   // API keys por tienda (/api/v1)
