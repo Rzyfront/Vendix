@@ -8,6 +8,7 @@ import { Injectable, signal } from '@angular/core';
  * rule lives in the store dashboard feature (`HomePanelService`), which
  * registers it here when it is created, so `core` (sidebar, guard) can consult
  * it without importing the feature. Unregistered → `false` (previous rule).
+ * It holds ONE rule: the last registration wins.
  */
 @Injectable({ providedIn: 'root' })
 export class DashboardAccessExtension {

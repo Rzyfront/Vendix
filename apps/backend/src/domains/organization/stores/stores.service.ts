@@ -215,6 +215,13 @@ export class StoresService {
           )
             ? mergedSettings.home_panel
             : suggestHomePanelSettings(storeData.industries);
+        } else if (
+          mergedSettings.home_panel !== undefined &&
+          !isHomePanelSettings(mergedSettings.home_panel)
+        ) {
+          // Without industries there is nothing to suggest: an invalid panel
+          // from the free-form payload is dropped (the store keeps the Resumen).
+          delete mergedSettings.home_panel;
         }
         if (Object.keys(mergedSettings).length > 0) {
           await tx.store_settings.create({
