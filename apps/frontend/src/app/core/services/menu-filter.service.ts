@@ -1779,6 +1779,17 @@ export class MenuFilterService {
   }
 
   /**
+   * Industry layer only, from the same industries `canSeeKey` reads. For
+   * in-page surfaces of an industry module (POS add-ons selector, checkout
+   * scheduled-order block, settings section) that follow the store industry
+   * but not the user/store panel layers (QUI-1001). Reactive inside
+   * `computed()`: it reads signals.
+   */
+  industryAllowsModule(key: string): boolean {
+    return industryAllowsKey(key, this.gateIndustries(this.accessGate.currentApp()));
+  }
+
+  /**
    * Lock painted on a sidebar item: only the plan lock (an upgrade unlocks it).
    * Industry-closed modules never reach the sidebar: they are hidden.
    */

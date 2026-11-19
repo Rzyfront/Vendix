@@ -70,7 +70,7 @@ import {
 } from '../utils/register-stock-gate.util';
 import { PosRestaurantIntegrationService } from '../services/pos-restaurant-integration.service';
 import { PosVariantSelectorComponent } from './pos-variant-selector/pos-variant-selector.component';
-import { AuthFacade } from '../../../../../core/store/auth/auth.facade';
+import { MenuFilterService } from '../../../../../core/services/menu-filter.service';
 import { PosOptionSelectorComponent } from './pos-option-selector/pos-option-selector.component';
 import {
   PosOptionSelection,
@@ -1314,7 +1314,7 @@ export class PosProductSelectionComponent {
   private dialogService = inject(DialogService);
   private router = inject(Router);
   private store = inject(Store);
-  private authFacade = inject(AuthFacade);
+  private menuFilter = inject(MenuFilterService);
   private currencyService = inject(CurrencyFormatService);
   private scaleService = inject(PosScaleService);
   private saleUnitService = inject(PosSaleUnitService);
@@ -2258,8 +2258,9 @@ export class PosProductSelectionComponent {
     variant: PosProductVariant | null,
   ): Promise<boolean> {
     if (!this.productOptionsEnabled()) return false;
-    // QUI-1001: add-ons are restaurant-only; other industries add the plain product.
-    if (!this.authFacade.isRestaurant()) return false;
+    // QUI-1001: add-ons follow their industry rule (`products_option_groups`,
+    // restaurant only); other industries add the plain product.
+    if (!this.menuFilter.industryAllowsModule('products_option_groups')) return false;
     if (this.restaurantIntegration.currentTableSession() != null) return false;
     if (product.pricing_type === 'weight' || this.requiresSerials(product)) {
       return false;
