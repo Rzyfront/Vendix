@@ -1,6 +1,7 @@
 import { Component, input } from '@angular/core';
 
 import { StatsComponent } from '../../../../../shared/components';
+import { formatCompactMoney } from '../../../../../shared/utils/compact-money.util';
 import { StoreStats } from '../interfaces/store.interface';
 
 @Component({
@@ -54,7 +55,7 @@ import { StoreStats } from '../interfaces/store.interface';
 
         <app-stats
           title="Total Revenue"
-          [value]="'$ ' + formatCurrency(stats().total_revenue)"
+          [value]="formatCurrency(stats().total_revenue)"
           iconName="dollar-sign"
           iconBgColor="bg-blue-100"
           iconColor="text-blue-600"
@@ -98,13 +99,17 @@ export class StoreStatsComponent {
     total_products: 0,
   });
 
+  /**
+   * QUI-1017 — formateador compacto central: el signo va antes del símbolo
+   * ("-$ 5.9M"). Bajo mil conserva 0 decimales, como antes.
+   */
   formatCurrency(value: number): string {
-    if (value >= 1000000) {
-      return (value / 1000000).toFixed(1) + 'M';
-    } else if (value >= 1000) {
-      return (value / 1000).toFixed(1) + 'K';
+    const num = Number(value) || 0;
+    if (Math.abs(num) >= 1000) {
+      return formatCompactMoney(num, { symbol: '$ ' });
     }
-    return value.toFixed(0);
+    const body = `$ ${Math.abs(num).toFixed(0)}`;
+    return num < 0 && Number(Math.abs(num).toFixed(0)) !== 0 ? `-${body}` : body;
   }
 
   formatNumber(value: number): string {

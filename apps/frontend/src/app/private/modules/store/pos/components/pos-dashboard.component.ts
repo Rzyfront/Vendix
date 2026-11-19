@@ -5,6 +5,7 @@ import { FormsModule } from '@angular/forms';
 
 // Import shared components
 import { StatsComponent } from '../../../../../shared/components/index';
+import { formatCompactMoney } from '../../../../../shared/utils/compact-money.util';
 
 import { PosDashboardService } from '../services/pos-dashboard.service';
 import { DashboardData, DashboardFilters } from '../models/dashboard.model';
@@ -46,9 +47,7 @@ import { DashboardData, DashboardFilters } from '../models/dashboard.model';
             <!-- Ventas -->
             <app-stats
               title="Ventas"
-              [value]="
-                '$' + formatNumber(dashboardData()!.todayStats.totalSales)
-              "
+              [value]="formatMoney(dashboardData()!.todayStats.totalSales)"
               smallText="+12.5% vs ayer"
               iconName="dollar-sign"
               iconBgColor="bg-primary/10"
@@ -76,8 +75,7 @@ import { DashboardData, DashboardFilters } from '../models/dashboard.model';
             <app-stats
               title="Promedio"
               [value]="
-                '$' +
-                formatNumber(dashboardData()!.todayStats.averageOrderValue)
+                formatMoney(dashboardData()!.todayStats.averageOrderValue)
               "
               smallText="-2.1% vs ayer"
               iconName="trending-up"
@@ -631,13 +629,9 @@ export class PosDashboardComponent {
     return item.category;
   }
 
-  // Formatear número para visualización
-  formatNumber(num: number): string {
-    if (num >= 1000000) {
-      return (num / 1000000).toFixed(1) + 'M';
-    } else if (num >= 1000) {
-      return (num / 1000).toFixed(1) + 'K';
-    }
-    return num.toFixed(0);
+  /** QUI-1017 — dinero compacto con el formateador central ("-$5.9M"). */
+  formatMoney(num: number): string {
+    return formatCompactMoney(num);
   }
+
 }
