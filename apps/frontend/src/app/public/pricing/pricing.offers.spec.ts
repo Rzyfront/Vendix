@@ -25,13 +25,21 @@ describe('PricingComponent offers (SEO-OPS-18)', () => {
     plan(3, 'Sin ciclo', 1000, 'weird'),
   ];
 
-  it('arma una oferta por plan con el precio, la moneda y la vigencia de la API', () => {
-    const ld = buildPricingJsonLd(data) as { offers: Array<Record<string, string>> };
+  it('arma una oferta por plan con el precio, la moneda, la vigencia y el período de la API', () => {
+    const ld = buildPricingJsonLd(data, 'https://vendix.com') as { url: string; offers: Array<Record<string, any>> };
+    expect(ld.url).toBe('https://vendix.com/pricing');
     expect(ld.offers.length).toBe(2);
     expect(ld.offers[0]).toEqual(jasmine.objectContaining({
       name: 'Emprendedor · Mensual', price: '69900', priceCurrency: 'COP', validFrom: PRICING_VALID_FROM,
+      url: 'https://vendix.com/pricing',
     }));
+    expect(ld.offers[0]['priceSpecification'].billingDuration).toBe('P1M');
     expect(ld.offers[1]).toEqual(jasmine.objectContaining({ name: 'Empresarial Pro · Anual', price: '969000' }));
+    expect(ld.offers[1]['priceSpecification'].billingDuration).toBe('P1Y');
+  });
+
+  it('la etiqueta de vigencia sale de la misma fecha', () => {
+    expect(PRICING_VALID_FROM_LABEL).toBe('Precios vigentes desde el 12 de noviembre de 2026.');
   });
 
   it('sin planes no publica JSON-LD', () => {
@@ -40,7 +48,12 @@ describe('PricingComponent offers (SEO-OPS-18)', () => {
 
   describe('en la página', () => {
     let fixture: ComponentFixture<PricingComponent>;
+    let origin: string | null;
     beforeEach(async () => {
+      // Karma corre en localhost: se simula el host comercial (o una tienda) con el origen.
+      origin = 'https://vendix.online';
+      spyOn(PricingComponent.prototype as unknown as { jsonLdOrigin: () => string | null }, 'jsonLdOrigin')
+        .and.callFake(() => origin);
       await TestBed.configureTestingModule({
         imports: [PricingComponent],
         providers: [
@@ -68,6 +81,26 @@ describe('PricingComponent offers (SEO-OPS-18)', () => {
       expect(ld.offers.length).toBe(2);
       fixture.destroy();
       expect(document.head.querySelector('#vendix-pricing-offers')).toBeNull();
+    });
+  });
+
+  describe('en una tienda o un dominio propio', () => {
+    it('no publica el JSON-LD de Vendix', async () => {
+      spyOn(PricingComponent.prototype as unknown as { jsonLdOrigin: () => string | null }, 'jsonLdOrigin')
+        .and.returnValue(null);
+      await TestBed.configureTestingModule({
+        imports: [PricingComponent],
+        providers: [
+          provideZonelessChangeDetection(),
+          provideRouter([{ path: '**', children: [] }]),
+          { provide: PublicPlansService, useValue: { list$: of({ success: true, data }) } },
+        ],
+      }).compileComponents();
+      const fixture = TestBed.createComponent(PricingComponent);
+      fixture.detectChanges();
+      await fixture.whenStable();
+      expect(document.head.querySelector('#vendix-pricing-offers')).toBeNull();
+      fixture.destroy();
     });
   });
 });
