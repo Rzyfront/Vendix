@@ -126,6 +126,8 @@ export const ERROR_MESSAGES: Record<string, string> = {
   PAYMENT_NOT_OWNED: 'No puedes operar este pago: pertenece a otra persona.',
   PRODUCT_VARIANT_MISMATCH: 'La variante seleccionada no corresponde al producto.',
   AUTH_TOKEN_001: 'Token invalido o expirado.',
+  AUTH_STORE_INACTIVE_001:
+    'La tienda esta inactiva. Elige otra tienda o pide que la reactiven.',
   AUTH_CREDENTIALS_001: 'Email o contrasena incorrectos.',
   AUTH_PASSWORD_001: 'La contrasena es incorrecta.',
   AUTH_ROLE_001: 'Rol no encontrado.',

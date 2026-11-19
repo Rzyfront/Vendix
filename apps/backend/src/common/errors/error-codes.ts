@@ -717,6 +717,12 @@ export const ErrorCodes = {
     httpStatus: 403,
     devMessage: 'Access denied',
   },
+  AUTH_STORE_INACTIVE_001: {
+    code: 'AUTH_STORE_INACTIVE_001',
+    httpStatus: 403,
+    devMessage:
+      'The store is inactive: it cannot be opened nor receive users or customers',
+  },
   AUTH_TOKEN_001: {
     code: 'AUTH_TOKEN_001',
     httpStatus: 401,
