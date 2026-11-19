@@ -400,7 +400,13 @@ export class CustomerHistoryService {
                 customer_id: customerId,
                 ...createdBefore,
                 ...(ownOnly
-                  ? { OR: [{ assigned_user_id: me }, { created_by_user_id: me }] }
+                  ? {
+                      OR: [
+                        { assigned_user_id: me },
+                        { created_by_user_id: me },
+                        { supporters: { some: { user_id: me } } },
+                      ],
+                    }
                   : {}),
               },
               select: {

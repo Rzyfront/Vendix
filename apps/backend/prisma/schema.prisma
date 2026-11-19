@@ -323,6 +323,7 @@ model users {
   crm_tasks                  crm_tasks[]                  @relation("crm_tasks_customer")
   crm_assigned_tasks         crm_tasks[]                  @relation("crm_tasks_assigned")
   crm_created_tasks          crm_tasks[]                  @relation("crm_tasks_created_by")
+  crm_supported_tasks        crm_task_assignees[]
   user_reminders             user_reminders[]
   crm_notes                  crm_notes[]                  @relation("crm_notes_customer")
   crm_created_notes          crm_notes[]                  @relation("crm_notes_created_by")
@@ -1278,6 +1279,7 @@ model stores {
   crm_pipeline_stages   crm_pipeline_stages[]
   crm_opportunities     crm_opportunities[]
   crm_tasks             crm_tasks[]
+  crm_task_assignees    crm_task_assignees[]
   crm_notes             crm_notes[]
   user_reminders        user_reminders[]
   crm_campaigns         crm_campaigns[]
@@ -15556,6 +15558,8 @@ model crm_pipeline_stages {
   pipeline      crm_pipelines       @relation(fields: [pipeline_id], references: [id], onDelete: Restrict, onUpdate: NoAction)
   opportunities crm_opportunities[]
   store_users   store_users[]
+  /// Tareas que, al completarse, mueven su oportunidad a esta etapa.
+  moving_tasks  crm_tasks[]
 
   @@unique([pipeline_id, name])
   @@index([pipeline_id, sort_order])
@@ -15610,19 +15614,41 @@ model crm_tasks {
   status             crm_task_status_enum @default(pending)
   assigned_user_id   Int?
   created_by_user_id Int?
+  /// Etapa a la que se mueve la oportunidad ligada al completar la tarea.
+  move_to_stage_id   Int?
   completed_at       DateTime?            @db.Timestamp(6)
   created_at         DateTime             @default(now()) @db.Timestamp(6)
   updated_at         DateTime             @default(now()) @updatedAt @db.Timestamp(6)
 
-  store         stores             @relation(fields: [store_id], references: [id], onDelete: Restrict, onUpdate: NoAction)
-  customer      users?             @relation("crm_tasks_customer", fields: [customer_id], references: [id], onDelete: SetNull, onUpdate: NoAction)
-  opportunity   crm_opportunities? @relation(fields: [opportunity_id], references: [id], onDelete: SetNull, onUpdate: NoAction)
-  conversation  crm_conversations? @relation(fields: [conversation_id], references: [id], onDelete: SetNull, onUpdate: NoAction)
-  assigned_user users?             @relation("crm_tasks_assigned", fields: [assigned_user_id], references: [id], onDelete: SetNull, onUpdate: NoAction)
-  created_by    users?             @relation("crm_tasks_created_by", fields: [created_by_user_id], references: [id], onDelete: SetNull, onUpdate: NoAction)
+  store         stores               @relation(fields: [store_id], references: [id], onDelete: Restrict, onUpdate: NoAction)
+  customer      users?               @relation("crm_tasks_customer", fields: [customer_id], references: [id], onDelete: SetNull, onUpdate: NoAction)
+  opportunity   crm_opportunities?   @relation(fields: [opportunity_id], references: [id], onDelete: SetNull, onUpdate: NoAction)
+  conversation  crm_conversations?   @relation(fields: [conversation_id], references: [id], onDelete: SetNull, onUpdate: NoAction)
+  assigned_user users?               @relation("crm_tasks_assigned", fields: [assigned_user_id], references: [id], onDelete: SetNull, onUpdate: NoAction)
+  created_by    users?               @relation("crm_tasks_created_by", fields: [created_by_user_id], references: [id], onDelete: SetNull, onUpdate: NoAction)
+  move_to_stage crm_pipeline_stages? @relation(fields: [move_to_stage_id], references: [id], onDelete: SetNull, onUpdate: NoAction)
+  supporters    crm_task_assignees[]
 
   @@index([store_id, assigned_user_id, status, due_at])
   @@index([customer_id])
+  @@index([move_to_stage_id])
+}
+
+/// Personas de apoyo de una tarea CRM. El responsable sigue siendo uno
+/// (`crm_tasks.assigned_user_id`); el apoyo ve la tarea y puede completarla.
+model crm_task_assignees {
+  id         Int      @id @default(autoincrement())
+  store_id   Int
+  task_id    Int
+  user_id    Int
+  created_at DateTime @default(now()) @db.Timestamp(6)
+
+  store stores    @relation(fields: [store_id], references: [id], onDelete: Restrict, onUpdate: NoAction)
+  task  crm_tasks @relation(fields: [task_id], references: [id], onDelete: Cascade, onUpdate: NoAction)
+  user  users     @relation(fields: [user_id], references: [id], onDelete: Cascade, onUpdate: NoAction)
+
+  @@unique([task_id, user_id])
+  @@index([store_id, user_id])
 }
 
 /// Notas CRM del cliente. No reutiliza `customer_consultation_notes`, que está

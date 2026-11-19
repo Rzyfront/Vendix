@@ -306,6 +306,7 @@ export class StorePrismaService extends BasePrismaService {
     'crm_stage_templates',
     'crm_opportunities',
     'crm_tasks',
+    'crm_task_assignees',
     'user_reminders',
     'crm_notes',
     'crm_campaigns',
@@ -2184,6 +2185,10 @@ export class StorePrismaService extends BasePrismaService {
 
   get crm_tasks() {
     return this.scoped_client.crm_tasks;
+  }
+
+  get crm_task_assignees() {
+    return this.scoped_client.crm_task_assignees;
   }
 
   get user_reminders() {

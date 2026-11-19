@@ -39,6 +39,11 @@ const { Client } = require('pg');
  * Formato: 'tabla.columna'.
  */
 const REQUIRED_COLUMNS = [
+  // --- CRM: apoyo en tareas y etapa destino (20261210090000) ---
+  // Toda lectura de crm_tasks (lista, hoy, panel del cliente) trae
+  // move_to_stage_id y las personas de apoyo: sin ellas Tareas da 500.
+  'crm_tasks.move_to_stage_id',
+  'crm_task_assignees.user_id',
   // --- CRM: plantillas de etapas y planilla del cliente (20261209090000, QUI-1043) ---
   // Toda lectura de data_collection_templates (listado, editor, reservas) trae
   // is_crm_default; la ficha del cliente y el detalle de la oportunidad leen

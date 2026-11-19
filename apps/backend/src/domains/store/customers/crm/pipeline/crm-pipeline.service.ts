@@ -15,6 +15,7 @@ import {
   CreateCrmStageDto,
   CrmOpportunitiesQueryDto,
   MoveCrmOpportunityDto,
+  OpenCrmOpportunitiesQueryDto,
   UpdateCrmOpportunityDto,
   UpdateCrmStageDto,
 } from './dto/crm-pipeline.dto';
@@ -50,6 +51,24 @@ type OpportunityRow = Prisma.crm_opportunitiesGetPayload<{
 type StageRow = Prisma.crm_pipeline_stagesGetPayload<{
   select: typeof STAGE_SELECT;
 }>;
+
+/** Why completing a task did not move its opportunity. */
+export type CrmTaskMoveSkipReason =
+  | 'opportunity_missing'
+  | 'opportunity_closed'
+  | 'already_in_stage'
+  | 'stage_unavailable'
+  | 'failed';
+
+/** What completing a task that "moves the opportunity" did to it. */
+export interface CrmTaskOpportunityMove {
+  moved: boolean;
+  reason: CrmTaskMoveSkipReason | null;
+  stage: { id: number; name: string; kind: string } | null;
+}
+
+/** Cap of the open opportunities offered by the task form. */
+const OPEN_FOR_CUSTOMER_LIMIT = 20;
 
 /**
  * Sales pipeline (PLAN-CRM §4.6). The stage kind drives the opportunity
@@ -215,6 +234,122 @@ export class CrmPipelineService {
 
   async findOne(id: number) {
     return this.toOpportunity(await this.findVisible(this.viewer(), id));
+  }
+
+  /**
+   * Open opportunities of one customer for the task form: board, current
+   * stage and the active stages of that board. Same visibility as the board,
+   * so a seller only gets their own. `include_id` (the opportunity of the
+   * task being edited) is added when it is not in the first page.
+   */
+  async openForCustomer(query: OpenCrmOpportunitiesQueryDto) {
+    const viewer = this.viewer();
+    const open: Prisma.crm_opportunitiesWhereInput[] = [
+      { customer_id: query.customer_id, status: 'open' },
+      this.visibility(viewer),
+    ];
+    const select = {
+      id: true,
+      title: true,
+      stage: { select: STAGE_SELECT },
+      pipeline: {
+        select: {
+          id: true,
+          name: true,
+          stages: {
+            where: { is_active: true },
+            select: STAGE_SELECT,
+            orderBy: [{ sort_order: 'asc' as const }, { id: 'asc' as const }],
+          },
+        },
+      },
+    };
+    const rows = await this.prisma.crm_opportunities.findMany({
+      where: { AND: open },
+      orderBy: [{ updated_at: 'desc' }, { id: 'desc' }],
+      take: OPEN_FOR_CUSTOMER_LIMIT,
+      select,
+    });
+    const includeId = query.include_id;
+    if (includeId && !rows.some((row) => row.id === includeId)) {
+      const linked = await this.prisma.crm_opportunities.findFirst({
+        where: { AND: [{ id: includeId }, ...open] },
+        select,
+      });
+      if (linked) rows.push(linked);
+    }
+    return rows.map((row) => ({
+      id: row.id,
+      title: row.title,
+      pipeline: { id: row.pipeline.id, name: row.pipeline.name },
+      stage: row.stage,
+      stages: row.pipeline.stages,
+    }));
+  }
+
+  /**
+   * Stage a task may move its linked opportunity to: of the opportunity's
+   * board, active and not `lost` (losing needs a reason; that stays on the
+   * board). Throws CRM_TASK_002 otherwise.
+   */
+  async assertTaskTargetStage(
+    opportunityId: number,
+    stageId: number,
+  ): Promise<void> {
+    const [opportunity, stage] = await Promise.all([
+      this.prisma.crm_opportunities.findFirst({
+        where: { id: opportunityId },
+        select: { pipeline_id: true },
+      }),
+      this.prisma.crm_pipeline_stages.findFirst({
+        where: { id: stageId },
+        select: STAGE_SELECT,
+      }),
+    ]);
+    if (!opportunity || !stage || !this.isTaskTarget(stage, opportunity.pipeline_id)) {
+      throw new VendixHttpException(ErrorCodes.CRM_TASK_002);
+    }
+  }
+
+  /**
+   * A task that "moves the opportunity" was completed: same move as the
+   * board ({@link applyStage}), a `won` stage wins it. Linking the task is
+   * what authorizes it, so whoever completes it (assignee or support) need
+   * not own the opportunity. When it is no longer open, is already there or
+   * the stage stopped being a valid target, nothing moves and the reason is
+   * returned: the task is completed anyway.
+   */
+  async moveForTask(
+    opportunityId: number,
+    stageId: number,
+  ): Promise<CrmTaskOpportunityMove> {
+    const viewer: CrmViewer = { ...this.viewer(), can_see_all: true };
+    const [current, stage] = await Promise.all([
+      this.prisma.crm_opportunities.findFirst({
+        where: { id: opportunityId },
+        include: OPPORTUNITY_INCLUDE,
+      }),
+      this.prisma.crm_pipeline_stages.findFirst({
+        where: { id: stageId },
+        select: STAGE_SELECT,
+      }),
+    ]);
+    const target = stage
+      ? { id: stage.id, name: stage.name, kind: stage.kind }
+      : null;
+    const skip = (reason: CrmTaskMoveSkipReason): CrmTaskOpportunityMove => ({
+      moved: false,
+      reason,
+      stage: target,
+    });
+    if (!current) return skip('opportunity_missing');
+    if (current.status !== 'open') return skip('opportunity_closed');
+    if (!stage || !this.isTaskTarget(stage, current.pipeline_id)) {
+      return skip('stage_unavailable');
+    }
+    if (stage.id === current.stage_id) return skip('already_in_stage');
+    await this.applyStage(viewer, current, stage, {});
+    return { moved: true, reason: null, stage: target };
   }
 
   async create(dto: CreateCrmOpportunityDto) {
@@ -417,6 +552,12 @@ export class CrmPipelineService {
     return resolveCrmViewer(ErrorCodes.CRM_OPPORTUNITY_001);
   }
 
+  private isTaskTarget(stage: StageRow, pipelineId: number): boolean {
+    return (
+      stage.pipeline_id === pipelineId && stage.is_active && stage.kind !== 'lost'
+    );
+  }
+
   private visibility(viewer: CrmViewer): Prisma.crm_opportunitiesWhereInput {
     return viewer.can_see_all ? {} : { owner_user_id: viewer.user_id };
   }
@@ -539,7 +680,7 @@ export class CrmPipelineService {
         { status: data.status, stage_id: stage.id, lost_reason: data.lost_reason },
       );
     }
-    return this.findOne(current.id);
+    return this.toOpportunity(await this.findVisible(viewer, current.id));
   }
 
   /**
