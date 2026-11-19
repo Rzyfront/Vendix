@@ -31,6 +31,7 @@ import { ToggleComponent } from '../../../../../../shared/components/toggle/togg
 import { CurrencyFormatService } from '../../../../../../shared/pipes/currency';
 import { StoreSettingsFacade } from '../../../../../../core/store/store-settings/store-settings.facade';
 import { UomService } from '../../services/uom.service';
+import { cartReceiptUomBlocks } from '../utils/receipt-uom-block.util';
 import {
   popLineAvailableStock,
   popLineHasStockData,
@@ -209,6 +210,15 @@ import {
                 "
                 class="!absolute left-1/2 -translate-x-1/2 top-0 z-10"
               ></app-tooltip>
+              @if (!submitBlock() && receiveBlock(); as receiveMsg) {
+                <p
+                  class="mb-2 text-xs font-medium text-warning"
+                  role="alert"
+                  data-testid="pop-receive-uom-block"
+                >
+                  {{ receiveMsg }}
+                </p>
+              }
               @if (submitBlock(); as blockMsg) {
                 <p
                   class="mb-2 text-xs font-medium text-warning"
@@ -248,7 +258,7 @@ import {
                   size="md"
                   [fullWidth]="true"
                   (clicked)="onCreateAndReceive()"
-                  [disabled]="actionState.loading || actionState.isEmpty || !!submitBlock()"
+                  [disabled]="actionState.loading || actionState.isEmpty || !!submitBlock() || !!receiveBlock()"
                   customClasses="!h-11 !font-semibold !shadow-sm"
                 >
                   Crear + Recibir
@@ -806,6 +816,19 @@ export class PopCartComponent {
     const st = this.cartState();
     return st ? submitBlockMessage(st) : null;
   });
+
+  /**
+   * QUI-1017 — primer producto con stock en masa/volumen sin unidad de compra
+   * (o sin factor): «Crear + Recibir» lo entraría 1:1 (10 kg como 10 g). Solo
+   * deshabilita la recepción; «Borrador» y «Crear orden» siguen disponibles.
+   */
+  readonly receiveBlock = computed(
+    () =>
+      cartReceiptUomBlocks(
+        this.cartState()?.items,
+        this.uomCatalog()?.data ?? null,
+      )[0] ?? null,
+  );
 
   /** Encender/apagar el IVA de toda la orden (recomputa todas las líneas). */
   onHasVatToggle(value: boolean): void {

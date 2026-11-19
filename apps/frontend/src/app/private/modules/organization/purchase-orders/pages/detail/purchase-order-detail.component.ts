@@ -92,6 +92,14 @@ const STATUS_BADGE_COLORS: Record<string, StickyHeaderBadgeColor> = {
           </app-alert-banner>
         }
 
+        @if (canReceive() && receiptUomBlocks().length > 0) {
+          <app-alert-banner variant="warning" icon="alert-triangle" heading="Corrige la unidad de compra para recibir" customClasses="mb-3" data-testid="org-po-receipt-uom-block">
+            @for (message of receiptUomBlocks(); track message) {
+              <p class="text-sm">{{ message }}</p>
+            }
+          </app-alert-banner>
+        }
+
         @if (loading()) {
           <div class="p-8">
             <app-spinner [center]="true" text="Cargando..." />
@@ -400,6 +408,21 @@ export class OrgPurchaseOrderDetailComponent {
     return s === 'approved' || s === 'sent' || s === 'in_transit';
   });
 
+  /**
+   * QUI-1017 — productos con stock en masa/volumen sin unidad de compra (o sin
+   * factor): recibirlos entraría 10 kg como 10 g. "Recibir todo" queda
+   * deshabilitado hasta corregirlos; el backend rechaza el mismo caso.
+   */
+  readonly receiptUomBlocks = computed(() =>
+    Array.from(
+      new Set(
+        (this.po()?.lines ?? [])
+          .map((l) => l.receipt_uom_block)
+          .filter((m): m is string => !!m),
+      ),
+    ),
+  );
+
   readonly headerActions = computed<StickyHeaderActionButton[]>(() => {
     const acts: StickyHeaderActionButton[] = [];
     const loading = this.actionLoading();
@@ -421,7 +444,7 @@ export class OrgPurchaseOrderDetailComponent {
         variant: 'primary',
         icon: 'package-check',
         loading,
-        disabled: loading,
+        disabled: loading || this.receiptUomBlocks().length > 0,
         visible: true,
       });
     }
@@ -542,6 +565,10 @@ export class OrgPurchaseOrderDetailComponent {
   async receive(): Promise<void> {
     const p = this.po();
     if (!p) return;
+    if (this.receiptUomBlocks().length > 0) {
+      this.toast.warning(this.receiptUomBlocks()[0]);
+      return;
+    }
     const lines = this.poLines() as Array<{ id: number; quantity: number }>;
     if (lines.length === 0) {
       this.toast.error('La orden no tiene líneas para recibir.');
