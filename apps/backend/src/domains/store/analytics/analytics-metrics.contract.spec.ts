@@ -10,6 +10,8 @@ import {
   sqlStateList,
   CostCoverage,
   buildCostCoverage,
+  lineStockUnitsSql,
+  lineCogsSql,
   // CASH BASIS block — every symbol below MUST stay exported. Merging any
   // PR that deletes one of these will fail this spec; that is the canary
   // the per-PR merge loop relies on.
@@ -511,6 +513,28 @@ describe('Analytics-metrics contract (Anchor regression)', () => {
           { status: 'released' },
         ]),
       ).toBe(100);
+    });
+  });
+
+  // QUI-1017 — COGS multiplica por unidades de STOCK, no por `quantity`.
+  describe('lineStockUnitsSql / lineCogsSql', () => {
+    it('usa stock_units_consumed y cae a quantity (peso legado, presentación, QUI-978)', () => {
+      expect(lineStockUnitsSql().sql).toBe(
+        'COALESCE(oi.stock_units_consumed, oi.quantity)',
+      );
+      expect(lineCogsSql().sql).toBe(
+        '(COALESCE(oi.stock_units_consumed, oi.quantity) * COALESCE(oi.cost_price, 0))',
+      );
+    });
+
+    it('respeta el alias de la tabla', () => {
+      expect(lineCogsSql('i').sql).toBe(
+        '(COALESCE(i.stock_units_consumed, i.quantity) * COALESCE(i.cost_price, 0))',
+      );
+    });
+
+    it('rechaza un alias que no es un identificador SQL', () => {
+      expect(() => lineCogsSql('oi; DROP TABLE x')).toThrow('Invalid SQL alias');
     });
   });
 });
