@@ -126,6 +126,16 @@ export class OpenCrmOpportunitiesQueryDto {
   @IsInt()
   @Min(1)
   customer_id!: number;
+
+  /**
+   * Opportunity linked to the task being edited: it is always returned while
+   * it is open and visible, even past the first page.
+   */
+  @IsOptional()
+  @Transform(toInt)
+  @IsInt()
+  @Min(1)
+  include_id?: number;
 }
 
 export class CreateCrmOpportunityDto {

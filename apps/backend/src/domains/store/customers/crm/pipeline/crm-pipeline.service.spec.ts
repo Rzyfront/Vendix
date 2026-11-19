@@ -408,6 +408,37 @@ describe('CrmPipelineService', () => {
       ]);
     });
 
+    it('adds the opportunity of the task being edited when it is not in the first page', async () => {
+      as('seller');
+      const { service, prisma } = setup();
+      const row = (id: number) => ({
+        id,
+        title: `Oportunidad ${id}`,
+        stage: STAGES[0],
+        pipeline: { id: 1, name: 'Ventas', stages: STAGES.slice(0, 4) },
+      });
+      const open = [{ customer_id: CUSTOMER, status: 'open' }, { owner_user_id: SELLER }];
+
+      prisma.crm_opportunities.findMany.mockResolvedValueOnce([row(500), row(501)]);
+      prisma.crm_opportunities.findFirst.mockResolvedValueOnce(row(900));
+      const rows = await service.openForCustomer({ customer_id: CUSTOMER, include_id: 900 });
+      expect(rows.map((item) => item.id)).toEqual([500, 501, 900]);
+      expect(prisma.crm_opportunities.findFirst.mock.calls[0][0].where).toEqual({
+        AND: [{ id: 900 }, ...open],
+      });
+
+      // Already in the page: no second read. Closed or not visible: not added.
+      prisma.crm_opportunities.findFirst.mockClear();
+      prisma.crm_opportunities.findMany.mockResolvedValueOnce([row(500)]);
+      await service.openForCustomer({ customer_id: CUSTOMER, include_id: 500 });
+      expect(prisma.crm_opportunities.findFirst).not.toHaveBeenCalled();
+
+      prisma.crm_opportunities.findMany.mockResolvedValueOnce([row(500)]);
+      prisma.crm_opportunities.findFirst.mockResolvedValueOnce(null);
+      const without = await service.openForCustomer({ customer_id: CUSTOMER, include_id: 901 });
+      expect(without.map((item) => item.id)).toEqual([500]);
+    });
+
     it('a target stage must be an active, non-lost stage of the opportunity board', async () => {
       as('seller');
       const { service, prisma } = setup();

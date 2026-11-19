@@ -239,36 +239,45 @@ export class CrmPipelineService {
   /**
    * Open opportunities of one customer for the task form: board, current
    * stage and the active stages of that board. Same visibility as the board,
-   * so a seller only gets their own.
+   * so a seller only gets their own. `include_id` (the opportunity of the
+   * task being edited) is added when it is not in the first page.
    */
   async openForCustomer(query: OpenCrmOpportunitiesQueryDto) {
     const viewer = this.viewer();
-    const rows = await this.prisma.crm_opportunities.findMany({
-      where: {
-        AND: [
-          { customer_id: query.customer_id, status: 'open' },
-          this.visibility(viewer),
-        ],
-      },
-      orderBy: [{ updated_at: 'desc' }, { id: 'desc' }],
-      take: OPEN_FOR_CUSTOMER_LIMIT,
-      select: {
-        id: true,
-        title: true,
-        stage: { select: STAGE_SELECT },
-        pipeline: {
-          select: {
-            id: true,
-            name: true,
-            stages: {
-              where: { is_active: true },
-              select: STAGE_SELECT,
-              orderBy: [{ sort_order: 'asc' }, { id: 'asc' }],
-            },
+    const open: Prisma.crm_opportunitiesWhereInput[] = [
+      { customer_id: query.customer_id, status: 'open' },
+      this.visibility(viewer),
+    ];
+    const select = {
+      id: true,
+      title: true,
+      stage: { select: STAGE_SELECT },
+      pipeline: {
+        select: {
+          id: true,
+          name: true,
+          stages: {
+            where: { is_active: true },
+            select: STAGE_SELECT,
+            orderBy: [{ sort_order: 'asc' as const }, { id: 'asc' as const }],
           },
         },
       },
+    };
+    const rows = await this.prisma.crm_opportunities.findMany({
+      where: { AND: open },
+      orderBy: [{ updated_at: 'desc' }, { id: 'desc' }],
+      take: OPEN_FOR_CUSTOMER_LIMIT,
+      select,
     });
+    const includeId = query.include_id;
+    if (includeId && !rows.some((row) => row.id === includeId)) {
+      const linked = await this.prisma.crm_opportunities.findFirst({
+        where: { AND: [{ id: includeId }, ...open] },
+        select,
+      });
+      if (linked) rows.push(linked);
+    }
     return rows.map((row) => ({
       id: row.id,
       title: row.title,
