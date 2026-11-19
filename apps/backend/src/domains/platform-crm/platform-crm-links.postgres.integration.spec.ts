@@ -34,7 +34,7 @@ const MIGRATION_SQL = readMigration('20261204090000_platform_crm_links');
 /** Enlace a una tienda concreta: columna, únicos parciales y trigger nuevos. */
 const LINKED_STORE_MIGRATION_SQL = readMigration('20261207090000_platform_crm_links_linked_store');
 /** D2: un cliente con varios enlaces (quita el único por cliente). */
-const MULTI_MIGRATION_SQL = readMigration('20261210090000_platform_crm_links_multi');
+const MULTI_MIGRATION_SQL = readMigration('20261211090000_platform_crm_links_multi');
 
 /** `pg` no entiende `?schema=public` del DATABASE_URL de Prisma. */
 function pgConnectionString(url: string): string {
