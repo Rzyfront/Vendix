@@ -6,7 +6,7 @@ import { storeDashboardGuard } from './store-dashboard.guard';
 import { MenuFilterService, PANEL_UI_NO_ACCESS_ROUTE } from '../services/menu-filter.service';
 import { ToastService } from '../../shared/components/toast/toast.service';
 import { AuthFacade } from '../store/auth/auth.facade';
-import { HomePanelService } from '../../private/modules/store/dashboard/home-panels/home-panel.service';
+import { DashboardAccessExtension } from '../services/dashboard-access-extension.service';
 
 describe('storeDashboardGuard (QUI-860)', () => {
   let menuFilter: jasmine.SpyObj<MenuFilterService>;
@@ -48,8 +48,8 @@ describe('storeDashboardGuard (QUI-860)', () => {
         { provide: ToastService, useValue: toast },
         { provide: AuthFacade, useValue: authFacade },
         {
-          provide: HomePanelService,
-          useValue: { canEnterDashboard: () => canEnterDashboard },
+          provide: DashboardAccessExtension,
+          useValue: { canEnter: () => canEnterDashboard },
         },
         {
           provide: AccessGateService,

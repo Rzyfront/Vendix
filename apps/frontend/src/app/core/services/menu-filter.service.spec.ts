@@ -17,6 +17,7 @@ import { APP_MODULES } from '../../shared/constants/app-modules.constant';
 import { getModulesHiddenByIndustries } from '../../shared/constants/industry-modules.constant';
 import { BehaviorSubject, firstValueFrom, of, take } from 'rxjs';
 import { AccessGateService } from './access-gate.service';
+import { DashboardAccessExtension } from './dashboard-access-extension.service';
 import { STORE_ADMIN_MENU_ITEMS } from '../../private/layouts/store-admin/store-admin-menu-items';
 import { MODULE_INDUSTRIES, isIndustryAlwaysEnforced } from '../../shared/constants/module-industries';
 
@@ -419,6 +420,20 @@ describe('MenuFilterService.firstActiveModuleRoute (QUI-860)', () => {
       ],
     });
     service = TestBed.inject(MenuFilterService);
+  });
+
+  it('QUI-967: sin permisos de indicadores pero con un panel principal visible, ve y entra al Panel Principal', () => {
+    authFacade.isModuleVisible.and.callFake(
+      (key: string) => key === 'dashboard' || key === 'pos',
+    );
+    TestBed.inject(DashboardAccessExtension).register(() => true);
+    expect(service.firstActiveModuleRoute([])).toBe('/admin/dashboard');
+    const diagnosis = service.diagnose({
+      label: 'Panel Principal',
+      route: '/admin/dashboard',
+      icon: '',
+    } as any);
+    expect(diagnosis.visible).toBeTrue();
   });
 
   it('un usuario operativo cajero con pos activo es enrutado a /admin/pos', () => {

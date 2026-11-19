@@ -77,7 +77,19 @@ describe('StoresService · la industria se escribe en sus dos fuentes (S18)', ()
       },
     } as any);
 
-    const [hotel, bakery] = db.tables.store_settings.map((s) => s.settings);
+    await service.create({
+      name: 'Salón Brisa',
+      store_type: 'physical',
+      industries: ['service'],
+      settings: { home_panel: { default_panel: 'widgets', enabled_panels: [] } },
+    } as any);
+
+    const [hotel, bakery, salon] = db.tables.store_settings.map((s) => s.settings);
+    // An invalid panel in the free-form payload falls back to the suggestion.
+    expect(salon.home_panel).toEqual({
+      default_panel: 'reservations_agenda',
+      enabled_panels: ['reservations_agenda', 'summary'],
+    });
     expect(hotel.home_panel).toEqual({
       default_panel: 'occupancy',
       enabled_panels: ['occupancy', 'summary'],

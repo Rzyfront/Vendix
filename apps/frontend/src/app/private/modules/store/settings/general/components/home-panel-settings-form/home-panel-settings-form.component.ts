@@ -4,6 +4,7 @@ import { AuthFacade } from '../../../../../../../core/store/auth/auth.facade';
 import { IconComponent } from '../../../../../../../shared/components/icon/icon.component';
 import { ButtonComponent } from '../../../../../../../shared/components/button/button.component';
 import {
+  HOME_PANEL_EDITOR_ROLES,
   HOME_PANEL_MAX_ENABLED,
   HomePanelId,
   HomePanelSettings,
@@ -12,14 +13,6 @@ import {
   HomePanelService,
   normalizeHomePanelSettings,
 } from '../../../../dashboard/home-panels/home-panel.service';
-
-const ADMIN_ROLES = [
-  'owner',
-  'admin',
-  'STORE_OWNER',
-  'ORG_OWNER',
-  'super_admin',
-];
 
 /**
  * Section «Panel principal»: which panel the store opens on and which extra
@@ -154,7 +147,7 @@ export class HomePanelSettingsForm {
     () =>
       this.auth.isOwner() ||
       this.auth.isAdmin() ||
-      this.auth.hasAnyRole(ADMIN_ROLES),
+      this.auth.hasAnyRole([...HOME_PANEL_EDITOR_ROLES]),
   );
 
   /** Current value restricted to eligible panels, home panel first. */

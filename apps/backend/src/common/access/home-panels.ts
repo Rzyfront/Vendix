@@ -77,6 +77,38 @@ export function suggestHomePanel(
 }
 
 /**
+ * Roles that may change the store's Panel Principal. The backend enforces it
+ * (`store:settings:update` is also held by `manager`); the settings form shows
+ * the section read-only to everyone else.
+ */
+export const HOME_PANEL_EDITOR_ROLES: readonly string[] = [
+  'owner',
+  'admin',
+  'STORE_OWNER',
+  'ORG_OWNER',
+  'super_admin',
+];
+
+/**
+ * Structural check of a `home_panel` value: catalog ids only, non-empty,
+ * no repeats and `default_panel` among `enabled_panels`. Same rule as the
+ * settings DTO, for writers that bypass it (store creation payloads).
+ */
+export function isHomePanelSettings(value: unknown): value is HomePanelSettings {
+  if (!value || typeof value !== 'object') return false;
+  const { default_panel, enabled_panels } = value as Record<string, unknown>;
+  if (!isHomePanelId(default_panel) || !Array.isArray(enabled_panels)) {
+    return false;
+  }
+  return (
+    enabled_panels.length > 0 &&
+    enabled_panels.every(isHomePanelId) &&
+    new Set(enabled_panels).size === enabled_panels.length &&
+    enabled_panels.includes(default_panel)
+  );
+}
+
+/**
  * Suggested `home_panel` setting: the suggested panel first and the "Resumen"
  * as a second tab (so indicators stay one click away).
  */

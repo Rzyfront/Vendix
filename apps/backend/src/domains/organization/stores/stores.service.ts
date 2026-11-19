@@ -25,7 +25,10 @@ import {
 } from '../../../common/helpers/domain-generator.helper';
 import { BrandingGeneratorHelper } from '../../../common/helpers/branding-generator.helper';
 import { getDefaultStoreSettings } from '../../store/settings/defaults/default-store-settings';
-import { suggestHomePanelSettings } from '../../../common/access/home-panels';
+import {
+  isHomePanelSettings,
+  suggestHomePanelSettings,
+} from '../../../common/access/home-panels';
 import { VendixHttpException, ErrorCodes } from 'src/common/errors';
 import { StoreSettings } from '../../store/settings/interfaces/store-settings.interface';
 import { StoreBootstrapHelper } from '@common/helpers/store-bootstrap.helper';
@@ -205,10 +208,13 @@ export class StoresService {
             industries: storeData.industries,
           };
           // QUI-967 — a new store opens on the panel suggested for its
-          // industries unless the payload already chose one.
-          mergedSettings.home_panel ??= suggestHomePanelSettings(
-            storeData.industries,
-          );
+          // industries unless the payload already chose a valid one (this
+          // `settings` payload is free-form, so it is checked here).
+          mergedSettings.home_panel = isHomePanelSettings(
+            mergedSettings.home_panel,
+          )
+            ? mergedSettings.home_panel
+            : suggestHomePanelSettings(storeData.industries);
         }
         if (Object.keys(mergedSettings).length > 0) {
           await tx.store_settings.create({

@@ -1,3 +1,4 @@
+import { HOME_PANEL_EDITOR_ROLES } from '../../../common/access/home-panels';
 import {
   Injectable,
   ForbiddenException,
@@ -604,9 +605,7 @@ export class SettingsService {
     ) {
       const roles = RequestContextService.getRoles();
       const puedeConfigurarPanel = roles.some((role) =>
-        ['owner', 'admin', 'STORE_OWNER', 'ORG_OWNER', 'super_admin'].includes(
-          role,
-        ),
+        HOME_PANEL_EDITOR_ROLES.includes(role),
       );
       if (!puedeConfigurarPanel) {
         throw new VendixHttpException(

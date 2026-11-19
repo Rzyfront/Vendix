@@ -1,8 +1,10 @@
 import { readFileSync } from 'fs';
 import { join } from 'path';
 import {
+  HOME_PANEL_EDITOR_ROLES,
   HOME_PANEL_IDS,
   isHomePanelId,
+  isHomePanelSettings,
   suggestHomePanel,
   suggestHomePanelSettings,
 } from './home-panels';
@@ -68,5 +70,31 @@ describe('home-panels (QUI-967) — parity and suggestion', () => {
       default_panel: 'summary',
       enabled_panels: ['summary'],
     });
+  });
+
+  it('isHomePanelSettings applies the same rule as the settings DTO', () => {
+    expect(
+      isHomePanelSettings({
+        default_panel: 'occupancy',
+        enabled_panels: ['occupancy', 'summary'],
+      }),
+    ).toBe(true);
+    for (const bad of [
+      null,
+      'summary',
+      { default_panel: 'widgets', enabled_panels: ['widgets'] },
+      { default_panel: 'summary', enabled_panels: [] },
+      { default_panel: 'summary', enabled_panels: ['summary', 'summary'] },
+      { default_panel: 'crm_pipeline', enabled_panels: ['summary'] },
+      { default_panel: 'summary', enabled_panels: ['summary', 'nope'] },
+    ]) {
+      expect(isHomePanelSettings(bad)).toBe(false);
+    }
+  });
+
+  it('only owner/admin roles edit the panel (manager excluded)', () => {
+    expect(HOME_PANEL_EDITOR_ROLES).toContain('owner');
+    expect(HOME_PANEL_EDITOR_ROLES).toContain('admin');
+    expect(HOME_PANEL_EDITOR_ROLES).not.toContain('manager');
   });
 });

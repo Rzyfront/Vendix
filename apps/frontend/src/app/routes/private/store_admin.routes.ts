@@ -1,4 +1,4 @@
-import { inject } from '@angular/core';
+import { inject, provideEnvironmentInitializer } from '@angular/core';
 import { Router, Routes } from '@angular/router';
 import { provideState } from '@ngrx/store';
 import { provideEffects } from '@ngrx/effects';
@@ -10,6 +10,7 @@ import { manageUsersGuard } from '../../core/guards/manage-users.guard';
 import { aiAgentsSettingsGuard } from '../../core/guards/vexi-settings.guard';
 import { vexAccessGuard } from '../../core/guards/vex-access.guard';
 import { storeDashboardGuard } from '../../core/guards/store-dashboard.guard'; // QUI-418
+import { HomePanelService } from '../../private/modules/store/dashboard/home-panels/home-panel.service';
 import { appKindGuard } from '../../private/modules/store/apps/utils/app-routes.util';
 import {
   panelUiGuard,
@@ -64,6 +65,10 @@ export const storeAdminRoutes: Routes = [
       import('../../private/layouts/store-admin/store-admin-layout.component').then(
         (c) => c.StoreAdminLayoutComponent,
       ),
+    // QUI-967: create `HomePanelService` with the route injector (before any
+    // guard runs) so it registers the Panel Principal entry rule that the
+    // sidebar, `panelUiGuard` and `storeDashboardGuard` consult.
+    providers: [provideEnvironmentInitializer(() => inject(HomePanelService))],
     // A.4: `panelUiGuard` corre DESPUÉS de AuthGuard. Cierra el bypass de URL
     // directa (deny-by-default): un módulo con `panel_ui=false` rechaza la URL
     // y redirige al primer módulo activo. Es UX, no autorización (ver el

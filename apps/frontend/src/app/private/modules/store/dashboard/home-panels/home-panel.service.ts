@@ -2,6 +2,7 @@ import { Injectable, computed, inject } from '@angular/core';
 import { AuthFacade } from '../../../../../core/store/auth/auth.facade';
 import { MenuFilterService } from '../../../../../core/services/menu-filter.service';
 import { canUserAccessDashboard } from '../../../../../core/utils/dashboard-access.util';
+import { DashboardAccessExtension } from '../../../../../core/services/dashboard-access-extension.service';
 import { industryAllowsKey } from '../../../../../shared/constants/module-industries';
 import {
   HOME_PANEL_FALLBACK,
@@ -98,6 +99,11 @@ export class HomePanelService {
       ? [HOME_PANEL_REGISTRY[HOME_PANEL_FALLBACK]]
       : [];
   });
+
+  constructor() {
+    // Lets `core` (sidebar, guards) apply the Panel Principal entry rule.
+    inject(DashboardAccessExtension).register(() => this.canEnterDashboard());
+  }
 
   /** True when the user can open `/admin/dashboard` (at least one tab). */
   canEnterDashboard(): boolean {

@@ -8,6 +8,7 @@ import {
   normalizeHomePanelSettings,
 } from './home-panel.service';
 import { HOME_PANEL_REGISTRY } from './home-panel.registry';
+import { DashboardAccessExtension } from '../../../../../core/services/dashboard-access-extension.service';
 
 /**
  * QUI-967 — resolution of the store "Panel Principal": store eligibility by
@@ -180,6 +181,20 @@ describe('HomePanelService (QUI-967)', () => {
     planDenied = ['customers_pipeline'];
     const service = setup();
     expect(service.eligiblePanels().map((p) => p.id)).not.toContain('crm_pipeline');
+  });
+
+  it('registers its entry rule for the sidebar and the guards', () => {
+    owner = false;
+    permissions = ['store:crm_pipeline:read'];
+    settings.set({
+      home_panel: { default_panel: 'crm_pipeline', enabled_panels: ['crm_pipeline'] },
+    });
+    setup();
+    const access = TestBed.inject(DashboardAccessExtension);
+    expect(access.canEnter()).toBeTrue();
+    permissions = [];
+    settings.set({ ...settings() });
+    expect(access.canEnter()).toBeFalse();
   });
 
   it('every registry entry declares a lazy component and its catalog id', () => {
