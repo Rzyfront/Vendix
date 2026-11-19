@@ -4,6 +4,7 @@ import { VideoLibraryService } from './video-library.service';
 describe('VideoLibraryService', () => {
   let service: VideoLibraryService;
   let prisma: {
+    $queryRaw: jest.Mock;
     videos: {
       findUnique: jest.Mock;
       update: jest.Mock;
@@ -20,6 +21,7 @@ describe('VideoLibraryService', () => {
 
   beforeEach(() => {
     prisma = {
+      $queryRaw: jest.fn().mockResolvedValue([]),
       videos: {
         findUnique: jest.fn(),
         update: jest.fn(),
@@ -109,6 +111,35 @@ describe('VideoLibraryService', () => {
       prisma.videos.update.mockRejectedValue(error);
 
       await expect(service.toggleLike(999)).rejects.toThrow(NotFoundException);
+    });
+  });
+
+  describe('findAll — search', () => {
+    beforeEach(() => {
+      prisma.videos.findMany.mockResolvedValue([]);
+      prisma.videos.count.mockResolvedValue(0);
+    });
+
+    it('builds the published-only where with the full phrase and each word of the query', async () => {
+      await service.findAll({ search: 'Punto de Venta' });
+
+      expect(prisma.videos.findMany.mock.calls[0][0].where).toEqual({
+        status: 'PUBLISHED',
+        OR: [
+          { title: { contains: 'Punto de Venta', mode: 'insensitive' } },
+          { summary: { contains: 'Punto de Venta', mode: 'insensitive' } },
+          { tags: { has: 'punto de venta' } },
+          { keywords: { has: 'punto de venta' } },
+          { title: { contains: 'punto', mode: 'insensitive' } },
+          { summary: { contains: 'punto', mode: 'insensitive' } },
+          { tags: { has: 'punto' } },
+          { keywords: { has: 'punto' } },
+          { title: { contains: 'venta', mode: 'insensitive' } },
+          { summary: { contains: 'venta', mode: 'insensitive' } },
+          { tags: { has: 'venta' } },
+          { keywords: { has: 'venta' } },
+        ],
+      });
     });
   });
 });
