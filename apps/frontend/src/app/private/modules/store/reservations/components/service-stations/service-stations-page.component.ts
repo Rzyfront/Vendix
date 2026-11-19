@@ -5,7 +5,8 @@ import { Component, computed, DestroyRef, inject, OnInit, signal } from '@angula
 import { takeUntilDestroyed } from '@angular/core/rxjs-interop';
 import { FormsModule } from '@angular/forms';
 import { Router } from '@angular/router';
-import { firstValueFrom, interval } from 'rxjs';
+import { debounceTime, distinctUntilChanged, firstValueFrom, interval, Subject } from 'rxjs';
+import { catchError } from 'rxjs/operators';
 import {
   BadgeComponent,
   ButtonComponent,
@@ -58,6 +59,7 @@ import {
   StationClock,
 } from './station-clock.util';
 import { stationTypeLabel } from './station-type-labels';
+import { CATALOG_FETCH_LIMIT, CATALOG_INITIAL_LIMIT, CATALOG_SEARCH_LIMIT, mergeById } from './catalog-search.util';
 
 import { environment } from '../../../../../../../environments/environment';
 import { DataCollectionTemplatesService } from '../../../data-collection/services/data-collection-templates.service';
@@ -699,7 +701,12 @@ export class ServiceStationsPageComponent implements OnInit {
 
   // Catalogs used by the check-in line picker
   readonly allCatalogProducts = signal<any[]>([]);
+  /** Caché de productos vendibles ya traídos por la búsqueda (variantes y precios por id). */
   readonly sellableCatalogProducts = signal<any[]>([]);
+  /** QUI-1030: ids del resultado actual de la búsqueda del selector de líneas. */
+  readonly checkinProductSearchIds = signal<number[]>([]);
+  readonly checkinProductSearchTerm = signal('');
+  private readonly checkinProductSearch$ = new Subject<string>();
 
   // Config station state
   readonly selectedStation = signal<ServiceStation | null>(null);
@@ -826,6 +833,7 @@ export class ServiceStationsPageComponent implements OnInit {
 
   ngOnInit(): void {
     this.loadData();
+    this.initCheckinProductSearch();
     interval(1000)
       .pipe(takeUntilDestroyed(this.destroyRef))
       .subscribe(() => this.now.set(Date.now()));
@@ -1533,14 +1541,8 @@ export class ServiceStationsPageComponent implements OnInit {
     this.checkinLines.set([]);
     this.checkinDeposit.set(null);
 
-    // Asegurar carga de catálogo de productos para el selector de insumos
-    // Catálogo vendible con variantes para las líneas de "Agregar producto"
-    if (!this.sellableCatalogProducts().length) {
-      this.stationsApi.getSellableProducts().subscribe({
-        next: (prods) => this.sellableCatalogProducts.set(prods || []),
-        error: () => {},
-      });
-    }
+    // QUI-1030: el selector de líneas busca en el servidor; al abrir trae los primeros.
+    this.onCheckinProductSearch('');
 
     this.showCheckinModal.set(true);
   }
@@ -1609,11 +1611,40 @@ export class ServiceStationsPageComponent implements OnInit {
     return active.length === 1 ? active[0] : 0;
   }
 
-  readonly checkinProductOptions = computed<SelectorOption[]>(() =>
-    this.sellableCatalogProducts()
-      .filter((prod) => prod.is_ingredient !== true && prod.is_sellable !== false && prod.product_type !== 'service')
-      .map((prod) => ({ value: prod.id, label: prod.name })),
-  );
+  readonly checkinProductOptions = computed<SelectorOption[]>(() => {
+    const byId = new Map(this.sellableCatalogProducts().map((p) => [p.id, p]));
+    const max = this.checkinProductSearchTerm().trim() ? CATALOG_SEARCH_LIMIT : CATALOG_INITIAL_LIMIT;
+    return this.checkinProductSearchIds()
+      .map((id) => byId.get(id))
+      .filter((prod) => !!prod && prod.is_ingredient !== true && prod.is_sellable !== false && prod.product_type !== 'service')
+      .slice(0, max)
+      .map((prod) => ({ value: prod.id, label: prod.name, description: prod.sku || undefined }));
+  });
+
+  /** QUI-1030: término del buscador del selector de producto de las líneas. */
+  onCheckinProductSearch(term: string): void {
+    this.checkinProductSearchTerm.set(term ?? '');
+    this.checkinProductSearch$.next(term ?? '');
+  }
+
+  private initCheckinProductSearch(): void {
+    this.checkinProductSearch$
+      .pipe(
+        debounceTime(250),
+        distinctUntilChanged(),
+        switchMap((term) =>
+          this.stationsApi
+            .searchSellableProducts(term, CATALOG_FETCH_LIMIT)
+            .pipe(catchError(() => of(null))),
+        ),
+        takeUntilDestroyed(this.destroyRef),
+      )
+      .subscribe((prods) => {
+        if (!prods) return;
+        this.sellableCatalogProducts.update((cache) => mergeById(cache, prods));
+        this.checkinProductSearchIds.set(prods.map((p: any) => p.id));
+      });
+  }
 
   checkinLineVariantOptions(productId: number | null): SelectorOption[] {
     if (!productId) return [];
