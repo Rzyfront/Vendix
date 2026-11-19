@@ -12,6 +12,7 @@ import { AuthFacade } from '../../../../../core/store/auth/auth.facade';
 import { DispatchNotesService } from '../../dispatch-notes/services/dispatch-notes.service';
 import { VexiUiHostRegistry } from '../../../../../core/services/vexi-ui-host.registry';
 import { BulkUploadLogService } from '../../bulk-uploads/services/bulk-upload-log.service';
+import { UomService } from '../services/uom.service';
 import type {
   InvoiceMatchResult,
   InvoiceScanResult,
@@ -73,6 +74,8 @@ describe('PopComponent — QUI-855 puntos de entrada', () => {
         { provide: DispatchNotesService, useValue: {} },
         { provide: VexiUiHostRegistry, useValue: { register: () => undefined, unregister: () => undefined } },
         { provide: BulkUploadLogService, useValue: bulkLog },
+        // QUI-1017 — catálogo UoM del bloqueo de «Crear + Recibir».
+        { provide: UomService, useValue: { getCatalog: () => of({ success: true, data: [] }) } },
       ],
     });
     TestBed.overrideComponent(PopComponent, { set: { template: '', imports: [] } });

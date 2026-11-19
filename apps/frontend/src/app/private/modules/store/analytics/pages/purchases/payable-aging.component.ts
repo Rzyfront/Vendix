@@ -279,14 +279,16 @@ export class PayableAgingComponent implements OnInit {
 
   // Etiquetas cortas para el eje en móvil ($1,2 M / $45 mil).
   // El tooltip mantiene el valor completo, no se pierde información.
+  // QUI-1017 — el signo va antes del símbolo ("-$1,2 M", nunca "$-1,2 M").
   private formatCompact(value: number): string {
     const abs = Math.abs(value);
+    const sign = value < 0 ? '-' : '';
     if (abs >= 1_000_000) {
-      const m = value / 1_000_000;
+      const m = abs / 1_000_000;
       const text = m >= 100 ? `${Math.round(m)}` : `${Math.round(m * 10) / 10}`;
-      return `$${text.replace('.', ',')} M`;
+      return `${sign}$${text.replace('.', ',')} M`;
     }
-    if (abs >= 1_000) return `$${Math.round(value / 1_000)} mil`;
+    if (abs >= 1_000) return `${sign}$${Math.round(abs / 1_000)} mil`;
     return this.currencyService.format(value);
   }
 

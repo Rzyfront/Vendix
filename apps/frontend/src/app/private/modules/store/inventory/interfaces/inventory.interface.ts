@@ -223,6 +223,12 @@ export interface PurchaseOrderItem {
   batch_number?: string;
   manufacturing_date?: string;
   expiration_date?: string;
+  /**
+   * QUI-1017 — por qué esta línea NO se puede recibir (stock en masa/volumen
+   * sin unidad de compra o sin factor de conversión). `null` = recibible.
+   * Lo calcula el backend con la misma regla que rechaza la recepción.
+   */
+  receipt_uom_block?: string | null;
   // Populated fields
   product?: {
     id: number;

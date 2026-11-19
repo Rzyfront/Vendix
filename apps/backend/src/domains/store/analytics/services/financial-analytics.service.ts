@@ -31,6 +31,7 @@ import {
   computeEffectiveTaxRate,
   round2 as roundMoney,
   sqlStateList,
+  lineCogsSql,
 } from '../analytics-metrics.contract';
 import { VendixHttpException, ErrorCodes } from 'src/common/errors';
 import { isServiceDepositSale } from '../../cash-registers/movements/movements.service';
@@ -839,7 +840,7 @@ export class FinancialAnalyticsService {
     >(
       Prisma.sql`
       SELECT
-        COALESCE(SUM(oi.quantity * COALESCE(oi.cost_price, 0)), 0) AS cogs,
+        COALESCE(SUM(${lineCogsSql()}), 0) AS cogs,
         COALESCE(SUM(oi.quantity), 0) AS units,
         COALESCE(SUM(CASE WHEN oi.cost_price IS NULL THEN oi.quantity ELSE 0 END), 0) AS units_without_cost
       FROM order_items oi
@@ -958,7 +959,7 @@ export class FinancialAnalyticsService {
       order_cost AS (
         SELECT
           oi.order_id,
-          SUM(oi.quantity * COALESCE(oi.cost_price, 0)) AS cogs,
+          SUM(${lineCogsSql()}) AS cogs,
           SUM(oi.quantity) AS units,
           SUM(CASE WHEN oi.cost_price IS NULL THEN oi.quantity ELSE 0 END) AS units_without_cost
         FROM order_items oi

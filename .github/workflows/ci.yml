@@ -793,6 +793,9 @@ jobs:
           --include='**/super-admin/monitoring/services/monitoring-alerts.service.spec.ts'
           --include='**/super-admin/monitoring/pages/alerts/monitoring-alerts.page.spec.ts'
           --include='**/store/platform-crm/*.spec.ts'
+          --include='**/pop/utils/receipt-uom-block.util.spec.ts'
+          --include='**/shared/utils/compact-money.util.spec.ts'
+          --include='**/shared/pipes/currency/currency.pipe.spec.ts'
 
   mobile:
     name: Mobile

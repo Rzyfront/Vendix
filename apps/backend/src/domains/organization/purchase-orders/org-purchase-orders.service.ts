@@ -12,6 +12,7 @@ import { OperatingScopeService } from '@common/services/operating-scope.service'
 import { RequestContextService } from '@common/context/request-context.service';
 
 import { PurchaseOrdersService } from '../../store/orders/purchase-orders/purchase-orders.service';
+import { PURCHASE_UOM_RELATIONS_SELECT } from '../../store/orders/purchase-orders/purchase-uom-factor.util';
 import { CreatePurchaseOrderDto } from '../../store/orders/purchase-orders/dto/create-purchase-order.dto';
 import { ReceivePurchaseOrderDto } from '../../store/orders/purchase-orders/dto/receive-purchase-order.dto';
 
@@ -276,7 +277,8 @@ export class OrgPurchaseOrdersService {
         },
         purchase_order_items: {
           include: {
-            products: true,
+            // QUI-1017 — unidades de stock/compra para `receipt_uom_block`.
+            products: { include: PURCHASE_UOM_RELATIONS_SELECT },
             product_variants: true,
           },
         },
@@ -298,7 +300,14 @@ export class OrgPurchaseOrdersService {
         `Purchase order ${id} not found for the current organization`,
       );
     }
-    return po;
+    // QUI-1017 — misma regla que el guard de `receive()`: la UI bloquea la
+    // recepción de las líneas que el backend rechazaría.
+    return {
+      ...po,
+      purchase_order_items: await this.storePurchaseOrders.withReceiptUomBlocks(
+        po.purchase_order_items,
+      ),
+    };
   }
 
   /**

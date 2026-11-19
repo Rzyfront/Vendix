@@ -231,6 +231,39 @@ export const OPERATING_REVENUE_SQL = Prisma.raw(
 ) as unknown as Prisma.Sql;
 
 /**
+ * Stock units a sold line really moved: `stock_units_consumed ?? quantity`,
+ * the same rule the inventory commit applies (`resolveCommittedStockUnits`).
+ *
+ * `cost_price` is a cost per STOCK unit, so COGS must multiply by stock units:
+ *  - Legacy WEIGHT line (`weight > 0`): `quantity` is 1 per weighing and the
+ *    grams/ml go to `stock_units_consumed` (180 g ⇒ 180). `quantity × cost`
+ *    under-counted the cost by that factor (QUI-1017).
+ *  - Presentation line (`packSize > 1`): `quantity` counts packs and
+ *    `stock_units_consumed` the units inside them.
+ *  - QUI-978 sale-UoM line: `quantity` is already in stock units and
+ *    `stock_units_consumed` is NULL, so nothing is counted twice.
+ *
+ * `alias` is an internal SQL identifier (never user input); it is validated
+ * to keep the fragment injection-proof.
+ */
+export function lineStockUnitsSql(alias = 'oi'): Prisma.Sql {
+  if (!/^[a-z_][a-z0-9_]*$/i.test(alias)) {
+    throw new Error(`Invalid SQL alias: ${alias}`);
+  }
+  return Prisma.raw(`COALESCE(${alias}.stock_units_consumed, ${alias}.quantity)`);
+}
+
+/**
+ * COGS of one order line: stock units moved × cost snapshot (NULL cost ⇒ 0;
+ * coverage reports it). See {@link lineStockUnitsSql}.
+ */
+export function lineCogsSql(alias = 'oi'): Prisma.Sql {
+  return Prisma.raw(
+    `(${lineStockUnitsSql(alias).sql} * COALESCE(${alias}.cost_price, 0))`,
+  );
+}
+
+/**
  * How much of the sold volume has a KNOWN unit cost.
  *
  * COGS sums `quantity * COALESCE(cost_price, 0)`, so a line whose cost snapshot

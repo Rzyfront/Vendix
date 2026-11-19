@@ -25,6 +25,7 @@ import {
   SHIPPING_TAX_SQL,
   round2,
   sqlStateList,
+  lineCogsSql,
 } from '../analytics-metrics.contract';
 import { VendixHttpException, ErrorCodes } from 'src/common/errors';
 
@@ -90,7 +91,7 @@ export class OverviewAnalyticsService {
     const states = sqlStateList(COMPLETED_SALE_STATES);
     const rows = await (this.prisma.withoutScope() as any).$queryRaw<CogsRow[]>`
       SELECT
-        COALESCE(SUM(oi.quantity * COALESCE(oi.cost_price, 0)), 0) AS cogs,
+        COALESCE(SUM(${lineCogsSql()}), 0) AS cogs,
         COALESCE(SUM(oi.quantity), 0) AS units,
         COALESCE(SUM(CASE WHEN oi.cost_price IS NULL THEN oi.quantity ELSE 0 END), 0) AS units_without_cost
       FROM order_items oi
@@ -279,7 +280,7 @@ export class OverviewAnalyticsService {
       LEFT JOIN (
         SELECT
           i.order_id,
-          SUM(i.quantity * COALESCE(i.cost_price, 0)) AS cogs,
+          SUM(${lineCogsSql('i')}) AS cogs,
           SUM(i.quantity) AS units,
           SUM(CASE WHEN i.cost_price IS NULL THEN i.quantity ELSE 0 END) AS units_without_cost
         FROM order_items i
