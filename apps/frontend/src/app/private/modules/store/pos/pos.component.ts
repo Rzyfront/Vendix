@@ -2114,6 +2114,11 @@ export class PosComponent {
     if (!child) {
       return;
     }
+    // QUI-1006 — "Bodega de la caja" sin caja abierta: el escaneo no agrega
+    // nada (ni consulta), igual que tocar un producto.
+    if (child.blockedWithoutRegister()) {
+      return;
+    }
 
     this.productService
       .getProductByBarcode(code)
