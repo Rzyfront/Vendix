@@ -8352,6 +8352,14 @@ export const ErrorCodes = {
     httpStatus: 404,
     devMessage: 'La tarea no existe o no tienes acceso a ella.',
   },
+  // "Esta tarea mueve la oportunidad": exige oportunidad ligada y una etapa
+  // activa de su tablero que no sea de tipo perdida.
+  CRM_TASK_002: {
+    code: 'CRM_TASK_002',
+    httpStatus: 422,
+    devMessage:
+      'La etapa destino debe ser una etapa activa (no perdida) del tablero de la oportunidad ligada a la tarea.',
+  },
   CRM_PIPELINE_001: {
     code: 'CRM_PIPELINE_001',
     httpStatus: 404,

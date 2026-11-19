@@ -120,6 +120,14 @@ export class CrmOpportunitiesQueryDto {
   q?: string;
 }
 
+/** Open opportunities of one customer, for the task form. */
+export class OpenCrmOpportunitiesQueryDto {
+  @Transform(toInt)
+  @IsInt()
+  @Min(1)
+  customer_id!: number;
+}
+
 export class CreateCrmOpportunityDto {
   @IsInt()
   @Min(1)

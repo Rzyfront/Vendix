@@ -55,6 +55,7 @@ export class CustomerCrmService {
           OR: [
             { assigned_user_id: viewer.user_id },
             { created_by_user_id: viewer.user_id },
+            { supporters: { some: { user_id: viewer.user_id } } },
           ],
         };
     const ownOpportunities = viewer.can_see_all

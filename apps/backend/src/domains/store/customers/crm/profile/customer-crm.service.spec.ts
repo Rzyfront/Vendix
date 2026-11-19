@@ -148,6 +148,22 @@ describe('CustomerCrmService', () => {
     expect(profile.rfm.scores).toEqual({ r: 5, f: 5, m: 5 });
   });
 
+  it('a seller counts the tasks assigned to them, theirs or where they are support', async () => {
+    as('seller');
+    const { service, prisma } = setup();
+    await service.getProfile(CUSTOMER);
+    const [open] = (prisma.crm_tasks.count as jest.Mock).mock.calls[0];
+    expect(open.where).toEqual({
+      customer_id: CUSTOMER,
+      status: 'pending',
+      OR: [
+        { assigned_user_id: SELLER },
+        { created_by_user_id: SELLER },
+        { supporters: { some: { user_id: SELLER } } },
+      ],
+    });
+  });
+
   it('a customer of another store answers 404', async () => {
     as('owner');
     const { service } = setup({ member: false });

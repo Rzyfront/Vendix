@@ -181,7 +181,7 @@ describe('CustomerHistoryService.getCrmTimeline', () => {
     );
   });
 
-  it('a seller only reads messages and tasks assigned to them', async () => {
+  it('a seller only reads messages and tasks assigned to them, theirs or where they are support', async () => {
     const { service, prisma } = setup();
     await service.getCrmTimeline(CUSTOMER, { limit: 20, viewer: seller });
 
@@ -190,7 +190,11 @@ describe('CustomerHistoryService.getCrmTimeline', () => {
     });
     expect(prisma.crm_tasks.findMany.mock.calls[0][0].where).toEqual({
       customer_id: CUSTOMER,
-      OR: [{ assigned_user_id: SELLER }, { created_by_user_id: SELLER }],
+      OR: [
+        { assigned_user_id: SELLER },
+        { created_by_user_id: SELLER },
+        { supporters: { some: { user_id: SELLER } } },
+      ],
     });
   });
 
