@@ -14,6 +14,7 @@ import { parseApiError } from '../../../../core/utils/parse-api-error';
 import { PlatformCrmService } from './platform-crm.service';
 import {
   PlatformAccountSearchResult,
+  PlatformCrmLinkItem,
   PlatformCrmLinkTarget,
   PlatformCrmLinkView,
   PlatformOrganizationSearchItem,
@@ -87,7 +88,9 @@ type LinkCandidate =
                           type="button"
                           role="option"
                           [attr.aria-selected]="isSelected('organization', org.id)"
-                          [class]="optionClass(isSelected('organization', org.id))"
+                          [attr.aria-disabled]="isOrganizationLinked(org.id)"
+                          [disabled]="isOrganizationLinked(org.id)"
+                          [class]="optionClass(isSelected('organization', org.id), isOrganizationLinked(org.id))"
                           (click)="selected.set({ kind: 'organization', item: org })"
                         >
                           <span class="min-w-0">
@@ -97,6 +100,9 @@ type LinkCandidate =
                               {{ org.slug }} · {{ organizationState(org.state) }}
                             </span>
                           </span>
+                          @if (isOrganizationLinked(org.id)) {
+                            <span class="shrink-0 text-xs font-medium text-text-secondary">Ya enlazada</span>
+                          }
                           @if (isSelected('organization', org.id)) {
                             <app-icon name="check" [size]="16"></app-icon>
                           }
@@ -113,7 +119,9 @@ type LinkCandidate =
                           type="button"
                           role="option"
                           [attr.aria-selected]="isSelected('store', store.id)"
-                          [class]="optionClass(isSelected('store', store.id))"
+                          [attr.aria-disabled]="isStoreLinked(store)"
+                          [disabled]="isStoreLinked(store)"
+                          [class]="optionClass(isSelected('store', store.id), isStoreLinked(store))"
                           (click)="selected.set({ kind: 'store', item: store })"
                         >
                           <span class="min-w-0">
@@ -123,6 +131,9 @@ type LinkCandidate =
                             <span class="block truncate font-semibold text-text-primary">{{ store.name }}</span>
                             <span class="block truncate text-xs text-text-secondary">{{ storePlan(store) }}</span>
                           </span>
+                          @if (isStoreLinked(store)) {
+                            <span class="shrink-0 text-xs font-medium text-text-secondary">Ya enlazada</span>
+                          }
                           @if (isSelected('store', store.id)) {
                             <app-icon name="check" [size]="16"></app-icon>
                           }
@@ -172,7 +183,20 @@ export class VendixAccountLinkModalComponent {
 
   readonly isOpen = model(false);
   readonly customerId = input.required<number>();
+  /** Cuentas que este cliente ya tiene: salen marcadas «Ya enlazada» y no se eligen. */
+  readonly linkedAccounts = input<PlatformCrmLinkItem[]>([]);
   readonly linked = output<PlatformCrmLinkView>();
+
+  /** Orgs enlazadas completas y tiendas enlazadas sueltas de este cliente. */
+  private readonly linkedSets = computed(() => {
+    const wholeOrgs = new Set<number>();
+    const stores = new Set<number>();
+    for (const item of this.linkedAccounts()) {
+      if (item.linked_store) stores.add(item.linked_store.id);
+      else if (item.organization) wholeOrgs.add(item.organization.id);
+    }
+    return { wholeOrgs, stores };
+  });
 
   protected readonly minQuery = MIN_QUERY;
   protected readonly searchDebounceMs = SEARCH_DEBOUNCE_MS;
@@ -266,6 +290,17 @@ export class VendixAccountLinkModalComponent {
     return current?.kind === kind && current.item.id === id;
   }
 
+  /** La org entera ya es de este cliente. */
+  protected isOrganizationLinked(organizationId: number): boolean {
+    return this.linkedSets().wholeOrgs.has(organizationId);
+  }
+
+  /** La tienda ya es de este cliente, suelta o por su organización completa. */
+  protected isStoreLinked(store: PlatformStoreSearchItem): boolean {
+    const { wholeOrgs, stores } = this.linkedSets();
+    return stores.has(store.id) || wholeOrgs.has(store.organization.id);
+  }
+
   protected organizationState(state: string): string {
     return organizationStateLabel(state);
   }
@@ -276,9 +311,10 @@ export class VendixAccountLinkModalComponent {
     return state ? `${plan} · ${state}` : plan;
   }
 
-  protected optionClass(selected: boolean): string {
+  protected optionClass(selected: boolean, linked = false): string {
     const base =
       'flex w-full items-center justify-between gap-3 rounded-lg border px-3 py-2 text-left text-sm transition-colors';
+    if (linked) return `${base} cursor-not-allowed border-border bg-surface opacity-60`;
     return selected ? `${base} border-primary bg-primary/10` : `${base} border-border bg-surface`;
   }
 }
