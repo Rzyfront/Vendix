@@ -12,12 +12,18 @@ import {
   IconComponent,
   InputsearchComponent,
   ModalComponent,
+  OptionsDropdownComponent,
   SpinnerComponent,
   StatsComponent,
   StickyHeaderComponent,
   ToastService,
 } from '../../../../../../shared/components';
-import type { StickyHeaderActionButton } from '../../../../../../shared/components';
+import type {
+  DropdownAction,
+  FilterConfig,
+  FilterValues,
+  StickyHeaderActionButton,
+} from '../../../../../../shared/components';
 import { CurrencyPipe } from '../../../../../../shared/pipes/currency';
 import { AuthFacade } from '../../../../../../core/store/auth/auth.facade';
 import { parseApiError } from '../../../../../../core/utils/parse-api-error';
@@ -76,6 +82,7 @@ const STATUS_LABELS: Record<CrmOpportunity['status'], string> = {
     IconComponent,
     InputsearchComponent,
     ModalComponent,
+    OptionsDropdownComponent,
     SpinnerComponent,
     StatsComponent,
     StickyHeaderComponent,
@@ -134,11 +141,11 @@ const STATUS_LABELS: Record<CrmOpportunity['status'], string> = {
 
       <app-card [showHeader]="true" customClasses="overflow-hidden">
         <div slot="header" class="flex flex-col gap-3 lg:flex-row lg:items-center lg:justify-between">
-          <h2 class="flex items-center gap-2 text-base font-semibold text-[var(--color-text-primary)]">
-            <app-icon name="columns" [size]="18"></app-icon>
-            <span class="truncate">Tablero · {{ board()?.pipeline?.name ?? 'Pipeline' }}</span>
-          </h2>
-          <div class="flex flex-col gap-2 sm:flex-row sm:flex-wrap sm:items-center">
+          <div class="flex min-w-0 flex-wrap items-center gap-3">
+            <h2 class="flex min-w-0 items-center gap-2 text-base font-semibold text-[var(--color-text-primary)]">
+              <app-icon name="columns" [size]="18"></app-icon>
+              <span class="truncate">Tablero · {{ board()?.pipeline?.name ?? 'Pipeline' }}</span>
+            </h2>
             <div class="inline-flex w-fit rounded-lg border border-[var(--color-border)] p-0.5" role="group" aria-label="Vista">
               <button
                 type="button"
@@ -161,39 +168,23 @@ const STATUS_LABELS: Record<CrmOpportunity['status'], string> = {
                 <app-icon name="list" [size]="14"></app-icon> Lista
               </button>
             </div>
-            @if (board()?.pipelines?.length) {
-              <select
-                class="h-10 rounded-lg border border-[var(--color-border)] bg-surface px-3 text-sm"
-                aria-label="Pipeline"
-                [ngModel]="pipelineId() ?? board()?.pipeline?.id"
-                (ngModelChange)="pipelineId.set(+$event)"
-              >
-                @for (pipeline of board()!.pipelines; track pipeline.id) {
-                  <option [value]="pipeline.id">{{ pipeline.name }}</option>
-                }
-              </select>
-            }
-            @if (canSeeAll()) {
-              <select
-                class="h-10 rounded-lg border border-[var(--color-border)] bg-surface px-3 text-sm"
-                aria-label="Responsable"
-                [ngModel]="owner()"
-                (ngModelChange)="owner.set($event)"
-              >
-                <option value="">Todo el equipo</option>
-                <option value="me">Mías</option>
-              </select>
-            }
+          </div>
+          <div class="flex flex-wrap items-center gap-2">
             <app-inputsearch
+              class="min-w-0 flex-1 sm:w-64 sm:flex-none"
               placeholder="Buscar oportunidad o cliente..."
               [debounceTime]="350"
               (searchChange)="search.set($event)"
             ></app-inputsearch>
-            @if (canConfigure()) {
-              <app-button variant="outline" size="md" (clicked)="templatesOpen.set(true)">
-                <app-icon slot="icon" name="layers" [size]="16"></app-icon> Plantillas de etapas
-              </app-button>
-            }
+            <app-options-dropdown
+              [filters]="filterConfigs()"
+              [filterValues]="filterValues()"
+              [actions]="dropdownActions()"
+              [isLoading]="loading()"
+              (filterChange)="onFilterChange($event)"
+              (clearAllFilters)="onClearFilters()"
+              (actionClick)="onActionClick($event)"
+            ></app-options-dropdown>
           </div>
         </div>
 
@@ -209,6 +200,8 @@ const STATUS_LABELS: Record<CrmOpportunity['status'], string> = {
         } @else if (!board()) {
           <div class="flex justify-center py-12"><app-spinner></app-spinner></div>
         } @else if (view() === 'board') {
+          <!-- The card body drops its top padding under a header (pt-0): give the board the same p-6 air. -->
+          <div class="pt-6">
           @if (board()!.truncated) {
             <p class="mb-2 text-xs text-[var(--color-text-muted)]">
               Se muestran las 500 oportunidades más recientes. Usa el buscador para encontrar otras.
@@ -337,6 +330,7 @@ const STATUS_LABELS: Record<CrmOpportunity['status'], string> = {
                 </div>
               </div>
             }
+          </div>
           </div>
         } @else {
           @if (!allCards().length) {
@@ -540,6 +534,43 @@ export class PipelineComponent {
       ? [{ id: 'new', label: 'Nueva oportunidad', icon: 'plus', variant: 'primary' }]
       : [],
   );
+  /** Pipeline (only with 2+ pipelines) and owner (only see-all) filters for the dropdown. */
+  protected readonly filterConfigs = computed<FilterConfig[]>(() => {
+    const filters: FilterConfig[] = [];
+    const pipelines = this.board()?.pipelines ?? [];
+    if (pipelines.length > 1) {
+      filters.push({
+        key: 'pipeline_id',
+        label: 'Pipeline',
+        type: 'select',
+        placeholder: this.board()?.pipeline?.name ?? 'Pipeline',
+        options: pipelines.map((pipeline) => ({ value: String(pipeline.id), label: pipeline.name })),
+      });
+    }
+    if (this.canSeeAll()) {
+      filters.push({
+        key: 'owner',
+        label: 'Responsable',
+        type: 'select',
+        placeholder: 'Todo el equipo',
+        options: [
+          { value: '', label: 'Todo el equipo' },
+          { value: 'me', label: 'Mías' },
+        ],
+      });
+    }
+    return filters;
+  });
+  /** Only explicit choices count as active filters: the default pipeline and "Todo el equipo" stay null. */
+  protected readonly filterValues = computed<FilterValues>(() => ({
+    pipeline_id: this.pipelineId() !== null ? String(this.pipelineId()) : null,
+    owner: this.owner() || null,
+  }));
+  protected readonly dropdownActions = computed<DropdownAction[]>(() =>
+    this.canConfigure()
+      ? [{ label: 'Plantillas de etapas', icon: 'layers', action: 'templates' }]
+      : [],
+  );
   protected readonly stages = computed<CrmBoardStage[]>(() => this.board()?.stages ?? []);
   protected readonly allCards = computed(() =>
     this.stages().flatMap((stage) => stage.opportunities),
@@ -569,6 +600,22 @@ export class PipelineComponent {
       this.search();
       untracked(() => void this.load());
     });
+  }
+
+  onFilterChange(values: FilterValues): void {
+    const pipelineId = values['pipeline_id'];
+    this.pipelineId.set(typeof pipelineId === 'string' && pipelineId ? +pipelineId : null);
+    const owner = values['owner'];
+    this.owner.set(typeof owner === 'string' ? owner : '');
+  }
+
+  onClearFilters(): void {
+    this.pipelineId.set(null);
+    this.owner.set('');
+  }
+
+  onActionClick(action: string): void {
+    if (action === 'templates' && this.canConfigure()) this.templatesOpen.set(true);
   }
 
   statusLabel(card: CrmOpportunity): string {
