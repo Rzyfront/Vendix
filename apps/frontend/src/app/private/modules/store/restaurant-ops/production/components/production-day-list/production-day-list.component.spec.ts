@@ -2,6 +2,7 @@ import { ComponentRef } from '@angular/core';
 import { TestBed } from '@angular/core/testing';
 import { ActivatedRoute, Router, convertToParamMap } from '@angular/router';
 import { of } from 'rxjs';
+import { AuthFacade } from '../../../../../../../core/store/auth/auth.facade';
 import { StoreSettingsFacade } from '../../../../../../../core/store/store-settings/store-settings.facade';
 import { DialogService, ToastService } from '../../../../../../../shared/components';
 import { storeToday } from '../../../../../../../shared/utils/date.util';
@@ -25,6 +26,8 @@ function setup(data: Record<string, unknown>, date: string | null) {
 
   TestBed.configureTestingModule({
     providers: [
+      // La sesión de planta (QUI-1013) lee la tienda activa del AuthFacade.
+      { provide: AuthFacade, useValue: { userStore: () => ({ id: 1 }) } },
       { provide: Router, useValue: router },
       {
         provide: ActivatedRoute,
