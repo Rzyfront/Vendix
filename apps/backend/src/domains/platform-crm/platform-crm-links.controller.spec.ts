@@ -165,6 +165,8 @@ const ROUTES = [
   { method: 'get', url: '/api/store/platform-crm/customers/5/link' },
   { method: 'post', url: '/api/store/platform-crm/customers/5/link', body: { organization_id: 9 } },
   { method: 'delete', url: '/api/store/platform-crm/customers/5/link', body: {} },
+  { method: 'get', url: '/api/store/platform-crm/customers/5/links' },
+  { method: 'delete', url: '/api/store/platform-crm/customers/5/links/3', body: { reason: 'vendió' } },
 ] as const;
 
 /** Sondas que prueban que el gate y el plan de verdad bloquean en este test. */
@@ -238,6 +240,8 @@ describe('PlatformCrmLinksController · aislamiento por tienda (candados 1, 4 y 
     getLink: jest.fn().mockResolvedValue({ link: null, organization: null }),
     link: jest.fn().mockResolvedValue({ link: null, organization: null }),
     unlink: jest.fn().mockResolvedValue({ link: null, organization: null }),
+    listLinks: jest.fn().mockResolvedValue({ links: [] }),
+    unlinkById: jest.fn().mockResolvedValue({ links: [] }),
   };
   const serviceCalls = () =>
     Object.values(service).reduce((sum, fn) => sum + fn.mock.calls.length, 0);
@@ -393,7 +397,7 @@ describe('PlatformCrmLinksController · aislamiento por tienda (candados 1, 4 y 
     await expectAll404(USERS.tenantOwner);
   });
 
-  it('dueño de una tienda normal con todos los permisos → 404 en las cuatro rutas', async () => {
+  it('dueño de una tienda normal con todos los permisos → 404 en todas las rutas', async () => {
     await expectAll404(USERS.tenantOwner);
   });
 
@@ -415,7 +419,7 @@ describe('PlatformCrmLinksController · aislamiento por tienda (candados 1, 4 y 
     await expectAll404(USERS.platformUserInInactiveStore);
   });
 
-  it('usuario de la tienda plataforma SIN el permiso → 403 en las cuatro rutas', async () => {
+  it('usuario de la tienda plataforma SIN el permiso → 403 en todas las rutas', async () => {
     for (const route of ROUTES) {
       const res = await call(route, USERS.platformUserWithoutPermission);
       expect(res.status).toBe(403);
@@ -423,18 +427,34 @@ describe('PlatformCrmLinksController · aislamiento por tienda (candados 1, 4 y 
     expect(serviceCalls()).toBe(0);
   });
 
-  it('usuario de la tienda plataforma CON el permiso → éxito en las cuatro rutas', async () => {
+  it('usuario de la tienda plataforma CON el permiso → éxito en todas las rutas', async () => {
     const statuses: number[] = [];
     for (const route of ROUTES) {
       statuses.push((await call(route, USERS.platformSeller)).status);
     }
     // POST conserva el 201 por defecto de Nest (crea la fila del enlace).
-    expect(statuses).toEqual([200, 200, 201, 200]);
+    expect(statuses).toEqual([200, 200, 201, 200, 200, 200]);
     expect(service.searchAccounts).toHaveBeenCalledWith('acme');
     const ctx = { store_id: PLATFORM_STORE, organization_id: PLATFORM_ORG, user_id: 100 };
     expect(service.getLink).toHaveBeenCalledWith(ctx, 5);
     expect(service.link).toHaveBeenCalledWith(ctx, 5, expect.objectContaining({ organization_id: 9 }));
     expect(service.unlink).toHaveBeenCalledWith(ctx, 5, expect.any(Object));
+    expect(service.listLinks).toHaveBeenCalledWith(ctx, 5);
+    expect(service.unlinkById).toHaveBeenCalledWith(
+      ctx,
+      5,
+      3,
+      expect.objectContaining({ reason: 'vendió' }),
+    );
+  });
+
+  it('desenlazar por id: un linkId no numérico → 400 sin tocar el servicio', async () => {
+    const res = await request(app.getHttpServer())
+      .delete('/api/store/platform-crm/customers/5/links/abc')
+      .set('x-test-user', JSON.stringify(USERS.platformSeller))
+      .send({});
+    expect(res.status).toBe(400);
+    expect(service.unlinkById).not.toHaveBeenCalled();
   });
 
   it('enlazar a una tienda: `linked_store_id` llega al servicio; las dos, ninguna o un id inválido → 400 sin tocarlo', async () => {
@@ -473,7 +493,7 @@ describe('PlatformCrmLinksController · aislamiento por tienda (candados 1, 4 y 
     for (const route of ROUTES) {
       statuses.push((await call(route, USERS.platformReader)).status);
     }
-    expect(statuses).toEqual([403, 200, 403, 403]);
+    expect(statuses).toEqual([403, 200, 403, 403, 200, 403]);
   });
 
   it.each([

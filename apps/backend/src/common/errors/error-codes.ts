@@ -8739,6 +8739,34 @@ export const ErrorCodes = {
     devMessage:
       'Una tienda de esta organización ya está enlazada a otro cliente del CRM.',
   },
+  // Varias cuentas por cliente (odd/tasks/cuenta-vendix-multi-movimientos.md, D2).
+  PLATFORM_CRM_009: {
+    code: 'PLATFORM_CRM_009',
+    httpStatus: 409,
+    devMessage: 'Esta cuenta ya está enlazada a este cliente.',
+  },
+  PLATFORM_CRM_010: {
+    code: 'PLATFORM_CRM_010',
+    httpStatus: 409,
+    devMessage: 'Este cliente ya llegó al máximo de 25 cuentas Vendix enlazadas.',
+  },
+  PLATFORM_CRM_011: {
+    code: 'PLATFORM_CRM_011',
+    httpStatus: 409,
+    devMessage:
+      'Este cliente tiene varias cuentas Vendix enlazadas: indica cuál desenlazar.',
+  },
+  PLATFORM_CRM_012: {
+    code: 'PLATFORM_CRM_012',
+    httpStatus: 404,
+    devMessage: 'El enlace no existe o no es de este cliente.',
+  },
+  PLATFORM_CRM_013: {
+    code: 'PLATFORM_CRM_013',
+    httpStatus: 409,
+    devMessage:
+      'Este cliente ya tiene enlazada una tienda de esta organización: desenlázala antes de enlazar la organización completa.',
+  },
 } as const satisfies Record<string, ErrorCodeEntry>;
 
 export const FiscalScopeBlockerCodes = {
