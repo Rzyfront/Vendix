@@ -10,6 +10,7 @@ import { HttpClient } from '@angular/common/http';
 import { firstValueFrom } from 'rxjs';
 import { environment } from '../../../../environments/environment';
 import { TenantFacade } from '../../../core/store/tenant/tenant.facade';
+import { formatCompactMoney } from '../../utils/compact-money.util';
 
 // ============================================================================
 // INTERFACES
@@ -422,48 +423,34 @@ export class CurrencyFormatService {
    * Ideal para stats cards, tooltips y celdas de tabla.
    */
   formatCompact(amount: number | string | null | undefined): string {
-    const num = Number(amount) || 0;
     const currency = this.currentCurrency();
-    const symbol = currency?.symbol || '$';
-    const position = currency?.position || 'before';
-
-    let formatted: string;
-    if (Math.abs(num) >= 1_000_000) {
-      formatted = `${(num / 1_000_000).toFixed(1)}M`;
-    } else if (Math.abs(num) >= 1_000) {
-      formatted = `${(num / 1_000).toFixed(1)}K`;
-    } else {
-      formatted = Math.round(num).toLocaleString(
-        this.getLocaleForStyle(currency?.format_style),
-      );
-    }
-
-    return position === 'before'
-      ? `${symbol}${formatted}`
-      : `${formatted}${symbol}`;
+    return formatCompactMoney(amount, {
+      symbol: currency?.symbol || '$',
+      position: currency?.position === 'after' ? 'after' : 'before',
+      locale: this.getLocaleForStyle(currency?.format_style),
+    });
   }
 
   /**
    * Formato compacto para ejes de gráficos: K enteros, sin decimales.
    */
   formatChartAxis(value: number | string | null | undefined): string {
-    const num = Number(value) || 0;
     const currency = this.currentCurrency();
-    const symbol = currency?.symbol || '$';
-    const position = currency?.position || 'before';
+    return formatCompactMoney(value, {
+      symbol: currency?.symbol || '$',
+      position: currency?.position === 'after' ? 'after' : 'before',
+      mode: 'axis',
+    });
+  }
 
-    let formatted: string;
-    if (Math.abs(num) >= 1_000_000) {
-      formatted = `${Math.round(num / 1_000_000)}M`;
-    } else if (Math.abs(num) >= 1_000) {
-      formatted = `${Math.round(num / 1_000)}K`;
-    } else {
-      formatted = `${Math.round(num)}`;
-    }
-
-    return position === 'before'
-      ? `${symbol}${formatted}`
-      : `${formatted}${symbol}`;
+  /**
+   * Tarjetas de estadísticas: compacto (K/M) desde mil; por debajo, el monto
+   * completo con sus decimales (`format`). Reemplaza las copias locales que
+   * tenían las tarjetas (QUI-1017).
+   */
+  formatCompactStat(amount: number | string | null | undefined): string {
+    const num = Number(amount) || 0;
+    return Math.abs(num) >= 1_000 ? this.formatCompact(num) : this.format(num);
   }
 
   /**

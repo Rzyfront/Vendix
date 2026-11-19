@@ -26,7 +26,7 @@ const BOARD_LIMIT = 500;
 
 const PERSON_SELECT = { id: true, first_name: true, last_name: true } as const;
 
-const STAGE_SELECT = {
+export const STAGE_SELECT = {
   id: true,
   pipeline_id: true,
   name: true,
@@ -305,6 +305,34 @@ export class CrmPipelineService {
       }
     }
     return this.findOne(id);
+  }
+
+  /**
+   * Deletes an opportunity (QUI-1043 H2). Same pattern as the rest of the CRM:
+   * physical delete plus an audit row with the full snapshot. Its tasks keep
+   * living (`crm_tasks.opportunity_id` is SET NULL). The customer's stage
+   * follows its most recently updated remaining opportunity; with none left it
+   * keeps the last stage it reached.
+   */
+  async remove(id: number) {
+    const viewer = this.viewer();
+    const current = await this.findVisible(viewer, id);
+    await this.prisma.crm_opportunities.deleteMany({ where: { id } });
+    await this.audit.log({
+      userId: viewer.user_id,
+      storeId: viewer.store_id,
+      action: 'DELETE',
+      resource: 'crm_opportunities',
+      resourceId: id,
+      oldValues: this.toOpportunity(current),
+    });
+    const latest = await this.prisma.crm_opportunities.findFirst({
+      where: { customer_id: current.customer_id },
+      orderBy: [{ updated_at: 'desc' }, { id: 'desc' }],
+      select: { stage_id: true },
+    });
+    if (latest) await this.syncCustomerStage(current.customer_id, latest.stage_id);
+    return { id };
   }
 
   async move(id: number, dto: MoveCrmOpportunityDto) {

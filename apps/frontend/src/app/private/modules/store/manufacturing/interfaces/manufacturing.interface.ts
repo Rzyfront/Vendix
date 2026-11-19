@@ -99,6 +99,9 @@ export interface ManufacturingOrder {
   started_at?: string | Date | null;
   produced_at?: string | Date | null;
   location_id?: number | null;
+  /** QUI-1013: plant the order is made in (null: restaurant or store without plants). */
+  plant_id?: number | null;
+  plant?: { id: number; name: string; is_active: boolean } | null;
   batch_id?: number | null;
   notes?: string | null;
   planned_cost?: number | string | null;
@@ -131,6 +134,8 @@ export interface ManufacturingOrderQuery {
   limit?: number;
   status?: ManufacturingOrderStatus;
   product_id?: number;
+  /** QUI-1013: only the orders of this plant. */
+  plant_id?: number;
   date_from?: string;
   date_to?: string;
   search?: string;
@@ -141,6 +146,8 @@ export interface CreateManufacturingOrderDto {
   planned_qty: number;
   due_date?: string;
   location_id?: number;
+  /** QUI-1013: required by the API when the store has several active plants. */
+  plant_id?: number;
   priority?: ManufacturingPriority;
   notes?: string;
 }
@@ -149,6 +156,7 @@ export interface UpdateManufacturingOrderDto {
   planned_qty?: number;
   due_date?: string;
   location_id?: number;
+  plant_id?: number;
   priority?: ManufacturingPriority;
   notes?: string;
 }
@@ -181,6 +189,50 @@ export interface ManufacturingSettings {
   cost_method: ManufacturingCostMethod;
   lot_required: boolean;
   wip_account_id?: number | null;
+}
+
+// ─── Plantas (QUI-1013) ────────────────────────────────────────────────────
+
+export interface ManufacturingPlantLocationRef {
+  id: number;
+  name: string;
+  code?: string | null;
+}
+
+export interface ManufacturingPlant {
+  id: number;
+  store_id: number;
+  name: string;
+  input_location_id: number | null;
+  output_location_id: number | null;
+  manager_user_id: number | null;
+  is_active: boolean;
+  /** First active plant by id: receives sale-linked orders. Only in list responses. */
+  is_main?: boolean;
+  input_location?: ManufacturingPlantLocationRef | null;
+  output_location?: ManufacturingPlantLocationRef | null;
+  manager?: { id: number; first_name: string | null; last_name: string | null } | null;
+}
+
+export interface ManufacturingPlantManager {
+  id: number;
+  first_name: string | null;
+  last_name: string | null;
+}
+
+export interface CreateManufacturingPlantDto {
+  name: string;
+  input_location_id: number;
+  output_location_id: number;
+  manager_user_id?: number | null;
+}
+
+export interface UpdateManufacturingPlantDto {
+  name?: string;
+  input_location_id?: number;
+  output_location_id?: number;
+  manager_user_id?: number | null;
+  is_active?: boolean;
 }
 
 // ─── Productos (selectores) ────────────────────────────────────────────────

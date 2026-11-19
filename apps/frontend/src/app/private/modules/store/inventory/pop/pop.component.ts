@@ -1,5 +1,5 @@
 import {Component, OnInit, OnDestroy, ViewChild, signal, computed, HostListener, DestroyRef, inject, viewChild, effect} from '@angular/core';
-import { takeUntilDestroyed } from '@angular/core/rxjs-interop';
+import { takeUntilDestroyed, toSignal } from '@angular/core/rxjs-interop';
 
 import { FormsModule } from '@angular/forms';
 import { ActivatedRoute, Router } from '@angular/router';
@@ -29,6 +29,8 @@ import { DialogService } from '../../../../../shared/components/dialog/dialog.se
 
 // Services
 import { PurchaseOrdersService } from '../services';
+import { UomService } from '../services/uom.service';
+import { cartReceiptUomBlocks } from './utils/receipt-uom-block.util';
 import { DispatchNotesService } from '../../dispatch-notes/services/dispatch-notes.service';
 import { ProductsService } from '../../products/services/products.service';
 
@@ -2141,6 +2143,9 @@ export class PopComponent implements OnInit, OnDestroy {
     // Con IVA encendido, una línea con el impuesto sin confirmar viajaría con
     // IVA 0: no se abre el wizard (ni se llama al backend) hasta confirmarlo.
     if (this.blockSubmitIfTaxUnconfirmed()) return;
+    if (action === 'create-receive' && this.blockReceiveIfUomUnresolved()) {
+      return;
+    }
 
     // Primera línea a propósito: una apertura NUNCA puede empezar mostrando la
     // valoración de la compra anterior. `loadCostPreview` retorna temprano si
@@ -2195,6 +2200,29 @@ export class PopComponent implements OnInit, OnDestroy {
    * ¿Hay líneas con el impuesto sin confirmar / no calculable (con IVA
    * encendido)? Avisa «Confirma el impuesto de N línea(s)» y devuelve true.
    */
+  /**
+   * QUI-1017 — catálogo UoM (cacheado en el servicio) para saber si una línea
+   * tiene stock en masa/volumen sin unidad de compra.
+   */
+  private readonly receiptUomCatalog = toSignal(inject(UomService).getCatalog(), {
+    initialValue: null,
+  });
+
+  /**
+   * QUI-1017 — «Crear + Recibir» con un producto en masa/volumen sin unidad de
+   * compra (o sin factor) entraría 10 kg como 10 g. Avisa qué producto
+   * corregir y devuelve true. El backend rechaza el mismo caso.
+   */
+  private blockReceiveIfUomUnresolved(): boolean {
+    const [message] = cartReceiptUomBlocks(
+      this.popCartService.currentState.items,
+      this.receiptUomCatalog()?.data ?? null,
+    );
+    if (!message) return false;
+    this.toastService.warning(message);
+    return true;
+  }
+
   private blockSubmitIfTaxUnconfirmed(): boolean {
     const msg = submitBlockMessage(this.popCartService.currentState);
     if (!msg) return false;
@@ -2215,6 +2243,12 @@ export class PopComponent implements OnInit, OnDestroy {
         return;
       }
       if (this.blockSubmitIfTaxUnconfirmed()) return;
+      if (
+        this.confirmOrderAction === 'create-receive' &&
+        this.blockReceiveIfUomUnresolved()
+      ) {
+        return;
+      }
     }
     // CP-ID-VNDX-2026-08-18-PO-PROD — F2.S6: NO cerrar el modal antes del POST.
     // Antes `showOrderConfirmModal.set(false)` corría como primera línea y el

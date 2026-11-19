@@ -256,8 +256,11 @@
   font-weight: var(--fw-medium);
   border-radius: var(--radius-pill);
   text-align: center;
-  white-space: normal; // Allow wrapping in badges if text is long
-  word-break: break-word;
+  white-space: normal; // Long multi-word badges may wrap between words...
+  // ...but never inside a word: `break-word` let the table shrink the column
+  // to one letter and split "Publicado" into "Publicad / o".
+  word-break: normal;
+  overflow-wrap: normal;
   transition: all var(--transition-fast) ease;
   min-width: 60px; // Reduced min-width
   max-width: 100%; // Ensure it doesn't overflow

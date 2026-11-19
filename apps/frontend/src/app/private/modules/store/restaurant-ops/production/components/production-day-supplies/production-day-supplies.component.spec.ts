@@ -69,7 +69,29 @@ describe('ProductionDaySuppliesComponent — S5 / S6', () => {
     fixture.componentRef.setInput('refreshToken', { loaded: 1 });
     fixture.detectChanges();
     await fixture.whenStable();
-    expect(getDaySupplies).toHaveBeenCalledOnceWith('2026-11-11', 'manufacturing');
+    // Without a plant session (one plant or none) the whole store is asked for.
+    expect(getDaySupplies).toHaveBeenCalledOnceWith('2026-11-11', 'manufacturing', null);
+  });
+
+  it('QUI-1013 — asks for the plant of the session and reloads when it changes', async () => {
+    getDaySupplies.and.returnValue(of(dayOf()));
+    fixture = TestBed.createComponent(ProductionDaySuppliesComponent);
+    fixture.componentRef.setInput('date', '2026-11-11');
+    fixture.componentRef.setInput('apiScope', 'manufacturing');
+    fixture.componentRef.setInput('plantId', 3);
+    fixture.componentRef.setInput('refreshToken', { loaded: 1 });
+    fixture.detectChanges();
+    await fixture.whenStable();
+    expect(getDaySupplies).toHaveBeenCalledOnceWith('2026-11-11', 'manufacturing', 3);
+
+    fixture.componentRef.setInput('plantId', 4);
+    fixture.componentRef.setInput('refreshToken', null);
+    fixture.detectChanges();
+    await fixture.whenStable();
+    fixture.componentRef.setInput('refreshToken', { loaded: 2 });
+    fixture.detectChanges();
+    await fixture.whenStable();
+    expect(getDaySupplies.calls.mostRecent().args).toEqual(['2026-11-11', 'manufacturing', 4]);
   });
 
   it('waits for the host to load its day: the first load is a single request', async () => {

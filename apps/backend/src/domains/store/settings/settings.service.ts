@@ -1,3 +1,4 @@
+import { HOME_PANEL_EDITOR_ROLES } from '../../../common/access/home-panels';
 import {
   Injectable,
   ForbiddenException,
@@ -111,6 +112,8 @@ export const KNOWN_SECTIONS = [
   'product_options',
   // Recordatorios de cuotas de venta a crédito. Sección + DTO, ver `scheduled_orders`.
   'credit_reminders',
+  // Panel Principal de la tienda (QUI-967). Sección + DTO, ver `scheduled_orders`.
+  'home_panel',
   // `app` is intentionally accepted here because the service maps it to
   // branding via updateStoreBranding(); the migrator strips persisted `app`
   // afterwards. The legacy alias should not break update calls.
@@ -583,6 +586,35 @@ export class SettingsService {
       assertCanChangeOverbooking();
     }
 
+    // QUI-967 — el Panel Principal es de toda la tienda: solo propietario o
+    // administrador lo cambian. `store:settings:update` también lo tienen
+    // `manager` y otros roles, así que se decide acá (como Vexi). Reenviar el
+    // valor vigente no lo exige: el formulario de Configuración manda todas
+    // las secciones al guardar cualquier otra.
+    const homePanelKey = (value?: {
+      default_panel?: string;
+      enabled_panels?: string[];
+    } | null): string =>
+      value
+        ? `${value.default_panel}|${(value.enabled_panels ?? []).join(',')}`
+        : '';
+    if (
+      dto.home_panel !== undefined &&
+      homePanelKey(dto.home_panel) !==
+        homePanelKey(currentSettings.home_panel)
+    ) {
+      const roles = RequestContextService.getRoles();
+      const puedeConfigurarPanel = roles.some((role) =>
+        HOME_PANEL_EDITOR_ROLES.includes(role),
+      );
+      if (!puedeConfigurarPanel) {
+        throw new VendixHttpException(
+          ErrorCodes.SYS_FORBIDDEN_001,
+          'Solo el propietario o un administrador de la tienda pueden cambiar el Panel Principal.',
+        );
+      }
+    }
+
     // Guardar valores antiguos para auditoría
     const oldValues = { ...currentSettings };
 
@@ -722,6 +754,17 @@ export class SettingsService {
       (updatedSettings as any).apps = {
         ...((currentSettings as any).apps ?? {}),
         ...dto.apps,
+      };
+    }
+
+    // `product_options` se mezcla por clave, como `vex` (QUI-1005): el
+    // interruptor «Adiciones» manda `{ enabled }` y «Permitir adiciones en la
+    // tienda en línea» manda `{ allow_online }`; con reemplazo de sección, el
+    // primero devolvería la tienda en línea a «permitidas» sin avisar.
+    if (dto.product_options !== undefined) {
+      (updatedSettings as any).product_options = {
+        ...((currentSettings as any).product_options ?? {}),
+        ...dto.product_options,
       };
     }
 

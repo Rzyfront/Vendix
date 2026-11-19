@@ -126,6 +126,8 @@ export const ERROR_MESSAGES: Record<string, string> = {
   PAYMENT_NOT_OWNED: 'No puedes operar este pago: pertenece a otra persona.',
   PRODUCT_VARIANT_MISMATCH: 'La variante seleccionada no corresponde al producto.',
   AUTH_TOKEN_001: 'Token invalido o expirado.',
+  AUTH_STORE_INACTIVE_001:
+    'La tienda esta inactiva. Elige otra tienda o pide que la reactiven.',
   AUTH_CREDENTIALS_001: 'Email o contrasena incorrectos.',
   AUTH_PASSWORD_001: 'La contrasena es incorrecta.',
   AUTH_ROLE_001: 'Rol no encontrado.',
@@ -587,6 +589,20 @@ export const ERROR_MESSAGES: Record<string, string> = {
   DCOL_DELETE_001:
     'No se puede eliminar una plantilla que tiene formularios enviados.',
   DCOL_PRODUCT_001: 'El formulario de recepción solo se puede vincular a servicios de esta tienda.',
+  DCOL_CRM_001: 'Solo una plantilla activa de tipo Cliente puede usarse en el CRM.',
+  DCOL_CRM_002: 'Otra plantilla se marcó como predeterminada del CRM al mismo tiempo. Intenta de nuevo.',
+  // CRM pipeline: stage templates and customer data sheet (QUI-1043).
+  CRM_PIPELINE_006: 'Una etapa que sobra tiene oportunidades abiertas. Muévelas antes de desactivarla o de aplicar la plantilla.',
+  CRM_PIPELINE_007: 'Solo el dueño o un administrador puede configurar pipelines y etapas.',
+  CRM_PIPELINE_008: 'Una etapa con oportunidades no puede cambiar de tipo. Muévelas antes de aplicar la plantilla.',
+  CRM_PIPELINE_009: 'Ya existe un pipeline con ese nombre.',
+  CRM_STAGE_TEMPLATE_001: 'La plantilla de etapas no existe.',
+  CRM_STAGE_TEMPLATE_002: 'Ya existe una plantilla de etapas con ese nombre.',
+  CRM_STAGE_TEMPLATE_003: 'La plantilla necesita al menos una etapa abierta, una ganada y una perdida, con nombres de etapa sin repetir.',
+  CRM_OPPORTUNITY_001: 'La oportunidad no existe o no tienes acceso a ella.',
+  CRM_DATA_SHEET_001: 'Ese campo no pertenece a la plantilla de datos del cliente.',
+  CRM_DATA_SHEET_002: 'El archivo no pertenece a la ficha de este cliente. Súbelo de nuevo.',
+  CRM_DATA_SHEET_003: 'Ese tipo de archivo no se permite. Sube una imagen, un PDF o un documento de Office, texto o CSV.',
   // Rejections a customer meets when booking a station online.
   STATION_001: 'El servicio, el profesional y la estación elegidos no son compatibles.',
   STATION_002: 'Ese horario de la estación ya fue tomado. Elige otro horario.',
@@ -1402,6 +1418,9 @@ export const ERROR_MESSAGES: Record<string, string> = {
   PLATFORM_CRM_003: 'Este cliente ya tiene una cuenta Vendix enlazada. Recarga la ficha.',
   PLATFORM_CRM_004: 'Esa organización ya está enlazada a otro cliente del CRM.',
   PLATFORM_CRM_005: 'Este cliente ya no tiene una cuenta Vendix enlazada. Recarga la ficha.',
+  PLATFORM_CRM_006: 'La tienda no existe o no se puede enlazar.',
+  PLATFORM_CRM_007: 'Esa tienda ya está enlazada a otro cliente del CRM.',
+  PLATFORM_CRM_008: 'Una tienda de esa organización ya está enlazada a otro cliente del CRM.',
 };
 
 export const EMPTY_CART_MESSAGE = 'El carrito está vacío.';

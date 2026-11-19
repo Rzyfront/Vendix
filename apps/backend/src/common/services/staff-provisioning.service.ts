@@ -97,6 +97,20 @@ export class StaffProvisioningService {
   }
 
   /**
+   * ¿La tienda existe y está activa? Regla del incidente vendix-centro
+   * (2026-11-18): una tienda inactiva puede tener miembros (p.ej. una tienda
+   * en borrador con su manager), pero NUNCA puede quedar como `main_store_id`
+   * ni ser elegida automáticamente como tienda de arranque.
+   */
+  static async isStoreActive(db: any, storeId: number): Promise<boolean> {
+    const store = await db.stores.findUnique({
+      where: { id: storeId },
+      select: { is_active: true },
+    });
+    return Boolean(store?.is_active);
+  }
+
+  /**
    * Resuelve la tienda de arranque de un STORE_ADMIN de forma determinista.
    *
    * Extracción fiel de las Estrategias 1/2/3 que estaban duplicadas en
@@ -123,7 +137,11 @@ export class StaffProvisioningService {
         where: { id: user.main_store_id },
       });
 
-      if (mainStore && mainStore.organization_id === user.organization_id) {
+      if (
+        mainStore &&
+        mainStore.is_active &&
+        mainStore.organization_id === user.organization_id
+      ) {
         const access = await db.store_users.findUnique({
           where: {
             store_id_user_id: { store_id: mainStore.id, user_id: user.id },
@@ -149,9 +167,10 @@ export class StaffProvisioningService {
     const firstMembership = await db.store_users.findFirst({
       where: {
         user_id: user.id,
-        store: { organization_id: user.organization_id },
+        store: { organization_id: user.organization_id, is_active: true },
       },
       include: { store: true },
+      orderBy: { store_id: 'asc' },
     });
 
     if (firstMembership?.store) {
@@ -165,7 +184,8 @@ export class StaffProvisioningService {
     // Estrategia 3: Fallback privilegio alto — cualquier tienda de la org
     if (hasHighPrivilege) {
       const firstOrgStore = await db.stores.findFirst({
-        where: { organization_id: user.organization_id },
+        where: { organization_id: user.organization_id, is_active: true },
+        orderBy: { id: 'asc' },
       });
 
       if (firstOrgStore) {
@@ -309,7 +329,12 @@ export class StaffProvisioningService {
 
     // 4. main_store_id como driver de la tienda de arranque (CD3/CD4).
     //    'if-empty' evita pisar el arranque de un owner multi-tienda.
-    if (setMainStore) {
+    //    Una tienda inactiva nunca queda como tienda de arranque: la membresía
+    //    sí se crea (tienda en borrador con su manager), pero main_store_id no.
+    if (
+      setMainStore &&
+      (await StaffProvisioningService.isStoreActive(db, storeId))
+    ) {
       if (setMainStore === 'if-empty') {
         const current = await db.users.findUnique({
           where: { id: userId },

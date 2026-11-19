@@ -294,7 +294,7 @@ export class PlanillaMonitorComponent implements OnInit {
 
   /** Opens the full planilla detail for the clicked monitor row. */
   onRowClick(row: DispatchRouteMonitorRow) {
-    this.router.navigate(['/admin/orders/planillas', row.id]);
+    this.router.navigate(['/admin/orders/rutas', row.id]);
   }
 
   formatCurrency(value: any): string {

@@ -21,17 +21,18 @@ import { PlatformCrmContext } from './platform-store.guard';
  *
  * Corre SOLO con `VENDIX_DESTRUCTIVE_E2E=1` contra una base desechable
  * (`assertDisposableDatabase`). El esquema sale de `prisma migrate diff`
- * (como el job de CI); el spec aplica la migración real encima: así prueba
- * que es idempotente y que instala el trigger y los únicos parciales que
- * Prisma no expresa.
+ * (como el job de CI); el spec aplica las migraciones reales encima, en orden:
+ * así prueba que son idempotentes y que instalan los triggers y los únicos
+ * parciales que Prisma no expresa.
  */
-const MIGRATION_SQL = fs.readFileSync(
-  path.resolve(
-    __dirname,
-    '../../../prisma/migrations/20261204090000_platform_crm_links/migration.sql',
-  ),
-  'utf8',
-);
+const readMigration = (name: string) =>
+  fs.readFileSync(
+    path.resolve(__dirname, `../../../prisma/migrations/${name}/migration.sql`),
+    'utf8',
+  );
+const MIGRATION_SQL = readMigration('20261204090000_platform_crm_links');
+/** Enlace a una tienda concreta: columna, únicos parciales y trigger nuevos. */
+const LINKED_STORE_MIGRATION_SQL = readMigration('20261207090000_platform_crm_links_linked_store');
 
 /** `pg` no entiende `?schema=public` del DATABASE_URL de Prisma. */
 function pgConnectionString(url: string): string {
@@ -162,18 +163,43 @@ describeDestructiveE2E('platform_crm_links contra Postgres real', () => {
       },
     });
 
-    // Primera aplicación de la migración sobre el esquema de `migrate diff`.
+    // Primera aplicación de las migraciones, en orden, sobre el esquema de
+    // `migrate diff` (que ya trae la columna y la FK de schema.prisma).
     await pool.query(MIGRATION_SQL);
+    await pool.query(LINKED_STORE_MIGRATION_SQL);
   });
+
+  /** Tienda de una org cliente con su suscripción al plan de prueba. */
+  async function createSubscribedStore(organization_id: number, label: string) {
+    const storeId = await createStore(organization_id, label);
+    const plan = await db.subscription_plans.findFirst({
+      where: { name: planName },
+      select: { id: true },
+    });
+    await db.store_subscriptions.create({
+      data: {
+        store_id: storeId,
+        plan_id: plan!.id,
+        state: 'active',
+        effective_price: 100000,
+        vendix_base_price: 100000,
+        resolved_features: {},
+        current_period_end: new Date('2027-01-31T00:00:00Z'),
+      },
+    });
+    return storeId;
+  }
 
   afterAll(async () => {
     await pool?.end();
     await prisma.$disconnect();
   });
 
-  it('la migración aplicada dos veces más no falla ni duplica filas', async () => {
-    await pool.query(MIGRATION_SQL);
-    await pool.query(MIGRATION_SQL);
+  it('las migraciones aplicadas dos veces más no fallan ni duplican filas', async () => {
+    for (let i = 0; i < 2; i++) {
+      await pool.query(MIGRATION_SQL);
+      await pool.query(LINKED_STORE_MIGRATION_SQL);
+    }
 
     const { rows } = await pool.query(
       `SELECT
@@ -185,18 +211,25 @@ describeDestructiveE2E('platform_crm_links contra Postgres real', () => {
          (SELECT count(*)::int FROM role_permissions rp JOIN roles r ON r.id = rp.role_id
             WHERE r.name = 'Comercial Vendix' AND r.organization_id = $1) AS grants,
          (SELECT count(*)::int FROM pg_trigger
-            WHERE tgname = 'platform_crm_links_platform_store_guard') AS triggers,
+            WHERE tgname IN ('platform_crm_links_platform_store_guard',
+                             'platform_crm_links_linked_store_guard')) AS triggers,
          (SELECT count(*)::int FROM pg_indexes WHERE tablename = 'platform_crm_links'
             AND indexname IN ('platform_crm_links_one_active_per_customer',
-                              'platform_crm_links_one_active_per_organization')) AS partial_uniques`,
+                              'platform_crm_links_one_active_per_organization',
+                              'platform_crm_links_one_active_per_linked_store')
+            AND indexdef LIKE 'CREATE UNIQUE INDEX%WHERE%') AS partial_uniques,
+         (SELECT indexdef FROM pg_indexes
+            WHERE indexname = 'platform_crm_links_one_active_per_organization') AS org_index`,
       [platformOrgId],
     );
     expect(rows[0]).toEqual({
       permissions: 2,
       roles: 1,
       grants: 2,
-      triggers: 1,
-      partial_uniques: 2,
+      triggers: 2,
+      partial_uniques: 3,
+      // El único de la org solo cuenta los enlaces a la org entera.
+      org_index: expect.stringContaining('linked_store_id IS NULL'),
     });
   });
 
@@ -361,9 +394,11 @@ describeDestructiveE2E('platform_crm_links contra Postgres real', () => {
       'id',
       'linked_at',
       'linked_by',
+      'linked_store',
       'note',
       'status',
     ]);
+    expect(view.link!.linked_store).toBeNull();
     expect(Object.keys(view.link!.linked_by).sort()).toEqual([
       'first_name',
       'id',
@@ -452,14 +487,221 @@ describeDestructiveE2E('platform_crm_links contra Postgres real', () => {
     }
   });
 
-  it('la búsqueda excluye la org plataforma, encuentra por NIT y devuelve solo id, nombre, slug y fecha', async () => {
-    const byName = await service.searchOrganizations(`PCRM platform ${run}`);
-    expect(byName).toEqual([]);
+  it('la búsqueda excluye la org plataforma y sus tiendas, encuentra la org por NIT y devuelve solo id, nombre, slug, estado y fecha', async () => {
+    expect(await service.searchAccounts(`PCRM platform ${run}`)).toEqual({
+      organizations: [],
+      stores: [],
+    });
+    expect(await service.searchAccounts(`pcrm-store-platform-${run}`)).toEqual({
+      organizations: [],
+      stores: [],
+    });
 
     const orgId = await newClientOrg('nit');
-    const byTaxId = await service.searchOrganizations(`pcrmnit${run}`);
-    expect(byTaxId.map((o) => o.id)).toEqual([orgId]);
-    expect(Object.keys(byTaxId[0]).sort()).toEqual(['created_at', 'id', 'name', 'slug']);
+    const byTaxId = await service.searchAccounts(`pcrmnit${run}`);
+    expect(byTaxId.organizations.map((o) => o.id)).toEqual([orgId]);
+    expect(Object.keys(byTaxId.organizations[0]).sort()).toEqual([
+      'created_at',
+      'id',
+      'name',
+      'slug',
+      'state',
+    ]);
+    expect(byTaxId.organizations[0].state).toBe('active');
+  });
+
+  it('la búsqueda encuentra tiendas por nombre o slug, y las de la org encontrada, con su org, plan y estado', async () => {
+    const orgId = await newClientOrg('search-stores');
+    const storeId = await createSubscribedStore(orgId, 'buscable');
+
+    const byStoreName = await service.searchAccounts(`tienda buscable ${run}`);
+    expect(byStoreName.organizations).toEqual([]);
+    expect(byStoreName.stores).toEqual([
+      {
+        id: storeId,
+        name: `PCRM tienda buscable ${run}`,
+        slug: `pcrm-store-buscable-${run}`,
+        organization: { id: orgId, name: `PCRM search-stores ${run}` },
+        plan_name: planName,
+        subscription_state: 'active',
+      },
+    ]);
+
+    const byStoreSlug = await service.searchAccounts(`pcrm-store-buscable-${run}`);
+    expect(byStoreSlug.stores.map((s) => s.id)).toEqual([storeId]);
+
+    // Al encontrar la org (por nombre, slug o NIT) también salen sus tiendas.
+    const byOrgName = await service.searchAccounts(`PCRM search-stores ${run}`);
+    expect(byOrgName.organizations.map((o) => o.id)).toEqual([orgId]);
+    expect(byOrgName.stores.map((s) => s.id)).toEqual([storeId]);
+  });
+
+  it('enlazar una tienda guarda la org de esa tienda y la ficha muestra solo esa tienda con su plan', async () => {
+    const orgId = await newClientOrg('store-link');
+    const storeId = await createSubscribedStore(orgId, 'store-link-a');
+    await createSubscribedStore(orgId, 'store-link-b');
+    const customer = await createCustomer(ctx.store_id, platformOrgId, 'store-link');
+
+    const view = await service.link(ctx, customer, { linked_store_id: storeId, note: 'sede norte' });
+
+    expect(view.link).toMatchObject({
+      status: 'linked',
+      note: 'sede norte',
+      linked_store: { id: storeId, name: `PCRM tienda store-link-a ${run}` },
+    });
+    expect(view.organization).toEqual({
+      id: orgId,
+      name: `PCRM store-link ${run}`,
+      state: 'active',
+      subscriptions: [
+        {
+          store_name: `PCRM tienda store-link-a ${run}`,
+          plan_name: planName,
+          state: 'active',
+          current_period_end: new Date('2027-01-31T00:00:00Z'),
+          trial_ends_at: null,
+        },
+      ],
+    });
+    const row = await db.platform_crm_links.findFirst({
+      where: { customer_id: customer },
+      select: { organization_id: true, linked_store_id: true },
+    });
+    expect(row).toEqual({ organization_id: orgId, linked_store_id: storeId });
+    expect(audit.log).toHaveBeenLastCalledWith(
+      expect.objectContaining({
+        newValues: expect.objectContaining({ organization_id: orgId, linked_store_id: storeId }),
+      }),
+    );
+
+    // Desenlazar un enlace a tienda funciona igual y conserva la fila.
+    await service.unlink(ctx, customer, {});
+    expect(await service.getLink(ctx, customer)).toEqual({ link: null, organization: null });
+    expect(
+      await db.platform_crm_links.count({ where: { customer_id: customer, status: 'unlinked' } }),
+    ).toBe(1);
+  });
+
+  it('unicidad: una tienda por prospecto, varias tiendas de una org a prospectos distintos y la org entera choca con sus tiendas', async () => {
+    const orgId = await newClientOrg('uniq');
+    const storeA = await createStore(orgId, 'uniq-a');
+    const storeB = await createStore(orgId, 'uniq-b');
+    const otherOrg = await newClientOrg('uniq-other');
+    const [c1, c2, c3, c4] = await Promise.all(
+      ['uniq-1', 'uniq-2', 'uniq-3', 'uniq-4'].map((label) =>
+        createCustomer(ctx.store_id, platformOrgId, label),
+      ),
+    );
+
+    await service.link(ctx, c1, { linked_store_id: storeA });
+    // Misma tienda a otro prospecto → 409 de tienda.
+    await expect(service.link(ctx, c2, { linked_store_id: storeA })).rejects.toMatchObject({
+      errorCode: 'PLATFORM_CRM_007',
+    });
+    // Otra tienda de la misma org → permitido.
+    await service.link(ctx, c2, { linked_store_id: storeB });
+    // La org entera ya tiene tiendas enlazadas → 409.
+    await expect(service.link(ctx, c3, { organization_id: orgId })).rejects.toMatchObject({
+      errorCode: 'PLATFORM_CRM_008',
+    });
+    // El prospecto con enlace no puede tener otro, sea org o tienda.
+    await expect(service.link(ctx, c1, { organization_id: otherOrg })).rejects.toMatchObject({
+      errorCode: 'PLATFORM_CRM_003',
+    });
+
+    // Org entera enlazada → ninguna de sus tiendas se enlaza a otro.
+    const wholeOrg = await newClientOrg('uniq-whole');
+    const wholeStore = await createStore(wholeOrg, 'uniq-whole');
+    await service.link(ctx, c3, { organization_id: wholeOrg });
+    await expect(service.link(ctx, c4, { linked_store_id: wholeStore })).rejects.toMatchObject({
+      errorCode: 'PLATFORM_CRM_004',
+    });
+
+    // La base impide dos enlaces activos a la misma tienda sin el servicio, y
+    // Prisma lo reporta como P2002 (el servicio traduce la carrera por él).
+    await expect(
+      pool.query(
+        `INSERT INTO platform_crm_links (store_id, customer_id, organization_id, linked_store_id, linked_by_user_id)
+         VALUES ($1, $2, $3, $4, $5)`,
+        [ctx.store_id, c4, orgId, storeA, ctx.user_id],
+      ),
+    ).rejects.toMatchObject({ code: '23505' });
+    await expect(
+      db.platform_crm_links.create({
+        data: {
+          store_id: ctx.store_id,
+          customer_id: c4,
+          organization_id: orgId,
+          linked_store_id: storeA,
+          linked_by_user_id: ctx.user_id,
+        },
+      }),
+    ).rejects.toMatchObject({ code: 'P2002' });
+  });
+
+  it('enlazar a la vez la org entera y una de sus tiendas: el candado por org deja pasar solo uno', async () => {
+    // Ningún único parcial cubre este choque (cada enlace cae en un índice
+    // distinto): sin `pg_advisory_xact_lock` los dos chequeos leen «libre» y
+    // ambos se crean. Varias orgs a la vez para que la carrera ocurra de verdad.
+    const pairs = await Promise.all(
+      ['lock-1', 'lock-2', 'lock-3', 'lock-4'].map(async (label) => {
+        const orgId = await newClientOrg(label);
+        const storeId = await createStore(orgId, label);
+        const [wholeOrgCustomer, storeCustomer] = await Promise.all([
+          createCustomer(ctx.store_id, platformOrgId, `${label}-org`),
+          createCustomer(ctx.store_id, platformOrgId, `${label}-store`),
+        ]);
+        return { orgId, storeId, wholeOrgCustomer, storeCustomer };
+      }),
+    );
+
+    const outcomes = await Promise.all(
+      pairs.map((p) =>
+        Promise.allSettled([
+          service.link(ctx, p.wholeOrgCustomer, { organization_id: p.orgId }),
+          service.link(ctx, p.storeCustomer, { linked_store_id: p.storeId }),
+        ]),
+      ),
+    );
+
+    for (const [i, results] of outcomes.entries()) {
+      expect(results.filter((r) => r.status === 'fulfilled')).toHaveLength(1);
+      const rejected = results.find((r) => r.status === 'rejected') as PromiseRejectedResult;
+      // Org entera primero → la tienda recibe 004; tienda primero → la org recibe 008.
+      expect(['PLATFORM_CRM_004', 'PLATFORM_CRM_008']).toContain(rejected.reason?.errorCode);
+      expect(
+        await db.platform_crm_links.count({
+          where: { organization_id: pairs[i].orgId, status: 'linked' },
+        }),
+      ).toBe(1);
+    }
+  });
+
+  it('una tienda de la org plataforma o inexistente no se enlaza; la base rechaza una tienda ajena a la org del enlace', async () => {
+    const customer = await createCustomer(ctx.store_id, platformOrgId, 'store-reject');
+    const before = await db.platform_crm_links.count();
+
+    await expect(
+      service.link(ctx, customer, { linked_store_id: ctx.store_id }),
+    ).rejects.toMatchObject({ errorCode: 'PLATFORM_CRM_006' });
+    await expect(
+      service.link(ctx, customer, { linked_store_id: 2_000_000_000 }),
+    ).rejects.toMatchObject({ errorCode: 'PLATFORM_CRM_006' });
+    expect(await db.platform_crm_links.count()).toBe(before);
+
+    // Sin el servicio: tienda de otra org que la del enlace → el trigger la rechaza.
+    const orgId = await newClientOrg('store-reject');
+    const foreignStore = await createStore(await newClientOrg('store-reject-other'), 'reject');
+    await expect(
+      pool.query(
+        `INSERT INTO platform_crm_links (store_id, customer_id, organization_id, linked_store_id, linked_by_user_id)
+         VALUES ($1, $2, $3, $4, $5)`,
+        [ctx.store_id, customer, orgId, foreignStore, ctx.user_id],
+      ),
+    ).rejects.toMatchObject({
+      code: '23514',
+      message: expect.stringContaining('does not belong to client organization'),
+    });
   });
 
   it('cada enlace y desenlace queda en la auditoría con la org plataforma como dueña', () => {

@@ -4,7 +4,7 @@ import { Component, computed, DestroyRef, inject, signal } from '@angular/core';
 import { takeUntilDestroyed } from '@angular/core/rxjs-interop';
 import { FormsModule } from '@angular/forms';
 import { ActivatedRoute, Router } from '@angular/router';
-import { interval, switchMap } from 'rxjs';
+import { catchError, debounceTime, distinctUntilChanged, interval, of, Subject, switchMap } from 'rxjs';
 import {
   BadgeComponent,
   ButtonComponent,
@@ -58,6 +58,7 @@ import {
   shouldWarnNextReservation,
 } from '../station-clock.util';
 import { stationTypeLabel } from '../station-type-labels';
+import { CATALOG_FETCH_LIMIT, CATALOG_INITIAL_LIMIT, CATALOG_SEARCH_LIMIT, mergeById } from '../catalog-search.util';
 import { storeWallTimeToIso } from '../service-stations-time.util';
 
 interface SessionOrderItem {
@@ -223,7 +224,12 @@ export class ServiceSessionPageComponent {
   readonly reissuingLink = signal(false);
 
   // Add items to the account
+  /** Caché de productos ya traídos por la búsqueda (precios y variantes por id). */
   readonly catalog = signal<SellableProduct[]>([]);
+  /** QUI-1030: ids del resultado actual de la búsqueda en servidor. */
+  readonly catalogSearchIds = signal<number[]>([]);
+  readonly catalogSearchTerm = signal('');
+  private readonly catalogSearch$ = new Subject<string>();
   readonly addProductId = signal<number | null>(null);
   readonly addVariantId = signal<number | null>(null);
   readonly addQuantity = signal<number>(1);
@@ -367,12 +373,17 @@ export class ServiceSessionPageComponent {
 
   readonly catalogOptions = computed<SelectorOption[]>(() => {
     const linked = this.linkedServiceIds();
-    return this.catalog()
-      .filter((prod) => {
+    const byId = new Map(this.catalog().map((p) => [p.id, p]));
+    const max = this.catalogSearchTerm().trim() ? CATALOG_SEARCH_LIMIT : CATALOG_INITIAL_LIMIT;
+    return this.catalogSearchIds()
+      .map((id) => byId.get(id))
+      .filter((prod): prod is SellableProduct => {
+        if (!prod) return false;
         if (prod.is_ingredient === true || prod.is_sellable === false) return false;
         if (prod.product_type === 'service' && linked.length) return linked.includes(prod.id);
         return true;
       })
+      .slice(0, max)
       .map((prod) => ({
         value: prod.id,
         label: `${prod.name} (${this.currencyService.format(Number(prod.base_price || 0))})`,
@@ -551,10 +562,7 @@ export class ServiceSessionPageComponent {
           this.maybeAutoClose();
         },
       });
-    this.api
-      .getSellableProducts()
-      .pipe(takeUntilDestroyed(this.destroyRef))
-      .subscribe({ next: (prods) => this.catalog.set((prods ?? []) as SellableProduct[]), error: () => {} });
+    this.initCatalogSearch();
     this.loadBudget(id);
     this.http
       .get<{ data?: SessionProposal[] }>(`${environment.apiUrl}/store/service-sessions/${id}/proposals`)
@@ -687,6 +695,35 @@ export class ServiceSessionPageComponent {
   private productPrice(product: SellableProduct | undefined): number {
     if (product?.is_on_sale && Number(product.sale_price) > 0) return Number(product.sale_price);
     return Number(product?.base_price || 0);
+  }
+
+  /** QUI-1030: término del buscador del selector "Producto / servicio del catálogo". */
+  onCatalogSearch(term: string): void {
+    this.catalogSearchTerm.set(term ?? '');
+    this.catalogSearch$.next(term ?? '');
+  }
+
+  private catalogSearchStarted = false;
+
+  /** Busca en el servidor (nombre o SKU); sin término trae los primeros. */
+  private initCatalogSearch(): void {
+    if (this.catalogSearchStarted) return;
+    this.catalogSearchStarted = true;
+    this.catalogSearch$
+      .pipe(
+        debounceTime(250),
+        distinctUntilChanged(),
+        switchMap((term) =>
+          this.api.searchSellableProducts(term, CATALOG_FETCH_LIMIT).pipe(catchError(() => of(null))),
+        ),
+        takeUntilDestroyed(this.destroyRef),
+      )
+      .subscribe((prods) => {
+        if (!prods) return;
+        this.catalog.update((cache) => mergeById(cache, prods as SellableProduct[]));
+        this.catalogSearchIds.set(prods.map((p: SellableProduct) => p.id));
+      });
+    this.onCatalogSearch('');
   }
 
   onAddProductSelect(productId: number | string | null): void {

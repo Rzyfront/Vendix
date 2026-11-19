@@ -23,6 +23,7 @@ import { ERROR_MESSAGES } from '../../../../../../core/utils/error-messages';
 import { KitchenTicketPrintService } from '../../../restaurant-ops/kds/services/kitchen-ticket-print.service';
 import { LodgingReservationsService } from '../../../hospitality/reservations/services/lodging-reservations.service';
 import { PosScheduledOrderService } from '../../services/pos-scheduled-order.service';
+import { MenuFilterService } from '../../../../../../core/services/menu-filter.service';
 
 /**
  * CP-POS-CHECKOUT-KEYBOARD — matriz teclado × paso del modal de pago.
@@ -231,6 +232,8 @@ describe('PosCheckoutShellComponent — matriz de teclado (CP-POS-CHECKOUT-KEYBO
   let settingsMock: { pos: () => any; checkout: () => null };
   let posSettings: WritableSignal<any>;
   let restaurantMode: WritableSignal<boolean>;
+  /** Store industries seen by the industry helper of the menu (QUI-1001). */
+  let industryAllowsScheduled: WritableSignal<boolean>;
   let scheduledMock: {
     enabled: WritableSignal<boolean>;
     schedule: WritableSignal<unknown>;
@@ -337,6 +340,7 @@ describe('PosCheckoutShellComponent — matriz de teclado (CP-POS-CHECKOUT-KEYBO
     };
     posSettings = signal(null);
     settingsMock = { pos: () => posSettings(), checkout: () => null };
+    industryAllowsScheduled = signal(true);
     scheduledMock = {
       enabled: signal(false),
       schedule: signal(null),
@@ -372,6 +376,13 @@ describe('PosCheckoutShellComponent — matriz de teclado (CP-POS-CHECKOUT-KEYBO
         // El servicio real inyecta HttpClient y este spec no lo provee; el
         // shell solo lee el estado compartido del pedido programado.
         { provide: PosScheduledOrderService, useValue: scheduledMock },
+        {
+          provide: MenuFilterService,
+          useValue: {
+            industryAllowsModule: (key: string) =>
+              key === 'orders_scheduled' ? industryAllowsScheduled() : true,
+          },
+        },
       ],
     });
 
@@ -1103,6 +1114,20 @@ describe('PosCheckoutShellComponent — matriz de teclado (CP-POS-CHECKOUT-KEYBO
       scheduledMock.active.set(true);
       fixture.detectChanges();
     };
+
+    it('QUI-1001: fuera de restaurante el bloque de pedido programado no aparece', () => {
+      fixture.detectChanges();
+      expect(pickerSections()).toEqual(['toggle']);
+
+      industryAllowsScheduled.set(false);
+      fixture.detectChanges();
+      expect(component.scheduledOrdersAvailable()).toBeFalse();
+      expect(pickerSections()).toEqual([]);
+
+      industryAllowsScheduled.set(true);
+      fixture.detectChanges();
+      expect(pickerSections()).toEqual(['toggle']);
+    });
 
     it('el toggle vive en Pedido y Cobro no muestra nada de entrega programada', () => {
       fixture.detectChanges();

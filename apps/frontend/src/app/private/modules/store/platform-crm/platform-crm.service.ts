@@ -3,8 +3,9 @@ import { HttpClient, HttpParams } from '@angular/common/http';
 import { Observable, map } from 'rxjs';
 import { environment } from '../../../../../environments/environment';
 import {
+  PlatformAccountSearchResult,
+  PlatformCrmLinkTarget,
   PlatformCrmLinkView,
-  PlatformOrganizationSearchItem,
 } from './platform-crm.interface';
 
 interface ApiEnvelope<T> {
@@ -17,12 +18,11 @@ export class PlatformCrmService {
   private readonly http = inject(HttpClient);
   private readonly base = `${environment.apiUrl}/store/platform-crm`;
 
-  searchOrganizations(q: string): Observable<PlatformOrganizationSearchItem[]> {
+  /** Organizaciones (nombre, slug o NIT) y tiendas (nombre o slug, o los de su org). */
+  searchAccounts(q: string): Observable<PlatformAccountSearchResult> {
     const params = new HttpParams().set('q', q);
     return this.http
-      .get<ApiEnvelope<PlatformOrganizationSearchItem[]>>(`${this.base}/organizations/search`, {
-        params,
-      })
+      .get<ApiEnvelope<PlatformAccountSearchResult>>(`${this.base}/accounts/search`, { params })
       .pipe(map((r) => r.data));
   }
 
@@ -34,7 +34,7 @@ export class PlatformCrmService {
 
   link(
     customerId: number,
-    body: { organization_id: number; note?: string },
+    body: PlatformCrmLinkTarget & { note?: string },
   ): Observable<PlatformCrmLinkView> {
     return this.http
       .post<ApiEnvelope<PlatformCrmLinkView>>(`${this.base}/customers/${customerId}/link`, body)

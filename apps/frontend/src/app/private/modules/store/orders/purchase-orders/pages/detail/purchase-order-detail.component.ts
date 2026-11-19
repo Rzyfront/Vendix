@@ -115,6 +115,8 @@ interface ReceiveLine {
   requires_serial: boolean;
   product_id: number;
   product_variant_id: number | null;
+  /** QUI-1017 — motivo por el que la línea no se puede recibir (o null). */
+  receipt_uom_block: string | null;
 }
 
 /**
@@ -471,6 +473,13 @@ interface ReceiveLine {
                         placeholder="Notas opcionales sobre esta recepción..."
                         [(ngModel)]="receptionNotes"></textarea>
                     </div>
+                    @if (receiptUomBlocks().length > 0) {
+                      <app-alert-banner variant="warning" icon="alert-triangle" heading="Corrige la unidad de compra para recibir" data-testid="po-receipt-uom-block">
+                        @for (message of receiptUomBlocks(); track message) {
+                          <p class="text-sm">{{ message }}</p>
+                        }
+                      </app-alert-banner>
+                    }
                     @if (pendingReceiptId(); as pendingId) {
                       <p class="text-xs text-amber-600 flex items-start gap-1.5">
                         <app-icon name="alert-triangle" [size]="13" class="shrink-0 mt-0.5" />
@@ -491,7 +500,7 @@ interface ReceiveLine {
                         <app-icon name="check-check" [size]="14" slot="icon" />
                         Recibir todo
                       </app-button>
-                      <app-button variant="primary" (clicked)="confirmReception()" [disabled]="receiveSaving() || (!pendingReceiptId() && !hasItemsToReceive())" [loading]="receiveSaving()">
+                      <app-button variant="primary" (clicked)="confirmReception()" [disabled]="receiveSaving() || receiptUomBlocks().length > 0 || (!pendingReceiptId() && !hasItemsToReceive())" [loading]="receiveSaving()">
                         {{ pendingReceiptId() ? 'Reintentar remisión #' + pendingReceiptId() : 'Recibir por remisión' }}
                       </app-button>
                     </div>
@@ -1206,6 +1215,7 @@ export class StorePurchaseOrderDetailComponent {
           requires_serial: !!product?.requires_serial_numbers,
           product_id: item.product_id ?? product?.id ?? 0,
           product_variant_id: item.product_variant_id ?? item.product_variants?.id ?? null,
+          receipt_uom_block: item.receipt_uom_block ?? null,
         };
       }),
     );
@@ -1468,6 +1478,21 @@ export class StorePurchaseOrderDetailComponent {
   }
 
   // ============ Reception ============
+  /**
+   * QUI-1017 — productos con stock en masa/volumen sin unidad de compra (o sin
+   * factor): recibirlos entraría 10 kg como 10 g. La recepción queda bloqueada
+   * hasta corregir el producto; el backend rechaza el mismo caso.
+   */
+  readonly receiptUomBlocks = computed(() =>
+    Array.from(
+      new Set(
+        this.receiveLines()
+          .map((l) => l.receipt_uom_block)
+          .filter((m): m is string => !!m),
+      ),
+    ),
+  );
+
   hasPending(): boolean {
     return this.receiveLines().some((l) => l.pending > 0);
   }
@@ -1483,6 +1508,11 @@ export class StorePurchaseOrderDetailComponent {
   confirmReception(): void {
     const po = this.po();
     if (!po) return;
+
+    if (this.receiptUomBlocks().length > 0) {
+      this.toast.warning(this.receiptUomBlocks()[0]);
+      return;
+    }
 
     // Reintento sobre una remisión ya creada: las cantidades viven en ella, no
     // en la tabla. Validar contra `receive_quantity` bloquearía el reintento.

@@ -156,6 +156,10 @@
                   [ngModel]="addProductId()"
                   (ngModelChange)="onAddProductSelect($event)"
                   placeholder="-- Seleccionar producto o servicio --"
+                  [searchable]="true"
+                  [remoteSearch]="true"
+                  searchPlaceholder="Buscar por nombre o SKU…"
+                  (searchChange)="onCatalogSearch($event)"
                 />
               </div>
               @if (addVariantOptions().length) {

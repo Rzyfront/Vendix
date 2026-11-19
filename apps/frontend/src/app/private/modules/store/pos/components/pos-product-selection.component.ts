@@ -64,9 +64,13 @@ import {
   weighMaxFor,
 } from '../utils/manual-weigh.util';
 import { availableStockLabel } from '../utils/product-card-stock.util';
+import {
+  REGISTER_REQUIRED_MESSAGE,
+  isRegisterStockGateActive,
+} from '../utils/register-stock-gate.util';
 import { PosRestaurantIntegrationService } from '../services/pos-restaurant-integration.service';
 import { PosVariantSelectorComponent } from './pos-variant-selector/pos-variant-selector.component';
-import { AuthFacade } from '../../../../../core/store/auth/auth.facade';
+import { MenuFilterService } from '../../../../../core/services/menu-filter.service';
 import { PosOptionSelectorComponent } from './pos-option-selector/pos-option-selector.component';
 import {
   PosOptionSelection,
@@ -381,10 +385,11 @@ function isMultiTokenQuery(query: string): boolean {
 
         <!-- Empty State -->
         @if (
-          !loading() &&
-          !searching() &&
-          !loadError() &&
-          filteredProducts().length === 0
+          registerRequired() ||
+          (!loading() &&
+            !searching() &&
+            !loadError() &&
+            filteredProducts().length === 0)
         ) {
           <div
             class="flex flex-col items-center justify-center h-64 text-center p-8"
@@ -422,7 +427,7 @@ function isMultiTokenQuery(query: string): boolean {
         <!-- Modern Compact Products Grid. La grilla previa persiste durante
              búsquedas (dim + overlay "Buscando…", F-056/F-067): swap atómico
              al responder, nunca flash a vacío. -->
-        @if (filteredProducts().length > 0) {
+        @if (filteredProducts().length > 0 && !registerRequired()) {
           <!-- Mobile Product Cards: Stitch Horizontal Compact Format (lg:hidden) -->
           <div
             role="list"
@@ -1194,7 +1199,9 @@ export class PosProductSelectionComponent {
 
   /** Acción del vacío = promesa (F-100): limpia lo que limita el listado. */
   readonly showEmptyAction = computed(
-    () => this.searchQuery().trim().length > 0 || this.hasActiveFilters(),
+    () =>
+      !this.registerRequired() &&
+      (this.searchQuery().trim().length > 0 || this.hasActiveFilters()),
   );
 
   readonly emptyActionLabel = computed(() => {
@@ -1307,7 +1314,7 @@ export class PosProductSelectionComponent {
   private dialogService = inject(DialogService);
   private router = inject(Router);
   private store = inject(Store);
-  private authFacade = inject(AuthFacade);
+  private menuFilter = inject(MenuFilterService);
   private currencyService = inject(CurrencyFormatService);
   private scaleService = inject(PosScaleService);
   private saleUnitService = inject(PosSaleUnitService);
@@ -1315,6 +1322,18 @@ export class PosProductSelectionComponent {
   private serialNumbersService = inject(SerialNumbersService);
   private cashRegisterService = inject(PosCashRegisterService);
   private posApiService = inject(PosApiService);
+
+  /**
+   * QUI-1006 — "Bodega de la caja" sin caja abierta: el POS no lista productos
+   * ni agrega ítems hasta que el cajero inicie caja. Con otros alcances es
+   * siempre `false` (sin cambio).
+   */
+  readonly registerRequired = computed(() =>
+    isRegisterStockGateActive(
+      this.productService.getPosStockScope(),
+      this.cashRegisterService.activeSession(),
+    ),
+  );
 
   // ─── Order-scope promotion notice ──────────────────────────────────────────
   /**
@@ -1611,6 +1630,22 @@ export class PosProductSelectionComponent {
    * overlay "Buscando…" hasta el swap atómico.
    */
   private filterProducts(): void {
+    // QUI-1006 — sin caja bajo "Bodega de la caja" no se pide catálogo: la
+    // grilla queda vacía con el mensaje de iniciar caja. Subir el seq descarta
+    // cualquier respuesta en vuelo de la caja anterior.
+    if (this.registerRequired()) {
+      this.requestSeq += 1;
+      this.pendingReplace = null;
+      this.filteredProducts.set([]);
+      this.totalResults.set(0);
+      this.currentPage.set(1);
+      this.loadError.set(null);
+      this.appendFailed.set(false);
+      this.loading.set(false);
+      this.searching.set(false);
+      this.loadingMore.set(false);
+      return;
+    }
     const hasPrevious = this.filteredProducts().length > 0;
     this.requestSeq += 1;
     this.lastLoadedQuery = this.searchQuery().trim();
@@ -1638,6 +1673,7 @@ export class PosProductSelectionComponent {
    * un append fallido (la página no avanzó, se re-pide la misma).
    */
   loadMore(): void {
+    if (this.registerRequired()) return;
     if (this.loadingMore() || this.loading() || this.searching()) return;
     if (!this.hasMoreResults() && !this.appendFailed()) return;
     // F-037 — clamp: la aritmética de paginación jamás emite page<1.
@@ -2168,6 +2204,7 @@ export class PosProductSelectionComponent {
   }
 
   async onAddToCart(product: any): Promise<void> {
+    if (this.blockedWithoutRegister()) return;
     // E.4 (F-069) — al tope: la elección ya se hizo aunque el flujo derive
     // (variantes/booking/precio). Fire-and-forget, jamás bloquea la venta.
     this.emitSearchSelection(product);
@@ -2221,8 +2258,9 @@ export class PosProductSelectionComponent {
     variant: PosProductVariant | null,
   ): Promise<boolean> {
     if (!this.productOptionsEnabled()) return false;
-    // QUI-1001: add-ons are restaurant-only; other industries add the plain product.
-    if (!this.authFacade.isRestaurant()) return false;
+    // QUI-1001: add-ons follow their industry rule (`products_option_groups`,
+    // restaurant only); other industries add the plain product.
+    if (!this.menuFilter.industryAllowsModule('products_option_groups')) return false;
     if (this.restaurantIntegration.currentTableSession() != null) return false;
     if (product.pricing_type === 'weight' || this.requiresSerials(product)) {
       return false;
@@ -2303,6 +2341,7 @@ export class PosProductSelectionComponent {
     this.selectedProductForVariant.set(null);
 
     if (!product) return;
+    if (this.blockedWithoutRegister()) return;
 
     if (product.product_type === 'service' || product.requires_booking === true) {
       this.bookingRequired.emit({ product, variant });
@@ -2451,6 +2490,17 @@ export class PosProductSelectionComponent {
    * due to insufficient stock under the `main_location` POS scope.
    * Falls back to a plain warning toast otherwise.
    */
+  /**
+   * QUI-1006 — puerta común de todo "agregar" (toque, variante, escaneo,
+   * etiqueta de peso): bajo "Bodega de la caja" sin caja abierta avisa y
+   * corta antes de tocar el carrito.
+   */
+  blockedWithoutRegister(): boolean {
+    if (!this.registerRequired()) return false;
+    this.toastService.warning(REGISTER_REQUIRED_MESSAGE);
+    return true;
+  }
+
   private handleAddToCartError(
     error: any,
     product: any,
@@ -2905,6 +2955,7 @@ export class PosProductSelectionComponent {
     product: any,
     weightKg: number,
   ): Promise<void> {
+    if (this.blockedWithoutRegister()) return;
     if (
       !(weightKg > 0) ||
       product?.pricing_type !== 'weight' ||
@@ -3194,6 +3245,7 @@ export class PosProductSelectionComponent {
   }
 
   getEmptyStateTitle(): string {
+    if (this.registerRequired()) return REGISTER_REQUIRED_MESSAGE;
     const query = this.searchQuery().trim();
     // E.1 (F-064) — vacío multi-token con eco: el typo se distingue del cero
     // real y el cajero ve qué corregir.
@@ -3207,6 +3259,9 @@ export class PosProductSelectionComponent {
   }
 
   getEmptyStateDescription(): string {
+    if (this.registerRequired()) {
+      return 'La tienda vende desde la bodega de la caja: abre tu caja para ver su inventario.';
+    }
     const query = this.searchQuery().trim();
     if (query && isMultiTokenQuery(query)) {
       return 'Revisa la ortografía o prueba con menos palabras.';

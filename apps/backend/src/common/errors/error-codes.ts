@@ -41,6 +41,8 @@ export const ErrorCodes = {
   OPT_ASSIGNMENT_TARGET: { code: 'OPT_ASSIGNMENT_TARGET', httpStatus: 400, devMessage: 'El grupo se engancha a un producto o a una categoría, no a ambos.' },
   OPT_REQUIRES_SCHEDULE: { code: 'OPT_REQUIRES_SCHEDULE', httpStatus: 400, devMessage: 'Las adiciones solo se venden en pedidos programados: agenda el pedido o quita las adiciones.' },
   OPT_SELECTION_INVALID: { code: 'OPT_SELECTION_INVALID', httpStatus: 400, devMessage: 'Las adiciones elegidas no cumplen las reglas del producto.' },
+  // QUI-1005: «Permitir adiciones en la tienda en línea» apagado. Solo el canal en línea.
+  OPT_ONLINE_DISABLED: { code: 'OPT_ONLINE_DISABLED', httpStatus: 400, devMessage: 'Esta tienda no permite adiciones en la tienda en línea: quita las adiciones del producto para continuar.' },
   OPT_DRAFT_LINE_LOCKED: { code: 'OPT_DRAFT_LINE_LOCKED', httpStatus: 409, devMessage: 'Esta línea del borrador tiene adiciones y no se puede cambiar aquí: quítala y vuelve a agregarla con sus adiciones.' },
   OPT_DRAFT_ADD_LOCKED: { code: 'OPT_DRAFT_ADD_LOCKED', httpStatus: 409, devMessage: 'Este pedido ya está guardado: no se le pueden agregar productos con adiciones. Cóbralo o cancélalo y registra las adiciones en un pedido nuevo.' },
   // API keys por tienda (/api/v1)
@@ -716,6 +718,12 @@ export const ErrorCodes = {
     code: 'AUTH_PERM_001',
     httpStatus: 403,
     devMessage: 'Access denied',
+  },
+  AUTH_STORE_INACTIVE_001: {
+    code: 'AUTH_STORE_INACTIVE_001',
+    httpStatus: 403,
+    devMessage:
+      'The store is inactive: it cannot be opened nor receive users or customers',
   },
   AUTH_TOKEN_001: {
     code: 'AUTH_TOKEN_001',
@@ -5673,6 +5681,18 @@ export const ErrorCodes = {
     httpStatus: 400,
     devMessage: 'Product not found in this store or is not a service',
   },
+  // La planilla del CRM (pipeline y ficha del cliente) solo usa plantillas
+  // activas de tipo Cliente (QUI-1043).
+  DCOL_CRM_001: {
+    code: 'DCOL_CRM_001',
+    httpStatus: 422,
+    devMessage: 'Solo una plantilla activa de tipo Cliente puede usarse en el CRM.',
+  },
+  DCOL_CRM_002: {
+    code: 'DCOL_CRM_002',
+    httpStatus: 409,
+    devMessage: 'Another template was marked as the CRM default at the same time.',
+  },
 
   // Customer History
   CUST_HISTORY_001: {
@@ -7322,6 +7342,38 @@ export const ErrorCodes = {
     httpStatus: 500,
     devMessage: 'No se pudo generar el consecutivo de la orden de producción',
   },
+  // QUI-1013 — varias plantas de producción.
+  MFG_PLANT_NOT_FOUND: {
+    code: 'MFG_PLANT_NOT_FOUND',
+    httpStatus: 404,
+    devMessage: 'La planta no existe en la tienda',
+  },
+  MFG_PLANT_INACTIVE: {
+    code: 'MFG_PLANT_INACTIVE',
+    httpStatus: 422,
+    devMessage: 'La planta está desactivada: elige una planta activa',
+  },
+  MFG_PLANT_REQUIRED: {
+    code: 'MFG_PLANT_REQUIRED',
+    httpStatus: 422,
+    devMessage: 'La tienda tiene varias plantas: elige en cuál se hace la orden',
+  },
+  MFG_PLANT_NAME_DUPLICATE: {
+    code: 'MFG_PLANT_NAME_DUPLICATE',
+    httpStatus: 409,
+    devMessage: 'Ya existe una planta con ese nombre',
+  },
+  MFG_PLANT_INVALID_MANAGER: {
+    code: 'MFG_PLANT_INVALID_MANAGER',
+    httpStatus: 422,
+    devMessage: 'El responsable debe ser un usuario activo del equipo de la tienda',
+  },
+  MFG_PLANT_HAS_OPEN_ORDERS: {
+    code: 'MFG_PLANT_HAS_OPEN_ORDERS',
+    httpStatus: 409,
+    devMessage:
+      'La planta tiene órdenes de producción abiertas: termínalas, cancélalas o muévelas a otra planta antes de desactivarla',
+  },
 
   // ── Kitchen Fire (Restaurant Suite Fase D) ─────────────────────────
   KITCHEN_FIRE_ORDER_NOT_FOUND: {
@@ -8338,6 +8390,52 @@ export const ErrorCodes = {
     httpStatus: 403,
     devMessage: 'Solo el dueño o un administrador puede editar las etapas.',
   },
+  // Aplicar una plantilla no cambia el tipo de una etapa que ya tiene
+  // oportunidades: su estado (abierta/ganada/perdida) dejaría de cuadrar.
+  CRM_PIPELINE_008: {
+    code: 'CRM_PIPELINE_008',
+    httpStatus: 409,
+    devMessage: 'Una etapa con oportunidades no puede cambiar de tipo. Muévelas antes de aplicar la plantilla.',
+  },
+  CRM_PIPELINE_009: {
+    code: 'CRM_PIPELINE_009',
+    httpStatus: 409,
+    devMessage: 'Ya existe un pipeline con ese nombre.',
+  },
+  // Plantillas de etapas (QUI-1043).
+  CRM_STAGE_TEMPLATE_001: {
+    code: 'CRM_STAGE_TEMPLATE_001',
+    httpStatus: 404,
+    devMessage: 'La plantilla de etapas no existe.',
+  },
+  CRM_STAGE_TEMPLATE_002: {
+    code: 'CRM_STAGE_TEMPLATE_002',
+    httpStatus: 409,
+    devMessage: 'Ya existe una plantilla de etapas con ese nombre.',
+  },
+  // Nombres de etapa repetidos (sin importar mayúsculas) o ninguna abierta.
+  CRM_STAGE_TEMPLATE_003: {
+    code: 'CRM_STAGE_TEMPLATE_003',
+    httpStatus: 422,
+    devMessage: 'La plantilla necesita al menos una etapa abierta, una ganada y una perdida, con nombres de etapa sin repetir.',
+  },
+  // Planilla de datos del cliente (QUI-1043).
+  CRM_DATA_SHEET_001: {
+    code: 'CRM_DATA_SHEET_001',
+    httpStatus: 422,
+    devMessage: 'El campo no pertenece a la plantilla de datos del cliente.',
+  },
+  // El adjunto debe ser uno subido a la ficha de este cliente.
+  CRM_DATA_SHEET_002: {
+    code: 'CRM_DATA_SHEET_002',
+    httpStatus: 422,
+    devMessage: 'El archivo no pertenece a la ficha de este cliente.',
+  },
+  CRM_DATA_SHEET_003: {
+    code: 'CRM_DATA_SHEET_003',
+    httpStatus: 422,
+    devMessage: 'File type not allowed in the customer data sheet.',
+  },
   // Sin `store:crm_inbox:assign` solo te asignas tareas u oportunidades a ti.
   CRM_ASSIGN_001: {
     code: 'CRM_ASSIGN_001',
@@ -8624,6 +8722,22 @@ export const ErrorCodes = {
     code: 'PLATFORM_CRM_005',
     httpStatus: 404,
     devMessage: 'Este cliente no tiene una cuenta Vendix enlazada.',
+  },
+  PLATFORM_CRM_006: {
+    code: 'PLATFORM_CRM_006',
+    httpStatus: 404,
+    devMessage: 'La tienda no existe o no se puede enlazar.',
+  },
+  PLATFORM_CRM_007: {
+    code: 'PLATFORM_CRM_007',
+    httpStatus: 409,
+    devMessage: 'Esta tienda ya está enlazada a otro cliente del CRM.',
+  },
+  PLATFORM_CRM_008: {
+    code: 'PLATFORM_CRM_008',
+    httpStatus: 409,
+    devMessage:
+      'Una tienda de esta organización ya está enlazada a otro cliente del CRM.',
   },
 } as const satisfies Record<string, ErrorCodeEntry>;
 

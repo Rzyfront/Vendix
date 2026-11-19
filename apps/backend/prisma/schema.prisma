@@ -197,6 +197,8 @@ model users {
   layaway_plans_as_customer layaway_plans[]    @relation("layaway_customer")
   layaway_plans_created     layaway_plans[]    @relation("layaway_created_by")
   layaway_payments_received layaway_payments[] @relation("layaway_payment_received_by")
+  // QUI-1013: plants this user is the manager of (optional).
+  manufacturing_plants_managed manufacturing_plants[] @relation("manufacturing_plants_manager")
 
   // Bank Reconciliation & Advanced Accounting
   bank_reconciliations_created      bank_reconciliations[]        @relation("bank_reconciliations_created_by")
@@ -379,6 +381,10 @@ model store_users {
   consent_updated_at  DateTime?                @db.Timestamp(6)
   crm_owner           users?                   @relation("store_users_crm_owner", fields: [crm_owner_user_id], references: [id], onDelete: SetNull, onUpdate: NoAction)
   crm_stage           crm_pipeline_stages?     @relation(fields: [crm_stage_id], references: [id], onDelete: SetNull, onUpdate: NoAction)
+  /// Data sheet (data collection template) chosen for this customer (QUI-1043).
+  /// Null = the store's CRM default template.
+  crm_data_template_id Int?
+  crm_data_template    data_collection_templates? @relation("store_users_crm_data_template", fields: [crm_data_template_id], references: [id], onDelete: SetNull, onUpdate: NoAction)
 
   @@unique([store_id, user_id])
   @@index([price_tier_id])
@@ -386,6 +392,7 @@ model store_users {
   @@index([store_id, crm_source])
   @@index([store_id, crm_stage_id])
   @@index([store_id, crm_last_contact_at])
+  @@index([crm_data_template_id])
 }
 
 model roles {
@@ -969,7 +976,8 @@ model organization_payment_policies {
 }
 
 model stores {
-  platform_crm_links         platform_crm_links[]
+  platform_crm_links         platform_crm_links[]                  @relation("platform_crm_links_store")
+  platform_crm_links_linked_store platform_crm_links[]             @relation("platform_crm_links_linked_store")
   workflow_definitions       workflow_definitions[]
   workflow_versions          workflow_versions[]
   work_groups                work_groups[]
@@ -1232,6 +1240,7 @@ model stores {
   recipes                   recipes[]
   production_orders         production_orders[]
   manufacturing_settings    manufacturing_settings?
+  manufacturing_plants      manufacturing_plants[]
   store_sequences           store_sequences[]
   tables                    tables[]
   table_sessions            table_sessions[]
@@ -1265,6 +1274,7 @@ model stores {
   crm_segment_members   crm_segment_members[]
   crm_segments          crm_segments[]
   crm_pipelines         crm_pipelines[]
+  crm_stage_templates   crm_stage_templates[]
   crm_pipeline_stages   crm_pipeline_stages[]
   crm_opportunities     crm_opportunities[]
   crm_tasks             crm_tasks[]
@@ -3832,6 +3842,10 @@ model inventory_locations {
 
   // Dispatch Routes
   dispatch_routes_origin_location dispatch_routes[] @relation("dispatch_routes_origin_location")
+
+  // QUI-1013: manufacturing plants that consume from / produce into this location.
+  manufacturing_plants_input  manufacturing_plants[] @relation("manufacturing_plants_input_location")
+  manufacturing_plants_output manufacturing_plants[] @relation("manufacturing_plants_output_location")
 
   @@unique([store_id, code])
   @@index([organization_id, store_id])
@@ -11732,10 +11746,16 @@ model data_collection_templates {
   checkin_show_products Boolean @default(true)
   checkin_show_notes    Boolean @default(true)
   is_default  Boolean              @default(false)
+  /// Data sheet of the CRM (pipeline card detail and customer profile), QUI-1043.
+  /// Only `entity_type = customer` templates. The DB also has a partial unique
+  /// index (`data_collection_templates_one_crm_default_per_store`,
+  /// `WHERE is_crm_default`): one CRM default per store.
+  is_crm_default Boolean             @default(false)
   created_at  DateTime             @default(now()) @db.Timestamp(6)
   updated_at  DateTime             @default(now()) @db.Timestamp(6)
 
   store                    stores                              @relation(fields: [store_id], references: [id])
+  crm_customers            store_users[]                       @relation("store_users_crm_data_template")
   sections                 data_collection_sections[]
   tabs                     data_collection_tabs[]
   products                 data_collection_template_products[]
@@ -13052,12 +13072,17 @@ model production_orders {
   order_id     Int?
   /// QUI-995: sold variant this order makes (one order per product+variant of a sale). NULL for base products and manual orders.
   product_variant_id Int?
+  /// QUI-1013: plant where the order is made (input/output locations come from it).
+  /// NULL for restaurant orders and for stores without any plant (they keep the
+  /// `manufacturing_settings` defaults, i.e. today's behaviour).
+  plant_id     Int?
 
   store      stores   @relation(fields: [store_id], references: [id], onUpdate: NoAction)
   product    products @relation(fields: [product_id], references: [id], onUpdate: NoAction)
   recipe     recipes  @relation(fields: [recipe_id], references: [id], onUpdate: NoAction)
   sale_order orders?  @relation(fields: [order_id], references: [id], onDelete: NoAction, onUpdate: NoAction)
   product_variant product_variants? @relation(fields: [product_variant_id], references: [id], onDelete: NoAction, onUpdate: NoAction)
+  plant      manufacturing_plants? @relation(fields: [plant_id], references: [id], onDelete: Restrict, onUpdate: NoAction)
   lines      production_order_lines[]
 
   @@unique([store_id, order_number])
@@ -13073,6 +13098,7 @@ model production_orders {
   @@index([store_id, status])
   @@index([store_id, product_id])
   @@index([store_id, created_at])
+  @@index([store_id, plant_id])
 }
 
 /// Planned vs consumed component line of a production order (manufacturing).
@@ -13113,6 +13139,34 @@ model manufacturing_settings {
   updated_at                 DateTime? @default(now()) @db.Timestamp(6)
 
   store stores @relation(fields: [store_id], references: [id], onUpdate: NoAction)
+}
+
+/// QUI-1013: a production plant of the store (e.g. "Camisas", "Zapatos").
+/// Each plant consumes inputs from its own input location and puts finished
+/// goods into its own output location. Plants are deactivated, never deleted
+/// (production_orders.plant_id is ON DELETE RESTRICT). Locations are nullable
+/// only for the plant backfilled from a `manufacturing_settings` row without
+/// defaults: NULL keeps today's resolution (the component's / product's own
+/// default location). The "main" plant is the active plant with the lowest id.
+model manufacturing_plants {
+  id                 Int       @id @default(autoincrement())
+  store_id           Int
+  name               String    @db.VarChar(100)
+  input_location_id  Int?
+  output_location_id Int?
+  manager_user_id    Int?
+  is_active          Boolean   @default(true)
+  created_at         DateTime? @default(now()) @db.Timestamp(6)
+  updated_at         DateTime? @default(now()) @db.Timestamp(6)
+
+  store             stores               @relation(fields: [store_id], references: [id], onDelete: Restrict, onUpdate: NoAction)
+  input_location    inventory_locations? @relation("manufacturing_plants_input_location", fields: [input_location_id], references: [id], onDelete: Restrict, onUpdate: NoAction)
+  output_location   inventory_locations? @relation("manufacturing_plants_output_location", fields: [output_location_id], references: [id], onDelete: Restrict, onUpdate: NoAction)
+  manager           users?               @relation("manufacturing_plants_manager", fields: [manager_user_id], references: [id], onDelete: SetNull, onUpdate: NoAction)
+  production_orders production_orders[]
+
+  @@unique([store_id, name])
+  @@index([store_id, is_active])
 }
 
 /// Generic per-store consecutive counters (e.g. key=production_order, prefix=OP-).
@@ -15469,6 +15523,22 @@ model crm_pipelines {
   @@unique([store_id, name])
 }
 
+/// Reusable stage lists for CRM pipelines (QUI-1043). `stages` is the ordered
+/// array `{ name, kind: open|won|lost, color, probability }`; the order is the
+/// array index. Applied to a pipeline by reconciling stages by name.
+model crm_stage_templates {
+  id         Int      @id @default(autoincrement())
+  store_id   Int
+  name       String   @db.VarChar(80)
+  stages     Json     @default("[]")
+  created_at DateTime @default(now()) @db.Timestamp(6)
+  updated_at DateTime @default(now()) @updatedAt @db.Timestamp(6)
+
+  store stores @relation(fields: [store_id], references: [id], onDelete: Restrict, onUpdate: NoAction)
+
+  @@unique([store_id, name])
+}
+
 model crm_pipeline_stages {
   id          Int     @id @default(autoincrement())
   store_id    Int
@@ -17168,9 +17238,12 @@ model workflow_exports {
 // (odd/tasks/vendix-platform-crm-enlace.md). Solo la tienda de la org
 // `is_platform` escribe aquí: lo impone el guard del módulo `platform-crm` y,
 // en la base, el trigger `platform_crm_links_platform_store_guard`.
-// Unicidad (un enlace activo por cliente y por organización) en índices únicos
-// PARCIALES `WHERE status = 'linked'` que Prisma no puede expresar: viven solo
-// en la migración 20261204090000_platform_crm_links.
+// Unicidad en índices únicos PARCIALES `WHERE status = 'linked'` que Prisma no
+// puede expresar: un enlace activo por cliente, por organización cuando el
+// enlace es a la org entera y por tienda cuando es a una tienda. Viven solo en
+// las migraciones 20261204090000_platform_crm_links y
+// 20261207090000_platform_crm_links_linked_store (con el trigger que exige que
+// la tienda enlazada sea de la organización enlazada).
 // ============================================
 
 enum platform_crm_link_status_enum {
@@ -17192,8 +17265,11 @@ model platform_crm_links {
   linked_at           DateTime                      @default(now()) @db.Timestamp(6)
   unlinked_by_user_id Int?
   unlinked_at         DateTime?                     @db.Timestamp(6)
+  /// Tienda concreta de la org cliente; NULL = la organización entera.
+  linked_store_id     Int?
 
-  store        stores        @relation(fields: [store_id], references: [id], onDelete: Restrict, onUpdate: NoAction)
+  store        stores        @relation("platform_crm_links_store", fields: [store_id], references: [id], onDelete: Restrict, onUpdate: NoAction)
+  linked_store stores?       @relation("platform_crm_links_linked_store", fields: [linked_store_id], references: [id], onDelete: Restrict, onUpdate: NoAction)
   customer     users         @relation("platform_crm_links_customer", fields: [customer_id], references: [id], onDelete: Restrict, onUpdate: NoAction)
   organization organizations @relation(fields: [organization_id], references: [id], onDelete: Restrict, onUpdate: NoAction)
   linked_by    users         @relation("platform_crm_links_linked_by", fields: [linked_by_user_id], references: [id], onDelete: Restrict, onUpdate: NoAction)

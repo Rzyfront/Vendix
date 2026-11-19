@@ -14,6 +14,12 @@ export { createSubscriptionTools } from './domains/subscriptions.tools';
 export { createSettingsAdminTools } from './domains/settings-admin.tools';
 export { createFinanceOpsTools } from './domains/finance-ops.tools';
 export { createCustomerTools } from './domains/customers.tools';
+// QUI-1042: CRM family (registered by CustomerCrmModule, owner of the services).
+export { createCrmCustomerTools } from './domains/crm-customers.tools';
+export { createCrmTagTools } from './domains/crm-tags.tools';
+export { createCrmSegmentTools } from './domains/crm-segments.tools';
+export { createCrmPipelineTools } from './domains/crm-pipeline.tools';
+export { createCrmTaskCampaignTools } from './domains/crm-tasks-campaigns.tools';
 export { createProductTools } from './domains/products.tools';
 export {
   createCategoryTools,

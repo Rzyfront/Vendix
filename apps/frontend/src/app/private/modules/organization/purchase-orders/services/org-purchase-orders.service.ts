@@ -36,6 +36,12 @@ export interface OrgPurchaseOrderLine {
   unit_cost: number | string;
   total_cost?: number | string | null;
   notes?: string | null;
+  /**
+   * QUI-1017 — por qué esta línea no se puede recibir (stock en masa/volumen
+   * sin unidad de compra o sin factor). `null` = recibible. Lo calcula el
+   * backend con la misma regla que rechaza la recepción.
+   */
+  receipt_uom_block?: string | null;
 }
 
 export interface OrgPurchaseOrderRow {
@@ -204,6 +210,7 @@ export class OrgPurchaseOrdersService {
       unit_cost: it.unit_cost,
       total_cost: it.total_cost ?? null,
       notes: it.notes ?? null,
+      receipt_uom_block: it.receipt_uom_block ?? null,
     }));
 
     return {

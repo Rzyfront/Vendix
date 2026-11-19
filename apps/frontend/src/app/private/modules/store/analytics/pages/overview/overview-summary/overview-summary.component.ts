@@ -485,14 +485,8 @@ this.store.dispatch(OverviewActions.clearOverviewSummaryState());
   /** Y-axis currency formatter: compact (k/M) on mobile to save horizontal space. */
   private formatAxisCurrency(value: number, mobile: boolean): string {
     if (!mobile) return this.currencyService.format(Math.round(value), 0);
-    const abs = Math.abs(value);
-    if (abs >= 1_000_000) {
-      return `${this.currencyService.format(Math.round(value / 1_000_000), 0)}M`;
-    }
-    if (abs >= 1_000) {
-      return `${this.currencyService.format(Math.round(value / 1_000), 0)}k`;
-    }
-    return this.currencyService.format(Math.round(value), 0);
+    // QUI-1017 — formateador central del eje: "-$6M", nunca "$-6M".
+    return this.currencyService.formatChartAxis(value);
   }
 
 }

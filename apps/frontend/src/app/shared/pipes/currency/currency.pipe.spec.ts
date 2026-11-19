@@ -163,6 +163,22 @@ describe('CurrencyFormatService / CurrencyPipe — formato del tenant', () => {
     it('respeta el override explícito de decimales', () => {
       expect(service.format(TOTAL, 2)).toBe('$100.436,18');
     });
+
+    // QUI-1017 — el P&L mostraba "$-5.9M": el signo va antes del símbolo.
+    it('compacto negativo: "-$5.9M" y eje "-$6M"; positivos y cero sin cambios', () => {
+      expect(service.formatCompact(-5_900_000)).toBe('-$5.9M');
+      expect(service.formatCompact(-1_500)).toBe('-$1.5K');
+      expect(service.formatCompact(-0.4)).toBe('$0');
+      expect(service.formatCompact(5_900_000)).toBe('$5.9M');
+      expect(service.formatChartAxis(-5_900_000)).toBe('-$6M');
+      expect(service.formatChartAxis(-2_300)).toBe('-$2K');
+      expect(service.formatChartAxis(2_300)).toBe('$2K');
+    });
+
+    it('formatCompactStat: compacto desde mil, completo por debajo', () => {
+      expect(service.formatCompactStat(-5_900_000)).toBe('-$5.9M');
+      expect(service.formatCompactStat(436)).toBe('$436');
+    });
   });
 
   describe('cuando la resolución termina sin moneda (resolution = unresolved)', () => {

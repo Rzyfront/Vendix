@@ -33,6 +33,7 @@ describe('VendixAccountBlockComponent', () => {
       note: 'Cerró con el plan anual',
       linked_at: '2026-11-10T15:00:00.000Z',
       linked_by: { id: 3, first_name: 'Ana', last_name: 'Comercial' },
+      linked_store: null,
     },
     organization: {
       id: 42,
@@ -51,7 +52,7 @@ describe('VendixAccountBlockComponent', () => {
   });
   const unlinkedView = (): PlatformCrmLinkView => ({ link: null, organization: null });
 
-  let service: { getLink: jasmine.Spy; unlink: jasmine.Spy; searchOrganizations: jasmine.Spy; link: jasmine.Spy };
+  let service: { getLink: jasmine.Spy; unlink: jasmine.Spy; searchAccounts: jasmine.Spy; link: jasmine.Spy };
   let dialog: { confirm: jasmine.Spy };
   let toast: { success: jasmine.Spy; error: jasmine.Spy };
 
@@ -62,7 +63,9 @@ describe('VendixAccountBlockComponent', () => {
     service = {
       getLink,
       unlink: jasmine.createSpy('unlink').and.returnValue(of(unlinkedView())),
-      searchOrganizations: jasmine.createSpy('searchOrganizations').and.returnValue(of([])),
+      searchAccounts: jasmine
+        .createSpy('searchAccounts')
+        .and.returnValue(of({ organizations: [], stores: [] })),
       link: jasmine.createSpy('link'),
     };
     dialog = { confirm: jasmine.createSpy('confirm').and.resolveTo(true) };
@@ -75,7 +78,7 @@ describe('VendixAccountBlockComponent', () => {
         { provide: PlatformCrmService, useValue: service },
         { provide: DialogService, useValue: dialog },
         { provide: ToastService, useValue: toast },
-        // app-input del modal hijo usa el formateador de moneda (HttpClient): fuera del alcance.
+        // Campos compartidos del modal hijo pueden pedir el formateador de moneda (HttpClient): fuera del alcance.
         {
           provide: CurrencyFormatService,
           useValue: {
@@ -131,7 +134,37 @@ describe('VendixAccountBlockComponent', () => {
     expect(content).toContain('Sede Centro');
     expect(content).toContain('Renueva');
     expect(content).toContain('Cerró con el plan anual');
+    expect(content).toContain('Enlazado a la organización completa.');
     expect(buttonWith(fixture, 'Desenlazar')).not.toBeNull();
+  });
+
+  it('enlace a una tienda: dice qué tienda es y muestra solo su plan', async () => {
+    const view = linkedView();
+    view.link!.linked_store = { id: 70, name: 'Sede Norte' };
+    view.organization!.subscriptions = [
+      {
+        store_name: 'Sede Norte',
+        plan_name: 'Plan Básico',
+        state: 'trial',
+        current_period_end: null,
+        trial_ends_at: '2026-12-31T17:00:00.000Z',
+      },
+    ];
+    const fixture = await setup(jasmine.createSpy('getLink').and.returnValue(of(view)), ALL);
+
+    const scope = (fixture.nativeElement as HTMLElement).querySelector(
+      '[data-testid="vendix-account-scope"]',
+    );
+    expect((scope?.textContent ?? '').replace(/\s+/g, ' ').trim()).toBe(
+      'Enlazado a la tienda Sede Norte de esta organización.',
+    );
+    const content = text(fixture);
+    expect(content).toContain('Panadería La Espiga');
+    expect(content).toContain('Plan Básico');
+    expect(content).toContain('En prueba');
+    expect(content).toContain('Trial hasta');
+    expect(content).not.toContain('organización completa');
+    expect(content).not.toContain('Sede Centro');
   });
 
   it('sin enlace y con permiso de gestión ofrece «Enlazar con cuenta Vendix»', async () => {

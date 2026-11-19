@@ -192,6 +192,16 @@ export class ProductionDayQueryDto {
   @IsString()
   @MaxLength(512)
   cursor?: string;
+
+  /**
+   * QUI-1013 — production session of ONE plant (Planta with several plants):
+   * only the orders made in that plant. Without it, every order of the day.
+   */
+  @IsOptional()
+  @Type(() => Number)
+  @IsInt()
+  @Min(1)
+  plant_id?: number;
 }
 
 /**
@@ -204,4 +214,14 @@ export class ProductionSuppliesQueryDto {
   @IsString()
   @Matches(/^\d{4}-\d{2}-\d{2}$/, { message: 'date debe tener el formato YYYY-MM-DD' })
   date?: string;
+
+  /**
+   * QUI-1013 — production session of ONE plant (Planta with several plants):
+   * only the orders made in that plant. Without it, every order of the day.
+   */
+  @IsOptional()
+  @Type(() => Number)
+  @IsInt()
+  @Min(1)
+  plant_id?: number;
 }

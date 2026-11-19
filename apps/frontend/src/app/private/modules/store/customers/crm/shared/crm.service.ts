@@ -8,6 +8,7 @@ import {
   CrmNote,
   CrmOpportunity,
   CrmPipeline,
+  CrmStageTemplate,
   CrmTag,
   CrmTask,
   CrmTaskStats,
@@ -19,6 +20,7 @@ import {
   CustomerCrmMemberships,
   CustomerCrmProfile,
   SaveCrmOpportunity,
+  SaveCrmStageTemplate,
   SaveCrmTask,
   UpdateCustomerCrmProfile,
 } from './crm.interface';
@@ -289,6 +291,53 @@ export class CrmService {
     return this.http
       .post<ApiResponse<CrmOpportunity>>(`${this.base}/crm/opportunities/${id}/lose`, {
         lost_reason: lostReason,
+      })
+      .pipe(map((r) => r.data));
+  }
+
+  deleteOpportunity(id: number): Observable<{ id: number }> {
+    return this.http
+      .delete<ApiResponse<{ id: number }>>(`${this.base}/crm/opportunities/${id}`)
+      .pipe(map((r) => r.data));
+  }
+
+  // ── Stage templates ───────────────────────────────────────
+  listStageTemplates(): Observable<CrmStageTemplate[]> {
+    return this.http
+      .get<ApiResponse<CrmStageTemplate[]>>(`${this.base}/crm/stage-templates`)
+      .pipe(map((r) => r.data));
+  }
+
+  createStageTemplate(
+    body: Required<SaveCrmStageTemplate>,
+  ): Observable<CrmStageTemplate> {
+    return this.http
+      .post<ApiResponse<CrmStageTemplate>>(`${this.base}/crm/stage-templates`, body)
+      .pipe(map((r) => r.data));
+  }
+
+  updateStageTemplate(id: number, body: SaveCrmStageTemplate): Observable<CrmStageTemplate> {
+    return this.http
+      .patch<ApiResponse<CrmStageTemplate>>(`${this.base}/crm/stage-templates/${id}`, body)
+      .pipe(map((r) => r.data));
+  }
+
+  deleteStageTemplate(id: number): Observable<{ id: number }> {
+    return this.http
+      .delete<ApiResponse<{ id: number }>>(`${this.base}/crm/stage-templates/${id}`)
+      .pipe(map((r) => r.data));
+  }
+
+  createPipeline(body: { name: string; template_id: number }): Observable<CrmPipeline> {
+    return this.http
+      .post<ApiResponse<CrmPipeline>>(`${this.base}/crm/pipelines`, body)
+      .pipe(map((r) => r.data));
+  }
+
+  applyStageTemplate(pipelineId: number, templateId: number): Observable<CrmPipeline> {
+    return this.http
+      .post<ApiResponse<CrmPipeline>>(`${this.base}/crm/pipelines/${pipelineId}/apply-template`, {
+        template_id: templateId,
       })
       .pipe(map((r) => r.data));
   }

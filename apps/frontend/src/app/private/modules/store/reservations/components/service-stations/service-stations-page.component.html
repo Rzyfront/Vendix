@@ -854,6 +854,10 @@
                 [ngModel]="line.product_id"
                 (ngModelChange)="onCheckinLineProduct(line.key, $event)"
                 placeholder="Gaseosa, aceite, repuesto…"
+                [searchable]="true"
+                [remoteSearch]="true"
+                searchPlaceholder="Buscar por nombre o SKU…"
+                (searchChange)="onCheckinProductSearch($event)"
               />
             </div>
             @if (checkinLineVariantOptions(line.product_id).length) {

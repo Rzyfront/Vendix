@@ -22,6 +22,7 @@ import {
   COMPLETED_SALE_STATES,
   OPERATING_REVENUE_SQL,
   sqlStateList,
+  lineCogsSql,
 } from '../../store/analytics/analytics-metrics.contract';
 
 /** Venta consumada, derivada del contrato (nunca `'finished'` a mano). */
@@ -589,7 +590,7 @@ export class OrganizationsService {
           SELECT
             EXTRACT(MONTH FROM ${createdAtLocal})::int as month,
             EXTRACT(YEAR FROM ${createdAtLocal})::int as year,
-            COALESCE(SUM(COALESCE(oi.cost_price, 0) * oi.quantity), 0) as costs
+            COALESCE(SUM(${lineCogsSql()}), 0) as costs
           FROM order_items oi
           INNER JOIN orders o ON oi.order_id = o.id
           INNER JOIN stores s ON s.id = o.store_id
@@ -751,7 +752,7 @@ export class OrganizationsService {
           ${endFilter}
           ${storeFilter}
       ), item_costs AS (
-        SELECT COALESCE(SUM(COALESCE(oi.cost_price, 0) * oi.quantity), 0) AS cogs
+        SELECT COALESCE(SUM(${lineCogsSql()}), 0) AS cogs
         FROM order_items oi
         INNER JOIN orders o ON o.id = oi.order_id
         INNER JOIN stores s ON s.id = o.store_id

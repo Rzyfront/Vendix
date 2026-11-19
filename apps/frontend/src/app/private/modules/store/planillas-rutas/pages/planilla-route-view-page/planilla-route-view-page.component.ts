@@ -491,7 +491,7 @@ export class PlanillaRouteViewPageComponent {
     () => ROUTE_STATUS_LABEL[this.route()?.status ?? ''] ?? '',
   );
 
-  readonly backRoute = computed(() => ['/admin/orders/planillas', String(this.routeId())]);
+  readonly backRoute = computed(() => ['/admin/orders/rutas', String(this.routeId())]);
 
   readonly headerTitle = computed(() => {
     const n = this.route()?.route_number;
@@ -873,7 +873,7 @@ export class PlanillaRouteViewPageComponent {
   }
 
   backToDetail(): void {
-    this.router.navigate(['/admin/orders/planillas', this.routeId()]);
+    this.router.navigate(['/admin/orders/rutas', this.routeId()]);
   }
 
   /** Starts sharing the responsible's location on a route dispatched by someone else. */

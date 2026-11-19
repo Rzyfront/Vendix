@@ -347,7 +347,7 @@ export class DispatchNoteDetailComponent {
 
   /** Navega al detalle de la planilla (ruta) asignada a la remisión. */
   goToRoute(routeId: number): void {
-    this.router.navigate(['/admin/orders/planillas', routeId]);
+    this.router.navigate(['/admin/orders/rutas', routeId]);
   }
 
   // ── Utility methods ─────────────────────────────────

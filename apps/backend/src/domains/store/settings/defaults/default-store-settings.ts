@@ -559,9 +559,11 @@ export function getDefaultStoreSettings(): StoreSettings {
       ],
     },
 
-    // Adiciones de producto - apagadas por defecto.
+    // Adiciones de producto - apagadas por defecto. `allow_online` (QUI-1005)
+    // nace encendido: activar adiciones las ofrece también en la tienda en línea.
     product_options: {
       enabled: false,
+      allow_online: true,
     },
 
     // Recordatorios de cuotas a crédito - apagados por defecto. Al activarlos

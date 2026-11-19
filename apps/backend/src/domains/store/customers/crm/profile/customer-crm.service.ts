@@ -181,6 +181,27 @@ export class CustomerCrmService {
     return this.getProfile(customerId);
   }
 
+  /**
+   * Whether the request user may change owners (same rule `updateProfile`
+   * enforces) and the current owner of each customer of THIS store, in one
+   * store-scoped read. Bulk owner assignment from the agent (QUI-1042)
+   * previews with it instead of loading the full profile (RFM included) once
+   * per customer. Ids that are not customers of the store are absent.
+   */
+  async ownersOf(customerIds: number[]) {
+    const viewer = this.viewer();
+    const rows = customerIds.length
+      ? await this.prisma.store_users.findMany({
+          where: { user_id: { in: customerIds } },
+          select: { user_id: true, crm_owner: { select: PERSON_SELECT } },
+        })
+      : [];
+    return {
+      can_assign: viewer.can_see_all,
+      owners: new Map(rows.map((row) => [row.user_id, row.crm_owner])),
+    };
+  }
+
   async timeline(customerId: number, query: CustomerCrmTimelineQueryDto) {
     const viewer = this.viewer();
     await this.membership(customerId);

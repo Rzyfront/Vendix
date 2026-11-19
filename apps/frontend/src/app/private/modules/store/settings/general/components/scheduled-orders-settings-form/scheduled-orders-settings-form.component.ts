@@ -143,6 +143,8 @@ export class ScheduledOrdersSettingsForm {
   /** Días con la tarjeta desplegada (por defecto todas plegadas). */
   readonly openDays = signal<Readonly<Record<number, boolean>>>({});
   readonly optionsEnabled = computed(() => this.productOptions()?.enabled === true);
+  /** QUI-1005: default permitidas; solo `false` explícito las apaga. */
+  readonly optionsAllowOnline = computed(() => this.productOptions()?.allow_online !== false);
 
   // Excepciones por fecha
   readonly exceptions = signal<FulfillmentException[]>([]);
@@ -183,8 +185,18 @@ export class ScheduledOrdersSettingsForm {
     });
   }
 
+  /** Conserva el resto de la sección (p. ej. `allow_online`) al mover el interruptor. */
   onOptionsEnabledChange(enabled: boolean): void {
-    this.productOptionsChange.emit({ enabled });
+    this.productOptionsChange.emit({ ...this.productOptions(), enabled });
+  }
+
+  /** QUI-1005 — «Permitir adiciones en la tienda en línea». */
+  onOptionsAllowOnlineChange(allow_online: boolean): void {
+    this.productOptionsChange.emit({
+      ...this.productOptions(),
+      enabled: this.optionsEnabled(),
+      allow_online,
+    });
   }
 
   onNumberChange(

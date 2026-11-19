@@ -50,6 +50,18 @@
     </app-settings-section>
   }
 
+  <!-- Panel principal -->
+  <app-settings-section
+    anchorId="panel-principal"
+    icon="layout-dashboard"
+    iconTone="teal"
+    title="Panel principal"
+    hint="Elige qué ve tu equipo al entrar al Panel Principal.">
+    <app-home-panel-settings-form
+      [settings]="store.settings().home_panel"
+      (settingsChange)="store.onSectionChange('home_panel', $event)" />
+  </app-settings-section>
+
   <!-- Personalización -->
   <app-settings-section
     anchorId="section-branding"

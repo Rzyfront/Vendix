@@ -46,18 +46,10 @@ export class OrderStatsComponent {
   }
 
   // Formatear moneda para visualización con escala K/M
+  // QUI-1017 — formateador central: "-$5.9M" (antes los negativos caían al
+  // formato completo y los positivos ignoraban la posición del símbolo).
   formatCurrency(value: number | string): string {
-    const numValue = typeof value === 'string' ? parseFloat(value) : value;
-    const currency = this.currencyService.currentCurrency();
-
-    if (numValue >= 1000000) {
-      const symbol = currency?.symbol || '$';
-      return symbol + (numValue / 1000000).toFixed(1) + 'M';
-    } else if (numValue >= 1000) {
-      const symbol = currency?.symbol || '$';
-      return symbol + (numValue / 1000).toFixed(1) + 'K';
-    }
-    return this.currencyService.format(numValue);
+    return this.currencyService.formatCompactStat(value);
   }
 
   // Calcular porcentaje de crecimiento

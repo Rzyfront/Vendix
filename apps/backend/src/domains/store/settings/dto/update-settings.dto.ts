@@ -5,6 +5,7 @@ import {
   IsObject,
 } from 'class-validator';
 import { Type } from 'class-transformer';
+import { HomePanelSettingsDto } from './home-panel-settings.dto';
 import { ApiProperty, ApiSchema } from '@nestjs/swagger';
 import {
   GeneralSettingsDto,
@@ -254,6 +255,18 @@ export class UpdateSettingsDto {
   @ValidateNested()
   @Type(() => ScheduledOrdersSettingsDto)
   scheduled_orders?: ScheduledOrdersSettingsDto;
+
+  @ApiProperty({
+    type: HomePanelSettingsDto,
+    required: false,
+    description:
+      'Panel Principal de la tienda (QUI-967): panel de inicio y paneles ' +
+      'habilitados como pestañas, del catálogo cerrado.',
+  })
+  @IsOptional()
+  @ValidateNested()
+  @Type(() => HomePanelSettingsDto)
+  home_panel?: HomePanelSettingsDto;
 
   @ApiProperty({ type: CreditRemindersSettingsDto, required: false })
   @IsOptional()

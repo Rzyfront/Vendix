@@ -431,11 +431,20 @@ export class ServiceStationsService {
     );
   }
 
-  getSellableProducts(): Observable<any[]> {
+  /**
+   * QUI-1030: búsqueda en servidor del catálogo vendible (nombre o SKU) para
+   * los selectores de "Agregar producto". Sin término trae solo los primeros.
+   */
+  searchSellableProducts(search: string, limit: number): Observable<any[]> {
+    let params = new HttpParams()
+      .set('limit', String(limit))
+      .set('is_sellable', 'true')
+      .set('is_ingredient', 'false')
+      .set('include_variants', 'true');
+    const term = (search ?? '').trim();
+    if (term) params = params.set('search', term);
     return this.http
-      .get<{ data?: unknown } | unknown>(
-        `${environment.apiUrl}/store/products?limit=150&is_sellable=true&is_ingredient=false&include_variants=true`,
-      )
+      .get<{ data?: unknown } | unknown>(`${environment.apiUrl}/store/products`, { params })
       .pipe(
         map((r) => {
           const unwrapped = this.unwrap<unknown>(r);

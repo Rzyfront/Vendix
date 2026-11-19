@@ -50,6 +50,8 @@ describe('ProductionSaleLinkService (QUI-995)', () => {
         deleteMany: jest.fn().mockResolvedValue({ count: 1 }),
         createMany: jest.fn().mockResolvedValue({ count: 1 }),
       },
+      // QUI-1013: no plant unless a test sets one (order keeps plant_id null).
+      manufacturing_plants: { findFirst: jest.fn().mockResolvedValue(null) },
     };
     client = {
       orders: { findFirst: jest.fn().mockResolvedValue(s) },
@@ -92,6 +94,24 @@ describe('ProductionSaleLinkService (QUI-995)', () => {
       select: { id: true },
     });
     expect(Number(tx.production_orders.create.mock.calls[0][0].data.planned_qty)).toBe(5);
+  });
+
+  it('QUI-1013: a sale-linked order goes to the main plant (first active by id) of the sale store', async () => {
+    setup(sale([{ id: 1, product_id: 50, quantity: 2 }]));
+    tx.manufacturing_plants.findFirst.mockResolvedValue({ id: 3 });
+    await service.ensureForOrder(77);
+    expect(tx.manufacturing_plants.findFirst).toHaveBeenCalledWith({
+      where: { store_id: 1, is_active: true },
+      orderBy: { id: 'asc' },
+      select: { id: true },
+    });
+    expect(tx.production_orders.create.mock.calls[0][0].data.plant_id).toBe(3);
+  });
+
+  it('QUI-1013: without plants the sale-linked order keeps no plant (previous behavior)', async () => {
+    setup(sale([{ id: 1, product_id: 50, quantity: 2 }]));
+    await service.ensureForOrder(77);
+    expect(tx.production_orders.create.mock.calls[0][0].data.plant_id).toBeNull();
   });
 
   it('S1: a new sale order is created with one planned line per recipe item for the summed quantity, consumed 0', async () => {
@@ -752,6 +772,7 @@ describe('ProductionSaleLinkService — live-sync events (QUI-1002)', () => {
         deleteMany: jest.fn().mockResolvedValue({ count: 0 }),
         createMany: jest.fn().mockResolvedValue({ count: 0 }),
       },
+      manufacturing_plants: { findFirst: jest.fn().mockResolvedValue(null) },
     };
     client = {
       orders: {

@@ -113,7 +113,7 @@ interface Selection {
       <div class="flex items-center justify-center h-64">
         <app-spinner size="md" />
       </div>
-    } @else if (template()) {
+    } @else if (template() || isNew()) {
       <app-sticky-header
         [title]="templateName()"
         subtitle="Editor de plantilla"
@@ -599,7 +599,7 @@ interface Selection {
                     <app-selector
                       label="Tipo de Entidad"
                       [ngModel]="formData().entity_type"
-                      (ngModelChange)="updateFormData('entity_type', $event)"
+                      (ngModelChange)="onEntityTypeChange($event)"
                       [options]="entityTypeOptions"
                     />
                     <app-selector
@@ -618,10 +618,19 @@ interface Selection {
                     />
                   }
                   <app-setting-toggle
-                    label="Plantilla por defecto"
+                    label="Por defecto en reservas"
+                    description="Se usa en reservas de servicios sin plantilla propia."
                     [ngModel]="formData().is_default"
                     (ngModelChange)="updateFormData('is_default', $event)"
                   />
+                  @if (canBeCrmDefault()) {
+                    <app-setting-toggle
+                      label="Predeterminada del CRM"
+                      description="Es la planilla del cliente en el pipeline y en su ficha."
+                      [ngModel]="formData().is_crm_default"
+                      (ngModelChange)="updateFormData('is_crm_default', $event)"
+                    />
+                  }
                   <app-setting-toggle
                     label="Organizar con pestañas"
                     [ngModel]="formData().use_tabs"
@@ -1037,6 +1046,8 @@ export class TemplateEditorComponent implements OnInit {
 
   template = signal<DataCollectionTemplate | null>(null);
   loading = signal(true);
+  /** True while the route is `templates/new/edit` and nothing was saved yet. */
+  isNew = signal(false);
   saving = signal(false);
   availableFields = signal<MetadataField[]>([]);
   availableProducts = signal<any[]>([]);
@@ -1077,6 +1088,7 @@ export class TemplateEditorComponent implements OnInit {
     station_type: string | null;
     status: string;
     is_default: boolean;
+    is_crm_default: boolean;
     checkin_show_budget: boolean;
     checkin_show_products: boolean;
     checkin_show_notes: boolean;
@@ -1091,6 +1103,7 @@ export class TemplateEditorComponent implements OnInit {
     station_type: null,
     status: 'active',
     is_default: false,
+    is_crm_default: false,
     checkin_show_budget: true,
     checkin_show_products: true,
     checkin_show_notes: true,
@@ -1099,7 +1112,11 @@ export class TemplateEditorComponent implements OnInit {
     sections: [],
   });
 
-  templateName = computed(() => this.formData().name || 'Nueva Plantilla');
+  templateName = computed(() => this.formData().name || 'Nueva plantilla');
+  /** Same rule as the backend (DCOL_CRM_001): active customer templates only. */
+  readonly canBeCrmDefault = computed(
+    () => this.formData().entity_type === 'customer' && this.formData().status === 'active',
+  );
 
   /**
    * Pantalla que abrió el editor (p. ej. Estaciones de servicio al diseñar la
@@ -1200,7 +1217,15 @@ export class TemplateEditorComponent implements OnInit {
   ngOnInit() {
     const returnTo = this.route.snapshot.queryParamMap.get('returnTo');
     if (returnTo && /^\/admin\/[\w\-/?=&]*$/.test(returnTo)) this.returnTo.set(returnTo);
-    const id = Number(this.route.snapshot.paramMap.get('id'));
+    const rawId = this.route.snapshot.paramMap.get('id');
+    if (rawId === 'new') {
+      this.isNew.set(true);
+      this.loading.set(false);
+      this.loadAvailableFields();
+      this.loadAvailableProducts();
+      return;
+    }
+    const id = Number(rawId);
     if (!id) {
       this.toastService.error('ID de plantilla no valido');
       this.router.navigate(['/admin/data-collection/templates']);
@@ -1239,6 +1264,7 @@ export class TemplateEditorComponent implements OnInit {
         station_type: t.station_type ?? null,
         status: t.status,
         is_default: t.is_default,
+        is_crm_default: t.is_crm_default ?? false,
         checkin_show_budget: t.checkin_show_budget ?? true,
         checkin_show_products: t.checkin_show_products ?? true,
         checkin_show_notes: t.checkin_show_notes ?? true,
@@ -1261,6 +1287,7 @@ export class TemplateEditorComponent implements OnInit {
         station_type: t.station_type ?? null,
         status: t.status,
         is_default: t.is_default,
+        is_crm_default: t.is_crm_default ?? false,
         checkin_show_budget: t.checkin_show_budget ?? true,
         checkin_show_products: t.checkin_show_products ?? true,
         checkin_show_notes: t.checkin_show_notes ?? true,
@@ -1356,7 +1383,7 @@ export class TemplateEditorComponent implements OnInit {
     if (!fd.name) return;
     this.saving.set(true);
 
-    const t = this.template()!;
+    const t = this.template();
     const payload: any = {
       name: fd.name,
       description: fd.description,
@@ -1365,6 +1392,10 @@ export class TemplateEditorComponent implements OnInit {
       station_type: fd.entity_type === 'service_session' ? fd.station_type || null : undefined,
       status: fd.status,
       is_default: fd.is_default,
+      // Only an active customer template can be the CRM default: archiving or
+      // deactivating it from here sends false, so the backend unmarks it.
+      is_crm_default:
+        fd.entity_type === 'customer' && fd.status === 'active' ? fd.is_crm_default : false,
       checkin_show_budget: fd.entity_type === 'service_session' ? fd.checkin_show_budget : undefined,
       checkin_show_products: fd.entity_type === 'service_session' ? fd.checkin_show_products : undefined,
       checkin_show_notes: fd.entity_type === 'service_session' ? fd.checkin_show_notes : undefined,
@@ -1380,6 +1411,11 @@ export class TemplateEditorComponent implements OnInit {
     }
 
     const productIds = this.selectedProductIds();
+
+    if (!t) {
+      this.createTemplate(payload, productIds);
+      return;
+    }
 
     this.templatesService.update(t.id, payload).pipe(takeUntilDestroyed(this.destroyRef)).subscribe({
       next: () => {
@@ -1401,6 +1437,45 @@ export class TemplateEditorComponent implements OnInit {
           this.saving.set(false);
           this.toastService.success('Plantilla actualizada');
         }
+      },
+      error: (err) => {
+        this.saving.set(false);
+        this.toastService.error(extractApiErrorMessage(err));
+      },
+    });
+  }
+
+  private createTemplate(payload: any, productIds: number[]) {
+    this.templatesService.create(payload).pipe(takeUntilDestroyed(this.destroyRef)).subscribe({
+      next: (created) => {
+        // From now on this editor behaves as an existing template, so next saves update it.
+        this.template.set(created);
+        this.isNew.set(false);
+        const finish = () => {
+          this.saving.set(false);
+          if (this.returnTo()) {
+            this.goBackIfRequested();
+            return;
+          }
+          this.router.navigate(['/admin', 'data-collection', 'templates', created.id, 'edit'], {
+            replaceUrl: true,
+          });
+        };
+        if (productIds.length === 0) {
+          this.toastService.success('Plantilla creada');
+          finish();
+          return;
+        }
+        this.templatesService.assignProducts(created.id, productIds).pipe(takeUntilDestroyed(this.destroyRef)).subscribe({
+          next: () => {
+            this.toastService.success('Plantilla creada');
+            finish();
+          },
+          error: () => {
+            this.toastService.warning('Plantilla guardada, pero error asignando productos');
+            finish();
+          },
+        });
       },
       error: (err) => {
         this.saving.set(false);
@@ -1519,6 +1594,14 @@ export class TemplateEditorComponent implements OnInit {
 
   updateFormData(key: string, value: any) {
     this.formData.update((fd) => ({ ...fd, [key]: value }));
+  }
+
+  onEntityTypeChange(value: string) {
+    this.formData.update((fd) => ({
+      ...fd,
+      entity_type: value,
+      is_crm_default: value === 'customer' ? fd.is_crm_default : false,
+    }));
   }
 
   // --- Tab Management ---

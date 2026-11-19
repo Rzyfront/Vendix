@@ -12,7 +12,18 @@ import {
   VideoSourceTypeEnum,
 } from './dto';
 import { Prisma } from '@prisma/client';
-import { normalizeKeywords } from '../../../common/helpers/keywords.helper';
+import {
+  normalizeKeywords,
+  calculateRelevance,
+} from '../../../common/helpers/keywords.helper';
+import {
+  buildVideoSearchWhere,
+  findVideoIdsIgnoringAccents,
+  videoRankingTokens,
+} from '../../video-library/video-search.helper';
+
+/** Thumbnail generated from a YouTube video ID (not uploaded by hand). */
+const AUTO_YOUTUBE_THUMBNAIL = /^https?:\/\/img\.youtube\.com\/vi\//;
 
 @Injectable()
 export class VideoLibraryAdminService {
@@ -28,6 +39,9 @@ export class VideoLibraryAdminService {
   async findAllVideos(query: AdminVideoQueryDto) {
     const { page = 1, limit = 20, status, video_source, category, search } = query;
     const skip = (page - 1) * limit;
+    const accentInsensitiveIds = search
+      ? await findVideoIdsIgnoringAccents(this.globalPrisma, search)
+      : [];
 
     const where: Prisma.videosWhereInput = {
       ...(status && { status: status as any }),
@@ -37,14 +51,7 @@ export class VideoLibraryAdminService {
           ? { slug: category }
           : { OR: [{ slug: category }, { id: Number(category) }] },
       }),
-      ...(search && {
-        OR: [
-          { title: { contains: search, mode: 'insensitive' as const } },
-          { summary: { contains: search, mode: 'insensitive' as const } },
-          { tags: { has: search.toLowerCase().trim() } },
-          { keywords: { has: search.toLowerCase().trim() } },
-        ],
-      }),
+      ...(search && buildVideoSearchWhere(search, accentInsensitiveIds)),
     };
 
     const [data, total] = await Promise.all([
@@ -69,6 +76,13 @@ export class VideoLibraryAdminService {
         video_url: await this.resolveMediaUrl(video.video_url),
       })),
     );
+
+    if (search) {
+      const tokens = videoRankingTokens(search);
+      signedData.sort(
+        (a, b) => calculateRelevance(b, tokens) - calculateRelevance(a, tokens),
+      );
+    }
 
     return {
       data: signedData,
@@ -176,19 +190,36 @@ export class VideoLibraryAdminService {
       slug = existing ? `${newSlug}-${Date.now()}` : newSlug;
     }
 
-    let external_id = dto.external_id;
-    let video_source = dto.video_source;
-    if (dto.video_url && dto.video_url !== video.video_url) {
-      const parsed = this.parseVideoUrl(dto.video_url, dto.video_source);
-      external_id = external_id || parsed.external_id;
-      video_source = video_source || parsed.video_source;
-    }
-
     const sanitizedVideoUrl = dto.video_url !== undefined
       ? (this.s3Service.sanitizeForStorage(dto.video_url) || dto.video_url)
       : undefined;
-    const sanitizedThumbnailUrl = dto.thumbnail_url !== undefined
-      ? (this.s3Service.sanitizeForStorage(dto.thumbnail_url) || dto.thumbnail_url)
+
+    let external_id: string | null | undefined = dto.external_id;
+    let video_source = dto.video_source;
+    let thumbnail_url = dto.thumbnail_url;
+    if (sanitizedVideoUrl && sanitizedVideoUrl !== video.video_url) {
+      const parsed = this.parseVideoUrl(dto.video_url!, dto.video_source);
+      // The edit form re-sends the stored ID/platform; a new URL must win over
+      // them. Only a value the user changed by hand is kept.
+      if (!external_id || external_id === video.external_id) {
+        external_id = parsed.external_id ?? null;
+      }
+      if (!video_source || video_source === video.video_source) {
+        video_source = parsed.video_source;
+      }
+      // Regenerate the auto YouTube thumbnail; never replace an uploaded one.
+      const currentThumbnail = thumbnail_url !== undefined ? thumbnail_url : video.thumbnail_url;
+      if (
+        video_source === VideoSourceTypeEnum.YOUTUBE &&
+        external_id &&
+        (!currentThumbnail || AUTO_YOUTUBE_THUMBNAIL.test(currentThumbnail))
+      ) {
+        thumbnail_url = `https://img.youtube.com/vi/${external_id}/maxresdefault.jpg`;
+      }
+    }
+
+    const sanitizedThumbnailUrl = thumbnail_url !== undefined
+      ? (this.s3Service.sanitizeForStorage(thumbnail_url) || thumbnail_url)
       : undefined;
 
     const updated = await this.globalPrisma.videos.update({

@@ -12,6 +12,9 @@ import {
 import { ProductionOrdersService } from '../../production/production-orders.service';
 import { FormulasService } from '../formulas/formulas.service';
 import { ManufacturingSettingsService } from '../settings/manufacturing-settings.service';
+import type { ManufacturingSettingsView } from '../settings/manufacturing-settings.service';
+import { ManufacturingPlantsService } from '../plants/manufacturing-plants.service';
+import { findPlantLocations, type PlantLocations } from '../plants/plant-resolution.util';
 import { OrderSequenceService } from './order-sequence.service';
 import {
   CompleteManufacturingOrderDto,
@@ -35,6 +38,8 @@ const ORDER_INCLUDE = {
   // S21: the sale state decides whether "Volver a iniciar" is offered.
   sale_order: { select: { id: true, order_number: true, state: true } },
   recipe: { select: { id: true, code: true, version: true } },
+  // QUI-1013: plant shown in Planta lists and detail.
+  plant: { select: { id: true, name: true, is_active: true } },
   lines: {
     orderBy: { sort_order: 'asc' },
     include: {
@@ -64,6 +69,8 @@ export class ManufacturingOrdersService {
     private readonly settingsService: ManufacturingSettingsService,
     private readonly sequences: OrderSequenceService,
     private readonly stockLevelManager: StockLevelManager,
+    // QUI-1013: plant assignment of new/edited orders.
+    private readonly plants: ManufacturingPlantsService,
     // QUI-1002: live-sync emission after commit (optional: absent in unit setups).
     private readonly eventEmitter?: EventEmitter2,
   ) {}
@@ -96,6 +103,32 @@ export class ManufacturingOrdersService {
     if (!location) {
       throw new VendixHttpException(ErrorCodes.MFG_INVALID_LOCATION);
     }
+  }
+
+  /**
+   * QUI-1013 — locations an order works with. Inputs: the plant's input
+   * location, else the settings default (else each component's own default,
+   * resolved by the engine). Finished goods: explicit location of the order,
+   * else the plant's output location, else the settings default (else the
+   * product's own default). Without a plant this is exactly the pre-plant rule.
+   */
+  private async resolveOrderLocations(
+    order: { plant_id?: number | null; location_id?: number | null },
+    settings: ManufacturingSettingsView,
+  ): Promise<{ input?: number; output?: number }> {
+    const plant: PlantLocations | null = await findPlantLocations(
+      this.prisma,
+      order.plant_id,
+    );
+    return {
+      input:
+        plant?.input_location_id ?? settings.default_input_location_id ?? undefined,
+      output:
+        order.location_id ??
+        plant?.output_location_id ??
+        settings.default_output_location_id ??
+        undefined,
+    };
   }
 
   /** Solo órdenes de manufactura (tienen consecutivo); las del restaurante no. */
@@ -144,6 +177,7 @@ export class ManufacturingOrdersService {
       limit = 25,
       status,
       product_id,
+      plant_id,
       date_from,
       date_to,
       search,
@@ -153,6 +187,7 @@ export class ManufacturingOrdersService {
       order_number: { not: null },
       ...(status && { status }),
       ...(product_id && { product_id }),
+      ...(plant_id && { plant_id }),
       ...((date_from || date_to) && {
         created_at: {
           ...(date_from && { gte: new Date(date_from) }),
@@ -213,6 +248,8 @@ export class ManufacturingOrdersService {
       throw new VendixHttpException(ErrorCodes.PRODUCTION_RECIPE_EMPTY);
     }
     await this.assertLocation(dto.location_id);
+    // QUI-1013: chosen plant, or the only active one (no extra step).
+    const plant_id = await this.plants.resolveForOrder(dto.plant_id);
 
     const cost = await this.formulas.calculateCost(recipe.id);
     const requirements = this.productionOrders.computeComponentRequirements(
@@ -236,6 +273,7 @@ export class ManufacturingOrdersService {
             order_number,
             due_date: dto.due_date ? new Date(dto.due_date) : null,
             location_id: dto.location_id ?? null,
+            plant_id,
             priority: dto.priority ?? 'normal',
             notes: dto.notes ?? null,
             created_by: context?.user_id ?? null,
@@ -266,6 +304,9 @@ export class ManufacturingOrdersService {
       });
     }
     await this.assertLocation(dto.location_id);
+    // QUI-1013: the plant can change while nothing has been consumed yet.
+    const plant_id =
+      dto.plant_id !== undefined ? await this.plants.resolveForOrder(dto.plant_id) : undefined;
 
     const qtyChanged =
       dto.planned_qty !== undefined &&
@@ -275,6 +316,7 @@ export class ManufacturingOrdersService {
       const data: Prisma.production_ordersUncheckedUpdateInput = {
         ...(dto.due_date !== undefined && { due_date: new Date(dto.due_date) }),
         ...(dto.location_id !== undefined && { location_id: dto.location_id }),
+        ...(plant_id !== undefined && { plant_id }),
         ...(dto.priority !== undefined && { priority: dto.priority }),
         ...(dto.notes !== undefined && { notes: dto.notes }),
         updated_at: new Date(),
@@ -369,6 +411,8 @@ export class ManufacturingOrdersService {
     const order = await this.loadOrder(id);
     const recipe = await this.loadRecipeForRequirements(order.recipe_id);
     const settings = await this.settingsService.get();
+    // QUI-1013: shortages are read in the plant's input location.
+    const { input: inputLocationId } = await this.resolveOrderLocations(order, settings);
 
     const remaining = Math.max(
       0,
@@ -388,7 +432,7 @@ export class ManufacturingOrdersService {
     const result: ShortageLine[] = [];
     for (const req of requirements) {
       const location_id =
-        settings.default_input_location_id ??
+        inputLocationId ??
         (await this.stockLevelManager.getDefaultLocationForProduct(
           req.component_product_id,
         ));
@@ -443,11 +487,10 @@ export class ManufacturingOrdersService {
 
     await this.assertLocation(dto.location_id);
     const settings = await this.settingsService.get();
-    const outputLocationId =
-      dto.location_id ??
-      order.location_id ??
-      settings.default_output_location_id ??
-      undefined;
+    // QUI-1013: inputs leave the plant's input location; finished goods enter
+    // its output location (an explicit location still wins).
+    const locations = await this.resolveOrderLocations(order, settings);
+    const outputLocationId = dto.location_id ?? locations.output;
 
     await this.productionOrders.complete(
       id,
@@ -456,7 +499,7 @@ export class ManufacturingOrdersService {
         allowPartialBatch: true,
         sourceModule: 'manufacturing',
         outputLocationId,
-        inputLocationId: settings.default_input_location_id ?? undefined,
+        inputLocationId: locations.input,
         costingMethod: settings.cost_method === 'cpp' ? 'weighted_average' : 'fifo',
         onProduced: async (tx, info) => {
           // Bloqueo optimista: si otro completado cambió la orden después de

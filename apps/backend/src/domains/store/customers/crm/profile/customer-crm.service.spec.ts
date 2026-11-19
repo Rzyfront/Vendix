@@ -50,6 +50,10 @@ function setup(options: { member?: boolean; staff?: boolean } = {}) {
         return options.staff === false ? null : { id: 5 };
       }),
       updateMany: jest.fn(async () => ({ count: 1 })),
+      findMany: jest.fn(async () => [
+        { user_id: CUSTOMER, crm_owner: { id: SELLER, first_name: 'Sara', last_name: 'V' } },
+        { user_id: 20, crm_owner: null },
+      ]),
     },
     users: {
       findUnique: jest.fn(async () => ({
@@ -158,6 +162,36 @@ describe('CustomerCrmService', () => {
       'CRM_PROFILE_001',
     );
     expect(prisma.store_users.updateMany).not.toHaveBeenCalled();
+  });
+
+  it('ownersOf: one store-scoped read with the current owners and who can assign', async () => {
+    as('owner');
+    const { service, prisma } = setup();
+    const result = await service.ownersOf([CUSTOMER, 20]);
+
+    expect(prisma.store_users.findMany).toHaveBeenCalledTimes(1);
+    expect(prisma.store_users.findMany).toHaveBeenCalledWith({
+      where: { user_id: { in: [CUSTOMER, 20] } },
+      select: { user_id: true, crm_owner: { select: { id: true, first_name: true, last_name: true } } },
+    });
+    expect(result.can_assign).toBe(true);
+    expect(result.owners.get(CUSTOMER)).toEqual({ id: SELLER, first_name: 'Sara', last_name: 'V' });
+    expect(result.owners.get(20)).toBeNull();
+    expect(result.owners.has(99)).toBe(false);
+  });
+
+  it('ownersOf: a seller without assign gets can_assign false', async () => {
+    as('seller');
+    const { service } = setup();
+    expect((await service.ownersOf([CUSTOMER])).can_assign).toBe(false);
+  });
+
+  it('ownersOf: no ids, no query', async () => {
+    as('owner');
+    const { service, prisma } = setup();
+    const result = await service.ownersOf([]);
+    expect(prisma.store_users.findMany).not.toHaveBeenCalled();
+    expect(result.owners.size).toBe(0);
   });
 
   it('the owner must be active staff of the store', async () => {

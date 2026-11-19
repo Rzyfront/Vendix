@@ -62,6 +62,59 @@ describe('StoresService · la industria se escribe en sus dos fuentes (S18)', ()
     expect(settings?.settings.general.industries).toEqual(store.industries);
   });
 
+  it('create: una tienda nueva abre en el panel sugerido por su industria (QUI-967)', async () => {
+    await service.create({
+      name: 'Hotel Sol',
+      store_type: 'physical',
+      industries: ['retail', 'hospitality'],
+    } as any);
+    await service.create({
+      name: 'Repostería Miel',
+      store_type: 'physical',
+      industries: ['restaurant'],
+      settings: {
+        home_panel: { default_panel: 'summary', enabled_panels: ['summary'] },
+      },
+    } as any);
+
+    await service.create({
+      name: 'Salón Brisa',
+      store_type: 'physical',
+      industries: ['service'],
+      settings: { home_panel: { default_panel: 'widgets', enabled_panels: [] } },
+    } as any);
+
+    await service.create({
+      name: 'Tienda Sin Industria',
+      store_type: 'physical',
+      settings: {
+        pos: { tips: { enabled: true } },
+        home_panel: { default_panel: 'nope', enabled_panels: ['nope'] },
+      },
+    } as any);
+
+    const [hotel, bakery, salon, plain] = db.tables.store_settings.map(
+      (s) => s.settings,
+    );
+    // Without industries an invalid panel is dropped (the store keeps the Resumen).
+    expect(plain.home_panel).toBeUndefined();
+    expect(plain.pos).toEqual({ tips: { enabled: true } });
+    // An invalid panel in the free-form payload falls back to the suggestion.
+    expect(salon.home_panel).toEqual({
+      default_panel: 'reservations_agenda',
+      enabled_panels: ['reservations_agenda', 'summary'],
+    });
+    expect(hotel.home_panel).toEqual({
+      default_panel: 'occupancy',
+      enabled_panels: ['occupancy', 'summary'],
+    });
+    // A payload that already chose a panel keeps it.
+    expect(bakery.home_panel).toEqual({
+      default_panel: 'summary',
+      enabled_panels: ['summary'],
+    });
+  });
+
   it('create: el espejo conserva el resto de los settings que traía el DTO', async () => {
     await service.create({
       name: 'Café Luna',

@@ -1,4 +1,5 @@
 import {
+  Columns3,
   Menu,
   ChevronDown,
   ChevronUp,
@@ -528,6 +529,7 @@ export const ICON_REGISTRY: Record<string, LucideIconData> = {
   share: Share2,
   'trending-down': TrendingDown,
   layers: Layers,
+  columns: Columns3,
   'shield-off': ShieldOff,
   'circle-x': CircleX,
   phone: Phone,
