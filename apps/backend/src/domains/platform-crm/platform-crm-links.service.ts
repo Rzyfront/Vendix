@@ -17,7 +17,23 @@ export interface PlatformOrganizationSearchItem {
   id: number;
   name: string;
   slug: string;
+  state: string;
   created_at: Date | null;
+}
+
+/** Tienda de una organización cliente: se puede enlazar sola, sin la org entera. */
+export interface PlatformStoreSearchItem {
+  id: number;
+  name: string;
+  slug: string;
+  organization: { id: number; name: string };
+  plan_name: string | null;
+  subscription_state: string | null;
+}
+
+export interface PlatformAccountSearchResult {
+  organizations: PlatformOrganizationSearchItem[];
+  stores: PlatformStoreSearchItem[];
 }
 
 /** Candado 7: lo ÚNICO que se lee de la organización cliente. */
@@ -41,8 +57,21 @@ export interface PlatformCrmLinkView {
     note: string | null;
     linked_at: Date;
     linked_by: { id: number; first_name: string | null; last_name: string | null };
+    /** Tienda concreta del enlace; `null` = la organización entera. */
+    linked_store: { id: number; name: string } | null;
   } | null;
+  /**
+   * Resumen de la organización enlazada. En un enlace a una tienda,
+   * `subscriptions` trae solo la suscripción de esa tienda.
+   */
   organization: PlatformOrganizationSummary | null;
+}
+
+/** Destino ya verificado de un enlace: la org entera o una de sus tiendas. */
+interface LinkTarget {
+  organization_id: number;
+  organization_name: string;
+  store: { id: number; name: string } | null;
 }
 
 /**
@@ -67,21 +96,62 @@ export class PlatformCrmLinksService {
     return this.prisma.withoutScope();
   }
 
-  async searchOrganizations(q: string): Promise<PlatformOrganizationSearchItem[]> {
-    const term = q.trim();
-    return this.db.organizations.findMany({
-      where: {
-        is_platform: false,
-        OR: [
-          { name: { contains: term, mode: 'insensitive' } },
-          { slug: { contains: term, mode: 'insensitive' } },
-          { tax_id: { contains: term, mode: 'insensitive' } },
-        ],
-      },
-      select: { id: true, name: true, slug: true, created_at: true },
-      orderBy: [{ name: 'asc' }, { id: 'asc' }],
-      take: SEARCH_LIMIT,
-    });
+  /**
+   * Organizaciones por nombre, slug o NIT, y tiendas por su nombre o slug o por
+   * los de su organización (así, al encontrar la org también aparecen sus
+   * tiendas). La org plataforma y sus tiendas nunca salen.
+   */
+  async searchAccounts(q: string): Promise<PlatformAccountSearchResult> {
+    const contains = { contains: q.trim(), mode: 'insensitive' as const };
+    const organizationMatch = {
+      OR: [{ name: contains }, { slug: contains }, { tax_id: contains }],
+    };
+
+    const [organizations, stores] = await Promise.all([
+      this.db.organizations.findMany({
+        where: { is_platform: false, ...organizationMatch },
+        select: { id: true, name: true, slug: true, state: true, created_at: true },
+        orderBy: [{ name: 'asc' }, { id: 'asc' }],
+        take: SEARCH_LIMIT,
+      }),
+      this.db.stores.findMany({
+        where: {
+          organizations: { is_platform: false },
+          OR: [
+            { name: contains },
+            { slug: contains },
+            { organizations: organizationMatch },
+          ],
+        },
+        select: {
+          id: true,
+          name: true,
+          slug: true,
+          organizations: { select: { id: true, name: true } },
+          subscription: { select: { state: true, plan: { select: { name: true } } } },
+        },
+        orderBy: [{ name: 'asc' }, { id: 'asc' }],
+        take: SEARCH_LIMIT,
+      }),
+    ]);
+
+    return {
+      organizations: organizations.map((org) => ({
+        id: org.id,
+        name: org.name,
+        slug: org.slug,
+        state: org.state,
+        created_at: org.created_at,
+      })),
+      stores: stores.map((store) => ({
+        id: store.id,
+        name: store.name,
+        slug: store.slug,
+        organization: { id: store.organizations.id, name: store.organizations.name },
+        plan_name: store.subscription?.plan?.name ?? null,
+        subscription_state: store.subscription?.state ?? null,
+      })),
+    };
   }
 
   async getLink(
@@ -99,6 +169,7 @@ export class PlatformCrmLinksService {
         linked_at: true,
         organization_id: true,
         linked_by: { select: { id: true, first_name: true, last_name: true } },
+        linked_store: { select: { id: true, name: true } },
       },
     });
     if (!link) return { link: null, organization: null };
@@ -114,8 +185,14 @@ export class PlatformCrmLinksService {
           first_name: link.linked_by.first_name ?? null,
           last_name: link.linked_by.last_name ?? null,
         },
+        linked_store: link.linked_store
+          ? { id: link.linked_store.id, name: link.linked_store.name }
+          : null,
       },
-      organization: await this.readOrganizationSummary(link.organization_id),
+      organization: await this.readOrganizationSummary(
+        link.organization_id,
+        link.linked_store?.id ?? null,
+      ),
     };
   }
 
@@ -126,22 +203,22 @@ export class PlatformCrmLinksService {
   ): Promise<PlatformCrmLinkView> {
     await this.assertPlatformCustomer(ctx, customerId);
 
-    const target = await this.db.organizations.findFirst({
-      where: { id: dto.organization_id, is_platform: false },
-      select: { id: true, name: true },
-    });
-    if (!target) throw new VendixHttpException(ErrorCodes.PLATFORM_CRM_002);
-
+    const target = await this.resolveLinkTarget(dto);
     const note = dto.note?.length ? dto.note : null;
     let created: { id: number };
     try {
       created = await this.db.$transaction(async (tx) => {
-        await this.assertNoActiveLink(tx, customerId, target.id);
+        // Serializa los enlaces de una misma organización: la regla «la org
+        // entera choca con cualquiera de sus tiendas» cruza dos índices
+        // parciales distintos, y ningún único la cubre sola.
+        await tx.$executeRaw`SELECT pg_advisory_xact_lock(hashtext(${`platform_crm_link_org:${target.organization_id}`}))`;
+        await this.assertNoActiveLink(tx, customerId, target);
         return tx.platform_crm_links.create({
           data: {
             store_id: ctx.store_id,
             customer_id: customerId,
-            organization_id: target.id,
+            organization_id: target.organization_id,
+            linked_store_id: target.store?.id ?? null,
             note,
             linked_by_user_id: ctx.user_id,
           },
@@ -155,7 +232,7 @@ export class PlatformCrmLinksService {
         error instanceof Prisma.PrismaClientKnownRequestError &&
         error.code === 'P2002'
       ) {
-        await this.assertNoActiveLink(this.db, customerId, target.id);
+        await this.assertNoActiveLink(this.db, customerId, target);
         throw new VendixHttpException(ErrorCodes.PLATFORM_CRM_003);
       }
       throw error;
@@ -170,11 +247,16 @@ export class PlatformCrmLinksService {
       resourceId: created.id,
       newValues: {
         customer_id: customerId,
-        organization_id: target.id,
+        organization_id: target.organization_id,
+        linked_store_id: target.store?.id ?? null,
         status: 'linked',
         note,
       },
-      metadata: { action: 'platform_crm_link', organization_name: target.name },
+      metadata: {
+        action: 'platform_crm_link',
+        organization_name: target.organization_name,
+        store_name: target.store?.name ?? null,
+      },
     });
 
     return this.getLink(ctx, customerId);
@@ -189,7 +271,7 @@ export class PlatformCrmLinksService {
 
     const active = await this.db.platform_crm_links.findFirst({
       where: { store_id: ctx.store_id, customer_id: customerId, status: 'linked' },
-      select: { id: true, organization_id: true },
+      select: { id: true, organization_id: true, linked_store_id: true },
     });
     if (!active) throw new VendixHttpException(ErrorCodes.PLATFORM_CRM_005);
 
@@ -214,7 +296,11 @@ export class PlatformCrmLinksService {
       action: AuditAction.UPDATE,
       resource: PLATFORM_CRM_AUDIT_RESOURCE,
       resourceId: active.id,
-      oldValues: { status: 'linked', organization_id: active.organization_id },
+      oldValues: {
+        status: 'linked',
+        organization_id: active.organization_id,
+        linked_store_id: active.linked_store_id,
+      },
       newValues: { status: 'unlinked' },
       metadata: { action: 'platform_crm_unlink', customer_id: customerId, reason },
     });
@@ -253,23 +339,89 @@ export class PlatformCrmLinksService {
     if (!customer) throw new VendixHttpException(ErrorCodes.PLATFORM_CRM_001);
   }
 
+  /**
+   * La organización entera (`organization_id`) o una tienda concreta
+   * (`linked_store_id`); el DTO garantiza que llega exactamente uno. De una
+   * tienda, la organización del enlace es SIEMPRE la suya. La org plataforma
+   * y sus tiendas no se enlazan.
+   */
+  private async resolveLinkTarget(dto: LinkPlatformCustomerDto): Promise<LinkTarget> {
+    if (dto.linked_store_id !== undefined) {
+      const store = await this.db.stores.findFirst({
+        where: { id: dto.linked_store_id, organizations: { is_platform: false } },
+        select: {
+          id: true,
+          name: true,
+          organizations: { select: { id: true, name: true } },
+        },
+      });
+      if (!store) throw new VendixHttpException(ErrorCodes.PLATFORM_CRM_006);
+      return {
+        organization_id: store.organizations.id,
+        organization_name: store.organizations.name,
+        store: { id: store.id, name: store.name },
+      };
+    }
+
+    const organization = await this.db.organizations.findFirst({
+      where: { id: dto.organization_id, is_platform: false },
+      select: { id: true, name: true },
+    });
+    if (!organization) throw new VendixHttpException(ErrorCodes.PLATFORM_CRM_002);
+    return {
+      organization_id: organization.id,
+      organization_name: organization.name,
+      store: null,
+    };
+  }
+
+  /**
+   * Unicidad (los únicos parciales de las migraciones la respaldan):
+   * - un cliente, un enlace activo;
+   * - la org entera, un solo prospecto, y ninguna de sus tiendas enlazada a
+   *   otro: el enlace a la org reclama todas sus tiendas;
+   * - una tienda, un solo prospecto; varias tiendas de una misma org sí pueden
+   *   ir a prospectos distintos.
+   */
   private async assertNoActiveLink(
     client: Pick<Prisma.TransactionClient, 'platform_crm_links'>,
     customerId: number,
-    organizationId: number,
+    target: LinkTarget,
   ): Promise<void> {
-    const existing = await client.platform_crm_links.findFirst({
+    const own = await client.platform_crm_links.findFirst({
+      where: { status: 'linked', customer_id: customerId },
+      select: { id: true },
+    });
+    if (own) throw new VendixHttpException(ErrorCodes.PLATFORM_CRM_003);
+
+    const taken = await client.platform_crm_links.findFirst({
       where: {
         status: 'linked',
-        OR: [{ customer_id: customerId }, { organization_id: organizationId }],
+        ...(target.store
+          ? {
+              OR: [
+                { linked_store_id: target.store.id },
+                { organization_id: target.organization_id, linked_store_id: null },
+              ],
+            }
+          : { organization_id: target.organization_id }),
       },
-      select: { customer_id: true },
+      select: { linked_store_id: true },
+      orderBy: { id: 'asc' },
     });
-    if (!existing) return;
+    if (!taken) return;
+
+    if (target.store) {
+      throw new VendixHttpException(
+        taken.linked_store_id === target.store.id
+          ? ErrorCodes.PLATFORM_CRM_007
+          : ErrorCodes.PLATFORM_CRM_004,
+      );
+    }
     throw new VendixHttpException(
-      existing.customer_id === customerId
-        ? ErrorCodes.PLATFORM_CRM_003
-        : ErrorCodes.PLATFORM_CRM_004,
+      taken.linked_store_id === null
+        ? ErrorCodes.PLATFORM_CRM_004
+        : ErrorCodes.PLATFORM_CRM_008,
     );
   }
 
@@ -280,6 +432,7 @@ export class PlatformCrmLinksService {
    */
   private async readOrganizationSummary(
     organizationId: number,
+    linkedStoreId: number | null,
   ): Promise<PlatformOrganizationSummary | null> {
     const org = await this.db.organizations.findFirst({
       where: { id: organizationId, is_platform: false },
@@ -288,6 +441,8 @@ export class PlatformCrmLinksService {
         name: true,
         state: true,
         stores: {
+          // Enlace a una tienda: solo esa tienda, nada del resto de la org.
+          ...(linkedStoreId !== null ? { where: { id: linkedStoreId } } : {}),
           select: {
             name: true,
             subscription: {
