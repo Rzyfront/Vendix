@@ -639,6 +639,44 @@ describeDestructiveE2E('platform_crm_links contra Postgres real', () => {
     ).rejects.toMatchObject({ code: 'P2002' });
   });
 
+  it('enlazar a la vez la org entera y una de sus tiendas: el candado por org deja pasar solo uno', async () => {
+    // Ningún único parcial cubre este choque (cada enlace cae en un índice
+    // distinto): sin `pg_advisory_xact_lock` los dos chequeos leen «libre» y
+    // ambos se crean. Varias orgs a la vez para que la carrera ocurra de verdad.
+    const pairs = await Promise.all(
+      ['lock-1', 'lock-2', 'lock-3', 'lock-4'].map(async (label) => {
+        const orgId = await newClientOrg(label);
+        const storeId = await createStore(orgId, label);
+        const [wholeOrgCustomer, storeCustomer] = await Promise.all([
+          createCustomer(ctx.store_id, platformOrgId, `${label}-org`),
+          createCustomer(ctx.store_id, platformOrgId, `${label}-store`),
+        ]);
+        return { orgId, storeId, wholeOrgCustomer, storeCustomer };
+      }),
+    );
+
+    const outcomes = await Promise.all(
+      pairs.map((p) =>
+        Promise.allSettled([
+          service.link(ctx, p.wholeOrgCustomer, { organization_id: p.orgId }),
+          service.link(ctx, p.storeCustomer, { linked_store_id: p.storeId }),
+        ]),
+      ),
+    );
+
+    for (const [i, results] of outcomes.entries()) {
+      expect(results.filter((r) => r.status === 'fulfilled')).toHaveLength(1);
+      const rejected = results.find((r) => r.status === 'rejected') as PromiseRejectedResult;
+      // Org entera primero → la tienda recibe 004; tienda primero → la org recibe 008.
+      expect(['PLATFORM_CRM_004', 'PLATFORM_CRM_008']).toContain(rejected.reason?.errorCode);
+      expect(
+        await db.platform_crm_links.count({
+          where: { organization_id: pairs[i].orgId, status: 'linked' },
+        }),
+      ).toBe(1);
+    }
+  });
+
   it('una tienda de la org plataforma o inexistente no se enlaza; la base rechaza una tienda ajena a la org del enlace', async () => {
     const customer = await createCustomer(ctx.store_id, platformOrgId, 'store-reject');
     const before = await db.platform_crm_links.count();
