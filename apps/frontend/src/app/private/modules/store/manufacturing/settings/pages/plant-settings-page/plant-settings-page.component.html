@@ -1,17 +1,85 @@
 <div class="w-full overflow-x-hidden">
   <app-sticky-header
     title="Planta"
-    subtitle="Bodegas, método de costeo y manejo de lotes de la producción"
+    subtitle="Plantas, bodegas, método de costeo y manejo de lotes de la producción"
     icon="settings"
     variant="glass"
     [actions]="headerActions()"
     (actionClicked)="onHeaderAction($event)"
   />
 
+  <div class="px-2 pt-3 md:px-4 md:pt-4">
+    <app-card
+      title="Plantas de producción"
+      subtitle="Cada planta consume de su bodega de insumos y entrega en su bodega de terminado"
+      [overflow]="'visible'"
+    >
+      <div class="flex justify-end mb-3">
+        <app-button variant="primary" size="sm" (clicked)="openPlantForm(null)">
+          <app-icon slot="icon" name="plus" [size]="16"></app-icon>
+          Nueva planta
+        </app-button>
+      </div>
+
+      @if (plantsLoading() && plants().length === 0) {
+        <p class="text-sm text-text-secondary">Cargando plantas…</p>
+      } @else if (plantsError(); as msg) {
+        <div class="flex flex-wrap items-center gap-2 text-sm text-text-secondary">
+          <span>{{ msg }}</span>
+          <app-button variant="outline" size="sm" (clicked)="loadPlants()">Reintentar</app-button>
+        </div>
+      } @else if (plants().length === 0) {
+        <p class="text-sm text-text-secondary">
+          Aún no hay plantas. Mientras tanto, las órdenes usan las bodegas por defecto de abajo.
+        </p>
+      } @else {
+        <ul class="divide-y divide-border">
+          @for (plant of plants(); track plant.id) {
+            <li class="flex flex-col gap-2 py-3 md:flex-row md:items-center md:justify-between">
+              <div class="min-w-0">
+                <div class="flex flex-wrap items-center gap-2">
+                  <span class="font-semibold text-text-primary">{{ plant.name }}</span>
+                  @if (plant.is_main) {
+                    <app-badge variant="primary" size="sm">Principal</app-badge>
+                  }
+                  @if (!plant.is_active) {
+                    <app-badge variant="neutral" size="sm">Inactiva</app-badge>
+                  }
+                </div>
+                <p class="text-xs text-text-secondary">
+                  Insumos: {{ plant.input_location?.name ?? 'Sin bodega' }} · Terminado:
+                  {{ plant.output_location?.name ?? 'Sin bodega' }}
+                </p>
+                <p class="text-xs text-text-secondary">
+                  Responsable: {{ managerName(plant.manager) ?? 'Sin responsable' }}
+                </p>
+              </div>
+              <div class="flex gap-2">
+                <app-button variant="outline" size="sm" (clicked)="openPlantForm(plant)">
+                  <app-icon slot="icon" name="pencil" [size]="14"></app-icon>
+                  Editar
+                </app-button>
+                <app-button
+                  variant="outline"
+                  size="sm"
+                  [loading]="togglingPlantId() === plant.id"
+                  [disabled]="togglingPlantId() != null"
+                  (clicked)="togglePlant(plant)"
+                >
+                  {{ plant.is_active ? 'Desactivar' : 'Activar' }}
+                </app-button>
+              </div>
+            </li>
+          }
+        </ul>
+      }
+    </app-card>
+  </div>
+
   <form [formGroup]="form" class="px-2 py-3 md:p-4 space-y-4">
     <app-card
-      title="Bodegas"
-      subtitle="De dónde salen los insumos y a dónde entra el producto terminado"
+      title="Bodegas por defecto"
+      subtitle="Solo para órdenes sin planta: cada planta usa sus propias bodegas"
       [overflow]="'visible'"
     >
       <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
@@ -56,4 +124,11 @@
       </div>
     </app-card>
   </form>
+
+  <app-plant-form-modal
+    [(isOpen)]="plantModalOpen"
+    [plant]="editingPlant()"
+    [locationOptions]="locationOptions()"
+    (saved)="loadPlants()"
+  />
 </div>

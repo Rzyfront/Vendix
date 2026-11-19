@@ -39,6 +39,7 @@ import {
 import {
   ManufacturingFormulasService,
   ManufacturingOrdersService,
+  ManufacturingPlantsService,
 } from '../../../services';
 import { ProductionOrdersService } from '../../../../restaurant-ops/production/services/production-orders.service';
 import { ProductionSseService } from '../../../../restaurant-ops/production/services/production-sse.service';
@@ -63,6 +64,7 @@ const STATUSES = Object.keys(ORDER_STATUS_LABELS) as ManufacturingOrderStatus[];
 export class OrdersListPageComponent implements OnInit {
   private readonly ordersService = inject(ManufacturingOrdersService);
   private readonly formulasService = inject(ManufacturingFormulasService);
+  private readonly plantsService = inject(ManufacturingPlantsService);
   private readonly toastService = inject(ToastService);
   private readonly router = inject(Router);
   private readonly destroyRef = inject(DestroyRef);
@@ -76,11 +78,15 @@ export class OrdersListPageComponent implements OnInit {
   readonly searchTerm = signal('');
   readonly statusFilter = signal<ManufacturingOrderStatus | null>(null);
   readonly productFilter = signal<number | null>(null);
+  /** QUI-1013: only the orders of this plant. */
+  readonly plantFilter = signal<number | null>(null);
   readonly dateFrom = signal<string | null>(null);
   readonly dateTo = signal<string | null>(null);
   filterValues: FilterValues = {};
 
   private readonly productOptions = signal<{ value: string; label: string }[]>([]);
+  /** Every plant (inactive ones keep their orders); the filter shows with two or more. */
+  private readonly plantOptions = signal<{ value: string; label: string }[]>([]);
 
   readonly totalPages = computed(
     () => Math.ceil(this.totalItems() / this.filters().limit) || 1,
@@ -90,6 +96,7 @@ export class OrdersListPageComponent implements OnInit {
       this.searchTerm().length > 0 ||
       this.statusFilter() !== null ||
       this.productFilter() !== null ||
+      this.plantFilter() !== null ||
       this.dateFrom() !== null ||
       this.dateTo() !== null,
   );
@@ -110,6 +117,16 @@ export class OrdersListPageComponent implements OnInit {
       type: 'select',
       options: [{ value: '', label: 'Todos' }, ...this.productOptions()],
     },
+    ...(this.plantOptions().length > 1
+      ? [
+          {
+            key: 'plant_id',
+            label: 'Planta',
+            type: 'select' as const,
+            options: [{ value: '', label: 'Todas' }, ...this.plantOptions()],
+          },
+        ]
+      : []),
     {
       key: 'due',
       label: 'Fecha de creación',
@@ -152,6 +169,12 @@ export class OrdersListPageComponent implements OnInit {
       priority: 2,
       transform: (v: number | string | null | undefined) =>
         v == null ? '—' : this.formatNumber(v),
+    },
+    {
+      key: 'plant',
+      label: 'Planta',
+      priority: 3,
+      transform: (_: unknown, row: ManufacturingOrder) => row.plant?.name ?? '—',
     },
     {
       key: 'due_date',
@@ -218,6 +241,7 @@ export class OrdersListPageComponent implements OnInit {
 
   ngOnInit(): void {
     this.loadProductOptions();
+    this.loadPlantOptions();
     this.loadOrders();
     // Another screen (or device) moved an order: refresh without a spinner.
     this.sse.listen(this.destroyRef, () => this.loadOrders(true), undefined, 'manufacturing');
@@ -240,6 +264,24 @@ export class OrdersListPageComponent implements OnInit {
       });
   }
 
+  private loadPlantOptions(): void {
+    this.plantsService
+      .list(true)
+      .pipe(takeUntilDestroyed(this.destroyRef))
+      .subscribe({
+        next: (rows) =>
+          this.plantOptions.set(
+            rows.map((p) => ({
+              value: String(p.id),
+              label: p.is_active ? p.name : `${p.name} (inactiva)`,
+            })),
+          ),
+        error: () => {
+          // El filtro por planta es opcional: se omite en silencio.
+        },
+      });
+  }
+
   loadOrders(silent = false): void {
     if (!silent) this.isLoading.set(true);
     const query: ManufacturingOrderQuery = {
@@ -249,6 +291,7 @@ export class OrdersListPageComponent implements OnInit {
     if (this.searchTerm()) query.search = this.searchTerm();
     if (this.statusFilter()) query.status = this.statusFilter() as ManufacturingOrderStatus;
     if (this.productFilter() != null) query.product_id = this.productFilter() as number;
+    if (this.plantFilter() != null) query.plant_id = this.plantFilter() as number;
     if (this.dateFrom()) query.date_from = this.dateFrom() as string;
     if (this.dateTo()) query.date_to = this.dateTo() as string;
 
@@ -289,6 +332,8 @@ export class OrdersListPageComponent implements OnInit {
     );
     const product = Number(values['product_id']);
     this.productFilter.set(Number.isFinite(product) && product > 0 ? product : null);
+    const plant = Number(values['plant_id']);
+    this.plantFilter.set(Number.isInteger(plant) && plant > 0 ? plant : null);
     this.dateFrom.set((values['due_start'] as string | undefined) || null);
     this.dateTo.set((values['due_end'] as string | undefined) || null);
     this.filters.update((f) => ({ ...f, page: 1 }));
@@ -299,6 +344,7 @@ export class OrdersListPageComponent implements OnInit {
     this.searchTerm.set('');
     this.statusFilter.set(null);
     this.productFilter.set(null);
+    this.plantFilter.set(null);
     this.dateFrom.set(null);
     this.dateTo.set(null);
     this.filterValues = {};

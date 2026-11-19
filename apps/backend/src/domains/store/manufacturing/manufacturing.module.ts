@@ -10,13 +10,15 @@ import { FormulasService } from './formulas/formulas.service';
 import { ManufacturingOrdersController } from './orders/manufacturing-orders.controller';
 import { ManufacturingOrdersService } from './orders/manufacturing-orders.service';
 import { OrderSequenceService } from './orders/order-sequence.service';
+import { ManufacturingPlantsController } from './plants/manufacturing-plants.controller';
+import { ManufacturingPlantsService } from './plants/manufacturing-plants.service';
 import { ManufacturingSettingsController } from './settings/manufacturing-settings.controller';
 import { ManufacturingSettingsService } from './settings/manufacturing-settings.service';
 
 /**
  * Módulo de Manufactura ("un motor, dos pieles"): reutiliza RecipesService y
  * ProductionOrdersService; solo agrega fórmulas, órdenes con consecutivo,
- * líneas planificado/consumido, costo real, lote y configuración de planta.
+ * líneas planificado/consumido, costo real, lote, configuración y plantas (QUI-1013).
  */
 @Module({
   imports: [
@@ -31,12 +33,14 @@ import { ManufacturingSettingsService } from './settings/manufacturing-settings.
     FormulasController,
     ManufacturingOrdersController,
     ManufacturingSettingsController,
+    ManufacturingPlantsController,
   ],
   providers: [
     FormulasService,
     ManufacturingOrdersService,
     ManufacturingSettingsService,
     OrderSequenceService,
+    ManufacturingPlantsService,
   ],
   exports: [FormulasService, ManufacturingOrdersService],
 })

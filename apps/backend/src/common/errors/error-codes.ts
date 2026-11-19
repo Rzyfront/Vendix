@@ -7330,6 +7330,38 @@ export const ErrorCodes = {
     httpStatus: 500,
     devMessage: 'No se pudo generar el consecutivo de la orden de producción',
   },
+  // QUI-1013 — varias plantas de producción.
+  MFG_PLANT_NOT_FOUND: {
+    code: 'MFG_PLANT_NOT_FOUND',
+    httpStatus: 404,
+    devMessage: 'La planta no existe en la tienda',
+  },
+  MFG_PLANT_INACTIVE: {
+    code: 'MFG_PLANT_INACTIVE',
+    httpStatus: 422,
+    devMessage: 'La planta está desactivada: elige una planta activa',
+  },
+  MFG_PLANT_REQUIRED: {
+    code: 'MFG_PLANT_REQUIRED',
+    httpStatus: 422,
+    devMessage: 'La tienda tiene varias plantas: elige en cuál se hace la orden',
+  },
+  MFG_PLANT_NAME_DUPLICATE: {
+    code: 'MFG_PLANT_NAME_DUPLICATE',
+    httpStatus: 409,
+    devMessage: 'Ya existe una planta con ese nombre',
+  },
+  MFG_PLANT_INVALID_MANAGER: {
+    code: 'MFG_PLANT_INVALID_MANAGER',
+    httpStatus: 422,
+    devMessage: 'El responsable debe ser un usuario activo del equipo de la tienda',
+  },
+  MFG_PLANT_HAS_OPEN_ORDERS: {
+    code: 'MFG_PLANT_HAS_OPEN_ORDERS',
+    httpStatus: 409,
+    devMessage:
+      'La planta tiene órdenes de producción abiertas: termínalas, cancélalas o muévelas a otra planta antes de desactivarla',
+  },
 
   // ── Kitchen Fire (Restaurant Suite Fase D) ─────────────────────────
   KITCHEN_FIRE_ORDER_NOT_FOUND: {

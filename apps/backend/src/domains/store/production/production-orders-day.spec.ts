@@ -85,6 +85,24 @@ describe('ProductionOrdersService.findDay (QUI-996)', () => {
     );
   });
 
+  it('QUI-1013: a plant session lists and counts only that plant (carried-over orders included)', async () => {
+    await service.findDay({ date: '2026-11-10', plant_id: 3 });
+
+    const where = prisma.production_orders.findMany.mock.calls[0][0].where;
+    expect(where.plant_id).toBe(3);
+    expect(where.OR).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({ status: { in: ['in_progress', 'partially_completed'] } }),
+      ]),
+    );
+    expect(prisma.production_orders.groupBy.mock.calls[0][0].where.plant_id).toBe(3);
+  });
+
+  it('QUI-1013: without plant_id the day is the whole store (previous behavior)', async () => {
+    await service.findDay({ date: '2026-11-10' });
+    expect(prisma.production_orders.findMany.mock.calls[0][0].where).not.toHaveProperty('plant_id');
+  });
+
   it('S16: carries over in-progress and partially completed orders from earlier days (multi-day production)', async () => {
     await service.findDay({ date: '2026-11-10' });
 

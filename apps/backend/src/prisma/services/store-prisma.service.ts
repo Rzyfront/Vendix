@@ -221,6 +221,8 @@ export class StorePrismaService extends BasePrismaService {
     // ===== Manufacturing module (MVP) =====
     'manufacturing_settings',
     'store_sequences',
+    // QUI-1013: production plants (direct store_id).
+    'manufacturing_plants',
     // ===== Membership core (generalized) =====
     // Las 5 tablas de membresía llevan store_id directo → scoping directo por
     // tienda. membership_access_logs también scopea por store_id (bitácora).
@@ -2373,6 +2375,10 @@ export class StorePrismaService extends BasePrismaService {
 
   get store_sequences() {
     return this.scoped_client.store_sequences;
+  }
+
+  get manufacturing_plants() {
+    return this.scoped_client.manufacturing_plants;
   }
 
   // ===== Pedidos programados + adiciones =====

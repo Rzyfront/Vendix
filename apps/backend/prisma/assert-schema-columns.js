@@ -39,6 +39,13 @@ const { Client } = require('pg');
  * Formato: 'tabla.columna'.
  */
 const REQUIRED_COLUMNS = [
+  // --- Manufactura: varias plantas (20261208090000, QUI-1013) ---
+  // Toda lectura de production_orders trae plant_id (restaurante incluido): sin
+  // ella cocina, Planta y pedidos programados dan 500. La planta resuelve las
+  // bodegas de insumos/terminado al completar.
+  'production_orders.plant_id',
+  'manufacturing_plants.input_location_id',
+  'manufacturing_plants.output_location_id',
   // --- CRM Vendix Platform: enlace a una tienda (20261207090000) ---
   // Toda lectura y escritura de platform_crm_links la selecciona: sin ella el
   // bloque «Cuenta Vendix» de la ficha del prospecto da 500.
@@ -249,6 +256,8 @@ const REQUIRED_TABLES = [
   'production_order_lines',
   'manufacturing_settings',
   'store_sequences',
+  // QUI-1013 — varias plantas (migración 20261208090000_manufacturing_plants).
+  'manufacturing_plants',
   // QUI-1010 — bot de monitoreo (migración 20261205100000_platform_alerts): el
   // filtro global de errores y el barrido de colas escriben aquí en caliente.
   'platform_alerts',

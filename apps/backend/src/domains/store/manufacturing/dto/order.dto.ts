@@ -46,6 +46,16 @@ export class CreateManufacturingOrderDto {
   @Type(() => Number)
   location_id?: number;
 
+  /**
+   * QUI-1013 — plant where the order is made. Optional: with a single active
+   * plant it is assigned automatically; with several it is required.
+   */
+  @IsOptional()
+  @IsInt()
+  @IsPositive()
+  @Type(() => Number)
+  plant_id?: number;
+
   @IsOptional()
   @IsIn(ORDER_PRIORITIES as unknown as string[])
   priority?: OrderPriority;
@@ -72,6 +82,16 @@ export class UpdateManufacturingOrderDto {
   @IsPositive()
   @Type(() => Number)
   location_id?: number;
+
+  /**
+   * QUI-1013 — plant where the order is made. Optional: with a single active
+   * plant it is assigned automatically; with several it is required.
+   */
+  @IsOptional()
+  @IsInt()
+  @IsPositive()
+  @Type(() => Number)
+  plant_id?: number;
 
   @IsOptional()
   @IsIn(ORDER_PRIORITIES as unknown as string[])
@@ -144,6 +164,13 @@ export class ManufacturingOrderQueryDto {
   @IsInt()
   @IsPositive()
   product_id?: number;
+
+  /** QUI-1013 — only the orders of this plant. */
+  @IsOptional()
+  @Type(() => Number)
+  @IsInt()
+  @IsPositive()
+  plant_id?: number;
 
   @IsOptional()
   @IsDateString()
