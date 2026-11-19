@@ -221,8 +221,12 @@ export class EnvironmentSwitchService {
         throw new NotFoundException('Tienda no encontrada');
       }
 
-      // Nunca se abre una tienda inactiva, ni con slug explícito.
-      if (!store.is_active) {
+      // Tienda inactiva: la auto-selección de arriba nunca la elige, así que
+      // aquí solo llega con slug explícito. Owner/admin pueden abrirla a
+      // propósito desde el panel de la organización (revisarla o
+      // reactivarla); el resto de roles no. En ningún caso queda guardada
+      // como main_store_id (ver más abajo).
+      if (!store.is_active && !has_high_privilege) {
         throw new VendixHttpException(ErrorCodes.AUTH_STORE_INACTIVE_001);
       }
 
@@ -331,8 +335,14 @@ export class EnvironmentSwitchService {
       },
     });
 
-    // También actualizar main_store_id cuando se cambia a STORE_ADMIN
-    if (targetEnvironment === 'STORE_ADMIN' && store_id) {
+    // También actualizar main_store_id cuando se cambia a STORE_ADMIN, salvo
+    // que la tienda esté inactiva: abrirla para revisarla no la convierte en
+    // la tienda de arranque del próximo login.
+    if (
+      targetEnvironment === 'STORE_ADMIN' &&
+      store_id &&
+      active_store?.is_active
+    ) {
       await this.prismaService.users.update({
         where: { id: userId },
         data: { main_store_id: store_id },

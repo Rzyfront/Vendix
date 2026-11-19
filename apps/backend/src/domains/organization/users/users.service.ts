@@ -807,8 +807,6 @@ export class UsersService {
             where: { user_id: id, store_id: storeId },
           });
           if (!exists) {
-            // Nunca se agrega un usuario a una tienda inactiva.
-            await StaffProvisioningService.assertStoreActive(tx, storeId);
             await tx.store_users.create({
               data: {
                 user_id: id,

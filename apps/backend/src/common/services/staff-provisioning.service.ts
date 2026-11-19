@@ -97,6 +97,20 @@ export class StaffProvisioningService {
   }
 
   /**
+   * ¿La tienda existe y está activa? Regla del incidente vendix-centro
+   * (2026-11-18): una tienda inactiva puede tener miembros (p.ej. una tienda
+   * en borrador con su manager), pero NUNCA puede quedar como `main_store_id`
+   * ni ser elegida automáticamente como tienda de arranque.
+   */
+  static async isStoreActive(db: any, storeId: number): Promise<boolean> {
+    const store = await db.stores.findUnique({
+      where: { id: storeId },
+      select: { is_active: true },
+    });
+    return Boolean(store?.is_active);
+  }
+
+  /**
    * Resuelve la tienda de arranque de un STORE_ADMIN de forma determinista.
    *
    * Extracción fiel de las Estrategias 1/2/3 que estaban duplicadas en
@@ -110,21 +124,6 @@ export class StaffProvisioningService {
    *
    * @returns la tienda resuelta, o `null` si no hay ninguna elegible (huérfano).
    */
-  /**
-   * Lanza AUTH_STORE_INACTIVE_001 si la tienda no existe o está inactiva.
-   * Punto único para impedir que usuarios, membresías o `main_store_id`
-   * apunten a una tienda inactiva.
-   */
-  static async assertStoreActive(db: any, storeId: number): Promise<void> {
-    const store = await db.stores.findUnique({
-      where: { id: storeId },
-      select: { is_active: true },
-    });
-    if (!store?.is_active) {
-      throw new VendixHttpException(ErrorCodes.AUTH_STORE_INACTIVE_001);
-    }
-  }
-
   async resolveStoreForStoreAdmin(
     user: { id: number; organization_id: number; main_store_id: number | null },
     hasHighPrivilege: boolean,
@@ -241,11 +240,6 @@ export class StaffProvisioningService {
     } = input;
     const db: any = tx;
 
-    // 0. Nunca se aprovisiona staff en una tienda inactiva: quedaría con
-    //    main_store_id/membresía/roles apuntando a una tienda que el login no
-    //    puede abrir (incidente vendix-centro, 2026-11-18).
-    await StaffProvisioningService.assertStoreActive(db, storeId);
-
     // 1. Relación store_users (idempotente)
     await db.store_users.upsert({
       where: { store_id_user_id: { store_id: storeId, user_id: userId } },
@@ -335,7 +329,12 @@ export class StaffProvisioningService {
 
     // 4. main_store_id como driver de la tienda de arranque (CD3/CD4).
     //    'if-empty' evita pisar el arranque de un owner multi-tienda.
-    if (setMainStore) {
+    //    Una tienda inactiva nunca queda como tienda de arranque: la membresía
+    //    sí se crea (tienda en borrador con su manager), pero main_store_id no.
+    if (
+      setMainStore &&
+      (await StaffProvisioningService.isStoreActive(db, storeId))
+    ) {
       if (setMainStore === 'if-empty') {
         const current = await db.users.findUnique({
           where: { id: userId },

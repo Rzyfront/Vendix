@@ -1,5 +1,4 @@
 import { StaffProvisioningService } from './staff-provisioning.service';
-import { ErrorCodes } from '../errors';
 
 /**
  * Incidente vendix-centro (2026-11-18): usuarios y clientes quedaron en una
@@ -32,37 +31,42 @@ describe('StaffProvisioningService — tiendas inactivas', () => {
   }
 
   describe('provisionStaffMembership', () => {
-    it('rechaza una tienda inactiva sin escribir nada', async () => {
+    it('en una tienda inactiva crea la membresía pero NO fija main_store_id', async () => {
+      // Caso real: crear una tienda con "Tienda activa" apagado y con manager.
       const db = makeDb({ is_active: false });
+      db.user_settings.findUnique.mockResolvedValue({ id: 1 });
 
-      await expect(
-        service.provisionStaffMembership(db as any, {
-          userId: 3628,
-          storeId: 2,
-          organizationId: 1,
-          roleName: 'admin',
-        }),
-      ).rejects.toMatchObject({
-        errorCode: ErrorCodes.AUTH_STORE_INACTIVE_001.code,
+      await service.provisionStaffMembership(db as any, {
+        userId: 3628,
+        storeId: 2,
+        organizationId: 1,
       });
-      expect(db.store_users.upsert).not.toHaveBeenCalled();
+
+      expect(db.store_users.upsert).toHaveBeenCalledWith({
+        where: { store_id_user_id: { store_id: 2, user_id: 3628 } },
+        update: {},
+        create: { store_id: 2, user_id: 3628 },
+      });
       expect(db.users.update).not.toHaveBeenCalled();
     });
 
-    it('rechaza una tienda que no existe', async () => {
-      const db = makeDb(null);
-      await expect(
-        service.provisionStaffMembership(db as any, {
-          userId: 1,
-          storeId: 999,
-          organizationId: 1,
-        }),
-      ).rejects.toMatchObject({
-        errorCode: ErrorCodes.AUTH_STORE_INACTIVE_001.code,
+    it("con setMainStore 'if-empty' tampoco fija una tienda inactiva", async () => {
+      const db = makeDb({ is_active: false });
+      db.user_settings.findUnique.mockResolvedValue({ id: 1 });
+      db.users.findUnique.mockResolvedValue({ main_store_id: null });
+
+      await service.provisionStaffMembership(db as any, {
+        userId: 3627,
+        storeId: 2,
+        organizationId: 1,
+        setMainStore: 'if-empty',
       });
+
+      expect(db.store_users.upsert).toHaveBeenCalled();
+      expect(db.users.update).not.toHaveBeenCalled();
     });
 
-    it('aprovisiona normal en una tienda activa', async () => {
+    it('en una tienda activa fija main_store_id como siempre', async () => {
       const db = makeDb({ is_active: true });
       db.user_settings.findUnique.mockResolvedValue({ id: 1 });
 

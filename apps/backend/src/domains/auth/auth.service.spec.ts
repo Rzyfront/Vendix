@@ -439,6 +439,115 @@ describe('AuthService Login Flow', () => {
       });
     });
 
+    it('slug de tienda inactiva con contraseña incorrecta: credenciales, sin revelar que está inactiva', async () => {
+      const user = accountRow({
+        email: 'owner@test.com',
+        password: await bcrypt.hash('correcta', 4),
+        user_roles: [{ roles: { name: 'owner', role_permissions: [] } }],
+      });
+      mockPrismaService.users.findMany.mockResolvedValue([user]);
+      mockPrismaService.stores.findFirst.mockResolvedValue({
+        id: 2,
+        slug: 'vendix-centro',
+        organization_id: 1,
+        organizations: { slug: 'org-a' },
+      });
+      mockPrismaService.user_settings.findUnique.mockResolvedValue({
+        config: {},
+      });
+      mockPrismaService.stores.findUnique.mockResolvedValue({
+        id: 2,
+        slug: 'vendix-centro',
+        organization_id: 1,
+        is_active: false,
+      });
+      const failed = jest
+        .spyOn(service as any, 'handleFailedLogin')
+        .mockResolvedValue(undefined);
+
+      await expect(
+        service.login({
+          email: 'owner@test.com',
+          password: 'otra',
+          store_slug: 'vendix-centro',
+        }),
+      ).rejects.toMatchObject({ errorCode: 'AUTH_CREDENTIALS_001' });
+      expect(failed).toHaveBeenCalledWith(user.id, undefined);
+      failed.mockRestore();
+    });
+
+    it('slug de tienda inactiva sin membresía (rol de tienda): credenciales antes que inactiva', async () => {
+      const user = accountRow({
+        email: 'staff@test.com',
+        password: await bcrypt.hash('123', 4),
+        user_roles: [{ roles: { name: 'employee', role_permissions: [] } }],
+      });
+      mockPrismaService.users.findMany.mockResolvedValue([user]);
+      mockPrismaService.stores.findFirst.mockResolvedValue({
+        id: 2,
+        slug: 'vendix-centro',
+        organization_id: 1,
+        organizations: { slug: 'org-a' },
+      });
+      mockPrismaService.user_settings.findUnique.mockResolvedValue({
+        config: {},
+      });
+      mockPrismaService.stores.findUnique.mockResolvedValue({
+        id: 2,
+        slug: 'vendix-centro',
+        organization_id: 1,
+        is_active: false,
+      });
+      mockPrismaService.store_users.findFirst.mockResolvedValueOnce(null);
+
+      await expect(
+        service.login({
+          email: 'staff@test.com',
+          password: '123',
+          store_slug: 'vendix-centro',
+        }),
+      ).rejects.toMatchObject({ errorCode: 'AUTH_CREDENTIALS_001' });
+    });
+
+    it('owner/admin: la sesión abierta a propósito en una tienda inactiva sí se renueva', async () => {
+      mockConfigService.get.mockReturnValue('secret');
+      mockJwtService.verify.mockReturnValue({
+        sub: 1,
+        organization_id: 1,
+        store_id: 2,
+      });
+      mockPrismaService.refresh_tokens.findFirst.mockResolvedValue({
+        id: 9,
+        user_id: 1,
+        users: {
+          id: 1,
+          organization_id: 1,
+          user_roles: [{ roles: { name: 'owner' } }],
+        },
+      });
+      const security = jest
+        .spyOn(service as any, 'validateRefreshTokenSecurity')
+        .mockResolvedValue(undefined);
+      // Se corta justo al emitir: basta con saber que llegó a generar tokens.
+      const generate = jest
+        .spyOn(service as any, 'generateTokens')
+        .mockRejectedValue(new Error('emitido'));
+      mockPrismaService.stores.findUnique.mockResolvedValue({
+        is_active: false,
+      });
+
+      await expect(
+        service.refreshToken({ refresh_token: 'rt' } as any),
+      ).rejects.toMatchObject({ errorCode: 'AUTH_TOKEN_001' });
+      expect(generate).toHaveBeenCalledWith(
+        expect.objectContaining({ id: 1 }),
+        expect.objectContaining({ store_id: 2 }),
+      );
+      security.mockRestore();
+      generate.mockRestore();
+      mockConfigService.get.mockReset();
+    });
+
     it('no renueva una sesión abierta en una tienda que se desactivó', async () => {
       mockConfigService.get.mockReturnValue('secret');
       mockJwtService.verify.mockReturnValue({
@@ -461,7 +570,7 @@ describe('AuthService Login Flow', () => {
 
       await expect(
         service.refreshToken({ refresh_token: 'rt' } as any),
-      ).rejects.toBeInstanceOf(VendixHttpException);
+      ).rejects.toMatchObject({ errorCode: 'AUTH_STORE_INACTIVE_001' });
       expect(mockPrismaService.stores.findUnique).toHaveBeenCalledWith({
         where: { id: 2 },
         select: { is_active: true },

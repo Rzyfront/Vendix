@@ -1792,12 +1792,6 @@ export class AuthService {
         throw new VendixHttpException(ErrorCodes.AUTH_CREDENTIALS_001);
       }
 
-      // Una tienda inactiva nunca se abre, ni siquiera con slug explícito.
-      if (!targetStore.is_active) {
-        await this.logLoginAttempt(user.id, false);
-        throw new VendixHttpException(ErrorCodes.AUTH_STORE_INACTIVE_001);
-      }
-
       if (!hasHighPrivilege) {
         const isStoreUser = await this.prismaService.store_users.findFirst({
           where: {
@@ -1810,6 +1804,24 @@ export class AuthService {
           await this.logLoginAttempt(user.id, false);
           throw new VendixHttpException(ErrorCodes.AUTH_CREDENTIALS_001);
         }
+      }
+
+      // El login por dominio/slug de una tienda inactiva se bloquea (regla de
+      // producto, incidente vendix-centro). Para no revelar que la tienda
+      // existe e está inactiva a quien no tiene acceso ni la contraseña, el
+      // aviso específico solo sale DESPUÉS de validar membresía y contraseña.
+      // Un owner/admin que quiera revisarla o reactivarla entra a la
+      // organización y la abre desde el panel (cambio de tienda explícito).
+      if (!targetStore.is_active) {
+        const locked = !!user.locked_until && new Date() < user.locked_until;
+        const passwordOk =
+          !locked && (await bcrypt.compare(password, user.password));
+        await this.logLoginAttempt(user.id, false);
+        if (!passwordOk) {
+          if (!locked) await this.handleFailedLogin(user.id, client_info);
+          throw new VendixHttpException(ErrorCodes.AUTH_CREDENTIALS_001);
+        }
+        throw new VendixHttpException(ErrorCodes.AUTH_STORE_INACTIVE_001);
       }
     }
 
@@ -2333,14 +2345,19 @@ export class AuthService {
         throw new VendixHttpException(ErrorCodes.AUTH_TOKEN_001);
       }
 
-      // Una sesión abierta en una tienda que se desactivó no se renueva:
-      // obliga a iniciar sesión de nuevo y caer en una tienda activa.
+      // Una sesión abierta en una tienda que se desactivó no se renueva
+      // (obliga a iniciar sesión de nuevo y caer en una tienda activa), salvo
+      // para owner/admin: ellos pueden abrirla a propósito desde el panel de
+      // la organización para revisarla o reactivarla.
       if (payload.store_id) {
         const scopedStore = await this.prismaService.stores.findUnique({
           where: { id: Number(payload.store_id) },
           select: { is_active: true },
         });
-        if (!scopedStore?.is_active) {
+        const isHighPrivilege = (user.user_roles ?? []).some((ur: any) =>
+          ['owner', 'admin', 'super_admin'].includes(ur.roles?.name),
+        );
+        if (!scopedStore?.is_active && !isHighPrivilege) {
           throw new VendixHttpException(ErrorCodes.AUTH_STORE_INACTIVE_001);
         }
       }
@@ -2398,6 +2415,14 @@ export class AuthService {
         ...tokens,
       };
     } catch (error) {
+      // El cierre por tienda inactiva conserva su código para que el front
+      // muestre el motivo; cualquier otro fallo sigue siendo token inválido.
+      if (
+        error instanceof VendixHttpException &&
+        error.errorCode === ErrorCodes.AUTH_STORE_INACTIVE_001.code
+      ) {
+        throw error;
+      }
       throw new VendixHttpException(ErrorCodes.AUTH_TOKEN_001);
     }
   }
