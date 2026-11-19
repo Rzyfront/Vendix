@@ -323,12 +323,9 @@ export class TemplatesService {
 
   /**
    * Marks the CRM default template of the store, unmarking the previous one
-   * in the same transaction (one per store, partial unique index).
-   */
-  /**
-   * Marca la predeterminada del CRM. Si otra se marcó al mismo tiempo, el
-   * índice único parcial responde P2002: se reintenta una vez (la última
-   * marca gana) y, si vuelve a chocar, 409 DCOL_CRM_002 en vez de un 500.
+   * in the same transaction (one per store, partial unique index). A
+   * concurrent mark (P2002) is retried once, last mark wins; a second clash
+   * answers 409 DCOL_CRM_002 instead of a 500.
    */
   private async setCrmDefault(templateId: number) {
     const { storeId } = this.requireStore();

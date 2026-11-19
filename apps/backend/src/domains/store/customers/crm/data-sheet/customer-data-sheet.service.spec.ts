@@ -442,6 +442,18 @@ describe('CustomerDataSheetService (QUI-1043 H5/H8)', () => {
         expect.stringMatching(/clientes\.CSV$/),
         'text/csv',
       );
+
+      // The same CSV from Windows with Excel installed.
+      await service.upload(CUSTOMER, {
+        buffer: Buffer.from('a;b'),
+        originalname: 'clientes.csv',
+        mimetype: 'application/vnd.ms-excel',
+      } as Express.Multer.File);
+      expect(s3.uploadFile).toHaveBeenLastCalledWith(
+        expect.any(Buffer),
+        expect.stringMatching(/clientes\.csv$/),
+        'application/vnd.ms-excel',
+      );
     });
   });
 });
