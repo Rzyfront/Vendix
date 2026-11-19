@@ -136,8 +136,38 @@ export interface CrmTask {
   assigned_user: CrmPerson | null;
   created_by: CrmPerson | null;
   opportunity: { id: number; title: string } | null;
+  /** People who help with the task; they see it and can complete it. */
+  support_users?: CrmPerson[];
+  /** Stage the linked opportunity moves to when the task is completed. */
+  move_to_stage?: Pick<CrmStage, 'id' | 'name' | 'kind' | 'color'> | null;
+  /** Only in the answer of the step to `done` of a task that moves. */
+  opportunity_move?: CrmTaskOpportunityMove | null;
   conversation_id: number | null;
   created_at: string;
+}
+
+/** Why completing a task did not move its opportunity. */
+export type CrmTaskMoveSkipReason =
+  | 'opportunity_missing'
+  | 'opportunity_closed'
+  | 'already_in_stage'
+  | 'stage_unavailable'
+  | 'failed';
+
+export interface CrmTaskOpportunityMove {
+  moved: boolean;
+  reason: CrmTaskMoveSkipReason | null;
+  stage: { id: number; name: string; kind: CrmStage['kind'] } | null;
+}
+
+/** Open opportunity of a customer, offered by the task form. */
+export interface CrmOpenOpportunity {
+  id: number;
+  title: string;
+  pipeline: { id: number; name: string };
+  stage: CrmStage | null;
+  /** Active stages of its pipeline, in board order. */
+  stages: CrmStage[];
 }
 
 export interface CrmTasksQuery {
@@ -178,6 +208,9 @@ export interface SaveCrmTask {
   customer_id?: number;
   opportunity_id?: number;
   status?: CrmTaskStatus;
+  /** Replaces the whole set on update; the assignee is dropped by the API. */
+  support_user_ids?: number[];
+  move_to_stage_id?: number | null;
 }
 
 export type CrmOpportunityStatus = 'open' | 'won' | 'lost';

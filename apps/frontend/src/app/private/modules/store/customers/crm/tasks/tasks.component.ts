@@ -3,6 +3,7 @@ import { FormsModule } from '@angular/forms';
 import { RouterLink } from '@angular/router';
 import { firstValueFrom } from 'rxjs';
 import {
+  BadgeComponent,
   ButtonComponent,
   CardComponent,
   EmptyStateComponent,
@@ -22,7 +23,14 @@ import { AuthFacade } from '../../../../../../core/store/auth/auth.facade';
 import { parseApiError } from '../../../../../../core/utils/parse-api-error';
 import { CrmService } from '../shared/crm.service';
 import { CrmTask, CrmTaskStats, CrmTasksQuery, personName } from '../shared/crm.interface';
-import { crmCanSeeAll, formatDateTime } from '../shared/crm.utils';
+import {
+  crmCanSeeAll,
+  formatDateTime,
+  isTaskSupporter,
+  supportLine,
+  taskCompletedMessage,
+  taskMoveLine,
+} from '../shared/crm.utils';
 import { TaskFormModalComponent } from '../shared/task-form-modal.component';
 
 type TaskTab = 'today' | 'overdue' | 'week' | 'open' | 'done';
@@ -40,6 +48,7 @@ const PAGE_SIZE = 30;
   imports: [
     FormsModule,
     RouterLink,
+    BadgeComponent,
     ButtonComponent,
     CardComponent,
     EmptyStateComponent,
@@ -185,6 +194,9 @@ const PAGE_SIZE = 30;
                   >
                     {{ task.title }}
                   </button>
+                  @if (isSupporter(task)) {
+                    <app-badge class="ml-2 align-middle" variant="info" size="xs">Apoyo</app-badge>
+                  }
                   <div class="mt-0.5 flex flex-wrap items-center gap-x-3 gap-y-1 text-xs text-[var(--color-text-secondary)]">
                     @if (task.due_at) {
                       <span
@@ -209,11 +221,14 @@ const PAGE_SIZE = 30;
                     @if (task.opportunity) {
                       <span class="inline-flex items-center gap-1">
                         <app-icon name="trending-up" [size]="12"></app-icon>
-                        {{ task.opportunity.title }}
+                        {{ moveLine(task) || task.opportunity.title }}
                       </span>
                     }
                     @if (canSeeAll()) {
                       <span>· {{ name(task.assigned_user) || 'Sin responsable' }}</span>
+                    }
+                    @if (support(task.support_users); as line) {
+                      <span>· {{ line }}</span>
                     }
                   </div>
                 </div>
@@ -280,6 +295,11 @@ export class TasksComponent {
   );
   protected readonly name = personName;
   protected readonly dateTime = formatDateTime;
+  protected readonly moveLine = taskMoveLine;
+  protected readonly support = supportLine;
+  /** "Apoyo" badge: the viewer helps with the task without owning it. */
+  protected readonly isSupporter = (task: CrmTask) =>
+    isTaskSupporter(task, this.auth.userId());
 
   constructor() {
     effect(() => {
@@ -321,7 +341,9 @@ export class TasksComponent {
         task.status === 'done' ? this.crm.reopenTask(task.id) : this.crm.completeTask(task.id),
       );
       this.rows.update((rows) => rows.map((row) => (row.id === updated.id ? updated : row)));
-      this.toast.success(updated.status === 'done' ? 'Tarea completada' : 'Tarea reabierta');
+      this.toast.success(
+        updated.status === 'done' ? taskCompletedMessage(updated) : 'Tarea reabierta',
+      );
       void this.loadStats();
     } catch (error) {
       this.toast.error(parseApiError(error).userMessage);

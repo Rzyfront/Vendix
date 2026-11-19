@@ -44,6 +44,10 @@ import {
   CRM_TIMELINE_META,
   crmCanSeeAll,
   formatDateTime,
+  isTaskSupporter,
+  supportLine,
+  taskCompletedMessage,
+  taskMoveLine,
 } from '../shared/crm.utils';
 import { TaskFormModalComponent } from '../shared/task-form-modal.component';
 import { CustomerSectionComponent, CustomerSectionEmptyComponent } from '../../components/customer-section/customer-section.component';
@@ -321,10 +325,22 @@ const TAG_CHIP = `${CHIP} border-border bg-surface text-text-secondary`;
                             </span>
                           }
                           <span>{{ name(task.assigned_user) || 'Sin responsable' }}</span>
+                          @if (supportLine(task.support_users); as line) {
+                            <span>· {{ line }}</span>
+                          }
+                          @if (isSupporter(task)) {
+                            <app-badge variant="info" size="xs">Apoyo</app-badge>
+                          }
                           @if (task.is_overdue) {
                             <app-badge variant="error" size="xs">Vencida</app-badge>
                           }
                         </p>
+                        @if (moveLine(task); as line) {
+                          <p class="flex items-center gap-1 text-xs text-text-secondary">
+                            <app-icon name="trending-up" [size]="12"></app-icon>
+                            {{ line }}
+                          </p>
+                        }
                         @if (task.description) {
                           <p class="mt-1 whitespace-pre-line text-xs text-text-secondary">{{ task.description }}</p>
                         }
@@ -807,6 +823,11 @@ export class CustomerCrmPanelComponent {
 
   protected readonly name = personName;
   protected readonly dateTime = formatDateTime;
+  protected readonly moveLine = taskMoveLine;
+  protected readonly supportLine = supportLine;
+  /** "Apoyo" badge: the viewer helps with the task without owning it. */
+  protected readonly isSupporter = (task: CrmTask) =>
+    isTaskSupporter(task, this.auth.userId());
   protected meta(type: CrmTimelineType) {
     return CRM_TIMELINE_META[type];
   }
@@ -990,8 +1011,10 @@ export class CustomerCrmPanelComponent {
     if (this.completingId()) return;
     this.completingId.set(task.id);
     try {
-      await firstValueFrom(this.crm.completeTask(task.id));
-      this.toast.success('Seguimiento completado');
+      const completed = await firstValueFrom(this.crm.completeTask(task.id));
+      this.toast.success(taskCompletedMessage(completed, 'Seguimiento completado'));
+      // The task may have moved one of the opportunities listed above.
+      if (completed.opportunity_move?.moved) void this.loadBoard();
       void this.loadTasks();
       this.refreshProfile();
       void this.loadTimeline(true);
