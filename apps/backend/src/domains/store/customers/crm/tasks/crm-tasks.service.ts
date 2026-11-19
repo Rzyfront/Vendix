@@ -14,12 +14,14 @@ import {
 } from '../pipeline/crm-pipeline.service';
 import {
   CrmViewer,
+  activeStoreStaffUserWhere,
   isActiveStoreStaff,
   isStoreCustomer,
   resolveCrmViewer,
 } from '../shared/crm-access';
 import {
   CreateCrmTaskDto,
+  CrmTaskStaffQueryDto,
   CrmTaskStatsQueryDto,
   CrmTasksQueryDto,
   UpdateCrmTaskDto,
@@ -29,6 +31,8 @@ export const CRM_TASKS_PERMISSION = 'store:crm_tasks:manage';
 export const CRM_TASK_ASSIGNED_NOTIFICATION = 'crm_task_assigned';
 export const CRM_TASK_DUE_NOTIFICATION = 'crm_task_due';
 export const CRM_TASKS_ROUTE = '/admin/customers/tasks';
+/** People the support picker lists per search. */
+export const CRM_TASK_STAFF_LIMIT = 20;
 
 const PERSON_SELECT = { id: true, first_name: true, last_name: true } as const;
 
@@ -188,6 +192,38 @@ export class CrmTasksService {
     return this.toTask(row, new Date());
   }
 
+  /**
+   * Active staff of the store for the support picker: the same people the
+   * API accepts as support (role with `store:crm_tasks:manage`), so a seller
+   * without POS access can still find them. Only id and name; every word of
+   * `q` must match the first or the last name.
+   */
+  async staff(query: CrmTaskStaffQueryDto = {}) {
+    this.viewer();
+    const words = (query.q ?? '').trim().split(/\s+/).filter(Boolean);
+    const rows = await this.prisma.store_users.findMany({
+      where: {
+        user: {
+          ...activeStoreStaffUserWhere(CRM_TASKS_PERMISSION),
+          ...(words.length
+            ? {
+                AND: words.map((word) => ({
+                  OR: [
+                    { first_name: { contains: word, mode: 'insensitive' as const } },
+                    { last_name: { contains: word, mode: 'insensitive' as const } },
+                  ],
+                })),
+              }
+            : {}),
+        },
+      },
+      select: { user: { select: PERSON_SELECT } },
+      orderBy: [{ user: { first_name: 'asc' } }, { user_id: 'asc' }],
+      take: CRM_TASK_STAFF_LIMIT,
+    });
+    return rows.map((row) => row.user);
+  }
+
   async create(dto: CreateCrmTaskDto) {
     const viewer = this.viewer();
     const assignee =
@@ -239,6 +275,7 @@ export class CrmTasksService {
   async update(id: number, dto: UpdateCrmTaskDto) {
     const viewer = this.viewer();
     const current = await this.findVisible(viewer, id);
+    this.assertSupportOnlyEdit(viewer, current, dto);
     const data: Prisma.crm_tasksUncheckedUpdateManyInput = {};
 
     if (dto.title !== undefined) data.title = dto.title.trim();
@@ -282,22 +319,47 @@ export class CrmTasksService {
       dto.support_user_ids,
     );
 
-    if (Object.keys(data).length) {
-      await this.prisma.crm_tasks.updateMany({ where: { id }, data });
-    }
-    if (support.removed.length) {
-      await this.prisma.crm_task_assignees.deleteMany({
-        where: { task_id: id, user_id: { in: support.removed } },
-      });
-    }
-    if (support.added.length) {
-      await this.prisma.crm_task_assignees.createMany({
-        data: support.added.map((user_id) => ({
-          store_id: viewer.store_id,
-          task_id: id,
-          user_id,
-        })),
-        skipDuplicates: true,
+    // The task and its support set change together or not at all. The tx
+    // client is unscoped: every write names the store. Completing is guarded
+    // on the row, so of two simultaneous completions only one moves the
+    // opportunity.
+    let completed = false;
+    if (
+      Object.keys(data).length ||
+      support.removed.length ||
+      support.added.length
+    ) {
+      await this.prisma.$transaction(async (tx: Prisma.TransactionClient) => {
+        if (Object.keys(data).length) {
+          const { count } = await tx.crm_tasks.updateMany({
+            where: {
+              id,
+              store_id: viewer.store_id,
+              ...(completing ? { status: { not: 'done' as const } } : {}),
+            },
+            data,
+          });
+          completed = completing && count === 1;
+        }
+        if (support.removed.length) {
+          await tx.crm_task_assignees.deleteMany({
+            where: {
+              store_id: viewer.store_id,
+              task_id: id,
+              user_id: { in: support.removed },
+            },
+          });
+        }
+        if (support.added.length) {
+          await tx.crm_task_assignees.createMany({
+            data: support.added.map((user_id) => ({
+              store_id: viewer.store_id,
+              task_id: id,
+              user_id,
+            })),
+            skipDuplicates: true,
+          });
+        }
       });
     }
     const updated = await this.prisma.crm_tasks.findFirst({
@@ -308,8 +370,9 @@ export class CrmTasksService {
     if (reassigned) await this.notifyAssigned(viewer, updated);
     await this.notifySupporters(viewer, updated, support.added);
     const task = this.toTask(updated, new Date());
-    if (!completing) return task;
-    // Reopening never moves it back; only the step to `done` moves it.
+    // Reopening never moves it back; only the step to `done` moves it, and
+    // only for the request that took that step.
+    if (!completed) return task;
     return {
       ...task,
       opportunity_move: await this.moveLinkedOpportunity(updated),
@@ -326,6 +389,49 @@ export class CrmTasksService {
 
   private viewer(): CrmViewer {
     return resolveCrmViewer(ErrorCodes.CRM_TASK_001);
+  }
+
+  /**
+   * Who only helps with a task (not its assignee nor its creator, without
+   * see-all) may complete or reopen it, nothing else (CRM_TASK_003). Only
+   * what really changes counts: the form sends title, description and due
+   * date on every save, so saving untouched is not an edit.
+   */
+  private assertSupportOnlyEdit(
+    viewer: CrmViewer,
+    current: TaskRow,
+    dto: UpdateCrmTaskDto,
+  ): void {
+    if (
+      viewer.can_see_all ||
+      current.assigned_user_id === viewer.user_id ||
+      current.created_by_user_id === viewer.user_id
+    ) {
+      return;
+    }
+    const time = (value: Date | string | null | undefined) =>
+      value ? new Date(value).getTime() : null;
+    const before = current.supporters.map((row) => row.user.id);
+    const requested = dto.support_user_ids
+      ? [...new Set(dto.support_user_ids)].filter(
+          (userId) => userId !== current.assigned_user_id,
+        )
+      : before;
+    const changes = [
+      dto.title !== undefined && dto.title.trim() !== current.title,
+      dto.description !== undefined &&
+        (dto.description?.trim() || null) !== current.description,
+      dto.due_at !== undefined && time(dto.due_at) !== time(current.due_at),
+      dto.assigned_user_id !== undefined &&
+        dto.assigned_user_id !== current.assigned_user_id,
+      dto.move_to_stage_id !== undefined &&
+        dto.move_to_stage_id !== current.move_to_stage_id,
+      requested.length !== before.length ||
+        requested.some((userId) => !before.includes(userId)),
+    ];
+    if (changes.some(Boolean)) {
+      throw new VendixHttpException(ErrorCodes.CRM_TASK_003);
+    }
   }
 
   private visibility(viewer: CrmViewer): Prisma.crm_tasksWhereInput {
@@ -423,7 +529,11 @@ export class CrmTasksService {
       throw new VendixHttpException(ErrorCodes.CRM_CUSTOMER_001);
     }
     if (dto.opportunity_id) {
-      await this.assertOpportunityVisible(viewer, dto.opportunity_id);
+      await this.assertOpportunityVisible(
+        viewer,
+        dto.opportunity_id,
+        dto.customer_id,
+      );
     }
     if (dto.conversation_id) {
       const found = await this.prisma.crm_conversations.count({
@@ -472,14 +582,20 @@ export class CrmTasksService {
     };
   }
 
-  /** Same visibility as the pipeline: a seller only reaches their own. */
+  /**
+   * Same visibility as the pipeline: a seller only reaches their own. With a
+   * customer, the opportunity must be that customer's, so a task of one
+   * customer never moves another customer's opportunity.
+   */
   private async assertOpportunityVisible(
     viewer: CrmViewer,
     opportunityId: number,
+    customerId?: number,
   ): Promise<void> {
     const found = await this.prisma.crm_opportunities.count({
       where: {
         id: opportunityId,
+        ...(customerId ? { customer_id: customerId } : {}),
         ...(viewer.can_see_all ? {} : { owner_user_id: viewer.user_id }),
       },
     });

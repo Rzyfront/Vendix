@@ -83,6 +83,10 @@ function setup(
         }
         return options.staff === false ? null : { id: 8 };
       }),
+      findMany: jest.fn(async (..._args: any[]) => [
+        { user: person(LUIS, 'Luis') },
+        { user: person(MARTA, 'Marta') },
+      ]),
     },
     crm_opportunities: { count: jest.fn(async (..._args: any[]) => 1) },
     crm_conversations: { count: jest.fn(async (..._args: any[]) => 1) },
@@ -104,7 +108,11 @@ function setup(
         });
         return current;
       }),
-      updateMany: jest.fn(async ({ data }: any) => {
+      updateMany: jest.fn(async ({ where, data }: any) => {
+        // The completion guard: a task already done is not completed again.
+        if (where.status?.not && current.status === where.status.not) {
+          return { count: 0 };
+        }
         current = { ...current, ...data };
         return { count: 1 };
       }),
@@ -131,6 +139,10 @@ function setup(
       return { count: data.length };
     }),
   };
+  // The task writes run in a transaction; the mock hands itself as the tx.
+  (prisma as any).$transaction = jest.fn(async (work: (tx: unknown) => unknown) =>
+    work(prisma),
+  );
   const notifications = { sendToUser: jest.fn(async (..._args: any[]) => null) };
   const pipeline = {
     assertTaskTargetStage: jest.fn(async (..._args: any[]) => undefined),
@@ -320,15 +332,15 @@ describe('CrmTasksService', () => {
     const { service, prisma } = setup();
     const done = await service.complete(50);
     expect(prisma.crm_tasks.updateMany.mock.calls[0][0]).toEqual({
-      where: { id: 50 },
+      where: { id: 50, store_id: STORE, status: { not: 'done' } },
       data: { status: 'done', completed_at: expect.any(Date) },
     });
     expect(done.status).toBe('done');
 
     await service.reopen(50);
-    expect(prisma.crm_tasks.updateMany.mock.calls[1][0].data).toEqual({
-      status: 'pending',
-      completed_at: null,
+    expect(prisma.crm_tasks.updateMany.mock.calls[1][0]).toEqual({
+      where: { id: 50, store_id: STORE },
+      data: { status: 'pending', completed_at: null },
     });
   });
 
@@ -427,7 +439,7 @@ describe('CrmTasksService', () => {
       const task = await service.update(50, { support_user_ids: [MARTA] });
 
       expect(prisma.crm_task_assignees.deleteMany).toHaveBeenCalledWith({
-        where: { task_id: 50, user_id: { in: [LUIS] } },
+        where: { store_id: STORE, task_id: 50, user_id: { in: [LUIS] } },
       });
       expect(prisma.crm_task_assignees.createMany).toHaveBeenCalledWith({
         data: [{ store_id: STORE, task_id: 50, user_id: MARTA }],
@@ -445,7 +457,7 @@ describe('CrmTasksService', () => {
       });
       await service.update(50, { assigned_user_id: LUIS });
       expect(prisma.crm_task_assignees.deleteMany).toHaveBeenCalledWith({
-        where: { task_id: 50, user_id: { in: [LUIS] } },
+        where: { store_id: STORE, task_id: 50, user_id: { in: [LUIS] } },
       });
       expect(prisma.crm_task_assignees.createMany).not.toHaveBeenCalled();
     });
@@ -607,6 +619,216 @@ describe('CrmTasksService', () => {
       });
       expect(failing.prisma.crm_tasks.updateMany.mock.calls[0][0].data).toMatchObject({
         status: 'done',
+      });
+    });
+  });
+
+  describe('a support person only changes the status', () => {
+    /** The seller helps on a task of STAFF created by the owner. */
+    const helping = (overrides: Record<string, unknown> = {}) => ({
+      task: {
+        title: 'Llamar a Laura',
+        description: 'Confirmar la cotización',
+        due_at: new Date('2026-11-20T15:00:00.000Z'),
+        assigned_user_id: STAFF,
+        created_by_user_id: OWNER,
+        opportunity_id: 500,
+        move_to_stage_id: 102,
+        supporters: [{ user: person(SELLER) }, { user: person(LUIS) }],
+        ...overrides,
+      },
+    });
+
+    it('completes and reopens it', async () => {
+      as('seller');
+      const { service, prisma } = setup(helping());
+      expect((await service.complete(50)).status).toBe('done');
+      expect((await service.reopen(50)).status).toBe('pending');
+      expect(prisma.crm_tasks.updateMany).toHaveBeenCalledTimes(2);
+    });
+
+    it('saving the form untouched is not an edit and answers the task', async () => {
+      as('seller');
+      const { service, prisma } = setup(helping());
+      const task = await service.update(50, {
+        title: '  Llamar a Laura ',
+        description: 'Confirmar la cotización',
+        due_at: '2026-11-20T10:00:00-05:00',
+        support_user_ids: [LUIS, SELLER, STAFF],
+        move_to_stage_id: 102,
+        assigned_user_id: STAFF,
+      });
+      expect(task.id).toBe(50);
+      expect(prisma.crm_tasks.updateMany.mock.calls[0][0].data).toEqual({
+        title: 'Llamar a Laura',
+        description: 'Confirmar la cotización',
+        due_at: new Date('2026-11-20T15:00:00.000Z'),
+      });
+      expect(prisma.crm_task_assignees.deleteMany).not.toHaveBeenCalled();
+      expect(prisma.crm_task_assignees.createMany).not.toHaveBeenCalled();
+    });
+
+    it.each([
+      ['the title', { title: 'Otra cosa' }],
+      ['the description', { description: null }],
+      ['the due date', { due_at: '2026-11-21T10:00:00-05:00' }],
+      ['the assignee', { assigned_user_id: SELLER }],
+      ['the support people', { support_user_ids: [SELLER] }],
+      ['the target stage', { move_to_stage_id: null }],
+      ['the status together with the title', { status: 'done', title: 'X' }],
+    ])('cannot change %s (CRM_TASK_003)', async (_what, dto) => {
+      as('seller');
+      const { service, prisma, pipeline } = setup(helping());
+      expect(await codeOf(service.update(50, dto as any))).toBe('CRM_TASK_003');
+      expect(prisma.crm_tasks.updateMany).not.toHaveBeenCalled();
+      expect(prisma.$transaction).not.toHaveBeenCalled();
+      expect(pipeline.moveForTask).not.toHaveBeenCalled();
+    });
+
+    it('the creator, the assignee and see-all still edit everything', async () => {
+      as('seller');
+      const creator = setup(helping({ created_by_user_id: SELLER }));
+      await creator.service.update(50, { title: 'Otra' });
+      expect(creator.prisma.crm_tasks.updateMany.mock.calls[0][0].data).toEqual({
+        title: 'Otra',
+      });
+
+      const assignee = setup(helping({ assigned_user_id: SELLER }));
+      await assignee.service.update(50, { title: 'Otra' });
+      expect(assignee.prisma.crm_tasks.updateMany).toHaveBeenCalledTimes(1);
+
+      jest.restoreAllMocks();
+      as('owner');
+      const owner = setup(helping({ created_by_user_id: STAFF }));
+      await owner.service.update(50, { title: 'Otra', support_user_ids: [MARTA] });
+      expect(owner.prisma.crm_tasks.updateMany).toHaveBeenCalledTimes(1);
+    });
+  });
+
+  describe('writes and races', () => {
+    it('the task and its support set are written in one transaction, naming the store', async () => {
+      as('owner');
+      const { service, prisma } = setup({
+        task: { supporters: [{ user: person(LUIS) }] },
+      });
+      await service.update(50, { title: 'Otra', support_user_ids: [MARTA] });
+      expect(prisma.$transaction).toHaveBeenCalledTimes(1);
+      expect(prisma.crm_tasks.updateMany.mock.calls[0][0].where).toEqual({
+        id: 50,
+        store_id: STORE,
+      });
+      expect(prisma.crm_task_assignees.deleteMany.mock.calls[0][0].where).toMatchObject({
+        store_id: STORE,
+      });
+      expect(prisma.crm_task_assignees.createMany.mock.calls[0][0].data[0]).toMatchObject({
+        store_id: STORE,
+      });
+    });
+
+    it('a failing support write leaves the error to the caller (the transaction rolls back)', async () => {
+      as('owner');
+      const { service, prisma, notifications } = setup();
+      prisma.crm_task_assignees.createMany.mockRejectedValueOnce(new Error('fk'));
+      await expect(
+        service.update(50, { title: 'Otra', support_user_ids: [MARTA] }),
+      ).rejects.toThrow('fk');
+      expect(notifications.sendToUser).not.toHaveBeenCalled();
+    });
+
+    it('nothing to write opens no transaction', async () => {
+      as('seller');
+      const { service, prisma } = setup();
+      await service.update(50, {});
+      expect(prisma.$transaction).not.toHaveBeenCalled();
+    });
+
+    it('of two simultaneous completions only the one that completes moves the opportunity', async () => {
+      as('seller');
+      const { service, prisma, pipeline } = setup({
+        task: { opportunity_id: 500, move_to_stage_id: 102 },
+      });
+      // Both read it pending; the other request completed it first.
+      prisma.crm_tasks.updateMany.mockResolvedValueOnce({ count: 0 });
+      const done = await service.complete(50);
+      expect(prisma.crm_tasks.updateMany.mock.calls[0][0].where).toEqual({
+        id: 50,
+        store_id: STORE,
+        status: { not: 'done' },
+      });
+      expect(pipeline.moveForTask).not.toHaveBeenCalled();
+      expect(done).not.toHaveProperty('opportunity_move');
+
+      await service.complete(50);
+      expect(pipeline.moveForTask).toHaveBeenCalledTimes(1);
+    });
+  });
+
+  describe('linked opportunity and customer', () => {
+    it('the opportunity must be of the task customer', async () => {
+      as('owner');
+      const { service, prisma } = setup();
+      prisma.crm_opportunities.count.mockResolvedValueOnce(0);
+      expect(
+        await codeOf(
+          service.create({ title: 'X', customer_id: CUSTOMER, opportunity_id: 9 }),
+        ),
+      ).toBe('CRM_OPPORTUNITY_001');
+      expect(prisma.crm_opportunities.count).toHaveBeenCalledWith({
+        where: { id: 9, customer_id: CUSTOMER },
+      });
+      expect(prisma.crm_tasks.create).not.toHaveBeenCalled();
+    });
+
+    it('a seller is checked by customer and ownership together', async () => {
+      as('seller');
+      const { service, prisma } = setup();
+      await service.create({ title: 'X', customer_id: CUSTOMER, opportunity_id: 9 });
+      expect(prisma.crm_opportunities.count).toHaveBeenCalledWith({
+        where: { id: 9, customer_id: CUSTOMER, owner_user_id: SELLER },
+      });
+    });
+  });
+
+  describe('staff for the support picker', () => {
+    const staffWhere = {
+      state: 'active',
+      user_roles: {
+        some: {
+          roles: {
+            role_permissions: {
+              some: {
+                permissions: { name: 'store:crm_tasks:manage', status: 'active' },
+              },
+            },
+          },
+        },
+      },
+    };
+
+    it('lists active staff with tasks permission, only id and name, up to 20', async () => {
+      as('seller');
+      const { service, prisma } = setup();
+      expect(await service.staff({})).toEqual([person(LUIS, 'Luis'), person(MARTA, 'Marta')]);
+      const args = prisma.store_users.findMany.mock.calls[0][0];
+      expect(args.where).toEqual({ user: staffWhere });
+      expect(args.select).toEqual({
+        user: { select: { id: true, first_name: true, last_name: true } },
+      });
+      expect(args.take).toBe(20);
+    });
+
+    it('every word of q matches the first or the last name', async () => {
+      as('seller');
+      const { service, prisma } = setup();
+      await service.staff({ q: '  luis  pé ' });
+      const name = (word: string) => ({
+        OR: [
+          { first_name: { contains: word, mode: 'insensitive' } },
+          { last_name: { contains: word, mode: 'insensitive' } },
+        ],
+      });
+      expect(prisma.store_users.findMany.mock.calls[0][0].where).toEqual({
+        user: { ...staffWhere, AND: [name('luis'), name('pé')] },
       });
     });
   });

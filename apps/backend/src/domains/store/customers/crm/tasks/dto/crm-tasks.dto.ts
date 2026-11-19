@@ -44,6 +44,14 @@ export class CrmTaskStatsQueryDto {
   assigned?: string;
 }
 
+/** Search of the support picker: active staff of the store by name. */
+export class CrmTaskStaffQueryDto {
+  @IsOptional()
+  @IsString()
+  @MaxLength(100)
+  q?: string;
+}
+
 export class CrmTasksQueryDto {
   /** `me`, `unassigned`, `all` or a user id. */
   @IsOptional()

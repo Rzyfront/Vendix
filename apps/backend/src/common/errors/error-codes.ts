@@ -8360,6 +8360,14 @@ export const ErrorCodes = {
     devMessage:
       'La etapa destino debe ser una etapa activa (no perdida) del tablero de la oportunidad ligada a la tarea.',
   },
+  // Quien solo es apoyo de una tarea (no responsable, no creador, sin
+  // ver-todo) puede marcarla hecha o reabrirla, nada más.
+  CRM_TASK_003: {
+    code: 'CRM_TASK_003',
+    httpStatus: 403,
+    devMessage:
+      'Como apoyo de esta tarea solo puedes cambiar su estado; el resto lo edita el responsable o quien la creó.',
+  },
   CRM_PIPELINE_001: {
     code: 'CRM_PIPELINE_001',
     httpStatus: 404,
