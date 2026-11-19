@@ -381,6 +381,10 @@ model store_users {
   consent_updated_at  DateTime?                @db.Timestamp(6)
   crm_owner           users?                   @relation("store_users_crm_owner", fields: [crm_owner_user_id], references: [id], onDelete: SetNull, onUpdate: NoAction)
   crm_stage           crm_pipeline_stages?     @relation(fields: [crm_stage_id], references: [id], onDelete: SetNull, onUpdate: NoAction)
+  /// Data sheet (data collection template) chosen for this customer (QUI-1043).
+  /// Null = the store's CRM default template.
+  crm_data_template_id Int?
+  crm_data_template    data_collection_templates? @relation("store_users_crm_data_template", fields: [crm_data_template_id], references: [id], onDelete: SetNull, onUpdate: NoAction)
 
   @@unique([store_id, user_id])
   @@index([price_tier_id])
@@ -388,6 +392,7 @@ model store_users {
   @@index([store_id, crm_source])
   @@index([store_id, crm_stage_id])
   @@index([store_id, crm_last_contact_at])
+  @@index([crm_data_template_id])
 }
 
 model roles {
@@ -1269,6 +1274,7 @@ model stores {
   crm_segment_members   crm_segment_members[]
   crm_segments          crm_segments[]
   crm_pipelines         crm_pipelines[]
+  crm_stage_templates   crm_stage_templates[]
   crm_pipeline_stages   crm_pipeline_stages[]
   crm_opportunities     crm_opportunities[]
   crm_tasks             crm_tasks[]
@@ -11740,10 +11746,16 @@ model data_collection_templates {
   checkin_show_products Boolean @default(true)
   checkin_show_notes    Boolean @default(true)
   is_default  Boolean              @default(false)
+  /// Data sheet of the CRM (pipeline card detail and customer profile), QUI-1043.
+  /// Only `entity_type = customer` templates. The DB also has a partial unique
+  /// index (`data_collection_templates_one_crm_default_per_store`,
+  /// `WHERE is_crm_default`): one CRM default per store.
+  is_crm_default Boolean             @default(false)
   created_at  DateTime             @default(now()) @db.Timestamp(6)
   updated_at  DateTime             @default(now()) @db.Timestamp(6)
 
   store                    stores                              @relation(fields: [store_id], references: [id])
+  crm_customers            store_users[]                       @relation("store_users_crm_data_template")
   sections                 data_collection_sections[]
   tabs                     data_collection_tabs[]
   products                 data_collection_template_products[]
@@ -15507,6 +15519,22 @@ model crm_pipelines {
   store         stores                @relation(fields: [store_id], references: [id], onDelete: Restrict, onUpdate: NoAction)
   stages        crm_pipeline_stages[]
   opportunities crm_opportunities[]
+
+  @@unique([store_id, name])
+}
+
+/// Reusable stage lists for CRM pipelines (QUI-1043). `stages` is the ordered
+/// array `{ name, kind: open|won|lost, color, probability }`; the order is the
+/// array index. Applied to a pipeline by reconciling stages by name.
+model crm_stage_templates {
+  id         Int      @id @default(autoincrement())
+  store_id   Int
+  name       String   @db.VarChar(80)
+  stages     Json     @default("[]")
+  created_at DateTime @default(now()) @db.Timestamp(6)
+  updated_at DateTime @default(now()) @updatedAt @db.Timestamp(6)
+
+  store stores @relation(fields: [store_id], references: [id], onDelete: Restrict, onUpdate: NoAction)
 
   @@unique([store_id, name])
 }

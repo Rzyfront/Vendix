@@ -68,6 +68,12 @@ export class TemplatesService {
   ) {}
 
   async createTemplate(dto: CreateTemplateDto) {
+    if (dto.is_crm_default) {
+      this.assertCrmDefaultEligible(
+        dto.entity_type ?? 'booking',
+        dto.status ?? 'active',
+      );
+    }
     const template = await this.prisma.data_collection_templates.create({
       data: {
         name: dto.name,
@@ -82,6 +88,8 @@ export class TemplatesService {
         checkin_show_notes: dto.checkin_show_notes ?? true,
       },
     });
+
+    if (dto.is_crm_default) await this.setCrmDefault(template.id);
 
     // Create tabs with their sections
     if (dto.tabs?.length) {
@@ -117,6 +125,14 @@ export class TemplatesService {
     });
     if (!existing) throw new VendixHttpException(ErrorCodes.DCOL_FIND_001);
 
+    // QUI-1043: only an active customer template can be the CRM default; one
+    // that stops being so loses the mark.
+    const entityType = dto.entity_type ?? existing.entity_type;
+    const status = dto.status ?? existing.status;
+    if (dto.is_crm_default === true) {
+      this.assertCrmDefaultEligible(entityType, status);
+    }
+
     // If tabs or sections are provided, delete existing structure and recreate
     if (dto.tabs !== undefined || dto.sections !== undefined) {
       // Delete tabs (cascades to tab-linked sections → items)
@@ -145,6 +161,20 @@ export class TemplatesService {
         updated_at: new Date(),
       },
     });
+
+    if (dto.is_crm_default === true) {
+      await this.setCrmDefault(templateId);
+    } else if (
+      existing.is_crm_default &&
+      (dto.is_crm_default === false ||
+        entityType !== 'customer' ||
+        status !== 'active')
+    ) {
+      await this.prisma.data_collection_templates.updateMany({
+        where: { id: templateId },
+        data: { is_crm_default: false },
+      });
+    }
 
     // Recreate tabs
     if (dto.tabs?.length) {
@@ -282,6 +312,45 @@ export class TemplatesService {
     });
     if (!product || product.product_type !== 'service') {
       throw new VendixHttpException(ErrorCodes.DCOL_PRODUCT_001, 'El producto no existe o no es un servicio.');
+    }
+  }
+
+  private assertCrmDefaultEligible(entityType: string, status: string) {
+    if (entityType !== 'customer' || status !== 'active') {
+      throw new VendixHttpException(ErrorCodes.DCOL_CRM_001);
+    }
+  }
+
+  /**
+   * Marks the CRM default template of the store, unmarking the previous one
+   * in the same transaction (one per store, partial unique index). A
+   * concurrent mark (P2002) is retried once, last mark wins; a second clash
+   * answers 409 DCOL_CRM_002 instead of a 500.
+   */
+  private async setCrmDefault(templateId: number) {
+    const { storeId } = this.requireStore();
+    for (let attempt = 1; ; attempt++) {
+      try {
+        await this.prisma.$transaction(async (tx) => {
+          // tx no aplica scope: el store va explícito.
+          await tx.data_collection_templates.updateMany({
+            where: {
+              store_id: storeId,
+              is_crm_default: true,
+              id: { not: templateId },
+            },
+            data: { is_crm_default: false },
+          });
+          await tx.data_collection_templates.updateMany({
+            where: { id: templateId, store_id: storeId },
+            data: { is_crm_default: true },
+          });
+        });
+        return;
+      } catch (error) {
+        if ((error as { code?: string } | null)?.code !== 'P2002') throw error;
+        if (attempt >= 2) throw new VendixHttpException(ErrorCodes.DCOL_CRM_002);
+      }
     }
   }
 

@@ -136,6 +136,15 @@ export class CreateTemplateDto {
   is_default?: boolean;
 
   /**
+   * QUI-1043: plantilla de datos por defecto del CRM (detalle de la
+   * oportunidad y ficha del cliente). Independiente de `is_default`, que es el
+   * respaldo de reservas. Solo una por tienda y solo de tipo Cliente activa.
+   */
+  @IsOptional()
+  @IsBoolean()
+  is_crm_default?: boolean;
+
+  /**
    * Bloques fijos de la recepción (Asignar) que la plantilla muestra.
    * Servicio y técnico van siempre; presupuesto, productos y notas los puede
    * quitar el administrador por plantilla. Sin valor: visibles.

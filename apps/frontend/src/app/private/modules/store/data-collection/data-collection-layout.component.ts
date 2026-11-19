@@ -69,7 +69,7 @@ export class DataCollectionLayoutComponent {
     { initialValue: this.router.url },
   );
 
-  readonly isEditor = computed(() => /\/templates\/\d+\/edit/.test(this.url()));
+  readonly isEditor = computed(() => /\/templates\/(\d+|new)\/edit/.test(this.url()));
 
   /**
    * Pantalla desde la que se entró a Recolección de datos (p. ej. Estaciones o el

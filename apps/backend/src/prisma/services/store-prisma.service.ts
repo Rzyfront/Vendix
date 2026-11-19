@@ -303,6 +303,7 @@ export class StorePrismaService extends BasePrismaService {
     'crm_segments',
     'crm_pipelines',
     'crm_pipeline_stages',
+    'crm_stage_templates',
     'crm_opportunities',
     'crm_tasks',
     'user_reminders',
@@ -2171,6 +2172,10 @@ export class StorePrismaService extends BasePrismaService {
 
   get crm_pipeline_stages() {
     return this.scoped_client.crm_pipeline_stages;
+  }
+
+  get crm_stage_templates() {
+    return this.scoped_client.crm_stage_templates;
   }
 
   get crm_opportunities() {

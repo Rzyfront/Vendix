@@ -5681,6 +5681,18 @@ export const ErrorCodes = {
     httpStatus: 400,
     devMessage: 'Product not found in this store or is not a service',
   },
+  // La planilla del CRM (pipeline y ficha del cliente) solo usa plantillas
+  // activas de tipo Cliente (QUI-1043).
+  DCOL_CRM_001: {
+    code: 'DCOL_CRM_001',
+    httpStatus: 422,
+    devMessage: 'Solo una plantilla activa de tipo Cliente puede usarse en el CRM.',
+  },
+  DCOL_CRM_002: {
+    code: 'DCOL_CRM_002',
+    httpStatus: 409,
+    devMessage: 'Another template was marked as the CRM default at the same time.',
+  },
 
   // Customer History
   CUST_HISTORY_001: {
@@ -8377,6 +8389,52 @@ export const ErrorCodes = {
     code: 'CRM_PIPELINE_007',
     httpStatus: 403,
     devMessage: 'Solo el dueño o un administrador puede editar las etapas.',
+  },
+  // Aplicar una plantilla no cambia el tipo de una etapa que ya tiene
+  // oportunidades: su estado (abierta/ganada/perdida) dejaría de cuadrar.
+  CRM_PIPELINE_008: {
+    code: 'CRM_PIPELINE_008',
+    httpStatus: 409,
+    devMessage: 'Una etapa con oportunidades no puede cambiar de tipo. Muévelas antes de aplicar la plantilla.',
+  },
+  CRM_PIPELINE_009: {
+    code: 'CRM_PIPELINE_009',
+    httpStatus: 409,
+    devMessage: 'Ya existe un pipeline con ese nombre.',
+  },
+  // Plantillas de etapas (QUI-1043).
+  CRM_STAGE_TEMPLATE_001: {
+    code: 'CRM_STAGE_TEMPLATE_001',
+    httpStatus: 404,
+    devMessage: 'La plantilla de etapas no existe.',
+  },
+  CRM_STAGE_TEMPLATE_002: {
+    code: 'CRM_STAGE_TEMPLATE_002',
+    httpStatus: 409,
+    devMessage: 'Ya existe una plantilla de etapas con ese nombre.',
+  },
+  // Nombres de etapa repetidos (sin importar mayúsculas) o ninguna abierta.
+  CRM_STAGE_TEMPLATE_003: {
+    code: 'CRM_STAGE_TEMPLATE_003',
+    httpStatus: 422,
+    devMessage: 'La plantilla necesita al menos una etapa abierta, una ganada y una perdida, con nombres de etapa sin repetir.',
+  },
+  // Planilla de datos del cliente (QUI-1043).
+  CRM_DATA_SHEET_001: {
+    code: 'CRM_DATA_SHEET_001',
+    httpStatus: 422,
+    devMessage: 'El campo no pertenece a la plantilla de datos del cliente.',
+  },
+  // El adjunto debe ser uno subido a la ficha de este cliente.
+  CRM_DATA_SHEET_002: {
+    code: 'CRM_DATA_SHEET_002',
+    httpStatus: 422,
+    devMessage: 'El archivo no pertenece a la ficha de este cliente.',
+  },
+  CRM_DATA_SHEET_003: {
+    code: 'CRM_DATA_SHEET_003',
+    httpStatus: 422,
+    devMessage: 'File type not allowed in the customer data sheet.',
   },
   // Sin `store:crm_inbox:assign` solo te asignas tareas u oportunidades a ti.
   CRM_ASSIGN_001: {

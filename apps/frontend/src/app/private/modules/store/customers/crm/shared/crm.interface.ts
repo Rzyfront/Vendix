@@ -225,6 +225,28 @@ export interface CrmPipeline {
   stages: CrmStage[];
 }
 
+export type CrmStageKind = CrmStage['kind'];
+
+export interface CrmStageTemplateStage {
+  name: string;
+  kind: CrmStageKind;
+  color: string | null;
+  probability: number | null;
+}
+
+export interface CrmStageTemplate {
+  id: number;
+  name: string;
+  stages: CrmStageTemplateStage[];
+  created_at: string;
+  updated_at: string;
+}
+
+export interface SaveCrmStageTemplate {
+  name?: string;
+  stages?: CrmStageTemplateStage[];
+}
+
 export interface CrmBoardQuery {
   pipeline_id?: number;
   owner?: string;

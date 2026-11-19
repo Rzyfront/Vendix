@@ -1,23 +1,18 @@
 import {Component, OnInit, ChangeDetectionStrategy, signal, inject, DestroyRef} from '@angular/core';
 import { takeUntilDestroyed } from '@angular/core/rxjs-interop';
 
-import { HttpClient } from '@angular/common/http';
 import { Router } from '@angular/router';
-import { map } from 'rxjs/operators';
 import { DataCollectionTemplatesService } from '../services/data-collection-templates.service';
 import { DataCollectionTemplate } from '../interfaces/data-collection-template.interface';
-import { ENTITY_TYPE_LABELS, MetadataField } from '../interfaces/metadata-field.interface';
-import { MetadataFieldsService } from '../services/metadata-fields.service';
+import { ENTITY_TYPE_LABELS } from '../interfaces/metadata-field.interface';
 import { IconComponent } from '../../../../../shared/components/icon/icon.component';
 import { ButtonComponent } from '../../../../../shared/components/button/button.component';
 import { SpinnerComponent } from '../../../../../shared/components/spinner/spinner.component';
 import { EmptyStateComponent } from '../../../../../shared/components/empty-state/empty-state.component';
 import { BadgeComponent } from '../../../../../shared/components/badge/badge.component';
-import { TemplateModalComponent } from './template-modal/template-modal.component';
 import { ToastService } from '../../../../../shared/components/toast/toast.service';
 import { DialogService } from '../../../../../shared/components/dialog/dialog.service';
 import { extractApiErrorMessage } from '../../../../../core/utils/api-error-handler';
-import { environment } from '../../../../../../environments/environment';
 
 @Component({
   selector: 'app-templates',
@@ -27,7 +22,6 @@ import { environment } from '../../../../../../environments/environment';
     SpinnerComponent,
     EmptyStateComponent,
     BadgeComponent,
-    TemplateModalComponent,
     IconComponent
 ],
   changeDetection: ChangeDetectionStrategy.OnPush,
@@ -44,7 +38,7 @@ import { environment } from '../../../../../../environments/environment';
         </h2>
         <!-- The empty state carries its own create button -->
         @if (loading() || templates().length > 0) {
-          <app-button variant="primary" size="sm" (clicked)="openCreateModal()">
+          <app-button variant="primary" size="sm" (clicked)="openNewTemplate()">
             <app-icon name="plus" [size]="16" slot="icon"></app-icon>
             Nueva plantilla
           </app-button>
@@ -62,7 +56,7 @@ import { environment } from '../../../../../../environments/environment';
           [showActionButton]="true"
           actionButtonText="Nueva Plantilla"
           actionButtonIcon="plus"
-          (actionClick)="openCreateModal()"
+          (actionClick)="openNewTemplate()"
         />
       } @else {
         <div class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
@@ -108,7 +102,16 @@ import { environment } from '../../../../../../environments/environment';
                     style="color: var(--color-primary)"
                   >
                     <app-icon name="star" [size]="12"></app-icon>
-                    Default
+                    Reservas
+                  </span>
+                }
+                @if (template.is_crm_default) {
+                  <span
+                    class="flex items-center gap-1"
+                    style="color: var(--color-primary)"
+                  >
+                    <app-icon name="star" [size]="12"></app-icon>
+                    CRM
                   </span>
                 }
                 @if (template.products?.length) {
@@ -122,14 +125,16 @@ import { environment } from '../../../../../../environments/environment';
                 class="flex gap-2 mt-3 pt-3"
                 style="border-top: 1px solid var(--color-border)"
               >
-                <app-button variant="ghost" size="xsm" (clicked)="openEditModal(template)">
+                <app-button variant="ghost" size="xsm" (clicked)="openEditor(template.id)">
                   <app-icon name="pencil" [size]="12" slot="icon" ></app-icon>
                   Editar
                 </app-button>
-                <app-button variant="ghost" size="xsm" (clicked)="openEditor(template.id)">
-                  <app-icon name="settings-2" [size]="12" slot="icon" ></app-icon>
-                  Editor
-                </app-button>
+                @if (canUseInCrm(template)) {
+                  <app-button variant="ghost" size="xsm" (clicked)="useInCrm(template)">
+                    <app-icon name="star" [size]="12" slot="icon" ></app-icon>
+                    Usar en el CRM
+                  </app-button>
+                }
                 <app-button variant="ghost" size="xsm" (clicked)="duplicateTemplate(template.id)">
                   <app-icon name="copy" [size]="12" slot="icon" ></app-icon>
                   Duplicar
@@ -144,16 +149,6 @@ import { environment } from '../../../../../../environments/environment';
       }
       </div>
     </div>
-
-    @if (isModalOpen()) {
-      <app-template-modal
-        [template]="selectedTemplate()"
-        [availableFields]="availableFields()"
-        [availableProducts]="availableProducts()"
-        (save)="onSaveTemplate($event)"
-        (close)="closeModal()"
-      />
-    }
   `,
 })
 export class TemplatesComponent implements OnInit {
@@ -164,22 +159,14 @@ export class TemplatesComponent implements OnInit {
   private destroyRef = inject(DestroyRef);
   private router = inject(Router);
   private templatesService = inject(DataCollectionTemplatesService);
-  private fieldsService = inject(MetadataFieldsService);
   private toastService = inject(ToastService);
   private dialogService = inject(DialogService);
-  private http = inject(HttpClient);
 
   templates = signal<DataCollectionTemplate[]>([]);
   loading = signal(true);
-  isModalOpen = signal(false);
-  selectedTemplate = signal<DataCollectionTemplate | null>(null);
-  availableFields = signal<MetadataField[]>([]);
-  availableProducts = signal<any[]>([]);
 
   ngOnInit() {
     this.loadTemplates();
-    this.loadAvailableFields();
-    this.loadAvailableProducts();
   }
 
   loadTemplates() {
@@ -196,95 +183,31 @@ export class TemplatesComponent implements OnInit {
     });
   }
 
-  loadAvailableFields() {
-    this.fieldsService.getFields().pipe(takeUntilDestroyed(this.destroyRef)).subscribe({
-      next: (fields) => this.availableFields.set(fields),
-      error: () => {},
-    });
+  openNewTemplate() {
+    this.router.navigate(['/admin', 'data-collection', 'templates', 'new', 'edit']);
   }
 
-  loadAvailableProducts() {
-    this.http
-      .get<any>(`${environment.apiUrl}/store/products?limit=200`)
-      .pipe(map((r) => r.data))
-      .pipe(takeUntilDestroyed(this.destroyRef)).subscribe({
-        next: (products) => this.availableProducts.set(products),
-        error: () => {},
-      });
+  canUseInCrm(template: DataCollectionTemplate): boolean {
+    return (
+      template.entity_type === 'customer' &&
+      template.status === 'active' &&
+      !template.is_crm_default
+    );
   }
 
-  openCreateModal() {
-    this.selectedTemplate.set(null);
-    this.isModalOpen.set(true);
-  }
-
-  openEditModal(template: DataCollectionTemplate) {
-    this.selectedTemplate.set(template);
-    this.isModalOpen.set(true);
-  }
-
-  closeModal() {
-    this.isModalOpen.set(false);
-    this.selectedTemplate.set(null);
-  }
-
-  onSaveTemplate(data: any) {
-    const selected = this.selectedTemplate();
-    const productIds: number[] = data.product_ids || [];
-    delete data.product_ids;
-
-    const obs = selected
-      ? this.templatesService.update(selected.id, data)
-      : this.templatesService.create(data);
-
-    obs.pipe(takeUntilDestroyed(this.destroyRef)).subscribe({
-      next: (result: any) => {
-        const templateId = selected?.id || result?.id;
-        if (templateId && productIds.length > 0) {
-          this.templatesService
-            .assignProducts(templateId, productIds)
-            .pipe(takeUntilDestroyed(this.destroyRef)).subscribe({
-              next: () => {
-                this.toastService.success(
-                  selected ? 'Plantilla actualizada' : 'Plantilla creada',
-                );
-                this.closeModal();
-                this.loadTemplates();
-              },
-              error: () => {
-                this.toastService.warning(
-                  'Plantilla guardada, pero hubo un error asignando productos',
-                );
-                this.closeModal();
-                this.loadTemplates();
-              },
-            });
-        } else if (templateId && productIds.length === 0 && selected) {
-          // Clear existing product assignments when editing and no products selected
-          this.templatesService.assignProducts(templateId, []).pipe(takeUntilDestroyed(this.destroyRef)).subscribe({
-            next: () => {
-              this.toastService.success('Plantilla actualizada');
-              this.closeModal();
-              this.loadTemplates();
-            },
-            error: () => {
-              this.toastService.success('Plantilla actualizada');
-              this.closeModal();
-              this.loadTemplates();
-            },
-          });
-        } else {
-          this.toastService.success(
-            selected ? 'Plantilla actualizada' : 'Plantilla creada',
-          );
-          this.closeModal();
+  useInCrm(template: DataCollectionTemplate) {
+    this.templatesService
+      .update(template.id, { is_crm_default: true })
+      .pipe(takeUntilDestroyed(this.destroyRef))
+      .subscribe({
+        next: () => {
+          this.toastService.success('Plantilla predeterminada del CRM actualizada');
           this.loadTemplates();
-        }
-      },
-      error: (err) => {
-        this.toastService.error(extractApiErrorMessage(err));
-      },
-    });
+        },
+        error: (err) => {
+          this.toastService.error(extractApiErrorMessage(err));
+        },
+      });
   }
 
   openEditor(templateId: number) {

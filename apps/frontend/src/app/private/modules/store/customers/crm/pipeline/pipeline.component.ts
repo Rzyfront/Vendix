@@ -7,6 +7,7 @@ import {
   BadgeComponent,
   ButtonComponent,
   CardComponent,
+  ConfirmationModalComponent,
   EmptyStateComponent,
   IconComponent,
   InputsearchComponent,
@@ -32,8 +33,19 @@ import {
   OpportunityFormModalComponent,
   OpportunityModalAction,
 } from './opportunity-form-modal.component';
+import { OpportunityDetailModalComponent } from './opportunity-detail-modal.component';
+import { StageTemplatesModalComponent } from './stage-templates-modal.component';
 
 type PipelineView = 'board' | 'list';
+
+/** The confirmation modal renders its message as HTML: escape user text. */
+function escapeHtml(value: string): string {
+  return value
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;');
+}
 
 const STATUS_LABELS: Record<CrmOpportunity['status'], string> = {
   open: 'Abierta',
@@ -58,6 +70,7 @@ const STATUS_LABELS: Record<CrmOpportunity['status'], string> = {
     BadgeComponent,
     ButtonComponent,
     CardComponent,
+    ConfirmationModalComponent,
     CurrencyPipe,
     EmptyStateComponent,
     IconComponent,
@@ -67,6 +80,8 @@ const STATUS_LABELS: Record<CrmOpportunity['status'], string> = {
     StatsComponent,
     StickyHeaderComponent,
     OpportunityFormModalComponent,
+    OpportunityDetailModalComponent,
+    StageTemplatesModalComponent,
   ],
   styles: [
     `
@@ -117,63 +132,72 @@ const STATUS_LABELS: Record<CrmOpportunity['status'], string> = {
         ></app-stats>
       </div>
 
-      <div class="mb-4 flex flex-col gap-3 md:flex-row md:items-center md:justify-between">
-        <div class="inline-flex w-fit rounded-lg border border-[var(--color-border)] p-0.5" role="group" aria-label="Vista">
-          <button
-            type="button"
-            class="inline-flex h-8 items-center gap-1 rounded-md px-3 text-sm font-semibold"
-            [class.bg-primary]="view() === 'board'"
-            [class.text-white]="view() === 'board'"
-            [attr.aria-pressed]="view() === 'board'"
-            (click)="view.set('board')"
-          >
-            <app-icon name="columns" [size]="14"></app-icon> Tablero
-          </button>
-          <button
-            type="button"
-            class="inline-flex h-8 items-center gap-1 rounded-md px-3 text-sm font-semibold"
-            [class.bg-primary]="view() === 'list'"
-            [class.text-white]="view() === 'list'"
-            [attr.aria-pressed]="view() === 'list'"
-            (click)="view.set('list')"
-          >
-            <app-icon name="list" [size]="14"></app-icon> Lista
-          </button>
+      <app-card [showHeader]="true" customClasses="overflow-hidden">
+        <div slot="header" class="flex flex-col gap-3 lg:flex-row lg:items-center lg:justify-between">
+          <h2 class="flex items-center gap-2 text-base font-semibold text-[var(--color-text-primary)]">
+            <app-icon name="columns" [size]="18"></app-icon>
+            <span class="truncate">Tablero · {{ board()?.pipeline?.name ?? 'Pipeline' }}</span>
+          </h2>
+          <div class="flex flex-col gap-2 sm:flex-row sm:flex-wrap sm:items-center">
+            <div class="inline-flex w-fit rounded-lg border border-[var(--color-border)] p-0.5" role="group" aria-label="Vista">
+              <button
+                type="button"
+                class="inline-flex h-8 items-center gap-1 rounded-md px-3 text-sm font-semibold"
+                [class.bg-primary]="view() === 'board'"
+                [class.text-white]="view() === 'board'"
+                [attr.aria-pressed]="view() === 'board'"
+                (click)="view.set('board')"
+              >
+                <app-icon name="columns" [size]="14"></app-icon> Tablero
+              </button>
+              <button
+                type="button"
+                class="inline-flex h-8 items-center gap-1 rounded-md px-3 text-sm font-semibold"
+                [class.bg-primary]="view() === 'list'"
+                [class.text-white]="view() === 'list'"
+                [attr.aria-pressed]="view() === 'list'"
+                (click)="view.set('list')"
+              >
+                <app-icon name="list" [size]="14"></app-icon> Lista
+              </button>
+            </div>
+            @if (board()?.pipelines?.length) {
+              <select
+                class="h-10 rounded-lg border border-[var(--color-border)] bg-surface px-3 text-sm"
+                aria-label="Pipeline"
+                [ngModel]="pipelineId() ?? board()?.pipeline?.id"
+                (ngModelChange)="pipelineId.set(+$event)"
+              >
+                @for (pipeline of board()!.pipelines; track pipeline.id) {
+                  <option [value]="pipeline.id">{{ pipeline.name }}</option>
+                }
+              </select>
+            }
+            @if (canSeeAll()) {
+              <select
+                class="h-10 rounded-lg border border-[var(--color-border)] bg-surface px-3 text-sm"
+                aria-label="Responsable"
+                [ngModel]="owner()"
+                (ngModelChange)="owner.set($event)"
+              >
+                <option value="">Todo el equipo</option>
+                <option value="me">Mías</option>
+              </select>
+            }
+            <app-inputsearch
+              placeholder="Buscar oportunidad o cliente..."
+              [debounceTime]="350"
+              (searchChange)="search.set($event)"
+            ></app-inputsearch>
+            @if (canConfigure()) {
+              <app-button variant="outline" size="md" (clicked)="templatesOpen.set(true)">
+                <app-icon slot="icon" name="layers" [size]="16"></app-icon> Plantillas de etapas
+              </app-button>
+            }
+          </div>
         </div>
-        <div class="flex flex-col gap-2 sm:flex-row sm:items-center">
-          @if ((board()?.pipelines?.length ?? 0) > 1) {
-            <select
-              class="h-10 rounded-lg border border-[var(--color-border)] bg-surface px-3 text-sm"
-              aria-label="Pipeline"
-              [ngModel]="pipelineId() ?? board()?.pipeline?.id"
-              (ngModelChange)="pipelineId.set(+$event)"
-            >
-              @for (pipeline of board()!.pipelines; track pipeline.id) {
-                <option [value]="pipeline.id">{{ pipeline.name }}</option>
-              }
-            </select>
-          }
-          @if (canSeeAll()) {
-            <select
-              class="h-10 rounded-lg border border-[var(--color-border)] bg-surface px-3 text-sm"
-              aria-label="Responsable"
-              [ngModel]="owner()"
-              (ngModelChange)="owner.set($event)"
-            >
-              <option value="">Todo el equipo</option>
-              <option value="me">Mías</option>
-            </select>
-          }
-          <app-inputsearch
-            placeholder="Buscar oportunidad o cliente..."
-            [debounceTime]="350"
-            (searchChange)="search.set($event)"
-          ></app-inputsearch>
-        </div>
-      </div>
 
-      @if (error() && !board()) {
-        <app-card>
+        @if (error() && !board()) {
           <app-empty-state
             icon="alert-triangle"
             title="No pudimos cargar el pipeline"
@@ -182,106 +206,139 @@ const STATUS_LABELS: Record<CrmOpportunity['status'], string> = {
             [showRefreshButton]="true"
             (refreshClick)="load()"
           ></app-empty-state>
-        </app-card>
-      } @else if (!board()) {
-        <div class="flex justify-center py-12"><app-spinner></app-spinner></div>
-      } @else if (view() === 'board') {
-        @if (board()!.truncated) {
-          <p class="mb-2 text-xs text-[var(--color-text-muted)]">
-            Se muestran las 500 oportunidades más recientes. Usa el buscador para encontrar otras.
-          </p>
-        }
-        <div class="flex gap-4 overflow-x-auto pb-4" cdkDropListGroup>
-          @for (stage of stages(); track stage.id) {
-            <div class="board-column flex flex-col rounded-2xl border border-[var(--color-border)] bg-[var(--color-background)]">
-              <div class="flex items-center justify-between gap-2 border-b border-[var(--color-border)] px-3 py-2">
-                <div class="min-w-0">
-                  <div class="flex items-center gap-2">
-                    <span class="h-2.5 w-2.5 rounded-full" [style.background]="stageColor(stage)"></span>
-                    <span class="truncate text-sm font-semibold text-[var(--color-text-primary)]">{{ stage.name }}</span>
-                    <span class="text-xs text-[var(--color-text-muted)]">{{ stage.count }}</span>
-                  </div>
-                  <div class="text-xs text-[var(--color-text-muted)]">
-                    {{ +stage.total_amount | currency }}
-                    @if (stage.probability !== null) { · {{ stage.probability }} % }
+        } @else if (!board()) {
+          <div class="flex justify-center py-12"><app-spinner></app-spinner></div>
+        } @else if (view() === 'board') {
+          @if (board()!.truncated) {
+            <p class="mb-2 text-xs text-[var(--color-text-muted)]">
+              Se muestran las 500 oportunidades más recientes. Usa el buscador para encontrar otras.
+            </p>
+          }
+          <div class="flex gap-4 overflow-x-auto pb-2" cdkDropListGroup>
+            @for (stage of stages(); track stage.id) {
+              <div class="board-column flex flex-col rounded-2xl border border-[var(--color-border)] bg-[var(--color-background)]">
+                <div class="flex items-center justify-between gap-2 border-b border-[var(--color-border)] px-3 py-2">
+                  <div class="min-w-0">
+                    <div class="flex items-center gap-2">
+                      <span class="h-2.5 w-2.5 rounded-full" [style.background]="stageColor(stage)"></span>
+                      <span class="truncate text-sm font-semibold text-[var(--color-text-primary)]">{{ stage.name }}</span>
+                      <span class="text-xs text-[var(--color-text-muted)]">{{ stage.count }}</span>
+                    </div>
+                    <div class="text-xs text-[var(--color-text-muted)]">
+                      {{ +stage.total_amount | currency }}
+                      @if (stage.probability !== null) { · {{ stage.probability }} % }
+                    </div>
                   </div>
                 </div>
-              </div>
-              <div
-                class="flex min-h-[8rem] flex-1 flex-col gap-2 p-2"
-                cdkDropList
-                [id]="'stage-' + stage.id"
-                [cdkDropListData]="stage"
-                [cdkDropListDisabled]="!canManage()"
-                (cdkDropListDropped)="onDrop($event)"
-              >
-                @for (card of stage.opportunities; track card.id) {
-                  <article
-                    class="cursor-grab rounded-xl border border-[var(--color-border)] bg-surface p-3 shadow-sm active:cursor-grabbing"
-                    cdkDrag
-                    [cdkDragData]="card"
-                  >
-                    <button
-                      type="button"
-                      class="w-full text-left text-sm font-semibold text-[var(--color-text-primary)] hover:underline"
-                      (click)="openEdit(card)"
+                <div
+                  class="flex min-h-[8rem] flex-1 flex-col gap-2 p-2"
+                  cdkDropList
+                  [id]="'stage-' + stage.id"
+                  [cdkDropListData]="stage"
+                  [cdkDropListDisabled]="!canManage()"
+                  (cdkDropListDropped)="onDrop($event)"
+                >
+                  @for (card of stage.opportunities; track card.id) {
+                    <article
+                      class="cursor-pointer rounded-xl border border-[var(--color-border)] bg-surface p-3 shadow-sm active:cursor-grabbing"
+                      cdkDrag
+                      [cdkDragData]="card"
+                      (cdkDragStarted)="dragging = true"
+                      (cdkDragEnded)="onDragEnded()"
+                      (click)="openDetail(card)"
                     >
-                      {{ card.title }}
-                    </button>
-                    <a
-                      class="mt-0.5 block truncate text-xs text-[var(--color-text-secondary)] hover:underline"
-                      [routerLink]="['/admin/customers', card.customer?.id]"
-                      [queryParams]="{ tab: 'crm' }"
-                    >
-                      {{ name(card.customer) }}
-                    </a>
-                    <div class="mt-2 flex flex-wrap items-center justify-between gap-2 text-xs">
-                      <span class="font-semibold text-[var(--color-text-primary)]">
-                        {{ card.amount !== null ? (+card.amount | currency) : 'Sin valor' }}
-                      </span>
-                      @if (card.expected_close_date) {
-                        <span class="text-[var(--color-text-muted)]">
-                          <app-icon name="calendar" [size]="11"></app-icon>
-                          {{ dateOnly(card.expected_close_date) }}
-                        </span>
-                      }
-                    </div>
-                    <div class="mt-1 flex flex-wrap items-center gap-2 text-xs text-[var(--color-text-muted)]">
-                      @if (card.owner) { <span>{{ name(card.owner) }}</span> }
-                      @if (card.quotation) {
-                        <span class="inline-flex items-center gap-0.5">
-                          <app-icon name="file-text" [size]="11"></app-icon>{{ card.quotation.quotation_number }}
-                        </span>
-                      }
-                      @if (card.status === 'lost' && card.lost_reason) {
-                        <span class="text-[var(--color-error)]">· {{ card.lost_reason }}</span>
-                      }
-                    </div>
-                    @if (canManage()) {
-                      <select
-                        class="mt-2 h-8 w-full rounded-md border border-[var(--color-border)] bg-surface px-2 text-xs md:hidden"
-                        aria-label="Mover a"
-                        [ngModel]="''"
-                        (ngModelChange)="$event && moveTo(card, +$event)"
-                      >
-                        <option value="">Mover a…</option>
-                        @for (target of stages(); track target.id) {
-                          @if (target.id !== card.stage_id && target.is_active !== false) {
-                            <option [value]="target.id">{{ target.name }}</option>
-                          }
+                      <div class="flex items-start justify-between gap-2">
+                        <button
+                          type="button"
+                          class="flex min-w-0 items-start gap-1.5 text-left text-sm font-semibold text-[var(--color-text-primary)] hover:underline"
+                        >
+                          <app-icon name="briefcase" [size]="14" class="mt-0.5 shrink-0 text-[var(--color-text-muted)]"></app-icon>
+                          <span class="min-w-0 break-words">{{ card.title }}</span>
+                        </button>
+                        @if (canManage()) {
+                          <div class="flex shrink-0 items-center gap-0.5">
+                            <button
+                              type="button"
+                              class="inline-flex h-7 w-7 items-center justify-center rounded-md hover:bg-[var(--color-background)]"
+                              aria-label="Editar oportunidad"
+                              title="Editar"
+                              (click)="openEdit(card); $event.stopPropagation()"
+                            >
+                              <app-icon name="pencil" [size]="14"></app-icon>
+                            </button>
+                            <button
+                              type="button"
+                              class="inline-flex h-7 w-7 items-center justify-center rounded-md text-[var(--color-error)] hover:bg-[var(--color-background)]"
+                              aria-label="Eliminar oportunidad"
+                              title="Eliminar"
+                              (click)="askDelete(card); $event.stopPropagation()"
+                            >
+                              <app-icon name="trash-2" [size]="14"></app-icon>
+                            </button>
+                          </div>
                         }
-                      </select>
-                    }
-                  </article>
-                } @empty {
-                  <p class="px-1 py-4 text-center text-xs text-[var(--color-text-muted)]">Suelta aquí</p>
-                }
+                      </div>
+                      <a
+                        class="mt-1 flex items-center gap-1.5 truncate text-xs text-[var(--color-text-secondary)] hover:underline"
+                        [routerLink]="['/admin/customers', card.customer?.id]"
+                        [queryParams]="{ tab: 'crm' }"
+                        (click)="$event.stopPropagation()"
+                      >
+                        <app-icon name="user" [size]="12" class="shrink-0"></app-icon>
+                        <span class="truncate">{{ name(card.customer) }}</span>
+                      </a>
+                      <div class="mt-2 flex flex-wrap items-center justify-between gap-2 text-xs">
+                        <span class="inline-flex items-center gap-1 font-semibold text-[var(--color-text-primary)]">
+                          <app-icon name="dollar-sign" [size]="12"></app-icon>
+                          {{ card.amount !== null ? (+card.amount | currency) : 'Sin valor' }}
+                        </span>
+                        @if (card.expected_close_date) {
+                          <span class="inline-flex items-center gap-1 text-[var(--color-text-muted)]">
+                            <app-icon name="calendar" [size]="12"></app-icon>
+                            {{ dateOnly(card.expected_close_date) }}
+                          </span>
+                        }
+                      </div>
+                      <div class="mt-1 flex flex-wrap items-center gap-2 text-xs text-[var(--color-text-muted)]">
+                        @if (card.owner) {
+                          <span class="inline-flex items-center gap-1">
+                            <app-icon name="user-check" [size]="12"></app-icon>{{ name(card.owner) }}
+                          </span>
+                        }
+                        @if (card.quotation) {
+                          <span class="inline-flex items-center gap-1">
+                            <app-icon name="file-text" [size]="12"></app-icon>{{ card.quotation.quotation_number }}
+                          </span>
+                        }
+                        @if (card.status === 'lost' && card.lost_reason) {
+                          <span class="text-[var(--color-error)]">· {{ card.lost_reason }}</span>
+                        }
+                      </div>
+                      @if (canManage()) {
+                        <select
+                          class="mt-2 h-8 w-full rounded-md border border-[var(--color-border)] bg-surface px-2 text-xs md:hidden"
+                          aria-label="Mover a"
+                          [ngModel]="''"
+                          (click)="$event.stopPropagation()"
+                          (ngModelChange)="$event && moveTo(card, +$event)"
+                        >
+                          <option value="">Mover a…</option>
+                          @for (target of stages(); track target.id) {
+                            @if (target.id !== card.stage_id && target.is_active !== false) {
+                              <option [value]="target.id">{{ target.name }}</option>
+                            }
+                          }
+                        </select>
+                      }
+                    </article>
+                  } @empty {
+                    <p class="px-1 py-4 text-center text-xs text-[var(--color-text-muted)]">Suelta aquí</p>
+                  }
+                </div>
               </div>
-            </div>
-          }
-        </div>
-      } @else {
-        <app-card>
+            }
+          </div>
+        } @else {
           @if (!allCards().length) {
             <app-empty-state
               icon="trending-up"
@@ -304,13 +361,18 @@ const STATUS_LABELS: Record<CrmOpportunity['status'], string> = {
                     <th class="px-3 py-2">Cierre esperado</th>
                     <th class="px-3 py-2">Responsable</th>
                     <th class="px-3 py-2">Estado</th>
+                    @if (canManage()) {
+                      <th class="px-3 py-2 text-right"><span class="sr-only">Acciones</span></th>
+                    }
                   </tr>
                 </thead>
                 <tbody class="divide-y divide-[var(--color-border)]">
                   @for (card of allCards(); track card.id) {
                     <tr class="hover:bg-[var(--color-background)]">
                       <td class="px-3 py-2">
-                        <button type="button" class="font-semibold hover:underline" (click)="openEdit(card)">{{ card.title }}</button>
+                        <button type="button" class="inline-flex items-center gap-1.5 text-left font-semibold hover:underline" (click)="openDetail(card)">
+                          <app-icon name="briefcase" [size]="14" class="shrink-0 text-[var(--color-text-muted)]"></app-icon>{{ card.title }}
+                        </button>
                       </td>
                       <td class="px-3 py-2">
                         <a class="hover:underline" [routerLink]="['/admin/customers', card.customer?.id]" [queryParams]="{ tab: 'crm' }">{{ name(card.customer) }}</a>
@@ -328,13 +390,55 @@ const STATUS_LABELS: Record<CrmOpportunity['status'], string> = {
                           <div class="text-xs text-[var(--color-text-muted)]">{{ card.lost_reason }}</div>
                         }
                       </td>
+                      @if (canManage()) {
+                        <td class="px-3 py-2">
+                          <div class="flex items-center justify-end gap-0.5">
+                            <button type="button" class="inline-flex h-7 w-7 items-center justify-center rounded-md hover:bg-[var(--color-background)]" aria-label="Editar oportunidad" title="Editar" (click)="openEdit(card)">
+                              <app-icon name="pencil" [size]="14"></app-icon>
+                            </button>
+                            <button type="button" class="inline-flex h-7 w-7 items-center justify-center rounded-md text-[var(--color-error)] hover:bg-[var(--color-background)]" aria-label="Eliminar oportunidad" title="Eliminar" (click)="askDelete(card)">
+                              <app-icon name="trash-2" [size]="14"></app-icon>
+                            </button>
+                          </div>
+                        </td>
+                      }
                     </tr>
                   }
                 </tbody>
               </table>
             </div>
           }
-        </app-card>
+        }
+      </app-card>
+
+      <app-crm-opportunity-detail-modal
+        [(isOpen)]="detailOpen"
+        [opportunity]="detailCard()"
+        [canManage]="canManage()"
+        (editRequested)="editFromDetail()"
+        (deleteRequested)="deleteFromDetail()"
+      ></app-crm-opportunity-detail-modal>
+
+      <app-confirmation-modal
+        [isOpen]="!!toDelete()"
+        (isOpenChange)="!$event && toDelete.set(null)"
+        title="Eliminar oportunidad"
+        [message]="deleteMessage()"
+        confirmText="Eliminar"
+        cancelText="Cancelar"
+        confirmVariant="danger"
+        (confirm)="confirmDelete()"
+        (cancel)="toDelete.set(null)"
+      ></app-confirmation-modal>
+
+      @if (canConfigure()) {
+        <app-crm-stage-templates-modal
+          [(isOpen)]="templatesOpen"
+          [pipelineId]="board()?.pipeline?.id ?? null"
+          [pipelineName]="board()?.pipeline?.name ?? ''"
+          (applied)="load()"
+          (pipelineCreated)="onPipelineCreated($event)"
+        ></app-crm-stage-templates-modal>
       }
 
       <app-crm-opportunity-form-modal
@@ -402,6 +506,12 @@ export class PipelineComponent {
   protected readonly editing = signal<CrmOpportunity | null>(null);
   protected readonly loseOpen = signal(false);
   protected readonly lostReason = signal('');
+  protected readonly detailOpen = signal(false);
+  private readonly detailId = signal<number | null>(null);
+  protected readonly toDelete = signal<CrmOpportunity | null>(null);
+  protected readonly templatesOpen = signal(false);
+  /** True while a card is being dragged, so the trailing click opens nothing. */
+  protected dragging = false;
   /** Pending lose: the card and, when dropped, the target stage and index. */
   private readonly pendingLose = signal<{
     card: CrmOpportunity;
@@ -415,6 +525,15 @@ export class PipelineComponent {
   protected readonly canSeeAll = computed(() => crmCanSeeAll(this.auth));
   protected readonly canManage = computed(
     () => this.auth.isOwner() || this.auth.hasPermission('store:crm_pipeline:manage'),
+  );
+  /** Only owner/admin (see-all) with manage permission configure stage templates. */
+  protected readonly canConfigure = computed(() => this.canSeeAll() && this.canManage());
+  protected readonly detailCard = computed(
+    () => this.allCards().find((card) => card.id === this.detailId()) ?? null,
+  );
+  protected readonly deleteMessage = computed(
+    () =>
+      `¿Eliminar la oportunidad «${escapeHtml(this.toDelete()?.title ?? '')}»?<br>Esta acción no se puede deshacer. Las tareas vinculadas se conservan.`,
   );
   protected readonly headerActions = computed<StickyHeaderActionButton[]>(() =>
     this.canManage()
@@ -492,6 +611,63 @@ export class PipelineComponent {
   openEdit(card: CrmOpportunity): void {
     this.editing.set(card);
     this.formOpen.set(true);
+  }
+
+  openDetail(card: CrmOpportunity): void {
+    if (this.dragging) return;
+    this.detailId.set(card.id);
+    this.detailOpen.set(true);
+  }
+
+  onDragEnded(): void {
+    setTimeout(() => (this.dragging = false));
+  }
+
+  editFromDetail(): void {
+    const card = this.detailCard();
+    if (!card) return;
+    this.detailOpen.set(false);
+    this.openEdit(card);
+  }
+
+  deleteFromDetail(): void {
+    const card = this.detailCard();
+    if (card) this.askDelete(card);
+  }
+
+  askDelete(card: CrmOpportunity): void {
+    this.toDelete.set(card);
+  }
+
+  async confirmDelete(): Promise<void> {
+    const card = this.toDelete();
+    this.toDelete.set(null);
+    if (!card) return;
+    try {
+      await firstValueFrom(this.crm.deleteOpportunity(card.id));
+      this.detailOpen.set(false);
+      this.board.update((board) => {
+        if (!board) return board;
+        const amount = Number(card.amount ?? 0);
+        const stages = board.stages.map((stage) => {
+          if (!stage.opportunities.some((row) => row.id === card.id)) return stage;
+          return {
+            ...stage,
+            count: Math.max(0, stage.count - 1),
+            total_amount: String(Math.max(0, Number(stage.total_amount) - amount)),
+            opportunities: stage.opportunities.filter((row) => row.id !== card.id),
+          };
+        });
+        return { ...board, stages };
+      });
+      this.toast.success('Oportunidad eliminada');
+    } catch (error) {
+      this.toast.error(parseApiError(error).userMessage);
+    }
+  }
+
+  onPipelineCreated(id: number): void {
+    this.pipelineId.set(id);
   }
 
   onDrop(event: CdkDragDrop<CrmBoardStage>): void {
