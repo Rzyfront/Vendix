@@ -88,12 +88,17 @@ export const CRM_TASK_MAX_SUPPORTERS = 10;
 /**
  * Stages a task can move its opportunity to: the active stages of its board
  * except the current one and the `lost` ones (losing asks for a reason, and
- * that stays on the board).
+ * that stays on the board). `keepStageId`, the target saved on a task being
+ * edited, stays offered even when the opportunity already reached it.
  */
-export function taskTargetStages(opportunity: CrmOpenOpportunity | null): CrmStage[] {
+export function taskTargetStages(
+  opportunity: CrmOpenOpportunity | null,
+  keepStageId: number | null = null,
+): CrmStage[] {
   if (!opportunity) return [];
   return opportunity.stages.filter(
-    (stage) => stage.kind !== 'lost' && stage.id !== opportunity.stage?.id,
+    (stage) =>
+      stage.kind !== 'lost' && (stage.id !== opportunity.stage?.id || stage.id === keepStageId),
   );
 }
 

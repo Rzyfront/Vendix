@@ -5,7 +5,7 @@ import {
   provideZonelessChangeDetection,
 } from '@angular/core';
 import { ComponentFixture, TestBed } from '@angular/core/testing';
-import { of } from 'rxjs';
+import { Observable, firstValueFrom, of } from 'rxjs';
 import { AuthFacade } from '../../../../../../core/store/auth/auth.facade';
 import { ToastService } from '../../../../../../shared/components';
 import type { CustomerSelectOption } from '../../../../../../shared/components';
@@ -70,7 +70,10 @@ interface FormInternals {
   targetStageId: WritableSignal<number | null>;
   opportunitiesLoaded: Signal<boolean>;
   stageOptions: Signal<{ value: string | number; label: string }[]>;
+  targetStageValid: Signal<boolean>;
+  supportOnly: Signal<boolean>;
   canSave: Signal<boolean>;
+  searchStaff(term: string): Observable<{ id: number; name: string }[]>;
   selectOpportunity(id: number | null): void;
   setMovesOpportunity(on: boolean): void;
   save(): Promise<void>;
@@ -98,9 +101,11 @@ describe('TaskFormModalComponent — linked opportunity and support people', () 
   ): Promise<void> {
     crm = jasmine.createSpyObj<CrmService>('CrmService', [
       'openOpportunities',
+      'taskStaff',
       'createTask',
       'updateTask',
     ]);
+    crm.taskStaff.and.returnValue(of([person(5, 'Luis'), { id: 6, first_name: null, last_name: null }]));
     crm.openOpportunities.and.callFake((customerId: number) => of(openByCustomer[customerId] ?? []));
     crm.createTask.and.callFake((body: SaveCrmTask) => of(savedTask({ title: body.title ?? '' })));
     crm.updateTask.and.callFake(() => of(savedTask()));
@@ -300,5 +305,99 @@ describe('TaskFormModalComponent — linked opportunity and support people', () 
     await saveWith();
     const body = crm.updateTask.calls.mostRecent().args[1];
     expect(Object.keys(body).sort()).toEqual(['assigned_user_id', 'description', 'due_at', 'title']);
+  });
+
+  it('asks for the linked opportunity of a saved task too, so it shows past the first 20', async () => {
+    openByCustomer[1] = [opportunity(50, 'Cotización X')];
+    await open({ task: savedTask() });
+
+    expect(crm.openOpportunities).toHaveBeenCalledWith(1, 50);
+  });
+
+  it('searches support people through the tasks API, not the POS staff lookup', async () => {
+    await open();
+
+    const found = await firstValueFrom(form().searchStaff('lu'));
+
+    expect(crm.taskStaff).toHaveBeenCalledWith('lu');
+    expect(found).toEqual([
+      { id: 5, name: 'Luis' },
+      { id: 6, name: 'Usuario #6' },
+    ]);
+  });
+
+  it('offers the saved target marked «(actual)» when the opportunity already reached it', async () => {
+    openByCustomer[1] = [{ ...opportunity(50, 'Cotización X'), stage: STAGES[2] }];
+    await open({ task: savedTask() });
+
+    expect(form().stageOptions().map((option) => option.label)).toEqual([
+      'Prospecto',
+      'Propuesta',
+      'Negociación (actual)',
+      'Ganada',
+    ]);
+    expect(form().targetStageId()).toBe(12);
+    expect(form().canSave()).toBeTrue();
+  });
+
+  it('clears a saved target that is no longer offered and asks to choose again', async () => {
+    openByCustomer[1] = [opportunity(50, 'Cotización X')];
+    await open({
+      task: savedTask({ move_to_stage: { id: 99, name: 'Vieja', kind: 'open', color: null } }),
+    });
+
+    expect(form().movesOpportunity()).toBeTrue();
+    expect(form().targetStageId()).toBeNull();
+    expect(form().targetStageValid()).toBeFalse();
+    expect(form().canSave()).toBeFalse();
+    await form().save();
+    expect(crm.updateTask).not.toHaveBeenCalled();
+
+    form().targetStageId.set(12);
+    expect(form().canSave()).toBeTrue();
+  });
+
+  it('shows a task where the user only helps read-only and never saves it', async () => {
+    owner = false;
+    openByCustomer[1] = [opportunity(50, 'Cotización X')];
+    await open({
+      task: savedTask({
+        assigned_user: person(8, 'Beto'),
+        created_by: person(9, 'Dora'),
+        support_users: [person(7, 'Ana')],
+      }),
+    });
+
+    expect(form().supportOnly()).toBeTrue();
+    expect(text()).toContain('Eres apoyo en esta tarea');
+    expect(form().canSave()).toBeFalse();
+    await saveWith('Otro título');
+    expect(crm.updateTask).not.toHaveBeenCalled();
+  });
+
+  it('the creator who also helps, and see-all, still edit the task', async () => {
+    owner = false;
+    await open({
+      task: savedTask({
+        opportunity: null,
+        assigned_user: person(8, 'Beto'),
+        created_by: person(7, 'Ana'),
+        support_users: [person(7, 'Ana')],
+      }),
+    });
+    expect(form().supportOnly()).toBeFalse();
+    expect(form().canSave()).toBeTrue();
+
+    TestBed.resetTestingModule();
+    owner = true;
+    await open({
+      task: savedTask({
+        opportunity: null,
+        assigned_user: person(8, 'Beto'),
+        created_by: person(9, 'Dora'),
+        support_users: [person(7, 'Ana')],
+      }),
+    });
+    expect(form().supportOnly()).toBeFalse();
   });
 });

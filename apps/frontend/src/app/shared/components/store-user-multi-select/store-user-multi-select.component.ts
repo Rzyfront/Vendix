@@ -17,7 +17,16 @@ import {
   FormsModule,
 } from '@angular/forms';
 import { takeUntilDestroyed } from '@angular/core/rxjs-interop';
-import { Subject, debounceTime, distinctUntilChanged, forkJoin, of, switchMap, tap } from 'rxjs';
+import {
+  Observable,
+  Subject,
+  debounceTime,
+  distinctUntilChanged,
+  forkJoin,
+  of,
+  switchMap,
+  tap,
+} from 'rxjs';
 import { catchError } from 'rxjs/operators';
 import { IconComponent } from '../icon/icon.component';
 import {
@@ -202,6 +211,14 @@ export class StoreUserMultiSelectComponent
    * single-user route.
    */
   readonly knownUsers = input<StoreUserOption[]>([]);
+  /**
+   * Own search for pickers backed by another endpoint (e.g. the CRM task
+   * support people, gated by the tasks permission). Opt-in — defaults to
+   * `null`, which keeps {@link StoreUserLookupService.search}.
+   */
+  readonly searchFn = input<((term: string) => Observable<StoreUserOption[]>) | null>(
+    null,
+  );
 
   // Signal UI state (zoneless-safe)
   readonly query = signal<string>('');
@@ -235,15 +252,18 @@ export class StoreUserMultiSelectComponent
         debounceTime(SEARCH_DEBOUNCE_MS),
         distinctUntilChanged(),
         tap(() => this.isLoading.set(true)),
-        switchMap((term) =>
-          this.lookup
-            .search(term, {
-              excludeIds: this.excludeIds(),
-              excludeRole: this.excludeRole() ?? undefined,
-              mode: this.lookupMode(),
-            })
-            .pipe(catchError(() => of([] as StoreUserOption[]))),
-        ),
+        switchMap((term) => {
+          const search = this.searchFn();
+          return (
+            search
+              ? search(term)
+              : this.lookup.search(term, {
+                  excludeIds: this.excludeIds(),
+                  excludeRole: this.excludeRole() ?? undefined,
+                  mode: this.lookupMode(),
+                })
+          ).pipe(catchError(() => of([] as StoreUserOption[])));
+        }),
         takeUntilDestroyed(this.destroyRef),
       )
       .subscribe((options) => {

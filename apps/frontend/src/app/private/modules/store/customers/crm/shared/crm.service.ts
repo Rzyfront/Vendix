@@ -8,6 +8,7 @@ import {
   CrmNote,
   CrmOpenOpportunity,
   CrmOpportunity,
+  CrmPerson,
   CrmPipeline,
   CrmStageTemplate,
   CrmTag,
@@ -204,6 +205,18 @@ export class CrmService {
       .pipe(map((r) => r.data));
   }
 
+  /**
+   * Active staff of the store for the task support picker, by name. Gated by
+   * the tasks permission, so a seller without POS access finds them too.
+   */
+  taskStaff(q: string): Observable<CrmPerson[]> {
+    return this.http
+      .get<ApiResponse<CrmPerson[]>>(`${this.base}/crm/tasks/staff`, {
+        params: toParams({ q: q.trim() }),
+      })
+      .pipe(map((r) => r.data ?? []));
+  }
+
   createTask(body: SaveCrmTask): Observable<CrmTask> {
     return this.http
       .post<ApiResponse<CrmTask>>(`${this.base}/crm/tasks`, body)
@@ -258,11 +271,15 @@ export class CrmService {
       .pipe(map((r) => r.data));
   }
 
-  /** Open opportunities of one customer the viewer sees (task form). */
-  openOpportunities(customerId: number): Observable<CrmOpenOpportunity[]> {
+  /**
+   * Open opportunities of one customer the viewer sees (task form).
+   * `includeId`, the opportunity of the task being edited, always comes back
+   * while it is open, even past the first page.
+   */
+  openOpportunities(customerId: number, includeId?: number): Observable<CrmOpenOpportunity[]> {
     return this.http
       .get<ApiResponse<CrmOpenOpportunity[]>>(`${this.base}/crm/opportunities/open`, {
-        params: toParams({ customer_id: customerId }),
+        params: toParams({ customer_id: customerId, include_id: includeId }),
       })
       .pipe(map((r) => r.data ?? []));
   }

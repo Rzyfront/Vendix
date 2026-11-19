@@ -10,7 +10,7 @@ import {
   untracked,
 } from '@angular/core';
 import { FormsModule } from '@angular/forms';
-import { firstValueFrom } from 'rxjs';
+import { Observable, firstValueFrom, map } from 'rxjs';
 import {
   ButtonComponent,
   CustomerSelectComponent,
@@ -34,6 +34,7 @@ import {
   CRM_TASK_MAX_SUPPORTERS,
   crmCanSeeAll,
   fromLocalInput,
+  isTaskSupporter,
   openOpportunityLabel,
   taskTargetStages,
   toLocalInput,
@@ -48,6 +49,10 @@ import {
  * preselected, several are offered, none is said. A linked opportunity can be
  * moved to another stage when the task is completed. The opportunity of a
  * saved task cannot be changed (the API has no such field), only its stage.
+ *
+ * Who only helps with a saved task (not its assignee nor its creator, without
+ * see-all) sees it read-only: the API only lets them change its status
+ * (CRM_TASK_003), and that is done from the list.
  */
 @Component({
   selector: 'app-crm-task-form-modal',
@@ -73,10 +78,18 @@ import {
       size="md"
     >
       <div class="flex flex-col gap-4">
+        @if (supportOnly()) {
+          <p class="text-sm text-[var(--color-text-secondary)]">
+            Eres apoyo en esta tarea: puedes verla y marcarla hecha desde la lista. El resto lo
+            cambia el responsable o quien la creó.
+          </p>
+        }
+
         <app-input
           label="Qué hay que hacer"
           placeholder="Ej.: Llamar para confirmar la cotización"
           [maxlength]="200"
+          [disabled]="supportOnly()"
           [ngModel]="title()"
           (ngModelChange)="title.set($event)"
         ></app-input>
@@ -84,6 +97,7 @@ import {
         <app-input
           label="Vence"
           type="datetime-local"
+          [disabled]="supportOnly()"
           [ngModel]="dueAt()"
           (ngModelChange)="dueAt.set($event)"
         ></app-input>
@@ -92,6 +106,7 @@ import {
           <app-customer-select
             label="Cliente (opcional)"
             [allowCreate]="false"
+            [disabled]="supportOnly()"
             [selected]="customer()"
             (selectedChange)="customer.set($event)"
           ></app-customer-select>
@@ -135,6 +150,7 @@ import {
           }
           <app-toggle
             label="Esta tarea mueve la oportunidad"
+            [disabled]="supportOnly()"
             [checked]="movesOpportunity()"
             (changed)="setMovesOpportunity($event)"
           ></app-toggle>
@@ -144,7 +160,8 @@ import {
               placeholder="Elige la etapa"
               helpText="Se mueve cuando la tarea se marque como hecha."
               [required]="true"
-              [errorText]="targetStageId() ? '' : 'Elige la etapa destino'"
+              [disabled]="supportOnly()"
+              [errorText]="targetStageValid() ? '' : 'Elige la etapa destino'"
               [options]="stageOptions()"
               [ngModel]="targetStageId() ?? ''"
               (ngModelChange)="targetStageId.set($event ? +$event : null)"
@@ -172,6 +189,8 @@ import {
           <app-store-user-multi-select
             placeholder="Buscar persona del equipo..."
             lookupMode="staff"
+            [searchFn]="searchStaff"
+            [disabled]="supportOnly()"
             [excludeIds]="supportExcludedIds()"
             [knownUsers]="knownSupporters()"
             [ngModel]="supporters()"
@@ -184,6 +203,7 @@ import {
 
         <app-textarea
           label="Detalle (opcional)"
+          [readonly]="supportOnly()"
           [ngModel]="description()"
           (ngModelChange)="description.set($event)"
         ></app-textarea>
@@ -254,12 +274,41 @@ export class TaskFormModalComponent {
       label: openOpportunityLabel(item),
     })),
   ]);
-  protected readonly stageOptions = computed<SelectorOption[]>(() =>
-    taskTargetStages(this.selectedOpportunity()).map((stage) => ({
+  /**
+   * Target stages. Editing keeps the saved target offered, marked «(actual)»
+   * when the opportunity already reached it on the board.
+   */
+  protected readonly stageOptions = computed<SelectorOption[]>(() => {
+    const opportunity = this.selectedOpportunity();
+    const saved = this.task()?.move_to_stage?.id ?? null;
+    return taskTargetStages(opportunity, saved).map((stage) => ({
       value: stage.id,
-      label: stage.name,
-    })),
-  );
+      label: stage.id === opportunity?.stage?.id ? `${stage.name} (actual)` : stage.name,
+    }));
+  });
+  /** The chosen target is one of the offered stages; an empty selector never saves. */
+  protected readonly targetStageValid = computed(() => {
+    if (!this.movesOpportunity() || !this.selectedOpportunity()) return true;
+    const id = this.targetStageId();
+    return id != null && this.stageOptions().some((option) => option.value === id);
+  });
+  /** Only helps with the saved task: everything but its status is read-only. */
+  protected readonly supportOnly = computed(() => {
+    const task = this.task();
+    if (!task || this.canSeeAll()) return false;
+    const userId = this.auth.userId();
+    return isTaskSupporter(task, userId) && task.created_by?.id !== userId;
+  });
+  /** Support search through the tasks API (a seller may lack POS access). */
+  protected readonly searchStaff = (term: string): Observable<StoreUserOption[]> =>
+    this.crm.taskStaff(term).pipe(
+      map((people) =>
+        people.map((person) => ({
+          id: person.id,
+          name: personName(person) || `Usuario #${person.id}`,
+        })),
+      ),
+    );
   /** The assignee is never a supporter too (the API drops it anyway). */
   protected readonly supportExcludedIds = computed(() => {
     const assignee = this.assignee();
@@ -279,9 +328,10 @@ export class TaskFormModalComponent {
   );
   protected readonly canSave = computed(
     () =>
+      !this.supportOnly() &&
       !!this.title().trim() &&
       !this.tooManySupporters() &&
-      (!this.movesOpportunity() || !!this.targetStageId()),
+      this.targetStageValid(),
   );
 
   constructor() {
@@ -347,11 +397,19 @@ export class TaskFormModalComponent {
     this.opportunitiesLoaded.set(false);
     if (!customerId) return;
     try {
-      const list = await firstValueFrom(this.crm.openOpportunities(customerId));
+      // Editing asks for its own opportunity too, so it is there past 20.
+      const linkedId = task?.opportunity?.id;
+      const list = await firstValueFrom(
+        linkedId
+          ? this.crm.openOpportunities(customerId, linkedId)
+          : this.crm.openOpportunities(customerId),
+      );
       if (request !== this.opportunityRequest) return;
       this.opportunities.set(list);
       this.opportunitiesLoaded.set(true);
       if (!task && list.length === 1) this.opportunityId.set(list[0].id);
+      // A saved target that is no longer offered is cleared: choose again.
+      if (task && !this.targetStageValid()) this.targetStageId.set(null);
     } catch {
       // Without pipeline access the task is simply saved without opportunity.
       if (request === this.opportunityRequest) this.opportunities.set([]);
