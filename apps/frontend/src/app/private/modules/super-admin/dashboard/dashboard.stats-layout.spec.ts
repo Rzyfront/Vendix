@@ -1,29 +1,27 @@
-import { readFileSync } from 'node:fs';
-import { join } from 'node:path';
+import { DashboardComponent } from './dashboard.component';
 
 /**
  * QUI-1029: en móvil (<640px) las tarjetas KPI del Panel Principal de Super
- * Admin deben usar la tira horizontal deslizable global de .stats-container,
- * no apilarse en una columna. El componente solo ajusta tablet a 2 columnas.
+ * Admin deben usar la tira horizontal deslizable global de .stats-container
+ * (styles.scss), no apilarse en una columna. El componente solo ajusta tablet
+ * a 2 columnas. Se leen los estilos compilados del componente (sin node:fs,
+ * porque el job Frontend corre en el navegador con Karma).
  */
-const source = readFileSync(join(__dirname, 'dashboard.component.ts'), 'utf8');
-const globalStyles = readFileSync(join(__dirname, '../../../../../styles.scss'), 'utf8');
+function componentStyles(): string {
+  const def = (DashboardComponent as unknown as { ɵcmp?: { styles?: unknown[] } }).ɵcmp;
+  return (def?.styles ?? []).map(String).join('\n').replace(/\s+/g, ' ');
+}
 
 describe('QUI-1029 super-admin dashboard stats layout', () => {
-  it('no pisa el modo móvil con una columna', () => {
-    expect(source).not.toMatch(/grid-template-columns:\s*1fr\s*;/);
-    expect(source).not.toMatch(/max-width:\s*640px/);
+  it('no pisa el modo móvil con una sola columna', () => {
+    const css = componentStyles();
+    expect(css).not.toMatch(/grid-template-columns: ?1fr ?[;}]/);
+    expect(css).not.toMatch(/max-width: ?640px/);
   });
 
   it('solo ajusta tablet (640-1023px) a 2 columnas', () => {
-    expect(source).toMatch(/@media \(min-width: 640px\) and \(max-width: 1023px\)/);
-    expect(source).toContain('grid-template-columns: repeat(2, 1fr);');
-  });
-
-  it('el estilo global sigue dando tira horizontal en móvil', () => {
-    const block = globalStyles.match(/\n\.stats-container\s*\{([\s\S]*?)\n\}/)?.[1] ?? '';
-    expect(block).toContain('@media (max-width: 639px)');
-    expect(block).toContain('overflow-x: auto;');
-    expect(block).toContain('display: flex;');
+    const css = componentStyles();
+    expect(css).toMatch(/min-width: ?640px\) and \(max-width: ?1023px/);
+    expect(css).toMatch(/grid-template-columns: ?repeat\(2, ?1fr\)/);
   });
 });
