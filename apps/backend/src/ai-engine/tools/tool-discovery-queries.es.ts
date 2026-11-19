@@ -1,3 +1,9 @@
+import { CRM_CUSTOMERS_DISCOVERY_QUERIES_ES } from './domains/crm-customers.discovery.es';
+import { CRM_PIPELINE_DISCOVERY_QUERIES_ES } from './domains/crm-pipeline.discovery.es';
+import { CRM_SEGMENTS_DISCOVERY_QUERIES_ES } from './domains/crm-segments.discovery.es';
+import { CRM_TAGS_DISCOVERY_QUERIES_ES } from './domains/crm-tags.discovery.es';
+import { CRM_TASKS_CAMPAIGNS_DISCOVERY_QUERIES_ES } from './domains/crm-tasks-campaigns.discovery.es';
+
 /**
  * Consultas sintéticas versionadas (español colombiano) con las que un comerciante pide
  * lo que hace cada herramienta. Generadas OFFLINE una sola vez con LLM (2026-10-19,
@@ -3146,4 +3152,11 @@ export const TOOL_DISCOVERY_QUERIES_ES: Readonly<
     'Quítale la fecha a ese recordatorio',
     'Cámbiale el título al recordatorio de las ventas',
   ],
+  // QUI-1042: CRM family. Pure data files next to each tool factory, written
+  // by hand with the same colloquial register (no customer data).
+  ...CRM_CUSTOMERS_DISCOVERY_QUERIES_ES,
+  ...CRM_TAGS_DISCOVERY_QUERIES_ES,
+  ...CRM_SEGMENTS_DISCOVERY_QUERIES_ES,
+  ...CRM_PIPELINE_DISCOVERY_QUERIES_ES,
+  ...CRM_TASKS_CAMPAIGNS_DISCOVERY_QUERIES_ES,
 };
