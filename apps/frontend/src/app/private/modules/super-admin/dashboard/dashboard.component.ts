@@ -200,21 +200,12 @@ interface ActivityItem {
   `,
   styles: [
     `
-      .stats-container {
-        display: grid;
-        grid-template-columns: repeat(4, 1fr);
-        gap: 1rem;
-      }
-
-      @media (max-width: 1024px) {
+      /* QUI-1029: el layout base (4 columnas y tira horizontal deslizable en
+         móvil <640px) viene de .stats-container global en styles.scss. Aquí
+         solo se pasa a 2 columnas en tablet, sin pisar el modo móvil. */
+      @media (min-width: 640px) and (max-width: 1023px) {
         .stats-container {
           grid-template-columns: repeat(2, 1fr);
-        }
-      }
-
-      @media (max-width: 640px) {
-        .stats-container {
-          grid-template-columns: 1fr;
         }
       }
     `,
