@@ -93,7 +93,8 @@ function makeWorld(initialLines: any[], orderOver: Record<string, unknown> = {})
   const settings = { get: jest.fn(async () => ({ default_input_location_id: null, default_output_location_id: null, cost_method: 'cpp', lot_required: false })) };
   const planta = new ManufacturingOrdersService(
     prisma, production, { calculateCost: jest.fn(async () => ({ unit_cost: 1 })) } as any,
-    settings as any, { next: jest.fn(async () => 'OP-1') } as any, stock as any, emitter as any,
+    settings as any, { next: jest.fn(async () => 'OP-1') } as any, stock as any,
+    { resolveForOrder: jest.fn(async () => null) } as any, emitter as any,
   );
   const dump = () => ({
     lines: rows
@@ -117,7 +118,7 @@ function makeWorld(initialLines: any[], orderOver: Record<string, unknown> = {})
       unit_cost: order.unit_cost == null ? null : Number(order.unit_cost),
     },
   });
-  return { order, rows, planta, production, dump, tx, prisma, stock };
+  return { order, rows, planta, production, dump, tx, prisma, stock, validator, settings };
 }
 
 // Planta create plan for 10 units: 99 -> 22, 98 -> 9, 97 -> 6 (computeComponentRequirements)
@@ -229,5 +230,88 @@ describe('Planta consumption lines — parity with the pre-change persistLines',
       line(98, 7, 7, 2.111, 14.777, [[7, 2.111, 14.777]]),
       line(99, 18, 18, 1.37, 24.66, [[18, 1.37, 24.66]]),
     ]);
+  });
+});
+
+/**
+ * QUI-1013 — an order made in a plant: inputs leave the plant's input location,
+ * finished goods enter its output location, and the stock pre-check judges the
+ * input location only. Real engine (`ProductionOrdersService.complete`).
+ */
+describe('QUI-1013 — plant locations through the real engine', () => {
+  beforeEach(() => jest.spyOn(RequestContextService, 'getContext').mockReturnValue(ctx as any));
+  afterEach(() => jest.restoreAllMocks());
+
+  const withPlant = (orderOver: Record<string, unknown> = {}) => {
+    const w = makeWorld(plantaPlan(), { plant_id: 3, ...orderOver });
+    w.prisma.manufacturing_plants = {
+      findFirst: jest.fn(async ({ where }: any) =>
+        where.id === 3 ? { input_location_id: 11, output_location_id: 12 } : null,
+      ),
+    };
+    return w;
+  };
+  const moves = (w: ReturnType<typeof makeWorld>) =>
+    w.dump().stock.map((s: any) => [s.product_id, s.movement_type, s.location_id]);
+
+  it('Planta: consumes from the plant input location and credits its output location', async () => {
+    const w = withPlant();
+    await w.planta.complete(1, {} as any);
+    expect(moves(w)).toEqual([
+      [99, 'consumption', 11],
+      [98, 'consumption', 11],
+      [97, 'consumption', 11],
+      [50, 'production', 12],
+    ]);
+    expect(w.stock.getDefaultLocationForProduct).not.toHaveBeenCalled();
+    expect(w.validator.assertIngredientsAvailable).toHaveBeenCalledWith(
+      expect.any(Array),
+      expect.objectContaining({ consumeLocationId: 11 }),
+    );
+  });
+
+  it('the plant wins over the old single-plant settings defaults', async () => {
+    const w = withPlant();
+    w.settings.get.mockResolvedValue({
+      default_input_location_id: 5,
+      default_output_location_id: 6,
+      cost_method: 'cpp',
+      lot_required: false,
+    } as any);
+    await w.planta.complete(1, {} as any);
+    expect(moves(w)).toEqual([
+      [99, 'consumption', 11],
+      [98, 'consumption', 11],
+      [97, 'consumption', 11],
+      [50, 'production', 12],
+    ]);
+  });
+
+  it('an explicit order location still receives the finished goods', async () => {
+    const w = withPlant({ location_id: 20 });
+    await w.planta.complete(1, {} as any);
+    expect(moves(w).at(-1)).toEqual([50, 'production', 20]);
+    expect(moves(w)[0]).toEqual([99, 'consumption', 11]);
+  });
+
+  it('engine called without locations (restaurant endpoint, sale-linked) falls back to the plant', async () => {
+    const w = withPlant({ order_number: null, planned_qty: D(8) });
+    await w.production.complete(1, { produced_qty: 8 } as any);
+    expect(moves(w)).toEqual([
+      [99, 'consumption', 11],
+      [98, 'consumption', 11],
+      [97, 'consumption', 11],
+      [50, 'production', 12],
+    ]);
+  });
+
+  it('without a plant nothing changes: per-product defaults and a store-wide pre-check', async () => {
+    const w = makeWorld(plantaPlan());
+    w.prisma.manufacturing_plants = { findFirst: jest.fn() };
+    await w.planta.complete(1, {} as any);
+    expect(moves(w).map((m: any[]) => m[2])).toEqual([1, 1, 1, 1]);
+    expect(w.prisma.manufacturing_plants.findFirst).not.toHaveBeenCalled();
+    const opts = (w.validator.assertIngredientsAvailable.mock.calls[0] as any[])[1];
+    expect(opts).not.toHaveProperty('consumeLocationId');
   });
 });
