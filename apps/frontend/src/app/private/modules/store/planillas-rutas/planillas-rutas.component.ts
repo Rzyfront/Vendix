@@ -212,7 +212,7 @@ export class PlanillasRutasComponent {
   }
 
   onViewDetail(route: DispatchRoute) {
-    this.router.navigate(['/admin/orders/planillas', route.id]);
+    this.router.navigate(['/admin/orders/rutas', route.id]);
   }
 
   openCreateModal() {

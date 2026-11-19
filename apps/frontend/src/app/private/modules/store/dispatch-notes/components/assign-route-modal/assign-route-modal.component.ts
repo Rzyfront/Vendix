@@ -196,7 +196,7 @@ export class AssignRouteModalComponent {
     const note = this.dispatchNote();
     this.close();
     // CONTRATO con planillas-rutas: `prefillNotes` = ids separados por coma.
-    this.router.navigate(['/admin/orders/planillas'], {
+    this.router.navigate(['/admin/orders/rutas'], {
       queryParams: { prefillNotes: String(note.id) },
     });
   }
