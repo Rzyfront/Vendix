@@ -8,6 +8,7 @@ import {
 } from '@angular/core';
 import { AuthFacade } from '../../../../../../core/store/auth/auth.facade';
 import { IconComponent } from '../../../../../../shared/components/icon/icon.component';
+import { UserAvatarComponent } from '../../../../../../shared/components/user-avatar/user-avatar.component';
 import { VexChatStore } from '../../state/vex-chat.store';
 
 interface VexSidebarUser {
@@ -15,12 +16,13 @@ interface VexSidebarUser {
   last_name?: string | null;
   username?: string | null;
   email?: string | null;
+  avatar_url?: string | null;
 }
 
 @Component({
   selector: 'vendix-vex-chats-sidebar',
   standalone: true,
-  imports: [IconComponent],
+  imports: [IconComponent, UserAvatarComponent],
   changeDetection: ChangeDetectionStrategy.OnPush,
   host: { class: 'block h-full' },
   template: `
@@ -142,7 +144,11 @@ interface VexSidebarUser {
           <div
             class="w-9 h-9 shrink-0 rounded-full bg-[rgba(var(--color-primary-rgb),0.12)] text-[var(--color-primary)] flex items-center justify-center text-sm font-semibold"
           >
-            {{ initials() }}
+            <app-user-avatar
+              [src]="current_user()?.avatar_url"
+              [initials]="initials()"
+              [alt]="display_name()"
+            ></app-user-avatar>
           </div>
           <div class="min-w-0">
             <p class="text-sm font-medium truncate">{{ display_name() }}</p>
@@ -164,7 +170,7 @@ export class VexChatsSidebarComponent {
   readonly collapsed = model<boolean>(false);
   readonly conversationSelected = output<void>();
 
-  private readonly current_user = computed<VexSidebarUser | null>(
+  protected readonly current_user = computed<VexSidebarUser | null>(
     () => (this.auth.user() as VexSidebarUser | null) ?? null,
   );
 

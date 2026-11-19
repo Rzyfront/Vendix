@@ -12,6 +12,10 @@ import { InputComponent } from '../../../../../shared/components/input/input.com
 import { PasswordRequirementsComponent } from '../../../../../shared/components/password-requirements/password-requirements.component';
 import { passwordPolicyValidator } from '../../../../../core/utils/password-policy';
 import { SelectorComponent, SelectorOption } from '../../../../../shared/components/selector/selector.component';
+import {
+  DOCUMENT_TYPE_SELECT_OPTIONS,
+  toDocumentTypeCode,
+} from '../../../../../shared/constants/document-types';
 
 @Component({
   selector: 'app-account',
@@ -64,12 +68,7 @@ export class AccountComponent implements OnInit {
   };
 
   // Document type options for selector
-  document_type_options: SelectorOption[] = [
-    { value: 'CC', label: 'Cédula de Ciudadanía' },
-    { value: 'CE', label: 'Cédula de Extranjería' },
-    { value: 'NIT', label: 'NIT' },
-    { value: 'passport', label: 'Pasaporte' },
-  ];
+  document_type_options: SelectorOption[] = DOCUMENT_TYPE_SELECT_OPTIONS;
 
   ngOnInit(): void {
     this.initForms();
@@ -106,7 +105,7 @@ export class AccountComponent implements OnInit {
               first_name: response.data.first_name || '',
               last_name: response.data.last_name || '',
               phone: response.data.phone || '',
-              document_type: response.data.document_type || '',
+              document_type: toDocumentTypeCode(response.data.document_type) ?? '',
               document_number: response.data.document_number || '',
             });
           }
@@ -128,7 +127,11 @@ export class AccountComponent implements OnInit {
     this.is_saving.set(true);
     this.clearMessages();
 
-    this.account_service.updateProfile(this.profile_form.value)
+    // Backend enum is uppercase; an empty selection clears the field.
+    this.account_service.updateProfile({
+      ...this.profile_form.value,
+      document_type: toDocumentTypeCode(this.profile_form.value.document_type),
+    })
       .pipe(takeUntilDestroyed(this.destroy_ref))
       .subscribe({
         next: (response) => {
