@@ -45,6 +45,7 @@ import {
   CardComponent,
   DialogService,
   ModalComponent,
+  UserAvatarComponent,
 } from '../../../../shared/components';
 import {
   CustomerAddressPickerAddress,
@@ -190,6 +191,7 @@ export function resolvePosPaymentCustomerName(
   selector: 'app-pos',
   standalone: true,
   imports: [
+    UserAvatarComponent,
     ModalComponent,
     CustomerAddressPickerComponent,
     KitchenConfirmModalComponent,
@@ -367,7 +369,11 @@ export function resolvePosPaymentCustomerName(
                       [title]="cashierFullTitle()"
                     >
                       <div class="w-5 h-5 rounded-full bg-primary/10 text-primary font-bold text-[10px] flex items-center justify-center shrink-0 border border-primary/20">
-                        {{ cashierInitials() }}
+                        <app-user-avatar
+                          [src]="cashierAvatarUrl()"
+                          [initials]="cashierInitials()"
+                          [alt]="cashierName()"
+                        ></app-user-avatar>
                       </div>
                       <span class="font-medium text-slate-500">Cajero:</span>
                       <span class="font-semibold text-slate-800 truncate max-w-[140px]">{{ cashierName() }}</span>
@@ -1439,6 +1445,9 @@ export class PosComponent {
       .join(' ');
     return full || u?.name || u?.email || 'Cajero';
   });
+  readonly cashierAvatarUrl = computed(
+    () => (this.authFacade.user() as any)?.avatar_url ?? null,
+  );
   readonly cashierInitials = computed(() =>
     this.cashierName()
       .split(' ')

@@ -11,6 +11,10 @@ import { CommonModule } from '@angular/common';
 import { takeUntilDestroyed } from '@angular/core/rxjs-interop';
 
 import { IconComponent } from '../icon/icon.component';
+import {
+  resolveAvatarSrc,
+  UserAvatarComponent,
+} from '../user-avatar/user-avatar.component';
 import { UserUiService } from '../../services/user-ui.service';
 import { AuthFacade } from '../../../core/store/auth/auth.facade';
 import { AuthService } from '../../../core/services/auth.service';
@@ -30,7 +34,7 @@ export interface UserMenuOption {
 @Component({
   selector: 'app-user-dropdown',
   standalone: true,
-  imports: [CommonModule, IconComponent],
+  imports: [CommonModule, IconComponent, UserAvatarComponent],
   template: `
     <div class="user-dropdown-container" [class.open]="isOpen()">
       <!-- Desktop: Full trigger with user info -->
@@ -41,7 +45,14 @@ export interface UserMenuOption {
         aria-label="Menú de usuario"
       >
         <div class="user-avatar" style="position: relative;">
-          <span class="user-initials">{{ user.initials || 'US' }}</span>
+          <app-user-avatar
+            class="user-initials"
+            [src]="user.avatarUrl"
+            [initials]="user.initials"
+            fallback="US"
+            [alt]="user.name"
+            (loadError)="onAvatarError()"
+          ></app-user-avatar>
           @if (hasNewModules()) {
             <span class="settings-badge"></span>
           }
@@ -67,7 +78,14 @@ export interface UserMenuOption {
         aria-label="Menú de usuario"
       >
         <div class="user-avatar-minimal" style="position: relative;">
-          <span class="user-initials">{{ user.initials || 'US' }}</span>
+          <app-user-avatar
+            class="user-initials"
+            [src]="user.avatarUrl"
+            [initials]="user.initials"
+            fallback="US"
+            [alt]="user.name"
+            (loadError)="onAvatarError()"
+          ></app-user-avatar>
           @if (hasNewModules()) {
             <span class="settings-badge"></span>
           }
@@ -76,7 +94,15 @@ export interface UserMenuOption {
 
       <div class="dropdown-menu" [class.show]="isOpen()">
         <div class="dropdown-header">
-          <div class="header-avatar">{{ user.initials || 'US' }}</div>
+          <div class="header-avatar">
+            <app-user-avatar
+              [src]="user.avatarUrl"
+              [initials]="user.initials"
+              fallback="US"
+              [alt]="user.name"
+              (loadError)="onAvatarError()"
+            ></app-user-avatar>
+          </div>
           <div class="header-info">
             <p class="header-name">{{ user.name || 'Usuario' }}</p>
             <p class="header-email">{{ user.email || 'user@example.com' }}</p>
@@ -178,6 +204,7 @@ export class UserDropdownComponent implements OnInit {
         email: 'user@example.com',
         role: 'Administrador',
         initials: 'US',
+        avatarUrl: null as string | null,
       };
     }
 
@@ -195,7 +222,21 @@ export class UserDropdownComponent implements OnInit {
       email,
       role: this.getRoleDisplay(context),
       initials,
+      avatarUrl: resolveAvatarSrc(user.avatar_url),
     };
+  }
+
+  private avatarRefreshRequested = false;
+
+  /**
+   * The session keeps the signed avatar URL across reloads; once it expires
+   * the image fails and the initials show. Ask /auth/me once for a fresh
+   * signed URL so the photo comes back without logging in again.
+   */
+  onAvatarError(): void {
+    if (this.avatarRefreshRequested) return;
+    this.avatarRefreshRequested = true;
+    this.authFacade.refreshUser();
   }
 
   menuOptions: UserMenuOption[] = [

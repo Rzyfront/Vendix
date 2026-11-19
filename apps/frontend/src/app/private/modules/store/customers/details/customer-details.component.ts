@@ -27,6 +27,7 @@ import {
   SelectorComponent,
   PaginationComponent,
   BadgeComponent,
+  UserAvatarComponent,
 } from '../../../../../../app/shared/components';
 import type { BadgeVariant } from '../../../../../../app/shared/components';
 import {
@@ -58,6 +59,7 @@ import {
     SelectorComponent,
     PaginationComponent,
     StickyHeaderComponent,
+    UserAvatarComponent,
     CustomerCrmPanelComponent,
     CustomerDataSheetComponent,
     CustomerLocationsComponent,
@@ -121,7 +123,11 @@ import {
                 <div
                   class="w-14 h-14 rounded-full flex items-center justify-center font-bold text-xl flex-shrink-0 bg-primary/10 text-primary-on-tint"
                   >
-                  {{ getInitials() }}
+                  <app-user-avatar
+                    [src]="customer().avatar_url"
+                    [initials]="getInitials()"
+                    [alt]="getDisplayName()"
+                  ></app-user-avatar>
                 </div>
                 <div>
                   <h2 class="text-xl font-bold text-text-primary">

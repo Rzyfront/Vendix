@@ -48,6 +48,7 @@ import { Prisma, organizations } from '@prisma/client';
 import { recordTriggerEvent } from '../store/workflows/engine/workflow-trigger.outbox';
 import { mergeStoreSettingsWithDefaults } from '../store/settings/defaults/default-store-settings';
 import { signUserAvatar } from './helpers/sign-user-avatar.helper';
+import { parseUserDocumentType } from '../../common/constants/document-types';
 
 /**
  * Result of organization lookup with smart fallback logic
@@ -400,6 +401,15 @@ export class AuthService {
     };
   }
 
+  /** Normaliza/valida `document_type` para `users` (ver parseUserDocumentType). */
+  private toUserDocumentType(value: unknown) {
+    try {
+      return parseUserDocumentType(value);
+    } catch (error) {
+      throw new BadRequestException(error.message);
+    }
+  }
+
   async updateProfile(
     userId: number,
     updateProfileDto: any,
@@ -420,9 +430,16 @@ export class AuthService {
     if (first_name) updateData.first_name = first_name;
     if (last_name) updateData.last_name = last_name;
     if (phone !== undefined) updateData.phone = phone;
-    if (document_type !== undefined) updateData.document_type = document_type;
+    // `identification_type_enum` es MAYÚSCULAS: normalizar ("cc" → "CC"),
+    // null/"" limpia el campo y un código desconocido es un 400 en español
+    // en vez del error crudo de Prisma.
+    if (document_type !== undefined)
+      updateData.document_type = this.toUserDocumentType(document_type);
     if (document_number !== undefined)
-      updateData.document_number = document_number;
+      updateData.document_number =
+        typeof document_number === 'string'
+          ? document_number.trim() || null
+          : document_number;
 
     // Manejar avatar_url - sanitizar para almacenar solo el key de S3, no la URL firmada
     if (avatar_url !== undefined) {
@@ -1148,7 +1165,7 @@ export class AuthService {
         first_name: formatted_first_name,
         last_name: formatted_last_name,
         phone,
-        document_type: document_type as any,
+        document_type: this.toUserDocumentType(document_type) ?? null,
         document_number,
         username: await this.generateUniqueUsername(email),
         email_verified: false,

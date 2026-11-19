@@ -125,3 +125,26 @@ export function getDocumentTypeLabel(code: string | null | undefined): string {
 export function isValidDocumentType(value: unknown): value is DocumentTypeCode {
   return typeof value === 'string' && value in DOCUMENT_TYPE_INDEX;
 }
+
+/** `{ value, label }` options for document-type selectors (uppercase enum codes). */
+export const DOCUMENT_TYPE_SELECT_OPTIONS: { value: DocumentTypeCode; label: string }[] =
+  DOCUMENT_TYPES.map((t) => ({ value: t.code, label: t.label }));
+
+/** Legacy selector values that older forms sent and the backend enum never accepted. */
+const LEGACY_DOCUMENT_TYPE_ALIASES: Record<string, DocumentTypeCode> = {
+  PAS: 'PA',
+  PASSPORT: 'PA',
+};
+
+/**
+ * Normalizes a document type before sending it to `users.document_type`
+ * (backend `identification_type_enum`, uppercase): trims, uppercases and maps
+ * legacy aliases (`'pas'` → `'PA'`). Empty or unknown values become `null` so
+ * the field is cleared instead of failing the whole save.
+ */
+export function toDocumentTypeCode(value: unknown): DocumentTypeCode | null {
+  if (typeof value !== 'string') return null;
+  const upper = value.trim().toUpperCase();
+  const code = LEGACY_DOCUMENT_TYPE_ALIASES[upper] ?? upper;
+  return isValidDocumentType(code) ? code : null;
+}
