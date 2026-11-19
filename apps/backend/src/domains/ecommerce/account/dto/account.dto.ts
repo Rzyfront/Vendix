@@ -10,6 +10,7 @@ import {
 } from 'class-validator';
 import { ApiSchema } from '@nestjs/swagger';
 import { IsStrongPassword } from '../../../../common/validators/password-policy';
+import { IsUserDocumentType } from '../../../../common/validators/user-document-type.validator';
 
 @ApiSchema({ name: 'EcommerceAccountUpdateProfileDto' })
 export class EcommerceAccountUpdateProfileDto {
@@ -29,8 +30,7 @@ export class EcommerceAccountUpdateProfileDto {
   })
   phone?: string;
 
-  @IsOptional()
-  @IsString()
+  @IsUserDocumentType()
   document_type?: string;
 
   @IsOptional()

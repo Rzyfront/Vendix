@@ -23,6 +23,8 @@ import { emailEquals, normalizeEmail } from '@common/utils/email.util';
 import { EventEmitter2 } from '@nestjs/event-emitter';
 import { VendixHttpException, ErrorCodes } from 'src/common/errors';
 import { computeNitDv, normalizeNit } from '../../../common/utils/nit.util';
+import { S3Service } from '@common/services/s3.service';
+import { signUserAvatar } from '../../auth/helpers/sign-user-avatar.helper';
 
 /**
  * Columnas de `users` que NUNCA pueden salir por la API de clientes.
@@ -180,6 +182,7 @@ export class CustomersService {
     private readonly prisma: StorePrismaService,
     private readonly eventEmitter: EventEmitter2,
     @Optional() private readonly operatingScope?: OperatingScopeService,
+    @Optional() private readonly s3Service?: S3Service,
   ) {}
 
   /**
@@ -2131,8 +2134,14 @@ export class CustomersService {
     });
 
     const row = stats[0];
+    // `avatar_url` persists the S3 key; the detail card renders it as <img>,
+    // so expose a signed URL (null without photo or without storage).
+    const avatar_url = this.s3Service
+      ? (await signUserAvatar(this.s3Service, user)).avatar_url
+      : null;
     return {
       ...withPriceTierId(withBillingAddress(user)),
+      avatar_url,
       total_orders: row?._count?.id ?? 0,
       total_spend: row?._sum?.grand_total ? Number(row._sum.grand_total) : 0,
       last_order_date: row?._max?.created_at ?? null,

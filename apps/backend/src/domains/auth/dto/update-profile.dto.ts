@@ -8,6 +8,8 @@ import {
 import { Type } from 'class-transformer';
 import { ApiPropertyOptional, ApiSchema } from '@nestjs/swagger';
 import { CreateAddressDto } from '../../organization/addresses/dto';
+import { DOCUMENT_TYPE_CODES } from '../../../common/constants/document-types';
+import { IsUserDocumentType } from '../../../common/validators/user-document-type.validator';
 
 @ApiSchema({ name: 'AuthUpdateProfileDto' })
 export class AuthUpdateProfileDto {
@@ -33,18 +35,24 @@ export class AuthUpdateProfileDto {
   @IsString()
   phone?: string;
 
-  @ApiPropertyOptional({ example: 'CC', description: 'Tipo de documento' })
-  @IsOptional()
-  @IsString()
-  document_type?: string;
+  @ApiPropertyOptional({
+    example: 'CC',
+    enum: DOCUMENT_TYPE_CODES,
+    nullable: true,
+    description:
+      'Tipo de documento (identification_type_enum). Acepta minúsculas; null o vacío lo limpia.',
+  })
+  @IsUserDocumentType()
+  document_type?: string | null;
 
   @ApiPropertyOptional({
     example: '1234567890',
-    description: 'Número de documento',
+    nullable: true,
+    description: 'Número de documento; null o vacío lo limpia',
   })
   @IsOptional()
   @IsString()
-  document_number?: string;
+  document_number?: string | null;
 
   @ApiPropertyOptional({ description: 'URL o key de la imagen de perfil' })
   @IsOptional()

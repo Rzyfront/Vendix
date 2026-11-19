@@ -10,6 +10,7 @@ import {
 } from 'class-validator';
 import { ApiProperty } from '@nestjs/swagger';
 import { IsStrongPassword } from '../../../common/validators/password-policy';
+import { IsUserDocumentType } from '../../../common/validators/user-document-type.validator';
 
 export class RegisterCustomerDto {
   @ApiProperty({
@@ -62,8 +63,7 @@ export class RegisterCustomerDto {
     description: 'Tipo de documento del cliente',
     required: false,
   })
-  @IsString({ message: 'El tipo de documento debe ser un string' })
-  @IsOptional()
+  @IsUserDocumentType()
   document_type?: string;
 
   @ApiProperty({

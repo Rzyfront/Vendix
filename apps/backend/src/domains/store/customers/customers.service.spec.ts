@@ -924,6 +924,39 @@ describe('CustomersService — QUI-728 customer fiscal data', () => {
       expect(result.total_spend).toBe(0); // null → 0, no null
       expect(result.last_order_date).toBeNull();
     });
+
+    it('devuelve avatar_url firmado para que la ficha muestre la foto', async () => {
+      const KEY = 'organizations/o/users/302/avatars/a.webp';
+      const s3 = {
+        signUrl: jest.fn(async (key: string) => `https://bucket.s3/${key}?sig`),
+      };
+      const withS3 = new CustomersService(
+        mockPrismaService as any,
+        mockEventEmitter as any,
+        undefined,
+        s3 as any,
+      );
+      mockPrismaService.users.findFirst.mockResolvedValue(
+        makeUser({ avatar_url: KEY }),
+      );
+      mockPrismaService.orders.groupBy.mockResolvedValue([]);
+
+      const result: any = await withS3.findOne(STORE_ID, CUSTOMER_ID);
+
+      expect(result.avatar_url).toBe(`https://bucket.s3/${KEY}?sig`);
+      expect(s3.signUrl).toHaveBeenCalledWith(KEY);
+    });
+
+    it('sin foto avatar_url queda null', async () => {
+      mockPrismaService.users.findFirst.mockResolvedValue(
+        makeUser({ avatar_url: null }),
+      );
+      mockPrismaService.orders.groupBy.mockResolvedValue([]);
+
+      const result: any = await service.findOne(STORE_ID, CUSTOMER_ID);
+
+      expect(result.avatar_url).toBeNull();
+    });
   });
 
   /**

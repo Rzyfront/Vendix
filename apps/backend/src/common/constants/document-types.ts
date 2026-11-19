@@ -61,3 +61,40 @@ export function isValidDocumentType(value: unknown): value is DocumentTypeCode {
     (DOCUMENT_TYPE_CODES as readonly string[]).includes(value)
   );
 }
+
+/**
+ * Spanish validation message listing every accepted code, e.g.
+ * "Tipo de documento no válido. Usa CC, CE, ..., DIE o NUIP."
+ */
+export const DOCUMENT_TYPE_INVALID_MESSAGE = `Tipo de documento no válido. Usa ${DOCUMENT_TYPE_CODES.slice(0, -1).join(', ')} o ${DOCUMENT_TYPE_CODES[DOCUMENT_TYPE_CODES.length - 1]}.`;
+
+/**
+ * Normalizes a user-supplied document type before it reaches
+ * `identification_type_enum` (uppercase in Prisma):
+ * - `undefined` stays `undefined` (field not sent, nothing to update).
+ * - `null`, empty or whitespace-only strings become `null` (clear the field).
+ * - Any other string is trimmed and uppercased (`" cc "` → `"CC"`).
+ * Non-string values are returned untouched so validators can reject them.
+ */
+export function normalizeDocumentType(value: unknown): unknown {
+  if (value === undefined || value === null) return value;
+  if (typeof value !== 'string') return value;
+  const normalized = value.trim().toUpperCase();
+  return normalized === '' ? null : normalized;
+}
+
+/**
+ * Normalizes and validates a document type for writes to
+ * `users.document_type`. Returns `undefined` (not sent), `null` (clear) or a
+ * valid enum code; throws an Error with DOCUMENT_TYPE_INVALID_MESSAGE otherwise.
+ */
+export function parseUserDocumentType(
+  value: unknown,
+): DocumentTypeCode | null | undefined {
+  const normalized = normalizeDocumentType(value);
+  if (normalized === undefined || normalized === null) return normalized;
+  if (!isValidDocumentType(normalized)) {
+    throw new Error(DOCUMENT_TYPE_INVALID_MESSAGE);
+  }
+  return normalized;
+}

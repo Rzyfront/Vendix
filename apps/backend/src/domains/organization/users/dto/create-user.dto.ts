@@ -13,6 +13,7 @@ import {
 import { ApiProperty, ApiPropertyOptional } from '@nestjs/swagger';
 import { user_state_enum } from '@prisma/client';
 import { IsStrongPassword } from '../../../../common/validators/password-policy';
+import { IsUserDocumentType } from '../../../../common/validators/user-document-type.validator';
 
 export class CreateUserDto {
   @ApiPropertyOptional({
@@ -84,8 +85,7 @@ export class CreateUserDto {
   phone?: string;
 
   @ApiPropertyOptional({ example: 'CC', description: 'Tipo de documento' })
-  @IsOptional()
-  @IsString()
+  @IsUserDocumentType()
   document_type?: string;
 
   @ApiPropertyOptional({
