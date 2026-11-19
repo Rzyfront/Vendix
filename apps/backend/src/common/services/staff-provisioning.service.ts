@@ -110,6 +110,21 @@ export class StaffProvisioningService {
    *
    * @returns la tienda resuelta, o `null` si no hay ninguna elegible (huérfano).
    */
+  /**
+   * Lanza AUTH_STORE_INACTIVE_001 si la tienda no existe o está inactiva.
+   * Punto único para impedir que usuarios, membresías o `main_store_id`
+   * apunten a una tienda inactiva.
+   */
+  static async assertStoreActive(db: any, storeId: number): Promise<void> {
+    const store = await db.stores.findUnique({
+      where: { id: storeId },
+      select: { is_active: true },
+    });
+    if (!store?.is_active) {
+      throw new VendixHttpException(ErrorCodes.AUTH_STORE_INACTIVE_001);
+    }
+  }
+
   async resolveStoreForStoreAdmin(
     user: { id: number; organization_id: number; main_store_id: number | null },
     hasHighPrivilege: boolean,
@@ -123,7 +138,11 @@ export class StaffProvisioningService {
         where: { id: user.main_store_id },
       });
 
-      if (mainStore && mainStore.organization_id === user.organization_id) {
+      if (
+        mainStore &&
+        mainStore.is_active &&
+        mainStore.organization_id === user.organization_id
+      ) {
         const access = await db.store_users.findUnique({
           where: {
             store_id_user_id: { store_id: mainStore.id, user_id: user.id },
@@ -149,9 +168,10 @@ export class StaffProvisioningService {
     const firstMembership = await db.store_users.findFirst({
       where: {
         user_id: user.id,
-        store: { organization_id: user.organization_id },
+        store: { organization_id: user.organization_id, is_active: true },
       },
       include: { store: true },
+      orderBy: { store_id: 'asc' },
     });
 
     if (firstMembership?.store) {
@@ -165,7 +185,8 @@ export class StaffProvisioningService {
     // Estrategia 3: Fallback privilegio alto — cualquier tienda de la org
     if (hasHighPrivilege) {
       const firstOrgStore = await db.stores.findFirst({
-        where: { organization_id: user.organization_id },
+        where: { organization_id: user.organization_id, is_active: true },
+        orderBy: { id: 'asc' },
       });
 
       if (firstOrgStore) {
@@ -219,6 +240,11 @@ export class StaffProvisioningService {
       setMainStore = true,
     } = input;
     const db: any = tx;
+
+    // 0. Nunca se aprovisiona staff en una tienda inactiva: quedaría con
+    //    main_store_id/membresía/roles apuntando a una tienda que el login no
+    //    puede abrir (incidente vendix-centro, 2026-11-18).
+    await StaffProvisioningService.assertStoreActive(db, storeId);
 
     // 1. Relación store_users (idempotente)
     await db.store_users.upsert({

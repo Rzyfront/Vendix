@@ -807,6 +807,8 @@ export class UsersService {
             where: { user_id: id, store_id: storeId },
           });
           if (!exists) {
+            // Nunca se agrega un usuario a una tienda inactiva.
+            await StaffProvisioningService.assertStoreActive(tx, storeId);
             await tx.store_users.create({
               data: {
                 user_id: id,
@@ -819,11 +821,21 @@ export class UsersService {
         // main_store_id como driver (CD4/CD7): staff de tienda apunta a su
         // única tienda; privilegio alto solo se fija si está vacío (no pisa
         // el arranque de un owner multi-tienda).
-        if (store_ids.length > 0) {
+        // La tienda de arranque es la primera ACTIVA de la lista: un
+        // main_store_id inactivo dejaría al usuario sin poder entrar.
+        const activeStores = store_ids.length
+          ? await tx.stores.findMany({
+              where: { id: { in: store_ids }, is_active: true },
+              select: { id: true },
+            })
+          : [];
+        const activeIds = new Set(activeStores.map((s: any) => s.id));
+        const mainCandidate = store_ids.find((sid) => activeIds.has(sid));
+        if (mainCandidate != null) {
           if (!isHighPriv) {
             await tx.users.update({
               where: { id },
-              data: { main_store_id: store_ids[0] },
+              data: { main_store_id: mainCandidate },
             });
           } else {
             const current = await tx.users.findUnique({
@@ -833,7 +845,7 @@ export class UsersService {
             if (current?.main_store_id == null) {
               await tx.users.update({
                 where: { id },
-                data: { main_store_id: store_ids[0] },
+                data: { main_store_id: mainCandidate },
               });
             }
           }

@@ -1792,6 +1792,12 @@ export class AuthService {
         throw new VendixHttpException(ErrorCodes.AUTH_CREDENTIALS_001);
       }
 
+      // Una tienda inactiva nunca se abre, ni siquiera con slug explícito.
+      if (!targetStore.is_active) {
+        await this.logLoginAttempt(user.id, false);
+        throw new VendixHttpException(ErrorCodes.AUTH_STORE_INACTIVE_001);
+      }
+
       if (!hasHighPrivilege) {
         const isStoreUser = await this.prismaService.store_users.findFirst({
           where: {
@@ -1835,7 +1841,9 @@ export class AuthService {
             where: { id: user.main_store_id },
           });
 
-          if (main_store) {
+          // Una main_store inactiva se ignora: se cae a las Estrategias 2/3,
+          // que también descartan tiendas inactivas.
+          if (main_store && main_store.is_active) {
             // Verificar si pertenece a la misma organización
             if (main_store.organization_id === user.organization_id) {
               // Verificar acceso o si es High Privilege
@@ -1876,9 +1884,11 @@ export class AuthService {
                 user_id: user.id,
                 store: {
                   organization_id: user.organization_id, // Asegurar que sea de la misma org
+                  is_active: true,
                 },
               },
               include: { store: true },
+              orderBy: { store_id: 'asc' },
             });
 
           if (first_store_user && first_store_user.store) {
@@ -1890,7 +1900,8 @@ export class AuthService {
         // Estrategia 3: High Privilege Fallback - Buscar CUALQUIER tienda de la org
         if (!effective_store_slug && hasHighPrivilege) {
           const first_org_store = await this.prismaService.stores.findFirst({
-            where: { organization_id: user.organization_id },
+            where: { organization_id: user.organization_id, is_active: true },
+            orderBy: { id: 'asc' },
           });
 
           if (first_org_store) {
@@ -1978,6 +1989,7 @@ export class AuthService {
           store: {
             slug: effective_store_slug,
             organization_id: user.organization_id, // Asegurar consistencia organizacional
+            is_active: true,
           },
         },
         include: {
@@ -2027,7 +2039,7 @@ export class AuthService {
           },
         });
 
-        if (targetStore) {
+        if (targetStore && targetStore.is_active) {
           // Crear la relación automáticamente para futuros accesos
           await this.prismaService.store_users.create({
             data: {
@@ -2319,6 +2331,18 @@ export class AuthService {
       // 🔒 VALIDACIÓN DE ORGANIZACIÓN: Asegurar que el token scope corresponde al usuario
       if (Number(payload.organization_id) !== user.organization_id) {
         throw new VendixHttpException(ErrorCodes.AUTH_TOKEN_001);
+      }
+
+      // Una sesión abierta en una tienda que se desactivó no se renueva:
+      // obliga a iniciar sesión de nuevo y caer en una tienda activa.
+      if (payload.store_id) {
+        const scopedStore = await this.prismaService.stores.findUnique({
+          where: { id: Number(payload.store_id) },
+          select: { is_active: true },
+        });
+        if (!scopedStore?.is_active) {
+          throw new VendixHttpException(ErrorCodes.AUTH_STORE_INACTIVE_001);
+        }
       }
 
       // Generar nuevos tokens — preservar app_type del refresh token original

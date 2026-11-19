@@ -24,6 +24,7 @@ import {
 import { STORE_AUTH_DOMAINS_INCLUDE } from './constants/store-public-domains.constants';
 import { buildActiveUserRolesWhere } from '@common/utils/role-scope.util';
 import { signUserAvatar } from './helpers/sign-user-avatar.helper';
+import { VendixHttpException, ErrorCodes } from '../../common/errors';
 
 @Injectable()
 export class EnvironmentSwitchService {
@@ -119,8 +120,10 @@ export class EnvironmentSwitchService {
             where: { id: user.main_store_id },
           });
 
+          // Una main_store inactiva se ignora (cae a las Estrategias 2/3).
           if (
             main_store &&
+            main_store.is_active &&
             main_store.organization_id === user.organization_id
           ) {
             const has_access = await this.prismaService.store_users.findUnique({
@@ -151,9 +154,13 @@ export class EnvironmentSwitchService {
             await this.prismaService.store_users.findFirst({
               where: {
                 user_id: user.id,
-                store: { organization_id: user.organization_id },
+                store: {
+                  organization_id: user.organization_id,
+                  is_active: true,
+                },
               },
               include: { store: true },
+              orderBy: { store_id: 'asc' },
             });
           if (first_store_user?.store) {
             effective_store_slug = first_store_user.store.slug;
@@ -163,7 +170,8 @@ export class EnvironmentSwitchService {
         // Estrategia 3: High Privilege Fallback
         if (!effective_store_slug && has_high_privilege) {
           const first_org_store = await this.prismaService.stores.findFirst({
-            where: { organization_id: user.organization_id },
+            where: { organization_id: user.organization_id, is_active: true },
+            orderBy: { id: 'asc' },
           });
           if (first_org_store) {
             effective_store_slug = first_org_store.slug;
@@ -211,6 +219,11 @@ export class EnvironmentSwitchService {
 
       if (!store) {
         throw new NotFoundException('Tienda no encontrada');
+      }
+
+      // Nunca se abre una tienda inactiva, ni con slug explícito.
+      if (!store.is_active) {
+        throw new VendixHttpException(ErrorCodes.AUTH_STORE_INACTIVE_001);
       }
 
       // Verificar acceso final (redundante pero seguro)
