@@ -19,6 +19,7 @@ import slugify from 'slugify';
 import { RequestContextService } from '@common/context/request-context.service';
 import { S3Service } from '@common/services/s3.service';
 import { getDefaultStoreSettings } from '../settings/defaults/default-store-settings';
+import { suggestHomePanelSettings } from '../../../common/access/home-panels';
 import { SettingsService } from '../settings/settings.service';
 import { SubscriptionTrialService } from '../subscriptions/services/subscription-trial.service';
 
@@ -73,10 +74,20 @@ export class StoresService {
     });
 
     // Always create store_settings with defaults or provided settings
-    const settingsToCreate =
+    const baseSettings: Record<string, any> =
       settings && Object.keys(settings).length > 0
         ? settings
         : getDefaultStoreSettings();
+    // QUI-967 — a new store opens on the panel suggested for its industries
+    // unless the payload already chose one.
+    const settingsToCreate = {
+      ...baseSettings,
+      home_panel:
+        baseSettings.home_panel ??
+        suggestHomePanelSettings(
+          baseSettings.general?.industries ?? storeData.industries,
+        ),
+    };
 
     await this.prisma.store_settings.create({
       data: {

@@ -62,6 +62,33 @@ describe('StoresService · la industria se escribe en sus dos fuentes (S18)', ()
     expect(settings?.settings.general.industries).toEqual(store.industries);
   });
 
+  it('create: una tienda nueva abre en el panel sugerido por su industria (QUI-967)', async () => {
+    await service.create({
+      name: 'Hotel Sol',
+      store_type: 'physical',
+      industries: ['retail', 'hospitality'],
+    } as any);
+    await service.create({
+      name: 'Repostería Miel',
+      store_type: 'physical',
+      industries: ['restaurant'],
+      settings: {
+        home_panel: { default_panel: 'summary', enabled_panels: ['summary'] },
+      },
+    } as any);
+
+    const [hotel, bakery] = db.tables.store_settings.map((s) => s.settings);
+    expect(hotel.home_panel).toEqual({
+      default_panel: 'occupancy',
+      enabled_panels: ['occupancy', 'summary'],
+    });
+    // A payload that already chose a panel keeps it.
+    expect(bakery.home_panel).toEqual({
+      default_panel: 'summary',
+      enabled_panels: ['summary'],
+    });
+  });
+
   it('create: el espejo conserva el resto de los settings que traía el DTO', async () => {
     await service.create({
       name: 'Café Luna',

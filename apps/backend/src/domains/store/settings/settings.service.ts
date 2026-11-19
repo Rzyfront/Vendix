@@ -111,6 +111,8 @@ export const KNOWN_SECTIONS = [
   'product_options',
   // Recordatorios de cuotas de venta a crédito. Sección + DTO, ver `scheduled_orders`.
   'credit_reminders',
+  // Panel Principal de la tienda (QUI-967). Sección + DTO, ver `scheduled_orders`.
+  'home_panel',
   // `app` is intentionally accepted here because the service maps it to
   // branding via updateStoreBranding(); the migrator strips persisted `app`
   // afterwards. The legacy alias should not break update calls.
@@ -581,6 +583,37 @@ export class SettingsService {
       nextOverbooking !== (currentSettings.hospitality?.default_overbooking_allowance ?? 0)
     ) {
       assertCanChangeOverbooking();
+    }
+
+    // QUI-967 — el Panel Principal es de toda la tienda: solo propietario o
+    // administrador lo cambian. `store:settings:update` también lo tienen
+    // `manager` y otros roles, así que se decide acá (como Vexi). Reenviar el
+    // valor vigente no lo exige: el formulario de Configuración manda todas
+    // las secciones al guardar cualquier otra.
+    const homePanelKey = (value?: {
+      default_panel?: string;
+      enabled_panels?: string[];
+    } | null): string =>
+      value
+        ? `${value.default_panel}|${(value.enabled_panels ?? []).join(',')}`
+        : '';
+    if (
+      dto.home_panel !== undefined &&
+      homePanelKey(dto.home_panel) !==
+        homePanelKey(currentSettings.home_panel)
+    ) {
+      const roles = RequestContextService.getRoles();
+      const puedeConfigurarPanel = roles.some((role) =>
+        ['owner', 'admin', 'STORE_OWNER', 'ORG_OWNER', 'super_admin'].includes(
+          role,
+        ),
+      );
+      if (!puedeConfigurarPanel) {
+        throw new VendixHttpException(
+          ErrorCodes.SYS_FORBIDDEN_001,
+          'Solo el propietario o un administrador de la tienda pueden cambiar el Panel Principal.',
+        );
+      }
     }
 
     // Guardar valores antiguos para auditoría

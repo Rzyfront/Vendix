@@ -24,6 +24,7 @@ import {
 } from '../../../common/helpers/domain-generator.helper';
 import { BrandingGeneratorHelper } from '../../../common/helpers/branding-generator.helper';
 import { getDefaultStoreSettings } from '../../store/settings/defaults/default-store-settings';
+import { suggestHomePanelSettings } from '../../../common/access/home-panels';
 import { StoreBootstrapHelper } from '@common/helpers/store-bootstrap.helper';
 import { SubscriptionTrialService } from '../../store/subscriptions/services/subscription-trial.service';
 import { OrgLocationsService } from '../inventory/locations/org-locations.service';
@@ -883,6 +884,12 @@ export class OnboardingWizardService {
     if (setupStoreDto.industries) {
       defaultSettings.general.industries = setupStoreDto.industries;
     }
+    // QUI-967 — a new store opens on the panel suggested for its industries
+    // (a hotel on the rack, a salon on the agenda…). Existing stores never
+    // get the key and keep the "Resumen".
+    defaultSettings.home_panel = suggestHomePanelSettings(
+      defaultSettings.general.industries,
+    );
 
     // Atomic store bootstrap (matches the pattern used by StoresService.create
     // in the organization domain). All writes commit together or roll back
@@ -1410,6 +1417,16 @@ export class OnboardingWizardService {
         },
         fonts: defaultSettings.fonts,
         publication: defaultSettings.publication,
+        // QUI-967 — keep the suggested panel written by setupStore (or
+        // suggest it now from the preserved industries).
+        home_panel:
+          existing?.home_panel ??
+          suggestHomePanelSettings(
+            Array.isArray(existing?.general?.industries) &&
+              existing.general.industries.length > 0
+              ? existing.general.industries
+              : defaultSettings.general.industries,
+          ),
       };
 
       await this.prismaService.store_settings.upsert({

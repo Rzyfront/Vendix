@@ -552,6 +552,95 @@ describe('SettingsService — guard de transición de caja (QUI-560)', () => {
 
   // ------------------------------------- interruptor del módulo Apps (T8)
 
+  // QUI-967 — Panel Principal de la tienda.
+  describe('updateSettings — panel principal (home_panel)', () => {
+    let stored: any;
+    const crm = {
+      default_panel: 'crm_pipeline',
+      enabled_panels: ['crm_pipeline', 'summary'],
+    };
+
+    beforeEach(() => {
+      sessionsService.countOpenSessions.mockResolvedValue(NO_OPEN_SESSIONS);
+      jest
+        .spyOn(RequestContextService, 'getRoles')
+        .mockReturnValue(['owner'] as any);
+      stored = { ...STORED_WITH_CASH_REGISTER_ON };
+      prisma.store_settings.findUnique.mockImplementation(async () => ({
+        store_id: STORE_ID,
+        settings: stored,
+      }));
+      prisma.store_settings.upsert.mockImplementation(
+        async ({ update }: any) => {
+          stored = update?.settings ?? stored;
+          return { store_id: STORE_ID, settings: stored };
+        },
+      );
+    });
+
+    it('una tienda sin configurar no recibe home_panel (sigue en Resumen)', async () => {
+      const settings: any = await service.updateSettings({
+        inventory: { low_stock_threshold: 5 },
+      });
+      expect(settings.home_panel).toBeUndefined();
+    });
+
+    it('el owner guarda la sección completa y la reemplaza', async () => {
+      await service.updateSettings({ home_panel: crm } as any);
+      expect(stored.home_panel).toEqual(crm);
+
+      await service.updateSettings({
+        home_panel: { default_panel: 'summary', enabled_panels: ['summary'] },
+      } as any);
+      expect(stored.home_panel).toEqual({
+        default_panel: 'summary',
+        enabled_panels: ['summary'],
+      });
+    });
+
+    it('rechaza un default_panel fuera de enabled_panels y no persiste', async () => {
+      const error = await service
+        .updateSettings({
+          home_panel: { default_panel: 'crm_pipeline', enabled_panels: ['summary'] },
+        } as any)
+        .catch((e) => e);
+      expect(error).toBeInstanceOf(Error);
+      expect(prisma.store_settings.upsert).not.toHaveBeenCalled();
+    });
+
+    it('rechaza ids fuera del catálogo', async () => {
+      const error = await service
+        .updateSettings({
+          home_panel: { default_panel: 'widgets', enabled_panels: ['widgets'] },
+        } as any)
+        .catch((e) => e);
+      expect(error).toBeInstanceOf(Error);
+      expect(prisma.store_settings.upsert).not.toHaveBeenCalled();
+    });
+
+    it('un manager no puede cambiarlo, pero sí reenviar el valor vigente', async () => {
+      stored = { ...stored, home_panel: crm };
+      jest
+        .spyOn(RequestContextService, 'getRoles')
+        .mockReturnValue(['manager'] as any);
+
+      const error = await service
+        .updateSettings({
+          home_panel: { default_panel: 'summary', enabled_panels: ['summary'] },
+        } as any)
+        .catch((e) => e);
+      expect(error).toBeInstanceOf(VendixHttpException);
+      expect(stored.home_panel).toEqual(crm);
+
+      await service.updateSettings({
+        home_panel: crm,
+        inventory: { low_stock_threshold: 7 },
+      } as any);
+      expect(stored.home_panel).toEqual(crm);
+      expect(prisma.store_settings.upsert).toHaveBeenCalledTimes(1);
+    });
+  });
+
   /**
    * `apps.enabled` (odd/tasks/apps-module.md, D3/T8) decide si el sidebar
    * muestra el padre «Apps». Desde apps-vistas-f1 (S1) el default es `true`
