@@ -140,6 +140,32 @@ describe('OptionsDropdownComponent accessible identity', () => {
     expect(fixture.debugElement.queryAll(By.css('.action-item')).length).toBe(2);
   });
 
+  it('renders a single action inside the Acciones menu when singleActionAsMenu is true', async () => {
+    fixture.componentRef.setInput('actions', [{ label: 'Plantillas de etapas', icon: 'layers', action: 'templates' }]);
+    fixture.componentRef.setInput('singleActionAsMenu', true);
+    const actionClick = jasmine.createSpy('actionClick');
+    component.actionClick.subscribe(actionClick);
+    await render();
+
+    expect(fixture.debugElement.query(By.css('.single-action-trigger'))).toBeNull();
+    const trigger = fixture.debugElement.query(By.css('.actions-trigger')).nativeElement as HTMLButtonElement;
+    expect(trigger.textContent).toContain('Acciones');
+    expect(trigger.textContent).not.toContain('Plantillas de etapas');
+    expect(trigger.getAttribute('aria-haspopup')).toBe('true');
+    expect(fixture.debugElement.query(By.css('.actions-dropdown'))).toBeNull();
+
+    trigger.click();
+    await render();
+    const items = fixture.debugElement.queryAll(By.css('.action-item'));
+    expect(items.length).toBe(1);
+    expect(items[0].nativeElement.textContent).toContain('Plantillas de etapas');
+
+    items[0].nativeElement.click();
+    await render();
+    expect(actionClick).toHaveBeenCalledOnceWith('templates');
+    expect(fixture.debugElement.query(By.css('.actions-dropdown'))).toBeNull();
+  });
+
   it('keeps a disabled single action disabled', async () => {
     fixture.componentRef.setInput('actions', [
       { label: 'Exportar', icon: 'download', action: 'export', disabled: true },

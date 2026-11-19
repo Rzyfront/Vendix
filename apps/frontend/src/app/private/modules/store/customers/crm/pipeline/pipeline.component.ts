@@ -180,6 +180,7 @@ const STATUS_LABELS: Record<CrmOpportunity['status'], string> = {
               [filters]="filterConfigs()"
               [filterValues]="filterValues()"
               [actions]="dropdownActions()"
+              [singleActionAsMenu]="true"
               [isLoading]="loading()"
               (filterChange)="onFilterChange($event)"
               (clearAllFilters)="onClearFilters()"
