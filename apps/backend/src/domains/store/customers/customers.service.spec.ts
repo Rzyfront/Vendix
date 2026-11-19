@@ -1023,6 +1023,19 @@ describe('CustomersService — QUI-728 customer fiscal data', () => {
       expect(result.meta.total).toBe(2);
     });
 
+    it('findAll: ordena por último editado (updated_at desc, nulos al final)', async () => {
+      mockPrismaService.users.findMany.mockResolvedValue([]);
+      mockPrismaService.users.count.mockResolvedValue(0);
+
+      await service.findAll(7, {});
+
+      const args = mockPrismaService.users.findMany.mock.calls[0][0];
+      expect(args.orderBy).toEqual([
+        { updated_at: { sort: 'desc', nulls: 'last' } },
+        { id: 'desc' },
+      ]);
+    });
+
     it('sin billing primaria toma la más reciente', async () => {
       mockPrismaService.users.findFirst.mockResolvedValue({
         id: 5,
@@ -1109,6 +1122,8 @@ describe('CustomersService — QUI-728 customer fiscal data', () => {
       // No era NIT antes ni ahora: sin DV que limpiar, pero el campo se
       // reafirma en null (no queda un DV huérfano de un NIT previo).
       expect(data.verification_digit).toBeNull();
+      // Editar marca updated_at para que el listado lo suba al tope.
+      expect(data.updated_at).toBeInstanceOf(Date);
     });
 
     it('cambio a NIT calcula y persiste el DV', async () => {
