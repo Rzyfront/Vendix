@@ -21,7 +21,7 @@ export const IMPLEMENTATION_WHATSAPP_URL =
  * SEO-OPS-19: página «Cómo empezamos con Vendix» (/implementacion).
  * Texto del 27-oct (entregas/2026-10-27/OPS-19-pagina-implementacion-copy.md), sin promesas
  * sin respaldo: no hay plazo de instalación, migración gratuita, visitas ni horarios garantizados.
- * Ruta detrás de IMPLEMENTATION_PAGE_ENABLED y en noindex hasta la aprobación.
+ * Ruta detrás de IMPLEMENTATION_PAGE_ENABLED; indexable desde la aprobación del 17-nov-2026.
  */
 @Component({
   selector: 'app-implementation-page',

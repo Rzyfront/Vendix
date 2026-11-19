@@ -35,6 +35,8 @@ import { CommercialConsentService } from './commercial-consent/commercial-consen
 import { CommercialConsentBannerComponent } from './commercial-consent/commercial-consent-banner.component';
 import { SectorGuidesComponent } from '../guides/sector-guides.component';
 import { SECTOR_GUIDES_ENABLED } from '../guides/sector-guides.config';
+import { SECTOR_PAGES_ENABLED } from '../../sectors/sector-pages.config';
+import { IMPLEMENTATION_PAGE_ENABLED } from '../../implementation/implementation-page.config';
 import {
   PublicPlansService,
   PublicPlan,
@@ -287,6 +289,9 @@ const DEMO_ORIGINS = [
 })
 export class VendixLandingComponent implements OnInit {
   readonly sectorGuidesEnabled = SECTOR_GUIDES_ENABLED;
+  // El pie solo enlaza páginas cuyas rutas existen: si se apaga un interruptor, no queda un enlace roto.
+  readonly sectorPagesEnabled = SECTOR_PAGES_ENABLED;
+  readonly implementationPageEnabled = IMPLEMENTATION_PAGE_ENABLED;
 
   private readonly landingRoute = inject(ActivatedRoute);
   private readonly landingScroller = inject(ViewportScroller);

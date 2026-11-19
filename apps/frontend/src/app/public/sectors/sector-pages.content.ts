@@ -7,8 +7,9 @@ import { MarketingPageMetadata } from '../marketing-page-metadata';
  * (registro editorial y claims-register):
  * - Solo se escribe lo que tiene evidencia (`evidence`): demo en pantalla o código.
  *   Lo que todavía no tiene demo no entra (propina, QR de mesa, comanda impresa…).
- * - Todas van en `noindex` y sin canonical hasta la firma de Producto y Ventas (G4).
- * - Las rutas y el interruptor viven en `sector-pages.config.ts` (apagado en producción).
+ * - Una página nueva va en `noindex` y sin canonical hasta la firma de Producto y Ventas (G4).
+ *   Las tres actuales se aprobaron el 17-nov-2026 y son indexables con canonical propio.
+ * - Las rutas y el interruptor viven en `sector-pages.config.ts` (encendido en producción).
  */
 export interface EvidencedText {
   text: string;

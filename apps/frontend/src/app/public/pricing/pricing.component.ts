@@ -10,7 +10,7 @@ import {
 } from '../../shared/components/pricing-card/pricing-card.component';
 import { PlanComparisonTableComponent } from './components/plan-comparison-table/plan-comparison-table.component';
 import { Meta, Title } from '@angular/platform-browser';
-import { applyMarketingPageMetadata, MARKETING_PAGES } from '../marketing-page-metadata';
+import { applyMarketingPageMetadata, MARKETING_PAGES, marketingOrigin } from '../marketing-page-metadata';
 
 type PricingViewMode = 'cards' | 'compare';
 
@@ -40,30 +40,62 @@ const VIEW_MODE_STORAGE_KEY = 'pricingViewMode';
  * vez que cambien los precios publicados.
  */
 export const PRICING_VALID_FROM = '2026-11-12';
-export const PRICING_VALID_FROM_LABEL = 'Precios vigentes desde el 12 de noviembre de 2026.';
+/** Una sola fuente: la etiqueta sale de la fecha (en UTC, para que no se corra un día en Bogotá). */
+export const PRICING_VALID_FROM_LABEL = `Precios vigentes desde el ${new Intl.DateTimeFormat('es-CO', {
+  dateStyle: 'long',
+  timeZone: 'UTC',
+}).format(new Date(PRICING_VALID_FROM + 'T12:00:00Z'))}.`;
 const PRICING_JSON_LD_ID = 'vendix-pricing-offers';
+/** Duración de cada ciclo para la especificación de precio (ISO 8601). Pago único: sin duración. */
+const BILLING_DURATION: Record<PricingCycle, string | null> = {
+  monthly: 'P1M',
+  quarterly: 'P3M',
+  semiannual: 'P6M',
+  annual: 'P1Y',
+  lifetime: null,
+};
 
 /**
  * SEO-OPS-18: datos estructurados de las ofertas, armados con los mismos planes de la
  * API que pintan las tarjetas, para que el schema y el texto digan lo mismo.
  */
-export function buildPricingJsonLd(plans: readonly PublicPlan[], validFrom = PRICING_VALID_FROM): object | null {
+export function buildPricingJsonLd(
+  plans: readonly PublicPlan[],
+  origin = 'https://vendix.online',
+  validFrom = PRICING_VALID_FROM,
+): object | null {
   const offers = plans
     .map((p) => ({ p, cycle: normalizePricingCycle(p.billing_cycle) }))
     .filter(({ p, cycle }) => cycle !== null && Number.isFinite(Number(p.base_price)) && !!p.currency)
-    .map(({ p, cycle }) => ({
-      '@type': 'Offer',
-      name: `${p.name} · ${PRICING_CYCLES.find((c) => c.value === cycle)!.label}`,
-      price: String(Number(p.base_price)),
-      priceCurrency: String(p.currency).toUpperCase(),
-      validFrom,
-      url: 'https://vendix.online/pricing',
-      availability: 'https://schema.org/InStock',
-    }));
+    .map(({ p, cycle }) => {
+      const price = String(Number(p.base_price));
+      const priceCurrency = String(p.currency).toUpperCase();
+      const duration = BILLING_DURATION[cycle as PricingCycle];
+      return {
+        '@type': 'Offer',
+        name: `${p.name} · ${PRICING_CYCLES.find((c) => c.value === cycle)!.label}`,
+        price,
+        priceCurrency,
+        validFrom,
+        url: `${origin}/pricing`,
+        availability: 'https://schema.org/InStock',
+        // Que Google sepa si $969.000 es por mes o por año.
+        priceSpecification: {
+          '@type': 'UnitPriceSpecification',
+          price,
+          priceCurrency,
+          ...(duration ? { billingDuration: duration } : {}),
+        },
+      };
+    });
   if (offers.length === 0) return null;
   return {
     '@context': 'https://schema.org',
     '@type': 'Product',
+    '@id': `${origin}/pricing#product`,
+    // Enlaza con la entidad que publica la portada (vendix-landing-structured-data.ts).
+    isRelatedTo: { '@id': `${origin}/#software` },
+    url: `${origin}/pricing`,
     name: 'Vendix',
     description: 'Software de punto de venta, inventario, tienda en línea y facturación electrónica para negocios en Colombia.',
     brand: { '@type': 'Brand', name: 'Vendix' },
@@ -148,7 +180,9 @@ export class PricingComponent {
   constructor() {
     // SEO-OPS-18: JSON-LD de ofertas con los mismos datos que las tarjetas.
     effect(() => {
-      const data = buildPricingJsonLd(this.plans());
+      // Solo en el host comercial: en tiendas y dominios propios /pricing no publica a Vendix.
+      const origin = this.jsonLdOrigin();
+      const data = origin === null ? null : buildPricingJsonLd(this.plans(), origin);
       const head = this.document.head;
       let script = this.document.getElementById(PRICING_JSON_LD_ID) as HTMLScriptElement | null;
       if (!data) { script?.remove(); return; }
@@ -171,6 +205,11 @@ export class PricingComponent {
         // localStorage unavailable (SSR / private mode) — silently ignore
       }
     });
+  }
+
+  /** Origen comercial o `null` fuera de vendix.online / vendix.com. Separado para las pruebas. */
+  protected jsonLdOrigin(): string | null {
+    return marketingOrigin(this.document);
   }
 
   setViewMode(mode: PricingViewMode): void {
