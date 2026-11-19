@@ -698,6 +698,12 @@ export class ProductionOrdersService {
     );
     const inputLocationId =
       options?.inputLocationId ?? plantLocations?.input_location_id ?? undefined;
+    // The plant-only rules (shortage judged in the input location, add-ons
+    // consumed there) apply only to orders of a plant with an input location.
+    // Without one, everything stays as before: store-wide pre-check and each
+    // add-on from its own default location.
+    const plantInputLocationId =
+      plantLocations?.input_location_id != null ? inputLocationId : undefined;
     const outputLocationId =
       options?.outputLocationId ?? plantLocations?.output_location_id ?? undefined;
 
@@ -752,10 +758,10 @@ export class ProductionOrdersService {
         ingredientDemands,
         {
           allowIngredientOveruse: inventoryPolicy.allowIngredientOveruse,
-          // QUI-1013: with a known input location (plant / Planta settings) the
-          // shortage is judged where the inputs are actually consumed, not on
-          // the whole store's sellable stock.
-          ...(inputLocationId != null && { consumeLocationId: inputLocationId }),
+          // QUI-1013: an order of a plant is judged where its inputs are
+          // actually consumed (the plant's input location), not on the whole
+          // store's sellable stock.
+          ...(plantInputLocationId != null && { consumeLocationId: plantInputLocationId }),
         },
       );
     }
@@ -889,7 +895,7 @@ export class ProductionOrdersService {
           production_order_id: order.id,
           sourceModule,
           allowOveruse: inventoryPolicy.allowIngredientOveruse,
-          inputLocationId,
+          inputLocationId: plantInputLocationId,
         });
         totalConsumedCost += addons.cost;
         consumedLineCount += addons.lines;

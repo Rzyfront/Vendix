@@ -314,4 +314,30 @@ describe('QUI-1013 — plant locations through the real engine', () => {
     const opts = (w.validator.assertIngredientsAvailable.mock.calls[0] as any[])[1];
     expect(opts).not.toHaveProperty('consumeLocationId');
   });
+
+  it('without a plant but with the old settings input location: consumes there, pre-check stays store-wide', async () => {
+    const w = makeWorld(plantaPlan());
+    w.prisma.manufacturing_plants = { findFirst: jest.fn() };
+    w.settings.get.mockResolvedValue({
+      default_input_location_id: 5,
+      default_output_location_id: null,
+      cost_method: 'cpp',
+      lot_required: false,
+    } as any);
+    await w.planta.complete(1, {} as any);
+    expect(moves(w).map((m: any[]) => m[2])).toEqual([5, 5, 5, 1]);
+    const opts = (w.validator.assertIngredientsAvailable.mock.calls[0] as any[])[1];
+    expect(opts).not.toHaveProperty('consumeLocationId');
+  });
+
+  it('a plant without input location keeps the store-wide pre-check', async () => {
+    const w = makeWorld(plantaPlan(), { plant_id: 3 });
+    w.prisma.manufacturing_plants = {
+      findFirst: jest.fn(async () => ({ input_location_id: null, output_location_id: 12 })),
+    };
+    await w.planta.complete(1, {} as any);
+    expect(moves(w).at(-1)).toEqual([50, 'production', 12]);
+    const opts = (w.validator.assertIngredientsAvailable.mock.calls[0] as any[])[1];
+    expect(opts).not.toHaveProperty('consumeLocationId');
+  });
 });
