@@ -1,3 +1,4 @@
+import type { HomePanelSettings } from '../../shared/constants/home-panels';
 import type { FiscalStatusBlock } from './fiscal-status.model';
 import type { StoreIndustry } from '../../shared/constants/industry-modules.constant';
 
@@ -64,6 +65,8 @@ export interface StoreSettings {
   product_options?: ProductOptionsSettings;
   /** Recordatorios de cuotas de venta a crédito. Ausente = apagado. */
   credit_reminders?: CreditRemindersSettings;
+  /** QUI-967 — Panel Principal de la tienda. Sin clave = Resumen (tiendas existentes). */
+  home_panel?: HomePanelSettings;
   /**
    * Master switch for the Vexi assistant. Mirrors backend `VexiSettings`.
    *

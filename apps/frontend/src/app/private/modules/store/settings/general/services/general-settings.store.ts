@@ -584,6 +584,7 @@ export class GeneralSettingsStore {
         'scheduled_orders',
         'product_options',
         'credit_reminders',
+        'home_panel',
       ];
       const currentSettings = this.settings();
       const sanitizedSettings = knownSections.reduce((acc, key) => {
