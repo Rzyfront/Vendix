@@ -106,6 +106,7 @@ export type OpportunityModalAction = 'saved' | 'won' | 'lose';
               placeholder="Buscar persona del equipo..."
               lookupMode="staff"
               [value]="ownerId()"
+              [valueLabel]="ownerLabel()"
               (valueChange)="ownerId.set($event)"
             ></app-store-user-select>
           </div>
@@ -172,6 +173,8 @@ export class OpportunityFormModalComponent {
   protected readonly expectedDate = signal('');
   protected readonly stageId = signal<number | null>(null);
   protected readonly ownerId = signal<number | null>(null);
+  /** Name of the preset owner, so the picker never shows `Usuario #id`. */
+  protected readonly ownerLabel = signal<string | null>(null);
   protected readonly quotationId = signal<number | null>(null);
   protected readonly quotationOptions = signal<SelectorOption[]>([]);
   protected readonly saving = signal(false);
@@ -208,6 +211,7 @@ export class OpportunityFormModalComponent {
           o?.stage_id ?? (this.stageOptions()[0]?.value as number | undefined) ?? null,
         );
         this.ownerId.set(o ? (o.owner?.id ?? null) : this.auth.userId());
+        this.ownerLabel.set(o ? personName(o.owner) || null : this.auth.userName());
         this.quotationId.set(o?.quotation?.id ?? null);
         this.quotationOptions.set(
           o?.quotation
