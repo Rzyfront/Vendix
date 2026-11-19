@@ -25,6 +25,27 @@ type FieldItem = {
 type ChildSection = { items: FieldItem[] };
 type Section = ChildSection & { child_sections: ChildSection[] };
 
+/**
+ * Attachments allowed in the data sheet, by MIME type, with the extensions
+ * that type may carry. Anything else (SVG, HTML, scripts, archives) is
+ * refused: files are served from S3 with their content type.
+ */
+const ALLOWED_ATTACHMENTS: Record<string, readonly string[]> = {
+  'image/jpeg': ['jpg', 'jpeg'],
+  'image/png': ['png'],
+  'image/webp': ['webp'],
+  'image/gif': ['gif'],
+  'application/pdf': ['pdf'],
+  'application/msword': ['doc'],
+  'application/vnd.openxmlformats-officedocument.wordprocessingml.document': ['docx'],
+  'application/vnd.ms-excel': ['xls'],
+  'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet': ['xlsx'],
+  'application/vnd.ms-powerpoint': ['ppt'],
+  'application/vnd.openxmlformats-officedocument.presentationml.presentation': ['pptx'],
+  'text/plain': ['txt'],
+  'text/csv': ['csv'],
+};
+
 const isCustomerField = (item: FieldItem) =>
   item.metadata_field.entity_type === 'customer' &&
   item.metadata_field.is_active;
@@ -180,9 +201,17 @@ export class CustomerDataSheetService {
   /** Uploads one attachment under the customer's own prefix. */
   async upload(customerId: number, file: Express.Multer.File | undefined) {
     if (!file?.buffer) throw new VendixHttpException(ErrorCodes.UPLOAD_FILE_001);
+    const original = file.originalname || 'archivo';
+    const mimetype = (file.mimetype ?? '').toLowerCase();
+    const extension = original.split('.').pop()?.toLowerCase() ?? '';
+    if (
+      !original.includes('.') ||
+      !ALLOWED_ATTACHMENTS[mimetype]?.includes(extension)
+    ) {
+      throw new VendixHttpException(ErrorCodes.CRM_DATA_SHEET_003);
+    }
     await this.assertCustomer(customerId);
     const prefix = await this.filePrefix(customerId);
-    const original = file.originalname || 'archivo';
     const safe =
       original
         .normalize('NFKD')
@@ -194,10 +223,7 @@ export class CustomerDataSheetService {
     const stamp = Date.now();
     let key: string;
     try {
-      if (
-        file.mimetype?.startsWith('image/') &&
-        file.mimetype !== 'image/svg+xml'
-      ) {
+      if (mimetype.startsWith('image/')) {
         const stem = safe.replace(/\.[^.]*$/, '') || 'imagen';
         const result = await this.s3.uploadImage(
           file.buffer,
@@ -208,7 +234,7 @@ export class CustomerDataSheetService {
         key = await this.s3.uploadFile(
           file.buffer,
           `${prefix}/${stamp}-${safe}`,
-          file.mimetype || 'application/octet-stream',
+          mimetype,
         );
       }
     } catch (error) {

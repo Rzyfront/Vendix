@@ -25,6 +25,8 @@ import {
 /** Name of the template every store starts with. */
 export const INITIAL_STAGE_TEMPLATE_NAME = 'Embudo estándar';
 const MAX_TEMPLATE_STAGES = 20;
+/** Every template needs one stage of each kind (see normalizeStages). */
+const REQUIRED_STAGE_KINDS: readonly CrmStageKind[] = ['open', 'won', 'lost'];
 
 export interface CrmStageTemplateStage {
   name: string;
@@ -71,11 +73,14 @@ export class CrmStageTemplatesService {
     private readonly bootstrap: StoreBootstrapHelper,
   ) {}
 
-  /** Templates of the store; seeds the initial one when there is none. */
+  /**
+   * Templates of the store. The initial one is seeded on the first read of
+   * someone who can configure templates (a plain read never writes).
+   */
   async list() {
     const viewer = this.viewer();
     let rows = await this.readTemplates();
-    if (!rows.length) {
+    if (!rows.length && viewer.can_see_all) {
       await this.seedInitialTemplate(viewer);
       rows = await this.readTemplates();
     }
@@ -192,25 +197,25 @@ export class CrmStageTemplatesService {
     const template = await this.findTemplate(templateId);
     const wanted = this.parseStages(template.stages);
 
-    const usage = await this.stageUsage(pipeline.id);
     const plan = this.planReconcile(pipeline.stages, wanted);
-
-    for (const { stage, target } of plan.matched) {
-      if (stage.kind !== target.kind && usage.total.get(stage.id)) {
-        throw new VendixHttpException(ErrorCodes.CRM_PIPELINE_008);
-      }
-    }
-    for (const stage of plan.surplus) {
-      if (stage.is_active && usage.open.get(stage.id)) {
-        throw new VendixHttpException(ErrorCodes.CRM_PIPELINE_006);
-      }
-    }
 
     const storeId = viewer.store_id;
     try {
-      // The tx client is unscoped: every write names the pipeline's stage ids
-      // read above (scoped) or the store explicitly.
+      // The tx client is unscoped: every read and write names the pipeline's
+      // stage ids read above (scoped) or the store explicitly. Usage is
+      // counted inside the transaction, right before the writes.
       await this.prisma.$transaction(async (tx: Prisma.TransactionClient) => {
+        const usage = await this.stageUsage(tx, pipeline.id, storeId);
+        for (const { stage, target } of plan.matched) {
+          if (stage.kind !== target.kind && usage.total.get(stage.id)) {
+            throw new VendixHttpException(ErrorCodes.CRM_PIPELINE_008);
+          }
+        }
+        for (const stage of plan.surplus) {
+          if (stage.is_active && usage.open.get(stage.id)) {
+            throw new VendixHttpException(ErrorCodes.CRM_PIPELINE_006);
+          }
+        }
         for (const { stage, target, index } of plan.matched) {
           await tx.crm_pipeline_stages.updateMany({
             where: { id: stage.id, pipeline_id: pipeline.id, store_id: storeId },
@@ -296,9 +301,13 @@ export class CrmStageTemplatesService {
   }
 
   /** Opportunities per stage of the pipeline: all and open ones. */
-  private async stageUsage(pipelineId: number) {
-    const rows = await this.prisma.crm_opportunities.findMany({
-      where: { pipeline_id: pipelineId },
+  private async stageUsage(
+    tx: Prisma.TransactionClient,
+    pipelineId: number,
+    storeId: number,
+  ) {
+    const rows = await tx.crm_opportunities.findMany({
+      where: { pipeline_id: pipelineId, store_id: storeId },
       select: { stage_id: true, status: true },
     });
     const total = new Map<number, number>();
@@ -360,7 +369,8 @@ export class CrmStageTemplatesService {
 
   /**
    * Trims names and enforces the template rules: 1-20 stages, names unique
-   * (case insensitive) and at least one open stage.
+   * (case insensitive) and at least one open, one won and one lost stage
+   * (win/lose need an active closing stage in the pipeline).
    */
   private normalizeStages(
     input: Array<CrmStageTemplateStageDto | CrmStageTemplateStage>,
@@ -379,7 +389,9 @@ export class CrmStageTemplatesService {
       stages.some(
         (stage) => !stage.name || !CRM_STAGE_KINDS.includes(stage.kind),
       ) ||
-      !stages.some((stage) => stage.kind === 'open')
+      !REQUIRED_STAGE_KINDS.every((kind) =>
+        stages.some((stage) => stage.kind === kind),
+      )
     ) {
       throw new VendixHttpException(ErrorCodes.CRM_STAGE_TEMPLATE_003);
     }

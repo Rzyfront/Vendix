@@ -325,23 +325,36 @@ export class TemplatesService {
    * Marks the CRM default template of the store, unmarking the previous one
    * in the same transaction (one per store, partial unique index).
    */
+  /**
+   * Marca la predeterminada del CRM. Si otra se marcó al mismo tiempo, el
+   * índice único parcial responde P2002: se reintenta una vez (la última
+   * marca gana) y, si vuelve a chocar, 409 DCOL_CRM_002 en vez de un 500.
+   */
   private async setCrmDefault(templateId: number) {
     const { storeId } = this.requireStore();
-    await this.prisma.$transaction(async (tx) => {
-      // tx no aplica scope: el store va explícito.
-      await tx.data_collection_templates.updateMany({
-        where: {
-          store_id: storeId,
-          is_crm_default: true,
-          id: { not: templateId },
-        },
-        data: { is_crm_default: false },
-      });
-      await tx.data_collection_templates.updateMany({
-        where: { id: templateId, store_id: storeId },
-        data: { is_crm_default: true },
-      });
-    });
+    for (let attempt = 1; ; attempt++) {
+      try {
+        await this.prisma.$transaction(async (tx) => {
+          // tx no aplica scope: el store va explícito.
+          await tx.data_collection_templates.updateMany({
+            where: {
+              store_id: storeId,
+              is_crm_default: true,
+              id: { not: templateId },
+            },
+            data: { is_crm_default: false },
+          });
+          await tx.data_collection_templates.updateMany({
+            where: { id: templateId, store_id: storeId },
+            data: { is_crm_default: true },
+          });
+        });
+        return;
+      } catch (error) {
+        if ((error as { code?: string } | null)?.code !== 'P2002') throw error;
+        if (attempt >= 2) throw new VendixHttpException(ErrorCodes.DCOL_CRM_002);
+      }
+    }
   }
 
   private requireStore() {

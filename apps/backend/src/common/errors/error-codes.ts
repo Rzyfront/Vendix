@@ -5688,6 +5688,11 @@ export const ErrorCodes = {
     httpStatus: 422,
     devMessage: 'Solo una plantilla activa de tipo Cliente puede usarse en el CRM.',
   },
+  DCOL_CRM_002: {
+    code: 'DCOL_CRM_002',
+    httpStatus: 409,
+    devMessage: 'Another template was marked as the CRM default at the same time.',
+  },
 
   // Customer History
   CUST_HISTORY_001: {
@@ -8412,7 +8417,7 @@ export const ErrorCodes = {
   CRM_STAGE_TEMPLATE_003: {
     code: 'CRM_STAGE_TEMPLATE_003',
     httpStatus: 422,
-    devMessage: 'La plantilla necesita al menos una etapa abierta y nombres de etapa sin repetir.',
+    devMessage: 'La plantilla necesita al menos una etapa abierta, una ganada y una perdida, con nombres de etapa sin repetir.',
   },
   // Planilla de datos del cliente (QUI-1043).
   CRM_DATA_SHEET_001: {
@@ -8425,6 +8430,11 @@ export const ErrorCodes = {
     code: 'CRM_DATA_SHEET_002',
     httpStatus: 422,
     devMessage: 'El archivo no pertenece a la ficha de este cliente.',
+  },
+  CRM_DATA_SHEET_003: {
+    code: 'CRM_DATA_SHEET_003',
+    httpStatus: 422,
+    devMessage: 'File type not allowed in the customer data sheet.',
   },
   // Sin `store:crm_inbox:assign` solo te asignas tareas u oportunidades a ti.
   CRM_ASSIGN_001: {

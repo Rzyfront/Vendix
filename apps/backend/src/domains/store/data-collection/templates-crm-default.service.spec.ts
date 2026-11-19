@@ -142,6 +142,35 @@ describe('TemplatesService CRM default', () => {
     expect(prisma.data_collection_templates.updateMany).not.toHaveBeenCalled();
   });
 
+  it('archiving the CRM default from the editor (full payload, flag off) saves and unmarks it', async () => {
+    existing({ is_crm_default: true });
+    await service.updateTemplate(5, {
+      status: 'archived',
+      is_crm_default: false,
+      sections: [],
+    } as any);
+    expect(prisma.data_collection_templates.update).toHaveBeenCalled();
+    expect(prisma.data_collection_templates.updateMany).toHaveBeenCalledWith({
+      where: { id: 5 },
+      data: { is_crm_default: false },
+    });
+  });
+
+  it('a concurrent mark (P2002) is retried once; a second clash answers 409 DCOL_CRM_002', async () => {
+    const clash = Object.assign(new Error('Unique constraint failed'), { code: 'P2002' });
+
+    prisma.$transaction.mockRejectedValueOnce(clash);
+    await service.updateTemplate(5, { is_crm_default: true } as any);
+    expect(prisma.$transaction).toHaveBeenCalledTimes(2);
+
+    prisma.$transaction.mockClear();
+    prisma.$transaction.mockRejectedValueOnce(clash).mockRejectedValueOnce(clash);
+    expect(
+      await codeOf(service.updateTemplate(5, { is_crm_default: true } as any)),
+    ).toBe('DCOL_CRM_002');
+    expect(prisma.$transaction).toHaveBeenCalledTimes(2);
+  });
+
   it('is_default (booking fallback) keeps working as before', async () => {
     await service.updateTemplate(5, { is_default: true } as any);
     expect(prisma.data_collection_templates.update).toHaveBeenCalledWith({

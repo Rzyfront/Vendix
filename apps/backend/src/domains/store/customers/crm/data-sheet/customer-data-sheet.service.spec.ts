@@ -407,5 +407,41 @@ describe('CustomerDataSheetService (QUI-1043 H5/H8)', () => {
       ).toBe('CRM_CUSTOMER_001');
       expect(foreign.s3.uploadFile).not.toHaveBeenCalled();
     });
+
+    it('refuses types outside the allow list and extensions that do not match the type', async () => {
+      const { service, s3 } = setup();
+      const refused: Array<[string, string]> = [
+        ['logo.svg', 'image/svg+xml'],
+        ['pagina.html', 'text/html'],
+        ['pagina.html', 'text/plain'],
+        ['script.js', 'application/javascript'],
+        ['respaldo.zip', 'application/zip'],
+        ['sin-extension', 'application/pdf'],
+      ];
+      for (const [originalname, mimetype] of refused) {
+        expect(
+          await codeOf(
+            service.upload(CUSTOMER, {
+              buffer: Buffer.from('x'),
+              originalname,
+              mimetype,
+            } as Express.Multer.File),
+          ),
+        ).toBe('CRM_DATA_SHEET_003');
+      }
+      expect(s3.uploadFile).not.toHaveBeenCalled();
+      expect(s3.uploadImage).not.toHaveBeenCalled();
+
+      await service.upload(CUSTOMER, {
+        buffer: Buffer.from('a;b'),
+        originalname: 'clientes.CSV',
+        mimetype: 'text/csv',
+      } as Express.Multer.File);
+      expect(s3.uploadFile).toHaveBeenCalledWith(
+        expect.any(Buffer),
+        expect.stringMatching(/clientes\.CSV$/),
+        'text/csv',
+      );
+    });
   });
 });

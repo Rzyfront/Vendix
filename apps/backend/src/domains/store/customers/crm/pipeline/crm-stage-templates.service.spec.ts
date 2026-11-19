@@ -5,6 +5,7 @@ import {
   CrmStageTemplatesService,
   INITIAL_STAGE_TEMPLATE_NAME,
 } from './crm-stage-templates.service';
+import { CrmStageKind } from './dto/crm-pipeline.dto';
 
 const STORE = 10;
 const OWNER = 1;
@@ -59,6 +60,10 @@ function setup(options: { opportunities?: Array<{ stage_id: number; status: stri
       updateMany: jest.fn(async (..._args: any[]) => ({ count: 1 })),
       create: jest.fn(async ({ data }: any) => ({ id: 900, ...data })),
     },
+    // Usage is counted inside the transaction (unscoped client).
+    crm_opportunities: {
+      findMany: jest.fn(async (..._args: any[]) => options.opportunities ?? []),
+    },
   };
   const prisma = {
     crm_stage_templates: {
@@ -76,9 +81,6 @@ function setup(options: { opportunities?: Array<{ stage_id: number; status: stri
         stages: PIPELINE_STAGES,
       })),
       create: jest.fn(async (..._args: any[]) => ({ id: 3 })),
-    },
-    crm_opportunities: {
-      findMany: jest.fn(async (..._args: any[]) => options.opportunities ?? []),
     },
     $transaction: jest.fn(async (fn: (client: typeof tx) => Promise<unknown>) => fn(tx)),
   } as Record<string, any>;
@@ -99,7 +101,7 @@ afterEach(() => jest.restoreAllMocks());
 describe('CrmStageTemplatesService (QUI-1043 H3)', () => {
   describe('list', () => {
     it('seeds "Embudo estándar" with the active stages of the default pipeline', async () => {
-      as('seller');
+      as('owner');
       const { service, prisma } = setup();
       prisma.crm_stage_templates.findMany.mockResolvedValueOnce([]);
 
@@ -148,6 +150,15 @@ describe('CrmStageTemplatesService (QUI-1043 H3)', () => {
       await expect(service.list()).resolves.toHaveLength(1);
     });
 
+    it('a plain read (no see-all) never writes: no seed, empty list', async () => {
+      as('seller');
+      const { service, prisma } = setup();
+      prisma.crm_stage_templates.findMany.mockResolvedValueOnce([]);
+
+      await expect(service.list()).resolves.toEqual([]);
+      expect(prisma.crm_stage_templates.create).not.toHaveBeenCalled();
+    });
+
     it('does not seed when the store already has templates', async () => {
       as('owner');
       const { service, prisma } = setup();
@@ -177,6 +188,7 @@ describe('CrmStageTemplatesService (QUI-1043 H3)', () => {
         stages: [
           { name: ' Lead ', kind: 'open', color: '', probability: 10 },
           { name: 'Cerrado', kind: 'won' },
+          { name: 'Descartado', kind: 'lost', probability: 0 },
         ],
       });
       expect(prisma.crm_stage_templates.create).toHaveBeenCalledWith({
@@ -186,13 +198,14 @@ describe('CrmStageTemplatesService (QUI-1043 H3)', () => {
           stages: [
             { name: 'Lead', kind: 'open', color: null, probability: 10 },
             { name: 'Cerrado', kind: 'won', color: null, probability: null },
+            { name: 'Descartado', kind: 'lost', color: null, probability: 0 },
           ],
         },
       });
-      expect(created.stages).toHaveLength(2);
+      expect(created.stages).toHaveLength(3);
     });
 
-    it('rejects repeated stage names (case insensitive) and a template without an open stage', async () => {
+    it('rejects repeated stage names (case insensitive) and a template without an open, won or lost stage', async () => {
       as('owner');
       const { service, prisma } = setup();
       expect(
@@ -202,15 +215,35 @@ describe('CrmStageTemplatesService (QUI-1043 H3)', () => {
             stages: [
               { name: 'Nuevo', kind: 'open' },
               { name: 'NUEVO ', kind: 'won' },
+              { name: 'Perdido', kind: 'lost' },
             ],
           }),
         ),
       ).toBe('CRM_STAGE_TEMPLATE_003');
       expect(
         await codeOf(
-          service.update(7, { stages: [{ name: 'Ganado', kind: 'won' }] }),
+          service.update(7, {
+            stages: [
+              { name: 'Ganado', kind: 'won' },
+              { name: 'Perdido', kind: 'lost' },
+            ],
+          }),
         ),
       ).toBe('CRM_STAGE_TEMPLATE_003');
+      // Without a closing stage the pipeline could never win or lose.
+      for (const closing of ['won', 'lost'] as const) {
+        expect(
+          await codeOf(
+            service.create({
+              name: 'Sin cierre',
+              stages: [
+                { name: 'Nuevo', kind: 'open' },
+                { name: 'Cierre', kind: closing },
+              ],
+            }),
+          ),
+        ).toBe('CRM_STAGE_TEMPLATE_003');
+      }
       expect(prisma.crm_stage_templates.create).not.toHaveBeenCalled();
       expect(prisma.crm_stage_templates.updateMany).not.toHaveBeenCalled();
     });
@@ -220,7 +253,10 @@ describe('CrmStageTemplatesService (QUI-1043 H3)', () => {
       const { service, prisma } = setup();
       prisma.crm_stage_templates.create.mockRejectedValueOnce(unique());
       expect(
-        await codeOf(service.create({ name: 'B2B', stages: [{ name: 'A', kind: 'open' }] })),
+        await codeOf(service.create({
+            name: 'B2B',
+            stages: TEMPLATE.stages.map((stage) => ({ ...stage, kind: stage.kind as CrmStageKind })),
+          })),
       ).toBe('CRM_STAGE_TEMPLATE_002');
     });
 
@@ -296,6 +332,10 @@ describe('CrmStageTemplatesService (QUI-1043 H3)', () => {
 
       await service.applyTemplate(1, 7);
 
+      expect(tx.crm_opportunities.findMany).toHaveBeenCalledWith({
+        where: { pipeline_id: 1, store_id: STORE },
+        select: { stage_id: true, status: true },
+      });
       const updates = tx.crm_pipeline_stages.updateMany.mock.calls.map(([args]: any) => args);
       expect(updates).toEqual([
         {
@@ -345,17 +385,18 @@ describe('CrmStageTemplatesService (QUI-1043 H3)', () => {
 
     it('refuses when a stage left out still has open opportunities', async () => {
       as('owner');
-      const { service, prisma, audit } = setup({
+      const { service, tx, audit } = setup({
         opportunities: [{ stage_id: 103, status: 'open' }],
       });
       expect(await codeOf(service.applyTemplate(1, 7))).toBe('CRM_PIPELINE_006');
-      expect(prisma.$transaction).not.toHaveBeenCalled();
+      expect(tx.crm_pipeline_stages.updateMany).not.toHaveBeenCalled();
+      expect(tx.crm_pipeline_stages.create).not.toHaveBeenCalled();
       expect(audit.log).not.toHaveBeenCalled();
     });
 
     it('refuses to change the kind of a stage that has opportunities', async () => {
       as('owner');
-      const { service, prisma } = setup({
+      const { service, prisma, tx } = setup({
         opportunities: [{ stage_id: 104, status: 'won' }],
       });
       prisma.crm_stage_templates.findFirst.mockResolvedValueOnce({
@@ -363,10 +404,13 @@ describe('CrmStageTemplatesService (QUI-1043 H3)', () => {
         stages: [
           { name: 'Nuevo', kind: 'open', color: null, probability: null },
           { name: 'Ganado', kind: 'open', color: null, probability: null },
+          { name: 'Cierre', kind: 'won', color: null, probability: null },
+          { name: 'Perdido', kind: 'lost', color: null, probability: null },
         ],
       });
       expect(await codeOf(service.applyTemplate(1, 7))).toBe('CRM_PIPELINE_008');
-      expect(prisma.$transaction).not.toHaveBeenCalled();
+      expect(tx.crm_pipeline_stages.updateMany).not.toHaveBeenCalled();
+      expect(tx.crm_pipeline_stages.create).not.toHaveBeenCalled();
     });
 
     it('only see-all applies templates, and an unknown pipeline answers 404', async () => {
