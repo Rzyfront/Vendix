@@ -74,7 +74,11 @@ describe('PipelineComponent — header filters and actions', () => {
       (button) => !button.closest('app-options-dropdown'),
     );
     expect(standaloneButtons.length).toBe(0);
-    expect(header.querySelector('app-options-dropdown')!.textContent).toContain('Plantillas de etapas');
+    // With a single action, the dropdown still shows the Acciones menu trigger, not a labelled button.
+    expect(dropdown.singleActionAsMenu()).toBeTrue();
+    expect(header.querySelector('.single-action-trigger')).toBeNull();
+    expect(header.textContent).not.toContain('Plantillas de etapas');
+    expect(header.querySelector('.actions-trigger')!.textContent).toContain('Acciones');
   });
 
   it('omits the pipeline filter with a single pipeline and the owner filter without see-all', async () => {
@@ -97,10 +101,17 @@ describe('PipelineComponent — header filters and actions', () => {
     expect(component().owner()).toBe('');
   });
 
-  it('opens the stage templates modal from the "templates" action', async () => {
+  it('opens the stage templates modal from the "templates" item of the Acciones menu', async () => {
     const dropdown = await setup(2);
     expect(dropdown.actions()).toEqual([{ label: 'Plantillas de etapas', icon: 'layers', action: 'templates' }]);
-    dropdown.actionClick.emit('templates');
+    const host: HTMLElement = fixture.nativeElement;
+    (host.querySelector('app-options-dropdown .actions-trigger') as HTMLButtonElement).click();
+    await fixture.whenStable();
+    fixture.detectChanges();
+    const item = host.querySelector('app-options-dropdown .actions-dropdown .action-item') as HTMLButtonElement;
+    expect(item.textContent).toContain('Plantillas de etapas');
+    item.click();
+    await fixture.whenStable();
     expect(component().templatesOpen()).toBeTrue();
   });
 
