@@ -4173,7 +4173,7 @@ export class OrderDetailsPageComponent {
     const { routeId } = this.dispatchGeneratedContext();
     this.showDispatchGeneratedModal.set(false);
     if (routeId != null) {
-      this.router.navigate(['/admin/orders/planillas', routeId]);
+      this.router.navigate(['/admin/orders/rutas', routeId]);
     }
   }
 
@@ -5266,7 +5266,7 @@ export class OrderDetailsPageComponent {
 
   /** Navigate to the dispatch route (planilla) detail page. */
   viewDispatchRoute(routeId: number): void {
-    this.router.navigate(['/admin/orders/planillas', routeId]);
+    this.router.navigate(['/admin/orders/rutas', routeId]);
   }
 
   goBack(): void {

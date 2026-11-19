@@ -22,8 +22,13 @@ Industria: visible solo cuando la tienda incluye `manufacturing`
 | POST | `orders/:id/release` · `start` · `complete` · `cancel` | `orders:update` |
 | GET | `orders/:id/shortages` | `orders:read` |
 | GET / PATCH | `settings` (defaults si no hay fila) | `settings:read` / `update` |
+| GET | `plants` (`?include_inactive=true`) · `plants/:id` | `settings:read` **o** `orders:read` |
+| POST / PATCH | `plants` · `plants/:id` (PATCH `is_active=false` = desactivar) | `settings:update` |
+| GET | `plants/managers?search=` (equipo activo para «Responsable») | `settings:update` |
+| GET | `orders/day` · `orders/day/supplies` (`?plant_id=` = sesión de una planta) | `orders:read` |
 
 `POST/PATCH formulas` aceptan además `items?: RecipeItemInputDto[]`.
+`POST/PATCH orders` aceptan `plant_id?`; `GET orders` acepta `?plant_id=`.
 `status` ∈ `draft|active|archived`; `is_active` se deriva (`active` ⇒ `true`).
 
 ## Modelo
@@ -35,9 +40,34 @@ Industria: visible solo cuando la tienda incluye `manufacturing`
 - `production_order_lines`: planificado vs consumido, costo unitario/total y
   `cost_snapshot` (historial de consumos) por componente.
 - `manufacturing_settings`: bodegas por defecto, `cost_method` (`fifo|cpp`),
-  `lot_required`, `wip_account_id`.
+  `lot_required`, `wip_account_id`. Con plantas, sus bodegas quedan solo como
+  respaldo de las órdenes sin planta.
+- `manufacturing_plants` (QUI-1013): `name` (único por tienda), `input_location_id`,
+  `output_location_id`, `manager_user_id?`, `is_active`. Se desactivan, nunca se
+  borran (bloqueado con órdenes abiertas: `MFG_PLANT_HAS_OPEN_ORDERS`). La
+  **planta principal** es la activa de menor id (la que la migración
+  `20261208090000_manufacturing_plants` creó desde la configuración anterior).
+- `production_orders.plant_id` (nullable): NULL en órdenes del restaurante y en
+  tiendas sin plantas (siguen con las bodegas de `manufacturing_settings`).
 - `store_sequences`: consecutivo `production_order` → `OP-000001`
   (`INSERT … ON CONFLICT DO UPDATE … RETURNING`, dentro de la transacción de creación).
+
+## Plantas (QUI-1013)
+
+- **Asignación** (`ManufacturingPlantsService.resolveForOrder`): `plant_id` explícito
+  (activa y de la tienda) → esa; sin `plant_id` y una sola planta activa → esa;
+  sin plantas → NULL; varias → `MFG_PLANT_REQUIRED`. Editable en `draft|released`.
+  Las órdenes nacidas de una venta (QUI-995) van a la planta principal.
+- **Bodegas**: insumos = `planta.input ?? settings.default_input ?? bodega del insumo`;
+  terminado = `dto.location_id ?? orden.location_id ?? planta.output ??
+  settings.default_output ?? bodega del producto`. `ProductionOrdersService.complete`
+  usa la planta de la orden como respaldo cuando quien llama no fija bodegas.
+- **Faltantes/bloqueo**: con bodega de insumos resuelta, `shortages` y el
+  pre-chequeo de `complete` (`consumeLocationId`) leen SOLO esa bodega (aunque sea
+  central o no vendible), respetando «Permitir sobre-uso de insumos».
+- **Sesión**: no hay tabla de sesiones; Producción activa / Lista del día de Planta
+  quedan enlazadas a una planta con `?plant_id=` (el frontend pide elegirla si hay
+  varias y la recuerda por tienda).
 
 ## Estados
 
@@ -67,6 +97,8 @@ agrega `source_module` y `lines`.
 ## Extensión (F2/F3, fuera del MVP)
 
 - WIP/cuenta puente (`wip_account_id` ya existe en settings).
+- Plantas fase 2 (QUI-1013): reportes por planta, permisos de usuario por planta,
+  líneas de producción por planta, planta en el impreso del lote (QUI-1011).
 - Costeo de mano de obra/CIF, rutas y centros de trabajo.
 - Órdenes originadas en pedidos de venta (`source='order'`) y reservas de insumos.
 - Versionado de fórmulas (hoy `version` es informativo).

@@ -47,6 +47,7 @@ import {
   ProductionSseService,
 } from '../../services';
 import { ProductionDayPager } from '../../utils/production-day-pager';
+import { injectPlantSession } from '../../../../manufacturing/services';
 import { ProductionOrderDetailModalComponent } from '../production-order-detail/production-order-detail-modal.component';
 import { ProductionDaySuppliesComponent } from '../production-day-supplies/production-day-supplies.component';
 
@@ -130,6 +131,7 @@ const NO_TIME_KEY = 'no-time';
       <app-production-day-supplies
         [date]="date()"
         [apiScope]="apiScope"
+        [plantId]="plantSession.plantId()"
         [refreshToken]="data()"
         [summary]="summary()"
       />
@@ -179,6 +181,19 @@ const NO_TIME_KEY = 'no-time';
                 [value]="date()"
                 (change)="onDateInput($event)"
               />
+              @if (plantSession.showPicker()) {
+                <select
+                  class="h-9 min-w-0 flex-1 rounded-[10px] border border-border bg-surface px-2.5 text-sm text-text-primary md:flex-none"
+                  aria-label="Planta"
+                  (change)="plantSession.selectFrom($event)"
+                >
+                  @for (plant of plantSession.plants(); track plant.id) {
+                    <option [value]="plant.id" [selected]="plant.id === plantSession.plantId()">
+                      {{ plant.name }}
+                    </option>
+                  }
+                </select>
+              }
             </div>
           </div>
         </div>
@@ -405,6 +420,8 @@ export class ProductionDayListComponent {
   /** Planta routes read through the manufacturing API (its own industry guard). */
   readonly apiScope: ProductionApiScope =
     this.routeData['apiScope'] === 'manufacturing' ? 'manufacturing' : 'restaurant';
+  /** QUI-1013: with several plants the session shows one plant (Planta only). */
+  readonly plantSession = injectPlantSession(this.apiScope === 'manufacturing');
   readonly consolidatedPath = computed<string | null>(
     () =>
       this.consolidatedPathInput() ??
@@ -451,7 +468,8 @@ export class ProductionDayListComponent {
   // --- data -------------------------------------------------------------
   // S20: scroll infinito. El pager pide `limit=100` y sigue `next_cursor`.
   private readonly pager = new ProductionDayPager(
-    (date, cursor, limit) => this.service.getDay(date, this.apiScope, { limit, cursor }),
+    (date, cursor, limit) =>
+      this.service.getDay(date, this.apiScope, { limit, cursor }, this.plantSession.plantId()),
     'Error al cargar la lista de producción',
   );
   readonly data = this.pager.data;
@@ -492,6 +510,9 @@ export class ProductionDayListComponent {
     this.destroyRef.onDestroy(() => this.pager.cancel());
     effect(() => {
       const date = this.date();
+      // QUI-1013: wait for the plants, then reload when the session's plant changes.
+      if (!this.plantSession.ready()) return;
+      this.plantSession.plantId();
       untracked(() => this.load(date, true));
     });
     // Another screen (or device) moved an order: reload silently. Without read
@@ -519,6 +540,7 @@ export class ProductionDayListComponent {
 
   // --- loading ----------------------------------------------------------
   reload(): void {
+    if (!this.plantSession.ready()) return;
     this.load(this.date(), false);
   }
 
@@ -564,7 +586,9 @@ export class ProductionDayListComponent {
           ? this.consolidatedPath()
           : null;
     if (target) {
-      void this.router.navigate([target], { queryParams: { date: this.date() } });
+      void this.router.navigate([target], {
+        queryParams: { date: this.date(), ...this.plantSession.queryParams() },
+      });
     }
   }
 

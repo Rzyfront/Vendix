@@ -72,6 +72,17 @@
           label="Fecha de entrega"
         />
 
+        @if (showPlantSelector()) {
+          <app-selector
+            formControlName="plant_id"
+            label="Planta"
+            placeholder="Elige la planta"
+            helpText="Los insumos salen de la bodega de esta planta y el terminado entra a su bodega de terminado."
+            [options]="plantOptions()"
+            [required]="plantRequired()"
+          />
+        }
+
         <app-selector
           formControlName="location_id"
           label="Bodega"

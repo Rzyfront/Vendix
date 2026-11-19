@@ -89,23 +89,53 @@ describe('ProductOptionsService.create — component_variant_id', () => {
 
 describe('ProductOptionsService.isEnabled', () => {
   const s3 = { signUrl: jest.fn() };
-  function build(settings: unknown) {
+  const ON = { product_options: { enabled: true }, scheduled_orders: { enabled: true } };
+  function build(settings: unknown, industries: string[] = ['restaurant']) {
     const prisma: any = {
-      store_settings: { findFirst: jest.fn(async () => ({ settings })) },
+      store_settings: { findFirst: jest.fn(async () => ({ settings, stores: { industries } })) },
     };
     return new ProductOptionsService(prisma, s3 as any);
   }
 
   it('las adiciones se venden solo con pedidos programados activos', async () => {
-    expect(
-      await build({ product_options: { enabled: true }, scheduled_orders: { enabled: true } }).isEnabled(1),
-    ).toBe(true);
+    expect(await build(ON).isEnabled(1)).toBe(true);
     expect(
       await build({ product_options: { enabled: true }, scheduled_orders: { enabled: false } }).isEnabled(1),
     ).toBe(false);
     expect(
       await build({ product_options: { enabled: false }, scheduled_orders: { enabled: true } }).isEnabled(1),
     ).toBe(false);
+  });
+
+  // QUI-1005: «Permitir adiciones en la tienda en línea» only gates the online
+  // store; the counter keeps reading `isEnabled`.
+  it('QUI-1005: la tienda en línea vende adiciones salvo que el dueño lo apague', async () => {
+    const on = { product_options: { enabled: true }, scheduled_orders: { enabled: true } };
+    expect(await build(on).isAllowedOnline(1)).toBe(true);
+    expect(await build({ ...on, product_options: { enabled: true, allow_online: true } }).isAllowedOnline(1)).toBe(true);
+    const off = { ...on, product_options: { enabled: true, allow_online: false } };
+    expect(await build(off).isAllowedOnline(1)).toBe(false);
+    expect(await build(off).isEnabled(1)).toBe(true);
+  });
+
+  it('QUI-1001: fuera de restaurante las adiciones no existen para la venta aunque los ajustes estén activos', async () => {
+    expect(await build(ON, ['retail']).isEnabled(1)).toBe(false);
+    expect(await build(ON, ['service', 'manufacturing']).isEnabled(1)).toBe(false);
+    // Sin industrias se lee como retail (default de la columna).
+    expect(await build(ON, []).isEnabled(1)).toBe(false);
+    // Tienda multiindustria con restaurante: las ve (semántica OR del menú).
+    expect(await build(ON, ['retail', 'restaurant']).isEnabled(1)).toBe(true);
+  });
+
+  it('QUI-1001: una tienda retail no recibe grupos aunque los tenga guardados (no se borran, solo no se leen)', async () => {
+    const client: any = {
+      product_categories: { findMany: jest.fn(async () => []) },
+      product_option_group_assignments: { findMany: jest.fn(async () => [{ group_id: 1 }]) },
+      product_option_groups: { findMany: jest.fn(async () => []) },
+    };
+    const groups = await build(ON, ['retail']).applicableForProduct(1, 5, { client });
+    expect(groups).toEqual([]);
+    expect(client.product_option_group_assignments.findMany).not.toHaveBeenCalled();
   });
 });
 
@@ -148,7 +178,14 @@ describe('ProductOptionsService — imagen del componente', () => {
       product_option_group_assignments: { findMany: jest.fn(async () => [{ group_id: 1 }]) },
       product_option_groups: { findMany: jest.fn(async () => [group([{ image_url: 'k/f.webp' }])]) },
     };
-    const prisma: any = { store_settings: { findFirst: jest.fn(async () => ({ settings: { product_options: { enabled: true }, scheduled_orders: { enabled: true } } })) } };
+    const prisma: any = {
+      store_settings: {
+        findFirst: jest.fn(async () => ({
+          settings: { product_options: { enabled: true }, scheduled_orders: { enabled: true } },
+          stores: { industries: ['restaurant'] },
+        })),
+      },
+    };
     const service = new ProductOptionsService(prisma, s3 as any);
     const groups: any = await service.applicableForProduct(1, 5, { withCost: false, client });
     expect(groups[0].options[0].component_product.image_url).toBe('signed:k/f.webp');

@@ -10,7 +10,11 @@ import { takeUntilDestroyed } from '@angular/core/rxjs-interop';
 import { FormBuilder, FormControl, ReactiveFormsModule } from '@angular/forms';
 
 import {
+  BadgeComponent,
+  ButtonComponent,
   CardComponent,
+  DialogService,
+  IconComponent,
   SelectorComponent,
   SelectorOption,
   SettingToggleComponent,
@@ -21,9 +25,12 @@ import {
 
 import {
   ManufacturingCostMethod,
+  ManufacturingPlant,
   ManufacturingSettings,
 } from '../../../interfaces';
-import { ManufacturingSettingsService } from '../../../services';
+import { ManufacturingPlantsService, ManufacturingSettingsService } from '../../../services';
+import { PlantFormModalComponent } from '../../components/plant-form-modal/plant-form-modal.component';
+import { managerName } from '../../components/plant-form-modal/plant-form.util';
 import { InventoryService } from '../../../../inventory/services/inventory.service';
 
 interface SettingsFormShape {
@@ -42,12 +49,18 @@ interface SettingsFormShape {
     CardComponent,
     SelectorComponent,
     SettingToggleComponent,
+    ButtonComponent,
+    IconComponent,
+    BadgeComponent,
+    PlantFormModalComponent,
   ],
   templateUrl: './plant-settings-page.component.html',
 })
 export class PlantSettingsPageComponent implements OnInit {
   private readonly fb = inject(FormBuilder);
   private readonly settingsService = inject(ManufacturingSettingsService);
+  private readonly plantsService = inject(ManufacturingPlantsService);
+  private readonly dialogService = inject(DialogService);
   private readonly inventoryService = inject(InventoryService);
   private readonly toastService = inject(ToastService);
   private readonly destroyRef = inject(DestroyRef);
@@ -55,6 +68,16 @@ export class PlantSettingsPageComponent implements OnInit {
   readonly isLoading = signal(false);
   readonly isSaving = signal(false);
   readonly locationOptions = signal<SelectorOption[]>([]);
+
+  // --- QUI-1013: production plants ------------------------------------------
+  readonly plants = signal<ManufacturingPlant[]>([]);
+  readonly plantsLoading = signal(false);
+  readonly plantsError = signal<string | null>(null);
+  /** Id of the plant being activated / deactivated. */
+  readonly togglingPlantId = signal<number | null>(null);
+  readonly plantModalOpen = signal(false);
+  readonly editingPlant = signal<ManufacturingPlant | null>(null);
+  readonly managerName = managerName;
 
   readonly costMethodOptions: SelectorOption[] = [
     {
@@ -90,6 +113,65 @@ export class PlantSettingsPageComponent implements OnInit {
   ngOnInit(): void {
     this.loadLocations();
     this.loadSettings();
+    this.loadPlants();
+  }
+
+  loadPlants(): void {
+    this.plantsLoading.set(true);
+    this.plantsError.set(null);
+    this.plantsService
+      .list(true)
+      .pipe(takeUntilDestroyed(this.destroyRef))
+      .subscribe({
+        next: (rows) => {
+          this.plants.set(rows);
+          this.plantsLoading.set(false);
+        },
+        error: (error: unknown) => {
+          this.plantsError.set(
+            typeof error === 'string' ? error : 'No se pudieron cargar las plantas',
+          );
+          this.plantsLoading.set(false);
+        },
+      });
+  }
+
+  openPlantForm(plant: ManufacturingPlant | null): void {
+    this.editingPlant.set(plant);
+    this.plantModalOpen.set(true);
+  }
+
+  /** Deactivating keeps the plant and its orders; it only stops new orders and sessions. */
+  async togglePlant(plant: ManufacturingPlant): Promise<void> {
+    if (this.togglingPlantId() != null) return;
+    const activate = !plant.is_active;
+    if (!activate) {
+      const ok = await this.dialogService.confirm({
+        title: 'Desactivar planta',
+        message: `«${plant.name}» no recibirá órdenes nuevas ni aparecerá en la producción del día. Sus órdenes cerradas se conservan. Puedes volver a activarla cuando quieras.`,
+        confirmText: 'Desactivar',
+        cancelText: 'Volver',
+        confirmVariant: 'danger',
+      });
+      if (!ok) return;
+    }
+    this.togglingPlantId.set(plant.id);
+    this.plantsService
+      .update(plant.id, { is_active: activate })
+      .pipe(takeUntilDestroyed(this.destroyRef))
+      .subscribe({
+        next: () => {
+          this.togglingPlantId.set(null);
+          this.toastService.success(activate ? 'Planta activada' : 'Planta desactivada');
+          this.loadPlants();
+        },
+        error: (error: unknown) => {
+          this.togglingPlantId.set(null);
+          this.toastService.error(
+            typeof error === 'string' ? error : 'No se pudo actualizar la planta',
+          );
+        },
+      });
   }
 
   private loadLocations(): void {

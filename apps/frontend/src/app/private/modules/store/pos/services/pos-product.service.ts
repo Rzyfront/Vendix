@@ -11,6 +11,7 @@ import {
   PosStockScope,
   InventorySettings,
 } from '../../../../../core/models/store-settings.interface';
+import { requiresRegisterScopedLookup } from '../utils/register-stock-gate.util';
 import {
   StockSourcingSuggestionQuery,
   StockSourcingSuggestionResponse,
@@ -348,6 +349,17 @@ export class PosProductService {
       | InventorySettings
       | undefined;
     return inventory?.pos_stock_scope ?? 'all_locations';
+  }
+
+  /**
+   * QUI-1006 — bajo "Bodega de la caja" el escaneo viaja con `pos_optimized`
+   * para que el backend aplique el mismo filtro de la grilla (sin caja →
+   * vacío; con caja → solo su bodega). Otros alcances: la consulta de siempre.
+   */
+  private withRegisterScope(params: HttpParams): HttpParams {
+    return requiresRegisterScopedLookup(this.getPosStockScope())
+      ? params.set('pos_optimized', 'true')
+      : params;
   }
 
   getLowStockThreshold(): number {
@@ -963,7 +975,9 @@ export class PosProductService {
 
   getProductByBarcode(barcode: string): Observable<Product | null> {
     // Hotelería (R5): una noche de hotel se cobra en la cuenta del huésped.
-    const params = new HttpParams().set('barcode', barcode).set('is_lodging', 'false');
+    const params = this.withRegisterScope(
+      new HttpParams().set('barcode', barcode).set('is_lodging', 'false'),
+    );
     return this.http.get<any>(this.apiUrl, { params }).pipe(
       map((response) => this.firstTransformedProduct(response)),
       catchError((error: any) => {
@@ -979,7 +993,9 @@ export class PosProductService {
    */
   getWeightProductByScaleCode(scaleCode: number): Observable<Product | null> {
     // Misma petición y mapeo que el probador; aquí se aplanan los motivos.
-    return this.lookupWeightProductByScaleCode(scaleCode).pipe(
+    // QUI-1006 — la etiqueta pistoleada en el POS respeta la bodega de la
+    // caja; el probador de ajustes (lookup directo) sigue sin alcance.
+    return this.lookupWeightProductByScaleCode(scaleCode, true).pipe(
       map((result) => (result.status === 'found' ? result.product : null)),
       catchError(() => of(null)),
     );
@@ -992,10 +1008,12 @@ export class PosProductService {
    */
   lookupWeightProductByScaleCode(
     scaleCode: number,
+    posScoped = false,
   ): Observable<ScaleCodeLookupResult> {
-    const params = new HttpParams()
+    const base = new HttpParams()
       .set('scale_code', String(scaleCode))
       .set('is_lodging', 'false');
+    const params = posScoped ? this.withRegisterScope(base) : base;
     return this.http.get<any>(this.apiUrl, { params }).pipe(
       map((response): ScaleCodeLookupResult => {
         const dataRoot = response?.success ? response.data : response;

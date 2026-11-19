@@ -41,6 +41,8 @@ export const ErrorCodes = {
   OPT_ASSIGNMENT_TARGET: { code: 'OPT_ASSIGNMENT_TARGET', httpStatus: 400, devMessage: 'El grupo se engancha a un producto o a una categoría, no a ambos.' },
   OPT_REQUIRES_SCHEDULE: { code: 'OPT_REQUIRES_SCHEDULE', httpStatus: 400, devMessage: 'Las adiciones solo se venden en pedidos programados: agenda el pedido o quita las adiciones.' },
   OPT_SELECTION_INVALID: { code: 'OPT_SELECTION_INVALID', httpStatus: 400, devMessage: 'Las adiciones elegidas no cumplen las reglas del producto.' },
+  // QUI-1005: «Permitir adiciones en la tienda en línea» apagado. Solo el canal en línea.
+  OPT_ONLINE_DISABLED: { code: 'OPT_ONLINE_DISABLED', httpStatus: 400, devMessage: 'Esta tienda no permite adiciones en la tienda en línea: quita las adiciones del producto para continuar.' },
   OPT_DRAFT_LINE_LOCKED: { code: 'OPT_DRAFT_LINE_LOCKED', httpStatus: 409, devMessage: 'Esta línea del borrador tiene adiciones y no se puede cambiar aquí: quítala y vuelve a agregarla con sus adiciones.' },
   OPT_DRAFT_ADD_LOCKED: { code: 'OPT_DRAFT_ADD_LOCKED', httpStatus: 409, devMessage: 'Este pedido ya está guardado: no se le pueden agregar productos con adiciones. Cóbralo o cancélalo y registra las adiciones en un pedido nuevo.' },
   // API keys por tienda (/api/v1)
@@ -7327,6 +7329,38 @@ export const ErrorCodes = {
     code: 'MFG_SEQUENCE_FAILED',
     httpStatus: 500,
     devMessage: 'No se pudo generar el consecutivo de la orden de producción',
+  },
+  // QUI-1013 — varias plantas de producción.
+  MFG_PLANT_NOT_FOUND: {
+    code: 'MFG_PLANT_NOT_FOUND',
+    httpStatus: 404,
+    devMessage: 'La planta no existe en la tienda',
+  },
+  MFG_PLANT_INACTIVE: {
+    code: 'MFG_PLANT_INACTIVE',
+    httpStatus: 422,
+    devMessage: 'La planta está desactivada: elige una planta activa',
+  },
+  MFG_PLANT_REQUIRED: {
+    code: 'MFG_PLANT_REQUIRED',
+    httpStatus: 422,
+    devMessage: 'La tienda tiene varias plantas: elige en cuál se hace la orden',
+  },
+  MFG_PLANT_NAME_DUPLICATE: {
+    code: 'MFG_PLANT_NAME_DUPLICATE',
+    httpStatus: 409,
+    devMessage: 'Ya existe una planta con ese nombre',
+  },
+  MFG_PLANT_INVALID_MANAGER: {
+    code: 'MFG_PLANT_INVALID_MANAGER',
+    httpStatus: 422,
+    devMessage: 'El responsable debe ser un usuario activo del equipo de la tienda',
+  },
+  MFG_PLANT_HAS_OPEN_ORDERS: {
+    code: 'MFG_PLANT_HAS_OPEN_ORDERS',
+    httpStatus: 409,
+    devMessage:
+      'La planta tiene órdenes de producción abiertas: termínalas, cancélalas o muévelas a otra planta antes de desactivarla',
   },
 
   // ── Kitchen Fire (Restaurant Suite Fase D) ─────────────────────────

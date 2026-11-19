@@ -33,6 +33,7 @@ import {
   type SaleLineForPlan,
 } from './production-order-lines.util';
 import { lockOrderLifecycle } from '../orders/order-flow/order-lifecycle-lock.util';
+import { findPlantLocations } from '../manufacturing/plants/plant-resolution.util';
 import {
   VendixHttpException,
   ErrorCodes,
@@ -688,11 +689,29 @@ export class ProductionOrdersService {
     }
     const sourceModule = options?.sourceModule ?? 'production';
 
+    // QUI-1013: an order made in a plant works with that plant's locations
+    // when the caller did not choose them (restaurant endpoint, sale-linked
+    // orders). Planta passes its own (plant → settings → none) resolution.
+    const plantLocations = await findPlantLocations(
+      this.prisma,
+      (order as { plant_id?: number | null }).plant_id,
+    );
+    const inputLocationId =
+      options?.inputLocationId ?? plantLocations?.input_location_id ?? undefined;
+    // The plant-only rules (shortage judged in the input location, add-ons
+    // consumed there) apply only to orders of a plant with an input location.
+    // Without one, everything stays as before: store-wide pre-check and each
+    // add-on from its own default location.
+    const plantInputLocationId =
+      plantLocations?.input_location_id != null ? inputLocationId : undefined;
+    const outputLocationId =
+      options?.outputLocationId ?? plantLocations?.output_location_id ?? undefined;
+
     // Resolve the location for the produced good. Uses the same default
     // resolver as the rest of the inventory flow so we don't surprise
     // operators with arbitrary location selection.
     const location_id =
-      options?.outputLocationId ??
+      outputLocationId ??
       (await (variantId != null
         ? this.stockLevelManager.getDefaultLocationForProduct(
             order.product_id,
@@ -737,7 +756,13 @@ export class ProductionOrdersService {
     if (ingredientDemands.length > 0) {
       stockWarnings = await this.stockValidatorService.assertIngredientsAvailable(
         ingredientDemands,
-        { allowIngredientOveruse: inventoryPolicy.allowIngredientOveruse },
+        {
+          allowIngredientOveruse: inventoryPolicy.allowIngredientOveruse,
+          // QUI-1013: an order of a plant is judged where its inputs are
+          // actually consumed (the plant's input location), not on the whole
+          // store's sellable stock.
+          ...(plantInputLocationId != null && { consumeLocationId: plantInputLocationId }),
+        },
       );
     }
 
@@ -808,7 +833,7 @@ export class ProductionOrdersService {
         // nunca bajaba y el terminado sí se acreditaba. Inventario inflado en
         // silencio, sin una fila que lo explicara.
         const componentLocationId =
-          options?.inputLocationId ??
+          inputLocationId ??
           (await this.stockLevelManager.getDefaultLocationForProduct(
             item.component_product_id,
             undefined,
@@ -870,6 +895,7 @@ export class ProductionOrdersService {
           production_order_id: order.id,
           sourceModule,
           allowOveruse: inventoryPolicy.allowIngredientOveruse,
+          inputLocationId: plantInputLocationId,
         });
         totalConsumedCost += addons.cost;
         consumedLineCount += addons.lines;
@@ -1049,6 +1075,8 @@ export class ProductionOrdersService {
       production_order_id: number;
       sourceModule: string;
       allowOveruse: boolean;
+      /** QUI-1013: the plant's input location; default = each add-on's own. */
+      inputLocationId?: number;
     },
   ): Promise<{ cost: number; lines: number; consumptions: LineConsumption[] }> {
     const lines = await tx.order_items.findMany({
@@ -1121,11 +1149,13 @@ export class ProductionOrdersService {
     let cost = 0;
     const consumptions: LineConsumption[] = [];
     for (const line of consumption) {
-      const location_id = await this.stockLevelManager.getDefaultLocationForProduct(
-        line.product_id,
-        line.variant_id ?? undefined,
-        tx,
-      );
+      const location_id =
+        p.inputLocationId ??
+        (await this.stockLevelManager.getDefaultLocationForProduct(
+          line.product_id,
+          line.variant_id ?? undefined,
+          tx,
+        ));
       const result = await this.stockLevelManager.updateStock(
         {
           product_id: line.product_id,
@@ -1633,6 +1663,7 @@ export class ProductionOrdersService {
   private async resolveDayWhere(
     store_id: number,
     queryDate?: string,
+    plant_id?: number,
   ): Promise<{
     date: string;
     timezone: string;
@@ -1646,6 +1677,8 @@ export class ProductionOrdersService {
 
     const dayWhere: Prisma.production_ordersWhereInput = {
       status: { not: 'cancelled' },
+      // QUI-1013: a plant's production session only sees that plant's orders.
+      ...(plant_id != null && { plant_id }),
       OR: [
         { order_id: { not: null }, due_date: { gte: local.startDate, lte: local.endDate } },
         { order_id: null, due_date: { gte: naive.startDate, lte: naive.endDate } },
@@ -1679,7 +1712,11 @@ export class ProductionOrdersService {
     if (!store_id) {
       throw new VendixHttpException(ErrorCodes.STORE_CONTEXT_001);
     }
-    const { date, timezone, dayWhere } = await this.resolveDayWhere(store_id, query?.date);
+    const { date, timezone, dayWhere } = await this.resolveDayWhere(
+      store_id,
+      query?.date,
+      query?.plant_id,
+    );
     const select = {
       id: true,
       order_number: true,
@@ -1853,7 +1890,11 @@ export class ProductionOrdersService {
     if (!store_id) {
       throw new VendixHttpException(ErrorCodes.STORE_CONTEXT_001);
     }
-    const { date, timezone, dayWhere } = await this.resolveDayWhere(store_id, query?.date);
+    const { date, timezone, dayWhere } = await this.resolveDayWhere(
+      store_id,
+      query?.date,
+      query?.plant_id,
+    );
 
     const orders = await this.prisma.production_orders.findMany({
       where: dayWhere,

@@ -2471,4 +2471,14 @@ export class ProductOptionsSettingsDto {
   @IsOptional()
   @IsBoolean()
   enabled?: boolean;
+
+  @ApiProperty({
+    example: true,
+    required: false,
+    description:
+      'QUI-1005 — Permitir adiciones en la tienda en línea. Default true. En false la tienda en línea no muestra adiciones y el checkout público las rechaza (OPT_ONLINE_DISABLED); el POS no cambia.',
+  })
+  @IsOptional()
+  @IsBoolean()
+  allow_online?: boolean;
 }

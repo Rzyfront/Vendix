@@ -45,6 +45,20 @@ interface PaginatedApiResponse<T> {
 }
 
 /**
+ * QUI-1013 — a Planta production session belongs to one plant: the day list and
+ * its supplies are read for that plant only. The restaurant has no plants.
+ */
+function withPlantParam(
+  params: HttpParams,
+  scope: ProductionApiScope,
+  plantId?: number | null,
+): HttpParams {
+  return scope === 'manufacturing' && plantId != null
+    ? params.set('plant_id', String(plantId))
+    : params;
+}
+
+/**
  * Store-scoped service for the Production Orders domain (Restaurant Suite
  * — Fase C). Mirrors the controller in
  * `apps/backend/src/domains/store/production/`.
@@ -120,10 +134,12 @@ export class ProductionOrdersService {
     date: string,
     scope: ProductionApiScope = 'restaurant',
     page?: { limit?: number; cursor?: string | null },
+    plantId?: number | null,
   ): Observable<ProductionDayResponse> {
     let params = new HttpParams().set('date', date);
     if (page?.limit != null) params = params.set('limit', String(page.limit));
     if (page?.cursor) params = params.set('cursor', page.cursor);
+    params = withPlantParam(params, scope, plantId);
     const base = scope === 'manufacturing' ? '/store/manufacturing/orders' : this.basePath;
     return this.http
       .get<ApiResponse<ProductionDayResponse>>(
@@ -144,11 +160,12 @@ export class ProductionOrdersService {
   getDaySupplies(
     date: string,
     scope: ProductionApiScope = 'restaurant',
+    plantId?: number | null,
   ): Observable<ProductionDaySupplies> {
     const base = scope === 'manufacturing' ? '/store/manufacturing/orders' : this.basePath;
     return this.http
       .get<ApiResponse<ProductionDaySupplies>>(`${this.apiUrl}${base}/day/supplies`, {
-        params: new HttpParams().set('date', date),
+        params: withPlantParam(new HttpParams().set('date', date), scope, plantId),
       })
       .pipe(
         map((res) => res.data),
@@ -161,8 +178,9 @@ export class ProductionOrdersService {
     date: string,
     scope: ProductionApiScope,
     cursor: string | null,
+    plantId?: number | null,
   ): Observable<ProductionDayResponse> {
-    return this.getDay(date, scope, { limit: PRODUCTION_DAY_PAGE_SIZE, cursor });
+    return this.getDay(date, scope, { limit: PRODUCTION_DAY_PAGE_SIZE, cursor }, plantId);
   }
 
   /**
@@ -175,9 +193,10 @@ export class ProductionOrdersService {
   getDayAllPages(
     date: string,
     scope: ProductionApiScope = 'restaurant',
+    plantId?: number | null,
   ): Observable<ProductionDayResponse> {
     const page = (cursor: string | null) =>
-      this.getDay(date, scope, { limit: PRODUCTION_DAY_MAX_LIMIT, cursor });
+      this.getDay(date, scope, { limit: PRODUCTION_DAY_MAX_LIMIT, cursor }, plantId);
     return page(null).pipe(
       expand((res) => (res.next_cursor ? page(res.next_cursor) : EMPTY)),
       reduce<ProductionDayResponse, ProductionDayResponse | null>(

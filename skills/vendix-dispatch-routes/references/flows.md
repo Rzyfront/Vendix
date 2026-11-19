@@ -29,7 +29,7 @@ Remisión suelta (sin parada activa: `dispatch_route_stops.status <> 'released'`
 
 - Encargado = `driver_user_id` si `!is_primary_driver_external`; si existe, solo él despacha (403 `DISPATCH_ROUTE_NOT_RESPONSIBLE`); conductor externo ⇒ cualquiera con `dispatch`.
 - Solo el encargado interno publica posiciones de una ruta `dispatched|in_transit`. Lectura: snapshot con trail ≤ 500 y SSE.
-- Frontend: `RoutePositionPublisherService` (solo encargado; sobrevive al cambio de página; para con 403/404/409) y `RouteTrackingService` (SSE + polling 15 s). El espectador nunca usa geolocalización. Vista `/admin/orders/planillas/:id/recorrido` (`pages/planilla-route-view-page`).
+- Frontend: `RoutePositionPublisherService` (solo encargado; sobrevive al cambio de página; para con 403/404/409) y `RouteTrackingService` (SSE + polling 15 s). El espectador nunca usa geolocalización. Vista `/admin/orders/rutas/:id/recorrido` (`pages/planilla-route-view-page`).
 
 ## Escáner de planillas
 
