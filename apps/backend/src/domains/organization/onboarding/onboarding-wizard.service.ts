@@ -1276,62 +1276,73 @@ export class OnboardingWizardService {
       });
     }
 
-    // Create/Update organization_settings with branding
-    await this.prismaService.organization_settings.upsert({
-      where: { organization_id: user.organization_id },
-      create: {
-        organization_id: user.organization_id,
-        settings: {
-          branding: {
-            name: user.organizations?.name || 'Organization',
-            primary_color:
-              setupAppConfigDto.primary_color || branding.primary_color,
-            secondary_color:
-              setupAppConfigDto.secondary_color || branding.secondary_color,
-            accent_color:
-              setupAppConfigDto.accent_color || branding.accent_color,
-            background_color: branding.background_color,
-            surface_color: branding.surface_color,
-            text_color: branding.text_color,
-            text_secondary_color: branding.text_secondary_color,
-            text_muted_color: branding.text_muted_color,
-            logo_url: branding.logo_url,
-            favicon_url: branding.favicon_url,
-          },
-          fonts: {
-            primary: 'Inter, sans-serif',
-            secondary: 'Inter, sans-serif',
-            headings: 'Inter, sans-serif',
-          },
+    // organization_settings.branding: SOLO se crea cuando la organización aún
+    // no tiene branding propio. Antes era un upsert que reescribía TODO
+    // `settings` (branding + fonts, perdiendo cualquier otra clave) con los
+    // colores del wizard: al completar el onboarding de la org plataforma
+    // (2026-11-18) los colores de la tienda del CRM pisaron la marca de Vendix.
+    // Los colores del wizard se aplican siempre a la tienda (store_settings,
+    // más abajo); la marca de una organización existente se edita en su panel.
+    const orgBranding = {
+      name: user.organizations?.name || 'Organization',
+      primary_color: setupAppConfigDto.primary_color || branding.primary_color,
+      secondary_color:
+        setupAppConfigDto.secondary_color || branding.secondary_color,
+      accent_color: setupAppConfigDto.accent_color || branding.accent_color,
+      background_color: branding.background_color,
+      surface_color: branding.surface_color,
+      text_color: branding.text_color,
+      text_secondary_color: branding.text_secondary_color,
+      text_muted_color: branding.text_muted_color,
+      logo_url: branding.logo_url,
+      favicon_url: branding.favicon_url,
+    };
+    const defaultOrgFonts = {
+      primary: 'Inter, sans-serif',
+      secondary: 'Inter, sans-serif',
+      headings: 'Inter, sans-serif',
+    };
+    const existingOrgSettings =
+      await this.prismaService.organization_settings.findUnique({
+        where: { organization_id: user.organization_id },
+      });
+
+    if (!existingOrgSettings) {
+      await this.prismaService.organization_settings.create({
+        data: {
+          organization_id: user.organization_id,
+          settings: { branding: orgBranding, fonts: defaultOrgFonts },
         },
-      },
-      update: {
-        settings: {
-          branding: {
-            name: user.organizations?.name || 'Organization',
-            primary_color:
-              setupAppConfigDto.primary_color || branding.primary_color,
-            secondary_color:
-              setupAppConfigDto.secondary_color || branding.secondary_color,
-            accent_color:
-              setupAppConfigDto.accent_color || branding.accent_color,
-            background_color: branding.background_color,
-            surface_color: branding.surface_color,
-            text_color: branding.text_color,
-            text_secondary_color: branding.text_secondary_color,
-            text_muted_color: branding.text_muted_color,
-            logo_url: branding.logo_url,
-            favicon_url: branding.favicon_url,
+      });
+    } else {
+      const currentSettings =
+        existingOrgSettings.settings &&
+        typeof existingOrgSettings.settings === 'object' &&
+        !Array.isArray(existingOrgSettings.settings)
+          ? (existingOrgSettings.settings as Record<string, any>)
+          : {};
+      const currentBranding = currentSettings.branding;
+      const hasOwnBranding =
+        currentBranding &&
+        typeof currentBranding === 'object' &&
+        Object.keys(currentBranding).length > 0;
+
+      if (!hasOwnBranding) {
+        // Fila existente sin branding (p. ej. creada por el paso fiscal):
+        // se agrega la marca conservando el resto de claves.
+        await this.prismaService.organization_settings.update({
+          where: { organization_id: user.organization_id },
+          data: {
+            settings: {
+              ...currentSettings,
+              branding: orgBranding,
+              fonts: currentSettings.fonts ?? defaultOrgFonts,
+            },
+            updated_at: new Date(),
           },
-          fonts: {
-            primary: 'Inter, sans-serif',
-            secondary: 'Inter, sans-serif',
-            headings: 'Inter, sans-serif',
-          },
-        },
-        updated_at: new Date(),
-      },
-    });
+        });
+      }
+    }
 
     // 3. Create/Update Store Domain with branding config
     let storeDomainRecord = null;

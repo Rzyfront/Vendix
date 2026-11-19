@@ -30,8 +30,9 @@ describe('OnboardingWizardService.setupAppConfig · dominio core de la plataform
     secondary_color: '#445566',
   } as any;
 
-  function build(coreDomainType: string) {
+  function build(coreDomainType: string, extra: Record<string, any[]> = {}) {
     db = createInMemoryDb({
+      ...extra,
       users: [{ id: USER_ID, organization_id: ORG_ID }],
       organizations: [{ id: ORG_ID, name: 'Vendix Platform', slug: 'vendix' }],
       stores: [
@@ -113,6 +114,73 @@ describe('OnboardingWizardService.setupAppConfig · dominio core de la plataform
       expect(orgDomains[0].hostname).toContain('-org.');
     },
   );
+
+  describe('branding de la organización', () => {
+    const PLATFORM_BRANDING = {
+      name: 'Vendix',
+      primary_color: '#7ED7A5',
+      secondary_color: '#2F6F4E',
+      accent_color: '#FFFFFF',
+      text_color: '#222222',
+    };
+    const orgSettings = () =>
+      (db.tables.organization_settings ?? []).find(
+        (s) => s.organization_id === ORG_ID,
+      );
+    const storeSettings = () =>
+      (db.tables.store_settings ?? []).find((s) => s.store_id === STORE_ID);
+
+    it('keeps an organization branding that already exists and applies the colors to the store', async () => {
+      build('vendix_core', {
+        organization_settings: [
+          {
+            id: 1,
+            organization_id: ORG_ID,
+            settings: { branding: PLATFORM_BRANDING, fiscal: { keep: true } },
+          },
+        ],
+      });
+
+      await service.setupAppConfig(USER_ID, {
+        ...dto,
+        primary_color: '#a24457',
+        secondary_color: '#78827f',
+        accent_color: '#eed3a5',
+      });
+
+      expect(orgSettings()!.settings).toEqual({
+        branding: PLATFORM_BRANDING,
+        fiscal: { keep: true },
+      });
+      expect(JSON.stringify(storeSettings()!.settings)).toContain('#a24457');
+    });
+
+    it('creates the organization branding when the organization has none', async () => {
+      build('vendix_core');
+
+      await service.setupAppConfig(USER_ID, dto);
+
+      expect(orgSettings()!.settings.branding).toMatchObject({
+        primary_color: '#112233',
+        secondary_color: '#445566',
+      });
+    });
+
+    it('adds branding to an existing settings row without one, keeping its other keys', async () => {
+      build('vendix_core', {
+        organization_settings: [
+          { id: 1, organization_id: ORG_ID, settings: { fiscal: { keep: true } } },
+        ],
+      });
+
+      await service.setupAppConfig(USER_ID, dto);
+
+      expect(orgSettings()!.settings).toMatchObject({
+        fiscal: { keep: true },
+        branding: { primary_color: '#112233' },
+      });
+    });
+  });
 
   it('rejects using the core hostname as a custom domain', async () => {
     build('vendix_core');
