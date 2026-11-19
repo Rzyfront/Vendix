@@ -112,7 +112,7 @@ export type SelectorVariant = 'default' | 'outline' | 'filled';
                     class="w-full px-3 py-1.5 text-sm border border-border rounded-lg
                            hover:border-[var(--color-primary)] focus:outline-none focus:ring-2 focus:ring-[var(--color-ring)] focus:border-[var(--color-primary)]
                            bg-[var(--color-surface)] text-[var(--color-text-primary)]"
-                    placeholder="Buscar..."
+                    [placeholder]="searchPlaceholder()"
                     />
                 </div>
                 <div class="py-1">
@@ -255,6 +255,12 @@ export class SelectorComponent implements ControlValueAccessor {
    *  native <select>. Default false keeps the existing native behaviour, so no
    *  existing usage changes unless it opts in. */
   readonly searchable = input<boolean>(false);
+  /** Solo con `searchable`: el consumidor filtra en el servidor. El selector no
+   *  filtra localmente, emite `searchChange` con lo tecleado (y '' al abrir) y
+   *  muestra `options` tal cual llegan. Default false = comportamiento actual. */
+  readonly remoteSearch = input<boolean>(false);
+  /** Texto de ayuda del input de búsqueda del modo searchable. */
+  readonly searchPlaceholder = input<string>('Buscar...');
   readonly value = input<string | number | null | undefined>(undefined);
 
   constructor() {
@@ -281,6 +287,8 @@ export class SelectorComponent implements ControlValueAccessor {
   readonly valueChange = output<string | number | null>();
   readonly blur = output<void>();
   readonly focus = output<void>();
+  /** Solo con `remoteSearch`: término tecleado ('' al abrir el panel). */
+  readonly searchChange = output<string>();
 
   readonly selectedValue = signal<string | number | null>(null);
 
@@ -308,6 +316,7 @@ export class SelectorComponent implements ControlValueAccessor {
   private readonly panelEstimatedHeight = 260;
 
   readonly filteredOptions = computed<SelectorOption[]>(() => {
+    if (this.remoteSearch()) return this.options();
     const term = this.searchTerm().toLowerCase().trim();
     if (!term) return this.options();
     return this.options().filter(
@@ -321,8 +330,14 @@ export class SelectorComponent implements ControlValueAccessor {
     const value = this.selectedValue();
     if (value == null) return '';
     const found = this.options().find((o) => o.value == value);
-    return found?.label ?? '';
+    if (found) return found.label;
+    // En búsqueda remota la opción elegida puede no estar en la página actual.
+    const cached = this.lastSelectedOption();
+    return cached && cached.value == value ? cached.label : '';
   });
+
+  /** Última opción elegida en el panel; sostiene el label en `remoteSearch`. */
+  private readonly lastSelectedOption = signal<SelectorOption | null>(null);
 
   // ControlValueAccessor callbacks
   private onChange: (value: string | number | null) => void = () => { };
@@ -369,6 +384,7 @@ export class SelectorComponent implements ControlValueAccessor {
     if (this.isDisabled()) return;
     if (!this.isOpen()) {
       this.searchTerm.set('');
+      if (this.remoteSearch()) this.searchChange.emit('');
       this.dropUp.set(this.shouldOpenUpward());
     }
     this.isOpen.update((v) => !v);
@@ -395,6 +411,7 @@ export class SelectorComponent implements ControlValueAccessor {
 
   selectOption(option: SelectorOption): void {
     if (option.disabled) return;
+    this.lastSelectedOption.set(option);
     this.selectedValue.set(option.value);
     this.onChange(option.value);
     this.valueChange.emit(option.value);
@@ -404,6 +421,7 @@ export class SelectorComponent implements ControlValueAccessor {
 
   onSearch(term: string): void {
     this.searchTerm.set(term);
+    if (this.remoteSearch()) this.searchChange.emit(term ?? '');
   }
 
   /** Marca una URL de miniatura como fallida para caer al fallback. */
