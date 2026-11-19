@@ -55,6 +55,7 @@ import { StoreSettingsFacade } from '../../../../../../core/store/store-settings
 import { PosHolderWarningComponent } from '../pos-holder-warning.component';
 import { KitchenTicketPrintService } from '../../../restaurant-ops/kds/services/kitchen-ticket-print.service';
 import { AuthFacade } from '../../../../../../core/store/auth/auth.facade';
+import { MenuFilterService } from '../../../../../../core/services/menu-filter.service';
 import { StoreOrdersService } from '../../../orders/services/store-orders.service';
 import { of } from 'rxjs';
 import { catchError, map, switchMap } from 'rxjs/operators';
@@ -166,6 +167,7 @@ export class PosCheckoutShellComponent {
   private readonly currencyService = inject(CurrencyFormatService);
   private readonly settingsFacade = inject(StoreSettingsFacade);
   private readonly authFacade = inject(AuthFacade);
+  private readonly menuFilter = inject(MenuFilterService);
   private readonly cartService = inject(PosCartService);
   private readonly paymentService = inject(PosPaymentService);
   private readonly scheduledOrders = inject(PosScheduledOrderService);
@@ -242,9 +244,12 @@ export class PosCheckoutShellComponent {
     () => this.effectiveIntent() === 'delivery',
   );
 
-  /** QUI-1001: scheduled orders are a restaurant-only module; hidden elsewhere. */
+  /**
+   * QUI-1001: scheduled orders follow their industry rule (`orders_scheduled`,
+   * restaurant only) through the same helper as the sidebar; hidden elsewhere.
+   */
   readonly scheduledOrdersAvailable = computed<boolean>(() =>
-    this.authFacade.isRestaurant(),
+    this.menuFilter.industryAllowsModule('orders_scheduled'),
   );
 
   /**
