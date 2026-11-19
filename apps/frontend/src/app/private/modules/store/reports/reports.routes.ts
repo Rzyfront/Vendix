@@ -195,7 +195,10 @@ export const reportsRoutes: Routes = [
             data: { categoryId: 'dispatch' },
           },
           { path: 'dispatch-remisiones',  data: { reportId: 'dispatch-remisiones' },  loadComponent: () => import('./pages/generic-report-page/generic-report-page.component').then(c => c.GenericReportPageComponent) },
-          { path: 'dispatch-planillas',   data: { reportId: 'dispatch-planillas' },   loadComponent: () => import('./pages/generic-report-page/generic-report-page.component').then(c => c.GenericReportPageComponent) },
+          // QUI-1024: la URL canónica es `dispatch-rutas`; el reportId se
+          // conserva (lo comparte el catálogo de reportes de Vexi en backend).
+          { path: 'dispatch-rutas',       data: { reportId: 'dispatch-planillas' },   loadComponent: () => import('./pages/generic-report-page/generic-report-page.component').then(c => c.GenericReportPageComponent) },
+          { path: 'dispatch-planillas', pathMatch: 'full', redirectTo: 'dispatch-rutas' },
           { path: 'dispatch-vehiculos',   data: { reportId: 'dispatch-vehiculos' },   loadComponent: () => import('./pages/generic-report-page/generic-report-page.component').then(c => c.GenericReportPageComponent) },
         ],
       },
