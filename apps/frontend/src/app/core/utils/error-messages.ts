@@ -1402,6 +1402,9 @@ export const ERROR_MESSAGES: Record<string, string> = {
   PLATFORM_CRM_003: 'Este cliente ya tiene una cuenta Vendix enlazada. Recarga la ficha.',
   PLATFORM_CRM_004: 'Esa organización ya está enlazada a otro cliente del CRM.',
   PLATFORM_CRM_005: 'Este cliente ya no tiene una cuenta Vendix enlazada. Recarga la ficha.',
+  PLATFORM_CRM_006: 'La tienda no existe o no se puede enlazar.',
+  PLATFORM_CRM_007: 'Esa tienda ya está enlazada a otro cliente del CRM.',
+  PLATFORM_CRM_008: 'Una tienda de esa organización ya está enlazada a otro cliente del CRM.',
 };
 
 export const EMPTY_CART_MESSAGE = 'El carrito está vacío.';
