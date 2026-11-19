@@ -39,6 +39,17 @@
             <p class="text-[11px] uppercase tracking-wide text-text-secondary">Producido</p>
             <p class="font-semibold">{{ num(o.produced_qty ?? 0) }} {{ o.recipe?.yield_unit }}</p>
           </div>
+          @if (o.plant; as plant) {
+            <div>
+              <p class="text-[11px] uppercase tracking-wide text-text-secondary">Planta</p>
+              <p class="font-semibold">
+                {{ plant.name }}
+                @if (!plant.is_active) {
+                  <span class="text-text-secondary">(inactiva)</span>
+                }
+              </p>
+            </div>
+          }
           <div>
             <p class="text-[11px] uppercase tracking-wide text-text-secondary">Entrega</p>
             <p class="font-semibold">{{ dateLabel(o.due_date) }}</p>

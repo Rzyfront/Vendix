@@ -207,6 +207,8 @@ export class ProductionDaySuppliesComponent {
   /** YYYY-MM-DD of the day the host shows. */
   readonly date = input.required<string>();
   readonly apiScope = input<ProductionApiScope>('restaurant');
+  /** QUI-1013: plant of the Planta production session (`null`: the whole store). */
+  readonly plantId = input<number | null>(null);
   /**
    * Any value that changes whenever the host reloads its day (its data signal
    * works). While it is null the host has not loaded the day yet, so the panel
@@ -225,7 +227,7 @@ export class ProductionDaySuppliesComponent {
   readonly canShowSummary = computed(() => this.summary().completed > 0);
 
   private loadSub: Subscription | null = null;
-  /** `date|scope` of the data on screen: a change of key drops it, a refresh keeps it. */
+  /** `date|scope|plant` of the data on screen: a change of key drops it, a refresh keeps it. */
   private loadedKey: string | null = null;
   /** Last summary reading of the day on screen (session only). */
   private lastSeen: { date: string; summary: ProductionDaySummaryCounts } | null = null;
@@ -236,8 +238,9 @@ export class ProductionDaySuppliesComponent {
     effect(() => {
       const date = this.date();
       const scope = this.apiScope();
+      const plantId = this.plantId();
       const hostLoaded = this.refreshToken() != null;
-      untracked(() => this.load(date, scope, hostLoaded));
+      untracked(() => this.load(date, scope, plantId, hostLoaded));
     });
 
     effect(() => {
@@ -278,9 +281,14 @@ export class ProductionDaySuppliesComponent {
     }
   }
 
-  private load(date: string, scope: ProductionApiScope, hostLoaded: boolean): void {
+  private load(
+    date: string,
+    scope: ProductionApiScope,
+    plantId: number | null,
+    hostLoaded: boolean,
+  ): void {
     this.loadSub?.unsubscribe();
-    const key = `${date}|${scope}`;
+    const key = `${date}|${scope}|${plantId ?? ''}`;
     if (this.loadedKey !== key) this.supplies.set(null);
     this.loadedKey = key;
     if (!hostLoaded) {
@@ -290,7 +298,7 @@ export class ProductionDaySuppliesComponent {
     }
     this.loading.set(true);
     this.errorMessage.set(null);
-    this.loadSub = this.service.getDaySupplies(date, scope).subscribe({
+    this.loadSub = this.service.getDaySupplies(date, scope, plantId).subscribe({
       next: (res) => {
         this.supplies.set(res);
         this.loading.set(false);
