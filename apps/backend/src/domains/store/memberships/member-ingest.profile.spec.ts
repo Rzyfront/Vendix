@@ -35,6 +35,10 @@ describe('member-ingest profile', () => {
     expect(parseSheetDate('15 ene 2026')).toBe('2026-01-15');
     expect(parseSheetDate('46204')).toBe('2026-07-01');
     expect(parseSheetDate('31/02/2026')).toBeNull();
+    // Two-digit years: memberships are 20xx, a birth date is never in the future.
+    expect(parseSheetDate('15/03/85', { past: true })).toBe('1985-03-15');
+    expect(parseSheetDate('15/03/05', { past: true })).toBe('2005-03-15');
+    expect(normalizeMemberRow({ full_name: 'Ana Pérez', date_of_birth: '15/03/85' }, { row: 2 }).record?.member.date_of_birth).toBe('1985-03-15');
     expect(parseSheetDate('mañana')).toBeNull();
   });
 

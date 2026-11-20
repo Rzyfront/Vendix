@@ -35,14 +35,14 @@ describe('MemberBulkScannerService (scan)', () => {
       size: JPEG.length,
     }) as Express.Multer.File;
 
-  const scanFile = (buffer = JPEG, mimeType = 'image/jpeg', originalName = 'padron.jpg') => ({
+  const scanFile = (buffer: Buffer = JPEG, mimeType = 'image/jpeg', originalName = 'padron.jpg') => ({
     buffer,
     mimeType,
     originalName,
     size: buffer.length,
   });
 
-  const xlsx = (rows: unknown[][]) => {
+  const xlsx = (rows: unknown[][]): Buffer => {
     const wb = XLSX.utils.book_new();
     XLSX.utils.book_append_sheet(wb, XLSX.utils.aoa_to_sheet(rows), 'Socios');
     return XLSX.write(wb, { type: 'buffer', bookType: 'xlsx' }) as Buffer;

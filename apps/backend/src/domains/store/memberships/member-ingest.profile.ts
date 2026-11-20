@@ -364,15 +364,23 @@ function isoDate(year: number, month: number, day: number): string | null {
  * ("4 de julio", "04/07") the year is `0000`: `analyze` puts the store's
  * current year and warns, as for scanned rosters. Excel serial numbers too.
  */
-export function parseSheetDate(value: string | null): string | null {
+export function parseSheetDate(
+  value: string | null,
+  options: { past?: boolean } = {},
+): string | null {
   const v = clean(value);
   if (!v) return null;
   let m = /^(\d{4})[-/.](\d{1,2})[-/.](\d{1,2})/.exec(v);
   if (m) return isoDate(Number(m[1]), Number(m[2]), Number(m[3]));
   m = /^(\d{1,2})[-/.](\d{1,2})[-/.](\d{2}|\d{4})$/.exec(v);
   if (m) {
-    const y = Number(m[3]);
-    return isoDate(m[3].length === 2 ? 2000 + y : y, Number(m[2]), Number(m[1]));
+    let y = Number(m[3]);
+    if (m[3].length === 2) {
+      y += 2000;
+      // A birth date is in the past: "15/03/85" is 1985, not 2085.
+      if (options.past && y > new Date().getUTCFullYear()) y -= 100;
+    }
+    return isoDate(y, Number(m[2]), Number(m[1]));
   }
   m = /^(\d{1,2})[-/.](\d{1,2})$/.exec(v);
   if (m) return isoDate(0, Number(m[2]), Number(m[1]));
@@ -460,7 +468,7 @@ export function normalizeMemberRow(
   for (const field of ['date_of_birth', 'membership_start_date', 'membership_end_date'] as const) {
     const value = clean(raw[field]);
     if (!value) continue;
-    const parsed = parseSheetDate(value);
+    const parsed = parseSheetDate(value, { past: field === 'date_of_birth' });
     if (!parsed) issue(field, `Fecha "${value}" no reconocida; se dejó vacía.`);
     // A birth date needs its year (the profile stores a real date).
     else if (field === 'date_of_birth' && parsed.startsWith('0000')) {
