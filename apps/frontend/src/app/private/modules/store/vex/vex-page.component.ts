@@ -1,4 +1,15 @@
-import { Component, computed, effect, inject, signal, untracked, viewChild } from '@angular/core';
+import {
+  Component,
+  ElementRef,
+  Injector,
+  afterNextRender,
+  computed,
+  effect,
+  inject,
+  signal,
+  untracked,
+  viewChild,
+} from '@angular/core';
 import { toSignal } from '@angular/core/rxjs-interop';
 import { ActivatedRoute, Router, RouterLink } from '@angular/router';
 import { map } from 'rxjs';
@@ -6,6 +17,7 @@ import { IconComponent } from '../../../../shared/components/icon/icon.component
 import { VexChatsSidebarComponent } from './components/vex-chats-sidebar/vex-chats-sidebar.component';
 import { VexLogSidebarComponent } from './components/vex-log-sidebar/vex-log-sidebar.component';
 import { VexComposerComponent } from './components/vex-composer/vex-composer.component';
+import { VexTitleEditorComponent } from './components/vex-title-editor/vex-title-editor.component';
 import { VexThreadComponent } from './components/vex-thread/vex-thread.component';
 import { VexWelcomeComponent } from './components/vex-welcome/vex-welcome.component';
 import { VexChatStore } from './state/vex-chat.store';
@@ -33,6 +45,7 @@ function isDesktop(): boolean {
     VexComposerComponent,
     VexThreadComponent,
     VexWelcomeComponent,
+    VexTitleEditorComponent,
   ],
   providers: [VexChatStore, VexLogStore],
   template: `
@@ -106,12 +119,29 @@ function isDesktop(): boolean {
             <app-icon name="arrow-left" [size]="18"></app-icon>
             <span>Panel</span>
           </a>
-          <span
-            class="lg:hidden flex-1 min-w-0 truncate text-right text-sm text-[var(--color-text-secondary)]"
-          >
-            {{ conversation_title() }}
-          </span>
-          <span class="hidden lg:block flex-1"></span>
+          <div class="flex-1 min-w-0 flex items-center justify-center">
+            @if (renaming_title() && header_conversation(); as current) {
+              <div class="w-full max-w-md">
+                <vendix-vex-title-editor
+                  [value]="current.title"
+                  (saved)="onTitleSaved(current.id, $event)"
+                  (cancelled)="onTitleDone()"
+                />
+              </div>
+            } @else if (header_conversation(); as current) {
+              <button
+                #titleButton
+                type="button"
+                class="group min-h-10 max-w-full px-3 rounded-full flex items-center gap-2 text-sm text-[var(--color-text-secondary)] hover:text-[var(--color-text-primary)] hover:bg-[rgba(var(--color-text-primary-rgb),0.06)]"
+                [attr.aria-label]="'Renombrar la conversación: ' + current.title"
+                title="Renombrar"
+                (click)="renaming_title.set(true)"
+              >
+                <span class="truncate">{{ current.title }}</span>
+                <app-icon name="pencil" [size]="14" class="shrink-0 opacity-60 group-hover:opacity-100" />
+              </button>
+            }
+          </div>
           <button
             type="button"
             class="lg:hidden w-10 h-10 rounded-full flex items-center justify-center text-[var(--color-text-secondary)] hover:text-[var(--color-text-primary)]"
@@ -175,11 +205,21 @@ export class VexPageComponent {
   readonly dragging = signal(false);
   private drag_depth = 0;
 
-  readonly conversation_title = computed(
-    () => this.store.active_conversation()?.title ?? '',
-  );
+  /** Open conversation that already exists on the server (the only one that can be renamed). */
+  readonly header_conversation = computed(() => {
+    const conversation = this.store.active_conversation();
+    return conversation && !conversation.local ? conversation : null;
+  });
+  readonly renaming_title = signal(false);
+  private readonly title_button = viewChild<ElementRef<HTMLButtonElement>>('titleButton');
+  private readonly injector = inject(Injector);
 
   constructor() {
+    // Switching conversation drops a half-edited header title.
+    effect(() => {
+      this.store.active_id();
+      untracked(() => this.renaming_title.set(false));
+    });
     // URL -> store: first load, reload, back/forward and shared links.
     effect(() => {
       const id = this.route_id();
@@ -202,6 +242,19 @@ export class VexPageComponent {
         }
         this.navigateTo(active, this.store.takeReplaceNavigation());
       });
+    });
+  }
+
+  async onTitleSaved(id: string, title: string): Promise<void> {
+    this.onTitleDone();
+    await this.store.renameConversation(id, title);
+  }
+
+  /** Closes the header editor and returns focus to the title button. */
+  onTitleDone(): void {
+    this.renaming_title.set(false);
+    afterNextRender(() => this.title_button()?.nativeElement.focus(), {
+      injector: this.injector,
     });
   }
 

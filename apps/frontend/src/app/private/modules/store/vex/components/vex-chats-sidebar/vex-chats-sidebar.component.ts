@@ -2,11 +2,14 @@ import {
   ChangeDetectionStrategy,
   Component,
   ElementRef,
+  Injector,
+  afterNextRender,
   computed,
   effect,
   inject,
   model,
   output,
+  signal,
   viewChild,
 } from '@angular/core';
 import { AuthFacade } from '../../../../../../core/store/auth/auth.facade';
@@ -16,6 +19,8 @@ import { InputsearchComponent } from '../../../../../../shared/components/inputs
 import { SpinnerComponent } from '../../../../../../shared/components/spinner/spinner.component';
 import { UserAvatarComponent } from '../../../../../../shared/components/user-avatar/user-avatar.component';
 import { VexChatStore } from '../../state/vex-chat.store';
+import { groupConversationsByDate } from '../../state/vex-conversation-groups.util';
+import { VexTitleEditorComponent } from '../vex-title-editor/vex-title-editor.component';
 
 interface VexSidebarUser {
   first_name?: string | null;
@@ -34,9 +39,13 @@ interface VexSidebarUser {
     InputsearchComponent,
     SpinnerComponent,
     EmptyStateComponent,
+    VexTitleEditorComponent,
   ],
   changeDetection: ChangeDetectionStrategy.OnPush,
-  host: { class: 'block h-full' },
+  host: {
+    class: 'block h-full',
+    '(document:click)': 'onDocumentClick($event)',
+  },
   template: `
     <aside
       id="vex-chats-panel"
@@ -116,35 +125,88 @@ interface VexSidebarUser {
         </div>
 
         <div #scroller class="flex-1 overflow-y-auto px-2 pb-2">
-          <p
-            class="px-2 pt-2 pb-1 text-xs font-medium uppercase tracking-wide text-[var(--color-text-secondary)]"
-          >
-            {{ chat_store.search_term().trim() ? 'Resultados' : 'Recientes' }}
-          </p>
-          @for (conversation of chat_store.conversations(); track conversation.id) {
-            <div
-              class="group relative flex items-center rounded-lg cursor-pointer min-h-10 hover:bg-[rgba(var(--color-text-primary-rgb),0.06)]"
-              [style.background-color]="conversation.id === chat_store.active_id() ? 'rgba(var(--color-primary-rgb),0.12)' : null"
-              (click)="onSelect(conversation.id)"
-            >
-              <button
-                type="button"
-                class="flex-1 min-w-0 text-left px-3 py-2 text-sm truncate"
-                [class.font-medium]="conversation.id === chat_store.active_id()"
-                [attr.aria-current]="conversation.id === chat_store.active_id() ? 'true' : null"
-                [title]="conversation.title"
+          @for (group of groups(); track group.key) {
+            <section role="group" [attr.aria-labelledby]="'vex-chat-group-' + group.key">
+              <h3
+                [id]="'vex-chat-group-' + group.key"
+                class="px-2 pt-3 pb-1 text-xs font-medium tracking-wide text-[var(--color-text-secondary)]"
               >
-                {{ conversation.title }}
-              </button>
-              <button
-                type="button"
-                class="shrink-0 w-10 h-10 mr-0.5 flex items-center justify-center rounded-lg text-[var(--color-text-secondary)] opacity-0 group-hover:opacity-100 focus-visible:opacity-100 hover:text-[var(--color-error)]"
-                aria-label="Eliminar chat"
-                (click)="onDelete($event, conversation.id)"
-              >
-                <app-icon name="trash-2" [size]="16" />
-              </button>
-            </div>
+                {{ group.label }}
+              </h3>
+              <ul class="flex flex-col gap-0.5">
+                @for (conversation of group.items; track conversation.id) {
+                  <li>
+                    @if (renaming_id() === conversation.id) {
+                      <div class="flex px-1 py-1">
+                        <vendix-vex-title-editor
+                          [value]="conversation.title"
+                          (saved)="onRenameSaved(conversation.id, $event)"
+                          (cancelled)="onRenameDone(conversation.id)"
+                        />
+                      </div>
+                    } @else {
+                      <div
+                        class="group flex items-center rounded-lg min-h-10 hover:bg-[rgba(var(--color-text-primary-rgb),0.06)]"
+                        [style.background-color]="conversation.id === chat_store.active_id() ? 'rgba(var(--color-primary-rgb),0.12)' : null"
+                      >
+                        <button
+                          type="button"
+                          class="flex-1 min-w-0 min-h-10 text-left px-3 py-2 text-sm truncate rounded-lg"
+                          [class.font-medium]="conversation.id === chat_store.active_id()"
+                          [attr.aria-current]="conversation.id === chat_store.active_id() ? 'true' : null"
+                          [attr.data-vex-chat-title]="conversation.id"
+                          [title]="conversation.title"
+                          (click)="onSelect(conversation.id)"
+                          (dblclick)="startRename(conversation.id)"
+                        >
+                          {{ conversation.title }}
+                        </button>
+                        <button
+                          type="button"
+                          class="shrink-0 w-10 h-10 mr-0.5 flex items-center justify-center rounded-lg text-[var(--color-text-secondary)] hover:text-[var(--color-text-primary)]"
+                          [class]="menuTriggerClass(conversation.id)"
+                          aria-haspopup="menu"
+                          [attr.aria-expanded]="menu_id() === conversation.id"
+                          [attr.aria-label]="'Acciones de ' + conversation.title"
+                          [attr.data-vex-chat-menu]="conversation.id"
+                          (click)="toggleMenu($event, conversation.id)"
+                          (keydown.arrowdown)="openMenu($event, conversation.id)"
+                        >
+                          <app-icon name="more-horizontal" [size]="16" />
+                        </button>
+                      </div>
+                      @if (menu_id() === conversation.id) {
+                        <div
+                          role="menu"
+                          aria-label="Acciones del chat"
+                          class="mx-2 mb-1 flex flex-col rounded-lg border border-[var(--color-border)] bg-[var(--color-background)] p-1"
+                          (keydown)="onMenuKeydown($event, conversation.id)"
+                        >
+                          <button
+                            type="button"
+                            role="menuitem"
+                            class="min-h-10 flex items-center gap-2 px-3 rounded-md text-sm text-left hover:bg-[rgba(var(--color-text-primary-rgb),0.06)] focus-visible:bg-[rgba(var(--color-text-primary-rgb),0.06)]"
+                            (click)="startRename(conversation.id)"
+                          >
+                            <app-icon name="pencil" [size]="16" />
+                            <span>Renombrar</span>
+                          </button>
+                          <button
+                            type="button"
+                            role="menuitem"
+                            class="min-h-10 flex items-center gap-2 px-3 rounded-md text-sm text-left text-[var(--color-error)] hover:bg-[rgba(var(--color-error-rgb),0.07)] focus-visible:bg-[rgba(var(--color-error-rgb),0.07)]"
+                            (click)="onDelete(conversation.id)"
+                          >
+                            <app-icon name="trash-2" [size]="16" />
+                            <span>Eliminar</span>
+                          </button>
+                        </div>
+                      }
+                    }
+                  </li>
+                }
+              </ul>
+            </section>
           } @empty {
             @if (chat_store.loading_list()) {
               <app-spinner size="sm" text="Cargando chats…" [center]="true" />
@@ -203,6 +265,17 @@ export class VexChatsSidebarComponent {
   private readonly scroller = viewChild<ElementRef<HTMLElement>>('scroller');
   private readonly sentinel = viewChild<ElementRef<HTMLElement>>('sentinel');
 
+  readonly renaming_id = signal<string | null>(null);
+  readonly menu_id = signal<string | null>(null);
+
+  /** Chat list grouped by last activity in local time: Hoy, Ayer, Últimos 7 días, months. */
+  readonly groups = computed(() =>
+    groupConversationsByDate(this.chat_store.conversations()),
+  );
+
+  private readonly host = inject<ElementRef<HTMLElement>>(ElementRef);
+  private readonly injector = inject(Injector);
+
   constructor() {
     // Progressive loading: the sentinel at the end of the list asks for the
     // next page when it scrolls into view. The observer is rebuilt after each
@@ -257,13 +330,115 @@ export class VexChatsSidebarComponent {
   }
 
   onSelect(id: string): void {
-    this.chat_store.selectConversation(id);
+    if (id !== this.chat_store.active_id()) {
+      this.chat_store.selectConversation(id);
+    }
     this.conversationSelected.emit();
   }
 
-  onDelete(event: Event, id: string): void {
-    event.stopPropagation();
+  onDelete(id: string): void {
+    this.menu_id.set(null);
     this.chat_store.deleteConversation(id);
+  }
+
+  // ── Rename ──────────────────────────────────────────────────────────
+
+  startRename(id: string): void {
+    this.menu_id.set(null);
+    this.renaming_id.set(id);
+  }
+
+  async onRenameSaved(id: string, title: string): Promise<void> {
+    this.onRenameDone(id);
+    await this.chat_store.renameConversation(id, title);
+  }
+
+  /** Closes the editor and returns focus to the row it came from. */
+  onRenameDone(id: string): void {
+    this.renaming_id.set(null);
+    this.focusAfterRender(`[data-vex-chat-title="${id}"]`);
+  }
+
+  // ── Row actions menu ────────────────────────────────────────────────
+
+  /** The trigger shows on hover/focus on desktop and always on touch; it stays while its menu is open. */
+  menuTriggerClass(id: string): string {
+    return this.menu_id() === id
+      ? 'lg:opacity-100'
+      : 'lg:opacity-0 lg:group-hover:opacity-100 lg:group-focus-within:opacity-100';
+  }
+
+  toggleMenu(event: Event, id: string): void {
+    event.stopPropagation();
+    if (this.menu_id() === id) {
+      this.menu_id.set(null);
+      return;
+    }
+    this.openMenu(event, id);
+  }
+
+  openMenu(event: Event, id: string): void {
+    event.preventDefault();
+    event.stopPropagation();
+    this.menu_id.set(id);
+    afterNextRender(
+      () => this.menuItems(id)[0]?.focus(),
+      { injector: this.injector },
+    );
+  }
+
+  onMenuKeydown(event: KeyboardEvent, id: string): void {
+    const items = this.menuItems(id);
+    const index = items.indexOf(document.activeElement as HTMLElement);
+    switch (event.key) {
+      case 'ArrowDown':
+        event.preventDefault();
+        items[(index + 1) % items.length]?.focus();
+        return;
+      case 'ArrowUp':
+        event.preventDefault();
+        items[(index - 1 + items.length) % items.length]?.focus();
+        return;
+      case 'Home':
+        event.preventDefault();
+        items[0]?.focus();
+        return;
+      case 'End':
+        event.preventDefault();
+        items[items.length - 1]?.focus();
+        return;
+      case 'Escape':
+        event.preventDefault();
+        event.stopPropagation();
+        this.menu_id.set(null);
+        this.focusAfterRender(`[data-vex-chat-menu="${id}"]`);
+        return;
+      case 'Tab':
+        this.menu_id.set(null);
+        return;
+    }
+  }
+
+  onDocumentClick(event: Event): void {
+    if (this.menu_id() === null) return;
+    const target = event.target as Element | null;
+    if (target?.closest('[role="menu"]')) return;
+    this.menu_id.set(null);
+  }
+
+  private menuItems(id: string): HTMLElement[] {
+    const trigger = this.host.nativeElement.querySelector(
+      `[data-vex-chat-menu="${id}"]`,
+    );
+    const menu = trigger?.closest('li')?.querySelector('[role="menu"]');
+    return Array.from(menu?.querySelectorAll<HTMLElement>('[role="menuitem"]') ?? []);
+  }
+
+  private focusAfterRender(selector: string): void {
+    afterNextRender(
+      () => this.host.nativeElement.querySelector<HTMLElement>(selector)?.focus(),
+      { injector: this.injector },
+    );
   }
 
   onSearch(term: string): void {

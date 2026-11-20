@@ -360,6 +360,18 @@ export class VexApiService {
       .pipe(map((res) => res.data));
   }
 
+  /** Renames a conversation (1–80 characters, validated server-side too). */
+  renameConversation(
+    id: number,
+    title: string,
+  ): Observable<VexBackendConversation | null> {
+    return this.http
+      .patch<{
+        data?: VexBackendConversation;
+      }>(`${this.chatBase}/conversations/${id}/title`, { title })
+      .pipe(map((res) => res?.data ?? null));
+  }
+
   archiveConversation(id: number): Observable<VexBackendConversation> {
     return this.http
       .patch<{

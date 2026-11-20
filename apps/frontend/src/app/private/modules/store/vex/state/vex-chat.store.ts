@@ -1,4 +1,5 @@
 import { vexApplyState } from './vex-plan-state';
+import { validateConversationTitle } from './vex-conversation-groups.util';
 import { VexiVoiceSafetyService } from '../../../../../core/services/vexi-voice-safety.service';
 import { VexiVoicePipelineService } from '../../../../../core/services/vexi-voice-pipeline.service';
 import {
@@ -394,6 +395,8 @@ export class VexChatStore {
   /** Conversations created in this visit whose first turn is still to close. */
   private readonly first_turn_ids = new Set<string>();
   private readonly title_received = new Set<string>();
+  /** Conversations renamed by hand in this visit: a generated title never replaces them. */
+  private readonly user_titled = new Set<string>();
   private replace_nav = false;
 
   /** Conversations of the list: server-filtered by the search, newest activity first. */
@@ -703,6 +706,38 @@ export class VexChatStore {
         void this.loadConversations();
       },
     );
+  }
+
+  /**
+   * Renames a conversation: optimistic, rolled back with an error toast if the
+   * server refuses. A name set by hand is never replaced by the generated title.
+   * Resolves `true` when the name was saved (or already was the same).
+   */
+  async renameConversation(id: string, raw_title: string): Promise<boolean> {
+    const numeric = Number(id);
+    const current = this._conversations().find((c) => c.id === id);
+    if (!current || !Number.isFinite(numeric)) return false;
+    if (validateConversationTitle(raw_title)) return false;
+    const title = raw_title.trim();
+    if (title === current.title) return true;
+    const previous = current.title;
+    this.title_received.add(id);
+    this.user_titled.add(id);
+    this.setTitle(id, title);
+    try {
+      const row = await firstValueFrom(this.api.renameConversation(numeric, title));
+      const confirmed = row?.title?.trim();
+      if (confirmed && confirmed !== title) this.setTitle(id, confirmed);
+      return true;
+    } catch (error) {
+      this.user_titled.delete(id);
+      this.setTitle(id, previous);
+      this.toast.error(
+        parseApiError(error).userMessage,
+        'No se pudo renombrar',
+      );
+      return false;
+    }
   }
 
   /** Stops the live stream; the turn already persisted stays as-is. */
@@ -2123,7 +2158,7 @@ export class VexChatStore {
             ? String(chunk.conversation_id)
             : conversation_id;
         this.title_received.add(target);
-        this.setTitle(target, title);
+        if (!this.user_titled.has(target)) this.setTitle(target, title);
         return;
       }
       case 'done': {
@@ -2210,7 +2245,9 @@ export class VexChatStore {
       void firstValueFrom(this.api.getConversation(numeric))
         .then((row) => {
           const title = row.title?.trim();
-          if (title) this.setTitle(conversation_id, title);
+          if (title && !this.user_titled.has(conversation_id)) {
+            this.setTitle(conversation_id, title);
+          }
         })
         .catch(() => undefined);
     }, TITLE_FALLBACK_DELAY_MS);
