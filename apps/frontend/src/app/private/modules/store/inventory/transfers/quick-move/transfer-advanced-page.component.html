@@ -1,0 +1,869 @@
+<!--
+  Orden avanzada de transferencia (P3). Estructura de página completa como
+  `dispatch-notes/bulk`: `app-sticky-header` en la raíz y el padding en el
+  bloque de contenido.
+-->
+<div class="w-full">
+  <app-sticky-header
+    title="Movimiento avanzado"
+    subtitle="Varios productos, lotes, transporte y remisiones, con aprobación antes de mover el inventario"
+    icon="repeat"
+    [actions]="headerActions()"
+    [metadataContent]="headerMetadata()"
+    (actionClicked)="onHeaderAction($event)"
+  />
+
+  <div class="flex flex-col gap-3 p-2 md:gap-4 md:p-4 max-w-6xl mx-auto">
+    @if (savedDraft(); as saved) {
+      <div
+        class="flex flex-col gap-2 md:flex-row md:items-center rounded-xl border border-info/30 bg-info/10 px-3 py-2 text-sm text-text-primary"
+        data-testid="advanced-saved-draft"
+      >
+        <app-icon name="save" [size]="16" class="text-info shrink-0" />
+        <span class="md:mr-auto">
+          Tienes un borrador guardado en este navegador ({{
+            saved.form.lines.length
+          }}
+          producto(s)).
+        </span>
+        <div class="flex gap-2">
+          <app-button variant="outline" size="sm" (clicked)="discardDraft()"
+            >Descartar</app-button
+          >
+          <app-button variant="primary" size="sm" (clicked)="resumeDraft()"
+            >Retomar borrador</app-button
+          >
+        </div>
+      </div>
+    }
+
+    @if (showErrors() && errors().length > 0) {
+      <div
+        class="rounded-xl border border-error/30 bg-error/10 px-3 py-2 text-sm text-error"
+        data-testid="advanced-errors"
+      >
+        <p class="font-semibold mb-1">Antes de enviar revisa:</p>
+        <ul class="list-disc pl-5 space-y-0.5">
+          @for (error of errors(); track error) {
+            <li>{{ error }}</li>
+          }
+        </ul>
+      </div>
+    }
+
+    <!-- 1. Modo -->
+    <app-card [responsive]="true" [padding]="false" overflow="visible">
+      <div class="px-3 py-3 md:px-5 md:py-4 border-b border-border">
+        <h2 class="text-sm font-semibold text-text-primary">Cómo se maneja</h2>
+      </div>
+      <div class="grid grid-cols-1 md:grid-cols-2 gap-3 p-3 md:p-5">
+        <button
+          type="button"
+          class="text-left rounded-xl border p-3 transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
+          [class.border-primary]="mode() === 'mass_only'"
+          [class.bg-primary/5]="mode() === 'mass_only'"
+          [class.border-border]="mode() !== 'mass_only'"
+          [disabled]="form().is_external"
+          data-testid="mode-mass-only"
+          (click)="setMode('mass_only')"
+        >
+          <div class="flex items-center gap-2">
+            <app-icon name="layers" [size]="16" class="text-primary" />
+            <span class="text-sm font-semibold text-text-primary"
+              >Solo movimiento masivo</span
+            >
+          </div>
+          <p class="text-xs text-text-secondary mt-1">
+            Mueve todos los productos al despachar, sin remisiones. Ideal entre
+            bodegas cercanas.
+          </p>
+          @if (form().is_external) {
+            <p class="text-xs text-warning mt-1">
+              Una salida a un destino externo siempre lleva remisión.
+            </p>
+          }
+        </button>
+        <button
+          type="button"
+          class="text-left rounded-xl border p-3 transition-colors"
+          [class.border-primary]="mode() === 'with_dispatch_notes'"
+          [class.bg-primary/5]="mode() === 'with_dispatch_notes'"
+          [class.border-border]="mode() !== 'with_dispatch_notes'"
+          data-testid="mode-with-notes"
+          (click)="setMode('with_dispatch_notes')"
+        >
+          <div class="flex items-center gap-2">
+            <app-icon name="file-text" [size]="16" class="text-primary" />
+            <span class="text-sm font-semibold text-text-primary"
+              >Con remisiones de salida y entrada</span
+            >
+          </div>
+          <p class="text-xs text-text-secondary mt-1">
+            Al despachar se cuenta lo que sale y se emite la remisión de salida;
+            al recibir se cuenta lo que llega y se emite la de entrada. Puedes
+            recibir por partes.
+          </p>
+        </button>
+      </div>
+    </app-card>
+
+    <!-- 2. Origen y destino -->
+    <app-card [responsive]="true" [padding]="false" overflow="visible">
+      <div
+        class="px-3 py-3 md:px-5 md:py-4 border-b border-border flex flex-wrap items-center gap-2"
+      >
+        <h2 class="text-sm font-semibold text-text-primary mr-auto">
+          Origen y destino
+        </h2>
+        <div
+          class="inline-flex rounded-lg border border-border overflow-hidden text-xs font-medium"
+        >
+          <button
+            type="button"
+            class="px-3 py-1.5"
+            [class.bg-primary]="!form().is_external"
+            [class.text-white]="!form().is_external"
+            data-testid="destination-own"
+            (click)="setExternal(false)"
+          >
+            Bodega propia
+          </button>
+          <button
+            type="button"
+            class="px-3 py-1.5 border-l border-border"
+            [class.bg-primary]="form().is_external"
+            [class.text-white]="form().is_external"
+            data-testid="destination-external"
+            (click)="setExternal(true)"
+          >
+            Destino externo
+          </button>
+        </div>
+      </div>
+
+      <div class="p-3 md:p-5 space-y-4">
+        <div class="grid grid-cols-1 md:grid-cols-3 gap-4">
+          <div>
+            <label class="block text-sm font-medium text-text-secondary mb-2"
+              >Bodega de origen *</label
+            >
+            <app-selector
+              [options]="locations()"
+              [ngModel]="form().from_location_id"
+              placeholder="Seleccionar origen"
+              (ngModelChange)="onFromChange($event)"
+            ></app-selector>
+          </div>
+
+          @if (!form().is_external) {
+            <div>
+              <label class="block text-sm font-medium text-text-secondary mb-2"
+                >Bodega de destino *</label
+              >
+              <app-selector
+                [options]="destinationOptions()"
+                [ngModel]="form().to_location_id"
+                placeholder="Seleccionar destino"
+                (ngModelChange)="onToChange($event)"
+              ></app-selector>
+            </div>
+          } @else {
+            <div>
+              <label class="block text-sm font-medium text-text-secondary mb-2"
+                >Nombre del destino *</label
+              >
+              <input
+                type="text"
+                maxlength="255"
+                class="w-full h-10 px-3 text-sm border border-border rounded-lg bg-surface focus:border-primary outline-none"
+                placeholder="Tienda o tercero que recibe"
+                data-testid="external-name"
+                [ngModel]="form().external.name"
+                (ngModelChange)="patchExternal({ name: $event })"
+              />
+            </div>
+          }
+
+          <div>
+            <label class="block text-sm font-medium text-text-secondary mb-2"
+              >Fecha límite de entrega</label
+            >
+            <input
+              type="date"
+              class="w-full h-10 px-3 text-sm border border-border rounded-lg bg-surface focus:border-primary outline-none"
+              [min]="today"
+              [ngModel]="form().expected_date"
+              (ngModelChange)="patch({ expected_date: $event })"
+            />
+            <p class="text-xs text-text-secondary mt-1">
+              Si vence con productos sin llegar, podrás cerrar el faltante como
+              pérdida.
+            </p>
+          </div>
+        </div>
+
+        @if (form().is_external) {
+          <div class="grid grid-cols-1 md:grid-cols-3 gap-4">
+            <div>
+              <label class="block text-sm font-medium text-text-secondary mb-2"
+                >NIT o documento</label
+              >
+              <input
+                type="text"
+                maxlength="50"
+                class="w-full h-10 px-3 text-sm border border-border rounded-lg bg-surface focus:border-primary outline-none"
+                [ngModel]="form().external.tax_id"
+                (ngModelChange)="patchExternal({ tax_id: $event })"
+              />
+            </div>
+            <div class="md:col-span-2">
+              <label class="block text-sm font-medium text-text-secondary mb-2"
+                >Dirección</label
+              >
+              <input
+                type="text"
+                maxlength="1000"
+                class="w-full h-10 px-3 text-sm border border-border rounded-lg bg-surface focus:border-primary outline-none"
+                [ngModel]="form().external.address"
+                (ngModelChange)="patchExternal({ address: $event })"
+              />
+            </div>
+            <div>
+              <label class="block text-sm font-medium text-text-secondary mb-2"
+                >Documento soporte</label
+              >
+              <select
+                class="w-full h-10 px-3 text-sm border border-border rounded-lg bg-surface focus:border-primary outline-none"
+                data-testid="external-support-type"
+                [ngModel]="form().external.support_document_type"
+                (ngModelChange)="
+                  patchExternal({ support_document_type: $event })
+                "
+              >
+                <option value="">Sin documento</option>
+                @for (opt of supportDocumentOptions; track opt.value) {
+                  <option [value]="opt.value">{{ opt.label }}</option>
+                }
+              </select>
+            </div>
+            <div>
+              <label class="block text-sm font-medium text-text-secondary mb-2"
+                >Número del documento</label
+              >
+              <input
+                type="text"
+                maxlength="100"
+                class="w-full h-10 px-3 text-sm border border-border rounded-lg bg-surface focus:border-primary outline-none"
+                [disabled]="!form().external.support_document_type"
+                [ngModel]="form().external.support_document_id"
+                (ngModelChange)="patchExternal({ support_document_id: $event })"
+              />
+            </div>
+            <div>
+              <label class="block text-sm font-medium text-text-secondary mb-2"
+                >Motivo de la salida</label
+              >
+              <input
+                type="text"
+                maxlength="1000"
+                class="w-full h-10 px-3 text-sm border border-border rounded-lg bg-surface focus:border-primary outline-none"
+                placeholder="Ej.: préstamo, muestra, garantía"
+                data-testid="external-reason"
+                [ngModel]="form().external.exit_reason"
+                (ngModelChange)="patchExternal({ exit_reason: $event })"
+              />
+            </div>
+          </div>
+
+          @if (supportAlert()) {
+            <div
+              class="flex items-start gap-2 rounded-xl border border-warning/40 bg-warning/10 px-3 py-2 text-sm text-text-primary"
+              data-testid="external-alert-warning"
+            >
+              <app-icon
+                name="alert-triangle"
+                [size]="16"
+                class="text-warning shrink-0 mt-0.5"
+              />
+              <span>
+                Sin documento soporte ni motivo, esta salida quedará con la
+                alerta
+                <strong>"salida de inventario sin documento ni motivo"</strong>
+                en la transferencia, la remisión y los listados. No se bloquea,
+                pero queda a la vista.
+              </span>
+            </div>
+          }
+        }
+      </div>
+    </app-card>
+
+    <!-- 3. Productos -->
+    <app-card [responsive]="true" [padding]="false" overflow="visible">
+      <div
+        class="px-3 py-3 md:px-5 md:py-4 border-b border-border flex items-center gap-2"
+      >
+        <h2 class="text-sm font-semibold text-text-primary mr-auto">
+          Productos ({{ lines().length }})
+        </h2>
+        @if (lines().length > 0) {
+          <app-button variant="ghost" size="sm" (clicked)="clearLines()"
+            >Quitar todos</app-button
+          >
+        }
+      </div>
+
+      <div class="p-3 md:p-5 space-y-4">
+        <app-transfer-product-picker
+          [fromLocationId]="form().from_location_id"
+          [toLocationId]="form().is_external ? null : form().to_location_id"
+          [requireDestination]="!form().is_external"
+          [searchFn]="searchFn"
+          [addedKeys]="addedKeys()"
+          (add)="onAddRows($event)"
+        ></app-transfer-product-picker>
+
+        <!-- Herramientas de carga -->
+        <div class="grid grid-cols-1 lg:grid-cols-3 gap-3">
+          <div class="rounded-xl border border-border p-3">
+            <p
+              class="text-xs font-semibold text-text-secondary mb-2 flex items-center gap-1.5"
+            >
+              <app-icon name="scan-line" [size]="14" /> Escáner o código de
+              barras
+            </p>
+            <form class="flex gap-2" (ngSubmit)="onScan()">
+              <input
+                type="text"
+                name="scan"
+                autocomplete="off"
+                class="flex-1 h-9 px-3 text-sm border border-border rounded-lg bg-surface focus:border-primary outline-none"
+                placeholder="Escanea o escribe el SKU y Enter"
+                data-testid="advanced-scan-input"
+                [disabled]="!form().from_location_id || scanning()"
+                [ngModel]="scanCode()"
+                (ngModelChange)="scanCode.set($event)"
+              />
+              <app-button
+                variant="outline"
+                size="sm"
+                type="submit"
+                [loading]="scanning()"
+                >+1</app-button
+              >
+            </form>
+            @if (scanMessage(); as msg) {
+              <p
+                class="text-xs mt-1.5"
+                [class.text-success]="msg.kind === 'ok'"
+                [class.text-error]="msg.kind === 'error'"
+              >
+                {{ msg.text }}
+              </p>
+            } @else {
+              <p class="text-xs text-text-secondary mt-1.5">
+                Cada lectura suma 1 unidad.
+              </p>
+            }
+          </div>
+
+          <div class="rounded-xl border border-border p-3">
+            <p
+              class="text-xs font-semibold text-text-secondary mb-2 flex items-center gap-1.5"
+            >
+              <app-icon name="clipboard-list" [size]="14" /> Pegar lista
+            </p>
+            @if (!pasteOpen()) {
+              <app-button
+                variant="outline"
+                size="sm"
+                [disabled]="!form().from_location_id"
+                (clicked)="pasteOpen.set(true)"
+              >
+                Pegar SKU;cantidad
+              </app-button>
+              <p class="text-xs text-text-secondary mt-1.5">
+                Una fila por producto, por ejemplo: CAF-500;12
+              </p>
+            } @else {
+              <textarea
+                rows="4"
+                class="w-full px-3 py-2 text-sm font-mono border border-border rounded-lg bg-surface focus:border-primary outline-none"
+                placeholder="CAF-500;12&#10;AZU-1K;4"
+                data-testid="advanced-paste-text"
+                [ngModel]="pasteText()"
+                (ngModelChange)="pasteText.set($event)"
+              ></textarea>
+              <div class="flex gap-2 mt-2">
+                <app-button
+                  variant="ghost"
+                  size="sm"
+                  (clicked)="pasteOpen.set(false); pasteReport.set(null)"
+                  >Cerrar</app-button
+                >
+                <app-button
+                  variant="primary"
+                  size="sm"
+                  [loading]="pasteProcessing()"
+                  (clicked)="processPaste()"
+                >
+                  Agregar lista
+                </app-button>
+              </div>
+            }
+            @if (pasteReport(); as report) {
+              <div class="mt-2 text-xs" data-testid="advanced-paste-report">
+                <p class="text-text-primary">
+                  {{ report.added }} fila(s) agregada(s).
+                </p>
+                @if (report.invalid.length > 0) {
+                  <p class="text-error font-medium mt-1">Filas sin agregar:</p>
+                  <ul class="max-h-28 overflow-y-auto text-error">
+                    @for (row of report.invalid; track row.line) {
+                      <li>
+                        Fila {{ row.line }} ({{ row.raw }}): {{ row.reason }}
+                      </li>
+                    }
+                  </ul>
+                }
+              </div>
+            }
+          </div>
+
+          <div class="rounded-xl border border-border p-3">
+            <p
+              class="text-xs font-semibold text-text-secondary mb-2 flex items-center gap-1.5"
+            >
+              <app-icon name="package" [size]="14" /> Todo el stock de la bodega
+            </p>
+            <div class="flex gap-2">
+              <select
+                class="flex-1 min-w-0 h-9 px-2 text-sm border border-border rounded-lg bg-surface focus:border-primary outline-none"
+                aria-label="Filtrar por categoría"
+                [disabled]="!form().from_location_id"
+                [ngModel]="stockCategoryId() ?? 0"
+                (ngModelChange)="stockCategoryId.set(+$event || null)"
+              >
+                @for (opt of categoryOptions(); track opt.value) {
+                  <option [ngValue]="opt.value">{{ opt.label }}</option>
+                }
+              </select>
+              <app-button
+                variant="outline"
+                size="sm"
+                [disabled]="!form().from_location_id"
+                [loading]="loadingAllStock()"
+                (clicked)="addAllStock()"
+              >
+                Agregar
+              </app-button>
+            </div>
+            <p class="text-xs text-text-secondary mt-1.5">
+              Agrega cada producto con todo su disponible.
+            </p>
+          </div>
+        </div>
+
+        <!-- Tabla de ítems -->
+        @if (lines().length === 0) {
+          <div
+            class="p-6 text-center border border-dashed border-border rounded-xl"
+          >
+            <app-icon
+              name="package"
+              [size]="28"
+              class="mx-auto mb-2 text-gray-300"
+            />
+            <p class="text-sm text-text-secondary">
+              Busca, escanea o pega productos para armar la orden.
+            </p>
+          </div>
+        } @else {
+          <div class="border border-border rounded-xl overflow-x-auto">
+            <table class="w-full min-w-[760px] text-sm">
+              <thead class="bg-surface-secondary text-xs text-text-secondary">
+                <tr>
+                  <th class="text-left font-medium px-3 py-2">Producto</th>
+                  <th class="text-left font-medium px-2 py-2 w-48">Lote</th>
+                  <th class="text-center font-medium px-2 py-2 w-24">
+                    Cantidad
+                  </th>
+                  <th class="text-center font-medium px-2 py-2 w-24">
+                    Disponible
+                  </th>
+                  <th class="text-center font-medium px-2 py-2 w-40">
+                    Quedará
+                  </th>
+                  <th class="w-10"></th>
+                </tr>
+              </thead>
+              <tbody>
+                @for (line of lines(); track line.key) {
+                  @let proj = projection(line);
+                  @let invalid = invalidLineKeys().has(line.key);
+                  <tr
+                    class="border-t border-border"
+                    [attr.data-testid]="'advanced-line-' + line.key"
+                  >
+                    <td class="px-3 py-2 min-w-0">
+                      <p class="font-medium text-text-primary truncate">
+                        {{ line.product_name }}
+                        @if (line.variant_name) {
+                          <span class="text-text-secondary"
+                            >· {{ line.variant_name }}</span
+                          >
+                        }
+                      </p>
+                      <p class="text-xs text-text-secondary truncate">
+                        {{ line.sku || "Sin SKU" }}
+                      </p>
+                    </td>
+                    <td class="px-2 py-2">
+                      @if (lineBatches(line).length > 0) {
+                        <select
+                          class="w-full h-8 px-2 text-xs border border-border rounded-lg bg-surface focus:border-primary outline-none"
+                          [attr.data-testid]="'advanced-batch-' + line.key"
+                          [value]="line.batch_id ?? ''"
+                          (change)="
+                            updateBatch(line.key, $any($event.target).value)
+                          "
+                        >
+                          <option value="">El más antiguo al despachar</option>
+                          @for (batch of lineBatches(line); track batch.id) {
+                            <option
+                              [value]="batch.id"
+                              [selected]="batch.id === line.batch_id"
+                              [disabled]="
+                                batch.available <= 0 &&
+                                batch.id !== line.batch_id
+                              "
+                            >
+                              {{ batch.batch_number }}
+                              @if (batch.expiration_date) {
+                                · vence {{ batch.expiration_date.slice(0, 10) }}
+                              }
+                              · {{ batch.available }} disp.
+                            </option>
+                          }
+                        </select>
+                      } @else {
+                        <span class="text-xs text-text-secondary"
+                          >Sin lotes</span
+                        >
+                      }
+                    </td>
+                    <td class="px-2 py-2 text-center">
+                      <input
+                        type="number"
+                        min="1"
+                        step="1"
+                        [max]="line.available_at_origin"
+                        class="w-20 h-8 px-2 text-sm text-center border rounded-lg bg-surface outline-none"
+                        [class.border-error]="invalid"
+                        [class.border-border]="!invalid"
+                        [attr.data-testid]="'advanced-qty-' + line.key"
+                        [value]="line.quantity"
+                        (input)="
+                          updateQuantity(line.key, $any($event.target).value)
+                        "
+                      />
+                    </td>
+                    <td
+                      class="px-2 py-2 text-center text-xs text-text-secondary"
+                    >
+                      {{ line.available_at_origin }}
+                    </td>
+                    <td class="px-2 py-2 text-center text-xs">
+                      <span
+                        [class.text-error]="proj.origin_after < 0"
+                        [class.text-text-primary]="proj.origin_after >= 0"
+                      >
+                        Origen {{ proj.origin_after }}
+                      </span>
+                      @if (!form().is_external) {
+                        <span class="text-text-secondary">
+                          · Destino {{ proj.destination_after }}</span
+                        >
+                      }
+                    </td>
+                    <td class="px-2 py-2 text-center">
+                      <button
+                        type="button"
+                        class="p-1.5 text-text-secondary hover:text-error"
+                        aria-label="Quitar producto"
+                        (click)="removeLine(line.key)"
+                      >
+                        <app-icon name="trash-2" [size]="15" />
+                      </button>
+                    </td>
+                  </tr>
+                }
+              </tbody>
+              <tfoot class="bg-surface-secondary text-xs">
+                <tr class="border-t border-border">
+                  <td
+                    class="px-3 py-2 font-medium text-text-primary"
+                    colspan="2"
+                  >
+                    {{ lines().length }} producto(s)
+                  </td>
+                  <td class="px-2 py-2 text-center font-bold text-text-primary">
+                    {{ units() }}
+                  </td>
+                  <td colspan="3"></td>
+                </tr>
+              </tfoot>
+            </table>
+          </div>
+        }
+      </div>
+    </app-card>
+
+    <!-- 4. Transporte -->
+    <app-card [responsive]="true" [padding]="false" overflow="visible">
+      <div class="px-3 py-3 md:px-5 md:py-4 border-b border-border">
+        <h2 class="text-sm font-semibold text-text-primary">
+          Transporte (opcional)
+        </h2>
+      </div>
+      <div class="p-3 md:p-5 space-y-4">
+        <div class="grid grid-cols-1 md:grid-cols-3 gap-4">
+          <div>
+            <label class="block text-sm font-medium text-text-secondary mb-2"
+              >Cómo viaja</label
+            >
+            <select
+              class="w-full h-10 px-3 text-sm border border-border rounded-lg bg-surface focus:border-primary outline-none"
+              data-testid="transport-method"
+              [ngModel]="form().transport.method"
+              (ngModelChange)="setTransportMethod($event)"
+            >
+              @for (opt of transportMethodOptions; track opt.value) {
+                <option [value]="opt.value">{{ opt.label }}</option>
+              }
+            </select>
+          </div>
+
+          @if (
+            form().transport.method === "internal_carrier" ||
+            form().transport.method === "internal_vehicle"
+          ) {
+            <div>
+              <label class="block text-sm font-medium text-text-secondary mb-2"
+                >Transportador</label
+              >
+              <app-selector
+                [options]="driverOptions()"
+                [searchable]="true"
+                placeholder="Elegir usuario"
+                [ngModel]="form().transport.driver_user_id"
+                (ngModelChange)="
+                  patchTransport({ driver_user_id: $event ? +$event : null })
+                "
+              ></app-selector>
+            </div>
+            <div>
+              <label class="block text-sm font-medium text-text-secondary mb-2"
+                >O escribe su nombre</label
+              >
+              <input
+                type="text"
+                maxlength="255"
+                class="w-full h-10 px-3 text-sm border border-border rounded-lg bg-surface focus:border-primary outline-none"
+                placeholder="Si no es usuario del sistema"
+                [ngModel]="form().transport.driver_name"
+                (ngModelChange)="patchTransport({ driver_name: $event })"
+              />
+            </div>
+          }
+
+          @if (form().transport.method === "internal_shipping_method") {
+            <div class="md:col-span-2">
+              <label class="block text-sm font-medium text-text-secondary mb-2"
+                >Forma de envío *</label
+              >
+              <app-selector
+                [options]="internalShippingOptions()"
+                placeholder="Elegir forma de envío"
+                [ngModel]="form().transport.shipping_method_id"
+                (ngModelChange)="
+                  patchTransport({
+                    shipping_method_id: $event ? +$event : null,
+                  })
+                "
+              ></app-selector>
+              @if (internalShippingOptions().length === 0) {
+                <p class="text-xs text-text-secondary mt-1">
+                  No hay formas de envío propias activas.
+                </p>
+              }
+            </div>
+          }
+
+          @if (form().transport.method === "external_shipping_method") {
+            <div>
+              <label class="block text-sm font-medium text-text-secondary mb-2"
+                >Transportadora</label
+              >
+              <app-selector
+                [options]="externalShippingOptions()"
+                placeholder="Elegir transportadora"
+                [ngModel]="form().transport.shipping_method_id"
+                (ngModelChange)="
+                  patchTransport({
+                    shipping_method_id: $event ? +$event : null,
+                  })
+                "
+              ></app-selector>
+            </div>
+            <div>
+              <label class="block text-sm font-medium text-text-secondary mb-2"
+                >O escribe su nombre</label
+              >
+              <input
+                type="text"
+                maxlength="255"
+                class="w-full h-10 px-3 text-sm border border-border rounded-lg bg-surface focus:border-primary outline-none"
+                [ngModel]="form().transport.carrier_name"
+                (ngModelChange)="patchTransport({ carrier_name: $event })"
+              />
+            </div>
+          }
+        </div>
+
+        @if (form().transport.method === "internal_vehicle") {
+          <div class="grid grid-cols-1 md:grid-cols-3 gap-4">
+            <div>
+              <label class="block text-sm font-medium text-text-secondary mb-2"
+                >Vehículo</label
+              >
+              <app-selector
+                [options]="vehicleOptions()"
+                [searchable]="true"
+                placeholder="Elegir vehículo"
+                [ngModel]="form().transport.vehicle_id"
+                (ngModelChange)="
+                  patchTransport({ vehicle_id: $event ? +$event : null })
+                "
+              ></app-selector>
+            </div>
+            @if (!form().transport.vehicle_id) {
+              <div>
+                <label
+                  class="block text-sm font-medium text-text-secondary mb-2"
+                  >O registra uno nuevo: placa</label
+                >
+                <input
+                  type="text"
+                  maxlength="20"
+                  class="w-full h-10 px-3 text-sm uppercase border border-border rounded-lg bg-surface focus:border-primary outline-none"
+                  placeholder="ABC123"
+                  data-testid="new-vehicle-plate"
+                  [ngModel]="form().transport.new_vehicle_plate"
+                  (ngModelChange)="
+                    patchTransport({ new_vehicle_plate: $event })
+                  "
+                />
+              </div>
+              <div>
+                <label
+                  class="block text-sm font-medium text-text-secondary mb-2"
+                  >Tipo</label
+                >
+                <select
+                  class="w-full h-10 px-3 text-sm border border-border rounded-lg bg-surface focus:border-primary outline-none"
+                  [ngModel]="form().transport.new_vehicle_type"
+                  (ngModelChange)="patchTransport({ new_vehicle_type: $event })"
+                >
+                  @for (opt of vehicleTypeOptions; track opt.value) {
+                    <option [value]="opt.value">{{ opt.label }}</option>
+                  }
+                </select>
+                <p class="text-xs text-text-secondary mt-1">
+                  Se registra en tu flota al crear la orden.
+                </p>
+              </div>
+            }
+          </div>
+        }
+
+        <div class="grid grid-cols-1 md:grid-cols-3 gap-4">
+          @if (
+            form().transport.method === "internal_shipping_method" ||
+            form().transport.method === "external_shipping_method"
+          ) {
+            <div>
+              <label class="block text-sm font-medium text-text-secondary mb-2"
+                >Número de guía</label
+              >
+              <input
+                type="text"
+                maxlength="120"
+                class="w-full h-10 px-3 text-sm border border-border rounded-lg bg-surface focus:border-primary outline-none"
+                [ngModel]="form().transport.tracking_number"
+                (ngModelChange)="patchTransport({ tracking_number: $event })"
+              />
+            </div>
+          }
+          <div>
+            <label class="block text-sm font-medium text-text-secondary mb-2"
+              >Costo del transporte</label
+            >
+            <input
+              type="number"
+              min="0"
+              step="0.01"
+              class="w-full h-10 px-3 text-sm border border-border rounded-lg bg-surface focus:border-primary outline-none"
+              data-testid="shipping-cost"
+              [ngModel]="form().transport.shipping_cost"
+              (ngModelChange)="
+                patchTransport({
+                  shipping_cost: $event === '' || $event == null ? 0 : +$event,
+                })
+              "
+            />
+            <p class="text-xs text-text-secondary mt-1">
+              Solo queda registrado; no cambia el costo del inventario.
+            </p>
+          </div>
+        </div>
+      </div>
+    </app-card>
+
+    <!-- 5. Notas -->
+    <app-card [responsive]="true" [padding]="false" overflow="visible">
+      <div class="p-3 md:p-5">
+        <label class="block text-sm font-medium text-text-secondary mb-2"
+          >Notas (opcional)</label
+        >
+        <textarea
+          rows="2"
+          class="w-full px-3 py-2 text-sm border border-border rounded-lg bg-surface focus:border-primary outline-none"
+          placeholder="Motivo o referencia de la orden..."
+          [ngModel]="form().notes"
+          (ngModelChange)="patch({ notes: $event })"
+        ></textarea>
+      </div>
+    </app-card>
+
+    <div class="flex flex-col-reverse gap-2 md:flex-row md:justify-end pb-6">
+      <app-button
+        variant="outline"
+        (clicked)="saveDraft()"
+        [disabled]="submitting()"
+      >
+        <app-icon slot="icon" name="save" [size]="14" />
+        Guardar borrador
+      </app-button>
+      <app-button
+        variant="primary"
+        (clicked)="submit()"
+        [loading]="submitting()"
+        data-testid="advanced-submit"
+      >
+        <app-icon slot="icon" name="send" [size]="14" />
+        Enviar a aprobación
+      </app-button>
+    </div>
+  </div>
+</div>
