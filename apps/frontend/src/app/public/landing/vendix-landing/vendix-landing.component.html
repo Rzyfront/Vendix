@@ -1651,6 +1651,10 @@
             @if (sectorPagesEnabled) {
               <li><a routerLink="/migracion" class="hover:text-emerald-300 transition-colors">Migrar tus datos</a></li>
             }
+            <!-- SEO-OPS-36: guías piloto publicadas (PUBLISHED_SECTOR_GUIDES). -->
+            @for (guide of publishedGuideLinks; track guide.key) {
+              <li><a [routerLink]="'/guias/' + guide.key" class="hover:text-emerald-300 transition-colors">{{ guide.label }}</a></li>
+            }
             <li><a [href]="'mailto:' + socialLinks.email" class="hover:text-emerald-300 transition-colors">Estado del Sistema</a></li>
           </ul>
         </div>
