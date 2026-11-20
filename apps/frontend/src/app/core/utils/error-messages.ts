@@ -922,7 +922,8 @@ export const ERROR_MESSAGES: Record<string, string> = {
   RTSCAN_MATCH_001:
     'Una fila de la planilla no coincide con ninguna parada de la ruta. Revisa que sea la planilla correcta.',
   MEMBER_SCAN_NO_FILE: 'Sube una foto o un PDF con la lista de socios.',
-  MEMBER_SCAN_INVALID_FILE: 'Formato no soportado. Usa una imagen o un PDF.',
+  MEMBER_SCAN_INVALID_FILE:
+    'Formato no soportado. Usa una imagen (JPG, PNG, WebP), un PDF, Excel (xlsx, xls) o CSV.',
   MEMBER_SCAN_AI_FAIL:
     'No se pudo analizar la lista por un problema del servicio. Intenta de nuevo.',
   MEMBER_SCAN_PARSE_FAIL:

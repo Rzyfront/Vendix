@@ -25,6 +25,8 @@ export type RosterDocumentType =
   | 'contract'
   | 'id_document'
   | 'signup_sheet'
+  /** ia-cargas F2 — an Excel/CSV read by code. */
+  | 'spreadsheet'
   | 'other';
 
 /** A membership plan (tariff) detected in the source document. */
@@ -67,6 +69,38 @@ export interface ExtractedMember {
   /** ISO date — membership expiry; drives status resolution. */
   membership_end_date: string | null;
   raw_row: string | null;
+  /** ia-cargas F2 — spreadsheet row of this member (absent for images/PDF). */
+  source_row?: number;
+  /** Sheet name, only for workbooks with several sheets. */
+  source_sheet?: string;
+}
+
+/** ia-cargas F2 — a sheet row that did not become a member, with the reason. */
+export interface RosterSkippedRow {
+  row: number;
+  row_end?: number;
+  sheet?: string;
+  reason: 'empty' | 'total' | 'header' | 'limit' | 'unreadable' | 'duplicate';
+  message: string;
+}
+
+/** ia-cargas F2 — something to check on a source row (the member was still read). */
+export interface RosterRowIssue {
+  row: number;
+  sheet?: string;
+  level: 'warning' | 'error';
+  field?: string;
+  message: string;
+}
+
+export interface RosterScanStats {
+  source: 'sheet' | 'document';
+  total_rows: number;
+  imported_rows: number;
+  skipped_rows: number;
+  mapping: 'synonyms' | 'ai' | null;
+  pages?: number;
+  text_pages?: number;
 }
 
 /**
@@ -80,6 +114,10 @@ export interface RosterScanResult {
   warnings: string[];
   /** 0–100 calibration; low values surface a banner in the review step. */
   confidence: number;
+  /** ia-cargas F2 — optional, only spreadsheets fill skipped/row_issues. */
+  skipped?: RosterSkippedRow[];
+  row_issues?: RosterRowIssue[];
+  stats?: RosterScanStats;
 }
 
 // ============================================================================
@@ -230,6 +268,10 @@ export interface CommitMemberRosterDto {
   /** QUI-1004 — huella devuelta por el escaneo, para el registro de cargas. */
   file_name?: string;
   file_hash?: string;
+  /** ia-cargas F2 — same id on every chunk of one load (one upload-log row). */
+  session_id?: string;
+  /** Members of the whole load (all chunks). */
+  total_members?: number;
 }
 
 /** Per-member commit outcome — echoed back so the UI can report failures. */
@@ -253,4 +295,6 @@ export interface CommitMemberRosterResult {
    * commit — when this array is non-empty, NO member rows were persisted.
    */
   plan_errors: Array<{ ref_index: number; error: string }>;
+  /** ia-cargas F2 — plan id behind each ref_index, for the next chunk. */
+  plans_resolved?: Array<{ ref_index: number; plan_id: number }>;
 }

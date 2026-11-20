@@ -14,7 +14,7 @@ import { takeUntilDestroyed } from '@angular/core/rxjs-interop';
 import { CommonModule } from '@angular/common';
 import { FormsModule } from '@angular/forms';
 import { HttpErrorResponse } from '@angular/common/http';
-import { Observable, Subscription, catchError, of, switchMap, tap } from 'rxjs';
+import { Observable, Subscription, catchError, from, of, switchMap, tap } from 'rxjs';
 import { parseApiError } from '../../../../../../../core/utils/parse-api-error';
 import { AiScanJobError } from '../../../../../../../core/utils/ai-job-error';
 import { AiJobProgressComponent } from '../../../../../../../shared/components/ai-job-progress/ai-job-progress.component';
@@ -52,7 +52,9 @@ import {
   MemberRosterAnalysis,
   PlanCandidate,
   PlanMatch,
+  RosterRowIssue,
   RosterScanResult,
+  RosterSkippedRow,
 } from '../../interfaces/member-bulk-scanner.interface';
 import { GymMembershipStatus } from '../../interfaces/membership.interface';
 
@@ -62,9 +64,10 @@ import { GymMembershipStatus } from '../../interfaces/membership.interface';
 // ============================================================================
 
 /**
- * Maximum upload size — mirrors the backend `MEMBER_SCAN_INVALID_FILE` guard.
+ * Maximum upload size — mirrors the backend guards (ai-ingest member profile).
  */
 const MAX_FILE_SIZE = 10 * 1024 * 1024;
+const MAX_SHEET_SIZE = 5 * 1024 * 1024;
 
 const ACCEPTED_MIMETYPES = [
   'image/jpeg',
@@ -72,6 +75,34 @@ const ACCEPTED_MIMETYPES = [
   'image/webp',
   'application/pdf',
 ];
+
+/** ia-cargas F2 — spreadsheets are read by code (up to 5.000 rows). */
+const SHEET_EXTENSIONS = ['xlsx', 'xls', 'csv'];
+const SHEET_MIMETYPES = [
+  'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+  'application/vnd.ms-excel',
+  'text/csv',
+];
+const FILE_ACCEPT =
+  'image/jpeg,image/png,image/webp,application/pdf,.xlsx,.xls,.csv,' +
+  SHEET_MIMETYPES.join(',');
+
+/** Member cards rendered at once in the review (a sheet may bring 5.000). */
+const PREVIEW_PAGE_SIZE = 50;
+
+const SKIP_REASON_LABELS: Record<RosterSkippedRow['reason'], string> = {
+  empty: 'Vacía',
+  total: 'Total',
+  header: 'Encabezado repetido',
+  limit: 'Tope',
+  unreadable: 'Ilegible',
+  duplicate: 'Repetida',
+};
+
+function isSheetFile(file: File): boolean {
+  const ext = (file.name.split('.').pop() ?? '').toLowerCase();
+  return SHEET_EXTENSIONS.includes(ext) || SHEET_MIMETYPES.includes(file.type);
+}
 
 // ============================================================================
 // Component
@@ -204,10 +235,10 @@ const ACCEPTED_MIMETYPES = [
                 <app-icon name="scan-line" [size]="32" class="text-primary"></app-icon>
               </div>
               <p class="text-sm font-semibold text-text-primary mb-1">
-                Arrastra la planilla o carnés aquí
+                Arrastra la planilla, el Excel o los carnés aquí
               </p>
               <p class="text-xs text-text-secondary">
-                JPG, PNG, WebP o PDF — máximo 10MB
+                JPG, PNG, WebP o PDF (máx. 10 MB) · Excel o CSV (máx. 5 MB)
               </p>
             }
           </div>
@@ -216,7 +247,7 @@ const ACCEPTED_MIMETYPES = [
             #fileInput
             type="file"
             class="hidden"
-            accept="image/jpeg,image/png,image/webp,application/pdf"
+            [accept]="fileAccept"
             (change)="onFileSelected($event)"
           />
           <input
@@ -243,8 +274,10 @@ const ACCEPTED_MIMETYPES = [
                   contratos de adhesión firmados o carnés de membresía.
                 </p>
                 <p>
-                  Solo se procesa la primera página de PDFs. Documentos
-                  ilegibles pueden requerir carga manual.
+                  Excel o CSV: se leen hasta 5.000 filas y te mostramos las
+                  filas omitidas y por qué. PDF: hasta 10 páginas; si el PDF
+                  tiene texto se lee directo, si es escaneado se lee como
+                  imagen. Documentos ilegibles pueden requerir carga manual.
                 </p>
               </div>
             </div>
@@ -312,6 +345,43 @@ const ACCEPTED_MIMETYPES = [
                 Revisa los datos con cuidado antes de confirmar.
               </p>
             </div>
+          }
+
+          <!-- ia-cargas F2: qué se leyó y qué quedó fuera -->
+          @if (scanResult()?.stats; as st) {
+            <p class="text-xs text-text-secondary">
+              @if (st.source === 'sheet') {
+                {{ st.total_rows }} fila(s) leídas · {{ st.imported_rows }} socio(s)
+                @if (st.skipped_rows) {
+                  · {{ st.skipped_rows }} fila(s) omitida(s)
+                }
+                @if (st.mapping === 'ai') {
+                  · columnas reconocidas con IA
+                }
+              } @else if (st.pages) {
+                {{ st.pages }} página(s) leídas
+                @if (st.text_pages) {
+                  ({{ st.text_pages }} con texto del PDF)
+                }
+                · {{ st.imported_rows }} socio(s)
+              }
+            </p>
+          }
+
+          @if (skippedRows().length > 0) {
+            <details class="bg-muted/30 border border-border rounded-lg p-3">
+              <summary class="text-xs font-semibold text-text-primary cursor-pointer">
+                Filas omitidas ({{ skippedRows().length }})
+              </summary>
+              <div class="mt-2 space-y-1 max-h-48 overflow-y-auto">
+                @for (s of skippedRows(); track $index) {
+                  <p class="text-xs text-text-secondary">
+                    <span class="font-medium text-text-primary">{{ skippedLabel(s) }}:</span>
+                    {{ s.message }}
+                  </p>
+                }
+              </div>
+            </details>
           }
 
           <!-- Counters strip -->
@@ -444,7 +514,7 @@ const ACCEPTED_MIMETYPES = [
             }
 
             <div class="space-y-3">
-              @for (m of editableMembers(); track m.row_number) {
+              @for (m of visibleMembers(); track m.row_number) {
                 <app-card [responsive]="true">
                   <div class="space-y-3" [class]="m.excluded ? discardedRowClasses : ''">
                     <!-- Row header: name summary + status + exclude -->
@@ -461,6 +531,11 @@ const ACCEPTED_MIMETYPES = [
                           }
                           @if (m.email) { · {{ m.email }} }
                         </p>
+                        @if (m.source_row) {
+                          <p class="text-xs text-text-secondary">
+                            {{ sourceLabel(m) }}
+                          </p>
+                        }
                       </div>
                       <div class="flex items-center gap-2 flex-shrink-0">
                         <app-badge
@@ -570,13 +645,16 @@ const ACCEPTED_MIMETYPES = [
                       </div>
 
                       <!-- Per-row warnings / errors -->
-                      @if (m.errors.length > 0 || m.warnings.length > 0) {
+                      @if (m.errors.length > 0 || m.warnings.length > 0 || issuesFor(m).length > 0) {
                         <div class="space-y-1">
                           @for (e of m.errors; track e) {
                             <p class="text-xs text-red-600">• {{ e }}</p>
                           }
                           @for (w of m.warnings; track w) {
                             <p class="text-xs text-amber-600">• {{ w }}</p>
+                          }
+                          @for (issue of issuesFor(m); track $index) {
+                            <p class="text-xs text-amber-600">• {{ issue.message }}</p>
                           }
                         </div>
                       }
@@ -585,6 +663,14 @@ const ACCEPTED_MIMETYPES = [
                 </app-card>
               }
             </div>
+            @if (editableMembers().length > visibleMembers().length) {
+              <div class="flex justify-center mt-3">
+                <app-button variant="outline" size="sm" (clicked)="showMoreMembers()">
+                  Mostrar {{ nextPageCount() }} más
+                  ({{ visibleMembers().length }} de {{ editableMembers().length }})
+                </app-button>
+              </div>
+            }
           </section>
 
           <!-- Verificación obligatoria de los datos precargados por la IA -->
@@ -700,6 +786,31 @@ export class MemberBulkScannerModalComponent {
   readonly editablePlans = signal<EditablePlan[]>([]);
   readonly editableMembers = signal<EditableMember[]>([]);
 
+  /** ia-cargas F2 — sheet rows left out and per-row notes from the scan. */
+  readonly skippedRows = computed<RosterSkippedRow[]>(
+    () => this.scanResult()?.skipped ?? [],
+  );
+  private readonly issuesByRow = computed(() => {
+    const map = new Map<string, RosterRowIssue[]>();
+    for (const issue of this.scanResult()?.row_issues ?? []) {
+      const key = `${issue.sheet ?? ''}#${issue.row}`;
+      map.set(key, [...(map.get(key) ?? []), issue]);
+    }
+    return map;
+  });
+  /** Cards rendered at once; "Mostrar más" adds a page. */
+  readonly visibleCount = signal(PREVIEW_PAGE_SIZE);
+  readonly visibleMembers = computed(() =>
+    this.editableMembers().slice(0, this.visibleCount()),
+  );
+  readonly nextPageCount = computed(() =>
+    Math.min(
+      PREVIEW_PAGE_SIZE,
+      this.editableMembers().length - this.visibleMembers().length,
+    ),
+  );
+  protected readonly fileAccept = FILE_ACCEPT;
+
   readonly isImageFile = computed(() => {
     const file = this.selectedFile();
     return file?.type?.startsWith('image/') ?? false;
@@ -800,14 +911,19 @@ export class MemberBulkScannerModalComponent {
   private handleFile(file: File): void {
     this.fileError.set(null);
 
-    if (!ACCEPTED_MIMETYPES.includes(file.type)) {
+    const sheet = isSheetFile(file);
+    if (!sheet && !ACCEPTED_MIMETYPES.includes(file.type)) {
       this.fileError.set(
-        'Formato no soportado. Usa JPG, PNG, WebP o PDF.',
+        'Formato no soportado. Usa JPG, PNG, WebP, PDF, Excel (xlsx, xls) o CSV.',
       );
       return;
     }
 
-    if (file.size > MAX_FILE_SIZE) {
+    if (sheet && file.size > MAX_SHEET_SIZE) {
+      this.fileError.set('La hoja de cálculo excede el límite de 5MB.');
+      return;
+    }
+    if (!sheet && file.size > MAX_FILE_SIZE) {
       this.fileError.set('El archivo excede el límite de 10MB.');
       return;
     }
@@ -890,7 +1006,13 @@ export class MemberBulkScannerModalComponent {
             throw new Error(res.message || 'Error al escanear el documento');
           }
           this.scanResult.set(res.data);
-          return this.service.analyzeRoster(res.data);
+          // ia-cargas F2: a sheet may bring thousands of members; the
+          // backend analyzes 200 per request.
+          return from(
+            this.service
+              .analyzeRosterInChunks(res.data)
+              .then((data) => ({ success: true, data, message: undefined as string | undefined })),
+          );
         }),
         tap((res) => {
           if (!res.success || !res.data) {
@@ -972,6 +1094,8 @@ export class MemberBulkScannerModalComponent {
   private toEditableMember(m: AnalyzedMember): EditableMember {
     return {
       row_number: m.row_number,
+      source_row: m.source_row,
+      source_sheet: m.source_sheet,
       action: m.action,
       existing_customer_id: m.existing_customer_id,
       plan_ref: m.plan_ref,
@@ -1149,6 +1273,28 @@ export class MemberBulkScannerModalComponent {
   // Display helpers (used by ResponsiveDataView transforms)
   // ------------------------------------------------------------------------
 
+  /** "Fila 12" / "Fila 12 · Sede Norte" (sheets only). */
+  sourceLabel(row: EditableMember): string {
+    if (!row.source_row) return '';
+    return `Fila ${row.source_row}${row.source_sheet ? ` · ${row.source_sheet}` : ''}`;
+  }
+
+  /** Notes the sheet reader left on this member's source row. */
+  issuesFor(row: EditableMember): RosterRowIssue[] {
+    if (!row.source_row) return [];
+    return this.issuesByRow().get(`${row.source_sheet ?? ''}#${row.source_row}`) ?? [];
+  }
+
+  skippedLabel(s: RosterSkippedRow): string {
+    const sheet = s.sheet ? ` (${s.sheet})` : '';
+    const rows = s.row_end ? `Filas ${s.row}–${s.row_end}` : `Fila ${s.row}`;
+    return `${rows}${sheet} · ${SKIP_REASON_LABELS[s.reason] ?? s.reason}`;
+  }
+
+  showMoreMembers(): void {
+    this.visibleCount.update((n) => n + PREVIEW_PAGE_SIZE);
+  }
+
   memberName(row: EditableMember): string {
     return (
       `${row.first_name ?? ''} ${row.last_name ?? ''}`.trim() ||
@@ -1285,6 +1431,7 @@ export class MemberBulkScannerModalComponent {
     this.analysis.set(null);
     this.editablePlans.set([]);
     this.editableMembers.set([]);
+    this.visibleCount.set(PREVIEW_PAGE_SIZE);
     // Obligatorio: el contenido proyectado en app-modal no se destruye al
     // cerrar, así que sin este reset la segunda apertura traería el check ya
     // marcado y el guard quedaría anulado.
@@ -1323,6 +1470,9 @@ interface EditablePlan {
 
 interface EditableMember {
   row_number: number;
+  /** ia-cargas F2 — spreadsheet row (absent for images/PDF). */
+  source_row?: number;
+  source_sheet?: string;
   action: AnalyzedMember['action'];
   existing_customer_id: number | undefined;
   plan_ref: number | null;
