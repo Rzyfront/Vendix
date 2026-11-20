@@ -7,7 +7,7 @@
  */
 type Row = Record<string, any>;
 
-const OPERATORS = new Set(['lt', 'lte', 'gte', 'in', 'not', 'contains', 'mode', 'some']);
+const OPERATORS = new Set(['lt', 'lte', 'gte', 'in', 'not', 'contains', 'mode', 'some', 'none']);
 
 const isOperatorObject = (condition: Row) =>
   Object.keys(condition).every((key) => OPERATORS.has(key));
@@ -25,6 +25,9 @@ function matchesValue(value: unknown, condition: unknown): boolean {
     }
     if ('some' in ops) {
       return Array.isArray(value) && value.some((item) => matchesWhere(item, ops.some));
+    }
+    if ('none' in ops) {
+      return !Array.isArray(value) || !value.some((item) => matchesWhere(item, ops.none));
     }
     if ('not' in ops && matchesValue(value, ops.not)) return false;
     if ('in' in ops && !(ops.in as unknown[]).includes(value)) return false;
@@ -91,6 +94,7 @@ export interface FakeLinkRecords {
   purchase_orders?: Row[];
   quotations?: Row[];
   invoices?: Row[];
+  fiscal_obligations?: Row[];
 }
 
 /** Store 1 sells "Coca-Cola 1.5L" (id 501), the product the specs link to. */
@@ -171,5 +175,6 @@ export function createFakeRemindersPrisma(
     purchase_orders: fakeTable(records.purchase_orders),
     quotations: fakeTable(records.quotations),
     invoices: fakeTable(records.invoices),
+    fiscal_obligations: fakeTable(records.fiscal_obligations),
   };
 }
