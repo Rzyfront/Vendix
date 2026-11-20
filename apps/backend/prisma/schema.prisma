@@ -9246,6 +9246,7 @@ model fiscal_obligations {
   declaration_drafts tax_declaration_drafts[]
   operation_events   fiscal_operation_events[]
   fiscal_tax_payments fiscal_tax_payments[]
+  user_reminders     user_reminders[]
 
   @@unique([accounting_entity_id, type, period_start, period_end, jurisdiction_key], map: "fiscal_obligations_entity_type_range_jurisdiction_key")
   @@index([organization_id, accounting_entity_id, type, period_year], map: "fiscal_obligations_org_entity_type_year_idx")
@@ -15395,6 +15396,8 @@ model user_reminders {
   link_id      Int?
   link_label   String?                     @db.VarChar(200)
   source       user_reminder_source_enum   @default(manual)
+  /// Obligación fiscal que originó el recordatorio (source = fiscal). SET NULL al borrarla.
+  fiscal_obligation_id Int?
   notified_at  DateTime?                   @db.Timestamp(6)
   completed_at DateTime?                   @db.Timestamp(6)
   created_at   DateTime                    @default(now()) @db.Timestamp(6)
@@ -15402,9 +15405,11 @@ model user_reminders {
 
   store stores @relation(fields: [store_id], references: [id], onDelete: Restrict, onUpdate: NoAction)
   user  users  @relation(fields: [user_id], references: [id], onDelete: Restrict, onUpdate: NoAction)
+  fiscal_obligation fiscal_obligations? @relation(fields: [fiscal_obligation_id], references: [id], onDelete: SetNull, onUpdate: NoAction)
 
   @@index([store_id, user_id, status, remind_at])
   @@index([status, notified_at, remind_at])
+  @@index([fiscal_obligation_id])
 }
 
 enum user_reminder_status_enum {
@@ -15415,6 +15420,7 @@ enum user_reminder_status_enum {
 enum user_reminder_source_enum {
   manual
   vex
+  fiscal
 }
 
 enum crm_task_status_enum {

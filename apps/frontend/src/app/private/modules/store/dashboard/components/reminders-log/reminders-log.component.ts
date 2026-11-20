@@ -230,7 +230,7 @@ function toStoreWallClock(iso: string, tz: string): string {
               {{ item.status === 'done' ? 'Hecho' : 'Pendiente' }}
             </span>
             <span class="text-xs font-semibold px-2 py-0.5 rounded-full bg-primary/10 text-primary">
-              {{ item.source === 'vex' ? 'Creado por Vex' : 'Creado manualmente' }}
+              {{ sourceLabel(item.source) }}
             </span>
           </div>
 
@@ -541,6 +541,18 @@ export class RemindersLogComponent implements OnInit {
 
   formatDate(iso: string): string {
     return formatStoreDateTime(iso, this.timezone());
+  }
+
+  /** De dónde salió el recordatorio: manual, Vex o el calendario tributario. */
+  sourceLabel(source: Reminder['source']): string {
+    switch (source) {
+      case 'vex':
+        return 'Creado por Vex';
+      case 'fiscal':
+        return 'Del calendario tributario';
+      default:
+        return 'Creado manualmente';
+    }
   }
 
   toggleDone(): void {
