@@ -8368,6 +8368,14 @@ export const ErrorCodes = {
     devMessage:
       'Como apoyo de esta tarea solo puedes cambiar su estado; el resto lo edita el responsable o quien la creó.',
   },
+  // Al completar se puede elegir qué oportunidad mover solo si la tarea no
+  // tiene ya una etapa destino configurada.
+  CRM_TASK_004: {
+    code: 'CRM_TASK_004',
+    httpStatus: 422,
+    devMessage:
+      'Esta tarea ya mueve su oportunidad al completarse; no se puede elegir otra al cerrarla.',
+  },
   CRM_PIPELINE_001: {
     code: 'CRM_PIPELINE_001',
     httpStatus: 404,
