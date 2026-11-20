@@ -342,8 +342,19 @@ export class CustomerCrmService {
   private async tagsOf(customerId: number) {
     const rows = await this.prisma.crm_customer_tags.findMany({
       where: { customer_id: customerId },
-      select: { tag: { select: { id: true, name: true, color: true } } },
-      orderBy: { tag: { name: 'asc' } },
+      select: {
+        tag: {
+          select: {
+            id: true,
+            name: true,
+            color: true,
+            group_name: true,
+            description: true,
+          },
+        },
+      },
+      // Mismo orden que el catálogo: por grupo y luego por nombre.
+      orderBy: [{ tag: { group_name: 'asc' } }, { tag: { name: 'asc' } }],
     });
     return rows.map((row) => row.tag);
   }

@@ -15545,17 +15545,23 @@ model crm_messages {
 }
 
 model crm_tags {
-  id         Int      @id @default(autoincrement())
-  store_id   Int
-  name       String   @db.VarChar(60)
-  color      String?  @db.VarChar(20)
-  created_at DateTime @default(now()) @db.Timestamp(6)
-  updated_at DateTime @default(now()) @updatedAt @db.Timestamp(6)
+  id          Int      @id @default(autoincrement())
+  store_id    Int
+  name        String   @db.VarChar(60)
+  color       String?  @db.VarChar(20)
+  /// Grupo del catálogo (Temperatura, Prioridad, …) para agrupar el gestor y
+  /// el selector; NULL = sin grupo.
+  group_name  String?  @db.VarChar(30)
+  /// «Cuándo se pone»: la regla humana para usar la etiqueta.
+  description String?  @db.VarChar(200)
+  created_at  DateTime @default(now()) @db.Timestamp(6)
+  updated_at  DateTime @default(now()) @updatedAt @db.Timestamp(6)
 
   store         stores              @relation(fields: [store_id], references: [id], onDelete: Restrict, onUpdate: NoAction)
   customer_tags crm_customer_tags[]
 
   @@unique([store_id, name])
+  @@index([store_id, group_name])
 }
 
 /// Puente cliente↔etiqueta. Borrar una etiqueta quita sus asignaciones,

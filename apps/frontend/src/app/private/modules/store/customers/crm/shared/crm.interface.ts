@@ -20,6 +20,10 @@ export interface CrmTag {
   id: number;
   name: string;
   color: string | null;
+  /** Grupo del catálogo (`Temperatura`, `Prioridad`, …); `null` = sin grupo. */
+  group_name: string | null;
+  /** «Cuándo se pone»: la regla humana para usar la etiqueta. */
+  description: string | null;
   customers_count?: number;
 }
 
@@ -27,6 +31,8 @@ export interface CrmTag {
 export interface SaveCrmTag {
   name?: string;
   color?: string | null;
+  group_name?: string | null;
+  description?: string | null;
 }
 
 /** How a customer belongs to a segment: by its rules, added by hand, or both. */
