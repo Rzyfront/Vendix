@@ -108,6 +108,10 @@ export interface CustomerImportScanResult {
     ai_rows: number;
     /** How the columns were recognized. */
     mapping: 'synonyms' | 'ai' | null;
+    /** ia-cargas F2 — images/PDF: pages (or photo strips) read. */
+    pages?: number;
+    /** Pages read from the PDF native text, without an image. */
+    text_pages?: number;
   };
 }
 

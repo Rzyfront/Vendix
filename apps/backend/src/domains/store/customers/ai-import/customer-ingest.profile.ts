@@ -795,7 +795,7 @@ export const customersIngestProfile: IngestProfile<CustomerRowDraft, CustomerShe
     maxRows: IMPORT_MAX_SHEET_ROWS,
     maxPages: 10,
     rowsPerBatch: 50,
-    pagesPerBatch: 1,
+    pagesPerBatch: 2,
     maxBytes: { sheet: 5 * 1024 * 1024, pdf: 10 * 1024 * 1024, image: 10 * 1024 * 1024 },
   },
   mode: 'list',
