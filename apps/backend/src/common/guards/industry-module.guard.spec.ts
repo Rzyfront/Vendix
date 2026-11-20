@@ -107,6 +107,17 @@ describe('IndustryModuleGuard', () => {
     },
   );
 
+  it('orders_scheduled: allowed for manufacturing; add-ons stay denied there', async () => {
+    mode.modeForStore.mockResolvedValue('enforce');
+    prisma.stores.findUnique.mockResolvedValue({ industries: ['manufacturing'] });
+    build('orders_scheduled');
+    await expect(guard.canActivate(makeCtx(user))).resolves.toBe(true);
+    build('products_option_groups');
+    await expect(guard.canActivate(makeCtx(user))).rejects.toMatchObject({
+      errorCode: 'MODULE_INDUSTRY_001',
+    });
+  });
+
   it.each(['orders_scheduled', 'products_option_groups'])(
     'QUI-1001 %s: blocks retail even in audit mode (always enforced)',
     async (key) => {

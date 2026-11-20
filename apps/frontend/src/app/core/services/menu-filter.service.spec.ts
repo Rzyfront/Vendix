@@ -887,11 +887,17 @@ describe('MenuFilterService.canSeeKey / applyAccessGate (apps-f4 S4)', () => {
     // key en su panel igual ve el selector si la tienda es restaurante.
     userKeys = [];
     storeSettings.set({ panel_ui: { STORE_ADMIN: { orders_scheduled: false } } });
-    for (const industry of [['retail'], ['service', 'manufacturing'], []]) {
+    for (const industry of [['retail'], ['service'], []]) {
       industries.set(industry);
       for (const key of keys) {
         expect(service.industryAllowsModule(key)).withContext(`${industry} ${key}`).toBeFalse();
       }
+    }
+    // Pedidos programados también para manufactura; adiciones, Producción y KDS no.
+    industries.set(['manufacturing']);
+    expect(service.industryAllowsModule('orders_scheduled')).toBeTrue();
+    for (const key of ['products_option_groups', 'restaurant_ops_production', 'restaurant_ops_kds']) {
+      expect(service.industryAllowsModule(key)).withContext(`manufacturing ${key}`).toBeFalse();
     }
     for (const industry of [['restaurant'], ['retail', 'restaurant']]) {
       industries.set(industry);

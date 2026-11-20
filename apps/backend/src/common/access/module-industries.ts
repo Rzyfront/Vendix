@@ -78,7 +78,8 @@ export const MODULE_INDUSTRIES: Readonly<Record<string, ModuleIndustryRule>> = {
   purchase_orders: 'all',
   orders_quotations: 'all',
   orders_layaway: 'all',
-  orders_scheduled: RESTAURANT,
+  // Rafael 2026-11-19: pedidos programados también para manufactura; adiciones siguen solo restaurante.
+  orders_scheduled: ['restaurant', 'manufacturing'],
   orders_contracts: ['construction'],
   orders_reservations: ['service'],
   orders_service_stations: ['service', 'hospitality'],
@@ -375,8 +376,9 @@ export const ENFORCED_INDUSTRY_KEYS: readonly string[] = [
   'documents_expiring',
   'documents_retention',
   'documents_templates',
-  // QUI-1001: Adiciones and scheduled orders are restaurant-only, hidden
-  // outside restaurant whatever the gate mode. Hiding never deletes data.
+  // QUI-1001: Adiciones (restaurant) and scheduled orders (restaurant +
+  // manufacturing) are hidden outside their industries whatever the gate
+  // mode. Hiding never deletes data.
   'orders_scheduled',
   'products_option_groups',
 ];
