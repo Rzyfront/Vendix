@@ -202,6 +202,12 @@ export interface TableSessionOrderItem {
    */
   final_unit_price?: number | string | null;
   final_total_price?: number | string | null;
+  /**
+   * Promo de producto aplicada a la línea: descuento de base y total de la
+   * línea ya descontado con su impuesto. Solo llegan si hay descuento.
+   */
+  discount_amount?: number | string | null;
+  discounted_total_price?: number | string | null;
   inventory_consumed_at_fire: boolean;
   /**
    * C3 — nota de preparación por línea
