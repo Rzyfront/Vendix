@@ -787,22 +787,62 @@ export class StockTransfersService {
       );
     }
 
-    // `UpdateTransferDto` extiende `PartialType(CreateTransferDto)`, así que
-    // hereda `items[]` — y volcarlo crudo en `prisma.update` reventaba con
-    // `Unknown argument 'items'`. Las líneas se editan por su propio camino;
-    // acá solo se aceptan campos de cabecera.
-    const { items: _items, ...headerData } = updateTransferDto as any;
+    // Lista blanca explícita de cabecera. `items` se ignora (las líneas no se
+    // editan por acá) y los campos avanzados —modo, destino externo,
+    // transporte, documento soporte— no se aceptan: sus validaciones viven en
+    // `create`/`dispatch` y escribirlos crudos las saltaba.
+    const dto = updateTransferDto as UpdateTransferDto;
+    // `IsOptional` deja pasar `null`: sin esto, `to_location_id: null` dejaba
+    // una transferencia interna sin destino y `from_location_id: null` daba 500.
+    if ((dto.from_location_id as unknown) === null) {
+      throw new BadRequestException('Elige la bodega de origen');
+    }
+    if (
+      (dto.to_location_id as unknown) === null &&
+      !existingTransfer.is_external_destination
+    ) {
+      throw new BadRequestException('Elige la bodega de destino');
+    }
+    const headerData: Prisma.stock_transfersUncheckedUpdateInput = {
+      ...(dto.from_location_id !== undefined && {
+        from_location_id: dto.from_location_id,
+      }),
+      ...(dto.to_location_id !== undefined && {
+        to_location_id: dto.to_location_id,
+      }),
+      ...(dto.expected_date !== undefined && {
+        expected_date: dto.expected_date,
+      }),
+      ...(dto.notes !== undefined && { notes: dto.notes }),
+    };
 
     if (
-      headerData.from_location_id !== undefined ||
-      headerData.to_location_id !== undefined
+      dto.from_location_id !== undefined ||
+      dto.to_location_id !== undefined
     ) {
+      // D8 — una salida externa no tiene bodega de destino: asignarle una
+      // dejaría `is_external_destination=true` con destino interno.
+      if (
+        existingTransfer.is_external_destination &&
+        dto.to_location_id != null
+      ) {
+        throw new BadRequestException(
+          'Una salida a destino externo no tiene bodega de destino',
+        );
+      }
+      const nextFrom = dto.from_location_id ?? existingTransfer.from_location_id;
+      const nextTo = dto.to_location_id ?? existingTransfer.to_location_id;
+      if (nextTo != null && nextFrom === nextTo) {
+        throw new BadRequestException(
+          'Source and destination locations must be different',
+        );
+      }
       // Cambiar el par de bodegas re-valida el alcance: sin esto se podía mover
       // el origen a una bodega de otra tienda esquivando el bloqueo de `create`.
       await this.validateTransferScope(
         existingTransfer.organization_id,
-        headerData.from_location_id ?? existingTransfer.from_location_id,
-        headerData.to_location_id ?? existingTransfer.to_location_id,
+        nextFrom,
+        nextTo,
         this.prisma,
       );
     }
