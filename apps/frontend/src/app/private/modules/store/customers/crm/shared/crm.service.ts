@@ -167,13 +167,13 @@ export class CrmService {
       .pipe(map((r) => r.data));
   }
 
-  createTag(body: { name: string; color?: string | null }): Observable<CrmTag> {
+  createTag(body: SaveCrmTag & { name: string }): Observable<CrmTag> {
     return this.http
       .post<ApiResponse<CrmTag>>(`${this.base}/crm/tags`, body)
       .pipe(map((r) => r.data));
   }
 
-  /** Renames and/or recolors a tag; its customers keep it. */
+  /** Renames, recolors, moves to a group and/or rewrites «cuándo se pone»; its customers keep it. */
   updateTag(id: number, body: SaveCrmTag): Observable<CrmTag> {
     return this.http
       .patch<ApiResponse<CrmTag>>(`${this.base}/crm/tags/${id}`, body)

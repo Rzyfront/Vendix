@@ -59,6 +59,7 @@ import {
   taskMoveLine,
 } from '../shared/crm.utils';
 import { CrmTagsManagerModalComponent } from '../shared/crm-tags-manager-modal.component';
+import { compareCrmTags } from '../shared/crm-tags.constants';
 import { TaskCompleteModalComponent } from '../shared/task-complete-modal.component';
 import { TaskFormModalComponent } from '../shared/task-form-modal.component';
 import { CustomerSectionComponent, CustomerSectionEmptyComponent } from '../../components/customer-section/customer-section.component';
@@ -457,7 +458,10 @@ const TAG_CHIP = `${CHIP} border-border bg-surface text-text-secondary`;
             }
             <div class="flex flex-wrap gap-2">
               @for (tag of p.tags; track tag.id) {
-                <span [class]="tagChip">
+                <span
+                  [class]="tagChip"
+                  [attr.title]="tag.description ? 'Cuándo se pone: ' + tag.description : null"
+                >
                   <app-icon name="tag" [size]="12" [style.color]="tag.color"></app-icon>
                   <span class="truncate">{{ tag.name }}</span>
                   @if (canUpdate()) {
@@ -483,6 +487,7 @@ const TAG_CHIP = `${CHIP} border-border bg-surface text-text-secondary`;
                   label="Agregar etiqueta"
                   placeholder="Elige una etiqueta"
                   [options]="availableTagOptions()"
+                  [helpText]="tagPickHelp()"
                   [disabled]="saving() || !availableTagOptions().length"
                   [ngModel]="tagPick() ?? ''"
                   (ngModelChange)="tagPick.set($event ? +$event : null)"
@@ -816,9 +821,24 @@ export class CustomerCrmPanelComponent {
   });
   protected readonly availableTagOptions = computed<SelectorOption[]>(() => {
     const assigned = new Set((this.profile()?.tags ?? []).map((tag) => tag.id));
+    // <select> no tiene encabezados: el grupo va delante del nombre y las
+    // opciones salen agrupadas en el orden de la hoja, con «Sin grupo» al final.
     return this.tagCatalog()
       .filter((tag) => !assigned.has(tag.id))
-      .map((tag) => ({ value: tag.id, label: tag.name }));
+      .sort(compareCrmTags)
+      .map((tag) => ({
+        value: tag.id,
+        label: tag.group_name ? `${tag.group_name} · ${tag.name}` : tag.name,
+      }));
+  });
+  /** The tag chosen in the selector, to show its «cuándo se pone» below it. */
+  protected readonly pickedTag = computed(() => {
+    const id = this.tagPick();
+    return id === null ? null : (this.tagCatalog().find((tag) => tag.id === id) ?? null);
+  });
+  protected readonly tagPickHelp = computed(() => {
+    const description = this.pickedTag()?.description;
+    return description ? `Cuándo se pone: ${description}` : '';
   });
   /** Segments the customer is not in yet; adding to a rule segment pins them by hand too. */
   protected readonly availableSegmentOptions = computed<SelectorOption[]>(() => {
@@ -1229,7 +1249,17 @@ export class CustomerCrmPanelComponent {
             ...profile,
             tags: profile.tags.flatMap((tag) => {
               const current = byId.get(tag.id);
-              return current ? [{ ...tag, name: current.name, color: current.color }] : [];
+              return current
+                ? [
+                    {
+                      ...tag,
+                      name: current.name,
+                      color: current.color,
+                      group_name: current.group_name,
+                      description: current.description,
+                    },
+                  ]
+                : [];
             }),
           }
         : profile,
