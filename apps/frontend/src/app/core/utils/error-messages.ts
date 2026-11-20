@@ -1379,6 +1379,8 @@ export const ERROR_MESSAGES: Record<string, string> = {
     'El carrito no alcanza la compra mínima de la promoción.',
   PROMOTION_NOT_APPLICABLE_001:
     'La promoción no aplica a los productos del carrito.',
+  PROMOTION_CODE_DUP_001:
+    'Ese código ya lo usa un cupón u otra promoción de la tienda.',
   PROMOTION_STATE_001:
     'Una promoción cancelada no se puede reactivar. Crea una nueva.',
   ORD_EDIT_COUPON_COMMIT_001:

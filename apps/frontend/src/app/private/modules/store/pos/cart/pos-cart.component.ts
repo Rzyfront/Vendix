@@ -2821,6 +2821,10 @@ private stationBookingService = inject(PosStationBookingService);
             .map((id: string | number) => Number(id))
             .filter((id: number) => Number.isFinite(id)),
           line_total: Number(item.totalPrice || 0),
+          // Si el código resulta ser una promoción, el motor necesita
+          // cantidad y precio unitario (escalas por cantidad).
+          quantity: Number(item.quantity || 0),
+          unit_price: Number(item.finalPrice ?? 0),
         };
       })
       .filter((item) => Number.isFinite(item.product_id));
@@ -2838,7 +2842,7 @@ private stationBookingService = inject(PosStationBookingService);
               .pipe(takeUntilDestroyed(this.destroyRef))
               .subscribe({
                 next: () => {
-                  this.toastService.success(`Cupón "${code}" aplicado`);
+                  this.toastService.success(`Código "${code}" aplicado`);
                   this.couponCode = '';
                   this.couponLoading = false;
                   this.closeCouponModal();
@@ -2891,7 +2895,7 @@ private stationBookingService = inject(PosStationBookingService);
 
   getCouponDiscountAmount(): number {
     const state = this.cartService.getCurrentState();
-    const couponDiscount = state.appliedDiscounts.find((d) => d.coupon_id);
+    const couponDiscount = state.appliedDiscounts.find((d) => this.cartService.isCodeDiscount(d));
     return couponDiscount?.amount || 0;
   }
 
