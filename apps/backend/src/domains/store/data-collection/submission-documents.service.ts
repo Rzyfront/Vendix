@@ -13,6 +13,11 @@ import {
 import { sanitizeUploadFileName } from './utils/file-name.util';
 import { matchesDeclaredSignature } from './utils/file-signature.util';
 
+/** True when `key` lives under `prefix` (which ends with `/`) without traversal. */
+export function isUnderPrefix(key: string, prefix: string): boolean {
+  return key.startsWith(prefix) && !key.includes('..') && !key.includes('\\');
+}
+
 export interface SignedDocument extends StoredDocument {
   url: string | null;
 }
@@ -198,7 +203,7 @@ export class SubmissionDocumentsService {
 
     const prefix = `${await this.storePrefix(submission.store_id)}/`;
     for (const doc of files) {
-      if (!doc.key.startsWith(prefix) || doc.key.includes('..')) {
+      if (!isUnderPrefix(doc.key, prefix)) {
         throw new VendixHttpException(
           ErrorCodes.DCOL_UPLOAD_004,
           'Uno de los archivos no pertenece a esta tienda.',
@@ -209,7 +214,14 @@ export class SubmissionDocumentsService {
   }
 
   /** Adds a signed URL to each document; a signing failure leaves `url` null. */
-  async signFiles(files: StoredDocument[]): Promise<SignedDocument[]> {
+  /**
+   * Signs the attachments of a store. A key outside the store's
+   * data-collection prefix (or with `..`) is never signed: it gets `url: null`,
+   * so a stored foreign key cannot become a download link.
+   */
+  async signFiles(storeId: number, files: StoredDocument[]): Promise<SignedDocument[]> {
+    if (!files.length) return [];
+    const prefix = `${await this.storePrefix(storeId)}/`;
     return Promise.all(
       files.map(async (doc) => ({
         key: doc.key,
@@ -217,9 +229,20 @@ export class SubmissionDocumentsService {
         size: doc.size,
         mime_type: doc.mime_type,
         ...(doc.uploaded_at ? { uploaded_at: doc.uploaded_at } : {}),
-        url: (await this.sign(doc.key)) ?? null,
+        url: isUnderPrefix(doc.key, prefix) ? ((await this.sign(doc.key)) ?? null) : null,
       })),
     );
+  }
+
+  /** Rejects a legacy single key (`value_text`) that is not of this store. */
+  async assertOwnKey(storeId: number, key: string): Promise<void> {
+    const prefix = `${await this.storePrefix(storeId)}/`;
+    if (!isUnderPrefix(key, prefix)) {
+      throw new VendixHttpException(
+        ErrorCodes.DCOL_UPLOAD_004,
+        'Uno de los archivos no pertenece a esta tienda.',
+      );
+    }
   }
 
   private async sign(key: string): Promise<string | undefined> {

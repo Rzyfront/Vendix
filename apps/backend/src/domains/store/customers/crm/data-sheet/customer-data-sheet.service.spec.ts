@@ -217,6 +217,19 @@ describe('CustomerDataSheetService (QUI-1043 H5/H8)', () => {
       ]);
     });
 
+    // Regression (verifier P1): the public form can write value_text, so a
+    // stored key of another store must never come back as a signed URL.
+    it('a stored key of another store is not signed', async () => {
+      const { service, prisma, s3 } = setup();
+      const foreign = 'organizations/other-3/stores/x-11/data-collection/1/secret.pdf';
+      prisma.entity_metadata_values.findMany.mockImplementation(async () => [
+        valueRow(RUT, { value_text: foreign }),
+      ]);
+      const sheet = await service.get(CUSTOMER);
+      expect(sheet.values[0]).toMatchObject({ file_url: null, files: [expect.objectContaining({ key: foreign, url: null })] });
+      expect(s3.signUrl).not.toHaveBeenCalledWith(foreign);
+    });
+
     it('a picked template wins over the default', async () => {
       const { service, templates } = setup({ picked: 30 });
       const sheet = await service.get(CUSTOMER);

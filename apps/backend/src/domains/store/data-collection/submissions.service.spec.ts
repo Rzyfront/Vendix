@@ -96,6 +96,8 @@ describe('SubmissionsService documents (S3)', () => {
     ],
   });
 
+  const FOREIGN_KEY = 'organizations/other-3/stores/x-11/data-collection/1/secret.pdf';
+
   function build(opts: { rules?: unknown; fieldRows?: Record<number, any>; values?: any[] } = {}) {
     const submission = {
       id: 9,
@@ -179,12 +181,12 @@ describe('SubmissionsService documents (S3)', () => {
   it('legacy: value_text only on a file field and plain fields keep working unchanged', async () => {
     const { service, metadataValues } = build();
     await service.saveStepResponses('t', 0, [
-      { field_id: FILE_FIELD, value_text: 'legacy/key.pdf' },
+      { field_id: FILE_FIELD, value_text: `${PREFIX}/9/1-legacy.pdf` },
       { field_id: 6, value_text: 'hola' },
     ] as any);
     const calls = metadataValues.setValuesUnscoped.mock.calls;
     expect(calls).toHaveLength(2);
-    expect(calls[0][3][0]).toMatchObject({ field_id: FILE_FIELD, value_text: 'legacy/key.pdf', value_json: undefined });
+    expect(calls[0][3][0]).toMatchObject({ field_id: FILE_FIELD, value_text: `${PREFIX}/9/1-legacy.pdf`, value_json: undefined });
     expect(calls[1][1]).toBe('booking');
   });
 
@@ -204,5 +206,34 @@ describe('SubmissionsService documents (S3)', () => {
       { ...doc('1-a.pdf'), url: `https://signed.example/${doc('1-a.pdf').key}` },
     ]);
     expect(result.responses.find((r: any) => r.field_id === 6).files).toBeUndefined();
+  });
+
+  // Regression (verifier P1): a public caller must not get a signed URL for a
+  // key of another store, neither by writing it nor by reading a stored one.
+  it('legacy value_text with a foreign key is rejected on save', async () => {
+    const { service, metadataValues } = build();
+    for (const key of [FOREIGN_KEY, `${PREFIX}/../../other/x.pdf`]) {
+      const err = await service
+        .saveStepResponses('t', 0, [{ field_id: FILE_FIELD, value_text: key }] as any)
+        .then(() => null, (e) => e);
+      expect(err?.errorCode).toBe('DCOL_UPLOAD_004');
+    }
+    expect(metadataValues.setValuesUnscoped).not.toHaveBeenCalled();
+  });
+
+  it('a stored foreign key is never signed on read', async () => {
+    const { service } = build({
+      values: [
+        {
+          id: 1, field_id: FILE_FIELD, entity_type: 'customer', field: { field_type: 'file' },
+          value_text: FOREIGN_KEY, value_json: null,
+        },
+      ],
+    });
+    const signUrl = (service as any).documents.s3.signUrl as jest.Mock;
+    const result: any = await service.getByToken('t');
+    const file = result.responses.find((r: any) => r.field_id === FILE_FIELD);
+    expect(file.files).toEqual([expect.objectContaining({ key: FOREIGN_KEY, url: null })]);
+    expect(signUrl).not.toHaveBeenCalledWith(FOREIGN_KEY);
   });
 });

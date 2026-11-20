@@ -232,6 +232,10 @@ export class SubmissionsService {
               resp.value_json,
             )
           : null;
+      // Legacy single-file answer: the key must still be one of this store.
+      if (field.field_type === 'file' && !storedFiles && resp.value_text) {
+        await this.documents.assertOwnKey(submission.store_id, resp.value_text);
+      }
       byEntity.get(key)!.values.push({
         field_id: resp.field_id,
         value_text: storedFiles ? storedFiles.value_text : resp.value_text,
@@ -615,6 +619,7 @@ export class SubmissionsService {
           ...(v.field?.field_type === 'file'
             ? {
                 files: await this.documents.signFiles(
+                  submission.store_id,
                   readStoredDocuments(v),
                 ),
               }

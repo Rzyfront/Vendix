@@ -168,11 +168,17 @@ describe('SubmissionDocumentsService.signFiles (S3 read)', () => {
     const { service, s3 } = setup();
     s3.signUrl.mockImplementationOnce(async () => { throw new Error('boom'); });
     jest.spyOn((service as any).logger, 'warn').mockImplementation(() => undefined);
-    const files = await service.signFiles([
-      { key: 'k1', name: 'a', size: 1, mime_type: 'x' },
-      { key: 'k2', name: 'b', size: 2, mime_type: 'y' },
+    const k1 = `${PREFIX}/9/k1`;
+    const k2 = `${PREFIX}/9/k2`;
+    const files = await service.signFiles(10, [
+      { key: k1, name: 'a', size: 1, mime_type: 'x' },
+      { key: k2, name: 'b', size: 2, mime_type: 'y' },
+      { key: 'organizations/other-3/stores/x-11/data-collection/1/k3', name: 'c', size: 3, mime_type: 'z' },
     ]);
     expect(files[0].url).toBeNull();
-    expect(files[1]).toMatchObject({ key: 'k2', name: 'b', url: 'https://signed.example/k2' });
+    expect(files[1]).toMatchObject({ key: k2, name: 'b', url: `https://signed.example/${k2}` });
+    // A key of another store is never signed.
+    expect(files[2].url).toBeNull();
+    expect(s3.signUrl).toHaveBeenCalledTimes(2);
   });
 });

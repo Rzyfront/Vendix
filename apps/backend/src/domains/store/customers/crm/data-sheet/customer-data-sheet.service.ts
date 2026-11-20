@@ -287,16 +287,27 @@ export class CustomerDataSheetService {
   }
 
   /** Attachments of a stored answer with signed URLs (url null if signing fails). */
-  private async signedFiles(row: {
-    value_text: string | null;
-    value_json: unknown;
-  }) {
+  private async signedFiles(
+    row: { value_text: string | null; value_json: unknown },
+    signablePrefix: string,
+  ) {
     return Promise.all(
       readStoredDocuments(row).map(async (doc) => ({
         ...doc,
-        url: (await this.sign(doc.key)) ?? null,
+        url: this.isSignable(doc.key, signablePrefix)
+          ? ((await this.sign(doc.key)) ?? null)
+          : null,
       })),
     );
+  }
+
+  /**
+   * Only keys under the store's data-collection prefix are signed: the public
+   * form can write `value_text`, so a stored key of another store must never
+   * turn into a download link.
+   */
+  private isSignable(key: string, signablePrefix: string): boolean {
+    return key.startsWith(signablePrefix) && !key.includes('..');
   }
 
   private async build(customerId: number) {
@@ -310,7 +321,12 @@ export class CustomerDataSheetService {
       include: { field: true },
       orderBy: [{ field: { sort_order: 'asc' } }, { id: 'asc' }],
     });
-    const mapped = await Promise.all(rows.map((row) => this.toValue(row)));
+    const signablePrefix = rows.some((row) => row.field.field_type === 'file')
+      ? `${await this.storeBasePath()}/data-collection/`
+      : '';
+    const mapped = await Promise.all(
+      rows.map((row) => this.toValue(row, signablePrefix)),
+    );
     return {
       customer_id: customerId,
       selected_template_id: selectedId,
@@ -402,7 +418,7 @@ export class CustomerDataSheetService {
     ];
   }
 
-  private async toValue(row: ValueRow) {
+  private async toValue(row: ValueRow, signablePrefix: string) {
     const isFile = row.field.field_type === 'file';
     return {
       field_id: row.field_id,
@@ -416,8 +432,11 @@ export class CustomerDataSheetService {
         : null,
       value_bool: row.value_bool,
       value_json: row.value_json ?? null,
-      file_url: isFile && row.value_text ? await this.sign(row.value_text) : null,
-      files: isFile ? await this.signedFiles(row) : [],
+      file_url:
+        isFile && row.value_text && this.isSignable(row.value_text, signablePrefix)
+          ? await this.sign(row.value_text)
+          : null,
+      files: isFile ? await this.signedFiles(row, signablePrefix) : [],
       updated_at: row.updated_at,
     };
   }
@@ -433,6 +452,11 @@ export class CustomerDataSheetService {
 
   /** `organizations/{org}/stores/{store}/data-collection/customers/{id}`. */
   private async filePrefix(customerId: number): Promise<string> {
+    return `${await this.storeBasePath()}/data-collection/customers/${customerId}`;
+  }
+
+  /** `organizations/{org}/stores/{store}`. */
+  private async storeBasePath(): Promise<string> {
     const storeId = this.storeId();
     const store = await this.prisma.withoutScope().stores.findUnique({
       where: { id: storeId },
@@ -443,8 +467,7 @@ export class CustomerDataSheetService {
       },
     });
     if (!store) throw new VendixHttpException(ErrorCodes.UPLOAD_STORE_001);
-    const base = this.s3Path.buildStorePath(store.organizations, store);
-    return `${base}/data-collection/customers/${customerId}`;
+    return this.s3Path.buildStorePath(store.organizations, store);
   }
 
   private isOwnFileKey(key: string, prefix: string): boolean {
