@@ -1,6 +1,7 @@
 import {
   ArrayMaxSize,
   IsArray,
+  ValidateBy,
   IsBoolean,
   IsDateString,
   IsInt,
@@ -16,6 +17,44 @@ import {
 } from 'class-validator';
 import { Type } from 'class-transformer';
 
+/** Most attachments one documents answer may hold (mirrors DOCUMENT_MAX_FILES). */
+const MAX_FILES = 10;
+
+const isPlainObject = (value: unknown): value is Record<string, unknown> =>
+  !!value && typeof value === 'object' && !Array.isArray(value);
+
+/** Multi-select answers: a short list of option values. */
+const isShortStringList = (value: unknown) =>
+  Array.isArray(value) &&
+  value.length <= 100 &&
+  value.every((item) => typeof item === 'string' && item.length <= 500);
+
+/** Documents answer: `{ files: [{ key, name?, size?, mime_type?, uploaded_at? }] }`. */
+const isFilesAnswer = (value: unknown) => {
+  if (!isPlainObject(value)) return false;
+  if (Object.keys(value).some((k) => k !== 'files')) return false;
+  const files = value['files'];
+  return (
+    Array.isArray(files) &&
+    files.length <= MAX_FILES &&
+    files.every(
+      (file) =>
+        isPlainObject(file) &&
+        typeof file['key'] === 'string' &&
+        file['key'].length > 0 &&
+        file['key'].length <= 1000 &&
+        (file['name'] === undefined ||
+          (typeof file['name'] === 'string' && file['name'].length <= 255)) &&
+        (file['size'] === undefined || typeof file['size'] === 'number') &&
+        (file['mime_type'] === undefined ||
+          (typeof file['mime_type'] === 'string' &&
+            file['mime_type'].length <= 255)) &&
+        (file['uploaded_at'] === undefined ||
+          typeof file['uploaded_at'] === 'string'),
+    )
+  );
+};
+
 const DATE_ONLY = /^\d{4}-\d{2}-\d{2}$/;
 /** entity_metadata_values.value_number is Decimal(12, 4). */
 const MAX_NUMBER = 99_999_999.9999;
@@ -26,6 +65,15 @@ export class SetCustomerDataTemplateDto {
   @IsInt()
   @Min(1)
   template_id!: number | null;
+}
+
+/** One stored attachment of a documents answer. */
+export interface CustomerDataSheetFileDto {
+  key: string;
+  name?: string;
+  size?: number;
+  mime_type?: string;
+  uploaded_at?: string;
 }
 
 /** One answer; an entry with every value null deletes the answer. */
@@ -59,14 +107,21 @@ export class CustomerDataSheetValueDto {
   @IsBoolean()
   value_bool?: boolean | null;
 
-  /** Multi-select answers: a short list of option values. */
+  /**
+   * Multi-select answers (a short list of option values) or the attachments
+   * of a documents field (`{ files: [...] }`).
+   */
   @IsOptional()
   @ValidateIf((_, value) => value !== null)
-  @IsArray()
-  @ArrayMaxSize(100)
-  @IsString({ each: true })
-  @MaxLength(500, { each: true })
-  value_json?: string[] | null;
+  @ValidateBy({
+    name: 'isCustomerDataSheetJson',
+    validator: {
+      validate: (value) => isShortStringList(value) || isFilesAnswer(value),
+      defaultMessage: () =>
+        'value_json must be a short list of strings or { files: [...] }',
+    },
+  })
+  value_json?: string[] | { files: CustomerDataSheetFileDto[] } | null;
 }
 
 export class SaveCustomerDataSheetValuesDto {

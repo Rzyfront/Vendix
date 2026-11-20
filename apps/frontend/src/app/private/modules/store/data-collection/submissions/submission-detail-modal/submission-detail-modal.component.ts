@@ -22,6 +22,9 @@ import { EmptyStateComponent } from '../../../../../../shared/components/empty-s
 import { SpinnerComponent } from '../../../../../../shared/components/spinner/spinner.component';
 import { ButtonComponent } from '../../../../../../shared/components/button/button.component';
 import { BadgeComponent } from '../../../../../../shared/components/badge/badge.component';
+import { AttachmentListComponent } from '../../../../../../shared/components/attachment-list/attachment-list.component';
+import type { AttachmentItem } from '../../../../../../shared/components/attachment-list/attachment-list.util';
+import { responseAttachments } from '../../utils/submission-attachments.util';
 
 interface GroupedResponse {
   response: SubmissionResponse;
@@ -54,6 +57,7 @@ interface GroupedTab {
     SpinnerComponent,
     ButtonComponent,
     BadgeComponent,
+    AttachmentListComponent,
   ],
   changeDetection: ChangeDetectionStrategy.OnPush,
   template: `
@@ -237,16 +241,10 @@ interface GroupedTab {
                     >
                       {{ resp.field.label || 'Campo' }}
                     </span>
-                    @if (isFileField(resp) && isFileUrl(resp)) {
-                      <a
-                        [href]="getFileUrl(resp)"
-                        target="_blank"
-                        rel="noopener"
-                        class="text-xs underline font-medium"
-                        style="color: var(--color-primary)"
-                      >
-                        Ver archivo
-                      </a>
+                    @if (isFileField(resp) && attachmentsOf(resp).length) {
+                      <div class="min-w-0 flex-1 max-w-sm">
+                        <app-attachment-list [files]="attachmentsOf(resp)" />
+                      </div>
                     } @else {
                       <span
                         class="text-sm text-right font-medium"
@@ -299,17 +297,9 @@ interface GroupedTab {
                       {{ resp.response.field.label || 'Campo' }}
                     </span>
                     @if (
-                      isFileField(resp.response) && isFileUrl(resp.response)
+                      isFileField(resp.response) && attachmentsOf(resp.response).length
                     ) {
-                      <a
-                        [href]="getFileUrl(resp.response)"
-                        target="_blank"
-                        rel="noopener"
-                        class="text-sm underline font-medium"
-                        style="color: var(--color-primary)"
-                      >
-                        Ver archivo
-                      </a>
+                      <app-attachment-list [files]="attachmentsOf(resp.response)" />
                     } @else {
                       <span
                         class="text-sm font-medium"
@@ -578,25 +568,28 @@ export class SubmissionDetailModalComponent implements OnInit {
     return response.field?.field_type === 'file';
   }
 
-  isFileUrl(response: SubmissionResponse): boolean {
-    const val = response.value_text || '';
-    return val.startsWith('http') || val.startsWith('organizations/');
-  }
+  /** Attachments of every file response, with the presigned URLs of legacy rows. */
+  private readonly attachmentsMap = computed(() => {
+    const map = new Map<number, AttachmentItem[]>();
+    const urls = this.fileUrlMap();
+    for (const resp of this.submission()?.responses ?? []) {
+      if (resp.field?.field_type === 'file') {
+        map.set(resp.id, responseAttachments(resp, urls.get(resp.id)));
+      }
+    }
+    return map;
+  });
 
-  getFileUrl(response: SubmissionResponse): string {
-    const val = response.value_text || '';
-    // If already an HTTP URL (presigned or direct), use it
-    if (val.startsWith('http')) return val;
-    // If it's an S3 key, check the resolved URLs map
-    const resolved = this.fileUrlMap().get(response.id);
-    return resolved || '#';
+  attachmentsOf(response: SubmissionResponse): AttachmentItem[] {
+    return this.attachmentsMap().get(response.id) ?? [];
   }
 
   private resolveFileUrls(sub: DataCollectionSubmission) {
     if (!sub.responses?.length) return;
 
     for (const resp of sub.responses) {
-      if (resp.field?.field_type === 'file' && resp.value_text) {
+      // Rows with `files` already carry their signed URLs; only legacy keys need one.
+      if (resp.field?.field_type === 'file' && resp.value_text && !resp.files?.length) {
         const val = resp.value_text;
         if (val.startsWith('organizations/')) {
           this.submissionsService.getPresignedUrl(val).pipe(takeUntilDestroyed(this.destroyRef)).subscribe({
