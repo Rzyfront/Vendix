@@ -46,7 +46,7 @@ export function buildPromotionClock(
   timezone?: string | null,
 ): PromotionClock {
   const tz = resolveTimezoneCascade(timezone);
-  let civil;
+  let civil: ReturnType<typeof localCivil>;
   let effectiveTz = tz;
   try {
     civil = localCivil(now, tz);

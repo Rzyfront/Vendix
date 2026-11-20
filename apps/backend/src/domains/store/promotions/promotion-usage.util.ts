@@ -12,14 +12,14 @@
  * el ajuste sea atómico con el cambio de estado de la orden.
  */
 
-type PromotionUsageTx = {
-  order_promotions: {
-    findMany: (args: any) => Promise<Array<{ promotion_id: number }>>;
-  };
-  promotions: {
-    updateMany: (args: any) => Promise<{ count: number }>;
-  };
-};
+/**
+ * Cliente de transacción de Prisma (o el scoped). Se tipa abierto, igual que
+ * `applyPromotion(tx?: any)`: los delegados genéricos de Prisma no encajan en
+ * una firma estructural estrecha. Solo se usan `order_promotions.findMany` y
+ * `promotions.updateMany`.
+ */
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+type PromotionUsageTx = any;
 
 /** Devuelve el uso de cada promoción que la orden consumió (con descuento). */
 export async function releaseOrderPromotionUsage(
@@ -31,7 +31,11 @@ export async function releaseOrderPromotionUsage(
     where: { order_id: orderId, discount_amount: { gt: 0 } },
     select: { promotion_id: true },
   });
-  const ids = Array.from(new Set(rows.map((r) => Number(r.promotion_id))));
+  const ids: number[] = Array.from(
+    new Set<number>(
+      (rows as Array<{ promotion_id: number }>).map((r) => Number(r.promotion_id)),
+    ),
+  );
   if (ids.length > 0) {
     // Una promoción aparece una sola vez por orden (unique order_id +
     // promotion_id), así que un decremento por promoción es exacto. El piso en
