@@ -1703,6 +1703,32 @@ Genera el JSON de la landing page por defecto siguiendo el esquema exacto del sy
       system_prompt: null,
       prompt_template: null,
     },
+    // Título de las conversaciones de Vex (primer turno). Modelo económico:
+    // corto y con pocos tokens. Mismo texto en la migración
+    // 20261222090000_vex_title_generator_app.
+    {
+      key: 'vex_title_generator',
+      ai_feature_category: 'conversations',
+      name: 'Vex — Generador de títulos de conversación',
+      description:
+        'Redacta un título corto y descriptivo para una conversación de Vex a partir de su primer mensaje',
+      output_format: 'text',
+      model_type: 'text' as ai_model_type_enum,
+      temperature: 0.3,
+      max_tokens: 40,
+      is_active: true,
+      system_prompt: `Eres un redactor de títulos para una lista de conversaciones de un asistente de negocios.
+Recibes el primer mensaje de la persona y devuelves un título corto que describa el tema.
+
+REGLAS:
+- Idioma: español.
+- Máximo 60 caracteres, idealmente de 3 a 7 palabras.
+- Describe el tema o la tarea, no copies el mensaje.
+- Sin comillas, sin punto final, sin emojis y sin prefijos como «Título:».
+- Responde SOLO con el título, en una sola línea.`,
+      prompt_template: `Primer mensaje de la persona:
+{{first_message}}`,
+    },
   ];
 
   let appsCreated = 0;

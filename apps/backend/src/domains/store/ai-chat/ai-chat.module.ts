@@ -5,6 +5,7 @@ import { VexiModule } from '../vexi/vexi.module';
 import { VexModule } from '../vex/vex.module';
 import { AIChatController } from './ai-chat.controller';
 import { AIChatService } from './ai-chat.service';
+import { ConversationTitleService } from './conversation-title.service';
 
 // One-way dependency: chat consumes Vexi's business snapshot, Vexi never
 // consumes chat. Keep it that way — VexiModule importing this back would
@@ -13,7 +14,7 @@ import { AIChatService } from './ai-chat.service';
 @Module({
   imports: [PrismaModule, ResponseModule, VexiModule, VexModule],
   controllers: [AIChatController],
-  providers: [AIChatService],
+  providers: [AIChatService, ConversationTitleService],
   exports: [AIChatService],
 })
 export class AIChatModule {}

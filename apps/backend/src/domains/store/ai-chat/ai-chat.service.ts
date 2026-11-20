@@ -74,6 +74,11 @@ import {
   ChatReplayCursor,
 } from './chat-stream-replay';
 import { resumeReferenceBlock } from './resume-reference';
+import {
+  ConversationTitleFrame,
+  ConversationTitleService,
+  TITLE_TIMEOUT_MS,
+} from './conversation-title.service';
 
 /**
  * The stored trace is for the human reading the transcript later, not for the
@@ -141,7 +146,11 @@ const PLAN_MESSAGE_RULES_BLOCK =
  * would make every implementation carry a case it cannot reach. The SSE
  * controller only serializes what it is handed, so the transport needs no change.
  */
-export type ChatStreamFrame = (AIStreamChunk | VexiVoiceFrame) & {
+export type ChatStreamFrame = (
+  | AIStreamChunk
+  | VexiVoiceFrame
+  | ConversationTitleFrame
+) & {
   replay?: ChatReplayCursor;
   reconcile_required?: boolean;
 };
@@ -250,6 +259,9 @@ export class AIChatService {
     @Optional() private readonly planApproval?: PlanApprovalService,
     @Optional() private readonly confirmations?: VexiConfirmationService,
     @Optional() private readonly durableSessions?: AgentDurableSessionService,
+    // Título generado de los hilos de Vex. Opcional-final como los demás: sin
+    // él el hilo conserva el título del cliente y no se emite el frame.
+    @Optional() private readonly titles?: ConversationTitleService,
   ) {}
 
   async createConversation(dto: CreateConversationDto) {
@@ -378,7 +390,9 @@ export class AIChatService {
     const [data, total] = await Promise.all([
       this.prisma.ai_conversations.findMany({
         where,
-        orderBy: { updated_at: 'desc' },
+        // `id` desempata: sin él, filas con el mismo `updated_at` saltan de
+        // página en página y el scroll infinito repite o pierde chats.
+        orderBy: [{ updated_at: 'desc' }, { id: 'desc' }],
         skip,
         take: limit,
         include: {
@@ -864,6 +878,17 @@ export class AIChatService {
     const vexTurn: VexTurnCollection | null =
       agentKey === VEX_AGENT_KEY ? { blocks: new Map(), plan: null } : null;
     let vexPlan: VexTurnCollection['plan'] = null;
+    // Título generado: solo hilos de Vex, solo el primer turno. Arranca ya, en
+    // paralelo al modelo, y su promesa nunca rechaza (ver el servicio).
+    const titleDeadline = Date.now() + TITLE_TIMEOUT_MS;
+    const titleTask =
+      vexTurn &&
+      this.titles &&
+      conversation.messages.length === 0 &&
+      !intent.continuation &&
+      intent.content
+        ? this.titles.start(conversationId, intent.content, TITLE_TIMEOUT_MS)
+        : null;
     // Held back until after the audio and timing frames. Both the SSE controller
     // and the browser close the connection the moment `done` arrives, so anything
     // emitted after it is never seen. See the agent branch below for the original
@@ -1176,6 +1201,20 @@ export class AIChatService {
     // `done` sale DESPUÉS de persistir: lleva `message_id` de la fila nueva para
     // que el frontend enlace la continuación (el cliente cierra el SSE al
     // recibirlo, así que nada que viaje después se vería).
+    // Frame extra con el título, justo antes de `done` (el cliente cierra el SSE
+    // al recibirlo). Si aún no está, la promesa lo persiste al resolver y el
+    // cliente refresca el listado.
+    if (titleTask && this.titles) {
+      const title = await this.titles.waitFor(titleTask, titleDeadline);
+      if (title) {
+        yield {
+          type: 'conversation_title',
+          conversation_id: conversationId,
+          title,
+        };
+      }
+    }
+
     if (doneChunk) {
       // Client boundary: model guidance never rides on the final frame.
       const safeDone = clientSafeChunk(doneChunk);
@@ -1184,16 +1223,10 @@ export class AIChatService {
         : safeDone;
     }
 
-    // Auto-generate title if first message
-    if (
-      conversation.messages.length === 0 &&
-      !conversation.title &&
-      intent.content
-    ) {
-      await this.prisma.ai_conversations.update({
-        where: { id: conversationId },
-        data: { title: intent.content.substring(0, 80) },
-      });
+    // Vex genera su título arriba (`titleTask`); Vexi y los hilos legacy
+    // conservan el primer mensaje recortado.
+    if (!vexTurn) {
+      await this.applyLegacyTitle(conversation, intent.content);
     }
 
     this.eventEmitter.emit('ai.message.sent', {
@@ -1207,6 +1240,19 @@ export class AIChatService {
     // claim to expire on its own TTL, which is the safe direction — a stale claim
     // rejects results, it never accepts a wrong one.
     await this.uiChannel.releaseTurn(streamId);
+  }
+
+  /** Título de Vexi/legacy: el primer mensaje recortado a 80 caracteres. */
+  private async applyLegacyTitle(
+    conversation: ConversationWithMessages,
+    content: string | undefined,
+  ): Promise<void> {
+    if (conversation.messages.length === 0 && !conversation.title && content) {
+      await this.prisma.ai_conversations.update({
+        where: { id: conversation.id },
+        data: { title: content.substring(0, 80) },
+      });
+    }
   }
 
   async archiveConversation(id: number) {
