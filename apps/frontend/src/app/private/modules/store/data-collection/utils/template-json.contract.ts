@@ -283,7 +283,7 @@ export interface TemplateJsonError {
 }
 
 export type TemplateJsonValidation =
-  | { ok: true; value: TemplateJson; errors: [] }
+  | { ok: true; value: TemplateJson; errors: TemplateJsonError[] }
   | { ok: false; errors: TemplateJsonError[] };
 
 /**

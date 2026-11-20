@@ -30,6 +30,14 @@ interface ResolvedField extends ImportFieldPlan {
   options?: string[];
 }
 
+interface ExistingField {
+  id: number;
+  entity_type: string;
+  field_key: string;
+  field_type: string;
+  is_active: boolean;
+}
+
 const fieldRef = (entityType: string, key: string) => `${entityType}:${key}`;
 
 /**
@@ -122,7 +130,7 @@ export class TemplateImportService {
     const items: Array<{ item: TemplateJsonItem; path: string }> = [];
     this.walk(json, (item, path) => items.push({ item, path }));
 
-    const existing = items.length
+    const existing: ExistingField[] = items.length
       ? await this.prisma.entity_metadata_fields.findMany({
           where: {
             field_key: { in: [...new Set(items.map((i) => i.item.field.key))] },
