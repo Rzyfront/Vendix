@@ -70,3 +70,19 @@ export interface IngestProfile<TRecord, TField extends string = string> {
   /** A list of records vs a single document with lines. */
   mode: 'list' | 'document';
 }
+
+/**
+ * A single document with lines (purchase invoice, sales invoice draft…), read
+ * page batch by page batch with `readDocumentWithAi`. No sheets, no rows: the
+ * domain keeps its own normalization of the merged document.
+ */
+export interface DocumentIngestProfile {
+  key: IngestProfileKey;
+  mode: 'document';
+  /** Schema of ONE batch answer (the document as seen on those pages). */
+  documentSchema: ExtractionSchema;
+  limits: Pick<IngestLimits, 'maxPages' | 'pagesPerBatch'> & {
+    /** Upload cap in bytes for PDF and photos. */
+    maxBytes: number;
+  };
+}
