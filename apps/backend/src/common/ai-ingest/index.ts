@@ -7,3 +7,7 @@ export * from './extraction/ai-extraction.service';
 export * from './extraction/batching';
 export * from './profiles/ingest-profile.interface';
 export * from './profiles/registry';
+export * from './documents/document-pages.service';
+export * from './documents/page-content';
+export * from './images/image-prep';
+export * from './documents/document-reader';

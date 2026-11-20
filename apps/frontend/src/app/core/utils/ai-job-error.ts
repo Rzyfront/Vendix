@@ -108,6 +108,8 @@ const DOCUMENT_CODE_SUFFIXES = [
   '_INCOMPLETE',
   '_UNSUPPORTED_TYPE',
   '_TOO_MANY_FILES',
+  '_TOO_MANY_PAGES',
+  '_NO_PAGES',
 ];
 
 const TITLES: Readonly<Record<AiJobErrorCategory, string>> = {
