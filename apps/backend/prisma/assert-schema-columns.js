@@ -50,6 +50,22 @@ const REQUIRED_COLUMNS = [
   'stock_transfers.is_external_destination',
   'stock_transfers.no_support_alert',
   'stock_transfers.shipping_cost',
+  // Prisma nombra TODAS las columnas del modelo en cada SELECT/RETURNING: si
+  // falta una sola, cualquier lectura o escritura de transferencias da 500.
+  'stock_transfers.driver_user_id',
+  'stock_transfers.driver_name',
+  'stock_transfers.shipping_method_id',
+  'stock_transfers.carrier_name',
+  'stock_transfers.tracking_number',
+  'stock_transfers.external_destination_name',
+  'stock_transfers.external_destination_tax_id',
+  'stock_transfers.external_destination_address',
+  'stock_transfers.support_document_type',
+  'stock_transfers.support_document_id',
+  'stock_transfers.exit_reason',
+  'stock_transfers.loss_closed_at',
+  'stock_transfers.loss_closed_by_user_id',
+  'stock_transfers.loss_reason',
   'stock_transfer_items.quantity_dispatched',
   'stock_transfer_items.quantity_lost',
   'stock_transfer_items.batch_id',
@@ -293,6 +309,10 @@ const REQUIRED_TABLES = [
 const REQUIRED_ENUM_TYPES = [
   'aiu_component_enum',
   'order_item_fulfillment_destination_enum',
+  // Transferencias: modo, transporte y documento soporte (20261215090000).
+  'transfer_movement_mode_enum',
+  'transfer_transport_method_enum',
+  'transfer_support_document_type_enum',
 ];
 
 /**
@@ -321,6 +341,8 @@ const REQUIRED_ENUM_VALUES = {
   // antes de enviar (20261106100400).
   notification_type_enum: ['crm_sms_spend_limit_reached'],
   crm_message_status_enum: ['sending'],
+  // Transferencias: recepción parcial y cierre con pérdida (20261215090000).
+  transfer_status_enum: ['partially_received', 'closed_with_loss'],
 };
 
 /** La identidad única de un abono CxC manual evita refund duplicado por retry. */
@@ -475,4 +497,10 @@ if (require.main === module) {
   });
 }
 
-module.exports = { findBrokenPartialIndexes, REQUIRED_PARTIAL_INDEXES };
+module.exports = {
+  findBrokenPartialIndexes,
+  REQUIRED_PARTIAL_INDEXES,
+  REQUIRED_COLUMNS,
+  REQUIRED_ENUM_TYPES,
+  REQUIRED_ENUM_VALUES,
+};

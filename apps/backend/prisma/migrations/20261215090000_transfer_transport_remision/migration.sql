@@ -3,7 +3,7 @@
 --
 -- DATA IMPACT:
 --   Tables affected:
---     stock_transfers: 21 columnas nuevas (nullable o con default), 1 índice
+--     stock_transfers: 22 columnas nuevas (nullable o con default), 1 índice
 --       parcial de apoyo y 5 FKs nuevas. `to_location_id` pasa a NULLABLE para
 --       admitir un destino externo (D8): las filas existentes conservan su
 --       valor, no se reescribe ninguna.
@@ -68,7 +68,8 @@ ALTER TABLE "stock_transfers"
   ADD COLUMN IF NOT EXISTS "exit_reason" TEXT,
   ADD COLUMN IF NOT EXISTS "no_support_alert" BOOLEAN NOT NULL DEFAULT false,
   ADD COLUMN IF NOT EXISTS "loss_closed_at" TIMESTAMP(6),
-  ADD COLUMN IF NOT EXISTS "loss_closed_by_user_id" INTEGER;
+  ADD COLUMN IF NOT EXISTS "loss_closed_by_user_id" INTEGER,
+  ADD COLUMN IF NOT EXISTS "loss_reason" TEXT;
 
 -- 5. Líneas: lote, conteo de salida y unidades perdidas.
 ALTER TABLE "stock_transfer_items"

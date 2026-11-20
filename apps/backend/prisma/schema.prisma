@@ -4565,7 +4565,7 @@ model stock_transfers {
   transfer_number       String                 @db.VarChar(50)
   organization_id       Int
   from_location_id      Int
-  to_location_id        Int
+  to_location_id        Int?
   status                transfer_status_enum   @default(pending)
   transfer_date         DateTime?              @default(now()) @db.Timestamp(6)
   expected_date         DateTime?              @db.Timestamp(6)
@@ -4618,7 +4618,7 @@ model stock_transfers {
   organizations         organizations          @relation(fields: [organization_id], references: [id], onDelete: Cascade)
   // D8 — un destino externo no tiene bodega interna: la columna es nullable
   // desde P2 y el servicio exige `to_location_id` para todo destino interno.
-  to_location           inventory_locations?   @relation("to_location", fields: [to_location_id], references: [id], onUpdate: NoAction)
+  to_location           inventory_locations?   @relation("to_location", fields: [to_location_id], references: [id], onDelete: Restrict, onUpdate: NoAction)
   vehicle               vehicles?              @relation("stock_transfers_vehicle", fields: [vehicle_id], references: [id], onDelete: SetNull, onUpdate: NoAction)
   driver                users?                 @relation("stock_transfers_driver", fields: [driver_user_id], references: [id], onDelete: SetNull, onUpdate: NoAction)
   shipping_method       shipping_methods?      @relation("stock_transfers_shipping_method", fields: [shipping_method_id], references: [id], onDelete: SetNull, onUpdate: NoAction)
