@@ -578,6 +578,27 @@ describe('AIEngineService.consumeSubscriptionQuota wiring', () => {
     expect(calls[0][3]).not.toEqual(calls[1][3]);
   });
 
+  it('async_queue calls sharing quotaKey use ONE requestId (1 job); without it each call counts', async () => {
+    const { service, prisma, subscriptionAccess } = buildService();
+    prisma.ai_engine_applications.findUnique.mockResolvedValue(
+      textApp('customer_import_ocr', 'async_queue'),
+    );
+    withTextProvider(service);
+
+    await inRequest(async () => {
+      await service.run('customer_import_ocr', {}, [], { quotaKey: 'ai-ingest:job-1' });
+      await service.run('customer_import_ocr', {}, [], { quotaKey: 'ai-ingest:job-1' });
+      await service.run('customer_import_ocr');
+    });
+
+    const calls = subscriptionAccess.consumeAIQuota.mock.calls;
+    expect(calls).toHaveLength(3);
+    expect(calls[0]).toEqual([STORE_ID, 'async_queue', 1, `${BASE}:ai-ingest:job-1`]);
+    expect(calls[1][3]).toBe(`${BASE}:ai-ingest:job-1`);
+    expect(calls[2][3]).toMatch(new RegExp(`^${BASE}:.+`));
+    expect(calls[2][3]).not.toBe(`${BASE}:ai-ingest:job-1`);
+  });
+
   it('charges chat_assistant (conversations) as 1 streaming_chat unit with the base requestId', async () => {
     const { service, prisma, subscriptionAccess } = buildService();
     prisma.ai_engine_applications.findUnique.mockResolvedValue(

@@ -36,6 +36,8 @@ export interface AiJobRealProgress {
   done: number;
   total: number;
   stage?: string;
+  /** What is counted ("filas", "páginas"): the bar then says "120 de 800 filas". */
+  unit?: string;
 }
 
 /**

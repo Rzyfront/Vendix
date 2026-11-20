@@ -54,6 +54,42 @@ describe('OpenAICompatibleProvider', () => {
     );
   });
 
+  describe('responseSchema (ai-ingest, opt-in por config)', () => {
+    const rs = {
+      name: 'rows',
+      schema: { type: 'object', properties: {}, required: [], additionalProperties: false },
+    };
+    const reply = () =>
+      jest.fn().mockResolvedValue({
+        choices: [{ message: { content: '{}' }, finish_reason: 'length' }],
+        model: 'test-model',
+      });
+
+    it('sin supports_json_schema no manda nada nuevo', async () => {
+      const provider = buildProvider('https://openrouter.ai/api/v1');
+      const create = reply();
+      (provider as any).client.chat.completions.create = create;
+
+      const res = await provider.chat([{ role: 'user', content: 'x' }], { responseSchema: rs });
+
+      expect(create.mock.calls[0][0]).not.toHaveProperty('response_format');
+      expect(res.finish_reason).toBe('length');
+    });
+
+    it('con supports_json_schema manda json_schema estricto', async () => {
+      const provider = buildProvider('https://openrouter.ai/api/v1', { supports_json_schema: true });
+      const create = reply();
+      (provider as any).client.chat.completions.create = create;
+
+      await provider.chat([{ role: 'user', content: 'x' }], { responseSchema: rs });
+
+      expect(create.mock.calls[0][0].response_format).toEqual({
+        type: 'json_schema',
+        json_schema: { name: 'rows', strict: true, schema: rs.schema },
+      });
+    });
+  });
+
   it('keeps the configured base URL trimmed but otherwise unchanged', () => {
     const provider = buildProvider('  https://api.example.com/v1/responses/  ');
 

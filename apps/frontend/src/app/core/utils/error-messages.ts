@@ -927,6 +927,12 @@ export const ERROR_MESSAGES: Record<string, string> = {
     'No se pudo analizar la lista por un problema del servicio. Intenta de nuevo.',
   MEMBER_SCAN_PARSE_FAIL:
     'No pudimos leer la lista de socios. Intenta con un archivo más nítido.',
+  AI_INGEST_PARSE_FAIL:
+    'La IA no pudo interpretar el documento. Intenta con un archivo más nítido o con menos datos.',
+  AI_INGEST_INCOMPLETE:
+    'El documento tiene demasiados datos para leerlo de una vez. Divídelo en partes más pequeñas o usa una hoja de cálculo.',
+  AI_INGEST_INVALID_FILE:
+    'No pudimos leer el archivo. Verifica que no esté dañado, protegido con contraseña o vacío.',
   RUT_SCAN_NO_FILE: 'Sube una foto o un PDF del RUT.',
   RUT_SCAN_INVALID_FILE: 'Formato no soportado. Usa JPG, PNG, WebP o PDF.',
   RUT_SCAN_AI_FAIL:

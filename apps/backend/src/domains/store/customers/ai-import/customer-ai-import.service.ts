@@ -1,13 +1,34 @@
 import { Injectable, Logger, OnModuleInit } from '@nestjs/common';
 import { computeNitDv } from '../../../../common/utils/nit.util';
-import * as XLSX from 'xlsx';
-import { AIEngineService } from '../../../../ai-engine/ai-engine.service';
 import { AIMessage } from '../../../../ai-engine/interfaces/ai-provider.interface';
-import { parseAiJson } from '../../../../ai-engine/utils/ai-json.util';
 import { StorePrismaService } from '../../../../prisma/services/store-prisma.service';
 import { RequestContextService } from '@common/context/request-context.service';
 import { AiScanFile } from '@common/ai-scan-jobs/interfaces/ai-scan-job.interface';
 import { AiScanHandlerRegistry } from '@common/ai-scan-jobs/ai-scan-handler.registry';
+import type { AiJobProgress } from '@common/ai-scan-jobs/ai-job-monitor.service';
+import {
+  DetectedIngestFile,
+  detectIngestFile,
+  IngestSheetFormat,
+} from '@common/ai-ingest/ingest-file.detector';
+import { SheetParserService } from '@common/ai-ingest/sheets/sheet-parser.service';
+import {
+  AiExtractionError,
+  AiExtractionService,
+  ExtractBatchesResult,
+  newIngestQuotaKey,
+} from '@common/ai-ingest/extraction/ai-extraction.service';
+import { IngestProfileRegistry } from '@common/ai-ingest/profiles/registry';
+import {
+  applyColumnMapping,
+  columnMappingSchema,
+  ColumnMapping,
+  mapColumnsBySynonyms,
+  mergeAiColumnMapping,
+  missingRequiredGroups,
+  unmappedHeadersWithData,
+} from '@common/ai-ingest/sheets/column-mapper';
+import type { SheetTable } from '@common/ai-ingest/ai-ingest.types';
 import { VendixHttpException, ErrorCodes } from '@common/errors';
 import { CustomersService } from '../customers.service';
 import { AddressesService } from '../../addresses/addresses.service';
@@ -15,6 +36,22 @@ import { CreateCustomerLocationDto } from '../../addresses/dto';
 import { CreateCustomerDto } from '../dto/create-customer.dto';
 import { UpdateCustomerDto } from '../dto/update-customer.dto';
 import { addressKey } from './customer-ai-import.util';
+import {
+  applyCustomerAiRow,
+  CUSTOMER_DOCUMENT_SCHEMA,
+  CUSTOMER_FIELD_DESCRIPTIONS,
+  CUSTOMER_ROWS_SCHEMA,
+  CUSTOMER_SHEET_FIELDS,
+  CustomerAiRow,
+  customerAiRowPayload,
+  CustomerRowDraft,
+  CustomerSheetField,
+  customersIngestProfile,
+  CustomerWithRows,
+  mergeCustomerRows,
+  normalizeCustomerRow,
+  unresolvedNeedsMessage,
+} from './customer-ingest.profile';
 import {
   AnalyzeCustomerImportDto,
   AnalyzedImportCustomer,
@@ -25,8 +62,12 @@ import {
   CommitCustomerResult,
   CustomerImportAnalysis,
   CustomerImportScanResult,
-  IMPORT_MAX_CUSTOMERS,
   IMPORT_MAX_LOCATIONS,
+  IMPORT_MAX_SHEET_ROWS,
+  IMPORT_MAX_SOURCE_ROWS,
+  ImportColumnMapping,
+  ImportRowIssue,
+  ImportSkippedRow,
   ImportCustomer,
   ImportCustomerDto,
   ImportCustomerMatch,
@@ -40,18 +81,14 @@ import {
 const DOCUMENT_TYPES = ['CC', 'CE', 'NIT', 'TI', 'PA', 'PEP', 'PPT', 'RC'];
 
 const IMAGE_MIMETYPES = ['image/jpeg', 'image/png', 'image/webp'];
-const PDF_MIMETYPE = 'application/pdf';
-const SHEET_MIMETYPES = [
-  'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
-  'application/vnd.ms-excel',
-  'text/csv',
-  'application/csv',
-];
-const SHEET_EXTENSIONS = ['xlsx', 'xls', 'csv'];
 
-const MAX_DOCUMENT_BYTES = 10 * 1024 * 1024; // imágenes y PDF
-const MAX_SHEET_BYTES = 5 * 1024 * 1024; // xlsx / xls / csv
-const MAX_SHEET_TEXT_CHARS = 120_000;
+const MAX_DOCUMENT_BYTES = customersIngestProfile.limits.maxBytes.pdf; // imágenes y PDF
+const MAX_SHEET_BYTES = customersIngestProfile.limits.maxBytes.sheet; // xlsx / xls / csv
+const APP_KEY = customersIngestProfile.appKey;
+const SAMPLE_ROWS_FOR_MAPPING = 5;
+
+type ReportProgress = (progress: AiJobProgress) => Promise<void>;
+type CustomerRowsAnswer = { customers: CustomerAiRow[]; warnings?: string[] };
 
 const sharp: typeof import('sharp').default = require('sharp'); // eslint-disable-line @typescript-eslint/no-require-imports, @typescript-eslint/no-unsafe-assignment -- sharp 0.35 types are ESM-only but CJS runtime exports the function
 
@@ -71,18 +108,21 @@ export class CustomerAiImportService implements OnModuleInit {
   private readonly logger = new Logger(CustomerAiImportService.name);
 
   constructor(
-    private readonly aiEngine: AIEngineService,
     private readonly prisma: StorePrismaService,
     private readonly customersService: CustomersService,
     private readonly addressesService: AddressesService,
     private readonly aiScanRegistry: AiScanHandlerRegistry,
+    private readonly sheetParser: SheetParserService,
+    private readonly aiExtraction: AiExtractionService,
+    private readonly ingestProfiles: IngestProfileRegistry,
   ) {}
 
   /** Registra el handler async `customer_import` (cola genérica `ai-scan`). */
   onModuleInit(): void {
+    this.ingestProfiles.register(customersIngestProfile);
     this.aiScanRegistry.register<CustomerImportScanResult>(
       'customer_import',
-      ({ files }) => this.scanFromFiles(files),
+      ({ files, reportProgress }) => this.scanFromFiles(files, reportProgress),
     );
   }
 
@@ -99,74 +139,411 @@ export class CustomerAiImportService implements OnModuleInit {
     };
   }
 
-  /** Validación previa (mime/tamaño) reutilizable por el controller antes de encolar. */
+  /** Validación previa (tipo real/tamaño) reutilizable por el controller antes de encolar. */
   assertValidFile(file?: Express.Multer.File): void {
     this.assertValidScanFile(file ? this.toScanFile(file) : undefined);
   }
 
-  async scanFromFiles(files: AiScanFile[]): Promise<CustomerImportScanResult> {
+  async scanFromFiles(
+    files: AiScanFile[],
+    reportProgress?: ReportProgress,
+  ): Promise<CustomerImportScanResult> {
     const file = files?.[0];
-    this.assertValidScanFile(file);
-
-    const instruction =
-      'Extract all customers and their locations from this document. Return ONLY the JSON object matching the schema defined in your system instructions.';
-    let message: AIMessage;
-
-    if (this.isSpreadsheet(file)) {
-      const csv = this.spreadsheetToText(file);
-      message = {
-        role: 'user',
-        content: `${instruction}\n\nThe document is a table exported as CSV text:\n\n${csv}`,
-      };
-    } else {
-      const { base64, mimeType } = await this.preprocessImage(file);
-      message = {
-        role: 'user',
-        content: [
-          { type: 'text', text: instruction },
-          {
-            type: 'image_url',
-            image_url: {
-              url: `data:${mimeType};base64,${base64}`,
-              detail: 'high',
-            },
-          },
-        ],
-      };
+    const detected = this.assertValidScanFile(file);
+    // One quota key per load: mapping, batches and repairs charge one job.
+    const quotaKey = newIngestQuotaKey();
+    if (detected.kind === 'sheet') {
+      return this.scanSheet(file!, detected.sheetFormat!, reportProgress, quotaKey);
     }
-
-    const response = await this.aiEngine.run('customer_import_ocr', {}, [
-      message,
-    ]);
-
-    if (!response.success || !response.content) {
-      this.logger.error(
-        `[CustomerImportScan] AI failed: ${response.error ?? 'no content'}`,
-      );
-      throw new VendixHttpException(
-        ErrorCodes.SYS_INTERNAL_001,
-        'La IA no pudo procesar el documento de clientes. Intenta de nuevo.',
-      );
-    }
-
-    let parsed: unknown;
-    try {
-      parsed = parseAiJson(response.content);
-    } catch (err: any) {
-      this.logger.error(
-        `[CustomerImportScan] Failed to parse AI response (${err?.message}). Raw content: ${response.content}`,
-      );
-      throw new VendixHttpException(
-        ErrorCodes.SYS_INTERNAL_001,
-        'No se pudo interpretar la respuesta de la IA. Intenta con un documento más claro o más corto.',
-      );
-    }
-    return this.normalizeScan(parsed);
+    return this.scanDocument(file!, detected, quotaKey);
   }
 
   /**
-   * Normaliza el JSON de la IA: tipos, documentos sin puntos/espacios, tipo de
-   * persona inferido y fusión de clientes repetidos por (tipo, número).
+   * Imagen o PDF: una llamada con esquema (validación ajv + 1 reparación). Si
+   * la respuesta se corta por longitud se avisa con un error claro en vez de
+   * fallar al parsear (F2 partirá el documento por páginas).
+   */
+  private async scanDocument(
+    file: AiScanFile,
+    detected: DetectedIngestFile,
+    quotaKey?: string,
+  ): Promise<CustomerImportScanResult> {
+    const instruction =
+      'Extract all customers and their locations from this document. Return ONLY the JSON object matching the schema defined in your system instructions.';
+    const { base64, mimeType } = await this.preprocessImage(file, detected.mime);
+    const message: AIMessage = {
+      role: 'user',
+      content: [
+        { type: 'text', text: instruction },
+        {
+          type: 'image_url',
+          image_url: { url: `data:${mimeType};base64,${base64}`, detail: 'high' },
+        },
+      ],
+    };
+
+    let parsed: unknown;
+    try {
+      parsed = await this.aiExtraction.extract({
+        appKey: APP_KEY,
+        schema: CUSTOMER_DOCUMENT_SCHEMA,
+        messages: [message],
+        quotaKey,
+      });
+    } catch (error) {
+      if (error instanceof AiExtractionError) {
+        this.logger.error(
+          `[CustomerImportScan] ${error.failure}: ${error.message}`,
+        );
+        throw error.toHttpException();
+      }
+      throw error;
+    }
+    const result = this.normalizeScan(parsed);
+    return {
+      ...result,
+      stats: {
+        source: 'document',
+        total_rows: result.customers.length,
+        imported_rows: result.customers.length,
+        skipped_rows: 0,
+        ai_rows: result.customers.length,
+        mapping: null,
+      },
+    };
+  }
+
+  /**
+   * Hoja de cálculo (ia-cargas F1): parser determinista → columnas por
+   * sinónimos (una sola llamada de mapeo si no alcanzan) → normalización por
+   * código → IA por lotes solo para las celdas ambiguas → fusión por
+   * documento. Todo lo omitido queda en `skipped` con fila y motivo.
+   */
+  private async scanSheet(
+    file: AiScanFile,
+    format: IngestSheetFormat,
+    reportProgress?: ReportProgress,
+    quotaKey: string = newIngestQuotaKey(),
+  ): Promise<CustomerImportScanResult> {
+    const progress = async (done: number, total: number, stage: string) => {
+      if (!reportProgress || total <= 0) return;
+      await reportProgress({ done, total, stage, unit: 'filas' });
+    };
+
+    const parsed = this.sheetParser.parse(file.buffer, format, {
+      maxRows: IMPORT_MAX_SHEET_ROWS,
+    });
+    const warnings = [...parsed.warnings];
+    const skipped: ImportSkippedRow[] = [...parsed.skipped];
+    const rowIssues: ImportRowIssue[] = [];
+    const columns: ImportColumnMapping[] = [];
+    if (!parsed.tables.length) {
+      throw new VendixHttpException(ErrorCodes.AI_INGEST_INVALID_FILE);
+    }
+
+    const totalRows = parsed.tables.reduce((n, t) => n + t.rows.length, 0);
+    await progress(0, totalRows, 'Leyendo la hoja');
+
+    let mappingMode: 'synonyms' | 'ai' = 'synonyms';
+    const drafts: CustomerRowDraft[] = [];
+    const multi = parsed.tables.length > 1;
+    for (const table of parsed.tables) {
+      const sheet = multi ? table.sheet : undefined;
+      const { mapping, usedAi } = await this.mapColumns(table, warnings, quotaKey);
+      if (usedAi) mappingMode = 'ai';
+      // No header is a known name: that row may be a customer taken as the
+      // header (a sheet of names only). Say so instead of losing it quietly.
+      if (
+        table.header_row > 0 &&
+        !mapColumnsBySynonyms(table.headers, customersIngestProfile.columnSynonyms).size
+      ) {
+        warnings.push(
+          `Ningún encabezado de la fila ${table.header_row}${sheet ? ` de "${sheet}"` : ''} (${table.headers.slice(0, 4).join(', ')}${table.headers.length > 4 ? '…' : ''}) es un nombre de columna conocido; si esa fila era un cliente, agrega una fila de encabezados y vuelve a cargar el archivo.`,
+        );
+      }
+      for (const header of table.headers) {
+        columns.push({
+          ...(sheet ? { sheet } : {}),
+          column: header,
+          field: mapping.get(header) ?? null,
+        });
+      }
+      if (!mapping.size) {
+        warnings.push(
+          `No se reconoció ninguna columna de clientes${sheet ? ` en la hoja "${sheet}"` : ''}; revisa los encabezados.`,
+        );
+        skipped.push({
+          row: table.row_numbers[0],
+          row_end: table.row_numbers[table.row_numbers.length - 1],
+          ...(sheet ? { sheet } : {}),
+          reason: 'unreadable',
+          message: 'La hoja no tiene columnas de clientes reconocibles.',
+        });
+        continue;
+      }
+      const ignored = table.headers.filter((h) => !mapping.has(h));
+      if (ignored.length) {
+        warnings.push(
+          `Columnas ignoradas${sheet ? ` en "${sheet}"` : ''}: ${ignored.join(', ')}.`,
+        );
+      }
+
+      table.rows.forEach((row, i) => {
+        const ctx = { row: table.row_numbers[i], ...(sheet ? { sheet } : {}) };
+        const raw = applyColumnMapping(row, mapping);
+        const { record, issues, skipMessage } = normalizeCustomerRow(raw, ctx);
+        rowIssues.push(...issues);
+        if (record) drafts.push(record);
+        else {
+          skipped.push({
+            ...ctx,
+            reason: 'unreadable',
+            message: skipMessage ?? 'Fila sin datos de cliente.',
+          });
+        }
+      });
+    }
+
+    // IA solo para las filas con celdas ambiguas, en lotes con row_id.
+    const ambiguous = drafts.filter((d) => d.needs.length);
+    const resolvedDeterministically = totalRows - ambiguous.length;
+    await progress(
+      resolvedDeterministically,
+      totalRows,
+      ambiguous.length ? 'Normalizando filas con IA' : 'Preparando la vista previa',
+    );
+    const resolved = await this.resolveAmbiguousRows(
+      ambiguous,
+      rowIssues,
+      warnings,
+      (done) =>
+        progress(resolvedDeterministically + done, totalRows, 'Normalizando filas con IA'),
+      quotaKey,
+    );
+
+    const perRow: CustomerWithRows[] = drafts.map((d) => {
+      const draft = resolved.get(d) ?? d;
+      const customer = this.normalizeCustomer({
+        ...draft,
+        locations: draft.location ? [draft.location] : [],
+      });
+      return {
+        ...customer,
+        source_rows: [d.row],
+        ...(d.sheet ? { source_sheet: d.sheet } : {}),
+      };
+    });
+    const merged = mergeCustomerRows(perRow);
+    skipped.push(...merged.skipped);
+
+    const byPosition = (a: { row: number; sheet?: string }, b: { row: number; sheet?: string }) =>
+      (a.sheet ?? '').localeCompare(b.sheet ?? '') || a.row - b.row;
+    skipped.sort(byPosition);
+    rowIssues.sort(byPosition);
+
+    const omitted = skipped.reduce(
+      (n, s) => n + (s.row_end ? s.row_end - s.row + 1 : 1),
+      0,
+    );
+    if (omitted) {
+      warnings.push(
+        `${omitted} fila(s) no se cargaron; mira "Filas omitidas" para ver cuáles y por qué.`,
+      );
+    }
+    await progress(totalRows, totalRows, 'Preparando la vista previa');
+
+    return {
+      customers: merged.customers,
+      warnings,
+      skipped,
+      row_issues: rowIssues,
+      columns,
+      stats: {
+        source: 'sheet',
+        total_rows: parsed.total_rows,
+        imported_rows: drafts.length,
+        skipped_rows: omitted,
+        ai_rows: ambiguous.length,
+        mapping: mappingMode,
+      },
+    };
+  }
+
+  /**
+   * Encabezados → campos. Primero sinónimos; si no cubren los obligatorios,
+   * UNA llamada con encabezados + 5 filas de muestra devuelve el mapeo, que
+   * luego se aplica con código a todas las filas.
+   */
+  private async mapColumns(
+    table: SheetTable,
+    warnings: string[],
+    quotaKey?: string,
+  ): Promise<{ mapping: ColumnMapping<CustomerSheetField>; usedAi: boolean }> {
+    const synonyms = mapColumnsBySynonyms<CustomerSheetField>(
+      table.headers,
+      customersIngestProfile.columnSynonyms,
+    );
+    const missing = missingRequiredGroups(
+      synonyms,
+      customersIngestProfile.requiredFields,
+    );
+    const sample = table.rows.slice(0, SAMPLE_ROWS_FOR_MAPPING);
+    // Without a required field the sheet cannot be read: always ask. Without
+    // a wanted one (the document), ask only if some column with data is left
+    // unmapped ("Ident.", "C.C./NIT No."); otherwise there is nothing to find.
+    const wantedMissing =
+      !missing.length &&
+      missingRequiredGroups(synonyms, customersIngestProfile.wantedFields ?? [])
+        .length > 0 &&
+      unmappedHeadersWithData(table.headers, synonyms, sample).length > 0;
+    if (!missing.length && !wantedMissing) {
+      return { mapping: synonyms, usedAi: false };
+    }
+
+    const fieldList = CUSTOMER_SHEET_FIELDS.map(
+      (f) => `- ${f}: ${CUSTOMER_FIELD_DESCRIPTIONS[f]}`,
+    ).join('\n');
+    const message: AIMessage = {
+      role: 'user',
+      content: [
+        'TASK FOR THIS REQUEST (it replaces the output format of your instructions): do NOT extract customers.',
+        'Map each column of a customer spreadsheet to ONE customer field, or "ignore".',
+        'Return ONLY a JSON object: {"columns":[{"column":"<exact column name>","field":"<field or ignore>"}],"warnings":[]}.',
+        'Use each field at most once. Use the sample values, not only the column names.',
+        'Fields:',
+        fieldList,
+        `Columns: ${JSON.stringify(table.headers)}`,
+        `Sample rows: ${JSON.stringify(sample)}`,
+      ].join('\n'),
+    };
+    try {
+      const answer = await this.aiExtraction.extract<{
+        columns?: { column?: unknown; field?: unknown }[];
+      }>({
+        appKey: APP_KEY,
+        schema: columnMappingSchema(CUSTOMER_SHEET_FIELDS),
+        messages: [message],
+        quotaKey,
+      });
+      const mapping = mergeAiColumnMapping(
+        synonyms,
+        table.headers,
+        CUSTOMER_SHEET_FIELDS,
+        answer,
+      );
+      return { mapping, usedAi: true };
+    } catch (error) {
+      // Optional call (names already mapped): any AI failure falls back to
+      // the synonyms; the load goes on without the extra column.
+      if (
+        !wantedMissing &&
+        (!(error instanceof AiExtractionError) || error.failure === 'ai_failed')
+      ) {
+        throw error instanceof AiExtractionError ? error.toHttpException() : error;
+      }
+      this.logger.warn(
+        `[CustomerImportScan] column mapping by AI failed (${error instanceof AiExtractionError ? error.failure : 'error'}); using synonyms only`,
+      );
+      warnings.push(
+        'No se pudieron reconocer todas las columnas; revisa nombres y documentos en la vista previa.',
+      );
+      return { mapping: synonyms, usedAi: false };
+    }
+  }
+
+  /**
+   * Lotes de 50 filas ambiguas con `row_id` (concurrencia 3, división por
+   * longitud y reparación en `AiExtractionService`). Una fila que la IA no
+   * resuelve se queda con la lectura determinista y un aviso: no se pierde.
+   */
+  private async resolveAmbiguousRows(
+    rows: CustomerRowDraft[],
+    rowIssues: ImportRowIssue[],
+    warnings: string[],
+    onProgress: (done: number) => Promise<void>,
+    quotaKey?: string,
+  ): Promise<Map<CustomerRowDraft, CustomerRowDraft>> {
+    const resolved = new Map<CustomerRowDraft, CustomerRowDraft>();
+    if (!rows.length) return resolved;
+    const ids = new Map<CustomerRowDraft, number>(
+      rows.map((r, i) => [r, i + 1] as const),
+    );
+
+    let outcome: ExtractBatchesResult<CustomerRowDraft, CustomerRowsAnswer>;
+    try {
+      outcome = await this.aiExtraction.extractBatches<
+        CustomerRowDraft,
+        CustomerRowsAnswer
+      >({
+        appKey: APP_KEY,
+        schema: CUSTOMER_ROWS_SCHEMA,
+        items: rows,
+        batchSize: customersIngestProfile.limits.rowsPerBatch,
+        concurrency: 3,
+        maxSplitDepth: 3,
+        buildMessages: (batch) => [this.rowsMessage(batch, ids)],
+        onProgress: (done) => onProgress(done),
+        quotaKey,
+      });
+    } catch (error) {
+      throw error instanceof AiExtractionError ? error.toHttpException() : error;
+    }
+
+    for (const { items, data } of outcome.results) {
+      const byId = new Map<number, CustomerAiRow>(
+        (data.customers ?? []).map((c) => [Number(c.row_id), c] as const),
+      );
+      for (const draft of items) {
+        const ai = byId.get(ids.get(draft)!);
+        if (ai) resolved.set(draft, applyCustomerAiRow(draft, ai));
+        else this.unresolved(draft, rowIssues);
+      }
+      for (const w of data.warnings ?? []) {
+        if (typeof w === 'string' && w.trim()) warnings.push(w.trim());
+      }
+    }
+    for (const { items } of outcome.failed) {
+      items.forEach((draft) => this.unresolved(draft, rowIssues));
+    }
+    return resolved;
+  }
+
+  private unresolved(draft: CustomerRowDraft, rowIssues: ImportRowIssue[]): void {
+    rowIssues.push({
+      row: draft.row,
+      ...(draft.sheet ? { sheet: draft.sheet } : {}),
+      level: 'warning',
+      message: unresolvedNeedsMessage(draft.needs),
+    });
+  }
+
+  private rowsMessage(
+    batch: CustomerRowDraft[],
+    ids: Map<CustomerRowDraft, number>,
+  ): AIMessage {
+    const lines = batch.map((d) =>
+      JSON.stringify(customerAiRowPayload(ids.get(d)!, d)),
+    );
+    return {
+      role: 'user',
+      content: [
+        'TASK FOR THIS REQUEST (it replaces the output format of your instructions): normalize rows of a customer spreadsheet.',
+        'Each input row has a "row_id". Return ONLY a JSON object {"customers":[...],"warnings":[]} with exactly ONE entry per input row, keeping its "row_id".',
+        'Do NOT merge rows, do NOT drop rows and NEVER invent data: omit a field you cannot determine.',
+        'Fields per entry: row_id, person_type (NATURAL|JURIDICA), first_name, last_name, legal_name, document_type (CC|CE|NIT|TI|PA|PEP|PPT|RC), document_number (digits and letters only, without the NIT verification digit), verification_digit, address_line_1, city, state.',
+        'Rules: a company name (S.A.S., LTDA, S.A., etc.) goes to legal_name with person_type JURIDICA; a person goes to first_name (given names) and last_name (both surnames, Colombian convention).',
+        '"address" may contain the city and department at the end: split them into address_line_1, city and state.',
+        '"document_number" or "document_type" may contain the type in words ("C.C.", "Cédula de extranjería", "NIT 900123456-7"): normalize them.',
+        'Rows (one JSON per line):',
+        ...lines,
+      ].join('\n'),
+    };
+  }
+
+  /**
+   * Normaliza el JSON de la IA (imagen/PDF): tipos, documentos sin
+   * puntos/espacios, tipo de persona inferido y fusión de clientes repetidos
+   * por (tipo, número). Nada se corta en silencio: si supera el tope se avisa.
    */
   normalizeScan(parsed: unknown): CustomerImportScanResult {
     const raw = (parsed ?? {}) as { customers?: unknown; warnings?: unknown };
@@ -178,13 +555,13 @@ export class CustomerAiImportService implements OnModuleInit {
     const merged = this.mergeCustomers(
       list.map((c) => this.normalizeCustomer(c)),
     );
-    if (merged.length > IMPORT_MAX_CUSTOMERS) {
+    if (merged.length > IMPORT_MAX_SHEET_ROWS) {
       warnings.push(
-        `El documento tiene más de ${IMPORT_MAX_CUSTOMERS} clientes; solo se cargaron los primeros ${IMPORT_MAX_CUSTOMERS}.`,
+        `El documento tiene ${merged.length} clientes; solo se cargaron los primeros ${IMPORT_MAX_SHEET_ROWS}. Divide el archivo para cargar el resto.`,
       );
     }
     return {
-      customers: merged.slice(0, IMPORT_MAX_CUSTOMERS),
+      customers: merged.slice(0, IMPORT_MAX_SHEET_ROWS),
       warnings,
     };
   }
@@ -615,6 +992,14 @@ export class CustomerAiImportService implements OnModuleInit {
       ...customer,
       person_type: this.str(c.person_type) as ImportPersonType | null,
     });
+    const rows = Array.isArray(c.source_rows)
+      ? c.source_rows.filter(
+          (r): r is number => typeof r === 'number' && Number.isInteger(r) && r > 0,
+        )
+      : [];
+    if (rows.length) customer.source_rows = rows.slice(0, IMPORT_MAX_SOURCE_ROWS);
+    const sheet = this.clean(this.str(c.source_sheet));
+    if (sheet) customer.source_sheet = sheet;
     return customer;
   }
 
@@ -665,6 +1050,12 @@ export class CustomerAiImportService implements OnModuleInit {
         if (base[field] === null) {
           (base as unknown as Record<string, unknown>)[field] = c[field];
         }
+      }
+      if (c.source_rows?.length) {
+        base.source_rows = [...(base.source_rows ?? []), ...c.source_rows].slice(
+          0,
+          IMPORT_MAX_SOURCE_ROWS,
+        );
       }
       const known = new Set(
         base.locations.map(
@@ -766,37 +1157,30 @@ export class CustomerAiImportService implements OnModuleInit {
   // Archivos
   // ─────────────────────────────────────────────────────────────────────────
 
-  private extension(file: AiScanFile): string {
-    return (file.originalName?.split('.').pop() ?? '').toLowerCase();
-  }
-
-  private isSpreadsheet(file: AiScanFile): boolean {
-    if (SHEET_MIMETYPES.includes(file.mimeType)) return true;
-    return (
-      file.mimeType === 'application/octet-stream' &&
-      SHEET_EXTENSIONS.includes(this.extension(file))
-    );
-  }
-
-  private assertValidScanFile(file?: AiScanFile): asserts file is AiScanFile {
+  /**
+   * Tipo real por firma (no por el `mimetype` del cliente ni por el que la
+   * cola reconstruye desde la key de S3) y tamaño por tipo.
+   */
+  private assertValidScanFile(file?: AiScanFile): DetectedIngestFile {
     if (!file) {
       throw new VendixHttpException(
         ErrorCodes.SYS_VALIDATION_001,
         'Sube un documento para analizar.',
       );
     }
-    if (this.isSpreadsheet(file)) {
+    const detected = detectIngestFile(file);
+    if (detected?.kind === 'sheet') {
       if (file.size > MAX_SHEET_BYTES) {
         throw new VendixHttpException(
           ErrorCodes.SYS_VALIDATION_001,
           'Las hojas de cálculo no pueden superar 5 MB.',
         );
       }
-      return;
+      return detected;
     }
     if (
-      IMAGE_MIMETYPES.includes(file.mimeType) ||
-      file.mimeType === PDF_MIMETYPE
+      detected &&
+      (detected.kind === 'pdf' || IMAGE_MIMETYPES.includes(detected.mime))
     ) {
       if (file.size > MAX_DOCUMENT_BYTES) {
         throw new VendixHttpException(
@@ -804,49 +1188,20 @@ export class CustomerAiImportService implements OnModuleInit {
           'Las imágenes y PDF no pueden superar 10 MB.',
         );
       }
-      return;
+      return detected;
     }
     throw new VendixHttpException(
       ErrorCodes.SYS_VALIDATION_001,
-      'Formato no soportado. Usa imagen (JPG, PNG, WebP), PDF, Excel (xlsx, xls) o CSV.',
+      detected?.mime === 'image/heic'
+        ? 'Las fotos HEIC aún no se leen aquí. Conviértela a JPG o PNG e intenta de nuevo.'
+        : 'Formato no soportado. Usa imagen (JPG, PNG, WebP), PDF, Excel (xlsx, xls) o CSV.',
     );
-  }
-
-  /** xlsx / xls / csv → texto CSV (todas las hojas con datos). */
-  private spreadsheetToText(file: AiScanFile): string {
-    let workbook: XLSX.WorkBook;
-    try {
-      workbook = XLSX.read(file.buffer, { type: 'buffer' });
-    } catch {
-      throw new VendixHttpException(
-        ErrorCodes.SYS_VALIDATION_001,
-        'No se pudo leer la hoja de cálculo. Verifica que no esté dañada.',
-      );
-    }
-    const parts: string[] = [];
-    for (const name of workbook.SheetNames) {
-      const csv = XLSX.utils.sheet_to_csv(workbook.Sheets[name], {
-        blankrows: false,
-      });
-      if (csv.trim()) {
-        parts.push(workbook.SheetNames.length > 1 ? `# ${name}\n${csv}` : csv);
-      }
-    }
-    const text = parts.join('\n\n');
-    if (!text.trim()) {
-      throw new VendixHttpException(
-        ErrorCodes.SYS_VALIDATION_001,
-        'La hoja de cálculo no tiene datos.',
-      );
-    }
-    return text.length > MAX_SHEET_TEXT_CHARS
-      ? text.slice(0, MAX_SHEET_TEXT_CHARS)
-      : text;
   }
 
   /** Igual que los demás escáneres: reduce imágenes; PDF pasa crudo. */
   private async preprocessImage(
     file: AiScanFile,
+    detectedMime: string,
   ): Promise<{ base64: string; mimeType: string }> {
     const MAX_DIMENSION = 1536;
     const JPEG_QUALITY = 85;
@@ -870,7 +1225,7 @@ export class CustomerAiImportService implements OnModuleInit {
       );
       return {
         base64: file.buffer.toString('base64'),
-        mimeType: file.mimeType,
+        mimeType: detectedMime,
       };
     }
   }

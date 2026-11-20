@@ -44,6 +44,8 @@ import {
   ImportCustomerMatch,
   ImportLocation,
   ImportPersonType,
+  ImportRowIssue,
+  ImportSkippedRow,
 } from '../../services/customer-ai-import.service';
 import { BulkUploadLogService } from '../../../bulk-uploads/services/bulk-upload-log.service';
 import {
@@ -111,7 +113,13 @@ interface EditableCustomer {
   /** Acción elegida cuando el cliente ya existe. */
   matchAction: ImportCommitAction;
   included: boolean;
+  /** Filas de la hoja de las que salió (vacío para imágenes/PDF). */
+  source_rows: number[];
+  source_sheet?: string;
 }
+
+/** Tarjetas de la precarga que se pintan de una vez (las hojas traen miles). */
+const PREVIEW_PAGE_SIZE = 50;
 
 /**
  * Carga de clientes con IA (S7).
@@ -219,9 +227,11 @@ interface EditableCustomer {
           <div class="bg-muted/30 border border-border rounded-lg p-3 flex items-start gap-3">
             <app-icon name="info" [size]="16" class="text-text-secondary mt-0.5"></app-icon>
             <p class="text-xs text-text-secondary">
-              Funciona con listados de clientes, catálogos, RUT o contratos. Las filas
-              del mismo NIT o cédula se agrupan en un solo cliente con varias ubicaciones.
-              Nada se crea hasta que confirmes el lote.
+              Funciona con listados de clientes, catálogos, RUT o contratos. En Excel o CSV
+              se leen hasta 5.000 filas, aunque el encabezado no esté en la primera fila.
+              Las filas del mismo NIT o cédula se agrupan en un solo cliente con varias
+              ubicaciones, y verás qué filas se omitieron y por qué. Nada se crea hasta
+              que confirmes el lote.
             </p>
           </div>
         </div>
@@ -236,6 +246,9 @@ interface EditableCustomer {
             [showRetry]="!!selectedFile()"
             (retry)="startScan()"
           />
+          @if (analyzeStatus(); as status) {
+            <p class="text-xs text-text-secondary" role="status">{{ status }}</p>
+          }
           @if (aiProgress.error()) {
             <app-button variant="outline" (clicked)="backToUpload()">
               Elegir otro archivo
@@ -259,6 +272,36 @@ interface EditableCustomer {
             </div>
           }
 
+          @if (sheetStats(); as st) {
+            <p class="text-xs text-text-secondary">
+              Se leyeron {{ st.total_rows }} fila(s) de la hoja:
+              {{ customers().length }} cliente(s) en la precarga
+              @if (st.skipped_rows) {
+                · {{ st.skipped_rows }} fila(s) omitida(s)
+              }
+              @if (st.ai_rows) {
+                · {{ st.ai_rows }} revisada(s) con IA
+              }
+            </p>
+          }
+
+          @if (skippedRows().length > 0) {
+            <details class="border border-border rounded-lg p-3 bg-muted/20">
+              <summary class="text-xs font-semibold text-text-primary cursor-pointer flex items-center gap-2">
+                <app-icon name="alert-triangle" [size]="14" class="text-amber-600"></app-icon>
+                Filas omitidas ({{ skippedRows().length }})
+              </summary>
+              <ul class="mt-2 space-y-1 max-h-48 overflow-y-auto">
+                @for (s of skippedRows(); track $index) {
+                  <li class="text-xs text-text-secondary">
+                    <span class="font-medium text-text-primary">{{ skippedLabel(s) }}:</span>
+                    {{ s.message }}
+                  </li>
+                }
+              </ul>
+            </details>
+          }
+
           <div class="flex flex-wrap gap-2 text-xs">
             <app-badge variant="neutral" size="xsm">{{ customers().length }} clientes</app-badge>
             <app-badge variant="neutral" size="xsm">{{ totalLocations() }} ubicaciones</app-badge>
@@ -266,7 +309,21 @@ interface EditableCustomer {
             <app-badge [variant]="errorCount() > 0 ? 'error' : 'success'" size="xsm">
               {{ errorCount() }} con errores
             </app-badge>
+            @if (rowIssues().length > 0) {
+              <app-badge variant="warning" size="xsm">{{ rowIssues().length }} aviso(s) por fila</app-badge>
+            }
           </div>
+
+          @if (customers().length > pageSize) {
+            <label class="flex items-center gap-2 text-xs text-text-secondary cursor-pointer">
+              <input
+                type="checkbox"
+                [ngModel]="onlyProblems()"
+                (ngModelChange)="onlyProblems.set($event); visibleCount.set(pageSize)"
+              />
+              Ver solo los clientes con errores o avisos
+            </label>
+          }
 
           @if (customers().length === 0) {
             <div class="text-sm text-text-secondary p-4 border border-dashed border-border rounded-lg text-center">
@@ -274,7 +331,7 @@ interface EditableCustomer {
             </div>
           }
 
-          @for (c of customers(); track c.uid) {
+          @for (c of visibleCustomers(); track c.uid) {
             <app-card [responsive]="true">
               <div class="space-y-3" [class]="c.included ? '' : discardedRowClasses">
                 <div class="flex items-start justify-between gap-2">
@@ -299,6 +356,14 @@ interface EditableCustomer {
                       }
                     } @else {
                       <app-badge variant="success" size="xsm">Nuevo</app-badge>
+                    }
+                    @if (c.source_rows.length) {
+                      <p class="mt-1 text-xs text-text-secondary">{{ rowsLabel(c) }}</p>
+                    }
+                    @for (issue of customerIssues(c); track $index) {
+                      <p class="text-xs" [class]="issue.level === 'error' ? 'text-red-600' : 'text-amber-700'">
+                        Fila {{ issue.row }}: {{ issue.message }}
+                      </p>
                     }
                   </div>
                   <div class="flex items-center gap-2 flex-shrink-0">
@@ -514,6 +579,15 @@ interface EditableCustomer {
             </app-card>
           }
 
+          @if (filteredCustomers().length > visibleCustomers().length) {
+            <div class="flex justify-center">
+              <app-button variant="outline" size="sm" (clicked)="showMore()">
+                Mostrar {{ nextPageCount() }} más
+                ({{ visibleCustomers().length }} de {{ filteredCustomers().length }})
+              </app-button>
+            </div>
+          }
+
           <app-ai-review-ack
             #ackBlock
             [(acknowledged)]="aiAck"
@@ -583,6 +657,9 @@ interface EditableCustomer {
             </app-button>
           }
           @if (currentStep() === 3) {
+            @if (commitStatus(); as status) {
+              <span class="self-center text-xs text-text-secondary" role="status">{{ status }}</span>
+            }
             <app-button
               variant="primary"
               [disabled]="!canCommit()"
@@ -646,6 +723,43 @@ export class CustomerAiImportModalComponent {
   private static readonly RESUME_KEY = 'customer_import:bulk';
   readonly analysis = signal<{ warnings: string[] } | null>(null);
   readonly customers = signal<EditableCustomer[]>([]);
+  /** ia-cargas F1 — filas omitidas y avisos por fila que trae el escaneo. */
+  readonly skippedRows = signal<ImportSkippedRow[]>([]);
+  readonly rowIssues = signal<ImportRowIssue[]>([]);
+  readonly sheetStats = signal<CustomerImportScanResult['stats'] | null>(null);
+  /** «Revisando clientes existentes 200 de 800» mientras corre `analyze`. */
+  readonly analyzeStatus = signal<string | null>(null);
+  readonly commitStatus = signal<string | null>(null);
+  readonly pageSize = PREVIEW_PAGE_SIZE;
+  readonly visibleCount = signal(PREVIEW_PAGE_SIZE);
+  readonly onlyProblems = signal(false);
+
+  private readonly issuesByRow = computed(() => {
+    const map = new Map<string, ImportRowIssue[]>();
+    for (const issue of this.rowIssues()) {
+      const key = `${issue.sheet ?? ''}|${issue.row}`;
+      map.set(key, [...(map.get(key) ?? []), issue]);
+    }
+    return map;
+  });
+  readonly filteredCustomers = computed(() => {
+    const list = this.customers();
+    if (!this.onlyProblems()) return list;
+    return list.filter(
+      (c) =>
+        (this.isActive(c) && !!this.customerError(c)) ||
+        this.customerIssues(c).length > 0,
+    );
+  });
+  readonly visibleCustomers = computed(() =>
+    this.filteredCustomers().slice(0, this.visibleCount()),
+  );
+  readonly nextPageCount = computed(() =>
+    Math.min(
+      PREVIEW_PAGE_SIZE,
+      this.filteredCustomers().length - this.visibleCustomers().length,
+    ),
+  );
   readonly committing = signal(false);
   readonly commitResult = signal<CommitCustomerImportResult | null>(null);
 
@@ -804,18 +918,30 @@ export class CustomerAiImportModalComponent {
             throw new Error(res.message || 'Error al escanear el documento');
           }
           scanWarnings = res.data.warnings ?? [];
+          this.skippedRows.set(res.data.skipped ?? []);
+          this.rowIssues.set(res.data.row_issues ?? []);
+          this.sheetStats.set(
+            res.data.stats?.source === 'sheet' ? res.data.stats : null,
+          );
           if (!res.data.customers?.length) {
             throw new AiScanJobError(
-              'No se detectaron clientes en el documento.',
+              res.data.skipped?.length
+                ? 'No quedó ningún cliente: todas las filas se omitieron. Revisa los encabezados y que las filas tengan nombre o documento.'
+                : 'No se detectaron clientes en el documento.',
               'document',
             );
           }
-          return this.service.analyze(res.data.customers);
+          return this.service.analyzeInChunks(res.data.customers, (done, total) =>
+            this.analyzeStatus.set(
+              `Revisando clientes existentes: ${done} de ${total}`,
+            ),
+          );
         }),
         tap((res) => {
           if (!res.success || !res.data) {
             throw new Error(res.message || 'Error al analizar el documento');
           }
+          this.analyzeStatus.set(null);
           this.seedEditableState(res.data, scanWarnings);
           this.currentStep.set(3);
         }),
@@ -830,6 +956,7 @@ export class CustomerAiImportModalComponent {
                   'Error al procesar el documento';
             this.toast.error(display);
           }
+          this.analyzeStatus.set(null);
           if (!this.aiProgress.error()) this.aiProgress.onFailed(err);
           return of(null);
         }),
@@ -849,6 +976,8 @@ export class CustomerAiImportModalComponent {
     this.customers.set(
       a.customers.map((c) => this.toEditable(c)),
     );
+    this.visibleCount.set(PREVIEW_PAGE_SIZE);
+    this.onlyProblems.set(false);
     this.aiAck.set(false);
   }
 
@@ -867,6 +996,8 @@ export class CustomerAiImportModalComponent {
       match: c.match,
       matchAction: 'add_locations',
       included: true,
+      source_rows: c.source_rows ?? [],
+      source_sheet: c.source_sheet,
       locations: c.locations.map((l) => ({
         uid: ++this.uidSeq,
         label: l.label,
@@ -942,6 +1073,34 @@ export class CustomerAiImportModalComponent {
   }
 
   // ------------------------------------------------------------ presentación
+
+  showMore(): void {
+    this.visibleCount.update((n) => n + PREVIEW_PAGE_SIZE);
+  }
+
+  rowsLabel(c: EditableCustomer): string {
+    const rows = c.source_rows;
+    const sheet = c.source_sheet ? ` · hoja «${c.source_sheet}»` : '';
+    if (rows.length === 1) return `Fila ${rows[0]}${sheet}`;
+    const shown = rows.slice(0, 8).join(', ');
+    return `Filas ${shown}${rows.length > 8 ? '…' : ''}${sheet}`;
+  }
+
+  /** Avisos de las filas de las que salió el cliente. */
+  customerIssues(c: EditableCustomer): ImportRowIssue[] {
+    if (!c.source_rows.length) return [];
+    const map = this.issuesByRow();
+    return c.source_rows.flatMap(
+      (row) => map.get(`${c.source_sheet ?? ''}|${row}`) ?? [],
+    );
+  }
+
+  skippedLabel(s: ImportSkippedRow): string {
+    const sheet = s.sheet ? ` (hoja «${s.sheet}»)` : '';
+    return s.row_end && s.row_end !== s.row
+      ? `Filas ${s.row}–${s.row_end}${sheet}`
+      : `Fila ${s.row}${sheet}`;
+  }
 
   customerLabel(c: EditableCustomer): string {
     const person = [c.first_name, c.last_name].filter(Boolean).join(' ').trim();
@@ -1020,11 +1179,14 @@ export class CustomerAiImportModalComponent {
     const payload = this.customers().map((c) => this.toCommitItem(c));
     this.committing.set(true);
     this.service
-      .commit(payload, this.fileInfo)
+      .commitInChunks(payload, this.fileInfo, (done, total) =>
+        this.commitStatus.set(`Cargando ${done} de ${total} clientes…`),
+      )
       .pipe(takeUntilDestroyed(this.destroyRef))
       .subscribe({
         next: (res) => {
           this.committing.set(false);
+          this.commitStatus.set(null);
           if (!res.success || !res.data) {
             this.toast.error(res.message || 'No se pudo crear el lote');
             return;
@@ -1043,6 +1205,7 @@ export class CustomerAiImportModalComponent {
         },
         error: (err: unknown) => {
           this.committing.set(false);
+          this.commitStatus.set(null);
           this.toast.error(
             err instanceof HttpErrorResponse
               ? parseApiError(err).userMessage
@@ -1102,6 +1265,13 @@ export class CustomerAiImportModalComponent {
     this.isDragging.set(false);
     this.analysis.set(null);
     this.customers.set([]);
+    this.skippedRows.set([]);
+    this.rowIssues.set([]);
+    this.sheetStats.set(null);
+    this.analyzeStatus.set(null);
+    this.commitStatus.set(null);
+    this.visibleCount.set(PREVIEW_PAGE_SIZE);
+    this.onlyProblems.set(false);
     this.committing.set(false);
     this.commitResult.set(null);
     // El contenido proyectado en app-modal no se destruye al cerrar: sin este
