@@ -20,7 +20,7 @@ export const MAX_IMAGE_STRIPS = 10;
 
 const HEIC_BRANDS = ['heic', 'heix', 'hevc', 'hevx', 'heim', 'heis', 'mif1', 'msf1'];
 
-export type ImagePrepFailure = 'unsupported' | 'too_large' | 'unreadable';
+export type ImagePrepFailure = 'unsupported' | 'too_large' | 'multipage' | 'unreadable';
 
 export class ImagePrepError extends Error {
   constructor(
@@ -139,17 +139,19 @@ export async function prepareImageForAi(
   let height: number;
   try {
     const metadata = await open().metadata();
+    if ((metadata.pages ?? 1) > 1) {
+      throw new ImagePrepError(
+        'multipage',
+        'La imagen tiene varias páginas; sube una foto por página o un PDF.',
+      );
+    }
     if (
-      (metadata.pages ?? 1) > 1 ||
       !metadata.width ||
       !metadata.height ||
       !Number.isFinite(metadata.width) ||
       !Number.isFinite(metadata.height)
     ) {
-      throw new ImagePrepError(
-        'unreadable',
-        'La imagen tiene varias páginas o dimensiones inválidas.',
-      );
+      throw new ImagePrepError('unreadable', 'La imagen tiene dimensiones inválidas.');
     }
     if (metadata.width * metadata.height > AI_IMAGE_MAX_INPUT_PIXELS) {
       throw new ImagePrepError(
@@ -182,12 +184,20 @@ export async function prepareImageForAi(
         .toBuffer();
       return [{ buffer: jpeg, mime: 'image/jpeg', strip: 1, strips: 1 }];
     }
+    // Decode and rotate ONCE; every strip is cut from the upright raw pixels.
+    const upright = await open().rotate().raw().toBuffer({ resolveWithObject: true });
+    const raw = {
+      width: upright.info.width,
+      height: upright.info.height,
+      channels: upright.info.channels,
+    };
+    // Planned again on the decoded size, so a box can never leave the image.
+    const cuts = planStrips(raw.width, raw.height, options.maxStrips);
+    const final = cuts.length ? cuts : [{ top: 0, height: raw.height }];
     const out: PreparedAiImage[] = [];
-    for (let i = 0; i < boxes.length; i += 1) {
-      // rotate() before extract(): the box is measured on the upright image.
-      const jpeg = await open()
-        .rotate()
-        .extract({ left: 0, top: boxes[i].top, width, height: boxes[i].height })
+    for (let i = 0; i < final.length; i += 1) {
+      const jpeg = await sharp(upright.data, { raw })
+        .extract({ left: 0, top: final[i].top, width: raw.width, height: final[i].height })
         .resize({
           width: maxEdge,
           height: maxEdge,
@@ -196,7 +206,7 @@ export async function prepareImageForAi(
         })
         .jpeg({ quality })
         .toBuffer();
-      out.push({ buffer: jpeg, mime: 'image/jpeg', strip: i + 1, strips: boxes.length });
+      out.push({ buffer: jpeg, mime: 'image/jpeg', strip: i + 1, strips: final.length });
     }
     return out;
   } catch (error) {

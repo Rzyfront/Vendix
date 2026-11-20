@@ -126,6 +126,19 @@ describe('DocumentPagesService', () => {
     expect(mock.loadingTask.destroy).toHaveBeenCalledTimes(1);
   });
 
+  it('prepare(): every PDF page carries ONE valid JPEG data URI (consumers decode it)', async () => {
+    installPdfMock([createPage(1, []), createPage(2, [])]);
+    const result = await service.prepare(pdfFile());
+    for (const page of result.pages) {
+      expect(page.data_uri.startsWith('data:image/jpeg;base64,')).toBe(true);
+      expect(page.data_uri.indexOf('data:', 1)).toBe(-1);
+      // base-pdf-pages decodes what follows the first comma: it must be a JPEG.
+      const bytes = Buffer.from(page.data_uri.slice(page.data_uri.indexOf(',') + 1), 'base64');
+      expect([...bytes.subarray(0, 3)]).toEqual([0xff, 0xd8, 0xff]);
+      expect(page.text).toBe(`texto-${page.page_number}`);
+    }
+  });
+
   it('rejects a render viewport beyond bounds before allocating its canvas', async () => {
     const page = createPage(1, [], (scale) => scale === 1 ? { width: 100, height: 100 } : { width: 2500, height: 10 });
     installPdfMock([page]);

@@ -176,8 +176,12 @@ export class DocumentPagesService {
         maxPages: this.pageCap(options.maxPages),
       });
       return {
+        // `readPdf` already holds the full data URI of every rendered page.
         pages: read.pages.map((p) => ({
-          ...this.toPage(p.page_number, p.data_uri ?? '', p.text),
+          page_number: p.page_number,
+          data_uri: p.data_uri ?? '',
+          mime_type: 'image/jpeg' as const,
+          text: p.text,
           width_pt: p.width_pt,
           height_pt: p.height_pt,
         })),
@@ -349,7 +353,7 @@ export class DocumentPagesService {
       return { pages: [page], page_count: 1 };
     } catch (error) {
       if (error instanceof BadRequestException) throw error;
-      if (error instanceof ImagePrepError && error.reason === 'too_large') {
+      if (error instanceof ImagePrepError && (error.reason === 'too_large' || error.reason === 'multipage')) {
         throw this.badRequest('La imagen excede los límites de páginas o dimensiones permitidos.');
       }
       throw this.badRequest('No se pudo preparar la imagen del documento.');
