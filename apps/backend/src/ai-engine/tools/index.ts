@@ -5,6 +5,7 @@ export { AIToolRegistry } from './ai-tool-registry';
 export { createSalesTools } from './domains/sales.tools';
 export { createOrdersTools } from './domains/orders.tools';
 export { createInventoryTools } from './domains/inventory.tools';
+export { createInventoryTransferTools } from './domains/inventory-transfers.tools';
 export { createAccountingTools } from './domains/accounting.tools';
 export { createFiscalTools } from './domains/fiscal.tools';
 export { createInvoicingTools } from './domains/invoicing.tools';
