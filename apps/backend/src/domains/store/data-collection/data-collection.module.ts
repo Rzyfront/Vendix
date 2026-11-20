@@ -11,6 +11,8 @@ import { S3Module } from '../../../common/services/s3.module';
 import { TemplateImportService } from './template-import.service';
 import { SubmissionDocumentsService } from './submission-documents.service';
 import { MetadataModule } from '../metadata/metadata.module';
+import { TemplateAiDraftService } from './ai-draft/template-ai-draft.service';
+import { ReceivedDocumentPagesService } from '../../received-documents/services/received-document-pages.service';
 
 @Module({
   imports: [ResponseModule, PrismaModule, MetadataModule, S3Module],
@@ -20,6 +22,10 @@ import { MetadataModule } from '../metadata/metadata.module';
     TemplateImportService,
     SubmissionDocumentsService,
     SubmissionsService,
+    // «Crear con IA (PDF/foto)»: handler `data_collection_template` of the
+    // global `ai-scan` queue (AiScanJobsModule and AIEngineModule are global).
+    TemplateAiDraftService,
+    ReceivedDocumentPagesService,
     BookingDataCollectionListener,
     BookingSnapshotListener,
   ],

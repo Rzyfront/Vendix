@@ -13,6 +13,7 @@ export const AI_SCAN_KIND_LABELS: Record<AiScanKind, string> = {
   product_image_enhance: 'mejora de imagen de producto con IA',
   product_image_generate: 'generación de imagen de producto con IA',
   invoice_draft: 'borrador de factura con IA',
+  data_collection_template: 'plantilla de recolección de datos con IA',
 };
 
 export function aiScanSource(kind: AiScanKind | string): AiJobSource {

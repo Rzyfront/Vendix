@@ -1,4 +1,4 @@
-import { ChangeDetectionStrategy, Component, DestroyRef, computed, inject, model, signal } from '@angular/core';
+import { ChangeDetectionStrategy, Component, DestroyRef, computed, inject, input, model, signal, OnInit } from '@angular/core';
 import { takeUntilDestroyed } from '@angular/core/rxjs-interop';
 import { Router } from '@angular/router';
 import { ModalComponent } from '../../../../../../shared/components/modal/modal.component';
@@ -96,6 +96,24 @@ const MAX_FILE_BYTES = 1024 * 1024;
             (input)="onTextInput($any($event.target).value)"
           ></textarea>
         </div>
+
+        @if (showAiErrors()) {
+          <div class="rounded-xl p-3" role="alert" style="border: 1px solid var(--color-warning)">
+            <p class="text-sm font-semibold mb-1" style="color: var(--color-text)">
+              Revisa estos puntos que marcó la IA
+            </p>
+            <ul class="space-y-1 text-xs max-h-40 overflow-y-auto" style="color: var(--color-text)">
+              @for (e of initialErrors(); track $index) {
+                <li>
+                  @if (e.path) {
+                    <code class="font-mono px-1 rounded" style="background: var(--color-surface-secondary)">{{ e.path }}</code>
+                  }
+                  {{ e.message }}
+                </li>
+              }
+            </ul>
+          </div>
+        }
 
         <!-- Live validation -->
         @if (text().trim()) {
@@ -215,15 +233,23 @@ const MAX_FILE_BYTES = 1024 * 1024;
     </app-modal>
   `,
 })
-export class TemplateJsonImportModalComponent {
+export class TemplateJsonImportModalComponent implements OnInit {
   private readonly destroyRef = inject(DestroyRef);
   private readonly router = inject(Router);
   private readonly templatesService = inject(DataCollectionTemplatesService);
   private readonly toast = inject(ToastService);
 
   readonly isOpen = model<boolean>(false);
+  /** Optional prefill (e.g. an AI draft); applied once on init. */
+  readonly initialText = input<string>('');
+  /** Optional errors flagged by the AI draft, listed in a banner. */
+  readonly initialErrors = input<{ path: string; message: string }[]>([]);
 
   readonly text = signal('');
+  /** AI-flagged errors refer to the prefilled draft: hide them once the user edits it. */
+  readonly showAiErrors = computed(
+    () => this.initialErrors().length > 0 && this.text() === this.initialText(),
+  );
   readonly showExample = signal(false);
   readonly checking = signal(false);
   readonly importing = signal(false);
@@ -253,6 +279,11 @@ export class TemplateJsonImportModalComponent {
   });
   readonly canSubmit = computed(() => this.validation()?.ok === true);
   readonly newFieldsCount = computed(() => this.dryRun()?.fields.filter((f) => f.status === 'new').length ?? 0);
+
+  ngOnInit(): void {
+    const initial = this.initialText();
+    if (initial) this.text.set(initial);
+  }
 
   entityLabel(type: string): string {
     return (ENTITY_TYPE_LABELS as Record<string, string>)[type] ?? type;
