@@ -73,6 +73,13 @@ const REQUIRED_COLUMNS = [
   'stock_transfer_items.quantity_dispatched',
   'stock_transfer_items.quantity_lost',
   'stock_transfer_items.batch_id',
+  // --- CRM: grupo y descripción de etiquetas (20261218090000) ---
+  // Prisma nombra todas las columnas del modelo en cada SELECT: sin la
+  // migración, el gestor de etiquetas y el selector del cliente darían 500, y
+  // además el alta o la edición de una etiqueta no podrían guardar grupo ni
+  // «cuándo se pone».
+  'crm_tags.group_name',
+  'crm_tags.description',
   // --- CRM: apoyo en tareas y etapa destino (20261210090000) ---
   // Toda lectura de crm_tasks (lista, hoy, panel del cliente) trae
   // move_to_stage_id y las personas de apoyo: sin ellas Tareas da 500.
