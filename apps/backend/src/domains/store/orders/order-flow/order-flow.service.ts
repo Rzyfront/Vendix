@@ -163,6 +163,7 @@ import {
 } from '../../withholding-tax/withholding-flow.service';
 import { mergeStoreSettingsWithDefaults } from '../../settings/defaults/default-store-settings';
 import { recordTriggerEvent } from '../../workflows/engine/workflow-trigger.outbox';
+import { releaseOrderPromotionUsage } from '../../promotions/promotion-usage.util';
 
 type OrderState = order_state_enum;
 
@@ -8085,6 +8086,10 @@ export class OrderFlowService {
         fromState: previousState,
         toState: 'cancelled',
       });
+
+      // La venta no ocurrió: devuelve el uso de sus promociones para que no
+      // agote el `usage_limit` (el historial en order_promotions se conserva).
+      await releaseOrderPromotionUsage(tx, orderId);
 
       // Winner (ADR-13): cancel pending attempts plus EVERY received leg
       // (`succeeded`/`captured`) — the cash legs the cash-out just returned

@@ -125,6 +125,7 @@ import { InvoicingService } from '../invoicing/invoicing.service';
 import { CreditNoteBalanceService } from '../invoicing/credit-notes/credit-note-balance.service';
 import { OrderHistoryService } from './order-history/order-history.service';
 import { ServiceAllocationCoordinator } from '../reservations/service-allocation-coordinator.service';
+import { syncOrderPromotionUsage } from '../promotions/promotion-usage.util';
 import {
   EMPTY_SHIPPING_TAX,
   type ShippingTaxSnapshot,
@@ -4534,8 +4535,31 @@ export class OrdersService {
     let promotionSnapshots: { promotion_id: number; discount_amount: number }[] =
       [];
     try {
+      // Categorías reales de cada producto: sin ellas una promoción por
+      // categoría cotizaba 0 al editar la orden.
+      const editorProductIds = Array.from(
+        new Set(
+          dto.items
+            .map((item) => Number(item.product_id))
+            .filter((id) => Number.isFinite(id) && id > 0),
+        ),
+      );
+      const editorCategoryRows = editorProductIds.length
+        ? await this.prisma.product_categories.findMany({
+            where: { product_id: { in: editorProductIds } },
+            select: { product_id: true, category_id: true },
+          })
+        : [];
+      const editorCategoryMap = new Map<number, number[]>();
+      for (const row of editorCategoryRows) {
+        const list = editorCategoryMap.get(row.product_id) ?? [];
+        list.push(row.category_id);
+        editorCategoryMap.set(row.product_id, list);
+      }
       const promotionInput = {
         customer_id: dto.customer_id,
+        // La propia orden no cuenta contra los límites de uso al re-cotizarla.
+        exclude_order_id: orderId,
         manual_promotion_ids: Array.isArray(dto.promotion_ids)
           ? dto.promotion_ids
           : [],
@@ -4546,7 +4570,8 @@ export class OrdersService {
             product_id: item.product_id as number,
             variant_id: item.product_variant_id ?? null,
             category_id: null,
-            category_ids: null,
+            category_ids:
+              editorCategoryMap.get(Number(item.product_id)) ?? null,
             unit_price: Number(item.final_unit_price ?? item.unit_price ?? 0),
             quantity: Number(item.quantity || 0),
             applied_price_tier_id: item.applied_price_tier_id ?? null,
@@ -5557,7 +5582,12 @@ export class OrdersService {
       }
 
       // 13e) Reconciliar `order_promotions`: borrar existentes, reinsertar
-      //      snapshots nuevas del motor.
+      //      snapshots nuevas del motor, y ajustar `usage_count` solo por
+      //      las promociones que entran o salen de la orden.
+      const previousPromotionRows = await tx.order_promotions.findMany({
+        where: { order_id: orderId, discount_amount: { gt: 0 } },
+        select: { promotion_id: true },
+      });
       await tx.order_promotions.deleteMany({
         where: { order_id: orderId },
       });
@@ -5571,6 +5601,13 @@ export class OrdersService {
           })),
         });
       }
+      await syncOrderPromotionUsage(
+        tx,
+        previousPromotionRows.map((r) => r.promotion_id),
+        promotionSnapshots
+          .filter((snap) => snap.discount_amount > 0)
+          .map((snap) => snap.promotion_id),
+      );
 
       // 13f) Cupón: ajustar `current_uses` UNA vez si cambió y la orden
       //      ya estaba creada. Draft no incrementa ni decrementa: la

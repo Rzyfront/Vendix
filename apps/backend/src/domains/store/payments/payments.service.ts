@@ -3433,9 +3433,17 @@ export class PaymentsService {
    */
   private async calculatePosPromotionQuote(
     dto: CreatePosPaymentDto,
+    /**
+     * Orden YA existente que se cobra (borrador adoptado, cierre de mesa): sus
+     * propios usos (`order_promotions` y su parte de `usage_count`) no cuentan
+     * contra `usage_limit`/`per_customer_limit`. Sin esto, una promo de cupo 1
+     * aplicada al guardar el borrador desaparecía al cobrarlo.
+     */
+    existingOrderId: number | null = null,
   ): Promise<PromotionQuoteResult> {
     const input: PromotionQuoteInput = {
       customer_id: dto.customer_id ?? null,
+      exclude_order_id: existingOrderId,
       manual_promotion_ids: Array.isArray(dto.promotion_ids)
         ? dto.promotion_ids
         : [],
@@ -5545,7 +5553,10 @@ export class PaymentsService {
     const resolvedTipValue = resolvedTip.value;
     // Re-evaluate promotions + coupons over the merged subtotal so the
     // final total stays consistent with the fresh path.
-    const promotionQuote = await this.calculatePosPromotionQuote(dto);
+    const promotionQuote = await this.calculatePosPromotionQuote(
+      dto,
+      session.order_id ?? null,
+    );
     const couponInfo = await this.calculatePosCouponDiscount(
       dto,
       newSubtotalGross,
@@ -6670,7 +6681,10 @@ export class PaymentsService {
           calculatedSubtotal + preDiscountTaxAmount,
         );
 
-        const promotionQuote = await this.calculatePosPromotionQuote(dto);
+        const promotionQuote = await this.calculatePosPromotionQuote(
+          dto,
+          existingOrder?.id ?? null,
+        );
         const couponInfo = await this.calculatePosCouponDiscount(
           dto,
           calculatedSubtotalGross,
