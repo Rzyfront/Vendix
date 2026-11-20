@@ -313,7 +313,7 @@ describe('perfil ai-ingest customers', () => {
         ['Ana Gómez', 'Cali'],
       ];
       const scan = await service.scanFromFiles([scanFile(xlsx(rows))], progress);
-      expect(scan.warnings.join(' ')).toContain('La fila 1 se tomó como encabezados (Juan Pérez, Bogotá)');
+      expect(scan.warnings.join(' ')).toContain('Ningún encabezado de la fila 1 (Juan Pérez, Bogotá)');
     });
 
     it('la IA puede escribir el tipo de persona en minúsculas sin invalidar el lote', () => {

@@ -33,14 +33,21 @@ interface RawSheet {
   rows: RawRow[];
 }
 
-/** Accent-free, lower-case, single-spaced: the key used to compare labels. */
-/** An e-mail, or a document/phone-like code (7+ digits, only separators). */
+/** Dates and periods ("31/01/2024", "2024-01-31", "2024-2025") are fine in a header. */
+const DATE_OR_PERIOD = /^(\d{1,4}[-/.]\d{1,2}([-/.]\d{1,4})?|\d{4}\s*[-/]\s*\d{4})$/;
+
+/**
+ * An e-mail, or a document/phone-like code (7+ digits, only separators);
+ * never a date or a period.
+ */
 export function looksLikeDataValue(value: string): boolean {
   const v = value.trim();
   if (/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(v)) return true;
+  if (DATE_OR_PERIOD.test(v)) return false;
   return /^\+?[\d\s.,\-/()]+$/.test(v) && v.replace(/\D/g, '').length >= 7;
 }
 
+/** Accent-free, lower-case, single-spaced: the key used to compare labels. */
 export function normalizeLabel(value: string): string {
   return value
     .normalize('NFD')
@@ -357,6 +364,18 @@ export class SheetParserService {
     const where = multi ? { sheet: sheet.name } : {};
 
     const skipped: IngestSkippedRow[] = [];
+    // Wide rows above the detected header are titles or misread data: they
+    // are reported, never dropped silently (titles are one or two cells).
+    const minFilled = this.headerMinFilled(content);
+    for (const raw of sheet.rows.slice(0, Math.max(0, headerIndex))) {
+      if (raw.cells.filter(Boolean).length < minFilled) continue;
+      skipped.push({
+        row: raw.row,
+        ...where,
+        reason: 'unreadable',
+        message: `Está antes de la fila de encabezados (fila ${headerRow.row}); si es un cliente, revisa los encabezados de la hoja.`,
+      });
+    }
     const dataRows: RawRow[] = [];
     let pendingEmpty: RawRow[] = [];
     for (const raw of sheet.rows.slice(headerIndex + 1)) {
@@ -417,11 +436,15 @@ export class SheetParserService {
    * dates) and that holds no data-like value (an e-mail or a code of 7+
    * digits: a document, a phone). `null` when none does (data only).
    */
-  private detectHeader(content: RawRow[]): RawRow | null {
+  private headerMinFilled(content: RawRow[]): number {
     const width = content
       .slice(0, 50)
       .reduce((n, r) => Math.max(n, r.cells.filter(Boolean).length), 0);
-    const minFilled = Math.max(2, Math.ceil(width * 0.5));
+    return Math.max(2, Math.ceil(width * 0.5));
+  }
+
+  private detectHeader(content: RawRow[]): RawRow | null {
+    const minFilled = this.headerMinFilled(content);
     for (const row of content.slice(0, HEADER_SCAN_ROWS)) {
       const filled = row.cells.filter(Boolean);
       if (filled.length < minFilled) continue;

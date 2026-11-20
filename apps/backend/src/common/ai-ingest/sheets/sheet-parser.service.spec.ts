@@ -143,6 +143,39 @@ describe('SheetParserService', () => {
     expect(result.warnings.join(' ')).toContain('no tiene fila de encabezados');
   });
 
+  it('encabezados con fecha o periodo siguen siendo encabezados', () => {
+    const result = parser.parse(
+      workbook([
+        ['Nombre', 'NIT', 'Saldo', '2024-2025', '31/01/2024'],
+        ['Acme SAS', '900123456', '100', '5', '6'],
+      ]),
+      'xlsx',
+      { maxRows: 100 },
+    );
+    expect(result.tables[0].header_row).toBe(1);
+    expect(result.tables[0].row_numbers).toEqual([2]);
+  });
+
+  it('si el encabezado real se descarta, las filas anchas de arriba quedan en omitidas (nunca en silencio)', () => {
+    const result = parser.parse(
+      workbook([
+        ['Nombre', 'Ciudad', 'Correo', '13050505'],
+        ['Acme', 'Cali', 'a@a.co', '5'],
+        ['Beta', 'Bogotá', '', '7'],
+        ['Gama', 'Neiva', '', '8'],
+      ]),
+      'xlsx',
+      { maxRows: 100 },
+    );
+    const table = result.tables[0];
+    const accounted = [
+      ...(table.header_row ? [table.header_row] : []),
+      ...table.row_numbers,
+      ...result.skipped.map((s) => s.row),
+    ].sort();
+    expect(accounted).toEqual([1, 2, 3, 4]);
+  });
+
   it('un cliente cuyo nombre empieza por "Total" no es fila de totales', () => {
     const buffer = workbook([
       ['Nombre', 'NIT', 'Ciudad'],

@@ -258,7 +258,7 @@ export class CustomerAiImportService implements OnModuleInit {
         !mapColumnsBySynonyms(table.headers, customersIngestProfile.columnSynonyms).size
       ) {
         warnings.push(
-          `La fila ${table.header_row}${sheet ? ` de "${sheet}"` : ''} se tomó como encabezados (${table.headers.slice(0, 4).join(', ')}${table.headers.length > 4 ? '…' : ''}); si era un cliente, agrega una fila de encabezados y vuelve a cargar el archivo.`,
+          `Ningún encabezado de la fila ${table.header_row}${sheet ? ` de "${sheet}"` : ''} (${table.headers.slice(0, 4).join(', ')}${table.headers.length > 4 ? '…' : ''}) es un nombre de columna conocido; si esa fila era un cliente, agrega una fila de encabezados y vuelve a cargar el archivo.`,
         );
       }
       for (const header of table.headers) {
