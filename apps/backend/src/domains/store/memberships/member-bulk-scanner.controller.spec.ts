@@ -17,12 +17,18 @@ describe('MemberBulkScannerController.scanAsync', () => {
     duplicate_of: null,
   };
 
-  const file = (mimetype = 'image/jpeg') =>
+  // The real type is read from the bytes (ai-ingest detector), not the mimetype.
+  const JPEG = Buffer.from([0xff, 0xd8, 0xff, 0xe0, 0, 0x10]);
+  const file = (
+    mimetype = 'image/jpeg',
+    buffer: Buffer = JPEG,
+    originalname = 'r.jpg',
+  ) =>
     ({
-      buffer: Buffer.from('x'),
+      buffer,
       mimetype,
-      originalname: 'r.jpg',
-      size: 1,
+      originalname,
+      size: buffer.length,
     }) as Express.Multer.File;
 
   beforeEach(() => {
@@ -32,6 +38,7 @@ describe('MemberBulkScannerController.scanAsync', () => {
     bulkUploadLogs = {
       describeFile: jest.fn().mockResolvedValue(FILE_INFO),
       trackUpload: jest.fn().mockResolvedValue(undefined),
+      trackSessionPage: jest.fn().mockResolvedValue(undefined),
     };
     controller = new MemberBulkScannerController(
       scanner,
@@ -41,11 +48,29 @@ describe('MemberBulkScannerController.scanAsync', () => {
     );
   });
 
-  it('mime invalido -> 400 sin encolar', async () => {
-    await expect(controller.scanAsync(file('text/plain'))).rejects.toBeInstanceOf(
-      VendixHttpException,
-    );
+  it('tipo invalido (por sus bytes) -> 400 sin encolar', async () => {
+    await expect(
+      controller.scanAsync(file('image/jpeg', Buffer.from([0, 1, 2, 0]), 'r.bin')),
+    ).rejects.toBeInstanceOf(VendixHttpException);
     expect(jobs.enqueue).not.toHaveBeenCalled();
+  });
+
+  it('foto HEIC que el servidor no decodifica -> mensaje claro sin encolar', async () => {
+    const heic = Buffer.concat([Buffer.from([0, 0, 0, 0x18]), Buffer.from('ftypheic'), Buffer.alloc(16)]);
+    await expect(controller.scanAsync(file('image/heic', heic, 'r.heic'))).rejects.toMatchObject({
+      errorCode: 'AI_INGEST_UNSUPPORTED_TYPE',
+    });
+    expect(jobs.enqueue).not.toHaveBeenCalled();
+  });
+
+  it('ia-cargas F2: acepta una hoja de cálculo y la encola', async () => {
+    const csv = Buffer.from('nombre;documento;plan\nAna Lopez;123;Mensual\n');
+    await controller.scanAsync(file('text/csv', csv, 'socios.csv'));
+    expect(jobs.enqueue).toHaveBeenCalledWith(
+      'member_roster',
+      [expect.objectContaining({ originalName: 'socios.csv' })],
+      {},
+    );
   });
 
   it('sin archivo -> error sin encolar', async () => {
@@ -98,6 +123,35 @@ describe('MemberBulkScannerController.scanAsync', () => {
       successful: 2,
       failed: 1,
       skipped: 1,
+    });
+  });
+
+  it('ia-cargas F2: un padrón en tramos suma en UNA fila del registro (session_id)', async () => {
+    scanner.commitRoster = jest.fn().mockResolvedValue({
+      ready: 2,
+      succeeded: 2,
+      failed: 0,
+      results: [
+        { row_number: 201, status: 'success' },
+        { row_number: 202, status: 'success' },
+      ],
+      plan_errors: [],
+    });
+    const dto: any = {
+      plans: [],
+      members: [{}, {}],
+      file_name: 'padron.xlsx',
+      file_hash: FILE_INFO.file_hash,
+      session_id: 'sess-1',
+      total_members: 900,
+    };
+    await controller.commit(dto);
+    expect(bulkUploadLogs.trackUpload).not.toHaveBeenCalled();
+    expect(bulkUploadLogs.trackSessionPage).toHaveBeenCalledWith('memberships', 'sess-1', dto, {
+      total: 900,
+      successful: 2,
+      failed: 0,
+      skipped: 0,
     });
   });
 });

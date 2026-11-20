@@ -168,7 +168,7 @@ export class MemberBulkScannerController {
 
   @Post('analyze')
   @Permissions('store:memberships:bulk_import')
-  async analyze(@Body() body: { scan: RosterScanResult }) {
+  async analyze(@Body() body: { scan: RosterScanResult; row_offset?: number }) {
     try {
       if (!body?.scan) {
         throw new VendixHttpException(
@@ -176,7 +176,12 @@ export class MemberBulkScannerController {
           'Falta el payload `scan` con el resultado del OCR',
         );
       }
-      const result = await this.scannerService.analyzeRoster(body.scan);
+      // ia-cargas F2 — optional: members before this chunk of a big sheet.
+      const rowOffset = Number(body.row_offset ?? 0);
+      const result = await this.scannerService.analyzeRoster(
+        body.scan,
+        Number.isInteger(rowOffset) && rowOffset > 0 ? rowOffset : 0,
+      );
       return this.responseService.success(
         result,
         'Padrón analizado exitosamente',
@@ -191,11 +196,25 @@ export class MemberBulkScannerController {
   async commit(@Body() dto: CommitMemberRosterDto) {
     try {
       const result = await this.scannerService.commitRoster(dto);
-      await this.bulkUploadLogs.trackUpload(
-        'memberships',
-        dto,
-        rosterUploadCounts(result),
-      );
+      // ia-cargas F2 — a big roster arrives in chunks with the same
+      // `session_id` and adds up on ONE row of the upload log.
+      if (dto.session_id) {
+        await this.bulkUploadLogs.trackSessionPage(
+          'memberships',
+          dto.session_id,
+          dto,
+          {
+            ...rosterUploadCounts(result),
+            total: dto.total_members ?? result.ready ?? dto.members.length,
+          },
+        );
+      } else {
+        await this.bulkUploadLogs.trackUpload(
+          'memberships',
+          dto,
+          rosterUploadCounts(result),
+        );
+      }
       return this.responseService.success(
         result,
         'Padrón cargado exitosamente',
