@@ -47,6 +47,8 @@ function buildHarness(overrides: {
   const notes: Record<number, any> = {};
 
   const tx: any = {
+    // Candado de numeración de remisiones (`pg_advisory_xact_lock`).
+    $executeRawUnsafe: jest.fn().mockResolvedValue(0),
     stock_transfers: {
       findFirst: jest.fn().mockImplementation(() =>
         Promise.resolve({ ...transfer, stock_transfer_items: items }),
@@ -56,7 +58,10 @@ function buildHarness(overrides: {
         Object.assign(transfer, data);
         return Promise.resolve({ ...transfer, stock_transfer_items: items });
       }),
-      create: jest.fn(),
+      create: jest.fn().mockImplementation(({ data }: any) =>
+        Promise.resolve({ id: 1, ...data }),
+      ),
+      count: jest.fn().mockResolvedValue(0),
     },
     stock_transfer_items: {
       update: jest.fn().mockImplementation(({ where, data }: any) => {
@@ -126,6 +131,7 @@ function buildHarness(overrides: {
   const orgPrisma: any = {
     $transaction: jest.fn((callback: any) => callback(tx)),
     stock_levels: tx.stock_levels,
+    stock_transfers: tx.stock_transfers,
   };
 
   const operatingScope = {
@@ -140,6 +146,7 @@ function buildHarness(overrides: {
     updateStock: jest.fn().mockResolvedValue({
       cost_snapshot: { unit_cost: 700 },
     }),
+    releaseReservationsByReference: jest.fn().mockResolvedValue(undefined),
   };
   const events = { emit: jest.fn() };
 
@@ -459,6 +466,193 @@ describe('OrgTransfersService — P2 transporte, remisión y recepción', () => 
         h.tx.stock_transfer_items.update.mock.calls[0][0].data.quantity_lost,
       ).toBe(3);
       expect(result.status).toBe('closed_with_loss');
+    });
+  });
+
+  describe('fixes de review P2', () => {
+    it('una línea despachada en 0 queda con quantity_dispatched 0 (no se lee como completa)', async () => {
+      const h = buildHarness();
+
+      await h.service.dispatch(1, {
+        items: [
+          { id: 21, quantity_dispatched: 5 },
+          { id: 22, quantity_dispatched: 0 },
+        ],
+      });
+
+      const zeroUpdate = h.tx.stock_transfer_items.update.mock.calls
+        .map((call: any) => call[0])
+        .find((call: any) => call.where.id === 22);
+      expect(zeroUpdate).toEqual({
+        where: { id: 22 },
+        data: { quantity_dispatched: 0 },
+      });
+      expect(h.stockLevelManager.updateStock).toHaveBeenCalledTimes(1);
+
+      // Cancelar devuelve al origen solo la línea que salió.
+      h.stockLevelManager.updateStock.mockClear();
+      await h.service.cancel(1, {});
+      expect(
+        h.stockLevelManager.updateStock.mock.calls.map((call: any) => call[0]),
+      ).toEqual([
+        expect.objectContaining({ product_id: 1, quantity_change: 5 }),
+      ]);
+    });
+
+    it('despachar sin transport_method no pisa el transporte guardado', async () => {
+      const h = buildHarness({
+        transfer: {
+          transport_method: 'internal_carrier',
+          driver_name: 'Ana Pérez',
+          shipping_cost: 9000,
+        },
+      });
+
+      await h.service.dispatch(1, {});
+
+      const data = h.tx.stock_transfers.update.mock.calls[0][0].data;
+      for (const key of [
+        'transport_method',
+        'vehicle_id',
+        'driver_user_id',
+        'driver_name',
+        'shipping_method_id',
+        'carrier_name',
+        'tracking_number',
+        'shipping_cost',
+      ]) {
+        expect(data).not.toHaveProperty(key);
+      }
+      expect(h.transfer.driver_name).toBe('Ana Pérez');
+    });
+
+    it('el reclamo del despacho condiciona por estado aprobado', async () => {
+      const h = buildHarness();
+      h.tx.stock_transfers.updateMany.mockResolvedValue({ count: 0 });
+
+      await expect(h.service.dispatch(1, {})).rejects.toThrow(
+        /ya fue despachada/,
+      );
+      expect(h.tx.stock_transfers.updateMany).toHaveBeenCalledWith(
+        expect.objectContaining({
+          where: {
+            id: 1,
+            organization_id: 1,
+            dispatched_at: null,
+            status: { in: ['approved', 'draft'] },
+          },
+        }),
+      );
+      expect(h.stockLevelManager.updateStock).not.toHaveBeenCalled();
+    });
+
+    it('closeWithLoss toma el candado de fila antes de leer y respeta el estado releído', async () => {
+      const h = buildHarness({
+        transfer: { status: 'in_transit', dispatched_at: new Date() },
+      });
+      h.tx.stock_transfers.updateMany.mockImplementation(async () => {
+        h.transfer.status = 'received';
+        return { count: 1 };
+      });
+
+      await expect(
+        h.service.closeWithLoss(1, 'Se perdió en ruta'),
+      ).rejects.toThrow(/Solo una transferencia despachada/);
+      expect(
+        h.tx.stock_transfers.updateMany.mock.invocationCallOrder[0],
+      ).toBeLessThan(h.tx.stock_transfers.findFirst.mock.invocationCallOrder[0]);
+      expect(h.tx.stock_transfers.updateMany).toHaveBeenCalledWith({
+        where: { id: 1, organization_id: 1 },
+        data: { updated_at: expect.any(Date) },
+      });
+    });
+
+    it('flujo histórico: recibir consume la reserva del aprobar de tienda antes de descontar', async () => {
+      const h = buildHarness({
+        transfer: { status: 'in_transit', dispatched_at: null },
+      });
+
+      await h.service.receive(1, {
+        items: [{ stock_transfer_item_id: 21, quantity_received: 5 }],
+      });
+
+      expect(
+        h.stockLevelManager.releaseReservationsByReference,
+      ).toHaveBeenCalledWith('transfer', 1, 'consumed', h.tx, {
+        decrementOnHand: false,
+      });
+      expect(
+        h.stockLevelManager.releaseReservationsByReference.mock
+          .invocationCallOrder[0],
+      ).toBeLessThan(h.stockLevelManager.updateStock.mock.invocationCallOrder[0]);
+    });
+
+    it('flujo histórico: cerrar con pérdida consume la reserva antes de la merma', async () => {
+      const h = buildHarness({
+        transfer: { status: 'in_transit', dispatched_at: null },
+      });
+
+      await h.service.closeWithLoss(1, 'Producto vencido');
+
+      expect(
+        h.stockLevelManager.releaseReservationsByReference,
+      ).toHaveBeenCalledWith('transfer', 1, 'consumed', h.tx, {
+        decrementOnHand: false,
+      });
+      const damage = h.stockLevelManager.updateStock.mock.calls.map(
+        (call: any) => call[0],
+      );
+      expect(damage).toEqual([
+        expect.objectContaining({ quantity_change: -5, movement_type: 'damage' }),
+        expect.objectContaining({ quantity_change: -2, movement_type: 'damage' }),
+      ]);
+    });
+
+    it('flujo histórico: cancelar una aprobada desde tienda libera la reserva y no devuelve stock', async () => {
+      const h = buildHarness({
+        transfer: { status: 'in_transit', dispatched_at: null },
+      });
+
+      const result = await h.service.cancel(1, { reason: 'Ya no va' });
+
+      expect(
+        h.stockLevelManager.releaseReservationsByReference,
+      ).toHaveBeenCalledWith('transfer', 1, 'cancelled', h.tx);
+      expect(h.stockLevelManager.updateStock).not.toHaveBeenCalled();
+      expect(result.status).toBe('cancelled');
+    });
+
+    it('rechaza un conductor de otra organización al crear', async () => {
+      const h = buildHarness();
+      h.tx.users.findFirst.mockResolvedValue(null);
+
+      await expect(
+        h.service.create({
+          from_location_id: 7,
+          to_location_id: 9,
+          movement_mode: 'with_dispatch_notes',
+          transport_method: 'internal_carrier',
+          driver_user_id: 80,
+          items: [{ product_id: 1, quantity: 1 }],
+        } as any),
+      ).rejects.toThrow(/El conductor #80 no existe/);
+      expect(h.tx.users.findFirst).toHaveBeenCalledWith(
+        expect.objectContaining({
+          where: { id: 80, organization_id: 1 },
+        }),
+      );
+      expect(h.tx.stock_transfers.create).not.toHaveBeenCalled();
+    });
+
+    it('getStats cuenta closed_with_loss en su propia tarjeta', async () => {
+      const h = buildHarness();
+      h.tx.stock_transfers.count.mockImplementation(async (args: any) =>
+        args?.where?.status === 'closed_with_loss' ? 2 : 0,
+      );
+
+      const stats = await h.service.getStats();
+
+      expect(stats.closed_with_loss).toBe(2);
     });
   });
 

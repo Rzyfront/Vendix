@@ -3,7 +3,14 @@
  * repetida, cierre con pérdida, destino externo (alerta), vehículo inline,
  * movimiento rápido contra destino externo y permiso de aprobación.
  */
-import { BadRequestException, NotFoundException } from '@nestjs/common';
+import {
+  BadRequestException,
+  ConflictException,
+  NotFoundException,
+} from '@nestjs/common';
+import { Prisma } from '@prisma/client';
+import { plainToInstance } from 'class-transformer';
+import { validate } from 'class-validator';
 import { VendixHttpException } from '@common/errors';
 import { Reflector } from '@nestjs/core';
 import { RequestContextService } from '@common/context/request-context.service';
@@ -11,6 +18,11 @@ import { PermissionsGuard } from '../../../auth/guards/permissions.guard';
 import { PERMISSIONS_KEY } from '../../../auth/decorators/permissions.decorator';
 import { StockTransfersController } from './stock-transfers.controller';
 import { StockTransfersService } from './stock-transfers.service';
+import { UpdateTransferDto } from './dto/update-transfer.dto';
+import {
+  createTransferNoteInTx,
+  resolveTransferTransport,
+} from './transfer-transport';
 
 const DAY = 24 * 60 * 60 * 1000;
 
@@ -54,6 +66,8 @@ function buildHarness(overrides: {
   const notes: Record<number, any> = {};
 
   const tx: any = {
+    // Candado de numeración de remisiones (`pg_advisory_xact_lock`).
+    $executeRawUnsafe: jest.fn().mockResolvedValue(0),
     stock_transfers: {
       findUnique: jest.fn().mockImplementation(() =>
         Promise.resolve({
@@ -180,6 +194,7 @@ function buildHarness(overrides: {
     stock_levels: tx.stock_levels,
     stock_transfers: {
       findUnique: tx.stock_transfers.findUnique,
+      update: tx.stock_transfers.update,
     },
   };
 
@@ -727,6 +742,437 @@ describe('StockTransfersService — P2 transporte, remisión y recepción', () =
       };
 
       expect(guard.canActivate(context)).toBe(true);
+    });
+  });
+
+  describe('fixes de review P2', () => {
+    it('una línea despachada en 0 queda con quantity_dispatched 0 y no se recibe, devuelve ni pierde', async () => {
+      const h = buildHarness({ transfer: { status: 'approved' } });
+
+      await h.service.dispatch(1, {
+        items: [
+          { id: 11, quantity_dispatched: 5 },
+          { id: 12, quantity_dispatched: 0 },
+        ],
+      });
+
+      const zeroUpdate = h.tx.stock_transfer_items.update.mock.calls
+        .map((call: any) => call[0])
+        .find((call: any) => call.where.id === 12);
+      expect(zeroUpdate).toEqual({
+        where: { id: 12 },
+        data: { quantity_dispatched: 0 },
+      });
+      // Solo sale del origen la línea con unidades.
+      expect(h.stockLevelManager.updateStock).toHaveBeenCalledTimes(1);
+      expect(h.items[1].quantity_dispatched).toBe(0);
+
+      // Recibir esa línea: el saldo pendiente es 0.
+      h.stockLevelManager.updateStock.mockClear();
+      await expect(
+        h.service.receive(1, [{ id: 12, quantity_received: 1 }]),
+      ).rejects.toThrow(/saldo pendiente es 0/);
+
+      // Cancelar devuelve al origen solo lo que salió (línea 11), no la 12.
+      h.stockLevelManager.updateStock.mockClear();
+      h.transfer.status = 'in_transit';
+      await h.service.cancel(1);
+      const returns = h.stockLevelManager.updateStock.mock.calls.map(
+        (call: any) => call[0],
+      );
+      expect(returns).toEqual([
+        expect.objectContaining({ product_id: 1, quantity_change: 5 }),
+      ]);
+    });
+
+    it('el cierre con pérdida no da de baja una línea despachada en 0', async () => {
+      const h = buildHarness({
+        transfer: { dispatched_at: new Date(), status: 'in_transit' },
+        items: [
+          { id: 11, product_id: 1, quantity: 5, quantity_received: 0, quantity_dispatched: 5, quantity_lost: 0 },
+          { id: 12, product_id: 2, quantity: 3, quantity_received: 0, quantity_dispatched: 0, quantity_lost: 0 },
+        ],
+      });
+
+      await h.service.closeWithLoss(1, 'Se perdió en ruta');
+
+      const lossUpdates = h.tx.stock_transfer_items.update.mock.calls.map(
+        (call: any) => call[0],
+      );
+      expect(lossUpdates).toEqual([
+        { where: { id: 11 }, data: { quantity_lost: 5 } },
+      ]);
+    });
+
+    it('despachar sin transport_method no pisa el transporte guardado al crear', async () => {
+      const h = buildHarness({
+        transfer: {
+          status: 'approved',
+          transport_method: 'internal_vehicle',
+          vehicle_id: 91,
+          driver_name: 'Ana Pérez',
+          shipping_cost: 25000,
+        },
+      });
+
+      await h.service.dispatch(1, {});
+
+      const data = h.tx.stock_transfers.update.mock.calls[0][0].data;
+      for (const key of [
+        'transport_method',
+        'vehicle_id',
+        'driver_user_id',
+        'driver_name',
+        'shipping_method_id',
+        'carrier_name',
+        'tracking_number',
+        'shipping_cost',
+      ]) {
+        expect(data).not.toHaveProperty(key);
+      }
+      expect(h.transfer.vehicle_id).toBe(91);
+      expect(h.transfer.shipping_cost).toBe(25000);
+      expect(h.tx.vehicles.findFirst).not.toHaveBeenCalled();
+    });
+
+    it('el reclamo del despacho exige estado aprobado o en tránsito', async () => {
+      const h = buildHarness({ transfer: { status: 'approved' } });
+      h.tx.stock_transfers.updateMany.mockResolvedValue({ count: 0 });
+
+      await expect(h.service.dispatch(1, {})).rejects.toBeInstanceOf(
+        ConflictException,
+      );
+      expect(h.tx.stock_transfers.updateMany).toHaveBeenCalledWith(
+        expect.objectContaining({
+          where: {
+            id: 1,
+            dispatched_at: null,
+            status: { in: ['approved', 'in_transit'] },
+          },
+        }),
+      );
+      expect(h.stockLevelManager.updateStock).not.toHaveBeenCalled();
+    });
+
+    it('closeWithLoss toma el candado de fila antes de leer y respeta el estado releído', async () => {
+      const h = buildHarness({
+        transfer: { dispatched_at: new Date(), status: 'in_transit' },
+        items: [
+          { id: 11, product_id: 1, quantity: 5, quantity_received: 0, quantity_dispatched: 5, quantity_lost: 0 },
+        ],
+      });
+      // Una recepción concurrente terminó primero: al releer, ya está recibida.
+      h.tx.stock_transfers.updateMany.mockImplementation(async () => {
+        h.transfer.status = 'received';
+        return { count: 1 };
+      });
+
+      await expect(
+        h.service.closeWithLoss(1, 'Se perdió en ruta'),
+      ).rejects.toThrow(/Solo una transferencia despachada/);
+
+      const lockOrder =
+        h.tx.stock_transfers.updateMany.mock.invocationCallOrder[0];
+      const readOrder =
+        h.tx.stock_transfers.findUnique.mock.invocationCallOrder[0];
+      expect(lockOrder).toBeLessThan(readOrder);
+      expect(h.tx.stock_transfers.updateMany).toHaveBeenCalledWith({
+        where: { id: 1 },
+        data: { updated_at: expect.any(Date) },
+      });
+      expect(h.tx.stock_transfer_items.update).not.toHaveBeenCalled();
+    });
+
+    it('closeWithLoss rechaza estados que no tienen saldo en camino', async () => {
+      for (const status of ['pending', 'approved', 'received', 'cancelled', 'closed_with_loss']) {
+        const h = buildHarness({ transfer: { status } });
+        await expect(
+          h.service.closeWithLoss(1, 'Se perdió en ruta'),
+        ).rejects.toThrow(BadRequestException);
+        expect(h.tx.stock_transfer_items.update).not.toHaveBeenCalled();
+      }
+    });
+
+    it('update() ignora los campos avanzados aunque lleguen en el payload', async () => {
+      const h = buildHarness({ transfer: { status: 'pending' } });
+
+      await h.service.update(1, {
+        notes: 'Cambio de nota',
+        movement_mode: 'mass_only',
+        is_external_destination: true,
+        external_destination_name: 'Otro',
+        vehicle_id: 999,
+        vehicle: { plate: 'ZZZ-000' },
+        transport_method: 'internal_vehicle',
+        shipping_cost: 1,
+        support_document_type: 'invoice',
+        items: [{ product_id: 1, quantity: 99 }],
+      } as any);
+
+      expect(h.tx.stock_transfers.update).toHaveBeenCalledWith(
+        expect.objectContaining({
+          where: { id: 1 },
+          data: { notes: 'Cambio de nota' },
+        }),
+      );
+      expect(h.tx.vehicles.create).not.toHaveBeenCalled();
+    });
+
+    it('el DTO de update rechaza los campos avanzados (forbidNonWhitelisted)', async () => {
+      const dto = plainToInstance(UpdateTransferDto, {
+        notes: 'ok',
+        movement_mode: 'mass_only',
+        is_external_destination: true,
+        vehicle: { plate: 'ZZZ-000' },
+        transport_method: 'internal_vehicle',
+      });
+      const errors = await validate(dto, {
+        whitelist: true,
+        forbidNonWhitelisted: true,
+      });
+      expect(errors.map((error) => error.property).sort()).toEqual([
+        'is_external_destination',
+        'movement_mode',
+        'transport_method',
+        'vehicle',
+      ]);
+
+      const allowed = plainToInstance(UpdateTransferDto, {
+        notes: 'ok',
+        expected_date: '2026-12-20',
+      });
+      expect(
+        await validate(allowed, { whitelist: true, forbidNonWhitelisted: true }),
+      ).toEqual([]);
+    });
+
+    it('getStats cuenta closed_with_loss en su propia tarjeta', async () => {
+      const h = buildHarness();
+      h.prisma.stock_transfers.count = jest.fn(async (args: any) =>
+        args?.where?.status === 'closed_with_loss' ? 2 : 0,
+      );
+
+      const stats = await h.service.getStats();
+
+      expect(stats.data.closed_with_loss).toBe(2);
+    });
+
+    it('update() no deja una transferencia interna sin destino ni sin origen', async () => {
+      const h = buildHarness({ transfer: { status: 'pending' } });
+
+      await expect(
+        h.service.update(1, { to_location_id: null } as any),
+      ).rejects.toThrow(/Elige la bodega de destino/);
+      await expect(
+        h.service.update(1, { from_location_id: null } as any),
+      ).rejects.toThrow(/Elige la bodega de origen/);
+      expect(h.tx.stock_transfers.update).not.toHaveBeenCalled();
+    });
+
+    it('update() no le asigna bodega de destino a una salida externa', async () => {
+      const h = buildHarness({
+        transfer: {
+          status: 'pending',
+          is_external_destination: true,
+          to_location_id: null,
+        },
+      });
+
+      await expect(
+        h.service.update(1, { to_location_id: 9 } as any),
+      ).rejects.toThrow(/destino externo no tiene bodega/);
+      expect(h.tx.stock_transfers.update).not.toHaveBeenCalled();
+    });
+  });
+
+  describe('scopes de transporte por organización', () => {
+    // Datos de dos organizaciones: el tx simula el filtro que hace Postgres.
+    function scopedTx() {
+      const users = [
+        { id: 8, organization_id: 1, first_name: 'Ana', last_name: 'Pérez' },
+        { id: 80, organization_id: 2, first_name: 'Intruso', last_name: 'X' },
+      ];
+      const stores = [
+        { id: 3, organization_id: 1 },
+        { id: 30, organization_id: 2 },
+      ];
+      const vehicles = [
+        { id: 55, store_id: 3 },
+        { id: 550, store_id: 30 },
+      ];
+      const methods = [
+        { id: 4, name: 'Propia', store_id: 3, is_active: true },
+        { id: 40, name: 'Ajena', store_id: 30, is_active: true },
+        { id: 5, name: 'Sistema', store_id: null, is_active: true },
+      ];
+      const orgOfStore = (storeId: number | null) =>
+        stores.find((store) => store.id === storeId)?.organization_id;
+      return {
+        users: {
+          findFirst: jest.fn(async ({ where }: any) =>
+            users.find(
+              (user) =>
+                user.id === where.id &&
+                (where.organization_id === undefined ||
+                  user.organization_id === where.organization_id),
+            ) ?? null,
+          ),
+        },
+        vehicles: {
+          findFirst: jest.fn(async ({ where }: any) =>
+            vehicles.find(
+              (vehicle) =>
+                vehicle.id === where.id &&
+                (where.store?.organization_id === undefined ||
+                  orgOfStore(vehicle.store_id) ===
+                    where.store.organization_id),
+            ) ?? null,
+          ),
+          findUnique: jest.fn().mockResolvedValue(null),
+          create: jest.fn().mockResolvedValue({ id: 56 }),
+        },
+        shipping_methods: {
+          findFirst: jest.fn(async ({ where }: any) => {
+            const orgId = where.OR?.[1]?.store?.organization_id;
+            return (
+              methods.find(
+                (method) =>
+                  method.id === where.id &&
+                  (orgId === undefined ||
+                    method.store_id === null ||
+                    orgOfStore(method.store_id) === orgId),
+              ) ?? null
+            );
+          }),
+        },
+      };
+    }
+
+    // Origen en bodega central: no hay tienda contra la cual comparar.
+    const central = { organization_id: 1, store_id: null };
+
+    it('rechaza un conductor de otra organización (no copia su nombre)', async () => {
+      const tx = scopedTx();
+      await expect(
+        resolveTransferTransport(
+          tx,
+          { transport_method: 'internal_carrier', driver_user_id: 80 },
+          central,
+        ),
+      ).rejects.toThrow(/El conductor #80 no existe/);
+
+      const ok = await resolveTransferTransport(
+        tx,
+        { transport_method: 'internal_carrier', driver_user_id: 8 },
+        central,
+      );
+      expect(ok.driver_name).toBe('Ana Pérez');
+    });
+
+    it('rechaza el conductor de otra organización también con vehículo propio', async () => {
+      const tx = scopedTx();
+      await expect(
+        resolveTransferTransport(
+          tx,
+          {
+            transport_method: 'internal_vehicle',
+            vehicle_id: 55,
+            driver_user_id: 80,
+          },
+          { organization_id: 1, store_id: 3 },
+        ),
+      ).rejects.toThrow(/El conductor #80 no existe/);
+    });
+
+    it('rechaza un vehículo de otra organización aunque el origen sea bodega central', async () => {
+      const tx = scopedTx();
+      await expect(
+        resolveTransferTransport(
+          tx,
+          { transport_method: 'internal_vehicle', vehicle_id: 550 },
+          central,
+        ),
+      ).rejects.toThrow(/El vehículo #550 no existe/);
+
+      const ok = await resolveTransferTransport(
+        tx,
+        { transport_method: 'internal_vehicle', vehicle_id: 55 },
+        central,
+      );
+      expect(ok.vehicle_id).toBe(55);
+    });
+
+    it('rechaza el conductor principal de otra organización en un vehículo inline', async () => {
+      const tx = scopedTx();
+      await expect(
+        resolveTransferTransport(
+          tx,
+          {
+            transport_method: 'internal_vehicle',
+            vehicle: { plate: 'NEW-001', primary_driver_id: 80 },
+          },
+          { organization_id: 1, store_id: 3 },
+        ),
+      ).rejects.toThrow(/El conductor #80 no existe/);
+      expect(tx.vehicles.create).not.toHaveBeenCalled();
+    });
+
+    it('rechaza un método de envío de otra organización y acepta los de sistema', async () => {
+      const tx = scopedTx();
+      await expect(
+        resolveTransferTransport(
+          tx,
+          { transport_method: 'external_shipping_method', shipping_method_id: 40 },
+          central,
+        ),
+      ).rejects.toThrow(/El método de envío #40 no existe/);
+
+      const system = await resolveTransferTransport(
+        tx,
+        { transport_method: 'external_shipping_method', shipping_method_id: 5 },
+        central,
+      );
+      expect(system.shipping_method_id).toBe(5);
+    });
+  });
+
+  describe('numeración de remisiones', () => {
+    const noteParams = {
+      store_id: 3,
+      direction: 'outbound' as const,
+      subtype: 'transfer_out' as const,
+      from_location_id: 7,
+      to_location_id: 9,
+      items: [{ product_id: 1, quantity: 2 }],
+    };
+
+    it('toma el candado de la tienda antes de calcular el número', async () => {
+      const h = buildHarness();
+      await createTransferNoteInTx(h.tx, noteParams);
+
+      expect(h.tx.$executeRawUnsafe).toHaveBeenCalledWith(
+        'SELECT pg_advisory_xact_lock(hashtext($1))',
+        'dispatch_notes:number:3',
+      );
+      const lockOrder = h.tx.$executeRawUnsafe.mock.invocationCallOrder[0];
+      const numberOrder =
+        h.tx.dispatch_notes.findFirst.mock.invocationCallOrder[0];
+      expect(lockOrder).toBeLessThan(numberOrder);
+    });
+
+    it('un choque de número no se reintenta en la transacción abortada: conflicto claro', async () => {
+      const h = buildHarness();
+      h.tx.dispatch_notes.create.mockRejectedValue(
+        new Prisma.PrismaClientKnownRequestError('Unique constraint failed', {
+          code: 'P2002',
+          clientVersion: 'test',
+        }),
+      );
+
+      await expect(createTransferNoteInTx(h.tx, noteParams)).rejects.toThrow(
+        ConflictException,
+      );
+      expect(h.tx.dispatch_notes.create).toHaveBeenCalledTimes(1);
     });
   });
 
