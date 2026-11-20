@@ -36,12 +36,16 @@ import { OrderFlowModule } from '../orders/order-flow/order-flow.module';
 // `PrintFormatsModule` sí tiene otras aristas que vuelven a este dominio por
 // `store.module.ts`, y cuesta cero.
 import { PrintFormatsModule } from '../print-formats/print-formats.module';
+import { AiIngestModule } from '../../../common/ai-ingest/ai-ingest.module';
+import { ReceiptScanReaderService } from './receipt-scan-reader.service';
 
 @Module({
   imports: [
     ResponseModule,
     PrismaModule,
     S3Module,
+    // ia-cargas F5a: the receipt scan reads PDFs and photos by pages.
+    AiIngestModule,
     // ADR-15 §4 — el PDF de la remisión vive en su propio módulo hoja, que
     // también consume `PrintFormatsModule`. Ver `pdf/dispatch-note-pdf.module.ts`.
     DispatchNotePdfModule,
@@ -71,6 +75,9 @@ import { PrintFormatsModule } from '../print-formats/print-formats.module';
     // receipt-scan queue worker — injects DispatchNotesService and restores the
     // tenant RequestContext from the job payload before running the OCR.
     ReceiptScanProcessor,
+    // ia-cargas F5a: document side of the receipt scan (S3 copy of the
+    // upload + shared page reader).
+    ReceiptScanReaderService,
   ],
   exports: [
     DispatchNotesService,

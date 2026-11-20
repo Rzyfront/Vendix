@@ -19,8 +19,6 @@ import {
   resolveCustomerSnapshotName,
 } from '../../../common/helpers/customer-display-name.helper';
 import { AIEngineService } from '../../../ai-engine/ai-engine.service';
-import { AIMessage } from '../../../ai-engine/interfaces/ai-provider.interface';
-import { parseAiJson } from '../../../ai-engine/utils/ai-json.util';
 import {
   CreateDispatchNoteDto,
   UpdateDispatchNoteDto,
@@ -45,6 +43,8 @@ import {
   ReceiptScanJobStatusResult,
   ReceiptScanJobState,
 } from './receipt-scan-job.interface';
+import { ReceiptScanReaderService } from './receipt-scan-reader.service';
+import type { AiJobProgress } from '@common/ai-scan-jobs/ai-job-monitor.service';
 import {
   dispatch_note_status_enum,
   dispatch_route_status_enum,
@@ -84,7 +84,6 @@ import {
 } from './types/dispatch-note-direction.type';
 import { DispatchFulfillmentListener } from './listeners/dispatch-fulfillment.listener';
 import { POOL_PUBLISHABLE_ORDER_STATES } from '../carrier/carrier-pool.contract';
-const sharp: typeof import('sharp').default = require('sharp'); // eslint-disable-line @typescript-eslint/no-require-imports, @typescript-eslint/no-unsafe-assignment -- sharp 0.35 types are ESM-only (export default) but CJS runtime exports the function
 
 const DISPATCH_NOTE_INCLUDE = {
   dispatch_note_items: {
@@ -179,8 +178,10 @@ export class DispatchNotesService {
     private readonly routeNumberGenerator: RouteNumberGenerator,
     private readonly eventEmitter: EventEmitter2,
     private readonly stockValidator: StockValidatorService,
-    // AIEngineService is provided by the @Global() AIEngineModule, so it is
-    // injectable here without importing the module (used by scanReceipt — R4c).
+    // AIEngineService is provided by the @Global() AIEngineModule. Since
+    // ia-cargas F5a the receipt scan calls the model through
+    // `ReceiptScanReaderService`; the parameter stays so the positional
+    // constructor used across specs does not shift.
     private readonly aiEngine: AIEngineService,
     // Async receipt-scan queue (registered in DispatchNotesModule). The HTTP
     // path preprocesses + enqueues here (202 + job_id); the worker restores the
@@ -196,6 +197,10 @@ export class DispatchNotesService {
     // present. Optional so the module can boot without the PurchaseOrdersModule
     // if that dependency is not wired yet (defensive — the module imports it).
     private readonly purchaseOrdersService?: PurchaseOrdersService,
+    // ia-cargas F5a (#11): document side of the receipt scanner (S3 copy of
+    // the upload, shared page reader). Optional and last so the positional
+    // constructor used across specs keeps working.
+    private readonly receiptReader?: ReceiptScanReaderService,
   ) {}
 
   // ───────────────────────────────────────────────────────────────────────
@@ -217,7 +222,7 @@ export class DispatchNotesService {
    * store catalog. Does NOT persist anything.
    *
    * 1:1 mechanism calque of InvoiceScannerService / MemberBulkScannerService:
-   * validate → preprocess (sharp) → AIEngine.run('invoice_ocr') → defensive JSON
+   * validate → shared page reader with 'invoice_ocr' (ia-cargas F5a) → defensive JSON
    * parse → normalize → catalog matching. Product/supplier ids are NEVER
    * invented: a match is emitted only on an exact SKU hit (variant or product)
    * or an unambiguous single name match; anything doubtful returns a null id
@@ -227,9 +232,9 @@ export class DispatchNotesService {
    * AI_PROVIDER_002 — expected locally; the wiring/contract is still valid.
    */
   /**
-   * HTTP entrypoint (async path). Validates + preprocesses the upload INLINE
-   * (sharp — the controller owns the multer buffer, which never survives the
-   * queue boundary) and enqueues a `receipt-scan` job. Returns the job id
+   * HTTP entrypoint (async path). Validates the upload INLINE (the controller
+   * owns the multer buffer, which never survives the queue boundary), stores
+   * the original in S3 and enqueues a `receipt-scan` job with its key. Returns the job id
    * immediately (the controller responds 202); the heavy OCR + catalog matching
    * runs out-of-band in `ReceiptScanProcessor` → `scanReceiptFromImage`.
    *
@@ -245,12 +250,15 @@ export class DispatchNotesService {
     const store_id = context?.store_id;
     if (!store_id) throw new VendixHttpException(ErrorCodes.STORE_CONTEXT_001);
 
-    const { base64, mimeType } = await this.preprocessReceiptImage(file!);
-    const dataUri = `data:${mimeType};base64,${base64}`;
+    // ia-cargas F5a: real type by signature, then the ORIGINAL upload goes to
+    // S3 and the job carries only its key (Redis no longer holds the file).
+    const document = await this.requireReceiptReader().stash(file!, {
+      organizationId: context?.organization_id,
+      storeId: store_id,
+    });
 
     const payload: ReceiptScanJob = {
-      dataUri,
-      mimeType,
+      ...document,
       context: {
         store_id,
         organization_id: context?.organization_id,
@@ -318,70 +326,56 @@ export class DispatchNotesService {
    */
   async scanReceipt(file?: Express.Multer.File): Promise<ScanReceiptResult> {
     this.assertValidReceiptFile(file);
-    const { base64, mimeType } = await this.preprocessReceiptImage(file!);
-    const dataUri = `data:${mimeType};base64,${base64}`;
-    return this.scanReceiptFromImage(dataUri, mimeType);
+    return this.scanReceiptFromFile({
+      buffer: file!.buffer,
+      mimeType: file!.mimetype,
+      originalName: file!.originalname,
+    });
   }
 
   /**
-   * Worker-side heavy lifting: run the vision OCR on an already-encoded image
-   * `data:` URI, parse + normalize the JSON defensively, and match
-   * supplier/items against the store catalog (tenant-scoped). Callable from the
-   * BullMQ worker (context restored via `RequestContextService.run`) OR
-   * synchronously (ambient HTTP context). Returns the UNCHANGED
-   * `ScanReceiptResult` contract — this is what lands in `job.returnvalue`.
-   *
-   * IMPORTANT: calls `aiEngine.run('invoice_ocr', {}, [imageMessage])` DIRECTLY
-   * (NOT `runByApplicationType`, which drops extra_messages for image execution
-   * types and would silently lose the image).
+   * Jobs queued before ia-cargas F5a carried a data URI (a JPEG prepared at
+   * enqueue, or the raw PDF as base64). They still work: the bytes go through
+   * the same page reader as a new job.
    */
   async scanReceiptFromImage(
     dataUri: string,
     mimeType: string,
   ): Promise<ScanReceiptResult> {
+    const file = await this.requireReceiptReader().load({ dataUri, mimeType });
+    return this.scanReceiptFromFile(file);
+  }
+
+  /**
+   * Worker-side heavy lifting (ia-cargas F5a, #11): read the receipt through
+   * the shared page reader (`ReceiptScanReaderService`: native PDF text first,
+   * scans and photos as images, never the raw PDF; the `invoice_ocr` answer
+   * checked with a schema and repaired once), normalize it defensively and
+   * match supplier/items against the store catalog (tenant-scoped). Callable
+   * from the BullMQ worker (context restored via `RequestContextService.run`)
+   * OR synchronously. Returns the UNCHANGED `ScanReceiptResult` contract —
+   * reading notices (pages not read) join `warnings`.
+   */
+  async scanReceiptFromFile(
+    file: { buffer: Buffer; mimeType?: string | null; originalName?: string | null },
+    options: { reportProgress?: (progress: AiJobProgress) => Promise<void> } = {},
+  ): Promise<ScanReceiptResult> {
     const store_id = RequestContextService.getContext()?.store_id;
     if (!store_id) throw new VendixHttpException(ErrorCodes.STORE_CONTEXT_001);
 
-    const imageMessage: AIMessage = {
-      role: 'user',
-      content: [
-        {
-          type: 'text',
-          text: 'Extract all data from this purchase receipt / invoice image. Return ONLY the JSON object matching the schema defined in your system instructions.',
-        },
-        {
-          type: 'image_url',
-          image_url: { url: dataUri, detail: 'high' },
-        },
-      ],
-    };
-
-    this.logger.debug(
-      `[ReceiptScan] Sending to AI engine (appKey=invoice_ocr, mime=${mimeType})...`,
-    );
-
-    const response = await this.aiEngine.run('invoice_ocr', {}, [imageMessage]);
-
-    this.logger.debug(
-      `[ReceiptScan] AI response: success=${response.success}, contentLength=${response.content?.length ?? 0}, model=${response.model}, error=${response.error}`,
-    );
-
-    if (!response.success || !response.content) {
-      this.logger.error(
-        `[ReceiptScan] AI failed: ${response.error ?? 'no content'}`,
+    const reading = await this.requireReceiptReader().read(file, options);
+    if (reading.batches > 1) {
+      this.logger.log(
+        `[ReceiptScan] ${reading.pages} page(s) read in ${reading.batches} batches`,
       );
-      throw new VendixHttpException(ErrorCodes.DISPATCH_RECEIPT_SCAN_AI_FAIL);
     }
 
     let normalized: RawReceiptScan;
     try {
-      const parsed = parseAiJson(response.content);
-      normalized = this.normalizeReceiptScan(parsed);
+      normalized = this.normalizeReceiptScan(reading.data);
     } catch (err: any) {
       if (err instanceof VendixHttpException) throw err;
-      this.logger.error(
-        `[ReceiptScan] Failed to parse AI response (${err?.message}). Raw content: ${response.content}`,
-      );
+      this.logger.error(`[ReceiptScan] Failed to normalize AI response (${err?.message}).`);
       throw new VendixHttpException(ErrorCodes.DISPATCH_RECEIPT_SCAN_PARSE_FAIL);
     }
 
@@ -389,7 +383,7 @@ export class DispatchNotesService {
       throw new VendixHttpException(ErrorCodes.DISPATCH_RECEIPT_SCAN_NO_ITEMS);
     }
 
-    const warnings: string[] = [];
+    const warnings: string[] = [...reading.warnings];
 
     // ── Supplier matching (tenant-scoped; never invents an id) ──────────────
     const supplier_id = await this.matchReceiptSupplier(
@@ -427,45 +421,14 @@ export class DispatchNotesService {
     }
   }
 
-  /**
-   * Preprocess the upload for the vision model: downscale big images to 1536px
-   * and re-encode as JPEG. PDFs / unsupported types fall through to the raw
-   * buffer so the model handles them natively. Copy-on-purpose mirror of
-   * InvoiceScannerService.preprocessImage.
-   */
-  private async preprocessReceiptImage(
-    file: Express.Multer.File,
-  ): Promise<{ base64: string; mimeType: string }> {
-    const MAX_DIMENSION = 1536;
-    const JPEG_QUALITY = 85;
-    try {
-      const metadata = await sharp(file.buffer).metadata();
-      const needsResize =
-        (metadata.width && metadata.width > MAX_DIMENSION) ||
-        (metadata.height && metadata.height > MAX_DIMENSION);
-      let pipeline = sharp(file.buffer);
-      if (needsResize) {
-        pipeline = pipeline.resize(MAX_DIMENSION, MAX_DIMENSION, {
-          fit: 'inside',
-          withoutEnlargement: true,
-        });
-      }
-      const processedBuffer = await pipeline
-        .jpeg({ quality: JPEG_QUALITY })
-        .toBuffer();
-      return {
-        base64: processedBuffer.toString('base64'),
-        mimeType: 'image/jpeg',
-      };
-    } catch (err: any) {
-      this.logger.warn(
-        `[ReceiptScan] Image preprocessing failed, using raw: ${err?.message}`,
+  private requireReceiptReader(): ReceiptScanReaderService {
+    if (!this.receiptReader) {
+      throw new VendixHttpException(
+        ErrorCodes.AI_QUEUE_001,
+        'El escáner de recibos no está disponible.',
       );
-      return {
-        base64: file.buffer.toString('base64'),
-        mimeType: file.mimetype,
-      };
     }
+    return this.receiptReader;
   }
 
   /**
