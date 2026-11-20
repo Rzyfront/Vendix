@@ -6,6 +6,9 @@ import {
   IsDate,
   ValidateNested,
   IsArray,
+  IsInt,
+  Min,
+  ArrayMinSize,
 } from 'class-validator';
 import { Type } from 'class-transformer';
 
@@ -18,8 +21,10 @@ export class CreateTransferItemDto {
   @IsNumber()
   product_variant_id?: number;
 
-  @IsNumber()
-  @IsNotEmpty()
+  // Unidades de stock (las mismas de `stock_levels`, columna Int): la compra
+  // ya convierte su unidad de compra a unidad de stock al recibir.
+  @IsInt()
+  @Min(1)
   quantity: number;
 
   @IsOptional()
@@ -50,6 +55,7 @@ export class CreateTransferDto {
   notes?: string;
 
   @IsArray()
+  @ArrayMinSize(1)
   @ValidateNested({ each: true })
   @Type(() => CreateTransferItemDto)
   items: CreateTransferItemDto[];

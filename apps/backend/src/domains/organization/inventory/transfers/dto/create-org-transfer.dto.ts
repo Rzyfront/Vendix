@@ -1,4 +1,5 @@
 import {
+  ArrayMinSize,
   IsArray,
   IsDate,
   IsInt,
@@ -20,7 +21,7 @@ export class CreateOrgTransferItemDto {
   @IsInt()
   product_variant_id?: number;
 
-  @IsNumber()
+  @IsInt()
   @IsPositive()
   quantity!: number;
 
@@ -59,6 +60,7 @@ export class CreateOrgTransferDto {
   notes?: string;
 
   @IsArray()
+  @ArrayMinSize(1)
   @ValidateNested({ each: true })
   @Type(() => CreateOrgTransferItemDto)
   items!: CreateOrgTransferItemDto[];

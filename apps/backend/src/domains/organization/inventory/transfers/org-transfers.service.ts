@@ -17,6 +17,30 @@ import { CreateOrgTransferDto } from './dto/create-org-transfer.dto';
 import { CompleteOrgTransferDto } from './dto/complete-org-transfer.dto';
 import { CancelOrgTransferDto } from './dto/cancel-org-transfer.dto';
 import { DispatchOrgTransferDto } from './dto/dispatch-org-transfer.dto';
+import {
+  assertStockAvailableAtOrigin,
+  assertTransferLines,
+  expandTransferablePickerRows,
+  type TransferablePickerRow,
+} from '../../../store/orders/stock-transfers/transfer-item-rules';
+
+/** Relaciones que devuelven todas las escrituras (mismo shape que `findOne`). */
+const TRANSFER_RESPONSE_INCLUDE = {
+  from_location: {
+    select: { id: true, name: true, code: true, store_id: true },
+  },
+  to_location: {
+    select: { id: true, name: true, code: true, store_id: true },
+  },
+  stock_transfer_items: {
+    include: {
+      products: { select: { id: true, name: true, sku: true } },
+      product_variants: {
+        select: { id: true, name: true, sku: true },
+      },
+    },
+  },
+} as const;
 
 /**
  * Org-native stock-transfers service (Plan P2.4 + P4.2 — full lifecycle).
@@ -329,32 +353,13 @@ export class OrgTransfersService {
 
     const organization_id = this.requireOrgId();
     const user_id = this.requireUserId();
+    assertTransferLines(dto.items);
 
-    // Validate location ownership / central-warehouse policy.
-    const fromLocation = await this.operatingScope.enforceLocationAccess(
+    await this.validateTransferLocations(
       organization_id,
       dto.from_location_id,
-      { allowCentral: true },
-    );
-    const toLocation = await this.operatingScope.enforceLocationAccess(
-      organization_id,
       dto.to_location_id,
-      { allowCentral: true },
     );
-
-    // Cross-store guard. Only matters when both locations resolve to a
-    // store_id; central warehouses (store_id null) are intra-org by design.
-    if (
-      fromLocation.store_id != null &&
-      toLocation.store_id != null &&
-      fromLocation.store_id !== toLocation.store_id
-    ) {
-      await this.operatingScope.assertCrossStoreTransferAllowed(
-        organization_id,
-        fromLocation.store_id,
-        toLocation.store_id,
-      );
-    }
 
     return this.orgPrisma.$transaction(async (tx: any) => {
       const transfer_number = await this.generateTransferNumber(tx);
@@ -399,6 +404,251 @@ export class OrgTransfersService {
 
       return this.mapResponse(created);
     });
+  }
+
+  /**
+   * Movimiento rápido (D1): crea la transferencia y la aplica en una sola
+   * transacción — resta en origen, suma en destino — dejando solo el registro
+   * y quién la hizo (`created/approved/dispatched_by_user_id`). Sin transporte
+   * ni remisión. Solo entre ubicaciones de la organización (D9); el alcance se
+   * valida igual que en `create()`.
+   *
+   * Espejo de `StockTransfersService.createAndComplete` (tienda): el costo que
+   * entra al destino es el snapshot de costo que sale del origen, para que la
+   * valuación por promedio no cambie por mover mercancía entre bodegas.
+   */
+  async createAndComplete(dto: CreateOrgTransferDto) {
+    if (dto.from_location_id === dto.to_location_id) {
+      throw new BadRequestException(
+        'Source and destination locations must be different',
+      );
+    }
+
+    const organization_id = this.requireOrgId();
+    const user_id = this.requireUserId();
+    assertTransferLines(dto.items);
+
+    await this.validateTransferLocations(
+      organization_id,
+      dto.from_location_id,
+      dto.to_location_id,
+    );
+
+    const result = await this.orgPrisma.$transaction(async (tx: any) => {
+      await assertStockAvailableAtOrigin(tx, dto.items, dto.from_location_id);
+
+      const transfer_number = await this.generateTransferNumber(tx);
+      const now = new Date();
+
+      const created = await tx.stock_transfers.create({
+        data: {
+          organization_id,
+          transfer_number,
+          from_location_id: dto.from_location_id,
+          to_location_id: dto.to_location_id,
+          status: transfer_status_enum.received,
+          transfer_date: now,
+          expected_date: dto.expected_date,
+          notes: dto.notes,
+          created_by_user_id: user_id,
+          approved_at: now,
+          approved_by_user_id: user_id,
+          dispatched_at: now,
+          dispatched_by_user_id: user_id,
+          completed_date: now,
+          stock_transfer_items: {
+            create: dto.items.map((item) => ({
+              product_id: item.product_id,
+              product_variant_id: item.product_variant_id,
+              quantity: item.quantity,
+              quantity_received: item.quantity,
+              notes: item.notes,
+            })),
+          },
+        },
+        include: { stock_transfer_items: true },
+      });
+
+      for (const item of created.stock_transfer_items) {
+        const source = await this.stockLevelManager.updateStock(
+          {
+            product_id: item.product_id,
+            variant_id: item.product_variant_id ?? undefined,
+            location_id: created.from_location_id,
+            quantity_change: -item.quantity,
+            movement_type: 'transfer',
+            reason: `Transfer ${created.transfer_number} - source`,
+            user_id,
+            create_movement: true,
+            from_location_id: created.from_location_id,
+            to_location_id: created.to_location_id,
+            // Descuento condicional y atómico: un doble envío no puede sacar
+            // dos veces las mismas unidades.
+            validate_availability: true,
+          },
+          tx,
+        );
+
+        await this.stockLevelManager.updateStock(
+          {
+            product_id: item.product_id,
+            variant_id: item.product_variant_id ?? undefined,
+            location_id: created.to_location_id,
+            quantity_change: item.quantity,
+            movement_type: 'transfer',
+            reason: `Transfer ${created.transfer_number} - destination`,
+            user_id,
+            create_movement: true,
+            from_location_id: created.from_location_id,
+            to_location_id: created.to_location_id,
+            unit_cost: Number(source.cost_snapshot?.unit_cost || 0),
+          },
+          tx,
+        );
+      }
+
+      return tx.stock_transfers.findUnique({
+        where: { id: created.id },
+        include: TRANSFER_RESPONSE_INCLUDE,
+      });
+    });
+
+    const total_cost = await this.calculateTransferTotalCost(
+      result.stock_transfer_items,
+      result.from_location_id,
+    );
+    this.eventEmitter.emit('stock_transfer.completed', {
+      transfer_id: result.id,
+      transfer_number: result.transfer_number,
+      organization_id: result.organization_id,
+      store_id:
+        result.from_location?.store_id === result.to_location?.store_id
+          ? result.from_location?.store_id
+          : undefined,
+      from_store_id: result.from_location?.store_id ?? undefined,
+      to_store_id: result.to_location?.store_id ?? undefined,
+      from_location_id: result.from_location_id,
+      to_location_id: result.to_location_id,
+      total_cost,
+      user_id,
+    });
+
+    return this.mapResponse(result);
+  }
+
+  /**
+   * Picker del movimiento rápido de organización: productos y variantes con
+   * stock registrado en el origen, con su disponible en origen y destino. Mismo
+   * shape que `GET /store/stock-transfers/search-products` para que el modal
+   * compartido no distinga la superficie.
+   */
+  async searchTransferableProducts(
+    search: string,
+    fromLocationId: number,
+    toLocationId: number,
+    limit = 20,
+  ): Promise<TransferablePickerRow[]> {
+    const organization_id = this.requireOrgId();
+    await this.operatingScope.enforceLocationAccess(
+      organization_id,
+      fromLocationId,
+      { allowCentral: true },
+    );
+    await this.operatingScope.enforceLocationAccess(
+      organization_id,
+      toLocationId,
+      { allowCentral: true },
+    );
+
+    const term = (search ?? '').trim();
+    const take = Math.min(Math.max(Number(limit) || 20, 1), 50);
+
+    const originRows = await this.orgPrisma.stock_levels.findMany({
+      where: {
+        location_id: fromLocationId,
+        products: { state: { not: 'archived' } },
+        ...(term
+          ? {
+              OR: [
+                { products: { name: { contains: term, mode: 'insensitive' } } },
+                { products: { sku: { contains: term, mode: 'insensitive' } } },
+                {
+                  product_variants: {
+                    name: { contains: term, mode: 'insensitive' },
+                  },
+                },
+                {
+                  product_variants: {
+                    sku: { contains: term, mode: 'insensitive' },
+                  },
+                },
+              ],
+            }
+          : {}),
+      },
+      select: {
+        product_id: true,
+        product_variant_id: true,
+        location_id: true,
+        quantity_on_hand: true,
+        quantity_reserved: true,
+        quantity_available: true,
+        products: { select: { id: true, name: true, sku: true } },
+        product_variants: { select: { id: true, name: true, sku: true } },
+      },
+      orderBy: [{ quantity_available: 'desc' }, { id: 'asc' }],
+      take,
+    });
+
+    if (originRows.length === 0) return [];
+
+    const productIds = [...new Set(originRows.map((r: any) => r.product_id))];
+    const destinationRows = await this.orgPrisma.stock_levels.findMany({
+      where: { location_id: toLocationId, product_id: { in: productIds } },
+      select: {
+        product_id: true,
+        product_variant_id: true,
+        location_id: true,
+        quantity_on_hand: true,
+        quantity_reserved: true,
+        quantity_available: true,
+      },
+    });
+
+    // Productos que ya llevan su stock por variante en el origen: su fila base
+    // vacía es un residuo y no se ofrece (misma regla que el picker de tienda).
+    const productsWithVariantRows = new Set(
+      originRows
+        .filter((r: any) => r.product_variant_id != null)
+        .map((r: any) => r.product_id),
+    );
+
+    // Se conserva el orden del origen (más disponible primero); cada fila de
+    // origen es exactamente una fila del picker.
+    return originRows
+      .filter(
+        (row: any) =>
+          row.product_variant_id != null ||
+          !productsWithVariantRows.has(row.product_id) ||
+          Number(row.quantity_on_hand ?? 0) > 0,
+      )
+      .flatMap((row: any) =>
+        expandTransferablePickerRows(
+          row.products ?? {
+            id: row.product_id,
+            name: `Producto #${row.product_id}`,
+            sku: null,
+          },
+          [
+            row,
+            ...destinationRows.filter(
+              (d: any) => d.product_id === row.product_id,
+            ),
+          ],
+          fromLocationId,
+          toLocationId,
+        ),
+      );
   }
 
   /**
@@ -854,6 +1104,42 @@ export class OrgTransfersService {
   // ------------------------------------------------------------------
   // Internals
   // ------------------------------------------------------------------
+
+  /**
+   * Pertenencia de ambas ubicaciones a la organización (bodega central
+   * permitida) y política de traslado entre tiendas. Compartido por `create` y
+   * `createAndComplete`.
+   */
+  private async validateTransferLocations(
+    organization_id: number,
+    fromLocationId: number,
+    toLocationId: number,
+  ): Promise<void> {
+    const fromLocation = await this.operatingScope.enforceLocationAccess(
+      organization_id,
+      fromLocationId,
+      { allowCentral: true },
+    );
+    const toLocation = await this.operatingScope.enforceLocationAccess(
+      organization_id,
+      toLocationId,
+      { allowCentral: true },
+    );
+
+    // Cross-store guard. Only matters when both locations resolve to a
+    // store_id; central warehouses (store_id null) are intra-org by design.
+    if (
+      fromLocation.store_id != null &&
+      toLocation.store_id != null &&
+      fromLocation.store_id !== toLocation.store_id
+    ) {
+      await this.operatingScope.assertCrossStoreTransferAllowed(
+        organization_id,
+        fromLocation.store_id,
+        toLocation.store_id,
+      );
+    }
+  }
 
   /**
    * Maps a legacy enum filter value to the equivalent set of physical values
