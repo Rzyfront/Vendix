@@ -307,10 +307,26 @@ export class TransferDetailModalComponent {
     );
   });
 
-  /** D4 — se puede recibir mientras haya saldo en camino, también por partes. */
+  /**
+   * D4 — se puede recibir mientras haya saldo en camino, también por partes.
+   * Una salida a destino externo no se recibe (se cierra al despachar) y una
+   * transferencia con modo de movimiento debe despacharse antes: el backend
+   * rechaza ambas, así que el botón no se muestra.
+   */
   readonly canReceive = computed(() => {
-    const status = this.transfer()?.status;
-    return status === 'in_transit' || status === 'partially_received';
+    const transfer = this.transfer();
+    if (!transfer) return false;
+    const status = transfer.status;
+    if (status !== 'in_transit' && status !== 'partially_received') {
+      return false;
+    }
+    if (transfer.is_external_destination) return false;
+    const neverDispatched =
+      !transfer.dispatched_at &&
+      (transfer.stock_transfer_items ?? []).every(
+        (item) => item.quantity_dispatched == null,
+      );
+    return !(transfer.movement_mode && neverDispatched);
   });
 
   /** D8 — una salida a destino externo no tiene bodega de destino. */

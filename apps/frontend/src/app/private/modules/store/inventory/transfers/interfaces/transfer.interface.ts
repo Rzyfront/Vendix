@@ -45,6 +45,10 @@ export interface StockTransfer {
   to_location?: InventoryLocation | null;
   is_external_destination?: boolean;
   external_destination_name?: string | null;
+  /** D3 — null en filas del flujo anterior (aprobar reservaba, recibir movía). */
+  movement_mode?: 'quick' | 'mass_only' | 'with_dispatch_notes' | null;
+  /** Fecha del despacho físico; null mientras no se despache. */
+  dispatched_at?: string | null;
   stock_transfer_items: StockTransferItem[];
 }
 
