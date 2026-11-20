@@ -365,7 +365,8 @@ describe('PromotionEngineService - quoteDiscounts', () => {
       );
       expect(args.where.OR).toEqual([
         { end_date: null },
-        { end_date: { gte: new Date('2026-06-01T00:00:00Z') } },
+        { end_date: { gte: new Date('2026-06-01T07:00:00Z') } },
+        { end_date: new Date('2026-06-01T00:00:00Z') },
       ]);
       expect(result.applied_promotions).toEqual([]);
     });
@@ -528,7 +529,8 @@ describe('PromotionEngineService - quoteDiscounts', () => {
       });
       expect(where.OR).toEqual([
         { end_date: null },
-        { end_date: { gte: new Date('2026-02-28T00:00:00Z') } },
+        { end_date: { gte: new Date('2026-02-28T19:00:00Z') } },
+        { end_date: new Date('2026-02-28T00:00:00Z') },
       ]);
     });
   });
@@ -2319,7 +2321,8 @@ describe('PromotionEngineService - auditoría y días de la semana', () => {
       const where = prisma.promotions.findMany.mock.calls[0][0].where;
       expect(where.OR).toEqual([
         { end_date: null },
-        { end_date: { gte: new Date('2026-11-30T00:00:00Z') } },
+        { end_date: { gte: new Date('2026-11-30T15:00:00Z') } },
+        { end_date: new Date('2026-11-30T00:00:00Z') },
       ]);
       // y la de inicio arranca a la medianoche LOCAL, no a las 19:00 del día anterior
       expect(where.start_date).toEqual({
