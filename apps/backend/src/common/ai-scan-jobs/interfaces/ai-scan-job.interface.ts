@@ -14,7 +14,8 @@ export type AiScanKind =
   | 'customer_import'
   | 'product_image_enhance'
   | 'product_image_generate'
-  | 'invoice_draft';
+  | 'invoice_draft'
+  | 'data_collection_template';
 
 export interface AiScanJobContext {
   store_id: number | null;

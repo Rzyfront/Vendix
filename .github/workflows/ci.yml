@@ -283,6 +283,14 @@ jobs:
           src/common/workflows/contract/workflow-contract.parity.spec.ts
           src/domains/store/data-collection/template-json/template-json.contract.parity.spec.ts
           src/domains/store/data-collection/template-json/template-json.contract.spec.ts
+      # «Crear plantilla con IA (PDF/foto)»: sus imports llegan a los tipos del
+      # AI Engine y Prisma, así que corren sin type-check por archivo.
+      - name: Jest — plantillas con IA (recolección de datos)
+        working-directory: apps/backend
+        run: >-
+          npx jest --ci --runInBand --config jest.isolated.config.js --runTestsByPath
+          src/domains/store/data-collection/ai-draft/template-ai-draft.builder.spec.ts
+          src/domains/store/data-collection/ai-draft/template-ai-draft.service.spec.ts
 
   # Lo que un doble en memoria no prueba del motor de Flujos: concurrencia,
   # SKIP LOCKED, idempotencia, triggers de evidencia y outbox transaccional.

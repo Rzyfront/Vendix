@@ -10,10 +10,20 @@ import {
   Query,
   ParseIntPipe,
   UseGuards,
+  HttpCode,
+  HttpStatus,
+  UploadedFile,
+  UseInterceptors,
 } from '@nestjs/common';
+import { FileInterceptor } from '@nestjs/platform-express';
+import { memoryStorage } from 'multer';
 import { ServiceIndustryGuard } from '../../../common/guards/service-industry.guard';
 import { TemplatesService } from './templates.service';
 import { TemplateImportService } from './template-import.service';
+import {
+  TEMPLATE_DRAFT_MAX_BYTES,
+  TemplateAiDraftService,
+} from './ai-draft/template-ai-draft.service';
 import { CreateTemplateDto } from './dto/create-template.dto';
 import { UpdateTemplateDto } from './dto/update-template.dto';
 import { SetProductTemplateDto } from './dto/set-product-template.dto';
@@ -27,6 +37,7 @@ export class TemplatesController {
   constructor(
     private readonly service: TemplatesService,
     private readonly importService: TemplateImportService,
+    private readonly aiDraftService: TemplateAiDraftService,
     private readonly responseService: ResponseService,
   ) {}
 
@@ -100,6 +111,33 @@ export class TemplatesController {
         ? 'La plantilla JSON es válida'
         : 'Plantilla importada como borrador',
     );
+  }
+
+  /**
+   * «Crear con IA (PDF/foto)»: enqueues a draft on the `ai-scan` queue
+   * (202 + job_id). The AI only produces a draft; the user reviews it in the
+   * JSON modal and imports it through `POST import`.
+   */
+  @Post('ai-draft')
+  @HttpCode(HttpStatus.ACCEPTED)
+  @Permissions('store:settings:write')
+  @UseInterceptors(
+    FileInterceptor('file', {
+      storage: memoryStorage(),
+      limits: { fileSize: TEMPLATE_DRAFT_MAX_BYTES, files: 1 },
+    }),
+  )
+  async startAiDraft(@UploadedFile() file?: Express.Multer.File) {
+    const result = await this.aiDraftService.enqueue(file);
+    return this.responseService.success(result, 'Leyendo el formulario con IA');
+  }
+
+  /** Draft status: pending | done ({ json, errors }) | failed. Owner-checked. */
+  @Get('ai-draft/:jobId')
+  @Permissions('store:settings:write')
+  async getAiDraft(@Param('jobId') jobId: string) {
+    const result = await this.aiDraftService.getStatus(jobId);
+    return this.responseService.success(result);
   }
 
   @Patch(':id')
