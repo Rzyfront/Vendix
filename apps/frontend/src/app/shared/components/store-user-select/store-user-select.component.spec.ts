@@ -1,7 +1,7 @@
 import { Component, signal } from '@angular/core';
 import { ComponentFixture, TestBed } from '@angular/core/testing';
 import { FormControl, ReactiveFormsModule } from '@angular/forms';
-import { of } from 'rxjs';
+import { Subject, of } from 'rxjs';
 
 import { StoreUserSelectComponent } from './store-user-select.component';
 import {
@@ -196,5 +196,62 @@ describe('StoreUserSelectComponent · syncValueInput no pisa el estado CVA (B9 r
 
       expect(component.selected()).toBeNull();
     });
+  });
+});
+
+// ── Responsable del CRM: el nombre llega tarde y no pisa lo elegido ─────────
+describe('StoreUserSelectComponent · nombre del responsable (Usuario #id)', () => {
+  let lookupSpy: jasmine.SpyObj<StoreUserLookupService>;
+  let fixture: ComponentFixture<CvaHostComponent>;
+  let host: CvaHostComponent;
+  let component: StoreUserSelectComponent;
+  let answer: Subject<StoreUserOption | null>;
+
+  beforeEach(async () => {
+    lookupSpy = makeLookupSpy();
+    answer = new Subject<StoreUserOption | null>();
+    lookupSpy.getById.and.returnValue(answer.asObservable());
+
+    await TestBed.configureTestingModule({
+      imports: [CvaHostComponent],
+      providers: [{ provide: StoreUserLookupService, useValue: lookupSpy }],
+    }).compileComponents();
+
+    fixture = TestBed.createComponent(CvaHostComponent);
+    host = fixture.componentInstance;
+    fixture.detectChanges();
+    await fixture.whenStable();
+    component = fixture.debugElement.children[0].componentInstance;
+  });
+
+  it('muestra el nombre que devuelve el servidor, no "Usuario #id"', async () => {
+    host.control.setValue(7);
+    answer.next(USER_7);
+    fixture.detectChanges();
+    await fixture.whenStable();
+
+    expect(component.selected()?.name).toBe('Ana Pérez');
+  });
+
+  it('una respuesta tardía no reemplaza a la persona que el usuario ya eligió', async () => {
+    host.control.setValue(7);
+    component.select(USER_9);
+    answer.next(USER_7);
+    fixture.detectChanges();
+    await fixture.whenStable();
+
+    expect(component.selected()?.id).toBe(9);
+    expect(host.control.value).toBe(9);
+  });
+
+  it('no vuelve a consultar cuando el id ya es el elegido', async () => {
+    component.select(USER_9);
+    lookupSpy.getById.calls.reset();
+    host.control.setValue(9);
+    fixture.detectChanges();
+    await fixture.whenStable();
+
+    expect(lookupSpy.getById).not.toHaveBeenCalled();
+    expect(component.selected()?.name).toBe('Luis Gómez');
   });
 });
