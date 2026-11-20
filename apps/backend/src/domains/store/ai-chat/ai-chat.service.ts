@@ -1235,9 +1235,25 @@ export class AIChatService {
       throw new VendixHttpException(ErrorCodes.AI_CHAT_001);
     }
 
+    // `title_source = 'user'` blinda el nombre puesto a mano: el título
+    // generado nunca lo sobrescribe. Se fusiona con `metadata` para no perder
+    // `agent_key` ni otras claves.
+    const previous =
+      conversation.metadata &&
+      typeof conversation.metadata === 'object' &&
+      !Array.isArray(conversation.metadata)
+        ? (conversation.metadata as Record<string, unknown>)
+        : {};
     return this.prisma.ai_conversations.update({
       where: { id },
-      data: { title, updated_at: new Date() },
+      data: {
+        title,
+        metadata: {
+          ...previous,
+          title_source: 'user',
+        } as Prisma.InputJsonValue,
+        updated_at: new Date(),
+      },
     });
   }
 

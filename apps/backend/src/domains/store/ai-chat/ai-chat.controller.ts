@@ -25,6 +25,7 @@ import {
   SendMessageDto,
   ConversationQueryDto,
   StreamIntentDto,
+  UpdateConversationTitleDto,
 } from './dto';
 
 @Controller('store/ai-chat')
@@ -223,9 +224,9 @@ export class AIChatController {
   @Patch('conversations/:id/title')
   async updateTitle(
     @Param('id', ParseIntPipe) id: number,
-    @Body('title') title: string,
+    @Body() dto: UpdateConversationTitleDto,
   ) {
-    const conversation = await this.chatService.updateTitle(id, title);
+    const conversation = await this.chatService.updateTitle(id, dto.title);
     return this.responseService.success(conversation, 'Title updated');
   }
 }
