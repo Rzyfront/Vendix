@@ -30,6 +30,7 @@ import {
 import { resolvePaymentReceivedSaleFields } from '../payments/utils/payment-sale-share.util';
 import { PromotionEngineService } from '../promotions/promotion-engine/promotion-engine.service';
 import { loadLinePromotionLabels } from '../promotions/utils/line-promotion-label.util';
+import { buildOrderLineBreakdown } from '../orders/utils/order-breakdown.util';
 import { assertNoActiveFinancialSplit } from '../orders/shared/financial-split-policy';
 import { canReassignOrderToTable } from '../orders/shared/order-table-reassignment-policy.util';
 import { lockOrderLifecycle } from '../orders/order-flow/order-lifecycle-lock.util';
@@ -129,6 +130,9 @@ export interface TableSessionView {
       // descontado. `final_total_price` sigue siendo el bruto sin descuento.
       discount_amount?: number;
       discounted_total_price?: number;
+      // Total con impuesto ANTES del descuento (precio tachado). Mismo cálculo
+      // que el detalle de la orden (`buildOrderLineBreakdown`).
+      total_before_discount?: number;
       // Nombre de la promoción que produjo el descuento (solo no-cocina).
       promotion_label?: string;
       inventory_consumed_at_fire: boolean;
@@ -2541,6 +2545,7 @@ export class TableSessionsService {
         final_total_price: number;
         discount_amount?: number;
         discounted_total_price?: number;
+        total_before_discount?: number;
         promotion_label?: string;
       }
     >();
@@ -2570,6 +2575,11 @@ export class TableSessionsService {
                       )) *
                       100,
                   ) / 100,
+                // Precio de lista CON impuesto: `final_total_price` devuelve
+                // la base cuando la tasa va incluida, así que el tachado y el
+                // ahorro salen del mismo desglose que el detalle de la orden.
+                total_before_discount:
+                  buildOrderLineBreakdown(it).total_before_discount,
               }
             : {};
         finalsByItemId.set(it.id, {

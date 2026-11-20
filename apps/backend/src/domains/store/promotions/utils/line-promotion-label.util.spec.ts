@@ -1,5 +1,4 @@
 import {
-  DEFAULT_PROMOTION_LABEL,
   loadLinePromotionLabels,
   resolveLinePromotionLabels,
 } from './line-promotion-label.util';
@@ -7,7 +6,7 @@ import {
 /**
  * La etiqueta es display-only: nombra la promoción que produjo el
  * `discount_amount` de la línea. Estos casos fijan el orden de resolución
- * (registrada > motor > fallback) y que las líneas sin descuento no se
+ * (registrada > motor > sin etiqueta) y que las líneas sin descuento no se
  * etiquetan.
  */
 describe('loadLinePromotionLabels', () => {
@@ -89,7 +88,7 @@ describe('loadLinePromotionLabels', () => {
     ]);
   });
 
-  it('cae al fallback cuando ni la orden ni el motor nombran la promo', async () => {
+  it('deja sin etiqueta la línea cuyo descuento no viene de una promo', async () => {
     const prisma = prismaMock();
     const lookup = jest.fn().mockResolvedValue(new Map());
 
@@ -100,10 +99,12 @@ describe('loadLinePromotionLabels', () => {
       lookup,
     );
 
-    expect(labels.get(4)).toBe(DEFAULT_PROMOTION_LABEL);
+    // Descuento manual / promo vencida: no se afirma "Promoción".
+    expect(labels.has(4)).toBe(false);
+    expect(labels.size).toBe(0);
   });
 
-  it('un fallo del motor no rompe la respuesta: fallback', async () => {
+  it('un fallo del motor no rompe la respuesta: línea sin etiqueta', async () => {
     const prisma = prismaMock();
     const lookup = jest.fn().mockRejectedValue(new Error('boom'));
 
@@ -114,7 +115,7 @@ describe('loadLinePromotionLabels', () => {
       lookup,
     );
 
-    expect(labels.get(5)).toBe(DEFAULT_PROMOTION_LABEL);
+    expect(labels.has(5)).toBe(false);
   });
 
   it('no etiqueta líneas sin descuento ni consulta nada', async () => {

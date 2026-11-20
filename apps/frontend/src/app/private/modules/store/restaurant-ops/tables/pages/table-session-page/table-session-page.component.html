@@ -673,24 +673,19 @@
                       <div class="item-money">
                         @if (item.discounted_total_price != null) {
                           <!-- Promo de producto: el total ya descontado manda;
-                               el precio de lista queda tachado como referencia. -->
-                          <span class="item-money__list">{{
-                            +(item.final_total_price ?? item.total_price) | currency
-                          }}</span>
+                               el precio de lista (con impuesto) queda tachado.
+                               Lista y ahorro salen de `total_before_discount`,
+                               igual que el detalle de la orden. -->
+                          @let listTotal = itemListTotal(item);
+                          @let savings = itemSavings(item);
+                          @if (listTotal !== null) {
+                            <span class="item-money__list">{{ listTotal | currency }}</span>
+                          }
                           <span class="item-money__promo">{{
                             +item.discounted_total_price | currency
                           }}</span>
-                          <!-- Ahorro con impuesto: lista tachada − total cobrado
-                               (`discount_amount` es de BASE y no cuadraría). -->
-                          @if (
-                            +(item.final_total_price ?? item.total_price) -
-                              +item.discounted_total_price >
-                            0
-                          ) {
-                            <span class="item-money__discount">{{
-                              +item.discounted_total_price -
-                                +(item.final_total_price ?? item.total_price) | currency
-                            }}</span>
+                          @if (savings !== null) {
+                            <span class="item-money__discount">{{ -savings | currency }}</span>
                           }
                         } @else {
                           {{ +(item.final_total_price ?? item.total_price) | currency }}
@@ -857,6 +852,7 @@
   <app-add-items-modal
     [isOpen]="isAddItemsOpen()"
     [loading]="isAddingItems()"
+    [accountLines]="accountLines()"
     (isOpenChange)="isAddItemsOpen.set($event)"
     (addItems)="onAddItems($event)"
   />

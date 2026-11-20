@@ -275,6 +275,53 @@ describe('TableSessionPageComponent waiter delivery', () => {
     expect(component.waiterName()).toBeNull();
   });
 
+  describe('promo en la cuenta: tachado y ahorro con impuesto', () => {
+    // Pinchos 30.000 con INC 8 % incluido, promo 30 %: `final_total_price`
+    // trae la BASE (27.777,78); el precio de lista es `total_before_discount`.
+    const promoLine = (overrides: Partial<TableSessionOrderItem> = {}): TableSessionOrderItem => ({
+      ...item(1, false),
+      unit_price: '27777.78',
+      total_price: '27777.78',
+      final_total_price: 27777.78,
+      discount_amount: 8333.33,
+      discounted_total_price: 21000,
+      total_before_discount: 30000,
+      ...overrides,
+    });
+
+    it('tacha 30.000, cobra 21.000 y ahorra 9.000 (igual que el detalle de la orden)', () => {
+      const line = promoLine();
+      expect(component.itemListTotal(line)).toBe(30000);
+      expect(Number(line.discounted_total_price)).toBe(21000);
+      expect(component.itemSavings(line)).toBe(9000);
+    });
+
+    it('sin total_before_discount no tacha la base como si fuera el precio', () => {
+      const line = promoLine({ total_before_discount: undefined });
+      expect(component.itemListTotal(line)).toBeNull();
+      expect(component.itemSavings(line)).toBeNull();
+    });
+
+    it('línea sin descuento: ni tachado ni ahorro', () => {
+      expect(component.itemListTotal(item(1, false))).toBeNull();
+      expect(component.itemSavings(item(1, false))).toBeNull();
+    });
+
+    it('entrega al selector las líneas vivas con su total de lista', () => {
+      component.session.set(
+        session([
+          promoLine(),
+          { ...item(2, false), final_total_price: 10800 },
+          { ...item(3, false), cancelled_at: '2026-09-23T12:05:00Z' },
+        ]),
+      );
+      expect(component.accountLines()).toEqual([
+        { product_id: 1, list_total: 30000, has_discount: true },
+        { product_id: 2, list_total: 10800, has_discount: false },
+      ]);
+    });
+  });
+
   describe('informal notes (QUI-898)', () => {
     it('saves trimmed text via updateInformalNotes and updates the session', () => {
       component.session.set(session([]));

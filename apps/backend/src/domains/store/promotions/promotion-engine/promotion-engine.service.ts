@@ -1923,6 +1923,15 @@ export class PromotionEngineService {
         promotional_price: promotionalPrice,
         badge_label: this.buildBadgeLabel(promo, discount, unitPrice),
         priority: promo.priority ?? 0,
+        // Reglas que el carrito aplica sobre el TOTAL del alcance (no por
+        // unidad): quien estime un total con cantidad > 1 las necesita para no
+        // anunciar más descuento del que `quoteDiscounts` cobra.
+        max_discount_amount: this.positiveAmountOrNull(
+          promo.max_discount_amount,
+        ),
+        min_purchase_amount: this.positiveAmountOrNull(
+          promo.min_purchase_amount,
+        ),
         // Flat promo: always emit an EMPTY array (NOT `undefined`) so the
         // shape is symmetric with `quantity_tiered` rows. Consumers can
         // iterate `entry.quantity_tiers ?? []` unconditionally; the field is
@@ -2090,6 +2099,11 @@ export class PromotionEngineService {
 
     // Order scope: applies to the whole cart.
     return items.map((_, idx) => idx);
+  }
+
+  private positiveAmountOrNull(value: unknown): number | null {
+    const amount = Number(value);
+    return Number.isFinite(amount) && amount > 0 ? amount : null;
   }
 
   /**
