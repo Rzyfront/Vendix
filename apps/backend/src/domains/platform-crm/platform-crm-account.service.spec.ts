@@ -58,7 +58,13 @@ const METRIC_KEYS = [
 ];
 const FORBIDDEN = /metadata|line_items|split_breakdown|gateway_reference|payload|partner|commission|refund_amount|SECRETO/;
 
-function createDb() {
+type RefundRow = { id: number; metadata: Record<string, unknown> };
+const REFUNDS_OK: RefundRow[] = [
+  { id: 22, metadata: { refund_amount: 119000, refund_result: 'success' } },
+  { id: 23, metadata: { refund_amount: 15, refund_result: 'success' } },
+];
+
+function createDb(refundRows: RefundRow[] = REFUNDS_OK) {
   const invoices = [
     {
       id: 11,
@@ -190,9 +196,7 @@ function createDb() {
     },
     subscription_payments: {
       findMany: jest.fn(async ({ select }: { select: Record<string, unknown> }) =>
-        select.metadata
-          ? [{ id: 23, metadata: { refund_amount: 15, refund_result: 'success' } }]
-          : payments,
+        select.metadata ? refundRows : payments,
       ),
     },
     subscription_events: { findMany: jest.fn(async () => events) },
@@ -310,13 +314,13 @@ describe('PlatformCrmAccountService', () => {
       for (const select of selects) {
         expect(select).not.toMatch(/line_items|split_breakdown|gateway_reference|metadata|partner|commission/);
       }
-      // El metadata del pago solo se lee para los reembolsos parciales.
+      // El metadata del pago solo se lee para los reembolsos (parciales y totales).
       const metadataCalls = db.subscription_payments.findMany.mock.calls.filter(
         ([args]) => (args as { select: { metadata?: boolean } }).select.metadata,
       );
       expect(metadataCalls).toHaveLength(1);
       expect(metadataCalls[0][0]).toEqual({
-        where: { id: { in: [23] } },
+        where: { id: { in: [22, 23] } },
         select: { id: true, metadata: true },
       });
       // Borradores fuera; eventos solo de la lista cerrada; todo acotado a los comercios cubiertos.
@@ -385,6 +389,29 @@ describe('PlatformCrmAccountService', () => {
       const clavo = summary.by_store.find((s) => s.store_id === 301)!;
       expect(clavo.total_paid).toEqual([{ currency: 'USD', amount: 25 }]);
       expect(clavo.overdue_count).toBe(1);
+    });
+
+    it('un reembolso que la pasarela rechazó no descuenta del total pagado', async () => {
+      db = createDb([
+        { id: 22, metadata: { refund_amount: 119000, refund_result: 'failed' } },
+        { id: 23, metadata: { refund_amount: 15, refund_result: 'failed' } },
+      ]);
+      service = new PlatformCrmAccountService({ withoutScope: () => db } as never, links as never, activity as never);
+      const { summary } = await service.getSubscriptionMovements(ctx, 5, {});
+      expect(summary.total.total_paid).toEqual([
+        { currency: 'COP', amount: 238000 },
+        { currency: 'USD', amount: 40 },
+      ]);
+    });
+
+    it('filas antiguas sin refund_result se toman como reembolso hecho', async () => {
+      db = createDb([{ id: 23, metadata: { refund_amount: 15 } }]);
+      service = new PlatformCrmAccountService({ withoutScope: () => db } as never, links as never, activity as never);
+      const { summary } = await service.getSubscriptionMovements(ctx, 5, {});
+      expect(summary.total.total_paid).toEqual([
+        { currency: 'COP', amount: 119000 },
+        { currency: 'USD', amount: 25 },
+      ]);
     });
 
     it('comercios con su plan y estado para el filtro', async () => {
