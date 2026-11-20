@@ -235,6 +235,19 @@ import {AiJobProgressComponent} from '../../../../../../shared/components/ai-job
             }
           </div>
 
+          <!-- ia-cargas F5a: avisos de la lectura (páginas no leídas, dos totales) -->
+          @if (scanWarnings().length > 0) {
+            <div class="bg-amber-50 border border-amber-200 rounded-lg p-3">
+              <p class="text-xs font-semibold text-amber-800 mb-1">Revisa antes de guardar</p>
+              @for (warn of scanWarnings(); track warn) {
+                <p class="text-xs text-amber-700">{{ warn }}</p>
+              }
+            </div>
+          }
+          @if ((scanPages() ?? 0) > 1) {
+            <p class="text-xs text-text-secondary">Factura leída en {{ scanPages() }} páginas.</p>
+          }
+
           <!-- Invoice header fields -->
           <div class="grid grid-cols-1 sm:grid-cols-2 gap-4">
             <app-input
@@ -626,6 +639,9 @@ export class ExpenseScannerModalComponent {
 
   // Scan results
   readonly scanResult = signal<ExpenseScanResult | null>(null);
+  /** ia-cargas F5a: notices about how the invoice was read (optional in the API). */
+  readonly scanWarnings = signal<string[]>([]);
+  readonly scanPages = signal<number | null>(null);
   readonly matchedCategory = signal<{
     id: number;
     name: string;
@@ -870,6 +886,8 @@ export class ExpenseScannerModalComponent {
 
           this.scanResult.set(scan);
           this.matchedCategory.set(matched);
+          this.scanWarnings.set(result.warnings ?? []);
+          this.scanPages.set(result.scan_source?.pages ?? null);
 
           // Pre-fill editable fields from scan
           this.editSupplierName.set(scan.supplier_name || '');
@@ -1117,6 +1135,8 @@ export class ExpenseScannerModalComponent {
     this.scanSub?.unsubscribe();
     this.aiProgress.reset();
     this.scanResult.set(null);
+    this.scanWarnings.set([]);
+    this.scanPages.set(null);
     this.matchedCategory.set(null);
     this.editableItems.set([]);
     this.editSupplierName.set('');
