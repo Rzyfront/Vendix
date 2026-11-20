@@ -3,6 +3,7 @@ import { HttpClient, HttpParams } from '@angular/common/http';
 import { Observable, map } from 'rxjs';
 import { environment } from '../../../../../../../environments/environment';
 import {
+  CompleteCrmTaskMove,
   CrmBoard,
   CrmBoardQuery,
   CrmNote,
@@ -229,9 +230,13 @@ export class CrmService {
       .pipe(map((r) => r.data));
   }
 
-  completeTask(id: number): Observable<CrmTask> {
+  /**
+   * Marks the task done. `move` (only for a task that moves nothing by
+   * itself) also moves that open opportunity of its customer to that stage.
+   */
+  completeTask(id: number, move?: CompleteCrmTaskMove): Observable<CrmTask> {
     return this.http
-      .post<ApiResponse<CrmTask>>(`${this.base}/crm/tasks/${id}/complete`, {})
+      .post<ApiResponse<CrmTask>>(`${this.base}/crm/tasks/${id}/complete`, move ?? {})
       .pipe(map((r) => r.data));
   }
 
