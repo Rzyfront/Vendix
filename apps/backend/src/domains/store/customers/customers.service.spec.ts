@@ -1036,6 +1036,44 @@ describe('CustomersService — QUI-728 customer fiscal data', () => {
       ]);
     });
 
+    it('findAll: filtra por departamento y ciudad en cualquier dirección del cliente', async () => {
+      mockPrismaService.users.findMany.mockResolvedValue([]);
+      mockPrismaService.users.count.mockResolvedValue(0);
+
+      await service.findAll(7, {
+        state_province: 'Antioquia',
+        city: 'Medellín',
+      });
+
+      const where = mockPrismaService.users.findMany.mock.calls[0][0].where;
+      expect(where.addresses).toEqual({
+        some: {
+          state_province: { equals: 'Antioquia', mode: 'insensitive' },
+          city: { equals: 'Medellín', mode: 'insensitive' },
+        },
+      });
+      // count must use the same filter so pagination matches the list.
+      expect(mockPrismaService.users.count.mock.calls[0][0].where).toBe(where);
+      // Tenant scope stays in place.
+      expect(where.store_users).toEqual({ some: { store_id: 7 } });
+    });
+
+    it('findAll: solo departamento filtra sin ciudad; sin filtros no toca addresses', async () => {
+      mockPrismaService.users.findMany.mockResolvedValue([]);
+      mockPrismaService.users.count.mockResolvedValue(0);
+
+      await service.findAll(7, { state_province: '  Antioquia ' });
+      await service.findAll(7, { state_province: '', city: '   ' });
+
+      const [withDept, none] = mockPrismaService.users.findMany.mock.calls;
+      expect(withDept[0].where.addresses).toEqual({
+        some: {
+          state_province: { equals: 'Antioquia', mode: 'insensitive' },
+        },
+      });
+      expect(none[0].where.addresses).toBeUndefined();
+    });
+
     it('sin billing primaria toma la más reciente', async () => {
       mockPrismaService.users.findFirst.mockResolvedValue({
         id: 5,

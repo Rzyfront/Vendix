@@ -189,11 +189,12 @@ export class CustomersService {
         if (filters?.search) {
             params = params.set('search', filters.search);
         }
-
-        // Example fitlers
-        // if (filters?.state) {
-        //   params = params.set('state', filters.state);
-        // }
+        if (filters?.state_province) {
+            params = params.set('state_province', filters.state_province);
+        }
+        if (filters?.city) {
+            params = params.set('city', filters.city);
+        }
 
         return this.http.get<PaginatedResponse<Customer>>(this.apiUrl, { params });
     }
