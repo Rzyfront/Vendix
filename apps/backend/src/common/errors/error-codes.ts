@@ -8783,6 +8783,17 @@ export const ErrorCodes = {
     devMessage:
       'Este cliente ya tiene enlazada una tienda de esta organización: desenlázala antes de enlazar la organización completa.',
   },
+  // Movimientos de suscripción y actividad por comercio (D1, D4).
+  PLATFORM_CRM_014: {
+    code: 'PLATFORM_CRM_014',
+    httpStatus: 400,
+    devMessage: 'El rango de fechas no es válido.',
+  },
+  PLATFORM_CRM_015: {
+    code: 'PLATFORM_CRM_015',
+    httpStatus: 404,
+    devMessage: 'El comercio no está enlazado a este cliente.',
+  },
 } as const satisfies Record<string, ErrorCodeEntry>;
 
 export const FiscalScopeBlockerCodes = {

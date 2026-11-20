@@ -1,7 +1,10 @@
 import { Transform, Type } from 'class-transformer';
 import {
+  IsIn,
   IsInt,
   IsOptional,
+  Matches,
+  Max,
   IsString,
   MaxLength,
   MinLength,
@@ -75,4 +78,60 @@ export class UnlinkPlatformCustomerDto {
   @IsString()
   @MaxLength(300)
   reason?: string;
+}
+
+const DATE_ONLY_REGEX = /^\d{4}-\d{2}-\d{2}$/;
+
+/** Tipos de movimiento del historial de suscripción (D1, D3). */
+export const SUBSCRIPTION_MOVEMENT_TYPES = ['invoice', 'payment', 'event'] as const;
+export type SubscriptionMovementType = (typeof SUBSCRIPTION_MOVEMENT_TYPES)[number];
+
+/**
+ * `GET store/platform-crm/customers/:customerId/subscription-movements`
+ * Fechas `YYYY-MM-DD` en UTC (vista de plataforma que cruza tiendas, igual
+ * que la actividad de Superadmin).
+ */
+export class SubscriptionMovementsQueryDto {
+  /** Solo un comercio cubierto por los enlaces del cliente (si no, 404). */
+  @IsOptional()
+  @Type(() => Number)
+  @IsInt()
+  @Min(1)
+  store_id?: number;
+
+  @IsOptional()
+  @IsIn([...SUBSCRIPTION_MOVEMENT_TYPES])
+  type?: SubscriptionMovementType;
+
+  @IsOptional()
+  @Matches(DATE_ONLY_REGEX, { message: 'from debe ser una fecha YYYY-MM-DD' })
+  from?: string;
+
+  @IsOptional()
+  @Matches(DATE_ONLY_REGEX, { message: 'to debe ser una fecha YYYY-MM-DD' })
+  to?: string;
+
+  @IsOptional()
+  @Type(() => Number)
+  @IsInt()
+  @Min(1)
+  page?: number;
+
+  @IsOptional()
+  @Type(() => Number)
+  @IsInt()
+  @Min(1)
+  @Max(50)
+  limit?: number;
+}
+
+/** `GET store/platform-crm/customers/:customerId/stores/:storeId/activity` */
+export class PlatformStoreActivityQueryDto {
+  @IsOptional()
+  @Matches(DATE_ONLY_REGEX, { message: 'from debe ser una fecha YYYY-MM-DD' })
+  from?: string;
+
+  @IsOptional()
+  @Matches(DATE_ONLY_REGEX, { message: 'to debe ser una fecha YYYY-MM-DD' })
+  to?: string;
 }

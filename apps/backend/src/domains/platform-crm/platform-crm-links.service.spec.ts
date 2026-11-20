@@ -107,6 +107,26 @@ function createDb() {
       ),
     },
     stores: {
+      findMany: jest.fn(
+        async ({
+          where,
+        }: {
+          where: { OR: Array<{ organization_id?: { in: number[] }; id?: { in: number[] } }> };
+        }) =>
+          Object.values(STORES)
+            .filter((store) =>
+              where.OR.some(
+                (scope) =>
+                  scope.organization_id?.in.includes(store.organization_id) ||
+                  scope.id?.in.includes(store.id),
+              ),
+            )
+            .sort((a, b) => a.organization_id - b.organization_id || a.id - b.id)
+            .map((store) => ({
+              ...store,
+              organizations: { name: ORGS[store.organization_id].name },
+            })),
+      ),
       findFirst: jest.fn(async ({ where }: { where: { id: number } }) => {
         const store = STORES[where.id];
         if (!store) return null;
@@ -352,6 +372,49 @@ describe('PlatformCrmLinksService · varias cuentas por cliente (D2)', () => {
     await expect(service.listLinks(ctx, 99)).rejects.toMatchObject({ errorCode: 'PLATFORM_CRM_001' });
     await expect(service.unlinkById(ctx, 99, 1, {})).rejects.toMatchObject({
       errorCode: 'PLATFORM_CRM_001',
+    });
+  });
+  describe('resolveCoveredStores (comercios que cubren los enlaces)', () => {
+    it('org completa → todas sus tiendas; tienda suelta → solo esa; sin duplicados y con el enlace que la cubre', async () => {
+      const whole = await service.link(ctx, 5, { organization_id: 20 });
+      const single = await service.link(ctx, 5, { linked_store_id: 301 });
+
+      const covered = await service.resolveCoveredStores(ctx, 5);
+      expect(covered).toEqual([
+        { store_id: 201, store_name: 'Espiga Centro', organization_name: 'Panadería La Espiga', link_id: whole.link!.id },
+        { store_id: 202, store_name: 'Espiga Norte', organization_name: 'Panadería La Espiga', link_id: whole.link!.id },
+        { store_id: 301, store_name: 'Clavo Principal', organization_name: 'Ferretería El Clavo', link_id: single.link!.id },
+      ]);
+      const [args] = db.stores.findMany.mock.calls[0] as unknown as [
+        { where: { organizations: unknown; OR: unknown[] } },
+      ];
+      // Nunca tiendas de la org plataforma; la org completa se resuelve al leer.
+      expect(args.where.organizations).toEqual({ is_platform: false });
+      expect(args.where.OR).toEqual([{ organization_id: { in: [20] } }, { id: { in: [301] } }]);
+    });
+
+    it('una tienda creada después en una org enlazada completa entra sola', async () => {
+      await service.link(ctx, 5, { organization_id: 30 });
+      STORES[302] = { id: 302, name: 'Clavo Sur', organization_id: 30 };
+      try {
+        expect((await service.resolveCoveredStores(ctx, 5)).map((s) => s.store_id)).toEqual([301, 302]);
+      } finally {
+        delete STORES[302];
+      }
+    });
+
+    it('sin enlaces activos → [] sin consultar tiendas; enlaces desenlazados no cuentan', async () => {
+      expect(await service.resolveCoveredStores(ctx, 5)).toEqual([]);
+      const link = await service.link(ctx, 5, { organization_id: 40 });
+      await service.unlinkById(ctx, 5, link.link!.id, {});
+      expect(await service.resolveCoveredStores(ctx, 5)).toEqual([]);
+      expect(db.stores.findMany).not.toHaveBeenCalled();
+    });
+
+    it('cliente que no es del CRM plataforma → 404', async () => {
+      await expect(service.resolveCoveredStores(ctx, 99)).rejects.toMatchObject({
+        errorCode: 'PLATFORM_CRM_001',
+      });
     });
   });
 });

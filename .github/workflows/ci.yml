@@ -568,6 +568,7 @@ jobs:
           npx jest --ci --runInBand --forceExit --config jest.isolated.config.js --runTestsByPath
           src/domains/platform-crm/platform-crm-links.controller.spec.ts
           src/domains/platform-crm/platform-crm-links.service.spec.ts
+          src/domains/platform-crm/platform-crm-account.service.spec.ts
           src/domains/platform-crm/platform-crm.seed.spec.ts
           src/domains/platform-crm/platform-permission-assignment.spec.ts
           src/domains/organization/onboarding/onboarding-wizard-org-admin-role.spec.ts
