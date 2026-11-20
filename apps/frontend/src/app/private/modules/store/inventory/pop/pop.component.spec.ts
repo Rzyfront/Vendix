@@ -333,6 +333,81 @@ describe('PopComponent — QUI-855 puntos de entrada', () => {
     });
   });
 
+  /**
+   * ia-cargas F3 — una factura de más de 100 líneas nuevas se precarga
+   * completa y la OC sale ENTERA: las líneas se resuelven con `resolve-lines`
+   * de a 100 en serie y `create` recibe todas con su product_id.
+   */
+  describe('ia-cargas F3 — factura de más de 100 líneas', () => {
+    const N = 130;
+    const scanLine = (i: number) =>
+      ({
+        description: `Producto ${i + 1}`,
+        quantity: 1,
+        unit_price: 1000,
+        total: 1000,
+        tax_rate: 0,
+        match_status: 'new',
+        candidates: [],
+      }) as unknown as MatchedLineItem;
+    const cartLine = (i: number) => ({
+      id: `n${i}`,
+      product: { id: 0, name: `Producto ${i + 1}`, code: '' },
+      quantity: 1,
+      unit_cost: 1000,
+      tax_rate: 0,
+      is_prebulk: true,
+      prebulk_data: { name: `Producto ${i + 1}`, code: '' },
+    });
+
+    it('la precarga agrega las 130 líneas al carrito como productos nuevos', () => {
+      component.onInvoiceScanConfirmed({
+        scanResult: { line_items: [] } as unknown as InvoiceScanResult,
+        matchResult: {} as InvoiceMatchResult,
+        editedItems: Array.from({ length: N }, (_, i) => scanLine(i)),
+      });
+      expect(cart.addToCart).toHaveBeenCalledTimes(N);
+      expect(cart.addToCart.calls.allArgs().every(([req]: any[]) => req.is_prebulk === true)).toBeTrue();
+    });
+
+    it('el borrador resuelve 100 + 30 con resolve-lines y crea UNA OC con las 130', () => {
+      const po = poService as unknown as Record<string, jasmine.Spy>;
+      cart.clearCart = jasmine.createSpy('clearCart').and.returnValue(of(null));
+      cart.currentState = makeState({
+        has_vat: false,
+        orderDate: new Date('2026-11-20'),
+        summary: { subtotal: N * 1000, tax_amount: 0, total: N * 1000 },
+        items: Array.from({ length: N }, (_, i) => cartLine(i)),
+      });
+      let nextId = 5000;
+      po['resolveLines'] = jasmine.createSpy('resolveLines').and.callFake((body: any) =>
+        of({
+          success: true,
+          data: {
+            items: body.items.map((_: unknown, index: number) => ({
+              index,
+              product_id: nextId++,
+              product_variant_id: null,
+            })),
+          },
+        }),
+      );
+      po['createPurchaseOrder'].and.returnValue(
+        of({ success: true, data: { id: 900, order_number: 'PO-900', status: 'draft' } }),
+      );
+
+      component.onSaveAsDraft();
+
+      expect(po['resolveLines']).toHaveBeenCalledTimes(2);
+      expect(po['resolveLines'].calls.allArgs().map(([b]: any[]) => b.items.length)).toEqual([100, 30]);
+      expect(po['createPurchaseOrder']).toHaveBeenCalledTimes(1);
+      const sent = po['createPurchaseOrder'].calls.mostRecent().args[0];
+      expect(sent.items.length).toBe(N);
+      expect(sent.items.every((it: any) => typeof it.product_id === 'number' && it.product_id >= 5000)).toBeTrue();
+      expect(sent.items.some((it: any) => 'product_name' in it)).toBeFalse();
+    });
+  });
+
   describe('QUI-1004 — varias cargas masivas en el mismo carrito', () => {
     const row = (name: string, sku: string) => ({ name, sku, quantity: 2, cost: 1000 });
     const upload = (file_name: string, file_hash: string, rows: object[], failed_rows = 0) => ({
