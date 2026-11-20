@@ -26,6 +26,12 @@ import { TransferQueryDto } from './dto/transfer-query.dto';
 import { transfer_status_enum } from '@prisma/client';
 import { OperatingScopeService } from '@common/services/operating-scope.service';
 import { recordTriggerEvent } from '../../workflows/engine/workflow-trigger.outbox';
+import {
+  assertStockAvailableAtOrigin,
+  assertTransferLines,
+  expandTransferablePickerRows,
+  type TransferablePickerRow,
+} from './transfer-item-rules';
 
 /**
  * Estados que representan "creada, todavía sin aprobar".
@@ -59,11 +65,32 @@ interface TransferableSearchRow {
   sku: string | null;
   stock_levels: Array<{
     location_id: number;
+    product_variant_id?: number | null;
     quantity_on_hand: unknown;
     quantity_reserved: unknown;
     quantity_available: unknown;
+    product_variants?: {
+      id: number;
+      name: string | null;
+      sku: string | null;
+    } | null;
   }>;
 }
+
+/**
+ * Columnas de `stock_levels` que el picker necesita: la variante viaja para que
+ * cada variante sea una fila propia con su propio disponible (antes se tomaba
+ * la primera fila de la ubicación, que en un producto con variantes era una
+ * variante cualquiera, y el ítem salía sin `product_variant_id`).
+ */
+const TRANSFERABLE_STOCK_LEVEL_SELECT = {
+  location_id: true,
+  product_variant_id: true,
+  quantity_on_hand: true,
+  quantity_reserved: true,
+  quantity_available: true,
+  product_variants: { select: { id: true, name: true, sku: true } },
+} as const;
 
 @Injectable()
 export class StockTransfersService {
@@ -202,22 +229,14 @@ export class StockTransfersService {
         tx,
       );
 
-      // Validate stock availability for all items
-      for (const item of createTransferDto.items) {
-        const stockLevel = await tx.stock_levels.findFirst({
-          where: {
-            product_id: item.product_id,
-            product_variant_id: item.product_variant_id ?? null,
-            location_id: createTransferDto.from_location_id,
-          },
-        });
-
-        if (!stockLevel || stockLevel.quantity_available < item.quantity) {
-          throw new BadRequestException(
-            `Insufficient stock for product ${item.product_id} at source location`,
-          );
-        }
-      }
+      // Líneas por producto + variante, sin repetidos, y stock disponible por
+      // variante en el origen (ver `transfer-item-rules.ts`).
+      assertTransferLines(createTransferDto.items);
+      await assertStockAvailableAtOrigin(
+        tx,
+        createTransferDto.items,
+        createTransferDto.from_location_id,
+      );
 
       const transferNumber = await this.generateTransferNumber(tx);
 
@@ -286,22 +305,14 @@ export class StockTransfersService {
         tx,
       );
 
-      // Validate stock availability for all items
-      for (const item of createTransferDto.items) {
-        const stockLevel = await tx.stock_levels.findFirst({
-          where: {
-            product_id: item.product_id,
-            product_variant_id: item.product_variant_id ?? null,
-            location_id: createTransferDto.from_location_id,
-          },
-        });
-
-        if (!stockLevel || stockLevel.quantity_available < item.quantity) {
-          throw new BadRequestException(
-            `Insufficient stock for product ${item.product_id} at source location`,
-          );
-        }
-      }
+      // Líneas por producto + variante, sin repetidos, y stock disponible por
+      // variante en el origen (ver `transfer-item-rules.ts`).
+      assertTransferLines(createTransferDto.items);
+      await assertStockAvailableAtOrigin(
+        tx,
+        createTransferDto.items,
+        createTransferDto.from_location_id,
+      );
 
       const transferNumber = await this.generateTransferNumber(tx);
 
@@ -347,6 +358,9 @@ export class StockTransfersService {
             reason: `Stock transfer ${stockTransfer.transfer_number} - source`,
             user_id: context?.user_id,
             create_movement: true,
+            // Descuento condicional y atómico: dos "Mover ahora" simultáneos
+            // (doble clic, dos pestañas) no pueden sacar las mismas unidades.
+            validate_availability: true,
             from_location_id: stockTransfer.from_location_id,
             to_location_id: stockTransfer.to_location_id,
           },
@@ -991,12 +1005,7 @@ export class StockTransfersService {
         where: {
           location_id: { in: [fromLocationId, toLocationId] },
         },
-        select: {
-          location_id: true,
-          quantity_on_hand: true,
-          quantity_reserved: true,
-          quantity_available: true,
-        },
+        select: TRANSFERABLE_STOCK_LEVEL_SELECT,
       },
     } as const;
     const byId = new Map<number, TransferableSearchRow>();
@@ -1044,7 +1053,7 @@ export class StockTransfersService {
         limit,
       );
     }
-    return outcome.rows.map((p) =>
+    return outcome.rows.flatMap((p) =>
       this.mapTransferableRow(p, fromLocationId, toLocationId),
     );
   }
@@ -1074,57 +1083,32 @@ export class StockTransfersService {
           where: {
             location_id: { in: [fromLocationId, toLocationId] },
           },
-          select: {
-            location_id: true,
-            quantity_on_hand: true,
-            quantity_reserved: true,
-            quantity_available: true,
-          },
+          select: TRANSFERABLE_STOCK_LEVEL_SELECT,
         },
       },
       take: limit,
     });
 
-    return products.map((p) =>
+    return (products as TransferableSearchRow[]).flatMap((p) =>
       this.mapTransferableRow(p, fromLocationId, toLocationId),
     );
   }
 
+  /**
+   * Un producto → una fila por variante con stock en el origen (o una sola
+   * fila si no maneja variantes). Ver `expandTransferablePickerRows`.
+   */
   private mapTransferableRow(
     p: TransferableSearchRow,
     fromLocationId: number,
     toLocationId: number,
-  ) {
-    const defaultStock = {
-      quantity_on_hand: 0,
-      quantity_reserved: 0,
-      quantity_available: 0,
-    };
-    const originStock = p.stock_levels.find(
-      (sl) => sl.location_id === fromLocationId,
+  ): TransferablePickerRow[] {
+    return expandTransferablePickerRows(
+      p,
+      p.stock_levels,
+      fromLocationId,
+      toLocationId,
     );
-    const destStock = p.stock_levels.find(
-      (sl) => sl.location_id === toLocationId,
-    );
-    return {
-      id: p.id,
-      name: p.name,
-      sku: p.sku,
-      stock_at_origin: originStock
-        ? {
-            quantity_on_hand: originStock.quantity_on_hand,
-            quantity_reserved: originStock.quantity_reserved,
-            quantity_available: originStock.quantity_available,
-          }
-        : defaultStock,
-      stock_at_destination: destStock
-        ? {
-            quantity_on_hand: destStock.quantity_on_hand,
-            quantity_reserved: destStock.quantity_reserved,
-            quantity_available: destStock.quantity_available,
-          }
-        : defaultStock,
-    };
   }
 
   /**

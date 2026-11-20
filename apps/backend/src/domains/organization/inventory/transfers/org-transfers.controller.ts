@@ -31,6 +31,8 @@ import { DispatchOrgTransferDto } from './dto/dispatch-org-transfer.dto';
  *   POST  /:id/dispatch      → decrement origin (logical: in_transit)
  *   POST  /:id/complete      → increment destination (logical: received)
  *   POST  /:id/cancel        → cancel; if in_transit returns origin stock
+ *   POST  /complete          → movimiento rápido: crea y aplica en una transacción
+ *   GET   /search-products   → picker del movimiento rápido
  *
  * Reads are inherited from the previous read-only iteration (`/`, `/:id`,
  * `/stats`).
@@ -71,6 +73,28 @@ export class OrgTransfersController {
     );
   }
 
+  /**
+   * Picker del movimiento rápido: productos/variantes con stock en el origen y
+   * su disponible en origen y destino. Declarado antes de `:id` para que la
+   * ruta literal gane sobre el parámetro.
+   */
+  @Get('search-products')
+  @Permissions('organization:inventory:transfers:read')
+  async searchTransferableProducts(
+    @Query('search') search: string,
+    @Query('from_location_id', ParseIntPipe) fromLocationId: number,
+    @Query('to_location_id', ParseIntPipe) toLocationId: number,
+    @Query('limit') limit?: string,
+  ) {
+    const data = await this.transfers.searchTransferableProducts(
+      search ?? '',
+      fromLocationId,
+      toLocationId,
+      limit ? +limit : 20,
+    );
+    return this.responseService.success(data, 'Productos transferibles');
+  }
+
   @Get(':id')
   @Permissions('organization:inventory:transfers:read')
   async findOne(@Param('id', ParseIntPipe) id: number) {
@@ -85,6 +109,21 @@ export class OrgTransfersController {
     return this.responseService.success(
       data,
       'Traslado creado exitosamente',
+    );
+  }
+
+  /**
+   * Movimiento rápido (D1): crea y aplica la transferencia en una transacción
+   * (origen −, destino +). Mueve stock de inmediato, por eso exige el permiso
+   * de despacho —el que autoriza sacar stock del origen— y no solo el de crear.
+   */
+  @Post('complete')
+  @Permissions('organization:inventory:transfers:dispatch')
+  async createAndComplete(@Body() dto: CreateOrgTransferDto) {
+    const data = await this.transfers.createAndComplete(dto);
+    return this.responseService.success(
+      data,
+      'Movimiento aplicado: el inventario ya se movió',
     );
   }
 
