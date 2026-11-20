@@ -490,4 +490,40 @@ describe('RemindersLogComponent (dashboard Bitácora)', () => {
     ]);
     expect(api.creates).toEqual([]);
   });
+
+  it('el recordatorio del calendario tributario abre la obligación del periodo y se identifica como tal', async () => {
+    api.items = [
+      reminder(9, {
+        title: 'IVA bimestral sep-oct 2026 · vence 24 nov',
+        source: 'fiscal',
+        remind_at: new Date(Date.now() + 5 * DAY).toISOString(),
+        bucket: 'upcoming',
+        link: {
+          type: 'fiscal_obligation',
+          type_label: 'Obligación fiscal',
+          id: 42,
+          label: 'IVA bimestral sep-oct 2026',
+          available: true,
+          url: '/admin/fiscal/obligations?obligationId=42',
+        },
+      }),
+    ];
+    fixture = TestBed.createComponent(RemindersLogComponent);
+    fixture.detectChanges();
+    await fixture.whenStable();
+    fixture.detectChanges();
+
+    const link = root().querySelector<HTMLAnchorElement>('a[data-testid="reminder-link"]');
+    expect(link?.textContent).toContain('Obligación fiscal · IVA bimestral sep-oct 2026');
+    // El enlace conserva el `?obligationId=` que arma el backend.
+    expect(link?.getAttribute('href')).toBe('/admin/fiscal/obligations?obligationId=42');
+
+    fixture.componentInstance.openDetail(api.items[0]);
+    await settle();
+    const detail = document.querySelector('[data-testid="reminder-detail"]');
+    expect(detail?.textContent).toContain('Del calendario tributario');
+    expect(detail?.querySelector('[data-testid="reminder-detail-link"]')?.getAttribute('href')).toBe(
+      '/admin/fiscal/obligations?obligationId=42',
+    );
+  });
 });

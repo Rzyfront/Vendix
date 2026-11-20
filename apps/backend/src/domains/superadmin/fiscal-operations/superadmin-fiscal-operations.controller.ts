@@ -668,7 +668,10 @@ export class SuperadminFiscalOperationsController {
           // comparte DTO y formulario con el de organización, así que necesita
           // la misma regla de que un `undefined` (campo del formulario sin
           // seleccionar) NO borre lo guardado.
-          const nextFiscalData = mergeFiscalData(previousFiscalData, dto as Record<string, unknown>);
+          // `vat_calendar_change` es una decisión de la petición (calendario
+          // tributario de tenants), no un dato fiscal: nunca se persiste.
+          const { vat_calendar_change: _decision, ...fiscalPatch } = dto;
+          const nextFiscalData = mergeFiscalData(previousFiscalData, fiscalPatch as Record<string, unknown>);
           const nextSettings = { ...currentSettings, fiscal_data: nextFiscalData };
 
           if (existing) {

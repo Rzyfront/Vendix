@@ -789,6 +789,8 @@ jobs:
           --include='**/orders/purchase-orders/pages/detail/purchase-order-support-document-card.component.spec.ts'
           --include='**/inventory/suppliers/components/supplier-form-modal.component.spec.ts'
           --include='**/dashboard/components/reminders-log/reminders-log.component.spec.ts'
+          --include='**/fiscal-operations/components/fiscal-identity-panel.component.spec.ts'
+          --include='**/fiscal-operations/components/fiscal-calendar-change-dialog.component.spec.ts'
           --include='**/store/platform-crm/*.spec.ts'
           --include='**/core/utils/async-job-poll.util.spec.ts'
           --include='**/core/utils/ai-job-error.spec.ts'

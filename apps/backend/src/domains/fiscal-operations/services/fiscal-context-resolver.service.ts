@@ -99,6 +99,22 @@ export class FiscalContextResolverService {
     return contexts;
   }
 
+  /**
+   * Contexto fiscal de un tenant SIN request (job diario del calendario
+   * tributario, hook de settings). `store_id` solo cuenta con fiscal_scope
+   * STORE; con ORGANIZATION se resuelve la entidad consolidada.
+   */
+  async resolveForTenant(params: {
+    organization_id: number;
+    store_id?: number | null;
+  }): Promise<FiscalOperationsContext> {
+    return this.resolve({
+      organization_id: params.organization_id,
+      store_id: params.store_id ?? null,
+      require_single_entity: true,
+    });
+  }
+
   private async resolve(params: {
     organization_id: number;
     store_id?: number | null;

@@ -25,6 +25,13 @@ import { InvoicingService } from '../store/invoicing/invoicing.service';
 import { FiscalTaxCreditAvailabilityService } from './services/fiscal-tax-credit-availability.service';
 import { StoreFiscalTaxCreditAvailabilityController } from './store-fiscal-tax-credit-availability.controller';
 import { OrganizationFiscalTaxCreditAvailabilityController } from './organization-fiscal-tax-credit-availability.controller';
+import { FiscalCalendarRemindersService } from './services/fiscal-calendar-reminders.service';
+import { FiscalCalendarSettingsListener } from './listeners/fiscal-calendar-settings.listener';
+import { FiscalCalendarRemindersJob } from './jobs/fiscal-calendar-reminders.job';
+import {
+  OrganizationFiscalCalendarController,
+  StoreFiscalCalendarController,
+} from './fiscal-calendar-reminders.controller';
 
 @Module({
   // InvoicingModule solo por `InvoicingService` (F-27 `list_invoices`): el
@@ -35,6 +42,8 @@ import { OrganizationFiscalTaxCreditAvailabilityController } from './organizatio
     OrganizationFiscalController,
     StoreFiscalTaxCreditAvailabilityController,
     OrganizationFiscalTaxCreditAvailabilityController,
+    StoreFiscalCalendarController,
+    OrganizationFiscalCalendarController,
   ],
   providers: [
     FiscalContextResolverService,
@@ -49,6 +58,10 @@ import { OrganizationFiscalTaxCreditAvailabilityController } from './organizatio
     FiscalStatusService,
     FiscalConfigChecklistService,
     FiscalTaxCreditAvailabilityService,
+    // Calendario tributario → bitácora (F1-F5).
+    FiscalCalendarRemindersService,
+    FiscalCalendarSettingsListener,
+    FiscalCalendarRemindersJob,
   ],
   exports: [
     FiscalContextResolverService,
