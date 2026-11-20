@@ -6,8 +6,16 @@ import {
   BadRequestException,
   Logger,
   Inject,
+  Optional,
   forwardRef,
 } from '@nestjs/common';
+import { EventEmitter2 } from '@nestjs/event-emitter';
+import {
+  FISCAL_DATA_UPDATED_EVENT,
+  FiscalCalendarSummary,
+  VatCalendarChangeDecision,
+  pickFiscalCalendarSummary,
+} from '@common/constants/fiscal-data-events';
 import { StorePrismaService } from '../../../prisma/services/store-prisma.service';
 import { OrganizationPrismaService } from '../../../prisma/services/organization-prisma.service';
 import { GlobalPrismaService } from '../../../prisma/services/global-prisma.service';
@@ -136,6 +144,9 @@ export class SettingsService {
     @Inject(forwardRef(() => SessionsService))
     private sessionsService: SessionsService,
     private pwaCache: PwaCacheService,
+    // Opcional: sin bus de eventos (tests unitarios) el guardado sigue igual y
+    // el calendario tributario simplemente no corre.
+    @Optional() private eventEmitter?: EventEmitter2,
   ) {}
 
   /**
@@ -1619,6 +1630,49 @@ export class SettingsService {
   async updateFiscalData(
     dto: Record<string, unknown>,
   ): Promise<StoreSettings['fiscal_data']> {
+    return (await this.updateFiscalDataWithCalendar(dto)).fiscal_data;
+  }
+
+  /**
+   * Igual que `updateFiscalData` y además devuelve el resumen del calendario
+   * tributario (obligaciones + recordatorios en la bitácora) generado DESPUÉS
+   * de persistir. Un fallo del calendario nunca rompe el guardado.
+   */
+  async updateFiscalDataWithCalendar(dto: Record<string, unknown>): Promise<{
+    fiscal_data: StoreSettings['fiscal_data'];
+    fiscal_calendar: FiscalCalendarSummary | null;
+  }> {
+    const decision = (dto.vat_calendar_change ?? null) as VatCalendarChangeDecision | null;
+    const persisted = await this.persistFiscalData(dto);
+    let fiscal_calendar: FiscalCalendarSummary | null = null;
+    if (this.eventEmitter) {
+      try {
+        fiscal_calendar = pickFiscalCalendarSummary(
+          await this.eventEmitter.emitAsync(FISCAL_DATA_UPDATED_EVENT, {
+            organization_id: persisted.organization_id,
+            store_id: persisted.store_id,
+            user_id: persisted.user_id,
+            previous_fiscal_data: persisted.previous as Record<string, unknown>,
+            next_fiscal_data: persisted.next as Record<string, unknown>,
+            vat_calendar_change: decision,
+          }),
+        );
+      } catch (err) {
+        this.logger.warn(
+          `Fiscal calendar after fiscal_data save failed: ${(err as Error).message}`,
+        );
+      }
+    }
+    return { fiscal_data: persisted.next, fiscal_calendar };
+  }
+
+  private async persistFiscalData(dto: Record<string, unknown>): Promise<{
+    organization_id: number;
+    store_id: number;
+    user_id: number | null;
+    previous: StoreSettings['fiscal_data'];
+    next: StoreSettings['fiscal_data'];
+  }> {
     const context = RequestContextService.getContext();
     const store_id = context?.store_id;
     const user_id = context?.user_id;
@@ -1667,6 +1721,8 @@ export class SettingsService {
     const writableDto = { ...dto };
     delete writableDto.tax_responsibilities_source;
     delete writableDto.tax_regime_source;
+    // Decisión del diálogo de periodicidad: viaja en la petición, no se guarda.
+    delete writableDto.vat_calendar_change;
 
     const nextFiscalData = mergeFiscalData(
       previousFiscalData as Record<string, unknown>,
@@ -1724,7 +1780,13 @@ export class SettingsService {
       );
     }
 
-    return nextFiscalData as StoreSettings['fiscal_data'];
+    return {
+      organization_id,
+      store_id,
+      user_id: user_id ?? null,
+      previous: previousFiscalData as StoreSettings['fiscal_data'],
+      next: nextFiscalData as StoreSettings['fiscal_data'],
+    };
   }
 
   /**

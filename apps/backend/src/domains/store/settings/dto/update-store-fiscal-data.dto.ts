@@ -8,6 +8,10 @@ import {
   MaxLength,
 } from 'class-validator';
 import { Transform } from 'class-transformer';
+import {
+  VAT_CALENDAR_CHANGE_DECISIONS,
+  VatCalendarChangeDecision,
+} from '@common/constants/fiscal-data-events';
 import { ApiPropertyOptional, ApiSchema } from '@nestjs/swagger';
 
 /**
@@ -152,6 +156,15 @@ export class UpdateStoreFiscalDataDto {
   @IsString()
   @IsIn(['monthly', 'bimonthly', 'four_monthly'])
   vat_periodicity?: 'monthly' | 'bimonthly' | 'four_monthly';
+
+  @ApiPropertyOptional({
+    enum: ['replace', 'keep'],
+    description:
+      'Solo al cambiar vat_periodicity: «replace» retira los recordatorios y obligaciones NO iniciadas de la periodicidad anterior; «keep» (o ausente) los conserva. No se persiste en fiscal_data.',
+  })
+  @IsOptional()
+  @IsIn(VAT_CALENDAR_CHANGE_DECISIONS)
+  vat_calendar_change?: VatCalendarChangeDecision;
 
   @ApiPropertyOptional({
     example: 'O-15',

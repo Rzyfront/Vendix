@@ -4,6 +4,7 @@ import {
   NotFoundException,
   ForbiddenException,
   BadRequestException,
+  Optional,
 } from '@nestjs/common';
 import { OrganizationPrismaService } from '../../../prisma/services/organization-prisma.service';
 import { UpdateSettingsDto, UpdateOrgInventorySettingsDto } from './dto';
@@ -25,6 +26,14 @@ import { AuditService, AuditResource } from '@common/audit/audit.service';
 import { FiscalScopeService } from '@common/services/fiscal-scope.service';
 import { buildTenantFiscalColumns, mergeFiscalData } from '@common/helpers/organization-fiscal-columns.helper';
 import { Prisma } from '@prisma/client';
+import { EventEmitter2 } from '@nestjs/event-emitter';
+import {
+  FISCAL_DATA_UPDATED_EVENT,
+  FiscalCalendarSummary,
+  FiscalDataUpdatedEvent,
+  VatCalendarChangeDecision,
+  pickFiscalCalendarSummary,
+} from '@common/constants/fiscal-data-events';
 
 @Injectable()
 export class SettingsService {
@@ -36,6 +45,9 @@ export class SettingsService {
     private s3Service: S3Service,
     private fiscalScope: FiscalScopeService,
     private pwaCache: PwaCacheService,
+    // Opcional: sin bus de eventos (tests unitarios) el guardado sigue igual y
+    // el calendario tributario simplemente no corre.
+    @Optional() private eventEmitter?: EventEmitter2,
   ) {}
 
   async findOne() {
@@ -426,6 +438,62 @@ export class SettingsService {
     dto: Record<string, unknown>,
     store_id?: number,
   ): Promise<OrganizationFiscalData> {
+    return (await this.updateFiscalDataWithCalendar(dto, store_id)).fiscal_data;
+  }
+
+  /**
+   * Igual que `updateFiscalData` y además devuelve el resumen del calendario
+   * tributario (obligaciones + recordatorios en la bitácora) que se generó
+   * DESPUÉS de persistir. Un fallo del calendario nunca rompe el guardado.
+   */
+  async updateFiscalDataWithCalendar(
+    dto: Record<string, unknown>,
+    store_id?: number,
+  ): Promise<{
+    fiscal_data: OrganizationFiscalData;
+    fiscal_calendar: FiscalCalendarSummary | null;
+  }> {
+    const context = RequestContextService.getContext();
+    if (!context?.organization_id) {
+      throw new VendixHttpException(ErrorCodes.ORG_CONTEXT_001);
+    }
+    const decision = (dto.vat_calendar_change ?? null) as VatCalendarChangeDecision | null;
+    const { target, previous, next } = await this.persistFiscalData(dto, store_id);
+    const fiscal_calendar = await this.emitFiscalDataUpdated({
+      organization_id: context.organization_id,
+      store_id: target.scope === 'store' ? target.store_id : null,
+      user_id: context.user_id ?? null,
+      previous_fiscal_data: previous as Record<string, unknown>,
+      next_fiscal_data: next as Record<string, unknown>,
+      vat_calendar_change: decision,
+    });
+    return { fiscal_data: next, fiscal_calendar };
+  }
+
+  private async emitFiscalDataUpdated(
+    event: FiscalDataUpdatedEvent,
+  ): Promise<FiscalCalendarSummary | null> {
+    if (!this.eventEmitter) return null;
+    try {
+      return pickFiscalCalendarSummary(
+        await this.eventEmitter.emitAsync(FISCAL_DATA_UPDATED_EVENT, event),
+      );
+    } catch (err) {
+      this.logger.warn(
+        `Fiscal calendar after fiscal_data save failed: ${(err as Error).message}`,
+      );
+      return null;
+    }
+  }
+
+  private async persistFiscalData(
+    dto: Record<string, unknown>,
+    store_id?: number,
+  ): Promise<{
+    target: { scope: 'organization' } | { scope: 'store'; store_id: number };
+    previous: OrganizationFiscalData;
+    next: OrganizationFiscalData;
+  }> {
     const context = RequestContextService.getContext();
     if (!context?.organization_id) {
       throw new VendixHttpException(ErrorCodes.ORG_CONTEXT_001);
@@ -437,6 +505,8 @@ export class SettingsService {
     );
     const cleanDto = { ...dto };
     delete (cleanDto as any).store_id;
+    // Decisión del diálogo de periodicidad: viaja en la petición, no se guarda.
+    delete (cleanDto as any).vat_calendar_change;
 
     if (target.scope === 'store') {
       const existing = await this.prisma.withoutScope().store_settings.findUnique({
@@ -510,7 +580,7 @@ export class SettingsService {
         }
       }
 
-      return nextFiscalData;
+      return { target, previous: previousFiscalData, next: nextFiscalData };
     }
 
     const existing = await this.prisma.organization_settings.findFirst();
@@ -604,7 +674,7 @@ export class SettingsService {
       }
     }
 
-    return nextFiscalData;
+    return { target, previous: previousFiscalData, next: nextFiscalData };
   }
 
   private async resolveFiscalDataTarget(
