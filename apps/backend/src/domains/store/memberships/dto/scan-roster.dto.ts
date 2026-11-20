@@ -8,6 +8,8 @@ import {
   IsNumber,
   IsOptional,
   IsString,
+  MaxLength,
+  Min,
   ValidateNested,
 } from 'class-validator';
 import { Type } from 'class-transformer';
@@ -59,6 +61,28 @@ export interface ExtractedMember {
   membership_start_date: string | null;
   membership_end_date: string | null;
   raw_row: string | null;
+  /** ia-cargas F2 — spreadsheet row this member came from (absent for images/PDF). */
+  source_row?: number;
+  /** Sheet name, only for workbooks with several sheets. */
+  source_sheet?: string;
+}
+
+/** ia-cargas F2 — a sheet row that did not become a member, with the reason. */
+export interface RosterSkippedRow {
+  row: number;
+  row_end?: number;
+  sheet?: string;
+  reason: 'empty' | 'total' | 'header' | 'limit' | 'unreadable' | 'duplicate';
+  message: string;
+}
+
+/** ia-cargas F2 — something to check on a source row (the member was still read). */
+export interface RosterRowIssue {
+  row: number;
+  sheet?: string;
+  level: 'warning' | 'error';
+  field?: string;
+  message: string;
 }
 
 /**
@@ -71,6 +95,22 @@ export interface RosterScanResult {
   members: ExtractedMember[];
   warnings: string[];
   confidence: number;
+  /** ia-cargas F2 — all optional so old clients keep working. */
+  skipped?: RosterSkippedRow[];
+  row_issues?: RosterRowIssue[];
+  columns?: Array<{ sheet?: string; column: string; field: string | null }>;
+  stats?: {
+    source: 'sheet' | 'document';
+    /** Sheet data rows (sheets) or members read (documents). */
+    total_rows: number;
+    imported_rows: number;
+    skipped_rows: number;
+    /** How the sheet columns were recognized. */
+    mapping: 'synonyms' | 'ai' | null;
+    /** Images/PDF: pages (or photo strips) read and how many as native text. */
+    pages?: number;
+    text_pages?: number;
+  };
 }
 
 // ───────────────────────────────────────────────────────────────────────────
@@ -312,6 +352,22 @@ export class CommitMemberRosterDto {
   @Type(() => CommitPlanDto)
   plans!: CommitPlanDto[];
 
+  /**
+   * ia-cargas F2 — a big roster is committed in chunks with the same id, so
+   * the upload log keeps ONE row for the whole file.
+   */
+  @IsOptional()
+  @IsString()
+  @MaxLength(64)
+  session_id?: string;
+
+  /** Members of the whole load (all chunks), for the upload log. */
+  @IsOptional()
+  @IsInt()
+  @Min(1)
+  @Type(() => Number)
+  total_members?: number;
+
   @IsArray()
   @ValidateNested({ each: true })
   @Type(() => CommitMemberDto)
@@ -349,4 +405,10 @@ export interface CommitMemberRosterResult {
    * no members are persisted when this list is non-empty.
    */
   plan_errors: Array<{ ref_index: number; error: string }>;
+  /**
+   * ia-cargas F2 — plan id behind each `ref_index` (new and existing), so the
+   * next chunk of the same load sends them as `existing` and creates no
+   * duplicates. Optional: old clients ignore it.
+   */
+  plans_resolved?: Array<{ ref_index: number; plan_id: number }>;
 }

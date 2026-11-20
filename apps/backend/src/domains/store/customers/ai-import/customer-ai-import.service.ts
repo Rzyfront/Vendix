@@ -19,6 +19,12 @@ import {
   newIngestQuotaKey,
 } from '@common/ai-ingest/extraction/ai-extraction.service';
 import { IngestProfileRegistry } from '@common/ai-ingest/profiles/registry';
+import { DocumentPagesService } from '@common/ai-ingest/documents/document-pages.service';
+import { readDocumentWithAi } from '@common/ai-ingest/documents/document-reader';
+import {
+  canDecodeHeic,
+  HEIC_UNSUPPORTED_MESSAGE,
+} from '@common/ai-ingest/images/image-prep';
 import {
   applyColumnMapping,
   columnMappingSchema,
@@ -90,8 +96,6 @@ const SAMPLE_ROWS_FOR_MAPPING = 5;
 type ReportProgress = (progress: AiJobProgress) => Promise<void>;
 type CustomerRowsAnswer = { customers: CustomerAiRow[]; warnings?: string[] };
 
-const sharp: typeof import('sharp').default = require('sharp'); // eslint-disable-line @typescript-eslint/no-require-imports, @typescript-eslint/no-unsafe-assignment -- sharp 0.35 types are ESM-only but CJS runtime exports the function
-
 /**
  * Carga masiva de clientes asistida por IA (S7).
  *
@@ -115,6 +119,7 @@ export class CustomerAiImportService implements OnModuleInit {
     private readonly sheetParser: SheetParserService,
     private readonly aiExtraction: AiExtractionService,
     private readonly ingestProfiles: IngestProfileRegistry,
+    private readonly documentPages: DocumentPagesService,
   ) {}
 
   /** Registra el handler async `customer_import` (cola genérica `ai-scan`). */
@@ -155,51 +160,48 @@ export class CustomerAiImportService implements OnModuleInit {
     if (detected.kind === 'sheet') {
       return this.scanSheet(file!, detected.sheetFormat!, reportProgress, quotaKey);
     }
-    return this.scanDocument(file!, detected, quotaKey);
+    return this.scanDocument(file!, detected, reportProgress, quotaKey);
   }
 
   /**
-   * Imagen o PDF: una llamada con esquema (validación ajv + 1 reparación). Si
-   * la respuesta se corta por longitud se avisa con un error claro en vez de
-   * fallar al parsear (F2 partirá el documento por páginas).
+   * Imagen o PDF (ia-cargas F2): páginas con texto nativo van como texto, las
+   * escaneadas y las fotos como imagen (fotos muy altas en franjas); nunca el
+   * PDF crudo. Lotes de páginas con esquema (ajv + 1 reparación); un lote
+   * cortado por longitud se parte y una página que aún así no se lee se
+   * avisa por número. Progreso real por páginas.
    */
   private async scanDocument(
     file: AiScanFile,
     detected: DetectedIngestFile,
-    quotaKey?: string,
+    reportProgress?: ReportProgress,
+    quotaKey: string = newIngestQuotaKey(),
   ): Promise<CustomerImportScanResult> {
-    const instruction =
-      'Extract all customers and their locations from this document. Return ONLY the JSON object matching the schema defined in your system instructions.';
-    const { base64, mimeType } = await this.preprocessImage(file, detected.mime);
-    const message: AIMessage = {
-      role: 'user',
-      content: [
-        { type: 'text', text: instruction },
-        {
-          type: 'image_url',
-          image_url: { url: `data:${mimeType};base64,${base64}`, detail: 'high' },
-        },
-      ],
-    };
+    const read = await readDocumentWithAi<{ customers?: unknown[]; warnings?: unknown[] }>({
+      file,
+      mimeType: detected.mime,
+      pages: this.documentPages,
+      extraction: this.aiExtraction,
+      appKey: APP_KEY,
+      schema: CUSTOMER_DOCUMENT_SCHEMA,
+      instruction:
+        'Extract all customers and their locations from these pages. Return ONLY the JSON object matching the schema defined in your system instructions. Never invent data.',
+      limits: customersIngestProfile.limits,
+      quotaKey,
+      reportProgress,
+      logLabel: 'CustomerImportScan',
+    });
 
-    let parsed: unknown;
-    try {
-      parsed = await this.aiExtraction.extract({
-        appKey: APP_KEY,
-        schema: CUSTOMER_DOCUMENT_SCHEMA,
-        messages: [message],
-        quotaKey,
-      });
-    } catch (error) {
-      if (error instanceof AiExtractionError) {
-        this.logger.error(
-          `[CustomerImportScan] ${error.failure}: ${error.message}`,
-        );
-        throw error.toHttpException();
-      }
-      throw error;
-    }
-    const result = this.normalizeScan(parsed);
+    const result = this.normalizeScan({
+      customers: read.answers.flatMap((a) =>
+        Array.isArray(a.customers) ? a.customers : [],
+      ),
+      warnings: [
+        ...read.answers.flatMap((a) =>
+          Array.isArray(a.warnings) ? a.warnings : [],
+        ),
+        ...read.warnings,
+      ],
+    });
     return {
       ...result,
       stats: {
@@ -209,6 +211,8 @@ export class CustomerAiImportService implements OnModuleInit {
         skipped_rows: 0,
         ai_rows: result.customers.length,
         mapping: null,
+        pages: read.pages,
+        text_pages: read.textPages,
       },
     };
   }
@@ -1180,7 +1184,9 @@ export class CustomerAiImportService implements OnModuleInit {
     }
     if (
       detected &&
-      (detected.kind === 'pdf' || IMAGE_MIMETYPES.includes(detected.mime))
+      (detected.kind === 'pdf' ||
+        IMAGE_MIMETYPES.includes(detected.mime) ||
+        (detected.mime === 'image/heic' && canDecodeHeic()))
     ) {
       if (file.size > MAX_DOCUMENT_BYTES) {
         throw new VendixHttpException(
@@ -1193,40 +1199,8 @@ export class CustomerAiImportService implements OnModuleInit {
     throw new VendixHttpException(
       ErrorCodes.SYS_VALIDATION_001,
       detected?.mime === 'image/heic'
-        ? 'Las fotos HEIC aún no se leen aquí. Conviértela a JPG o PNG e intenta de nuevo.'
+        ? HEIC_UNSUPPORTED_MESSAGE
         : 'Formato no soportado. Usa imagen (JPG, PNG, WebP), PDF, Excel (xlsx, xls) o CSV.',
     );
-  }
-
-  /** Igual que los demás escáneres: reduce imágenes; PDF pasa crudo. */
-  private async preprocessImage(
-    file: AiScanFile,
-    detectedMime: string,
-  ): Promise<{ base64: string; mimeType: string }> {
-    const MAX_DIMENSION = 1536;
-    const JPEG_QUALITY = 85;
-    try {
-      const metadata = await sharp(file.buffer).metadata();
-      const needsResize =
-        (metadata.width && metadata.width > MAX_DIMENSION) ||
-        (metadata.height && metadata.height > MAX_DIMENSION);
-      let pipeline = sharp(file.buffer);
-      if (needsResize) {
-        pipeline = pipeline.resize(MAX_DIMENSION, MAX_DIMENSION, {
-          fit: 'inside',
-          withoutEnlargement: true,
-        });
-      }
-      const processed = await pipeline.jpeg({ quality: JPEG_QUALITY }).toBuffer();
-      return { base64: processed.toString('base64'), mimeType: 'image/jpeg' };
-    } catch (err) {
-      this.logger.warn(
-        `[CustomerImportScan] Image preprocessing failed, using raw: ${(err as Error).message}`,
-      );
-      return {
-        base64: file.buffer.toString('base64'),
-        mimeType: detectedMime,
-      };
-    }
   }
 }

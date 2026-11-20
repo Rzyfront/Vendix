@@ -922,7 +922,8 @@ export const ERROR_MESSAGES: Record<string, string> = {
   RTSCAN_MATCH_001:
     'Una fila de la planilla no coincide con ninguna parada de la ruta. Revisa que sea la planilla correcta.',
   MEMBER_SCAN_NO_FILE: 'Sube una foto o un PDF con la lista de socios.',
-  MEMBER_SCAN_INVALID_FILE: 'Formato no soportado. Usa una imagen o un PDF.',
+  MEMBER_SCAN_INVALID_FILE:
+    'Formato no soportado. Usa una imagen (JPG, PNG, WebP), un PDF, Excel (xlsx, xls) o CSV.',
   MEMBER_SCAN_AI_FAIL:
     'No se pudo analizar la lista por un problema del servicio. Intenta de nuevo.',
   MEMBER_SCAN_PARSE_FAIL:
@@ -933,6 +934,12 @@ export const ERROR_MESSAGES: Record<string, string> = {
     'El documento tiene demasiados datos para leerlo de una vez. Divídelo en partes más pequeñas o usa una hoja de cálculo.',
   AI_INGEST_INVALID_FILE:
     'No pudimos leer el archivo. Verifica que no esté dañado, protegido con contraseña o vacío.',
+  AI_INGEST_TOO_MANY_PAGES:
+    'El PDF tiene más páginas de las que se pueden leer en una sola carga. Divídelo en partes o usa una hoja de cálculo.',
+  AI_INGEST_UNSUPPORTED_TYPE:
+    'Las fotos HEIC (iPhone) aún no se pueden leer. Expórtala como JPG o PNG, o cambia la cámara a "Más compatible", e intenta de nuevo.',
+  AI_INGEST_NO_PAGES:
+    'El PDF no tiene texto ni páginas que se puedan leer. Si es un escaneo, vuelve a escanearlo o sube fotos de las páginas.',
   RUT_SCAN_NO_FILE: 'Sube una foto o un PDF del RUT.',
   RUT_SCAN_INVALID_FILE: 'Formato no soportado. Usa JPG, PNG, WebP o PDF.',
   RUT_SCAN_AI_FAIL:

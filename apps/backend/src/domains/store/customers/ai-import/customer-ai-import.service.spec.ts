@@ -20,6 +20,7 @@ describe('CustomerAiImportService', () => {
   };
   let addressesMock: { addCustomerLocation: jest.Mock };
   let registryMock: { register: jest.Mock };
+  let pagesMock: { prepareForAi: jest.Mock };
 
   const AI_JSON = JSON.stringify({
     customers: [
@@ -90,6 +91,16 @@ describe('CustomerAiImportService', () => {
         .mockResolvedValue({ address: { id: 1 }, created: true }),
     };
     registryMock = { register: jest.fn() };
+    // ia-cargas F2: the PDF is read by DocumentPagesService (own spec); here
+    // a digital PDF of one page with native text.
+    pagesMock = {
+      prepareForAi: jest.fn().mockResolvedValue({
+        source: 'pdf',
+        pages: [{ page_number: 1, mode: 'text', text: 'Acme S.A.S NIT 900123456-7' }],
+        page_count: 1,
+        unreadable_pages: [],
+      }),
+    };
     service = new CustomerAiImportService(
       prismaMock as any,
       customersMock as any,
@@ -98,6 +109,7 @@ describe('CustomerAiImportService', () => {
       new SheetParserService(),
       new AiExtractionService(aiMock as any),
       new IngestProfileRegistry(),
+      pagesMock as any,
     );
   });
 
@@ -150,6 +162,66 @@ describe('CustomerAiImportService', () => {
         { buffer: PDF, mimeType: 'image/jpeg', originalName: 'k', size: PDF.length },
       ]),
     ).rejects.toMatchObject({ errorCode: 'AI_INGEST_INCOMPLETE' });
+  });
+
+  it('F2: un PDF digital va como texto (nunca el PDF crudo como image_url)', async () => {
+    await service.scanFromFiles([
+      { buffer: PDF, mimeType: 'image/jpeg', originalName: 'k.pdf', size: PDF.length },
+    ]);
+    // The real type (pdf), not the S3-rebuilt mimetype, reaches the reader.
+    expect(pagesMock.prepareForAi).toHaveBeenCalledWith(
+      expect.objectContaining({ mimetype: 'application/pdf' }),
+      expect.objectContaining({ maxPages: 10 }),
+    );
+    const [, , messages] = aiMock.run.mock.calls[0];
+    const parts = messages[0].content as Array<{ type: string; text?: string; image_url?: { url: string } }>;
+    expect(parts.some((p) => p.type === 'image_url')).toBe(false);
+    expect(parts.map((p) => p.text).join('\n')).toContain('NIT 900123456-7');
+    expect(JSON.stringify(messages)).not.toContain('application/pdf');
+  });
+
+  it('F2: PDF escaneado de 3 páginas → lotes de 2 páginas como imagen, progreso por páginas y una página fallida se avisa', async () => {
+    const img = 'data:image/jpeg;base64,AAAA';
+    pagesMock.prepareForAi.mockResolvedValue({
+      source: 'pdf',
+      pages: [1, 2, 3].map((n) => ({ page_number: n, mode: 'image', text: '', image: img })),
+      page_count: 3,
+      unreadable_pages: [],
+    });
+    const page = (doc: string) =>
+      JSON.stringify({ customers: [{ first_name: 'Ana', last_name: 'Ruiz', document_type: 'CC', document_number: doc, locations: [] }] });
+    aiMock.run
+      .mockResolvedValueOnce({ success: true, content: page('111') })
+      // The 1-page batch (page 3) is cut even alone → reported, not lost silently.
+      .mockResolvedValue({ success: true, content: '{"customers":[', finish_reason: 'length' });
+    const progress = jest.fn().mockResolvedValue(undefined);
+
+    const scan = await service.scanFromFiles(
+      [{ buffer: PDF, mimeType: 'application/pdf', originalName: 'k.pdf', size: PDF.length }],
+      progress,
+    );
+
+    expect(aiMock.run).toHaveBeenCalledTimes(2);
+    const firstParts = aiMock.run.mock.calls[0][2][0].content as Array<{ type: string }>;
+    expect(firstParts.filter((p) => p.type === 'image_url')).toHaveLength(2);
+    expect(scan.customers.map((c) => c.document_number)).toEqual(['111']);
+    expect(scan.warnings.join(' ')).toContain('La página 3');
+    expect(scan.stats).toMatchObject({ source: 'document', pages: 3, text_pages: 0 });
+    expect(progress).toHaveBeenCalledWith(
+      expect.objectContaining({ unit: 'páginas', total: 3, done: 3 }),
+    );
+  });
+
+  it('F2: si ninguna página se puede leer, error claro AI_INGEST_*', async () => {
+    pagesMock.prepareForAi.mockRejectedValue(
+      new VendixHttpException(ErrorCodes.AI_INGEST_NO_PAGES),
+    );
+    await expect(
+      service.scanFromFiles([
+        { buffer: PDF, mimeType: 'application/pdf', originalName: 'k.pdf', size: PDF.length },
+      ]),
+    ).rejects.toMatchObject({ errorCode: 'AI_INGEST_NO_PAGES' });
+    expect(aiMock.run).not.toHaveBeenCalled();
   });
 
   it('xlsx con columnas reconocibles no llama a la IA', async () => {

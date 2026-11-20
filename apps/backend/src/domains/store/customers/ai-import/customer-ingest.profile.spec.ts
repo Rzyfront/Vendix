@@ -203,6 +203,8 @@ describe('perfil ai-ingest customers', () => {
         new SheetParserService(),
         new AiExtractionService({ run } as any),
         new IngestProfileRegistry(),
+        // Sheets never reach the document reader.
+        { prepareForAi: jest.fn() } as any,
       );
     });
 

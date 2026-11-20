@@ -1,5 +1,6 @@
 import { Module, OnModuleInit } from '@nestjs/common';
 import { BulkUploadsModule } from '../bulk-uploads/bulk-uploads.module';
+import { AiIngestModule } from '@common/ai-ingest/ai-ingest.module';
 import { MembershipsController } from './memberships.controller';
 import { MemberProfilesController } from './member-profiles.controller';
 import { MemberBulkScannerController } from './member-bulk-scanner.controller';
@@ -41,6 +42,8 @@ import { createMembershipTools } from '../../../ai-engine/tools/domains/membersh
     OrderFlowModule,
     CustomersModule,
     BulkUploadsModule,
+    // ia-cargas F2: sheet parser, document pages and AI extraction for the roster scanner.
+    AiIngestModule,
   ],
   controllers: [
     MembershipsController,

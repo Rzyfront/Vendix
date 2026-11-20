@@ -2387,6 +2387,22 @@ export const ErrorCodes = {
     httpStatus: 400,
     devMessage: 'Uploaded file is unreadable, empty or of an unsupported type',
   },
+  AI_INGEST_TOO_MANY_PAGES: {
+    code: 'AI_INGEST_TOO_MANY_PAGES',
+    httpStatus: 400,
+    devMessage: 'PDF has more pages than the load profile accepts',
+  },
+  AI_INGEST_UNSUPPORTED_TYPE: {
+    code: 'AI_INGEST_UNSUPPORTED_TYPE',
+    httpStatus: 400,
+    devMessage: 'Image format cannot be decoded on the server (HEIC/HEVC)',
+  },
+  AI_INGEST_NO_PAGES: {
+    code: 'AI_INGEST_NO_PAGES',
+    httpStatus: 422,
+    devMessage:
+      'PDF has no usable native text and none of its pages could be rendered',
+  },
   AI_CONFIG_002: {
     code: 'AI_CONFIG_002',
     httpStatus: 409,
