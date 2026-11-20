@@ -137,6 +137,8 @@ export interface InvoiceDraftScanResult {
   requires_review: string[];
   extraction_notes: string | null;
   documents_scanned: number;
+  /** Avisos de lectura en español (páginas sin leer, documento leído en partes…). */
+  warnings?: string[];
 }
 
 /** Topes del backend (`scan-draft`). */
