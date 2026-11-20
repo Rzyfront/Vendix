@@ -95,28 +95,6 @@ export class ResolutionsController {
    * nothing: the user reviews the result and then calls `POST /` or
    * `PATCH /:id` explicitly, so a mis-read never lands in the numbering table.
    */
-  /**
-   * @deprecated Usar POST store/invoicing/resolutions/scan/async (el síncrono muere en 504 tras 60 s de proxy).
-   */
-  @Post('scan')
-  @Permissions('invoicing:write')
-  @UseInterceptors(FileInterceptor('file'))
-  async scan(@UploadedFile() file: Express.Multer.File) {
-    if (!file) {
-      throw new VendixHttpException(ErrorCodes.RESOLUTION_SCAN_NO_FILE);
-    }
-    if (!SCAN_ALLOWED_MIME_TYPES.includes(file.mimetype)) {
-      throw new VendixHttpException(ErrorCodes.RESOLUTION_SCAN_INVALID_FILE);
-    }
-
-    const result =
-      await this.resolution_scanner_service.scanResolutionDocument(file);
-    return this.response_service.success(
-      result,
-      'Resolución escaneada exitosamente',
-    );
-  }
-
   @Post('scan/async')
   @Permissions('invoicing:write')
   @HttpCode(HttpStatus.ACCEPTED)

@@ -88,23 +88,6 @@ export class OrgDianConfigController {
    * usuario, así que el escáner tiene que existir en ambos o el paso 3 pierde
    * la lectura por foto para toda organización.
    */
-  /**
-   * @deprecated Usar POST organization/invoicing/dian-config/scan-habilitation/async (el síncrono muere en 504 tras 60 s de proxy).
-   */
-  @Post('scan-habilitation')
-  @Permissions('organization:invoicing:dian:write')
-  @HttpCode(HttpStatus.OK)
-  // Holgura de 1: ver el comentario equivalente en el controlador de store.
-  @UseInterceptors(FilesInterceptor('files', MAX_HABILITATION_SCAN_FILES + 1))
-  async scanHabilitation(@UploadedFiles() files: Express.Multer.File[]) {
-    const result = await this.habilitation_scanner_service
-      .scanHabilitationDocuments(assertScannableFiles(files));
-    return this.response_service.success(
-      result,
-      'Documentos de habilitación escaneados exitosamente',
-    );
-  }
-
   @Post('scan-habilitation/async')
   @Permissions('organization:invoicing:dian:write')
   @HttpCode(HttpStatus.ACCEPTED)

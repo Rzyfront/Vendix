@@ -163,21 +163,6 @@ export class RouteFlowController {
 
   // ===== Route-sheet AI scanner =====
 
-  /**
-   * @deprecated Usar `POST :id/scan/async` (504 tras 60 s de proxy).
-   */
-  @Post(':id/scan')
-  @HttpCode(HttpStatus.OK)
-  @Permissions('store:dispatch_routes:update')
-  @UseInterceptors(FileInterceptor('file'))
-  async scanRouteSheet(
-    @Param('id', ParseIntPipe) id: number,
-    @UploadedFile() file: Express.Multer.File,
-  ) {
-    const result = await this.routeSheetScanner.scanRouteSheet(id, file);
-    return this.responseService.success(result, 'Hoja de ruta escaneada');
-  }
-
   @Post(':id/scan/async')
   @HttpCode(HttpStatus.ACCEPTED)
   @Permissions('store:dispatch_routes:update')

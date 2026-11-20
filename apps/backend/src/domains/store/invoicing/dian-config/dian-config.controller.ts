@@ -152,26 +152,6 @@ export class DianConfigController {
    * dispara después de revisar, así que una lectura equivocada nunca aterriza
    * sola en la configuración fiscal.
    */
-  /**
-   * @deprecated Usar POST store/invoicing/dian-config/scan-habilitation/async (el síncrono muere en 504 tras 60 s de proxy).
-   */
-  @Post('scan-habilitation')
-  @Permissions('invoicing:write')
-  @HttpCode(HttpStatus.OK)
-  // Holgura de 1 a propósito: si multer corta en el tope exacto responde
-  // "Unexpected field - files" sin error_code, y el frontend no puede
-  // traducirlo. Dejándolo pasar, `assertScannableFiles` devuelve
-  // HABILITATION_SCAN_TOO_MANY_FILES con su mensaje en español.
-  @UseInterceptors(FilesInterceptor('files', MAX_HABILITATION_SCAN_FILES + 1))
-  async scanHabilitation(@UploadedFiles() files: Express.Multer.File[]) {
-    const result = await this.habilitation_scanner_service
-      .scanHabilitationDocuments(assertScannableFiles(files));
-    return this.response_service.success(
-      result,
-      'Documentos de habilitación escaneados exitosamente',
-    );
-  }
-
   @Post('scan-habilitation/async')
   @Permissions('invoicing:write')
   @HttpCode(HttpStatus.ACCEPTED)

@@ -589,30 +589,6 @@ export class SubscriptionFiscalController {
    * `POST resolutions` or `PATCH resolutions/:id`, so an OCR slip can never
    * reach the platform numbering by itself.
    */
-  /**
-   * @deprecated Usar POST superadmin/subscriptions/fiscal/resolutions/scan/async (el síncrono muere en 504 tras 60 s de proxy).
-   */
-  @Post('resolutions/scan')
-  @Permissions('superadmin:subscriptions:fiscal:write')
-  @UseInterceptors(FileInterceptor('file'))
-  @ApiOperation({
-    summary:
-      'Extract DIAN resolution fields from a photo/PDF (returns data, persists nothing)',
-  })
-  async scanResolution(
-    @UploadedFile() file: Express.Multer.File,
-  ): Promise<any> {
-    if (!file) {
-      throw new VendixHttpException(ErrorCodes.RESOLUTION_SCAN_NO_FILE);
-    }
-    if (!SCAN_ALLOWED_MIME_TYPES.includes(file.mimetype)) {
-      throw new VendixHttpException(ErrorCodes.RESOLUTION_SCAN_INVALID_FILE);
-    }
-
-    const result = await this.resolutionScanner.scanResolutionDocument(file);
-    return this.responseService.success(result, 'Platform resolution scanned');
-  }
-
   @Post('resolutions/scan/async')
   @HttpCode(HttpStatus.ACCEPTED)
   @Permissions('superadmin:subscriptions:fiscal:write')

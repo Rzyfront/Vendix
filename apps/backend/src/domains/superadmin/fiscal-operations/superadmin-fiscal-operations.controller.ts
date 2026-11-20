@@ -596,29 +596,6 @@ export class SuperadminFiscalOperationsController {
    * (it reads a document and returns fields; it touches no tenant data), so the
    * platform scope needs the route, not a different implementation.
    */
-  /**
-   * @deprecated Usar POST super-admin/fiscal/identity/rut-scanner/scan/async (el síncrono muere en 504 tras 60 s de proxy).
-   */
-  @Post('identity/rut-scanner/scan')
-  @Permissions('superadmin:fiscal:identity:write')
-  @UseInterceptors(FileInterceptor('file'))
-  async scanRut(@UploadedFile() file: Express.Multer.File) {
-    if (!file) {
-      throw new VendixHttpException(ErrorCodes.RUT_SCAN_NO_FILE);
-    }
-    const allowedTypes = [
-      'image/jpeg',
-      'image/png',
-      'image/webp',
-      'application/pdf',
-    ];
-    if (!allowedTypes.includes(file.mimetype)) {
-      throw new VendixHttpException(ErrorCodes.RUT_SCAN_INVALID_FILE);
-    }
-    const result = await this.rutScanner.scanRutDocument(file);
-    return this.response.success(result, 'RUT escaneado exitosamente');
-  }
-
   @Post('identity/rut-scanner/scan/async')
   @HttpCode(HttpStatus.ACCEPTED)
   @Permissions('superadmin:fiscal:identity:write')

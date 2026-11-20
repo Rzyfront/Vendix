@@ -415,6 +415,7 @@ jobs:
           src/ai-engine/ai-logging.app-health.spec.ts
           src/domains/superadmin/ai-engine/ai-engine.controller.app-health.spec.ts
           src/domains/store/memberships/member-bulk-scanner.controller.spec.ts
+          src/common/ai-scan-jobs/ai-sync-scan-endpoints.retired.spec.ts
           src/domains/received-documents/services/received-document-pages.service.spec.ts
           src/domains/store/documents/checks/document-check-normalizers.spec.ts
           src/domains/store/documents/checks/document-checks.service.spec.ts

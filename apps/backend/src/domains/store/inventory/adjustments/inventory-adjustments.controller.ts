@@ -316,35 +316,6 @@ export class InventoryAdjustmentsController {
     );
   }
 
-  /**
-   * @deprecated Usar `POST scan/async` (504 tras 60 s de proxy).
-   */
-  @Post('scan')
-  @ApiOperation({ summary: 'Scan inventory count sheet with AI' })
-  @ApiResponse({ status: 201, description: 'Count sheet scanned successfully' })
-  @RequirePermissions('store:inventory:adjustments:create')
-  @UseInterceptors(FileInterceptor('file'))
-  async scanCount(
-    @UploadedFile() file: Express.Multer.File,
-    @Query('location_id') location_id: string,
-  ) {
-    if (!file) throw new VendixHttpException(ErrorCodes.INV_SCAN_NO_FILE);
-    if (!location_id)
-      throw new VendixHttpException(ErrorCodes.INV_SCAN_NO_FILE);
-    // ia-cargas F5a: tipo REAL por firma (fotos, PDF y hojas de cálculo).
-    this.inventoryCountScanner.assertValidScanFile(
-      this.inventoryCountScanner.toScanFile(file),
-    );
-    const result = await this.inventoryCountScanner.scanCount(
-      file,
-      +location_id,
-    );
-    return this.responseService.success(
-      result,
-      'Hoja de reconteo escaneada exitosamente',
-    );
-  }
-
   @Post('scan/async')
   @HttpCode(HttpStatus.ACCEPTED)
   @ApiOperation({
