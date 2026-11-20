@@ -392,6 +392,36 @@ import {
             </div>
           }
 
+          <!-- ia-cargas F3: páginas leídas (solo si fueron varias) -->
+          @if (scanPagesNote(); as note) {
+            <p class="text-xs text-text-secondary" data-testid="pop-scan-pages-note">{{ note }}</p>
+          }
+
+          <!--
+            ia-cargas F3: una OC admite PURCHASE_ORDER_ITEMS_MAX líneas. Nada se
+            recorta ni se divide solo: se dice cuántas se leyeron y el tope,
+            y el operador decide (descartar o llevar el resto a otra compra).
+          -->
+          @if (overOrderLimit()) {
+            <div
+              class="bg-red-50 border border-red-200 rounded-lg p-3"
+              role="alert"
+              data-testid="pop-scan-over-limit"
+            >
+              <p class="text-xs font-semibold text-red-800 mb-1">
+                Esta factura supera el tope de una orden de compra
+              </p>
+              <p class="text-xs text-red-700">
+                Se leyeron {{ editableItems().length }} líneas y vas a cargar
+                {{ keptCount() }}; una orden de compra admite máximo
+                {{ PURCHASE_ORDER_ITEMS_MAX }}. No se quitó ninguna línea:
+                descarta las que no van en esta compra (puedes cargarlas en otra)
+                antes de confirmar, porque una orden con más de
+                {{ PURCHASE_ORDER_ITEMS_MAX }} líneas se rechaza.
+              </p>
+            </div>
+          }
+
           <!-- Line items table -->
           <div id="pop-scan-lines" tabindex="-1" class="outline-none">
             <h4 class="text-sm font-semibold text-text-primary mb-3">
@@ -1618,6 +1648,25 @@ export class InvoiceScannerModalComponent {
   readonly allDiscarded = computed(
     () => this.editableItems().length > 0 && this.keptCount() === 0,
   );
+
+  /** Tope de líneas de una OC (`PURCHASE_ORDER_ITEMS_MAX` del backend). */
+  readonly PURCHASE_ORDER_ITEMS_MAX = 100;
+
+  /** ia-cargas F3: las líneas que se van a cargar superan el tope de la OC. */
+  readonly overOrderLimit = computed(
+    () => this.keptCount() > this.PURCHASE_ORDER_ITEMS_MAX,
+  );
+
+  /** ia-cargas F3: "Factura leída en 3 páginas (2 con el texto del PDF)." */
+  readonly scanPagesNote = computed(() => {
+    const source = this.scanResult()?.scan_source;
+    if (!source || source.pages <= 1) return null;
+    const text =
+      source.text_pages > 0
+        ? ` (${source.text_pages} con el texto del PDF)`
+        : '';
+    return `Factura leída en ${source.pages} páginas${text}.`;
+  });
 
   // ===== QUI-855 paso 8b: revalidación con IA =====
   readonly REVALIDATE_NOTE_MAX = 2000;
