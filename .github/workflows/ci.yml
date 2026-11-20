@@ -281,6 +281,8 @@ jobs:
         run: >-
           npx jest --ci --runInBand --runTestsByPath
           src/common/workflows/contract/workflow-contract.parity.spec.ts
+          src/domains/store/data-collection/template-json/template-json.contract.parity.spec.ts
+          src/domains/store/data-collection/template-json/template-json.contract.spec.ts
 
   # Lo que un doble en memoria no prueba del motor de Flujos: concurrencia,
   # SKIP LOCKED, idempotencia, triggers de evidencia y outbox transaccional.
@@ -818,6 +820,7 @@ jobs:
           --include='**/pop/utils/receipt-uom-block.util.spec.ts'
           --include='**/shared/utils/compact-money.util.spec.ts'
           --include='**/shared/pipes/currency/currency.pipe.spec.ts'
+          --include='**/data-collection/utils/template-json.contract.spec.ts'
 
   mobile:
     name: Mobile
