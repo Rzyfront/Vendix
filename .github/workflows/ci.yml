@@ -769,6 +769,7 @@ jobs:
           --include='**/workflows/services/workflow-limits-api.service.spec.ts'
           --include='**/workflows/utils/workflow-errors.util.spec.ts'
           --include='**/customers/crm/shared/task-form-modal.component.spec.ts'
+          --include='**/customers/crm/shared/task-complete-modal.component.spec.ts'
           --include='**/workflows/records/pages/record-detail-page/record-detail-page.component.spec.ts'
           --include='**/documents/pages/templates-editor/templates-editor-page.component.spec.ts'
           --include='**/super-admin/subscriptions/pages/plans/plan-form.component.spec.ts'
