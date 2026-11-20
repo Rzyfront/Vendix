@@ -173,11 +173,22 @@ function moneyList(bucket: Map<string, number>): MoneyAmount[] {
     .map(([currency, amount]) => ({ currency, amount: round2(amount) }));
 }
 
-/** Monto de un reembolso parcial guardado por `SubscriptionPaymentService.refund`. */
-function refundAmountOf(metadata: Prisma.JsonValue | null): number {
-  if (!metadata || typeof metadata !== 'object' || Array.isArray(metadata)) return 0;
-  const value = Number((metadata as Record<string, unknown>).refund_amount);
-  return Number.isFinite(value) && value > 0 ? value : 0;
+/**
+ * Reembolso guardado por `SubscriptionPaymentService.refund` en `metadata`.
+ * El estado del pago cambia aunque la pasarela rechace el reembolso; solo
+ * `refund_result: 'failed'` dice que el dinero nunca salió. Filas antiguas sin
+ * `refund_result` se toman como reembolso exitoso (comportamiento previo).
+ */
+function refundOf(metadata: Prisma.JsonValue | null): { failed: boolean; amount: number } {
+  if (!metadata || typeof metadata !== 'object' || Array.isArray(metadata)) {
+    return { failed: false, amount: 0 };
+  }
+  const meta = metadata as Record<string, unknown>;
+  const value = Number(meta.refund_amount);
+  return {
+    failed: meta.refund_result === 'failed',
+    amount: Number.isFinite(value) && value > 0 ? value : 0,
+  };
 }
 
 /** Solo los ids de plan del payload de `plan_changed`; el payload nunca sale. */
@@ -337,16 +348,18 @@ export class PlatformCrmAccountService {
       }
     }
 
-    // Reembolso parcial: el monto devuelto vive solo en `metadata.refund_amount`
-    // del pago. Se lee aparte, para esos pagos, y no sale de aquí.
-    const partialIds = payments.filter((p) => p.state === 'partial_refund').map((p) => p.id);
-    const refunds = new Map<number, number>();
-    if (partialIds.length) {
+    // Reembolsos: el monto devuelto y si la pasarela lo aceptó viven solo en
+    // `metadata` del pago. Se leen aparte, para esos pagos, y no salen de aquí.
+    const refundIds = payments
+      .filter((p) => p.state === 'partial_refund' || p.state === 'refunded')
+      .map((p) => p.id);
+    const refunds = new Map<number, { failed: boolean; amount: number }>();
+    if (refundIds.length) {
       const rows = await this.db.subscription_payments.findMany({
-        where: { id: { in: partialIds } },
+        where: { id: { in: refundIds } },
         select: { id: true, metadata: true },
       });
-      for (const row of rows) refunds.set(row.id, refundAmountOf(row.metadata));
+      for (const row of rows) refunds.set(row.id, refundOf(row.metadata));
     }
 
     // Nombres de plan de los cambios de plan (solo ids del payload).
@@ -423,11 +436,13 @@ export class PlatformCrmAccountService {
           ? payment.failure_reason.slice(0, FAILURE_REASON_MAX)
           : null,
       });
+      // Un reembolso que la pasarela rechazó no devolvió dinero: cuenta entero.
+      const refund = refunds.get(payment.id);
       const net =
-        payment.state === 'succeeded'
+        payment.state === 'succeeded' || refund?.failed
           ? amount
           : payment.state === 'partial_refund'
-            ? Math.max(0, amount - (refunds.get(payment.id) ?? 0))
+            ? Math.max(0, amount - (refund?.amount ?? 0))
             : 0;
       paymentFacts.push({
         store_id: storeId,
