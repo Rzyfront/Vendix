@@ -1,4 +1,7 @@
-import { storeIsRestaurant } from '../../../../common/helpers/industry-capabilities.helper';
+import {
+  storeIsManufacturing,
+  storeIsRestaurant,
+} from '../../../../common/helpers/industry-capabilities.helper';
 import { sellableStockLevelsWhere } from '../../inventory/shared/helpers/pos-stock-scope.helper';
 import {
   FulfillmentDestination,
@@ -116,6 +119,7 @@ export function resolveLineDestinationFromContext(
   ctx: LineDestinationContext,
   params: {
     isRestaurant: boolean;
+    isManufacturing?: boolean;
     isScheduled: boolean;
     line: DestinationLineRef & {
       quantity?: number | null;
@@ -128,6 +132,7 @@ export function resolveLineDestinationFromContext(
   const product = line.product_id ? (ctx.productById.get(line.product_id) ?? null) : null;
   return resolveLineDestination({
     isRestaurant: params.isRestaurant,
+    isManufacturing: params.isManufacturing,
     product,
     availableStock: line.product_id
       ? (ctx.stockByKey.get(stockKey(line.product_id, line.product_variant_id)) ?? 0)
@@ -150,11 +155,11 @@ export const previousLineKey = (line: DestinationLineRef): string =>
 
 /**
  * One call for every write point: reads the store industry, and for
- * restaurants batch-loads the catalog and stock once. Non-restaurant stores
- * resolve to all-null without touching the catalog (lines are built exactly as
- * before). `previous` (edit paths) keeps what an existing line already has: a
- * legacy line (NULL destination) stays null, and a line with a destination
- * re-validates it against the matrix as the cashier's choice.
+ * restaurants or manufacturing batch-loads the catalog and stock once. Other
+ * stores resolve to all-null without touching the catalog (lines are built
+ * exactly as before). `previous` (edit paths) keeps what an existing line
+ * already has: a legacy line (NULL destination) stays null, and a line with a
+ * destination re-validates it against the matrix as the cashier's choice.
  */
 export async function resolveLineDestinations(
   client: any,
@@ -174,21 +179,32 @@ export async function resolveLineDestinations(
     /**
      * S12: quien ya leyó la industria de la tienda en esta venta la pasa y
      * se evita una segunda lectura. Sin ella, se lee aquí como siempre.
+     * `industries` manda sobre `isRestaurant`; `isRestaurant: true` basta
+     * (restaurante decide todo), `false` aún lee si la tienda es manufactura.
      */
     isRestaurant?: boolean;
+    industries?: string[] | null;
   } = {},
 ): Promise<Array<ResolvedLineDestination | null>> {
-  const isRestaurant =
-    opts.isRestaurant ??
-    storeIsRestaurant(
-      (
-        await client.stores.findUnique({
-          where: { id: storeId },
-          select: { industries: true },
-        })
-      )?.industries,
-    );
-  if (!isRestaurant) {
+  let isRestaurant: boolean;
+  let isManufacturing: boolean;
+  if (opts.industries !== undefined) {
+    isRestaurant = storeIsRestaurant(opts.industries);
+    isManufacturing = storeIsManufacturing(opts.industries);
+  } else if (opts.isRestaurant === true) {
+    isRestaurant = true;
+    isManufacturing = false;
+  } else {
+    const industries = (
+      await client.stores.findUnique({
+        where: { id: storeId },
+        select: { industries: true },
+      })
+    )?.industries;
+    isRestaurant = opts.isRestaurant ?? storeIsRestaurant(industries);
+    isManufacturing = storeIsManufacturing(industries);
+  }
+  if (!isRestaurant && !isManufacturing) {
     return items.map(() => null);
   }
   const ctx = await loadLineDestinationContext(client, storeId, items, {
@@ -197,8 +213,9 @@ export async function resolveLineDestinations(
   return items.map((item) => {
     const prev = opts.previous?.get(previousLineKey(item));
     if (prev && !prev.fulfillment_destination) return null;
-    return resolveLineDestinationFromContext(ctx, {
-      isRestaurant: true,
+    const resolved = resolveLineDestinationFromContext(ctx, {
+      isRestaurant,
+      isManufacturing,
       isScheduled: opts.isScheduled === true,
       line: {
         ...item,
@@ -207,6 +224,9 @@ export async function resolveLineDestinations(
         requested: item.requested ?? prev?.fulfillment_destination ?? null,
       },
     });
+    // Manufacturing without restaurant decides only producible lines; every
+    // other line stays exactly as before (null).
+    return !isRestaurant && resolved.destination === null ? null : resolved;
   });
 }
 

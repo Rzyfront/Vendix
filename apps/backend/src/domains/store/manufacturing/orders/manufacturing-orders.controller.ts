@@ -55,7 +55,7 @@ export class ManufacturingOrdersController {
   @Get('day')
   @Permissions('store:manufacturing:orders:read')
   async findDay(@Query() query: ProductionDayQueryDto) {
-    const result = await this.productionOrders.findDay(query);
+    const result = await this.productionOrders.findDay(query, 'plant');
     return this.responseService.success(result, 'Lista de producción del día obtenida');
   }
 
@@ -67,7 +67,7 @@ export class ManufacturingOrdersController {
   @Get('day/supplies')
   @Permissions('store:manufacturing:orders:read')
   async findDaySupplies(@Query() query: ProductionSuppliesQueryDto) {
-    const result = await this.productionOrders.findDaySupplies(query);
+    const result = await this.productionOrders.findDaySupplies(query, 'plant');
     return this.responseService.success(result, 'Consumo de insumos del día obtenido');
   }
 

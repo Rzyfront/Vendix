@@ -97,7 +97,8 @@ describe('ProductionSaleLinkService (QUI-995)', () => {
   });
 
   it('QUI-1013: a sale-linked order goes to the main plant (first active by id) of the sale store', async () => {
-    setup(sale([{ id: 1, product_id: 50, quantity: 2 }]));
+    // A plant order (manufacturing store); kitchen orders never take a plant.
+    setup(sale([{ id: 1, product_id: 50, quantity: 2 }], { stores: { industries: ['manufacturing'] } }));
     tx.manufacturing_plants.findFirst.mockResolvedValue({ id: 3 });
     await service.ensureForOrder(77);
     expect(tx.manufacturing_plants.findFirst).toHaveBeenCalledWith({
@@ -112,6 +113,81 @@ describe('ProductionSaleLinkService (QUI-995)', () => {
     setup(sale([{ id: 1, product_id: 50, quantity: 2 }]));
     await service.ensureForOrder(77);
     expect(tx.production_orders.create.mock.calls[0][0].data.plant_id).toBeNull();
+  });
+
+  describe('dónde se produce: la orden de la venta va a su pantalla', () => {
+    const line = (products: Record<string, unknown> | undefined) => ({
+      id: 1,
+      product_id: 50,
+      quantity: 2,
+      ...(products && { products }),
+    });
+    const created = () => tx.production_orders.create.mock.calls[0][0].data;
+
+    it('restaurant only: kitchen order with no plant even if the store has a plant', async () => {
+      setup(sale([line(undefined)], { stores: { industries: ['restaurant'] } }));
+      tx.manufacturing_plants.findFirst.mockResolvedValue({ id: 3 });
+      await service.ensureForOrder(77);
+      expect(created().production_site).toBe('kitchen');
+      expect(created().plant_id).toBeNull();
+      expect(tx.manufacturing_plants.findFirst).not.toHaveBeenCalled();
+    });
+
+    it('manufacturing only, product without site: plant order at the main plant', async () => {
+      setup(sale([line({ production_site: null, production_plant_id: null })], {
+        stores: { industries: ['manufacturing'] },
+      }));
+      tx.manufacturing_plants.findFirst.mockResolvedValue({ id: 3 });
+      await service.ensureForOrder(77);
+      expect(created().production_site).toBe('plant');
+      expect(created().plant_id).toBe(3);
+    });
+
+    it('restaurant + manufacturing, product without site: kitchen fallback (sale not broken)', async () => {
+      setup(sale([line({ production_site: null, production_plant_id: null })], {
+        stores: { industries: ['restaurant', 'manufacturing'] },
+      }));
+      tx.manufacturing_plants.findFirst.mockResolvedValue({ id: 3 });
+      await service.ensureForOrder(77);
+      expect(created().production_site).toBe('kitchen');
+      expect(created().plant_id).toBeNull();
+    });
+
+    it('product made in a specific active plant: the order goes to that plant', async () => {
+      setup(sale([line({ production_site: 'plant', production_plant_id: 8 })], {
+        stores: { industries: ['restaurant', 'manufacturing'] },
+      }));
+      tx.manufacturing_plants.findFirst.mockImplementation(async (args: any) =>
+        args.where.id === 8 ? { id: 8 } : { id: 3 },
+      );
+      await service.ensureForOrder(77);
+      expect(tx.manufacturing_plants.findFirst).toHaveBeenCalledWith({
+        where: { id: 8, store_id: 1, is_active: true },
+        select: { id: true },
+      });
+      expect(created().production_site).toBe('plant');
+      expect(created().plant_id).toBe(8);
+    });
+
+    it('product plant no longer active: falls back to the main plant', async () => {
+      setup(sale([line({ production_site: 'plant', production_plant_id: 8 })], {
+        stores: { industries: ['manufacturing'] },
+      }));
+      tx.manufacturing_plants.findFirst.mockImplementation(async (args: any) =>
+        args.where.id === 8 ? null : { id: 3 },
+      );
+      await service.ensureForOrder(77);
+      expect(created().plant_id).toBe(3);
+    });
+
+    it('product marked kitchen in a manufacturing store: kitchen order', async () => {
+      setup(sale([line({ production_site: 'kitchen', production_plant_id: null })], {
+        stores: { industries: ['restaurant', 'manufacturing'] },
+      }));
+      await service.ensureForOrder(77);
+      expect(created().production_site).toBe('kitchen');
+      expect(created().plant_id).toBeNull();
+    });
   });
 
   it('S1: a new sale order is created with one planned line per recipe item for the summed quantity, consumed 0', async () => {

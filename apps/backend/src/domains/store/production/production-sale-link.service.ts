@@ -17,6 +17,7 @@ import {
 import { emitProductionOrderUpdated } from './production-order-events';
 import type { ProductionDisposition } from './production-disposition.util';
 import { findProductionOrderForLine } from './production-order-pairing.util';
+import { resolveProductionSite } from './production-site.util';
 import {
   ADDON_OPTIONS_SELECT,
   RECIPE_REQUIREMENT_SELECT,
@@ -399,6 +400,8 @@ export class ProductionSaleLinkService {
         state: true,
         created_at: true,
         fulfillment_schedule: { select: { scheduled_start: true } },
+        // Where each product is made (kitchen vs plant) follows the store industry.
+        stores: { select: { industries: true } },
         order_items: {
           where: LIVE_PRODUCTION_LINES,
           select: {
@@ -407,6 +410,7 @@ export class ProductionSaleLinkService {
             product_variant_id: true,
             quantity: true,
             order_item_options: ADDON_OPTIONS_SELECT,
+            products: { select: { production_site: true, production_plant_id: true } },
           },
         },
       },
@@ -438,6 +442,8 @@ export class ProductionSaleLinkService {
         state: true,
         created_at: true,
         fulfillment_schedule: { select: { scheduled_start: true } },
+        // Where each product is made (kitchen vs plant) follows the store industry.
+        stores: { select: { industries: true } },
         order_items: {
           where: LIVE_PRODUCTION_LINES,
           select: {
@@ -446,6 +452,7 @@ export class ProductionSaleLinkService {
             product_variant_id: true,
             quantity: true,
             order_item_options: ADDON_OPTIONS_SELECT,
+            products: { select: { production_site: true, production_plant_id: true } },
           },
         },
       },
@@ -476,7 +483,19 @@ export class ProductionSaleLinkService {
         items: SaleLineForPlan[];
       }
     >();
+    // Product site facts (kitchen / plant + its plant), one per product.
+    const siteByProduct = new Map<
+      number,
+      { production_site: string | null; production_plant_id: number | null }
+    >();
     for (const item of sale.order_items) {
+      const facts = (item as { products?: { production_site?: string | null; production_plant_id?: number | null } | null }).products;
+      if (!siteByProduct.has(item.product_id!)) {
+        siteByProduct.set(item.product_id!, {
+          production_site: facts?.production_site ?? null,
+          production_plant_id: facts?.production_plant_id ?? null,
+        });
+      }
       const variant_id = item.product_variant_id ?? null;
       const key = keyOf(item.product_id!, variant_id);
       const current = planned.get(key);
@@ -547,9 +566,32 @@ export class ProductionSaleLinkService {
           existing.map((o) => [keyOf(o.product_id, o.product_variant_id ?? null), o]),
         );
         const result: { id: number }[] = [];
-        // QUI-1013: orders born from a sale go to the store's main plant (the
-        // only one, or the first active one); NULL when the store has no plant.
+        // Destination of the order: kitchen (Producción, plant_id NULL) or plant
+        // (Planta). A plant order goes to the product's plant while it is
+        // active, else to the store's main plant (QUI-1013: the only one, or the
+        // first active one); NULL when the store has no plant.
+        const industries = (sale as { stores?: { industries?: string[] | null } | null }).stores
+          ?.industries;
         let mainPlantId: number | null | undefined;
+        const activePlant = new Map<number, number | null>();
+        const plantFor = async (product_id: number): Promise<number | null> => {
+          const own = siteByProduct.get(product_id)?.production_plant_id ?? null;
+          if (own != null) {
+            if (!activePlant.has(own)) {
+              const row = await tx.manufacturing_plants.findFirst({
+                where: { id: own, store_id: sale.store_id, is_active: true },
+                select: { id: true },
+              });
+              activePlant.set(own, row ? (row.id as number) : null);
+            }
+            const active = activePlant.get(own);
+            if (active != null) return active;
+          }
+          if (mainPlantId === undefined) {
+            mainPlantId = await findMainPlantId(tx, sale.store_id);
+          }
+          return mainPlantId;
+        };
 
         for (const [key, { product_id, variant_id, qty, items }] of planned) {
           const current = byKey.get(key);
@@ -563,9 +605,11 @@ export class ProductionSaleLinkService {
               continue;
             }
             const order_number = await this.sequences.next(tx, sale.store_id);
-            if (mainPlantId === undefined) {
-              mainPlantId = await findMainPlantId(tx, sale.store_id);
-            }
+            const { site } = resolveProductionSite({
+              industries,
+              productSite: siteByProduct.get(product_id)?.production_site,
+            });
+            const plant_id = site === 'plant' ? await plantFor(product_id) : null;
             const requirements = await this.plannedRequirements(tx, { recipe, qty, items });
             const created = await tx.production_orders.create({
               data: {
@@ -580,7 +624,8 @@ export class ProductionSaleLinkService {
                 priority: 'normal',
                 order_number,
                 due_date,
-                plant_id: mainPlantId,
+                plant_id,
+                production_site: site,
                 // S1: born with its planned supplies (consumed_qty = 0).
                 lines: { create: plannedLinesCreate(requirements) },
               },
