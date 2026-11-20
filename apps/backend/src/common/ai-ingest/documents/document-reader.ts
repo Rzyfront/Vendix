@@ -149,10 +149,17 @@ async function extractPreparedPages<T>(
     totalPages: pages.length,
     totalBatches: Math.ceil(pages.length / batchSize),
   };
-  const instructionFor = (batch: AiDocumentPage[]) =>
-    typeof options.instruction === 'function'
-      ? options.instruction(batch, context)
-      : options.instruction;
+  // A batch the extractor halved after a cut answer holds only part of the
+  // pages even if the document was planned as ONE batch: tell it so, or the
+  // model would total (and maybe list a "Van" line of) pages it cannot see.
+  const instructionFor = (batch: AiDocumentPage[]) => {
+    if (typeof options.instruction !== 'function') return options.instruction;
+    const partial = batch.length < pages.length;
+    return options.instruction(
+      batch,
+      partial && context.totalBatches < 2 ? { ...context, totalBatches: 2 } : context,
+    );
+  };
   const label = options.logLabel ?? options.appKey;
   const fail = (error: AiExtractionError): never => {
     throw options.rawExtractionErrors ? error : error.toHttpException();

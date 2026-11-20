@@ -286,6 +286,14 @@ describe('InvoiceDraftScannerService — ai-ingest (F5b)', () => {
     const out = await service.scanDraftFromFiles([pdfFile()]);
 
     expect(aiEngine.run).toHaveBeenCalledTimes(3); // cut whole + two halves
+    // The halves know they hold only part of the pages (no totals of unseen pages).
+    for (const callIndex of [1, 2]) {
+      const first = (aiEngine.run.mock.calls[callIndex][2][0].content as any[])[0].text as string;
+      expect(first).toContain('This message holds only page');
+      expect(first).toContain('"totals" describe ONLY the lines you return in this message');
+    }
+    const whole = (aiEngine.run.mock.calls[0][2][0].content as any[])[0].text as string;
+    expect(whole).not.toContain('This message holds only');
     expect(out.lines).toHaveLength(200);
     const warning = out.warnings!.find((w) => w.includes('230 líneas'));
     expect(warning).toContain('no se cargaron de la 201 a la 230');
@@ -411,7 +419,7 @@ describe('InvoiceDraftScannerService — ai-ingest (F5b)', () => {
         { pages: p(2), data: { totals: { total: '2.000' } } },
       ]);
       expect(merged.data.totals.total).toBe('2.000');
-      expect(merged.warnings.join(' ')).toContain('No se pudieron sumar los totales');
+      expect(merged.warnings.join(' ')).toContain('No se pudo sumar el total');
     });
   });
 });

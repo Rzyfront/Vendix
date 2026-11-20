@@ -234,11 +234,10 @@ export function mergeInvoiceDraftBatches(
       totals[key] = (present as number[]).reduce((sum, v) => sum + v, 0);
     } else {
       totals[key] = present[present.length - 1];
-      if (key === 'total') {
-        warnings.push(
-          'No se pudieron sumar los totales de las partes del documento; se tomó el de la última. Compáralo con el resumen antes de emitir.',
-        );
-      }
+      const label = key === 'total' ? 'el total' : key === 'subtotal' ? 'el subtotal' : 'el IVA total';
+      warnings.push(
+        `No se pudo sumar ${label} de las partes del documento; se tomó el de la última. Compáralo con el resumen antes de emitir.`,
+      );
     }
   }
   data.totals = totals;

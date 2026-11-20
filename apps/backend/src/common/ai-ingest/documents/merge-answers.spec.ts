@@ -53,4 +53,17 @@ describe('buildFormInstruction', () => {
       scanSourceOf({ batches: [], documents: 2, pages: 3, textPages: 0, missingPages: [{ document: 2, page: 1 }], warnings: [] }),
     ).toEqual({ documents: 2, pages: 3, text_pages: 0, batches: 0, missing_pages: [{ document: 2, page: 1 }] });
   });
+
+  it('LAX_LIST keeps a lone number as is (ajv coerceTypes never turns 13 into "13")', () => {
+    // eslint-disable-next-line @typescript-eslint/no-require-imports
+    const Ajv = require('ajv');
+    const { LAX_LIST } = require('../extraction/lax-schema');
+    const validate = new Ajv({ coerceTypes: true, strict: false }).compile({
+      type: 'object',
+      properties: { list: LAX_LIST },
+    });
+    const data: any = { list: 13 };
+    expect(validate(data)).toBe(true);
+    expect(data.list).toBe(13);
+  });
 });

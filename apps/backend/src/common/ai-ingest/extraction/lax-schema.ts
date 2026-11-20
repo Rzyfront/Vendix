@@ -12,9 +12,13 @@ import type { JsonSchema } from './ai-extraction.service';
  */
 export const LAX_VALUE: JsonSchema = { type: ['string', 'number', 'boolean', 'null'] };
 
-/** A list of leaves (codes, responsibilities); a lone value is left to the normalizer. */
+/**
+ * A list of leaves (codes, responsibilities); a lone value is left to the
+ * normalizer. `number`/`boolean` are listed so ajv never coerces a lone 13
+ * into "13" (the normalizer ignores a non-array, as before).
+ */
 export const LAX_LIST: JsonSchema = {
-  type: ['array', 'string', 'null'],
+  type: ['array', 'string', 'number', 'boolean', 'null'],
   items: LAX_VALUE,
 };
 
