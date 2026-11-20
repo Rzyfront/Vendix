@@ -80,8 +80,41 @@ describe('InvoiceScanProcessor', () => {
       'image/png',
       'ingredient',
       ATTACHMENT,
+      expect.objectContaining({ reportProgress: expect.any(Function) }),
     );
     expect(res).toBe(result);
+  });
+
+  it('ia-cargas F3: el progreso real por páginas llega al job con `at`', async () => {
+    const { processor, scanner } = build();
+    const updateProgress = jest.fn().mockResolvedValue(undefined);
+    scanner.scanInvoiceFromBuffer.mockImplementation(
+      async (_b: unknown, _m: unknown, _o: unknown, _a: unknown, opts: any) => {
+        await opts.reportProgress({ done: 2, total: 6, unit: 'páginas', stage: 'Leyendo con IA' });
+        return { line_items: [] };
+      },
+    );
+
+    await processor.process({ ...job(), updateProgress } as any);
+
+    expect(updateProgress).toHaveBeenCalledWith(
+      expect.objectContaining({ done: 2, total: 6, unit: 'páginas', at: expect.any(Number) }),
+    );
+  });
+
+  it('ia-cargas F3: un fallo al guardar el progreso no rompe el escaneo', async () => {
+    const { processor, scanner } = build();
+    const updateProgress = jest.fn().mockRejectedValue(new Error('redis down'));
+    scanner.scanInvoiceFromBuffer.mockImplementation(
+      async (_b: unknown, _m: unknown, _o: unknown, _a: unknown, opts: any) => {
+        await opts.reportProgress({ done: 1, total: 1, unit: 'páginas', stage: 'x' });
+        return { ok: true };
+      },
+    );
+
+    await expect(
+      processor.process({ ...job(), updateProgress } as any),
+    ).resolves.toEqual({ ok: true });
   });
 
   it('INV_SCAN_PARSE_FAIL => UnrecoverableError', async () => {

@@ -171,6 +171,17 @@ export interface InvoiceScanResult {
   header_discount_kind?: 'percent' | 'amount';
   schema_version?: 1 | 2;
   /**
+   * ia-cargas F3 — cómo se leyó el documento (opcional, solo informativo):
+   * páginas preparadas, cuántas fueron solo texto nativo del PDF, cuántas
+   * llamadas a la IA (lotes) y las páginas que NO se pudieron leer.
+   */
+  scan_source?: {
+    pages: number;
+    text_pages: number;
+    batches: number;
+    missing_pages?: number[];
+  };
+  /**
    * QUI-855 — documento escaneado guardado en S3 (KEY, no URL firmada). El
    * frontend lo reenvía en `scan_attachment` al crear la OC. null si la subida
    * falló (el escaneo no se rompe).

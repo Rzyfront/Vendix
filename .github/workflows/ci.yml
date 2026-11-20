@@ -535,6 +535,8 @@ jobs:
           src/domains/store/orders/orders.editor-discount.spec.ts
           src/domains/store/orders/orders.service.spec.ts
           src/domains/store/orders/purchase-orders/purchase-orders.attachments.spec.ts
+          src/domains/store/orders/purchase-orders/purchase-invoice-ingest.profile.spec.ts
+          src/domains/store/orders/purchase-orders/invoice-scanner.ingest.spec.ts
           src/domains/store/orders/purchase-orders/purchase-orders.multi-tax.spec.ts
           src/domains/store/orders/purchase-orders/purchase-orders.service.spec.ts
           src/domains/store/orders/purchase-orders/purchase-orders.uom-config.spec.ts
