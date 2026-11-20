@@ -209,6 +209,12 @@ export interface TableSessionOrderItem {
   discount_amount?: number | string | null;
   discounted_total_price?: number | string | null;
   /**
+   * Total de la línea con impuesto ANTES del descuento (precio tachado). Es el
+   * mismo valor que muestra el detalle de la orden; `final_total_price` no
+   * sirve para esto porque con impuesto incluido devuelve la base.
+   */
+  total_before_discount?: number | string | null;
+  /**
    * Nombre de la promoción que produjo el descuento de la línea (aditivo,
    * solo no-cocina). Sin él la fila no pinta badge de promo.
    */

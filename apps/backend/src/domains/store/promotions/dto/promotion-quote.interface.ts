@@ -261,6 +261,17 @@ export interface ActiveProductPromotion {
   badge_label: string;
   priority: number;
   /**
+   * Flat promos only. Cap of the discount over the WHOLE scoped total (not
+   * per unit); `null` when the promotion has no cap. Lets a client estimate
+   * a multi-unit total with the same rule `quoteDiscounts` charges.
+   */
+  max_discount_amount?: number | null;
+  /**
+   * Flat promos only. Minimum cart subtotal `quoteDiscounts` requires; the
+   * listing does NOT evaluate it (no cart here). `null` when not required.
+   */
+  min_purchase_amount?: number | null;
+  /**
    * `true` ONLY for `quantity_tiered` promos. Lets the frontend branch on
    * the rule type without re-deriving it from `promotion_quantity_tiers`.
    * `undefined` (NOT `false`) for flat promos.

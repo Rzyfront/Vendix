@@ -3051,7 +3051,12 @@ describe('TableSessionsService — open + addItems (Fase E smoke)', () => {
           total_price: new Prisma.Decimal(55555.56),
           tax_amount_item: new Prisma.Decimal(1555.56),
           discount_amount: new Prisma.Decimal(16666.67),
-          order_item_taxes: [{ tax_amount: new Prisma.Decimal(3111.11) }],
+          order_item_taxes: [
+            {
+              tax_rate: new Prisma.Decimal(0.08),
+              tax_amount: new Prisma.Decimal(3111.11),
+            },
+          ],
         }),
       );
 
@@ -3060,6 +3065,12 @@ describe('TableSessionsService — open + addItems (Fase E smoke)', () => {
 
       expect(item.discount_amount).toBe(16666.67);
       expect(item.discounted_total_price).toBe(42000);
+      // INC incluido: el tachado es el bruto (60.000), no la base (55.555,56),
+      // igual que `total_before_discount` del detalle de la orden.
+      expect(item.total_before_discount).toBe(60000);
+      expect(item.total_before_discount - item.discounted_total_price).toBe(
+        18000,
+      );
     });
 
     it('cancelOrderItem es idempotente: el segundo llamado ve cancelled_at y no reescribe', async () => {
