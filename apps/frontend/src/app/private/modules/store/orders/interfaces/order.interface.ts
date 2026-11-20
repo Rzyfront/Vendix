@@ -85,6 +85,8 @@ export interface OrderLineBreakdown {
   taxes: OrderBreakdownTax[];
   tax_total: number;
   total: number;
+  /** Total con impuesto antes del descuento de la línea (precio tachado). */
+  total_before_discount?: number;
 }
 
 /** Totales de la orden desde las líneas vivas; `grand_total` es el persistido. */
@@ -478,6 +480,11 @@ export interface OrderItem {
   final_total_price?: number | null;
   /** Desglose persistido de la línea (aditivo; cocina no lo recibe). */
   line_breakdown?: OrderLineBreakdown | null;
+  /**
+   * Nombre de la promoción que produjo el `discount_amount` de la línea
+   * (aditivo; cocina no lo recibe). Solo llega en líneas con descuento.
+   */
+  promotion_label?: string | null;
   tax_rate?: number;
   tax_amount_item?: number;
   /**

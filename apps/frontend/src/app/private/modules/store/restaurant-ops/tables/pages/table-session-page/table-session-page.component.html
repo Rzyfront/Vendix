@@ -503,6 +503,21 @@
                             </span>
                           }
                           <!--
+                            Promo de la línea (aditivo): nombre de la
+                            promoción que produjo el descuento. El backend
+                            solo lo manda en líneas con descuento, así que
+                            su presencia ya es la señal.
+                          -->
+                          @if (item.promotion_label) {
+                            <span
+                              class="item-promo"
+                              [attr.title]="'Promoción aplicada: ' + item.promotion_label"
+                            >
+                              <app-icon name="tag" [size]="11"></app-icon>
+                              {{ item.promotion_label }}
+                            </span>
+                          }
+                          <!--
                             carril D / lina — D2: badge de cancelado en la
                             línea. El ítem queda visible con su motivo
                             persistido y la marca contable
@@ -665,6 +680,18 @@
                           <span class="item-money__promo">{{
                             +item.discounted_total_price | currency
                           }}</span>
+                          <!-- Ahorro con impuesto: lista tachada − total cobrado
+                               (`discount_amount` es de BASE y no cuadraría). -->
+                          @if (
+                            +(item.final_total_price ?? item.total_price) -
+                              +item.discounted_total_price >
+                            0
+                          ) {
+                            <span class="item-money__discount">{{
+                              +item.discounted_total_price -
+                                +(item.final_total_price ?? item.total_price) | currency
+                            }}</span>
+                          }
                         } @else {
                           {{ +(item.final_total_price ?? item.total_price) | currency }}
                         }

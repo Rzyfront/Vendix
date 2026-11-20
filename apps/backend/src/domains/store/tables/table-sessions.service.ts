@@ -28,6 +28,8 @@ import {
   TypedTaxRate,
 } from '../taxes/utils/final-price.util';
 import { resolvePaymentReceivedSaleFields } from '../payments/utils/payment-sale-share.util';
+import { PromotionEngineService } from '../promotions/promotion-engine/promotion-engine.service';
+import { loadLinePromotionLabels } from '../promotions/utils/line-promotion-label.util';
 import { assertNoActiveFinancialSplit } from '../orders/shared/financial-split-policy';
 import { canReassignOrderToTable } from '../orders/shared/order-table-reassignment-policy.util';
 import { lockOrderLifecycle } from '../orders/order-flow/order-lifecycle-lock.util';
@@ -127,6 +129,8 @@ export interface TableSessionView {
       // descontado. `final_total_price` sigue siendo el bruto sin descuento.
       discount_amount?: number;
       discounted_total_price?: number;
+      // Nombre de la promoción que produjo el descuento (solo no-cocina).
+      promotion_label?: string;
       inventory_consumed_at_fire: boolean;
       // Snapshot of `products.product_type` taken at order creation
       // (Restaurant Suite — see addItems at L311 and OrdersService
@@ -309,6 +313,11 @@ export class TableSessionsService {
     // agregar/cancelar. Opcional: sin él la cuenta queda sin descuento (como
     // antes) y el cobro sigue recotizando.
     @Optional() private readonly openOrderPromotion?: OpenOrderPromotionService,
+    // Etiqueta de la promo por línea: cuenta abierta aún no registra
+    // `order_promotions`, así que se consulta el MISMO motor que cotiza la
+    // promo (`findActiveAutoPromotionsForProducts`). Opcional: sin él la
+    // línea cae al fallback "Promoción".
+    @Optional() private readonly promotionEngine?: PromotionEngineService,
   ) {}
 
   // ------------------------------------------------------------------ helpers
@@ -2532,6 +2541,7 @@ export class TableSessionsService {
         final_total_price: number;
         discount_amount?: number;
         discounted_total_price?: number;
+        promotion_label?: string;
       }
     >();
     if (order && !this.isKitchenRole()) {
@@ -2577,6 +2587,33 @@ export class TableSessionsService {
           ),
           ...discounted,
         });
+      }
+      // Etiqueta de la promo por línea (display-only, ADITIVO): `order_items`
+      // guarda el descuento, no qué promoción lo produjo. Solo se etiquetan
+      // líneas con descuento; un fallo del motor no rompe la cuenta.
+      try {
+        const labels = await loadLinePromotionLabels(
+          this.prisma as any,
+          order.id,
+          order.order_items.map((it) => ({
+            id: it.id,
+            product_id: it.product_id ?? null,
+            discount_amount: it.discount_amount,
+            unit_price: it.unit_price,
+          })),
+          this.promotionEngine
+            ? (products) =>
+                this.promotionEngine!.findActiveAutoPromotionsForProducts(
+                  products,
+                )
+            : null,
+        );
+        for (const [itemId, label] of labels) {
+          const entry = finalsByItemId.get(itemId);
+          if (entry) entry.promotion_label = label;
+        }
+      } catch {
+        // Cosmético: la cuenta sigue mostrando precio y descuento.
       }
     }
     return {

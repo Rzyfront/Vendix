@@ -75,9 +75,20 @@
               @if (row.product_type) {
                 <span class="type">{{ row.product_type }}</span>
               }
-              <span class="price">
-                {{ rowDisplayPrice(row) | currency }}
-              </span>
+              @if (rowPromotion(row)) {
+                <span class="promo-tag" [attr.title]="promotionLabel(row)">
+                  <app-icon name="tag" [size]="12"></app-icon>
+                  {{ promotionLabel(row) }}
+                </span>
+                <span class="price price--promo">
+                  <s class="price-regular">{{ rowDisplayPrice(row) | currency }}</s>
+                  {{ rowChargedPrice(row) | currency }}
+                </span>
+              } @else {
+                <span class="price">
+                  {{ rowDisplayPrice(row) | currency }}
+                </span>
+              }
             </div>
           </div>
           <div class="qty-controls" (click)="$event.stopPropagation()">
@@ -115,7 +126,13 @@
                     (click)="selectVariant(row, variant.id)"
                   >
                     {{ variantLabel(variant) }} ·
-                    {{ variantFinalPrice(variant, row) | currency }}
+                    @let vPromo = variantPromoPrice(variant, row);
+                    @if (vPromo !== null) {
+                      <s class="price-regular">{{ variantFinalPrice(variant, row) | currency }}</s>
+                      {{ vPromo | currency }}
+                    } @else {
+                      {{ variantFinalPrice(variant, row) | currency }}
+                    }
                   </button>
                 }
               </div>
