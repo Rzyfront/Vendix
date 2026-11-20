@@ -13,6 +13,8 @@ import { BadgeComponent } from '../../../../../shared/components/badge/badge.com
 import { ToastService } from '../../../../../shared/components/toast/toast.service';
 import { DialogService } from '../../../../../shared/components/dialog/dialog.service';
 import { TemplateJsonImportModalComponent } from './template-json-import/template-json-import-modal.component';
+import { TemplateAiDraftModalComponent } from './template-ai-draft/template-ai-draft-modal.component';
+import { AiDraftPathError } from '../utils/template-ai-draft.util';
 import { extractApiErrorMessage } from '../../../../../core/utils/api-error-handler';
 
 @Component({
@@ -25,6 +27,7 @@ import { extractApiErrorMessage } from '../../../../../core/utils/api-error-hand
     BadgeComponent,
     IconComponent,
     TemplateJsonImportModalComponent,
+    TemplateAiDraftModalComponent,
 ],
   changeDetection: ChangeDetectionStrategy.OnPush,
   template: `
@@ -41,7 +44,11 @@ import { extractApiErrorMessage } from '../../../../../core/utils/api-error-hand
         <!-- The empty state carries its own create button -->
         @if (loading() || templates().length > 0) {
           <div class="flex items-center gap-2">
-            <app-button variant="outline" size="sm" (clicked)="showJsonImport.set(true)">
+            <app-button variant="outline" size="sm" (clicked)="showAiDraft.set(true)">
+              <app-icon name="sparkles" [size]="16" slot="icon"></app-icon>
+              Crear con IA (PDF/foto)
+            </app-button>
+            <app-button variant="outline" size="sm" (clicked)="openJsonImport()">
               <app-icon name="upload" [size]="16" slot="icon"></app-icon>
               Crear desde JSON
             </app-button>
@@ -66,8 +73,12 @@ import { extractApiErrorMessage } from '../../../../../core/utils/api-error-hand
           actionButtonIcon="plus"
           (actionClick)="openNewTemplate()"
         />
-        <div class="flex justify-center mt-3">
-          <app-button variant="outline" size="sm" (clicked)="showJsonImport.set(true)">
+        <div class="flex justify-center gap-2 mt-3">
+          <app-button variant="outline" size="sm" (clicked)="showAiDraft.set(true)">
+            <app-icon name="sparkles" [size]="16" slot="icon"></app-icon>
+            Crear con IA (PDF/foto)
+          </app-button>
+          <app-button variant="outline" size="sm" (clicked)="openJsonImport()">
             <app-icon name="upload" [size]="16" slot="icon"></app-icon>
             Crear desde JSON
           </app-button>
@@ -163,7 +174,19 @@ import { extractApiErrorMessage } from '../../../../../core/utils/api-error-hand
       }
       </div>
       @if (showJsonImport()) {
-        <app-template-json-import-modal [isOpen]="true" (isOpenChange)="!$event && showJsonImport.set(false)" />
+        <app-template-json-import-modal
+          [isOpen]="true"
+          [initialText]="aiDraftText()"
+          [initialErrors]="aiDraftErrors()"
+          (isOpenChange)="!$event && showJsonImport.set(false)"
+        />
+      }
+      @if (showAiDraft()) {
+        <app-template-ai-draft-modal
+          [isOpen]="true"
+          (isOpenChange)="!$event && showAiDraft.set(false)"
+          (draftReady)="onDraftReady($event)"
+        />
       }
     </div>
   `,
@@ -182,6 +205,9 @@ export class TemplatesComponent implements OnInit {
   templates = signal<DataCollectionTemplate[]>([]);
   loading = signal(true);
   showJsonImport = signal(false);
+  showAiDraft = signal(false);
+  aiDraftText = signal('');
+  aiDraftErrors = signal<AiDraftPathError[]>([]);
 
   ngOnInit() {
     this.loadTemplates();
@@ -199,6 +225,20 @@ export class TemplatesComponent implements OnInit {
         this.loading.set(false);
       },
     });
+  }
+
+  /** Plain "Crear desde JSON": no AI prefill. */
+  openJsonImport() {
+    this.aiDraftText.set('');
+    this.aiDraftErrors.set([]);
+    this.showJsonImport.set(true);
+  }
+
+  onDraftReady(draft: { text: string; errors: AiDraftPathError[] }) {
+    this.aiDraftText.set(draft.text);
+    this.aiDraftErrors.set(draft.errors);
+    this.showAiDraft.set(false);
+    this.showJsonImport.set(true);
   }
 
   openNewTemplate() {
