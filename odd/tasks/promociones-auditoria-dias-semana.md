@@ -43,7 +43,14 @@ Regla aplicada: ante lo ambiguo, la opción más simple, aditiva y que no cambia
 - **D6 — Una promoción cancelada no se reactiva.** Se crea una nueva. Antes `activate` la revivía y ese estado se consideraba definitivo.
 - **D7 — Escalas `per_product`: cada producto recibe el tramo que alcanzó.** Antes solo los productos del tramo de mayor valor recibían descuento. Es el comportamiento que el admin describe ("cada SKU se evalúa por su cuenta"). Un tramo de monto fijo se reparte una vez entre las líneas de ese mismo tramo.
 - **D8 — Franja horaria: no incluida.** Agregar hora de inicio y fin suma dos columnas, la validación de cruce de medianoche y la UI. Queda como siguiente paso (P8). El reloj de la tienda (`PromotionClock.wall_now`) ya está listo para soportarla.
-- **D9 — Códigos de promoción: no se unifican con cupones en este PR.** Está pendiente la decisión de Rafael (ver "Necesita decisión"). Se deja lista la validación por código en el backend (`POST /store/promotions/validate-code`), sin pantalla que la use.
+- **D9 — Códigos de promoción unificados con cupones (decisión de Rafael, 2026-11-19).** La MISMA casilla de cupón del POS y del checkout ecommerce acepta también el código de una promoción. No hay casilla nueva.
+  - **Cupón primero:** si existe un cupón con ese código (activo o no, sin distinguir mayúsculas), el flujo de cupones sigue idéntico. Si no hay ni cupón ni promoción, se responde el mismo `CPN_FIND_001` de siempre.
+  - **Si no es cupón, se busca la promoción con ese código** (`resolveDiscountCode`). Entra al motor como promoción manual: respeta vigencia, días de la semana, hora de la tienda, límites de uso y alcance, y se registra en `order_promotions` con su uso.
+  - **Si no aplica,** se rechaza con el motivo concreto (`PROMOTION_NOT_TODAY_001`, `PROMOTION_USAGE_LIMIT_001`…).
+  - **Si aplica pero no mejora el precio** (con `winner_takes_all` gana otra promo de mayor prioridad), se rechaza con `PROMOTION_NOT_APPLICABLE_001`. Así nunca se cobra distinto de lo mostrado.
+  - **Lo que muestra la casilla** (`discount_amount`) es lo que el código AGREGA frente a la compra sin él. Sumado al descuento automático que ya se veía, da exactamente lo cobrado.
+  - **Unicidad:** un cupón no puede repetir el código de una promoción (`CPN_DUP_001`), y una promoción no puede repetir el de un cupón u otra promoción (`PROMOTION_CODE_DUP_001`).
+  - **Una promo por código ya aplicada a una orden se conserva** al cobrarla o editarla (borrador adoptado, mesa, editor), aunque no se reenvíe el código.
 
 ### Archivos críticos y lo que se reutiliza
 
@@ -136,7 +143,8 @@ Veredicto: **OK**, **FALLA (corregida)** o **FALLA (pendiente)**. Severidad: A =
 
 | # | Caso | Esperado | Real (evidencia) | Veredicto | Sev. |
 |---|---|---|---|---|---|
-| 6.1 | `promotions.code` usable en POS / checkout | Aplica la promo | No existe ningún flujo: el campo "Código (cupón)" del form no lo usa nadie; el POS y el checkout validan contra `coupons` | FALLA (decisión de Rafael, D9) | M |
+| 6.1 | `promotions.code` usable en POS / checkout | Aplica la promo | (antes) no existía ningún flujo; el POS y el checkout validaban solo contra `coupons`. Ahora casilla única (D9): `resolveDiscountCode` / `quoteWithPromotionCode` / `previewPromotionCode` (`promotion-engine.service.ts`); POS `POST /store/promotions/discount-code/validate` (`promotions.controller.ts`); cobro `payments.service.ts` (`resolveCodePromotionId`); editor `orders.service.ts`; ecommerce `resolveCheckoutDiscounts` (`checkout.service.ts`); frontend POS `pos-api.service.ts` y `pos-cart.service.ts` (`code_promotion_id`) | FALLA (corregida) | M |
+| 6.4 | Código repetido entre cupón y promoción | Imposible crear | `assertCodeAvailable` (`promotions.service.ts`) y `assertCodeNotUsedByPromotion` (`coupons.service.ts`) | Nuevo | — |
 | 6.2 | `validatePromotion` | Errores tipados | (antes) `BadRequestException` plano y código muerto. Ahora `PROMOTION_*` (`common/errors/error-codes.ts`), `validatePromotionByCode` y `POST /store/promotions/validate-code` | FALLA (corregida) | B |
 | 6.3 | Código fuera de día | Mensaje claro | `PROMOTION_NOT_TODAY_001`: "Esta promoción no aplica hoy: solo es válida los martes, miércoles y viernes" (`promotion-engine.service.ts:252`) | Nuevo | — |
 
@@ -173,6 +181,7 @@ Veredicto: **OK**, **FALLA (corregida)** o **FALLA (pendiente)**. Severidad: A =
 - [x] T5 Usos: cancelar devuelve el uso; editor de órdenes y cobro de orden existente.
 - [x] T6 Vitrina ecommerce.
 - [x] T7 Frontend: chips, listado, limpiar opcionales al editar, mensajes y recarga del POS.
+- [x] T8 Casilla única de código (cupón primero, luego promoción) en POS, editor, mesas y checkout ecommerce, más unicidad de códigos (D9).
 - [ ] Pendientes P1–P8 (abajo).
 
 ## Pendiente (no tocado en este PR)
@@ -188,11 +197,11 @@ Veredicto: **OK**, **FALLA (corregida)** o **FALLA (pendiente)**. Severidad: A =
 
 ## Necesita decisión de Rafael
 
-1. **Códigos de promoción vs cupones (D9).** Hoy el campo "Código" de una promoción no se puede usar en ninguna pantalla, y las promos manuales (`is_auto_apply = false`) no se aplican nunca. Los códigos que funcionan son los **cupones** (entidad aparte). Opciones:
-   - (a) quitar el campo código y la opción "manual" de las promociones, y usar solo cupones;
-   - (b) unificar los códigos en un solo campo del POS y del checkout, que busque primero en cupones y luego en promociones (el backend ya tiene `POST /store/promotions/validate-code`).
+1. ~~Códigos de promoción vs cupones~~ → **decidido: casilla única, cupón primero** (D9, implementado en este PR).
 2. **Reembolso parcial y uso de la promo (P4):** ¿devuelve el uso o no?
 3. **Prioridad de P1 (mesas).** Afecta a los restaurantes, que son justo el nicho de la promo por días.
+4. **Código de promoción que no mejora el precio.** Hoy se rechaza (regla de prioridad del motor). Alternativa: que un código escrito por el cliente gane siempre sobre las automáticas.
+5. **Datos existentes.** Si hoy hay un cupón y una promoción con el mismo código, gana el cupón. Al editar esa promoción hay que cambiarle el código.
 
 ## Log
 
@@ -216,6 +225,20 @@ Veredicto: **OK**, **FALLA (corregida)** o **FALLA (pendiente)**. Severidad: A =
   | `payments.service.spec.ts` | 203/203 |
   | `checkout-gross-lines.spec.ts` | 4/4 |
 
+- **Casilla única de código (D9), tests:**
+
+  | Spec | Resultado |
+  |---|---|
+  | `promotion-engine.service.spec.ts` | 86/86 (+7: cupón primero, promo por código, sin coincidencia, fuera de día, no mejora el precio, vista previa con forma de cupón) |
+  | `promotions.service.spec.ts` | 7/7 (+2: unicidad) |
+  | `coupons.service.spec.ts` | 10/10 (+1: unicidad) |
+  | `payments.service.spec.ts` | 205/205 (+2) |
+  | `checkout.service.spec.ts` | 79/79 (+1: el checkout cobra el código como promoción, sin cupón) |
+  | `orders.service.spec.ts` | 214/214 |
+  | `payments.service.scheduled-fire.spec.ts` | 14/14 |
+  | `payments.service.credit-sale-emit.spec.ts` | 5/5 |
+
+  En los specs existentes solo se agregó `resolveDiscountCode`/`quoteWithPromotionCode` a los mocks del motor; por defecto devuelven "no es promoción". El frontend compila (`buildcheck --frontend`). No hay spec de frontend porque `ng test` está prohibido en desarrollo.
 - **Fallos previos, no causados por este PR:**
   - `catalog.service.spec.ts`: 2 fallos ("attaches active_promotion …").
   - `checkout-inclusive-line.parity.spec.ts`: 2 fallos.
