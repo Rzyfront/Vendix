@@ -761,6 +761,32 @@ describe('CrmTasksService', () => {
       await service.complete(50);
       expect(pipeline.moveForTask).toHaveBeenCalledTimes(1);
     });
+
+    it('race: a PATCH with status and title saves the title and does not move the opportunity', async () => {
+      as('owner');
+      const { service, prisma, pipeline } = setup({
+        task: { opportunity_id: 500, move_to_stage_id: 102 },
+      });
+      // Read pending; another request completes it before this one writes.
+      const write = prisma.crm_tasks.updateMany.getMockImplementation()!;
+      prisma.crm_tasks.updateMany.mockImplementation(async (args: any) =>
+        args.where.status ? { count: 0 } : write(args),
+      );
+      const task = await service.update(50, { status: 'done', title: 'Nuevo título' });
+
+      expect(prisma.crm_tasks.updateMany).toHaveBeenCalledTimes(2);
+      expect(prisma.crm_tasks.updateMany.mock.calls[0][0]).toEqual({
+        where: { id: 50, store_id: STORE },
+        data: { title: 'Nuevo título' },
+      });
+      expect(prisma.crm_tasks.updateMany.mock.calls[1][0]).toEqual({
+        where: { id: 50, store_id: STORE, status: { not: 'done' } },
+        data: { status: 'done', completed_at: expect.any(Date) },
+      });
+      expect(task.title).toBe('Nuevo título');
+      expect(pipeline.moveForTask).not.toHaveBeenCalled();
+      expect(task).not.toHaveProperty('opportunity_move');
+    });
   });
 
   describe('linked opportunity and customer', () => {

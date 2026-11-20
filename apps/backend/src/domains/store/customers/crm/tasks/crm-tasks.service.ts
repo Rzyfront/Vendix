@@ -276,7 +276,9 @@ export class CrmTasksService {
     const viewer = this.viewer();
     const current = await this.findVisible(viewer, id);
     this.assertSupportOnlyEdit(viewer, current, dto);
+    // Plain fields are written as asked; the status step is guarded apart.
     const data: Prisma.crm_tasksUncheckedUpdateManyInput = {};
+    const state: Prisma.crm_tasksUncheckedUpdateManyInput = {};
 
     if (dto.title !== undefined) data.title = dto.title.trim();
     if (dto.description !== undefined) {
@@ -294,8 +296,8 @@ export class CrmTasksService {
     }
     const completing = dto.status === 'done' && current.status !== 'done';
     if (dto.status !== undefined && dto.status !== current.status) {
-      data.status = dto.status;
-      data.completed_at = dto.status === 'done' ? new Date() : null;
+      state.status = dto.status;
+      state.completed_at = dto.status === 'done' ? new Date() : null;
     }
     if (
       dto.move_to_stage_id !== undefined &&
@@ -322,22 +324,29 @@ export class CrmTasksService {
     // The task and its support set change together or not at all. The tx
     // client is unscoped: every write names the store. Completing is guarded
     // on the row, so of two simultaneous completions only one moves the
-    // opportunity.
+    // opportunity; the other fields of the same request are saved anyway.
     let completed = false;
     if (
       Object.keys(data).length ||
+      Object.keys(state).length ||
       support.removed.length ||
       support.added.length
     ) {
       await this.prisma.$transaction(async (tx: Prisma.TransactionClient) => {
         if (Object.keys(data).length) {
+          await tx.crm_tasks.updateMany({
+            where: { id, store_id: viewer.store_id },
+            data,
+          });
+        }
+        if (Object.keys(state).length) {
           const { count } = await tx.crm_tasks.updateMany({
             where: {
               id,
               store_id: viewer.store_id,
               ...(completing ? { status: { not: 'done' as const } } : {}),
             },
-            data,
+            data: state,
           });
           completed = completing && count === 1;
         }
