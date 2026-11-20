@@ -191,6 +191,30 @@ describe('inventory.tools · O-14 manage_stock_transfers / O-15 approve_stock_ad
       expect(JSON.stringify(preview.changes)).toMatch(/Café 500g x50/);
     });
 
+    it('preview nombra el destino externo en vez de #null', async () => {
+      const { tools } = buildTools({
+        transfersService: {
+          findOne: jest.fn().mockResolvedValue({
+            ...TRANSFER,
+            to_location_id: null,
+            to_location: null,
+            is_external_destination: true,
+            external_destination_name: 'Cliente Mayorista',
+          }),
+        } as any,
+      });
+      const tool = getTool(tools, 'manage_stock_transfers');
+      const preview = await tool.preview!(
+        { action: 'approve', transfer_id: 301 },
+        CONTEXT,
+      );
+
+      expect(preview.target).toBe(
+        'Transferencia TRF-0301 — Bodega central → destino externo: Cliente Mayorista',
+      );
+      expect(preview.target).not.toMatch(/#null/);
+    });
+
     it('preview complete rechaza recibir más de lo despachado', async () => {
       const { tools } = buildTools({
         transfersService: {
