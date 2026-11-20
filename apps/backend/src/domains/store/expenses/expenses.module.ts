@@ -7,6 +7,8 @@ import { ExpenseScannerService } from './expense-scanner.service';
 import { ExpenseScanProcessor } from './expense-scan.processor';
 import { ResponseModule } from '../../../common/responses/response.module';
 import { PrismaModule } from '../../../prisma/prisma.module';
+import { S3Module } from '../../../common/services/s3.module';
+import { AiIngestModule } from '../../../common/ai-ingest/ai-ingest.module';
 import { AIToolRegistry } from '../../../ai-engine/tools/ai-tool-registry';
 import { createExpenseTools } from '../../../ai-engine/tools/domains/expenses.tools';
 
@@ -14,6 +16,10 @@ import { createExpenseTools } from '../../../ai-engine/tools/domains/expenses.to
   imports: [
     ResponseModule,
     PrismaModule,
+    // ia-cargas F5a: the scan reads the invoice by pages (shared reader) and
+    // the upload travels through S3, not Redis.
+    S3Module,
+    AiIngestModule,
     // Cola dedicada para el OCR asíncrono de facturas de gasto. El root BullMQ
     // (conexión Redis) es @Global vía QueueModule, así que aquí solo se declara
     // la cola local del dominio.
