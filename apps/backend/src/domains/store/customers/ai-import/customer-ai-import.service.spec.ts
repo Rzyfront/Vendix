@@ -147,6 +147,8 @@ describe('CustomerAiImportService', () => {
         responseSchema: expect.objectContaining({ name: 'customer_document' }),
         // One key per load: `async_queue` charges one job, not one per call.
         quotaKey: expect.stringMatching(/^ai-ingest:/),
+        // Log-only (ai_engine_logs.attempt/validation_error); stripped before the provider.
+        logContext: expect.objectContaining({ attempt: 1 }),
       },
     );
   });
