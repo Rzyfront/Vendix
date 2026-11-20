@@ -2076,7 +2076,9 @@ export class PosCartModalComponent {
   /** QUI-648 — sufijo de la escala de precio: "/m", "/kg", "/paquete". */
   /** QUI-999 — selector / badge mode of the line (restaurant only). */
   fulfillmentMode(item: CartItem): LineFulfillmentMode {
-    return this.authFacade.isRestaurant() ? fulfillmentModeForLine(item) : null;
+    return this.authFacade.usesProductionDestinations()
+      ? fulfillmentModeForLine(item)
+      : null;
   }
 
   lineDestination(item: CartItem): FulfillmentChoice | null {

@@ -4299,18 +4299,18 @@ export class PaymentsService {
    * Un cliente de larga vida (el compartido, uno con alcance o `withoutScope`)
    * expone `$transaction`; con él no se memoiza, para no servir un valor viejo.
    */
-  private restaurantByTx?: WeakMap<object, Map<number, Promise<boolean>>>;
+  private industriesByTx?: WeakMap<object, Map<number, Promise<string[] | null>>>;
 
-  private isRestaurantStore(tx: any, storeId: number): Promise<boolean> {
+  private storeIndustries(tx: any, storeId: number): Promise<string[] | null> {
     const read = async () => {
       const store = await tx.stores.findUnique({
         where: { id: storeId },
         select: { industries: true },
       });
-      return storeIsRestaurant(store?.industries);
+      return (store?.industries as string[] | null | undefined) ?? null;
     };
     if (tx === this.prisma || typeof tx?.$transaction === 'function') return read();
-    const memo = (this.restaurantByTx ??= new WeakMap());
+    const memo = (this.industriesByTx ??= new WeakMap());
     let perStore = memo.get(tx);
     if (!perStore) {
       perStore = new Map();
@@ -4322,6 +4322,10 @@ export class PaymentsService {
       perStore.set(storeId, cached);
     }
     return cached;
+  }
+
+  private async isRestaurantStore(tx: any, storeId: number): Promise<boolean> {
+    return storeIsRestaurant(await this.storeIndustries(tx, storeId));
   }
 
   /** QUI-999: POS lines mapped to what the destination resolver reads. */
@@ -5450,7 +5454,7 @@ export class PaymentsService {
             tx,
             dtoStoreId,
             this.toDestinationLines(dto.items),
-            { isRestaurant: await this.isRestaurantStore(tx, dtoStoreId) },
+            { industries: await this.storeIndustries(tx, dtoStoreId) },
           )
         : [];
     const newItems =
@@ -6572,7 +6576,7 @@ export class PaymentsService {
       this.toDestinationLines(items),
       {
         isScheduled: !!dto.schedule,
-        isRestaurant: await this.isRestaurantStore(tx, dtoStoreId),
+        industries: await this.storeIndustries(tx, dtoStoreId),
       },
     );
 
