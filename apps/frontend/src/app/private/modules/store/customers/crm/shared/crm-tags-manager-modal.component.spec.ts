@@ -12,10 +12,19 @@ import { CrmService } from './crm.service';
 import { CrmTag } from './crm.interface';
 import { CrmTagsManagerModalComponent } from './crm-tags-manager-modal.component';
 
-const tag = (id: number, name: string, customers_count = 0, color: string | null = null): CrmTag => ({
+const tag = (
+  id: number,
+  name: string,
+  customers_count = 0,
+  color: string | null = null,
+  group_name: string | null = null,
+  description: string | null = null,
+): CrmTag => ({
   id,
   name,
   color,
+  group_name,
+  description,
   customers_count,
 });
 
@@ -30,12 +39,23 @@ const duplicate = () =>
   });
 
 /** What the specs drive and read; the shared components are not under test. */
+interface TagSectionView {
+  key: string;
+  label: string;
+  tags: CrmTag[];
+}
+
 interface ManagerInternals {
   tags: Signal<CrmTag[]>;
+  sections: Signal<TagSectionView[]>;
   editingId: Signal<number | null>;
   draftName: WritableSignal<string>;
   draftColor: WritableSignal<string | null>;
+  draftGroup: WritableSignal<string | null>;
+  draftDescription: WritableSignal<string>;
   newName: WritableSignal<string>;
+  newGroup: WritableSignal<string | null>;
+  newDescription: WritableSignal<string>;
   toDelete: Signal<CrmTag | null>;
   deleteMessage: Signal<string>;
   startEdit(tag: CrmTag): void;
@@ -210,6 +230,92 @@ describe('CrmTagsManagerModalComponent — manage the CRM tag catalog', () => {
     expect(names()).toEqual(['Abandonó carrito', 'Frecuente', 'Mayorista', 'VIP']);
     expect(manager().newName()).toBe('');
     expect(emitted[0].find((row) => row.id === 9)?.customers_count).toBe(0);
+  });
+
+  it('groups the catalog by group, in sheet order, «sin grupo» last', async () => {
+    catalog = [
+      tag(1, 'VIP', 0, null, 'Valor'),
+      tag(2, 'Frío', 0, null, 'Temperatura'),
+      tag(3, 'Sin grupo'),
+      tag(4, 'Caliente', 0, null, 'Temperatura'),
+      tag(5, 'Mayorista', 0, null, 'Tipo'),
+    ];
+    await open();
+
+    expect(manager().sections().map((section) => section.label)).toEqual([
+      'Temperatura',
+      'Tipo',
+      'Valor',
+      'Sin grupo',
+    ]);
+    expect(manager().sections()[0].tags.map((row) => row.name)).toEqual(['Caliente', 'Frío']);
+    expect(text()).toContain('Temperatura');
+    expect(manager().tags().map((row) => row.name)).toEqual([
+      'Caliente',
+      'Frío',
+      'Mayorista',
+      'VIP',
+      'Sin grupo',
+    ]);
+  });
+
+  it('creates a tag with its group and its «cuándo se pone»', async () => {
+    await open();
+    crm.createTag.and.returnValue(
+      of(tag(9, 'Frío', 0, null, 'Temperatura', 'No compra desde hace 90 días.')),
+    );
+
+    manager().newName.set('Frío');
+    manager().newGroup.set('Temperatura');
+    manager().newDescription.set('  No compra desde hace 90 días.  ');
+    await manager().create();
+    await settle();
+
+    expect(crm.createTag).toHaveBeenCalledOnceWith({
+      name: 'Frío',
+      group_name: 'Temperatura',
+      description: 'No compra desde hace 90 días.',
+    });
+    expect(manager().newGroup()).toBeNull();
+    expect(manager().newDescription()).toBe('');
+    expect(manager().sections()[0].label).toBe('Temperatura');
+    expect(text()).toContain('No compra desde hace 90 días.');
+  });
+
+  it('moves a tag to another group and writes its note', async () => {
+    await open();
+    crm.updateTag.and.returnValue(of(tag(1, 'VIP', 3, '#3B82F6', 'Pago', 'Paga a 30 días.')));
+
+    manager().startEdit(catalog[1]);
+    manager().draftGroup.set('Pago');
+    manager().draftDescription.set('  Paga a 30 días.  ');
+    await manager().saveEdit();
+
+    expect(crm.updateTag).toHaveBeenCalledOnceWith(1, {
+      group_name: 'Pago',
+      description: 'Paga a 30 días.',
+    });
+    const saved = manager().tags().find((row) => row.id === 1);
+    expect(saved?.group_name).toBe('Pago');
+    expect(saved?.description).toBe('Paga a 30 días.');
+    expect(manager().sections().map((section) => section.label)).toEqual([
+      'Pago',
+      'Sin grupo',
+    ]);
+  });
+
+  it('clearing the group and the note sends null, not an empty string', async () => {
+    catalog = [tag(1, 'VIP', 3, null, 'Valor', 'Gasta más de 1M al mes.')];
+    await open();
+    crm.updateTag.and.returnValue(of(tag(1, 'VIP', 3, null, null, null)));
+
+    manager().startEdit(manager().tags()[0]);
+    manager().draftGroup.set(null);
+    manager().draftDescription.set('   ');
+    await manager().saveEdit();
+
+    expect(crm.updateTag).toHaveBeenCalledOnceWith(1, { group_name: null, description: null });
+    expect(manager().sections()[0].label).toBe('Sin grupo');
   });
 
   it('deletes only after confirming, warning that customers are not deleted', async () => {

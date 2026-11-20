@@ -5,15 +5,20 @@ import { CrmTagsService } from './crm-tags.service';
 
 const STORE = 10;
 
+const VIP = {
+  id: 1,
+  store_id: STORE,
+  name: 'VIP',
+  color: null,
+  group_name: 'Valor',
+  description: 'Gasta más de 1M al mes.',
+};
+
 function setup() {
   const prisma = {
     crm_tags: {
-      findMany: jest.fn(async () => [
-        { id: 1, store_id: STORE, name: 'VIP', color: null, _count: { customer_tags: 3 } },
-      ]),
-      findFirst: jest.fn(async ({ where }: any) =>
-        where.id === 1 ? { id: 1, store_id: STORE, name: 'VIP', color: null } : null,
-      ),
+      findMany: jest.fn(async () => [{ ...VIP, _count: { customer_tags: 3 } }]),
+      findFirst: jest.fn(async ({ where }: any) => (where.id === 1 ? { ...VIP } : null)),
       create: jest.fn(async ({ data }: any) => ({ id: 2, ...data })),
       updateMany: jest.fn(async () => ({ count: 1 })),
       deleteMany: jest.fn(async () => ({ count: 1 })),
@@ -39,18 +44,64 @@ beforeEach(() => {
 afterEach(() => jest.restoreAllMocks());
 
 describe('CrmTagsService', () => {
-  it('lists tags with how many customers carry each', async () => {
-    const { service } = setup();
+  it('lists tags with how many customers carry each, grouped then by name', async () => {
+    const { service, prisma } = setup();
     expect(await service.list()).toEqual([
-      { id: 1, store_id: STORE, name: 'VIP', color: null, customers_count: 3 },
+      {
+        id: 1,
+        store_id: STORE,
+        name: 'VIP',
+        color: null,
+        group_name: 'Valor',
+        description: 'Gasta más de 1M al mes.',
+        customers_count: 3,
+      },
     ]);
+    // ASC deja los NULL al final en Postgres: las etiquetas sin grupo cierran.
+    expect(prisma.crm_tags.findMany).toHaveBeenCalledWith(
+      expect.objectContaining({
+        orderBy: [{ group_name: 'asc' }, { name: 'asc' }],
+      }),
+    );
   });
 
-  it('creates a trimmed tag in the store of the request', async () => {
+  it('creates a trimmed tag in the store of the request, without group or note', async () => {
     const { service, prisma } = setup();
     await service.create({ name: '  Mayorista ', color: '#0a0' });
     expect(prisma.crm_tags.create).toHaveBeenCalledWith({
-      data: { store_id: STORE, name: 'Mayorista', color: '#0a0' },
+      data: {
+        store_id: STORE,
+        name: 'Mayorista',
+        color: '#0a0',
+        group_name: null,
+        description: null,
+      },
+    });
+  });
+
+  it('creates a tag with its group and its «cuándo se pone»', async () => {
+    const { service, prisma } = setup();
+    await service.create({
+      name: 'Frío',
+      group_name: 'Temperatura',
+      description: '  No compra desde hace 90 días.  ',
+    });
+    expect(prisma.crm_tags.create).toHaveBeenCalledWith({
+      data: {
+        store_id: STORE,
+        name: 'Frío',
+        color: null,
+        group_name: 'Temperatura',
+        description: 'No compra desde hace 90 días.',
+      },
+    });
+  });
+
+  it('an empty note is stored as null, never as blank text', async () => {
+    const { service, prisma } = setup();
+    await service.create({ name: 'Nueva', description: '   ' });
+    expect(prisma.crm_tags.create).toHaveBeenCalledWith({
+      data: expect.objectContaining({ description: null }),
     });
   });
 
@@ -63,6 +114,39 @@ describe('CrmTagsService', () => {
       }),
     );
     expect(await codeOf(service.create({ name: 'VIP' }))).toBe('CRM_TAG_002');
+  });
+
+  it('updates only the fields that came in the patch', async () => {
+    const { service, prisma } = setup();
+    await service.update(1, { name: '  VIP oro ' });
+    expect(prisma.crm_tags.updateMany).toHaveBeenCalledWith({
+      where: { id: 1 },
+      data: { name: 'VIP oro' },
+    });
+  });
+
+  it('moves a tag to another group and rewrites its note, trimmed', async () => {
+    const { service, prisma } = setup();
+    await service.update(1, {
+      group_name: 'Prioridad',
+      description: '  Llamar antes de cada campaña.  ',
+    });
+    expect(prisma.crm_tags.updateMany).toHaveBeenCalledWith({
+      where: { id: 1 },
+      data: {
+        group_name: 'Prioridad',
+        description: 'Llamar antes de cada campaña.',
+      },
+    });
+  });
+
+  it('clearing the group and the note sends null, not an empty string', async () => {
+    const { service, prisma } = setup();
+    await service.update(1, { group_name: null, description: null });
+    expect(prisma.crm_tags.updateMany).toHaveBeenCalledWith({
+      where: { id: 1 },
+      data: { group_name: null, description: null },
+    });
   });
 
   it('a tag of another store is not found and is never deleted', async () => {
