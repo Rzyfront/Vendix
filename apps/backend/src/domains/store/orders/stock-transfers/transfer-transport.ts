@@ -250,7 +250,7 @@ export async function resolveTransferDriver(
   });
   if (!driver) {
     throw new BadRequestException(
-      `El conductor #${driverUserId} no existe o no hace parte del personal`,
+      'El transportador elegido ya no está disponible: elige otro.',
     );
   }
   return {

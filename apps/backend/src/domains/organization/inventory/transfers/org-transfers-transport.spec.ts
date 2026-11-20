@@ -755,7 +755,7 @@ describe('OrgTransfersService — P2 transporte, remisión y recepción', () => 
           driver_user_id: 80,
           items: [{ product_id: 1, quantity: 1 }],
         } as any),
-      ).rejects.toThrow(/El conductor #80 no existe/);
+      ).rejects.toThrow(/El transportador elegido ya no está disponible/);
       expect(h.tx.users.findFirst).toHaveBeenCalledWith(
         expect.objectContaining({
           // M1 (review P3): misma organización y solo personal, sin

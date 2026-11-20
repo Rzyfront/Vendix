@@ -1060,7 +1060,7 @@ describe('StockTransfersService — P2 transporte, remisión y recepción', () =
           { transport_method: 'internal_carrier', driver_user_id: 80 },
           central,
         ),
-      ).rejects.toThrow(/El conductor #80 no existe/);
+      ).rejects.toThrow(/El transportador elegido ya no está disponible/);
 
       const ok = await resolveTransferTransport(
         tx,
@@ -1082,7 +1082,7 @@ describe('StockTransfersService — P2 transporte, remisión y recepción', () =
           },
           { organization_id: 1, store_id: 3 },
         ),
-      ).rejects.toThrow(/El conductor #80 no existe/);
+      ).rejects.toThrow(/El transportador elegido ya no está disponible/);
     });
 
     it('rechaza un vehículo de otra organización aunque el origen sea bodega central', async () => {
@@ -1114,7 +1114,7 @@ describe('StockTransfersService — P2 transporte, remisión y recepción', () =
           },
           { organization_id: 1, store_id: 3 },
         ),
-      ).rejects.toThrow(/El conductor #80 no existe/);
+      ).rejects.toThrow(/El transportador elegido ya no está disponible/);
       expect(tx.vehicles.create).not.toHaveBeenCalled();
     });
 

@@ -520,7 +520,13 @@ describe('transfer-advanced-options (P3)', () => {
   describe('M2 — lookupTransferCode (escáner y pegar lista)', () => {
     const level = (
       productId: number,
-      variant: { id: number; name: string; sku: string } | null,
+      variant: {
+        id: number;
+        name: string;
+        sku: string;
+        barcode?: string | null;
+      } | null,
+      productSku = 'CAM',
     ) => ({
       product_id: productId,
       product_variant_id: variant?.id ?? null,
@@ -528,14 +534,24 @@ describe('transfer-advanced-options (P3)', () => {
       quantity_on_hand: 4,
       quantity_reserved: 0,
       quantity_available: 4,
-      products: { id: productId, name: 'Camisa', sku: 'CAM' },
+      products: {
+        id: productId,
+        name: 'Camisa',
+        sku: productSku,
+        barcode: null,
+      },
       product_variants: variant,
     });
 
     it('busca exacto por SKU y código de barras del producto y de la variante, acotado a la organización', async () => {
       const client = buildClient();
       client.stock_levels.findMany.mockResolvedValueOnce([
-        level(1, { id: 11, name: 'Talla M', sku: 'CAM-M' }),
+        level(1, {
+          id: 11,
+          name: 'Talla M',
+          sku: 'CAM-M',
+          barcode: '7701234567890',
+        }),
       ]);
       const rows = await lookupTransferCode(client, {
         organization_id: 1,
@@ -591,6 +607,88 @@ describe('transfer-advanced-options (P3)', () => {
         to_location_id: 9,
       });
       expect(rows[0].stock_at_destination.quantity_available).toBe(3);
+    });
+
+    it('m10 — escapa `_` y descarta las filas que ILIKE trae por comodín', async () => {
+      const client = buildClient();
+      // Lo que devolvería un ILIKE con `_` sin escapar: el SKU exacto y otro
+      // parecido.
+      client.stock_levels.findMany.mockResolvedValueOnce([
+        level(1, null, 'CAM-ROJA-M'),
+        level(2, null, 'cam_roja_m'),
+      ]);
+      const rows = await lookupTransferCode(client, {
+        organization_id: 1,
+        code: 'CAM_ROJA_M',
+        from_location_id: 7,
+      });
+
+      const where = client.stock_levels.findMany.mock.calls[0][0].where;
+      expect(where.OR[0]).toEqual({
+        products: {
+          sku: { equals: 'CAM\\_ROJA\\_M', mode: 'insensitive' },
+        },
+      });
+      expect(rows.map((r: any) => r.product_id)).toEqual([2]);
+    });
+
+    it('m10 — con solo una fila parecida no agrega otro producto', async () => {
+      const client = buildClient();
+      client.stock_levels.findMany.mockResolvedValueOnce([
+        level(1, null, 'CAM-ROJA-M'),
+      ]);
+      expect(
+        await lookupTransferCode(client, {
+          organization_id: 1,
+          code: 'CAM_ROJA_M',
+          from_location_id: 7,
+        }),
+      ).toEqual([]);
+    });
+
+    it('m10 — escapa `%` y `\\`; un `%` suelto no devuelve nada', async () => {
+      const client = buildClient();
+      client.stock_levels.findMany.mockResolvedValueOnce([
+        level(1, null, 'CAM'),
+        level(2, { id: 21, name: 'Talla S', sku: 'POL-S' }, 'POL'),
+      ]);
+      const rows = await lookupTransferCode(client, {
+        organization_id: 1,
+        code: '%',
+        from_location_id: 7,
+      });
+      const where = client.stock_levels.findMany.mock.calls[0][0].where;
+      expect(where.OR[1]).toEqual({
+        products: { barcode: { equals: '\\%', mode: 'insensitive' } },
+      });
+      expect(rows).toEqual([]);
+
+      const client2 = buildClient();
+      await lookupTransferCode(client2, {
+        organization_id: 1,
+        code: 'A\\B%C',
+        from_location_id: 7,
+      });
+      expect(
+        client2.stock_levels.findMany.mock.calls[0][0].where.OR[2],
+      ).toEqual({
+        product_variants: {
+          sku: { equals: 'A\\\\B\\%C', mode: 'insensitive' },
+        },
+      });
+    });
+
+    it('m10 — conserva el match exacto sin distinguir mayúsculas en código de barras de variante', async () => {
+      const client = buildClient();
+      client.stock_levels.findMany.mockResolvedValueOnce([
+        level(1, { id: 11, name: 'Talla M', sku: 'X', barcode: 'abc_1' }),
+      ]);
+      const rows = await lookupTransferCode(client, {
+        organization_id: 1,
+        code: 'ABC_1',
+        from_location_id: 7,
+      });
+      expect(rows.map((r: any) => r.product_variant_id)).toEqual([11]);
     });
 
     it('un código vacío no consulta', async () => {

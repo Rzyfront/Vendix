@@ -339,6 +339,20 @@ async function withDestinationStock(
   );
 }
 
+/** Escapa los comodines de LIKE/ILIKE (`\`, `%`, `_`) de un valor literal. */
+export function escapeLikePattern(value: string): string {
+  return value.replace(/[\\%_]/g, '\\$&');
+}
+
+/** Como el picker, más los códigos de barras para la comparación exacta. */
+const LOOKUP_STOCK_SELECT = {
+  ...PICKER_STOCK_SELECT,
+  products: { select: { id: true, name: true, sku: true, barcode: true } },
+  product_variants: {
+    select: { id: true, name: true, sku: true, barcode: true },
+  },
+} as const;
+
 /**
  * Escáner y "pegar lista" (M2): filas con stock en el origen cuyo código es
  * EXACTAMENTE el leído (sin distinguir mayúsculas) en el SKU o el código de
@@ -360,7 +374,13 @@ export async function lookupTransferCode(
 ): Promise<TransferablePickerRow[]> {
   const code = String(params.code ?? '').trim();
   if (!code || code.length > 100) return [];
-  const equals = { equals: code, mode: 'insensitive' as const };
+  // Prisma compila `equals` + `insensitive` como ILIKE sin escapar: `_` y `%`
+  // del código actuarían como comodines (CAM_ROJA_M encontraría CAM-ROJA-M).
+  // Se escapan aquí y, por si acaso, se re-filtra abajo con igualdad exacta.
+  const equals = {
+    equals: escapeLikePattern(code),
+    mode: 'insensitive' as const,
+  };
 
   const originRows = await client.stock_levels.findMany({
     where: {
@@ -376,14 +396,25 @@ export async function lookupTransferCode(
         { product_variants: { barcode: equals } },
       ],
     },
-    select: PICKER_STOCK_SELECT,
+    select: LOOKUP_STOCK_SELECT,
     orderBy: [{ product_id: 'asc' }, { id: 'asc' }],
     take: 20,
   });
 
+  const needle = code.toLowerCase();
+  const sameCode = (value: unknown) =>
+    typeof value === 'string' && value.toLowerCase() === needle;
+  const exactRows = originRows.filter(
+    (row: any) =>
+      sameCode(row.products?.sku) ||
+      sameCode(row.products?.barcode) ||
+      sameCode(row.product_variants?.sku) ||
+      sameCode(row.product_variants?.barcode),
+  );
+
   return withDestinationStock(
     client,
-    originRows,
+    exactRows,
     params.from_location_id,
     params.to_location_id ?? null,
   );
