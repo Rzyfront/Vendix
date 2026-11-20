@@ -1,6 +1,7 @@
 import {
   Injectable,
   BadRequestException,
+  ConflictException,
   NotFoundException,
   Logger,
 } from '@nestjs/common';
@@ -32,6 +33,23 @@ import {
   expandTransferablePickerRows,
   type TransferablePickerRow,
 } from './transfer-item-rules';
+import {
+  accumulateTransferReceiptNoteInTx,
+  appendTransferNote,
+  buildDispatchPlan,
+  cleanText,
+  computeNoSupportAlert,
+  createTransferNoteInTx,
+  dispatchedQuantity,
+  hasDeliveryDeadlinePassed,
+  noSupportAlertNote,
+  pendingQuantity,
+  resolveLineBatch,
+  resolveTransferNoteStoreId,
+  resolveTransferTransport,
+} from './transfer-transport';
+import { DispatchTransferDto } from './dto/transfer-advanced.dto';
+import { VendixHttpException, ErrorCodes } from '../../../../common/errors';
 
 /**
  * Estados que representan "creada, todavía sin aprobar".
@@ -92,6 +110,39 @@ const TRANSFERABLE_STOCK_LEVEL_SELECT = {
   product_variants: { select: { id: true, name: true, sku: true } },
 } as const;
 
+/** Shape de respuesta de las escrituras del ciclo de despacho/recepción. */
+const TRANSFER_FLOW_INCLUDE = {
+  from_location: true,
+  to_location: true,
+  stock_transfer_items: {
+    include: {
+      products: true,
+      product_variants: true,
+      inventory_batches: {
+        select: { id: true, batch_number: true, expiration_date: true },
+      },
+    },
+  },
+  dispatch_note: {
+    select: {
+      id: true,
+      dispatch_number: true,
+      status: true,
+      subtype: true,
+      emission_date: true,
+    },
+  },
+  receipt_note: {
+    select: {
+      id: true,
+      dispatch_number: true,
+      status: true,
+      subtype: true,
+      emission_date: true,
+    },
+  },
+} as const;
+
 @Injectable()
 export class StockTransfersService {
   private readonly logger = new Logger(StockTransfersService.name);
@@ -107,29 +158,87 @@ export class StockTransfersService {
   private async validateTransferScope(
     organizationId: number,
     fromLocationId: number,
-    toLocationId: number,
+    toLocationId: number | null,
     tx: any,
-  ): Promise<{ store_id?: number | null }> {
+  ): Promise<{
+    store_id?: number | null;
+    from_store_id: number | null;
+    to_store_id: number | null;
+  }> {
     const context = RequestContextService.getContext();
+    // D8 — un destino externo no tiene bodega: solo se valida el origen.
+    const locationIds =
+      toLocationId == null
+        ? [fromLocationId]
+        : [fromLocationId, toLocationId];
     const { scope, locations } =
       await this.operatingScopeService.validateLocationScope(
         organizationId,
-        [fromLocationId, toLocationId],
+        locationIds,
         tx,
       );
 
+    const fromLocation = locations.find(
+      (location: any) => location.id === fromLocationId,
+    );
+    const toLocation =
+      toLocationId == null
+        ? null
+        : (locations.find(
+            (location: any) => location.id === toLocationId,
+          ) ?? null);
+
     if (scope === 'ORGANIZATION') {
-      return { store_id: null };
+      return {
+        store_id: null,
+        from_store_id: fromLocation?.store_id ?? null,
+        to_store_id: toLocation?.store_id ?? null,
+      };
     }
 
-    const storeId = locations[0].store_id;
+    const storeId = fromLocation?.store_id ?? null;
     if (!context?.store_id || context.store_id !== storeId) {
       throw new BadRequestException(
         'Cross-store stock transfers are not allowed in STORE operating scope',
       );
     }
 
-    return { store_id: storeId };
+    return {
+      store_id: storeId,
+      from_store_id: storeId,
+      to_store_id: toLocation?.store_id ?? null,
+    };
+  }
+
+  /**
+   * Costo unitario con el que sale una línea del origen. Es el mismo criterio
+   * de `calculateTransferTotalCost`: CPP del stock, luego costo de la variante
+   * y luego del producto. Se lee ANTES de mover para que el destino reciba el
+   * costo correcto aunque el origen quede en cero.
+   */
+  private async resolveOriginUnitCost(
+    tx: any,
+    line: { product_id: number; product_variant_id?: number | null },
+    fromLocationId: number,
+  ): Promise<number> {
+    const stockLevel = await tx.stock_levels.findFirst({
+      where: {
+        product_id: line.product_id,
+        product_variant_id: line.product_variant_id ?? null,
+        location_id: fromLocationId,
+      },
+      select: {
+        cost_per_unit: true,
+        products: { select: { cost_price: true } },
+        product_variants: { select: { cost_price: true } },
+      },
+    });
+
+    return (
+      Number(stockLevel?.cost_per_unit || 0) ||
+      Number(stockLevel?.product_variants?.cost_price || 0) ||
+      Number(stockLevel?.products?.cost_price || 0)
+    );
   }
 
   private async calculateTransferTotalCost(
@@ -176,19 +285,33 @@ export class StockTransfersService {
    * `draft`/`completed` mostraban 0).
    */
   async getStats() {
-    const [total, pending, approved, in_transit, received, cancelled] =
-      await Promise.all([
-        this.prisma.stock_transfers.count(),
-        this.prisma.stock_transfers.count({
-          where: { status: { in: ['pending', 'draft'] } },
-        }),
-        this.prisma.stock_transfers.count({ where: { status: 'approved' } }),
-        this.prisma.stock_transfers.count({ where: { status: 'in_transit' } }),
-        this.prisma.stock_transfers.count({
-          where: { status: { in: ['received', 'completed'] } },
-        }),
-        this.prisma.stock_transfers.count({ where: { status: 'cancelled' } }),
-      ]);
+    const [
+      total,
+      pending,
+      approved,
+      in_transit,
+      partially_received,
+      received,
+      cancelled,
+    ] = await Promise.all([
+      this.prisma.stock_transfers.count(),
+      this.prisma.stock_transfers.count({
+        where: { status: { in: ['pending', 'draft'] } },
+      }),
+      this.prisma.stock_transfers.count({ where: { status: 'approved' } }),
+      // Una recepción parcial sigue en tránsito: comparte la tarjeta y el
+      // filtro con `in_transit` para que la suma de tarjetas sea el total.
+      this.prisma.stock_transfers.count({
+        where: { status: { in: ['in_transit', 'partially_received'] } },
+      }),
+      this.prisma.stock_transfers.count({
+        where: { status: 'partially_received' },
+      }),
+      this.prisma.stock_transfers.count({
+        where: { status: { in: ['received', 'completed'] } },
+      }),
+      this.prisma.stock_transfers.count({ where: { status: 'cancelled' } }),
+    ]);
 
     return {
       success: true,
@@ -197,6 +320,7 @@ export class StockTransfersService {
         pending,
         approved,
         in_transit,
+        partially_received,
         received,
         cancelled,
         // Alias de compatibilidad para consumidores que aún leen los nombres
@@ -214,18 +338,46 @@ export class StockTransfersService {
         throw new BadRequestException('Organization context is required');
       }
 
-      if (
-        createTransferDto.from_location_id === createTransferDto.to_location_id
-      ) {
+      const isExternal =
+        createTransferDto.is_external_destination === true;
+      // D8 — destino externo: no hay bodega de destino, solo el nombre.
+      const toLocationId = isExternal
+        ? null
+        : (createTransferDto.to_location_id ?? null);
+
+      if (!isExternal) {
+        if (toLocationId == null) {
+          throw new BadRequestException('Elige la bodega de destino');
+        }
+        if (createTransferDto.from_location_id === toLocationId) {
+          throw new BadRequestException(
+            'Source and destination locations must be different',
+          );
+        }
+      } else {
+        if (createTransferDto.movement_mode !== 'with_dispatch_notes') {
+          throw new VendixHttpException(
+            ErrorCodes.INV_TRANSFER_EXTERNAL_REQUIRES_DISPATCH_NOTE,
+            'Una salida a destino externo solo se registra con remisión: elige el manejo con remisiones',
+          );
+        }
+        if (!cleanText(createTransferDto.external_destination_name)) {
+          throw new BadRequestException(
+            'Escribe el nombre del destino externo',
+          );
+        }
+      }
+
+      if (createTransferDto.movement_mode === 'quick') {
         throw new BadRequestException(
-          'Source and destination locations must be different',
+          'El movimiento rápido se registra desde su propia acción, no como borrador',
         );
       }
 
-      await this.validateTransferScope(
+      const scope = await this.validateTransferScope(
         context.organization_id,
         createTransferDto.from_location_id,
-        createTransferDto.to_location_id,
+        toLocationId,
         tx,
       );
 
@@ -238,13 +390,48 @@ export class StockTransfersService {
         createTransferDto.from_location_id,
       );
 
+      const transport = await resolveTransferTransport(
+        tx,
+        createTransferDto,
+        {
+          store_id: scope.from_store_id,
+          user_id: context.user_id,
+        },
+      );
+
+      // El lote elegido se valida al crear; el FIFO/FEFO se resuelve recién al
+      // despachar, cuando el stock real de la bodega manda (D5).
+      const items: Array<{
+        product_id: number;
+        product_variant_id?: number | null;
+        quantity: number;
+        notes?: string | null;
+        batch_id: number | null;
+      }> = [];
+      for (const item of createTransferDto.items) {
+        items.push({
+          product_id: item.product_id,
+          product_variant_id: item.product_variant_id ?? null,
+          quantity: item.quantity,
+          notes: item.notes,
+          batch_id: await resolveLineBatch(
+            tx,
+            item,
+            createTransferDto.from_location_id,
+            item.batch_id ?? null,
+            { defaultToFefo: false },
+          ),
+        });
+      }
+
+      const noSupportAlert = computeNoSupportAlert(createTransferDto);
       const transferNumber = await this.generateTransferNumber(tx);
 
-      const stockTransfer = await tx.stock_transfers.create({
+      return tx.stock_transfers.create({
         data: {
           organization_id: context.organization_id,
           from_location_id: createTransferDto.from_location_id,
-          to_location_id: createTransferDto.to_location_id,
+          to_location_id: toLocationId,
           notes: createTransferDto.notes,
           transfer_number: transferNumber,
           // Explícito y canónico. Antes se omitía y la fila tomaba el
@@ -258,41 +445,71 @@ export class StockTransfersService {
           transfer_date: new Date(),
           expected_date: createTransferDto.expected_date,
           created_by_user_id: context.user_id,
+          movement_mode: (createTransferDto.movement_mode as any) ?? null,
+          ...transport,
+          is_external_destination: isExternal,
+          external_destination_name: cleanText(
+            createTransferDto.external_destination_name,
+          ),
+          external_destination_tax_id: cleanText(
+            createTransferDto.external_destination_tax_id,
+          ),
+          external_destination_address: cleanText(
+            createTransferDto.external_destination_address,
+          ),
+          support_document_type:
+            (createTransferDto.support_document_type as any) ?? null,
+          support_document_id: cleanText(
+            createTransferDto.support_document_id,
+          ),
+          exit_reason: cleanText(createTransferDto.exit_reason),
+          no_support_alert: noSupportAlert,
           stock_transfer_items: {
-            create: createTransferDto.items.map((item) => ({
-              product_id: item.product_id,
-              product_variant_id: item.product_variant_id,
-              quantity: item.quantity,
-              notes: item.notes,
-            })),
+            create: items,
           },
         },
-        include: {
-          from_location: true,
-          to_location: true,
-          stock_transfer_items: {
-            include: {
-              products: true,
-              product_variants: true,
-            },
-          },
-        },
+        include: TRANSFER_FLOW_INCLUDE,
       });
-
-      return stockTransfer;
     });
   }
 
   async createAndComplete(createTransferDto: CreateTransferDto) {
+    // D9 — el movimiento rápido solo opera entre bodegas propias. El destino
+    // externo existe únicamente en la orden avanzada, con remisión.
+    if (createTransferDto.is_external_destination) {
+      throw new VendixHttpException(
+        ErrorCodes.INV_TRANSFER_QUICK_EXTERNAL_FORBIDDEN,
+        'El movimiento rápido solo mueve inventario entre tus propias bodegas; para un destino externo usa la orden avanzada',
+      );
+    }
+    if (
+      createTransferDto.movement_mode &&
+      createTransferDto.movement_mode !== 'quick'
+    ) {
+      throw new BadRequestException(
+        'El movimiento rápido no admite un modo de orden avanzada',
+      );
+    }
+    if (
+      createTransferDto.transport_method &&
+      createTransferDto.transport_method !== 'none'
+    ) {
+      throw new BadRequestException(
+        'El movimiento rápido no registra transporte ni remisión: usa la orden avanzada',
+      );
+    }
+    const toLocationId = createTransferDto.to_location_id;
+    if (toLocationId == null) {
+      throw new BadRequestException('Elige la bodega de destino');
+    }
+
     const result = await this.prisma.$transaction(async (tx) => {
       const context = RequestContextService.getContext();
       if (!context?.organization_id) {
         throw new BadRequestException('Organization context is required');
       }
 
-      if (
-        createTransferDto.from_location_id === createTransferDto.to_location_id
-      ) {
+      if (createTransferDto.from_location_id === toLocationId) {
         throw new BadRequestException(
           'Source and destination locations must be different',
         );
@@ -301,7 +518,7 @@ export class StockTransfersService {
       const transferScope = await this.validateTransferScope(
         context.organization_id,
         createTransferDto.from_location_id,
-        createTransferDto.to_location_id,
+        toLocationId,
         tx,
       );
 
@@ -320,7 +537,7 @@ export class StockTransfersService {
         data: {
           organization_id: context.organization_id,
           from_location_id: createTransferDto.from_location_id,
-          to_location_id: createTransferDto.to_location_id,
+          to_location_id: toLocationId,
           notes: createTransferDto.notes,
           transfer_number: transferNumber,
           transfer_date: new Date(),
@@ -329,6 +546,7 @@ export class StockTransfersService {
           approved_by_user_id: context.user_id,
           completed_date: new Date(),
           status: transfer_status_enum.completed,
+          movement_mode: 'quick',
           stock_transfer_items: {
             create: createTransferDto.items.map((item) => ({
               product_id: item.product_id,
@@ -450,6 +668,10 @@ export class StockTransfersService {
   private static readonly STATUS_FILTER_GROUPS: Record<string, string[]> = {
     pending: ['pending', 'draft'],
     draft: ['pending', 'draft'],
+    // D4 — el saldo pendiente sigue en camino: la pestaña "En tránsito"
+    // muestra también las recepciones parciales.
+    in_transit: ['in_transit', 'partially_received'],
+    partially_received: ['partially_received'],
     received: ['received', 'completed'],
     completed: ['received', 'completed'],
   };
@@ -544,16 +766,7 @@ export class StockTransfersService {
   findOne(id: number) {
     return this.prisma.stock_transfers.findUnique({
       where: { id },
-      include: {
-        from_location: true,
-        to_location: true,
-        stock_transfer_items: {
-          include: {
-            products: true,
-            product_variants: true,
-          },
-        },
-      },
+      include: TRANSFER_FLOW_INCLUDE,
     });
   }
 
@@ -617,6 +830,10 @@ export class StockTransfersService {
         include: { stock_transfer_items: true },
       });
 
+      if (!stockTransfer) {
+        throw new NotFoundException(`Transferencia #${id} no encontrada`);
+      }
+
       await this.validateTransferScope(
         stockTransfer.organization_id,
         stockTransfer.from_location_id,
@@ -632,7 +849,7 @@ export class StockTransfersService {
 
       const context = RequestContextService.getContext();
 
-      // Reserve stock at source location using StockLevelManager
+      // Reserva el stock del origen. El descuento real ocurre al despachar.
       for (const item of stockTransfer.stock_transfer_items) {
         await this.stockLevelManager.reserveStock(
           item.product_id,
@@ -651,33 +868,34 @@ export class StockTransfersService {
         where: { id },
         data: {
           status: transfer_status_enum.in_transit,
+          approved_at: new Date(),
+          approved_by_user_id: context?.user_id ?? null,
         },
-        include: {
-          from_location: true,
-          to_location: true,
-          stock_transfer_items: {
-            include: {
-              products: true,
-              product_variants: true,
-            },
-          },
-        },
+        include: TRANSFER_FLOW_INCLUDE,
       });
     });
   }
 
-  async complete(
-    id: number,
-    items: Array<{ id: number; quantity_received: number }>,
-  ) {
-    const result = await this.prisma.$transaction(async (tx) => {
-      // Se lee la transferencia ANTES de escribir nada. El orden anterior
-      // actualizaba `quantity_received` por `item.id` crudo como primera
-      // sentencia —sin comprobar estado, sin comprobar pertenencia y sin tope—
-      // así que un id de OTRA transferencia era escribible, y un
-      // `quantity_received` arbitrario acreditaba esa cantidad REAL en destino,
-      // repetible sobre una transferencia ya cerrada. Era la única vía viva del
-      // módulo y la única sin validación.
+  /**
+   * Despacho físico (D3): descuenta el origen, guarda el conteo de salida por
+   * línea (`quantity_dispatched`), el lote (D5) y el transporte/costo (D6), y
+   * crea la remisión `transfer_out` en la MISMA transacción cuando el modo es
+   * `with_dispatch_notes`.
+   *
+   * Modos:
+   * - `mass_only`: suma en destino y cierra la transferencia (no hay recepción
+   *   aparte; D3 "solo movimiento masivo").
+   * - destino externo (D8): solo salida, sin bodega de destino; queda
+   *   `completed` porque no hay nada que recibir.
+   * - `with_dispatch_notes` o sin modo (filas históricas): queda en tránsito
+   *   para recibirse después.
+   *
+   * Idempotencia: si la transferencia ya tiene `dispatched_at` o alguna línea
+   * con `quantity_dispatched`, se rechaza. Dos despachos no pueden descontar
+   * dos veces.
+   */
+  async dispatch(id: number, dto: DispatchTransferDto = {}) {
+    const outcome = await this.prisma.$transaction(async (tx) => {
       const stockTransfer = await tx.stock_transfers.findUnique({
         where: { id },
         include: { stock_transfer_items: true },
@@ -687,96 +905,80 @@ export class StockTransfersService {
         throw new NotFoundException(`Transferencia #${id} no encontrada`);
       }
 
-      // Solo una transferencia despachada puede recibirse: es la que reservó el
-      // stock en origen. Cerrar una `pending` movía existencias que nadie había
-      // comprometido.
-      if (stockTransfer.status !== transfer_status_enum.in_transit) {
-        throw new BadRequestException(
-          'Solo una transferencia en tránsito puede recibirse',
-        );
-      }
-
-      // `tx` es `any`, así que las líneas llegan sin tipo: se anota el Map para
-      // que el acceso a `quantity` / `quantity_received` compile.
-      const lineById = new Map<number, any>(
-        stockTransfer.stock_transfer_items.map((l: any) => [l.id, l]),
-      );
-
-      for (const item of items) {
-        const line = lineById.get(item.id);
-        if (!line) {
-          throw new BadRequestException(
-            `La línea #${item.id} no pertenece a la transferencia #${id}`,
-          );
-        }
-        if (item.quantity_received > line.quantity) {
-          throw new BadRequestException(
-            `No se puede recibir ${item.quantity_received} de la línea #${item.id}: se despacharon ${line.quantity}`,
-          );
-        }
-        await tx.stock_transfer_items.update({
-          where: { id: item.id },
-          data: {
-            quantity_received: item.quantity_received,
-          },
-        });
-        // Mantener el mapa en línea con lo escrito, porque el bucle de stock de
-        // más abajo recorre `stockTransfer.stock_transfer_items`.
-        line.quantity_received = item.quantity_received;
-      }
-
-      const transferScope = await this.validateTransferScope(
+      const context = RequestContextService.getContext();
+      const scope = await this.validateTransferScope(
         stockTransfer.organization_id,
         stockTransfer.from_location_id,
         stockTransfer.to_location_id,
         tx,
       );
 
-      const context = RequestContextService.getContext();
-
-      for (const item of stockTransfer.stock_transfer_items) {
-        const receivedItem = items.find((i) => i.id === item.id);
-        if (receivedItem && receivedItem.quantity_received > 0) {
-          // Subtract from source
-          const sourceStockUpdate = await this.stockLevelManager.updateStock(
-            {
-              product_id: item.product_id,
-              variant_id: item.product_variant_id ?? undefined,
-              location_id: stockTransfer.from_location_id,
-              quantity_change: -receivedItem.quantity_received,
-              movement_type: 'transfer',
-              reason: `Stock transfer ${stockTransfer.transfer_number} - source`,
-              user_id: context?.user_id,
-              create_movement: true,
-              from_location_id: stockTransfer.from_location_id,
-              to_location_id: stockTransfer.to_location_id,
-            },
-            tx,
-          );
-
-          // Add to destination
-          await this.stockLevelManager.updateStock(
-            {
-              product_id: item.product_id,
-              variant_id: item.product_variant_id ?? undefined,
-              location_id: stockTransfer.to_location_id,
-              quantity_change: receivedItem.quantity_received,
-              movement_type: 'transfer',
-              reason: `Stock transfer ${stockTransfer.transfer_number} - destination`,
-              user_id: context?.user_id,
-              create_movement: true,
-              from_location_id: stockTransfer.from_location_id,
-              to_location_id: stockTransfer.to_location_id,
-              unit_cost: Number(
-                sourceStockUpdate.cost_snapshot?.unit_cost || 0,
-              ),
-            },
-            tx,
-          );
-        }
+      if (stockTransfer.movement_mode === 'quick') {
+        throw new BadRequestException(
+          'Esta transferencia es un movimiento rápido: el inventario ya se movió',
+        );
       }
 
-      // Release reservations created during approve
+      if (
+        stockTransfer.status !== transfer_status_enum.in_transit &&
+        stockTransfer.status !== transfer_status_enum.approved
+      ) {
+        throw new BadRequestException(
+          'Solo una transferencia aprobada puede despacharse',
+        );
+      }
+
+      if (
+        stockTransfer.dispatched_at != null ||
+        stockTransfer.stock_transfer_items.some(
+          (item: any) => item.quantity_dispatched != null,
+        )
+      ) {
+        throw new ConflictException(
+          `La transferencia ${stockTransfer.transfer_number} ya fue despachada`,
+        );
+      }
+
+      // Reclamo atómico del despacho: dos peticiones simultáneas (doble clic,
+      // dos pestañas) compiten por la misma fila; la segunda encuentra
+      // `dispatched_at` ya escrito y no vuelve a descontar stock.
+      const claim = await tx.stock_transfers.updateMany({
+        where: { id, dispatched_at: null },
+        data: {
+          dispatched_at: new Date(),
+          dispatched_by_user_id: context?.user_id ?? null,
+        },
+      });
+      if (claim.count === 0) {
+        throw new ConflictException(
+          `La transferencia ${stockTransfer.transfer_number} ya fue despachada`,
+        );
+      }
+
+      const isExternal = stockTransfer.is_external_destination === true;
+      if (isExternal) {
+        if (stockTransfer.movement_mode !== 'with_dispatch_notes') {
+          throw new VendixHttpException(
+            ErrorCodes.INV_TRANSFER_EXTERNAL_REQUIRES_DISPATCH_NOTE,
+            'Una salida a destino externo necesita remisión',
+          );
+        }
+      } else if (stockTransfer.to_location_id == null) {
+        throw new BadRequestException(
+          'La transferencia no tiene bodega de destino',
+        );
+      }
+
+      const plan = buildDispatchPlan(
+        stockTransfer.stock_transfer_items,
+        dto.items,
+      );
+
+      // Las reservas del origen se consumen ANTES de validar disponibilidad:
+      // `reserveStock` ya descontó `quantity_available`, así que si quedaran
+      // activas el despacho fallaría contra su propia reserva. No se toca el
+      // on-hand acá: eso lo hace `updateStock`, que también deja el movimiento
+      // y la valuación.
       await this.stockLevelManager.releaseReservationsByReference(
         'transfer',
         stockTransfer.id,
@@ -785,38 +987,192 @@ export class StockTransfersService {
         { decrementOnHand: false },
       );
 
-      const allItemsReceived = stockTransfer.stock_transfer_items.every(
-        (item) => {
-          const receivedItem = items.find((i) => i.id === item.id);
-          return (
-            receivedItem && receivedItem.quantity_received >= item.quantity
-          );
-        },
+      // Disponibilidad real del origen antes de escribir nada.
+      await assertStockAvailableAtOrigin(
+        tx,
+        plan
+          .filter((entry) => entry.quantity_dispatched > 0)
+          .map((entry) => ({
+            product_id: entry.line.product_id,
+            product_variant_id: entry.line.product_variant_id,
+            quantity: entry.quantity_dispatched,
+          })),
+        stockTransfer.from_location_id,
       );
 
-      const newStatus = allItemsReceived
-        ? transfer_status_enum.completed
-        : transfer_status_enum.in_transit;
+      // Lote por línea: el elegido en el payload, el ya guardado o el más
+      // antiguo con saldo (FEFO). El lote queda ligado a la fila.
+      const batchNumbers = new Map<number, string>();
+      for (const entry of plan) {
+        if (entry.quantity_dispatched <= 0) continue;
+        entry.batch_id = await resolveLineBatch(
+          tx,
+          entry.line,
+          stockTransfer.from_location_id,
+          entry.batch_id,
+          { defaultToFefo: true },
+        );
+        if (entry.batch_id != null && !batchNumbers.has(entry.batch_id)) {
+          const batch = await tx.inventory_batches.findFirst({
+            where: { id: entry.batch_id },
+            select: { batch_number: true },
+          });
+          if (batch?.batch_number) {
+            batchNumbers.set(entry.batch_id, batch.batch_number);
+          }
+        }
+      }
+
+      const transport = await resolveTransferTransport(tx, dto, {
+        store_id: scope.from_store_id,
+        user_id: context?.user_id,
+      });
+
+      const wantsDispatchNote =
+        stockTransfer.movement_mode === 'with_dispatch_notes' || isExternal;
+      let dispatchNoteId: number | null =
+        stockTransfer.dispatch_note_id ?? null;
+
+      if (wantsDispatchNote) {
+        const noteStoreId = resolveTransferNoteStoreId(
+          scope.from_store_id,
+          scope.to_store_id,
+        );
+        const note = await createTransferNoteInTx(tx, {
+          store_id: noteStoreId,
+          direction: 'outbound',
+          subtype: 'transfer_out',
+          from_location_id: stockTransfer.from_location_id,
+          to_location_id: stockTransfer.to_location_id,
+          items: plan
+            .filter((entry) => entry.quantity_dispatched > 0)
+            .map((entry) => ({
+              product_id: entry.line.product_id,
+              product_variant_id: entry.line.product_variant_id,
+              quantity: entry.quantity_dispatched,
+              lot_serial:
+                entry.batch_id != null
+                  ? (batchNumbers.get(entry.batch_id) ?? null)
+                  : null,
+            })),
+          notes: `Remisión de salida de la transferencia ${stockTransfer.transfer_number}`,
+          internal_notes: stockTransfer.no_support_alert
+            ? noSupportAlertNote()
+            : null,
+          external: isExternal
+            ? {
+                name: stockTransfer.external_destination_name,
+                tax_id: stockTransfer.external_destination_tax_id,
+                address: stockTransfer.external_destination_address,
+              }
+            : null,
+          user_id: context?.user_id,
+        });
+        dispatchNoteId = note.id;
+      }
+
+      const sourceCosts = new Map<number, number>();
+      for (const entry of plan) {
+        if (entry.quantity_dispatched <= 0) continue;
+        const source = await this.stockLevelManager.updateStock(
+          {
+            product_id: entry.line.product_id,
+            variant_id: entry.line.product_variant_id ?? undefined,
+            location_id: stockTransfer.from_location_id,
+            quantity_change: -entry.quantity_dispatched,
+            movement_type: 'transfer',
+            reason: `Stock transfer ${stockTransfer.transfer_number} - source`,
+            user_id: context?.user_id,
+            create_movement: true,
+            validate_availability: true,
+            from_location_id: stockTransfer.from_location_id,
+            to_location_id: stockTransfer.to_location_id ?? undefined,
+          },
+          tx,
+        );
+        sourceCosts.set(
+          entry.line.id,
+          Number(source.cost_snapshot?.unit_cost || 0),
+        );
+
+        await tx.stock_transfer_items.update({
+          where: { id: entry.line.id },
+          data: {
+            quantity_dispatched: entry.quantity_dispatched,
+            batch_id: entry.batch_id,
+          },
+        });
+        entry.line.quantity_dispatched = entry.quantity_dispatched;
+      }
+
+      const now = new Date();
+      let status: transfer_status_enum = transfer_status_enum.in_transit;
+      let completedDate: Date | null = null;
+      let totalCost = 0;
+
+      if (isExternal) {
+        // D8 — la salida externa termina en el despacho: no hay recepción.
+        // `completed` es terminal y la bandera `is_external_destination`
+        // distingue estas filas de una recepción normal.
+        status = transfer_status_enum.completed;
+        completedDate = now;
+        totalCost = plan.reduce(
+          (sum, entry) =>
+            sum +
+            (sourceCosts.get(entry.line.id) ?? 0) *
+              entry.quantity_dispatched,
+          0,
+        );
+      } else if (stockTransfer.movement_mode === 'mass_only') {
+        // D3 — el movimiento masivo aplica todo de una vez, sin remisiones.
+        for (const entry of plan) {
+          if (entry.quantity_dispatched <= 0) continue;
+          const unitCost = sourceCosts.get(entry.line.id) ?? 0;
+          await this.stockLevelManager.updateStock(
+            {
+              product_id: entry.line.product_id,
+              variant_id: entry.line.product_variant_id ?? undefined,
+              location_id: stockTransfer.to_location_id as number,
+              quantity_change: entry.quantity_dispatched,
+              movement_type: 'transfer',
+              reason: `Stock transfer ${stockTransfer.transfer_number} - destination`,
+              user_id: context?.user_id,
+              create_movement: true,
+              from_location_id: stockTransfer.from_location_id,
+              to_location_id: stockTransfer.to_location_id ?? undefined,
+              unit_cost: unitCost,
+            },
+            tx,
+          );
+          await tx.stock_transfer_items.update({
+            where: { id: entry.line.id },
+            data: { quantity_received: entry.quantity_dispatched },
+          });
+          totalCost += unitCost * entry.quantity_dispatched;
+        }
+        status = transfer_status_enum.received;
+        completedDate = now;
+      }
 
       const updated = await tx.stock_transfers.update({
         where: { id },
         data: {
-          status: newStatus,
-          completed_date: allItemsReceived ? new Date() : null,
+          ...transport,
+          dispatch_note_id: dispatchNoteId,
+          dispatched_at: now,
+          dispatched_by_user_id: context?.user_id ?? null,
+          status,
+          completed_date: completedDate,
+          notes: appendTransferNote(stockTransfer.notes, dto.notes),
         },
-        include: {
-          from_location: true,
-          to_location: true,
-          stock_transfer_items: {
-            include: {
-              products: true,
-              product_variants: true,
-            },
-          },
-        },
+        include: TRANSFER_FLOW_INCLUDE,
       });
-      if (allItemsReceived) {
-        // Flujos P1.1: inventory.transferred in the same transaction
+
+      if (
+        (status === transfer_status_enum.received ||
+          status === transfer_status_enum.completed) &&
+        updated.to_location_id != null
+      ) {
         await recordTriggerEvent(tx, 'inventory.transferred', {
           store_id:
             updated.from_location?.store_id ??
@@ -828,33 +1184,451 @@ export class StockTransfersService {
           to_location_id: updated.to_location_id,
         });
       }
-      return updated;
+
+      return { transfer: updated, totalCost };
     });
 
-    // Emit accounting event only if transfer is fully completed
-    if (result.status === transfer_status_enum.completed) {
+    // Una salida externa no tiene destino interno: el asiento de traslado no
+    // aplica y el listener contable espera un `to_location_id` numérico.
+    if (
+      (outcome.transfer.status === transfer_status_enum.received ||
+        outcome.transfer.status === transfer_status_enum.completed) &&
+      outcome.transfer.to_location_id != null
+    ) {
       this.event_emitter.emit('stock_transfer.completed', {
-        transfer_id: result.id,
-        transfer_number: result.transfer_number,
-        organization_id: result.organization_id,
+        transfer_id: outcome.transfer.id,
+        transfer_number: outcome.transfer.transfer_number,
+        organization_id: outcome.transfer.organization_id,
         store_id:
-          result.from_location?.store_id === result.to_location?.store_id
-            ? result.from_location?.store_id
+          outcome.transfer.from_location?.store_id ===
+          outcome.transfer.to_location?.store_id
+            ? outcome.transfer.from_location?.store_id
             : undefined,
-        from_store_id: result.from_location?.store_id ?? undefined,
-        to_store_id: result.to_location?.store_id ?? undefined,
-        from_location_id: result.from_location_id,
-        to_location_id: result.to_location_id,
+        from_store_id: outcome.transfer.from_location?.store_id ?? undefined,
+        to_store_id: outcome.transfer.to_location?.store_id ?? undefined,
+        from_location_id: outcome.transfer.from_location_id,
+        to_location_id: outcome.transfer.to_location_id,
+        total_cost: outcome.totalCost,
+        user_id: RequestContextService.getUserId(),
+      });
+    }
+
+    return outcome.transfer;
+  }
+
+  /**
+   * Recepción repetible (D4). Suma en destino SOLO lo que llega ahora, así que
+   * dos recepciones parciales no duplican stock. Cuando queda saldo pendiente
+   * la transferencia pasa a `partially_received`; al completarse, a `received`.
+   *
+   * Compatibilidad: una transferencia que nunca pasó por `dispatch` (flujo
+   * anterior: aprobar reservaba y completar movía) descuenta el origen en esta
+   * recepción, igual que antes. Las despachadas ya descontaron en `dispatch` y
+   * acá solo acreditan destino — sin doble movimiento.
+   */
+  async receive(
+    id: number,
+    items: Array<{ id: number; quantity_received: number }>,
+    notes?: string,
+  ) {
+    const outcome = await this.prisma.$transaction(async (tx) => {
+      // Serializa recepciones simultáneas sobre la misma fila: la segunda
+      // espera el commit de la primera y vuelve a leer el saldo ya actualizado,
+      // así un doble envío no puede sumar dos veces las mismas unidades.
+      await tx.stock_transfers.updateMany({
+        where: { id },
+        data: { updated_at: new Date() },
+      });
+
+      const stockTransfer = await tx.stock_transfers.findUnique({
+        where: { id },
+        include: { stock_transfer_items: true },
+      });
+
+      if (!stockTransfer) {
+        throw new NotFoundException(`Transferencia #${id} no encontrada`);
+      }
+
+      const context = RequestContextService.getContext();
+      const scope = await this.validateTransferScope(
+        stockTransfer.organization_id,
+        stockTransfer.from_location_id,
+        stockTransfer.to_location_id,
+        tx,
+      );
+
+      if (stockTransfer.is_external_destination) {
+        throw new BadRequestException(
+          'Una salida a destino externo no se recibe: se cierra al despachar',
+        );
+      }
+      if (stockTransfer.to_location_id == null) {
+        throw new BadRequestException(
+          'La transferencia no tiene bodega de destino',
+        );
+      }
+      if (
+        stockTransfer.status !== transfer_status_enum.in_transit &&
+        stockTransfer.status !== transfer_status_enum.partially_received
+      ) {
+        throw new BadRequestException(
+          'Solo una transferencia despachada o con recepción parcial puede recibirse',
+        );
+      }
+
+      const linesById = new Map<number, any>(
+        stockTransfer.stock_transfer_items.map((line: any) => [
+          line.id,
+          line,
+        ]),
+      );
+      const seen = new Set<number>();
+      const normalized: Array<{ line: any; quantity: number }> = [];
+
+      for (const received of items) {
+        if (seen.has(received.id)) {
+          throw new BadRequestException(
+            `La línea #${received.id} está repetida en la recepción`,
+          );
+        }
+        seen.add(received.id);
+        const line = linesById.get(received.id);
+        if (!line) {
+          throw new BadRequestException(
+            `La línea #${received.id} no pertenece a la transferencia #${id}`,
+          );
+        }
+        if (
+          !Number.isInteger(received.quantity_received) ||
+          received.quantity_received < 0
+        ) {
+          throw new BadRequestException(
+            `La cantidad recibida de la línea #${received.id} debe ser un entero mayor o igual a cero`,
+          );
+        }
+        const pending = pendingQuantity(line);
+        if (received.quantity_received > pending) {
+          throw new BadRequestException(
+            `No puedes recibir ${received.quantity_received} de la línea #${received.id}: el saldo pendiente es ${pending}`,
+          );
+        }
+        normalized.push({ line, quantity: received.quantity_received });
+      }
+
+      const toReceive = normalized.filter((entry) => entry.quantity > 0);
+      if (toReceive.length === 0) {
+        throw new BadRequestException(
+          'Escribe al menos una cantidad recibida mayor que cero',
+        );
+      }
+
+      // Flujo anterior (sin despacho): el descuento del origen no ocurrió
+      // todavía. Se hace acá para no romper las transferencias creadas antes de
+      // P2 ni las que se aprueban y completan de una vez.
+      const legacyUndispatched =
+        stockTransfer.dispatched_at == null &&
+        stockTransfer.stock_transfer_items.every(
+          (line: any) => line.quantity_dispatched == null,
+        );
+
+      if (legacyUndispatched) {
+        await this.stockLevelManager.releaseReservationsByReference(
+          'transfer',
+          stockTransfer.id,
+          'consumed',
+          tx,
+          { decrementOnHand: false },
+        );
+      }
+
+      for (const entry of toReceive) {
+        const line = entry.line;
+        let unitCost = await this.resolveOriginUnitCost(
+          tx,
+          line,
+          stockTransfer.from_location_id,
+        );
+
+        if (legacyUndispatched) {
+          const source = await this.stockLevelManager.updateStock(
+            {
+              product_id: line.product_id,
+              variant_id: line.product_variant_id ?? undefined,
+              location_id: stockTransfer.from_location_id,
+              quantity_change: -entry.quantity,
+              movement_type: 'transfer',
+              reason: `Stock transfer ${stockTransfer.transfer_number} - source`,
+              user_id: context?.user_id,
+              create_movement: true,
+              from_location_id: stockTransfer.from_location_id,
+              to_location_id: stockTransfer.to_location_id ?? undefined,
+            },
+            tx,
+          );
+          unitCost =
+            Number(source.cost_snapshot?.unit_cost || 0) || unitCost;
+        }
+
+        await this.stockLevelManager.updateStock(
+          {
+            product_id: line.product_id,
+            variant_id: line.product_variant_id ?? undefined,
+            location_id: stockTransfer.to_location_id as number,
+            quantity_change: entry.quantity,
+            movement_type: 'transfer',
+            reason: `Stock transfer ${stockTransfer.transfer_number} - destination`,
+            user_id: context?.user_id,
+            create_movement: true,
+            from_location_id: stockTransfer.from_location_id,
+            to_location_id: stockTransfer.to_location_id ?? undefined,
+            unit_cost: unitCost,
+          },
+          tx,
+        );
+
+        await tx.stock_transfer_items.update({
+          where: { id: line.id },
+          data: {
+            quantity_received:
+              Number(line.quantity_received ?? 0) + entry.quantity,
+          },
+        });
+        line.quantity_received =
+          Number(line.quantity_received ?? 0) + entry.quantity;
+      }
+
+      let receiptNoteId = stockTransfer.receipt_note_id ?? null;
+      if (
+        stockTransfer.movement_mode === 'with_dispatch_notes' &&
+        stockTransfer.to_location_id != null
+      ) {
+        receiptNoteId = await accumulateTransferReceiptNoteInTx(tx, {
+          existing_note_id: receiptNoteId,
+          store_id: resolveTransferNoteStoreId(
+            scope.from_store_id,
+            scope.to_store_id,
+          ),
+          direction: 'inbound',
+          subtype: 'transfer_in',
+          from_location_id: stockTransfer.from_location_id,
+          to_location_id: stockTransfer.to_location_id,
+          items: toReceive.map((entry) => ({
+            product_id: entry.line.product_id,
+            product_variant_id: entry.line.product_variant_id,
+            quantity: entry.quantity,
+          })),
+          notes: `Remisión de entrada de la transferencia ${stockTransfer.transfer_number}`,
+          user_id: context?.user_id,
+        });
+      }
+
+      const refreshed = await tx.stock_transfer_items.findMany({
+        where: { stock_transfer_id: id },
+      });
+      const fullyReceived = refreshed.every(
+        (line: any) => line.quantity_received >= dispatchedQuantity(line),
+      );
+
+      const updated = await tx.stock_transfers.update({
+        where: { id },
+        data: {
+          status: fullyReceived
+            ? transfer_status_enum.received
+            : transfer_status_enum.partially_received,
+          completed_date: fullyReceived ? new Date() : null,
+          receipt_note_id: receiptNoteId,
+          notes: appendTransferNote(stockTransfer.notes, notes),
+        },
+        include: TRANSFER_FLOW_INCLUDE,
+      });
+
+      if (fullyReceived) {
+        await recordTriggerEvent(tx, 'inventory.transferred', {
+          store_id:
+            updated.from_location?.store_id ??
+            updated.to_location?.store_id ??
+            RequestContextService.getStoreId(),
+          transfer_id: updated.id,
+          transfer_number: updated.transfer_number,
+          from_location_id: updated.from_location_id,
+          to_location_id: updated.to_location_id,
+        });
+      }
+
+      return { transfer: updated, fullyReceived };
+    });
+
+    if (outcome.fullyReceived) {
+      this.event_emitter.emit('stock_transfer.completed', {
+        transfer_id: outcome.transfer.id,
+        transfer_number: outcome.transfer.transfer_number,
+        organization_id: outcome.transfer.organization_id,
+        store_id:
+          outcome.transfer.from_location?.store_id ===
+          outcome.transfer.to_location?.store_id
+            ? outcome.transfer.from_location?.store_id
+            : undefined,
+        from_store_id: outcome.transfer.from_location?.store_id ?? undefined,
+        to_store_id: outcome.transfer.to_location?.store_id ?? undefined,
+        from_location_id: outcome.transfer.from_location_id,
+        to_location_id: outcome.transfer.to_location_id,
         total_cost: await this.calculateTransferTotalCost(
-          result.stock_transfer_items,
-          result.from_location_id,
-          (item) => Number(item.quantity_received || 0),
+          outcome.transfer.stock_transfer_items,
+          outcome.transfer.from_location_id,
+          (item: any) => Number(item.quantity_received || 0),
         ),
         user_id: RequestContextService.getUserId(),
       });
     }
 
-    return result;
+    return outcome.transfer;
+  }
+
+  /**
+   * Compatibilidad con el endpoint `PATCH :id/complete`: recibir es la misma
+   * operación, ahora incremental y repetible.
+   */
+  async complete(
+    id: number,
+    items: Array<{ id: number; quantity_received: number }>,
+  ) {
+    return this.receive(id, items);
+  }
+
+  /**
+   * D4 — cierre del saldo pendiente como pérdida. Solo después de la fecha
+   * límite de entrega (`expected_date`) y con motivo obligatorio.
+   *
+   * Si la transferencia YA se despachó, las unidades pendientes salieron del
+   * origen en el despacho: acá solo se registran como pérdidas (`quantity_lost`)
+   * para no descontar dos veces. Si nunca se despachó (flujo anterior), sí se
+   * crea el movimiento de merma en el origen, porque esas unidades seguían ahí.
+   */
+  async closeWithLoss(
+    id: number,
+    reasonInput: string,
+    notes?: string,
+  ) {
+    return this.prisma.$transaction(async (tx) => {
+      const stockTransfer = await tx.stock_transfers.findUnique({
+        where: { id },
+        include: { stock_transfer_items: true },
+      });
+
+      if (!stockTransfer) {
+        throw new NotFoundException(`Transferencia #${id} no encontrada`);
+      }
+
+      const context = RequestContextService.getContext();
+      await this.validateTransferScope(
+        stockTransfer.organization_id,
+        stockTransfer.from_location_id,
+        stockTransfer.to_location_id,
+        tx,
+      );
+
+      if (stockTransfer.is_external_destination) {
+        throw new BadRequestException(
+          'Una salida a destino externo se cierra al despachar: no tiene saldo pendiente',
+        );
+      }
+
+      if (
+        stockTransfer.status !== transfer_status_enum.in_transit &&
+        stockTransfer.status !== transfer_status_enum.partially_received
+      ) {
+        throw new BadRequestException(
+          'Solo una transferencia despachada con saldo pendiente puede cerrarse como pérdida',
+        );
+      }
+
+      const reason = reasonInput?.trim();
+      if (!reason) {
+        throw new VendixHttpException(
+          ErrorCodes.INV_TRANSFER_LOSS_REASON_REQUIRED,
+          'Escribe el motivo de la pérdida',
+        );
+      }
+
+      if (!stockTransfer.expected_date) {
+        throw new BadRequestException(
+          'La transferencia no tiene fecha límite de entrega: agrega una antes de cerrar la pérdida',
+        );
+      }
+
+      if (!hasDeliveryDeadlinePassed(stockTransfer.expected_date)) {
+        throw new VendixHttpException(
+          ErrorCodes.INV_TRANSFER_LOSS_NOT_DUE,
+          'Todavía no vence la fecha límite de entrega: podrás cerrar la pérdida después de esa fecha',
+        );
+      }
+
+      const pendingLines = stockTransfer.stock_transfer_items
+        .map((line: any) => ({ line, pending: pendingQuantity(line) }))
+        .filter((entry: any) => entry.pending > 0);
+
+      if (pendingLines.length === 0) {
+        throw new BadRequestException(
+          'No hay saldo pendiente: la transferencia ya está completa',
+        );
+      }
+
+      const legacyUndispatched =
+        stockTransfer.dispatched_at == null &&
+        stockTransfer.stock_transfer_items.every(
+          (line: any) => line.quantity_dispatched == null,
+        );
+
+      if (legacyUndispatched) {
+        await this.stockLevelManager.releaseReservationsByReference(
+          'transfer',
+          stockTransfer.id,
+          'consumed',
+          tx,
+          { decrementOnHand: false },
+        );
+        for (const entry of pendingLines) {
+          await this.stockLevelManager.updateStock(
+            {
+              product_id: entry.line.product_id,
+              variant_id: entry.line.product_variant_id ?? undefined,
+              location_id: stockTransfer.from_location_id,
+              quantity_change: -entry.pending,
+              movement_type: 'damage',
+              reason: `Merma de transferencia ${stockTransfer.transfer_number}: ${reason}`,
+              user_id: context?.user_id,
+              create_movement: true,
+              validate_availability: true,
+              from_location_id: stockTransfer.from_location_id,
+              to_location_id: stockTransfer.to_location_id ?? undefined,
+            },
+            tx,
+          );
+        }
+      }
+
+      for (const entry of pendingLines) {
+        await tx.stock_transfer_items.update({
+          where: { id: entry.line.id },
+          data: {
+            quantity_lost:
+              Number(entry.line.quantity_lost ?? 0) + entry.pending,
+          },
+        });
+      }
+
+      return tx.stock_transfers.update({
+        where: { id },
+        data: {
+          status: transfer_status_enum.closed_with_loss,
+          loss_closed_at: new Date(),
+          loss_closed_by_user_id: context?.user_id ?? null,
+          loss_reason: reason,
+          notes: appendTransferNote(stockTransfer.notes, notes),
+        },
+        include: TRANSFER_FLOW_INCLUDE,
+      });
+    });
   }
 
   async cancel(id: number) {
@@ -868,10 +1642,8 @@ export class StockTransfersService {
         throw new NotFoundException(`Transferencia #${id} no encontrada`);
       }
 
-      // Cancelar libera reservas en la bodega de ORIGEN, así que es un
-      // movimiento real de stock y necesita la misma guarda de alcance que
-      // `create`/`approve`/`complete`. Sin ella, una tienda podía cancelar la
-      // transferencia de otra y liberarle el stock comprometido.
+      // Cancelar libera reservas o devuelve stock al origen, así que es un
+      // movimiento real y necesita la misma guarda de alcance.
       await this.validateTransferScope(
         stockTransfer.organization_id,
         stockTransfer.from_location_id,
@@ -880,25 +1652,49 @@ export class StockTransfersService {
       );
 
       // `received` también es terminal: es el estado que escribe el flujo de
-      // organización sobre esta MISMA tabla. Mirar sólo `completed` dejaba
-      // cancelable una transferencia cuyo stock ya se acreditó en destino, y la
-      // cancelación no revierte nada porque la reserva ya no existe.
+      // organización sobre esta MISMA tabla. `closed_with_loss` lo es desde P2.
       if (
         stockTransfer.status === transfer_status_enum.completed ||
-        stockTransfer.status === transfer_status_enum.received
+        stockTransfer.status === transfer_status_enum.received ||
+        stockTransfer.status === transfer_status_enum.closed_with_loss
       ) {
         throw new BadRequestException(
-          'Una transferencia ya recibida no se puede cancelar',
+          'Una transferencia ya recibida o cerrada no se puede cancelar',
         );
       }
       if (stockTransfer.status === transfer_status_enum.cancelled) {
-        throw new BadRequestException(
-          'La transferencia ya está cancelada',
-        );
+        throw new BadRequestException('La transferencia ya está cancelada');
       }
 
-      // Release any reservations if transfer was in_transit
-      if (stockTransfer.status === transfer_status_enum.in_transit) {
+      const wasDispatched =
+        stockTransfer.dispatched_at != null ||
+        stockTransfer.stock_transfer_items.some(
+          (item: any) => item.quantity_dispatched != null,
+        );
+
+      if (wasDispatched) {
+        // Lo despachado y no recibido vuelve al origen; lo recibido ya está en
+        // destino y no se toca. Una salida externa es terminal y no llega acá.
+        for (const item of stockTransfer.stock_transfer_items) {
+          const pending = pendingQuantity(item);
+          if (pending <= 0) continue;
+          await this.stockLevelManager.updateStock(
+            {
+              product_id: item.product_id,
+              variant_id: item.product_variant_id ?? undefined,
+              location_id: stockTransfer.from_location_id,
+              quantity_change: pending,
+              movement_type: 'transfer',
+              reason: `Stock transfer ${stockTransfer.transfer_number} - cancelled return`,
+              user_id: RequestContextService.getUserId(),
+              create_movement: true,
+              from_location_id: stockTransfer.from_location_id,
+              to_location_id: stockTransfer.to_location_id ?? undefined,
+            },
+            tx,
+          );
+        }
+      } else if (stockTransfer.status === transfer_status_enum.in_transit) {
         await this.stockLevelManager.releaseReservationsByReference(
           'transfer',
           stockTransfer.id,
@@ -912,16 +1708,7 @@ export class StockTransfersService {
         data: {
           status: transfer_status_enum.cancelled,
         },
-        include: {
-          from_location: true,
-          to_location: true,
-          stock_transfer_items: {
-            include: {
-              products: true,
-              product_variants: true,
-            },
-          },
-        },
+        include: TRANSFER_FLOW_INCLUDE,
       });
     });
   }
