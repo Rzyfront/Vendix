@@ -1250,7 +1250,17 @@ export class CheckoutService {
     total_price: Prisma.Decimal | number | string;
     tax_amount_item?: Prisma.Decimal | number | string | null;
     quantity: number;
+    unit_price?: Prisma.Decimal | number | string | null;
+    final_unit_price?: Prisma.Decimal | number | string | null;
   }): number {
+    // Contrato nuevo con descuento: el impuesto persistido es post-descuento,
+    // así que el bruto de línea sale del unitario publicado.
+    if (oi.final_unit_price != null) {
+      const unit = Number(oi.unit_price ?? 0);
+      const multiplier =
+        unit !== 0 ? Number(oi.total_price) / unit : Number(oi.quantity);
+      return this.roundMoney(Number(oi.final_unit_price) * multiplier);
+    }
     const lineTax = new Prisma.Decimal(oi.tax_amount_item ?? 0)
       .times(new Prisma.Decimal(oi.quantity))
       .toFixed(2, Prisma.Decimal.ROUND_DOWN);
@@ -2751,7 +2761,16 @@ export class CheckoutService {
                 // F1: descuento de BASE de la línea (contrato nuevo). NULL =
                 // sin descuento, la orden queda como siempre.
                 ...(lineDiscounts
-                  ? { discount_amount: lineDiscounts.lines[itemIndex].discount_amount }
+                  ? {
+                      discount_amount: lineDiscounts.lines[itemIndex].discount_amount,
+                      // Bruto unitario PUBLICADO (pre-descuento), igual que el POS.
+                      // Con el contrato nuevo `tax_amount_item` es post-descuento y
+                      // ya no sirve para reconstruir el bruto en las vistas del
+                      // comprador (resumen, cuenta, comprobante).
+                      final_unit_price: this.roundMoney(
+                        item.base_unit_price + item.tax_amount_item,
+                      ),
+                    }
                   : {}),
                 cost_price: item.cost_price,
                 notes: (item as any).notes?.trim() || null,
@@ -3780,7 +3799,16 @@ export class CheckoutService {
                 // F1: descuento de BASE de la línea (contrato nuevo). NULL =
                 // sin descuento, la orden queda como siempre.
                 ...(lineDiscounts
-                  ? { discount_amount: lineDiscounts.lines[itemIndex].discount_amount }
+                  ? {
+                      discount_amount: lineDiscounts.lines[itemIndex].discount_amount,
+                      // Bruto unitario PUBLICADO (pre-descuento), igual que el POS.
+                      // Con el contrato nuevo `tax_amount_item` es post-descuento y
+                      // ya no sirve para reconstruir el bruto en las vistas del
+                      // comprador (resumen, cuenta, comprobante).
+                      final_unit_price: this.roundMoney(
+                        item.base_unit_price + item.tax_amount_item,
+                      ),
+                    }
                   : {}),
                 cost_price: item.cost_price,
                 notes: (item as any).notes?.trim() || null,
@@ -3955,7 +3983,9 @@ export class CheckoutService {
         // `tax_amount_item` persistido es POR UNIDAD; la línea = × cantidad
         // (mismo truncado ROUND_DOWN que `total_tax` del cálculo).
         unit_price_gross: this.roundMoney(
-          Number(oi.unit_price) + Number(oi.tax_amount_item ?? 0),
+          oi.final_unit_price != null
+            ? Number(oi.final_unit_price)
+            : Number(oi.unit_price) + Number(oi.tax_amount_item ?? 0),
         ),
         total_price_gross: this.grossLineTotal(oi),
         // [resid-fiscal] — Aditivo. El FE pinta la línea tachada con
