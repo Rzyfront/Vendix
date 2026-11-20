@@ -77,6 +77,10 @@ interface MembersStats {
 export class MembershipMembersListPageComponent implements OnInit {
   private readonly membershipsService = inject(MembershipsService);
   private readonly bulkScanner = inject(MemberBulkScannerService);
+  /** ia-cargas F2 — members committed so far in a chunked bulk load. */
+  readonly bulkCommitProgress = signal<{ done: number; total: number } | null>(
+    null,
+  );
   private readonly toastService = inject(ToastService);
   private readonly router = inject(Router);
   private readonly destroyRef = inject(DestroyRef);
@@ -341,15 +345,23 @@ export class MembershipMembersListPageComponent implements OnInit {
       );
     }
     this.bulkScanner
-      .commitRosterInChunks(dto)
+      .commitRosterInChunks(dto, (done, count) =>
+        this.bulkCommitProgress.set(
+          count > MEMBER_COMMIT_CHUNK ? { done, total: count } : null,
+        ),
+      )
       .then((data) => {
-        // Plan creation is atomic on the backend: if any plan failed, NO
-        // member row was persisted. Report and let the user retry.
+        this.bulkCommitProgress.set(null);
+        // Plan creation is atomic per request: if any plan failed, NO member
+        // of THAT request was persisted. Earlier chunks may have landed.
         if (data.plan_errors?.length) {
           this.toastService.error(
-            `No se creó nada: ${data.plan_errors.length} plan(es) con error. Corrige los planes e intenta de nuevo.`,
+            data.succeeded
+              ? `Se cargaron ${data.succeeded} socios y la carga se detuvo: ${data.plan_errors.length} plan(es) con error. Revisa los planes antes de cargar el resto.`
+              : `No se creó nada: ${data.plan_errors.length} plan(es) con error. Corrige los planes e intenta de nuevo.`,
             'Carga masiva',
           );
+          if (data.succeeded) this.loadMemberships();
           return;
         }
 
@@ -376,6 +388,7 @@ export class MembershipMembersListPageComponent implements OnInit {
         this.loadMemberships();
       })
       .catch((error: unknown) => {
+        this.bulkCommitProgress.set(null);
         const message =
           typeof error === 'string'
             ? error

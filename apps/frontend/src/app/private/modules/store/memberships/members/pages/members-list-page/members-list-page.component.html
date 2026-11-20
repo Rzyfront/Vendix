@@ -15,6 +15,16 @@
     (actionClicked)="onActionClick($event)"
   />
 
+  <!-- ia-cargas F2: una carga grande de socios va por partes. -->
+  @if (bulkCommitProgress(); as bp) {
+    <div
+      class="mx-2 md:mx-0 my-2 p-3 rounded-lg border border-primary/30 bg-primary/5 text-sm text-text-primary"
+      role="status"
+    >
+      Cargando socios: {{ bp.done }} de {{ bp.total }}. No cierres esta página.
+    </div>
+  }
+
   <div
     class="stats-container sticky top-[52px] z-20 bg-background md:static md:bg-transparent"
   >
