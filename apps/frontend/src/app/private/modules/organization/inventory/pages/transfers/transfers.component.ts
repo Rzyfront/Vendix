@@ -7,6 +7,7 @@ import {
   signal,
 } from '@angular/core';
 import { takeUntilDestroyed } from '@angular/core/rxjs-interop';
+import { Observable } from 'rxjs';
 import { RouterLink } from '@angular/router';
 
 import { AuthFacade } from '../../../../../../core/store/auth/auth.facade';
@@ -35,6 +36,12 @@ import {
 import { OrgTransferListComponent } from './components/transfer-list.component';
 import { OrgTransferCreateModalComponent } from './components/transfer-create-modal.component';
 import { OrgTransferDetailModalComponent } from './components/transfer-detail-modal.component';
+import { TransferQuickMoveModalComponent } from '../../../../store/inventory/transfers/quick-move/transfer-quick-move-modal.component';
+import type {
+  TransferPayload,
+  TransferPickerRow,
+  TransferProductSearchFn,
+} from '../../../../store/inventory/transfers/quick-move/transfer-draft';
 
 /**
  * ORG_ADMIN — Transferencias de stock con lifecycle completo
@@ -62,6 +69,7 @@ import { OrgTransferDetailModalComponent } from './components/transfer-detail-mo
     OrgTransferListComponent,
     OrgTransferCreateModalComponent,
     OrgTransferDetailModalComponent,
+    TransferQuickMoveModalComponent,
   ],
   template: `
     <div class="w-full">
@@ -135,6 +143,20 @@ import { OrgTransferDetailModalComponent } from './components/transfer-detail-mo
         (pageChange)="onPageChange($event)"
       />
 
+      @defer (when showQuickMoveModal()) {
+        <app-transfer-quick-move-modal
+          [isOpen]="showQuickMoveModal()"
+          [isSubmitting]="isSubmitting()"
+          [locations]="locationOptions()"
+          [searchFn]="searchProductsFn"
+          advancedRoute="/admin/inventory/transfers/new"
+          (isOpenChange)="showQuickMoveModal.set($event)"
+          (cancel)="showQuickMoveModal.set(false)"
+          (quickMove)="onQuickMove($event)"
+          (useDetailedFlow)="onUseDetailedFlow()"
+        ></app-transfer-quick-move-modal>
+      }
+
       @defer (when showCreateModal()) {
         <app-org-transfer-create-modal
           [isOpen]="showCreateModal()"
@@ -180,6 +202,7 @@ export class OrgTransfersComponent implements OnInit {
   readonly isSubmitting = signal(false);
 
   readonly showCreateModal = signal(false);
+  readonly showQuickMoveModal = signal(false);
   readonly showDetailModal = signal(false);
   readonly selectedTransfer = signal<OrgTransfer | null>(null);
 
@@ -333,7 +356,7 @@ export class OrgTransfersComponent implements OnInit {
         this.toast.error('No tienes permisos para crear transferencias');
         return;
       }
-      this.showCreateModal.set(true);
+      this.showQuickMoveModal.set(true);
     } else if (action === 'refresh') {
       this.refresh();
     }
@@ -345,6 +368,43 @@ export class OrgTransfersComponent implements OnInit {
   }
 
   // ─── Mutations ─────────────────────────────────────────────────────────
+
+  /** Picker del movimiento rápido: una fila por variante (shape compartido). */
+  readonly searchProductsFn: TransferProductSearchFn = (
+    term: string,
+    from: number,
+    to: number,
+  ): Observable<TransferPickerRow[]> =>
+    this.orgTransfers.searchTransferableProducts(term, from, to, 30);
+
+  /** D1: mover ahora entre bodegas de la organización, en una transacción. */
+  onQuickMove(payload: TransferPayload): void {
+    if (this.isSubmitting()) return;
+    this.isSubmitting.set(true);
+    this.orgTransfers
+      .createAndComplete(payload)
+      .pipe(takeUntilDestroyed(this.destroyRef))
+      .subscribe({
+        next: () => {
+          this.toast.success(
+            'Inventario movido: el origen ya descontó y el destino ya sumó.',
+          );
+          this.isSubmitting.set(false);
+          this.showQuickMoveModal.set(false);
+          this.refresh();
+        },
+        error: (err) => {
+          this.toast.error(err?.message || 'Error al mover el inventario');
+          this.isSubmitting.set(false);
+        },
+      });
+  }
+
+  /** Flujo con borrador, aprobación y despacho (transferencia pendiente). */
+  onUseDetailedFlow(): void {
+    this.showQuickMoveModal.set(false);
+    this.showCreateModal.set(true);
+  }
 
   onCreate(dto: CreateOrgTransferRequest): void {
     if (!this.canCreate()) return;

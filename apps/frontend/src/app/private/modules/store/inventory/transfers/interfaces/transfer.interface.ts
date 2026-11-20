@@ -118,8 +118,13 @@ export interface LocationStock {
 }
 
 export interface TransferableProduct {
+  /** Id del producto (contrato histórico del endpoint). */
   id: number;
+  product_id: number;
+  /** Una fila por variante: dos variantes del mismo producto son dos filas. */
+  product_variant_id: number | null;
   name: string;
+  variant_name: string | null;
   sku: string | null;
   stock_at_origin: LocationStock;
   stock_at_destination: LocationStock;

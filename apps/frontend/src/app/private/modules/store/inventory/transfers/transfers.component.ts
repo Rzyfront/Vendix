@@ -4,6 +4,7 @@ import { takeUntilDestroyed } from '@angular/core/rxjs-interop';
 
 
 import { HttpClient } from '@angular/common/http';
+import { Observable } from 'rxjs';
 import { map } from 'rxjs/operators';
 import { StatsComponent } from '../../../../../shared/components/stats/stats.component';
 import { ToastService } from '../../../../../shared/components/toast/toast.service';
@@ -14,6 +15,12 @@ import { TransfersService } from './services';
 import { TransferListComponent } from './components/transfer-list.component';
 import { TransferCreateModalComponent } from './components/transfer-create-modal.component';
 import { TransferDetailModalComponent } from './components/transfer-detail-modal.component';
+import { TransferQuickMoveModalComponent } from './quick-move/transfer-quick-move-modal.component';
+import type {
+  TransferPayload,
+  TransferPickerRow,
+  TransferProductSearchFn,
+} from './quick-move/transfer-draft';
 import {
   StockTransfer,
   TransferStats,
@@ -29,6 +36,7 @@ import {
     TransferListComponent,
     TransferCreateModalComponent,
     TransferDetailModalComponent,
+    TransferQuickMoveModalComponent,
   ],
   template: `
     <div class="w-full">
@@ -89,6 +97,21 @@ import {
         (deleteTransfer)="onDelete($event)"
       ></app-transfer-list>
 
+      <!-- Movimiento rápido (D1): la vía principal para mover inventario -->
+      @defer (when showQuickMoveModal()) {
+        <app-transfer-quick-move-modal
+          [isOpen]="showQuickMoveModal()"
+          [isSubmitting]="isSubmitting()"
+          [locations]="locationOptions()"
+          [searchFn]="searchProductsFn"
+          advancedRoute="/admin/inventory/transfers/new"
+          (isOpenChange)="showQuickMoveModal.set($event)"
+          (cancel)="showQuickMoveModal.set(false)"
+          (quickMove)="onQuickMove($event)"
+          (useDetailedFlow)="onUseDetailedFlow()"
+        ></app-transfer-quick-move-modal>
+      }
+
       @defer (when showCreateModal()) {
         <app-transfer-create-modal
           [isOpen]="showCreateModal()"
@@ -134,6 +157,7 @@ export class TransfersComponent implements OnInit {
   isSubmitting = signal(false);
 
   showCreateModal = signal(false);
+  showQuickMoveModal = signal(false);
   showDetailModal = signal(false);
   selectedTransfer = signal<StockTransfer | null>(null);
   locationOptions = signal<SelectorOption[]>([]);
@@ -199,6 +223,48 @@ loadStats(): void {
       });
   }
 
+  /**
+   * Búsqueda del picker del modal rápido. Cada variante llega como fila propia
+   * con su disponible en origen y destino.
+   */
+  readonly searchProductsFn: TransferProductSearchFn = (
+    term: string,
+    from: number,
+    to: number,
+  ): Observable<TransferPickerRow[]> =>
+    this.transfersService.searchTransferableProducts(term, from, to, 30);
+
+  /** D1: mover ahora — crea y completa en una transacción. */
+  onQuickMove(payload: TransferPayload): void {
+    if (this.isSubmitting()) return;
+    this.isSubmitting.set(true);
+    this.transfersService
+      .createAndComplete(payload as CreateTransferRequest)
+      .pipe(takeUntilDestroyed(this.destroyRef))
+      .subscribe({
+        next: () => {
+          this.toastService.success(
+            'Inventario movido: el origen ya descontó y el destino ya sumó.',
+          );
+          this.isSubmitting.set(false);
+          this.showQuickMoveModal.set(false);
+          this.refresh();
+        },
+        error: (err) => {
+          this.toastService.error(
+            err.message || 'Error al mover el inventario',
+          );
+          this.isSubmitting.set(false);
+        },
+      });
+  }
+
+  /** El comerciante pidió el flujo con borrador, aprobación y despacho. */
+  onUseDetailedFlow(): void {
+    this.showQuickMoveModal.set(false);
+    this.showCreateModal.set(true);
+  }
+
   onSearch(term: string): void {
     this.searchTerm = term;
     this.loadTransfers();
@@ -216,7 +282,7 @@ loadStats(): void {
   }
 
   onActionClick(action: string): void {
-    if (action === 'create') this.showCreateModal.set(true);
+    if (action === 'create') this.showQuickMoveModal.set(true);
     if (action === 'refresh') this.refresh();
   }
 
