@@ -9,6 +9,7 @@ import {
   PLATFORM_CRM_PERMISSIONS,
   PlatformCrmLinkItem,
   PlatformCrmLinkList,
+  SubscriptionMovementsView,
   canManageVendixAccount,
   canSeeVendixAccount,
 } from './platform-crm.interface';
@@ -86,7 +87,24 @@ describe('VendixAccountBlockComponent', () => {
     unlinkById: jasmine.Spy;
     searchAccounts: jasmine.Spy;
     link: jasmine.Spy;
+    getSubscriptionMovements: jasmine.Spy;
+    getStoreActivity: jasmine.Spy;
   };
+  const emptyMetrics = {
+    total_paid: [],
+    last_payment: null,
+    next_renewal_at: null,
+    overdue_count: 0,
+    overdue_balance: [],
+    monthly_value: [],
+  };
+  const movementsView = (): SubscriptionMovementsView => ({
+    window: { from: '2025-11-20', to: '2026-11-19' },
+    stores: [],
+    summary: { total: emptyMetrics, by_store: [] },
+    items: [],
+    pagination: { page: 1, limit: 20, total: 0, has_more: false },
+  });
   let dialog: { prompt: jasmine.Spy };
   let toast: { success: jasmine.Spy; error: jasmine.Spy };
 
@@ -101,6 +119,10 @@ describe('VendixAccountBlockComponent', () => {
         .createSpy('searchAccounts')
         .and.returnValue(of({ organizations: [], stores: [] })),
       link: jasmine.createSpy('link'),
+      getSubscriptionMovements: jasmine
+        .createSpy('getSubscriptionMovements')
+        .and.callFake(() => of(movementsView())),
+      getStoreActivity: jasmine.createSpy('getStoreActivity').and.returnValue(of(null)),
     };
     dialog = { prompt: jasmine.createSpy('prompt').and.resolveTo('') };
     toast = { success: jasmine.createSpy('success'), error: jasmine.createSpy('error') };
@@ -171,6 +193,8 @@ describe('VendixAccountBlockComponent', () => {
 
     expect(service.getLinks).toHaveBeenCalledOnceWith(55);
     expect(cards(fixture)).toHaveSize(0);
+    // Sin cuentas no hay historial que pedir.
+    expect(service.getSubscriptionMovements).not.toHaveBeenCalled();
     expect(text(fixture)).toContain('Sin cuenta Vendix enlazada.');
     expect(buttonWith(fixture, 'Enlazar con cuenta Vendix')).not.toBeNull();
     expect(buttonWith(fixture, 'Enlazar otra cuenta')).toBeNull();
@@ -316,6 +340,24 @@ describe('VendixAccountBlockComponent', () => {
 
     expect(service.unlinkById).toHaveBeenCalledOnceWith(55, 7, {});
     expect(text(fixture)).toContain('Sin cuenta Vendix enlazada.');
+  });
+
+  it('con cuentas muestra «Movimientos de la suscripción» y lo recarga al desenlazar una', async () => {
+    const fixture = await setup(
+      jasmine.createSpy('getLinks').and.returnValue(of(list(orgItem(), storeItem()))),
+      ALL,
+    );
+
+    expect(text(fixture)).toContain('Movimientos de la suscripción');
+    expect(text(fixture)).toContain('No afectan la contabilidad de esta tienda.');
+    expect(service.getSubscriptionMovements).toHaveBeenCalledTimes(1);
+    expect(service.getSubscriptionMovements.calls.mostRecent().args[0]).toBe(55);
+
+    service.unlinkById.and.returnValue(of(list(orgItem())));
+    buttonsWith(cards(fixture)[1], 'Desenlazar')[0].click();
+    await settle(fixture);
+
+    expect(service.getSubscriptionMovements).toHaveBeenCalledTimes(2);
   });
 
   it('desenlazar que falla avisa con el mensaje del backend y conserva las cuentas', async () => {

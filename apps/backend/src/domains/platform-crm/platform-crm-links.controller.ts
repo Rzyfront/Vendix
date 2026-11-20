@@ -15,6 +15,7 @@ import { ResponseService } from '@common/responses/response.service';
 import { PLATFORM_CRM_LINK_PERMISSIONS } from '../../common/constants/platform-permissions.constant';
 import { SkipSubscriptionGate } from '../store/subscriptions/decorators/skip-subscription-gate.decorator';
 import { PlatformCrmLinksService } from './platform-crm-links.service';
+import { PlatformCrmAccountService } from './platform-crm-account.service';
 import {
   PlatformCrmContext,
   PlatformCrmCtx,
@@ -22,7 +23,9 @@ import {
 } from './platform-store.guard';
 import {
   LinkPlatformCustomerDto,
+  PlatformStoreActivityQueryDto,
   SearchPlatformAccountsQueryDto,
+  SubscriptionMovementsQueryDto,
   UnlinkPlatformCustomerDto,
 } from './dto/platform-crm-links.dto';
 
@@ -43,6 +46,7 @@ import {
 export class PlatformCrmLinksController {
   constructor(
     private readonly service: PlatformCrmLinksService,
+    private readonly account: PlatformCrmAccountService,
     private readonly response: ResponseService,
   ) {}
 
@@ -75,6 +79,39 @@ export class PlatformCrmLinksController {
     return this.response.success(
       await this.service.unlinkById(ctx, customerId, linkId, dto),
       'Enlace deshecho',
+    );
+  }
+
+  /**
+   * Facturas, pagos y cambios de la suscripción de los comercios enlazados,
+   * con métricas (D1, D3). Solo lectura; `store_id` ajeno → 404.
+   */
+  @Get('customers/:customerId/subscription-movements')
+  @Permissions(PLATFORM_CRM_LINK_PERMISSIONS.READ)
+  async subscriptionMovements(
+    @PlatformCrmCtx() ctx: PlatformCrmContext,
+    @Param('customerId', ParseIntPipe) customerId: number,
+    @Query() query: SubscriptionMovementsQueryDto,
+  ) {
+    return this.response.success(
+      await this.account.getSubscriptionMovements(ctx, customerId, query),
+    );
+  }
+
+  /**
+   * Gráfica de actividad de un comercio enlazado (D4): agregados diarios, por
+   * canal y por estado, sin timeline. Comercio no cubierto → 404.
+   */
+  @Get('customers/:customerId/stores/:storeId/activity')
+  @Permissions(PLATFORM_CRM_LINK_PERMISSIONS.READ)
+  async storeActivity(
+    @PlatformCrmCtx() ctx: PlatformCrmContext,
+    @Param('customerId', ParseIntPipe) customerId: number,
+    @Param('storeId', ParseIntPipe) storeId: number,
+    @Query() query: PlatformStoreActivityQueryDto,
+  ) {
+    return this.response.success(
+      await this.account.getStoreActivity(ctx, customerId, storeId, query),
     );
   }
 

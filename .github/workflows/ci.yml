@@ -568,6 +568,7 @@ jobs:
           npx jest --ci --runInBand --forceExit --config jest.isolated.config.js --runTestsByPath
           src/domains/platform-crm/platform-crm-links.controller.spec.ts
           src/domains/platform-crm/platform-crm-links.service.spec.ts
+          src/domains/platform-crm/platform-crm-account.service.spec.ts
           src/domains/platform-crm/platform-crm.seed.spec.ts
           src/domains/platform-crm/platform-permission-assignment.spec.ts
           src/domains/organization/onboarding/onboarding-wizard-org-admin-role.spec.ts
@@ -808,6 +809,8 @@ jobs:
           --include='**/super-admin/monitoring/services/monitoring-alerts.service.spec.ts'
           --include='**/super-admin/monitoring/pages/alerts/monitoring-alerts.page.spec.ts'
           --include='**/store/platform-crm/*.spec.ts'
+          --include='**/shared/components/store-activity-charts/*.spec.ts'
+          --include='**/super-admin/stores/activity/components/store-activity-detail-modal.component.spec.ts'
           --include='**/pop/utils/receipt-uom-block.util.spec.ts'
           --include='**/shared/utils/compact-money.util.spec.ts'
           --include='**/shared/pipes/currency/currency.pipe.spec.ts'

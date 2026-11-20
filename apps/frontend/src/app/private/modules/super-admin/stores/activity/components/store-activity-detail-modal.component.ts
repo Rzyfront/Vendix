@@ -8,10 +8,8 @@ import {
   signal,
 } from '@angular/core';
 import { takeUntilDestroyed } from '@angular/core/rxjs-interop';
-import type { EChartsOption } from 'echarts';
 
 import {
-  ChartComponent,
   EmptyStateComponent,
   IconComponent,
   ModalComponent,
@@ -22,9 +20,9 @@ import type {
   FilterConfig,
   FilterValues,
 } from '../../../../../../shared/components/options-dropdown/options-dropdown.interfaces';
+import { StoreActivityChartsComponent } from '../../../../../../shared/components/store-activity-charts/store-activity-charts.component';
 import { CurrencyFormatService } from '../../../../../../shared/pipes/currency/currency.pipe';
 import {
-  formatChartPeriod,
   formatDateOnlyUTC,
   toLocalDateString,
 } from '../../../../../../shared/utils/date.util';
@@ -50,23 +48,12 @@ function defaultTo(): string {
   return toLocalDateString();
 }
 
-function axisColors(): { border: string; secondary: string } {
-  if (typeof document === 'undefined') {
-    return { border: '#e5e7eb', secondary: '#6b7280' };
-  }
-  const style = getComputedStyle(document.documentElement);
-  return {
-    border: style.getPropertyValue('--color-border').trim() || '#e5e7eb',
-    secondary:
-      style.getPropertyValue('--color-text-secondary').trim() || '#6b7280',
-  };
-}
-
 /**
  * Detalle de actividad de una tienda sobre el ranking (no navega).
  *
- * Hero con score protagonista + tira de métricas con iconos, tres gráficos
- * `app-chart` (serie diaria, ingreso operativo, doughnuts por canal/estado) y
+ * Hero con score protagonista + tira de métricas con iconos, las gráficas
+ * compartidas `app-store-activity-charts` (serie diaria, ingreso operativo,
+ * doughnuts por canal/estado; las mismas de la Cuenta Vendix del CRM) y
  * filtros propios en `app-options-dropdown` (rango con presets, canal,
  * estado). El resumen sale de `getDetail().summary`; las series del endpoint
  * `GET /superadmin/stores/activity/:storeId/series` (buckets diarios UTC con
@@ -81,7 +68,7 @@ function axisColors(): { border: string; secondary: string } {
   imports: [
     ModalComponent,
     OptionsDropdownComponent,
-    ChartComponent,
+    StoreActivityChartsComponent,
     EmptyStateComponent,
     IconComponent,
   ],
@@ -226,75 +213,10 @@ function axisColors(): { border: string; secondary: string } {
             (clearFiltersClick)="onClearFilters()"
           />
         } @else {
-          <!-- Serie diaria -->
-          <section class="mt-4">
-            <h4 class="text-sm font-semibold text-text-primary">Actividad diaria</h4>
-            <p class="mt-0.5 text-xs text-text-secondary">
-              Pedidos, eventos auditados y accesos por día (UTC).
-            </p>
-            <div class="mt-2 h-64">
-              <app-chart
-                [options]="dailyOptions()"
-                [loading]="isLoadingSeries()"
-              ></app-chart>
-            </div>
-          </section>
-
-          <!-- Ingreso operativo -->
-          <section class="mt-5">
-            <h4 class="text-sm font-semibold text-text-primary">
-              Ingreso operativo por día
-            </h4>
-            <p class="mt-0.5 text-xs text-text-secondary">
-              Suma diaria de ingreso operativo en el rango (UTC).
-            </p>
-            <div class="mt-2 h-64">
-              <app-chart
-                [options]="revenueOptions()"
-                [loading]="isLoadingSeries()"
-              ></app-chart>
-            </div>
-          </section>
-
-          <!-- Distribuciones -->
-          <div class="mt-5 grid grid-cols-1 gap-4 md:grid-cols-2">
-            <section>
-              <h4 class="text-sm font-semibold text-text-primary">Pedidos por canal</h4>
-              <p class="mt-0.5 text-xs text-text-secondary">
-                Distribución de pedidos del rango.
-              </p>
-              @if (hasChannelData()) {
-                <div class="mt-2 h-60">
-                  <app-chart
-                    [options]="channelOptions()"
-                    [loading]="isLoadingSeries()"
-                  ></app-chart>
-                </div>
-              } @else {
-                <p class="mt-2 rounded-lg border border-dashed border-border px-3 py-6 text-center text-xs text-text-secondary">
-                  Sin pedidos con canal en el rango.
-                </p>
-              }
-            </section>
-            <section>
-              <h4 class="text-sm font-semibold text-text-primary">Pedidos por estado</h4>
-              <p class="mt-0.5 text-xs text-text-secondary">
-                Distribución de pedidos del rango.
-              </p>
-              @if (hasStateData()) {
-                <div class="mt-2 h-60">
-                  <app-chart
-                    [options]="stateOptions()"
-                    [loading]="isLoadingSeries()"
-                  ></app-chart>
-                </div>
-              } @else {
-                <p class="mt-2 rounded-lg border border-dashed border-border px-3 py-6 text-center text-xs text-text-secondary">
-                  Sin pedidos con estado en el rango.
-                </p>
-              }
-            </section>
-          </div>
+          <app-store-activity-charts
+            [series]="series()"
+            [loading]="isLoadingSeries()"
+          ></app-store-activity-charts>
         }
       }
     </app-modal>
@@ -377,14 +299,6 @@ export class StoreActivityDetailModalComponent {
     return from ? `Desde ${formatDateOnlyUTC(from)}` : `Hasta ${formatDateOnlyUTC(to)}`;
   });
 
-  readonly hasChannelData = computed(() =>
-    Object.values(this.series()?.by_channel ?? {}).some((v) => v > 0),
-  );
-
-  readonly hasStateData = computed(() =>
-    Object.values(this.series()?.by_state ?? {}).some((v) => v > 0),
-  );
-
   readonly modalTitle = computed(() => {
     const current = this.store();
     return current ? `Actividad · ${current.name}` : 'Actividad de tienda';
@@ -396,193 +310,6 @@ export class StoreActivityDetailModalComponent {
     const org = current.organization_name ?? 'Sin organización';
     return `${current.slug} · ${org}`;
   });
-
-  readonly dailyOptions = computed<EChartsOption>(() => {
-    const days = this.series()?.days ?? [];
-    const { border, secondary } = axisColors();
-    const labels = days.map((d) => formatChartPeriod(d.date, 'day'));
-    return {
-      tooltip: {
-        trigger: 'axis',
-        confine: true,
-        backgroundColor: 'rgba(255,255,255,0.98)',
-        borderColor: border,
-        borderWidth: 1,
-        textStyle: { color: secondary, fontSize: 12 },
-      },
-      dataZoom: [
-        {
-          type: 'inside',
-          start: 0,
-          end: 100,
-          zoomOnMouseWheel: true,
-          moveOnMouseMove: true,
-        },
-      ],
-      grid: { left: '3%', right: '4%', bottom: '18%', containLabel: true },
-      xAxis: {
-        type: 'category',
-        data: labels,
-        axisLine: { lineStyle: { color: border } },
-        axisLabel: { color: secondary, fontSize: 11, hideOverlap: true },
-      },
-      yAxis: {
-        type: 'value',
-        axisLine: { show: false },
-        axisLabel: { color: secondary, fontSize: 11 },
-        splitLine: { lineStyle: { color: border, type: 'dashed' } },
-      },
-      series: [
-        {
-          name: 'Pedidos',
-          type: 'line',
-          smooth: 0.4,
-          data: days.map((d) => d.orders),
-          symbol: 'circle',
-          symbolSize: 6,
-          showSymbol: false,
-          emphasis: { scale: true },
-          lineStyle: { color: '#3b82f6', width: 3 },
-          itemStyle: { color: '#3b82f6' },
-        },
-        {
-          name: 'Eventos',
-          type: 'line',
-          smooth: 0.4,
-          data: days.map((d) => d.audit_events),
-          symbol: 'circle',
-          symbolSize: 6,
-          showSymbol: false,
-          emphasis: { scale: true },
-          lineStyle: { color: '#06b6d4', width: 2 },
-          itemStyle: { color: '#06b6d4' },
-        },
-        {
-          name: 'Accesos',
-          type: 'line',
-          smooth: 0.4,
-          data: days.map((d) => d.logins),
-          symbol: 'circle',
-          symbolSize: 6,
-          showSymbol: false,
-          emphasis: { scale: true },
-          lineStyle: { color: '#10b981', width: 2 },
-          itemStyle: { color: '#10b981' },
-        },
-      ],
-    };
-  });
-
-  readonly revenueOptions = computed<EChartsOption>(() => {
-    const days = this.series()?.days ?? [];
-    const { border, secondary } = axisColors();
-    const labels = days.map((d) => formatChartPeriod(d.date, 'day'));
-    return {
-      tooltip: {
-        trigger: 'axis',
-        confine: true,
-        backgroundColor: 'rgba(255,255,255,0.98)',
-        borderColor: border,
-        borderWidth: 1,
-        textStyle: { color: secondary, fontSize: 12 },
-        formatter: (params: unknown) => {
-          const point = Array.isArray(params) ? params[0] : params as { name?: string; value?: number };
-          const value = Number(point?.value) || 0;
-          const name = String(point?.name ?? '');
-          return name + '<br/>' + 'Ingreso: <strong>' + this.currency.format(value) + '</strong>';
-        },
-      },
-      dataZoom: [
-        {
-          type: 'inside',
-          start: 0,
-          end: 100,
-          zoomOnMouseWheel: true,
-          moveOnMouseMove: true,
-        },
-      ],
-      grid: { left: '3%', right: '4%', bottom: '18%', containLabel: true },
-      xAxis: {
-        type: 'category',
-        data: labels,
-        axisLine: { lineStyle: { color: border } },
-        axisLabel: { color: secondary, fontSize: 11, hideOverlap: true },
-      },
-      yAxis: {
-        type: 'value',
-        axisLine: { show: false },
-        axisLabel: {
-          color: secondary,
-          fontSize: 11,
-          formatter: (value: number) => this.currency.formatChartAxis(value),
-        },
-        splitLine: { lineStyle: { color: border, type: 'dashed' } },
-      },
-      series: [
-        {
-          name: 'Ingreso operativo',
-          type: 'bar',
-          data: days.map((d) => Number(d.revenue_operating) || 0),
-          itemStyle: { color: '#3b82f6', borderRadius: [6, 6, 0, 0] },
-          barMaxWidth: 48,
-        },
-      ],
-    };
-  });
-
-  readonly channelOptions = computed<EChartsOption>(() =>
-    this.doughnutOptions(
-      'Pedidos por canal',
-      Object.entries(this.series()?.by_channel ?? {}),
-    ),
-  );
-
-  readonly stateOptions = computed<EChartsOption>(() =>
-    this.doughnutOptions(
-      'Pedidos por estado',
-      Object.entries(this.series()?.by_state ?? {}),
-    ),
-  );
-
-  private doughnutOptions(
-    title: string,
-    entries: Array<[string, number]>,
-  ): EChartsOption {
-    const { secondary } = axisColors();
-    return {
-      tooltip: {
-        trigger: 'item',
-        confine: true,
-        backgroundColor: 'rgba(255,255,255,0.98)',
-        textStyle: { color: secondary, fontSize: 12 },
-        formatter: (params: unknown) => {
-          const point = params as { name?: string; value?: number };
-          const value = Number(point?.value) || 0;
-          return String(point?.name ?? title) + ': <strong>' + value + '</strong>';
-        },
-      },
-      legend: {
-        bottom: 0,
-        textStyle: { color: secondary, fontSize: 11 },
-      },
-      series: [
-        {
-          name: title,
-          type: 'pie',
-          radius: ['55%', '75%'],
-          center: ['50%', '44%'],
-          avoidLabelOverlap: true,
-          itemStyle: { borderRadius: 6, borderColor: '#fff', borderWidth: 2 },
-          label: {
-            color: secondary,
-            fontSize: 11,
-            formatter: '{b}: {c}',
-          },
-          data: entries.map(([name, value]) => ({ name, value })),
-        },
-      ],
-    };
-  }
 
   onOpened(): void {
     this.reload();

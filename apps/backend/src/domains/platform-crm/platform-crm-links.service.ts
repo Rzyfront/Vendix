@@ -87,6 +87,20 @@ export interface PlatformCrmLinkList {
   links: PlatformCrmLinkItem[];
 }
 
+/**
+ * Comercio cubierto por un enlace activo del cliente: la tienda suelta, o cada
+ * tienda de una org enlazada completa (incluidas las creadas después).
+ */
+export interface PlatformCoveredStore {
+  store_id: number;
+  store_name: string;
+  organization_name: string;
+  link_id: number;
+}
+
+/** Tope de comercios cubiertos que se leen por cliente (25 enlaces × varias tiendas). */
+export const MAX_COVERED_STORES = 200;
+
 /** `select` literal de un enlace: lo único que se lee de la fila. */
 const LINK_SELECT = {
   id: true,
@@ -425,6 +439,61 @@ export class PlatformCrmLinksService {
         link.linked_store?.id ?? null,
       ),
     };
+  }
+
+  /**
+   * Comercios cubiertos por los enlaces activos del cliente (B.1). Se resuelve
+   * al leer: una tienda creada después en una org enlazada completa entra sola.
+   * Sin duplicados; si una tienda la cubren su org completa y un enlace suelto,
+   * manda el de la org. Base de todo anti-IDOR por `store_id` del módulo.
+   */
+  async resolveCoveredStores(
+    ctx: PlatformCrmContext,
+    customerId: number,
+  ): Promise<PlatformCoveredStore[]> {
+    await this.assertPlatformCustomer(ctx, customerId);
+    const links = await this.db.platform_crm_links.findMany({
+      where: { store_id: ctx.store_id, customer_id: customerId, status: 'linked' },
+      select: { id: true, organization_id: true, linked_store_id: true },
+      orderBy: [{ linked_at: 'asc' }, { id: 'asc' }],
+      take: MAX_ACTIVE_LINKS_PER_CUSTOMER,
+    });
+    if (links.length === 0) return [];
+
+    const orgLinks = new Map<number, number>();
+    const storeLinks = new Map<number, number>();
+    for (const link of links) {
+      if (link.linked_store_id === null) orgLinks.set(link.organization_id, link.id);
+      else storeLinks.set(link.linked_store_id, link.id);
+    }
+    const scopes: Prisma.storesWhereInput[] = [];
+    if (orgLinks.size) scopes.push({ organization_id: { in: [...orgLinks.keys()] } });
+    if (storeLinks.size) scopes.push({ id: { in: [...storeLinks.keys()] } });
+
+    const stores = await this.db.stores.findMany({
+      where: { organizations: { is_platform: false }, OR: scopes },
+      select: {
+        id: true,
+        name: true,
+        organization_id: true,
+        organizations: { select: { name: true } },
+      },
+      orderBy: [{ organization_id: 'asc' }, { id: 'asc' }],
+      take: MAX_COVERED_STORES,
+    });
+
+    const covered: PlatformCoveredStore[] = [];
+    for (const store of stores) {
+      const linkId = orgLinks.get(store.organization_id) ?? storeLinks.get(store.id);
+      if (linkId === undefined) continue;
+      covered.push({
+        store_id: store.id,
+        store_name: store.name,
+        organization_name: store.organizations.name,
+        link_id: linkId,
+      });
+    }
+    return covered;
   }
 
   /**
