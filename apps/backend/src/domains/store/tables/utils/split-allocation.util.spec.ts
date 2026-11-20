@@ -540,3 +540,87 @@ describe('split money serialization', () => {
     expect(formatCents(0n)).toBe('0.00');
   });
 });
+
+describe('allocateFinancialSplit — descuento por línea persistido (promo de producto)', () => {
+  // Mesa real (caso pinchos): todo con INC 8 %. Promo de producto de 18.000
+  // en bruto SOLO sobre los pinchos → 16.666,67 de base; el INC de los pinchos
+  // ya viene recalculado sobre la base descontada (contrato nuevo).
+  const inc = (amount: string) =>
+    tax(amount, { tax_name: 'INC 8%', tax_rate: '0.08', tax_type: 'inc' });
+  const pinchosSource = (withLineDiscounts = true): FinancialSplitSource => ({
+    subtotal_amount: '130185.19',
+    discount_amount: '16666.67',
+    tax_amount: '9081.48',
+    shipping_cost: '0.00',
+    tip_amount: '0.00',
+    grand_total: '122600.00',
+    paid_total: '0.00',
+    items: [
+      {
+        id: 1, // Pinchos x2
+        subtotal_amount: '55555.56',
+        ...(withLineDiscounts ? { discount_amount: '16666.67' } : {}),
+        taxes: [inc('3111.11')],
+      },
+      {
+        id: 2, // Pollo entero
+        subtotal_amount: '54629.63',
+        ...(withLineDiscounts ? { discount_amount: '0.00' } : {}),
+        taxes: [inc('4370.37')],
+      },
+      {
+        id: 3, // Gaseosa 1.5 L x2
+        subtotal_amount: '20000.00',
+        ...(withLineDiscounts ? { discount_amount: '0.00' } : {}),
+        taxes: [inc('1600.00')],
+      },
+    ],
+  });
+  const byItems: FinancialSplitRequest = {
+    mode: 'items',
+    item_groups: [{ order_item_ids: [1] }, { order_item_ids: [2, 3] }],
+  };
+
+  it('dividir por ítems deja la promo solo en la cuenta de los pinchos y cada cuenta cuadra', () => {
+    const source = pinchosSource();
+    const result = allocateFinancialSplit(source, byItems);
+    assertConservation(source, result);
+    const [pinchos, resto] = result.accounts;
+    expect(pinchos.discount_amount).toBe('16666.67');
+    expect(pinchos.subtotal_amount).toBe('55555.56');
+    expect(pinchos.tax_amount).toBe('3111.11');
+    expect(pinchos.grand_total).toBe('42000.00');
+    expect(resto.discount_amount).toBe('0.00');
+    expect(resto.grand_total).toBe('80600.00');
+    // Cada línea: base − descuento + impuesto = total (sin impuesto descuadrado).
+    for (const account of result.accounts) {
+      for (const line of account.lines.filter((l) => l.kind === 'item')) {
+        expect(
+          cents(line.subtotal_amount) - cents(line.discount_amount) + cents(line.tax_amount),
+        ).toBe(cents(line.total_amount));
+      }
+    }
+  });
+
+  it('partes iguales con descuento por línea conserva el total y el descuento', () => {
+    const source = pinchosSource();
+    const result = allocateFinancialSplit(source, { mode: 'equal', n_splits: 2 });
+    assertConservation(source, result);
+    expect(add(result.accounts.map((a) => a.discount_amount))).toBe(1666667n);
+  });
+
+  it('orden legada (sin descuento por línea) mantiene el prorrateo por base de siempre', () => {
+    const source = pinchosSource(false);
+    const result = allocateFinancialSplit(source, byItems);
+    expect(cents(result.accounts[1].discount_amount)).toBeGreaterThan(0n);
+    expect(add(result.accounts.map((a) => a.discount_amount))).toBe(1666667n);
+  });
+
+  it('si el reparto por línea no cuadra con la cabecera, cae al prorrateo (falla cerrado al legado)', () => {
+    const source = pinchosSource();
+    source.items[0].discount_amount = '10000.00'; // Σ líneas ≠ cabecera
+    const result = allocateFinancialSplit(source, byItems);
+    expect(cents(result.accounts[1].discount_amount)).toBeGreaterThan(0n);
+    expect(add(result.accounts.map((a) => a.discount_amount))).toBe(1666667n);
+  });
+});
