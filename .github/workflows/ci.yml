@@ -774,6 +774,8 @@ jobs:
           --include='**/customers/crm/shared/task-form-modal.component.spec.ts'
           --include='**/customers/crm/shared/task-complete-modal.component.spec.ts'
           --include='**/customers/crm/shared/crm-tags-manager-modal.component.spec.ts'
+          --include='**/customers/crm/pipeline/opportunity-form-modal.component.spec.ts'
+          --include='**/customers/crm/profile/customer-crm-panel.component.spec.ts'
           --include='**/workflows/records/pages/record-detail-page/record-detail-page.component.spec.ts'
           --include='**/documents/pages/templates-editor/templates-editor-page.component.spec.ts'
           --include='**/super-admin/subscriptions/pages/plans/plan-form.component.spec.ts'

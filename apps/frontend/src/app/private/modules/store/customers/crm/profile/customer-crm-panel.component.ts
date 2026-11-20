@@ -36,6 +36,7 @@ import {
   CrmCustomerSource,
   CrmNote,
   CrmOpportunity,
+  CrmPerson,
   CrmPipeline,
   CrmStage,
   CrmTag,
@@ -62,6 +63,7 @@ import { CrmTagsManagerModalComponent } from '../shared/crm-tags-manager-modal.c
 import { compareCrmTags } from '../shared/crm-tags.constants';
 import { TaskCompleteModalComponent } from '../shared/task-complete-modal.component';
 import { TaskFormModalComponent } from '../shared/task-form-modal.component';
+import { OpportunityFormModalComponent } from '../pipeline/opportunity-form-modal.component';
 import { CustomerSectionComponent, CustomerSectionEmptyComponent } from '../../components/customer-section/customer-section.component';
 import { VendixAccountBlockComponent } from '../../../platform-crm/vendix-account-block.component';
 import { canSeeVendixAccount } from '../../../platform-crm/platform-crm.interface';
@@ -107,6 +109,7 @@ const TAG_CHIP = `${CHIP} border-border bg-surface text-text-secondary`;
     CrmTagsManagerModalComponent,
     TaskCompleteModalComponent,
     TaskFormModalComponent,
+    OpportunityFormModalComponent,
     CustomerSectionComponent,
     CustomerSectionEmptyComponent,
     VendixAccountBlockComponent,
@@ -272,34 +275,10 @@ const TAG_CHIP = `${CHIP} border-border bg-surface text-text-secondary`;
               }
 
               @if (canManagePipeline() && pipelines().length) {
-                <div class="mt-4 flex flex-col gap-2 border-t border-border pt-4 sm:flex-row sm:items-end">
-                  @if (pipelines().length > 1) {
-                    <app-selector
-                      class="flex-1"
-                      label="Pipeline"
-                      [options]="pipelineOptions()"
-                      [disabled]="boardSaving()"
-                      [ngModel]="placePipelineId()"
-                      (ngModelChange)="onPlacePipeline($event)"
-                    ></app-selector>
-                  }
-                  <app-selector
-                    class="flex-1"
-                    label="Ubicar en la etapa"
-                    placeholder="Elige una etapa"
-                    [options]="placeStageOptions()"
-                    [disabled]="boardSaving()"
-                    [ngModel]="placeStageId() ?? ''"
-                    (ngModelChange)="placeStageId.set($event ? +$event : null)"
-                  ></app-selector>
-                  <app-button
-                    variant="outline"
-                    size="md"
-                    [disabled]="!placeStageId()"
-                    [loading]="boardSaving()"
-                    (clicked)="placeOnBoard()"
-                  >
-                    Agregar al tablero
+                <div class="mt-4 flex border-t border-border pt-4">
+                  <app-button variant="outline" size="md" (clicked)="openNewOpportunity()">
+                    <app-icon slot="icon" name="plus" [size]="14"></app-icon>
+                    Nueva oportunidad
                   </app-button>
                 </div>
               }
@@ -703,6 +682,18 @@ const TAG_CHIP = `${CHIP} border-border bg-surface text-text-secondary`;
 
       <app-crm-task-complete-modal></app-crm-task-complete-modal>
 
+      @if (canManagePipeline()) {
+        <app-crm-opportunity-form-modal
+          [isOpen]="opportunityModalOpen()"
+          (isOpenChange)="opportunityModalOpen.set($event)"
+          [presetCustomer]="formCustomer()"
+          [lockCustomer]="true"
+          [pipelines]="pipelines()"
+          [presetPipelineId]="defaultPipelineId()"
+          (saved)="onOpportunitySaved()"
+        ></app-crm-opportunity-form-modal>
+      }
+
       @if (canManageSegments()) {
         <app-crm-tags-manager-modal
           [isOpen]="tagsManagerOpen()"
@@ -759,8 +750,8 @@ export class CustomerCrmPanelComponent {
   protected readonly opportunities = signal<CrmOpportunity[]>([]);
   protected readonly boardLoading = signal(false);
   protected readonly boardSaving = signal(false);
-  protected readonly placePipelineId = signal<number | null>(null);
-  protected readonly placeStageId = signal<number | null>(null);
+  /** "Nueva oportunidad": the pipeline's form, with this customer fixed. */
+  protected readonly opportunityModalOpen = signal(false);
 
   // Follow-ups
   protected readonly tasks = signal<CrmTask[]>([]);
@@ -810,14 +801,14 @@ export class CustomerCrmPanelComponent {
   );
 
   protected readonly ownerName = computed(() => personName(this.profile()?.owner));
-  protected readonly pipelineOptions = computed<SelectorOption[]>(() =>
-    this.pipelines().map((pipeline) => ({ value: pipeline.id, label: pipeline.name })),
+  /** The customer the form opens with, fixed; never copied into the title. */
+  protected readonly formCustomer = computed<CrmPerson>(
+    () => this.profile()?.customer ?? { id: this.customerId(), first_name: null, last_name: null },
   );
-  protected readonly placeStageOptions = computed<SelectorOption[]>(() => {
-    const pipelineId = this.placePipelineId();
-    return pipelineId === null
-      ? []
-      : this.placeableStages(pipelineId).map((stage) => ({ value: stage.id, label: stage.name }));
+  /** Where a new opportunity starts; the user can change it in the form. */
+  protected readonly defaultPipelineId = computed(() => {
+    const pipelines = this.pipelines();
+    return (pipelines.find((row) => row.is_default) ?? pipelines[0])?.id ?? null;
   });
   protected readonly availableTagOptions = computed<SelectorOption[]>(() => {
     const assigned = new Set((this.profile()?.tags ?? []).map((tag) => tag.id));
@@ -960,10 +951,6 @@ export class CustomerCrmPanelComponent {
       if (!this.pipelines().length) {
         this.pipelines.set(await firstValueFrom(this.crm.pipelines()));
       }
-      if (this.placePipelineId() === null) {
-        const fallback = this.pipelines().find((row) => row.is_default) ?? this.pipelines()[0];
-        this.placePipelineId.set(fallback?.id ?? null);
-      }
       const customerId = this.customerId();
       const boards = await Promise.all(
         this.pipelines().map((pipeline) =>
@@ -983,34 +970,18 @@ export class CustomerCrmPanelComponent {
     }
   }
 
-  onPlacePipeline(value: string | number | null): void {
-    this.placePipelineId.set(value ? +value : null);
-    this.placeStageId.set(null);
+  /**
+   * Nothing is created here: the form opens with the customer fixed and the
+   * user types the title and the rest before saving.
+   */
+  openNewOpportunity(): void {
+    if (!this.canManagePipeline() || !this.pipelines().length) return;
+    this.opportunityModalOpen.set(true);
   }
 
-  /** Same request the Pipeline screen sends to create a card. */
-  async placeOnBoard(): Promise<void> {
-    const pipelineId = this.placePipelineId();
-    const stageId = this.placeStageId();
-    if (!pipelineId || !stageId || this.boardSaving()) return;
-    this.boardSaving.set(true);
-    try {
-      await firstValueFrom(
-        this.crm.createOpportunity({
-          customer_id: this.customerId(),
-          title: personName(this.profile()?.customer) || 'Cliente',
-          pipeline_id: pipelineId,
-          stage_id: stageId,
-        }),
-      );
-      this.placeStageId.set(null);
-      this.toast.success('Cliente agregado al tablero');
-      this.afterBoardChange();
-    } catch (error) {
-      this.toast.error(parseApiError(error).userMessage);
-    } finally {
-      this.boardSaving.set(false);
-    }
+  /** The form already showed its toast; refresh what the new card changes. */
+  onOpportunitySaved(): void {
+    this.afterBoardChange();
   }
 
   /** Same request the Pipeline screen sends when a card is dragged. */
