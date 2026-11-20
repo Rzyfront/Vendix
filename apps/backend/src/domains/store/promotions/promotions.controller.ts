@@ -71,6 +71,31 @@ export class PromotionsController {
     return this.response_service.success(result);
   }
 
+  /**
+   * Valida una promoción por su código contra el carrito y devuelve el
+   * descuento que el cobro aplicaría. Errores con código propio
+   * (PROMOTION_NOT_TODAY_001, PROMOTION_USAGE_LIMIT_001, …).
+   */
+  @Post('validate-code')
+  @Permissions('store:promotions:read')
+  @HttpCode(HttpStatus.OK)
+  async validateCode(
+    @Body() body: { code: string; items: any[]; customer_id?: number },
+  ) {
+    const { promotion, discount } =
+      await this.promotion_engine_service.validatePromotionByCode(
+        body?.code,
+        body?.items ?? [],
+        body?.customer_id,
+      );
+    return this.response_service.success({
+      promotion_id: promotion.id,
+      name: promotion.name,
+      code: promotion.code,
+      discount,
+    });
+  }
+
   // --- Parameter Routes (MUST be last) ---
 
   @Get(':id')
