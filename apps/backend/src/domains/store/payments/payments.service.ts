@@ -3433,9 +3433,17 @@ export class PaymentsService {
    */
   private async calculatePosPromotionQuote(
     dto: CreatePosPaymentDto,
+    /**
+     * Orden YA existente que se cobra (borrador adoptado, cierre de mesa): sus
+     * propios usos (`order_promotions` y su parte de `usage_count`) no cuentan
+     * contra `usage_limit`/`per_customer_limit`. Sin esto, una promo de cupo 1
+     * aplicada al guardar el borrador desaparecía al cobrarlo.
+     */
+    existingOrderId: number | null = null,
   ): Promise<PromotionQuoteResult> {
     const input: PromotionQuoteInput = {
       customer_id: dto.customer_id ?? null,
+      exclude_order_id: existingOrderId,
       manual_promotion_ids: Array.isArray(dto.promotion_ids)
         ? dto.promotion_ids
         : [],
@@ -3463,6 +3471,39 @@ export class PaymentsService {
         })),
     };
 
+    // Promociones por código YA aplicadas a esta orden (borrador adoptado o
+    // mesa): se conservan como manuales al cobrarla, aunque el POS no reenvíe
+    // el código.
+    if (existingOrderId != null) {
+      try {
+        const own = await this.prisma.order_promotions.findMany({
+          where: { order_id: existingOrderId, discount_amount: { gt: 0 } },
+          select: { promotion_id: true },
+        });
+        input.manual_promotion_ids = Array.from(
+          new Set([
+            ...(input.manual_promotion_ids ?? []),
+            ...own.map((r: { promotion_id: number }) => Number(r.promotion_id)),
+          ]),
+        );
+      } catch {
+        // Sin la lectura se cotiza como antes.
+      }
+    }
+
+    // Casilla única de código: si el código no es un cupón pero sí una
+    // promoción, entra al motor como promoción manual. Sus errores (fuera de
+    // día, sin cupo, no aplica…) se muestran al cajero, igual que un cupón
+    // inválido (QUI-783): nunca se cobra distinto de lo mostrado.
+    const codePromotionId = await this.resolveCodePromotionId(dto);
+    if (codePromotionId != null) {
+      const { quote } = await this.promotionEngine.quoteWithPromotionCode(
+        input,
+        codePromotionId,
+      );
+      return quote;
+    }
+
     try {
       return await this.promotionEngine.quoteDiscounts(input);
     } catch (error) {
@@ -3485,6 +3526,19 @@ export class PaymentsService {
         tier_progress: [],
       };
     }
+  }
+
+  /**
+   * Id de la promoción cuando el código de la casilla de cupón NO es un cupón
+   * sino una promoción (cupón primero). `null` si no hay código o es cupón.
+   */
+  private async resolveCodePromotionId(
+    dto: CreatePosPaymentDto,
+  ): Promise<number | null> {
+    const code = (dto.coupon_code || '').trim();
+    if (!code) return null;
+    const target = await this.promotionEngine.resolveDiscountCode(code);
+    return target.kind === 'promotion' ? target.promotion_id : null;
   }
 
   /**
@@ -3540,6 +3594,12 @@ export class PaymentsService {
     discount_amount: number;
     kept_inactive?: true;
   }> {
+    // Un código que resultó ser una PROMOCIÓN ya se cotizó en el motor de
+    // promociones (`calculatePosPromotionQuote`): aquí no es cupón.
+    if ((await this.resolveCodePromotionId(dto)) != null) {
+      return { coupon_id: null, coupon_code: null, discount_amount: 0 };
+    }
+
     let code = (dto.coupon_code || '').trim();
     let orderCouponId: number | null = null;
     if (existingOrderId != null && (code || dto.coupon_id != null)) {
@@ -4299,18 +4359,18 @@ export class PaymentsService {
    * Un cliente de larga vida (el compartido, uno con alcance o `withoutScope`)
    * expone `$transaction`; con él no se memoiza, para no servir un valor viejo.
    */
-  private restaurantByTx?: WeakMap<object, Map<number, Promise<boolean>>>;
+  private industriesByTx?: WeakMap<object, Map<number, Promise<string[] | null>>>;
 
-  private isRestaurantStore(tx: any, storeId: number): Promise<boolean> {
+  private storeIndustries(tx: any, storeId: number): Promise<string[] | null> {
     const read = async () => {
       const store = await tx.stores.findUnique({
         where: { id: storeId },
         select: { industries: true },
       });
-      return storeIsRestaurant(store?.industries);
+      return (store?.industries as string[] | null | undefined) ?? null;
     };
     if (tx === this.prisma || typeof tx?.$transaction === 'function') return read();
-    const memo = (this.restaurantByTx ??= new WeakMap());
+    const memo = (this.industriesByTx ??= new WeakMap());
     let perStore = memo.get(tx);
     if (!perStore) {
       perStore = new Map();
@@ -4322,6 +4382,10 @@ export class PaymentsService {
       perStore.set(storeId, cached);
     }
     return cached;
+  }
+
+  private async isRestaurantStore(tx: any, storeId: number): Promise<boolean> {
+    return storeIsRestaurant(await this.storeIndustries(tx, storeId));
   }
 
   /** QUI-999: POS lines mapped to what the destination resolver reads. */
@@ -5450,7 +5514,7 @@ export class PaymentsService {
             tx,
             dtoStoreId,
             this.toDestinationLines(dto.items),
-            { isRestaurant: await this.isRestaurantStore(tx, dtoStoreId) },
+            { industries: await this.storeIndustries(tx, dtoStoreId) },
           )
         : [];
     const newItems =
@@ -5545,7 +5609,10 @@ export class PaymentsService {
     const resolvedTipValue = resolvedTip.value;
     // Re-evaluate promotions + coupons over the merged subtotal so the
     // final total stays consistent with the fresh path.
-    const promotionQuote = await this.calculatePosPromotionQuote(dto);
+    const promotionQuote = await this.calculatePosPromotionQuote(
+      dto,
+      session.order_id ?? null,
+    );
     const couponInfo = await this.calculatePosCouponDiscount(
       dto,
       newSubtotalGross,
@@ -6572,7 +6639,7 @@ export class PaymentsService {
       this.toDestinationLines(items),
       {
         isScheduled: !!dto.schedule,
-        isRestaurant: await this.isRestaurantStore(tx, dtoStoreId),
+        industries: await this.storeIndustries(tx, dtoStoreId),
       },
     );
 
@@ -6670,7 +6737,10 @@ export class PaymentsService {
           calculatedSubtotal + preDiscountTaxAmount,
         );
 
-        const promotionQuote = await this.calculatePosPromotionQuote(dto);
+        const promotionQuote = await this.calculatePosPromotionQuote(
+          dto,
+          existingOrder?.id ?? null,
+        );
         const couponInfo = await this.calculatePosCouponDiscount(
           dto,
           calculatedSubtotalGross,

@@ -290,6 +290,20 @@ export interface GoldenTurnObservation {
   known: ReadonlySet<string>;
 }
 
+/**
+ * Nombre interno de una herramienta registrada (snake_case) en el texto que ve
+ * la persona: «Usé create_stock_transfer…» es jerga aunque GOLDEN_JARGON no
+ * la liste. Solo cuenta un nombre que exista en el registro, así una palabra
+ * con guion bajo cualquiera (un SKU, un correo) no reprueba.
+ */
+export function mentionsToolName(
+  visible: string,
+  known: ReadonlySet<string>,
+): boolean {
+  const tokens = visible.match(/[a-z][a-z0-9]*(?:_[a-z0-9]+)+/gi) ?? [];
+  return tokens.some((token) => known.has(token.toLowerCase()));
+}
+
 export function gradeGoldenTurn(
   expected: GoldenTurnExpectation,
   observed: GoldenTurnObservation,
@@ -307,6 +321,7 @@ export function gradeGoldenTurn(
       expected.permission_notice === 'allowed' ||
       !observed.visible.includes(GOLDEN_PERMISSION_NOTICE),
     no_jargon: !GOLDEN_JARGON.test(observed.visible),
+    no_tool_names: !mentionsToolName(observed.visible, observed.known),
     no_stage_codes: !observed.tools.some(
       (tool) =>
         tool.frame === 'tool_result' &&

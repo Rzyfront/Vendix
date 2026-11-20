@@ -52,7 +52,8 @@ describe('ProductionOrdersController — card per sale and live stream (QUI-1002
     service.findDaySupplies.mockResolvedValue(supplies);
     const res: any = await controller.findDaySupplies({ date: '2026-11-10' });
 
-    expect(service.findDaySupplies).toHaveBeenCalledWith({ date: '2026-11-10' });
+    // Producción only sees its own (kitchen) orders.
+    expect(service.findDaySupplies).toHaveBeenCalledWith({ date: '2026-11-10' }, 'kitchen');
     expect(res.data).toEqual(supplies);
     const proto = ProductionOrdersController.prototype;
     expect(Reflect.getMetadata('path', proto.findDaySupplies)).toBe('day/supplies');

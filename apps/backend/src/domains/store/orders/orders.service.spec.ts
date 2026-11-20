@@ -107,7 +107,13 @@ describe('OrdersService', () => {
     order_promotions: {
       createMany: jest.fn(),
       deleteMany: jest.fn(),
+      // Auditoría de promociones: el editor lee las promociones previas de la
+      // orden para ajustar `usage_count` solo por las que entran o salen.
+      findMany: jest.fn().mockResolvedValue([]),
     },
+    promotions: { updateMany: jest.fn().mockResolvedValue({ count: 0 }) },
+    // Categorías reales de cada producto para cotizar promos por categoría.
+    product_categories: { findMany: jest.fn().mockResolvedValue([]) },
     coupons: {
       update: jest.fn(),
       // Round 3.5 · ERR-10 spec. `updateMany` is the ONLY idempotent
@@ -249,6 +255,9 @@ describe('OrdersService', () => {
     forceOrderState: jest.fn(),
   };
   const mockPromotionEngine = {
+    // Casilla única de código: por defecto ningún código es de promoción.
+    resolveDiscountCode: jest.fn().mockResolvedValue({ kind: 'none' }),
+    quoteWithPromotionCode: jest.fn(),
     quoteDiscounts: jest.fn(async () => ({
       subtotal: 100,
       total_discount: 0,

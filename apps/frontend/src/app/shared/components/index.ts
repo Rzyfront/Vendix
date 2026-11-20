@@ -146,6 +146,10 @@ export type {
   AddressPayload,
 } from './address-form-fields/address-form-fields.component';
 export { ColorPickerComponent } from './color-picker/color-picker.component';
+export {
+  UserAvatarComponent,
+  resolveAvatarSrc,
+} from './user-avatar/user-avatar.component';
 export { UserSelectComponent } from './user-select/user-select.component';
 export type { UserPickerOption } from './user-select/user-select.component';
 export { DispatchNoteAddressEditorComponent } from './dispatch-note-address-editor/dispatch-note-address-editor.component';

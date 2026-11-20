@@ -3,6 +3,7 @@ import {
   DestroyRef,
   computed,
   inject,
+  model,
   signal,
   viewChild,
 } from '@angular/core';
@@ -23,6 +24,7 @@ import {
   TaxRegime,
 } from '../../../../shared/components/forms/legal-data-form/legal-data-form.component';
 import { RutScannerModalComponent } from '../../../../shared/components/fiscal-activation-wizard/components/rut-scanner-modal.component';
+import { FiscalCalendarChangeDialogComponent } from './fiscal-calendar-change-dialog.component';
 import {
   RutScanResult,
   RutScannerScope,
@@ -32,6 +34,8 @@ import { parseApiError } from '../../../../core/utils/parse-api-error';
 import {
   ApiResponse,
   FiscalApiScope,
+  FiscalCalendarChangePreview,
+  FiscalCalendarSummary,
   FiscalDataEnvelope,
   FiscalDataResponse,
   FiscalDataSettings,
@@ -78,6 +82,7 @@ const VALID_NIT_TYPES: NitType[] = [
     IconComponent,
     LegalDataFormComponent,
     RutScannerModalComponent,
+    FiscalCalendarChangeDialogComponent,
   ],
   template: `
     <section class="space-y-4">
@@ -199,6 +204,13 @@ const VALID_NIT_TYPES: NitType[] = [
       (isOpenChange)="scannerOpen.set($event)"
       (confirmed)="onScanConfirmed($event)"
     ></app-rut-scanner-modal>
+
+    <!-- Cambio de periodicidad de IVA (F3): reemplazar o conservar lo anterior. -->
+    <app-fiscal-calendar-change-dialog
+      [(isOpen)]="calendarDialogOpen"
+      [preview]="calendarPreview()"
+      (decision)="onCalendarDecision($event)"
+    ></app-fiscal-calendar-change-dialog>
   `,
 })
 export class FiscalIdentityPanelComponent {
@@ -250,6 +262,17 @@ export class FiscalIdentityPanelComponent {
 
   private readonly legalForm =
     viewChild.required<LegalDataFormComponent>('legalForm');
+
+  // ── Cambio de periodicidad de IVA (F3) ────────────────────
+  /**
+   * Periodicidad guardada al cargar la página. Si el formulario la cambia, el
+   * guardado pregunta antes si reemplazar o conservar los avisos del
+   * calendario anterior. Sin periodicidad previa no hay nada que preguntar.
+   */
+  private currentPeriodicity = '';
+  readonly calendarPreview = signal<FiscalCalendarChangePreview | null>(null);
+  readonly calendarDialogOpen = model(false);
+  private pendingCalendarPayload: Record<string, unknown> | null = null;
 
   constructor() {
     // El botón "Actualizar" del sticky-header del shell delega vía bus;
@@ -374,21 +397,103 @@ export class FiscalIdentityPanelComponent {
     // campo por campo en lugar de castear para no perder el tipado del
     // origen ni filtrar llaves que la firma no conoce.
     const payload: Record<string, unknown> = { ...value };
+
+    // Cambio de periodicidad con calendario anterior vivo: preguntar antes de
+    // guardar si reemplaza o conserva los recordatorios ya creados.
+    const nextPeriodicity = value.vat_periodicity ?? '';
+    const changed =
+      !!this.currentPeriodicity &&
+      !!nextPeriodicity &&
+      nextPeriodicity !== this.currentPeriodicity &&
+      this.apiScope !== 'platform';
+    if (changed) {
+      this.askCalendarChange(payload, nextPeriodicity);
+      return;
+    }
+
+    this.patchFiscalData(payload, null);
+  }
+
+  /** Consulta el impacto del cambio y, si hay algo pendiente, abre el diálogo. */
+  private askCalendarChange(
+    payload: Record<string, unknown>,
+    nextPeriodicity: string,
+  ): void {
     this.service
-      .patchFiscalDataSettings(this.apiScope, payload)
+      .getFiscalCalendarChangePreview(this.apiScope, nextPeriodicity)
       .pipe(takeUntilDestroyed(this.destroyRef))
       .subscribe({
-        next: () => {
+        next: (response) => {
+          const preview = response?.data ?? null;
+          this.saving.set(false);
+          if (
+            !preview?.changed ||
+            (!preview.pending_reminders && !preview.pending_obligations)
+          ) {
+            // Nada que reemplazar: se guarda sin decisión.
+            this.patchFiscalData(payload, null);
+            return;
+          }
+          this.pendingCalendarPayload = payload;
+          this.calendarPreview.set(preview);
+          this.calendarDialogOpen.set(true);
+        },
+        error: () => {
+          // Si no se pudo consultar, se guarda sin tocar lo anterior (conservar).
+          this.saving.set(false);
+          this.patchFiscalData(payload, null);
+        },
+      });
+  }
+
+  /** Decisión del diálogo: reemplazar o conservar el calendario anterior. */
+  onCalendarDecision(decision: 'replace' | 'keep'): void {
+    const payload = this.pendingCalendarPayload;
+    this.pendingCalendarPayload = null;
+    this.calendarPreview.set(null);
+    if (!payload) return;
+    this.saving.set(true);
+    this.patchFiscalData(payload, decision);
+  }
+
+  private patchFiscalData(
+    payload: Record<string, unknown>,
+    decision: 'replace' | 'keep' | null,
+  ): void {
+    this.saving.set(true);
+    const body: Record<string, unknown> = { ...payload };
+    if (decision) body['vat_calendar_change'] = decision;
+    this.service
+      .patchFiscalDataSettings(this.apiScope, body)
+      .pipe(takeUntilDestroyed(this.destroyRef))
+      .subscribe({
+        next: (response) => {
           this.saving.set(false);
           // Nueva línea base = lo recién guardado.
           this.baselineLegalJson.set(this.legalJson());
+          this.currentPeriodicity = String(payload['vat_periodicity'] ?? '');
           this.toast.success('Identidad fiscal actualizada');
+          // Lo que se generó en la bitácora (F1): contarlo o explicar por qué no.
+          const summary = this.unwrapCalendarSummary(response);
+          if (summary?.message) this.toast.success(summary.message);
         },
         error: (error) => {
           this.saving.set(false);
           this.toast.error(parseApiError(error).userMessage);
         },
       });
+  }
+
+  /** El resumen del calendario viene plano (org) o dentro de `data` (tienda). */
+  private unwrapCalendarSummary(
+    response: FiscalDataEnvelope | null,
+  ): FiscalCalendarSummary | null {
+    if (!response) return null;
+    const direct = (response as FiscalDataResponse).fiscal_calendar;
+    if (direct) return direct;
+    return (
+      (response as ApiResponse<FiscalDataResponse>)?.data?.fiscal_calendar ?? null
+    );
   }
 
   // ── Internos ──────────────────────────────────────────────
@@ -418,6 +523,7 @@ export class FiscalIdentityPanelComponent {
   private hydrate(fiscal: FiscalDataSettings | null): void {
     // El próximo valueChange del form (disparado por el seed) fija la línea base.
     this.awaitingBaseline = true;
+    this.currentPeriodicity = fiscal?.vat_periodicity ?? '';
     this.formSeed.set(this.toLegalSeed(fiscal));
   }
 

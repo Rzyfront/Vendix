@@ -25,6 +25,8 @@ import {
   PromotionQuantityTier,
 } from '../../interfaces/promotion.interface';
 import { selectPromotionsMeta } from '../../state/selectors/promotions.selectors';
+import { formatDateOnlyUTC } from '../../../../../../../shared/utils/date.util';
+import { formatWeekdaysShort } from '../../utils/promotion-weekdays.util';
 
 /**
  * View-model row used to drive `app-responsive-data-view`.
@@ -39,7 +41,28 @@ import { selectPromotionsMeta } from '../../state/selectors/promotions.selectors
 interface PromotionRow extends Promotion {
   tiers_count: number;
   tiers_summary: string;
+  /** "Mar · Mié · Vie" / "Todos los días" (precalculado, ver arriba). */
+  days_label: string;
+  /**
+   * Estado que se MUESTRA: el efectivo derivado de las fechas en la zona de
+   * la tienda (una promo "activa" cuya fecha fin ya pasó se ve "Expirada").
+   * Las acciones siguen usando `state`, que es lo que el backend valida.
+   */
+  display_state: Promotion['state'];
 }
+
+const STATE_LABELS: Record<string, string> = {
+  draft: 'Borrador',
+  scheduled: 'Programada',
+  active: 'Activa',
+  paused: 'Pausada',
+  expired: 'Expirada',
+  cancelled: 'Cancelada',
+};
+
+/** Fechas de promoción = fechas de calendario guardadas a medianoche UTC. */
+const formatPromotionDate = (val: string): string =>
+  val ? formatDateOnlyUTC(val) : '-';
 
 @Component({
   selector: 'app-promotion-list',
@@ -227,6 +250,8 @@ export class PromotionListComponent {
           sorted,
           this.currency_service,
         ),
+        days_label: formatWeekdaysShort(promotion.active_weekdays),
+        display_state: promotion.effective_state ?? promotion.state,
       };
     });
   });
@@ -358,28 +383,28 @@ export class PromotionListComponent {
       },
     },
     {
+      key: 'days_label',
+      label: 'Días',
+      priority: 2,
+    },
+    {
       key: 'start_date',
       label: 'Inicio',
       priority: 3,
-      transform: (val: string) =>
-        val ? new Date(val).toLocaleDateString() : '-',
+      transform: formatPromotionDate,
     },
     {
-      key: 'state',
+      key: 'end_date',
+      label: 'Fin',
+      priority: 3,
+      transform: formatPromotionDate,
+      defaultValue: 'Sin fin',
+    },
+    {
+      key: 'display_state',
       label: 'Estado',
-      sortable: true,
       priority: 1,
-      transform: (val: string) => {
-        const labels: Record<string, string> = {
-          draft: 'Borrador',
-          scheduled: 'Programada',
-          active: 'Activa',
-          paused: 'Pausada',
-          expired: 'Expirada',
-          cancelled: 'Cancelada',
-        };
-        return labels[val] || val;
-      },
+      transform: (val: string) => STATE_LABELS[val] || val,
     },
     {
       key: 'usage_count',
@@ -398,19 +423,9 @@ export class PromotionListComponent {
     subtitleTransform: (item: any) => (item.code ? `Codigo: ${item.code}` : ''),
     avatarFallbackIcon: 'tag',
     avatarShape: 'square',
-    badgeKey: 'state',
+    badgeKey: 'display_state',
     badgeConfig: { type: 'status', size: 'sm' },
-    badgeTransform: (val: string) => {
-      const labels: Record<string, string> = {
-        draft: 'Borrador',
-        scheduled: 'Programada',
-        active: 'Activa',
-        paused: 'Pausada',
-        expired: 'Expirada',
-        cancelled: 'Cancelada',
-      };
-      return labels[val] || val;
-    },
+    badgeTransform: (val: string) => STATE_LABELS[val] || val,
     detailKeys: [
       {
         key: 'rule_type',
@@ -441,11 +456,15 @@ export class PromotionListComponent {
         // stays visually consistent with the desktop table.
       },
       {
+        key: 'days_label',
+        label: 'Días',
+        icon: 'calendar-days',
+      },
+      {
         key: 'start_date',
         label: 'Inicio',
         icon: 'calendar',
-        transform: (val: string) =>
-          val ? new Date(val).toLocaleDateString() : '-',
+        transform: formatPromotionDate,
       },
       {
         key: 'usage_count',
@@ -481,8 +500,9 @@ export class PromotionListComponent {
       icon: 'play',
       variant: 'success',
       action: (row: any) => this.activate.emit(row.id),
+      // Una cancelada no se reactiva (el backend responde PROMOTION_STATE_001).
       show: (row: any) =>
-        ['draft', 'scheduled', 'paused', 'cancelled'].includes(row.state),
+        ['draft', 'scheduled', 'paused'].includes(row.state),
     },
     {
       label: 'Pausar',

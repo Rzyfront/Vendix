@@ -23,6 +23,7 @@ import { Subject, Observable, of, debounceTime, distinctUntilChanged, switchMap,
 import { UsersService } from '../../../private/modules/organization/users/services/users.service';
 import { User, UserState, PaginatedUsersResponse } from '../../../private/modules/organization/users/interfaces/user.interface';
 import { IconComponent } from '../icon/icon.component';
+import { UserAvatarComponent } from '../user-avatar/user-avatar.component';
 import { SuperAdminUsersLookupService } from '../../../private/modules/super-admin/stores/services/super-admin-users-lookup.service';
 
 /**
@@ -37,6 +38,8 @@ export interface UserPickerOption {
   email: string;
   /** Optional avatar fallback initials source. Falls back to `displayName[0]`. */
   initialsSource?: string;
+  /** Optional signed photo URL; shown instead of the initial when it loads. */
+  avatarUrl?: string | null;
 }
 
 /**
@@ -59,7 +62,7 @@ export interface UserPickerOption {
   selector: 'app-user-select',
   standalone: true,
   changeDetection: ChangeDetectionStrategy.OnPush,
-  imports: [CommonModule, FormsModule, IconComponent],
+  imports: [CommonModule, FormsModule, IconComponent, UserAvatarComponent],
   template: `
     <div class="relative" #container>
       @if (selectedUser()) {
@@ -71,9 +74,12 @@ export interface UserPickerOption {
             <div
               class="w-8 h-8 rounded-full bg-primary/10 text-primary flex items-center justify-center shrink-0"
             >
-              <span class="text-xs font-bold">
-                {{ initialFor(selectedUser()!.displayName) }}
-              </span>
+              <app-user-avatar
+                class="text-xs font-bold"
+                [src]="selectedUser()!.avatarUrl"
+                [initials]="initialFor(selectedUser()!.displayName)"
+                [alt]="selectedUser()!.displayName"
+              ></app-user-avatar>
             </div>
             <div class="min-w-0">
               <p class="text-sm font-medium text-text-primary truncate">
@@ -140,9 +146,12 @@ export interface UserPickerOption {
                 <div
                   class="w-8 h-8 rounded-full bg-primary/10 text-primary flex items-center justify-center shrink-0"
                 >
-                  <span class="text-xs font-bold">
-                    {{ initialFor(user.displayName) }}
-                  </span>
+                  <app-user-avatar
+                    class="text-xs font-bold"
+                    [src]="user.avatarUrl"
+                    [initials]="initialFor(user.displayName)"
+                    [alt]="user.displayName"
+                  ></app-user-avatar>
                 </div>
                 <div class="min-w-0 flex-1">
                   <p class="text-sm font-medium text-text-primary truncate">
@@ -345,6 +354,7 @@ export class UserSelectComponent implements OnInit {
             id: u.id,
             displayName: u.username,
             email: u.email,
+            avatarUrl: u.avatar_url ?? null,
           }),
         error: () =>
           this.selectedUser.set({
@@ -360,6 +370,7 @@ export class UserSelectComponent implements OnInit {
       id: u.id,
       displayName: u.username,
       email: u.email,
+      avatarUrl: u.avatar_url ?? null,
     }));
   }
 }

@@ -16,6 +16,10 @@
  * | Other, no inventory               | stock (the sale is only recorded)        |
  *
  * Producible = `is_batch_produced` AND an active recipe.
+ *
+ * Manufacturing stores use the same matrix for producible products (they go to
+ * production, i.e. Planta). Without restaurant there is no KDS: every other
+ * line keeps the legacy no-decision (`null`).
  */
 
 export type FulfillmentDestination = 'kds' | 'production' | 'stock';
@@ -29,6 +33,8 @@ export interface LineDestinationProductFacts {
 
 export interface ResolveLineDestinationInput {
   isRestaurant: boolean;
+  /** Store includes `manufacturing`: producible lines follow the matrix. */
+  isManufacturing?: boolean;
   /** `null` for custom lines (no catalog product). */
   product: LineDestinationProductFacts | null;
   /** Sellable stock of the line's product/variant. */
@@ -44,7 +50,7 @@ export interface ResolveLineDestinationInput {
 }
 
 export interface ResolvedLineDestination {
-  /** `null` = no matrix decision (non-restaurant store or custom/service line). */
+  /** `null` = no matrix decision (store without restaurant/manufacturing, custom/service line, or a non-producible line in a manufacturing-only store). */
   destination: FulfillmentDestination | null;
   skip_kds: boolean;
   /** True only where the matrix lets the cashier pick. */
@@ -78,7 +84,8 @@ export function resolveLineDestination(
 ): ResolvedLineDestination {
   const clientSkipKds = input.clientSkipKds === true;
 
-  if (!input.isRestaurant || !input.product) {
+  const usesMatrix = input.isRestaurant || input.isManufacturing === true;
+  if (!usesMatrix || !input.product) {
     return { destination: null, skip_kds: clientSkipKds, choosable: false };
   }
 
@@ -99,6 +106,11 @@ export function resolveLineDestination(
     const destination: FulfillmentDestination =
       requested && CHOOSABLE_DESTINATIONS.includes(requested) ? requested : 'stock';
     return { destination, skip_kds: true, choosable: true };
+  }
+
+  // Manufacturing without restaurant: no KDS and no decision for the rest.
+  if (!input.isRestaurant) {
+    return { destination: null, skip_kds: clientSkipKds, choosable: false };
   }
 
   if (product.product_type === 'prepared') {

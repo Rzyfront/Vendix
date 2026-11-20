@@ -22,6 +22,10 @@ import { ToastService } from '../../../../../shared/components/toast/toast.servi
 import { ImageUploadService } from '../../../../../shared/services/image-upload.service';
 import { dataUrlToFile } from '../../../../../shared/utils/data-url.util';
 import { extractApiErrorMessage } from '../../../../../core/utils/api-error-handler';
+import {
+  DOCUMENT_TYPE_SELECT_OPTIONS,
+  toDocumentTypeCode,
+} from '../../../../../shared/constants/document-types';
 
 @Component({
   selector: 'app-user-edit-modal',
@@ -99,11 +103,9 @@ import { extractApiErrorMessage } from '../../../../../core/utils/api-error-hand
                 [disabled]="isUpdating()"
               >
                 <option value="">Seleccionar</option>
-                <option value="CC">Cédula de Ciudadanía</option>
-                <option value="CE">Cédula de Extranjería</option>
-                <option value="PASSPORT">Pasaporte</option>
-                <option value="NIT">NIT</option>
-                <option value="OTHER">Otro</option>
+                @for (opt of documentTypeOptions; track opt.value) {
+                  <option [value]="opt.value">{{ opt.label }}</option>
+                }
               </select>
             </div>
             <app-input
@@ -287,6 +289,8 @@ import { extractApiErrorMessage } from '../../../../../core/utils/api-error-hand
   ],
 })
 export class UserEditModalComponent implements OnInit {
+  readonly documentTypeOptions = DOCUMENT_TYPE_SELECT_OPTIONS;
+
   private destroyRef = inject(DestroyRef);
   private fb = inject(FormBuilder);
   private usersService = inject(UsersService);
@@ -342,7 +346,7 @@ export class UserEditModalComponent implements OnInit {
         username: user.username,
         email: user.email,
         phone: user.phone || '',
-        document_type: user.document_type || '',
+        document_type: toDocumentTypeCode(user.document_type) ?? '',
         document_number: user.document_number || '',
         state: user.state,
         avatar_url: user.avatar_url || '',
@@ -405,6 +409,8 @@ export class UserEditModalComponent implements OnInit {
 
     this.isUpdating.set(true);
     const userData: UpdateUserDto = this.userForm.value;
+    // Backend enum is uppercase; an empty selection clears the field.
+    (userData as any).document_type = toDocumentTypeCode(userData.document_type);
 
     if (!userData.password) {
       delete userData.password;

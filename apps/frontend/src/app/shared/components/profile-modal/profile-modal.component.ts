@@ -30,6 +30,14 @@ import {
 } from '../../../services/country.service';
 import { ImageUploadService } from '../../services/image-upload.service';
 import { dataUrlToFile } from '../../utils/data-url.util';
+import {
+  resolveAvatarSrc,
+  UserAvatarComponent,
+} from '../user-avatar/user-avatar.component';
+import {
+  DOCUMENT_TYPE_SELECT_OPTIONS,
+  toDocumentTypeCode,
+} from '../../constants/document-types';
 
 @Component({
   selector: 'app-profile-modal',
@@ -45,6 +53,7 @@ import { dataUrlToFile } from '../../utils/data-url.util';
     SelectorComponent,
     IconComponent,
     ImageSourceModalComponent,
+    UserAvatarComponent,
   ],
   template: `
     <app-modal
@@ -63,19 +72,11 @@ import { dataUrlToFile } from '../../utils/data-url.util';
             <div
               class="w-20 h-20 md:w-24 md:h-24 rounded-xl overflow-hidden border-2 border-primary-200 mb-3"
             >
-              @if (avatarSrc(); as src) {
-                <img
-                  [src]="src"
-                  alt="Avatar"
-                  class="w-full h-full object-contain"
-                />
-              } @else {
-                <div
-                  class="w-full h-full bg-primary-100 flex items-center justify-center text-primary-600 text-2xl md:text-3xl font-bold"
-                >
-                  {{ getInitials() }}
-                </div>
-              }
+              <app-user-avatar
+                class="bg-primary-100 text-primary-600 text-2xl md:text-3xl font-bold"
+                [src]="avatarSrc()"
+                [initials]="getInitials()"
+              ></app-user-avatar>
             </div>
             <h3 class="text-lg font-semibold text-gray-900">
               {{ userInfo()?.first_name }} {{ userInfo()?.last_name }}
@@ -325,19 +326,11 @@ import { dataUrlToFile } from '../../utils/data-url.util';
               class="relative w-20 h-20 rounded-xl overflow-hidden border-2 border-primary-200 cursor-pointer group flex-shrink-0"
               (click)="openAvatarModal()"
             >
-              @if (avatarPreview() || avatarSrc(); as src) {
-                <img
-                  [src]="src"
-                  alt="Avatar"
-                  class="w-full h-full object-contain"
-                />
-              } @else {
-                <div
-                  class="w-full h-full bg-primary-100 flex items-center justify-center text-primary-600 text-2xl font-bold"
-                >
-                  {{ getInitials() }}
-                </div>
-              }
+              <app-user-avatar
+                class="bg-primary-100 text-primary-600 text-2xl font-bold"
+                [src]="avatarPreview() || avatarSrc()"
+                [initials]="getInitials()"
+              ></app-user-avatar>
               <div
                 class="absolute inset-0 bg-black/40 flex items-center justify-center opacity-0 group-hover:opacity-100 transition-opacity"
               >
@@ -575,12 +568,9 @@ export class ProfileModalComponent {
    * against the frontend host and 404; show initials until `getProfile()`
    * brings the signed URL.
    */
-  readonly avatarSrc = computed<string | null>(() => {
-    const url: unknown = this.userInfo()?.avatar_url;
-    return typeof url === 'string' && /^(https?:|data:|blob:)/i.test(url)
-      ? url
-      : null;
-  });
+  readonly avatarSrc = computed<string | null>(() =>
+    resolveAvatarSrc(this.userInfo()?.avatar_url),
+  );
   readonly addressInfo = signal<any>(null);
   readonly hasAddress = signal(false);
 
@@ -588,14 +578,8 @@ export class ProfileModalComponent {
   departments: Department[] = [];
   cities: City[] = [];
 
-  // Document types for Colombia
-  documentTypes = [
-    { value: 'cc', label: 'Cédula de Ciudadanía' },
-    { value: 'ce', label: 'Cédula de Extranjería' },
-    { value: 'ti', label: 'Tarjeta de Identidad' },
-    { value: 'nit', label: 'NIT' },
-    { value: 'pas', label: 'Pasaporte' },
-  ];
+  // Uppercase codes of `identification_type_enum` (backend rejects lowercase).
+  readonly documentTypeOptions: SelectorOption[] = DOCUMENT_TYPE_SELECT_OPTIONS;
 
   constructor() {
     this.profileForm = this.fb.group({
@@ -712,7 +696,7 @@ export class ProfileModalComponent {
         last_name: info.last_name,
         email: info.email,
         phone: info.phone,
-        document_type: info.document_type,
+        document_type: toDocumentTypeCode(info.document_type) ?? '',
         document_number: info.document_number,
         avatar_url: '', // Will be set only if changed
       });
@@ -863,48 +847,44 @@ export class ProfileModalComponent {
   }
 
   onSubmit() {
-    if (this.profileForm.invalid) return;
+    if (this.profileForm.invalid) {
+      this.profileForm.markAllAsTouched();
+      this.toastService.error(
+        'Completa los campos obligatorios marcados antes de guardar.',
+      );
+      return;
+    }
 
     this.saving.set(true);
-    const formValue = this.profileForm.value;
+    // getRawValue: state/city controls are disabled outside Colombia and
+    // `.value` would silently drop them from the payload.
+    const formValue = this.profileForm.getRawValue();
+    const addressData = formValue.address ?? {};
 
-    // Convert IDs back to names for backend
-    const addressData = { ...formValue.address };
+    // Selectors hold department/city IDs (number or string); the backend
+    // stores names. Compare as strings so numeric IDs also resolve.
+    const department = this.departments.find(
+      (d) => String(d.id) === String(addressData.state_province ?? ''),
+    );
+    const city = this.cities.find(
+      (c) => String(c.id) === String(addressData.city ?? ''),
+    );
 
-    // Find department name from ID
-    if (addressData.state_province) {
-      const department = this.departments.find(
-        (d) => d.id.toString() === addressData.state_province,
-      );
-      if (department) {
-        addressData.state_province = department.name;
-      }
-    }
-
-    // Find city name from ID
-    if (addressData.city) {
-      const city = this.cities.find(
-        (c) => c.id.toString() === addressData.city,
-      );
-      if (city) {
-        addressData.city = city.name;
-      }
-    }
-
-    // Build payload
+    // Build payload — CreateAddressDto fields are all strings.
     const payload: any = {
-      first_name: formValue.first_name,
-      last_name: formValue.last_name,
-      phone: formValue.phone,
-      document_type: formValue.document_type,
-      document_number: formValue.document_number,
+      first_name: formValue.first_name?.trim(),
+      last_name: formValue.last_name?.trim(),
+      phone: formValue.phone?.trim() || null,
+      // Backend enum is uppercase (`CC`, `CE`, ...); empty clears the field.
+      document_type: toDocumentTypeCode(formValue.document_type),
+      document_number: formValue.document_number?.toString().trim() || null,
       address: {
-        address_line_1: addressData.address_line_1,
-        address_line_2: addressData.address_line_2,
-        country: addressData.country_code,
-        state: addressData.state_province,
-        city: addressData.city,
-        postal_code: addressData.postal_code,
+        address_line_1: this.asText(addressData.address_line_1),
+        address_line_2: this.asText(addressData.address_line_2),
+        country: this.asText(addressData.country_code),
+        state: department?.name ?? this.asText(addressData.state_province),
+        city: city?.name ?? this.asText(addressData.city),
+        postal_code: this.asText(addressData.postal_code),
       },
     };
 
@@ -923,8 +903,23 @@ export class ProfileModalComponent {
       .pipe(finalize(() => this.saving.set(false)))
       .pipe(takeUntilDestroyed(this.destroyRef)).subscribe({
         next: (response) => {
+          // PUT /auth/profile answers HTTP 200 with `success: false` when the
+          // update fails; never report that as saved.
+          if (response?.success === false) {
+            this.toastService.error(
+              this.messageOf(response) ??
+                'No se pudo guardar el perfil. Revisa los datos e intenta nuevamente.',
+            );
+            return;
+          }
           this.isEditing.set(false);
+          this.avatarPreview.set(null);
+          this.pendingAvatarKey = null;
+          // Reload via getProfile: it returns the signed avatar URL.
           this.loadProfile();
+          // Refresh the session user (/auth/me) so the header dropdown shows
+          // the new name and photo without reloading.
+          this.authFacade.refreshUser();
           this.toastService.success('¡Perfil guardado correctamente!');
         },
         error: (err) => {
@@ -941,8 +936,9 @@ export class ProfileModalComponent {
           }
 
           // Mostrar mensaje más específico al usuario
-          if (err.error?.message) {
-            this.toastService.error(err.error.message);
+          const message = this.messageOf(err.error);
+          if (message) {
+            this.toastService.error(message);
           } else if (err.error?.errors) {
             this.toastService.error(
               'Algunos campos tienen información incorrecta. Revisa y corrige los datos marcados.',
@@ -1037,10 +1033,6 @@ export class ProfileModalComponent {
     }
   }
 
-  get documentTypeOptions(): SelectorOption[] {
-    return this.documentTypes.map((t) => ({ value: t.value, label: t.label }));
-  }
-
   get countryOptions(): SelectorOption[] {
     return this.countries.map((c) => ({ value: c.code, label: c.name }));
   }
@@ -1057,6 +1049,19 @@ export class ProfileModalComponent {
     return g.get('new_password')?.value === g.get('confirm_password')?.value
       ? null
       : { passwordMismatch: true };
+  }
+
+  private asText(value: unknown): string | undefined {
+    if (value === null || value === undefined) return undefined;
+    const text = String(value).trim();
+    return text === '' ? undefined : text;
+  }
+
+  /** Backend messages may be a string or a ValidationPipe string array. */
+  private messageOf(body: any): string | null {
+    const message = body?.message;
+    if (Array.isArray(message)) return message.filter(Boolean).join('. ') || null;
+    return typeof message === 'string' && message.trim() ? message : null;
   }
 
   getInitials(): string {

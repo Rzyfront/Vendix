@@ -33,6 +33,8 @@ const readMigration = (name: string) =>
 const MIGRATION_SQL = readMigration('20261204090000_platform_crm_links');
 /** Enlace a una tienda concreta: columna, únicos parciales y trigger nuevos. */
 const LINKED_STORE_MIGRATION_SQL = readMigration('20261207090000_platform_crm_links_linked_store');
+/** D2: un cliente con varios enlaces (quita el único por cliente). */
+const MULTI_MIGRATION_SQL = readMigration('20261211090000_platform_crm_links_multi');
 
 /** `pg` no entiende `?schema=public` del DATABASE_URL de Prisma. */
 function pgConnectionString(url: string): string {
@@ -167,6 +169,7 @@ describeDestructiveE2E('platform_crm_links contra Postgres real', () => {
     // `migrate diff` (que ya trae la columna y la FK de schema.prisma).
     await pool.query(MIGRATION_SQL);
     await pool.query(LINKED_STORE_MIGRATION_SQL);
+    await pool.query(MULTI_MIGRATION_SQL);
   });
 
   /** Tienda de una org cliente con su suscripción al plan de prueba. */
@@ -199,6 +202,7 @@ describeDestructiveE2E('platform_crm_links contra Postgres real', () => {
     for (let i = 0; i < 2; i++) {
       await pool.query(MIGRATION_SQL);
       await pool.query(LINKED_STORE_MIGRATION_SQL);
+      await pool.query(MULTI_MIGRATION_SQL);
     }
 
     const { rows } = await pool.query(
@@ -227,7 +231,8 @@ describeDestructiveE2E('platform_crm_links contra Postgres real', () => {
       roles: 1,
       grants: 2,
       triggers: 2,
-      partial_uniques: 3,
+      // Org entera y tienda; el único por cliente lo quita la migración multi.
+      partial_uniques: 2,
       // El único de la org solo cuenta los enlaces a la org entera.
       org_index: expect.stringContaining('linked_store_id IS NULL'),
     });
@@ -262,17 +267,22 @@ describeDestructiveE2E('platform_crm_links contra Postgres real', () => {
     ).rejects.toMatchObject({ code: '23514' });
   });
 
-  it('doble enlace del mismo cliente o de la misma organización → conflicto', async () => {
+  it('un cliente con varias organizaciones; la misma organización a otro cliente → conflicto', async () => {
     const orgA = await newClientOrg('dup-a');
     const orgB = await newClientOrg('dup-b');
     const customer1 = await createCustomer(ctx.store_id, platformOrgId, 'dup-1');
     const customer2 = await createCustomer(ctx.store_id, platformOrgId, 'dup-2');
 
     await service.link(ctx, customer1, { organization_id: orgA });
-
+    // D2: el mismo cliente enlaza una segunda organización.
+    await service.link(ctx, customer1, { organization_id: orgB });
+    expect(
+      (await service.listLinks(ctx, customer1)).links.map((l) => l.organization?.id),
+    ).toEqual([orgA, orgB]);
+    // La misma org otra vez al mismo cliente → 009, no un segundo enlace.
     await expect(
-      service.link(ctx, customer1, { organization_id: orgB }),
-    ).rejects.toMatchObject({ errorCode: 'PLATFORM_CRM_003' });
+      service.link(ctx, customer1, { organization_id: orgA }),
+    ).rejects.toMatchObject({ errorCode: 'PLATFORM_CRM_009' });
     await expect(
       service.link(ctx, customer2, { organization_id: orgA }),
     ).rejects.toMatchObject({ errorCode: 'PLATFORM_CRM_004' });
@@ -299,7 +309,7 @@ describeDestructiveE2E('platform_crm_links contra Postgres real', () => {
     ).rejects.toMatchObject({ code: 'P2002' });
   });
 
-  it('dos enlaces simultáneos del mismo cliente: uno gana y el otro recibe 409', async () => {
+  it('dos enlaces simultáneos del mismo cliente a dos orgs: los dos entran (D2)', async () => {
     const orgA = await newClientOrg('race-a');
     const orgB = await newClientOrg('race-b');
     const customer = await createCustomer(ctx.store_id, platformOrgId, 'race');
@@ -309,13 +319,44 @@ describeDestructiveE2E('platform_crm_links contra Postgres real', () => {
       service.link(ctx, customer, { organization_id: orgB }),
     ]);
 
-    expect(results.filter((r) => r.status === 'fulfilled')).toHaveLength(1);
-    const rejected = results.find((r) => r.status === 'rejected') as PromiseRejectedResult;
-    expect(rejected.reason).toMatchObject({ errorCode: 'PLATFORM_CRM_003' });
+    expect(results.filter((r) => r.status === 'fulfilled')).toHaveLength(2);
     const active = await db.platform_crm_links.count({
       where: { customer_id: customer, status: 'linked' },
     });
-    expect(active).toBe(1);
+    expect(active).toBe(2);
+  });
+
+  it('org entera + tienda de otra org al mismo cliente; desenlazar por id deja la otra; un id ajeno → 404', async () => {
+    const orgA = await newClientOrg('multi-a');
+    const orgB = await newClientOrg('multi-b');
+    const storeB = await createSubscribedStore(orgB, 'multi-b');
+    const customer = await createCustomer(ctx.store_id, platformOrgId, 'multi');
+    const other = await createCustomer(ctx.store_id, platformOrgId, 'multi-other');
+
+    const first = await service.link(ctx, customer, { organization_id: orgA });
+    const second = await service.link(ctx, customer, { linked_store_id: storeB });
+    const otherLink = await service.link(ctx, other, { organization_id: await newClientOrg('multi-c') });
+
+    const { links } = await service.listLinks(ctx, customer);
+    expect(links.map((l) => [l.id, l.scope])).toEqual([
+      [first.link!.id, 'organization'],
+      [second.link!.id, 'store'],
+    ]);
+    // El GET de compatibilidad devuelve el más antiguo; el DELETE viejo pide cuál.
+    expect((await service.getLink(ctx, customer)).link?.id).toBe(first.link!.id);
+    await expect(service.unlink(ctx, customer, {})).rejects.toMatchObject({
+      errorCode: 'PLATFORM_CRM_011',
+    });
+
+    await expect(
+      service.unlinkById(ctx, customer, otherLink.link!.id, {}),
+    ).rejects.toMatchObject({ errorCode: 'PLATFORM_CRM_012' });
+    expect(
+      await db.platform_crm_links.count({ where: { id: otherLink.link!.id, status: 'linked' } }),
+    ).toBe(1);
+
+    const rest = await service.unlinkById(ctx, customer, first.link!.id, { reason: 'vendió' });
+    expect(rest.links.map((l) => l.id)).toEqual([second.link!.id]);
   });
 
   it('desenlazar y volver a enlazar conserva el historial', async () => {
@@ -421,6 +462,21 @@ describeDestructiveE2E('platform_crm_links contra Postgres real', () => {
     ]);
     // Lo que NO debe salir aunque exista en la fila de la organización.
     expect(JSON.stringify(view)).not.toMatch(/tax_id|email|slug|legal_name|PCRMsummary/);
+
+    // La lista de enlaces (D2) agrega solo `scope` y el mismo resumen cerrado.
+    const { links } = await service.listLinks(ctx, customer);
+    expect(Object.keys(links[0]).sort()).toEqual([
+      'id',
+      'linked_at',
+      'linked_by',
+      'linked_store',
+      'note',
+      'organization',
+      'scope',
+      'status',
+    ]);
+    expect(links[0].organization).toEqual(view.organization);
+    expect(JSON.stringify(links)).not.toMatch(/tax_id|email|slug|legal_name|PCRMsummary/);
   });
 
   it('cliente de otra tienda u organización plataforma → 404 sin escribir nada', async () => {
@@ -604,9 +660,14 @@ describeDestructiveE2E('platform_crm_links contra Postgres real', () => {
     await expect(service.link(ctx, c3, { organization_id: orgId })).rejects.toMatchObject({
       errorCode: 'PLATFORM_CRM_008',
     });
-    // El prospecto con enlace no puede tener otro, sea org o tienda.
-    await expect(service.link(ctx, c1, { organization_id: otherOrg })).rejects.toMatchObject({
-      errorCode: 'PLATFORM_CRM_003',
+    // D2: el prospecto con enlace sí puede tener otro, en otra org.
+    await service.link(ctx, c1, { organization_id: otherOrg });
+    // Pero no la misma tienda otra vez (009), ni la org entera de su tienda (013).
+    await expect(service.link(ctx, c1, { linked_store_id: storeA })).rejects.toMatchObject({
+      errorCode: 'PLATFORM_CRM_009',
+    });
+    await expect(service.link(ctx, c1, { organization_id: orgId })).rejects.toMatchObject({
+      errorCode: 'PLATFORM_CRM_013',
     });
 
     // Org entera enlazada → ninguna de sus tiendas se enlaza a otro.
@@ -615,6 +676,10 @@ describeDestructiveE2E('platform_crm_links contra Postgres real', () => {
     await service.link(ctx, c3, { organization_id: wholeOrg });
     await expect(service.link(ctx, c4, { linked_store_id: wholeStore })).rejects.toMatchObject({
       errorCode: 'PLATFORM_CRM_004',
+    });
+    // Al mismo cliente, su tienda ya está cubierta por la org entera → 009.
+    await expect(service.link(ctx, c3, { linked_store_id: wholeStore })).rejects.toMatchObject({
+      errorCode: 'PLATFORM_CRM_009',
     });
 
     // La base impide dos enlaces activos a la misma tienda sin el servicio, y

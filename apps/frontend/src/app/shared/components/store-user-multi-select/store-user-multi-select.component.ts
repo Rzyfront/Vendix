@@ -17,7 +17,16 @@ import {
   FormsModule,
 } from '@angular/forms';
 import { takeUntilDestroyed } from '@angular/core/rxjs-interop';
-import { Subject, debounceTime, distinctUntilChanged, forkJoin, of, switchMap, tap } from 'rxjs';
+import {
+  Observable,
+  Subject,
+  debounceTime,
+  distinctUntilChanged,
+  forkJoin,
+  of,
+  switchMap,
+  tap,
+} from 'rxjs';
 import { catchError } from 'rxjs/operators';
 import { IconComponent } from '../icon/icon.component';
 import {
@@ -191,6 +200,25 @@ export class StoreUserMultiSelectComponent
    * full store-user list.
    */
   readonly excludeRole = input<string | null>(null);
+  /**
+   * `'staff'` searches only the store staff (`staff-lookup`), as the single
+   * `app-store-user-select` does. Opt-in — defaults to `'default'`.
+   */
+  readonly lookupMode = input<'default' | 'staff'>('default');
+  /**
+   * Users whose name is already known (e.g. the ones saved on a record), so
+   * an incoming id never renders as `Usuario #id`: the staff lookup has no
+   * single-user route.
+   */
+  readonly knownUsers = input<StoreUserOption[]>([]);
+  /**
+   * Own search for pickers backed by another endpoint (e.g. the CRM task
+   * support people, gated by the tasks permission). Opt-in — defaults to
+   * `null`, which keeps {@link StoreUserLookupService.search}.
+   */
+  readonly searchFn = input<((term: string) => Observable<StoreUserOption[]>) | null>(
+    null,
+  );
 
   // Signal UI state (zoneless-safe)
   readonly query = signal<string>('');
@@ -224,14 +252,18 @@ export class StoreUserMultiSelectComponent
         debounceTime(SEARCH_DEBOUNCE_MS),
         distinctUntilChanged(),
         tap(() => this.isLoading.set(true)),
-        switchMap((term) =>
-          this.lookup
-            .search(term, {
-              excludeIds: this.excludeIds(),
-              excludeRole: this.excludeRole() ?? undefined,
-            })
-            .pipe(catchError(() => of([] as StoreUserOption[]))),
-        ),
+        switchMap((term) => {
+          const search = this.searchFn();
+          return (
+            search
+              ? search(term)
+              : this.lookup.search(term, {
+                  excludeIds: this.excludeIds(),
+                  excludeRole: this.excludeRole() ?? undefined,
+                  mode: this.lookupMode(),
+                })
+          ).pipe(catchError(() => of([] as StoreUserOption[])));
+        }),
         takeUntilDestroyed(this.destroyRef),
       )
       .subscribe((options) => {
@@ -247,8 +279,14 @@ export class StoreUserMultiSelectComponent
       this.selected.set([]);
       return;
     }
-    // Resolve name/avatar for each incoming id.
-    forkJoin(ids.map((id) => this.lookup.getById(id)))
+    // Resolve name/avatar for each incoming id; known users skip the lookup.
+    const known = new Map(this.knownUsers().map((user) => [user.id, user]));
+    forkJoin(
+      ids.map((id) => {
+        const user = known.get(id);
+        return user ? of(user) : this.lookup.getById(id, { mode: this.lookupMode() });
+      }),
+    )
       .pipe(takeUntilDestroyed(this.destroyRef))
       .subscribe((resolved) => {
         this.selected.set(

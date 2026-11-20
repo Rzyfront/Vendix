@@ -1,15 +1,13 @@
-import { IsOptional, IsString, MaxLength } from 'class-validator';
+import { DispatchTransferDto } from '../../../../store/orders/stock-transfers/dto/transfer-advanced.dto';
 
 /**
- * Optional dispatch payload for org-level stock transfers.
+ * Despacho de una transferencia de organización.
  *
- * Dispatch is the physical step where origin stock is decremented and the
- * transfer enters `in_transit`. The `notes` field is appended to the
- * existing transfer notes for traceability.
+ * Desde P2 comparte el bloque de transporte, el conteo de salida por línea y el
+ * lote con la superficie de tienda (`DispatchTransferDto`): `items` permite
+ * despachar menos de lo pedido y elegir lote, y `transport_method` + vehículo +
+ * costo quedan registrados en la transferencia.
+ *
+ * `notes` se sigue anexando a las notas existentes para trazabilidad.
  */
-export class DispatchOrgTransferDto {
-  @IsOptional()
-  @IsString()
-  @MaxLength(500)
-  notes?: string;
-}
+export class DispatchOrgTransferDto extends DispatchTransferDto {}

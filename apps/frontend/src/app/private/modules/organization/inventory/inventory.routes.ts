@@ -53,6 +53,15 @@ export const orgInventoryRoutes: Routes = [
             (c) => c.OrgTransfersComponent,
           ),
       },
+      // Vista avanzada del movimiento entre bodegas (P1 es esqueleto). Mismos
+      // guards/permisos que 'transfers': hereda el scope y el gate del padre.
+      {
+        path: 'transfers/new',
+        loadComponent: () =>
+          import('./pages/transfers/transfer-advanced-page.component').then(
+            (c) => c.OrgTransferAdvancedPageComponent,
+          ),
+      },
       {
         path: 'adjustments',
         loadComponent: () =>

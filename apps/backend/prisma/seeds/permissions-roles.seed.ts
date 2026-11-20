@@ -2252,6 +2252,16 @@ export async function seedPermissionsAndRoles(
       path: '/api/store/stock-transfers/:id',
       method: 'PATCH',
     },
+    // D2 — aprobar es una acción propia: cualquier usuario con este permiso
+    // puede aprobar (incluido el creador). El endpoint acepta además el
+    // histórico `update` para no quitarle la acción a los roles existentes.
+    {
+      name: 'store:stock-transfers:approve',
+      description:
+        'Aprobar una transferencia de inventario (no mueve stock; reserva el origen)',
+      path: '/api/store/stock-transfers/:id/approve',
+      method: 'PATCH',
+    },
     {
       name: 'store:stock-transfers:delete',
       description: 'Eliminar transferencia de inventario',

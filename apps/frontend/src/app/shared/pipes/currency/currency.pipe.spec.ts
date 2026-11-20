@@ -175,6 +175,14 @@ describe('CurrencyFormatService / CurrencyPipe — formato del tenant', () => {
       expect(service.formatChartAxis(2_300)).toBe('$2K');
     });
 
+    it('formato completo negativo: "-$5.900.000"; cero redondeado sin signo', () => {
+      expect(service.format(-5_900_000)).toBe('-$5.900.000');
+      expect(service.format(-436.18, 2)).toBe('-$436,18');
+      expect(service.format(-0.4)).toBe('$0');
+      expect(service.format(5_900_000)).toBe('$5.900.000');
+      expect(service.formatCompactStat(-436)).toBe('-$436');
+    });
+
     it('formatCompactStat: compacto desde mil, completo por debajo', () => {
       expect(service.formatCompactStat(-5_900_000)).toBe('-$5.9M');
       expect(service.formatCompactStat(436)).toBe('$436');
@@ -190,6 +198,7 @@ describe('CurrencyFormatService / CurrencyPipe — formato del tenant', () => {
 
       expect(service.resolution()).toBe('unresolved');
       expect(service.format(TOTAL)).toBe('$100,436.18');
+      expect(service.format(-TOTAL)).toBe('-$100,436.18');
     });
   });
 

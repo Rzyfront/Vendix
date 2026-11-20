@@ -836,7 +836,7 @@ export function createVariantTools(deps: VariantToolDeps): RegisteredTool[] {
               name: created?.name ?? null,
             },
             next_step:
-              'Si la variante lleva stock en varias bodegas, muévelo con manage_stock_transfers.',
+              'Si la variante lleva stock en varias bodegas, muévelo con create_stock_transfer.',
           });
         } catch (error) {
           const { code, message } = describeError(error);

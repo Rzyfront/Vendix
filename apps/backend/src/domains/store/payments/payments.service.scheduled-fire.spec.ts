@@ -159,6 +159,9 @@ describe('PaymentsService fire-to-kitchen vs pedidos programados (QUI-989)', () 
     };
 
     const mockPromotionEngine = {
+      // Casilla única de código: por defecto ningún código es de promoción.
+      resolveDiscountCode: jest.fn().mockResolvedValue({ kind: 'none' }),
+      quoteWithPromotionCode: jest.fn(),
       quoteDiscounts: jest.fn(),
       applyPromotion: jest.fn(),
       validatePromotion: jest.fn(),

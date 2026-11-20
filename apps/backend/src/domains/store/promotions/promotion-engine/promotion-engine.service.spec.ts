@@ -355,13 +355,17 @@ describe('PromotionEngineService - quoteDiscounts', () => {
         now: REFERENCE_NOW,
       });
 
-      // Verify the query enforced state + date range predicates.
+      // Verify the query enforced state + date range predicates, evaluated on
+      // the store's wall clock (America/Bogota by default): 12:00Z is 07:00
+      // local and the end date counts its whole local calendar day.
       const args = prisma.promotions.findMany.mock.calls[0][0];
       expect(args.where.state.in).toEqual(['active', 'scheduled']);
-      expect(args.where.start_date.lte).toBe(REFERENCE_NOW);
+      expect(args.where.start_date.lte).toEqual(
+        new Date('2026-06-01T07:00:00Z'),
+      );
       expect(args.where.OR).toEqual([
         { end_date: null },
-        { end_date: { gte: REFERENCE_NOW } },
+        { end_date: { gte: new Date('2026-06-01T00:00:00Z') } },
       ]);
       expect(result.applied_promotions).toEqual([]);
     });
@@ -406,7 +410,12 @@ describe('PromotionEngineService - quoteDiscounts', () => {
       expect(prisma.order_promotions.groupBy).toHaveBeenCalledWith({
         by: ['promotion_id'],
         // las filas en 0 (promoción que dejó de aplicar) no consumen el límite
-        where: { promotion_id: { in: [63] }, customer_id: 77, discount_amount: { gt: 0 } },
+        where: {
+          promotion_id: { in: [63] },
+          customer_id: 77,
+          discount_amount: { gt: 0 },
+          orders: { state: { notIn: ['cancelled', 'refunded'] } },
+        },
         _count: { _all: true },
       });
       expect(result.applied_promotions).toEqual([]);
@@ -432,7 +441,13 @@ describe('PromotionEngineService - quoteDiscounts', () => {
       const withOpt = await service.quoteDiscounts({ ...input, exclude_order_id: 900 });
       expect(prisma.order_promotions.groupBy).toHaveBeenLastCalledWith({
         by: ['promotion_id'],
-        where: { promotion_id: { in: [64] }, customer_id: 77, discount_amount: { gt: 0 }, order_id: { not: 900 } },
+        where: {
+          promotion_id: { in: [64] },
+          customer_id: 77,
+          discount_amount: { gt: 0 },
+          orders: { state: { notIn: ['cancelled', 'refunded'] } },
+          order_id: { not: 900 },
+        },
         _count: { _all: true },
       });
       expect(withOpt.applied_promotions).toHaveLength(1);
@@ -506,8 +521,15 @@ describe('PromotionEngineService - quoteDiscounts', () => {
         now: REFERENCE_NOW,
       });
       const where = prisma.promotions.findMany.mock.calls[0][0].where;
-      expect(where.start_date).toEqual({ lte: asOf });
-      expect(where.OR).toEqual([{ end_date: null }, { end_date: { gte: asOf } }]);
+      // 2026-03-01T00:00Z es el 28-feb 19:00 en Bogotá: la ventana se evalúa
+      // con ese reloj local.
+      expect(where.start_date).toEqual({
+        lte: new Date('2026-02-28T19:00:00Z'),
+      });
+      expect(where.OR).toEqual([
+        { end_date: null },
+        { end_date: { gte: new Date('2026-02-28T00:00:00Z') } },
+      ]);
     });
   });
 
@@ -2120,3 +2142,437 @@ describe('PromotionEngineService - quoteDiscounts', () => {
   });
 });
 
+
+/**
+ * Auditoría de promociones (odd/tasks/promociones-auditoria-dias-semana.md).
+ * Cada bloque demuestra una falla encontrada (falla antes del fix y pasa
+ * después) o un criterio de la feature "días de la semana".
+ */
+describe('PromotionEngineService - auditoría y días de la semana', () => {
+  let service: PromotionEngineService;
+  let prisma: any;
+
+  // 2026-11-17 es martes, 2026-11-19 jueves y 2026-11-20 viernes.
+  const TUESDAY_10AM_BOGOTA = new Date('2026-11-17T15:00:00Z');
+  const THURSDAY_10AM_BOGOTA = new Date('2026-11-19T15:00:00Z');
+  // Viernes 22:00 en Bogotá, pero ya sábado 03:00 en UTC.
+  const FRIDAY_10PM_BOGOTA = new Date('2026-11-21T03:00:00Z');
+  const LINE = { line_id: 'a', product_id: 1, unit_price: 100, quantity: 1 };
+
+  beforeEach(async () => {
+    prisma = {
+      promotions: {
+        findMany: jest.fn().mockResolvedValue([]),
+        findFirst: jest.fn(),
+        update: jest.fn(),
+      },
+      order_promotions: {
+        count: jest.fn().mockResolvedValue(0),
+        create: jest.fn(),
+        update: jest.fn(),
+        findFirst: jest.fn().mockResolvedValue(null),
+        groupBy: jest.fn().mockResolvedValue([]),
+        findMany: jest.fn().mockResolvedValue([]),
+      },
+      products: { findMany: jest.fn().mockResolvedValue([]) },
+    };
+    const module: TestingModule = await Test.createTestingModule({
+      providers: [
+        PromotionEngineService,
+        { provide: StorePrismaService, useValue: prisma },
+      ],
+    }).compile();
+    service = module.get(PromotionEngineService);
+  });
+
+  describe('días de la semana (active_weekdays)', () => {
+    const tueWedFri = () =>
+      buildPromotion({ id: 700, active_weekdays: [2, 3, 5] });
+
+    it('aplica en uno de sus días (martes)', async () => {
+      prisma.promotions.findMany.mockResolvedValue([tueWedFri()]);
+      const r = await service.quoteDiscounts({
+        items: [LINE],
+        now: TUESDAY_10AM_BOGOTA,
+      });
+      expect(r.applied_promotions.map((p) => p.promotion_id)).toEqual([700]);
+      expect(r.total_discount).toBe(10);
+    });
+
+    it('no se auto-aplica fuera de sus días (jueves)', async () => {
+      prisma.promotions.findMany.mockResolvedValue([tueWedFri()]);
+      const r = await service.quoteDiscounts({
+        items: [LINE],
+        now: THURSDAY_10AM_BOGOTA,
+      });
+      expect(r.applied_promotions).toEqual([]);
+      expect(r.total_discount).toBe(0);
+    });
+
+    it('tampoco aplica como promoción manual fuera de sus días', async () => {
+      prisma.promotions.findMany.mockResolvedValue([
+        buildPromotion({ id: 701, is_auto_apply: false, active_weekdays: [2] }),
+      ]);
+      const r = await service.quoteDiscounts({
+        items: [LINE],
+        manual_promotion_ids: [701],
+        now: THURSDAY_10AM_BOGOTA,
+      });
+      expect(r.applied_promotions).toEqual([]);
+    });
+
+    it('lista vacía = todos los días (promociones existentes no cambian)', async () => {
+      prisma.promotions.findMany.mockResolvedValue([
+        buildPromotion({ id: 702, active_weekdays: [] }),
+      ]);
+      const r = await service.quoteDiscounts({
+        items: [LINE],
+        now: THURSDAY_10AM_BOGOTA,
+      });
+      expect(r.applied_promotions).toHaveLength(1);
+    });
+
+    it('el día se calcula en la zona de la tienda, no en UTC', async () => {
+      prisma.promotions.findMany.mockResolvedValue([tueWedFri()]);
+      // Viernes 22:00 local (sábado en UTC): la promo del viernes aplica.
+      const r = await service.quoteDiscounts({
+        items: [LINE],
+        now: FRIDAY_10PM_BOGOTA,
+      });
+      expect(r.applied_promotions).toHaveLength(1);
+    });
+
+    it('usa stores.timezone de la tienda cuando existe', async () => {
+      prisma.store_settings = {
+        findFirst: jest.fn().mockResolvedValue({
+          settings: { general: { timezone: 'America/Bogota' } },
+          stores: { timezone: 'Europe/Madrid' },
+        }),
+      };
+      prisma.promotions.findMany.mockResolvedValue([
+        buildPromotion({ id: 703, active_weekdays: [5] }),
+      ]);
+      // Jueves 23:30Z = viernes 00:30 en Madrid (jueves 18:30 en Bogotá).
+      const r = await service.quoteDiscounts({
+        items: [LINE],
+        now: new Date('2026-11-19T23:30:00Z'),
+      });
+      expect(r.applied_promotions).toHaveLength(1);
+    });
+
+    it('la tarjeta de producto no anuncia la promo fuera de su día', async () => {
+      prisma.promotions.findMany.mockResolvedValue([
+        buildPromotion({
+          id: 704,
+          scope: 'product',
+          active_weekdays: [2],
+          promotion_products: [{ product_id: 1 }],
+        }),
+      ]);
+      const onTuesday = await service.findActiveAutoPromotionsForProducts(
+        [{ product_id: 1, unit_price: 100, category_ids: [] }],
+        TUESDAY_10AM_BOGOTA,
+      );
+      const onThursday = await service.findActiveAutoPromotionsForProducts(
+        [{ product_id: 1, unit_price: 100, category_ids: [] }],
+        THURSDAY_10AM_BOGOTA,
+      );
+      expect(onTuesday.get(1)?.id).toBe(704);
+      expect(onThursday.has(1)).toBe(false);
+    });
+
+    it('el código fuera de día se rechaza con mensaje claro', async () => {
+      jest.useFakeTimers().setSystemTime(THURSDAY_10AM_BOGOTA);
+      try {
+        prisma.promotions.findFirst.mockResolvedValue(tueWedFri());
+        await expect(service.validatePromotion(700, [LINE])).rejects.toMatchObject({
+          response: {
+            error_code: 'PROMOTION_NOT_TODAY_001',
+            message:
+              'Esta promoción no aplica hoy: solo es válida los martes, miércoles y viernes',
+          },
+        });
+      } finally {
+        jest.useRealTimers();
+      }
+    });
+
+    it('validatePromotionByCode rechaza un código inexistente', async () => {
+      prisma.promotions.findFirst.mockResolvedValue(null);
+      await expect(
+        service.validatePromotionByCode('NOPE', [LINE]),
+      ).rejects.toMatchObject({
+        response: { error_code: 'PROMOTION_INVALID_001' },
+      });
+    });
+  });
+
+  describe('fechas en la zona de la tienda', () => {
+    it('la fecha de fin incluye todo su día local', async () => {
+      await service.quoteDiscounts({
+        items: [LINE],
+        // 30-nov 15:00 en Bogotá. Antes: `end_date >= now` (20:00Z) dejaba
+        // fuera una promo con fin "2026-11-30" (medianoche UTC) desde las
+        // 19:00 del 29-nov.
+        now: new Date('2026-11-30T20:00:00Z'),
+      });
+      const where = prisma.promotions.findMany.mock.calls[0][0].where;
+      expect(where.OR).toEqual([
+        { end_date: null },
+        { end_date: { gte: new Date('2026-11-30T00:00:00Z') } },
+      ]);
+      // y la de inicio arranca a la medianoche LOCAL, no a las 19:00 del día anterior
+      expect(where.start_date).toEqual({
+        lte: new Date('2026-11-30T15:00:00Z'),
+      });
+    });
+  });
+
+  describe('escalas por producto (quantity_grouping = per_product)', () => {
+    it('cada producto recibe el tramo que alcanzó, no solo el del tramo mayor', async () => {
+      prisma.promotions.findMany.mockResolvedValue([
+        buildPromotion({
+          id: 710,
+          rule_type: 'quantity_tiered',
+          quantity_grouping: 'per_product',
+          scope: 'product',
+          promotion_products: [{ product_id: 1 }, { product_id: 2 }],
+          promotion_quantity_tiers: [
+            buildTier({ id: 1, promotion_id: 710, min_quantity: 2, max_quantity: 4, value: 10 }),
+            buildTier({ id: 2, promotion_id: 710, min_quantity: 5, value: 20 }),
+          ],
+        }),
+      ]);
+      const r = await service.quoteDiscounts({
+        items: [
+          { line_id: 'a', product_id: 1, unit_price: 100, quantity: 5 },
+          { line_id: 'b', product_id: 2, unit_price: 100, quantity: 2 },
+        ],
+        now: TUESDAY_10AM_BOGOTA,
+      });
+      // A: 20 % de 500 = 100; B: 10 % de 200 = 20. Antes B quedaba en 0.
+      expect(r.items[0].promotion_discount).toBe(100);
+      expect(r.items[1].promotion_discount).toBe(20);
+      expect(r.total_discount).toBe(120);
+    });
+  });
+
+  describe('apilamiento (stacking_groups)', () => {
+    it('el descuento de orden se reparte sobre el saldo: líneas y total cuadran', async () => {
+      prisma.store_settings = {
+        findFirst: jest.fn().mockResolvedValue({
+          settings: { promotions: { evaluation_strategy: 'stacking_groups' } },
+        }),
+      };
+      prisma.promotions.findMany.mockResolvedValue([
+        buildPromotion({
+          id: 720,
+          scope: 'product',
+          value: 100,
+          priority: 1,
+          promotion_products: [{ product_id: 1 }],
+        }),
+        buildPromotion({ id: 721, scope: 'order', value: 50, priority: 2 }),
+      ]);
+      const r = await service.quoteDiscounts({
+        items: [
+          { line_id: 'a', product_id: 1, unit_price: 100, quantity: 1 },
+          { line_id: 'b', product_id: 2, unit_price: 100, quantity: 1 },
+        ],
+        now: TUESDAY_10AM_BOGOTA,
+      });
+      const lineDiscounts = r.items.reduce(
+        (sum, i) => sum + i.promotion_discount,
+        0,
+      );
+      expect(r.total_discount).toBe(150);
+      expect(r.promotional_subtotal).toBe(50);
+      // Antes: 25 del descuento de orden caía en la línea ya en 0 y se perdía.
+      expect(lineDiscounts).toBe(150);
+      expect(r.items[1].final_line_total).toBe(50);
+    });
+  });
+
+  describe('vista previa = cobro (check-eligibility)', () => {
+    it('usa el mismo cálculo que el cobro: escalas y solo automáticas', async () => {
+      prisma.promotions.findMany.mockResolvedValue([
+        buildPromotion({
+          id: 730,
+          rule_type: 'quantity_tiered',
+          value: 0,
+          promotion_quantity_tiers: [
+            buildTier({ id: 3, promotion_id: 730, min_quantity: 3, value: 15 }),
+          ],
+        }),
+      ]);
+      const preview = await service.getEligiblePromotions([
+        { product_id: 1, unit_price: 100, quantity: 4 },
+      ]);
+      // Antes: descuento plano con promo.value (0) → la vista previa decía 0.
+      expect(preview).toHaveLength(1);
+      expect(preview[0].calculated_discount).toBe(60);
+    });
+  });
+
+  describe('casilla única de código (cupón primero, luego promoción)', () => {
+    beforeEach(() => {
+      prisma.coupons = { findFirst: jest.fn().mockResolvedValue(null) };
+    });
+
+    it('un código de cupón sigue siendo cupón aunque una promo tenga el mismo', async () => {
+      prisma.coupons.findFirst.mockResolvedValue({ id: 1 });
+      prisma.promotions.findFirst.mockResolvedValue({ id: 800 });
+      await expect(service.resolveDiscountCode('VERANO')).resolves.toEqual({
+        kind: 'coupon',
+      });
+      expect(prisma.promotions.findFirst).not.toHaveBeenCalled();
+    });
+
+    it('sin cupón, el código resuelve a la promoción (sin distinguir mayúsculas)', async () => {
+      prisma.promotions.findFirst.mockResolvedValue({ id: 800 });
+      await expect(service.resolveDiscountCode('martes2x1')).resolves.toEqual({
+        kind: 'promotion',
+        promotion_id: 800,
+      });
+      expect(prisma.promotions.findFirst.mock.calls[0][0].where).toEqual({
+        code: { equals: 'martes2x1', mode: 'insensitive' },
+      });
+    });
+
+    it('ni cupón ni promoción: none (el flujo de cupones responde CPN_FIND_001)', async () => {
+      prisma.promotions.findFirst.mockResolvedValue(null);
+      await expect(service.resolveDiscountCode('NOEXISTE')).resolves.toEqual({
+        kind: 'none',
+      });
+    });
+
+    it('aplica la promoción por código como manual y reporta lo que agrega', async () => {
+      prisma.promotions.findMany.mockImplementation(async ({ where }: any) => {
+        const manual =
+          JSON.stringify(where).includes('"in":[800]') ? [
+            buildPromotion({
+              id: 800,
+              code: 'MARTES20',
+              is_auto_apply: false,
+              value: 20,
+              active_weekdays: [2],
+            }),
+          ] : [];
+        return [buildPromotion({ id: 801, value: 5, priority: 5 }), ...manual];
+      });
+      const result = await service.quoteWithPromotionCode(
+        { items: [LINE], now: TUESDAY_10AM_BOGOTA },
+        800,
+      );
+      // Sin código: 5 % (auto). Con código: gana la de prioridad 0 → 20 %.
+      expect(result.quote.applied_promotions.map((p) => p.promotion_id)).toEqual([800]);
+      expect(result.quote.total_discount).toBe(20);
+      expect(result.code_discount).toBe(15);
+    });
+
+    it('fuera de su día el código se rechaza con el motivo concreto', async () => {
+      jest.useFakeTimers().setSystemTime(THURSDAY_10AM_BOGOTA);
+      try {
+        const promo = buildPromotion({
+          id: 800,
+          is_auto_apply: false,
+          active_weekdays: [2],
+        });
+        prisma.promotions.findMany.mockResolvedValue([promo]);
+        prisma.promotions.findFirst.mockResolvedValue(promo);
+        await expect(
+          service.quoteWithPromotionCode(
+            { items: [LINE], now: THURSDAY_10AM_BOGOTA },
+            800,
+          ),
+        ).rejects.toMatchObject({
+          response: { error_code: 'PROMOTION_NOT_TODAY_001' },
+        });
+      } finally {
+        jest.useRealTimers();
+      }
+    });
+
+    it('si no mejora el precio (gana otra promo de mayor prioridad) se rechaza', async () => {
+      const code = buildPromotion({
+        id: 802,
+        is_auto_apply: false,
+        value: 5,
+        priority: 9,
+      });
+      const auto = buildPromotion({ id: 803, value: 30, priority: 1 });
+      prisma.promotions.findMany.mockResolvedValue([auto, code]);
+      prisma.promotions.findFirst.mockResolvedValue(code);
+      await expect(
+        service.quoteWithPromotionCode(
+          { items: [LINE], now: TUESDAY_10AM_BOGOTA },
+          802,
+        ),
+      ).rejects.toMatchObject({
+        response: { error_code: 'PROMOTION_NOT_APPLICABLE_001' },
+      });
+    });
+
+    it('la vista previa del POS responde con la forma de un cupón', async () => {
+      prisma.promotions.findMany.mockImplementation(async ({ where }: any) =>
+        JSON.stringify(where).includes('"in":[800]')
+          ? [buildPromotion({ id: 800, code: 'MARTES20', is_auto_apply: false, value: 20 })]
+          : [],
+      );
+      const preview = await service.previewPromotionCode(800, {
+        items: [{ product_id: 1, line_total: 300, quantity: 3, unit_price: 100 }],
+      });
+      expect(preview).toMatchObject({
+        valid: true,
+        kind: 'promotion',
+        coupon_id: null,
+        promotion_id: 800,
+        coupon_code: 'MARTES20',
+        discount_type: 'PERCENTAGE',
+        discount_amount: 60,
+      });
+    });
+  });
+
+  describe('conteo de usos', () => {
+    it('applyPromotion no duplica la fila ni el uso si la orden ya la tenía', async () => {
+      prisma.order_promotions.findFirst.mockResolvedValue({
+        id: 9,
+        discount_amount: 10,
+      });
+      await service.applyPromotion(55, 700, 12, null);
+      expect(prisma.order_promotions.create).not.toHaveBeenCalled();
+      expect(prisma.order_promotions.update).toHaveBeenCalledWith({
+        where: { id: 9 },
+        data: { discount_amount: 12, customer_id: null },
+      });
+      expect(prisma.promotions.update).not.toHaveBeenCalled();
+    });
+
+    it('applyPromotion cuenta el uso una vez en una orden nueva', async () => {
+      await service.applyPromotion(56, 700, 12, 3);
+      expect(prisma.order_promotions.create).toHaveBeenCalledTimes(1);
+      expect(prisma.promotions.update).toHaveBeenCalledWith({
+        where: { id: 700 },
+        data: { usage_count: { increment: 1 } },
+      });
+    });
+
+    it('la tarjeta de producto no anuncia una promo con el cupo agotado', async () => {
+      prisma.promotions.findMany.mockResolvedValue([
+        buildPromotion({
+          id: 740,
+          scope: 'product',
+          usage_limit: 3,
+          usage_count: 3,
+          promotion_products: [{ product_id: 1 }],
+        }),
+      ]);
+      const map = await service.findActiveAutoPromotionsForProducts(
+        [{ product_id: 1, unit_price: 100, category_ids: [] }],
+        TUESDAY_10AM_BOGOTA,
+      );
+      expect(map.has(1)).toBe(false);
+    });
+  });
+});

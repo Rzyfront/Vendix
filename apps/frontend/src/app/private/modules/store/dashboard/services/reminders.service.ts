@@ -13,6 +13,7 @@ export type ReminderLinkType =
   | 'purchase_order'
   | 'quotation'
   | 'invoice'
+  | 'fiscal_obligation'
   | 'metric';
 
 export interface ReminderLink {
@@ -45,7 +46,8 @@ export interface Reminder {
   status: ReminderStatus;
   bucket: ReminderBucket;
   link: ReminderLink | null;
-  source: 'manual' | 'vex';
+  /** `fiscal`: creado por el calendario tributario al guardar la periodicidad de IVA. */
+  source: 'manual' | 'vex' | 'fiscal';
   completed_at: string | null;
   created_at: string;
   updated_at: string;

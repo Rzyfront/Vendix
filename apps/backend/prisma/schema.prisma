@@ -117,6 +117,8 @@ model users {
   stock_transfers            stock_transfers[]            @relation("stock_transfers_created_by")
   stock_transfers_dispatched stock_transfers[]            @relation("stock_transfers_dispatched_by")
   stock_transfers_cancelled  stock_transfers[]            @relation("stock_transfers_cancelled_by")
+  stock_transfers_driver     stock_transfers[]            @relation("stock_transfers_driver")
+  stock_transfers_loss_closed stock_transfers[]           @relation("stock_transfers_loss_closed")
   store_users                store_users[]                @relation("store_users_user")
   user_roles                 user_roles[]
   user_sessions              user_sessions[]
@@ -323,6 +325,7 @@ model users {
   crm_tasks                  crm_tasks[]                  @relation("crm_tasks_customer")
   crm_assigned_tasks         crm_tasks[]                  @relation("crm_tasks_assigned")
   crm_created_tasks          crm_tasks[]                  @relation("crm_tasks_created_by")
+  crm_supported_tasks        crm_task_assignees[]
   user_reminders             user_reminders[]
   crm_notes                  crm_notes[]                  @relation("crm_notes_customer")
   crm_created_notes          crm_notes[]                  @relation("crm_notes_created_by")
@@ -1278,6 +1281,7 @@ model stores {
   crm_pipeline_stages   crm_pipeline_stages[]
   crm_opportunities     crm_opportunities[]
   crm_tasks             crm_tasks[]
+  crm_task_assignees    crm_task_assignees[]
   crm_notes             crm_notes[]
   user_reminders        user_reminders[]
   crm_campaigns         crm_campaigns[]
@@ -2348,6 +2352,12 @@ model products {
   is_ingredient                  Boolean                          @default(false)
   is_combo                       Boolean                          @default(false)
   is_batch_produced              Boolean                          @default(false)
+  /// Dónde se produce (producible: `is_batch_produced` + receta/fórmula):
+  /// `kitchen` = Producción (cocina), `plant` = Planta. NULL = lo decide la
+  /// industria de la tienda (solo manufactura → planta, si no → cocina).
+  production_site                String?                          @db.VarChar(20)
+  /// Planta concreta cuando `production_site = plant`; NULL = planta principal.
+  production_plant_id            Int?
   /// Naturaleza de uso: para qué existe el producto. `sale` se vende; `supply`
   /// (insumo) solo entra en recetas/producción/fórmulas; `internal_use` lo
   /// consume la operación. `supply` e `internal_use` NUNCA son vendibles en
@@ -2540,6 +2550,9 @@ model products {
   // Adiciones
   product_option_components  product_options[]                  @relation("product_option_component")
   product_option_assignments product_option_group_assignments[] @relation("product_option_group_assignment_product")
+  production_plant               manufacturing_plants?            @relation("products_production_plant", fields: [production_plant_id], references: [id], onDelete: SetNull, onUpdate: NoAction)
+
+  @@index([production_plant_id])
 }
 
 /// CP-pos-smart-search E.4 (F-069) — log append-only de selecciones del
@@ -3923,6 +3936,7 @@ model inventory_batches {
   product_variants         product_variants?          @relation(fields: [product_variant_id], references: [id], onDelete: Cascade)
   inventory_serial_numbers inventory_serial_numbers[]
   inventory_adjustments    inventory_adjustments[]
+  stock_transfer_items     stock_transfer_items[]
 
   @@unique([product_id, batch_number])
 }
@@ -4560,7 +4574,7 @@ model stock_transfers {
   transfer_number       String                 @db.VarChar(50)
   organization_id       Int
   from_location_id      Int
-  to_location_id        Int
+  to_location_id        Int?
   status                transfer_status_enum   @default(pending)
   transfer_date         DateTime?              @default(now()) @db.Timestamp(6)
   expected_date         DateTime?              @db.Timestamp(6)
@@ -4576,6 +4590,32 @@ model stock_transfers {
   cancellation_reason   String?
   source_order_id       Int?
   source_order_type     String?                @db.VarChar(50)
+  // P2 (transferencias multi-producto) — ejecución, transporte, remisiones,
+  // destino externo y cierre con pérdida. Todo nullable o con default para no
+  // reescribir las filas históricas: `movement_mode` NULL = flujo anterior
+  // (aprobar → despachar/recibir sin documentos).
+  movement_mode          transfer_movement_mode_enum?
+  transport_method       transfer_transport_method_enum?
+  vehicle_id             Int?
+  driver_user_id         Int?
+  driver_name            String?                @db.VarChar(255)
+  shipping_method_id     Int?
+  carrier_name           String?                @db.VarChar(255)
+  tracking_number        String?                @db.VarChar(120)
+  shipping_cost          Decimal                @default(0) @db.Decimal(12, 2)
+  dispatch_note_id       Int?
+  receipt_note_id        Int?
+  is_external_destination Boolean               @default(false)
+  external_destination_name    String?          @db.VarChar(255)
+  external_destination_tax_id  String?          @db.VarChar(50)
+  external_destination_address String?          @db.Text
+  support_document_type  transfer_support_document_type_enum?
+  support_document_id    String?                @db.VarChar(100)
+  exit_reason            String?                @db.Text
+  no_support_alert       Boolean                @default(false)
+  loss_closed_at         DateTime?              @db.Timestamp(6)
+  loss_closed_by_user_id Int?
+  loss_reason            String?                @db.Text
   created_at            DateTime?              @default(now()) @db.Timestamp(6)
   updated_at            DateTime?              @default(now()) @db.Timestamp(6)
   stock_transfer_items  stock_transfer_items[]
@@ -4585,11 +4625,23 @@ model stock_transfers {
   canceller             users?                 @relation("stock_transfers_cancelled_by", fields: [cancelled_by_user_id], references: [id], onDelete: SetNull, onUpdate: NoAction)
   from_location         inventory_locations    @relation("from_location", fields: [from_location_id], references: [id], onUpdate: NoAction)
   organizations         organizations          @relation(fields: [organization_id], references: [id], onDelete: Cascade)
-  to_location           inventory_locations    @relation("to_location", fields: [to_location_id], references: [id], onUpdate: NoAction)
+  // D8 — un destino externo no tiene bodega interna: la columna es nullable
+  // desde P2 y el servicio exige `to_location_id` para todo destino interno.
+  to_location           inventory_locations?   @relation("to_location", fields: [to_location_id], references: [id], onDelete: Restrict, onUpdate: NoAction)
+  vehicle               vehicles?              @relation("stock_transfers_vehicle", fields: [vehicle_id], references: [id], onDelete: SetNull, onUpdate: NoAction)
+  driver                users?                 @relation("stock_transfers_driver", fields: [driver_user_id], references: [id], onDelete: SetNull, onUpdate: NoAction)
+  shipping_method       shipping_methods?      @relation("stock_transfers_shipping_method", fields: [shipping_method_id], references: [id], onDelete: SetNull, onUpdate: NoAction)
+  dispatch_note         dispatch_notes?        @relation("stock_transfers_dispatch_note", fields: [dispatch_note_id], references: [id], onDelete: SetNull, onUpdate: NoAction)
+  receipt_note          dispatch_notes?        @relation("stock_transfers_receipt_note", fields: [receipt_note_id], references: [id], onDelete: SetNull, onUpdate: NoAction)
+  loss_closed_by        users?                 @relation("stock_transfers_loss_closed", fields: [loss_closed_by_user_id], references: [id], onDelete: SetNull, onUpdate: NoAction)
 
   @@unique([organization_id, transfer_number])
   @@index([source_order_type, source_order_id], map: "stock_transfers_source_order_idx")
   @@index([status], map: "stock_transfers_status_idx")
+  @@index([dispatch_note_id])
+  @@index([receipt_note_id])
+  @@index([vehicle_id])
+  @@index([is_external_destination])
 }
 
 model stock_transfer_items {
@@ -4599,14 +4651,23 @@ model stock_transfer_items {
   product_variant_id Int?
   quantity           Int
   quantity_received  Int               @default(0)
+  /// D5 — lote elegido por fila (o el más antiguo por FIFO/FEFO al despachar).
+  batch_id           Int?
+  /// Conteo de salida (D3): unidades que realmente salieron del origen. NULL en
+  /// filas históricas, donde se asume que salió `quantity`.
+  quantity_dispatched Int?
+  /// Unidades del saldo pendiente dadas de baja en un cierre con pérdida (D4).
+  quantity_lost      Int               @default(0)
   notes              String?
   created_at         DateTime?         @default(now()) @db.Timestamp(6)
   products           products          @relation(fields: [product_id], references: [id], onDelete: Cascade)
   product_variants   product_variants? @relation(fields: [product_variant_id], references: [id], onDelete: Cascade)
   stock_transfers    stock_transfers   @relation(fields: [stock_transfer_id], references: [id], onDelete: Cascade)
+  inventory_batches  inventory_batches? @relation(fields: [batch_id], references: [id], onDelete: SetNull, onUpdate: NoAction)
 
   @@index([stock_transfer_id])
   @@index([product_id, stock_transfer_id])
+  @@index([batch_id])
 }
 
 model return_orders {
@@ -4732,6 +4793,7 @@ model shipping_methods {
   // Plan Despacho Economía — FASE 3 paso 11. Contraparte de
   // dispatch_routes.shipping_method_id → shipping_methods.id.
   dispatch_routes_using_method dispatch_routes[]  @relation("dispatch_routes_shipping_method")
+  stock_transfers              stock_transfers[]  @relation("stock_transfers_shipping_method")
 
   @@index([store_id])
   @@index([is_system])
@@ -4965,6 +5027,10 @@ model promotions {
   state               promotion_state_enum             @default(draft)
   is_auto_apply       Boolean                          @default(false)
   priority            Int                              @default(0)
+  // Días de la semana en que aplica (0 = domingo … 6 = sábado), evaluados en
+  // la zona horaria de la tienda. Vacío = todos los días (comportamiento
+  // histórico de todas las promociones existentes).
+  active_weekdays     Int[]                            @default([])
   created_at          DateTime?                        @default(now()) @db.Timestamp(6)
   updated_at          DateTime?                        @default(now()) @db.Timestamp(6)
 
@@ -6157,6 +6223,41 @@ enum transfer_status_enum {
   received
   completed // legacy, deferred drop per Plan §13#2
   cancelled
+  /// Recepción parcial (D4): parte de lo despachado ya entró a destino y
+  /// queda saldo pendiente por recibir. No es terminal.
+  partially_received
+  /// Cierre con pérdida (D4): el saldo pendiente se dio de baja con motivo
+  /// después de vencer `expected_date`. Terminal, distinto de `received`
+  /// (no entró mercancía) y de `cancelled` (el despacho no se revierte).
+  closed_with_loss
+}
+
+/// D3 — cómo se ejecuta la orden avanzada de transferencia.
+/// `quick` es el movimiento rápido (D1); `mass_only` aplica el movimiento
+/// completo tras la aprobación, sin remisiones; `with_dispatch_notes` genera
+/// remisión de salida al despachar y de entrada al recibir.
+enum transfer_movement_mode_enum {
+  quick
+  mass_only
+  with_dispatch_notes
+}
+
+/// D6 — cómo viaja la mercancía entre bodegas.
+enum transfer_transport_method_enum {
+  none
+  internal_carrier
+  internal_vehicle
+  internal_shipping_method
+  external_shipping_method
+}
+
+/// D8 — documento que respalda una salida a un destino externo.
+enum transfer_support_document_type_enum {
+  sales_order
+  invoice
+  purchase_order
+  return
+  other
 }
 
 enum return_order_type_enum {
@@ -9158,6 +9259,7 @@ model fiscal_obligations {
   declaration_drafts tax_declaration_drafts[]
   operation_events   fiscal_operation_events[]
   fiscal_tax_payments fiscal_tax_payments[]
+  user_reminders     user_reminders[]
 
   @@unique([accounting_entity_id, type, period_start, period_end, jurisdiction_key], map: "fiscal_obligations_entity_type_range_jurisdiction_key")
   @@index([organization_id, accounting_entity_id, type, period_year], map: "fiscal_obligations_org_entity_type_year_idx")
@@ -11196,6 +11298,8 @@ model dispatch_notes {
   voided_by_user       users?                 @relation("dispatch_notes_voided_by", fields: [voided_by_user_id], references: [id], onDelete: Restrict, onUpdate: NoAction)
   return_orders        return_orders[]        @relation("return_orders_related_dispatch")
   dispatch_route_stops dispatch_route_stops[]
+  stock_transfers_dispatch stock_transfers[]  @relation("stock_transfers_dispatch_note")
+  stock_transfers_receipt  stock_transfers[]  @relation("stock_transfers_receipt_note")
 
   @@unique([store_id, dispatch_number])
   @@index([store_id, status])
@@ -13076,6 +13180,9 @@ model production_orders {
   /// NULL for restaurant orders and for stores without any plant (they keep the
   /// `manufacturing_settings` defaults, i.e. today's behaviour).
   plant_id     Int?
+  /// Pantalla dueña de la orden: `kitchen` (Producción) | `plant` (Planta).
+  /// NULL = filas anteriores: Planta las manuales con consecutivo, Producción el resto.
+  production_site String?                  @db.VarChar(20)
 
   store      stores   @relation(fields: [store_id], references: [id], onUpdate: NoAction)
   product    products @relation(fields: [product_id], references: [id], onUpdate: NoAction)
@@ -13164,6 +13271,7 @@ model manufacturing_plants {
   output_location   inventory_locations? @relation("manufacturing_plants_output_location", fields: [output_location_id], references: [id], onDelete: Restrict, onUpdate: NoAction)
   manager           users?               @relation("manufacturing_plants_manager", fields: [manager_user_id], references: [id], onDelete: SetNull, onUpdate: NoAction)
   production_orders production_orders[]
+  products_produced products[]           @relation("products_production_plant")
 
   @@unique([store_id, name])
   @@index([store_id, is_active])
@@ -13545,6 +13653,7 @@ model vehicles {
   // Plan Despacho Economía — FASE 2 paso 8. Contraparte de la relación
   // shipping_methods.default_vehicle_id → vehicles.id.
   default_for_methods shipping_methods[] @relation("shipping_methods_default_vehicle")
+  stock_transfers     stock_transfers[]  @relation("stock_transfers_vehicle")
 
   @@unique([store_id, plate])
   @@index([store_id, is_active])
@@ -15304,6 +15413,8 @@ model user_reminders {
   link_id      Int?
   link_label   String?                     @db.VarChar(200)
   source       user_reminder_source_enum   @default(manual)
+  /// Obligación fiscal que originó el recordatorio (source = fiscal). SET NULL al borrarla.
+  fiscal_obligation_id Int?
   notified_at  DateTime?                   @db.Timestamp(6)
   completed_at DateTime?                   @db.Timestamp(6)
   created_at   DateTime                    @default(now()) @db.Timestamp(6)
@@ -15311,9 +15422,11 @@ model user_reminders {
 
   store stores @relation(fields: [store_id], references: [id], onDelete: Restrict, onUpdate: NoAction)
   user  users  @relation(fields: [user_id], references: [id], onDelete: Restrict, onUpdate: NoAction)
+  fiscal_obligation fiscal_obligations? @relation(fields: [fiscal_obligation_id], references: [id], onDelete: SetNull, onUpdate: NoAction)
 
   @@index([store_id, user_id, status, remind_at])
   @@index([status, notified_at, remind_at])
+  @@index([fiscal_obligation_id])
 }
 
 enum user_reminder_status_enum {
@@ -15324,6 +15437,7 @@ enum user_reminder_status_enum {
 enum user_reminder_source_enum {
   manual
   vex
+  fiscal
 }
 
 enum crm_task_status_enum {
@@ -15556,6 +15670,8 @@ model crm_pipeline_stages {
   pipeline      crm_pipelines       @relation(fields: [pipeline_id], references: [id], onDelete: Restrict, onUpdate: NoAction)
   opportunities crm_opportunities[]
   store_users   store_users[]
+  /// Tareas que, al completarse, mueven su oportunidad a esta etapa.
+  moving_tasks  crm_tasks[]
 
   @@unique([pipeline_id, name])
   @@index([pipeline_id, sort_order])
@@ -15610,19 +15726,41 @@ model crm_tasks {
   status             crm_task_status_enum @default(pending)
   assigned_user_id   Int?
   created_by_user_id Int?
+  /// Etapa a la que se mueve la oportunidad ligada al completar la tarea.
+  move_to_stage_id   Int?
   completed_at       DateTime?            @db.Timestamp(6)
   created_at         DateTime             @default(now()) @db.Timestamp(6)
   updated_at         DateTime             @default(now()) @updatedAt @db.Timestamp(6)
 
-  store         stores             @relation(fields: [store_id], references: [id], onDelete: Restrict, onUpdate: NoAction)
-  customer      users?             @relation("crm_tasks_customer", fields: [customer_id], references: [id], onDelete: SetNull, onUpdate: NoAction)
-  opportunity   crm_opportunities? @relation(fields: [opportunity_id], references: [id], onDelete: SetNull, onUpdate: NoAction)
-  conversation  crm_conversations? @relation(fields: [conversation_id], references: [id], onDelete: SetNull, onUpdate: NoAction)
-  assigned_user users?             @relation("crm_tasks_assigned", fields: [assigned_user_id], references: [id], onDelete: SetNull, onUpdate: NoAction)
-  created_by    users?             @relation("crm_tasks_created_by", fields: [created_by_user_id], references: [id], onDelete: SetNull, onUpdate: NoAction)
+  store         stores               @relation(fields: [store_id], references: [id], onDelete: Restrict, onUpdate: NoAction)
+  customer      users?               @relation("crm_tasks_customer", fields: [customer_id], references: [id], onDelete: SetNull, onUpdate: NoAction)
+  opportunity   crm_opportunities?   @relation(fields: [opportunity_id], references: [id], onDelete: SetNull, onUpdate: NoAction)
+  conversation  crm_conversations?   @relation(fields: [conversation_id], references: [id], onDelete: SetNull, onUpdate: NoAction)
+  assigned_user users?               @relation("crm_tasks_assigned", fields: [assigned_user_id], references: [id], onDelete: SetNull, onUpdate: NoAction)
+  created_by    users?               @relation("crm_tasks_created_by", fields: [created_by_user_id], references: [id], onDelete: SetNull, onUpdate: NoAction)
+  move_to_stage crm_pipeline_stages? @relation(fields: [move_to_stage_id], references: [id], onDelete: SetNull, onUpdate: NoAction)
+  supporters    crm_task_assignees[]
 
   @@index([store_id, assigned_user_id, status, due_at])
   @@index([customer_id])
+  @@index([move_to_stage_id])
+}
+
+/// Personas de apoyo de una tarea CRM. El responsable sigue siendo uno
+/// (`crm_tasks.assigned_user_id`); el apoyo ve la tarea y puede completarla.
+model crm_task_assignees {
+  id         Int      @id @default(autoincrement())
+  store_id   Int
+  task_id    Int
+  user_id    Int
+  created_at DateTime @default(now()) @db.Timestamp(6)
+
+  store stores    @relation(fields: [store_id], references: [id], onDelete: Restrict, onUpdate: NoAction)
+  task  crm_tasks @relation(fields: [task_id], references: [id], onDelete: Cascade, onUpdate: NoAction)
+  user  users     @relation(fields: [user_id], references: [id], onDelete: Cascade, onUpdate: NoAction)
+
+  @@unique([task_id, user_id])
+  @@index([store_id, user_id])
 }
 
 /// Notas CRM del cliente. No reutiliza `customer_consultation_notes`, que está

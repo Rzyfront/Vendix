@@ -15,14 +15,18 @@ export type TransferStatus =
   | 'received'
   | 'cancelled'
   | 'draft'
-  | 'completed';
+  | 'completed'
+  // D4 — recepción parcial (sigue con saldo en camino) y cierre con pérdida.
+  | 'partially_received'
+  | 'closed_with_loss';
 
 export interface StockTransfer {
   id: number;
   transfer_number: string;
   organization_id: number;
   from_location_id: number;
-  to_location_id: number;
+  /** D8 — null en una salida a destino externo (no hay bodega de destino). */
+  to_location_id: number | null;
   status: TransferStatus;
   transfer_date: string;
   expected_date?: string;
@@ -38,8 +42,41 @@ export interface StockTransfer {
   created_at: string;
   updated_at: string;
   from_location: InventoryLocation;
-  to_location: InventoryLocation;
+  to_location?: InventoryLocation | null;
+  is_external_destination?: boolean;
+  external_destination_name?: string | null;
+  /** D3 — null en filas del flujo anterior (aprobar reservaba, recibir movía). */
+  movement_mode?: 'quick' | 'mass_only' | 'with_dispatch_notes' | null;
+  /** Fecha del despacho físico; null mientras no se despache. */
+  dispatched_at?: string | null;
+  external_destination_tax_id?: string | null;
+  external_destination_address?: string | null;
+  support_document_type?: string | null;
+  support_document_id?: string | null;
+  exit_reason?: string | null;
+  /** D8 — salida externa sin documento soporte ni motivo. */
+  no_support_alert?: boolean;
+  transport_method?: string | null;
+  driver_name?: string | null;
+  carrier_name?: string | null;
+  tracking_number?: string | null;
+  shipping_cost?: number | string | null;
+  loss_reason?: string | null;
+  dispatch_note?: TransferLinkedNote | null;
+  receipt_note?: TransferLinkedNote | null;
   stock_transfer_items: StockTransferItem[];
+}
+
+/** Remisión ligada a la transferencia (`transfer_out` / `transfer_in`). */
+export interface TransferLinkedNote {
+  id: number;
+  dispatch_number: string;
+  status?: string | null;
+  subtype?: string | null;
+  emission_date?: string | null;
+  /** Tienda donde vive el documento (R3-2). */
+  store_id?: number | null;
+  store?: { id: number; name: string } | null;
 }
 
 export interface InventoryLocation {
@@ -56,6 +93,17 @@ export interface StockTransferItem {
   product_variant_id?: number;
   quantity: number;
   quantity_received?: number;
+  /** Conteo de salida (D3). Null en filas históricas: salió `quantity`. */
+  quantity_dispatched?: number | null;
+  /** Unidades dadas de baja en un cierre con pérdida (D4). */
+  quantity_lost?: number;
+  /** Lote de la fila (D5). */
+  batch_id?: number | null;
+  inventory_batches?: {
+    id: number;
+    batch_number: string;
+    expiration_date?: string | null;
+  } | null;
   cost_per_unit?: number;
   notes?: string;
   received_date?: string;
@@ -84,6 +132,8 @@ export interface TransferQuery {
   limit?: number;
   search?: string;
   status?: TransferStatus;
+  /** D8 — solo salidas externas con alerta. */
+  with_alert?: boolean;
   from_location_id?: number;
   to_location_id?: number;
   transfer_date_from?: string;
@@ -118,8 +168,13 @@ export interface LocationStock {
 }
 
 export interface TransferableProduct {
+  /** Id del producto (contrato histórico del endpoint). */
   id: number;
+  product_id: number;
+  /** Una fila por variante: dos variantes del mismo producto son dos filas. */
+  product_variant_id: number | null;
   name: string;
+  variant_name: string | null;
   sku: string | null;
   stock_at_origin: LocationStock;
   stock_at_destination: LocationStock;

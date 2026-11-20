@@ -113,6 +113,30 @@ export class TransfersService {
     );
   }
 
+  /** Despacho con conteo de salida por línea (D3). */
+  dispatch(
+    id: number,
+    body: {
+      items?: Array<{ id: number; quantity_dispatched: number; batch_id?: number }>;
+      notes?: string;
+    } = {},
+  ): Observable<StockTransfer> {
+    return this.http.post<any>(`${this.apiUrl}/${id}/dispatch`, body).pipe(
+      map((r) => r.data || r),
+      tap(() => this.invalidateCache()),
+      catchError((error) => throwError(() => new Error(this.extractErrorMessage(error)))),
+    );
+  }
+
+  /** D4 — cierre del pendiente como pérdida (solo tras la fecha límite). */
+  closeWithLoss(id: number, body: { reason: string; notes?: string }): Observable<StockTransfer> {
+    return this.http.post<any>(`${this.apiUrl}/${id}/close-with-loss`, body).pipe(
+      map((r) => r.data || r),
+      tap(() => this.invalidateCache()),
+      catchError((error) => throwError(() => new Error(this.extractErrorMessage(error)))),
+    );
+  }
+
   cancel(id: number): Observable<StockTransfer> {
     return this.http.patch<any>(`${this.apiUrl}/${id}/cancel`, {}).pipe(
       map((r) => r.data || r),
@@ -151,6 +175,7 @@ export class TransfersService {
   }
 
   private extractErrorMessage(error: any): string {
-    return error?.error?.message || error?.message || 'Error desconocido';
+    const msg = error?.error?.message || error?.message || 'Error desconocido';
+    return Array.isArray(msg) ? msg.join('. ') : msg;
   }
 }

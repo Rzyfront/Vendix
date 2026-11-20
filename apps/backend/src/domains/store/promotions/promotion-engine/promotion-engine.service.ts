@@ -1,6 +1,15 @@
-import { Injectable, BadRequestException, Logger } from '@nestjs/common';
+import { Injectable, Logger } from '@nestjs/common';
 import { StorePrismaService } from 'src/prisma/services/store-prisma.service';
+import { VendixHttpException, ErrorCodes } from 'src/common/errors';
+import { resolveTimezoneCascade } from 'src/common/utils/store-timezone.util';
 import { resolvePriceUnits } from '../../products/services/price-unit.util';
+import {
+  PromotionClock,
+  buildPromotionClock,
+  formatWeekdaysEs,
+  isPromotionActiveOnWeekday,
+  promotionDateWindowWhere,
+} from '../promotion-schedule.util';
 import {
   ActiveProductPromotion,
   ActivePromotionProductInput,
@@ -32,13 +41,6 @@ type ScalableLine = {
   stock_units_consumed?: unknown;
   applied_price_tier_id?: unknown;
 };
-
-/**
- * "Ningún producto declara escala". Se usa como valor por defecto en los
- * caminos legacy sincrónicos, donde colapsa la aritmética a la histórica
- * `unit_price × quantity`.
- */
-const NO_SALE_UNIT_SCALES: ReadonlyMap<number, number> = new Map();
 
 /** Tier row resolved from DB; `type` and `value` mirror a flattened promotion. */
 interface PromotionQuantityTierRecord {
@@ -74,6 +76,8 @@ interface PromotionRecord {
   start_date: Date;
   end_date: Date | null;
   state: string;
+  /** 0 = domingo … 6 = sábado (zona de la tienda). Vacío = todos los días. */
+  active_weekdays?: number[] | null;
   promotion_products?: Array<{ product_id: number }>;
   promotion_categories?: Array<{ category_id: number }>;
   promotion_quantity_tiers?: PromotionQuantityTierRecord[];
@@ -86,185 +90,63 @@ export class PromotionEngineService {
   constructor(private prisma: StorePrismaService) {}
 
   /**
-   * Get eligible promotions for the current cart
+   * Lee de una vez la configuración de promociones de la tienda y su zona
+   * horaria (columna `stores.timezone` primero, luego el JSON legado). Si la
+   * lectura falla, el motor sigue con los valores por defecto (estrategia
+   * winner-takes-all, America/Bogota) en vez de dejar de cotizar.
    */
-  async getEligiblePromotions(cartItems: any[], customerId?: number) {
-    const now = new Date();
-
-    // Misma escala de venta que `quoteDiscounts`: /check-eligibility y el
-    // snapshot del POS tienen que ver el mismo dinero, o el cliente vería un
-    // descuento al validar y otro al cobrar.
-    const saleUnitScale = await this.resolveSaleUnitScales(cartItems ?? []);
-
-    // Fetch active promotions (query-time filtering)
-    const promotions = await this.prisma.promotions.findMany({
-      where: {
-        state: { in: ['active', 'scheduled'] },
-        start_date: { lte: now },
-        OR: [{ end_date: null }, { end_date: { gte: now } }],
-      },
-      include: {
-        promotion_products: true,
-        promotion_categories: true,
-        promotion_quantity_tiers: true,
-      },
-      // Priority follows the "1 = highest" convention (ranking-style, intuitive
-      // for UI). Lower number wins. Promos with the same priority keep their
-      // insertion order (id desc as tiebreaker).
-      orderBy: [{ priority: 'asc' }, { id: 'asc' }],
-    });
-
-    // CP-ECOM-PROMO-UX-001 convergence-R5-N+1: batch per-customer usage
-    // counts via a single `groupBy` instead of issuing one `count` per
-    // candidate promo. With N promos carrying `per_customer_limit`, the
-    // loop below used to issue N extra queries per `getCart`; now it is a
-    // single round-trip and the per-promo check is a Map lookup. Same
-    // shape as the optimization applied to `quoteDiscounts`.
-    const usageCounts = new Map<number, number>();
-    const candidateIds = promotions.map((p) => p.id);
-    if (customerId && candidateIds.length > 0) {
-      const rows = await this.prisma.order_promotions.groupBy({
-        by: ['promotion_id'],
-        where: {
-          promotion_id: { in: candidateIds },
-          customer_id: customerId,
-          // Una fila en 0 (la promoción dejó de aplicar) no consume el límite.
-          discount_amount: { gt: 0 },
-        },
-        _count: { _all: true },
-      });
-      for (const row of rows) {
-        usageCounts.set(Number(row.promotion_id), Number(row._count._all));
-      }
+  private async loadStoreContext(): Promise<{
+    promoSettings: any;
+    timezone: string;
+  }> {
+    try {
+      const row = (await this.prisma.store_settings?.findFirst?.({
+        select: { settings: true, stores: { select: { timezone: true } } },
+      } as any)) as any;
+      return {
+        promoSettings: row?.settings?.promotions,
+        timezone: resolveTimezoneCascade(
+          row?.stores?.timezone,
+          row?.settings?.general?.timezone,
+        ),
+      };
+    } catch {
+      return { promoSettings: undefined, timezone: resolveTimezoneCascade() };
     }
+  }
 
-    const eligible: any[] = [];
-    for (const promo of promotions) {
-      // Check usage limit
-      if (promo.usage_limit && promo.usage_count >= promo.usage_limit) continue;
-
-      // Check per-customer limit (looked up from the batched Map above).
-      if (promo.per_customer_limit && customerId) {
-        const customerUsage = usageCounts.get(promo.id) ?? 0;
-        if (customerUsage >= promo.per_customer_limit) continue;
-      }
-
-      const applicableTotal = this.calculateApplicableTotal(
-        promo,
-        cartItems,
-        saleUnitScale,
-      );
-      if (applicableTotal <= 0) continue;
-
-      // Check minimum purchase
-      const cartTotal = cartItems.reduce(
-        (sum, item) => sum + this.lineTotal(item, saleUnitScale),
-        0,
-      );
-      if (
-        promo.min_purchase_amount &&
-        cartTotal < Number(promo.min_purchase_amount)
-      )
-        continue;
-
-      // Calculate discount
-      const discount = this.calculateDiscount(promo, cartItems, saleUnitScale);
-
-      eligible.push({
-        ...promo,
-        calculated_discount: discount,
-      });
-    }
-
-    // WINNER-TAKES-ALL: return only the single lowest-priority-number
-    // eligible promotion (1 = highest, per the "1=highest" convention).
-    // Ties broken by lowest promotion_id (the older promo wins). This MUST
-    // match quoteDiscounts exactly, otherwise /check-eligibility and the POS
-    // payments snapshot pick different winners whenever two promos share a
-    // priority — which is the common case, since promotions.priority defaults
-    // to 0.
-    if (eligible.length === 0) return eligible;
-    const winner = eligible.reduce((best, current) => {
-      if (
-        current.priority < best.priority ||
-        (current.priority === best.priority && current.id < best.id)
-      ) {
-        return current;
-      }
-      return best;
-    });
-    return [winner];
+  /** Reloj de la tienda (fecha, hora y día local) para evaluar vigencias. */
+  async getStoreClock(now: Date = new Date()): Promise<PromotionClock> {
+    const { timezone } = await this.loadStoreContext();
+    return buildPromotionClock(now, timezone);
   }
 
   /**
-   * Calculate discount amount for a promotion.
+   * Vista previa de `POST /store/promotions/check-eligibility`.
    *
-   * `scaleByProduct` trae el `price_unit_quantity` de los productos que
-   * publican su precio por N unidades de stock. Se recibe por parámetro porque
-   * este método es sincrónico y la escala se lee una sola vez por carrito; sin
-   * él la aritmética colapsa a la histórica `unit_price × quantity`, que es lo
-   * correcto para todo el catálogo por pieza.
+   * Delegada a `quoteDiscounts` para que la vista previa y el cobro sean el
+   * MISMO cálculo: antes este método tenía su propia aritmética plana (sin
+   * escalas por cantidad, sin estrategia de apilamiento, sin topes globales e
+   * incluía promociones manuales no pedidas), y podía mostrar un descuento
+   * distinto al que luego se cobraba. Devuelve las promociones que el cobro
+   * aplicaría, con la forma histórica `{ ...promo, calculated_discount }`.
    */
-  calculateDiscount(
-    promotion: any,
-    cartItems: any[],
-    scaleByProduct: ReadonlyMap<number, number> = NO_SALE_UNIT_SCALES,
-  ): number {
-    const applicableTotal = this.calculateApplicableTotal(
-      promotion,
-      cartItems,
-      scaleByProduct,
-    );
-
-    let discount = 0;
-    if (promotion.type === 'percentage') {
-      discount = applicableTotal * (Number(promotion.value) / 100);
-    } else {
-      discount = Math.min(Number(promotion.value), applicableTotal);
-    }
-
-    // Apply max_discount_amount cap
-    const maxDiscountAmount = Number(promotion.max_discount_amount);
-    if (Number.isFinite(maxDiscountAmount) && maxDiscountAmount > 0) {
-      discount = Math.min(discount, maxDiscountAmount);
-    }
-
-    return Math.round(discount * 100) / 100;
-  }
-
-  private calculateApplicableTotal(
-    promotion: any,
-    cartItems: any[],
-    scaleByProduct: ReadonlyMap<number, number> = NO_SALE_UNIT_SCALES,
-  ): number {
-    if (promotion.scope === 'product') {
-      const promoProductIds =
-        promotion.promotion_products?.map((pp: any) => Number(pp.product_id)) ||
-        [];
-
-      return cartItems
-        .filter((item) => promoProductIds.includes(Number(item.product_id)))
-        .reduce((sum, item) => sum + this.lineTotal(item, scaleByProduct), 0);
-    }
-
-    if (promotion.scope === 'category') {
-      const promoCategoryIds =
-        promotion.promotion_categories?.map((pc: any) => Number(pc.category_id)) ||
-        [];
-
-      return cartItems
-        .filter((item) =>
-          this.getItemCategoryIds(item).some((categoryId) =>
-            promoCategoryIds.includes(categoryId),
-          ),
-        )
-        .reduce((sum, item) => sum + this.lineTotal(item, scaleByProduct), 0);
-    }
-
-    return cartItems.reduce(
-      (sum, item) => sum + this.lineTotal(item, scaleByProduct),
-      0,
-    );
+  async getEligiblePromotions(cartItems: any[], customerId?: number) {
+    const quote = await this.quoteDiscounts({
+      customer_id: customerId ?? null,
+      items: (cartItems ?? []).map((item, index) => ({
+        ...item,
+        line_id: item?.line_id ?? index,
+        product_id: Number(item?.product_id),
+        unit_price: Number(item?.unit_price ?? 0),
+        quantity: Number(item?.quantity ?? 0),
+      })),
+    });
+    return quote.applied_promotions.map((applied) => ({
+      ...applied,
+      id: applied.promotion_id,
+      calculated_discount: applied.discount_amount,
+    }));
   }
 
   private getItemCategoryIds(item: any): number[] {
@@ -280,7 +162,13 @@ export class PromotionEngineService {
   }
 
   /**
-   * Apply promotion to an order (create order_promotion record + increment usage)
+   * Registra la promoción en la orden (`order_promotions`) y consume un uso.
+   *
+   * Idempotente por `(order_id, promotion_id)`: cobrar una orden que ya tenía
+   * la fila (borrador POS adoptado, re-cobro) actualiza el monto en vez de
+   * insertar otra vez. Antes el `create` chocaba con el unique y, dentro de la
+   * transacción del cobro, dejaba la transacción abortada; o contaba el uso
+   * dos veces. El uso solo se consume cuando la fila pasa a tener descuento.
    */
   async applyPromotion(
     orderId: number,
@@ -290,54 +178,93 @@ export class PromotionEngineService {
     tx?: any,
   ) {
     const client = tx || this.prisma;
+    const amount = Number(discountAmount) || 0;
+
+    const existing = await client.order_promotions.findFirst({
+      where: { order_id: orderId, promotion_id: promotionId },
+      select: { id: true, discount_amount: true },
+    });
+
+    if (existing) {
+      await client.order_promotions.update({
+        where: { id: existing.id },
+        data: { discount_amount: amount, customer_id: customerId },
+      });
+      if (Number(existing.discount_amount) <= 0 && amount > 0) {
+        await client.promotions.update({
+          where: { id: promotionId },
+          data: { usage_count: { increment: 1 } },
+        });
+      }
+      return;
+    }
 
     await client.order_promotions.create({
       data: {
         order_id: orderId,
         promotion_id: promotionId,
-        discount_amount: discountAmount,
+        discount_amount: amount,
         customer_id: customerId,
       },
     });
 
-    await client.promotions.update({
-      where: { id: promotionId },
-      data: { usage_count: { increment: 1 } },
-    });
+    if (amount > 0) {
+      await client.promotions.update({
+        where: { id: promotionId },
+        data: { usage_count: { increment: 1 } },
+      });
+    }
   }
 
   /**
-   * Validate a specific promotion (e.g. coupon code) against cart
+   * Valida UNA promoción (por id o resuelta desde su código) contra el
+   * carrito y devuelve el descuento que el cobro aplicaría. Cada motivo de
+   * rechazo tiene su propio error code para que el frontend muestre un
+   * mensaje claro (p. ej. "Esta promoción solo aplica los martes y viernes").
    */
   async validatePromotion(
     promotionId: number,
     cartItems: any[],
     customerId?: number,
   ) {
-    const now = new Date();
-    const promotion = await this.prisma.promotions.findFirst({
+    const { timezone } = await this.loadStoreContext();
+    const clock = buildPromotionClock(new Date(), timezone);
+    const promotion = (await this.prisma.promotions.findFirst({
       where: {
         id: promotionId,
         state: { in: ['active', 'scheduled'] },
-        start_date: { lte: now },
-        OR: [{ end_date: null }, { end_date: { gte: now } }],
+        ...promotionDateWindowWhere(clock),
       },
       include: {
         promotion_products: true,
         promotion_categories: true,
         promotion_quantity_tiers: true,
       },
-    });
+    })) as any;
 
     if (!promotion) {
-      throw new BadRequestException('Promocion no valida o expirada');
+      throw new VendixHttpException(
+        ErrorCodes.PROMOTION_INVALID_001,
+        'La promoción no es válida, no está activa o está fuera de sus fechas',
+      );
+    }
+
+    if (!isPromotionActiveOnWeekday(promotion, clock.weekday)) {
+      throw new VendixHttpException(
+        ErrorCodes.PROMOTION_NOT_TODAY_001,
+        `Esta promoción no aplica hoy: solo es válida los ${formatWeekdaysEs(promotion.active_weekdays)}`,
+        { active_weekdays: promotion.active_weekdays, weekday: clock.weekday },
+      );
     }
 
     if (
       promotion.usage_limit &&
       promotion.usage_count >= promotion.usage_limit
     ) {
-      throw new BadRequestException('Promocion ha alcanzado su limite de uso');
+      throw new VendixHttpException(
+        ErrorCodes.PROMOTION_USAGE_LIMIT_001,
+        'La promoción ya alcanzó su límite de usos',
+      );
     }
 
     if (promotion.per_customer_limit && customerId) {
@@ -346,19 +273,19 @@ export class PromotionEngineService {
           promotion_id: promotion.id,
           customer_id: customerId,
           discount_amount: { gt: 0 },
+          orders: { state: { notIn: ['cancelled', 'refunded'] } },
         },
       });
       if (customerUsage >= promotion.per_customer_limit) {
-        throw new BadRequestException(
-          'Has alcanzado el limite de uso para esta promocion',
+        throw new VendixHttpException(
+          ErrorCodes.PROMOTION_CUSTOMER_LIMIT_001,
+          'El cliente ya alcanzó el límite de usos de esta promoción',
         );
       }
     }
 
-    // Misma escala de venta que `quoteDiscounts` y `getEligiblePromotions`.
     const saleUnitScale = await this.resolveSaleUnitScales(cartItems ?? []);
-
-    const cartTotal = cartItems.reduce(
+    const cartTotal = (cartItems ?? []).reduce(
       (sum, item) => sum + this.lineTotal(item, saleUnitScale),
       0,
     );
@@ -366,22 +293,201 @@ export class PromotionEngineService {
       promotion.min_purchase_amount &&
       cartTotal < Number(promotion.min_purchase_amount)
     ) {
-      throw new BadRequestException(
-        `Compra minima de ${promotion.min_purchase_amount} requerida`,
+      throw new VendixHttpException(
+        ErrorCodes.PROMOTION_MIN_PURCHASE_001,
+        `La promoción requiere una compra mínima de ${Number(promotion.min_purchase_amount)}`,
+        { min_purchase_amount: Number(promotion.min_purchase_amount) },
       );
     }
 
-    const applicableTotal = this.calculateApplicableTotal(
-      promotion,
-      cartItems,
-      saleUnitScale,
+    // El descuento sale del MISMO cálculo que el cobro (escalas, topes,
+    // escala de venta), restringido a esta promoción.
+    const quote = await this.quoteDiscounts({
+      customer_id: customerId ?? null,
+      manual_promotion_ids: [promotion.id],
+      only_promotion_ids: [promotion.id],
+      items: (cartItems ?? []).map((item, index) => ({
+        ...item,
+        line_id: item?.line_id ?? index,
+        product_id: Number(item?.product_id),
+        unit_price: Number(item?.unit_price ?? 0),
+        quantity: Number(item?.quantity ?? 0),
+      })),
+    });
+    const applied = quote.applied_promotions.find(
+      (p) => p.promotion_id === promotion.id,
     );
-    if (applicableTotal <= 0) {
-      throw new BadRequestException('Promocion no aplica a los items del carrito');
+    if (!applied || applied.discount_amount <= 0) {
+      throw new VendixHttpException(
+        ErrorCodes.PROMOTION_NOT_APPLICABLE_001,
+        'La promoción no aplica a los productos del carrito',
+      );
     }
 
-    const discount = this.calculateDiscount(promotion, cartItems, saleUnitScale);
-    return { promotion, discount };
+    return { promotion, discount: applied.discount_amount };
+  }
+
+  /**
+   * Casilla única de código (POS y checkout ecommerce): decide si un código
+   * es un CUPÓN o una PROMOCIÓN. El cupón tiene prioridad: si existe un cupón
+   * con ese código (activo o no) el flujo de cupones sigue exactamente igual
+   * que antes, incluido su error `CPN_FIND_001` cuando no existe ninguno de
+   * los dos. Solo si no hay cupón se busca una promoción con ese código.
+   */
+  async resolveDiscountCode(
+    code?: string | null,
+  ): Promise<
+    | { kind: 'none' }
+    | { kind: 'coupon' }
+    | { kind: 'promotion'; promotion_id: number }
+  > {
+    const normalized = String(code ?? '').trim();
+    if (!normalized) return { kind: 'none' };
+    const coupon = await this.prisma.coupons.findFirst({
+      where: { code: { equals: normalized, mode: 'insensitive' } },
+      select: { id: true },
+    });
+    if (coupon) return { kind: 'coupon' };
+    const promotion = await this.prisma.promotions.findFirst({
+      where: { code: { equals: normalized, mode: 'insensitive' } },
+      select: { id: true },
+    });
+    return promotion
+      ? { kind: 'promotion', promotion_id: Number(promotion.id) }
+      : { kind: 'none' };
+  }
+
+  /**
+   * Cotiza el carrito aplicando la promoción que el cliente escribió en la
+   * casilla de código. La promoción entra como MANUAL al mismo motor (fechas
+   * y días en la zona de la tienda, límites, alcance, prioridad), así que el
+   * cobro la registra en `order_promotions` y consume su uso como cualquier
+   * otra.
+   *
+   * `code_discount` es lo que el código AGREGA frente a la compra sin él: es
+   * la cifra que la casilla muestra, y sumada al descuento automático que ya
+   * se veía da exactamente el total cobrado. Si el código no aplica o no
+   * mejora el precio (otra promoción de mayor prioridad ya gana), se rechaza
+   * con el motivo concreto en vez de cobrar distinto a lo mostrado.
+   */
+  async quoteWithPromotionCode(
+    input: PromotionQuoteInput,
+    promotionId: number,
+  ): Promise<{
+    quote: PromotionQuoteResult;
+    code_discount: number;
+    applied: PromotionQuoteApplied;
+  }> {
+    const otherManual = (input.manual_promotion_ids ?? []).filter(
+      (id) => Number(id) !== Number(promotionId),
+    );
+    const base = await this.quoteDiscounts({
+      ...input,
+      manual_promotion_ids: otherManual,
+    });
+    const withCode = await this.quoteDiscounts({
+      ...input,
+      manual_promotion_ids: [...otherManual, promotionId],
+    });
+    const applied = withCode.applied_promotions.find(
+      (p) => p.promotion_id === Number(promotionId),
+    );
+    const codeDiscount = this.roundMoney(
+      withCode.total_discount - base.total_discount,
+    );
+    if (applied && codeDiscount > 0) {
+      return { quote: withCode, code_discount: codeDiscount, applied };
+    }
+    if (!applied) {
+      // Motivo concreto (fuera de fechas, otro día, sin cupo, compra mínima,
+      // no aplica a los productos…). Si pasa, es que perdió por prioridad.
+      await this.validatePromotion(
+        promotionId,
+        input.items as any[],
+        input.customer_id ?? undefined,
+      );
+    }
+    throw new VendixHttpException(
+      ErrorCodes.PROMOTION_NOT_APPLICABLE_001,
+      'Este código no mejora el precio: la compra ya tiene una promoción igual o mejor',
+    );
+  }
+
+  /**
+   * Vista previa de un código de promoción escrito en la casilla de cupón del
+   * POS. Recibe el mismo cuerpo que la validación de cupones y responde con
+   * la misma forma (más `kind: 'promotion'`), para que el POS lo pinte igual
+   * que un cupón. `discount_amount` es lo que el código agrega.
+   */
+  async previewPromotionCode(
+    promotionId: number,
+    dto: {
+      customer_id?: number;
+      items?: Array<{
+        product_id?: number;
+        category_id?: number;
+        category_ids?: number[];
+        line_total: number;
+        quantity?: number;
+        unit_price?: number;
+      }>;
+    },
+  ) {
+    const items = (dto.items ?? [])
+      .filter((item) => Number(item.product_id) > 0)
+      .map((item, index) => {
+        const quantity = Number(item.quantity) > 0 ? Number(item.quantity) : 1;
+        const unitPrice =
+          item.unit_price != null
+            ? Number(item.unit_price)
+            : Number(item.line_total || 0) / quantity;
+        return {
+          line_id: index,
+          product_id: Number(item.product_id),
+          category_id: item.category_id ?? null,
+          category_ids: item.category_ids ?? null,
+          unit_price: unitPrice,
+          quantity,
+        };
+      });
+    const { code_discount, applied } = await this.quoteWithPromotionCode(
+      { items, customer_id: dto.customer_id ?? null },
+      promotionId,
+    );
+    return {
+      valid: true,
+      kind: 'promotion' as const,
+      coupon_id: null,
+      promotion_id: applied.promotion_id,
+      code: applied.code,
+      coupon_code: applied.code,
+      name: applied.name,
+      discount_type: applied.type === 'percentage' ? 'PERCENTAGE' : 'FIXED',
+      discount_value: Number(applied.value),
+      discount_amount: code_discount,
+    };
+  }
+
+  /** Igual que `validatePromotion`, resolviendo la promoción por su código. */
+  async validatePromotionByCode(
+    code: string,
+    cartItems: any[],
+    customerId?: number,
+  ) {
+    const normalized = String(code ?? '').trim();
+    const promotion = normalized
+      ? await this.prisma.promotions.findFirst({
+          where: { code: { equals: normalized, mode: 'insensitive' } },
+          select: { id: true },
+        })
+      : null;
+    if (!promotion) {
+      throw new VendixHttpException(
+        ErrorCodes.PROMOTION_INVALID_001,
+        'No existe una promoción con ese código',
+      );
+    }
+    return this.validatePromotion(promotion.id, cartItems, customerId);
   }
 
   /**
@@ -580,11 +686,15 @@ export class PromotionEngineService {
       });
     });
 
-    // Fetch store_settings to read the promotion evaluation strategy and guards
-    const settingsRow = await this.prisma.store_settings?.findFirst?.({
-      select: { settings: true },
-    });
-    const rawPromoSettings = (settingsRow?.settings as any)?.promotions;
+    // Configuración de promociones + zona horaria de la tienda en una lectura.
+    // Fechas y día de la semana se evalúan en el reloj LOCAL de la tienda.
+    const storeContext = await this.loadStoreContext();
+    const rawPromoSettings = storeContext.promoSettings;
+    const clock = buildPromotionClock(now, storeContext.timezone);
+    const dateWindow = promotionDateWindowWhere(clock);
+    const onlyIds = input.only_promotion_ids?.length
+      ? Array.from(new Set(input.only_promotion_ids.map(Number)))
+      : null;
     const strategy: 'winner_takes_all' | 'stacking_groups' =
       input.strategy ??
       rawPromoSettings?.evaluation_strategy ??
@@ -612,15 +722,20 @@ export class PromotionEngineService {
     }
 
     // Fetch candidate promotions: auto-apply OR explicitly requested.
-    const candidates = (await this.prisma.promotions.findMany({
-      where: orderScopeIds && orderScopeWithAuto
+    const fetchedCandidates = (await this.prisma.promotions.findMany({
+      where: onlyIds
+        ? {
+            id: { in: onlyIds },
+            state: { in: ['active', 'scheduled'] },
+            ...dateWindow,
+          }
+        : orderScopeIds && orderScopeWithAuto
         ? {
             // Re-cotización al editar productos de la orden: sus promociones
             // (cualquier `state`) MÁS las automáticas activas, como el POS. Una
             // escala por volumen que no aplicaba con 5 unidades sí aplica al
             // subir a 50. La ventana de fechas sigue con `as_of`.
-            start_date: { lte: now },
-            OR: [{ end_date: null }, { end_date: { gte: now } }],
+            ...dateWindow,
             AND: [
               {
                 OR: [
@@ -637,13 +752,11 @@ export class PromotionEngineService {
             // cancelada…). La ventana de fechas sigue con `as_of`; una
             // promoción borrada simplemente no existe y no aparece.
             id: { in: orderScopeIds },
-            start_date: { lte: now },
-            OR: [{ end_date: null }, { end_date: { gte: now } }],
+            ...dateWindow,
           }
         : {
             state: { in: ['active', 'scheduled'] },
-            start_date: { lte: now },
-            OR: [{ end_date: null }, { end_date: { gte: now } }],
+            ...dateWindow,
             ...(manualIds.length
               ? { AND: [{ OR: [{ is_auto_apply: true }, { id: { in: manualIds } }] }] }
               : { is_auto_apply: true }),
@@ -655,6 +768,12 @@ export class PromotionEngineService {
       },
       orderBy: [{ priority: 'asc' }, { id: 'asc' }],
     })) as unknown as PromotionRecord[];
+
+    // Días de la semana: fuera de sus días la promoción no existe para este
+    // carrito (no se auto-aplica, no se acepta como manual, no empuja escalas).
+    const candidates = fetchedCandidates.filter((promo) =>
+      isPromotionActiveOnWeekday(promo, clock.weekday),
+    );
 
     // CP-ECOM-PROMO-UX-001 convergence-R5-N+1: batch per-customer usage
     // counts via a single `groupBy` instead of issuing one `count` per
@@ -677,6 +796,8 @@ export class PromotionEngineService {
           promotion_id: { in: candidateIds },
           customer_id: customerId,
           discount_amount: { gt: 0 },
+          // Una orden cancelada o reembolsada no consume el límite por cliente.
+          orders: { state: { notIn: ['cancelled', 'refunded'] } },
           ...(excludeOrderId != null
             ? { order_id: { not: excludeOrderId } }
             : {}),
@@ -703,7 +824,7 @@ export class PromotionEngineService {
 
     for (const promo of candidates) {
       const isManual = !promo.is_auto_apply;
-      if (isManual && !manualIds.includes(promo.id)) continue;
+      if (isManual && !manualIds.includes(promo.id) && !onlyIds) continue;
       if (
         promo.usage_limit &&
         promo.usage_count - (ownPromotionIds.has(Number(promo.id)) ? 1 : 0) >=
@@ -756,6 +877,9 @@ export class PromotionEngineService {
         let scopedQty = 0;
         let tierIndexes = applicableIndexes;
         let tierTotal = applicableTotal;
+        // per_product: tramo propio de cada línea (por su producto). En
+        // cart_total todas las líneas comparten `matchedTier`.
+        let tierByLine: Map<number, (typeof tiers)[number]> | null = null;
 
         if (grouping === 'per_product') {
           const byProduct = new Map<number, number>();
@@ -783,14 +907,18 @@ export class PromotionEngineService {
           }
 
           if (matchedTier) {
-            const winningTierId = matchedTier.id;
-            const qualifyingPids = new Set(
-              Array.from(tierByProduct.entries())
-                .filter(([, t]) => t.id === winningTierId)
-                .map(([pid]) => pid),
-            );
+            // Cada producto se evalúa por su cuenta: TODOS los que alcanzaron
+            // algún tramo reciben el suyo. Antes solo cobraban descuento los
+            // productos que caían en el tramo de mayor valor y el resto (que
+            // sí había alcanzado un tramo menor) se quedaba sin descuento.
             tierIndexes = applicableIndexes.filter((idx) =>
-              qualifyingPids.has(Number(items[idx].product_id)),
+              tierByProduct.has(Number(items[idx].product_id)),
+            );
+            tierByLine = new Map(
+              tierIndexes.map((idx) => [
+                idx,
+                tierByProduct.get(Number(items[idx].product_id))!,
+              ]),
             );
             tierTotal = this.roundMoney(
               tierIndexes.reduce(
@@ -814,15 +942,33 @@ export class PromotionEngineService {
         if (!matchedTier) continue;
         if (tierIndexes.length === 0 || tierTotal <= 0) continue;
 
+        // Total por tramo: un tramo de monto fijo se reparte UNA vez entre
+        // las líneas de ese mismo tramo (idéntico al cálculo histórico para el
+        // tramo ganador).
+        const totalByTierId = new Map<number, number>();
+        if (tierByLine) {
+          for (const [idx, t] of tierByLine.entries()) {
+            totalByTierId.set(
+              t.id,
+              (totalByTierId.get(t.id) ?? 0) +
+                this.lineTotal(items[idx], saleUnitScale),
+            );
+          }
+        }
+
         const perLineShares = new Map<number, number>();
         let rawTotal = 0;
         for (const idx of tierIndexes) {
           const item = items[idx];
+          const lineTier = tierByLine?.get(idx) ?? matchedTier;
+          const lineTierTotal = tierByLine
+            ? this.roundMoney(totalByTierId.get(lineTier.id) ?? 0)
+            : tierTotal;
           const lineDiscount = this.computeTierDiscountForResolvedTier(
             Number(item.unit_price),
             this.toPriceUnits(item, saleUnitScale),
-            matchedTier,
-            tierTotal,
+            lineTier,
+            lineTierTotal,
           );
           perLineShares.set(idx, lineDiscount);
           rawTotal = this.roundMoney(rawTotal + lineDiscount);
@@ -1062,18 +1208,42 @@ export class PromotionEngineService {
           orderDiscount = this.roundMoney(orderDiscount);
 
           if (orderDiscount > 0) {
+            // Se reparte sobre el SALDO de cada línea (lo que quedó después de
+            // su promo de producto/categoría), igual que se calculó el monto.
+            // Repartirlo sobre el total bruto le asignaba parte del descuento
+            // a líneas ya en 0; el tope por línea lo recortaba y el total de
+            // la orden quedaba distinto de la suma de sus líneas.
+            const itemDiscountByLine = new Map<number, number>();
+            for (const wp of winningPromotions) {
+              for (const [idx, share] of wp.perLineShares.entries()) {
+                itemDiscountByLine.set(
+                  idx,
+                  (itemDiscountByLine.get(idx) ?? 0) + share,
+                );
+              }
+            }
+            const residualLines: Array<{ idx: number; residual: number }> = [];
+            for (let i = 0; i < items.length; i++) {
+              const residual = Math.max(
+                0,
+                this.lineTotal(items[i], saleUnitScale) -
+                  (itemDiscountByLine.get(i) ?? 0),
+              );
+              if (residual > 0) residualLines.push({ idx: i, residual });
+            }
+            const residualSum = residualLines.reduce(
+              (sum, l) => sum + l.residual,
+              0,
+            );
             const orderLineShares = new Map<number, number>();
             let assigned = 0;
-            for (let i = 0; i < items.length; i++) {
-              const item = items[i];
-              const lineTotal = this.lineTotal(item, saleUnitScale);
-              const isLast = i === items.length - 1;
+            for (let i = 0; i < residualLines.length; i++) {
+              const { idx, residual } = residualLines[i];
+              const isLast = i === residualLines.length - 1;
               const share = isLast
                 ? this.roundMoney(orderDiscount - assigned)
-                : this.roundMoney(
-                    (lineTotal / subtotal) * orderDiscount,
-                  );
-              orderLineShares.set(i, share);
+                : this.roundMoney((residual / residualSum) * orderDiscount);
+              orderLineShares.set(idx, share);
               assigned = this.roundMoney(assigned + share);
             }
 
@@ -1584,11 +1754,11 @@ export class PromotionEngineService {
     const result = new Map<number, ActiveProductPromotion>();
     if (!Array.isArray(products) || products.length === 0) return result;
 
-    const promotions = (await this.prisma.promotions.findMany({
+    const clock = await this.getStoreClock(now);
+    const fetched = (await this.prisma.promotions.findMany({
       where: {
         state: { in: ['active', 'scheduled'] },
-        start_date: { lte: now },
-        OR: [{ end_date: null }, { end_date: { gte: now } }],
+        ...promotionDateWindowWhere(clock),
         is_auto_apply: true,
         scope: { in: ['product', 'category'] },
       },
@@ -1599,6 +1769,13 @@ export class PromotionEngineService {
       },
       orderBy: [{ priority: 'asc' }, { id: 'asc' }],
     })) as unknown as PromotionRecord[];
+    // Fuera de su día o con el cupo de usos agotado, la promoción no se cobra:
+    // tampoco se anuncia en la tarjeta del producto.
+    const promotions = fetched.filter(
+      (promo) =>
+        isPromotionActiveOnWeekday(promo, clock.weekday) &&
+        !(promo.usage_limit && promo.usage_count >= promo.usage_limit),
+    );
 
     if (promotions.length === 0) return result;
 

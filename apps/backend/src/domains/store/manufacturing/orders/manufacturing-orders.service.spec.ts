@@ -1,6 +1,7 @@
 import { Prisma } from '@prisma/client';
 import { RequestContextService } from '@common/context/request-context.service';
 import { ManufacturingOrdersService } from './manufacturing-orders.service';
+import { productionSiteWhere } from '../../production/production-site.util';
 import { ErrorCodes, VendixHttpException } from '../../../../common/errors';
 
 type Row = Record<string, any>;
@@ -221,6 +222,15 @@ describe('ManufacturingOrdersService', () => {
       expect(prisma.production_orders.findMany.mock.calls[0][0].include.product_variant).toEqual({
         select: { id: true, name: true },
       });
+    });
+
+    it('Planta nunca lista las órdenes de cocina (ventas hechas en Producción)', async () => {
+      await service.findAll({ search: 'pan' } as any);
+      const where = prisma.production_orders.findMany.mock.calls[0][0].where;
+      expect(where.order_number).toEqual({ not: null });
+      expect(where.AND).toEqual([productionSiteWhere('plant')]);
+      // The search OR is kept next to the site filter.
+      expect(where.OR).toHaveLength(2);
     });
 
     it('S21: findOne marca can_restart solo en una orden cancelada que la regla de reinicio acepta', async () => {

@@ -113,6 +113,9 @@ describe('CheckoutService - promotions and coupons', () => {
 
     // Default empty quote shape — individual tests override.
     promotionEngine = {
+      // Casilla única de código: por defecto ningún código es de promoción.
+      resolveDiscountCode: jest.fn().mockResolvedValue({ kind: 'none' }),
+      quoteWithPromotionCode: jest.fn(),
       quoteDiscounts: jest.fn().mockResolvedValue({
         subtotal: 0,
         total_discount: 0,
@@ -744,6 +747,67 @@ describe('CheckoutService - promotions and coupons', () => {
       expect(result.promotion_discount).toBe(1000);
       expect(result.coupon_discount).toBe(500);
       expect(result.discount_amount).toBe(1500);
+    });
+
+    it('un código de PROMOCIÓN en la casilla de cupón se cobra como promoción (sin cupón)', async () => {
+      promotionEngine.resolveDiscountCode.mockResolvedValue({
+        kind: 'promotion',
+        promotion_id: 800,
+      });
+      promotionEngine.quoteWithPromotionCode.mockResolvedValue({
+        code_discount: 2000,
+        quote: {
+          subtotal: 10000,
+          total_discount: 2000,
+          promotional_subtotal: 8000,
+          applied_promotions: [
+            {
+              promotion_id: 800,
+              name: 'Martes 20',
+              code: 'MARTES20',
+              type: 'percentage',
+              scope: 'order',
+              value: 20,
+              is_auto_apply: false,
+              discount_amount: 2000,
+              applicable_item_ids: [0],
+            },
+          ],
+          items: [
+            {
+              line_id: 0,
+              product_id: PRODUCT_BASE.id,
+              variant_id: null,
+              quantity: 1,
+              original_unit_price: 10000,
+              promotion_discount: 2000,
+              final_unit_price: 8000,
+              final_line_total: 8000,
+              promotion_ids: [800],
+            },
+          ],
+          order_promotions_snapshot: [{ promotion_id: 800, discount_amount: 2000 }],
+        },
+      });
+      mockOrderCreate(8000);
+      prisma.store_payment_methods.findFirst.mockResolvedValue({
+        id: 7,
+        state: 'enabled',
+        system_payment_method: { type: 'wompi', provider: 'wompi' },
+      });
+
+      const result: any = await service.checkout({
+        payment_method_id: 7,
+        items: [{ product_id: PRODUCT_BASE.id, quantity: 1 }],
+        coupon_code: 'MARTES20',
+      } as any);
+
+      expect(promotionEngine.resolveDiscountCode).toHaveBeenCalledWith('MARTES20');
+      expect(couponsService.validate).not.toHaveBeenCalled();
+      expect(couponsService.registerUse).not.toHaveBeenCalled();
+      expect(promotionEngine.applyPromotion).toHaveBeenCalledWith(1, 800, 2000, USER_ID);
+      expect(prisma.orders.create.mock.calls[0][0].data.discount_amount).toBe(2000);
+      expect(result.coupon_discount).toBe(0);
     });
 
     it('rechaza con ECOM_PRODUCT_002 un insumo (is_ingredient=true) aunque sea vendible', async () => {

@@ -1366,6 +1366,23 @@ export const ERROR_MESSAGES: Record<string, string> = {
     'Los cambios no son válidos. Revisa los productos e intenta de nuevo.',
   ORD_EDIT_PROMOTION_INVALID_001:
     'La promoción o cupón ya no está disponible.',
+  // Promociones de la tienda. El backend suele enviar un mensaje más
+  // específico (p. ej. los días en que aplica); estos son el respaldo.
+  PROMOTION_INVALID_001:
+    'La promoción no es válida, no está activa o está fuera de sus fechas.',
+  PROMOTION_NOT_TODAY_001:
+    'Esta promoción no aplica hoy. Revisa los días en que está disponible.',
+  PROMOTION_USAGE_LIMIT_001: 'La promoción ya alcanzó su límite de usos.',
+  PROMOTION_CUSTOMER_LIMIT_001:
+    'El cliente ya alcanzó el límite de usos de esta promoción.',
+  PROMOTION_MIN_PURCHASE_001:
+    'El carrito no alcanza la compra mínima de la promoción.',
+  PROMOTION_NOT_APPLICABLE_001:
+    'La promoción no aplica a los productos del carrito.',
+  PROMOTION_CODE_DUP_001:
+    'Ese código ya lo usa un cupón u otra promoción de la tienda.',
+  PROMOTION_STATE_001:
+    'Una promoción cancelada no se puede reactivar. Crea una nueva.',
   ORD_EDIT_COUPON_COMMIT_001:
     'No fue posible registrar el cupón. Revisa la orden.',
   ORD_EDIT_RESPONSE_MISMATCH_001:

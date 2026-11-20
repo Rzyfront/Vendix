@@ -125,6 +125,7 @@ import { InvoicingService } from '../invoicing/invoicing.service';
 import { CreditNoteBalanceService } from '../invoicing/credit-notes/credit-note-balance.service';
 import { OrderHistoryService } from './order-history/order-history.service';
 import { ServiceAllocationCoordinator } from '../reservations/service-allocation-coordinator.service';
+import { syncOrderPromotionUsage } from '../promotions/promotion-usage.util';
 import {
   EMPTY_SHIPPING_TAX,
   type ShippingTaxSnapshot,
@@ -4533,9 +4534,40 @@ export class OrdersService {
     let promotionDiscount = 0;
     let promotionSnapshots: { promotion_id: number; discount_amount: number }[] =
       [];
+    // Casilla única de código: si `coupon_code` no es un cupón sino una
+    // promoción, se cotiza como promoción manual y deja de tratarse como
+    // cupón en el paso 10.
+    const codeTarget = await this.promotionEngine.resolveDiscountCode(
+      dto.coupon_code,
+    );
+    const codePromotionId =
+      codeTarget.kind === 'promotion' ? codeTarget.promotion_id : null;
     try {
+      // Categorías reales de cada producto: sin ellas una promoción por
+      // categoría cotizaba 0 al editar la orden.
+      const editorProductIds = Array.from(
+        new Set(
+          dto.items
+            .map((item) => Number(item.product_id))
+            .filter((id) => Number.isFinite(id) && id > 0),
+        ),
+      );
+      const editorCategoryRows = editorProductIds.length
+        ? await this.prisma.product_categories.findMany({
+            where: { product_id: { in: editorProductIds } },
+            select: { product_id: true, category_id: true },
+          })
+        : [];
+      const editorCategoryMap = new Map<number, number[]>();
+      for (const row of editorCategoryRows) {
+        const list = editorCategoryMap.get(row.product_id) ?? [];
+        list.push(row.category_id);
+        editorCategoryMap.set(row.product_id, list);
+      }
       const promotionInput = {
         customer_id: dto.customer_id,
+        // La propia orden no cuenta contra los límites de uso al re-cotizarla.
+        exclude_order_id: orderId,
         manual_promotion_ids: Array.isArray(dto.promotion_ids)
           ? dto.promotion_ids
           : [],
@@ -4546,15 +4578,35 @@ export class OrdersService {
             product_id: item.product_id as number,
             variant_id: item.product_variant_id ?? null,
             category_id: null,
-            category_ids: null,
+            category_ids:
+              editorCategoryMap.get(Number(item.product_id)) ?? null,
             unit_price: Number(item.final_unit_price ?? item.unit_price ?? 0),
             quantity: Number(item.quantity || 0),
             applied_price_tier_id: item.applied_price_tier_id ?? null,
             stock_units_consumed: null,
           })),
       };
+      // Las promociones que la orden ya tenía (p. ej. una aplicada por código
+      // antes) se conservan como manuales al re-cotizar.
+      const ownPromotionRows = await this.prisma.order_promotions.findMany({
+        where: { order_id: orderId, discount_amount: { gt: 0 } },
+        select: { promotion_id: true },
+      });
+      promotionInput.manual_promotion_ids = Array.from(
+        new Set([
+          ...promotionInput.manual_promotion_ids,
+          ...ownPromotionRows.map((r) => Number(r.promotion_id)),
+        ]),
+      );
       const promotionQuote =
-        await this.promotionEngine.quoteDiscounts(promotionInput);
+        codePromotionId != null
+          ? (
+              await this.promotionEngine.quoteWithPromotionCode(
+                promotionInput,
+                codePromotionId,
+              )
+            ).quote
+          : await this.promotionEngine.quoteDiscounts(promotionInput);
       promotionDiscount = promotionQuote.total_discount || 0;
       promotionSnapshots = (promotionQuote.order_promotions_snapshot || []).map(
         (s) => ({
@@ -4567,8 +4619,12 @@ export class OrdersService {
         `[editor] quoteDiscounts failed: ${(err as Error).message}`,
       );
       // El editor nunca devuelve éxito falso: si la cotización falla y el
-      // cliente envió `promotion_ids`, emitimos auditoría y rechazamos.
-      if (Array.isArray(dto.promotion_ids) && dto.promotion_ids.length > 0) {
+      // cliente envió `promotion_ids` o un código de promoción, emitimos
+      // auditoría y rechazamos.
+      if (
+        codePromotionId != null ||
+        (Array.isArray(dto.promotion_ids) && dto.promotion_ids.length > 0)
+      ) {
         await this.auditService.logCustom(
           userId,
           'order.editor.pricing_failed',
@@ -4584,6 +4640,11 @@ export class OrdersService {
           },
           orderId,
         );
+        // El motivo concreto del código de promoción (otro día, sin cupo…)
+        // llega tal cual al cajero.
+        if (codePromotionId != null && err instanceof VendixHttpException) {
+          throw err;
+        }
         throw new VendixHttpException(ErrorCodes.ORD_EDIT_PROMOTION_INVALID_001);
       }
     }
@@ -4676,7 +4737,8 @@ export class OrdersService {
     //     ajusta una vez si el código cambió.
     let couponId: number | null = existingOrder.coupon_id ?? null;
     let couponDiscount = 0;
-    const requestedCode = (dto.coupon_code || '').trim();
+    const requestedCode =
+      codePromotionId != null ? '' : (dto.coupon_code || '').trim();
     const currentCode = (existingOrder.coupon_code || '').trim();
     const couponChanged = requestedCode !== currentCode;
 
@@ -5557,7 +5619,12 @@ export class OrdersService {
       }
 
       // 13e) Reconciliar `order_promotions`: borrar existentes, reinsertar
-      //      snapshots nuevas del motor.
+      //      snapshots nuevas del motor, y ajustar `usage_count` solo por
+      //      las promociones que entran o salen de la orden.
+      const previousPromotionRows = await tx.order_promotions.findMany({
+        where: { order_id: orderId, discount_amount: { gt: 0 } },
+        select: { promotion_id: true },
+      });
       await tx.order_promotions.deleteMany({
         where: { order_id: orderId },
       });
@@ -5571,6 +5638,13 @@ export class OrdersService {
           })),
         });
       }
+      await syncOrderPromotionUsage(
+        tx,
+        previousPromotionRows.map((r) => r.promotion_id),
+        promotionSnapshots
+          .filter((snap) => snap.discount_amount > 0)
+          .map((snap) => snap.promotion_id),
+      );
 
       // 13f) Cupón: ajustar `current_uses` UNA vez si cambió y la orden
       //      ya estaba creada. Draft no incrementa ni decrementa: la

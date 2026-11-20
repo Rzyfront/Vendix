@@ -396,25 +396,28 @@ export class CurrencyFormatService {
       }
       // Fallback con símbolo por defecto: la resolución terminó sin moneda
       const dec = decimals ?? 2;
-      const formatted = num.toLocaleString('en-US', {
+      const formatted = Math.abs(num).toLocaleString('en-US', {
         minimumFractionDigits: dec,
         maximumFractionDigits: dec,
       });
-      return `$${formatted}`;
+      return `${num < 0 ? '-' : ''}$${formatted}`;
     }
 
     const dec = decimals ?? currency.decimal_places ?? 2;
     const locale = this.getLocaleForStyle(currency.format_style);
-    const formatted = num.toLocaleString(locale, {
+    // El signo va antes del símbolo: "-$5.900.000", no "$-5.900.000".
+    const formatted = Math.abs(num).toLocaleString(locale, {
       minimumFractionDigits: dec,
       maximumFractionDigits: dec,
     });
+    // Un monto que redondea a cero no lleva signo ("-$0").
+    const sign = num < 0 && Number(formatted.replace(/[^0-9]/g, '')) !== 0 ? '-' : '';
 
     const symbol = currency.symbol || currency.code;
     if (currency.position === 'before') {
-      return `${symbol}${formatted}`;
+      return `${sign}${symbol}${formatted}`;
     } else {
-      return `${formatted}${symbol}`;
+      return `${sign}${formatted}${symbol}`;
     }
   }
 

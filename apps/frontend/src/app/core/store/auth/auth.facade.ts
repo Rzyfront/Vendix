@@ -15,6 +15,7 @@ import type {
 import type { FiscalArea } from '../../models/fiscal-status.model';
 
 import { industriesSupportIngredients } from '../../../shared/constants/industry-modules.constant';
+import { usesProductionDestinations } from '../../../shared/utils/production-site.util';
 
 @Injectable({
   providedIn: 'root',
@@ -293,6 +294,18 @@ export class AuthFacade {
   // — mismo patrón del que A1 y A2 nos estan limpiando.
   readonly isGym = computed<boolean>(() =>
     this.storeIndustries().includes('gym'),
+  );
+  /** True if the active store includes `manufacturing` (same industries cascade). */
+  readonly isManufacturing = computed<boolean>(() =>
+    this.storeIndustries().includes('manufacturing'),
+  );
+  /**
+   * The store routes producible sale lines to production (Stock / Producción
+   * choice): restaurants (kitchen) and manufacturing (Planta). Mirrors the
+   * backend `resolveLineDestinations` gate.
+   */
+  readonly usesProductionDestinations = computed<boolean>(() =>
+    usesProductionDestinations(this.storeIndustries()),
   );
   /** True if the active store is a hotel (same industries cascade). */
   readonly isHospitality = computed<boolean>(() =>

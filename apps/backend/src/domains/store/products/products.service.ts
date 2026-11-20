@@ -116,6 +116,7 @@ import type { StoreSettings } from '../settings/interfaces/store-settings.interf
 import { PromotionEngineService } from '../promotions/promotion-engine/promotion-engine.service';
 import { AutoEntryService } from '../accounting/auto-entries/auto-entry.service';
 import { storeIndustriesSupportIngredients } from '@common/helpers/industry-capabilities.helper';
+import { productionSiteRequired } from '../production/production-site.util';
 import { assertCanChargeVat } from '@common/helpers/vat-responsibility.helper';
 import { SettingsService } from '../settings/settings.service';
 // B.1 — cutover por capability (A.0) + tokenizado/ensamblaje canónicos
@@ -888,6 +889,69 @@ export class ProductsService {
   }
 
   /**
+   * Dónde se produce (kitchen / plant). Solo trabaja si el payload toca
+   * `production_site`, `production_plant_id` o `is_batch_produced`:
+   * - fuera de `plant` la planta concreta se limpia;
+   * - una planta concreta debe ser de la tienda;
+   * - en tienda restaurante + manufactura un producto por lote debe decirlo
+   *   (`PRODUCTION_SITE_REQUIRED`). Una edición que no toca esos campos (precio,
+   *   nombre…) nunca se bloquea: el aviso "Elige dónde se produce" queda en el
+   *   formulario y la venta usa Cocina como respaldo.
+   */
+  private async applyProductionSite<
+    T extends {
+      production_site?: string | null;
+      production_plant_id?: number | null;
+      is_batch_produced?: boolean;
+    },
+  >(
+    dto: T,
+    storeId: number,
+    existing?: {
+      is_batch_produced?: boolean | null;
+      production_site?: string | null;
+    } | null,
+  ): Promise<T> {
+    if (
+      dto.production_site === undefined &&
+      dto.production_plant_id === undefined &&
+      dto.is_batch_produced === undefined
+    ) {
+      return dto;
+    }
+    const out = { ...dto };
+    const site =
+      dto.production_site !== undefined
+        ? dto.production_site
+        : (existing?.production_site ?? null);
+    if (site !== 'plant') {
+      if (dto.production_site !== undefined || dto.production_plant_id != null) {
+        out.production_plant_id = null;
+      }
+    } else if (out.production_plant_id != null) {
+      const plant = await this.prisma.manufacturing_plants.findFirst({
+        where: { id: out.production_plant_id, store_id: storeId },
+        select: { id: true },
+      });
+      if (!plant) {
+        throw new VendixHttpException(ErrorCodes.PRODUCTION_SITE_PLANT_INVALID);
+      }
+    }
+    const batch = dto.is_batch_produced ?? existing?.is_batch_produced ?? false;
+    const decides = dto.is_batch_produced === true || dto.production_site === null;
+    if (batch === true && site == null && decides) {
+      const store = await this.prisma.stores.findUnique({
+        where: { id: storeId },
+        select: { industries: true },
+      });
+      if (productionSiteRequired(store?.industries as string[] | undefined)) {
+        throw new VendixHttpException(ErrorCodes.PRODUCTION_SITE_REQUIRED);
+      }
+    }
+    return out;
+  }
+
+  /**
    * S13: las subconsultas de receta solo aportan algo si la tienda tiene al
    * menos una receta activa. Se decide por el dato y no por la industria, así
    * una tienda que cambió de industria conserva `is_producible` y
@@ -1118,6 +1182,8 @@ export class ProductsService {
       );
 
       assertProductSaleValid(sanitizedDto, sanitizedDto);
+
+      sanitizedDto = await this.applyProductionSite(sanitizedDto, store_id);
 
       // Verify user context for audit
       const user_id = context?.user_id;
@@ -4566,6 +4632,12 @@ export class ProductsService {
       // después) se sigue pudiendo editar en precio, nombre o stock; sólo se le
       // exige una cuenta contabilizable a quien la está escribiendo ahora.
       await this.assertAccountCodesArePostable(sanitizedDto);
+
+      sanitizedDto = await this.applyProductionSite(
+        sanitizedDto,
+        existingProduct.store_id,
+        existingProduct,
+      );
 
       // IMPORTANTE: se destructura `sanitizedDto`, NO `updateProductDto`.
       // `sanitizeIngredientPayload()` y `enforceIngredientCapability()`

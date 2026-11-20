@@ -2076,7 +2076,9 @@ export class PosCartModalComponent {
   /** QUI-648 — sufijo de la escala de precio: "/m", "/kg", "/paquete". */
   /** QUI-999 — selector / badge mode of the line (restaurant only). */
   fulfillmentMode(item: CartItem): LineFulfillmentMode {
-    return this.authFacade.isRestaurant() ? fulfillmentModeForLine(item) : null;
+    return this.authFacade.usesProductionDestinations()
+      ? fulfillmentModeForLine(item)
+      : null;
   }
 
   lineDestination(item: CartItem): FulfillmentChoice | null {
@@ -2857,6 +2859,10 @@ export class PosCartModalComponent {
             .map((id: string | number) => Number(id))
             .filter((id: number) => Number.isFinite(id)),
           line_total: Number(item.totalPrice || 0),
+          // Si el código resulta ser una promoción, el motor necesita
+          // cantidad y precio unitario (escalas por cantidad).
+          quantity: Number(item.quantity || 0),
+          unit_price: Number(item.finalPrice ?? 0),
         };
       })
       .filter((item) => Number.isFinite(item.product_id));
@@ -2874,7 +2880,7 @@ export class PosCartModalComponent {
               .pipe(takeUntilDestroyed(this.destroyRef))
               .subscribe({
                 next: () => {
-                  this.toastService.success(`Cupón "${code}" aplicado`);
+                  this.toastService.success(`Código "${code}" aplicado`);
                   this.couponCode.set('');
                   this.couponLoading.set(false);
                   this.closeCouponModal();
@@ -2921,7 +2927,7 @@ export class PosCartModalComponent {
 
   getCouponDiscountAmount(): number {
     const state = this.cartService.getCurrentState();
-    const couponDiscount = state.appliedDiscounts?.find((d) => d.coupon_id);
+    const couponDiscount = state.appliedDiscounts?.find((d) => this.cartService.isCodeDiscount(d));
     return couponDiscount?.amount || 0;
   }
 }

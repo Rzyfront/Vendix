@@ -157,6 +157,50 @@ type AuditView = 'evidence' | 'history' | 'uncovered-sales';
             </app-button>
           </div>
           <div class="px-2 pb-2 pt-3 md:p-4">
+            @if (focusedObligation(); as focused) {
+              <!-- Deep link desde el recordatorio del calendario tributario. -->
+              <div
+                class="mb-3 rounded-xl border border-primary/30 bg-primary/5 p-3 md:p-4"
+                data-testid="focused-obligation"
+              >
+                <p class="text-xs font-semibold text-primary">
+                  Vencimiento del calendario tributario
+                </p>
+                <p class="mt-1 text-sm font-medium text-text-primary">
+                  {{ typeLabel(focused.type) }} · {{ periodLabel(focused) }}
+                </p>
+                <p class="mt-0.5 text-xs text-text-secondary">
+                  @if (focused.due_date) {
+                    Vence el {{ formatDate(focused.due_date) }} ·
+                  } @else {
+                    Fecha por confirmar (calendario DIAN aún no publicado) ·
+                  }
+                  {{ statusLabel(focused.status) }}
+                </p>
+                <p class="mt-1 text-xs text-text-secondary">
+                  Prepara la declaración de este periodo con las cifras de tus
+                  ventas y compras: el borrador queda listo para revisar.
+                </p>
+                <div class="mt-2 flex flex-wrap gap-2">
+                  <app-button
+                    variant="primary"
+                    size="sm"
+                    [disabled]="working()"
+                    (clicked)="prepareDeclaration(focused)"
+                  >
+                    Preparar declaración del periodo
+                  </app-button>
+                  <app-button
+                    variant="outline"
+                    size="sm"
+                    [disabled]="working()"
+                    (clicked)="clearFocusedObligation()"
+                  >
+                    Ver todas
+                  </app-button>
+                </div>
+              </div>
+            }
             <app-responsive-data-view
               [data]="obligations()"
               [columns]="obligationColumns"
@@ -654,6 +698,15 @@ export class FiscalOperationsComponent {
   );
   readonly overview = signal<FiscalOverview | null>(null);
   readonly obligations = signal<FiscalObligation[]>([]);
+  /**
+   * Obligación abierta desde la bitácora (`?obligationId=`): el recordatorio
+   * del calendario tributario enlaza aquí para preparar la declaración.
+   */
+  readonly focusedObligationId = signal<number | null>(null);
+  readonly focusedObligation = computed(() => {
+    const id = this.focusedObligationId();
+    return id === null ? null : (this.obligations().find((o) => o.id === id) ?? null);
+  });
   readonly declarations = signal<TaxDeclarationDraft[]>([]);
   readonly selectedDeclaration = signal<TaxDeclarationDraft | null>(null);
   readonly declarationLines = signal<TaxDeclarationLine[]>([]);
@@ -728,6 +781,7 @@ export class FiscalOperationsComponent {
   ];
 
   readonly obligationActions: TableAction[] = [
+    { label: 'Preparar declaración', icon: 'file-edit', variant: 'primary', action: (i) => this.prepareDeclaration(i), disabled: () => this.working(), show: (i) => this.canPrepareDeclaration(i) },
     { label: 'En progreso', icon: 'edit-3', variant: 'ghost', action: (i) => this.setObligationStatus(i, 'in_progress'), disabled: () => this.working() },
     { label: 'Lista', icon: 'check-square', variant: 'ghost', action: (i) => this.setObligationStatus(i, 'ready'), disabled: () => this.working() },
     { label: 'Evidencia', icon: 'folder-open', variant: 'ghost', action: (i) => this.attachObligationEvidence(i), disabled: () => this.working() },
@@ -885,6 +939,18 @@ export class FiscalOperationsComponent {
 
   constructor() {
     this.currency.loadCurrency();
+
+    // El recordatorio del calendario tributario enlaza a
+    // `/admin/fiscal/obligations?obligationId=N`: esa obligación se muestra
+    // arriba, con su acción «Preparar declaración del periodo».
+    this.route.queryParamMap
+      .pipe(takeUntilDestroyed(this.destroyRef))
+      .subscribe((params) => {
+        const raw = Number(params.get('obligationId'));
+        this.focusedObligationId.set(
+          Number.isInteger(raw) && raw > 0 ? raw : null,
+        );
+      });
 
     effect(() => {
       const tab = this.activeTab();
@@ -1334,6 +1400,62 @@ export class FiscalOperationsComponent {
       annual_close: 'Cierre anual',
     };
     return labels[type] || type;
+  }
+
+  /**
+   * Borrador de declaración del periodo de una obligación: cierra el ciclo que
+   * el recordatorio de la bitácora anuncia («preparar el reporte del periodo»).
+   */
+  canPrepareDeclaration(item: FiscalObligation): boolean {
+    if (item.status === 'paid' || item.status === 'not_applicable') return false;
+    return this.declarationTypeFor(item.type) !== null;
+  }
+
+  prepareDeclaration(item: FiscalObligation): void {
+    const declarationType = this.declarationTypeFor(item.type);
+    if (!declarationType) return;
+    this.working.set(true);
+    this.service
+      .createDeclarationDraft(this.apiScope(), {
+        declaration_type: declarationType,
+        period_year: item.period_year,
+        period_month: item.period_month ?? undefined,
+        period_quarter: item.period_quarter ?? undefined,
+        obligation_id: item.id,
+      })
+      .pipe(takeUntilDestroyed(this.destroyRef))
+      .subscribe({
+        next: () => {
+          this.toast.success(
+            'Borrador del periodo listo en Declaraciones',
+          );
+          this.loadDeclarations();
+          this.loadObligations();
+          this.loadOverview();
+        },
+        error: (err) =>
+          this.presentOrHandle(err, 'No se pudo preparar la declaración'),
+        complete: () => this.working.set(false),
+      });
+  }
+
+  /** Equivalencia obligación DIAN → tipo de borrador de declaración. */
+  declarationTypeFor(obligationType: string): string | null {
+    const map: Record<string, string> = {
+      vat_return: 'vat',
+      inc_return: 'inc',
+      withholding_return: 'withholding',
+      reteiva_return: 'reteiva',
+      reteica_return: 'reteica',
+      ica_return: 'ica',
+      exogenous_report: 'exogenous',
+      income_tax_precierre: 'income_tax_precierre',
+    };
+    return map[obligationType] ?? null;
+  }
+
+  clearFocusedObligation(): void {
+    this.focusedObligationId.set(null);
   }
 
   declarationLabel(type: string): string {

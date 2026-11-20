@@ -202,6 +202,9 @@ describe('PaymentsService credit_sale.created emission (QUI-540)', () => {
     };
 
     const mockPromotionEngine = {
+      // Casilla única de código: por defecto ningún código es de promoción.
+      resolveDiscountCode: jest.fn().mockResolvedValue({ kind: 'none' }),
+      quoteWithPromotionCode: jest.fn(),
       quoteDiscounts: jest.fn(),
       applyPromotion: jest.fn(),
       validatePromotion: jest.fn(),

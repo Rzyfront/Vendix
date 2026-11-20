@@ -26,6 +26,10 @@ import { ToastService } from '../../../../../shared/components/toast/toast.servi
 import { ImageUploadService } from '../../../../../shared/services/image-upload.service';
 import { dataUrlToFile } from '../../../../../shared/utils/data-url.util';
 import { extractApiErrorMessage } from '../../../../../core/utils/api-error-handler';
+import {
+  DOCUMENT_TYPE_SELECT_OPTIONS,
+  toDocumentTypeCode,
+} from '../../../../../shared/constants/document-types';
 
 @Component({
   selector: 'app-user-create-modal',
@@ -107,11 +111,9 @@ import { extractApiErrorMessage } from '../../../../../core/utils/api-error-hand
               [disabled]="isCreating()"
             >
               <option value="">Seleccionar</option>
-              <option value="CC">Cédula de Ciudadanía</option>
-              <option value="CE">Cédula de Extranjería</option>
-              <option value="PASSPORT">Pasaporte</option>
-              <option value="NIT">NIT</option>
-              <option value="OTHER">Otro</option>
+              @for (opt of documentTypeOptions; track opt.value) {
+                <option [value]="opt.value">{{ opt.label }}</option>
+              }
             </select>
           </div>
 
@@ -289,6 +291,8 @@ import { extractApiErrorMessage } from '../../../../../core/utils/api-error-hand
   ],
 })
 export class UserCreateModalComponent implements OnInit {
+  readonly documentTypeOptions = DOCUMENT_TYPE_SELECT_OPTIONS;
+
   private destroyRef = inject(DestroyRef);
   private fb = inject(FormBuilder);
   private usersService = inject(UsersService);
@@ -471,6 +475,10 @@ export class UserCreateModalComponent implements OnInit {
 
     this.isCreating.set(true);
     const userData: CreateUserDto = this.userForm.value;
+    // Backend enum is uppercase; omit the field when nothing was selected.
+    const documentType = toDocumentTypeCode(userData.document_type);
+    if (documentType) userData.document_type = documentType;
+    else delete userData.document_type;
 
     this.usersService
       .createUser(userData)

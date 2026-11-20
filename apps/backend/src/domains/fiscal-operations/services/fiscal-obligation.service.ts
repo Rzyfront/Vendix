@@ -468,6 +468,33 @@ export class FiscalObligationService {
     return { updated: due.length };
   }
 
+  /**
+   * Calendario tributario → bitácora: vencimiento que `generateForContext`
+   * asignaría a la obligación, sin escribir nada. Sirve para decidir si un
+   * periodo ya venció y si una obligación bloqueada por calendario ya puede
+   * refrescarse (calendario DIAN cargado). Misma resolución que la generación.
+   */
+  async previewDeadline(
+    context: FiscalOperationsContext,
+    type: fiscal_obligation_type_enum,
+    dto: Pick<GenerateFiscalObligationsDto, 'period_year' | 'period_month' | 'periodicity'>,
+  ) {
+    const period = resolveFiscalPeriodRange(dto);
+    return this.resolveDeadline(context, type, period, dto.periodicity ?? null);
+  }
+
+  /**
+   * Tipos que la generación automática incluiría para el periodo (los mismos
+   * de «Generar obligaciones» sin `types`). El calendario tributario los usa
+   * solo para saber si el comercio practica retenciones en el mes.
+   */
+  async detectDefaultTypes(
+    context: FiscalOperationsContext,
+    dto: Pick<GenerateFiscalObligationsDto, 'period_year' | 'period_month' | 'periodicity'>,
+  ): Promise<fiscal_obligation_type_enum[]> {
+    return this.defaultTypesForContext(context, resolveFiscalPeriodRange(dto));
+  }
+
   private async defaultTypesForContext(
     context: FiscalOperationsContext,
     period: ReturnType<typeof resolveFiscalPeriodRange>,

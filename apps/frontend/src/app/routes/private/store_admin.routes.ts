@@ -283,6 +283,16 @@ export const storeAdminRoutes: Routes = [
                 (c) => c.TransfersComponent,
               ),
           },
+          // Vista avanzada del movimiento entre bodegas (P1 es esqueleto: recibe
+          // lo llenado en el modal rápido). Va declarada antes de 'transfers'
+          // por claridad; la ruta literal gana igual por segmentos.
+          {
+            path: 'transfers/new',
+            loadComponent: () =>
+              import('../../private/modules/store/inventory/transfers/quick-move/transfer-advanced-page.component').then(
+                (c) => c.TransferAdvancedPageComponent,
+              ),
+          },
           {
             path: 'movements',
             loadComponent: () =>

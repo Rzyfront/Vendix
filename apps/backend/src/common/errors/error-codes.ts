@@ -2050,6 +2050,34 @@ export const ErrorCodes = {
     httpStatus: 404,
     devMessage: 'Stock transfer not found',
   },
+  INV_TRANSFER_EXTERNAL_REQUIRES_DISPATCH_NOTE: {
+    code: 'INV_TRANSFER_EXTERNAL_REQUIRES_DISPATCH_NOTE',
+    httpStatus: 400,
+    devMessage:
+      'External destination transfers require remisiones (with_dispatch_notes)',
+  },
+  INV_TRANSFER_QUICK_EXTERNAL_FORBIDDEN: {
+    code: 'INV_TRANSFER_QUICK_EXTERNAL_FORBIDDEN',
+    httpStatus: 400,
+    devMessage:
+      'Quick stock movements only run between own warehouses, not to external destinations',
+  },
+  INV_TRANSFER_NOT_DISPATCHED: {
+    code: 'INV_TRANSFER_NOT_DISPATCHED',
+    httpStatus: 400,
+    devMessage: 'Stock transfer has not been dispatched yet',
+  },
+  INV_TRANSFER_LOSS_NOT_DUE: {
+    code: 'INV_TRANSFER_LOSS_NOT_DUE',
+    httpStatus: 400,
+    devMessage:
+      'The loss can only be closed after the expected delivery date',
+  },
+  INV_TRANSFER_LOSS_REASON_REQUIRED: {
+    code: 'INV_TRANSFER_LOSS_REASON_REQUIRED',
+    httpStatus: 400,
+    devMessage: 'A reason is required to close the pending balance as a loss',
+  },
 
   // Serial number tracking (QUI-431)
   SERIAL_REQUIRED_001: {
@@ -6110,6 +6138,50 @@ export const ErrorCodes = {
     devMessage: 'Commission payout already processed',
   },
 
+  // Promociones de la tienda (descuentos de carrito / POS / ecommerce).
+  // 422 cuando la petición es válida pero la promoción no aplica; 409 cuando
+  // el cupo de usos ya se consumió.
+  PROMOTION_INVALID_001: {
+    code: 'PROMOTION_INVALID_001',
+    httpStatus: 422,
+    devMessage: 'Promotion not found, inactive or outside its date range',
+  },
+  PROMOTION_NOT_TODAY_001: {
+    code: 'PROMOTION_NOT_TODAY_001',
+    httpStatus: 422,
+    devMessage: 'Promotion does not apply on the current weekday (store timezone)',
+  },
+  PROMOTION_USAGE_LIMIT_001: {
+    code: 'PROMOTION_USAGE_LIMIT_001',
+    httpStatus: 409,
+    devMessage: 'Promotion reached its usage limit',
+  },
+  PROMOTION_CUSTOMER_LIMIT_001: {
+    code: 'PROMOTION_CUSTOMER_LIMIT_001',
+    httpStatus: 409,
+    devMessage: 'Customer reached the per-customer limit for this promotion',
+  },
+  PROMOTION_MIN_PURCHASE_001: {
+    code: 'PROMOTION_MIN_PURCHASE_001',
+    httpStatus: 422,
+    devMessage: 'Cart subtotal is below the promotion minimum purchase',
+  },
+  PROMOTION_NOT_APPLICABLE_001: {
+    code: 'PROMOTION_NOT_APPLICABLE_001',
+    httpStatus: 422,
+    devMessage: 'Promotion does not apply to any cart item',
+  },
+  PROMOTION_CODE_DUP_001: {
+    code: 'PROMOTION_CODE_DUP_001',
+    httpStatus: 409,
+    devMessage: 'Code already used by another promotion or coupon of the store',
+  },
+  PROMOTION_STATE_001: {
+    code: 'PROMOTION_STATE_001',
+    httpStatus: 409,
+    devMessage: 'Promotion state does not allow this transition',
+  },
+
   // Promotional plans
   PROMO_001: {
     code: 'PROMO_001',
@@ -7263,6 +7335,17 @@ export const ErrorCodes = {
     devMessage:
       'La orden de producción cambió en otra operación; recarga e intenta de nuevo',
   },
+  PRODUCTION_SITE_REQUIRED: {
+    code: 'PRODUCTION_SITE_REQUIRED',
+    httpStatus: 422,
+    devMessage:
+      'Elige dónde se produce: la tienda es restaurante y manufactura, y un producto producido por lote debe decir si va a Cocina (Producción) o a Planta.',
+  },
+  PRODUCTION_SITE_PLANT_INVALID: {
+    code: 'PRODUCTION_SITE_PLANT_INVALID',
+    httpStatus: 422,
+    devMessage: 'La planta elegida no existe en esta tienda.',
+  },
   PRODUCTION_ORDER_NOT_BATCH: {
     code: 'PRODUCTION_ORDER_NOT_BATCH',
     httpStatus: 422,
@@ -8352,6 +8435,30 @@ export const ErrorCodes = {
     httpStatus: 404,
     devMessage: 'La tarea no existe o no tienes acceso a ella.',
   },
+  // "Esta tarea mueve la oportunidad": exige oportunidad ligada y una etapa
+  // activa de su tablero que no sea de tipo perdida.
+  CRM_TASK_002: {
+    code: 'CRM_TASK_002',
+    httpStatus: 422,
+    devMessage:
+      'La etapa destino debe ser una etapa activa (no perdida) del tablero de la oportunidad ligada a la tarea.',
+  },
+  // Quien solo es apoyo de una tarea (no responsable, no creador, sin
+  // ver-todo) puede marcarla hecha o reabrirla, nada más.
+  CRM_TASK_003: {
+    code: 'CRM_TASK_003',
+    httpStatus: 403,
+    devMessage:
+      'Como apoyo de esta tarea solo puedes cambiar su estado; el resto lo edita el responsable o quien la creó.',
+  },
+  // Al completar se puede elegir qué oportunidad mover solo si la tarea no
+  // tiene ya una etapa destino configurada.
+  CRM_TASK_004: {
+    code: 'CRM_TASK_004',
+    httpStatus: 422,
+    devMessage:
+      'Esta tarea ya mueve su oportunidad al completarse; no se puede elegir otra al cerrarla.',
+  },
   CRM_PIPELINE_001: {
     code: 'CRM_PIPELINE_001',
     httpStatus: 404,
@@ -8738,6 +8845,45 @@ export const ErrorCodes = {
     httpStatus: 409,
     devMessage:
       'Una tienda de esta organización ya está enlazada a otro cliente del CRM.',
+  },
+  // Varias cuentas por cliente (odd/tasks/cuenta-vendix-multi-movimientos.md, D2).
+  PLATFORM_CRM_009: {
+    code: 'PLATFORM_CRM_009',
+    httpStatus: 409,
+    devMessage: 'Esta cuenta ya está enlazada a este cliente.',
+  },
+  PLATFORM_CRM_010: {
+    code: 'PLATFORM_CRM_010',
+    httpStatus: 409,
+    devMessage: 'Este cliente ya llegó al máximo de 25 cuentas Vendix enlazadas.',
+  },
+  PLATFORM_CRM_011: {
+    code: 'PLATFORM_CRM_011',
+    httpStatus: 409,
+    devMessage:
+      'Este cliente tiene varias cuentas Vendix enlazadas: indica cuál desenlazar.',
+  },
+  PLATFORM_CRM_012: {
+    code: 'PLATFORM_CRM_012',
+    httpStatus: 404,
+    devMessage: 'El enlace no existe o no es de este cliente.',
+  },
+  PLATFORM_CRM_013: {
+    code: 'PLATFORM_CRM_013',
+    httpStatus: 409,
+    devMessage:
+      'Este cliente ya tiene enlazada una tienda de esta organización: desenlázala antes de enlazar la organización completa.',
+  },
+  // Movimientos de suscripción y actividad por comercio (D1, D4).
+  PLATFORM_CRM_014: {
+    code: 'PLATFORM_CRM_014',
+    httpStatus: 400,
+    devMessage: 'El rango de fechas no es válido.',
+  },
+  PLATFORM_CRM_015: {
+    code: 'PLATFORM_CRM_015',
+    httpStatus: 404,
+    devMessage: 'El comercio no está enlazado a este cliente.',
   },
 } as const satisfies Record<string, ErrorCodeEntry>;
 

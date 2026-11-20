@@ -924,6 +924,39 @@ describe('CustomersService — QUI-728 customer fiscal data', () => {
       expect(result.total_spend).toBe(0); // null → 0, no null
       expect(result.last_order_date).toBeNull();
     });
+
+    it('devuelve avatar_url firmado para que la ficha muestre la foto', async () => {
+      const KEY = 'organizations/o/users/302/avatars/a.webp';
+      const s3 = {
+        signUrl: jest.fn(async (key: string) => `https://bucket.s3/${key}?sig`),
+      };
+      const withS3 = new CustomersService(
+        mockPrismaService as any,
+        mockEventEmitter as any,
+        undefined,
+        s3 as any,
+      );
+      mockPrismaService.users.findFirst.mockResolvedValue(
+        makeUser({ avatar_url: KEY }),
+      );
+      mockPrismaService.orders.groupBy.mockResolvedValue([]);
+
+      const result: any = await withS3.findOne(STORE_ID, CUSTOMER_ID);
+
+      expect(result.avatar_url).toBe(`https://bucket.s3/${KEY}?sig`);
+      expect(s3.signUrl).toHaveBeenCalledWith(KEY);
+    });
+
+    it('sin foto avatar_url queda null', async () => {
+      mockPrismaService.users.findFirst.mockResolvedValue(
+        makeUser({ avatar_url: null }),
+      );
+      mockPrismaService.orders.groupBy.mockResolvedValue([]);
+
+      const result: any = await service.findOne(STORE_ID, CUSTOMER_ID);
+
+      expect(result.avatar_url).toBeNull();
+    });
   });
 
   /**
@@ -988,6 +1021,19 @@ describe('CustomersService — QUI-728 customer fiscal data', () => {
       expect(second.addresses.map((a: any) => a.id)).toEqual([20]);
       expect(second.billing_address).toBeNull();
       expect(result.meta.total).toBe(2);
+    });
+
+    it('findAll: ordena por último editado (updated_at desc, nulos al final)', async () => {
+      mockPrismaService.users.findMany.mockResolvedValue([]);
+      mockPrismaService.users.count.mockResolvedValue(0);
+
+      await service.findAll(7, {});
+
+      const args = mockPrismaService.users.findMany.mock.calls[0][0];
+      expect(args.orderBy).toEqual([
+        { updated_at: { sort: 'desc', nulls: 'last' } },
+        { id: 'desc' },
+      ]);
     });
 
     it('sin billing primaria toma la más reciente', async () => {
@@ -1076,6 +1122,8 @@ describe('CustomersService — QUI-728 customer fiscal data', () => {
       // No era NIT antes ni ahora: sin DV que limpiar, pero el campo se
       // reafirma en null (no queda un DV huérfano de un NIT previo).
       expect(data.verification_digit).toBeNull();
+      // Editar marca updated_at para que el listado lo suba al tope.
+      expect(data.updated_at).toBeInstanceOf(Date);
     });
 
     it('cambio a NIT calcula y persiste el DV', async () => {

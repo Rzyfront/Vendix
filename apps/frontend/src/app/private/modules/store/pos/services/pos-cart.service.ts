@@ -2165,17 +2165,28 @@ export class PosCartService {
   applyCouponDiscount(couponValidation: any): Observable<CartState> {
     const currentState = this.cartState();
 
-    // Remove any previously applied coupon
-    const withoutCoupon = currentState.appliedDiscounts.filter(d => !d.coupon_id);
+    // Remove any previously applied coupon / promotion code
+    const withoutCoupon = currentState.appliedDiscounts.filter(d => !this.isCodeDiscount(d));
 
+    // La casilla de código acepta cupones y códigos de promoción (cupón
+    // primero, lo decide el backend). Una promoción por código ocupa el lugar
+    // del cupón y viaja al cobro como `coupon_code`.
+    const isPromotionCode = couponValidation.kind === 'promotion';
+    const code = couponValidation.coupon_code ?? couponValidation.code;
     const newDiscount: CartDiscount = {
-      id: 'COUPON_' + couponValidation.coupon_id,
+      id: isPromotionCode
+        ? 'PROMO_CODE_' + couponValidation.promotion_id
+        : 'COUPON_' + couponValidation.coupon_id,
       type: couponValidation.discount_type === 'PERCENTAGE' ? 'percentage' : 'fixed',
       value: Number(couponValidation.discount_value),
-      description: `Cupón ${couponValidation.coupon_code}`,
+      description: isPromotionCode
+        ? `Promoción ${couponValidation.name ?? code}`
+        : `Cupón ${code}`,
       amount: Number(couponValidation.discount_amount),
-      coupon_id: couponValidation.coupon_id,
-      coupon_code: couponValidation.coupon_code,
+      ...(isPromotionCode
+        ? { code_promotion_id: Number(couponValidation.promotion_id) }
+        : { coupon_id: couponValidation.coupon_id }),
+      coupon_code: code,
     };
 
     const updatedDiscounts = [...withoutCoupon, newDiscount];
@@ -2184,10 +2195,11 @@ export class PosCartService {
       ...currentState,
       appliedDiscounts: updatedDiscounts,
       appliedCoupon: {
-        id: couponValidation.coupon_id,
-        code: couponValidation.coupon_code,
+        id: isPromotionCode ? 0 : couponValidation.coupon_id,
+        code,
         discount_type: couponValidation.discount_type,
         discount_value: Number(couponValidation.discount_value),
+        kind: isPromotionCode ? 'promotion' : 'coupon',
       },
       summary: this.calculateSummary(currentState.items, updatedDiscounts),
       updatedAt: new Date(),
@@ -2202,7 +2214,7 @@ export class PosCartService {
    */
   removeCoupon(): Observable<CartState> {
     const currentState = this.cartState();
-    const withoutCoupon = currentState.appliedDiscounts.filter(d => !d.coupon_id);
+    const withoutCoupon = currentState.appliedDiscounts.filter(d => !this.isCodeDiscount(d));
 
     const newState: CartState = {
       ...currentState,
@@ -2214,6 +2226,11 @@ export class PosCartService {
 
     this.cartState.set(newState);
     return of(newState);
+  }
+
+  /** Descuento puesto desde la casilla de código (cupón o promoción por código). */
+  isCodeDiscount(d: CartDiscount): boolean {
+    return !!d.coupon_id || !!d.code_promotion_id;
   }
 
   /**

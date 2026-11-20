@@ -25,6 +25,7 @@ import { SubscriptionGateConfig } from '../store/subscriptions/config/subscripti
 import { PlanAccessService } from '../store/subscriptions/services/plan-access.service';
 import { PlatformCrmLinksController } from './platform-crm-links.controller';
 import { PlatformCrmLinksService } from './platform-crm-links.service';
+import { PlatformCrmAccountService } from './platform-crm-account.service';
 import { PlatformStoreGuard } from './platform-store.guard';
 
 /**
@@ -165,6 +166,10 @@ const ROUTES = [
   { method: 'get', url: '/api/store/platform-crm/customers/5/link' },
   { method: 'post', url: '/api/store/platform-crm/customers/5/link', body: { organization_id: 9 } },
   { method: 'delete', url: '/api/store/platform-crm/customers/5/link', body: {} },
+  { method: 'get', url: '/api/store/platform-crm/customers/5/links' },
+  { method: 'delete', url: '/api/store/platform-crm/customers/5/links/3', body: { reason: 'vendió' } },
+  { method: 'get', url: '/api/store/platform-crm/customers/5/subscription-movements?store_id=201&type=payment&limit=10' },
+  { method: 'get', url: '/api/store/platform-crm/customers/5/stores/201/activity?from=2026-10-01&to=2026-10-31' },
 ] as const;
 
 /** Sondas que prueban que el gate y el plan de verdad bloquean en este test. */
@@ -238,9 +243,18 @@ describe('PlatformCrmLinksController · aislamiento por tienda (candados 1, 4 y 
     getLink: jest.fn().mockResolvedValue({ link: null, organization: null }),
     link: jest.fn().mockResolvedValue({ link: null, organization: null }),
     unlink: jest.fn().mockResolvedValue({ link: null, organization: null }),
+    listLinks: jest.fn().mockResolvedValue({ links: [] }),
+    unlinkById: jest.fn().mockResolvedValue({ links: [] }),
+  };
+  const account = {
+    getSubscriptionMovements: jest.fn().mockResolvedValue({ items: [] }),
+    getStoreActivity: jest.fn().mockResolvedValue({ series: { days: [] } }),
   };
   const serviceCalls = () =>
-    Object.values(service).reduce((sum, fn) => sum + fn.mock.calls.length, 0);
+    [...Object.values(service), ...Object.values(account)].reduce(
+      (sum, fn) => sum + fn.mock.calls.length,
+      0,
+    );
 
   // Guards globales: la tienda ajena tiene la suscripción bloqueada y un plan
   // que no incluye nada, con ambos gates en `enforce`.
@@ -283,6 +297,7 @@ describe('PlatformCrmLinksController · aislamiento por tienda (candados 1, 4 y 
         PlatformOrgService,
         { provide: GlobalPrismaService, useValue: { withoutScope: () => db } },
         { provide: PlatformCrmLinksService, useValue: service },
+        { provide: PlatformCrmAccountService, useValue: account },
         {
           provide: ResponseService,
           useValue: { success: (data: unknown) => ({ success: true, data }) },
@@ -393,7 +408,7 @@ describe('PlatformCrmLinksController · aislamiento por tienda (candados 1, 4 y 
     await expectAll404(USERS.tenantOwner);
   });
 
-  it('dueño de una tienda normal con todos los permisos → 404 en las cuatro rutas', async () => {
+  it('dueño de una tienda normal con todos los permisos → 404 en todas las rutas', async () => {
     await expectAll404(USERS.tenantOwner);
   });
 
@@ -415,7 +430,7 @@ describe('PlatformCrmLinksController · aislamiento por tienda (candados 1, 4 y 
     await expectAll404(USERS.platformUserInInactiveStore);
   });
 
-  it('usuario de la tienda plataforma SIN el permiso → 403 en las cuatro rutas', async () => {
+  it('usuario de la tienda plataforma SIN el permiso → 403 en todas las rutas', async () => {
     for (const route of ROUTES) {
       const res = await call(route, USERS.platformUserWithoutPermission);
       expect(res.status).toBe(403);
@@ -423,18 +438,67 @@ describe('PlatformCrmLinksController · aislamiento por tienda (candados 1, 4 y 
     expect(serviceCalls()).toBe(0);
   });
 
-  it('usuario de la tienda plataforma CON el permiso → éxito en las cuatro rutas', async () => {
+  it('usuario de la tienda plataforma CON el permiso → éxito en todas las rutas', async () => {
     const statuses: number[] = [];
     for (const route of ROUTES) {
       statuses.push((await call(route, USERS.platformSeller)).status);
     }
     // POST conserva el 201 por defecto de Nest (crea la fila del enlace).
-    expect(statuses).toEqual([200, 200, 201, 200]);
+    expect(statuses).toEqual([200, 200, 201, 200, 200, 200, 200, 200]);
     expect(service.searchAccounts).toHaveBeenCalledWith('acme');
     const ctx = { store_id: PLATFORM_STORE, organization_id: PLATFORM_ORG, user_id: 100 };
     expect(service.getLink).toHaveBeenCalledWith(ctx, 5);
     expect(service.link).toHaveBeenCalledWith(ctx, 5, expect.objectContaining({ organization_id: 9 }));
     expect(service.unlink).toHaveBeenCalledWith(ctx, 5, expect.any(Object));
+    expect(service.listLinks).toHaveBeenCalledWith(ctx, 5);
+    expect(service.unlinkById).toHaveBeenCalledWith(
+      ctx,
+      5,
+      3,
+      expect.objectContaining({ reason: 'vendió' }),
+    );
+    expect(account.getSubscriptionMovements).toHaveBeenCalledWith(
+      ctx,
+      5,
+      expect.objectContaining({ store_id: 201, type: 'payment', limit: 10 }),
+    );
+    expect(account.getStoreActivity).toHaveBeenCalledWith(
+      ctx,
+      5,
+      201,
+      expect.objectContaining({ from: '2026-10-01', to: '2026-10-31' }),
+    );
+  });
+
+  it('movimientos y actividad: filtros inválidos → 400 sin tocar el servicio', async () => {
+    const get = (url: string) =>
+      request(app.getHttpServer())
+        .get(url)
+        .set('x-test-user', JSON.stringify(USERS.platformSeller));
+    const base = '/api/store/platform-crm/customers/5';
+    const rejected = [
+      `${base}/subscription-movements?limit=51`,
+      `${base}/subscription-movements?store_id=abc`,
+      `${base}/subscription-movements?type=order`,
+      `${base}/subscription-movements?from=19-11-2026`,
+      `${base}/subscription-movements?page=0`,
+      `${base}/stores/201/activity?from=ayer`,
+      `${base}/stores/abc/activity`,
+    ];
+    for (const url of rejected) {
+      const res = await get(url);
+      expect({ url, status: res.status }).toEqual({ url, status: 400 });
+    }
+    expect(serviceCalls()).toBe(0);
+  });
+
+  it('desenlazar por id: un linkId no numérico → 400 sin tocar el servicio', async () => {
+    const res = await request(app.getHttpServer())
+      .delete('/api/store/platform-crm/customers/5/links/abc')
+      .set('x-test-user', JSON.stringify(USERS.platformSeller))
+      .send({});
+    expect(res.status).toBe(400);
+    expect(service.unlinkById).not.toHaveBeenCalled();
   });
 
   it('enlazar a una tienda: `linked_store_id` llega al servicio; las dos, ninguna o un id inválido → 400 sin tocarlo', async () => {
@@ -473,7 +537,7 @@ describe('PlatformCrmLinksController · aislamiento por tienda (candados 1, 4 y 
     for (const route of ROUTES) {
       statuses.push((await call(route, USERS.platformReader)).status);
     }
-    expect(statuses).toEqual([403, 200, 403, 403]);
+    expect(statuses).toEqual([403, 200, 403, 403, 200, 403, 200, 200]);
   });
 
   it.each([

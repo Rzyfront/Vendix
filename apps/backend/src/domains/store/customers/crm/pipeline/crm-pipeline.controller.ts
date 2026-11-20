@@ -28,6 +28,7 @@ import {
   CrmOpportunitiesQueryDto,
   LoseCrmOpportunityDto,
   MoveCrmOpportunityDto,
+  OpenCrmOpportunitiesQueryDto,
   UpdateCrmOpportunityDto,
   UpdateCrmStageDto,
   UpdateCrmStageTemplateDto,
@@ -42,6 +43,7 @@ import {
  *   POST  /store/customers/crm/pipelines/:id/stages      see-all only
  *   PATCH /store/customers/crm/stages/:id                see-all only, no delete
  *   GET   /store/customers/crm/opportunities             board grouped by stage
+ *   GET   /store/customers/crm/opportunities/open        ?customer_id, for the task form
  *   GET   /store/customers/crm/opportunities/:id
  *   POST  /store/customers/crm/opportunities
  *   PATCH /store/customers/crm/opportunities/:id
@@ -154,6 +156,13 @@ export class CrmPipelineController {
   @Permissions(CRM_PIPELINE_READ_PERMISSION)
   async board(@Query() query: CrmOpportunitiesQueryDto) {
     return this.response.success(await this.service.board(query));
+  }
+
+  /** Declared before `opportunities/:id`, which would swallow `open`. */
+  @Get('opportunities/open')
+  @Permissions(CRM_PIPELINE_READ_PERMISSION)
+  async openForCustomer(@Query() query: OpenCrmOpportunitiesQueryDto) {
+    return this.response.success(await this.service.openForCustomer(query));
   }
 
   @Get('opportunities/:id')

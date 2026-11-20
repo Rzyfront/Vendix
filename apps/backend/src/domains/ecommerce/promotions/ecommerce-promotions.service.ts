@@ -2,6 +2,10 @@ import { Injectable } from '@nestjs/common';
 import { StorePrismaService } from '../../../prisma/services/store-prisma.service';
 import { PromotionEngineService } from '../../store/promotions/promotion-engine/promotion-engine.service';
 import { QuantityTierSummary } from '../../store/promotions/dto/promotion-quote.interface';
+import {
+  isPromotionActiveOnWeekday,
+  promotionDateWindowWhere,
+} from '../../store/promotions/promotion-schedule.util';
 
 /**
  * The ONLY promotion scopes the public storefront contract recognises. Mirrors
@@ -81,6 +85,8 @@ export interface StorefrontActivePromotion {
    * surface shows identical copy. Guaranteed non-empty.
    */
   promotion_type_label: string;
+  /** Días en que aplica (0 = domingo … 6 = sábado). Vacío = todos los días. */
+  active_weekdays: number[];
 }
 
 @Injectable()
@@ -100,19 +106,19 @@ export class EcommercePromotionsService {
    * populates `store_id` for `/ecommerce/*` routes). The query never crosses
    * stores.
    *
-   * "Active" criteria (strictest live definition, matching a storefront
-   * banner): `state = 'active'` AND the date window is current AND
-   * `is_auto_apply = true`. Manual/coupon promotions are excluded because they
-   * are not auto-applied.
+   * "Active" criteria = exactly what the cart engine would auto-apply TODAY:
+   * `state` active/scheduled within its date window (store timezone),
+   * `is_auto_apply = true`, on one of its weekdays and with usage left.
+   * Before, scheduled promos that already started were hidden while the cart
+   * applied them, and exhausted promos were still advertised.
    */
   async getActivePromotions(): Promise<StorefrontActivePromotion[]> {
-    const now = new Date();
+    const clock = await this.promotionEngine.getStoreClock();
 
-    const promotions = await this.prisma.promotions.findMany({
+    const rows = await this.prisma.promotions.findMany({
       where: {
-        state: 'active',
-        start_date: { lte: now },
-        OR: [{ end_date: null }, { end_date: { gte: now } }],
+        state: { in: ['active', 'scheduled'] },
+        ...promotionDateWindowWhere(clock),
         is_auto_apply: true,
       },
       include: {
@@ -126,9 +132,16 @@ export class EcommercePromotionsService {
           ],
         },
       },
-      // Priority follows the "1 = highest" convention (lower number wins).
-      orderBy: [{ priority: 'asc' }, { id: 'desc' }],
+      // Priority follows the "1 = highest" convention (lower number wins);
+      // ties go to the oldest promo, same as the engine.
+      orderBy: [{ priority: 'asc' }, { id: 'asc' }],
     });
+
+    const promotions = rows.filter(
+      (promo) =>
+        isPromotionActiveOnWeekday(promo, clock.weekday) &&
+        !(promo.usage_limit && promo.usage_count >= promo.usage_limit),
+    );
 
     const active: StorefrontActivePromotion[] = [];
 
@@ -176,6 +189,9 @@ export class EcommercePromotionsService {
             ? Number(promo.min_purchase_amount)
             : null,
         quantity_tiers: quantityTiers,
+        active_weekdays: Array.isArray(promo.active_weekdays)
+          ? promo.active_weekdays
+          : [],
         promotion_type_label: this.buildPromotionTypeLabel({
           scope,
           rule_type: promo.rule_type,

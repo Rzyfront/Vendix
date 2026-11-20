@@ -185,3 +185,51 @@ describe('resolveLineDestinations', () => {
     });
   });
 });
+
+describe('resolveLineDestinations — manufacturing', () => {
+  it('manufacturing-only store: a producible line without stock goes to production', async () => {
+    const client = clientWith({
+      industries: ['manufacturing'],
+      products: [productRow({ id: 1, product_type: 'physical' })],
+    });
+    const out = await resolveLineDestinations(client, 5, [{ product_id: 1, quantity: 1 }]);
+    expect(out).toEqual([{ destination: 'production', skip_kds: true, choosable: false }]);
+  });
+
+  it('manufacturing-only store: a non-producible line keeps null', async () => {
+    const client = clientWith({
+      industries: ['manufacturing'],
+      products: [productRow({ id: 1, is_batch_produced: false, product_type: 'prepared' })],
+    });
+    const out = await resolveLineDestinations(client, 5, [{ product_id: 1, quantity: 1 }]);
+    expect(out).toEqual([null]);
+  });
+
+  it('S12: the industries already read are used without reading the store', async () => {
+    const client = clientWith({
+      industries: ['retail'],
+      products: [productRow({ id: 1, product_type: 'physical' })],
+    });
+    const out = await resolveLineDestinations(client, 5, [{ product_id: 1, quantity: 1 }], {
+      industries: ['manufacturing'],
+    });
+    expect(client.stores.findUnique).not.toHaveBeenCalled();
+    expect(out[0]?.destination).toBe('production');
+    const retail = await resolveLineDestinations(client, 5, [{ product_id: 1 }], {
+      industries: ['retail'],
+    });
+    expect(retail).toEqual([null]);
+  });
+
+  it('isRestaurant: false still reads the store so a manufacturing store keeps its matrix', async () => {
+    const client = clientWith({
+      industries: ['manufacturing'],
+      products: [productRow({ id: 1, product_type: 'physical' })],
+    });
+    const out = await resolveLineDestinations(client, 5, [{ product_id: 1 }], {
+      isRestaurant: false,
+    });
+    expect(client.stores.findUnique).toHaveBeenCalledTimes(1);
+    expect(out[0]?.destination).toBe('production');
+  });
+});

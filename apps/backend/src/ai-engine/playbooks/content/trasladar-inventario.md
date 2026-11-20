@@ -19,6 +19,10 @@
         "version": "1"
       },
       {
+        "name": "create_stock_transfer",
+        "version": "1"
+      },
+      {
         "name": "manage_stock_transfers",
         "version": "1"
       },
@@ -65,18 +69,6 @@
         "required": true
       },
       {
-        "key": "expected_status",
-        "description": "Estado solicitado según transición del dominio.",
-        "source": "user",
-        "required": true
-      },
-      {
-        "key": "transfer_id",
-        "description": "ID del traslado creado o leído.",
-        "source": "lookup",
-        "required": false
-      },
-      {
         "key": "product_id",
         "required": true,
         "source": "lookup",
@@ -89,10 +81,22 @@
         "description": "Campo publicado por la tool; resolver/confirmar antes de este paso, nunca inventar."
       },
       {
-        "key": "transfer_action",
+        "key": "mode",
         "required": true,
         "source": "user",
-        "description": "Campo publicado por la tool; resolver/confirmar antes de este paso, nunca inventar."
+        "description": "Si el movimiento se ejecuta de inmediato o queda como orden pendiente."
+      },
+      {
+        "key": "documents",
+        "required": false,
+        "source": "user",
+        "description": "Si el traslado lleva remisión de salida o no la lleva."
+      },
+      {
+        "key": "transfer_action",
+        "required": false,
+        "source": "user",
+        "description": "Transición a aplicar cuando la orden queda pendiente: aprobar, despachar o recibir."
       }
     ],
     "steps": [
@@ -122,14 +126,17 @@
       {
         "id": "transfer",
         "section": "steps",
-        "tool": "manage_stock_transfers",
-        "instruction": "Proponer UNA acción (create/ship/receive según contrato); cada transición es consentimiento separado.",
+        "tool": "create_stock_transfer",
+        "instruction": "Preparar el traslado completo con varias líneas; la persona confirma antes de mover inventario.",
         "depends_on": [
           "availability"
         ],
         "approval": "individual",
         "arguments": {
-          "action": "${inputs.transfer_action}"
+          "mode": "${inputs.mode}",
+          "from_location_id": "${inputs.from_location_id}",
+          "to_location_id": "${inputs.to_location_id}",
+          "items": "${inputs.items}"
         }
       },
       {
@@ -153,7 +160,7 @@
         ],
         "approval": "none",
         "arguments": {
-          "path": "store/stock-transfers/${inputs.transfer_id}"
+          "path": "store/stock-transfers/${steps.transfer.transfer_id}"
         },
         "bridge": {
           "method": "GET",
@@ -169,7 +176,7 @@
           "from_location_id": 900100,
           "to_location_id": 900101,
           "items": [],
-          "expected_status": "in_transit"
+          "mode": "quick"
         },
         "observations": [
           {
@@ -193,7 +200,7 @@
           },
           {
             "step_id": "transfer",
-            "tool": "manage_stock_transfers",
+            "tool": "create_stock_transfer",
             "status": "ok",
             "fresh": true,
             "complete": true,
@@ -217,7 +224,7 @@
               "id": 900102,
               "from_location_id": 900100,
               "to_location_id": 900101,
-              "status": "in_transit"
+              "status": "completed"
             },
             "after_step": "transfer",
             "bridge": {
@@ -235,7 +242,7 @@
           "from_location_id": 900100,
           "to_location_id": 900101,
           "items": [],
-          "expected_status": "in_transit"
+          "mode": "quick"
         },
         "observations": [
           {
@@ -259,7 +266,7 @@
           },
           {
             "step_id": "transfer",
-            "tool": "manage_stock_transfers",
+            "tool": "create_stock_transfer",
             "status": "ok",
             "fresh": true,
             "complete": true,
@@ -308,12 +315,12 @@ Usar solo por intención explícita del usuario en este proceso. No usar para sa
 ## inputs
 - `product_id` — obligatorio: Campo publicado por la tool; resolver/confirmar antes de este paso, nunca inventar.
 - `quantity` — obligatorio: Campo publicado por la tool; resolver/confirmar antes de este paso, nunca inventar.
-- `transfer_action` — obligatorio: Campo publicado por la tool; resolver/confirmar antes de este paso, nunca inventar.
+- `mode` — obligatorio: si el movimiento se ejecuta de inmediato o queda como orden pendiente.
+- `documents` — opcional: si el traslado lleva remisión de salida.
+- `transfer_action` — opcional: transición a aplicar cuando la orden queda pendiente (aprobar, despachar o recibir).
 - `from_location_id` — obligatorio, resuelto desde lectura/recibo de dominio: Ubicación origen elegida.
 - `to_location_id` — obligatorio, resuelto desde lectura/recibo de dominio: Destino diferente y permitido.
 - `items` — obligatorio, confirmado por persona: Productos/variantes y cantidades.
-- `expected_status` — obligatorio, confirmado por persona: Estado solicitado según transición del dominio.
-- `transfer_id` — opcional/condicional, resuelto desde lectura/recibo de dominio: ID del traslado creado o leído.
 Si falta un campo obligatorio pedir exactamente ese campo. Los IDs simbólicos del contrato se sustituyen solo con lecturas/recibos del alcance autenticado; los fixtures numéricos son sintéticos y nunca argumentos por defecto.
 
 ## setup
@@ -323,7 +330,7 @@ No mover entre tiendas si scope STORE lo prohíbe. Cada acción conserva costo/v
 ## steps
 - `locations` (inicio) → `get_inventory_locations` v1: Resolver ubicaciones y alcance operativo.
 - `availability` (locations) → `check_stock_availability` v1: Comprobar disponibles en origen, no físico reservado.
-- `transfer` (availability) → `manage_stock_transfers` v1: Proponer UNA acción (create/ship/receive según contrato); cada transición es consentimiento separado.
+- `transfer` (availability) → `create_stock_transfer` v1: Preparar el traslado completo con varias líneas; la persona confirma antes de mover inventario.
 - `stock` (transfer) → `get_stock_levels` v1: Releer existencias origen/destino conservando producto/variante.
 Las dependencias son orden lógico, no scheduler automático. Reutilizar IDs/evidencia del objetivo sin repetir descubrimiento; revalidar stock, saldo y estado antes de proponer cambios. Una tool resuelta con error/pending/unknown nunca prueba éxito.
 

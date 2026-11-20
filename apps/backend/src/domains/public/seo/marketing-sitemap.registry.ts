@@ -23,6 +23,11 @@ export const MARKETING_SITEMAP_PAGES: readonly MarketingSitemapPage[] = [
   { path: '/sectores/restaurantes', priority: '0.8', changefreq: 'monthly', editorialRevision: 1 },
   { path: '/implementacion', priority: '0.6', changefreq: 'monthly', editorialRevision: 1 },
   { path: '/migracion', priority: '0.6', changefreq: 'monthly', editorialRevision: 1 },
+  // Pilot guides approved one by one by Adel on 2026-11-19 (SEO-OPS-36); same list as
+  // PUBLISHED_SECTOR_GUIDES in the frontend.
+  { path: '/guias/comandas-restaurantes', priority: '0.5', changefreq: 'monthly', editorialRevision: 1 },
+  { path: '/guias/ventas-mayoristas-al-detal', priority: '0.5', changefreq: 'monthly', editorialRevision: 1 },
+  { path: '/guias/pasar-productos-excel-a-pos', priority: '0.5', changefreq: 'monthly', editorialRevision: 1 },
 ];
 
 export function marketingSitemapVersion(

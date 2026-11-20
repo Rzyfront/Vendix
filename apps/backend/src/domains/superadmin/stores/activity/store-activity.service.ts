@@ -56,6 +56,19 @@ export interface StoreActivityRow {
   last_activity_at: string | null;
 }
 
+/**
+ * La fila de un comercio sin identidad ni timeline: lo que comparte la Cuenta
+ * Vendix del CRM de Vendix Platform (`getSummary`).
+ */
+export interface StoreActivitySummary {
+  score: number;
+  orders_count: number;
+  revenue_operating: number;
+  active_users: number;
+  audit_events: number;
+  last_activity_at: string | null;
+}
+
 export interface StoreActivityStats {
   active_stores: number;
   activity_pct_vs_meta_80: number;
@@ -309,6 +322,31 @@ export class StoreActivityService {
       total,
       page,
       limit,
+    };
+  }
+
+  /**
+   * Solo la fila de agregados del comercio en la ventana (score, órdenes,
+   * ingresos, usuarios activos, eventos y última actividad), sin timeline: no
+   * expone números de orden ni correos. Comercio sin actividad → ceros.
+   */
+  async getSummary(
+    storeId: number,
+    window: StoreActivityWindow,
+  ): Promise<StoreActivitySummary> {
+    const rows = await this.buildRows(
+      { organization_id: undefined } as StoreActivityQueryDto,
+      window,
+      [storeId],
+    );
+    const row = rows[0];
+    return {
+      score: row?.score ?? 0,
+      orders_count: row?.orders_count ?? 0,
+      revenue_operating: row?.revenue_operating ?? 0,
+      active_users: row?.active_users ?? 0,
+      audit_events: row?.audit_events ?? 0,
+      last_activity_at: row?.last_activity_at ?? null,
     };
   }
 

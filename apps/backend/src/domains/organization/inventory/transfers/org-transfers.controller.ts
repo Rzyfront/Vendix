@@ -15,11 +15,17 @@ import { ResponseService } from '@common/responses/response.service';
 import { SkipSubscriptionGate } from '../../../store/subscriptions/decorators/skip-subscription-gate.decorator';
 
 import { OrgTransfersService } from './org-transfers.service';
+import {
+  parseIdList,
+  parseOptionalId,
+  parseRequiredId,
+} from '../../../store/orders/stock-transfers/transfer-query-params';
 import { OrgTransferQueryDto } from './dto/org-transfer-query.dto';
 import { CreateOrgTransferDto } from './dto/create-org-transfer.dto';
 import { CompleteOrgTransferDto } from './dto/complete-org-transfer.dto';
 import { CancelOrgTransferDto } from './dto/cancel-org-transfer.dto';
 import { DispatchOrgTransferDto } from './dto/dispatch-org-transfer.dto';
+import { CloseTransferWithLossDto } from '../../../store/orders/stock-transfers/dto/transfer-advanced.dto';
 
 /**
  * `/api/organization/inventory/transfers` — org-level stock transfer
@@ -31,6 +37,8 @@ import { DispatchOrgTransferDto } from './dto/dispatch-org-transfer.dto';
  *   POST  /:id/dispatch      → decrement origin (logical: in_transit)
  *   POST  /:id/complete      → increment destination (logical: received)
  *   POST  /:id/cancel        → cancel; if in_transit returns origin stock
+ *   POST  /complete          → movimiento rápido: crea y aplica en una transacción
+ *   GET   /search-products   → picker del movimiento rápido
  *
  * Reads are inherited from the previous read-only iteration (`/`, `/:id`,
  * `/stats`).
@@ -71,6 +79,91 @@ export class OrgTransfersController {
     );
   }
 
+  /**
+   * Picker del movimiento rápido: productos/variantes con stock en el origen y
+   * su disponible en origen y destino. Declarado antes de `:id` para que la
+   * ruta literal gane sobre el parámetro.
+   */
+  @Get('search-products')
+  @Permissions('organization:inventory:transfers:read')
+  async searchTransferableProducts(
+    @Query('search') search: string,
+    @Query('from_location_id', ParseIntPipe) fromLocationId: number,
+    @Query('to_location_id', ParseIntPipe) toLocationId: number,
+    @Query('limit') limit?: string,
+  ) {
+    const data = await this.transfers.searchTransferableProducts(
+      search ?? '',
+      fromLocationId,
+      toLocationId,
+      limit ? +limit : 20,
+    );
+    return this.responseService.success(data, 'Productos transferibles');
+  }
+
+  /** P3 — transporte, conductores, métodos de envío y categorías del origen. */
+  @Get('advanced-options')
+  @Permissions('organization:inventory:transfers:read')
+  async getAdvancedOptions(@Query('from_location_id') fromLocationId: string) {
+    const data = await this.transfers.getAdvancedOptions(
+      parseRequiredId(fromLocationId, 'from_location_id'),
+    );
+    return this.responseService.success(data, 'Opciones de la orden');
+  }
+
+  /** P3 — lotes de los productos en la bodega de origen (FEFO, D5). */
+  @Get('batches')
+  @Permissions('organization:inventory:transfers:read')
+  async getTransferBatches(
+    @Query('from_location_id') fromLocationId: string,
+    @Query('product_ids') productIds?: string,
+  ) {
+    const data = await this.transfers.getTransferBatches(
+      parseRequiredId(fromLocationId, 'from_location_id'),
+      parseIdList(productIds),
+    );
+    return this.responseService.success(data, 'Lotes del origen');
+  }
+
+  /** P3 — todo el stock disponible de la bodega de origen (por categoría). */
+  @Get('location-stock')
+  @Permissions('organization:inventory:transfers:read')
+  async getLocationStock(
+    @Query('from_location_id') fromLocationId: string,
+    @Query('to_location_id') toLocationId?: string,
+    @Query('category_id') categoryId?: string,
+    @Query('limit') limit?: string,
+    @Query('product_ids') productIds?: string,
+  ) {
+    const page = await this.transfers.getLocationStock(
+      parseRequiredId(fromLocationId, 'from_location_id'),
+      parseOptionalId(toLocationId),
+      parseOptionalId(categoryId),
+      limit ? +limit : undefined,
+      parseIdList(productIds),
+    );
+    return this.responseService.success(page.rows, 'Stock de la bodega', {
+      has_more: page.has_more,
+      limit: page.limit,
+    });
+  }
+
+  /** P3 — escáner / pegar lista: SKU o código de barras exacto (M2). */
+  @Get('lookup-code')
+  @Permissions('organization:inventory:transfers:read')
+  async lookupTransferCode(
+    @Query('code') code: string,
+    @Query('from_location_id') fromLocationId: string,
+    @Query('to_location_id') toLocationId?: string,
+  ) {
+    const data = await this.transfers.lookupTransferCode(
+      code ?? '',
+      parseRequiredId(fromLocationId, 'from_location_id'),
+      parseOptionalId(toLocationId),
+    );
+    return this.responseService.success(data, 'Productos por código');
+  }
+
   @Get(':id')
   @Permissions('organization:inventory:transfers:read')
   async findOne(@Param('id', ParseIntPipe) id: number) {
@@ -85,6 +178,21 @@ export class OrgTransfersController {
     return this.responseService.success(
       data,
       'Traslado creado exitosamente',
+    );
+  }
+
+  /**
+   * Movimiento rápido (D1): crea y aplica la transferencia en una transacción
+   * (origen −, destino +). Mueve stock de inmediato, por eso exige el permiso
+   * de despacho —el que autoriza sacar stock del origen— y no solo el de crear.
+   */
+  @Post('complete')
+  @Permissions('organization:inventory:transfers:dispatch')
+  async createAndComplete(@Body() dto: CreateOrgTransferDto) {
+    const data = await this.transfers.createAndComplete(dto);
+    return this.responseService.success(
+      data,
+      'Movimiento aplicado: el inventario ya se movió',
     );
   }
 
@@ -113,6 +221,41 @@ export class OrgTransfersController {
   ) {
     const data = await this.transfers.complete(id, dto);
     return this.responseService.success(data, 'Traslado recibido');
+  }
+
+  /**
+   * D4 — recepción repetible con conteos por línea. `complete` queda como
+   * alias para los clientes actuales.
+   */
+  @Post(':id/receive')
+  @Permissions('organization:inventory:transfers:complete')
+  async receive(
+    @Param('id', ParseIntPipe) id: number,
+    @Body() dto: CompleteOrgTransferDto,
+  ) {
+    const data = await this.transfers.receive(id, dto);
+    return this.responseService.success(data, 'Traslado recibido');
+  }
+
+  /**
+   * D4 — cierre del saldo pendiente como pérdida. Exige motivo y que la fecha
+   * límite de entrega ya haya vencido; lo valida el servicio.
+   */
+  @Post(':id/close-with-loss')
+  @Permissions('organization:inventory:transfers:complete')
+  async closeWithLoss(
+    @Param('id', ParseIntPipe) id: number,
+    @Body() dto: CloseTransferWithLossDto,
+  ) {
+    const data = await this.transfers.closeWithLoss(
+      id,
+      dto.reason,
+      dto.notes,
+    );
+    return this.responseService.success(
+      data,
+      'Saldo pendiente cerrado como pérdida',
+    );
   }
 
   @Post(':id/cancel')

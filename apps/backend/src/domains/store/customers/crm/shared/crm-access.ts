@@ -1,3 +1,4 @@
+import { Prisma } from '@prisma/client';
 import { RequestContextService } from '@common/context/request-context.service';
 import { ErrorCodeEntry, VendixHttpException } from '../../../../../common/errors';
 import { StorePrismaService } from '../../../../../prisma/services/store-prisma.service';
@@ -33,6 +34,30 @@ export function resolveCrmViewer(missing: ErrorCodeEntry): CrmViewer {
 }
 
 /**
+ * "Active staff" of the store: an active user whose role grants `permission`.
+ * One definition for checking a user ({@link isActiveStoreStaff}) and for
+ * listing them (the task support picker).
+ */
+export function activeStoreStaffUserWhere(
+  permission: string,
+): Prisma.usersWhereInput {
+  return {
+    state: 'active',
+    user_roles: {
+      some: {
+        roles: {
+          role_permissions: {
+            some: {
+              permissions: { name: permission, status: 'active' },
+            },
+          },
+        },
+      },
+    },
+  };
+}
+
+/**
  * Active member of the store of the request whose role grants `permission`,
  * so whatever is assigned to them is never invisible to them (and never
  * assigned to a customer). `store_users` is store-scoped by the client.
@@ -43,23 +68,7 @@ export async function isActiveStoreStaff(
   permission: string,
 ): Promise<boolean> {
   const row = await prisma.store_users.findFirst({
-    where: {
-      user_id: userId,
-      user: {
-        state: 'active',
-        user_roles: {
-          some: {
-            roles: {
-              role_permissions: {
-                some: {
-                  permissions: { name: permission, status: 'active' },
-                },
-              },
-            },
-          },
-        },
-      },
-    },
+    where: { user_id: userId, user: activeStoreStaffUserWhere(permission) },
     select: { id: true },
   });
   return !!row;

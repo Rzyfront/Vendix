@@ -1,8 +1,9 @@
-import { Component, computed, effect, inject, signal, untracked } from '@angular/core';
+import { Component, computed, effect, inject, signal, untracked, viewChild } from '@angular/core';
 import { FormsModule } from '@angular/forms';
 import { RouterLink } from '@angular/router';
 import { firstValueFrom } from 'rxjs';
 import {
+  BadgeComponent,
   ButtonComponent,
   CardComponent,
   EmptyStateComponent,
@@ -22,7 +23,15 @@ import { AuthFacade } from '../../../../../../core/store/auth/auth.facade';
 import { parseApiError } from '../../../../../../core/utils/parse-api-error';
 import { CrmService } from '../shared/crm.service';
 import { CrmTask, CrmTaskStats, CrmTasksQuery, personName } from '../shared/crm.interface';
-import { crmCanSeeAll, formatDateTime } from '../shared/crm.utils';
+import {
+  crmCanSeeAll,
+  formatDateTime,
+  isTaskSupporter,
+  supportLine,
+  taskCompletedMessage,
+  taskMoveLine,
+} from '../shared/crm.utils';
+import { TaskCompleteModalComponent } from '../shared/task-complete-modal.component';
 import { TaskFormModalComponent } from '../shared/task-form-modal.component';
 
 type TaskTab = 'today' | 'overdue' | 'week' | 'open' | 'done';
@@ -40,6 +49,7 @@ const PAGE_SIZE = 30;
   imports: [
     FormsModule,
     RouterLink,
+    BadgeComponent,
     ButtonComponent,
     CardComponent,
     EmptyStateComponent,
@@ -49,6 +59,7 @@ const PAGE_SIZE = 30;
     SpinnerComponent,
     StatsComponent,
     StickyHeaderComponent,
+    TaskCompleteModalComponent,
     TaskFormModalComponent,
   ],
   template: `
@@ -173,7 +184,7 @@ const PAGE_SIZE = 30;
                   [attr.aria-label]="(task.status === 'done' ? 'Reabrir ' : 'Completar ') + task.title"
                   [checked]="task.status === 'done'"
                   [disabled]="busyId() === task.id"
-                  (change)="toggle(task)"
+                  (change)="toggle(task, $event)"
                 />
                 <div class="min-w-0 flex-1">
                   <button
@@ -185,6 +196,9 @@ const PAGE_SIZE = 30;
                   >
                     {{ task.title }}
                   </button>
+                  @if (isSupporter(task)) {
+                    <app-badge class="ml-2 align-middle" variant="info" size="xs">Apoyo</app-badge>
+                  }
                   <div class="mt-0.5 flex flex-wrap items-center gap-x-3 gap-y-1 text-xs text-[var(--color-text-secondary)]">
                     @if (task.due_at) {
                       <span
@@ -209,11 +223,14 @@ const PAGE_SIZE = 30;
                     @if (task.opportunity) {
                       <span class="inline-flex items-center gap-1">
                         <app-icon name="trending-up" [size]="12"></app-icon>
-                        {{ task.opportunity.title }}
+                        {{ moveLine(task) || task.opportunity.title }}
                       </span>
                     }
                     @if (canSeeAll()) {
                       <span>· {{ name(task.assigned_user) || 'Sin responsable' }}</span>
+                    }
+                    @if (support(task.support_users); as line) {
+                      <span>· {{ line }}</span>
                     }
                   </div>
                 </div>
@@ -236,6 +253,8 @@ const PAGE_SIZE = 30;
         [task]="editing()"
         (saved)="refresh()"
       ></app-crm-task-form-modal>
+
+      <app-crm-task-complete-modal></app-crm-task-complete-modal>
     </section>
   `,
 })
@@ -269,6 +288,8 @@ export class TasksComponent {
   protected readonly busyId = signal<number | null>(null);
   protected readonly modalOpen = signal(false);
   protected readonly editing = signal<CrmTask | null>(null);
+  /** Asks whether to move the customer's opportunity when completing. */
+  private readonly completer = viewChild.required(TaskCompleteModalComponent);
 
   protected readonly canSeeAll = computed(() => crmCanSeeAll(this.auth));
   /** Whose tasks the counters count: the same filter as the list. */
@@ -280,6 +301,11 @@ export class TasksComponent {
   );
   protected readonly name = personName;
   protected readonly dateTime = formatDateTime;
+  protected readonly moveLine = taskMoveLine;
+  protected readonly support = supportLine;
+  /** "Apoyo" badge: the viewer helps with the task without owning it. */
+  protected readonly isSupporter = (task: CrmTask) =>
+    isTaskSupporter(task, this.auth.userId());
 
   constructor() {
     effect(() => {
@@ -314,14 +340,23 @@ export class TasksComponent {
     void this.load(false);
   }
 
-  async toggle(task: CrmTask): Promise<void> {
+  async toggle(task: CrmTask, event?: Event): Promise<void> {
     this.busyId.set(task.id);
     try {
-      const updated = await firstValueFrom(
-        task.status === 'done' ? this.crm.reopenTask(task.id) : this.crm.completeTask(task.id),
-      );
+      const updated =
+        task.status === 'done'
+          ? await firstValueFrom(this.crm.reopenTask(task.id))
+          : await this.completer().complete(task);
+      if (!updated) {
+        // Dismissed: nothing changed, so the checkbox goes back.
+        const box = event?.target as HTMLInputElement | null;
+        if (box) box.checked = task.status === 'done';
+        return;
+      }
       this.rows.update((rows) => rows.map((row) => (row.id === updated.id ? updated : row)));
-      this.toast.success(updated.status === 'done' ? 'Tarea completada' : 'Tarea reabierta');
+      this.toast.success(
+        updated.status === 'done' ? taskCompletedMessage(updated) : 'Tarea reabierta',
+      );
       void this.loadStats();
     } catch (error) {
       this.toast.error(parseApiError(error).userMessage);

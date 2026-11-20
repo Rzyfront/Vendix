@@ -15,8 +15,22 @@ import {
   IconComponent,
 } from '../../../../../../shared/components/index';
 import { ToastService } from '../../../../../../shared/components/toast/toast.service';
+import { AuthFacade } from '../../../../../../core/store/auth/auth.facade';
+import { activeStoreId } from '../../../../../../core/utils/store-scoped-cache';
 
 import { StockTransfer, StockTransferItem, TransferStatus, CompleteTransferItem } from '../interfaces';
+import {
+  TransferFlowPanelComponent,
+  type TransferCloseWithLossRequest,
+  type TransferDispatchRequest,
+} from '../advanced/transfer-flow-panel.component';
+import {
+  TransferFlowNote,
+  TransferFlowView,
+  isAdvancedTransfer,
+  isNeverDispatched,
+  receiptStoreBlock,
+} from '../advanced/transfer-advanced';
 
 @Component({
   selector: 'app-transfer-detail-modal',
@@ -27,13 +41,14 @@ import { StockTransfer, StockTransferItem, TransferStatus, CompleteTransferItem 
     ModalComponent,
     ButtonComponent,
     IconComponent,
+    TransferFlowPanelComponent,
   ],
   template: `
     <app-modal
       [isOpen]="isOpen()"
       [title]="transfer()?.transfer_number || 'Detalle'"
-      [subtitle]="getStatusLabel(transfer()?.status)"
-      size="md"
+      [subtitle]="statusLabel()"
+      size="lg"
       (closed)="onClose()"
       (isOpenChange)="isOpenChange.emit($event)"
     >
@@ -45,8 +60,17 @@ import { StockTransfer, StockTransferItem, TransferStatus, CompleteTransferItem 
             [class]="getStatusClasses(transfer()!.status)"
           >
             <app-icon [name]="getStatusIcon(transfer()!.status)" [size]="14" class="mr-1.5"></app-icon>
-            {{ getStatusLabel(transfer()!.status) }}
+            {{ statusLabel() }}
           </span>
+          @if (transfer()!.no_support_alert) {
+            <span
+              class="ml-2 inline-flex items-center px-3 py-1 rounded-full text-sm font-medium bg-red-100 text-red-700"
+              data-testid="detail-alert-badge"
+            >
+              <app-icon name="alert-triangle" [size]="14" class="mr-1.5"></app-icon>
+              Con alerta
+            </span>
+          }
         </div>
 
         <!-- Locations -->
@@ -64,11 +88,22 @@ import { StockTransfer, StockTransferItem, TransferStatus, CompleteTransferItem 
               <p class="text-xs text-text-secondary mb-1">Destino</p>
               <div class="flex items-center gap-2">
                 <app-icon name="map-pin" [size]="16" class="text-success"></app-icon>
-                <p class="text-sm font-semibold text-text-primary">{{ transfer()!.to_location.name || '-' }}</p>
+                <p class="text-sm font-semibold text-text-primary">{{ destinationName() }}</p>
               </div>
             </div>
           </div>
         </div>
+
+        <!-- Orden avanzada: remisiones, transporte, despacho y pérdida (P3) -->
+        <app-transfer-flow-panel
+          [transfer]="flowView()"
+          surface="store"
+          [currentStoreId]="currentStoreId()"
+          [isProcessing]="isProcessing()"
+          (dispatch)="dispatchTransfer.emit($event)"
+          (closeWithLoss)="closeWithLoss.emit($event)"
+          (openNote)="openNote.emit($event)"
+        ></app-transfer-flow-panel>
 
         <!-- Timeline -->
         <div class="p-4 bg-surface-secondary rounded-xl border border-border mb-4">
@@ -135,10 +170,11 @@ import { StockTransfer, StockTransferItem, TransferStatus, CompleteTransferItem 
           <div class="border border-border rounded-xl overflow-hidden">
             <!-- Header -->
             <div class="grid grid-cols-12 gap-2 p-3 bg-surface-secondary text-xs font-medium text-text-secondary border-b border-border">
-              <div class="col-span-5">Producto</div>
-              <div class="col-span-2 text-right">Solicitado</div>
-              <div class="col-span-3 text-right">
-                {{ isCompleting ? 'Recibido' : 'Recibido' }}
+              <div class="col-span-4">Producto</div>
+              <div class="col-span-2 text-right">Pedido</div>
+              <div class="col-span-2 text-right">Enviado</div>
+              <div class="col-span-2 text-right">
+                {{ isCompleting ? 'Llegó ahora' : 'Recibido' }}
               </div>
               <div class="col-span-2 text-right">Estado</div>
             </div>
@@ -147,23 +183,29 @@ import { StockTransfer, StockTransferItem, TransferStatus, CompleteTransferItem 
             @for (item of transfer()!.stock_transfer_items; track item.id; let i = $index) {
               <div class="grid grid-cols-12 gap-2 p-3 items-center border-b border-border last:border-b-0"
                 [class.bg-primary/5]="isCompleting">
-                <div class="col-span-5">
+                <div class="col-span-4 min-w-0">
                   <p class="text-sm font-medium text-text-primary">
                     {{ item.products.name || 'Producto' }}
                   </p>
                   @if (item.product_variants?.name) {
                     <p class="text-xs text-text-secondary">{{ item.product_variants?.name }}</p>
                   }
+                  @if (item.inventory_batches?.batch_number) {
+                    <p class="text-xs text-text-secondary">Lote {{ item.inventory_batches?.batch_number }}</p>
+                  }
                 </div>
                 <div class="col-span-2 text-right text-sm font-medium text-text-primary">
                   {{ item.quantity }}
                 </div>
-                <div class="col-span-3 text-right">
+                <div class="col-span-2 text-right text-sm text-text-primary">
+                  {{ item.quantity_dispatched ?? (transfer()!.dispatched_at ? item.quantity : '-') }}
+                </div>
+                <div class="col-span-2 text-right">
                   @if (isCompleting) {
                     <input
                       type="number"
                       [min]="0"
-                      [max]="item.quantity"
+                      [max]="pendingQuantity(item)"
                       [value]="getReceivedQuantity(item.id)"
                       (input)="updateReceivedQuantity(item.id, $event)"
                       class="w-20 px-2 py-1 text-sm text-right border border-border rounded-lg bg-surface focus:border-primary focus:ring-1 focus:ring-primary outline-none"
@@ -174,10 +216,12 @@ import { StockTransfer, StockTransferItem, TransferStatus, CompleteTransferItem 
                 </div>
                 <div class="col-span-2 text-right">
                   @if (item.quantity_received !== undefined && item.quantity_received !== null) {
-                    @if (item.quantity_received >= item.quantity) {
+                    @if (pendingQuantity(item) === 0 && (item.quantity_lost ?? 0) > 0) {
+                      <span class="text-xs text-error font-medium">Pérdida {{ item.quantity_lost }}</span>
+                    } @else if (pendingQuantity(item) === 0 && item.quantity_received > 0) {
                       <span class="text-xs text-success font-medium">Completo</span>
                     } @else if (item.quantity_received > 0) {
-                      <span class="text-xs text-warning font-medium">Parcial</span>
+                      <span class="text-xs text-warning font-medium">Faltan {{ pendingQuantity(item) }}</span>
                     } @else {
                       <span class="text-xs text-text-secondary">Pendiente</span>
                     }
@@ -194,11 +238,8 @@ import { StockTransfer, StockTransferItem, TransferStatus, CompleteTransferItem 
           <div class="p-3 mt-4 bg-warning/10 rounded-xl border border-warning/30 flex items-start gap-2">
             <app-icon name="alert-triangle" [size]="18" class="text-warning mt-0.5 shrink-0"></app-icon>
             <div>
-              <p class="text-sm font-medium text-text-primary">Estas seguro?</p>
-              <p class="text-xs text-text-secondary mt-0.5">
-                Esta accion aplicara los movimientos de inventario: se restara stock de la
-                ubicacion de origen y se sumara en la ubicacion de destino. Esta accion no se puede deshacer.
-              </p>
+              <p class="text-sm font-medium text-text-primary">¿Estás seguro?</p>
+              <p class="text-xs text-text-secondary mt-0.5">{{ receptionWarning() }}</p>
             </div>
           </div>
         }
@@ -228,7 +269,7 @@ import { StockTransfer, StockTransferItem, TransferStatus, CompleteTransferItem 
             </app-button>
           }
 
-          @if (transfer()?.status === 'in_transit' && !isCompleting) {
+          @if (canReceive() && !isCompleting) {
             <app-button variant="primary" (clicked)="startCompleting()" customClasses="!rounded-xl font-bold">
               <app-icon name="check-circle" [size]="14" class="mr-1.5" slot="icon" ></app-icon>
               Recibir
@@ -281,8 +322,42 @@ export class TransferDetailModalComponent {
   readonly approveTransfer = output<StockTransfer>();
   readonly cancelTransfer = output<StockTransfer>();
   readonly completeTransfer = output<CompleteTransferItem[]>();
+  readonly dispatchTransfer = output<TransferDispatchRequest>();
+  readonly closeWithLoss = output<TransferCloseWithLossRequest>();
+  readonly openNote = output<TransferFlowNote>();
 
   private toastService = inject(ToastService);
+  private authFacade = inject(AuthFacade);
+
+  /** Tienda activa: decide si la recepción puede seguir desde aquí (R3-2). */
+  readonly currentStoreId = computed(() => activeStoreId(this.authFacade));
+
+  readonly flowView = computed(
+    () => this.transfer() as unknown as TransferFlowView | null,
+  );
+
+  /** En tienda, aprobar deja `in_transit`; si aún no salió, se dice así. */
+  readonly statusLabel = computed(() => {
+    const transfer = this.transfer();
+    if (!transfer) return '';
+    const view = transfer as unknown as TransferFlowView;
+    if (
+      transfer.status === 'in_transit' &&
+      isAdvancedTransfer(view) &&
+      isNeverDispatched(view)
+    ) {
+      return 'Aprobada, por despachar';
+    }
+    return this.getStatusLabel(transfer.status);
+  });
+
+  readonly receptionWarning = computed(() => {
+    const transfer = this.transfer();
+    if (transfer?.dispatched_at) {
+      return 'Se sumará al destino lo que registres como recibido. Si falta algo, la transferencia queda recibida en parte y podrás registrar lo que llegue después.';
+    }
+    return 'Esta acción aplicará los movimientos de inventario: se restará stock de la bodega de origen y se sumará en la de destino. No se puede deshacer.';
+  });
 
   /**
    * El backend crea las transferencias en `pending`; el botón sólo miraba
@@ -302,8 +377,51 @@ export class TransferDetailModalComponent {
       status === 'pending' ||
       status === 'draft' ||
       status === 'approved' ||
-      status === 'in_transit'
+      status === 'in_transit' ||
+      status === 'partially_received'
     );
+  });
+
+  /**
+   * D4 — se puede recibir mientras haya saldo en camino, también por partes.
+   * Una salida a destino externo no se recibe (se cierra al despachar) y una
+   * transferencia con modo de movimiento debe despacharse antes: el backend
+   * rechaza ambas, así que el botón no se muestra.
+   */
+  readonly canReceive = computed(() => {
+    const transfer = this.transfer();
+    if (!transfer) return false;
+    const status = transfer.status;
+    if (status !== 'in_transit' && status !== 'partially_received') {
+      return false;
+    }
+    if (transfer.is_external_destination) return false;
+    const neverDispatched =
+      !transfer.dispatched_at &&
+      (transfer.stock_transfer_items ?? []).every(
+        (item) => item.quantity_dispatched == null,
+      );
+    if (transfer.movement_mode && neverDispatched) return false;
+    // R3-2 — las entregas siguen en la tienda de la primera remisión de
+    // entrada: el panel lo explica y aquí no se ofrece el botón.
+    return (
+      receiptStoreBlock(
+        transfer as unknown as TransferFlowView,
+        'store',
+        this.currentStoreId(),
+      ) == null
+    );
+  });
+
+  /** D8 — una salida a destino externo no tiene bodega de destino. */
+  readonly destinationName = computed(() => {
+    const transfer = this.transfer();
+    if (!transfer) return '-';
+    if (transfer.to_location?.name) return transfer.to_location.name;
+    if (transfer.is_external_destination) {
+      return `Destino externo: ${transfer.external_destination_name || '-'}`;
+    }
+    return '-';
   });
 
   isCompleting = false;
@@ -324,9 +442,18 @@ export class TransferDetailModalComponent {
     this.isCompleting = true;
     if (this.transfer()?.stock_transfer_items) {
       for (const item of this.transfer()!.stock_transfer_items) {
-        this.receivedQuantities.set(item.id, item.quantity);
+        this.receivedQuantities.set(item.id, this.pendingQuantity(item));
       }
     }
+  }
+
+  /** Saldo por recibir: lo que salió menos lo recibido y lo perdido. */
+  pendingQuantity(item: StockTransferItem): number {
+    const dispatched = item.quantity_dispatched ?? item.quantity;
+    return Math.max(
+      0,
+      dispatched - (item.quantity_received ?? 0) - (item.quantity_lost ?? 0),
+    );
   }
 
   getReceivedQuantity(itemId: number): number {
@@ -372,6 +499,8 @@ export class TransferDetailModalComponent {
       received: 'Recibida',
       completed: 'Completada',
       cancelled: 'Cancelada',
+      partially_received: 'Parcialmente recibida',
+      closed_with_loss: 'Cerrada con pérdida',
     };
     return labels[status] || status;
   }
@@ -385,6 +514,8 @@ export class TransferDetailModalComponent {
       received: 'bg-emerald-100 text-emerald-700',
       completed: 'bg-emerald-100 text-emerald-700',
       cancelled: 'bg-gray-100 text-gray-500',
+      partially_received: 'bg-amber-100 text-amber-700',
+      closed_with_loss: 'bg-red-100 text-red-700',
     };
     return map[status] || 'bg-gray-100 text-gray-700';
   }
@@ -398,6 +529,8 @@ export class TransferDetailModalComponent {
       received: 'check-circle',
       completed: 'check-circle',
       cancelled: 'x-circle',
+      partially_received: 'truck',
+      closed_with_loss: 'alert-triangle',
     };
     return map[status] || 'info';
   }

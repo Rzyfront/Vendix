@@ -997,4 +997,64 @@ describe('AuthService Login Flow', () => {
       expect(result.access_token).toBe('a');
     });
   });
+
+  describe('updateProfile document_type (identification_type_enum)', () => {
+    beforeEach(() => {
+      mockPrismaService.users.update.mockReset();
+      mockPrismaService.users.update.mockResolvedValue({ id: 7 });
+      jest
+        .spyOn(service, 'getProfile')
+        .mockResolvedValue({ id: 7 } as any);
+    });
+
+    afterEach(() => jest.restoreAllMocks());
+
+    it.each(['cc', 'CC', 'Cc', ' cc '])(
+      'normalizes %p to CC and saves the whole profile',
+      async (document_type) => {
+        await service.updateProfile(7, {
+          first_name: 'Rafael',
+          last_name: 'M',
+          phone: '3001234567',
+          document_type,
+          document_number: '1234567890',
+        });
+
+        expect(mockPrismaService.users.update).toHaveBeenCalledWith({
+          where: { id: 7 },
+          data: {
+            first_name: 'Rafael',
+            last_name: 'M',
+            phone: '3001234567',
+            document_type: 'CC',
+            document_number: '1234567890',
+          },
+        });
+      },
+    );
+
+    it.each(['X', 'C.C.'])(
+      'rejects %p with a clear Spanish error and writes nothing',
+      async (document_type) => {
+        await expect(
+          service.updateProfile(7, { document_type }),
+        ).rejects.toThrow(
+          'Tipo de documento no válido. Usa CC, CE, NIT, TI, RC, PA, PEP, PPT, DIE o NUIP.',
+        );
+        expect(mockPrismaService.users.update).not.toHaveBeenCalled();
+      },
+    );
+
+    it.each([null, '', '   '])('clears document_type when sent %p', async (value) => {
+      await service.updateProfile(7, {
+        document_type: value,
+        document_number: value,
+      });
+
+      expect(mockPrismaService.users.update).toHaveBeenCalledWith({
+        where: { id: 7 },
+        data: { document_type: null, document_number: null },
+      });
+    });
+  });
 });

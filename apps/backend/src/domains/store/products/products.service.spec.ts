@@ -127,6 +127,7 @@ describe('ProductsService', () => {
     stores: {
       findUnique: jest.fn(),
     },
+    manufacturing_plants: { findFirst: jest.fn() },
     // QUI-1006 — sesión abierta del cajero bajo "Bodega de la caja".
     cash_register_sessions: {
       findFirst: jest.fn(),
@@ -682,6 +683,63 @@ describe('ProductsService', () => {
           { tax_category_id: 4, product_id: 1 },
         ],
       });
+    });
+  });
+
+  describe('dónde se produce (production_site)', () => {
+    const apply = (dto: any, existing?: any) =>
+      (service as any).applyProductionSite(dto, 1, existing);
+    const industries = (list: string[]) =>
+      (mockPrismaService.stores.findUnique as jest.Mock).mockResolvedValue({ industries: list });
+
+    afterEach(() => {
+      (mockPrismaService.stores.findUnique as jest.Mock).mockReset();
+      (mockPrismaService.manufacturing_plants.findFirst as jest.Mock).mockReset();
+    });
+
+    it('restaurante + manufactura: un producto por lote sin dónde se produce se rechaza', async () => {
+      industries(['restaurant', 'manufacturing']);
+      await expect(apply({ is_batch_produced: true })).rejects.toMatchObject({
+        errorCode: 'PRODUCTION_SITE_REQUIRED',
+      });
+      await expect(
+        apply({ is_batch_produced: true, production_site: 'kitchen' }),
+      ).resolves.toMatchObject({ production_site: 'kitchen', production_plant_id: null });
+    });
+
+    it('solo manufactura o solo restaurante: no es obligatorio (la industria decide)', async () => {
+      industries(['manufacturing']);
+      await expect(apply({ is_batch_produced: true })).resolves.toEqual({ is_batch_produced: true });
+      industries(['restaurant']);
+      await expect(apply({ is_batch_produced: true })).resolves.toEqual({ is_batch_produced: true });
+    });
+
+    it('editar precio o nombre de un producto existente sin el campo nunca se bloquea', async () => {
+      industries(['restaurant', 'manufacturing']);
+      const dto = { base_price: 10 };
+      await expect(
+        apply(dto, { is_batch_produced: true, production_site: null }),
+      ).resolves.toBe(dto);
+      expect(mockPrismaService.stores.findUnique).not.toHaveBeenCalled();
+    });
+
+    it('la planta concreta debe ser de la tienda; fuera de Planta se limpia', async () => {
+      (mockPrismaService.manufacturing_plants.findFirst as jest.Mock).mockResolvedValue(null);
+      await expect(
+        apply({ production_site: 'plant', production_plant_id: 99 }),
+      ).rejects.toMatchObject({ errorCode: 'PRODUCTION_SITE_PLANT_INVALID' });
+      expect(mockPrismaService.manufacturing_plants.findFirst).toHaveBeenCalledWith({
+        where: { id: 99, store_id: 1 },
+        select: { id: true },
+      });
+
+      (mockPrismaService.manufacturing_plants.findFirst as jest.Mock).mockResolvedValue({ id: 4 });
+      await expect(
+        apply({ production_site: 'plant', production_plant_id: 4 }),
+      ).resolves.toMatchObject({ production_plant_id: 4 });
+      await expect(
+        apply({ production_site: 'kitchen', production_plant_id: 4 }),
+      ).resolves.toMatchObject({ production_plant_id: null });
     });
   });
 

@@ -567,6 +567,8 @@ jobs:
         run: >-
           npx jest --ci --runInBand --forceExit --config jest.isolated.config.js --runTestsByPath
           src/domains/platform-crm/platform-crm-links.controller.spec.ts
+          src/domains/platform-crm/platform-crm-links.service.spec.ts
+          src/domains/platform-crm/platform-crm-account.service.spec.ts
           src/domains/platform-crm/platform-crm.seed.spec.ts
           src/domains/platform-crm/platform-permission-assignment.spec.ts
           src/domains/organization/onboarding/onboarding-wizard-org-admin-role.spec.ts
@@ -705,6 +707,7 @@ jobs:
           --include='**/products/utils/variant-stock-requirements.util.spec.ts'
           --include='**/products/utils/variant-price-inheritance.util.spec.ts'
           --include='**/products/utils/sale-uom-principal.util.spec.ts'
+          --include='**/shared/utils/production-site.util.spec.ts'
           --include='**/products/utils/sale-unit-form.util.spec.ts'
           --include='**/products/components/sale-unit-section/*.spec.ts'
           --include='**/shared/services/pricing/price-resolver.service.spec.ts'
@@ -768,6 +771,9 @@ jobs:
           --include='**/workflows/services/workflow-export-api.service.spec.ts'
           --include='**/workflows/services/workflow-limits-api.service.spec.ts'
           --include='**/workflows/utils/workflow-errors.util.spec.ts'
+          --include='**/customers/crm/shared/task-form-modal.component.spec.ts'
+          --include='**/customers/crm/shared/task-complete-modal.component.spec.ts'
+          --include='**/customers/crm/shared/crm-tags-manager-modal.component.spec.ts'
           --include='**/workflows/records/pages/record-detail-page/record-detail-page.component.spec.ts'
           --include='**/documents/pages/templates-editor/templates-editor-page.component.spec.ts'
           --include='**/super-admin/subscriptions/pages/plans/plan-form.component.spec.ts'
@@ -784,6 +790,8 @@ jobs:
           --include='**/orders/purchase-orders/pages/detail/purchase-order-support-document-card.component.spec.ts'
           --include='**/inventory/suppliers/components/supplier-form-modal.component.spec.ts'
           --include='**/dashboard/components/reminders-log/reminders-log.component.spec.ts'
+          --include='**/fiscal-operations/components/fiscal-identity-panel.component.spec.ts'
+          --include='**/fiscal-operations/components/fiscal-calendar-change-dialog.component.spec.ts'
           --include='**/store/platform-crm/*.spec.ts'
           --include='**/core/utils/async-job-poll.util.spec.ts'
           --include='**/core/utils/ai-job-error.spec.ts'
@@ -805,6 +813,8 @@ jobs:
           --include='**/super-admin/monitoring/services/monitoring-alerts.service.spec.ts'
           --include='**/super-admin/monitoring/pages/alerts/monitoring-alerts.page.spec.ts'
           --include='**/store/platform-crm/*.spec.ts'
+          --include='**/shared/components/store-activity-charts/*.spec.ts'
+          --include='**/super-admin/stores/activity/components/store-activity-detail-modal.component.spec.ts'
           --include='**/pop/utils/receipt-uom-block.util.spec.ts'
           --include='**/shared/utils/compact-money.util.spec.ts'
           --include='**/shared/pipes/currency/currency.pipe.spec.ts'

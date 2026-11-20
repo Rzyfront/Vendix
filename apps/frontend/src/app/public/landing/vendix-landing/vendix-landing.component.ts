@@ -34,7 +34,7 @@ import { TenantFacade } from '../../../core/store/tenant/tenant.facade';
 import { CommercialConsentService } from './commercial-consent/commercial-consent.service';
 import { CommercialConsentBannerComponent } from './commercial-consent/commercial-consent-banner.component';
 import { SectorGuidesComponent } from '../guides/sector-guides.component';
-import { SECTOR_GUIDES_ENABLED } from '../guides/sector-guides.config';
+import { PUBLISHED_SECTOR_GUIDES, SECTOR_GUIDES_ENABLED } from '../guides/sector-guides.config';
 import { SECTOR_PAGES_ENABLED } from '../../sectors/sector-pages.config';
 import { IMPLEMENTATION_PAGE_ENABLED } from '../../implementation/implementation-page.config';
 import {
@@ -289,6 +289,12 @@ const DEMO_ORIGINS = [
 })
 export class VendixLandingComponent implements OnInit {
   readonly sectorGuidesEnabled = SECTOR_GUIDES_ENABLED;
+  /** SEO-OPS-36: enlaces del pie a las guías publicadas, con su texto. */
+  readonly publishedGuideLinks: ReadonlyArray<{ key: string; label: string }> = [
+    { key: 'comandas-restaurantes', label: 'Guía: comandas de restaurante' },
+    { key: 'ventas-mayoristas-al-detal', label: 'Guía: precio mayorista y al detal' },
+    { key: 'pasar-productos-excel-a-pos', label: 'Guía: de Excel a tu POS' },
+  ].filter((guide) => PUBLISHED_SECTOR_GUIDES.includes(guide.key));
   // El pie solo enlaza páginas cuyas rutas existen: si se apaga un interruptor, no queda un enlace roto.
   readonly sectorPagesEnabled = SECTOR_PAGES_ENABLED;
   readonly implementationPageEnabled = IMPLEMENTATION_PAGE_ENABLED;
