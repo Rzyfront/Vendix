@@ -199,10 +199,15 @@ export class TransferListComponent {
       defaultValue: '-',
     },
     {
-      key: 'to_location.name',
+      // D8 — la clave es `id` (nunca vacía) para que la tabla siempre llame a
+      // `transform`: con `to_location.name` una salida externa no tiene bodega
+      // y la celda quedaba en "-" sin el nombre del destino externo.
+      key: 'id',
       label: 'Destino',
       priority: 2,
       defaultValue: '-',
+      transform: (_value: number, item?: StockTransfer) =>
+        this.getDestinationLabel(item),
     },
     {
       key: 'status',
@@ -220,6 +225,8 @@ export class TransferListComponent {
           received: '#22c55e',
           completed: '#22c55e',
           cancelled: '#ef4444',
+          partially_received: '#0ea5e9',
+          closed_with_loss: '#b91c1c',
         },
       },
       transform: (value: TransferStatus) => this.getStatusLabel(value),
@@ -254,7 +261,7 @@ export class TransferListComponent {
     titleKey: 'transfer_number',
     subtitleKey: 'from_location.name',
     subtitleTransform: (item: any) =>
-      `${item?.from_location?.name || '-'} → ${item?.to_location?.name || '-'}`,
+      `${item?.from_location?.name || '-'} → ${this.getDestinationLabel(item)}`,
     badgeKey: 'status',
     badgeConfig: {
       type: 'custom',
@@ -267,6 +274,8 @@ export class TransferListComponent {
         received: '#10b981',
         completed: '#10b981',
         cancelled: '#6b7280',
+        partially_received: '#0ea5e9',
+        closed_with_loss: '#b91c1c',
       },
     },
     badgeTransform: (val: TransferStatus) => this.getStatusLabel(val),
@@ -318,7 +327,16 @@ export class TransferListComponent {
     this.actionClick.emit(action);
   }
 
-  getStatusLabel(status: TransferStatus): string {
+  /** D8 — bodega de destino o, en una salida externa, el nombre del destino. */
+  getDestinationLabel(item?: StockTransfer | null): string {
+    if (item?.to_location?.name) return item.to_location.name;
+    if (item?.is_external_destination) {
+      return `Destino externo: ${item.external_destination_name || '-'}`;
+    }
+    return '-';
+  }
+
+    getStatusLabel(status: TransferStatus): string {
     const labels: Record<TransferStatus, string> = {
       pending: 'Pendiente',
       draft: 'Borrador',
@@ -327,6 +345,8 @@ export class TransferListComponent {
       received: 'Recibida',
       completed: 'Completada',
       cancelled: 'Cancelada',
+      partially_received: 'Recibida en parte',
+      closed_with_loss: 'Cerrada con pérdida',
     };
     return labels[status] || status;
   }

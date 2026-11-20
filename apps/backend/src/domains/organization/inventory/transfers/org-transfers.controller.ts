@@ -20,6 +20,7 @@ import { CreateOrgTransferDto } from './dto/create-org-transfer.dto';
 import { CompleteOrgTransferDto } from './dto/complete-org-transfer.dto';
 import { CancelOrgTransferDto } from './dto/cancel-org-transfer.dto';
 import { DispatchOrgTransferDto } from './dto/dispatch-org-transfer.dto';
+import { CloseTransferWithLossDto } from '../../../store/orders/stock-transfers/dto/transfer-advanced.dto';
 
 /**
  * `/api/organization/inventory/transfers` — org-level stock transfer
@@ -152,6 +153,41 @@ export class OrgTransfersController {
   ) {
     const data = await this.transfers.complete(id, dto);
     return this.responseService.success(data, 'Traslado recibido');
+  }
+
+  /**
+   * D4 — recepción repetible con conteos por línea. `complete` queda como
+   * alias para los clientes actuales.
+   */
+  @Post(':id/receive')
+  @Permissions('organization:inventory:transfers:complete')
+  async receive(
+    @Param('id', ParseIntPipe) id: number,
+    @Body() dto: CompleteOrgTransferDto,
+  ) {
+    const data = await this.transfers.receive(id, dto);
+    return this.responseService.success(data, 'Traslado recibido');
+  }
+
+  /**
+   * D4 — cierre del saldo pendiente como pérdida. Exige motivo y que la fecha
+   * límite de entrega ya haya vencido; lo valida el servicio.
+   */
+  @Post(':id/close-with-loss')
+  @Permissions('organization:inventory:transfers:complete')
+  async closeWithLoss(
+    @Param('id', ParseIntPipe) id: number,
+    @Body() dto: CloseTransferWithLossDto,
+  ) {
+    const data = await this.transfers.closeWithLoss(
+      id,
+      dto.reason,
+      dto.notes,
+    );
+    return this.responseService.success(
+      data,
+      'Saldo pendiente cerrado como pérdida',
+    );
   }
 
   @Post(':id/cancel')

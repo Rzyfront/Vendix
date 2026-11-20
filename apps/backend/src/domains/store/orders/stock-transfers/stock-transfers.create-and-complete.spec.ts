@@ -73,7 +73,12 @@ describe('StockTransfersService — createAndComplete (movimiento rápido)', () 
     const operatingScope = {
       validateLocationScope: jest.fn().mockResolvedValue({
         scope: 'STORE',
-        locations: [{ store_id: 3 }, { store_id: 3 }],
+        // Con `id`, como la consulta real: el servicio ubica origen y destino
+        // por id (el orden de `findMany` no está garantizado).
+        locations: [
+          { id: 7, store_id: 3 },
+          { id: 9, store_id: 3 },
+        ],
       }),
     };
     service = new StockTransfersService(

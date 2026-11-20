@@ -20,7 +20,10 @@ export type OrgTransferStatus =
   | 'cancelled'
   // Legacy values that may slip through if a backend mapping bug occurs.
   | 'draft'
-  | 'completed';
+  | 'completed'
+  // D4 — recepción parcial (sigue con saldo en camino) y cierre con pérdida.
+  | 'partially_received'
+  | 'closed_with_loss';
 
 export interface OrgTransferLocationRef {
   id: number;
@@ -36,6 +39,10 @@ export interface OrgTransferItem {
   product_variant_id?: number | null;
   quantity: number;
   quantity_received: number;
+  /** Conteo de salida (D3). Null en filas históricas: salió `quantity`. */
+  quantity_dispatched?: number | null;
+  /** Unidades dadas de baja en un cierre con pérdida (D4). */
+  quantity_lost?: number | null;
   cost_per_unit?: number | string | null;
   notes?: string | null;
   received_date?: string | null;
@@ -48,7 +55,8 @@ export interface OrgTransfer {
   organization_id: number;
   transfer_number: string;
   from_location_id: number;
-  to_location_id: number;
+  /** D8 — null en una salida a destino externo (no hay bodega de destino). */
+  to_location_id: number | null;
   status: OrgTransferStatus;
   transfer_date?: string | null;
   expected_date?: string | null;
@@ -66,7 +74,18 @@ export interface OrgTransfer {
   updated_at?: string;
   from_location?: OrgTransferLocationRef | null;
   to_location?: OrgTransferLocationRef | null;
+  is_external_destination?: boolean;
+  external_destination_name?: string | null;
   stock_transfer_items: OrgTransferItem[];
+}
+
+/** Saldo por recibir de una línea: lo que salió menos lo recibido y lo perdido. */
+export function orgTransferItemPending(item: OrgTransferItem): number {
+  const dispatched = item.quantity_dispatched ?? item.quantity;
+  return Math.max(
+    0,
+    dispatched - (item.quantity_received ?? 0) - (item.quantity_lost ?? 0),
+  );
 }
 
 export interface OrgTransferStats {
@@ -146,6 +165,8 @@ export function normalizeOrgTransferStatus(
     case 'in_transit':
     case 'received':
     case 'cancelled':
+    case 'partially_received':
+    case 'closed_with_loss':
       return status;
     default:
       return 'pending';

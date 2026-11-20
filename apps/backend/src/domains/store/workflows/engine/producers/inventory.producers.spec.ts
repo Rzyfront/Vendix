@@ -59,18 +59,30 @@ describe('Flujos P1.1 producers: inventory.transferred', () => {
 
   describe('complete', () => {
     const buildComplete = () => {
+      // `receive` acumula lo recibido sobre estas mismas líneas y luego las
+      // vuelve a leer para decidir si la transferencia quedó completa.
+      const lines = [
+        { id: 5, product_id: 9, product_variant_id: null, quantity: 3 },
+      ];
       const tx = {
         stock_transfers: {
+          // Candado de fila que `receive` toma antes de leer el saldo.
+          updateMany: jest.fn().mockResolvedValue({ count: 1 }),
           findUnique: jest.fn().mockResolvedValue({
             ...completedTransfer,
             status: transfer_status_enum.in_transit,
-            stock_transfer_items: [
-              { id: 5, product_id: 9, product_variant_id: null, quantity: 3 },
-            ],
+            stock_transfer_items: lines,
           }),
           update: jest.fn().mockResolvedValue(completedTransfer),
         },
-        stock_transfer_items: { update: jest.fn().mockResolvedValue({}) },
+        stock_transfer_items: {
+          update: jest.fn().mockResolvedValue({}),
+          findMany: jest.fn().mockImplementation(async () => lines),
+        },
+        // Costo de origen que `receive` lee antes de mover el stock.
+        stock_levels: {
+          findFirst: jest.fn().mockResolvedValue({ cost_per_unit: 5 }),
+        },
       };
       return { tx, ...build(tx) };
     };

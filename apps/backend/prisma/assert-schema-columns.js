@@ -39,6 +39,36 @@ const { Client } = require('pg');
  * Formato: 'tabla.columna'.
  */
 const REQUIRED_COLUMNS = [
+  // --- Transferencias multi-producto: transporte y remisión (20261215090000) ---
+  // El despacho/recepción y las listas leen estas columnas: sin la migración,
+  // despachar o recibir da 500 y el listado de transferencias también.
+  'stock_transfers.movement_mode',
+  'stock_transfers.transport_method',
+  'stock_transfers.vehicle_id',
+  'stock_transfers.dispatch_note_id',
+  'stock_transfers.receipt_note_id',
+  'stock_transfers.is_external_destination',
+  'stock_transfers.no_support_alert',
+  'stock_transfers.shipping_cost',
+  // Prisma nombra TODAS las columnas del modelo en cada SELECT/RETURNING: si
+  // falta una sola, cualquier lectura o escritura de transferencias da 500.
+  'stock_transfers.driver_user_id',
+  'stock_transfers.driver_name',
+  'stock_transfers.shipping_method_id',
+  'stock_transfers.carrier_name',
+  'stock_transfers.tracking_number',
+  'stock_transfers.external_destination_name',
+  'stock_transfers.external_destination_tax_id',
+  'stock_transfers.external_destination_address',
+  'stock_transfers.support_document_type',
+  'stock_transfers.support_document_id',
+  'stock_transfers.exit_reason',
+  'stock_transfers.loss_closed_at',
+  'stock_transfers.loss_closed_by_user_id',
+  'stock_transfers.loss_reason',
+  'stock_transfer_items.quantity_dispatched',
+  'stock_transfer_items.quantity_lost',
+  'stock_transfer_items.batch_id',
   // --- CRM: apoyo en tareas y etapa destino (20261210090000) ---
   // Toda lectura de crm_tasks (lista, hoy, panel del cliente) trae
   // move_to_stage_id y las personas de apoyo: sin ellas Tareas da 500.
@@ -279,6 +309,10 @@ const REQUIRED_TABLES = [
 const REQUIRED_ENUM_TYPES = [
   'aiu_component_enum',
   'order_item_fulfillment_destination_enum',
+  // Transferencias: modo, transporte y documento soporte (20261215090000).
+  'transfer_movement_mode_enum',
+  'transfer_transport_method_enum',
+  'transfer_support_document_type_enum',
 ];
 
 /**
@@ -307,6 +341,8 @@ const REQUIRED_ENUM_VALUES = {
   // antes de enviar (20261106100400).
   notification_type_enum: ['crm_sms_spend_limit_reached'],
   crm_message_status_enum: ['sending'],
+  // Transferencias: recepción parcial y cierre con pérdida (20261215090000).
+  transfer_status_enum: ['partially_received', 'closed_with_loss'],
 };
 
 /** La identidad única de un abono CxC manual evita refund duplicado por retry. */
@@ -461,4 +497,10 @@ if (require.main === module) {
   });
 }
 
-module.exports = { findBrokenPartialIndexes, REQUIRED_PARTIAL_INDEXES };
+module.exports = {
+  findBrokenPartialIndexes,
+  REQUIRED_PARTIAL_INDEXES,
+  REQUIRED_COLUMNS,
+  REQUIRED_ENUM_TYPES,
+  REQUIRED_ENUM_VALUES,
+};

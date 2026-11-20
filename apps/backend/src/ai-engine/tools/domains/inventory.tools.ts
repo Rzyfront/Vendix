@@ -120,7 +120,12 @@ function compactTransferLine(item: any) {
 function transferLabel(t: any): string {
   const number = t.transfer_number ? ` ${t.transfer_number}` : ` #${t.id}`;
   const from = t.from_location?.name ?? `#${t.from_location_id}`;
-  const to = t.to_location?.name ?? `#${t.to_location_id}`;
+  // D8 — una salida a destino externo no tiene bodega (`to_location_id` null).
+  const to =
+    t.to_location?.name ??
+    (t.is_external_destination || t.to_location_id == null
+      ? `destino externo: ${t.external_destination_name || 'sin nombre'}`
+      : `#${t.to_location_id}`);
   return `Transferencia${number} — ${from} → ${to}`;
 }
 

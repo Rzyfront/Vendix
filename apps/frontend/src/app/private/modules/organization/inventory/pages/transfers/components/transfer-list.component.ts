@@ -29,6 +29,8 @@ const STATUS_LABELS: Record<
   in_transit: 'En tránsito',
   received: 'Recibida',
   cancelled: 'Cancelada',
+  partially_received: 'Recibida en parte',
+  closed_with_loss: 'Cerrada con pérdida',
 };
 
 const STATUS_COLOR: Record<string, string> = {
@@ -37,6 +39,8 @@ const STATUS_COLOR: Record<string, string> = {
   in_transit: '#f59e0b',
   received: '#10b981',
   cancelled: '#ef4444',
+  partially_received: '#f59e0b',
+  closed_with_loss: '#ef4444',
 };
 
 interface TransferRow extends OrgTransfer {
@@ -340,10 +344,14 @@ export class OrgTransferListComponent {
     parent: OrgTransfer,
     _isDestination = false,
   ): string {
-    if (!loc) return '-';
+    if (!loc) {
+      // D8 — una salida a destino externo no tiene bodega de destino.
+      return _isDestination && parent.is_external_destination
+        ? `Destino externo · ${parent.external_destination_name || '-'}`
+        : '-';
+    }
     const isCentral = loc.store_id == null;
     const tag = isCentral ? '📦 Bodega Central' : '🏪 Tienda';
-    void parent; // currently unused — placeholder for future store-name lookup
     return `${tag} · ${loc.name}`;
   }
 }

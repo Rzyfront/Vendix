@@ -11,6 +11,8 @@ import {
   CompleteOrgTransferItemRequest,
   normalizeOrgTransferStatus,
   OrgTransfer,
+  orgTransferItemPending,
+  OrgTransferItem,
   OrgTransferStatus,
 } from '../../../interfaces/org-transfer.interface';
 
@@ -23,6 +25,8 @@ const STATUS_LABELS: Record<
   in_transit: 'En tránsito',
   received: 'Recibida',
   cancelled: 'Cancelada',
+  partially_received: 'Recibida en parte',
+  closed_with_loss: 'Cerrada con pérdida',
 };
 
 const STATUS_BADGE_CLASSES: Record<
@@ -34,6 +38,8 @@ const STATUS_BADGE_CLASSES: Record<
   in_transit: 'bg-amber-100 text-amber-700',
   received: 'bg-emerald-100 text-emerald-700',
   cancelled: 'bg-red-100 text-red-700',
+  partially_received: 'bg-amber-100 text-amber-700',
+  closed_with_loss: 'bg-red-100 text-red-700',
 };
 
 const STATUS_ICONS: Record<
@@ -45,6 +51,8 @@ const STATUS_ICONS: Record<
   in_transit: 'truck',
   received: 'check-circle',
   cancelled: 'x-circle',
+  partially_received: 'truck',
+  closed_with_loss: 'alert-triangle',
 };
 
 @Component({
@@ -471,9 +479,14 @@ export class OrgTransferDetailModalComponent {
   readonly originLabel = computed(() =>
     this.locationLabel(this.transfer()?.from_location ?? null),
   );
-  readonly destinationLabel = computed(() =>
-    this.locationLabel(this.transfer()?.to_location ?? null),
-  );
+  readonly destinationLabel = computed(() => {
+    const t = this.transfer();
+    // D8 — una salida a destino externo no tiene bodega de destino.
+    if (!t?.to_location && t?.is_external_destination) {
+      return `Destino externo · ${t.external_destination_name || '-'}`;
+    }
+    return this.locationLabel(t?.to_location ?? null);
+  });
 
   readonly canApproveCurrent = computed(
     () => this.canApprove() && this.statusValue() === 'pending',
@@ -482,12 +495,15 @@ export class OrgTransferDetailModalComponent {
     () => this.canDispatch() && this.statusValue() === 'approved',
   );
   readonly canCompleteCurrent = computed(
-    () => this.canComplete() && this.statusValue() === 'in_transit',
+    () =>
+      this.canComplete() &&
+      (this.statusValue() === 'in_transit' ||
+        this.statusValue() === 'partially_received'),
   );
   readonly canCancelCurrent = computed(() => {
     if (!this.canCancel()) return false;
     const s = this.statusValue();
-    return s !== 'received' && s !== 'cancelled';
+    return s !== 'received' && s !== 'cancelled' && s !== 'closed_with_loss';
   });
 
   constructor() {
@@ -514,8 +530,7 @@ export class OrgTransferDetailModalComponent {
     if (!t) return;
     const next = new Map<number, number>();
     for (const item of t.stock_transfer_items) {
-      const remaining = item.quantity - (item.quantity_received ?? 0);
-      next.set(item.id, Math.max(0, remaining));
+      next.set(item.id, orgTransferItemPending(item));
     }
     this.receivedDraft.set(next);
     this.isCompleting.set(true);
@@ -527,8 +542,8 @@ export class OrgTransferDetailModalComponent {
     this.confirmReception.set(false);
   }
 
-  getMaxReceivable(item: { id: number; quantity: number; quantity_received?: number | null }): number {
-    return item.quantity - (item.quantity_received ?? 0);
+  getMaxReceivable(item: OrgTransferItem): number {
+    return orgTransferItemPending(item);
   }
 
   getReceivedDraft(itemId: number): number {

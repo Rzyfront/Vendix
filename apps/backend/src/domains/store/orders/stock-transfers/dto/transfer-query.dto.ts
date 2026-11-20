@@ -35,6 +35,9 @@ export class TransferQueryDto {
     // legacy aliases — kept to preserve old frontend tabs / saved filters
     'draft',
     'completed',
+    // P2 (D4) — recepción parcial y cierre con pérdida.
+    'partially_received',
+    'closed_with_loss',
   ])
   status?:
     | 'pending'
@@ -43,7 +46,9 @@ export class TransferQueryDto {
     | 'received'
     | 'cancelled'
     | 'draft'
-    | 'completed';
+    | 'completed'
+    | 'partially_received'
+    | 'closed_with_loss';
 
   @IsOptional()
   @IsNumber()
