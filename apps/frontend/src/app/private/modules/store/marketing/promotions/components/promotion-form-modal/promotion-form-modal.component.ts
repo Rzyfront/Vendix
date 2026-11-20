@@ -963,6 +963,15 @@ export class PromotionFormModalComponent {
       category_ids: promotion?.promotion_categories?.map((pc) => pc.category_id) || [],
     }, { emitEvent: false });
 
+    // `reset({ emitEvent: false })` no emite `valueChanges`, y los chips de días
+    // leen el control a través de ese stream: al abrir una promo guardada se
+    // quedaban con el `[]` anterior (los 7 días encendidos). Se re-emite solo
+    // este control (`onlySelf`) para que los chips reflejen los días guardados
+    // sin disparar los efectos del resto del formulario.
+    this.form
+      .get('active_weekdays')
+      ?.updateValueAndValidity({ onlySelf: true });
+
     // Reset the tiers array explicitly (reset() keeps existing FormArray children
     // unless we clear them). Seed rows from the persisted promotion.
     this.quantityTiers.clear({ emitEvent: false });
