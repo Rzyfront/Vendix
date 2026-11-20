@@ -272,7 +272,10 @@ export class StoreUserSelectComponent implements ControlValueAccessor, OnInit {
       return;
     }
     this.receivedValueInput = true;
-    if (untracked(() => this.selected())?.id === id) return;
+    if (untracked(() => this.selected())?.id === id) {
+      this.resolvingId = null;
+      return;
+    }
     const label = untracked(() => this.valueLabel());
     if (label) {
       this.resolvingId = null;
@@ -281,7 +284,6 @@ export class StoreUserSelectComponent implements ControlValueAccessor, OnInit {
     }
     this.resolve(id);
   });
-
 
   ngOnInit(): void {
     this.searchSubject

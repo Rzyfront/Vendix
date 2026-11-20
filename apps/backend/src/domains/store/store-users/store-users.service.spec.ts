@@ -1,5 +1,12 @@
 import { Test, TestingModule } from '@nestjs/testing';
+import { plainToInstance } from 'class-transformer';
+import { validateSync } from 'class-validator';
 import { StoreUsersService, parseIdList } from './store-users.service';
+import {
+  QueryStaffLookupDto,
+  QueryStoreUsersDto,
+  QueryStoreUsersLookupDto,
+} from './dto';
 import { StorePrismaService } from '../../../prisma/services/store-prisma.service';
 
 /**
@@ -169,5 +176,28 @@ describe('StoreUsersService — resolver usuarios por ids', () => {
     expect(parseIdList(undefined)).toBeNull();
     expect(parseIdList('')).toBeNull();
     expect(parseIdList('3,3,x,0,9')).toEqual([3, 9]);
+  });
+});
+
+describe('DTOs — filtro ids', () => {
+  const errors = (cls: any, query: object) =>
+    validateSync(plainToInstance(cls, query), {
+      whitelist: true,
+      forbidNonWhitelisted: true,
+    });
+
+  it('acepta una lista de ids positivos en ambos endpoints', () => {
+    expect(errors(QueryStaffLookupDto, { ids: '42,7' })).toHaveLength(0);
+    expect(errors(QueryStoreUsersLookupDto, { ids: '1500' })).toHaveLength(0);
+  });
+
+  it('rechaza ids vacíos, cero o fuera de rango Int32', () => {
+    expect(errors(QueryStaffLookupDto, { ids: '0' })).not.toHaveLength(0);
+    expect(errors(QueryStaffLookupDto, { ids: '99999999999' })).not.toHaveLength(0);
+    expect(errors(QueryStoreUsersLookupDto, { ids: '3,,4' })).not.toHaveLength(0);
+  });
+
+  it('el listado de gestión sigue sin aceptar ids', () => {
+    expect(errors(QueryStoreUsersDto, { ids: '3' })).not.toHaveLength(0);
   });
 });

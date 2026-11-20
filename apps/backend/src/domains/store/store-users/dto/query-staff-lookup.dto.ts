@@ -30,6 +30,6 @@ export class QueryStaffLookupDto {
    * Still staff-only (non-customer role) but not limited to active users.
    */
   @IsOptional()
-  @Matches(/^\d+(,\d+){0,49}$/, { message: 'ids debe ser una lista de ids separados por coma (máx. 50)' })
+  @Matches(/^[1-9]\d{0,8}(,[1-9]\d{0,8}){0,49}$/, { message: 'ids debe ser una lista de ids separados por coma (máx. 50)' })
   ids?: string;
 }

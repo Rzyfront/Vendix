@@ -35,16 +35,6 @@ export class QueryStoreUsersDto {
   @IsString()
   state?: string;
 
-  /**
-   * Comma-separated `users.id` list (max 50) to resolve specific users by id,
-   * e.g. the name of an already-assigned user in `app-store-user-select`.
-   * Bypasses the default active-only filter so a deactivated assignee still
-   * shows by name; ignores `page`.
-   */
-  @IsOptional()
-  @Matches(/^\d+(,\d+){0,49}$/, { message: 'ids debe ser una lista de ids separados por coma (máx. 50)' })
-  ids?: string;
-
   @IsOptional()
   @IsString()
   sort_by?: string;
@@ -52,4 +42,20 @@ export class QueryStoreUsersDto {
   @IsOptional()
   @IsIn(['asc', 'desc'])
   sort_order?: 'asc' | 'desc' = 'desc';
+}
+
+/**
+ * Query for `GET /store/users` (the selector lookup). Adds `ids` on top of the
+ * shared listing filters; the management listing keeps rejecting it.
+ */
+export class QueryStoreUsersLookupDto extends QueryStoreUsersDto {
+  /**
+   * Comma-separated `users.id` list (max 50) to resolve specific users by id,
+   * e.g. the name of an already-assigned user in `app-store-user-select`.
+   * Bypasses the default active-only filter so a deactivated assignee still
+   * shows by name; ignores `page`.
+   */
+  @IsOptional()
+  @Matches(/^[1-9]\d{0,8}(,[1-9]\d{0,8}){0,49}$/, { message: 'ids debe ser una lista de ids separados por coma (máx. 50)' })
+  ids?: string;
 }

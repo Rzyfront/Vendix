@@ -112,11 +112,18 @@ export const selectUserEmail = createSelector(
   (user: any) => user?.email || null,
 );
 
-export const selectUserName = createSelector(selectUser, (user: any) =>
-  user?.firstName
-    ? `${user.firstName} ${user.lastName || ''}`.trim()
-    : user?.name || null,
-);
+/**
+ * Full name of the session user. The login payload is snake_case
+ * (`first_name`/`last_name`); camelCase is kept for older persisted sessions.
+ * Reading only camelCase made this always `null`, so the CRM "Nueva tarea" /
+ * "Nueva oportunidad" modals preset the responsible as `Usuario #id`.
+ */
+export const selectUserName = createSelector(selectUser, (user: any) => {
+  const first = user?.first_name ?? user?.firstName;
+  const last = user?.last_name ?? user?.lastName;
+  const full = [first, last].filter(Boolean).join(' ').trim();
+  return full || user?.name || null;
+});
 
 export const selectIsAdmin = createSelector(
   selectUserRole,
