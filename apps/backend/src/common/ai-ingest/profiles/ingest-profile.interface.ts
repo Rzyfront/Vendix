@@ -53,6 +53,12 @@ export interface IngestProfile<TRecord, TField extends string = string> {
    * least one of these".
    */
   requiredFields: TField[][];
+  /**
+   * Groups worth ONE AI mapping call when no synonym covers them and some
+   * header with data stayed unmapped (e.g. a document column named "Ident.").
+   * Required groups always trigger it; these only with unmapped data.
+   */
+  wantedFields?: TField[][];
   normalizeRow(
     raw: Partial<Record<TField, string>>,
     ctx: IngestRowContext,

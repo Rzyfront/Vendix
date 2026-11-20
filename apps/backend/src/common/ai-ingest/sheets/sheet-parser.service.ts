@@ -81,6 +81,11 @@ export class SheetParserService {
       if (!built) continue;
       const { table, dataRows, skipped: sheetSkipped } = built;
       skipped.push(...sheetSkipped);
+      if (table.header_row === 0) {
+        warnings.push(
+          `${multi ? `La hoja "${sheet.name}"` : 'La hoja'} no tiene fila de encabezados; sus columnas se leyeron por posición (Columna A, B…).`,
+        );
+      }
       totalRows += dataRows.length;
 
       const room = Math.max(0, options.maxRows - kept);
@@ -120,8 +125,10 @@ export class SheetParserService {
         cellText: true,
       });
     } catch {
+      // Inside the ai-scan job only the CODE reaches the user; this one has
+      // its own message in the web ("dañado, protegido con contraseña o vacío").
       throw new VendixHttpException(
-        ErrorCodes.SYS_VALIDATION_001,
+        ErrorCodes.AI_INGEST_INVALID_FILE,
         'No se pudo leer la hoja de cálculo. Verifica que no esté dañada o protegida con contraseña.',
       );
     }
@@ -240,7 +247,7 @@ export class SheetParserService {
       });
     } catch {
       throw new VendixHttpException(
-        ErrorCodes.SYS_VALIDATION_001,
+        ErrorCodes.AI_INGEST_INVALID_FILE,
         'No se pudo leer el CSV. Verifica que el archivo no esté dañado.',
       );
     }
@@ -328,9 +335,14 @@ export class SheetParserService {
     const content = sheet.rows.filter((r) => r.cells.some(Boolean));
     if (!content.length) return null;
 
-    const headerRow = this.detectHeader(content);
-    const headerIndex = sheet.rows.indexOf(headerRow);
-    const usedColumns = this.usedColumns(sheet.rows.slice(headerIndex));
+    // No row looks like a header (all data): columns are "Columna A…" and
+    // the first row is data, so it is not lost silently.
+    const detected = this.detectHeader(content);
+    const headerRow: RawRow = detected ?? { row: 0, cells: [] };
+    const headerIndex = detected
+      ? sheet.rows.indexOf(detected)
+      : sheet.rows.indexOf(content[0]) - 1;
+    const usedColumns = this.usedColumns(sheet.rows.slice(Math.max(0, headerIndex)));
     const headers = this.uniqueHeaders(headerRow.cells, usedColumns);
     const headerKey = usedColumns
       .map((c) => normalizeLabel(headerRow.cells[c] ?? ''))
@@ -395,9 +407,9 @@ export class SheetParserService {
   /**
    * First row, among the first 20 with content, that is at least half as wide
    * as the widest row and whose filled cells are mostly text (not numbers or
-   * dates). Falls back to the first row with content.
+   * dates). `null` when none does (a sheet of data only).
    */
-  private detectHeader(content: RawRow[]): RawRow {
+  private detectHeader(content: RawRow[]): RawRow | null {
     const width = content
       .slice(0, 50)
       .reduce((n, r) => Math.max(n, r.cells.filter(Boolean).length), 0);
@@ -410,7 +422,7 @@ export class SheetParserService {
       );
       if (textual.length / filled.length >= 0.6) return row;
     }
-    return content[0];
+    return null;
   }
 
   /** Columns that have a header or at least one value below it. */

@@ -54,6 +54,18 @@ describe('perfil ai-ingest customers', () => {
       });
     });
 
+    it.each([
+      [['Nombre', 'C.C.', 'Cel'], ['full_name', 'document_number', 'phone']],
+      [['Nombre', 'No. Doc', 'Tel.'], ['full_name', 'document_number', 'phone']],
+      [['Nombre', 'Doc.', 'Telf'], ['full_name', 'document_number', 'phone']],
+      [['Cliente', 'N.I.T.', 'D.V.', 'Celular 1'], ['full_name', 'document_number', 'verification_digit', 'phone']],
+      [['Nombre', 'Nº Identificación', 'E-mail'], ['full_name', 'document_number', 'email']],
+      [['Nombre', 'Tipo Doc', 'Doc'], ['full_name', 'document_type', 'document_number']],
+    ])('encabezados abreviados %j se reconocen', (headers, fields) => {
+      const mapping = mapColumnsBySynonyms(headers, CUSTOMER_COLUMN_SYNONYMS);
+      expect(headers.map((h) => mapping.get(h))).toEqual(fields);
+    });
+
     it('"Tipo de documento" va al tipo y "Número de documento" al número', () => {
       const mapping = mapColumnsBySynonyms(
         ['Tipo de documento', 'Número de documento', 'Nombre completo'],
@@ -79,6 +91,21 @@ describe('perfil ai-ingest customers', () => {
       const wrong = parseDocument('900123456', 'NIT', '1');
       expect(wrong.verification_digit).toBe('8');
       expect(wrong.issues[0]).toContain('no corresponde');
+    });
+
+    it('NIT con el DV pegado se separa con aviso; si el último dígito no es el DV no se toca', () => {
+      const glued = parseDocument('9001234568', undefined, undefined);
+      expect(glued).toMatchObject({
+        document_type: 'NIT',
+        document_number: '900123456',
+        verification_digit: '8',
+      });
+      expect(glued.issues[0]).toContain('pegado');
+      expect(parseDocument('9001234567', undefined, undefined).document_number).toBe('9001234567');
+      // Una cédula de 10 dígitos (empieza por 1) nunca se parte.
+      expect(parseDocument('1020304050', undefined, undefined).document_type).toBe('CC');
+      // Tipo CC explícito: no se reinterpreta.
+      expect(parseDocument('9001234568', 'CC', undefined).document_number).toBe('9001234568');
     });
 
     it('lee el tipo escrito dentro del número y asume CC solo con aviso', () => {
@@ -238,6 +265,41 @@ describe('perfil ai-ingest customers', () => {
       expect(scan.customers[0]).toMatchObject({ legal_name: 'Empresa 1 SAS', document_type: 'NIT', person_type: 'JURIDICA' });
       expect(scan.stats?.mapping).toBe('ai');
       expect(scan.columns).toContainEqual({ column: 'Col C', field: null });
+    });
+
+    it('nombre reconocido pero documento con un nombre raro: UNA llamada de mapeo para encontrarlo', async () => {
+      run.mockResolvedValue({
+        success: true,
+        content: JSON.stringify({
+          columns: [{ column: 'Referencia fiscal', field: 'document_number' }],
+        }),
+      });
+      const rows: unknown[][] = [['Nombre', 'Referencia fiscal', 'Celular']];
+      for (let i = 1; i <= 20; i++) rows.push([`Ana${i} Pérez${i}`, 10000000 + i, 3000000000 + i]);
+
+      const scan = await service.scanFromFiles([scanFile(xlsx(rows))], progress);
+
+      expect(run).toHaveBeenCalledTimes(1);
+      expect(scan.customers[0]).toMatchObject({ document_number: '10000001', phone: '3000000001' });
+      expect(scan.stats?.mapping).toBe('ai');
+    });
+
+    it('sin columna de documento ni columnas sobrantes con datos: no se llama a la IA', async () => {
+      const rows: unknown[][] = [['Nombre', 'Cel', 'Vacía']];
+      for (let i = 1; i <= 5; i++) rows.push([`Ana${i} Pérez${i}`, 3000000000 + i, '']);
+      const scan = await service.scanFromFiles([scanFile(xlsx(rows))], progress);
+      expect(run).not.toHaveBeenCalled();
+      expect(scan.customers).toHaveLength(5);
+    });
+
+    it('si el mapeo opcional falla en el proveedor, la carga sigue con los sinónimos', async () => {
+      run.mockResolvedValue({ success: false, error: 'timeout' });
+      const rows: unknown[][] = [['Nombre', 'Referencia fiscal']];
+      for (let i = 1; i <= 3; i++) rows.push([`Ana${i} Pérez${i}`, 10000000 + i]);
+      const scan = await service.scanFromFiles([scanFile(xlsx(rows))], progress);
+      expect(run).toHaveBeenCalledTimes(1);
+      expect(scan.customers).toHaveLength(3);
+      expect(scan.stats?.mapping).toBe('synonyms');
     });
 
     it('solo las filas ambiguas van a la IA, por lotes con row_id', async () => {

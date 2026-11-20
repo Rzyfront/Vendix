@@ -131,7 +131,11 @@ describe('CustomerAiImportService', () => {
       'customer_import_ocr',
       {},
       expect.any(Array),
-      { responseSchema: expect.objectContaining({ name: 'customer_document' }) },
+      {
+        responseSchema: expect.objectContaining({ name: 'customer_document' }),
+        // One key per load: `async_queue` charges one job, not one per call.
+        quotaKey: expect.stringMatching(/^ai-ingest:/),
+      },
     );
   });
 

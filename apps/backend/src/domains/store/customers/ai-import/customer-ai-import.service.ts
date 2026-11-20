@@ -16,6 +16,7 @@ import {
   AiExtractionError,
   AiExtractionService,
   ExtractBatchesResult,
+  newIngestQuotaKey,
 } from '@common/ai-ingest/extraction/ai-extraction.service';
 import { IngestProfileRegistry } from '@common/ai-ingest/profiles/registry';
 import {
@@ -25,6 +26,7 @@ import {
   mapColumnsBySynonyms,
   mergeAiColumnMapping,
   missingRequiredGroups,
+  unmappedHeadersWithData,
 } from '@common/ai-ingest/sheets/column-mapper';
 import type { SheetTable } from '@common/ai-ingest/ai-ingest.types';
 import { VendixHttpException, ErrorCodes } from '@common/errors';
@@ -148,10 +150,12 @@ export class CustomerAiImportService implements OnModuleInit {
   ): Promise<CustomerImportScanResult> {
     const file = files?.[0];
     const detected = this.assertValidScanFile(file);
+    // One quota key per load: mapping, batches and repairs charge one job.
+    const quotaKey = newIngestQuotaKey();
     if (detected.kind === 'sheet') {
-      return this.scanSheet(file!, detected.sheetFormat!, reportProgress);
+      return this.scanSheet(file!, detected.sheetFormat!, reportProgress, quotaKey);
     }
-    return this.scanDocument(file!, detected);
+    return this.scanDocument(file!, detected, quotaKey);
   }
 
   /**
@@ -162,6 +166,7 @@ export class CustomerAiImportService implements OnModuleInit {
   private async scanDocument(
     file: AiScanFile,
     detected: DetectedIngestFile,
+    quotaKey?: string,
   ): Promise<CustomerImportScanResult> {
     const instruction =
       'Extract all customers and their locations from this document. Return ONLY the JSON object matching the schema defined in your system instructions.';
@@ -183,6 +188,7 @@ export class CustomerAiImportService implements OnModuleInit {
         appKey: APP_KEY,
         schema: CUSTOMER_DOCUMENT_SCHEMA,
         messages: [message],
+        quotaKey,
       });
     } catch (error) {
       if (error instanceof AiExtractionError) {
@@ -217,6 +223,7 @@ export class CustomerAiImportService implements OnModuleInit {
     file: AiScanFile,
     format: IngestSheetFormat,
     reportProgress?: ReportProgress,
+    quotaKey: string = newIngestQuotaKey(),
   ): Promise<CustomerImportScanResult> {
     const progress = async (done: number, total: number, stage: string) => {
       if (!reportProgress || total <= 0) return;
@@ -242,7 +249,7 @@ export class CustomerAiImportService implements OnModuleInit {
     const multi = parsed.tables.length > 1;
     for (const table of parsed.tables) {
       const sheet = multi ? table.sheet : undefined;
-      const { mapping, usedAi } = await this.mapColumns(table, warnings);
+      const { mapping, usedAi } = await this.mapColumns(table, warnings, quotaKey);
       if (usedAi) mappingMode = 'ai';
       for (const header of table.headers) {
         columns.push({
@@ -301,6 +308,7 @@ export class CustomerAiImportService implements OnModuleInit {
       warnings,
       (done) =>
         progress(resolvedDeterministically + done, totalRows, 'Normalizando filas con IA'),
+      quotaKey,
     );
 
     const perRow: CustomerWithRows[] = drafts.map((d) => {
@@ -359,6 +367,7 @@ export class CustomerAiImportService implements OnModuleInit {
   private async mapColumns(
     table: SheetTable,
     warnings: string[],
+    quotaKey?: string,
   ): Promise<{ mapping: ColumnMapping<CustomerSheetField>; usedAi: boolean }> {
     const synonyms = mapColumnsBySynonyms<CustomerSheetField>(
       table.headers,
@@ -368,9 +377,19 @@ export class CustomerAiImportService implements OnModuleInit {
       synonyms,
       customersIngestProfile.requiredFields,
     );
-    if (!missing.length) return { mapping: synonyms, usedAi: false };
-
     const sample = table.rows.slice(0, SAMPLE_ROWS_FOR_MAPPING);
+    // Without a required field the sheet cannot be read: always ask. Without
+    // a wanted one (the document), ask only if some column with data is left
+    // unmapped ("Ident.", "C.C./NIT No."); otherwise there is nothing to find.
+    const wantedMissing =
+      !missing.length &&
+      missingRequiredGroups(synonyms, customersIngestProfile.wantedFields ?? [])
+        .length > 0 &&
+      unmappedHeadersWithData(table.headers, synonyms, sample).length > 0;
+    if (!missing.length && !wantedMissing) {
+      return { mapping: synonyms, usedAi: false };
+    }
+
     const fieldList = CUSTOMER_SHEET_FIELDS.map(
       (f) => `- ${f}: ${CUSTOMER_FIELD_DESCRIPTIONS[f]}`,
     ).join('\n');
@@ -394,6 +413,7 @@ export class CustomerAiImportService implements OnModuleInit {
         appKey: APP_KEY,
         schema: columnMappingSchema(CUSTOMER_SHEET_FIELDS),
         messages: [message],
+        quotaKey,
       });
       const mapping = mergeAiColumnMapping(
         synonyms,
@@ -403,11 +423,16 @@ export class CustomerAiImportService implements OnModuleInit {
       );
       return { mapping, usedAi: true };
     } catch (error) {
-      if (!(error instanceof AiExtractionError) || error.failure === 'ai_failed') {
+      // Optional call (names already mapped): any AI failure falls back to
+      // the synonyms; the load goes on without the extra column.
+      if (
+        !wantedMissing &&
+        (!(error instanceof AiExtractionError) || error.failure === 'ai_failed')
+      ) {
         throw error instanceof AiExtractionError ? error.toHttpException() : error;
       }
       this.logger.warn(
-        `[CustomerImportScan] column mapping by AI failed (${error.failure}); using synonyms only`,
+        `[CustomerImportScan] column mapping by AI failed (${error instanceof AiExtractionError ? error.failure : 'error'}); using synonyms only`,
       );
       warnings.push(
         'No se pudieron reconocer todas las columnas; revisa nombres y documentos en la vista previa.',
@@ -426,6 +451,7 @@ export class CustomerAiImportService implements OnModuleInit {
     rowIssues: ImportRowIssue[],
     warnings: string[],
     onProgress: (done: number) => Promise<void>,
+    quotaKey?: string,
   ): Promise<Map<CustomerRowDraft, CustomerRowDraft>> {
     const resolved = new Map<CustomerRowDraft, CustomerRowDraft>();
     if (!rows.length) return resolved;
@@ -447,6 +473,7 @@ export class CustomerAiImportService implements OnModuleInit {
         maxSplitDepth: 3,
         buildMessages: (batch) => [this.rowsMessage(batch, ids)],
         onProgress: (done) => onProgress(done),
+        quotaKey,
       });
     } catch (error) {
       throw error instanceof AiExtractionError ? error.toHttpException() : error;

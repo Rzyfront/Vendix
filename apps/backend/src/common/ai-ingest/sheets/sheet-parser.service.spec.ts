@@ -111,6 +111,21 @@ describe('SheetParserService', () => {
     ]);
   });
 
+  it('hoja sin encabezado: columnas por posición y la primera fila es dato (no se pierde)', () => {
+    const buffer = workbook([
+      ['Ana Pérez', 1020304050, 3001234567, 'ana@correo.co'],
+      ['Luis Gómez', 79123456, 3109876543, 'luis@correo.co'],
+    ]);
+    const result = parser.parse(buffer, 'xlsx', { maxRows: 100 });
+    const table = result.tables[0];
+    expect(table.header_row).toBe(0);
+    expect(table.headers).toEqual(['Columna A', 'Columna B', 'Columna C', 'Columna D']);
+    expect(table.row_numbers).toEqual([1, 2]);
+    expect(table.rows[0]['Columna A']).toBe('Ana Pérez');
+    expect(result.skipped).toEqual([]);
+    expect(result.warnings.join(' ')).toContain('no tiene fila de encabezados');
+  });
+
   it('un cliente cuyo nombre empieza por "Total" no es fila de totales', () => {
     const buffer = workbook([
       ['Nombre', 'NIT', 'Ciudad'],

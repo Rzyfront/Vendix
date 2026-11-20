@@ -1,4 +1,4 @@
-import { normalizeNit } from '../../../../common/utils/nit.util';
+import { computeNitDv, normalizeNit } from '../../../../common/utils/nit.util';
 import { normalizeLabel } from '@common/ai-ingest/sheets/sheet-parser.service';
 import type {
   IngestRowIssue,
@@ -119,6 +119,8 @@ export const CUSTOMER_COLUMN_SYNONYMS: Record<CustomerSheetField, string[]> = {
     'tipo identificacion',
     'tipo de identificacion',
     'tipo id',
+    'tipo ident',
+    'tipo identif',
     'document type',
   ],
   document_number: [
@@ -143,14 +145,54 @@ export const CUSTOMER_COLUMN_SYNONYMS: Record<CustomerSheetField, string[]> = {
     'rut',
     'document',
     'id',
+    'doc',
+    'no doc',
+    'nro doc',
+    'num doc',
+    'numero doc',
+    'n doc',
+    'no documento identidad',
+    'documento identidad',
+    'no identificacion',
+    'nro identificacion',
+    'num identificacion',
+    'n identificacion',
+    'ident',
+    'identif',
+    'no id',
+    'nro id',
+    'ced',
+    'cedula de ciudadania',
+    'no cedula',
+    'nro cedula',
+    'no nit',
+    'nro nit',
+    'nuip',
   ],
-  verification_digit: ['dv', 'digito verificacion', 'digito de verificacion', 'digito'],
-  email: ['correo', 'email', 'e mail', 'correo electronico', 'mail', 'correo e'],
+  verification_digit: [
+    'dv',
+    'digito verificacion',
+    'digito de verificacion',
+    'digito',
+    'dig verif',
+    'dig ver',
+  ],
+  email: ['correo', 'email', 'e mail', 'correo electronico', 'mail', 'correo e', 'emails'],
   phone: [
     'telefono',
+    'telefonos',
     'celular',
+    'celulares',
+    'cel',
     'movil',
     'tel',
+    'telf',
+    'tlf',
+    'tfno',
+    'no celular',
+    'nro celular',
+    'no telefono',
+    'nro telefono',
     'telefono celular',
     'numero de telefono',
     'numero celular',
@@ -370,6 +412,30 @@ export function parseDocument(
   const dashDv = /^[\d.,\s]+-\s*\d$/.test(value);
   const digits = value.replace(/[^\d]/g, '');
   const looksNit = !hasLetters && (dashDv || (digits.length === 9 && /^[89]/.test(digits)));
+
+  // NIT with its DV glued on: "9001234568" = 900123456 + DV 8. Only when the
+  // 10th digit IS the DV of the first 9 (a 10-digit CC starts with 1), no DV
+  // column says otherwise and the type is NIT or unknown.
+  if (
+    !hasLetters &&
+    !dashDv &&
+    !clean(dvRaw) &&
+    (!type || type === 'NIT') &&
+    digits.length === 10 &&
+    /^[89]/.test(digits) &&
+    computeNitDv(digits.slice(0, 9)) === digits[9]
+  ) {
+    issues.push(
+      `El NIT ${digits} traía el dígito de verificación pegado; se separó como ${digits.slice(0, 9)}-${digits[9]}. Revísalo.`,
+    );
+    return {
+      document_type: 'NIT',
+      document_number: digits.slice(0, 9),
+      verification_digit: digits[9],
+      needsAi,
+      issues,
+    };
+  }
 
   if (!type) {
     if (clean(dvRaw) || looksNit) type = 'NIT';
@@ -714,6 +780,7 @@ export const customersIngestProfile: IngestProfile<CustomerRowDraft, CustomerShe
   recordSchema: CUSTOMER_ROWS_SCHEMA,
   columnSynonyms: CUSTOMER_COLUMN_SYNONYMS,
   requiredFields: [['full_name', 'first_name', 'legal_name']],
+  wantedFields: [['document_number']],
   normalizeRow: (raw, ctx) => {
     const { record, issues } = normalizeCustomerRow(raw, ctx);
     return { record, issues };

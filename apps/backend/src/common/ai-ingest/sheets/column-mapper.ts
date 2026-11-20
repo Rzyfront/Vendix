@@ -5,6 +5,17 @@ import type { ExtractionSchema } from '../extraction/ai-extraction.service';
 export type ColumnMapping<TField extends string> = Map<string, TField>;
 
 /**
+ * `normalizeLabel` plus initials joined: "C.C." → "c c" → "cc", "N.I.T" →
+ * "nit". Runs of two or more one-letter words are glued; the rest stays.
+ */
+export function headerKey(value: string): string {
+  return normalizeLabel(value).replace(
+    /\b[a-z](?: [a-z]\b)+/g,
+    (run) => run.replace(/ /g, ''),
+  );
+}
+
+/**
  * Deterministic header → field mapping from a synonym dictionary.
  * An exact label match beats a whole-word match inside a longer label, and a
  * longer synonym beats a shorter one; each header and each field is used once.
@@ -15,13 +26,13 @@ export function mapColumnsBySynonyms<TField extends string>(
 ): ColumnMapping<TField> {
   const candidates: { header: string; field: TField; score: number }[] = [];
   for (const header of headers) {
-    const label = normalizeLabel(header);
+    const label = headerKey(header);
     if (!label) continue;
     const padded = ` ${label} `;
     for (const field of Object.keys(synonyms) as TField[]) {
       let best = 0;
       for (const synonym of synonyms[field]) {
-        const key = normalizeLabel(synonym);
+        const key = headerKey(synonym);
         if (!key) continue;
         if (label === key) best = Math.max(best, 1000 + key.length);
         else if (padded.includes(` ${key} `)) best = Math.max(best, 100 + key.length);
@@ -39,6 +50,20 @@ export function mapColumnsBySynonyms<TField extends string>(
     usedFields.add(c.field);
   }
   return mapping;
+}
+
+/**
+ * Headers no synonym took that carry data in the sample rows: worth showing
+ * to the AI mapping call (an empty or unnamed-and-empty column is not).
+ */
+export function unmappedHeadersWithData<TField extends string>(
+  headers: readonly string[],
+  mapping: ColumnMapping<TField>,
+  sample: readonly Record<string, string>[],
+): string[] {
+  return headers.filter(
+    (h) => !mapping.has(h) && sample.some((row) => (row[h] ?? '').trim() !== ''),
+  );
 }
 
 /** Required groups (alternatives) that no mapped column covers. */

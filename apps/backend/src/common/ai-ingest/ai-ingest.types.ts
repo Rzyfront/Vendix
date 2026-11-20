@@ -41,7 +41,7 @@ export interface IngestRowIssue {
 /** One sheet of a workbook (or the CSV) as text cells, after cleaning. */
 export interface SheetTable {
   sheet: string;
-  /** 1-based row number of the detected header. */
+  /** 1-based row number of the detected header; 0 = none (data only). */
   header_row: number;
   /** Unique, non-empty header labels (empty ones become "Columna C"). */
   headers: string[];
