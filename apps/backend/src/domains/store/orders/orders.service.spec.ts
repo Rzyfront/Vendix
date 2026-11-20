@@ -1354,6 +1354,7 @@ describe('OrdersService', () => {
         ],
         tax_total: 3111.11,
         total: 42000,
+        total_before_discount: 60000,
       });
       // La base persistida no cambia de magnitud para el lector viejo.
       expect(result.order_items[0].total_price).toBe(55555.56);

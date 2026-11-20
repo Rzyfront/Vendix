@@ -63,6 +63,7 @@ import {
   buildOrderLineBreakdown,
   buildOrderTotalsBreakdown,
 } from './utils/order-breakdown.util';
+import { loadLinePromotionLabels } from '../promotions/utils/line-promotion-label.util';
 import { resolveWeightLinesStockUnits } from '../products/services/weight-stock-units.util';
 import {
   groupRatesByProductId,
@@ -2091,6 +2092,30 @@ export class OrdersService {
         item.line_breakdown = buildOrderLineBreakdown(item);
       }
       order.totals_breakdown = buildOrderTotalsBreakdown(order);
+      // Etiqueta de la promo por línea (display-only, ADITIVO): `order_items`
+      // guarda el descuento, no qué promoción lo produjo. Solo se etiquetan
+      // líneas con descuento; si el motor falla, el detalle sigue saliendo
+      // con el fallback y no se rompe.
+      try {
+        const labels = await loadLinePromotionLabels(
+          this.prisma as any,
+          order.id,
+          order.order_items.map((item: any) => ({
+            id: item.id,
+            product_id: item.product_id ?? null,
+            discount_amount: item.discount_amount,
+            unit_price: item.unit_price,
+          })),
+          (products) =>
+            this.promotionEngine.findActiveAutoPromotionsForProducts(products),
+        );
+        for (const item of order.order_items) {
+          const label = labels.get(item.id);
+          if (label) item.promotion_label = label;
+        }
+      } catch {
+        // La etiqueta es cosmética: nunca tumba el detalle de la orden.
+      }
     }
 
     // Mirrors `findBlockingSalesInvoiceForPaymentCancel`'s exact semantics

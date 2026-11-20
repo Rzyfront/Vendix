@@ -472,6 +472,53 @@ describe('SplitOrderService financial ledger', () => {
     expect(db.order_financial_accounts.create).not.toHaveBeenCalled();
   });
 
+  /** Promo de producto ya asignada a la línea 1 (contrato nuevo, caso pinchos). */
+  function withLineDiscountOnItem1() {
+    source.payments = [];
+    source.total_paid = '0.00';
+    source.discount_amount = '10.00';
+    source.tax_amount = '17.10';
+    source.grand_total = '118.10';
+    source.order_items[0].discount_amount = '10.00';
+    source.order_items[0].order_item_taxes[0].tax_amount = '7.60';
+    source.order_items[1].discount_amount = '0.00';
+  }
+
+  it('dividir por ítems deja la promo de producto solo en la cuenta de su línea', async () => {
+    withLineDiscountOnItem1();
+    const result = await service.preview(100, {
+      mode: 'items',
+      item_groups: [{ order_item_ids: [1] }, { order_item_ids: [2] }],
+    });
+    expect(result.accounts.map((a) => a.discount_amount)).toEqual([
+      '10.00',
+      '0.00',
+    ]);
+    const total = result.accounts.reduce(
+      (sum, a) => sum.plus(new Prisma.Decimal(a.grand_total)),
+      new Prisma.Decimal(0),
+    );
+    expect(total.toFixed(2)).toBe('118.10');
+  });
+
+  it('al confirmar la división registra la promo de la cuenta abierta (order_promotions + uso)', async () => {
+    withLineDiscountOnItem1();
+    const registerAppliedInTx = jest.fn(async () => 1);
+    service = new SplitOrderService(db, { registerAppliedInTx } as any);
+    const preview = await service.preview(100, {
+      mode: 'items',
+      item_groups: [{ order_item_ids: [1] }, { order_item_ids: [2] }],
+    });
+    await service.splitByItems(100, {
+      mode: 'items',
+      item_groups: [{ order_item_ids: [1] }, { order_item_ids: [2] }],
+      source_version: preview.source_version,
+      idempotency_key: 'promo-split-key',
+    } as any);
+    expect(registerAppliedInTx).toHaveBeenCalledTimes(1);
+    expect(registerAppliedInTx).toHaveBeenCalledWith(db, 100);
+  });
+
   it('supports items and custom remainder, rejecting duplicate/omitted items', async () => {
     expect(
       (

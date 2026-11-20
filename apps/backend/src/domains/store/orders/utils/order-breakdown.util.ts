@@ -25,6 +25,12 @@ export interface OrderLineBreakdown {
   taxes: OrderBreakdownTax[];
   tax_total: number;
   total: number;
+  /**
+   * Total de la línea (con impuesto) ANTES del descuento: el precio que se
+   * muestra tachado. El impuesto persistido es sobre la base ya descontada,
+   * así que se reescala a la base completa. Sin descuento es igual a `total`.
+   */
+  total_before_discount: number;
 }
 
 export interface OrderTotalsBreakdown {
@@ -86,12 +92,32 @@ export function buildOrderLineBreakdown(
       amount: round2(num(row.tax_amount)),
     }));
   const tax_total = round2(taxes.reduce((sum, tax) => sum + tax.amount, 0));
+  const total = round2(base - discount + tax_total);
+  const discountedBase = base - discount;
+  // Impuesto sobre la base completa: con la tasa persistida cuando explica
+  // la fila (exacto al centavo); si no (monto fijo, tasa en otro formato),
+  // proporcional a la base.
+  const taxBeforeDiscount = taxes.reduce((sum, tax) => {
+    if (discountedBase <= 0) return sum + tax.amount;
+    const rateExplainsRow =
+      tax.rate != null &&
+      Math.abs(round2(discountedBase * tax.rate) - tax.amount) <= 0.02;
+    return (
+      sum +
+      (rateExplainsRow
+        ? base * (tax.rate as number)
+        : (tax.amount * base) / discountedBase)
+    );
+  }, 0);
+  const total_before_discount =
+    discount > 0 ? round2(base + taxBeforeDiscount) : total;
   return {
     base,
     discount,
     taxes,
     tax_total,
-    total: round2(base - discount + tax_total),
+    total,
+    total_before_discount,
   };
 }
 

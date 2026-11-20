@@ -61,8 +61,54 @@ interface AddItemsVariant {
   final_price?: number | string | null;
 }
 
+/**
+ * Promoción automática vigente que el listado de productos ya resuelve con el
+ * MISMO motor que cotiza la cuenta (`findActiveAutoPromotionsForProducts`,
+ * backend `products.service.ts` → `resolveActivePromotionsForListing`).
+ * `promotional_price` es el precio final (con impuesto) ya descontado.
+ */
+export interface AddItemsActivePromotion {
+  id: number;
+  name?: string | null;
+  type?: 'percentage' | 'fixed_amount' | string;
+  discount_percentage?: number | string | null;
+  discount_amount?: number | string | null;
+  promotional_price: number | string;
+  badge_label?: string | null;
+}
+
 interface AddItemsProductOption extends SellableProductOption {
   product_variants?: AddItemsVariant[];
+  active_promotion?: AddItemsActivePromotion | null;
+}
+
+const roundMoney = (value: number): number =>
+  Math.round((value + Number.EPSILON) * 100) / 100;
+
+/**
+ * Precio con la promo aplicada sobre un precio final dado. Para el producto
+ * base se usa el `promotional_price` del backend tal cual; para una variante
+ * (precio distinto) se re-aplica el mismo beneficio (porcentaje o monto fijo)
+ * sobre su precio. `null` = no hay promo que baje el precio.
+ */
+export function promotionalPriceFor(
+  regular: number,
+  promo: AddItemsActivePromotion | null | undefined,
+  productRegular?: number,
+): number | null {
+  if (!promo || !(regular > 0)) return null;
+  const backendPrice = Number(promo.promotional_price);
+  let price: number;
+  if (productRegular != null && Math.abs(productRegular - regular) < 0.005) {
+    price = backendPrice;
+  } else if (promo.type === 'fixed_amount') {
+    price = regular - Number(promo.discount_amount ?? 0);
+  } else {
+    const pct = Number(promo.discount_percentage);
+    price = Number.isFinite(pct) ? regular * (1 - pct / 100) : backendPrice;
+  }
+  price = roundMoney(Math.max(0, price));
+  return Number.isFinite(price) && price < regular ? price : null;
 }
 
 /**
@@ -178,7 +224,7 @@ export class AddItemsModalComponent {
     let sum = 0;
     for (const [id, qty] of this.selectedQty()) {
       const p = byId.get(id);
-      if (p) sum += this.rowDisplayPrice(p) * qty;
+      if (p) sum += this.rowChargedPrice(p) * qty;
     }
     return sum;
   });
@@ -416,6 +462,43 @@ export class AddItemsModalComponent {
         : undefined;
     if (variant) return this.variantFinalPrice(variant, row);
     return Number(row.final_price ?? row.base_price ?? 0);
+  }
+
+  /** Promo vigente de la fila (solo si baja el precio). */
+  rowPromotion(row: AddItemsProductOption): AddItemsActivePromotion | null {
+    return this.rowPromoPrice(row) != null ? (row.active_promotion ?? null) : null;
+  }
+
+  /** Etiqueta corta de la promo: badge del backend o su nombre. */
+  promotionLabel(row: AddItemsProductOption): string {
+    const promo = row.active_promotion;
+    return promo?.name?.trim() || promo?.badge_label?.trim() || 'Promoción';
+  }
+
+  /** Precio de la fila con la promo aplicada; `null` sin promo. */
+  rowPromoPrice(row: AddItemsProductOption): number | null {
+    return promotionalPriceFor(
+      this.rowDisplayPrice(row),
+      row.active_promotion,
+      Number(row.final_price ?? row.base_price ?? 0),
+    );
+  }
+
+  /** Precio de una variante con la promo del producto; `null` sin promo. */
+  variantPromoPrice(
+    variant: AddItemsVariant,
+    product: AddItemsProductOption,
+  ): number | null {
+    return promotionalPriceFor(
+      this.variantFinalPrice(variant, product),
+      product.active_promotion,
+      Number(product.final_price ?? product.base_price ?? 0),
+    );
+  }
+
+  /** Lo que la cuenta cobrará por unidad: con promo si aplica. */
+  rowChargedPrice(row: AddItemsProductOption): number {
+    return this.rowPromoPrice(row) ?? this.rowDisplayPrice(row);
   }
 
   /** Etiqueta legible de la variante (atributos → name → sku). */
