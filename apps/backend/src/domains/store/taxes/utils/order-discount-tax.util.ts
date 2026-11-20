@@ -285,6 +285,98 @@ export function distributeAmount(
   return distributeCents(cents, weights).map((c) => round2(c / 100));
 }
 
+/**
+ * Desglose del descuento BRUTO de una venta para repartirlo por línea.
+ *
+ * - `promotionByLine`: descuento promocional bruto que el motor ya calculó
+ *   para cada línea (`PromotionQuoteResult.items[].promotion_discount`),
+ *   alineado por índice con las líneas del caller. `null` cuando no hay un
+ *   mapeo confiable o cuando todas las promociones aplicadas son de alcance
+ *   ORDEN: en ese caso se conserva el reparto histórico por bruto.
+ * - `couponTotal`: monto agregado del cupón (sin desglose por línea).
+ */
+export interface GrossDiscountSplit {
+  promotionTotal: number;
+  promotionByLine: ReadonlyArray<number> | null;
+  couponTotal: number;
+}
+
+/**
+ * Reparte el descuento BRUTO de una venta entre sus líneas respetando el
+ * alcance de la promoción (F1): la parte promocional va a las líneas a las que
+ * el motor la aplicó —nunca a una línea fuera de alcance, que con tarifas
+ * mezcladas declararía mal el IVA— y el cupón se reparte proporcional al
+ * bruto que le queda a cada línea después de la promoción.
+ *
+ * Sin desglose por línea (`promotionByLine` null o de otro largo) el
+ * resultado es EXACTAMENTE el histórico: `distributeAmount(promo + cupón,
+ * bruto)`. Así las promociones de alcance orden no cambian un centavo.
+ *
+ * Σ resultado = `promotionTotal + couponTotal` a centavo, y ninguna línea
+ * recibe más que su bruto mientras el total quepa.
+ */
+export function resolveGrossDiscountByLine(
+  grossByLine: ReadonlyArray<number>,
+  split: GrossDiscountSplit,
+): number[] {
+  const gross = grossByLine.map((g) => Math.max(0, Number(g) || 0));
+  const promotionTotal = round2(Math.max(0, Number(split.promotionTotal) || 0));
+  const couponTotal = round2(Math.max(0, Number(split.couponTotal) || 0));
+  const byLine = split.promotionByLine;
+  if (!byLine || byLine.length !== gross.length) {
+    const total = round2(promotionTotal + couponTotal);
+    return total > 0 ? distributeAmount(total, gross) : gross.map(() => 0);
+  }
+
+  const promo = gross.map((g, i) =>
+    round2(Math.min(g, Math.max(0, Number(byLine[i]) || 0))),
+  );
+  // Cierre contra el total del motor: el tope por línea (bruto de la orden vs
+  // total de línea del motor) o el redondeo pueden dejar centavos sueltos.
+  const leftoverCents = Math.round(
+    (promotionTotal - promo.reduce((s, v) => s + v, 0)) * 100,
+  );
+  if (leftoverCents > 0) {
+    const extra = distributeCents(
+      leftoverCents,
+      gross.map((g, i) => (promo[i] > 0 ? Math.max(0, g - promo[i]) : 0)),
+    );
+    const placed = extra.reduce((s, v) => s + v, 0);
+    // Si las líneas promocionadas ya no tienen bruto, lo que falte va a las
+    // demás por su bruto remanente.
+    const rest =
+      placed < leftoverCents
+        ? distributeCents(
+            leftoverCents - placed,
+            gross.map((g, i) => Math.max(0, g - promo[i] - extra[i] / 100)),
+          )
+        : gross.map(() => 0);
+    gross.forEach((_, i) => {
+      promo[i] = round2(promo[i] + (extra[i] + rest[i]) / 100);
+    });
+  } else if (leftoverCents < 0) {
+    let excess = -leftoverCents;
+    const order = promo
+      .map((v, i) => ({ i, v }))
+      .sort((a, b) => b.v - a.v);
+    for (const { i } of order) {
+      if (excess <= 0) break;
+      const take = Math.min(excess, Math.round(promo[i] * 100));
+      promo[i] = round2(promo[i] - take / 100);
+      excess -= take;
+    }
+  }
+
+  const coupon =
+    couponTotal > 0
+      ? distributeAmount(
+          couponTotal,
+          gross.map((g, i) => Math.max(0, g - promo[i])),
+        )
+      : gross.map(() => 0);
+  return gross.map((_, i) => round2(promo[i] + coupon[i]));
+}
+
 export function projectOrderLineDiscountsChain(
   lines: DiscountableLine[],
   discounts: DiscountDescriptor[],

@@ -2393,6 +2393,64 @@ describe('PromotionEngineService - auditoría y días de la semana', () => {
     });
   });
 
+  describe('F5: el total de la promoción es la suma de sus líneas', () => {
+    const sumLines = (r: { items: Array<{ promotion_discount: number }> }) =>
+      Math.round(r.items.reduce((s, i) => s + i.promotion_discount, 0) * 100) / 100;
+
+    it('con el tope por línea (precio con fracción de centavo) Σ líneas == discount_amount == total_discount', async () => {
+      prisma.promotions.findMany.mockResolvedValue([
+        buildPromotion({
+          id: 740,
+          scope: 'product',
+          type: 'percentage',
+          value: 100,
+          promotion_products: [{ product_id: 1 }],
+        }),
+      ]);
+      const r = await service.quoteDiscounts({
+        items: [
+          { line_id: 0, product_id: 1, unit_price: 33.335, quantity: 1 },
+          { line_id: 1, product_id: 2, unit_price: 50, quantity: 1 },
+        ],
+        now: TUESDAY_10AM_BOGOTA,
+      });
+      expect(r.applied_promotions).toHaveLength(1);
+      expect(r.applied_promotions[0].discount_amount).toBe(r.total_discount);
+      expect(sumLines(r)).toBe(r.total_discount);
+      expect(r.order_promotions_snapshot[0].discount_amount).toBe(r.total_discount);
+      // Sólo la línea con promoción lleva descuento, y a centavo.
+      expect(r.items[1].promotion_discount).toBe(0);
+      // Antes: la línea quedaba en 33,335 (sin redondear) y la promoción en
+      // 33,34; ahora ambas son el mismo monto a centavo.
+      expect(r.items[0].promotion_discount).toBe(33.34);
+    });
+
+    it('promo de producto 10 % sobre A con B fuera de alcance: el desglose por línea queda en A', async () => {
+      prisma.promotions.findMany.mockResolvedValue([
+        buildPromotion({
+          id: 741,
+          scope: 'product',
+          type: 'percentage',
+          value: 10,
+          promotion_products: [{ product_id: 1 }],
+        }),
+      ]);
+      const r = await service.quoteDiscounts({
+        items: [
+          { line_id: 0, product_id: 1, unit_price: 119000, quantity: 1 },
+          { line_id: 1, product_id: 2, unit_price: 100000, quantity: 1 },
+        ],
+        now: TUESDAY_10AM_BOGOTA,
+      });
+      expect(r.total_discount).toBe(11900);
+      expect(r.items.map((i) => [i.line_id, i.promotion_discount])).toEqual([
+        [0, 11900],
+        [1, 0],
+      ]);
+      expect(sumLines(r)).toBe(11900);
+    });
+  });
+
   describe('vista previa = cobro (check-eligibility)', () => {
     it('usa el mismo cálculo que el cobro: escalas y solo automáticas', async () => {
       prisma.promotions.findMany.mockResolvedValue([

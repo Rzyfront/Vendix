@@ -7,6 +7,7 @@ import { StorePrismaService } from 'src/prisma/services/store-prisma.service';
 import { Prisma, refunds_state_enum } from '@prisma/client';
 import { ErrorCodes, VendixHttpException } from 'src/common/errors';
 import { prorateShippingTaxRefundCents } from '../../../shipping/utils/shipping-tax.util';
+import { projectOrderInvoiceLines } from '../../../invoicing/utils/order-invoice-lines.util';
 
 /** Step 1 (CP-REFUND-FLOW-REDESIGN): states that reserve ceiling once the
  * caller opts into a pending-aware ceiling. `failed` never reserves;
@@ -300,6 +301,20 @@ export class RefundCalculationService {
     const discount_amount = Number(order.discount_amount) || 0;
     const discount_ratio =
       subtotal_amount > 0 ? discount_amount / subtotal_amount : 0;
+    // F2 — neto e impuesto de cada línea con la MISMA proyección que factura
+    // la orden (`projectOrderInvoiceLines`): respeta el descuento por línea
+    // del contrato nuevo (`order_items.discount_amount`) y reparte el de
+    // orden del contrato legado igual que la factura. Así la devolución total
+    // devuelve lo cobrado y la nota crédito anula la factura completa. Si la
+    // proyección no aplica (la factura tampoco saldría), se conserva el
+    // cálculo histórico.
+    const invoiceProjection = projectOrderInvoiceLines(
+      order.order_items as any,
+      order.discount_amount,
+    );
+    const projectedLines = invoiceProjection.error
+      ? null
+      : invoiceProjection.lines;
 
     const calculatedItems: RefundItemCalculation[] = [];
 
@@ -342,23 +357,75 @@ export class RefundCalculationService {
       const line_total = Number(orderItem.total_price);
       const qty_ratio =
         orderItem.quantity > 0 ? reqItem.quantity / orderItem.quantity : 0;
-      const gross_amount = line_total * qty_ratio;
-      const item_discount = gross_amount * discount_ratio;
-      const net_amount = gross_amount - item_discount;
+      const projected =
+        projectedLines?.[order.order_items.indexOf(orderItem)] ?? null;
 
-      // Calculate tax from order_item_taxes
-      let tax_rate = 0;
-      if (orderItem.order_item_taxes && orderItem.order_item_taxes.length > 0) {
-        tax_rate = orderItem.order_item_taxes.reduce(
-          (sum, t) => sum + Number(t.tax_rate),
-          0,
-        );
-      } else if (orderItem.tax_rate) {
-        tax_rate = Number(orderItem.tax_rate);
+      let gross_amount: number;
+      let item_discount: number;
+      let net_amount: number;
+      let tax_amount: number;
+      if (projected && orderItem.quantity > 0) {
+        // Prorrateo ACUMULADO por unidades: lo devuelto hasta ahora más esta
+        // devolución, menos lo devuelto antes. Cada parte se redondea a
+        // centavo y la última unidad devuelta se lleva el residuo, así la
+        // suma de todas las devoluciones de la línea es exactamente su base
+        // facturada.
+        const before = Math.min(alreadyRefundedQty, orderItem.quantity);
+        const after = Math.min(before + reqItem.quantity, orderItem.quantity);
+        const share = (total: number, units: number) =>
+          units >= orderItem.quantity
+            ? total
+            : Math.round((total * units * 100) / orderItem.quantity) / 100;
+        const slice = (total: number) =>
+          Math.round((share(total, after) - share(total, before)) * 100) / 100;
+        gross_amount = slice(line_total);
+        net_amount = slice(projected.base.toNumber());
+        // Impuesto = Σ por fila de `trunc(neto devuelto × tarifa)`: es EXACTO
+        // lo que recalcula la nota crédito sobre la fuente (línea de factura
+        // en base, `dianAmount` trunca), así la NC del reembolso no cae en
+        // `refund_snapshot_amount_mismatch` por un centavo. Sin tarifas
+        // legibles (impuesto escalar) se prorratea el impuesto facturado.
+        const rows = orderItem.order_item_taxes ?? [];
+        const rates = rows.map((row) => Number(row.tax_rate) || 0);
+        const ratesUsable =
+          rows.length > 0 &&
+          rows.every(
+            (row, k) => rates[k] > 0 || Number(row.tax_amount || 0) === 0,
+          );
+        tax_amount = ratesUsable
+          ? rates.reduce(
+              (sum, rate) =>
+                sum +
+                new Prisma.Decimal(net_amount)
+                  .times(rate)
+                  .toDecimalPlaces(2, Prisma.Decimal.ROUND_DOWN)
+                  .toNumber(),
+              0,
+            )
+          : slice(projected.tax_total.toNumber());
+        tax_amount = Math.round(tax_amount * 100) / 100;
+        item_discount = Math.round((gross_amount - net_amount) * 100) / 100;
+      } else {
+        gross_amount = line_total * qty_ratio;
+        item_discount = gross_amount * discount_ratio;
+        net_amount = gross_amount - item_discount;
+
+        // Calculate tax from order_item_taxes
+        let tax_rate = 0;
+        if (orderItem.order_item_taxes && orderItem.order_item_taxes.length > 0) {
+          tax_rate = orderItem.order_item_taxes.reduce(
+            (sum, t) => sum + Number(t.tax_rate),
+            0,
+          );
+        } else if (orderItem.tax_rate) {
+          tax_rate = Number(orderItem.tax_rate);
+        }
+
+        tax_amount = net_amount * tax_rate;
       }
-
-      const tax_amount = net_amount * tax_rate;
-      const refund_amount = net_amount + tax_amount;
+      const refund_amount = projected
+        ? Math.round((net_amount + tax_amount) * 100) / 100
+        : net_amount + tax_amount;
 
       calculatedItems.push({
         order_item_id: orderItem.id,
@@ -394,11 +461,19 @@ export class RefundCalculationService {
       0,
     );
 
-    // Proportional shipping refund
+    // Proportional shipping refund. La proporción es la de la base ANTES del
+    // descuento (`gross_amount` contra `subtotal_amount`, ambas pre-descuento):
+    // devolver todos los productos de una venta con promoción devuelve el
+    // envío completo. Sin descuento coincide con la proporción de siempre.
     let shipping_refund = 0;
     if (include_shipping && subtotal_amount > 0) {
       const shipping_cost = Number(order.shipping_cost) || 0;
-      shipping_refund = shipping_cost * (subtotal_refund / subtotal_amount);
+      const shipping_base_refund = calculatedItems.reduce(
+        (sum, i) => sum + i.gross_amount,
+        0,
+      );
+      shipping_refund =
+        shipping_cost * Math.min(1, shipping_base_refund / subtotal_amount);
     }
 
     const total_refund = subtotal_refund + tax_refund + shipping_refund;
