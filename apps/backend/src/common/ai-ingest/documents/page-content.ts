@@ -28,10 +28,14 @@ export function classifyPageText(text: string | null | undefined): PageReadMode 
 }
 
 function pageLabel(page: AiDocumentPage): string {
+  const doc =
+    page.document && page.document.count > 1
+      ? `Document ${page.document.index} of ${page.document.count}, `
+      : '';
   if (page.strip) {
-    return `Image part ${page.strip.index} of ${page.strip.count} (top to bottom; consecutive parts overlap a little, do not repeat a row that appears in both)`;
+    return `${doc}Image part ${page.strip.index} of ${page.strip.count} (top to bottom; consecutive parts overlap a little, do not repeat a row that appears in both)`;
   }
-  return `Page ${page.page_number}`;
+  return `${doc}${doc ? 'page' : 'Page'} ${page.page_number}`;
 }
 
 /**

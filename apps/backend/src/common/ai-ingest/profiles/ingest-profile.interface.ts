@@ -16,6 +16,9 @@ export type IngestProfileKey =
   | 'inventory_count'
   | 'route_sheet'
   | 'expense'
+  | 'rut'
+  | 'dian_resolution'
+  | 'dian_habilitation'
   | 'data_collection_template';
 
 export interface IngestLimits {

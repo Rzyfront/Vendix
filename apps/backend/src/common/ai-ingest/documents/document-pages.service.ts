@@ -48,6 +48,13 @@ export interface AiDocumentPagesOptions extends DocumentPagesOptions {
   maxBytes?: number;
   /** Real progress while pages are read (done of total pages). */
   onPage?: (done: number, total: number) => Promise<void> | void;
+  /**
+   * Fiscal forms (RUT, DIAN resolution, habilitación): a page with enough
+   * native text is ALSO rendered and goes as text + image, so the model keeps
+   * the boxes of the form (which number belongs to which casilla) while the
+   * text gives it the exact digits. Default false: native text alone.
+   */
+  renderTextPages?: boolean;
 }
 
 /**
@@ -66,6 +73,11 @@ export interface AiDocumentPage {
   image?: string;
   /** Photos read in strips: "strip 2 of 5". */
   strip?: { index: number; count: number };
+  /**
+   * Several files read together (one sale, one habilitación): which file this
+   * page belongs to (1-based). Absent when only one file is read.
+   */
+  document?: { index: number; count: number };
 }
 
 export interface AiDocumentPages {
@@ -242,7 +254,8 @@ export class DocumentPagesService {
     try {
       read = await this.readPdf(file.buffer, {
         maxPages: this.pageCap(options.maxPages),
-        shouldRender: (text) => classifyPageText(text) !== 'text',
+        shouldRender: (text) =>
+          !!options.renderTextPages || classifyPageText(text) !== 'text',
         tolerateRenderFailure: true,
         onPage: options.onPage,
       });
@@ -255,7 +268,9 @@ export class DocumentPagesService {
     for (const p of read.pages) {
       const textMode = classifyPageText(p.text);
       const text = p.text.trim();
-      if (textMode === 'text') {
+      if (textMode === 'text' && options.renderTextPages && p.data_uri) {
+        pages.push({ page_number: p.page_number, mode: 'text+image', text, image: p.data_uri });
+      } else if (textMode === 'text') {
         pages.push({ page_number: p.page_number, mode: 'text', text });
       } else if (p.data_uri) {
         pages.push({
