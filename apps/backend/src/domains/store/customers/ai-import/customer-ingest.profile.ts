@@ -268,7 +268,9 @@ export const CUSTOMER_ROWS_SCHEMA: ExtractionSchema = {
           required: ['row_id'],
           properties: {
             row_id: { type: 'integer' },
-            person_type: { type: ['string', 'null'], enum: ['NATURAL', 'JURIDICA', null] },
+            // No enum: "natural"/"Jurídica" must not void a batch of 50 rows;
+            // `applyCustomerAiRow` reads it with `personTypeFromText`.
+            person_type: { type: ['string', 'null'] },
             first_name: nullableString,
             last_name: nullableString,
             legal_name: nullableString,
@@ -658,7 +660,9 @@ export function applyCustomerAiRow(draft: CustomerRowDraft, ai: CustomerAiRow): 
   const v = (value: string | null | undefined) => clean(value ?? null);
   if (draft.needs.includes('name_split')) {
     const legal = v(ai.legal_name);
-    const juridica = ai.person_type === 'JURIDICA' || (!!legal && !v(ai.first_name));
+    const juridica =
+      personTypeFromText(ai.person_type ?? undefined) === 'JURIDICA' ||
+      (!!legal && !v(ai.first_name));
     if (juridica && legal) {
       next.legal_name = legal;
       next.first_name = null;

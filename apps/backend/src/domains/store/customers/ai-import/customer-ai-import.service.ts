@@ -251,6 +251,16 @@ export class CustomerAiImportService implements OnModuleInit {
       const sheet = multi ? table.sheet : undefined;
       const { mapping, usedAi } = await this.mapColumns(table, warnings, quotaKey);
       if (usedAi) mappingMode = 'ai';
+      // No header is a known name: that row may be a customer taken as the
+      // header (a sheet of names only). Say so instead of losing it quietly.
+      if (
+        table.header_row > 0 &&
+        !mapColumnsBySynonyms(table.headers, customersIngestProfile.columnSynonyms).size
+      ) {
+        warnings.push(
+          `La fila ${table.header_row}${sheet ? ` de "${sheet}"` : ''} se tomó como encabezados (${table.headers.slice(0, 4).join(', ')}${table.headers.length > 4 ? '…' : ''}); si era un cliente, agrega una fila de encabezados y vuelve a cargar el archivo.`,
+        );
+      }
       for (const header of table.headers) {
         columns.push({
           ...(sheet ? { sheet } : {}),

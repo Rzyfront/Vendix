@@ -281,6 +281,9 @@ export class AiExtractionService {
     };
 
     const runBatch = async (items: TItem[], depth: number): Promise<void> => {
+      // Heartbeat: a long chain of splits still reports it is alive (the job
+      // monitor counts "stalled" from the last progress report).
+      await advance(0);
       try {
         const data = await this.extract<TOut>({
           appKey: options.appKey,

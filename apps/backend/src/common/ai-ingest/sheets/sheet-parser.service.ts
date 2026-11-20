@@ -34,6 +34,13 @@ interface RawSheet {
 }
 
 /** Accent-free, lower-case, single-spaced: the key used to compare labels. */
+/** An e-mail, or a document/phone-like code (7+ digits, only separators). */
+export function looksLikeDataValue(value: string): boolean {
+  const v = value.trim();
+  if (/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(v)) return true;
+  return /^\+?[\d\s.,\-/()]+$/.test(v) && v.replace(/\D/g, '').length >= 7;
+}
+
 export function normalizeLabel(value: string): string {
   return value
     .normalize('NFD')
@@ -407,7 +414,8 @@ export class SheetParserService {
   /**
    * First row, among the first 20 with content, that is at least half as wide
    * as the widest row and whose filled cells are mostly text (not numbers or
-   * dates). `null` when none does (a sheet of data only).
+   * dates) and that holds no data-like value (an e-mail or a code of 7+
+   * digits: a document, a phone). `null` when none does (data only).
    */
   private detectHeader(content: RawRow[]): RawRow | null {
     const width = content
@@ -417,6 +425,9 @@ export class SheetParserService {
     for (const row of content.slice(0, HEADER_SCAN_ROWS)) {
       const filled = row.cells.filter(Boolean);
       if (filled.length < minFilled) continue;
+      // "Juan Pérez;1020304050;300…;Calle 10;Bogotá" is 60 % text, but a
+      // header never carries a document number or an e-mail.
+      if (filled.some(looksLikeDataValue)) continue;
       const textual = filled.filter(
         (v) => v.length <= 60 && !/^[\d\s.,$%+\-/:()]+$/.test(v) && !/@/.test(v),
       );

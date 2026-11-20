@@ -126,6 +126,23 @@ describe('SheetParserService', () => {
     expect(result.warnings.join(' ')).toContain('no tiene fila de encabezados');
   });
 
+  it('hoja sin encabezado con filas mayormente de texto (nombre, cédula, celular, dirección, ciudad): nada se pierde', () => {
+    const csv = Buffer.from(
+      [
+        'Juan Pérez;1020304050;3001234567;Calle 10 # 5-20;Bogotá',
+        'Ana Gómez;79123456;3109876543;Cra 7 # 1-2;Cali',
+        'Luis Ruiz;80111222;3201112233;Av 3 # 4-5;Medellín',
+      ].join('\n'),
+      'utf8',
+    );
+    const result = parser.parse(csv, 'csv', { maxRows: 100 });
+    const table = result.tables[0];
+    expect(table.header_row).toBe(0);
+    expect(table.row_numbers).toEqual([1, 2, 3]);
+    expect(table.rows[0]['Columna A']).toBe('Juan Pérez');
+    expect(result.warnings.join(' ')).toContain('no tiene fila de encabezados');
+  });
+
   it('un cliente cuyo nombre empieza por "Total" no es fila de totales', () => {
     const buffer = workbook([
       ['Nombre', 'NIT', 'Ciudad'],

@@ -6,6 +6,7 @@ import { IngestProfileRegistry } from '@common/ai-ingest/profiles/registry';
 import { AIMessage } from '../../../../ai-engine/interfaces/ai-provider.interface';
 import { CustomerAiImportService } from './customer-ai-import.service';
 import {
+  applyCustomerAiRow,
   CUSTOMER_COLUMN_SYNONYMS,
   mergeCustomerRows,
   normalizeCustomerRow,
@@ -300,6 +301,28 @@ describe('perfil ai-ingest customers', () => {
       expect(run).toHaveBeenCalledTimes(1);
       expect(scan.customers).toHaveLength(3);
       expect(scan.stats?.mapping).toBe('synonyms');
+    });
+
+    it('hoja de solo nombres sin encabezado: avisa qué fila se tomó como encabezados', async () => {
+      run.mockResolvedValue({
+        success: true,
+        content: JSON.stringify({ columns: [{ column: 'Juan Pérez', field: 'full_name' }] }),
+      });
+      const rows: unknown[][] = [
+        ['Juan Pérez', 'Bogotá'],
+        ['Ana Gómez', 'Cali'],
+      ];
+      const scan = await service.scanFromFiles([scanFile(xlsx(rows))], progress);
+      expect(scan.warnings.join(' ')).toContain('La fila 1 se tomó como encabezados (Juan Pérez, Bogotá)');
+    });
+
+    it('la IA puede escribir el tipo de persona en minúsculas sin invalidar el lote', () => {
+      const draft = normalizeCustomerRow({ full_name: 'Grupo Andino Norte' }, { row: 2 }).record!;
+      const out = applyCustomerAiRow(
+        { ...draft, needs: ['name_split'] },
+        { row_id: 1, person_type: 'jurídica', legal_name: 'Grupo Andino Norte' } as any,
+      );
+      expect(out).toMatchObject({ person_type: 'JURIDICA', legal_name: 'Grupo Andino Norte' });
     });
 
     it('solo las filas ambiguas van a la IA, por lotes con row_id', async () => {
