@@ -8,13 +8,35 @@ import {
 } from './observability/agent-trace.service';
 import { CACHE_MANAGER } from '@nestjs/cache-manager';
 import { Cache } from 'cache-manager';
+import { Prisma } from '@prisma/client';
 import { GlobalPrismaService } from '../prisma/services/global-prisma.service';
 import {
   AILogEntry,
   AIUsageStatsFilter,
   AIUsageStats,
+  AIAppHealthReport,
+  AIAppHealthRow,
   TenantUsageStats,
 } from './interfaces/ai-log.interface';
+
+/** `ai_engine_logs.validation_error` is VARCHAR(500). */
+export const VALIDATION_ERROR_MAX_CHARS = 500;
+/** Default window of the per-app health board. */
+export const APP_HEALTH_DEFAULT_DAYS = 7;
+/** Widest window the board accepts (one aggregate scan, never rows). */
+export const APP_HEALTH_MAX_DAYS = 92;
+const DAY_MS = 24 * 60 * 60 * 1000;
+
+/** Raw aggregate row; Postgres COUNT/SUM come back as bigint. */
+interface AppHealthSqlRow {
+  app_key: string | null;
+  total_calls: bigint | number;
+  error_calls: bigint | number;
+  truncated_calls: bigint | number;
+  validation_failed_calls: bigint | number;
+  avg_prompt_tokens: number | string | null;
+  avg_completion_tokens: number | string | null;
+}
 
 /**
  * Measured prompt cache (remediation step 8): cache token counts carried
@@ -107,12 +129,36 @@ export class AILoggingService {
             ? '[redacted]'
             : entry.error_message,
           input_preview: undefined,
+          finish_reason: this.safeFinishReason(entry.finish_reason),
+          attempt: this.safeAttempt(entry.attempt),
+          validation_error: this.safeValidationError(entry.validation_error),
         },
       });
     } catch (error: any) {
       // Prisma errors may contain the rejected data, including legacy previews.
       this.logger.error('Failed to log AI request');
     }
+  }
+
+  private safeFinishReason(value?: string): string | undefined {
+    return typeof value === 'string' && /^[a-z_]{1,32}$/.test(value)
+      ? value
+      : undefined;
+  }
+
+  private safeAttempt(value?: number): number | undefined {
+    return typeof value === 'number' &&
+      Number.isSafeInteger(value) &&
+      value >= 0 &&
+      value <= 1000
+      ? value
+      : undefined;
+  }
+
+  private safeValidationError(value?: string): string | undefined {
+    if (typeof value !== 'string') return undefined;
+    const text = value.replace(/\s+/g, ' ').trim();
+    return text ? text.slice(0, VALIDATION_ERROR_MAX_CHARS) : undefined;
   }
 
   private safeUuid(value?: string): string | undefined {
@@ -264,6 +310,95 @@ export class AILoggingService {
 
     await this.cache.set(cacheKey, stats, 30 * 1000);
     return stats;
+  }
+
+  /**
+   * Per-app health board (super admin): calls, % error, % cut
+   * (`finish_reason = 'length'`), % rejected by validation and average tokens
+   * per call, in ONE aggregate query (no rows reach memory). Default window:
+   * the last {@link APP_HEALTH_DEFAULT_DAYS} days; wider than
+   * {@link APP_HEALTH_MAX_DAYS} is clamped from `date_to` backwards.
+   */
+  async getAppHealth(filter: {
+    date_from?: Date;
+    date_to?: Date;
+    app_key?: string;
+  }): Promise<AIAppHealthReport> {
+    const dateTo = this.validDate(filter.date_to) ?? new Date();
+    let dateFrom =
+      this.validDate(filter.date_from) ??
+      new Date(dateTo.getTime() - APP_HEALTH_DEFAULT_DAYS * DAY_MS);
+    if (dateFrom.getTime() > dateTo.getTime()) {
+      dateFrom = new Date(dateTo.getTime() - APP_HEALTH_DEFAULT_DAYS * DAY_MS);
+    }
+    const earliest = dateTo.getTime() - APP_HEALTH_MAX_DAYS * DAY_MS;
+    if (dateFrom.getTime() < earliest) dateFrom = new Date(earliest);
+
+    const appKey = filter.app_key?.trim().slice(0, 100) || undefined;
+    const cacheKey = `ai:app-health:${dateFrom.toISOString()}:${dateTo.toISOString()}:${appKey ?? ''}`;
+    const cached = await this.cache.get<AIAppHealthReport>(cacheKey);
+    if (cached) return cached;
+
+    const appFilter = appKey
+      ? Prisma.sql`AND app_key = ${appKey}`
+      : Prisma.empty;
+    const rows = await this.prisma.$queryRaw<AppHealthSqlRow[]>(Prisma.sql`
+      SELECT app_key,
+             COUNT(*) AS total_calls,
+             COUNT(*) FILTER (WHERE status = 'error') AS error_calls,
+             COUNT(*) FILTER (WHERE finish_reason = 'length') AS truncated_calls,
+             COUNT(*) FILTER (WHERE validation_error IS NOT NULL) AS validation_failed_calls,
+             AVG(prompt_tokens) AS avg_prompt_tokens,
+             AVG(completion_tokens) AS avg_completion_tokens
+        FROM ai_engine_logs
+       WHERE created_at >= ${dateFrom}
+         AND created_at <= ${dateTo}
+         AND app_key IS NOT NULL
+         ${appFilter}
+       GROUP BY app_key
+       ORDER BY COUNT(*) DESC, app_key ASC
+       LIMIT 500
+    `);
+
+    const report: AIAppHealthReport = {
+      date_from: dateFrom.toISOString(),
+      date_to: dateTo.toISOString(),
+      apps: rows.map((row) => this.toHealthRow(row)),
+    };
+    await this.cache.set(cacheKey, report, 30 * 1000);
+    return report;
+  }
+
+  private toHealthRow(row: AppHealthSqlRow): AIAppHealthRow {
+    const total = Number(row.total_calls) || 0;
+    const errors = Number(row.error_calls) || 0;
+    const truncated = Number(row.truncated_calls) || 0;
+    const invalid = Number(row.validation_failed_calls) || 0;
+    const avgPrompt = Math.round(Number(row.avg_prompt_tokens ?? 0) || 0);
+    const avgCompletion = Math.round(
+      Number(row.avg_completion_tokens ?? 0) || 0,
+    );
+    const rate = (part: number) =>
+      total > 0 ? Math.round((part / total) * 1000) / 10 : 0;
+    return {
+      app_key: row.app_key ?? 'unknown',
+      total_calls: total,
+      error_calls: errors,
+      truncated_calls: truncated,
+      validation_failed_calls: invalid,
+      error_rate: rate(errors),
+      truncated_rate: rate(truncated),
+      validation_failed_rate: rate(invalid),
+      avg_prompt_tokens: avgPrompt,
+      avg_completion_tokens: avgCompletion,
+      avg_total_tokens: avgPrompt + avgCompletion,
+    };
+  }
+
+  private validDate(value?: Date): Date | undefined {
+    return value instanceof Date && !Number.isNaN(value.getTime())
+      ? value
+      : undefined;
   }
 
   async getUsageByTenant(

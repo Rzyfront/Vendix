@@ -52,6 +52,7 @@ import {
   AIRerankRequestOptions,
   AIRerankResponse,
   AIModelType,
+  AIRunLogContext,
 } from './interfaces/ai-provider.interface';
 import { OpenAICompatibleProvider } from './providers/openai-compatible.provider';
 import { AnthropicCompatibleProvider } from './providers/anthropic-compatible.provider';
@@ -532,6 +533,8 @@ export class AIEngineService implements OnModuleInit {
     let logStatus: 'success' | 'error' = 'error';
     let logResponse: AIResponse = { success: false, error: 'No attempt made' };
     let resolvedConfigId: number | null = null;
+    // Log-only annotations never travel to the provider.
+    const { logContext, ...providerOverride } = optionsOverride ?? {};
 
     try {
       const app = await this.prisma.ai_engine_applications.findUnique({
@@ -565,7 +568,7 @@ export class AIEngineService implements OnModuleInit {
       }
 
       const messages = this.applicationMessages(app, variables, extraMessages);
-      const options = this.applicationOptions(app, optionsOverride);
+      const options = this.applicationOptions(app, providerOverride);
 
       // Execute with retry
       const retryConfig = app.retry_config as {
@@ -689,6 +692,7 @@ export class AIEngineService implements OnModuleInit {
         status: logStatus,
         error_message: logStatus === 'error' ? logResponse.error : undefined,
         input_preview: variables ? JSON.stringify(variables) : undefined,
+        ...this.runLogAnnotations(logStatus, logResponse, logContext),
       });
 
       this.eventEmitter.emit('ai.request.completed', {
@@ -2175,6 +2179,43 @@ export class AIEngineService implements OnModuleInit {
       latency_ms: record.latencyMs,
       status: 'success',
     });
+  }
+
+  /**
+   * F6 columns of the `run()` log row: provider `finish_reason`, the caller
+   * attempt and why the caller will reject the answer. Pure bookkeeping: a
+   * failing caller validator leaves `validation_error` empty and never
+   * reaches the call (this runs in `finally`, so it must not throw).
+   */
+  private runLogAnnotations(
+    status: 'success' | 'error',
+    response: AIResponse,
+    context?: AIRunLogContext,
+  ): { finish_reason?: string; attempt?: number; validation_error?: string } {
+    const out: {
+      finish_reason?: string;
+      attempt?: number;
+      validation_error?: string;
+    } = {};
+    try {
+      if (typeof response.finish_reason === 'string') {
+        out.finish_reason = response.finish_reason;
+      }
+      if (typeof context?.attempt === 'number') out.attempt = context.attempt;
+      if (
+        status === 'success' &&
+        response.finish_reason !== 'length' &&
+        typeof context?.validate === 'function'
+      ) {
+        const verdict = context.validate(response.content ?? '');
+        if (typeof verdict === 'string' && verdict) {
+          out.validation_error = verdict;
+        }
+      }
+    } catch {
+      // Annotation is best effort; the call already has its answer.
+    }
+    return out;
   }
 
   private observedLogFields(usage: AIResponse['usage']) {

@@ -15,6 +15,7 @@ import { AIEngineConfigService } from './ai-engine.service';
 import { AILoggingService } from '../../../ai-engine/ai-logging.service';
 import { ResponseService } from '../../../common/responses/response.service';
 import { CreateAIConfigDto, UpdateAIConfigDto, AIConfigQueryDto } from './dto';
+import { AIAppHealthQueryDto } from './dto/ai-app-health-query.dto';
 import { RolesGuard } from '../../auth/guards/roles.guard';
 import { Roles } from '../../auth/decorators/roles.decorator';
 import { UserRole } from '../../auth/enums/user-role.enum';
@@ -107,6 +108,25 @@ export class AIEngineController {
       stats,
       'Tenant AI usage statistics retrieved',
     );
+  }
+
+  /**
+   * Read-only health board per `app_key` (ia-cargas F6): calls, % error,
+   * % cut (`finish_reason = 'length'`), % rejected by validation and average
+   * tokens. One aggregate query over ai_engine_logs; default last 7 days.
+   */
+  @Get('app-health')
+  @ApiOperation({
+    summary: 'AI health per application (error/truncation/validation rates)',
+  })
+  @ApiResponse({ status: 200, description: 'AI app health retrieved' })
+  async getAppHealth(@Query() query: AIAppHealthQueryDto) {
+    const report = await this.aiLoggingService.getAppHealth({
+      date_from: query.date_from ? new Date(query.date_from) : undefined,
+      date_to: query.date_to ? new Date(query.date_to) : undefined,
+      app_key: query.app_key,
+    });
+    return this.responseService.success(report, 'AI app health retrieved');
   }
 
   @Get('tools')
