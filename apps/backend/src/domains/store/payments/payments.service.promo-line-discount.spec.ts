@@ -18,7 +18,7 @@ describe('PaymentsService — reparto por línea de la promoción (F1)', () => {
     svc.logger = new Logger('spec');
   });
 
-  const lineA = () => ({
+  const lineA = (): any => ({
     product_id: 1,
     quantity: 1,
     total_price: 100000,
@@ -29,7 +29,7 @@ describe('PaymentsService — reparto por línea de la promoción (F1)', () => {
       ],
     },
   });
-  const lineB = () => ({
+  const lineB = (): any => ({
     product_id: 2,
     quantity: 1,
     total_price: 100000,
