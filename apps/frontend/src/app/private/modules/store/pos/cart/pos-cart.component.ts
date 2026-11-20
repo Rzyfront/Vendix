@@ -4,8 +4,8 @@ import {
 } from '@money-kernel/uom-conversion';
 import { Component, input, output, inject, DestroyRef, computed, signal } from '@angular/core';
 import { FormsModule } from '@angular/forms';
-import { Observable } from 'rxjs';
-import { map, distinctUntilChanged, skip } from 'rxjs/operators';
+import { Observable, of, timer } from 'rxjs';
+import { map, distinctUntilChanged, skip, switchMap, catchError } from 'rxjs/operators';
 import { toSignal, toObservable, takeUntilDestroyed} from '@angular/core/rxjs-interop';
 import {
   PosCartService,
@@ -1599,6 +1599,7 @@ import {
   ] })
 export class PosCartComponent {
   private destroyRef = inject(DestroyRef);
+  private static readonly PROMOTIONS_REFRESH_MS = 15 * 60 * 1000;
 private cartService = inject(PosCartService);
 private stationBookingService = inject(PosStationBookingService);
   /** PSVERSION0001 paso 4 — solo lectura de activeSession() para la tira. */
@@ -1855,18 +1856,32 @@ private stationBookingService = inject(PosStationBookingService);
         }
       });
 
-// Load active promotions
-    this.posApiService
-      .getActivePromotions()
-      .pipe(takeUntilDestroyed(this.destroyRef))
-      .subscribe({
-        next: (response) => {
-          this.activePromotions.set(response?.data || response || []);
-        },
-        error: () => {
-          // Silently fail - promotions are not critical
-          this.activePromotions.set([]);
-        } });
+// Load active promotions, and refresh them every 15 minutes: `/active`
+    // only returns what applies TODAY (store timezone, weekday, usage left), so
+    // a POS left open across midnight or past an end date must not keep
+    // previewing promotions the backend will no longer charge.
+    timer(0, PosCartComponent.PROMOTIONS_REFRESH_MS)
+      .pipe(
+        switchMap((tick) =>
+          this.posApiService.getActivePromotions().pipe(
+            map((response: any) => ({ tick, promos: response?.data || response || [] })),
+            // Silently fail - promotions are not critical. On a refresh keep
+            // the last good list instead of wiping the preview.
+            catchError(() => of({ tick, promos: tick === 0 ? [] : null })),
+          ),
+        ),
+        takeUntilDestroyed(this.destroyRef),
+      )
+      .subscribe(({ tick, promos }) => {
+        if (promos === null) return;
+        this.activePromotions.set(promos);
+        if (tick > 0 && this.cartService.cartState().items.length > 0) {
+          this.cartService
+            .applyPromotions(promos)
+            .pipe(takeUntilDestroyed(this.destroyRef))
+            .subscribe();
+        }
+      });
 
     // Re-apply promotions when cart items change (use item count to avoid infinite loops)
     toObservable(this.cartService.cartState)
@@ -2806,6 +2821,10 @@ private stationBookingService = inject(PosStationBookingService);
             .map((id: string | number) => Number(id))
             .filter((id: number) => Number.isFinite(id)),
           line_total: Number(item.totalPrice || 0),
+          // Si el código resulta ser una promoción, el motor necesita
+          // cantidad y precio unitario (escalas por cantidad).
+          quantity: Number(item.quantity || 0),
+          unit_price: Number(item.finalPrice ?? 0),
         };
       })
       .filter((item) => Number.isFinite(item.product_id));
@@ -2823,7 +2842,7 @@ private stationBookingService = inject(PosStationBookingService);
               .pipe(takeUntilDestroyed(this.destroyRef))
               .subscribe({
                 next: () => {
-                  this.toastService.success(`Cupón "${code}" aplicado`);
+                  this.toastService.success(`Código "${code}" aplicado`);
                   this.couponCode = '';
                   this.couponLoading = false;
                   this.closeCouponModal();
@@ -2876,7 +2895,7 @@ private stationBookingService = inject(PosStationBookingService);
 
   getCouponDiscountAmount(): number {
     const state = this.cartService.getCurrentState();
-    const couponDiscount = state.appliedDiscounts.find((d) => d.coupon_id);
+    const couponDiscount = state.appliedDiscounts.find((d) => this.cartService.isCodeDiscount(d));
     return couponDiscount?.amount || 0;
   }
 

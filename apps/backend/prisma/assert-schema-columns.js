@@ -39,6 +39,10 @@ const { Client } = require('pg');
  * Formato: 'tabla.columna'.
  */
 const REQUIRED_COLUMNS = [
+  // --- Promociones por días de la semana (20261216090000) ---
+  // Prisma nombra todas las columnas del modelo en cada SELECT: sin la
+  // migración, cotizar, cobrar en POS o abrir el carrito ecommerce da 500.
+  'promotions.active_weekdays',
   // --- Transferencias multi-producto: transporte y remisión (20261215090000) ---
   // El despacho/recepción y las listas leen estas columnas: sin la migración,
   // despachar o recibir da 500 y el listado de transferencias también.

@@ -161,6 +161,12 @@ export interface CartDiscount {
   promotion_id?: number;
   coupon_id?: number;
   coupon_code?: string;
+  /**
+   * Promoción aplicada desde la casilla de código (cuando el código no es de
+   * un cupón sino de una promoción). Ocupa el lugar del cupón en el carrito;
+   * el backend la cotiza como promoción manual a partir de `coupon_code`.
+   */
+  code_promotion_id?: number;
   is_auto_applied?: boolean;
   /**
    * Human tier/benefit label for scaled (quantity_tiered) promotions, mirroring
@@ -331,7 +337,14 @@ export interface CartState {
    */
   internalNotes: string;
   appliedDiscounts: CartDiscount[];
-  appliedCoupon?: { id: number; code: string; discount_type: string; discount_value: number };
+  appliedCoupon?: {
+    id: number;
+    code: string;
+    discount_type: string;
+    discount_value: number;
+    /** `promotion` cuando el código de la casilla es de una promoción. */
+    kind?: 'coupon' | 'promotion';
+  };
   pendingBookings: PendingBooking[];
   summary: CartSummary;
   createdAt: Date;

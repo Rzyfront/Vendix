@@ -111,3 +111,33 @@ describe('CouponsService.validate — cupón desactivado que la orden ya usa (QU
     expect(res).not.toHaveProperty('kept_inactive');
   });
 });
+
+describe('CouponsService.create — código compartido con promociones', () => {
+  it('rechaza el código de una promoción existente (la casilla es la misma)', async () => {
+    const prisma: any = {
+      coupons: { findFirst: jest.fn().mockResolvedValue(null) },
+      promotions: { findFirst: jest.fn().mockResolvedValue({ id: 4 }) },
+      $transaction: jest.fn(),
+    };
+    jest
+      .spyOn(require('@common/context/request-context.service').RequestContextService, 'getContext')
+      .mockReturnValue({ store_id: 1 } as any);
+    const svc = new CouponsService(prisma);
+    await expect(
+      svc.create({
+        code: 'MARTES20',
+        name: 'Martes',
+        discount_type: 'PERCENTAGE',
+        discount_value: 20,
+        valid_from: past.toISOString(),
+        valid_until: future.toISOString(),
+      } as any),
+    ).rejects.toMatchObject({
+      response: { error_code: 'CPN_DUP_001', message: 'Ya existe una promoción con ese código' },
+    });
+    expect(prisma.promotions.findFirst.mock.calls[0][0].where).toEqual({
+      code: { equals: 'MARTES20', mode: 'insensitive' },
+    });
+    expect(prisma.$transaction).not.toHaveBeenCalled();
+  });
+});

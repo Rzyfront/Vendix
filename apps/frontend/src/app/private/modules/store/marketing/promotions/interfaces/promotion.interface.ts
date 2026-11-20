@@ -52,6 +52,13 @@ export interface Promotion {
    * Backend default = 'cart_total' si no se envía.
    */
   quantity_grouping?: 'cart_total' | 'per_product';
+  /**
+   * Días en que aplica, en la zona horaria de la tienda: 0 = domingo …
+   * 6 = sábado. Vacío = todos los días.
+   */
+  active_weekdays?: number[];
+  /** Estado derivado de las fechas (no hay job que actualice `state`). */
+  effective_state?: Promotion['state'];
   _count?: { order_promotions: number };
 }
 
@@ -99,9 +106,17 @@ export interface CreatePromotionDto {
    * Server replaces existing tiers on update (no merge semantics).
    */
   quantity_tiers?: PromotionQuantityTier[];
+  /** Días de la semana (0 = domingo … 6 = sábado). `[]` = todos los días. */
+  active_weekdays?: number[];
 }
 
-export interface UpdatePromotionDto extends Partial<CreatePromotionDto> {}
+/**
+ * En edición, `null` limpia un campo opcional (fecha fin, código, límites).
+ * Omitirlo lo deja como estaba en el servidor.
+ */
+export type UpdatePromotionDto = {
+  [K in keyof CreatePromotionDto]?: CreatePromotionDto[K] | null;
+};
 
 export interface QueryPromotionsDto {
   search?: string;

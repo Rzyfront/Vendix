@@ -5018,6 +5018,10 @@ model promotions {
   state               promotion_state_enum             @default(draft)
   is_auto_apply       Boolean                          @default(false)
   priority            Int                              @default(0)
+  // Días de la semana en que aplica (0 = domingo … 6 = sábado), evaluados en
+  // la zona horaria de la tienda. Vacío = todos los días (comportamiento
+  // histórico de todas las promociones existentes).
+  active_weekdays     Int[]                            @default([])
   created_at          DateTime?                        @default(now()) @db.Timestamp(6)
   updated_at          DateTime?                        @default(now()) @db.Timestamp(6)
 

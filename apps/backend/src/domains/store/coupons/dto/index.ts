@@ -163,6 +163,23 @@ export class ValidateCouponItemDto {
   @Min(0)
   @Type(() => Number)
   line_total: number;
+
+  /**
+   * Opcionales (aditivos): si el código resulta ser una PROMOCIÓN, el motor
+   * necesita cantidad y precio unitario para escalas por cantidad. Los cupones
+   * los ignoran.
+   */
+  @IsOptional()
+  @IsNumber()
+  @Min(0)
+  @Type(() => Number)
+  quantity?: number;
+
+  @IsOptional()
+  @IsNumber()
+  @Min(0)
+  @Type(() => Number)
+  unit_price?: number;
 }
 
 export class ValidateCouponDto {

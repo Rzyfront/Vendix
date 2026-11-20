@@ -1323,6 +1323,11 @@ export class CheckoutService {
     promotion_discount: number;
     coupon_discount: number;
     total_discount: number;
+    /**
+     * Lo que agrega el código de la casilla: el descuento del cupón, o lo que
+     * suma la promoción por código frente a la compra sin él.
+     */
+    code_discount: number;
   }> {
     const items = params.items;
     if (items.length === 0) {
@@ -1340,13 +1345,14 @@ export class CheckoutService {
         promotion_discount: 0,
         coupon_discount: 0,
         total_discount: 0,
+        code_discount: 0,
       };
     }
 
     const productIds = Array.from(new Set(items.map((i) => i.product_id)));
     const categoryMap = await this.resolveProductCategories(productIds);
 
-    const quote = await this.promotionEngine.quoteDiscounts({
+    const quoteInput = {
       items: items.map((item, index) => ({
         line_id: index,
         product_id: item.product_id,
@@ -1364,12 +1370,32 @@ export class CheckoutService {
         stock_units_consumed: item.stock_units_consumed ?? null,
       })),
       customer_id: params.customerId,
-    });
+    };
 
+    // Casilla única de código: cupón primero; si el código no es de ningún
+    // cupón pero sí de una promoción, la promoción entra al motor como manual
+    // (fechas, días, hora de la tienda, límites y alcance) y se persiste en
+    // `order_promotions` como cualquier otra.
     const couponCode = params.couponCode?.trim();
+    const codeTarget = couponCode
+      ? await this.promotionEngine.resolveDiscountCode(couponCode)
+      : ({ kind: 'none' } as const);
+    let quote: PromotionQuoteResult;
+    let codePromotionDiscount = 0;
+    if (codeTarget.kind === 'promotion') {
+      const withCode = await this.promotionEngine.quoteWithPromotionCode(
+        quoteInput,
+        codeTarget.promotion_id,
+      );
+      quote = withCode.quote;
+      codePromotionDiscount = withCode.code_discount;
+    } else {
+      quote = await this.promotionEngine.quoteDiscounts(quoteInput);
+    }
+
     let coupon: { coupon_id: number; discount_amount: number } | null = null;
 
-    if (couponCode) {
+    if (couponCode && codeTarget.kind !== 'promotion') {
       // Discount base for the coupon is the post-promotion subtotal so we
       // never refund money the customer didn't actually pay. We pass per-line
       // totals so SPECIFIC_PRODUCTS / SPECIFIC_CATEGORIES coupons can
@@ -1409,6 +1435,7 @@ export class CheckoutService {
       promotion_discount,
       coupon_discount,
       total_discount,
+      code_discount: coupon ? coupon_discount : codePromotionDiscount,
     };
   }
 
@@ -1502,7 +1529,7 @@ export class CheckoutService {
         valid: true,
         coupon_id: res.coupon?.coupon_id ?? null,
         code,
-        discount_amount: res.coupon_discount,
+        discount_amount: res.code_discount,
         subtotal: res.quote.promotional_subtotal,
       };
     } catch (err) {
