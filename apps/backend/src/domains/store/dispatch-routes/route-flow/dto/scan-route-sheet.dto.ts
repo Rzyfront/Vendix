@@ -37,6 +37,15 @@ export interface RouteSheetScanStop {
 export interface RouteSheetScanResult {
   stops: RouteSheetScanStop[];
   confidence: number;
+  /** ia-cargas F5a (optional): Spanish notices, e.g. pages that could not be read. */
+  warnings?: string[];
+  /** ia-cargas F5a (optional): how the document was read. */
+  scan_source?: {
+    pages: number;
+    text_pages: number;
+    batches: number;
+    missing_pages?: number[];
+  };
 }
 
 // ─────────────────────────────────────────────────────────────────────────────

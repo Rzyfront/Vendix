@@ -2,6 +2,13 @@ import { Prisma } from '@prisma/client';
 import { RouteSheetScannerService } from './route-sheet-scanner.service';
 import { RequestContextService } from '@common/context/request-context.service';
 import { VendixHttpException } from '@common/errors';
+import { AiExtractionService } from '@common/ai-ingest/extraction/ai-extraction.service';
+import { ROUTE_SHEET_IMAGE_INSTRUCTION } from './route-sheet-ingest.profile';
+
+// ia-cargas F5a: the type is detected by signature, so the bytes are real.
+const JPEG = Buffer.from([0xff, 0xd8, 0xff, 0xe0, 0, 0x10, 0x4a, 0x46, 0x49, 0x46, 0, 1]);
+const PDF = Buffer.from('%PDF-1.7 planilla');
+const IMG = 'data:image/jpeg;base64,/9j/AAAA';
 
 /**
  * Unit tests for the route-sheet AI scanner.
@@ -21,6 +28,7 @@ describe('RouteSheetScannerService', () => {
   let dispatchRoutesMock: any;
   let s3Mock: any;
   let registryMock: any;
+  let pagesMock: any;
 
   // The AI app returns a JSON string matching the route_sheet_ocr schema.
   const AI_FIXTURE = JSON.stringify({
@@ -47,7 +55,7 @@ describe('RouteSheetScannerService', () => {
 
   const file = (mimetype = 'image/jpeg'): Express.Multer.File =>
     ({
-      buffer: Buffer.from('fake'),
+      buffer: JPEG,
       mimetype,
       originalname: 'planilla.jpg',
       size: 4,
@@ -88,14 +96,23 @@ describe('RouteSheetScannerService', () => {
     s3Mock = { uploadFile: jest.fn().mockResolvedValue('s3/key/planilla.jpg') };
 
     registryMock = { register: jest.fn() };
+    pagesMock = {
+      prepareForAi: jest.fn().mockResolvedValue({
+        source: 'image',
+        pages: [{ page_number: 1, mode: 'image', text: '', image: IMG }],
+        page_count: 1,
+        unreadable_pages: [],
+      }),
+    };
 
     service = new RouteSheetScannerService(
-      aiMock as any,
+      new AiExtractionService(aiMock as any),
       prismaMock as any,
       routeFlowMock as any,
       dispatchRoutesMock as any,
       s3Mock as any,
       registryMock as any,
+      pagesMock as any,
     );
   });
 
@@ -103,7 +120,7 @@ describe('RouteSheetScannerService', () => {
 
   describe('scanRouteSheetFromFiles / registro async', () => {
     const scanFile = (mimeType = 'image/jpeg') => ({
-      buffer: Buffer.from('fake'),
+      buffer: JPEG,
       mimeType,
       originalName: 'planilla.jpg',
       size: 4,
@@ -119,7 +136,7 @@ describe('RouteSheetScannerService', () => {
 
     it('rechaza mime invalido y archivo ausente', async () => {
       await expect(
-        service.scanRouteSheetFromFiles([scanFile('text/plain')], {
+        service.scanRouteSheetFromFiles([{ ...scanFile('text/plain'), buffer: Buffer.from('hola') }], {
           route_id: ROUTE_ID,
         }),
       ).rejects.toBeInstanceOf(VendixHttpException);
@@ -138,7 +155,7 @@ describe('RouteSheetScannerService', () => {
       const spy = jest.spyOn(service, 'scanRouteSheetFromFiles');
       const files = [scanFile()];
       await handler({ files, params: { route_id: ROUTE_ID }, context: {} });
-      expect(spy).toHaveBeenCalledWith(files, { route_id: ROUTE_ID });
+      expect(spy).toHaveBeenCalledWith(files, { route_id: ROUTE_ID }, undefined);
     });
   });
 
@@ -150,7 +167,13 @@ describe('RouteSheetScannerService', () => {
         'route_sheet_ocr',
         {},
         expect.any(Array),
+        expect.objectContaining({ responseSchema: expect.any(Object) }),
       );
+      // A photo gets the exact request of always, as a prepared JPEG.
+      const content = aiMock.run.mock.calls[0][2][0].content;
+      expect(content[0]).toEqual({ type: 'text', text: ROUTE_SHEET_IMAGE_INSTRUCTION });
+      expect(content[2]).toEqual({ type: 'image_url', image_url: { url: IMG, detail: 'high' } });
+      expect(result.scan_source).toEqual({ pages: 1, text_pages: 0, batches: 1 });
       expect(result.confidence).toBe(92);
       expect(result.stops).toHaveLength(2);
       // payment_method normalized efectivo → cash
@@ -182,11 +205,83 @@ describe('RouteSheetScannerService', () => {
       ).rejects.toBeInstanceOf(VendixHttpException);
     });
 
-    it('throws RTSCAN_PARSE_FAIL when the AI returns invalid JSON', async () => {
+    it('throws RTSCAN_AI_FAIL (code kept) when the AI call fails', async () => {
+      aiMock.run.mockResolvedValueOnce({ success: false, error: 'boom' });
+      await expect(service.scanRouteSheet(ROUTE_ID, file())).rejects.toMatchObject({
+        errorCode: 'RTSCAN_AI_FAIL',
+      });
+    });
+
+    it('repairs an invalid JSON once; a second invalid answer is RTSCAN_PARSE_FAIL', async () => {
       aiMock.run.mockResolvedValueOnce({ success: true, content: 'not json' });
+      const repaired = await service.scanRouteSheet(ROUTE_ID, file());
+      expect(aiMock.run).toHaveBeenCalledTimes(2);
+      expect(repaired.stops).toHaveLength(2);
+
+      aiMock.run.mockReset();
+      aiMock.run.mockResolvedValue({ success: true, content: 'not json' });
+      await expect(service.scanRouteSheet(ROUTE_ID, file())).rejects.toMatchObject({
+        errorCode: 'RTSCAN_PARSE_FAIL',
+      });
+      // An answer without the stops list is also repaired, then a parse failure.
+      aiMock.run.mockReset();
+      aiMock.run.mockResolvedValue({ success: true, content: '{"confidence": 80}' });
+      await expect(service.scanRouteSheet(ROUTE_ID, file())).rejects.toMatchObject({
+        errorCode: 'RTSCAN_PARSE_FAIL',
+      });
+    });
+
+    it('a PDF is read by pages (native text first, never the raw PDF); 7 pages → 2 calls merged', async () => {
+      pagesMock.prepareForAi.mockResolvedValue({
+        source: 'pdf',
+        pages: Array.from({ length: 7 }, (_, i) => ({
+          page_number: i + 1,
+          mode: 'text',
+          text: `PLANILLA pagina ${i + 1} ` + 'x'.repeat(220),
+        })),
+        page_count: 7,
+        unreadable_pages: [],
+      });
+      aiMock.run.mockImplementation(async (_app: string, _v: unknown, messages: any[]) => {
+        const text = JSON.stringify(messages[0].content);
+        const first = text.includes('pages 1-5');
+        return {
+          success: true,
+          content: JSON.stringify({
+            stops: [{ stop_sequence: first ? 1 : 2, remision_number: first ? 'REM-1' : 'REM-2', delivered: true, collected_amount: 100 }],
+            confidence: first ? 90 : 70,
+          }),
+        };
+      });
+
+      const result = await service.scanRouteSheet(ROUTE_ID, {
+        buffer: PDF,
+        mimetype: 'application/pdf',
+        originalname: 'planilla.pdf',
+        size: PDF.length,
+      } as any);
+
+      expect(pagesMock.prepareForAi).toHaveBeenCalledWith(
+        expect.objectContaining({ mimetype: 'application/pdf' }),
+        expect.objectContaining({ maxPages: 10, splitTallImages: false }),
+      );
+      expect(aiMock.run).toHaveBeenCalledTimes(2);
+      const sent = JSON.stringify(aiMock.run.mock.calls.map((c: any[]) => c[2]));
+      expect(sent).not.toContain('application/pdf');
+      expect(sent).not.toContain('image_url');
+      expect(result.stops.map((s) => s.remision_number)).toEqual(['REM-1', 'REM-2']);
+      expect(result.confidence).toBe(70);
+      expect(result.scan_source).toEqual({ pages: 7, text_pages: 7, batches: 2 });
+    });
+
+    it('document problems arrive as AI_INGEST_* (too many pages)', async () => {
+      const { ErrorCodes } = jest.requireActual('@common/errors');
+      pagesMock.prepareForAi.mockRejectedValue(
+        new VendixHttpException(ErrorCodes.AI_INGEST_TOO_MANY_PAGES, 'El PDF excede el máximo de 10 páginas.'),
+      );
       await expect(
-        service.scanRouteSheet(ROUTE_ID, file()),
-      ).rejects.toBeInstanceOf(VendixHttpException);
+        service.scanRouteSheet(ROUTE_ID, { buffer: PDF, mimetype: 'application/pdf', originalname: 'p.pdf', size: PDF.length } as any),
+      ).rejects.toMatchObject({ errorCode: 'AI_INGEST_TOO_MANY_PAGES' });
     });
   });
 
