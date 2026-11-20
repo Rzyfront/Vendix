@@ -39,6 +39,11 @@ import {
   resolveTransferReceiptNoteStoreId,
   resolveTransferTransport,
 } from '../../../store/orders/stock-transfers/transfer-transport';
+import {
+  listTransferAdvancedOptions,
+  listTransferBatches,
+  listTransferLocationStock,
+} from '../../../store/orders/stock-transfers/transfer-advanced-options';
 import { VendixHttpException, ErrorCodes } from '@common/errors';
 
 /** Relaciones que devuelven todas las escrituras (mismo shape que `findOne`). */
@@ -67,6 +72,9 @@ const TRANSFER_RESPONSE_INCLUDE = {
       status: true,
       subtype: true,
       emission_date: true,
+      // R3-2 — la UI avisa desde qué tienda se sigue el documento.
+      store_id: true,
+      store: { select: { id: true, name: true } },
     },
   },
   receipt_note: {
@@ -76,6 +84,9 @@ const TRANSFER_RESPONSE_INCLUDE = {
       status: true,
       subtype: true,
       emission_date: true,
+      // R3-2 — la UI avisa desde qué tienda se sigue el documento.
+      store_id: true,
+      store: { select: { id: true, name: true } },
     },
   },
 } as const;
@@ -198,6 +209,7 @@ export class OrgTransfersService {
       ...(query.to_location_id != null
         ? { to_location_id: query.to_location_id }
         : {}),
+      ...(query.with_alert ? { no_support_alert: true } : {}),
     };
 
     if (query.transfer_date_from || query.transfer_date_to) {
@@ -742,6 +754,61 @@ export class OrgTransfersService {
           toLocationId,
         ),
       );
+  }
+
+  // ------------------------------------------------------------------
+  // P3 — lecturas de apoyo de la orden avanzada (mismas que en tienda)
+  // ------------------------------------------------------------------
+
+  /** Vehículos, conductores, métodos de envío y categorías del origen (D6). */
+  async getAdvancedOptions(fromLocationId: number) {
+    const organization_id = this.requireOrgId();
+    const scope = await this.validateTransferLocations(
+      organization_id,
+      fromLocationId,
+      null,
+    );
+    return this.orgPrisma.$transaction((tx: any) =>
+      listTransferAdvancedOptions(tx, {
+        organization_id,
+        from_store_id: scope.from_store_id,
+      }),
+    );
+  }
+
+  /** Lotes de los productos en la bodega de origen, en orden FEFO (D5). */
+  async getTransferBatches(fromLocationId: number, productIds: number[]) {
+    const organization_id = this.requireOrgId();
+    await this.validateTransferLocations(organization_id, fromLocationId, null);
+    return this.orgPrisma.$transaction((tx: any) =>
+      listTransferBatches(tx, {
+        location_id: fromLocationId,
+        product_ids: productIds,
+      }),
+    );
+  }
+
+  /** "Agregar todo el stock de la bodega", con filtro opcional por categoría. */
+  async getLocationStock(
+    fromLocationId: number,
+    toLocationId: number | null,
+    categoryId: number | null,
+    limit?: number,
+  ) {
+    const organization_id = this.requireOrgId();
+    await this.validateTransferLocations(
+      organization_id,
+      fromLocationId,
+      toLocationId,
+    );
+    return this.orgPrisma.$transaction((tx: any) =>
+      listTransferLocationStock(tx, {
+        from_location_id: fromLocationId,
+        to_location_id: toLocationId,
+        category_id: categoryId,
+        limit,
+      }),
+    );
   }
 
   /**

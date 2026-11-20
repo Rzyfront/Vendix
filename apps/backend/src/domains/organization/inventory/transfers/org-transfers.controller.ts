@@ -15,6 +15,11 @@ import { ResponseService } from '@common/responses/response.service';
 import { SkipSubscriptionGate } from '../../../store/subscriptions/decorators/skip-subscription-gate.decorator';
 
 import { OrgTransfersService } from './org-transfers.service';
+import {
+  parseIdList,
+  parseOptionalId,
+  parseRequiredId,
+} from '../../../store/orders/stock-transfers/transfer-query-params';
 import { OrgTransferQueryDto } from './dto/org-transfer-query.dto';
 import { CreateOrgTransferDto } from './dto/create-org-transfer.dto';
 import { CompleteOrgTransferDto } from './dto/complete-org-transfer.dto';
@@ -94,6 +99,48 @@ export class OrgTransfersController {
       limit ? +limit : 20,
     );
     return this.responseService.success(data, 'Productos transferibles');
+  }
+
+  /** P3 — transporte, conductores, métodos de envío y categorías del origen. */
+  @Get('advanced-options')
+  @Permissions('organization:inventory:transfers:read')
+  async getAdvancedOptions(@Query('from_location_id') fromLocationId: string) {
+    const data = await this.transfers.getAdvancedOptions(
+      parseRequiredId(fromLocationId, 'from_location_id'),
+    );
+    return this.responseService.success(data, 'Opciones de la orden');
+  }
+
+  /** P3 — lotes de los productos en la bodega de origen (FEFO, D5). */
+  @Get('batches')
+  @Permissions('organization:inventory:transfers:read')
+  async getTransferBatches(
+    @Query('from_location_id') fromLocationId: string,
+    @Query('product_ids') productIds?: string,
+  ) {
+    const data = await this.transfers.getTransferBatches(
+      parseRequiredId(fromLocationId, 'from_location_id'),
+      parseIdList(productIds),
+    );
+    return this.responseService.success(data, 'Lotes del origen');
+  }
+
+  /** P3 — todo el stock disponible de la bodega de origen (por categoría). */
+  @Get('location-stock')
+  @Permissions('organization:inventory:transfers:read')
+  async getLocationStock(
+    @Query('from_location_id') fromLocationId: string,
+    @Query('to_location_id') toLocationId?: string,
+    @Query('category_id') categoryId?: string,
+    @Query('limit') limit?: string,
+  ) {
+    const data = await this.transfers.getLocationStock(
+      parseRequiredId(fromLocationId, 'from_location_id'),
+      parseOptionalId(toLocationId),
+      parseOptionalId(categoryId),
+      limit ? +limit : undefined,
+    );
+    return this.responseService.success(data, 'Stock de la bodega');
   }
 
   @Get(':id')

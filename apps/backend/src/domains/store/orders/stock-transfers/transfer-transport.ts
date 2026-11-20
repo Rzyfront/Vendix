@@ -665,13 +665,28 @@ export function resolveTransferReceiptNoteStoreId(
  * en la tienda del contexto. El candado, el consecutivo y el documento usan esa
  * misma tienda; si se calcularan con otra, la lectura del último número
  * quedaría vacía y cada remisión del día chocaría con la `…0001`.
+ *
+ * Esa tienda tiene que ser parte de la transferencia: la de origen o la de
+ * destino. Con alcance de organización un administrador puede operar desde
+ * cualquier tienda, y sin esta regla la remisión de un traslado A→B quedaba
+ * como documento de una tercera tienda C.
  */
 export function resolveStoreSurfaceNoteStoreId(
   contextStoreId: number | null | undefined,
+  transferStores: {
+    from_store_id?: number | null;
+    to_store_id?: number | null;
+  },
 ): number {
   if (contextStoreId == null) {
     throw new BadRequestException(
       'Elige la tienda desde la que trabajas para emitir la remisión',
+    );
+  }
+  const allowed = [transferStores.from_store_id, transferStores.to_store_id];
+  if (!allowed.includes(contextStoreId)) {
+    throw new BadRequestException(
+      'La remisión de esta transferencia se emite desde la tienda de origen o la de destino: cambia a una de esas tiendas para continuar',
     );
   }
   return contextStoreId;
@@ -874,7 +889,7 @@ export async function accumulateTransferReceiptNoteInTx(
   if (!note) {
     if (params.on_missing_existing === 'reject') {
       throw new ConflictException(
-        'La remisión de entrada de esta transferencia está en otra tienda: registra la recepción desde la tienda que recibió la primera entrega',
+        'Las entregas de esta transferencia se están registrando en otra tienda: cambia a la tienda donde se registró la primera entrega para seguir recibiendo',
       );
     }
     // La FK es SetNull: si el documento se borró, se emite uno nuevo en vez de

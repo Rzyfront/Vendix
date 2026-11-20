@@ -1337,6 +1337,49 @@ describe('StockTransfersService — P2 transporte, remisión y recepción', () =
         expect(h.tx.stock_transfers.update).not.toHaveBeenCalled();
       });
 
+      it('R3-1: rechaza la remisión de salida si la tienda del contexto no es origen ni destino', async () => {
+        const h = buildHarness({ transfer: { status: 'approved' } });
+        // Origen en la tienda 4 y destino en la 5: el contexto (3) es ajeno.
+        h.operatingScope.validateLocationScope.mockImplementation(
+          async (_org: number, ids: number[]) => ({
+            scope: 'ORGANIZATION',
+            locations: ids.map((id) => ({
+              id,
+              organization_id: 1,
+              store_id: id === 7 ? 4 : 5,
+            })),
+          }),
+        );
+
+        await expect(h.service.dispatch(1, {})).rejects.toThrow(
+          /tienda de origen o la de destino/,
+        );
+        expect(h.tx.dispatch_notes.create).not.toHaveBeenCalled();
+      });
+
+      it('R3-1: rechaza la recepción con remisión antes de mover stock si la tienda es ajena', async () => {
+        const h = buildHarness({
+          transfer: { status: 'in_transit', dispatched_at: new Date() },
+          items: dispatchedItems(),
+        });
+        h.operatingScope.validateLocationScope.mockImplementation(
+          async (_org: number, ids: number[]) => ({
+            scope: 'ORGANIZATION',
+            locations: ids.map((id) => ({
+              id,
+              organization_id: 1,
+              store_id: id === 7 ? 4 : 5,
+            })),
+          }),
+        );
+
+        await expect(
+          h.service.receive(1, [{ id: 11, quantity_received: 2 }]),
+        ).rejects.toThrow(/tienda de origen o la de destino/);
+        expect(h.stockLevelManager.updateStock).not.toHaveBeenCalled();
+        expect(h.tx.dispatch_notes.create).not.toHaveBeenCalled();
+      });
+
       it('sin tienda en el contexto no emite remisión con otra tienda', async () => {
         const h = buildHarness({ transfer: { status: 'approved' } });
         orgScope(h);
