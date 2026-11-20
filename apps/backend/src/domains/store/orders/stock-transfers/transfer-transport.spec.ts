@@ -20,6 +20,7 @@ import { StockTransfersController } from './stock-transfers.controller';
 import { StockTransfersService } from './stock-transfers.service';
 import { UpdateTransferDto } from './dto/update-transfer.dto';
 import {
+  accumulateTransferReceiptNoteInTx,
   createTransferNoteInTx,
   resolveTransferTransport,
 } from './transfer-transport';
@@ -558,9 +559,9 @@ describe('StockTransfersService — P2 transporte, remisión y recepción', () =
       expect(result.loss_reason).toBe('Se perdió en ruta');
     });
 
-    it('si nunca se despachó, sí genera el movimiento de merma en el origen', async () => {
+    it('si nunca se despachó (fila sin modo), sí genera el movimiento de merma en el origen', async () => {
       const h = buildHarness({
-        transfer: { dispatched_at: null },
+        transfer: { dispatched_at: null, movement_mode: null },
         items: [
           { id: 11, product_id: 1, quantity: 5, quantity_received: 0, quantity_dispatched: null, quantity_lost: 0 },
         ],
@@ -1133,6 +1134,236 @@ describe('StockTransfersService — P2 transporte, remisión y recepción', () =
         central,
       );
       expect(system.shipping_method_id).toBe(5);
+    });
+  });
+
+  describe('fixes de re-review P2', () => {
+    const TERMINAL = ['completed', 'received', 'closed_with_loss', 'cancelled'];
+    const dispatchedItems = () => [
+      { id: 11, product_id: 1, product_variant_id: 10, quantity: 5, quantity_received: 0, quantity_dispatched: 5, quantity_lost: 0 },
+    ];
+
+    it('N1: cancelar toma el candado condicionado por estado antes de leer', async () => {
+      const h = buildHarness({
+        transfer: { dispatched_at: new Date(), status: 'in_transit' },
+        items: dispatchedItems(),
+      });
+
+      await h.service.cancel(1);
+
+      expect(h.tx.stock_transfers.updateMany).toHaveBeenCalledWith({
+        where: { id: 1, status: { notIn: TERMINAL } },
+        data: { updated_at: expect.any(Date) },
+      });
+      expect(
+        h.tx.stock_transfers.updateMany.mock.invocationCallOrder[0],
+      ).toBeLessThan(h.tx.stock_transfers.findUnique.mock.invocationCallOrder[0]);
+    });
+
+    it('N1: si una recepción concurrente ya cerró la transferencia, cancelar se rechaza sin mover stock', async () => {
+      const h = buildHarness({
+        transfer: { dispatched_at: new Date(), status: 'in_transit' },
+        items: dispatchedItems(),
+      });
+      // La recepción hizo commit primero: el candado ya no encuentra un estado
+      // cancelable y la relectura ve `received`.
+      h.tx.stock_transfers.updateMany.mockImplementation(async () => {
+        h.transfer.status = 'received';
+        h.items[0].quantity_received = 5;
+        return { count: 0 };
+      });
+
+      await expect(h.service.cancel(1)).rejects.toThrow(BadRequestException);
+      expect(h.stockLevelManager.updateStock).not.toHaveBeenCalled();
+      expect(
+        h.stockLevelManager.releaseReservationsByReference,
+      ).not.toHaveBeenCalled();
+      expect(h.tx.stock_transfers.update).not.toHaveBeenCalled();
+    });
+
+    it('N1: con el candado sin efecto y estado aún cancelable, responde conflicto sin mover stock', async () => {
+      const h = buildHarness({
+        transfer: { dispatched_at: new Date(), status: 'in_transit' },
+        items: dispatchedItems(),
+      });
+      h.tx.stock_transfers.updateMany.mockResolvedValue({ count: 0 });
+
+      await expect(h.service.cancel(1)).rejects.toBeInstanceOf(
+        ConflictException,
+      );
+      expect(h.stockLevelManager.updateStock).not.toHaveBeenCalled();
+      expect(h.tx.stock_transfers.update).not.toHaveBeenCalled();
+    });
+
+    it('N1: cancelar devuelve al origen solo el saldo releído después del candado', async () => {
+      const h = buildHarness({
+        transfer: { dispatched_at: new Date(), status: 'in_transit' },
+        items: dispatchedItems(),
+      });
+      // Una recepción parcial de 3 hizo commit mientras se esperaba el candado.
+      h.tx.stock_transfers.updateMany.mockImplementation(async () => {
+        h.transfer.status = 'partially_received';
+        h.items[0].quantity_received = 3;
+        return { count: 1 };
+      });
+
+      const result = await h.service.cancel(1);
+
+      expect(
+        h.stockLevelManager.updateStock.mock.calls.map((call: any) => call[0]),
+      ).toEqual([
+        expect.objectContaining({ location_id: 7, quantity_change: 2 }),
+      ]);
+      expect(result.status).toBe('cancelled');
+    });
+
+    it('N2: una transferencia con modo avanzado no se recibe sin despacho', async () => {
+      for (const movement_mode of ['with_dispatch_notes', 'mass_only']) {
+        const h = buildHarness({
+          transfer: { status: 'in_transit', dispatched_at: null, movement_mode },
+        });
+
+        await expect(
+          h.service.receive(1, [{ id: 11, quantity_received: 5 }]),
+        ).rejects.toThrow(/Despacha la transferencia antes de recibirla/);
+        expect(h.stockLevelManager.updateStock).not.toHaveBeenCalled();
+        expect(
+          h.stockLevelManager.releaseReservationsByReference,
+        ).not.toHaveBeenCalled();
+        expect(h.tx.dispatch_notes.create).not.toHaveBeenCalled();
+      }
+    });
+
+    it('N2: una transferencia con modo avanzado no se cierra con pérdida sin despacho', async () => {
+      const h = buildHarness({
+        transfer: { status: 'in_transit', dispatched_at: null },
+      });
+
+      await expect(
+        h.service.closeWithLoss(1, 'Se perdió en ruta'),
+      ).rejects.toThrow(/Despacha la transferencia antes de cerrarla/);
+      expect(h.stockLevelManager.updateStock).not.toHaveBeenCalled();
+      expect(h.tx.stock_transfer_items.update).not.toHaveBeenCalled();
+    });
+
+    it('N2: una fila sin modo (flujo anterior) sigue recibiéndose sin despacho y descuenta el origen', async () => {
+      const h = buildHarness({
+        transfer: { status: 'in_transit', dispatched_at: null, movement_mode: null },
+        items: [
+          { id: 11, product_id: 1, product_variant_id: 10, quantity: 5, quantity_received: 0, quantity_dispatched: null, quantity_lost: 0 },
+        ],
+      });
+
+      const result = await h.service.receive(1, [
+        { id: 11, quantity_received: 5 },
+      ]);
+
+      expect(
+        h.stockLevelManager.updateStock.mock.calls.map((call: any) => call[0]),
+      ).toEqual([
+        expect.objectContaining({ location_id: 7, quantity_change: -5 }),
+        expect.objectContaining({ location_id: 9, quantity_change: 5 }),
+      ]);
+      expect(result.status).toBe('received');
+    });
+
+    describe('N3: remisiones con alcance de organización desde otra tienda', () => {
+      // Contexto: tienda 3. Origen en la tienda 4, destino en la 3.
+      const orgScope = (h: any) =>
+        h.operatingScope.validateLocationScope.mockImplementation(
+          async (_org: number, ids: number[]) => ({
+            scope: 'ORGANIZATION',
+            locations: ids.map((id) => ({
+              id,
+              organization_id: 1,
+              store_id: id === 7 ? 4 : 3,
+            })),
+          }),
+        );
+
+      it('el despacho usa la tienda del contexto para candado, consecutivo y documento', async () => {
+        const h = buildHarness({ transfer: { status: 'approved' } });
+        orgScope(h);
+
+        await h.service.dispatch(1, {});
+
+        expect(h.tx.$executeRawUnsafe).toHaveBeenCalledWith(
+          'SELECT pg_advisory_xact_lock(hashtext($1))',
+          'dispatch_notes:number:3',
+        );
+        const numberLookup = h.tx.dispatch_notes.findFirst.mock.calls.find(
+          (call: any) => call[0]?.where?.dispatch_number,
+        );
+        expect(numberLookup[0].where.store_id).toBe(3);
+        expect(h.tx.dispatch_notes.create.mock.calls[0][0].data.store_id).toBe(3);
+      });
+
+      it('la remisión de entrada queda en la tienda que recibe (contexto)', async () => {
+        const h = buildHarness({
+          transfer: { status: 'in_transit', dispatched_at: new Date() },
+          items: dispatchedItems(),
+        });
+        orgScope(h);
+
+        await h.service.receive(1, [{ id: 11, quantity_received: 2 }]);
+
+        expect(h.tx.$executeRawUnsafe).toHaveBeenCalledWith(
+          'SELECT pg_advisory_xact_lock(hashtext($1))',
+          'dispatch_notes:number:3',
+        );
+        const created = h.tx.dispatch_notes.create.mock.calls[0][0].data;
+        expect(created.store_id).toBe(3);
+        expect(created.subtype).toBe('transfer_in');
+      });
+
+      it('no duplica la remisión de entrada si la anterior está en otra tienda', async () => {
+        const h = buildHarness({
+          transfer: {
+            status: 'partially_received',
+            dispatched_at: new Date(),
+            receipt_note_id: 777,
+          },
+          items: [
+            { id: 11, product_id: 1, product_variant_id: 10, quantity: 5, quantity_received: 2, quantity_dispatched: 5, quantity_lost: 0 },
+          ],
+        });
+        orgScope(h);
+        // Con scope de tienda, la nota 777 (de otra tienda) no se encuentra.
+
+        await expect(
+          h.service.receive(1, [{ id: 11, quantity_received: 3 }]),
+        ).rejects.toBeInstanceOf(ConflictException);
+        expect(h.tx.dispatch_notes.create).not.toHaveBeenCalled();
+        expect(h.tx.stock_transfers.update).not.toHaveBeenCalled();
+      });
+
+      it('sin tienda en el contexto no emite remisión con otra tienda', async () => {
+        const h = buildHarness({ transfer: { status: 'approved' } });
+        orgScope(h);
+        (RequestContextService.getStoreId as jest.Mock).mockReturnValue(
+          undefined,
+        );
+
+        await expect(h.service.dispatch(1, {})).rejects.toThrow(
+          /Elige la tienda/,
+        );
+        expect(h.tx.dispatch_notes.create).not.toHaveBeenCalled();
+      });
+
+      it('la acumulación de entrada del cliente sin scope sigue creando si el documento se borró', async () => {
+        const h = buildHarness();
+        const id = await accumulateTransferReceiptNoteInTx(h.tx, {
+          existing_note_id: 123,
+          store_id: 3,
+          direction: 'inbound',
+          subtype: 'transfer_in',
+          from_location_id: 7,
+          to_location_id: 9,
+          items: [{ product_id: 1, quantity: 1 }],
+        });
+        expect(id).toBe(900);
+        expect(h.tx.dispatch_notes.create).toHaveBeenCalledTimes(1);
+      });
     });
   });
 

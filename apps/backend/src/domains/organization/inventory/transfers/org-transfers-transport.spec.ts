@@ -569,7 +569,7 @@ describe('OrgTransfersService — P2 transporte, remisión y recepción', () => 
 
     it('flujo histórico: recibir consume la reserva del aprobar de tienda antes de descontar', async () => {
       const h = buildHarness({
-        transfer: { status: 'in_transit', dispatched_at: null },
+        transfer: { status: 'in_transit', dispatched_at: null, movement_mode: null },
       });
 
       await h.service.receive(1, {
@@ -589,7 +589,7 @@ describe('OrgTransfersService — P2 transporte, remisión y recepción', () => 
 
     it('flujo histórico: cerrar con pérdida consume la reserva antes de la merma', async () => {
       const h = buildHarness({
-        transfer: { status: 'in_transit', dispatched_at: null },
+        transfer: { status: 'in_transit', dispatched_at: null, movement_mode: null },
       });
 
       await h.service.closeWithLoss(1, 'Producto vencido');
@@ -610,7 +610,7 @@ describe('OrgTransfersService — P2 transporte, remisión y recepción', () => 
 
     it('flujo histórico: cancelar una aprobada desde tienda libera la reserva y no devuelve stock', async () => {
       const h = buildHarness({
-        transfer: { status: 'in_transit', dispatched_at: null },
+        transfer: { status: 'in_transit', dispatched_at: null, movement_mode: null },
       });
 
       const result = await h.service.cancel(1, { reason: 'Ya no va' });
@@ -620,6 +620,126 @@ describe('OrgTransfersService — P2 transporte, remisión y recepción', () => 
       ).toHaveBeenCalledWith('transfer', 1, 'cancelled', h.tx);
       expect(h.stockLevelManager.updateStock).not.toHaveBeenCalled();
       expect(result.status).toBe('cancelled');
+    });
+
+    it('N1: cancelar toma el candado condicionado por estado dentro de la transacción y antes de leer', async () => {
+      const h = buildHarness({
+        transfer: { status: 'in_transit', dispatched_at: new Date() },
+        items: [
+          { id: 21, product_id: 1, quantity: 5, quantity_received: 0, quantity_dispatched: 5, quantity_lost: 0 },
+        ],
+      });
+
+      await h.service.cancel(1, {});
+
+      expect(h.orgPrisma.$transaction).toHaveBeenCalledTimes(1);
+      expect(h.tx.stock_transfers.updateMany).toHaveBeenCalledWith({
+        where: {
+          id: 1,
+          organization_id: 1,
+          status: {
+            notIn: ['received', 'completed', 'closed_with_loss', 'cancelled'],
+          },
+        },
+        data: { updated_at: expect.any(Date) },
+      });
+      expect(
+        h.tx.stock_transfers.updateMany.mock.invocationCallOrder[0],
+      ).toBeLessThan(h.tx.stock_transfers.findFirst.mock.invocationCallOrder[0]);
+    });
+
+    it('N1: si una recepción concurrente ya cerró la transferencia, cancelar se rechaza sin mover stock', async () => {
+      const h = buildHarness({
+        transfer: { status: 'in_transit', dispatched_at: new Date() },
+        items: [
+          { id: 21, product_id: 1, quantity: 5, quantity_received: 0, quantity_dispatched: 5, quantity_lost: 0 },
+        ],
+      });
+      h.tx.stock_transfers.updateMany.mockImplementation(async () => {
+        h.transfer.status = 'received';
+        h.items[0].quantity_received = 5;
+        return { count: 0 };
+      });
+
+      await expect(h.service.cancel(1, {})).rejects.toThrow(
+        /Cannot cancel transfer in status 'received'/,
+      );
+      expect(h.stockLevelManager.updateStock).not.toHaveBeenCalled();
+      expect(
+        h.stockLevelManager.releaseReservationsByReference,
+      ).not.toHaveBeenCalled();
+      expect(h.tx.stock_transfers.update).not.toHaveBeenCalled();
+    });
+
+    it('N1: un despacho que hizo commit antes que la cancelación se devuelve al origen', async () => {
+      // Al leer fuera del candado la fila se veía `approved` y se cancelaba
+      // sin devolver lo que el despacho ya había descontado.
+      const h = buildHarness();
+      h.tx.stock_transfers.updateMany.mockImplementation(async () => {
+        h.transfer.status = 'in_transit';
+        h.transfer.dispatched_at = new Date();
+        h.items[0].quantity_dispatched = 5;
+        h.items[1].quantity_dispatched = 2;
+        return { count: 1 };
+      });
+
+      const result = await h.service.cancel(1, {});
+
+      expect(
+        h.stockLevelManager.updateStock.mock.calls.map((call: any) => call[0]),
+      ).toEqual([
+        expect.objectContaining({ location_id: 7, quantity_change: 5 }),
+        expect.objectContaining({ location_id: 7, quantity_change: 2 }),
+      ]);
+      expect(result.status).toBe('cancelled');
+    });
+
+    it('N2: con modo avanzado no se recibe ni se cierra con pérdida sin despacho', async () => {
+      const receiving = buildHarness({
+        transfer: { status: 'in_transit', dispatched_at: null },
+      });
+      await expect(
+        receiving.service.receive(1, {
+          items: [{ stock_transfer_item_id: 21, quantity_received: 5 }],
+        } as any),
+      ).rejects.toThrow(/Despacha la transferencia antes de recibirla/);
+      expect(receiving.stockLevelManager.updateStock).not.toHaveBeenCalled();
+      expect(
+        receiving.stockLevelManager.releaseReservationsByReference,
+      ).not.toHaveBeenCalled();
+
+      const closing = buildHarness({
+        transfer: {
+          status: 'in_transit',
+          dispatched_at: null,
+          movement_mode: 'mass_only',
+        },
+      });
+      await expect(
+        closing.service.closeWithLoss(1, 'Se perdió en ruta'),
+      ).rejects.toThrow(/Despacha la transferencia antes de cerrarla/);
+      expect(closing.stockLevelManager.updateStock).not.toHaveBeenCalled();
+      expect(closing.tx.stock_transfer_items.update).not.toHaveBeenCalled();
+    });
+
+    it('N3: la remisión de entrada queda en la tienda que recibe y la de salida en la que despacha', async () => {
+      const h = buildHarness();
+      await h.service.dispatch(1, {});
+      await h.service.receive(1, {
+        items: [{ stock_transfer_item_id: 21, quantity_received: 1 }],
+      } as any);
+
+      const created = h.tx.dispatch_notes.create.mock.calls.map(
+        (call: any) => call[0].data,
+      );
+      expect(created.map((data: any) => [data.subtype, data.store_id])).toEqual([
+        ['transfer_out', 3],
+        ['transfer_in', 4],
+      ]);
+      expect(h.tx.$executeRawUnsafe.mock.calls.map((call: any) => call[1])).toEqual([
+        'dispatch_notes:number:3',
+        'dispatch_notes:number:4',
+      ]);
     });
 
     it('rechaza un conductor de otra organización al crear', async () => {
