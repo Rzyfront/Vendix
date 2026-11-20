@@ -64,7 +64,7 @@ import { StockTransfer, StockTransferItem, TransferStatus, CompleteTransferItem 
               <p class="text-xs text-text-secondary mb-1">Destino</p>
               <div class="flex items-center gap-2">
                 <app-icon name="map-pin" [size]="16" class="text-success"></app-icon>
-                <p class="text-sm font-semibold text-text-primary">{{ transfer()!.to_location.name || '-' }}</p>
+                <p class="text-sm font-semibold text-text-primary">{{ destinationName() }}</p>
               </div>
             </div>
           </div>
@@ -163,7 +163,7 @@ import { StockTransfer, StockTransferItem, TransferStatus, CompleteTransferItem 
                     <input
                       type="number"
                       [min]="0"
-                      [max]="item.quantity"
+                      [max]="pendingQuantity(item)"
                       [value]="getReceivedQuantity(item.id)"
                       (input)="updateReceivedQuantity(item.id, $event)"
                       class="w-20 px-2 py-1 text-sm text-right border border-border rounded-lg bg-surface focus:border-primary focus:ring-1 focus:ring-primary outline-none"
@@ -228,7 +228,7 @@ import { StockTransfer, StockTransferItem, TransferStatus, CompleteTransferItem 
             </app-button>
           }
 
-          @if (transfer()?.status === 'in_transit' && !isCompleting) {
+          @if (canReceive() && !isCompleting) {
             <app-button variant="primary" (clicked)="startCompleting()" customClasses="!rounded-xl font-bold">
               <app-icon name="check-circle" [size]="14" class="mr-1.5" slot="icon" ></app-icon>
               Recibir
@@ -302,8 +302,26 @@ export class TransferDetailModalComponent {
       status === 'pending' ||
       status === 'draft' ||
       status === 'approved' ||
-      status === 'in_transit'
+      status === 'in_transit' ||
+      status === 'partially_received'
     );
+  });
+
+  /** D4 — se puede recibir mientras haya saldo en camino, también por partes. */
+  readonly canReceive = computed(() => {
+    const status = this.transfer()?.status;
+    return status === 'in_transit' || status === 'partially_received';
+  });
+
+  /** D8 — una salida a destino externo no tiene bodega de destino. */
+  readonly destinationName = computed(() => {
+    const transfer = this.transfer();
+    if (!transfer) return '-';
+    if (transfer.to_location?.name) return transfer.to_location.name;
+    if (transfer.is_external_destination) {
+      return `Destino externo: ${transfer.external_destination_name || '-'}`;
+    }
+    return '-';
   });
 
   isCompleting = false;
@@ -324,9 +342,18 @@ export class TransferDetailModalComponent {
     this.isCompleting = true;
     if (this.transfer()?.stock_transfer_items) {
       for (const item of this.transfer()!.stock_transfer_items) {
-        this.receivedQuantities.set(item.id, item.quantity);
+        this.receivedQuantities.set(item.id, this.pendingQuantity(item));
       }
     }
+  }
+
+  /** Saldo por recibir: lo que salió menos lo recibido y lo perdido. */
+  pendingQuantity(item: StockTransferItem): number {
+    const dispatched = item.quantity_dispatched ?? item.quantity;
+    return Math.max(
+      0,
+      dispatched - (item.quantity_received ?? 0) - (item.quantity_lost ?? 0),
+    );
   }
 
   getReceivedQuantity(itemId: number): number {
@@ -372,6 +399,8 @@ export class TransferDetailModalComponent {
       received: 'Recibida',
       completed: 'Completada',
       cancelled: 'Cancelada',
+      partially_received: 'Recibida en parte',
+      closed_with_loss: 'Cerrada con pérdida',
     };
     return labels[status] || status;
   }
@@ -385,6 +414,8 @@ export class TransferDetailModalComponent {
       received: 'bg-emerald-100 text-emerald-700',
       completed: 'bg-emerald-100 text-emerald-700',
       cancelled: 'bg-gray-100 text-gray-500',
+      partially_received: 'bg-amber-100 text-amber-700',
+      closed_with_loss: 'bg-red-100 text-red-700',
     };
     return map[status] || 'bg-gray-100 text-gray-700';
   }
@@ -398,6 +429,8 @@ export class TransferDetailModalComponent {
       received: 'check-circle',
       completed: 'check-circle',
       cancelled: 'x-circle',
+      partially_received: 'truck',
+      closed_with_loss: 'alert-triangle',
     };
     return map[status] || 'info';
   }

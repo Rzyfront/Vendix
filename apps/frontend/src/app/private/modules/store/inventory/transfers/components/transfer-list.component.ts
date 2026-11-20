@@ -254,7 +254,12 @@ export class TransferListComponent {
     titleKey: 'transfer_number',
     subtitleKey: 'from_location.name',
     subtitleTransform: (item: any) =>
-      `${item?.from_location?.name || '-'} → ${item?.to_location?.name || '-'}`,
+      `${item?.from_location?.name || '-'} → ${
+        item?.to_location?.name ||
+        (item?.is_external_destination
+          ? `Destino externo: ${item?.external_destination_name || '-'}`
+          : '-')
+      }`,
     badgeKey: 'status',
     badgeConfig: {
       type: 'custom',
@@ -327,6 +332,8 @@ export class TransferListComponent {
       received: 'Recibida',
       completed: 'Completada',
       cancelled: 'Cancelada',
+      partially_received: 'Recibida en parte',
+      closed_with_loss: 'Cerrada con pérdida',
     };
     return labels[status] || status;
   }

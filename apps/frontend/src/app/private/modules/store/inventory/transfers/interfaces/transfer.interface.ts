@@ -15,14 +15,18 @@ export type TransferStatus =
   | 'received'
   | 'cancelled'
   | 'draft'
-  | 'completed';
+  | 'completed'
+  // D4 — recepción parcial (sigue con saldo en camino) y cierre con pérdida.
+  | 'partially_received'
+  | 'closed_with_loss';
 
 export interface StockTransfer {
   id: number;
   transfer_number: string;
   organization_id: number;
   from_location_id: number;
-  to_location_id: number;
+  /** D8 — null en una salida a destino externo (no hay bodega de destino). */
+  to_location_id: number | null;
   status: TransferStatus;
   transfer_date: string;
   expected_date?: string;
@@ -38,7 +42,9 @@ export interface StockTransfer {
   created_at: string;
   updated_at: string;
   from_location: InventoryLocation;
-  to_location: InventoryLocation;
+  to_location?: InventoryLocation | null;
+  is_external_destination?: boolean;
+  external_destination_name?: string | null;
   stock_transfer_items: StockTransferItem[];
 }
 
@@ -56,6 +62,10 @@ export interface StockTransferItem {
   product_variant_id?: number;
   quantity: number;
   quantity_received?: number;
+  /** Conteo de salida (D3). Null en filas históricas: salió `quantity`. */
+  quantity_dispatched?: number | null;
+  /** Unidades dadas de baja en un cierre con pérdida (D4). */
+  quantity_lost?: number;
   cost_per_unit?: number;
   notes?: string;
   received_date?: string;
