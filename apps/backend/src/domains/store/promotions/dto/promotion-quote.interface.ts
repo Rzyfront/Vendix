@@ -61,6 +61,12 @@ export interface PromotionQuoteInput {
    */
   manual_promotion_ids?: number[];
   /**
+   * Aditivo. Restringe la cotización a estas promociones (ignora el resto de
+   * automáticas). Lo usa la validación de una promoción puntual para obtener
+   * su descuento con exactamente el mismo cálculo del cobro.
+   */
+  only_promotion_ids?: number[];
+  /**
    * Aditivo. Al RE-cotizar una orden ya persistida, los usos que esa misma
    * orden registró (`order_promotions` y su parte de `usage_count`) no cuentan
    * contra `per_customer_limit` ni `usage_limit`. Sin la opción, el

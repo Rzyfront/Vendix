@@ -6138,6 +6138,45 @@ export const ErrorCodes = {
     devMessage: 'Commission payout already processed',
   },
 
+  // Promociones de la tienda (descuentos de carrito / POS / ecommerce).
+  // 422 cuando la petición es válida pero la promoción no aplica; 409 cuando
+  // el cupo de usos ya se consumió.
+  PROMOTION_INVALID_001: {
+    code: 'PROMOTION_INVALID_001',
+    httpStatus: 422,
+    devMessage: 'Promotion not found, inactive or outside its date range',
+  },
+  PROMOTION_NOT_TODAY_001: {
+    code: 'PROMOTION_NOT_TODAY_001',
+    httpStatus: 422,
+    devMessage: 'Promotion does not apply on the current weekday (store timezone)',
+  },
+  PROMOTION_USAGE_LIMIT_001: {
+    code: 'PROMOTION_USAGE_LIMIT_001',
+    httpStatus: 409,
+    devMessage: 'Promotion reached its usage limit',
+  },
+  PROMOTION_CUSTOMER_LIMIT_001: {
+    code: 'PROMOTION_CUSTOMER_LIMIT_001',
+    httpStatus: 409,
+    devMessage: 'Customer reached the per-customer limit for this promotion',
+  },
+  PROMOTION_MIN_PURCHASE_001: {
+    code: 'PROMOTION_MIN_PURCHASE_001',
+    httpStatus: 422,
+    devMessage: 'Cart subtotal is below the promotion minimum purchase',
+  },
+  PROMOTION_NOT_APPLICABLE_001: {
+    code: 'PROMOTION_NOT_APPLICABLE_001',
+    httpStatus: 422,
+    devMessage: 'Promotion does not apply to any cart item',
+  },
+  PROMOTION_STATE_001: {
+    code: 'PROMOTION_STATE_001',
+    httpStatus: 409,
+    devMessage: 'Promotion state does not allow this transition',
+  },
+
   // Promotional plans
   PROMO_001: {
     code: 'PROMO_001',
