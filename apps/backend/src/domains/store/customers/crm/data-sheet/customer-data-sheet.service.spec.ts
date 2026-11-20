@@ -217,6 +217,19 @@ describe('CustomerDataSheetService (QUI-1043 H5/H8)', () => {
       ]);
     });
 
+    // Regression (verifier P1): the public form can write value_text, so a
+    // stored key of another store must never come back as a signed URL.
+    it('a stored key of another store is not signed', async () => {
+      const { service, prisma, s3 } = setup();
+      const foreign = 'organizations/other-3/stores/x-11/data-collection/1/secret.pdf';
+      prisma.entity_metadata_values.findMany.mockImplementation(async () => [
+        valueRow(RUT, { value_text: foreign }),
+      ]);
+      const sheet = await service.get(CUSTOMER);
+      expect(sheet.values[0]).toMatchObject({ file_url: null, files: [expect.objectContaining({ key: foreign, url: null })] });
+      expect(s3.signUrl).not.toHaveBeenCalledWith(foreign);
+    });
+
     it('a picked template wins over the default', async () => {
       const { service, templates } = setup({ picked: 30 });
       const sheet = await service.get(CUSTOMER);
@@ -359,6 +372,73 @@ describe('CustomerDataSheetService (QUI-1043 H5/H8)', () => {
     });
   });
 
+  describe('documents field with several files (E1 S3)', () => {
+    const doc = (n: string) => ({
+      key: `${PREFIX}/${n}`,
+      name: n,
+      size: 5,
+      mime_type: 'application/pdf',
+    });
+
+    it('get returns signed files for file answers (value_json.files, legacy value_text fallback)', async () => {
+      const { service, prisma } = setup();
+      prisma.entity_metadata_values.findMany.mockImplementation(async ({ select }: any) =>
+        select
+          ? []
+          : [
+              valueRow(RUT, {
+                value_text: `${PREFIX}/1-a.pdf`,
+                value_json: { files: [doc('1-a.pdf'), doc('2-b.pdf')] },
+              }),
+              valueRow(NAME, { value_text: 'Laura' }),
+            ],
+      );
+      const sheet = await service.get(CUSTOMER);
+      const rut = sheet.values.find((v) => v.field_id === RUT.id) as any;
+      expect(rut.files).toEqual([
+        { ...doc('1-a.pdf'), url: `https://signed.example/${PREFIX}/1-a.pdf` },
+        { ...doc('2-b.pdf'), url: `https://signed.example/${PREFIX}/2-b.pdf` },
+      ]);
+      expect((sheet.values.find((v) => v.field_id === NAME.id) as any).files).toEqual([]);
+    });
+
+    it('legacy single value_text still yields one file entry', async () => {
+      const { service } = setup();
+      const sheet = await service.get(CUSTOMER);
+      const rut = sheet.values.find((v) => v.field_id === RUT.id) as any;
+      expect(rut.files).toEqual([
+        expect.objectContaining({ key: `${PREFIX}/1-rut.pdf`, url: `https://signed.example/${PREFIX}/1-rut.pdf` }),
+      ]);
+    });
+
+    it('saveValues rejects a foreign key inside value_json.files before any write', async () => {
+      const { service, prisma } = setup();
+      const foreign = doc('1-a.pdf');
+      foreign.key = 'organizations/acme-2/stores/centro-10/data-collection/customers/5/1-a.pdf';
+      expect(
+        await codeOf(
+          service.saveValues(CUSTOMER, [
+            { field_id: RUT.id, value_json: { files: [doc('1-a.pdf'), foreign] } } as any,
+          ]),
+        ),
+      ).toBe('CRM_DATA_SHEET_002');
+      expect(prisma.entity_metadata_values.upsert).not.toHaveBeenCalled();
+    });
+
+    it('saveValues accepts own keys and unchanged ones, storing { files } and the first key', async () => {
+      const { service, prisma } = setup();
+      await service.saveValues(CUSTOMER, [
+        {
+          field_id: RUT.id,
+          value_json: { files: [doc('1-rut.pdf'), doc('9-nuevo.pdf')] },
+        } as any,
+      ]);
+      const call = prisma.entity_metadata_values.upsert.mock.calls[0][0];
+      expect(call.create.value_json).toEqual({ files: [doc('1-rut.pdf'), doc('9-nuevo.pdf')] });
+      expect(call.create.value_text).toBe(`${PREFIX}/1-rut.pdf`);
+    });
+  });
+
   describe('upload', () => {
     it('uploads a document under the customer prefix with a safe name', async () => {
       const { service, s3 } = setup();
@@ -378,6 +458,10 @@ describe('CustomerDataSheetService (QUI-1043 H5/H8)', () => {
         key: `${PREFIX}/1700000000000-RUT_2026_firmado_.pdf`,
         url: `https://signed.example/${PREFIX}/1700000000000-RUT_2026_firmado_.pdf`,
         original_name: 'RUT 2026 (firmado).pdf',
+        name: 'RUT 2026 (firmado).pdf',
+        size: 3,
+        mime_type: 'application/pdf',
+        uploaded_at: new Date(1700000000000).toISOString(),
       });
     });
 

@@ -17,6 +17,8 @@ export interface DataSheetValue {
   value_json: unknown;
   /** Signed URL when `field_type` is `file`. */
   file_url: string | null;
+  /** Documents of a `file` value, with signed URLs. */
+  files?: { key: string; name: string; size: number; mime_type: string; url: string | null }[];
   updated_at: string;
 }
 
@@ -50,4 +52,8 @@ export interface DataSheetUploadResult {
   key: string;
   url: string;
   original_name: string;
+  name?: string;
+  size?: number;
+  mime_type?: string;
+  uploaded_at?: string;
 }

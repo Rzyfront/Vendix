@@ -12,6 +12,9 @@ import { EmptyStateComponent } from '../../../../../shared/components/empty-stat
 import { BadgeComponent } from '../../../../../shared/components/badge/badge.component';
 import { ToastService } from '../../../../../shared/components/toast/toast.service';
 import { DialogService } from '../../../../../shared/components/dialog/dialog.service';
+import { TemplateJsonImportModalComponent } from './template-json-import/template-json-import-modal.component';
+import { TemplateAiDraftModalComponent } from './template-ai-draft/template-ai-draft-modal.component';
+import { AiDraftPathError } from '../utils/template-ai-draft.util';
 import { extractApiErrorMessage } from '../../../../../core/utils/api-error-handler';
 
 @Component({
@@ -22,7 +25,9 @@ import { extractApiErrorMessage } from '../../../../../core/utils/api-error-hand
     SpinnerComponent,
     EmptyStateComponent,
     BadgeComponent,
-    IconComponent
+    IconComponent,
+    TemplateJsonImportModalComponent,
+    TemplateAiDraftModalComponent,
 ],
   changeDetection: ChangeDetectionStrategy.OnPush,
   template: `
@@ -38,10 +43,20 @@ import { extractApiErrorMessage } from '../../../../../core/utils/api-error-hand
         </h2>
         <!-- The empty state carries its own create button -->
         @if (loading() || templates().length > 0) {
-          <app-button variant="primary" size="sm" (clicked)="openNewTemplate()">
-            <app-icon name="plus" [size]="16" slot="icon"></app-icon>
-            Nueva plantilla
-          </app-button>
+          <div class="flex items-center gap-2">
+            <app-button variant="outline" size="sm" (clicked)="showAiDraft.set(true)">
+              <app-icon name="sparkles" [size]="16" slot="icon"></app-icon>
+              Crear con IA (PDF/foto)
+            </app-button>
+            <app-button variant="outline" size="sm" (clicked)="openJsonImport()">
+              <app-icon name="upload" [size]="16" slot="icon"></app-icon>
+              Crear desde JSON
+            </app-button>
+            <app-button variant="primary" size="sm" (clicked)="openNewTemplate()">
+              <app-icon name="plus" [size]="16" slot="icon"></app-icon>
+              Nueva plantilla
+            </app-button>
+          </div>
         }
       </div>
       @if (loading()) {
@@ -58,6 +73,16 @@ import { extractApiErrorMessage } from '../../../../../core/utils/api-error-hand
           actionButtonIcon="plus"
           (actionClick)="openNewTemplate()"
         />
+        <div class="flex justify-center gap-2 mt-3">
+          <app-button variant="outline" size="sm" (clicked)="showAiDraft.set(true)">
+            <app-icon name="sparkles" [size]="16" slot="icon"></app-icon>
+            Crear con IA (PDF/foto)
+          </app-button>
+          <app-button variant="outline" size="sm" (clicked)="openJsonImport()">
+            <app-icon name="upload" [size]="16" slot="icon"></app-icon>
+            Crear desde JSON
+          </app-button>
+        </div>
       } @else {
         <div class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
           @for (template of templates(); track template.id) {
@@ -148,6 +173,21 @@ import { extractApiErrorMessage } from '../../../../../core/utils/api-error-hand
         </div>
       }
       </div>
+      @if (showJsonImport()) {
+        <app-template-json-import-modal
+          [isOpen]="true"
+          [initialText]="aiDraftText()"
+          [initialErrors]="aiDraftErrors()"
+          (isOpenChange)="!$event && showJsonImport.set(false)"
+        />
+      }
+      @if (showAiDraft()) {
+        <app-template-ai-draft-modal
+          [isOpen]="true"
+          (isOpenChange)="!$event && showAiDraft.set(false)"
+          (draftReady)="onDraftReady($event)"
+        />
+      }
     </div>
   `,
 })
@@ -164,6 +204,10 @@ export class TemplatesComponent implements OnInit {
 
   templates = signal<DataCollectionTemplate[]>([]);
   loading = signal(true);
+  showJsonImport = signal(false);
+  showAiDraft = signal(false);
+  aiDraftText = signal('');
+  aiDraftErrors = signal<AiDraftPathError[]>([]);
 
   ngOnInit() {
     this.loadTemplates();
@@ -181,6 +225,20 @@ export class TemplatesComponent implements OnInit {
         this.loading.set(false);
       },
     });
+  }
+
+  /** Plain "Crear desde JSON": no AI prefill. */
+  openJsonImport() {
+    this.aiDraftText.set('');
+    this.aiDraftErrors.set([]);
+    this.showJsonImport.set(true);
+  }
+
+  onDraftReady(draft: { text: string; errors: AiDraftPathError[] }) {
+    this.aiDraftText.set(draft.text);
+    this.aiDraftErrors.set(draft.errors);
+    this.showAiDraft.set(false);
+    this.showJsonImport.set(true);
   }
 
   openNewTemplate() {

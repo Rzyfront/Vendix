@@ -281,6 +281,8 @@ jobs:
         run: >-
           npx jest --ci --runInBand --runTestsByPath
           src/common/workflows/contract/workflow-contract.parity.spec.ts
+          src/domains/store/data-collection/template-json/template-json.contract.parity.spec.ts
+          src/domains/store/data-collection/template-json/template-json.contract.spec.ts
 
   # Lo que un doble en memoria no prueba del motor de Flujos: concurrencia,
   # SKIP LOCKED, idempotencia, triggers de evidencia y outbox transaccional.
@@ -573,6 +575,15 @@ jobs:
           src/domains/platform-crm/platform-permission-assignment.spec.ts
           src/domains/organization/onboarding/onboarding-wizard-org-admin-role.spec.ts
           src/domains/platform-crm/platform-crm-links.postgres.integration.spec.ts
+      # «Crear plantilla con IA (PDF/foto)»: sus imports llegan al cliente de
+      # Prisma (vía @common/errors), por eso corren aquí, tras prisma generate,
+      # y no en «Backend Guard Specs». Sin base de datos.
+      - name: Jest — plantillas con IA (recolección de datos)
+        working-directory: apps/backend
+        run: >-
+          npx jest --ci --runInBand --config jest.isolated.config.js --runTestsByPath
+          src/domains/store/data-collection/ai-draft/template-ai-draft.builder.spec.ts
+          src/domains/store/data-collection/ai-draft/template-ai-draft.service.spec.ts
 
   frontend:
     name: Frontend
@@ -774,6 +785,8 @@ jobs:
           --include='**/customers/crm/shared/task-form-modal.component.spec.ts'
           --include='**/customers/crm/shared/task-complete-modal.component.spec.ts'
           --include='**/customers/crm/shared/crm-tags-manager-modal.component.spec.ts'
+          --include='**/customers/crm/pipeline/opportunity-form-modal.component.spec.ts'
+          --include='**/customers/crm/profile/customer-crm-panel.component.spec.ts'
           --include='**/workflows/records/pages/record-detail-page/record-detail-page.component.spec.ts'
           --include='**/documents/pages/templates-editor/templates-editor-page.component.spec.ts'
           --include='**/super-admin/subscriptions/pages/plans/plan-form.component.spec.ts'
@@ -818,6 +831,13 @@ jobs:
           --include='**/pop/utils/receipt-uom-block.util.spec.ts'
           --include='**/shared/utils/compact-money.util.spec.ts'
           --include='**/shared/pipes/currency/currency.pipe.spec.ts'
+          --include='**/data-collection/utils/template-json.contract.spec.ts'
+          --include='**/data-collection/utils/template-editor.util.spec.ts'
+          --include='**/data-collection/utils/template-json-import.util.spec.ts'
+          --include='**/data-collection/utils/template-ai-draft.util.spec.ts'
+          --include='**/data-collection/utils/document-responses.util.spec.ts'
+          --include='**/data-collection/utils/submission-attachments.util.spec.ts'
+          --include='**/shared/components/attachment-list/attachment-list.util.spec.ts'
 
   mobile:
     name: Mobile

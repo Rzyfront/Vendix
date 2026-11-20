@@ -14,7 +14,7 @@ export const FIELD_TYPE_LABELS: Record<FieldType, string> = {
   select: 'Lista de opciones',
   checkbox: 'Casilla (sí / no)',
   textarea: 'Texto largo',
-  file: 'Archivo',
+  file: 'Documentos / adjuntos',
   email: 'Correo electrónico',
   phone: 'Teléfono',
   url: 'Enlace (URL)',

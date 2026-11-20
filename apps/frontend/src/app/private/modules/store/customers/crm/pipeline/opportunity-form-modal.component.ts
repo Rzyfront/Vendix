@@ -17,6 +17,8 @@ import { parseApiError } from '../../../../../../core/utils/parse-api-error';
 import { CrmService } from '../shared/crm.service';
 import {
   CrmOpportunity,
+  CrmPerson,
+  CrmPipeline,
   CrmStage,
   SaveCrmOpportunity,
   personName,
@@ -28,6 +30,11 @@ export type OpportunityModalAction = 'saved' | 'won' | 'lose';
 /**
  * Create or edit an opportunity. The stage is chosen on creation; afterwards
  * it changes by dragging on the board, "Mover a" or the win/lose buttons.
+ *
+ * Opened from another screen (the customer's CRM tab) it can come prefilled:
+ * `presetCustomer` + `lockCustomer` fix the customer, `pipelines` lets the
+ * user pick the pipeline here and `presetPipelineId` / `presetStageId` choose
+ * where it starts. The title and the rest are always typed by the user.
  */
 @Component({
   selector: 'app-crm-opportunity-form-modal',
@@ -55,6 +62,10 @@ export type OpportunityModalAction = 'saved' | 'won' | 'lose';
             @if (o.status === 'lost' && o.lost_reason) {
               · Motivo: {{ o.lost_reason }}
             }
+          </p>
+        } @else if (customerLocked()) {
+          <p class="text-sm text-[var(--color-text-secondary)]" data-testid="locked-customer">
+            Cliente: <strong>{{ name(presetCustomer()) || 'Este cliente' }}</strong>
           </p>
         } @else {
           <app-customer-select
@@ -89,6 +100,15 @@ export type OpportunityModalAction = 'saved' | 'won' | 'lose';
             (ngModelChange)="expectedDate.set($event)"
           ></app-input>
         </div>
+
+        @if (!opportunity() && pipelines().length > 1) {
+          <app-selector
+            label="Pipeline"
+            [options]="pipelineOptions()"
+            [ngModel]="pipelineId()"
+            (ngModelChange)="onPipeline($event)"
+          ></app-selector>
+        }
 
         @if (!opportunity()) {
           <app-selector
@@ -164,6 +184,15 @@ export class OpportunityFormModalComponent {
   readonly isOpen = model(false);
   readonly opportunity = input<CrmOpportunity | null>(null);
   readonly stages = input<CrmStage[]>([]);
+  /** Customer to start with on creation (e.g. from the customer's profile). */
+  readonly presetCustomer = input<CrmPerson | null>(null);
+  /** With `presetCustomer`: show it as fixed text instead of the picker. */
+  readonly lockCustomer = input(false);
+  /** Pipelines to choose from here; when empty, `stages` is the only list. */
+  readonly pipelines = input<CrmPipeline[]>([]);
+  readonly presetPipelineId = input<number | null>(null);
+  /** Stage to start with on creation; falls back to the first open stage. */
+  readonly presetStageId = input<number | null>(null);
   readonly saved = output<CrmOpportunity>();
   readonly action = output<OpportunityModalAction>();
 
@@ -172,6 +201,7 @@ export class OpportunityFormModalComponent {
   protected readonly amount = signal<string | number>('');
   protected readonly expectedDate = signal('');
   protected readonly stageId = signal<number | null>(null);
+  protected readonly pipelineId = signal<number | null>(null);
   protected readonly ownerId = signal<number | null>(null);
   /** Name of the preset owner, so the picker never shows `Usuario #id`. */
   protected readonly ownerLabel = signal<string | null>(null);
@@ -184,18 +214,33 @@ export class OpportunityFormModalComponent {
   protected readonly canReadQuotations = computed(
     () => this.auth.isOwner() || this.auth.hasPermission('store:quotations:read'),
   );
+  protected readonly customerLocked = computed(
+    () => this.lockCustomer() && !!this.presetCustomer(),
+  );
+  protected readonly pipelineOptions = computed<SelectorOption[]>(() =>
+    this.pipelines().map((pipeline) => ({ value: pipeline.id, label: pipeline.name })),
+  );
+  /** Stages of the pipeline chosen here, or the `stages` input when there is no choice. */
+  private readonly availableStages = computed<CrmStage[]>(() => {
+    const pipelines = this.pipelines();
+    if (!pipelines.length) return this.stages();
+    return pipelines.find((pipeline) => pipeline.id === this.pipelineId())?.stages ?? [];
+  });
   protected readonly stageOptions = computed<SelectorOption[]>(() =>
-    this.stages()
+    this.availableStages()
       .filter((stage) => stage.is_active !== false && stage.kind !== 'lost')
       .map((stage) => ({ value: stage.id, label: stage.name })),
   );
+  private readonly newCustomerId = computed(() =>
+    this.customerLocked() ? this.presetCustomer()!.id : (this.customer()?.id ?? null),
+  );
   protected readonly customerIdForQuotes = computed(
-    () => this.opportunity()?.customer?.id ?? this.customer()?.id ?? null,
+    () => this.opportunity()?.customer?.id ?? this.newCustomerId(),
   );
   protected readonly canSave = computed(
     () =>
       !!this.title().trim() &&
-      (!!this.opportunity() || (!!this.customer() && !!this.stageId())),
+      (!!this.opportunity() || (!!this.newCustomerId() && !!this.stageId())),
   );
 
   constructor() {
@@ -203,13 +248,15 @@ export class OpportunityFormModalComponent {
       if (!this.isOpen()) return;
       const o = this.opportunity();
       untracked(() => {
-        this.customer.set(null);
+        const preset = o ? null : this.presetCustomer();
+        this.customer.set(
+          preset ? { id: preset.id, name: personName(preset) || 'Este cliente' } : null,
+        );
         this.title.set(o?.title ?? '');
         this.amount.set(o?.amount ?? '');
         this.expectedDate.set(o?.expected_close_date ?? '');
-        this.stageId.set(
-          o?.stage_id ?? (this.stageOptions()[0]?.value as number | undefined) ?? null,
-        );
+        this.pipelineId.set(o ? null : this.initialPipelineId());
+        this.stageId.set(o?.stage_id ?? this.initialStageId());
         this.ownerId.set(o ? (o.owner?.id ?? null) : this.auth.userId());
         this.ownerLabel.set(o ? personName(o.owner) || null : this.auth.userName());
         this.quotationId.set(o?.quotation?.id ?? null);
@@ -218,9 +265,34 @@ export class OpportunityFormModalComponent {
             ? [{ value: o.quotation.id, label: o.quotation.quotation_number }]
             : [],
         );
-        if (o?.customer) void this.loadQuotations(o.customer.id);
+        const quotesFor = o?.customer?.id ?? preset?.id;
+        if (quotesFor) void this.loadQuotations(quotesFor);
       });
     });
+  }
+
+  private initialPipelineId(): number | null {
+    const pipelines = this.pipelines();
+    if (!pipelines.length) return null;
+    const preset = this.presetPipelineId();
+    return (
+      pipelines.find((pipeline) => pipeline.id === preset) ??
+      pipelines.find((pipeline) => pipeline.is_default) ??
+      pipelines[0]
+    ).id;
+  }
+
+  /** The preset stage when it can be chosen here, else the first open one. */
+  private initialStageId(): number | null {
+    const options = this.stageOptions();
+    const preset = this.presetStageId();
+    if (preset !== null && options.some((option) => option.value === preset)) return preset;
+    return (options[0]?.value as number | undefined) ?? null;
+  }
+
+  onPipeline(value: string | number | null): void {
+    this.pipelineId.set(value ? +value : null);
+    this.stageId.set((this.stageOptions()[0]?.value as number | undefined) ?? null);
   }
 
   onCustomer(customer: CustomerSelectOption | null): void {
@@ -265,7 +337,7 @@ export class OpportunityFormModalComponent {
         : await firstValueFrom(
             this.crm.createOpportunity({
               ...body,
-              customer_id: this.customer()!.id,
+              customer_id: this.newCustomerId()!,
               stage_id: this.stageId()!,
               amount: body.amount ?? undefined,
               expected_close_date: body.expected_close_date ?? undefined,

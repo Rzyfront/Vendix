@@ -2,6 +2,7 @@ import { PrismaClient, ai_model_type_enum } from '@prisma/client';
 import { getPrismaClient } from './shared/client';
 import { RECEIVED_DOCUMENT_OCR_APPLICATION } from './received-document-ocr.application';
 import { INVOICE_DRAFT_OCR_APPLICATION } from './invoice-draft-ocr.application';
+import { DATA_COLLECTION_TEMPLATE_BUILDER_APPLICATION } from './data-collection-template-builder.application';
 import { WORKFLOW_DOCUMENT_EXTRACT_APPLICATION } from './workflow-document-extract.application';
 import { WORKFLOW_AI_STEP_APPLICATION } from './workflow-ai-step.application';
 import { WORKFLOW_INSIGHTS_SUMMARY_APPLICATION } from './workflow-insights-summary.application';
@@ -755,6 +756,10 @@ RULES:
     // cola ai-scan). Prompt en su propio archivo; mismo texto en la migración
     // 20261014050000_invoice_draft_ocr_app.
     INVOICE_DRAFT_OCR_APPLICATION,
+    // Plantillas de recolección de datos con IA desde PDF/foto (kind
+    // `data_collection_template` de la cola ai-scan). Mismo texto en la
+    // migración 20261220100000_data_collection_template_builder_app.
+    DATA_COLLECTION_TEMPLATE_BUILDER_APPLICATION,
     {
       key: 'route_sheet_ocr',
       ai_feature_category: 'async_queue',
@@ -1812,6 +1817,7 @@ Genera el JSON de la landing page por defecto siguiendo el esquema exacto del sy
       'customer_import_ocr',
       'inventory_count_ocr',
       'invoice_draft_ocr',
+      'data_collection_template_builder',
       'workflow_document_extract',
     ]) {
       const visionApp = await client.ai_engine_applications.findUnique({
@@ -2046,6 +2052,7 @@ async function linkTextAppsWhenNoDefault(
       'customer_import_ocr',
       'inventory_count_ocr',
       'invoice_draft_ocr',
+      'data_collection_template_builder',
       'workflow_document_extract',
     ]);
     const textAppKeys = apps

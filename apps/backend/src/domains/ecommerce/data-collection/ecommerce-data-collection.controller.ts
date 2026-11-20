@@ -8,27 +8,20 @@ import {
   UseInterceptors,
   UploadedFile,
   BadRequestException,
-  Logger,
 } from '@nestjs/common';
 import { FileInterceptor } from '@nestjs/platform-express';
 import { Public } from '@common/decorators/public.decorator';
 import { SubmissionsService } from '../../store/data-collection/submissions.service';
 import { SubmitStepResponseDto } from '../../store/data-collection/dto/submit-response.dto';
 import { ResponseService } from '@common/responses/response.service';
-import { S3Service } from '@common/services/s3.service';
-import { S3PathHelper } from '@common/helpers/s3-path.helper';
-import { GlobalPrismaService } from '../../../prisma/services/global-prisma.service';
+import { VendixHttpException, ErrorCodes } from '../../../common/errors';
+import { DOCUMENT_MAX_SIZE_MB_LIMIT } from '../../store/data-collection/template-json/template-json.contract';
 
 @Controller('ecommerce/data-collection')
 export class EcommerceDataCollectionController {
-  private readonly logger = new Logger(EcommerceDataCollectionController.name);
-
   constructor(
     private readonly submissionsService: SubmissionsService,
     private readonly responseService: ResponseService,
-    private readonly s3Service: S3Service,
-    private readonly s3PathHelper: S3PathHelper,
-    private readonly prisma: GlobalPrismaService,
   ) {}
 
   @Public()
@@ -63,57 +56,39 @@ export class EcommerceDataCollectionController {
     );
   }
 
+  /**
+   * Public attachment upload. Multipart `file` plus an optional `field_id`:
+   * with it the file is validated against the documents field of the form;
+   * without it the legacy behavior applies. Multer caps every file at the hard
+   * ceiling (a larger one answers 413 before reaching the service).
+   */
   @Public()
   @Post(':token/upload')
-  @UseInterceptors(FileInterceptor('file'))
-  async uploadFile(@Param('token') token: string, @UploadedFile() file: any) {
+  @UseInterceptors(
+    FileInterceptor('file', {
+      limits: { fileSize: DOCUMENT_MAX_SIZE_MB_LIMIT * 1024 * 1024 },
+    }),
+  )
+  async uploadFile(
+    @Param('token') token: string,
+    @UploadedFile() file: Express.Multer.File,
+    @Body('field_id') fieldIdRaw?: string,
+  ) {
     if (!file) {
       throw new BadRequestException('No file provided');
     }
-
-    // Validate token and get submission with store context
-    const submission = await this.submissionsService.getByToken(token);
-
-    // Resolve store + org for S3 path
-    const store = await this.prisma.stores.findUnique({
-      where: { id: submission.store_id },
-      select: { id: true, slug: true, organization_id: true },
-    });
-    if (!store) throw new BadRequestException('Store not found');
-
-    const org = await this.prisma.organizations.findUnique({
-      where: { id: store.organization_id },
-      select: { id: true, slug: true },
-    });
-    if (!org) throw new BadRequestException('Organization not found');
-
-    const basePath = this.s3PathHelper.buildStorePath(org, store);
-    const sanitizedName = file.originalname.replace(/\s+/g, '_');
-    const fileName = `${Date.now()}-${sanitizedName}`;
-    const key = `${basePath}/data-collection/${submission.id}/${fileName}`;
-
-    let uploadedKey: string;
-
-    if (file.mimetype?.startsWith('image/')) {
-      const result = await this.s3Service.uploadImage(file.buffer, key);
-      uploadedKey = result.key;
-    } else {
-      uploadedKey = await this.s3Service.uploadFile(
-        file.buffer,
-        key,
-        file.mimetype,
-      );
+    let fieldId: number | undefined;
+    if (fieldIdRaw !== undefined && fieldIdRaw !== null && `${fieldIdRaw}` !== '') {
+      fieldId = Number(fieldIdRaw);
+      if (!Number.isInteger(fieldId) || fieldId <= 0) {
+        throw new VendixHttpException(ErrorCodes.DCOL_UPLOAD_003);
+      }
     }
-
-    const url = await this.s3Service.signUrl(uploadedKey);
-
-    this.logger.log(
-      `Public file uploaded for submission ${submission.id}: ${uploadedKey}`,
+    const result = await this.submissionsService.uploadDocument(
+      token,
+      file,
+      fieldId,
     );
-
-    return this.responseService.success(
-      { key: uploadedKey, url, originalName: file.originalname },
-      'Archivo subido correctamente',
-    );
+    return this.responseService.success(result, 'Archivo subido correctamente');
   }
 }

@@ -12,6 +12,8 @@ export interface SubmissionResponse {
   value_date?: string;
   value_bool?: boolean;
   value_json?: any;
+  /** Documents of a `file` field with signed URLs (url is null when it cannot be resolved). */
+  files?: { key: string; name: string; size: number; mime_type: string; url: string | null }[];
   field: MetadataField;
 }
 
