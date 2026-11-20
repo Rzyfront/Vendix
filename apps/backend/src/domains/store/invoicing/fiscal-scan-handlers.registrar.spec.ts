@@ -13,6 +13,7 @@ const files = [
 ];
 
 describe('fiscal scan handler registrars', () => {
+  const reportProgress = jest.fn().mockResolvedValue(undefined);
   it('registers dian_habilitation and dian_resolution and delegates', async () => {
     const registry = new AiScanHandlerRegistry();
     const hab = { scanHabilitationFromFiles: jest.fn().mockResolvedValue('H') };
@@ -20,13 +21,14 @@ describe('fiscal scan handler registrars', () => {
     new FiscalScanHandlersRegistrar(registry, hab as any, res as any, {} as any).onModuleInit();
 
     await expect(
-      registry.get('dian_habilitation')!({ files, params: {}, context: ctx }),
+      registry.get('dian_habilitation')!({ files, params: {}, context: ctx, reportProgress }),
     ).resolves.toBe('H');
     await expect(
-      registry.get('dian_resolution')!({ files, params: {}, context: ctx }),
+      registry.get('dian_resolution')!({ files, params: {}, context: ctx, reportProgress }),
     ).resolves.toBe('R');
-    expect(hab.scanHabilitationFromFiles).toHaveBeenCalledWith(files);
-    expect(res.scanResolutionFromFiles).toHaveBeenCalledWith(files);
+    // ia-cargas F5b: real progress by pages reaches the scanners.
+    expect(hab.scanHabilitationFromFiles).toHaveBeenCalledWith(files, { reportProgress });
+    expect(res.scanResolutionFromFiles).toHaveBeenCalledWith(files, { reportProgress });
   });
 
   it('registers invoice_draft and forwards the user note', async () => {
@@ -89,9 +91,9 @@ describe('fiscal scan handler registrars', () => {
     const rut = { scanRutFromFiles: jest.fn().mockResolvedValue('RUT') };
     new RutScanHandlerRegistrar(registry, rut as any).onModuleInit();
     await expect(
-      registry.get('rut')!({ files, params: {}, context: ctx }),
+      registry.get('rut')!({ files, params: {}, context: ctx, reportProgress }),
     ).resolves.toBe('RUT');
-    expect(rut.scanRutFromFiles).toHaveBeenCalledWith(files);
+    expect(rut.scanRutFromFiles).toHaveBeenCalledWith(files, { reportProgress });
   });
 
   it('both registrars together cover the 4 kinds without duplicates', () => {

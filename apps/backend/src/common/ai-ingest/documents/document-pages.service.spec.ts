@@ -332,6 +332,16 @@ describe('DocumentPagesService', () => {
       expect(scanned.render).toHaveBeenCalledTimes(1);
     });
 
+    it('renderTextPages (F5b fiscal forms): a page with native text ALSO goes with its image', async () => {
+      const page = withText(createPage(1, []), NATIVE_TEXT);
+      installPdfMock([page]);
+      const result = await service.prepareForAi(pdfFile(), { renderTextPages: true });
+      expect(result.pages).toHaveLength(1);
+      expect(result.pages[0]).toMatchObject({ page_number: 1, mode: 'text+image', text: NATIVE_TEXT.trim() });
+      expect(result.pages[0].image).toMatch(/^data:image\/jpeg;base64,/);
+      expect(page.render).toHaveBeenCalledTimes(1);
+    });
+
     it('maxBytes (ia-cargas F3): a 12 MiB invoice passes under a 15 MiB cap; the default stays 10 MiB', async () => {
       const page = withText(createPage(1, []), NATIVE_TEXT);
       installPdfMock([page]);

@@ -316,39 +316,6 @@ export class InventoryAdjustmentsController {
     );
   }
 
-  /**
-   * @deprecated Usar `POST scan/async` (504 tras 60 s de proxy).
-   */
-  @Post('scan')
-  @ApiOperation({ summary: 'Scan inventory count sheet with AI' })
-  @ApiResponse({ status: 201, description: 'Count sheet scanned successfully' })
-  @RequirePermissions('store:inventory:adjustments:create')
-  @UseInterceptors(FileInterceptor('file'))
-  async scanCount(
-    @UploadedFile() file: Express.Multer.File,
-    @Query('location_id') location_id: string,
-  ) {
-    if (!file) throw new VendixHttpException(ErrorCodes.INV_SCAN_NO_FILE);
-    if (!location_id)
-      throw new VendixHttpException(ErrorCodes.INV_SCAN_NO_FILE);
-    const allowed = [
-      'image/jpeg',
-      'image/png',
-      'image/webp',
-      'application/pdf',
-    ];
-    if (!allowed.includes(file.mimetype))
-      throw new VendixHttpException(ErrorCodes.INV_SCAN_INVALID_FILE);
-    const result = await this.inventoryCountScanner.scanCount(
-      file,
-      +location_id,
-    );
-    return this.responseService.success(
-      result,
-      'Hoja de reconteo escaneada exitosamente',
-    );
-  }
-
   @Post('scan/async')
   @HttpCode(HttpStatus.ACCEPTED)
   @ApiOperation({
@@ -379,7 +346,8 @@ export class InventoryAdjustmentsController {
     }
     const { job_id } = await this.aiScanJobs.enqueue(
       'inventory_count',
-      [scanFile],
+      // `assertValidScanFile` threw above when there was no file.
+      [scanFile!],
       { location_id: locationId },
     );
     return this.responseService.success({ job_id }, 'Escaneo encolado');

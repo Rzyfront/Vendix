@@ -1,3 +1,4 @@
+import type { DocumentScanSource } from '@common/ai-ingest/documents/form-instruction';
 /**
  * Contrato del escáner IA de borrador de factura de venta
  * (`POST store/invoicing/scan-draft/async` → `GET ai-scan-jobs/:jobId`).
@@ -194,4 +195,11 @@ export interface InvoiceDraftScanResult {
   requires_review: string[];
   extraction_notes: string | null;
   documents_scanned: number;
+  /**
+   * Avisos de lectura en español (páginas sin leer, documento leído en partes,
+   * líneas por encima del tope del borrador). Opcional: ausente si no hay.
+   */
+  warnings?: string[];
+  /** Qué se leyó (documentos, páginas, páginas de texto, llamadas). Opcional. */
+  scan_source?: DocumentScanSource;
 }

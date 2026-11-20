@@ -52,4 +52,34 @@ describe('OrdersService editor discount contract', () => {
     expect(r.tax).toBe(190);
     expect(r.baseDiscount).toBe(0);
   });
+
+  describe('F1 — promoción de producto con tarifas mezcladas', () => {
+    // A = 119.000 (IVA 19 %, base 100.000) · B = 100.000 excluido.
+    const excluded = (base: number) => ({
+      unit_price: base, total_price: base, tax_rate: 0,
+      tax_amount_item: 0, final_unit_price: base, line_tax_total: 0,
+      taxes: [], source: 'catalog',
+    });
+    const applySplit = (lines: any[], gross: number, split: any) =>
+      proto.applyGrossDiscountToPlannedLines.call(self, lines, gross, split);
+
+    it('escenario A: la promo 10 % sobre A queda sólo en A (base 90.000, IVA 17.100), B intacta', () => {
+      const r = applySplit([line(100000), excluded(100000)], 11900, {
+        promotionTotal: 11900, promotionByLine: [11900, 0], couponTotal: 0,
+      });
+      expect(r.discountByLine).toEqual([10000, 0]);
+      expect(r.tax).toBe(17100);
+      expect(r.lines[0].taxes[0].tax_amount).toBe(17100);
+      expect(200000 + r.tax - r.baseDiscount).toBe(207100);
+    });
+
+    it('promoción de orden (sin desglose) = reparto histórico por bruto', () => {
+      const legacy = apply([line(100000), excluded(100000)], 21900);
+      const now = applySplit([line(100000), excluded(100000)], 21900, {
+        promotionTotal: 21900, promotionByLine: null, couponTotal: 0,
+      });
+      expect(now).toEqual(legacy);
+      expect(now.tax).toBe(17100);
+    });
+  });
 });

@@ -129,10 +129,13 @@ import {
   type ShippingTaxSnapshot,
 } from '../shipping/utils/shipping-tax.util';
 import { buildOrderSaleTaxPayload } from './utils/order-sale-tax-payload.util';
+import { promotionDiscountByLine } from '../promotions/promotion-line-discount.util';
 import {
   applyGrossDiscountRetax,
   distributeAmount,
+  resolveGrossDiscountByLine,
   type GrossDiscountableLine,
+  type GrossDiscountSplit,
 } from '../taxes/utils/order-discount-tax.util';
 import {
   resolvePaymentReceivedSaleFields,
@@ -3447,9 +3450,13 @@ export class PaymentsService {
       manual_promotion_ids: Array.isArray(dto.promotion_ids)
         ? dto.promotion_ids
         : [],
+      // `line_id` = índice ORIGINAL en `dto.items` (antes de filtrar los ítems
+      // custom): es el que usa el reparto por línea del descuento (F1) para
+      // devolver cada `items[].promotion_discount` a su línea de la orden.
       items: (dto.items || [])
-        .filter((item) => item.product_id)
-        .map((item, index) => ({
+        .map((item, index) => ({ item, index }))
+        .filter(({ item }) => item.product_id)
+        .map(({ item, index }) => ({
           line_id: index,
           product_id: item.product_id as number,
           variant_id: item.product_variant_id ?? null,
@@ -3745,12 +3752,12 @@ export class PaymentsService {
    * SIN impuesto y el impuesto se calcula sobre eso". Recibe las líneas de la
    * orden YA construidas (base + `order_item_taxes.create` pre-descuento) y
    * el descuento TOTAL en bruto (promoción + cupón, como se evalúan hoy
-   * contra el subtotal bruto, F-017 — eso no cambia). Reparte el descuento
-   * proporcional al bruto de cada línea (mismo criterio "whole-cart" que ya
-   * usa el preview del carrito — el motor de promociones no expone un mapeo
-   * `line_id` confiable hacia `dto.items` cuando hay ítems custom
-   * intercalados, así que no se intenta un reparto por-línea más fino aquí),
-   * y MUTA en sitio `item.order_item_taxes.create[].tax_amount` de cada línea
+   * contra el subtotal bruto, F-017 — eso no cambia). Con `split` (F1) la
+   * promoción de producto/categoría/escala va SOLO a las líneas a las que el
+   * motor la aplicó (`line_id` = índice original de `dto.items`) y el cupón
+   * se reparte sobre el bruto remanente (`resolveGrossDiscountByLine`); sin
+   * desglose (promoción de orden, sin mapeo) se reparte proporcional al bruto
+   * de cada línea como siempre. MUTA en sitio `item.order_item_taxes.create[].tax_amount` de cada línea
    * a su valor post-descuento (recalculado hacia adelante: `base_descontada ×
    * tarifa`). `total_price` (base) NUNCA se toca — `orders.subtotal_amount`
    * sigue siendo la base bruta pre-descuento (necesaria para que el asiento
@@ -3764,6 +3771,7 @@ export class PaymentsService {
   private retaxPosOrderItemsAfterDiscount(
     orderItems: any[],
     totalGrossDiscount: number,
+    split: GrossDiscountSplit | null = null,
   ): { tax_amount: number; discount_amount_base: number } {
     if (totalGrossDiscount <= 0) {
       // Contrato nuevo explícito en cada línea: sin descuento => 0 (NULL sólo
@@ -3805,10 +3813,15 @@ export class PaymentsService {
       };
     });
 
-    const grossDiscountByLine = distributeAmount(
-      totalGrossDiscount,
-      lines.map((l) => l.grossOriginal),
-    );
+    const grossDiscountByLine = split
+      ? resolveGrossDiscountByLine(
+          lines.map((l) => l.grossOriginal),
+          split,
+        )
+      : distributeAmount(
+          totalGrossDiscount,
+          lines.map((l) => l.grossOriginal),
+        );
     const retax = applyGrossDiscountRetax(lines, grossDiscountByLine);
 
     orderItems.forEach((item, i) => {
@@ -3835,6 +3848,67 @@ export class PaymentsService {
       tax_amount: retax.totalTax,
       discount_amount_base: retax.totalBaseDiscount,
     };
+  }
+
+  /**
+   * F1 — desglose del descuento bruto de una venta POS para el retax por
+   * línea: promoción por línea desde la cotización del motor (`line_id` =
+   * índice original de `dto.items`) y cupón agregado. `lineIndexOfDtoItem`
+   * traduce ese índice al de la línea que se retaxa (`null` = sin ubicar, y
+   * entonces se conserva el reparto por bruto).
+   */
+  private buildPosDiscountSplit(
+    promotionQuote: Partial<PromotionQuoteResult> | null | undefined,
+    couponDiscount: number,
+    lineCount: number,
+    lineIndexOfDtoItem: (dtoIndex: number) => number | null,
+  ): GrossDiscountSplit {
+    return {
+      promotionTotal: this.roundMoney(Number(promotionQuote?.total_discount) || 0),
+      couponTotal: this.roundMoney(Number(couponDiscount) || 0),
+      promotionByLine: promotionDiscountByLine(
+        promotionQuote,
+        lineCount,
+        (lineId) => {
+          const dtoIndex = Number(lineId);
+          return Number.isInteger(dtoIndex) && dtoIndex >= 0
+            ? lineIndexOfDtoItem(dtoIndex)
+            : null;
+        },
+      ),
+    };
+  }
+
+  /**
+   * Orden adoptada: el motor cotiza `dto.items` pero el retax corre sobre las
+   * líneas PERSISTIDAS (sin orden garantizado). Empareja cada ítem del DTO con
+   * una línea persistida del mismo producto, variante y cantidad, usando cada
+   * línea una sola vez. `null` = sin pareja (ese descuento no se ubica y la
+   * venta conserva el reparto por bruto).
+   */
+  private matchDtoItemsToPersistedLines(
+    dtoItems: ReadonlyArray<{
+      product_id?: number | null;
+      product_variant_id?: number | null;
+      quantity?: number | null;
+    }>,
+    persisted: ReadonlyArray<any>,
+  ): Array<number | null> {
+    const used = new Set<number>();
+    return dtoItems.map((item) => {
+      if (!item.product_id) return null;
+      const index = persisted.findIndex(
+        (row, i) =>
+          !used.has(i) &&
+          Number(row.product_id) === Number(item.product_id) &&
+          (row.product_variant_id ?? null) ===
+            (item.product_variant_id ?? null) &&
+          Number(row.quantity) === Number(item.quantity),
+      );
+      if (index < 0) return null;
+      used.add(index);
+      return index;
+    });
   }
 
   /** Multiplicador de precio de una línea POS (1 si es pesable). */
@@ -3886,14 +3960,17 @@ export class PaymentsService {
    * para líneas no pesables se reconstruye dividiendo el nuevo impuesto total
    * de línea por el mismo `multiplier` (`resolvePriceUnits`) que usa la suma
    * de `newTax` más arriba; para líneas pesables el multiplicador es 1 (el
-   * campo ya guarda el total de línea). Mismo criterio "whole-cart"
-   * proporcional al bruto que la rama de orden fresca.
+   * campo ya guarda el total de línea). Mismo reparto que la rama de orden
+   * fresca: con `split` (F1) la promoción va a sus líneas (índices sobre
+   * `[...existingItems, ...newItems]`) y el cupón al bruto remanente; sin
+   * desglose, proporcional al bruto de todas.
    */
   private async retaxMergedPosOrderItemsForTableClose(
     tx: any,
     existingItems: any[],
     newItems: any[],
     totalGrossDiscount: number,
+    split: GrossDiscountSplit | null = null,
   ): Promise<{ tax_amount: number; discount_amount_base: number }> {
     const allItems = [...existingItems, ...newItems];
     const rowsOf = (item: any): any[] =>
@@ -3995,10 +4072,15 @@ export class PaymentsService {
       };
     });
 
-    const grossDiscountByLine = distributeAmount(
-      totalGrossDiscount,
-      lines.map((l) => l.grossOriginal),
-    );
+    const grossDiscountByLine = split
+      ? resolveGrossDiscountByLine(
+          lines.map((l) => l.grossOriginal),
+          split,
+        )
+      : distributeAmount(
+          totalGrossDiscount,
+          lines.map((l) => l.grossOriginal),
+        );
     const retax = applyGrossDiscountRetax(lines, grossDiscountByLine);
 
     for (let i = 0; i < allItems.length; i++) {
@@ -5630,11 +5712,21 @@ export class PaymentsService {
     // YA persistidas (`existingItems`) reciben `tx.order_items.update()` /
     // `tx.order_item_taxes.update()`; las nuevas se mutan en memoria antes
     // del `tx.orders.update` de abajo.
+    // F1: el motor cotizó `dto.items` (= `newItems`, mismo índice), que en el
+    // arreglo combinado van después de las líneas ya persistidas.
+    const tableDiscountSplit = this.buildPosDiscountSplit(
+      promotionQuote,
+      couponInfo.discount_amount,
+      existingItems.length + newItems.length,
+      (dtoIndex) =>
+        dtoIndex < newItems.length ? existingItems.length + dtoIndex : null,
+    );
     const retaxResult = await this.retaxMergedPosOrderItemsForTableClose(
       tx,
       existingItems,
       newItems,
       totalGrossDiscount,
+      tableDiscountSplit,
     );
     const newTax = retaxResult.tax_amount;
     const totalDiscount = retaxResult.discount_amount_base;
@@ -6760,16 +6852,31 @@ export class PaymentsService {
         // órdenes y no se retocan aquí (mismo criterio que subtotal/tax
         // arriba). `orders.discount_amount` cambia de semántica: antes era
         // el descuento en BRUTO, ahora es SOLO la parte de BASE.
+        // F1: la promoción de producto/categoría/escala va sólo a sus líneas.
+        // Venta nueva: `orderItems[i]` es `dto.items[i]`. Orden adoptada: el
+        // motor cotizó `dto.items` y el retax corre sobre las persistidas.
+        const adoptedLineOf = existingOrder
+          ? this.matchDtoItemsToPersistedLines(items, adoptedItems)
+          : null;
+        const discountSplit = this.buildPosDiscountSplit(
+          promotionQuote,
+          couponInfo.discount_amount,
+          existingOrder ? adoptedItems.length : orderItems.length,
+          (dtoIndex) =>
+            adoptedLineOf ? (adoptedLineOf[dtoIndex] ?? null) : dtoIndex,
+        );
         const retaxResult = existingOrder
           ? await this.retaxMergedPosOrderItemsForTableClose(
               tx,
               adoptedItems,
               [],
               totalGrossDiscount,
+              discountSplit,
             )
           : this.retaxPosOrderItemsAfterDiscount(
               orderItems,
               totalGrossDiscount,
+              discountSplit,
             );
         const calculatedTaxAmount = retaxResult
           ? retaxResult.tax_amount

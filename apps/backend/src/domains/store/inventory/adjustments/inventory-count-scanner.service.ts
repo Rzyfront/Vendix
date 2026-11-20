@@ -1,30 +1,83 @@
 import { Injectable, Logger, OnModuleInit } from '@nestjs/common';
-import { AIEngineService } from '../../../../ai-engine/ai-engine.service';
 import { AIMessage } from '../../../../ai-engine/interfaces/ai-provider.interface';
-import { parseAiJson } from '../../../../ai-engine/utils/ai-json.util';
 import { StorePrismaService } from '../../../../prisma/services/store-prisma.service';
 import { VendixHttpException, ErrorCodes } from '@common/errors';
 import { AiScanFile } from '@common/ai-scan-jobs/interfaces/ai-scan-job.interface';
 import type { AiJobProgress } from '@common/ai-scan-jobs/ai-job-monitor.service';
 import { AiScanHandlerRegistry } from '@common/ai-scan-jobs/ai-scan-handler.registry';
 import {
+  DetectedIngestFile,
+  detectIngestFile,
+  IngestSheetFormat,
+} from '@common/ai-ingest/ingest-file.detector';
+import { SheetParserService } from '@common/ai-ingest/sheets/sheet-parser.service';
+import {
+  AiExtractionError,
+  AiExtractionService,
+  newIngestQuotaKey,
+} from '@common/ai-ingest/extraction/ai-extraction.service';
+import { DocumentPagesService } from '@common/ai-ingest/documents/document-pages.service';
+import { readDocumentWithAi } from '@common/ai-ingest/documents/document-reader';
+import {
+  applyColumnMapping,
+  ColumnMapping,
+  columnMappingSchema,
+  mapColumnsBySynonyms,
+  mergeAiColumnMapping,
+  missingRequiredGroups,
+} from '@common/ai-ingest/sheets/column-mapper';
+import type {
+  IngestRowIssue,
+  IngestSkippedRow,
+  SheetTable,
+} from '@common/ai-ingest/ai-ingest.types';
+import {
   InventoryCountItem,
   InventoryCountScanResult,
   MatchedCountProduct,
   InventoryCountScanResponse,
 } from './dto/scan-inventory.dto';
-const sharp: typeof import('sharp').default = require('sharp'); // eslint-disable-line @typescript-eslint/no-require-imports, @typescript-eslint/no-unsafe-assignment -- sharp 0.35 types are ESM-only (export default) but CJS runtime exports the function
+import {
+  buildInventoryCountInstruction,
+  INVENTORY_COUNT_COLUMN_SYNONYMS,
+  INVENTORY_COUNT_FIELD_DESCRIPTIONS,
+  INVENTORY_COUNT_FIELDS,
+  INVENTORY_COUNT_LIMITS,
+  INVENTORY_COUNT_MAX_BYTES,
+  INVENTORY_COUNT_REQUIRED_FIELDS,
+  INVENTORY_COUNT_SCHEMA,
+  InventoryCountField,
+  inventoryCountProductKey,
+  mergeInventoryCountBatches,
+  normalizeInventoryCountRow,
+} from './inventory-count-ingest.profile';
 
 type CandidateProduct = MatchedCountProduct['candidates'][number];
+type ReportProgress = (progress: AiJobProgress) => Promise<void>;
+
+const APP_KEY = 'inventory_count_ocr';
+const SAMPLE_ROWS_FOR_MAPPING = 5;
+
+/** What the scan read, before the matching against the catalog. */
+interface CountReading {
+  scan: InventoryCountScanResult;
+  warnings: string[];
+  extras: Pick<
+    InventoryCountScanResponse,
+    'skipped' | 'row_issues' | 'columns' | 'stats'
+  >;
+}
 
 @Injectable()
 export class InventoryCountScannerService implements OnModuleInit {
   private readonly logger = new Logger(InventoryCountScannerService.name);
 
   constructor(
-    private readonly aiEngine: AIEngineService,
     private readonly prisma: StorePrismaService,
     private readonly aiScanRegistry: AiScanHandlerRegistry,
+    private readonly sheetParser: SheetParserService,
+    private readonly extraction: AiExtractionService,
+    private readonly documentPages: DocumentPagesService,
   ) {}
 
   /** Registra el handler async `inventory_count` (cola generica `ai-scan`). */
@@ -47,21 +100,40 @@ export class InventoryCountScannerService implements OnModuleInit {
     return this.scanCountFromFiles([this.toScanFile(file)], locationId);
   }
 
-  /** Nucleo (buffer + mime, sin multer): sincrono y handler async. */
+  /**
+   * Nucleo (buffer + tipo REAL por firma, sin multer): sincrono y handler
+   * async. ia-cargas F5a (#8):
+   *  - Hoja (xlsx/xls/csv): parser determinista, columnas por sinónimos (a lo
+   *    sumo UNA llamada de mapeo) y código para todas las filas; lo omitido
+   *    va a `skipped` con su fila y motivo.
+   *  - PDF/foto: lector común por páginas (texto nativo primero), 2 páginas
+   *    por llamada; un lote cortado se parte; fotos largas en franjas.
+   * El matching contra el catálogo y la aplicación de ajustes no cambian.
+   */
   async scanCountFromFiles(
     files: AiScanFile[],
     locationId: number,
-    reportProgress?: (progress: AiJobProgress) => Promise<void>,
+    reportProgress?: ReportProgress,
   ): Promise<InventoryCountScanResponse> {
     const file = files?.[0];
-    this.assertValidScanFile(file);
-    const scan = await this.runOcr(file);
+    const detected = this.assertValidScanFile(file);
+    // One quota key per load: mapping, page batches and repairs charge one job.
+    const quotaKey = newIngestQuotaKey();
+    const reading =
+      detected.kind === 'sheet'
+        ? await this.readSheet(file, detected.sheetFormat!, quotaKey, reportProgress)
+        : await this.readDocument(file, detected, quotaKey, reportProgress);
     const { matched_products, warnings } = await this.matchProducts(
-      scan,
+      reading.scan,
       locationId,
       reportProgress,
     );
-    return { scan, matched_products, warnings };
+    return {
+      scan: reading.scan,
+      matched_products,
+      warnings: [...reading.warnings, ...warnings],
+      ...reading.extras,
+    };
   }
 
   toScanFile(file: Express.Multer.File): AiScanFile {
@@ -73,76 +145,292 @@ export class InventoryCountScannerService implements OnModuleInit {
     };
   }
 
-  /** Validacion previa (archivo presente + mime) reutilizable por el controller async. */
-  assertValidScanFile(file?: AiScanFile | null): asserts file is AiScanFile {
-    if (!file) throw new VendixHttpException(ErrorCodes.INV_SCAN_NO_FILE);
-    const allowed = [
-      'image/jpeg',
-      'image/png',
-      'image/webp',
-      'application/pdf',
-    ];
-    if (!allowed.includes(file.mimeType))
-      throw new VendixHttpException(ErrorCodes.INV_SCAN_INVALID_FILE);
+  /**
+   * Validacion previa reutilizable por el controller async (antes de encolar):
+   * archivo presente, tamaño y tipo REAL por firma (no el mimetype del
+   * cliente). Acepta PDF, fotos (JPG/PNG/WebP) y hojas (xlsx/xls/csv).
+   */
+  assertValidScanFile(file?: AiScanFile | null): DetectedIngestFile {
+    if (!file?.buffer?.length) throw new VendixHttpException(ErrorCodes.INV_SCAN_NO_FILE);
+    if (file.buffer.length > INVENTORY_COUNT_MAX_BYTES) {
+      throw new VendixHttpException(
+        ErrorCodes.AI_INGEST_INVALID_FILE,
+        'El archivo debe pesar como máximo 10 MB.',
+      );
+    }
+    const detected = detectIngestFile({
+      buffer: file.buffer,
+      originalName: file.originalName,
+      mimeType: file.mimeType,
+    });
+    if (!detected) {
+      throw new VendixHttpException(
+        ErrorCodes.AI_INGEST_INVALID_FILE,
+        'Formato no soportado. Sube una foto (JPG, PNG o WebP), un PDF o una hoja de cálculo (Excel o CSV).',
+      );
+    }
+    return detected;
   }
 
   // --- Private helpers ---
 
-  private async runOcr(
+  /**
+   * PDF o foto por el lector común: texto nativo primero, escaneadas y fotos
+   * como imagen (fotos muy largas en franjas cuyo solape se fusiona), 2
+   * páginas por llamada con esquema y reparación. Las páginas que no se
+   * leen quedan en `warnings` con su número.
+   */
+  private async readDocument(
     file: AiScanFile,
-  ): Promise<InventoryCountScanResult> {
-    this.logger.debug(
-      `[InventoryCountScan] File: mimetype=${file.mimeType}, size=${file.size}, buffer=${file.buffer?.length ?? 'NO BUFFER'}`,
-    );
-
-    const { base64, mimeType } = await this.preprocessImage(file);
-    const dataUri = `data:${mimeType};base64,${base64}`;
-
-    this.logger.debug(
-      `[InventoryCountScan] DataURI length: ${dataUri.length} chars`,
-    );
-
-    const imageMessage: AIMessage = {
-      role: 'user',
-      content: [
-        {
-          type: 'text',
-          text: 'Extract the inventory count sheet data. Return ONLY valid JSON matching the schema defined in your system instructions.',
+    detected: DetectedIngestFile,
+    quotaKey: string,
+    reportProgress?: ReportProgress,
+  ): Promise<CountReading> {
+    let read;
+    try {
+      read = await readDocumentWithAi<Record<string, any>>({
+        file: { buffer: file.buffer, originalName: file.originalName },
+        mimeType: detected.mime,
+        pages: this.documentPages,
+        extraction: this.extraction,
+        appKey: APP_KEY,
+        schema: INVENTORY_COUNT_SCHEMA,
+        instruction: buildInventoryCountInstruction,
+        limits: INVENTORY_COUNT_LIMITS,
+        maxBytes: INVENTORY_COUNT_MAX_BYTES,
+        quotaKey,
+        reportProgress,
+        logLabel: 'InventoryCountScan',
+      });
+    } catch (err) {
+      throw this.toScanError(err);
+    }
+    const strips = read.batches.length > 1 && detected.kind === 'image';
+    const merged = mergeInventoryCountBatches(read.batches, { strips });
+    const scan = this.normalizeCountOcrResponse(merged.data);
+    return {
+      scan,
+      warnings: [...read.warnings, ...merged.warnings],
+      extras: {
+        stats: {
+          source: 'document',
+          total_rows: scan.counted_items.length,
+          imported_rows: scan.counted_items.length,
+          skipped_rows: 0,
+          mapping: null,
+          pages: read.pages,
+          text_pages: read.textPages,
         },
-        {
-          type: 'image_url',
-          image_url: { url: dataUri, detail: 'high' },
-        },
-      ],
+      },
+    };
+  }
+
+  /**
+   * Hoja de cálculo: parser determinista → columnas por sinónimos (UNA llamada
+   * de mapeo solo si no cubren producto + cantidad) → código para todas las
+   * filas. Ninguna fila se pierde en silencio: lo que no es un conteo va a
+   * `skipped` con su fila y motivo, y un producto repetido queda avisado.
+   */
+  private async readSheet(
+    file: AiScanFile,
+    format: IngestSheetFormat,
+    quotaKey: string,
+    reportProgress?: ReportProgress,
+  ): Promise<CountReading> {
+    const progress = async (done: number, total: number) => {
+      if (!reportProgress || total <= 0) return;
+      try {
+        await reportProgress({ done, total, stage: 'Leyendo la hoja', unit: 'filas' });
+      } catch {
+        // Progress is best effort.
+      }
     };
 
-    this.logger.debug(`[InventoryCountScan] Sending to AI engine...`);
-    const response = await this.aiEngine.run('inventory_count_ocr', {}, [
-      imageMessage,
-    ]);
-
-    this.logger.debug(
-      `[InventoryCountScan] AI response: success=${response.success}, contentLength=${response.content?.length ?? 0}, model=${response.model}, error=${response.error}`,
-    );
-    this.logger.debug(
-      `[InventoryCountScan] AI content preview: ${response.content?.substring(0, 300)}`,
-    );
-
-    if (!response.success || !response.content) {
-      this.logger.error(`AI inventory count OCR failed: ${response.error}`);
-      throw new VendixHttpException(ErrorCodes.INV_SCAN_AI_FAIL);
-    }
-
-    try {
-      const parsed = parseAiJson(response.content);
-      return this.normalizeCountOcrResponse(parsed);
-    } catch (err) {
-      if (err instanceof VendixHttpException) throw err;
-      this.logger.error(
-        `Failed to parse AI inventory count OCR response: ${response.content}`,
+    const parsed = this.sheetParser.parse(file.buffer, format, {
+      maxRows: INVENTORY_COUNT_LIMITS.maxRows,
+    });
+    if (!parsed.tables.length) {
+      throw new VendixHttpException(
+        ErrorCodes.AI_INGEST_INVALID_FILE,
+        'La hoja no tiene filas con datos.',
       );
-      throw new VendixHttpException(ErrorCodes.INV_SCAN_PARSE_FAIL);
     }
+    const warnings = [...parsed.warnings];
+    const skipped: IngestSkippedRow[] = [...parsed.skipped];
+    const rowIssues: IngestRowIssue[] = [];
+    const columns: NonNullable<InventoryCountScanResponse['columns']> = [];
+    const items: InventoryCountItem[] = [];
+    const totalRows = parsed.tables.reduce((n, t) => n + t.rows.length, 0);
+    const multi = parsed.tables.length > 1;
+    let mappingMode: 'synonyms' | 'ai' = 'synonyms';
+    let done = 0;
+    await progress(0, totalRows);
+
+    for (const table of parsed.tables) {
+      const sheet = multi ? table.sheet : undefined;
+      const { mapping, usedAi } = await this.mapColumns(table, warnings, quotaKey);
+      if (usedAi) mappingMode = 'ai';
+      for (const header of table.headers) {
+        columns.push({ ...(sheet ? { sheet } : {}), column: header, field: mapping.get(header) ?? null });
+      }
+      const missing = missingRequiredGroups(mapping, INVENTORY_COUNT_REQUIRED_FIELDS);
+      if (missing.length) {
+        warnings.push(
+          `No se reconoció ${missing.some((g) => g.includes('quantity')) ? 'la columna de cantidad contada' : 'la columna de producto (nombre, SKU o código de barras)'}${sheet ? ` en la hoja "${sheet}"` : ''}; revisa los encabezados.`,
+        );
+        if (table.row_numbers.length) {
+          skipped.push({
+            row: table.row_numbers[0],
+            row_end: table.row_numbers[table.row_numbers.length - 1],
+            ...(sheet ? { sheet } : {}),
+            reason: 'unreadable',
+            message: 'La hoja no tiene columnas de producto y cantidad reconocibles.',
+          });
+        }
+        done += table.rows.length;
+        continue;
+      }
+      const ignored = table.headers.filter((h) => !mapping.has(h));
+      if (ignored.length) {
+        warnings.push(`Columnas ignoradas${sheet ? ` en "${sheet}"` : ''}: ${ignored.join(', ')}.`);
+      }
+
+      const firstRowOf = new Map<string, number>();
+      table.rows.forEach((row, i) => {
+        const ctx = { row: table.row_numbers[i], ...(sheet ? { sheet } : {}) };
+        const { record, issues, skipMessage } = normalizeInventoryCountRow(
+          applyColumnMapping(row, mapping),
+          ctx,
+        );
+        rowIssues.push(...issues);
+        if (!record) {
+          skipped.push({ ...ctx, reason: 'unreadable', message: skipMessage ?? 'Fila sin datos de conteo.' });
+          return;
+        }
+        // The same product on two rows (two shelves) is kept as counted:
+        // nothing is summed or dropped, the operator is told.
+        const key = inventoryCountProductKey(record);
+        const first = firstRowOf.get(key);
+        if (first != null) {
+          rowIssues.push({
+            ...ctx,
+            level: 'warning',
+            message: `El producto "${record.description}" ya aparece en la fila ${first}; se cargaron las dos filas.`,
+          });
+        } else {
+          firstRowOf.set(key, ctx.row);
+        }
+        items.push(record);
+      });
+      done += table.rows.length;
+      await progress(done, totalRows);
+    }
+
+    const byPosition = (a: { row: number; sheet?: string }, b: { row: number; sheet?: string }) =>
+      (a.sheet ?? '').localeCompare(b.sheet ?? '') || a.row - b.row;
+    skipped.sort(byPosition);
+    rowIssues.sort(byPosition);
+    const omitted = skipped.reduce((n, s) => n + (s.row_end ? s.row_end - s.row + 1 : 1), 0);
+    if (omitted) {
+      warnings.push(`${omitted} fila(s) de la hoja no se cargaron; mira "Filas omitidas" para ver cuáles y por qué.`);
+    }
+
+    return {
+      // Read by code, not guessed: the low-confidence banner does not apply.
+      scan: { counted_items: items, sheet_notes: null, confidence: 100, extraction_notes: null },
+      warnings,
+      extras: {
+        skipped,
+        row_issues: rowIssues,
+        columns,
+        stats: {
+          source: 'sheet',
+          total_rows: parsed.total_rows,
+          imported_rows: items.length,
+          skipped_rows: omitted,
+          mapping: mappingMode,
+        },
+      },
+    };
+  }
+
+  /**
+   * Encabezados → campos. Primero sinónimos; si no cubren producto + cantidad,
+   * UNA llamada con encabezados + 5 filas de muestra devuelve el mapeo, que se
+   * aplica con código a todas las filas. Si la IA no responde algo usable, se
+   * sigue con los sinónimos y se avisa.
+   */
+  private async mapColumns(
+    table: SheetTable,
+    warnings: string[],
+    quotaKey: string,
+  ): Promise<{ mapping: ColumnMapping<InventoryCountField>; usedAi: boolean }> {
+    const synonyms = mapColumnsBySynonyms<InventoryCountField>(
+      table.headers,
+      INVENTORY_COUNT_COLUMN_SYNONYMS,
+    );
+    if (!missingRequiredGroups(synonyms, INVENTORY_COUNT_REQUIRED_FIELDS).length) {
+      return { mapping: synonyms, usedAi: false };
+    }
+    const sample = table.rows.slice(0, SAMPLE_ROWS_FOR_MAPPING);
+    const fieldList = INVENTORY_COUNT_FIELDS.map(
+      (f) => `- ${f}: ${INVENTORY_COUNT_FIELD_DESCRIPTIONS[f]}`,
+    ).join('\n');
+    const message: AIMessage = {
+      role: 'user',
+      content: [
+        'TASK FOR THIS REQUEST (it replaces the output format of your instructions): do NOT extract the count.',
+        'Map each column of an inventory count spreadsheet to ONE field, or "ignore".',
+        'Return ONLY a JSON object: {"columns":[{"column":"<exact column name>","field":"<field or ignore>"}],"warnings":[]}.',
+        'Use each field at most once. Use the sample values, not only the column names. The counted quantity is the PHYSICAL count, not the system stock or a price.',
+        'Fields:',
+        fieldList,
+        `Columns: ${JSON.stringify(table.headers)}`,
+        `Sample rows: ${JSON.stringify(sample)}`,
+      ].join('\n'),
+    };
+    try {
+      const answer = await this.extraction.extract<{
+        columns?: { column?: unknown; field?: unknown }[];
+      }>({
+        appKey: APP_KEY,
+        schema: columnMappingSchema(INVENTORY_COUNT_FIELDS),
+        messages: [message],
+        quotaKey,
+      });
+      return {
+        mapping: mergeAiColumnMapping(synonyms, table.headers, INVENTORY_COUNT_FIELDS, answer),
+        usedAi: true,
+      };
+    } catch (error) {
+      // The AI is down: the job fails (and is retried). An unusable answer
+      // falls back to the synonyms, and the sheet says what it could not map.
+      if (!(error instanceof AiExtractionError) || error.failure === 'ai_failed') {
+        throw this.toScanError(error);
+      }
+      this.logger.warn(
+        `[InventoryCountScan] column mapping by AI failed (${error.failure}); using synonyms only`,
+      );
+      return { mapping: synonyms, usedAi: false };
+    }
+  }
+
+  /**
+   * Keeps the scanner's error contract: an unusable model answer is still
+   * `INV_SCAN_PARSE_FAIL` and an AI failure `INV_SCAN_AI_FAIL`. Document
+   * problems keep their `AI_INGEST_*` code and credits / rate limit their
+   * `AI_PROVIDER_*` one.
+   */
+  private toScanError(err: unknown): unknown {
+    const error = err instanceof AiExtractionError ? err.toHttpException() : err;
+    if (!(error instanceof VendixHttpException)) return error;
+    if (error.errorCode === ErrorCodes.AI_INGEST_PARSE_FAIL.code) {
+      return new VendixHttpException(ErrorCodes.INV_SCAN_PARSE_FAIL);
+    }
+    if (error.errorCode === ErrorCodes.AI_REQUEST_001.code) {
+      return new VendixHttpException(ErrorCodes.INV_SCAN_AI_FAIL);
+    }
+    return error;
   }
 
   /**
@@ -184,6 +472,13 @@ export class InventoryCountScannerService implements OnModuleInit {
         });
       }
       const item = scan.counted_items[idx];
+      // Sheets say the row the operator sees in Excel; documents the line.
+      const where = item.source_row
+        ? `Fila ${item.source_row}${item.source_sheet ? ` (${item.source_sheet})` : ''}`
+        : `Línea ${idx + 1}`;
+      const origin = item.source_row
+        ? { source_row: item.source_row, ...(item.source_sheet ? { source_sheet: item.source_sheet } : {}) }
+        : {};
 
       try {
         const { candidates, stockInfoByProductId } =
@@ -228,11 +523,11 @@ export class InventoryCountScannerService implements OnModuleInit {
 
         if (ambiguousVariant) {
           warnings.push(
-            `Línea ${idx + 1}: '${item.description}' coincide con un producto de múltiples variantes en esta ubicación, selecciona la variante manualmente`,
+            `${where}: '${item.description}' coincide con un producto de múltiples variantes en esta ubicación, selecciona la variante manualmente`,
           );
         } else if (matchStatus === 'new' || selectedProductId == null) {
           warnings.push(
-            `Línea ${idx + 1}: '${item.description}' no coincide con catálogo, revisar`,
+            `${where}: '${item.description}' no coincide con catálogo, revisar`,
           );
         }
 
@@ -247,13 +542,14 @@ export class InventoryCountScannerService implements OnModuleInit {
           selected_product_variant_id: selectedVariantId,
           stock_on_hand: stockOnHand,
           candidates,
+          ...origin,
         });
       } catch (err: any) {
         this.logger.warn(
           `Item matching failed for "${item.description}": ${err?.message}`,
         );
         warnings.push(
-          `Línea ${idx + 1}: '${item.description}' no coincide con catálogo, revisar`,
+          `${where}: '${item.description}' no coincide con catálogo, revisar`,
         );
         matched_products.push({
           description: item.description,
@@ -266,6 +562,7 @@ export class InventoryCountScannerService implements OnModuleInit {
           selected_product_variant_id: null,
           stock_on_hand: null,
           candidates: [],
+          ...origin,
         });
       }
     }
@@ -498,57 +795,6 @@ export class InventoryCountScannerService implements OnModuleInit {
     }
 
     return Math.round((matches / qWords.length) * 80);
-  }
-
-  /**
-   * Copiado verbatim de ExpenseScannerService.preprocessImage (L248-290) /
-   * InvoiceScannerService.preprocessImage (L519-561): sharp resize ≤1536,
-   * JPEG q85; si falla (PDFs, formatos no soportados por sharp) pasa el
-   * buffer crudo con su mimetype original para que el modelo de visión lo
-   * procese nativamente.
-   */
-  private async preprocessImage(
-    file: AiScanFile,
-  ): Promise<{ base64: string; mimeType: string }> {
-    const MAX_DIMENSION = 1536;
-    const JPEG_QUALITY = 85;
-
-    try {
-      const metadata = await sharp(file.buffer).metadata();
-      const needsResize =
-        (metadata.width && metadata.width > MAX_DIMENSION) ||
-        (metadata.height && metadata.height > MAX_DIMENSION);
-
-      let pipeline = sharp(file.buffer);
-
-      if (needsResize) {
-        pipeline = pipeline.resize(MAX_DIMENSION, MAX_DIMENSION, {
-          fit: 'inside',
-          withoutEnlargement: true,
-        });
-      }
-
-      const processedBuffer = await pipeline
-        .jpeg({ quality: JPEG_QUALITY })
-        .toBuffer();
-
-      this.logger.debug(
-        `[InventoryCountScan] Image preprocessed: ${file.size} bytes → ${processedBuffer.length} bytes (${metadata.width}x${metadata.height}${needsResize ? ' resized' : ''})`,
-      );
-
-      return {
-        base64: processedBuffer.toString('base64'),
-        mimeType: 'image/jpeg',
-      };
-    } catch (err) {
-      this.logger.warn(
-        `[InventoryCountScan] Image preprocessing failed, using raw: ${err.message}`,
-      );
-      return {
-        base64: file.buffer.toString('base64'),
-        mimeType: file.mimeType,
-      };
-    }
   }
 
   /**

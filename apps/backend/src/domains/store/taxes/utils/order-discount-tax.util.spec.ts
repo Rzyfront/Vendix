@@ -3,6 +3,7 @@ import {
   projectOrderLineDiscountsChain,
   applyGrossDiscountRetax,
   distributeAmount,
+  resolveGrossDiscountByLine,
   DiscountableLine,
   GrossDiscountableLine,
 } from './order-discount-tax.util';
@@ -246,6 +247,98 @@ describe('distributeAmount', () => {
 
   it('devuelve ceros cuando el monto es 0', () => {
     expect(distributeAmount(0, [10, 20])).toEqual([0, 0]);
+  });
+});
+
+describe('resolveGrossDiscountByLine — F1: la promoción va sólo a sus líneas', () => {
+  // A = 119.000 (IVA 19 % incluido, base 100.000) · B = 100.000 (excluido).
+  const lines: GrossDiscountableLine[] = [
+    { base: 100000, grossOriginal: 119000, taxRows: [{ rate: 0.19 }] },
+    { base: 100000, grossOriginal: 100000, taxRows: [] },
+  ];
+  const gross = lines.map((l) => l.grossOriginal);
+
+  it('escenario A: promo 10 % de producto sobre A ⇒ A base 90.000 / IVA 17.100, B intacta, total 207.100', () => {
+    const byLine = resolveGrossDiscountByLine(gross, {
+      promotionTotal: 11900,
+      promotionByLine: [11900, 0],
+      couponTotal: 0,
+    });
+    expect(byLine).toEqual([11900, 0]);
+    const result = applyGrossDiscountRetax(lines, byLine);
+    expect(result.lines[0]).toMatchObject({ base: 90000, baseDiscount: 10000, taxTotal: 17100 });
+    expect(result.lines[1]).toMatchObject({ base: 100000, baseDiscount: 0, taxTotal: 0 });
+    expect(result.totalTax).toBe(17100);
+    expect(round(result.totalBase + result.totalTax)).toBe(207100);
+  });
+
+  it('escenario B: promo 10 % de producto sobre B (excluido) ⇒ IVA 19.000 completo, total 209.000', () => {
+    const byLine = resolveGrossDiscountByLine(gross, {
+      promotionTotal: 10000,
+      promotionByLine: [0, 10000],
+      couponTotal: 0,
+    });
+    const result = applyGrossDiscountRetax(lines, byLine);
+    expect(result.lines[0]).toMatchObject({ base: 100000, baseDiscount: 0, taxTotal: 19000 });
+    expect(result.lines[1]).toMatchObject({ base: 90000, baseDiscount: 10000, taxTotal: 0 });
+    expect(result.totalTax).toBe(19000);
+    expect(round(result.totalBase + result.totalTax)).toBe(209000);
+  });
+
+  it('sin desglose (promoción de ORDEN) es idéntico al reparto histórico por bruto', () => {
+    const split = { promotionTotal: 11900, promotionByLine: null, couponTotal: 5000 };
+    expect(resolveGrossDiscountByLine(gross, split)).toEqual(
+      distributeAmount(16900, gross),
+    );
+    // Promo de orden 10 % con tarifas mezcladas: mismo IVA que hoy.
+    const today = applyGrossDiscountRetax(lines, distributeAmount(21900, gross));
+    const now = applyGrossDiscountRetax(
+      lines,
+      resolveGrossDiscountByLine(gross, { promotionTotal: 21900, promotionByLine: null, couponTotal: 0 }),
+    );
+    expect(now).toEqual(today);
+    expect(now.totalTax).toBe(17100);
+  });
+
+  it('promo de producto + cupón: el cupón se reparte sobre el bruto remanente de TODAS las líneas', () => {
+    // Promo 11.900 sobre A; cupón 20.710 (10 % del remanente 207.100).
+    const byLine = resolveGrossDiscountByLine(gross, {
+      promotionTotal: 11900,
+      promotionByLine: [11900, 0],
+      couponTotal: 20710,
+    });
+    // Remanente A 107.100 · B 100.000 ⇒ cupón A 10.710 · B 10.000.
+    expect(byLine).toEqual([22610, 10000]);
+    const result = applyGrossDiscountRetax(lines, byLine);
+    expect(result.lines[0]).toMatchObject({ base: 81000, taxTotal: 15390 });
+    expect(result.lines[1]).toMatchObject({ base: 90000, taxTotal: 0 });
+    expect(round(result.totalBase + result.totalTax)).toBe(186390);
+  });
+
+  it('cierra contra el total del motor: Σ líneas = promoción + cupón aun con tope o centavos sueltos', () => {
+    // El motor dice 100,01 pero la línea sólo reporta 100: el centavo va a la
+    // línea promocionada, nunca a la que no tiene promoción.
+    const byLine = resolveGrossDiscountByLine([500, 300], {
+      promotionTotal: 100.01,
+      promotionByLine: [100, 0],
+      couponTotal: 0,
+    });
+    expect(byLine).toEqual([100.01, 0]);
+    // Línea topada a su bruto: lo que sobra va al resto por bruto remanente.
+    const capped = resolveGrossDiscountByLine([50, 300], {
+      promotionTotal: 60,
+      promotionByLine: [60, 0],
+      couponTotal: 0,
+    });
+    expect(capped).toEqual([50, 10]);
+    // Desglose de otro largo ⇒ reparto histórico.
+    expect(
+      resolveGrossDiscountByLine([100, 100], {
+        promotionTotal: 10,
+        promotionByLine: [10],
+        couponTotal: 0,
+      }),
+    ).toEqual([5, 5]);
   });
 });
 

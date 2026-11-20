@@ -33,6 +33,7 @@ import {
   AIEngineConfigModalComponent,
   AIEngineAppModalComponent,
   AIEngineAgentModalComponent,
+  AIAppHealthPanelComponent,
 } from './components/index';
 
 import {
@@ -68,7 +69,7 @@ import {
   Validators,
 } from '@angular/forms';
 
-type ActiveTab = 'configs' | 'apps' | 'tools' | 'jobs' | 'agents';
+type ActiveTab = 'configs' | 'apps' | 'tools' | 'jobs' | 'agents' | 'health';
 
 @Component({
   selector: 'app-ai-engine',
@@ -80,6 +81,7 @@ type ActiveTab = 'configs' | 'apps' | 'tools' | 'jobs' | 'agents';
     AIEngineConfigModalComponent,
     AIEngineAppModalComponent,
     AIEngineAgentModalComponent,
+    AIAppHealthPanelComponent,
     EmptyStateComponent,
     ResponsiveDataViewComponent,
     InputsearchComponent,

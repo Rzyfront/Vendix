@@ -28,6 +28,10 @@ export interface ExpenseScanResult {
 export interface ExpenseScanResponse {
   scan: ExpenseScanResult;
   matched_category: { id: number; name: string; confidence: number } | null;
+  /** ia-cargas F5a (optional): notices about the reading (pages not read, two totals…). */
+  warnings?: string[];
+  /** ia-cargas F5a (optional): how the document was read. */
+  scan_source?: { pages: number; text_pages: number; batches: number; missing_pages?: number[] };
 }
 
 export interface ConfirmScannedExpensePayload {

@@ -1314,6 +1314,10 @@ export class PromotionEngineService {
     // Apply winning promotions to itemBreakdownMap
     const appliedPromotions: PromotionQuoteApplied[] = [];
     for (const wp of winningPromotions) {
+      // F5: el descuento de la promoción es la Σ de lo que REALMENTE quedó en
+      // sus líneas (después del tope por línea), para que Σ líneas == total y
+      // los consumidores puedan repartir por línea sin centavos sueltos.
+      let appliedOnLines = 0;
       for (const [idx, share] of wp.perLineShares.entries()) {
         const current = itemBreakdownMap.get(idx);
         if (!current) continue;
@@ -1324,7 +1328,13 @@ export class PromotionEngineService {
         const accumulatedDiscount = this.roundMoney(
           current.promotion_discount + share,
         );
-        const cappedDiscount = Math.min(accumulatedDiscount, lineTotal);
+        const cappedDiscount = Math.max(
+          current.promotion_discount,
+          this.roundMoney(Math.min(accumulatedDiscount, lineTotal)),
+        );
+        appliedOnLines = this.roundMoney(
+          appliedOnLines + (cappedDiscount - current.promotion_discount),
+        );
         const remainingLineTotal = this.roundMoney(lineTotal - cappedDiscount);
         const nextUnitPrice =
           priceUnits > 0
@@ -1351,7 +1361,7 @@ export class PromotionEngineService {
         value: wp.matchedTierValue != null ? wp.matchedTierValue : Number(wp.promo.value),
         is_auto_apply: wp.promo.is_auto_apply,
         priority: wp.promo.priority,
-        discount_amount: this.roundMoney(wp.discountAmount),
+        discount_amount: this.roundMoney(appliedOnLines),
         applicable_item_ids: wp.applicableIndexes
           .map((idx) => itemBreakdownMap.get(idx)?.line_id)
           .filter((lineId): lineId is string | number => lineId !== undefined),

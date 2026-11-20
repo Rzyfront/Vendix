@@ -300,6 +300,12 @@ const REQUIRED_COLUMNS = [
   // Proveedores de servicio como usuarios de tienda (migración 20261112090000):
   // crear un proveedor persiste `user_id`.
   'service_providers.user_id',
+  // Observabilidad de IA (migración 20261221090000): cada llamada de IA escribe
+  // estas columnas en ai_engine_logs. Sin ellas el log falla en silencio (se
+  // pierde costo y auditoría) y el tablero de salud por app da 500.
+  'ai_engine_logs.finish_reason',
+  'ai_engine_logs.attempt',
+  'ai_engine_logs.validation_error',
 ];
 
 /** Tablas cuya ausencia completa es igual de fatal. */

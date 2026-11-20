@@ -39,6 +39,7 @@ import { VexiConfirmationService } from '../domains/store/vexi/vexi-confirmation
 import { VexiAttachmentsService } from '../domains/store/vexi/vexi-attachments.service';
 import { VexiUiChannelService } from '../domains/store/vexi/vexi-ui-channel.service';
 import { AiToolboxService } from './toolbox/ai-toolbox.service';
+import { DocumentPagesService } from '../common/ai-ingest/documents/document-pages.service';
 import { createAiToolboxTools } from './tools/domains/ai-toolbox.tools';
 import { CapabilityRegistryService } from './tools/bridge/capability-registry.service';
 import { createCapabilityTools } from './tools/bridge/capability.tools';
@@ -118,6 +119,11 @@ import { S3Service } from '../common/services/s3.service';
     VexiAttachmentsService,
     VexiUiChannelService,
     AiToolboxService,
+    // ia-cargas F5a: the toolbox prepares documents with the shared ai-ingest
+    // page service. Provided here as a plain class (no dependencies) and NOT
+    // exported; importing `AiIngestModule` would close a cycle, because its
+    // extraction service needs `AIEngineService` from this module.
+    DocumentPagesService,
     ApiCatalogService,
     CapabilityRegistryService,
     // The `ai-agent` queue was declared and never consumed, so `enqueueAgentTask`

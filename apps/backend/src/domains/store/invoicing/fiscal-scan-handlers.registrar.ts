@@ -19,20 +19,21 @@ export class FiscalScanHandlersRegistrar implements OnModuleInit {
   ) {}
 
   onModuleInit(): void {
-    this.registry.register('dian_habilitation', ({ files }) =>
-      this.habilitationScanner.scanHabilitationFromFiles(files),
+    this.registry.register('dian_habilitation', ({ files, reportProgress }) =>
+      this.habilitationScanner.scanHabilitationFromFiles(files, { reportProgress }),
     );
-    this.registry.register('dian_resolution', ({ files }) =>
-      this.resolutionScanner.scanResolutionFromFiles(files),
+    this.registry.register('dian_resolution', ({ files, reportProgress }) =>
+      this.resolutionScanner.scanResolutionFromFiles(files, { reportProgress }),
     );
     // Borrador de factura de venta: la nota libre viaja en `params.note` y el
     // contexto (`store` por defecto | `platform` para el riel super-admin) en
     // `params.context`. El contexto del job (quién encoló) valida el riel.
-    this.registry.register('invoice_draft', ({ files, params, context }) =>
+    this.registry.register('invoice_draft', ({ files, params, context, reportProgress }) =>
       this.invoiceDraftScanner.scanDraftFromFiles(files, {
         note: typeof params?.note === 'string' ? params.note : null,
         context: params?.context === 'platform' ? 'platform' : 'store',
         job_context: context ?? null,
+        reportProgress,
       }),
     );
   }

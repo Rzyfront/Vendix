@@ -616,7 +616,14 @@ export function planPlatformInvoiceDraft(
       pending,
       noteApplied: result.note_applied?.trim() || null,
       extractionNotes: result.extraction_notes?.trim() || null,
-      unresolved,
+      // ia-cargas F5b: los avisos de la lectura (páginas sin leer, documento
+      // leído en partes) van en la lista que la página ya muestra.
+      unresolved: [
+        ...unresolved,
+        ...(result.warnings ?? [])
+          .map((w) => String(w ?? '').trim())
+          .filter((w) => w.length > 0),
+      ],
       totalsInconsistent: result.totals?.consistent === false,
       documentTotal:
         typeof result.totals?.total === 'number' ? result.totals.total : null,

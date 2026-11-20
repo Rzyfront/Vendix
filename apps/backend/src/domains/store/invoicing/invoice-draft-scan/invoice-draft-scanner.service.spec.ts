@@ -2,6 +2,7 @@ import { ErrorCodes, VendixHttpException } from '@common/errors';
 import { RequestContextService } from '@common/context/request-context.service';
 import { computeNitDv } from '@common/utils/nit.util';
 import { AiScanFile } from '@common/ai-scan-jobs/interfaces/ai-scan-job.interface';
+import { AiExtractionService } from '@common/ai-ingest/extraction/ai-extraction.service';
 import { InvoiceDraftScannerService } from './invoice-draft-scanner.service';
 import { INVOICE_DRAFT_SCAN_APP_KEY } from './invoice-draft-scan.types';
 
@@ -81,11 +82,40 @@ const RUT_QUOTE_NOTE_RESPONSE = {
   extraction_notes: null,
 };
 
+/** Bytes with the real signature of the type (ai-ingest detects by signature). */
+const MAGIC: Record<string, Buffer> = {
+  'application/pdf': Buffer.from('%PDF-1.7 documento'),
+  'image/png': Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a, 0, 0, 0, 0]),
+  'image/jpeg': Buffer.from([0xff, 0xd8, 0xff, 0xe0, 0, 0x10, 0x4a, 0x46, 0x49, 0x46]),
+};
+
 const file = (mimeType: string, name = 'doc'): AiScanFile => ({
-  buffer: Buffer.from('not-really-an-image'),
+  buffer: MAGIC[mimeType] ?? Buffer.from('not-really-an-image'),
   mimeType,
   originalName: name,
-  size: 19,
+  size: (MAGIC[mimeType] ?? Buffer.from('not-really-an-image')).length,
+});
+
+/**
+ * Pages service stub (ia-cargas F5b): a PDF comes back as one page of native
+ * text, a photo as one image page. The real one is covered by its own spec.
+ */
+const fakePages = () => ({
+  prepareForAi: jest.fn(async (f: { mimetype: string }) =>
+    f.mimetype === 'application/pdf'
+      ? {
+          source: 'pdf',
+          pages: [{ page_number: 1, mode: 'text', text: 'COTIZACION COT-2026-118 ' + 'x'.repeat(220) }],
+          page_count: 1,
+          unreadable_pages: [],
+        }
+      : {
+          source: 'image',
+          pages: [{ page_number: 1, mode: 'image', text: '', image: 'data:image/jpeg;base64,AAAA' }],
+          page_count: 1,
+          unreadable_pages: [],
+        },
+  ),
 });
 
 describe('InvoiceDraftScannerService', () => {
@@ -145,6 +175,8 @@ describe('InvoiceDraftScannerService', () => {
       settings as any,
       customers as any,
       globalPrisma as any,
+      new AiExtractionService(aiEngine as any),
+      fakePages() as any,
     );
     respond(RUT_QUOTE_NOTE_RESPONSE);
   });
@@ -152,7 +184,7 @@ describe('InvoiceDraftScannerService', () => {
   afterEach(() => jest.restoreAllMocks());
 
   describe('message construction', () => {
-    it('sends ONE user message with the instruction text + one image part per file', async () => {
+    it('sends ONE user message with the instruction text + every page, labelled by document', async () => {
       const files = [
         file('application/pdf', 'rut.pdf'),
         file('image/png', 'cot.png'),
@@ -176,10 +208,17 @@ describe('InvoiceDraftScannerService', () => {
       expect(parts[0].text).toContain('Facturar el 50 % del anticipo, pago a 30 días');
       expect(parts[0].text).toContain('NO decimals'); // currency instruction
       const images = parts.filter((p: any) => p.type === 'image_url');
-      expect(images).toHaveLength(3);
-      // PDFs viajan crudos con su mime.
-      expect(images[0].image_url.url.startsWith('data:application/pdf;base64,')).toBe(true);
+      // ia-cargas F5b: el PDF va como su texto nativo; las fotos como imagen.
+      // Nunca un PDF crudo.
+      expect(images).toHaveLength(2);
+      expect(images.every((p: any) => p.image_url.url.startsWith('data:image/jpeg;base64,'))).toBe(true);
+      expect(JSON.stringify(parts)).not.toContain('application/pdf');
+      const labels = parts.filter((p: any) => p.type === 'text').map((p: any) => p.text);
+      expect(labels.some((t: string) => t.startsWith('--- Document 1 of 3, page 1 (text extracted from the PDF)'))).toBe(true);
+      expect(labels.some((t: string) => t.startsWith('--- Document 3 of 3, page 1'))).toBe(true);
       expect(result.documents_scanned).toBe(3);
+      expect(result.scan_source).toEqual({ documents: 3, pages: 3, text_pages: 1, batches: 1 });
+      expect(result.warnings).toBeUndefined();
     });
 
     it('without a note it says so and nulls note_applied', async () => {
