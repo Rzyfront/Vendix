@@ -85,6 +85,55 @@ export class OpenOrderPromotionService {
     };
   }
 
+  /**
+   * Registra la traza de la promo (`order_promotions` + `usage_count`) cuando
+   * la cuenta abierta se liquida por una vía que no pasa por el cobro de mesa
+   * (división de cuenta). Recotiza sobre las líneas vivas SIN reescribirlas y
+   * usa el snapshot del motor, igual que el cobro. `applyPromotion` es upsert:
+   * si luego la mesa se cobra por la vía normal no se cuenta dos veces.
+   * Sin descuento persistido no hace nada. Nunca rompe la operación.
+   */
+  async registerAppliedInTx(tx: any, orderId: number): Promise<number> {
+    try {
+      const [order, lines] = await Promise.all([
+        tx.orders.findFirst({
+          where: { id: orderId },
+          select: { customer_id: true, discount_amount: true },
+        }),
+        tx.order_items.findMany({
+          where: { order_id: orderId, cancelled_at: null },
+          include: { order_item_taxes: true },
+          orderBy: { id: 'asc' },
+        }),
+      ]);
+      if (!order || !(Number(order.discount_amount) > 0)) return 0;
+      const quote = await this.quote(
+        tx,
+        orderId,
+        order.customer_id ?? null,
+        lines,
+      );
+      let registered = 0;
+      for (const promo of quote?.order_promotions_snapshot ?? []) {
+        if (!(Number(promo.discount_amount) > 0)) continue;
+        await this.promotionEngine.applyPromotion(
+          orderId,
+          promo.promotion_id,
+          promo.discount_amount,
+          order.customer_id ?? null,
+          tx,
+        );
+        registered++;
+      }
+      return registered;
+    } catch (error) {
+      this.logger.warn(
+        `[open-order] registerAppliedInTx failed order=${orderId}: ${(error as Error).message}`,
+      );
+      return 0;
+    }
+  }
+
   private async quote(
     tx: any,
     orderId: number,

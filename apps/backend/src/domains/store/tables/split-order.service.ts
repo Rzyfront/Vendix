@@ -1,4 +1,5 @@
-import { Injectable } from '@nestjs/common';
+import { Injectable, Optional } from '@nestjs/common';
+import { OpenOrderPromotionService } from '../promotions/open-order-promotion.service';
 import { Prisma } from '@prisma/client';
 import { createHash } from 'crypto';
 import { StorePrismaService } from '../../../prisma/services/store-prisma.service';
@@ -127,7 +128,10 @@ export interface SplitResult {
 /** Financial ledger only: never creates orders/items or calls stock or kitchen. */
 @Injectable()
 export class SplitOrderService {
-  constructor(private readonly prisma: StorePrismaService) {}
+  constructor(
+    private readonly prisma: StorePrismaService,
+    @Optional() private readonly openOrderPromotion?: OpenOrderPromotionService,
+  ) {}
 
   private context() {
     const ctx = RequestContextService.getContext();
@@ -269,6 +273,12 @@ export class SplitOrderService {
         return {
           id: item.id,
           subtotal_amount: item.total_price,
+          // Contrato nuevo: el descuento de la promo ya viene asignado a sus
+          // líneas. Solo se agrega cuando existe para no alterar la huella
+          // (`version`) de las órdenes legadas.
+          ...(item.discount_amount != null
+            ? { discount_amount: item.discount_amount }
+            : {}),
           taxes: taxes.map((tax: any) => ({
             tax_rate_id: tax.tax_rate_id ?? null,
             tax_name: tax.tax_name,
@@ -547,6 +557,10 @@ export class SplitOrderService {
             dto.accounts?.[index],
           );
         }
+        // La división liquida la cuenta abierta sin pasar por el cobro de
+        // mesa: la promo que ya descontó debe quedar registrada y contar su
+        // uso (upsert, sin doble conteo si luego se cobra por la vía normal).
+        await this.openOrderPromotion?.registerAppliedInTx(tx, orderId);
         const claimed = await tx.orders.updateMany({
           where: { id: orderId, store_id, active_financial_split_id: null },
           data: {
