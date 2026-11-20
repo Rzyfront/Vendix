@@ -315,3 +315,5 @@ export {
 } from './gamified-incentive-bar/gamified-incentive-bar.component';
 
 export { CustomerSelectComponent, type CustomerSelectOption } from './customer-select/customer-select.component';
+export { AttachmentListComponent } from './attachment-list/attachment-list.component';
+export { formatFileSize, attachmentKind, type AttachmentItem, type AttachmentKind } from './attachment-list/attachment-list.util';

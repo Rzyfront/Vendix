@@ -12,6 +12,7 @@ import { EmptyStateComponent } from '../../../../../shared/components/empty-stat
 import { BadgeComponent } from '../../../../../shared/components/badge/badge.component';
 import { ToastService } from '../../../../../shared/components/toast/toast.service';
 import { DialogService } from '../../../../../shared/components/dialog/dialog.service';
+import { TemplateJsonImportModalComponent } from './template-json-import/template-json-import-modal.component';
 import { extractApiErrorMessage } from '../../../../../core/utils/api-error-handler';
 
 @Component({
@@ -22,7 +23,8 @@ import { extractApiErrorMessage } from '../../../../../core/utils/api-error-hand
     SpinnerComponent,
     EmptyStateComponent,
     BadgeComponent,
-    IconComponent
+    IconComponent,
+    TemplateJsonImportModalComponent,
 ],
   changeDetection: ChangeDetectionStrategy.OnPush,
   template: `
@@ -38,10 +40,16 @@ import { extractApiErrorMessage } from '../../../../../core/utils/api-error-hand
         </h2>
         <!-- The empty state carries its own create button -->
         @if (loading() || templates().length > 0) {
-          <app-button variant="primary" size="sm" (clicked)="openNewTemplate()">
-            <app-icon name="plus" [size]="16" slot="icon"></app-icon>
-            Nueva plantilla
-          </app-button>
+          <div class="flex items-center gap-2">
+            <app-button variant="outline" size="sm" (clicked)="showJsonImport.set(true)">
+              <app-icon name="upload" [size]="16" slot="icon"></app-icon>
+              Crear desde JSON
+            </app-button>
+            <app-button variant="primary" size="sm" (clicked)="openNewTemplate()">
+              <app-icon name="plus" [size]="16" slot="icon"></app-icon>
+              Nueva plantilla
+            </app-button>
+          </div>
         }
       </div>
       @if (loading()) {
@@ -58,6 +66,12 @@ import { extractApiErrorMessage } from '../../../../../core/utils/api-error-hand
           actionButtonIcon="plus"
           (actionClick)="openNewTemplate()"
         />
+        <div class="flex justify-center mt-3">
+          <app-button variant="outline" size="sm" (clicked)="showJsonImport.set(true)">
+            <app-icon name="upload" [size]="16" slot="icon"></app-icon>
+            Crear desde JSON
+          </app-button>
+        </div>
       } @else {
         <div class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
           @for (template of templates(); track template.id) {
@@ -148,6 +162,9 @@ import { extractApiErrorMessage } from '../../../../../core/utils/api-error-hand
         </div>
       }
       </div>
+      @if (showJsonImport()) {
+        <app-template-json-import-modal [isOpen]="true" (isOpenChange)="!$event && showJsonImport.set(false)" />
+      }
     </div>
   `,
 })
@@ -164,6 +181,7 @@ export class TemplatesComponent implements OnInit {
 
   templates = signal<DataCollectionTemplate[]>([]);
   loading = signal(true);
+  showJsonImport = signal(false);
 
   ngOnInit() {
     this.loadTemplates();

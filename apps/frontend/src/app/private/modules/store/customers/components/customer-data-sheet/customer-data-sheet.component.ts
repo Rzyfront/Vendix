@@ -24,7 +24,23 @@ import {
   TextareaComponent,
   ToastService,
   ToggleComponent,
+  AttachmentListComponent,
+  type AttachmentItem,
 } from '../../../../../../shared/components';
+import {
+  checkDocumentFile,
+  DEFAULT_DOCUMENT_CONFIG,
+  DOCUMENT_KIND_KEYS,
+  DOCUMENT_MAX_FILES,
+  documentAcceptAttribute,
+  readStoredDocuments,
+  resolveDocumentConfig,
+  StoredDocument,
+} from '../../../data-collection/utils/template-json.contract';
+import {
+  addUploadedDocument,
+  documentsToValueInput,
+} from '../../../data-collection/utils/document-responses.util';
 import type { SelectorOption } from '../../../../../../shared/components/selector/selector.component';
 import { parseApiError } from '../../../../../../core/utils/parse-api-error';
 import { formatDateOnlyUTC } from '../../../../../../shared/utils/date.util';
@@ -65,11 +81,6 @@ interface ViewTab {
   id: number;
   title: string;
   sections: ViewSection[];
-}
-
-interface FileInfo {
-  url: string;
-  name: string;
 }
 
 const DEFAULT_SENTINEL = 'default';
@@ -146,6 +157,7 @@ function originalControlValue(
     SpinnerComponent,
     TextareaComponent,
     ToggleComponent,
+    AttachmentListComponent,
   ],
   host: { class: 'block' },
   styles: [
@@ -271,14 +283,8 @@ function originalControlValue(
                   @for (v of data.other_values; track v.field_id) {
                     <div class="flex min-w-0 flex-col">
                       <span class="text-xs text-text-secondary">{{ v.label }}</span>
-                      @if (v.field_type === 'file' && v.file_url) {
-                        <a
-                          class="text-sm font-semibold text-primary hover:underline"
-                          [href]="v.file_url"
-                          target="_blank"
-                          rel="noopener noreferrer"
-                          >Ver adjunto</a
-                        >
+                      @if (v.field_type === 'file' && (filesByField().get(v.field_id)?.length ?? 0) > 0) {
+                        <app-attachment-list [files]="filesByField().get(v.field_id) ?? []" />
                       } @else {
                         <span class="break-words text-sm text-text-primary">{{ displayValue(v) }}</span>
                       }
@@ -320,17 +326,7 @@ function originalControlValue(
         <div class="flex min-w-0 flex-col">
           <span class="text-xs text-text-secondary">{{ vi.field.label }}</span>
           @if (vi.type === 'file') {
-            @if (fileLink(vi); as link) {
-              <a
-                class="text-sm font-semibold text-primary hover:underline"
-                [href]="link.url"
-                target="_blank"
-                rel="noopener noreferrer"
-                >Ver adjunto</a
-              >
-            } @else {
-              <span class="text-sm text-text-primary">—</span>
-            }
+            <app-attachment-list [files]="filesOf(vi)" emptyText="—" />
           } @else {
             <span class="break-words text-sm text-text-primary">{{ readText(vi) }}</span>
           }
@@ -378,12 +374,17 @@ function originalControlValue(
                   <span class="text-error">*</span>
                 }
               </span>
+              <app-attachment-list
+                [files]="filesOf(vi)"
+                [removable]="!isUploading(vi)"
+                (remove)="removeFileAt(vi, $event)"
+              />
               <div class="flex flex-wrap items-center gap-2">
                 <input
                   #fileInput
                   type="file"
                   class="hidden"
-                  accept=".jpg,.jpeg,.png,.webp,.gif,.pdf,.doc,.docx,.xls,.xlsx,.ppt,.pptx,.txt,.csv"
+                  [attr.accept]="acceptOf(vi)"
                   (change)="onFileSelected(vi, fileInput)"
                 />
                 <app-button
@@ -394,25 +395,8 @@ function originalControlValue(
                   (clicked)="fileInput.click()"
                 >
                   <app-icon name="upload" [size]="14" slot="icon"></app-icon>
-                  {{ fileLink(vi) ? 'Reemplazar' : 'Subir archivo' }}
+                  {{ uploadLabel(vi) }}
                 </app-button>
-                @if (fileLink(vi); as link) {
-                  <a
-                    class="text-sm font-semibold text-primary hover:underline"
-                    [href]="link.url"
-                    target="_blank"
-                    rel="noopener noreferrer"
-                    >Ver adjunto</a
-                  >
-                  <button
-                    type="button"
-                    class="inline-flex items-center gap-1 text-xs text-text-secondary hover:text-error"
-                    (click)="removeFile(vi)"
-                  >
-                    <app-icon name="x" [size]="12"></app-icon>
-                    Quitar
-                  </button>
-                }
               </div>
               @if (uploadErrors()[vi.field.id]; as err) {
                 <span class="text-xs text-error">{{ err }}</span>
@@ -472,13 +456,18 @@ export class CustomerDataSheetComponent {
 
   /** Changed controls only, keyed by field id. */
   private readonly draft = signal<Record<number, DraftValue>>({});
-  private readonly fileInfo = signal<Record<number, FileInfo>>({});
+  /** Documents edited per file field (full list, replaces the saved one). */
+  private readonly fileDraft = signal<Record<number, StoredDocument[]>>({});
+  /** Signed URLs of files uploaded in this edit session, by storage key. */
+  private readonly uploadedUrls = signal<Record<string, string>>({});
   private readonly uploading = signal<Record<number, boolean>>({});
   readonly uploadErrors = signal<Record<number, string>>({});
 
   private readonly retry$ = new Subject<void>();
 
-  readonly hasChanges = computed(() => Object.keys(this.draft()).length > 0);
+  readonly hasChanges = computed(
+    () => Object.keys(this.draft()).length > 0 || Object.keys(this.fileDraft()).length > 0,
+  );
   readonly uploadingCount = computed(
     () => Object.values(this.uploading()).filter(Boolean).length,
   );
@@ -647,18 +636,82 @@ export class CustomerDataSheetComponent {
 
   // ---- files ----
 
-  fileLink(vi: ViewItem): FileInfo | null {
-    const id = vi.field.id;
-    const d = this.draft()[id];
-    if (d !== undefined) {
-      return d === '' ? null : (this.fileInfo()[id] ?? null);
+  /** Config of a documents item; legacy items without it accept every kind. */
+  private docsConfig(vi: ViewItem) {
+    const rules = vi.item.validation_rules as Record<string, unknown> | undefined | null;
+    if (rules?.['documents']) return resolveDocumentConfig(rules);
+    return { ...DEFAULT_DOCUMENT_CONFIG, accept: [...DOCUMENT_KIND_KEYS] };
+  }
+
+  /** Current documents of a file answer: edited list, saved `files` or the legacy single key. */
+  private currentFiles(vi: ViewItem): StoredDocument[] {
+    const edited = this.fileDraft()[vi.field.id];
+    if (edited) return edited;
+    return this.savedFiles(this.valuesById().get(vi.field.id));
+  }
+
+  private savedFiles(v: DataSheetValue | undefined): StoredDocument[] {
+    if (!v) return [];
+    return readStoredDocuments({
+      value_text: v.value_text,
+      value_json: v.files?.length ? { files: v.files } : v.value_json,
+    });
+  }
+
+  /** Attachments of every file field (template items and "other" values), with signed URLs. */
+  readonly filesByField = computed(() => {
+    const map = new Map<number, AttachmentItem[]>();
+    const saved = new Map<number, DataSheetValue>();
+    for (const v of [...(this.sheet()?.values ?? []), ...(this.sheet()?.other_values ?? [])]) {
+      saved.set(v.field_id, v);
     }
-    const url = this.valuesById().get(id)?.file_url;
-    return url ? { url, name: 'Ver adjunto' } : null;
+    const uploaded = this.uploadedUrls();
+    const toItems = (files: StoredDocument[], v: DataSheetValue | undefined): AttachmentItem[] =>
+      files.map((f) => ({
+        ...f,
+        url:
+          uploaded[f.key] ??
+          v?.files?.find((x) => x.key === f.key)?.url ??
+          (f.key === v?.value_text ? (v?.file_url ?? null) : null),
+      }));
+    for (const [id, v] of saved) {
+      if (v.field_type === 'file') map.set(id, toItems(this.savedFiles(v), v));
+    }
+    for (const [id, files] of Object.entries(this.fileDraft())) {
+      map.set(Number(id), toItems(files, saved.get(Number(id))));
+    }
+    return map;
+  });
+
+  filesOf(vi: ViewItem): AttachmentItem[] {
+    return this.filesByField().get(vi.field.id) ?? [];
+  }
+
+  acceptOf(vi: ViewItem): string {
+    return documentAcceptAttribute(this.docsConfig(vi));
+  }
+
+  uploadLabel(vi: ViewItem): string {
+    const has = this.currentFiles(vi).length > 0;
+    if (!has) return 'Subir archivo';
+    return this.docsConfig(vi).multiple ? 'Agregar archivo' : 'Reemplazar';
   }
 
   isUploading(vi: ViewItem): boolean {
     return !!this.uploading()[vi.field.id];
+  }
+
+  private setFiles(vi: ViewItem, files: StoredDocument[]): void {
+    const id = vi.field.id;
+    const original = this.savedFiles(this.valuesById().get(id));
+    const same =
+      files.length === original.length && files.every((f, i) => f.key === original[i].key);
+    this.fileDraft.update((d) => {
+      const next = { ...d };
+      if (same) delete next[id];
+      else next[id] = files;
+      return next;
+    });
   }
 
   onFileSelected(vi: ViewItem, input: HTMLInputElement): void {
@@ -666,6 +719,23 @@ export class CustomerDataSheetComponent {
     input.value = '';
     if (!file) return;
     const id = vi.field.id;
+    const config = this.docsConfig(vi);
+    const problem = checkDocumentFile(config, {
+      name: file.name,
+      mime_type: file.type,
+      size: file.size,
+    });
+    if (problem) {
+      this.uploadErrors.update((e) => ({ ...e, [id]: problem }));
+      return;
+    }
+    if (config.multiple && this.currentFiles(vi).length >= DOCUMENT_MAX_FILES) {
+      this.uploadErrors.update((e) => ({
+        ...e,
+        [id]: `Se alcanzó el máximo de ${DOCUMENT_MAX_FILES} archivos.`,
+      }));
+      return;
+    }
     this.uploading.update((u) => ({ ...u, [id]: true }));
     this.uploadErrors.update(({ [id]: _drop, ...rest }) => rest);
     this.service
@@ -676,11 +746,18 @@ export class CustomerDataSheetComponent {
       )
       .subscribe({
         next: (res) => {
-          this.fileInfo.update((f) => ({
-            ...f,
-            [id]: { url: res.url, name: res.original_name },
-          }));
-          this.setDraft(vi, res.key);
+          this.uploadedUrls.update((m) => ({ ...m, [res.key]: res.url }));
+          const stored: StoredDocument = {
+            key: res.key,
+            name: res.name || res.original_name || file.name,
+            size: res.size ?? file.size,
+            mime_type: res.mime_type || file.type,
+            ...(res.uploaded_at ? { uploaded_at: res.uploaded_at } : {}),
+          };
+          this.setFiles(
+            vi,
+            addUploadedDocument(this.currentFiles(vi), stored, config.multiple, DOCUMENT_MAX_FILES),
+          );
         },
         error: (err) =>
           this.uploadErrors.update((e) => ({
@@ -690,8 +767,11 @@ export class CustomerDataSheetComponent {
       });
   }
 
-  removeFile(vi: ViewItem): void {
-    this.setDraft(vi, '');
+  removeFileAt(vi: ViewItem, index: number): void {
+    this.setFiles(
+      vi,
+      this.currentFiles(vi).filter((_, i) => i !== index),
+    );
   }
 
   // ---- actions ----
@@ -702,7 +782,8 @@ export class CustomerDataSheetComponent {
 
   private resetEdits(): void {
     this.draft.set({});
-    this.fileInfo.set({});
+    this.fileDraft.set({});
+    this.uploadedUrls.set({});
     this.uploading.set({});
     this.uploadErrors.set({});
   }
@@ -752,6 +833,17 @@ export class CustomerDataSheetComponent {
         entry.value_text = typeof raw === 'string' && raw.trim() ? raw : null;
       }
       payload.push(entry);
+    }
+    for (const [key, files] of Object.entries(this.fileDraft())) {
+      const fieldId = Number(key);
+      if (!items.has(fieldId)) continue;
+      payload.push({
+        field_id: fieldId,
+        value_number: null,
+        value_date: null,
+        value_bool: null,
+        ...documentsToValueInput(files),
+      });
     }
     return payload;
   }
