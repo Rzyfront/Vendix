@@ -421,5 +421,17 @@ describe('InvoiceDraftScannerService — ai-ingest (F5b)', () => {
       expect(merged.data.totals.total).toBe('2.000');
       expect(merged.warnings.join(' ')).toContain('No se pudo sumar el total');
     });
+
+    it('a subtotal or IVA written as text is not added either, and each one is warned', () => {
+      const merged = mergeInvoiceDraftBatches([
+        { pages: p(1), data: { totals: { subtotal: '1.000', tax_total: 190, total: 1190 } } },
+        { pages: p(2), data: { totals: { subtotal: 500, tax_total: '95', total: 595 } } },
+      ]);
+      expect(merged.data.totals).toEqual({ subtotal: 500, tax_total: '95', total: 1785 });
+      const text = merged.warnings.join(' ');
+      expect(text).toContain('No se pudo sumar el subtotal');
+      expect(text).toContain('No se pudo sumar el IVA total');
+      expect(text).not.toContain('No se pudo sumar el total');
+    });
   });
 });
