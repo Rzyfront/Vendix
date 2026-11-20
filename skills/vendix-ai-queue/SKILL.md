@@ -7,7 +7,7 @@ description: >
 license: Apache-2.0
 metadata:
   author: rzyfront
-  version: "2.5"
+  version: "2.6"
   scope: [root]
   auto_invoke:
     - "Working with AI async processing"
@@ -54,14 +54,18 @@ metadata:
 ### Añadir un kind
 
 1. Literal en `AiScanKind`.
-2. Servicio de dominio con `…FromFiles(files: AiScanFile[], params)` (misma lógica que el camino síncrono; el archivo llega de S3).
+2. Servicio de dominio con `…FromFiles(files: AiScanFile[], params)`; si lee archivos con IA, por el lector común `ai-ingest` (ver `vendix-ai-ingest`). El archivo llega de S3.
 3. Registrar el handler UNA vez en `onModuleInit`; si el servicio está en varios módulos, usar un `*-handler.registrar.ts` provisto en un solo módulo.
-4. Endpoint `…/async` hermano (el síncrono pasa a `@deprecated`): validar ANTES de encolar (tipo/tamaño, permisos, cuota) y responder `202 { job_id }`.
+4. Solo endpoint `…/async`: validar ANTES de encolar (tipo por bytes/tamaño, permisos, cuota) y responder `202 { job_id }`. No se crea camino síncrono: los escaneos síncronos `@deprecated` (RUT, habilitación y resolución DIAN, planilla de ruta, conteo, padrón de socios) se retiraron en ia-cargas F6 por no tener llamadores; antes de retirar otro, grep de solo lectura en `apps/frontend`, `apps/mobile`, toolbox de Vexi y jobs.
 5. Frontend `AiScanJobService.enqueueAndWait<T>(url, body, opts)` con timeout mayor al presupuesto de reintentos; mobile usa el mismo contrato.
 
 Resultados binarios: el handler sube a S3 y devuelve la key, nunca base64 en Redis; se muestran por proxy autenticado (`GET store/products/ai-image?key=`).
 
 Legacy per-domain queues (`receipt-scan`, `expense-scan`, `invoice-scan`, `invoice-revalidate`, `payment-receipt-scan`, `received-document-scan`) stay valid but are not a pattern for new code. Detail: `references/legacy-domain-scan-queues.md` (leer bajo demanda).
+
+## Observability
+
+Cada llamada de un job queda en `ai_engine_logs` con `finish_reason`, y las de ai-ingest con `attempt` y `validation_error`. Para medir fallos por app: super admin → Motor de IA → **Salud por app** (`GET superadmin/ai-engine/app-health`, 7 días por defecto). Escribir el log nunca rompe el job.
 
 ## IDOR rule (mandatory for any job-status poll)
 
@@ -76,4 +80,4 @@ BullMQ job ids are global sequential integers on queues shared by all tenants, a
 
 ## Related Skills
 
-`vendix-ai-platform-core`, `vendix-ai-embeddings-rag`, `vendix-ai-agent-tools`, `vendix-s3-storage`.
+`vendix-ai-platform-core`, `vendix-ai-ingest`, `vendix-ai-embeddings-rag`, `vendix-ai-agent-tools`, `vendix-s3-storage`.
