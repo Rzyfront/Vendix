@@ -166,10 +166,15 @@ export class AiJobMonitorService {
         // Keep the time-threshold verdict.
       }
     }
+    // A job that keeps reporting progress is alive: the active threshold
+    // counts from its last report (ai-ingest sheets can take several minutes).
+    const lastProgressAt = progressReportedAt(job.progress);
+    const activeSince =
+      startedAt === null ? null : Math.max(startedAt, lastProgressAt ?? 0);
     const stalledActive =
       state === 'active' &&
-      startedAt !== null &&
-      now - startedAt > AI_JOB_ACTIVE_STALL_MS;
+      activeSince !== null &&
+      now - activeSince > AI_JOB_ACTIVE_STALL_MS;
 
     const meta: AiJobStatusMeta = {
       progress: readProgress(job.progress),
@@ -234,7 +239,7 @@ export class AiJobMonitorService {
         : `Proceso de IA colgado: ${source.label}`,
       summary: waiting
         ? `Un trabajo de ${source.label} lleva más de ${AI_JOB_WAITING_STALL_MS / 60_000} min en cola sin que ningún worker lo tome. Revisa el worker de la cola ${source.queue}.`
-        : `Un trabajo de ${source.label} lleva más de ${AI_JOB_ACTIVE_STALL_MS / 60_000} min en proceso sin terminar.`,
+        : `Un trabajo de ${source.label} lleva más de ${AI_JOB_ACTIVE_STALL_MS / 60_000} min en proceso sin terminar ni reportar avance.`,
       category: 'stalled',
     });
   }
@@ -375,6 +380,13 @@ function toIso(ms: number | null | undefined): string | null {
   return typeof ms === 'number' && Number.isFinite(ms) && ms > 0
     ? new Date(ms).toISOString()
     : null;
+}
+
+/** When the handler last reported progress (`at`, epoch ms), if it did. */
+export function progressReportedAt(progress: unknown): number | null {
+  if (!progress || typeof progress !== 'object') return null;
+  const at = (progress as { at?: unknown }).at;
+  return typeof at === 'number' && Number.isFinite(at) ? at : null;
 }
 
 /** `job.progress` is `number | object`; only `{done,total}` counts as real progress. */

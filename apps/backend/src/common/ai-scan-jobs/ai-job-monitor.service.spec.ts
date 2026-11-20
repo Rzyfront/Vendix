@@ -4,6 +4,7 @@ import {
   AI_JOB_ACTIVE_STALL_MS,
   AI_JOB_WAITING_STALL_MS,
   AiJobMonitorService,
+  progressReportedAt,
   readProgress,
 } from './ai-job-monitor.service';
 
@@ -129,6 +130,38 @@ describe('AiJobMonitorService (QUI-1020)', () => {
       expect(incidents.report.mock.calls[0][0].dedupeKey).toBe(
         'ai-job:stalled:active:ai-scan:rut',
       );
+    });
+
+    it('activo largo que sigue reportando avance (`at` reciente) NO está colgado', async () => {
+      const meta = await monitor.describe(
+        job({
+          processedOn: NOW - AI_JOB_ACTIVE_STALL_MS * 3,
+          progress: { done: 1200, total: 5000, at: NOW - 30_000 },
+        }),
+        'active',
+        SOURCE,
+        OWNER,
+        undefined,
+        NOW,
+      );
+      expect(meta.stalled).toBe(false);
+      expect(meta.progress).toEqual(expect.objectContaining({ done: 1200, total: 5000 }));
+      expect(incidents.report).not.toHaveBeenCalled();
+    });
+
+    it('activo cuyo último avance pasó el umbral -> colgado', async () => {
+      const meta = await monitor.describe(
+        job({
+          processedOn: NOW - AI_JOB_ACTIVE_STALL_MS * 3,
+          progress: { done: 1200, total: 5000, at: NOW - AI_JOB_ACTIVE_STALL_MS - 1 },
+        }),
+        'active',
+        SOURCE,
+        OWNER,
+        undefined,
+        NOW,
+      );
+      expect(meta.stalled).toBe(true);
     });
 
     it('reintento en espera (ya empezó antes) no cuenta como cola sin worker', async () => {
@@ -400,6 +433,15 @@ describe('AiJobMonitorService (QUI-1020)', () => {
           })
           .catch((e) => expect(e.errorCode).toBe('RUT_SCAN_AI_FAIL')),
       ]);
+    });
+  });
+
+  describe('progressReportedAt', () => {
+    it('lee `at` solo si es un número finito', () => {
+      expect(progressReportedAt({ done: 1, total: 2, at: 123 })).toBe(123);
+      expect(progressReportedAt({ done: 1, total: 2 })).toBeNull();
+      expect(progressReportedAt({ at: 'x' })).toBeNull();
+      expect(progressReportedAt(5)).toBeNull();
     });
   });
 

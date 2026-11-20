@@ -173,6 +173,12 @@ export interface CommitCustomerImportResult {
 
 /** Clientes por petición de `analyze` (tope del backend: 200). */
 export const ANALYZE_CHUNK_SIZE = 200;
+/**
+ * Tope de espera del escaneo. Una hoja de 5.000 filas con muchas filas
+ * ambiguas puede tardar varios minutos; el corte real lo da el backend con
+ * `stalled` (5 min sin reportar avance), no este tope.
+ */
+export const CUSTOMER_SCAN_TIMEOUT_MS = 30 * 60_000;
 /** Clientes por petición de `commit` (patrón de cargas masivas: 100). */
 export const COMMIT_CHUNK_SIZE = 100;
 
@@ -202,7 +208,7 @@ export class CustomerAiImportService {
       .enqueueAndWait<CustomerImportScanResult>(
         `${this.apiUrl}/async`,
         formData,
-        opts,
+        { timeoutMs: CUSTOMER_SCAN_TIMEOUT_MS, ...opts },
       )
       .pipe(map((result) => ({ success: true, data: result })));
   }
@@ -214,7 +220,10 @@ export class CustomerAiImportService {
   ): Observable<ApiResponse<CustomerImportScanResult>> | null {
     return (
       this.aiScanJobs
-        .resume<CustomerImportScanResult>(resumeKey, opts)
+        .resume<CustomerImportScanResult>(resumeKey, {
+          timeoutMs: CUSTOMER_SCAN_TIMEOUT_MS,
+          ...opts,
+        })
         ?.pipe(map((result) => ({ success: true, data: result }))) ?? null
     );
   }

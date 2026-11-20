@@ -115,10 +115,12 @@ describe('AiScanProcessor', () => {
         return { ok: 1 };
       });
       await processor.process(j);
+      // `at`: when it reported, so a long job that keeps advancing is not stalled.
       expect(j.updateProgress).toHaveBeenCalledWith({
         done: 1,
         total: 3,
         stage: 'Leyendo páginas',
+        at: expect.any(Number),
       });
     });
 
