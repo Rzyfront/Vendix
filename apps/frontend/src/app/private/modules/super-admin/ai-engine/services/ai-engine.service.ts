@@ -1,7 +1,7 @@
 import { Injectable, inject } from '@angular/core';
 import { HttpClient, HttpParams } from '@angular/common/http';
 import { Observable } from 'rxjs';
-import { shareReplay, tap } from 'rxjs/operators';
+import { map, shareReplay, tap } from 'rxjs/operators';
 import { environment } from '../../../../../../environments/environment';
 import {
   AIEngineConfig,
@@ -24,6 +24,8 @@ import {
   UpdateAIAgentDto,
   AIAgentQueryDto,
   PaginatedAIAgentResponse,
+  AIAppHealthQuery,
+  AIAppHealthReport,
 } from '../interfaces';
 
 interface CacheEntry<T> {
@@ -183,6 +185,25 @@ export class AIEngineService {
     return this.http.get<any>(
       `${this.apiUrl}/superadmin/ai-engine/jobs/${queueName}/${jobId}`,
     );
+  }
+
+  // --- Salud por app (ia-cargas F6): solo lectura ---
+
+  getAppHealth(query: AIAppHealthQuery = {}): Observable<AIAppHealthReport> {
+    let params = new HttpParams();
+    if (query.date_from) params = params.set('date_from', query.date_from);
+    if (query.date_to) params = params.set('date_to', query.date_to);
+    return this.http
+      .get<
+        { data?: AIAppHealthReport } | AIAppHealthReport
+      >(`${this.apiUrl}/superadmin/ai-engine/app-health`, { params })
+      .pipe(
+        map((response) =>
+          'apps' in response
+            ? response
+            : (response.data ?? { date_from: '', date_to: '', apps: [] }),
+        ),
+      );
   }
 
   // --- AI Agents (F5: CRUD del endpoint F4) ---

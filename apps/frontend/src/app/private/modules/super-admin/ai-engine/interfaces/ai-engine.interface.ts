@@ -544,3 +544,32 @@ export const KNOWN_PROVIDERS: KnownProvider[] = [
     models: [],
   },
 ];
+
+// --- Salud por app (ia-cargas F6): GET superadmin/ai-engine/app-health ---
+
+/** Una fila del tablero. Las tasas van de 0 a 100. */
+export interface AIAppHealthRow {
+  app_key: string;
+  total_calls: number;
+  error_calls: number;
+  truncated_calls: number;
+  validation_failed_calls: number;
+  error_rate: number;
+  truncated_rate: number;
+  validation_failed_rate: number;
+  avg_prompt_tokens: number;
+  avg_completion_tokens: number;
+  avg_total_tokens: number;
+}
+
+export interface AIAppHealthReport {
+  date_from: string;
+  date_to: string;
+  apps: AIAppHealthRow[];
+}
+
+/** Rango del tablero en fechas ISO (el backend usa 7 días si faltan). */
+export interface AIAppHealthQuery {
+  date_from?: string;
+  date_to?: string;
+}
