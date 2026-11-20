@@ -16,8 +16,8 @@ export class RutScanHandlerRegistrar implements OnModuleInit {
   ) {}
 
   onModuleInit(): void {
-    this.registry.register('rut', ({ files }) =>
-      this.rutScanner.scanRutFromFiles(files),
+    this.registry.register('rut', ({ files, reportProgress }) =>
+      this.rutScanner.scanRutFromFiles(files, { reportProgress }),
     );
   }
 }

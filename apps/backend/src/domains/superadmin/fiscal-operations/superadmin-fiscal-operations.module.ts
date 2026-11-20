@@ -1,3 +1,4 @@
+import { AiIngestModule } from '../../../common/ai-ingest/ai-ingest.module';
 import { Module } from '@nestjs/common';
 
 import { PrismaModule } from '../../../prisma/prisma.module';
@@ -10,11 +11,18 @@ import { SuperadminFiscalOperationsController } from './superadmin-fiscal-operat
 import { RutScannerService } from '../../store/settings/rut-scanner.service';
 
 @Module({
-  imports: [PrismaModule, ResponseModule, S3Module, FiscalOperationsModule],
+  imports: [
+    AiIngestModule,
+    PrismaModule,
+    ResponseModule,
+    S3Module,
+    FiscalOperationsModule,
+  ],
   controllers: [SuperadminFiscalOperationsController],
-  // RutScannerService only needs AIEngineService, which comes from the @Global()
-  // AI module — providing it here avoids importing the whole store settings
-  // module (and its cash-registers/email dependencies) for one endpoint.
+  // RutScannerService only needs AIEngineService (from the @Global() AI module)
+  // and the ai-ingest reader (AiIngestModule above) — providing it here avoids
+  // importing the whole store settings module (and its cash-registers/email
+  // dependencies) for one endpoint.
   providers: [PlatformOrgService, RutScannerService],
 })
 export class SuperadminFiscalOperationsModule {}

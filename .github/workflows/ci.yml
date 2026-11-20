@@ -405,6 +405,7 @@ jobs:
           src/domains/ecommerce/workflows-public/ecommerce-documents-signing.controller.spec.ts
           src/common/ai-ingest/documents/document-pages.service.spec.ts
           src/common/ai-ingest/documents/page-content.spec.ts
+          src/common/ai-ingest/documents/merge-answers.spec.ts
           src/common/ai-ingest/images/image-prep.spec.ts
           src/common/ai-ingest/documents/queued-document.spec.ts
           src/ai-engine/toolbox/ai-toolbox.service.spec.ts
@@ -542,6 +543,13 @@ jobs:
           src/domains/store/orders/purchase-orders/purchase-invoice-ingest.profile.spec.ts
           src/domains/store/orders/purchase-orders/invoice-scanner.ingest.spec.ts
           src/domains/store/expenses/expense-scanner.ingest.spec.ts
+          src/domains/store/invoicing/invoice-draft-scan/invoice-draft-scanner.ingest.spec.ts
+          src/domains/store/invoicing/invoice-draft-scan/invoice-draft-scanner.service.spec.ts
+          src/domains/store/invoicing/fiscal-scanners.ingest.spec.ts
+          src/domains/store/invoicing/fiscal-scan-handlers.registrar.spec.ts
+          src/domains/store/settings/rut-scanner.service.spec.ts
+          src/domains/store/invoicing/resolutions/resolution-scanner.service.spec.ts
+          src/domains/store/invoicing/dian-config/dian-habilitation-scanner.service.spec.ts
           src/domains/store/expenses/expense-scan.processor.spec.ts
           src/domains/store/inventory/adjustments/inventory-count-scanner.service.spec.ts
           src/domains/store/dispatch-routes/route-flow/route-sheet-scanner.service.spec.ts

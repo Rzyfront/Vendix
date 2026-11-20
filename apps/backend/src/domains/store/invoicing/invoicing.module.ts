@@ -1,3 +1,4 @@
+import { AiIngestModule } from '../../../common/ai-ingest/ai-ingest.module';
 import { Module, OnModuleInit } from '@nestjs/common';
 import { AIToolRegistry } from '../../../ai-engine/tools/ai-tool-registry';
 import { createInvoicingTools } from '../../../ai-engine/tools/domains/invoicing.tools';
@@ -64,6 +65,7 @@ import { StoreDocumentReceptionConnectionsController } from '../../received-docu
 
 @Module({
   imports: [
+    AiIngestModule,
     ResponseModule,
     PrismaModule,
     S3Module,

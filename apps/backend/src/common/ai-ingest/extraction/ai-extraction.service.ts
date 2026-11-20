@@ -102,6 +102,8 @@ export interface ExtractBatchesOptions<TItem> {
   quotaKey?: string;
   /** Real progress: items finished (ok or failed) out of `items.length`. */
   onProgress?: (done: number, total: number) => Promise<void> | void;
+  /** Template variables of the app prompt, the same for every batch. */
+  variables?: Record<string, string>;
 }
 
 export interface ExtractedBatch<TItem, TOut> {
@@ -297,6 +299,7 @@ export class AiExtractionService {
           schema: options.schema,
           messages: options.buildMessages(items),
           quotaKey,
+          variables: options.variables,
         });
         results.push({ items, data });
         await advance(items.length);

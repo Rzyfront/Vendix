@@ -360,6 +360,24 @@ const TAX_REGIME_LABELS: Record<string, string> = {
             </div>
           }
 
+          <!-- ia-cargas F5b: avisos de lectura (páginas sin leer, valores en conflicto) -->
+          @if (result()!.warnings?.length) {
+            <div
+              class="flex items-start gap-2 bg-warning-light border border-warning rounded-lg p-3"
+            >
+              <app-icon
+                name="alert-triangle"
+                [size]="16"
+                class="text-warning mt-0.5"
+              ></app-icon>
+              <ul class="list-disc space-y-0.5 pl-4 text-xs text-warning">
+                @for (warning of result()!.warnings; track $index) {
+                  <li>{{ warning }}</li>
+                }
+              </ul>
+            </div>
+          }
+
           <!-- Verificación obligatoria de los datos precargados por la IA -->
           <app-ai-review-ack
             #ackBlock

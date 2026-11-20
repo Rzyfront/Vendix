@@ -61,6 +61,8 @@ export interface DianHabilitationScanResult {
   extraction_notes: string | null;
   /** Cuántos documentos recibió el modelo. */
   documents_scanned: number;
+  /** Avisos de lectura en español (páginas sin leer, documento leído en partes…). */
+  warnings?: string[];
 }
 
 /** Envelope del endpoint. */

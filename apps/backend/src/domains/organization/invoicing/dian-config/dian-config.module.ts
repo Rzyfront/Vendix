@@ -1,3 +1,4 @@
+import { AiIngestModule } from '../../../../common/ai-ingest/ai-ingest.module';
 import { Module } from '@nestjs/common';
 import { OrgDianConfigController } from './dian-config.controller';
 import { OrgDianConfigService } from './dian-config.service';
@@ -17,6 +18,7 @@ import { DianHabilitationScannerService } from '../../../store/invoicing/dian-co
 
 @Module({
   imports: [
+    AiIngestModule,
     ResponseModule,
     PrismaModule,
     S3Module,

@@ -1,11 +1,32 @@
 import { Injectable, Logger } from '@nestjs/common';
 import { AIEngineService } from '../../../ai-engine/ai-engine.service';
-import { AIMessage } from '../../../ai-engine/interfaces/ai-provider.interface';
-import { parseAiJson } from '../../../ai-engine/utils/ai-json.util';
 import { VendixHttpException, ErrorCodes } from '@common/errors';
 import { normalizeFiscalResponsibilityCode } from '@common/constants/fiscal-responsibilities';
 import { AiScanFile } from '@common/ai-scan-jobs/interfaces/ai-scan-job.interface';
-const sharp: typeof import('sharp').default = require('sharp'); // eslint-disable-line @typescript-eslint/no-require-imports, @typescript-eslint/no-unsafe-assignment -- sharp 0.35 types are ESM-only (export default) but CJS runtime exports the function
+import type { AiJobProgress } from '@common/ai-scan-jobs/ai-job-monitor.service';
+import {
+  AiExtractionService,
+  newIngestQuotaKey,
+} from '@common/ai-ingest/extraction/ai-extraction.service';
+import { toScannerError } from '@common/ai-ingest/extraction/scanner-errors';
+import { DocumentPagesService } from '@common/ai-ingest/documents/document-pages.service';
+import {
+  readDocumentWithAi,
+  ReadDocumentResult,
+} from '@common/ai-ingest/documents/document-reader';
+import { detectQueuedDocument } from '@common/ai-ingest/documents/queued-document';
+import { mergeFormAnswers } from '@common/ai-ingest/documents/merge-answers';
+import {
+  buildFormInstruction,
+  conflictWarnings,
+  DocumentScanSource,
+  scanSourceOf,
+} from '@common/ai-ingest/documents/form-instruction';
+import {
+  RUT_FIELD_LABELS,
+  RUT_INGEST_PROFILE,
+  RUT_SCAN_INSTRUCTION,
+} from './rut-ingest.profile';
 
 /**
  * Normalized RUT extraction contract.
@@ -41,6 +62,10 @@ export interface RutScanResult {
   /** 0-100. */
   confidence: number;
   extraction_notes: string | null;
+  /** Avisos de lectura en español (páginas sin leer, valores en conflicto). Opcional. */
+  warnings?: string[];
+  /** Qué se leyó (páginas, páginas de texto, llamadas). Opcional. */
+  scan_source?: DocumentScanSource;
 }
 
 function toAiScanFile(file: Express.Multer.File): AiScanFile {
@@ -56,15 +81,17 @@ function toAiScanFile(file: Express.Multer.File): AiScanFile {
 export class RutScannerService {
   private readonly logger = new Logger(RutScannerService.name);
 
-  constructor(private readonly aiEngine: AIEngineService) {}
+  constructor(
+    private readonly aiEngine: AIEngineService,
+    private readonly extraction: AiExtractionService,
+    private readonly documentPages: DocumentPagesService,
+  ) {}
 
   /**
    * Scans a Colombian RUT document (image or PDF) and returns normalized
    * fiscal identity data ready to pre-fill the legal/tax form.
    *
-   * Mirrors `InvoiceScannerService.scanInvoice`: the file is preprocessed
-   * (sharp resize for images, raw passthrough for PDFs) and sent as an
-   * `image_url` data-uri so the vision model processes it natively.
+   * Reads it through the common ai-ingest reader (`scanRutFromFiles`).
    */
   async scanRutDocument(file: Express.Multer.File): Promise<RutScanResult> {
     return this.scanRutFromFiles([toAiScanFile(file)]);
@@ -77,120 +104,90 @@ export class RutScannerService {
     await this.aiEngine.assertVisionModelLinked('rut_scanner');
   }
 
-  /** Núcleo del escaneo: recibe buffer+mime (handler de la cola `ai-scan`). */
-  async scanRutFromFiles(files: AiScanFile[]): Promise<RutScanResult> {
+  /**
+   * Núcleo del escaneo (handler `rut` de la cola `ai-scan`), por el lector
+   * común de ai-ingest (plan ia-cargas F5b, #12):
+   *
+   * - El tipo real se detecta por firma; nunca viaja el PDF crudo.
+   * - Cada página del PDF va con su texto nativo Y su imagen: el texto da los
+   *   dígitos exactos del NIT y la imagen conserva las casillas del formulario.
+   *   Una foto se endereza (EXIF) y se reduce a 1536 px como antes.
+   * - Todas las páginas van en UNA llamada (hasta 10), validada con esquema y
+   *   reparada una vez si no cuadra.
+   * - Desde ahí, la misma `normalizeRutResponse`: con la misma respuesta del
+   *   modelo, NIT, DV, razón social, responsabilidades y régimen son idénticos.
+   */
+  async scanRutFromFiles(
+    files: AiScanFile[],
+    options: { reportProgress?: (progress: AiJobProgress) => Promise<void> } = {},
+  ): Promise<RutScanResult> {
     const file = files[0];
     this.logger.debug(
-      `[RutScan] File: mimetype=${file.mimeType}, size=${file.size}, buffer=${file.buffer?.length ?? 'NO BUFFER'}`,
+      `[RutScan] File: mimetype=${file?.mimeType}, size=${file?.size}, buffer=${file?.buffer?.length ?? 'NO BUFFER'}`,
     );
 
     await this.assertReady();
 
-    const { base64, mimeType } = await this.preprocessImage(file);
-    const dataUri = `data:${mimeType};base64,${base64}`;
-
-    this.logger.debug(`[RutScan] DataURI length: ${dataUri.length} chars`);
-
-    const documentMessage: AIMessage = {
-      role: 'user',
-      content: [
-        {
-          type: 'text',
-          text: 'Extract the fiscal identity data from this Colombian RUT document (DIAN). Return ONLY the JSON object matching the schema defined in your system instructions.',
-        },
-        {
-          type: 'image_url',
-          image_url: { url: dataUri, detail: 'high' },
-        },
-      ],
-    };
-
-    this.logger.debug(`[RutScan] Sending to AI engine...`);
-    const response = await this.aiEngine.run('rut_scanner', {}, [
-      documentMessage,
-    ]);
-
-    this.logger.debug(
-      `[RutScan] AI response: success=${response.success}, contentLength=${response.content?.length ?? 0}, model=${response.model}, error=${response.error}`,
-    );
-    this.logger.debug(
-      `[RutScan] AI content preview: ${response.content?.substring(0, 300)}`,
+    const detected = detectQueuedDocument(
+      { buffer: file?.buffer, originalname: file?.originalName, mimetype: file?.mimeType },
+      'El RUT debe ser un PDF o una foto (JPG, PNG o WebP).',
     );
 
-    if (!response.success || !response.content) {
-      this.logger.error(`AI RUT extraction failed: ${response.error}`);
-      // Se propaga el error del proveedor: "la foto está ilegible" y "el modelo
-      // enlazado a esta app no acepta imágenes" son causas distintas y la
-      // segunda no se arregla tomando otra foto.
-      throw new VendixHttpException(
-        ErrorCodes.RUT_SCAN_AI_FAIL,
-        response.error
-          ? `La IA no pudo leer el RUT: ${response.error}`
-          : undefined,
-      );
+    let read: ReadDocumentResult<Record<string, unknown>>;
+    try {
+      read = await readDocumentWithAi<Record<string, unknown>>({
+        file: { buffer: file.buffer, originalName: file.originalName ?? 'rut' },
+        mimeType: detected.mime,
+        pages: this.documentPages,
+        extraction: this.extraction,
+        appKey: 'rut_scanner',
+        schema: RUT_INGEST_PROFILE.documentSchema,
+        instruction: (batch, context) =>
+          buildFormInstruction(RUT_SCAN_INSTRUCTION, batch, context),
+        limits: RUT_INGEST_PROFILE.limits,
+        maxBytes: RUT_INGEST_PROFILE.limits.maxBytes,
+        // Una foto sigue siendo UNA imagen, como antes.
+        splitTallImages: false,
+        renderTextPages: true,
+        // Una unidad de cuota por escaneo, como la llamada única de antes.
+        quotaKey: newIngestQuotaKey(),
+        reportProgress: options.reportProgress,
+        logLabel: 'RutScan',
+        rawExtractionErrors: true,
+      });
+    } catch (err) {
+      this.logger.error(`AI RUT extraction failed: ${(err as Error)?.message}`);
+      throw toScannerError(err, {
+        parseFail: ErrorCodes.RUT_SCAN_PARSE_FAIL,
+        // Se propaga el error del proveedor: "la foto está ilegible" y "el
+        // modelo enlazado a esta app no acepta imágenes" son causas distintas
+        // y la segunda no se arregla tomando otra foto.
+        aiFail: ErrorCodes.RUT_SCAN_AI_FAIL,
+        aiFailMessage: (e) => `La IA no pudo leer el RUT: ${e}`,
+      });
     }
 
+    const merged = mergeFormAnswers(read.answers);
+    let result: RutScanResult;
     try {
-      const parsed = parseAiJson(response.content);
-      return this.normalizeRutResponse(parsed);
+      result = this.normalizeRutResponse(merged.data);
     } catch (err) {
       if (err instanceof VendixHttpException) throw err;
-      this.logger.error(`Failed to parse AI RUT response: ${response.content}`);
+      this.logger.error(`Failed to normalize AI RUT response: ${(err as Error)?.message}`);
       throw new VendixHttpException(ErrorCodes.RUT_SCAN_PARSE_FAIL);
     }
+    const warnings = [
+      ...read.warnings,
+      ...conflictWarnings(merged.conflicts, RUT_FIELD_LABELS),
+    ];
+    return {
+      ...result,
+      ...(warnings.length ? { warnings } : {}),
+      scan_source: scanSourceOf(read),
+    };
   }
 
   // --- Private helpers ---
-
-  /**
-   * Try to optimize images via sharp; on failure (e.g. PDFs, unsupported
-   * formats) fall back to the raw buffer with its original mimetype. This is
-   * what makes a PDF work: sharp throws → we send the raw PDF data-uri and the
-   * vision model (Gemini 2.5 Flash) processes it natively.
-   */
-  private async preprocessImage(
-    file: AiScanFile,
-  ): Promise<{ base64: string; mimeType: string }> {
-    const MAX_DIMENSION = 1536;
-    const JPEG_QUALITY = 85;
-
-    try {
-      const metadata = await sharp(file.buffer).metadata();
-      const needsResize =
-        (metadata.width && metadata.width > MAX_DIMENSION) ||
-        (metadata.height && metadata.height > MAX_DIMENSION);
-
-      let pipeline = sharp(file.buffer);
-
-      if (needsResize) {
-        pipeline = pipeline.resize(MAX_DIMENSION, MAX_DIMENSION, {
-          fit: 'inside',
-          withoutEnlargement: true,
-        });
-      }
-
-      const processedBuffer = await pipeline
-        .jpeg({ quality: JPEG_QUALITY })
-        .toBuffer();
-
-      this.logger.debug(
-        `[RutScan] Image preprocessed: ${file.size} bytes → ${processedBuffer.length} bytes (${metadata.width}x${metadata.height}${needsResize ? ' resized' : ''})`,
-      );
-
-      return {
-        base64: processedBuffer.toString('base64'),
-        mimeType: 'image/jpeg',
-      };
-    } catch (err) {
-      this.logger.warn(
-        `[RutScan] Image preprocessing failed, using raw: ${err.message}`,
-      );
-      return {
-        base64: file.buffer.toString('base64'),
-        mimeType: file.mimeType,
-      };
-    }
-  }
 
   private normalizeRutResponse(parsed: any): RutScanResult {
     const PERSON_TYPES = new Set(['NATURAL', 'JURIDICA']);

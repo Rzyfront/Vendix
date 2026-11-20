@@ -54,6 +54,8 @@ export interface RutScanResult {
   confidence: number;
   /** Optional free-form notes the model attached to the extraction. */
   extraction_notes?: string;
+  /** Avisos de lectura en español (páginas sin leer, documento leído en partes…). */
+  warnings?: string[];
 }
 
 /** Generic envelope returned by the RUT scanner endpoint. */
