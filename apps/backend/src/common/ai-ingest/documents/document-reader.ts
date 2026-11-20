@@ -17,6 +17,14 @@ export interface ReadDocumentFile {
   originalName?: string | null;
 }
 
+/** Where a batch sits in the document, for a per-batch instruction. */
+export interface ReadDocumentBatchContext {
+  /** Pages (or photo strips) prepared for the model. */
+  totalPages: number;
+  /** Batches the document was cut into (1 = the whole document at once). */
+  totalBatches: number;
+}
+
 export interface ReadDocumentOptions {
   file: ReadDocumentFile;
   /** REAL type from the ai-ingest detector (never the multipart/S3 one). */
@@ -26,9 +34,20 @@ export interface ReadDocumentOptions {
   appKey: string;
   /** Schema of the answer for ONE batch of pages. */
   schema: ExtractionSchema;
-  /** First text of every batch message. */
-  instruction: string;
+  /**
+   * First text of every batch message. A function gets the batch pages, so a
+   * multi-batch document can say "pages 6–10 of 12".
+   */
+  instruction:
+    | string
+    | ((batch: AiDocumentPage[], context: ReadDocumentBatchContext) => string);
   limits: Pick<IngestLimits, 'maxPages' | 'pagesPerBatch'>;
+  /** Upload size cap (bytes). Default: the pages service default (10 MiB). */
+  maxBytes?: number;
+  /** Longest edge of photos. Default: the image-prep default (1536 px). */
+  imageMaxEdge?: number;
+  /** Cut very tall photos into overlapping strips. Default true. */
+  splitTallImages?: boolean;
   /** One per load: every batch, repair and split charges the same unit. */
   quotaKey: string;
   reportProgress?: (progress: AiJobProgress) => Promise<void>;
@@ -40,10 +59,14 @@ export interface ReadDocumentOptions {
 export interface ReadDocumentResult<T> {
   /** One validated answer per batch of pages, in page order. */
   answers: T[];
+  /** Same answers with the page numbers each one read, in page order. */
+  batches: Array<{ pages: number[]; data: T }>;
   /** Pages (or photo strips) read. */
   pages: number;
   /** Pages read from native PDF text only. */
   textPages: number;
+  /** Pages that could not be read (unreadable or a batch the model failed). */
+  missingPages: number[];
   /** Spanish, ready to show: pages left out and why. */
   warnings: string[];
 }
@@ -90,6 +113,9 @@ export async function readDocumentWithAi<T>(
     },
     {
       maxPages: options.limits.maxPages,
+      maxBytes: options.maxBytes,
+      imageMaxEdge: options.imageMaxEdge,
+      splitTallImages: options.splitTallImages,
       onPage: (done, total) => progress(done, total, 'Preparando páginas'),
     },
   );
@@ -102,17 +128,27 @@ export async function readDocumentWithAi<T>(
     );
   }
 
+  const batchSize = Math.max(1, options.limits.pagesPerBatch);
+  const context: ReadDocumentBatchContext = {
+    totalPages: prepared.pages.length,
+    totalBatches: Math.ceil(prepared.pages.length / batchSize),
+  };
+  const instructionFor = (batch: AiDocumentPage[]) =>
+    typeof options.instruction === 'function'
+      ? options.instruction(batch, context)
+      : options.instruction;
+
   let outcome;
   try {
     outcome = await options.extraction.extractBatches<AiDocumentPage, T>({
       appKey: options.appKey,
       schema: options.schema,
       items: prepared.pages,
-      batchSize: Math.max(1, options.limits.pagesPerBatch),
+      batchSize,
       concurrency: options.concurrency,
       quotaKey: options.quotaKey,
       buildMessages: (batch) => [
-        { role: 'user', content: pagesMessageContent(options.instruction, batch) },
+        { role: 'user', content: pagesMessageContent(instructionFor(batch), batch) },
       ],
       onProgress: (done, total) => progress(done, total, 'Leyendo con IA'),
     });
@@ -141,14 +177,20 @@ export async function readDocumentWithAi<T>(
 
   const firstPage = (items: AiDocumentPage[]) =>
     Math.min(...items.map((p) => p.page_number));
-  const answers = [...outcome.results]
+  const batches = [...outcome.results]
     .sort((a, b) => firstPage(a.items) - firstPage(b.items))
-    .map((r) => r.data);
+    .map((r) => ({ pages: r.items.map((p) => p.page_number), data: r.data }));
+  const missingPages = [
+    ...prepared.unreadable_pages,
+    ...outcome.failed.flatMap((f) => f.items.map((p) => p.page_number)),
+  ].sort((a, b) => a - b);
 
   return {
-    answers,
+    answers: batches.map((b) => b.data),
+    batches,
     pages: prepared.pages.length,
     textPages: prepared.pages.filter((p) => p.mode === 'text').length,
+    missingPages,
     warnings,
   };
 }

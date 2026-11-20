@@ -41,6 +41,11 @@ export interface AiDocumentPagesOptions extends DocumentPagesOptions {
   imageMaxEdge?: number;
   /** Read very tall photos in overlapping strips (long photographed lists). Default true. */
   splitTallImages?: boolean;
+  /**
+   * Upload size cap in bytes. Default 10 MiB; never above 25 MiB. Purchase
+   * invoices keep the 15 MB their endpoint always accepted.
+   */
+  maxBytes?: number;
   /** Real progress while pages are read (done of total pages). */
   onPage?: (done: number, total: number) => Promise<void> | void;
 }
@@ -137,6 +142,8 @@ interface PdfCanvasEntry {
 }
 
 const MAX_UPLOAD_BYTES = 10 * 1024 * 1024;
+/** Ceiling of `AiDocumentPagesOptions.maxBytes` (render time and memory per job). */
+const ABSOLUTE_MAX_UPLOAD_BYTES = 25 * 1024 * 1024;
 const MAX_TOTAL_OUTPUT_BYTES = 20 * 1024 * 1024;
 export const DEFAULT_MAX_PDF_PAGES = 10;
 /** Hard ceiling for any profile (render time and memory per job). */
@@ -202,7 +209,10 @@ export class DocumentPagesService {
   ): Promise<AiDocumentPages> {
     let mimeType: string;
     try {
-      mimeType = this.validateFile(file, { allowHeic: true });
+      mimeType = this.validateFile(file, {
+        allowHeic: true,
+        maxBytes: options.maxBytes,
+      });
     } catch (error) {
       throw this.toIngestError(error);
     }
@@ -315,12 +325,21 @@ export class DocumentPagesService {
     if (bytes > MAX_TOTAL_OUTPUT_BYTES) throw this.badRequest('Las páginas preparadas exceden el límite de 20 MiB.');
   }
 
-  private validateFile(file: DocumentSourceFile, options: { allowHeic?: boolean } = {}): string {
+  private validateFile(
+    file: DocumentSourceFile,
+    options: { allowHeic?: boolean; maxBytes?: number } = {},
+  ): string {
     if (!file?.buffer || !Buffer.isBuffer(file.buffer) || file.buffer.length === 0) {
       throw this.badRequest('Se requiere un archivo de imagen o PDF.');
     }
-    if (file.buffer.length > MAX_UPLOAD_BYTES || file.size !== file.buffer.length) {
-      throw this.badRequest('El archivo debe pesar como máximo 10 MiB.');
+    const maxBytes =
+      options.maxBytes != null && Number.isFinite(options.maxBytes) && options.maxBytes > 0
+        ? Math.min(ABSOLUTE_MAX_UPLOAD_BYTES, Math.floor(options.maxBytes))
+        : MAX_UPLOAD_BYTES;
+    if (file.buffer.length > maxBytes || file.size !== file.buffer.length) {
+      throw this.badRequest(
+        `El archivo debe pesar como máximo ${Math.round(maxBytes / (1024 * 1024))} MiB.`,
+      );
     }
 
     const mimeType = file.mimetype?.trim().toLowerCase();

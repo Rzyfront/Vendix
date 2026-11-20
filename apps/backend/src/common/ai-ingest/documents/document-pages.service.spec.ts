@@ -332,6 +332,24 @@ describe('DocumentPagesService', () => {
       expect(scanned.render).toHaveBeenCalledTimes(1);
     });
 
+    it('maxBytes (ia-cargas F3): a 12 MiB invoice passes under a 15 MiB cap; the default stays 10 MiB', async () => {
+      const page = withText(createPage(1, []), NATIVE_TEXT);
+      installPdfMock([page]);
+      const big = Buffer.concat([Buffer.from('%PDF-1.7 '), Buffer.alloc(12 * 1024 * 1024)]);
+      const file = { ...pdfFile(), buffer: big, size: big.length };
+      await expect(service.prepareForAi(file)).rejects.toMatchObject({
+        errorCode: 'AI_INGEST_INVALID_FILE',
+        message: 'El archivo debe pesar como máximo 10 MiB.',
+      });
+      const result = await service.prepareForAi(file, { maxBytes: 15 * 1024 * 1024 });
+      expect(result.pages).toHaveLength(1);
+      // Never above the 25 MiB ceiling, whatever the profile asks.
+      const huge = Buffer.concat([Buffer.from('%PDF-1.7 '), Buffer.alloc(26 * 1024 * 1024)]);
+      await expect(
+        service.prepareForAi({ ...pdfFile(), buffer: huge, size: huge.length }, { maxBytes: 100 * 1024 * 1024 }),
+      ).rejects.toMatchObject({ errorCode: 'AI_INGEST_INVALID_FILE' });
+    });
+
     it('a scanned PDF whose pages cannot be drawn fails with AI_INGEST_NO_PAGES', async () => {
       const broken = withText(createPage(1, [], undefined, new Error('bad drawing')), '');
       installPdfMock([broken]);

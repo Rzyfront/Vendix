@@ -70,6 +70,19 @@ export class InvoiceScanProcessor extends WorkerHost {
               mimeFromKey(data.scan_attachment_key, buffer),
               data.order_type,
               data.scan_attachment,
+              {
+                // ia-cargas F3 — progreso real por páginas. `at`: un job que
+                // sigue reportando está vivo, no atascado (QUI-1020).
+                reportProgress: async (progress) => {
+                  try {
+                    await job.updateProgress({ ...progress, at: Date.now() });
+                  } catch (err: any) {
+                    this.logger.warn(
+                      `[InvoiceScan] job=${job.id} progress not stored: ${err?.message ?? err}`,
+                    );
+                  }
+                },
+              },
             ),
           );
         },
