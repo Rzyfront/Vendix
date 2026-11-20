@@ -83,6 +83,23 @@ export interface AIRequestOptions {
    * a per-call category (`async_queue`) charges ONE unit per job, as before.
    */
   quotaKey?: string;
+  /**
+   * Server-only annotations for the `ai_engine_logs` row of this `run()`;
+   * stripped before the provider sees the options. Never changes the call.
+   */
+  logContext?: AIRunLogContext;
+}
+
+/** What a caller (ai-ingest) adds to the log row of one `run()`. */
+export interface AIRunLogContext {
+  /** Caller attempt: ai-ingest 1 = first call, +1 per repair and split level. */
+  attempt?: number;
+  /**
+   * Called once with the final answer text of a successful, non-truncated
+   * call. Returns why the caller will reject it (`null` = valid). Its result
+   * only goes to `validation_error`; if it throws, the column stays empty.
+   */
+  validate?: (content: string) => string | null;
 }
 
 export interface AIResponseSchema {

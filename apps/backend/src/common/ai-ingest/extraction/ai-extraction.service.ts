@@ -85,6 +85,11 @@ export interface ExtractOptions {
    * e.g. the consolidated JSON a revalidation compares against. Default none.
    */
   variables?: Record<string, string>;
+  /**
+   * `ai_engine_logs.attempt` of the first call (the repair logs +1). Batches
+   * pass 1 + split depth. Log-only: it never changes the call. Default 1.
+   */
+  attempt?: number;
 }
 
 export interface ExtractBatchesOptions<TItem> {
@@ -125,6 +130,13 @@ export interface ExtractBatchesResult<TItem, TOut> {
 
 const MAX_ECHO_CHARS = 20_000;
 
+/** Fixed text for a non-JSON answer: the parser message may echo model text. */
+export const NOT_JSON_LOG_ERROR = 'not_json: the answer is not valid JSON';
+
+type CheckResult<T> =
+  | { ok: true; data: T }
+  | { ok: false; errors: string[]; logError: string };
+
 /**
  * Removes object keys whose value is `null`, at any depth (array items stay).
  * Strict structured output answers optional fields with `null`; the lenient
@@ -154,7 +166,9 @@ export function toStrictJsonSchema(node: JsonSchema): JsonSchema {
     const strictProps: Record<string, JsonSchema> = {};
     for (const [key, child] of Object.entries(properties)) {
       const strictChild = toStrictJsonSchema(child);
-      strictProps[key] = required.has(key) ? strictChild : nullable(strictChild);
+      strictProps[key] = required.has(key)
+        ? strictChild
+        : nullable(strictChild);
     }
     out.properties = strictProps;
     out.required = Object.keys(properties);
@@ -218,14 +232,18 @@ export class AiExtractionService {
     };
 
     const quotaKey = options.quotaKey ?? newIngestQuotaKey();
-    const first = await this.call(
+    const attempt = options.attempt ?? 1;
+    const first = await this.call<T>(
       options.appKey,
       options.messages,
       responseSchema,
       quotaKey,
       options.variables,
+      validate,
+      attempt,
     );
-    const firstCheck = this.check<T>(first.content ?? '', validate);
+    const firstCheck =
+      first.check ?? this.check<T>(first.content ?? '', validate);
     if (firstCheck.ok) return firstCheck.data;
 
     this.logger.warn(
@@ -247,20 +265,23 @@ export class AiExtractionService {
         ].join('\n'),
       },
     ];
-    const second = await this.call(
+    const second = await this.call<T>(
       options.appKey,
       repairMessages,
       responseSchema,
       quotaKey,
       options.variables,
+      validate,
+      attempt + 1,
     );
-    const secondCheck = this.check<T>(second.content ?? '', validate);
+    const secondCheck =
+      second.check ?? this.check<T>(second.content ?? '', validate);
     if (secondCheck.ok) return secondCheck.data;
 
     throw new AiExtractionError(
       'invalid',
       `Invalid AI output after repair: ${secondCheck.errors.slice(0, 3).join('; ')}`,
-      second,
+      second.response,
     );
   }
 
@@ -300,14 +321,22 @@ export class AiExtractionService {
           messages: options.buildMessages(items),
           quotaKey,
           variables: options.variables,
+          attempt: 1 + depth,
         });
         results.push({ items, data });
         await advance(items.length);
       } catch (error) {
-        if (!(error instanceof AiExtractionError) || error.failure === 'ai_failed') {
+        if (
+          !(error instanceof AiExtractionError) ||
+          error.failure === 'ai_failed'
+        ) {
           throw error;
         }
-        if (error.failure === 'truncated' && items.length > 1 && depth < maxDepth) {
+        if (
+          error.failure === 'truncated' &&
+          items.length > 1 &&
+          depth < maxDepth
+        ) {
           const half = Math.ceil(items.length / 2);
           this.logger.warn(
             `[AiExtraction] ${options.appKey} batch of ${items.length} truncated; splitting (depth ${depth + 1})`,
@@ -331,17 +360,45 @@ export class AiExtractionService {
 
   // ─────────────────────────────────────────────────────────────────────────
 
-  private async call(
+  /**
+   * One provider call. The log row gets `attempt` and, through
+   * `logContext.validate`, the same verdict {@link check} gives, so
+   * `validation_error` says why the answer was rejected. The verdict is
+   * reused here (one parse per answer); the call itself is unchanged.
+   */
+  private async call<T>(
     appKey: string,
     messages: AIMessage[],
     responseSchema: { name: string; schema: JsonSchema },
     quotaKey: string,
-    variables: Record<string, string> = {},
-  ): Promise<AIResponse> {
-    const response = await this.aiEngine.run(appKey, variables, messages, {
-      responseSchema,
-      quotaKey,
-    });
+    variables: Record<string, string> | undefined,
+    validate: ValidateFunction,
+    attempt: number,
+  ): Promise<{
+    content: string | undefined;
+    response: AIResponse;
+    check?: CheckResult<T>;
+  }> {
+    // Holder object: a `let` set inside the callback would stay narrowed to
+    // `undefined` for the compiler after the await.
+    const seen: { verdict?: { content: string; check: CheckResult<T> } } = {};
+    const response = await this.aiEngine.run(
+      appKey,
+      variables ?? {},
+      messages,
+      {
+        responseSchema,
+        quotaKey,
+        logContext: {
+          attempt,
+          validate: (content) => {
+            const check = this.check<T>(content, validate);
+            seen.verdict = { content, check };
+            return check.ok ? null : check.logError;
+          },
+        },
+      },
+    );
     if (!response.success) {
       throw new AiExtractionError(
         'ai_failed',
@@ -352,13 +409,22 @@ export class AiExtractionService {
     if (response.finish_reason === 'length') {
       throw new AiExtractionError('truncated', 'AI output truncated', response);
     }
-    return response;
+    const content = response.content ?? '';
+    return {
+      content: response.content,
+      response,
+      // Reuse only a verdict on exactly this text; otherwise check again.
+      check:
+        seen.verdict && seen.verdict.content === content
+          ? seen.verdict.check
+          : undefined,
+    };
   }
 
   private check<T>(
     content: string,
     validate: ValidateFunction,
-  ): { ok: true; data: T } | { ok: false; errors: string[] } {
+  ): CheckResult<T> {
     let parsed: unknown;
     try {
       parsed = parseAiJson(content);
@@ -366,13 +432,20 @@ export class AiExtractionService {
       return {
         ok: false,
         errors: [`The answer is not valid JSON (${(error as Error).message}).`],
+        logError: NOT_JSON_LOG_ERROR,
       };
     }
     // The provider gets the strict schema (optional = nullable) but ajv checks
     // the lenient one: a `null` optional means "absent", so drop it first.
     parsed = dropNullKeys(parsed);
     if (validate(parsed)) return { ok: true, data: parsed as T };
-    return { ok: false, errors: this.describe(validate.errors) };
+    const errors = this.describe(validate.errors);
+    return {
+      ok: false,
+      errors,
+      // Paths and ajv messages only (schema words, never the model's values).
+      logError: `schema: ${errors.slice(0, MAX_ERRORS_SHOWN).join('; ')}`,
+    };
   }
 
   private describe(errors: ErrorObject[] | null | undefined): string[] {

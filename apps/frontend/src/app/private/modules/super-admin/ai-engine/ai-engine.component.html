@@ -1,7 +1,7 @@
 <!-- AI Engine Module Layout -->
 <div class="flex flex-col gap-6">
   <!-- Tab Navigation -->
-  <div class="flex items-center gap-1 border-b border-border">
+  <div class="flex items-center gap-1 border-b border-border overflow-x-auto">
     <button
       (click)="switchTab('configs')"
       class="px-4 py-2.5 text-sm font-medium transition-colors relative"
@@ -67,7 +67,25 @@
         ></span>
       }
     </button>
+    <button
+      (click)="switchTab('health')"
+      class="px-4 py-2.5 text-sm font-medium transition-colors relative"
+      [class.text-primary]="activeTab() === 'health'"
+      [class.text-text-secondary]="activeTab() !== 'health'"
+    >
+      Salud por app
+      @if (activeTab() === "health") {
+        <span
+          class="absolute bottom-0 left-0 right-0 h-0.5 bg-primary rounded-t-full"
+        ></span>
+      }
+    </button>
   </div>
+
+  <!-- Salud por app (ia-cargas F6): solo lectura, carga al abrir la pestaña -->
+  @if (activeTab() === "health") {
+    <app-ai-app-health-panel></app-ai-app-health-panel>
+  }
 
   <!-- ═══════════════════════════════════════ -->
   <!-- CONFIGS TAB                             -->

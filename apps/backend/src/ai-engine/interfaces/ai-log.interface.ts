@@ -32,6 +32,12 @@ export interface AILogEntry {
   status: 'success' | 'error';
   error_message?: string;
   input_preview?: string;
+  /** Provider finish reason of the final answer (`length` = cut). */
+  finish_reason?: string;
+  /** Caller attempt (ai-ingest: 1 first call, +1 per repair/split level). */
+  attempt?: number;
+  /** Why the caller rejected the answer (parse/ajv); never the model text. */
+  validation_error?: string;
 }
 
 export interface AIUsageStatsFilter {
@@ -64,6 +70,27 @@ export interface AIUsageStats {
     total_cost_usd: number;
     avg_latency_ms: number;
   }>;
+}
+
+/** One row of the per-app health board (super admin). Rates are 0-100. */
+export interface AIAppHealthRow {
+  app_key: string;
+  total_calls: number;
+  error_calls: number;
+  truncated_calls: number;
+  validation_failed_calls: number;
+  error_rate: number;
+  truncated_rate: number;
+  validation_failed_rate: number;
+  avg_prompt_tokens: number;
+  avg_completion_tokens: number;
+  avg_total_tokens: number;
+}
+
+export interface AIAppHealthReport {
+  date_from: string;
+  date_to: string;
+  apps: AIAppHealthRow[];
 }
 
 export interface TenantUsageStats {

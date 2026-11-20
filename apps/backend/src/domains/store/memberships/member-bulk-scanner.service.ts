@@ -85,7 +85,7 @@ const IMAGE_MIMETYPES = ['image/jpeg', 'image/png', 'image/webp'];
  * MemberBulkScannerService — backend of the "Carga masiva de socios por IA"
  * feature. 1:1 calque of `InvoiceScannerService`/`RouteSheetScannerService`:
  *
- *   POST /store/memberships/bulk-scan        → `scanRoster`  (raw OCR)
+ *   POST /store/memberships/bulk-scan/async  → job `member_roster` (raw OCR)
  *   POST /store/memberships/bulk-scan/analyze → `analyzeRoster` (resolve plan/customer)
  *   POST /store/memberships/bulk-scan/commit  → `commitRoster` (persist)
  *
