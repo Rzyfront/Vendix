@@ -17,17 +17,20 @@ function basename(path: string): string {
  * when resolved, comes in `resolvedUrl`).
  */
 export function responseAttachments(response: FileResponseLike, resolvedUrl?: string | null): AttachmentItem[] {
+  const text = response.value_text ?? '';
+  // A legacy row whose `value_text` is already an http URL comes back as one
+  // unsigned file (`url: null`, key = that URL): link the URL itself.
+  const legacyUrl = text.startsWith('http') ? text : null;
   if (response.files?.length) {
     return response.files.map((f) => ({
       key: f.key,
       name: f.name || basename(f.key ?? '') || 'Archivo',
       size: f.size ?? null,
       mime_type: f.mime_type ?? null,
-      url: f.url ?? null,
+      url: f.url ?? (legacyUrl && f.key === legacyUrl ? legacyUrl : null),
     }));
   }
-  const text = response.value_text ?? '';
-  if (text.startsWith('http')) return [{ name: basename(text) || 'Archivo', url: text }];
+  if (legacyUrl) return [{ name: basename(legacyUrl) || 'Archivo', url: legacyUrl }];
   if (text.startsWith('organizations/')) {
     return [{ key: text, name: basename(text), url: resolvedUrl ?? null }];
   }

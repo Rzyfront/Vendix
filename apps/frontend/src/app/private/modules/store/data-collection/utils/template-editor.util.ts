@@ -3,7 +3,7 @@ import {
   DocumentFieldConfig,
   DocumentKind,
   DOCUMENT_MAX_SIZE_MB_LIMIT,
-  resolveDocumentConfig,
+  resolveItemDocumentConfig,
 } from './template-json.contract';
 
 /** Minimal shape the editor helpers need from a section form. */
@@ -78,7 +78,7 @@ export function patchDocumentsRules(
   validationRules: Record<string, unknown> | null | undefined,
   patch: Partial<DocumentFieldConfig>,
 ): Record<string, unknown> {
-  const current = resolveDocumentConfig(validationRules);
+  const current = resolveItemDocumentConfig(validationRules);
   const next: DocumentFieldConfig = { ...current, ...patch };
   next.max_size_mb = Math.min(
     DOCUMENT_MAX_SIZE_MB_LIMIT,

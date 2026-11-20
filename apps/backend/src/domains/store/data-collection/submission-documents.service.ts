@@ -8,7 +8,7 @@ import {
   StoredDocument,
   checkDocumentFile,
   readStoredDocuments,
-  resolveDocumentConfig,
+  resolveItemDocumentConfig,
 } from './template-json/template-json.contract';
 import { sanitizeUploadFileName } from './utils/file-name.util';
 import { matchesDeclaredSignature } from './utils/file-signature.util';
@@ -122,7 +122,7 @@ export class SubmissionDocumentsService {
     if (!item || item.metadata_field?.field_type !== 'file') {
       throw new VendixHttpException(ErrorCodes.DCOL_UPLOAD_003);
     }
-    const config = resolveDocumentConfig(item.validation_rules);
+    const config = resolveItemDocumentConfig(item.validation_rules);
     const mime = (file.mimetype ?? '').toLowerCase();
     const size = file.size ?? file.buffer?.length ?? 0;
     const problem = checkDocumentFile(config, {
@@ -189,7 +189,7 @@ export class SubmissionDocumentsService {
       );
     }
 
-    const config = resolveDocumentConfig(
+    const config = resolveItemDocumentConfig(
       this.findItem(submission, fieldId)?.validation_rules,
     );
     if (files.length > DOCUMENT_MAX_FILES || (!config.multiple && files.length > 1)) {

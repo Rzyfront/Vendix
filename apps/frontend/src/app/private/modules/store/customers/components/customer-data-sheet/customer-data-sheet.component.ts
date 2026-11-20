@@ -29,12 +29,10 @@ import {
 } from '../../../../../../shared/components';
 import {
   checkDocumentFile,
-  DEFAULT_DOCUMENT_CONFIG,
-  DOCUMENT_KIND_KEYS,
   DOCUMENT_MAX_FILES,
   documentAcceptAttribute,
   readStoredDocuments,
-  resolveDocumentConfig,
+  resolveItemDocumentConfig,
   StoredDocument,
 } from '../../../data-collection/utils/template-json.contract';
 import {
@@ -638,9 +636,7 @@ export class CustomerDataSheetComponent {
 
   /** Config of a documents item; legacy items without it accept every kind. */
   private docsConfig(vi: ViewItem) {
-    const rules = vi.item.validation_rules as Record<string, unknown> | undefined | null;
-    if (rules?.['documents']) return resolveDocumentConfig(rules);
-    return { ...DEFAULT_DOCUMENT_CONFIG, accept: [...DOCUMENT_KIND_KEYS] };
+    return resolveItemDocumentConfig(vi.item.validation_rules);
   }
 
   /** Current documents of a file answer: edited list, saved `files` or the legacy single key. */
