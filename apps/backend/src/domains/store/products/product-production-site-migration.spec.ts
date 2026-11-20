@@ -8,13 +8,13 @@ import { resolve } from 'node:path';
 const sql = readFileSync(
   resolve(
     __dirname,
-    '../../../../prisma/migrations/20261216090000_product_production_site/migration.sql',
+    '../../../../prisma/migrations/20261217090000_product_production_site/migration.sql',
   ),
   'utf8',
 );
 const executable = sql.replace(/--[^\n]*/g, '');
 
-describe('migration 20261216090000_product_production_site', () => {
+describe('migration 20261217090000_product_production_site', () => {
   it('declares its data impact and never drops, truncates, deletes, updates or cascades', () => {
     expect(sql).toContain('-- DATA IMPACT:');
     expect(executable).not.toMatch(/^\s*(?:DROP|TRUNCATE|DELETE|UPDATE|INSERT)\b/im);
