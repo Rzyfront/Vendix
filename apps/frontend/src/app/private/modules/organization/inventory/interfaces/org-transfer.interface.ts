@@ -43,6 +43,13 @@ export interface OrgTransferItem {
   quantity_dispatched?: number | null;
   /** Unidades dadas de baja en un cierre con pérdida (D4). */
   quantity_lost?: number | null;
+  /** Lote de la fila (D5). */
+  batch_id?: number | null;
+  inventory_batches?: {
+    id: number;
+    batch_number: string;
+    expiration_date?: string | null;
+  } | null;
   cost_per_unit?: number | string | null;
   notes?: string | null;
   received_date?: string | null;
@@ -76,7 +83,35 @@ export interface OrgTransfer {
   to_location?: OrgTransferLocationRef | null;
   is_external_destination?: boolean;
   external_destination_name?: string | null;
+  external_destination_tax_id?: string | null;
+  external_destination_address?: string | null;
+  /** D3 — null en filas del flujo anterior. */
+  movement_mode?: 'quick' | 'mass_only' | 'with_dispatch_notes' | null;
+  support_document_type?: string | null;
+  support_document_id?: string | null;
+  exit_reason?: string | null;
+  /** D8 — salida externa sin documento soporte ni motivo. */
+  no_support_alert?: boolean;
+  transport_method?: string | null;
+  driver_name?: string | null;
+  carrier_name?: string | null;
+  tracking_number?: string | null;
+  shipping_cost?: number | string | null;
+  loss_reason?: string | null;
+  dispatch_note?: OrgTransferLinkedNote | null;
+  receipt_note?: OrgTransferLinkedNote | null;
   stock_transfer_items: OrgTransferItem[];
+}
+
+/** Remisión ligada a la transferencia (`transfer_out` / `transfer_in`). */
+export interface OrgTransferLinkedNote {
+  id: number;
+  dispatch_number: string;
+  status?: string | null;
+  subtype?: string | null;
+  emission_date?: string | null;
+  store_id?: number | null;
+  store?: { id: number; name: string } | null;
 }
 
 /** Saldo por recibir de una línea: lo que salió menos lo recibido y lo perdido. */
@@ -101,6 +136,8 @@ export interface OrgTransferQuery {
   page?: number;
   limit?: number;
   status?: OrgTransferStatus;
+  /** D8 — solo salidas externas con alerta. */
+  with_alert?: boolean;
   store_id?: number;
   from_location_id?: number;
   to_location_id?: number;
@@ -139,6 +176,13 @@ export interface CompleteOrgTransferRequest {
 }
 
 export interface DispatchOrgTransferRequest {
+  notes?: string;
+  /** Conteo de salida por línea y lote (D3/D5). Sin `items` sale lo pedido. */
+  items?: Array<{ id: number; quantity_dispatched: number; batch_id?: number }>;
+}
+
+export interface CloseOrgTransferWithLossRequest {
+  reason: string;
   notes?: string;
 }
 

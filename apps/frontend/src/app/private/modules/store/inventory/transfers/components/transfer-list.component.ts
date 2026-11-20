@@ -169,14 +169,27 @@ export class TransferListComponent {
         { value: 'pending', label: 'Pendiente' },
         { value: 'approved', label: 'Aprobada' },
         { value: 'in_transit', label: 'En Tránsito' },
+        { value: 'partially_received', label: 'Parcialmente recibida' },
         { value: 'received', label: 'Recibida' },
+        { value: 'closed_with_loss', label: 'Cerrada con pérdida' },
         { value: 'cancelled', label: 'Cancelada' },
+      ],
+    },
+    {
+      // D8 — salidas a destino externo sin documento soporte ni motivo.
+      key: 'alert',
+      label: 'Alertas',
+      type: 'select',
+      options: [
+        { value: '', label: 'Todas' },
+        { value: 'with_alert', label: 'Con alerta' },
       ],
     },
   ];
 
   dropdownActions: DropdownAction[] = [
     { label: 'Refrescar', icon: 'refresh-cw', action: 'refresh' },
+    { label: 'Movimiento avanzado', icon: 'layers', action: 'advanced' },
     {
       label: 'Nueva Transferencia',
       icon: 'plus',
@@ -199,11 +212,14 @@ export class TransferListComponent {
       defaultValue: '-',
     },
     {
-      // D8 — la clave es `id` (nunca vacía) para que la tabla siempre llame a
-      // `transform`: con `to_location.name` una salida externa no tiene bodega
-      // y la celda quedaba en "-" sin el nombre del destino externo.
+      // D8 — la tabla solo llama a `transform` si el valor de `key` no está
+      // vacío, y una salida externa no tiene `to_location`: por eso la clave
+      // es `id` (nunca vacía) y la celda se arma con `getDestinationLabel`.
+      // Es una columna calculada: NO la marques `sortable` ni la exportes por
+      // `key`, porque ordenaría o exportaría el id de la transferencia.
       key: 'id',
       label: 'Destino',
+      sortable: false,
       priority: 2,
       defaultValue: '-',
       transform: (_value: number, item?: StockTransfer) =>
@@ -229,7 +245,8 @@ export class TransferListComponent {
           closed_with_loss: '#b91c1c',
         },
       },
-      transform: (value: TransferStatus) => this.getStatusLabel(value),
+      transform: (value: TransferStatus, item?: StockTransfer) =>
+        this.getRowStatusLabel(value, item),
     },
     {
       key: 'stock_transfer_items',
@@ -336,7 +353,27 @@ export class TransferListComponent {
     return '-';
   }
 
-    getStatusLabel(status: TransferStatus): string {
+  /**
+   * Etiqueta de la fila: en tienda aprobar deja `in_transit` aunque la orden
+   * avanzada todavía no salió, y una salida sin soporte lleva su alerta (D8).
+   */
+  getRowStatusLabel(status: TransferStatus, item?: StockTransfer | null): string {
+    let label = this.getStatusLabel(status);
+    if (
+      item &&
+      status === 'in_transit' &&
+      (item.movement_mode === 'mass_only' ||
+        item.movement_mode === 'with_dispatch_notes' ||
+        item.is_external_destination) &&
+      !item.dispatched_at &&
+      (item.stock_transfer_items ?? []).every((i) => i.quantity_dispatched == null)
+    ) {
+      label = 'Aprobada, por despachar';
+    }
+    return item?.no_support_alert ? `${label} · Con alerta` : label;
+  }
+
+  getStatusLabel(status: TransferStatus): string {
     const labels: Record<TransferStatus, string> = {
       pending: 'Pendiente',
       draft: 'Borrador',
@@ -345,7 +382,7 @@ export class TransferListComponent {
       received: 'Recibida',
       completed: 'Completada',
       cancelled: 'Cancelada',
-      partially_received: 'Recibida en parte',
+      partially_received: 'Parcialmente recibida',
       closed_with_loss: 'Cerrada con pérdida',
     };
     return labels[status] || status;

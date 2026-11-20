@@ -9,6 +9,7 @@ import type {
 } from '../../../store/inventory/transfers/quick-move/transfer-draft';
 import {
   CancelOrgTransferRequest,
+  CloseOrgTransferWithLossRequest,
   CompleteOrgTransferRequest,
   CreateOrgTransferRequest,
   DispatchOrgTransferRequest,
@@ -160,6 +161,20 @@ export class OrgTransfersService {
       );
   }
 
+  /** D4 — cierre del pendiente como pérdida (solo tras la fecha límite). */
+  closeWithLoss(
+    id: number,
+    body: CloseOrgTransferWithLossRequest,
+  ): Observable<OrgTransfer> {
+    return this.http
+      .post<ApiResponse<OrgTransfer>>(`${this.baseUrl}/${id}/close-with-loss`, body)
+      .pipe(
+        map((r) => r.data),
+        tap(() => this.invalidateCache()),
+        catchError((err) => throwError(() => this.normalizeError(err))),
+      );
+  }
+
   cancel(
     id: number,
     body: CancelOrgTransferRequest = {},
@@ -208,6 +223,7 @@ export class OrgTransfersService {
       error?.error?.error ||
       error?.message ||
       'Error desconocido';
+    if (Array.isArray(msg)) return new Error(msg.join('. '));
     return new Error(typeof msg === 'string' ? msg : JSON.stringify(msg));
   }
 }
