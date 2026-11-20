@@ -656,7 +656,18 @@
 
                       <!-- Money column -->
                       <div class="item-money">
-                        {{ +(item.final_total_price ?? item.total_price) | currency }}
+                        @if (item.discounted_total_price != null) {
+                          <!-- Promo de producto: el total ya descontado manda;
+                               el precio de lista queda tachado como referencia. -->
+                          <span class="item-money__list">{{
+                            +(item.final_total_price ?? item.total_price) | currency
+                          }}</span>
+                          <span class="item-money__promo">{{
+                            +item.discounted_total_price | currency
+                          }}</span>
+                        } @else {
+                          {{ +(item.final_total_price ?? item.total_price) | currency }}
+                        }
                       </div>
 
                       <!-- Actions -->

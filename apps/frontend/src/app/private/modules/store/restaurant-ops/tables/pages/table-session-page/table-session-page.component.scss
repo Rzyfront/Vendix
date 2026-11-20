@@ -789,6 +789,20 @@
   white-space: nowrap;
 }
 
+// Promo de producto: precio de lista tachado sobre el total ya descontado.
+.item-money__list {
+  display: block;
+  font-size: 0.72rem;
+  font-weight: 500;
+  color: var(--color-text-secondary);
+  text-decoration: line-through;
+}
+
+.item-money__promo {
+  display: block;
+  color: var(--color-success, #16a34a);
+}
+
 .item-action {
   grid-area: action;
   display: flex;

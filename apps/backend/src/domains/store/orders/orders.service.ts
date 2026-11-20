@@ -59,6 +59,10 @@ import {
 import { SellableStockAllocator } from '../inventory/shared/services/sellable-stock-allocator.service';
 import { ShippingCalculatorService } from '../shipping/shipping-calculator.service';
 import { resolveTierSnapshotsForItems } from '../products/services/tier-snapshot.util';
+import {
+  buildOrderLineBreakdown,
+  buildOrderTotalsBreakdown,
+} from './utils/order-breakdown.util';
 import { resolveWeightLinesStockUnits } from '../products/services/weight-stock-units.util';
 import {
   groupRatesByProductId,
@@ -2079,6 +2083,14 @@ export class OrdersService {
         item.unit_price_gross = finals.final_unit_price;
         item.line_total_gross = finals.final_total_price;
       }
+      // Desglose leído de lo PERSISTIDO (aditivo): base, descuento de línea,
+      // filas de `order_item_taxes` y total con impuesto. Los `final_*` de
+      // arriba salen de las tasas vigentes del producto y con tasa incluida
+      // devuelven la base; el detalle pinta este desglose.
+      for (const item of order.order_items) {
+        item.line_breakdown = buildOrderLineBreakdown(item);
+      }
+      order.totals_breakdown = buildOrderTotalsBreakdown(order);
     }
 
     // Mirrors `findBlockingSalesInvoiceForPaymentCancel`'s exact semantics
