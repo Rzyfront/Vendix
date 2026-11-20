@@ -248,6 +248,44 @@ describe('InvoiceScannerModalComponent — QUI-845 proveedor nuevo en el confirm
     expect((component as any).supplierConfirmDeclined).toBe(false);
     expect((component as any).pendingSupplierConfirm).toBe(false);
   });
+
+  /**
+   * ia-cargas F3 — el tope de una OC es PURCHASE_ORDER_CREATE_ITEMS_MAX
+   * (10.000), no 100: el 100 es por solicitud de líneas sin resolver y el POP
+   * las resuelve por lotes antes de crear la orden.
+   */
+  describe('tope de líneas de la OC', () => {
+    const items = (n: number): MatchedLineItem[] =>
+      Array.from({ length: n }, (_, i) => ({ ...buildItem(), description: `L${i + 1}` }));
+    const overLimitAlert = () =>
+      fixture.nativeElement.querySelector('[data-testid="pop-scan-over-limit"]');
+
+    it('el tope es 10.000 (el del backend), no 100', () => {
+      expect(component.PURCHASE_ORDER_CREATE_ITEMS_MAX).toBe(10000);
+      expect(component.orderLimitLabel).toBe('10.000');
+    });
+
+    it('factura de 130 líneas: sin aviso rojo', () => {
+      component.scanResult.set(buildScan());
+      component.matchResult.set(buildMatch(false));
+      component.editableItems.set(items(130));
+      fixture.detectChanges();
+      expect(component.overOrderLimit()).toBe(false);
+      expect(overLimitAlert()).toBeNull();
+    });
+
+    it('factura de 2.000 líneas: sin aviso', () => {
+      component.editableItems.set(items(2000));
+      expect(component.overOrderLimit()).toBe(false);
+    });
+
+    it('más de 10.000 líneas activas: sí avisa; descartar hasta el tope lo quita', () => {
+      component.editableItems.set(items(10001));
+      expect(component.overOrderLimit()).toBe(true);
+      component.discardedIndexes.set(new Set([0]));
+      expect(component.overOrderLimit()).toBe(false);
+    });
+  });
 });
 /**
  * QUI-1020 — la espera del escaneo es de `AiScanJobService`: el modal solo

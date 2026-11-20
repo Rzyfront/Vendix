@@ -159,6 +159,16 @@ export interface InvoiceScanResult {
   header_discount_percentage?: number;
   header_discount_kind?: 'percent' | 'amount';
   schema_version?: 1 | 2;
+  /**
+   * ia-cargas F3 — cómo se leyó el documento (solo informativo): páginas,
+   * cuántas como texto nativo del PDF, llamadas a la IA y páginas sin leer.
+   */
+  scan_source?: {
+    pages: number;
+    text_pages: number;
+    batches: number;
+    missing_pages?: number[];
+  };
 }
 
 // ============================================================================

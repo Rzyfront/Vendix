@@ -80,6 +80,11 @@ export interface ExtractOptions {
   messages: AIMessage[];
   /** Share it across the calls of one load; default: one key per `extract`. */
   quotaKey?: string;
+  /**
+   * Template variables of the app prompt (`{{name}}` in its system prompt),
+   * e.g. the consolidated JSON a revalidation compares against. Default none.
+   */
+  variables?: Record<string, string>;
 }
 
 export interface ExtractBatchesOptions<TItem> {
@@ -216,6 +221,7 @@ export class AiExtractionService {
       options.messages,
       responseSchema,
       quotaKey,
+      options.variables,
     );
     const firstCheck = this.check<T>(first.content ?? '', validate);
     if (firstCheck.ok) return firstCheck.data;
@@ -244,6 +250,7 @@ export class AiExtractionService {
       repairMessages,
       responseSchema,
       quotaKey,
+      options.variables,
     );
     const secondCheck = this.check<T>(second.content ?? '', validate);
     if (secondCheck.ok) return secondCheck.data;
@@ -326,8 +333,9 @@ export class AiExtractionService {
     messages: AIMessage[],
     responseSchema: { name: string; schema: JsonSchema },
     quotaKey: string,
+    variables: Record<string, string> = {},
   ): Promise<AIResponse> {
-    const response = await this.aiEngine.run(appKey, {}, messages, {
+    const response = await this.aiEngine.run(appKey, variables, messages, {
       responseSchema,
       quotaKey,
     });
