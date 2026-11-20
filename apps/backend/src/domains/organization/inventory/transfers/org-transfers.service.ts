@@ -31,9 +31,12 @@ import {
   dispatchedQuantity,
   hasDeliveryDeadlinePassed,
   noSupportAlertNote,
+  isNeverDispatched,
   pendingQuantity,
+  requiresDispatchFirst,
   resolveLineBatch,
   resolveTransferNoteStoreId,
+  resolveTransferReceiptNoteStoreId,
   resolveTransferTransport,
 } from '../../../store/orders/stock-transfers/transfer-transport';
 import { VendixHttpException, ErrorCodes } from '@common/errors';
@@ -1167,6 +1170,11 @@ export class OrgTransfersService {
             `Transfer must be in_transit first.`,
         );
       }
+      if (requiresDispatchFirst(transfer)) {
+        throw new BadRequestException(
+          'Despacha la transferencia antes de recibirla',
+        );
+      }
 
       const linesById = new Map<number, any>(
         transfer.stock_transfer_items.map((line: any) => [line.id, line]),
@@ -1206,11 +1214,9 @@ export class OrgTransfersService {
         );
       }
 
-      const legacyUndispatched =
-        transfer.dispatched_at == null &&
-        transfer.stock_transfer_items.every(
-          (line: any) => line.quantity_dispatched == null,
-        );
+      // Solo filas sin modo de movimiento llegan acá sin despacho: un modo
+      // avanzado sin despacho ya se rechazó arriba.
+      const legacyUndispatched = isNeverDispatched(transfer);
 
       // Flujo histórico: una transferencia aprobada desde la tienda reservó el
       // origen. Se consume la reserva antes de descontar (igual que la tienda);
@@ -1287,9 +1293,10 @@ export class OrgTransfersService {
 
       let receiptNoteId = transfer.receipt_note_id ?? null;
       if (transfer.movement_mode === 'with_dispatch_notes') {
+        // La remisión de entrada queda en la tienda que recibe.
         receiptNoteId = await accumulateTransferReceiptNoteInTx(tx, {
           existing_note_id: receiptNoteId,
-          store_id: resolveTransferNoteStoreId(
+          store_id: resolveTransferReceiptNoteStoreId(
             scope.from_store_id,
             scope.to_store_id,
           ),
@@ -1393,6 +1400,11 @@ export class OrgTransfersService {
           'Solo una transferencia despachada con saldo pendiente puede cerrarse como pérdida',
         );
       }
+      if (requiresDispatchFirst(transfer)) {
+        throw new BadRequestException(
+          'Despacha la transferencia antes de cerrarla como pérdida',
+        );
+      }
 
       const reason = reasonInput?.trim();
       if (!reason) {
@@ -1425,11 +1437,7 @@ export class OrgTransfersService {
         );
       }
 
-      const legacyUndispatched =
-        transfer.dispatched_at == null &&
-        transfer.stock_transfer_items.every(
-          (line: any) => line.quantity_dispatched == null,
-        );
+      const legacyUndispatched = isNeverDispatched(transfer);
 
       if (legacyUndispatched) {
         // La reserva del aprobar de tienda se consume antes de la merma.
@@ -1500,103 +1508,107 @@ export class OrgTransfersService {
     const organization_id = this.requireOrgId();
     const user_id = this.requireUserId();
 
-    const transfer = await this.orgPrisma.stock_transfers.findFirst({
-      where: { id, organization_id },
-      include: { stock_transfer_items: true },
-    });
-    if (!transfer) {
-      throw new NotFoundException(`Transfer ${id} not found`);
-    }
-
-    if (
-      OrgTransfersService.TERMINAL_STATES.includes(transfer.status as any)
-    ) {
-      throw new BadRequestException(
-        `Cannot cancel transfer in status '${transfer.status}'`,
-      );
-    }
-
-    if (
-      transfer.status === transfer_status_enum.in_transit ||
-      transfer.status === transfer_status_enum.partially_received
-    ) {
-      const legacyUndispatched =
-        transfer.dispatched_at == null &&
-        transfer.stock_transfer_items.every(
-          (item: any) => item.quantity_dispatched == null,
-        );
-
-      const updated = await this.orgPrisma.$transaction(async (tx: any) => {
-        // Flujo histórico (aprobada desde la tienda, nunca despachada): el
-        // origen no se descontó, solo se reservó. Se libera la reserva y no se
-        // devuelve nada, igual que la tienda; devolver crearía stock fantasma.
-        if (legacyUndispatched) {
-          await this.stockLevelManager.releaseReservationsByReference(
-            'transfer',
-            transfer.id,
-            'cancelled',
-            tx,
-          );
-          return tx.stock_transfers.update({
-            where: { id },
-            data: {
-              status: transfer_status_enum.cancelled,
-              cancelled_at: new Date(),
-              cancelled_by_user_id: user_id,
-              cancellation_reason: dto?.reason ?? null,
-            },
-            include: TRANSFER_RESPONSE_INCLUDE,
-          });
-        }
-
-        // Devuelve al origen lo pendiente (despachado y no recibido).
-        for (const item of transfer.stock_transfer_items) {
-          const pending = pendingQuantity(item);
-          if (pending <= 0) continue;
-          await this.stockLevelManager.updateStock(
-            {
-              product_id: item.product_id,
-              variant_id: item.product_variant_id ?? undefined,
-              location_id: transfer.from_location_id,
-              quantity_change: pending,
-              movement_type: 'transfer',
-              reason:
-                dto?.reason ??
-                `Transfer ${transfer.transfer_number} cancelled — return to origin`,
-              user_id,
-              create_movement: true,
-              from_location_id: transfer.from_location_id,
-              to_location_id: transfer.to_location_id ?? undefined,
-            },
-            tx,
-          );
-        }
-
-        return tx.stock_transfers.update({
-          where: { id },
-          data: {
-            status: transfer_status_enum.cancelled,
-            cancelled_at: new Date(),
-            cancelled_by_user_id: user_id,
-            cancellation_reason: dto?.reason ?? null,
-          },
-          include: TRANSFER_RESPONSE_INCLUDE,
-        });
+    const updated = await this.orgPrisma.$transaction(async (tx: any) => {
+      // Candado de fila condicionado por estado (mismo patrón que el reclamo
+      // del despacho): una recepción, un despacho o un cierre concurrentes se
+      // serializan con esta cancelación, y la lectura se hace DESPUÉS del
+      // candado y dentro de la transacción. Así no se devuelve al origen lo
+      // que otra operación acaba de recibir en destino ni se cancela sin
+      // devolución algo que se acaba de despachar.
+      const lock = await tx.stock_transfers.updateMany({
+        where: {
+          id,
+          organization_id,
+          status: { notIn: OrgTransfersService.TERMINAL_STATES },
+        },
+        data: { updated_at: new Date() },
       });
 
-      return this.mapResponse(updated);
-    }
+      const transfer = await tx.stock_transfers.findFirst({
+        where: { id, organization_id },
+        include: { stock_transfer_items: true },
+      });
+      if (!transfer) {
+        throw new NotFoundException(`Transfer ${id} not found`);
+      }
 
-    // pending / approved / legacy draft → just terminate, no stock movement.
-    const updated = await this.orgPrisma.stock_transfers.update({
-      where: { id },
-      data: {
+      if (
+        OrgTransfersService.TERMINAL_STATES.includes(transfer.status as any)
+      ) {
+        throw new BadRequestException(
+          `Cannot cancel transfer in status '${transfer.status}'`,
+        );
+      }
+      if (lock.count === 0) {
+        throw new ConflictException(
+          `La transferencia ${transfer.transfer_number} cambió mientras se cancelaba: actualiza e intenta de nuevo`,
+        );
+      }
+
+      const cancelledData = {
         status: transfer_status_enum.cancelled,
         cancelled_at: new Date(),
         cancelled_by_user_id: user_id,
         cancellation_reason: dto?.reason ?? null,
-      },
-      include: TRANSFER_RESPONSE_INCLUDE,
+      };
+
+      // pending / approved / legacy draft → just terminate, no stock movement.
+      if (
+        transfer.status !== transfer_status_enum.in_transit &&
+        transfer.status !== transfer_status_enum.partially_received
+      ) {
+        return tx.stock_transfers.update({
+          where: { id },
+          data: cancelledData,
+          include: TRANSFER_RESPONSE_INCLUDE,
+        });
+      }
+
+      // Flujo histórico (aprobada desde la tienda, nunca despachada): el
+      // origen no se descontó, solo se reservó. Se libera la reserva y no se
+      // devuelve nada, igual que la tienda; devolver crearía stock fantasma.
+      if (isNeverDispatched(transfer)) {
+        await this.stockLevelManager.releaseReservationsByReference(
+          'transfer',
+          transfer.id,
+          'cancelled',
+          tx,
+        );
+        return tx.stock_transfers.update({
+          where: { id },
+          data: cancelledData,
+          include: TRANSFER_RESPONSE_INCLUDE,
+        });
+      }
+
+      // Devuelve al origen lo pendiente (despachado y no recibido).
+      for (const item of transfer.stock_transfer_items) {
+        const pending = pendingQuantity(item);
+        if (pending <= 0) continue;
+        await this.stockLevelManager.updateStock(
+          {
+            product_id: item.product_id,
+            variant_id: item.product_variant_id ?? undefined,
+            location_id: transfer.from_location_id,
+            quantity_change: pending,
+            movement_type: 'transfer',
+            reason:
+              dto?.reason ??
+              `Transfer ${transfer.transfer_number} cancelled — return to origin`,
+            user_id,
+            create_movement: true,
+            from_location_id: transfer.from_location_id,
+            to_location_id: transfer.to_location_id ?? undefined,
+          },
+          tx,
+        );
+      }
+
+      return tx.stock_transfers.update({
+        where: { id },
+        data: cancelledData,
+        include: TRANSFER_RESPONSE_INCLUDE,
+      });
     });
 
     return this.mapResponse(updated);

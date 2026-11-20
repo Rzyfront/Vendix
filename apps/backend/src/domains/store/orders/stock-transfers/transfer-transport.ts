@@ -413,6 +413,11 @@ export async function resolveTransferTransport(
 
       // Métodos propios de una tienda de la organización o de sistema
       // (`store_id` NULL). Nunca el de otra organización.
+      // Limitación conocida: en la superficie de tienda `shipping_methods` tiene
+      // scope de tienda (`StorePrismaService` agrega `store_id = contexto`), así
+      // que ahí el `store_id: null` no aplica y solo se aceptan los métodos de
+      // la tienda del contexto. Lo mismo pasa con los lotes sin bodega en
+      // `resolveLineBatch`. La superficie de organización no tiene ese límite.
       const shippingMethod = await tx.shipping_methods.findFirst({
         where: {
           id: input.shipping_method_id,
@@ -519,6 +524,37 @@ export function pendingQuantity(line: {
 }
 
 /**
+ * La transferencia nunca pasó por el despacho: sin `dispatched_at` y sin
+ * conteo de salida en ninguna línea.
+ */
+export function isNeverDispatched(transfer: {
+  dispatched_at?: Date | null;
+  stock_transfer_items: Array<{ quantity_dispatched?: number | null }>;
+}): boolean {
+  return (
+    transfer.dispatched_at == null &&
+    transfer.stock_transfer_items.every(
+      (line) => line.quantity_dispatched == null,
+    )
+  );
+}
+
+/**
+ * Una transferencia con modo de movimiento (P2) debe despacharse antes de
+ * recibirse o cerrarse con pérdida: el despacho es el que descuenta el origen,
+ * guarda el conteo de salida y el lote y emite la remisión `transfer_out`.
+ * Solo las filas sin modo (flujo anterior: aprobar reservaba y completar
+ * movía) pueden recibirse sin despacho, descontando el origen al recibir.
+ */
+export function requiresDispatchFirst(transfer: {
+  movement_mode?: string | null;
+  dispatched_at?: Date | null;
+  stock_transfer_items: Array<{ quantity_dispatched?: number | null }>;
+}): boolean {
+  return transfer.movement_mode != null && isNeverDispatched(transfer);
+}
+
+/**
  * Lote de una línea. Si el usuario eligió uno, se valida producto/variante y
  * bodega; si no, se elige el más antiguo con saldo (FEFO: primero el que
  * vence antes; sin fecha de vencimiento, el creado antes), que es el criterio
@@ -610,6 +646,35 @@ export function resolveTransferNoteStoreId(
     );
   }
   return storeId;
+}
+
+/**
+ * Remisión de entrada: queda en la tienda que recibe (la del destino) y, si el
+ * destino es bodega central de la organización, en la del origen.
+ */
+export function resolveTransferReceiptNoteStoreId(
+  fromStoreId: number | null | undefined,
+  toStoreId: number | null | undefined,
+): number {
+  return resolveTransferNoteStoreId(toStoreId, fromStoreId);
+}
+
+/**
+ * Superficie de tienda: `dispatch_notes` tiene scope de tienda en
+ * `StorePrismaService`, así que toda remisión se crea (y solo se puede leer)
+ * en la tienda del contexto. El candado, el consecutivo y el documento usan esa
+ * misma tienda; si se calcularan con otra, la lectura del último número
+ * quedaría vacía y cada remisión del día chocaría con la `…0001`.
+ */
+export function resolveStoreSurfaceNoteStoreId(
+  contextStoreId: number | null | undefined,
+): number {
+  if (contextStoreId == null) {
+    throw new BadRequestException(
+      'Elige la tienda desde la que trabajas para emitir la remisión',
+    );
+  }
+  return contextStoreId;
 }
 
 async function nextDispatchNumber(
@@ -785,7 +850,17 @@ export async function createTransferNoteInTx(
  */
 export async function accumulateTransferReceiptNoteInTx(
   tx: any,
-  params: CreateTransferNoteParams & { existing_note_id: number | null },
+  params: CreateTransferNoteParams & {
+    existing_note_id: number | null;
+    /**
+     * Qué hacer si `existing_note_id` no se encuentra con este cliente.
+     * `create` (organización, cliente sin scope de tienda): el documento se
+     * borró y se emite otro. `reject` (tienda): con scope de tienda, no
+     * encontrarla significa que la remisión de entrada está en OTRA tienda;
+     * crear otra duplicaría el documento y reemplazaría `receipt_note_id`.
+     */
+    on_missing_existing?: 'create' | 'reject';
+  },
 ): Promise<number> {
   if (params.existing_note_id == null) {
     const note = await createTransferNoteInTx(tx, params);
@@ -797,6 +872,11 @@ export async function accumulateTransferReceiptNoteInTx(
     include: { dispatch_note_items: true },
   });
   if (!note) {
+    if (params.on_missing_existing === 'reject') {
+      throw new ConflictException(
+        'La remisión de entrada de esta transferencia está en otra tienda: registra la recepción desde la tienda que recibió la primera entrega',
+      );
+    }
     // La FK es SetNull: si el documento se borró, se emite uno nuevo en vez de
     // perder el conteo de entrada.
     const created = await createTransferNoteInTx(tx, params);

@@ -44,8 +44,10 @@ import {
   hasDeliveryDeadlinePassed,
   noSupportAlertNote,
   pendingQuantity,
+  isNeverDispatched,
+  requiresDispatchFirst,
   resolveLineBatch,
-  resolveTransferNoteStoreId,
+  resolveStoreSurfaceNoteStoreId,
   resolveTransferTransport,
 } from './transfer-transport';
 import { DispatchTransferDto } from './dto/transfer-advanced.dto';
@@ -63,6 +65,18 @@ import { VendixHttpException, ErrorCodes } from '../../../../common/errors';
 const PENDING_LIKE_STATUSES: transfer_status_enum[] = [
   transfer_status_enum.pending,
   transfer_status_enum.draft,
+];
+
+/**
+ * Estados terminales: ninguna operación mueve stock sobre ellos. `received` es
+ * el que escribe el flujo de organización sobre esta misma tabla y
+ * `closed_with_loss` es terminal desde P2.
+ */
+const TRANSFER_TERMINAL_STATUSES: transfer_status_enum[] = [
+  transfer_status_enum.completed,
+  transfer_status_enum.received,
+  transfer_status_enum.closed_with_loss,
+  transfer_status_enum.cancelled,
 ];
 
 /**
@@ -1100,9 +1114,10 @@ export class StockTransfersService {
         stockTransfer.dispatch_note_id ?? null;
 
       if (wantsDispatchNote) {
-        const noteStoreId = resolveTransferNoteStoreId(
-          scope.from_store_id,
-          scope.to_store_id,
+        // N3 — la remisión vive en la tienda del contexto: es donde el scope de
+        // `dispatch_notes` la crea y donde se lee el consecutivo.
+        const noteStoreId = resolveStoreSurfaceNoteStoreId(
+          RequestContextService.getStoreId(),
         );
         const note = await createTransferNoteInTx(tx, {
           store_id: noteStoreId,
@@ -1327,7 +1342,7 @@ export class StockTransfersService {
       }
 
       const context = RequestContextService.getContext();
-      const scope = await this.validateTransferScope(
+      await this.validateTransferScope(
         stockTransfer.organization_id,
         stockTransfer.from_location_id,
         stockTransfer.to_location_id,
@@ -1350,6 +1365,11 @@ export class StockTransfersService {
       ) {
         throw new BadRequestException(
           'Solo una transferencia despachada o con recepción parcial puede recibirse',
+        );
+      }
+      if (requiresDispatchFirst(stockTransfer)) {
+        throw new BadRequestException(
+          'Despacha la transferencia antes de recibirla',
         );
       }
 
@@ -1399,14 +1419,11 @@ export class StockTransfersService {
         );
       }
 
-      // Flujo anterior (sin despacho): el descuento del origen no ocurrió
-      // todavía. Se hace acá para no romper las transferencias creadas antes de
-      // P2 ni las que se aprueban y completan de una vez.
-      const legacyUndispatched =
-        stockTransfer.dispatched_at == null &&
-        stockTransfer.stock_transfer_items.every(
-          (line: any) => line.quantity_dispatched == null,
-        );
+      // Flujo anterior (sin despacho y sin modo de movimiento): el descuento
+      // del origen no ocurrió todavía. Se hace acá para no romper las
+      // transferencias creadas antes de P2 ni las que se aprueban y completan
+      // de una vez. Un modo avanzado sin despacho ya se rechazó arriba.
+      const legacyUndispatched = isNeverDispatched(stockTransfer);
 
       if (legacyUndispatched) {
         await this.stockLevelManager.releaseReservationsByReference(
@@ -1479,11 +1496,14 @@ export class StockTransfersService {
         stockTransfer.movement_mode === 'with_dispatch_notes' &&
         stockTransfer.to_location_id != null
       ) {
+        // N3 — la remisión de entrada queda en la tienda que recibe (la del
+        // contexto, la única donde el scope deja crearla y leerla). Si una
+        // recepción anterior la dejó en otra tienda, no se duplica.
         receiptNoteId = await accumulateTransferReceiptNoteInTx(tx, {
           existing_note_id: receiptNoteId,
-          store_id: resolveTransferNoteStoreId(
-            scope.from_store_id,
-            scope.to_store_id,
+          on_missing_existing: 'reject',
+          store_id: resolveStoreSurfaceNoteStoreId(
+            RequestContextService.getStoreId(),
           ),
           direction: 'inbound',
           subtype: 'transfer_in',
@@ -1626,6 +1646,11 @@ export class StockTransfersService {
           'Solo una transferencia despachada con saldo pendiente puede cerrarse como pérdida',
         );
       }
+      if (requiresDispatchFirst(stockTransfer)) {
+        throw new BadRequestException(
+          'Despacha la transferencia antes de cerrarla como pérdida',
+        );
+      }
 
       const reason = reasonInput?.trim();
       if (!reason) {
@@ -1658,11 +1683,7 @@ export class StockTransfersService {
         );
       }
 
-      const legacyUndispatched =
-        stockTransfer.dispatched_at == null &&
-        stockTransfer.stock_transfer_items.every(
-          (line: any) => line.quantity_dispatched == null,
-        );
+      const legacyUndispatched = isNeverDispatched(stockTransfer);
 
       if (legacyUndispatched) {
         await this.stockLevelManager.releaseReservationsByReference(
@@ -1718,6 +1739,16 @@ export class StockTransfersService {
 
   async cancel(id: number) {
     return this.prisma.$transaction(async (tx) => {
+      // Candado de fila condicionado por estado, igual que el reclamo del
+      // despacho: una recepción, un despacho o un cierre concurrentes se
+      // serializan con esta cancelación. Si el otro terminó primero y dejó la
+      // transferencia en un estado terminal, no se toca nada; si no, la lectura
+      // de abajo ya ve su saldo y no devuelve al origen lo que entró a destino.
+      const lock = await tx.stock_transfers.updateMany({
+        where: { id, status: { notIn: TRANSFER_TERMINAL_STATUSES } },
+        data: { updated_at: new Date() },
+      });
+
       const stockTransfer = await tx.stock_transfers.findUnique({
         where: { id },
         include: { stock_transfer_items: true },
@@ -1749,6 +1780,11 @@ export class StockTransfersService {
       }
       if (stockTransfer.status === transfer_status_enum.cancelled) {
         throw new BadRequestException('La transferencia ya está cancelada');
+      }
+      if (lock.count === 0) {
+        throw new ConflictException(
+          `La transferencia ${stockTransfer.transfer_number} cambió mientras se cancelaba: actualiza e intenta de nuevo`,
+        );
       }
 
       const wasDispatched =
