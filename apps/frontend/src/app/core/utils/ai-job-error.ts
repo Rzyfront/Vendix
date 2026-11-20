@@ -36,6 +36,8 @@ export interface AiJobRealProgress {
   done: number;
   total: number;
   stage?: string;
+  /** What is counted ("filas", "páginas"): the bar then says "120 de 800 filas". */
+  unit?: string;
 }
 
 /**
@@ -106,6 +108,8 @@ const DOCUMENT_CODE_SUFFIXES = [
   '_INCOMPLETE',
   '_UNSUPPORTED_TYPE',
   '_TOO_MANY_FILES',
+  '_TOO_MANY_PAGES',
+  '_NO_PAGES',
 ];
 
 const TITLES: Readonly<Record<AiJobErrorCategory, string>> = {

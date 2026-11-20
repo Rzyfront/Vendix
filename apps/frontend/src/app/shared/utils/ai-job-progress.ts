@@ -199,10 +199,16 @@ export class AiJobProgress {
     }
   });
 
-  /** «paso 2 de 5» when the server reports real steps. */
+  /**
+   * «paso 2 de 5» when the server reports real steps, or «120 de 800 filas»
+   * when it says what it counts.
+   */
   readonly stepLabel = computed(() => {
     const real = this.realState();
     if (!real || real.total <= 1 || !this.running()) return null;
+    if (real.unit) {
+      return `${Math.min(real.done, real.total)} de ${real.total} ${real.unit}`;
+    }
     return `paso ${Math.min(real.done + 1, real.total)} de ${real.total}`;
   });
 

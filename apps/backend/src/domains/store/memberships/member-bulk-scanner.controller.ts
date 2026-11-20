@@ -25,6 +25,7 @@ import {
 } from './dto/scan-roster.dto';
 import { IndustryModuleGuard } from '../../../common/guards/industry-module.guard';
 import { IndustryModule } from '../../../common/decorators/industry-module.decorator';
+import { detectIngestFile } from '@common/ai-ingest/ingest-file.detector';
 
 /**
  * Member bulk scanner controller.
@@ -118,6 +119,18 @@ export class MemberBulkScannerController {
       if (!file) {
         throw new VendixHttpException(ErrorCodes.MEMBER_SCAN_NO_FILE);
       }
+      // The mimetype above is what the client claims: the real type comes
+      // from the bytes. This synchronous path runs inside the API, so it only
+      // takes images and PDFs; spreadsheets go through `bulk-scan/async`.
+      const detected = detectIngestFile(this.scannerService.toScanFile(file));
+      if (!detected || (detected.kind !== 'image' && detected.kind !== 'pdf')) {
+        throw new VendixHttpException(
+          ErrorCodes.MEMBER_SCAN_INVALID_FILE,
+          detected?.kind === 'sheet'
+            ? 'Las hojas de cálculo se cargan con el escaneo en segundo plano; este envío solo acepta imágenes o PDF.'
+            : 'El archivo no es una imagen ni un PDF válido.',
+        );
+      }
       const result = await this.scannerService.scanRoster(file);
       const fileInfo = await this.bulkUploadLogs.describeFile(
         'memberships',
@@ -168,7 +181,7 @@ export class MemberBulkScannerController {
 
   @Post('analyze')
   @Permissions('store:memberships:bulk_import')
-  async analyze(@Body() body: { scan: RosterScanResult }) {
+  async analyze(@Body() body: { scan: RosterScanResult; row_offset?: number }) {
     try {
       if (!body?.scan) {
         throw new VendixHttpException(
@@ -176,7 +189,12 @@ export class MemberBulkScannerController {
           'Falta el payload `scan` con el resultado del OCR',
         );
       }
-      const result = await this.scannerService.analyzeRoster(body.scan);
+      // ia-cargas F2 — optional: members before this chunk of a big sheet.
+      const rowOffset = Number(body.row_offset ?? 0);
+      const result = await this.scannerService.analyzeRoster(
+        body.scan,
+        Number.isInteger(rowOffset) && rowOffset > 0 ? rowOffset : 0,
+      );
       return this.responseService.success(
         result,
         'Padrón analizado exitosamente',
@@ -191,11 +209,25 @@ export class MemberBulkScannerController {
   async commit(@Body() dto: CommitMemberRosterDto) {
     try {
       const result = await this.scannerService.commitRoster(dto);
-      await this.bulkUploadLogs.trackUpload(
-        'memberships',
-        dto,
-        rosterUploadCounts(result),
-      );
+      // ia-cargas F2 — a big roster arrives in chunks with the same
+      // `session_id` and adds up on ONE row of the upload log.
+      if (dto.session_id) {
+        await this.bulkUploadLogs.trackSessionPage(
+          'memberships',
+          dto.session_id,
+          dto,
+          {
+            ...rosterUploadCounts(result),
+            total: dto.total_members ?? result.ready ?? dto.members.length,
+          },
+        );
+      } else {
+        await this.bulkUploadLogs.trackUpload(
+          'memberships',
+          dto,
+          rosterUploadCounts(result),
+        );
+      }
       return this.responseService.success(
         result,
         'Padrón cargado exitosamente',

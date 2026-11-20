@@ -540,6 +540,24 @@ export class AnthropicCompatibleProvider implements AIProvider {
    * Only with a verified capability, the rest of the authorized catalog is
    * appended with `defer_loading: true` (never carrying cache_control).
    */
+  /**
+   * ai-ingest structured output as a forced tool (`emit_result`). Opt-in: only
+   * a config with `settings.supports_json_schema: true` gets it, and never
+   * together with real tools or an agent stream.
+   */
+  private structuredOutputTool(
+    options: AIRequestOptions | undefined,
+  ): { name: string; description: string; input_schema: any } | null {
+    const rs = options?.responseSchema;
+    if (!rs || options?.agenticStream || options?.tools?.length) return null;
+    if (this.config.settings?.supports_json_schema !== true) return null;
+    return {
+      name: 'emit_result',
+      description: `Return the ${rs.name} result.`,
+      input_schema: rs.schema,
+    };
+  }
+
   private buildToolPayload(
     options: AIRequestOptions | undefined,
     model: string,
@@ -642,8 +660,10 @@ export class AnthropicCompatibleProvider implements AIProvider {
       const system = this.transformSystem(messages, options);
       const model = options?.model || this.config.modelId;
       let payload = this.buildToolPayload(options, model);
+      const structured = this.structuredOutputTool(options);
       const send = (attempt: ToolPayload) => {
-        const { tools: toolPayload, native } = attempt;
+        const { native } = attempt;
+        const toolPayload = structured ? [structured] : attempt.tools;
         const transformedMessages = this.transformMessages(messages, native);
         const request = () =>
           this.client.messages.create(
@@ -669,6 +689,9 @@ export class AnthropicCompatibleProvider implements AIProvider {
                             name: options.tool_choice.function.name,
                           },
                 }),
+              ...(structured && {
+                tool_choice: { type: 'tool' as const, name: structured.name },
+              }),
               ...(toolPayload?.length && { tools: toolPayload }),
             },
             ...this.requestOptions(deadline?.signal, native),
@@ -701,6 +724,13 @@ export class AnthropicCompatibleProvider implements AIProvider {
       for (const block of response.content) {
         if (block.type === 'text') {
           textContent += block.text;
+        } else if (
+          block.type === 'tool_use' &&
+          structured &&
+          block.name === structured.name
+        ) {
+          // ai-ingest structured output: the forced tool input IS the answer.
+          textContent = JSON.stringify(block.input);
         } else if (block.type === 'tool_use') {
           toolCalls.push({
             id: block.id,
@@ -726,10 +756,10 @@ export class AnthropicCompatibleProvider implements AIProvider {
           : undefined,
       );
       const finishReason =
-        response.stop_reason === 'tool_use'
-          ? 'tool_calls'
-          : response.stop_reason === 'max_tokens'
-            ? 'length'
+        response.stop_reason === 'max_tokens'
+          ? 'length'
+          : response.stop_reason === 'tool_use' && !structured
+            ? 'tool_calls'
             : 'stop';
 
       const completedCalls = options?.agenticStream

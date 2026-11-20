@@ -619,7 +619,8 @@ export class AIEngineService implements OnModuleInit {
             lastResponse.usage?.totalTokens ??
               (lastResponse.usage?.promptTokens ?? 0) +
                 (lastResponse.usage?.completionTokens ?? 0),
-            { appKey: app.key ?? appKey, callId },
+            // ai-ingest: every call of one job shares `quotaKey` → 1 unit.
+            { appKey: app.key ?? appKey, callId: optionsOverride?.quotaKey ?? callId },
           );
 
           logStatus = 'success';

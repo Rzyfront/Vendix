@@ -110,14 +110,25 @@ export class CustomerAiImportController {
     try {
       const result = await this.importService.commit(dto);
       // QUI-1004 — una fila en el registro de cargas masivas (accesorio: un
-      // fallo al registrar no tumba el lote ya escrito).
-      await this.bulkUploadLogs.trackUpload('customers_ai', dto, {
-        total: dto.customers.length,
+      // fallo al registrar no tumba el lote ya escrito). Una carga grande
+      // llega en tramos con el mismo `session_id` y suma sobre la misma fila.
+      const counts = {
+        total: dto.total_customers ?? dto.customers.length,
         successful: result.created + result.updated + countLocationsOnly(result),
         created: result.created,
         failed: result.failed,
         skipped: result.skipped,
-      });
+      };
+      if (dto.session_id) {
+        await this.bulkUploadLogs.trackSessionPage(
+          'customers_ai',
+          dto.session_id,
+          dto,
+          counts,
+        );
+      } else {
+        await this.bulkUploadLogs.trackUpload('customers_ai', dto, counts);
+      }
       return this.responseService.success(result, 'Lote procesado');
     } catch (error) {
       this.fail(error, 'Error al cargar el lote de clientes');

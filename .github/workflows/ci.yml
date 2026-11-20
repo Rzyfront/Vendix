@@ -403,6 +403,11 @@ jobs:
           npx jest --ci --runInBand --config jest.isolated.config.js --runTestsByPath
           src/common/workflows/contract/workflow-contract.parity.spec.ts
           src/domains/ecommerce/workflows-public/ecommerce-documents-signing.controller.spec.ts
+          src/common/ai-ingest/documents/document-pages.service.spec.ts
+          src/common/ai-ingest/documents/page-content.spec.ts
+          src/common/ai-ingest/images/image-prep.spec.ts
+          src/common/ai-ingest/sheets/sheet-parser.service.spec.ts
+          src/domains/store/memberships/member-bulk-scanner.controller.spec.ts
           src/domains/received-documents/services/received-document-pages.service.spec.ts
           src/domains/store/documents/checks/document-check-normalizers.spec.ts
           src/domains/store/documents/checks/document-checks.service.spec.ts

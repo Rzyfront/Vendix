@@ -79,7 +79,9 @@ export class AiScanProcessor extends WorkerHost {
               context: ctx,
               reportProgress: async (progress) => {
                 try {
-                  await job.updateProgress(progress);
+                  // `at`: a job that keeps reporting is alive, not stalled
+                  // (long sheet loads run past the 5 min active threshold).
+                  await job.updateProgress({ ...progress, at: Date.now() });
                 } catch (err: any) {
                   this.logger.warn(
                     `[AiScan] job=${job.id} progress not stored: ${err?.message ?? err}`,

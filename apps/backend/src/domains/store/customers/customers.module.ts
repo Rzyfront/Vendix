@@ -2,6 +2,7 @@ import { BulkUploadsModule } from '../bulk-uploads/bulk-uploads.module';
 import { BulkUploadHandlerRegistry } from '../bulk-uploads/bulk-upload-handler.registry';
 import { CustomersBulkJobHandler } from './customers-bulk-job.handler';
 import { S3Module } from '@common/services/s3.module';
+import { AiIngestModule } from '@common/ai-ingest/ai-ingest.module';
 import { Module, OnModuleInit } from '@nestjs/common';
 import { AIToolRegistry } from '../../../ai-engine/tools/ai-tool-registry';
 import { createCustomerTools } from '../../../ai-engine/tools/domains/customers.tools';
@@ -35,6 +36,7 @@ import { AddressesModule } from '../addresses/addresses.module';
     AddressesModule,
     BulkUploadsModule,
     S3Module,
+    AiIngestModule,
   ],
   controllers: [
     CustomersController,
