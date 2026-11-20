@@ -97,7 +97,7 @@ const MAX_FILE_BYTES = 1024 * 1024;
           ></textarea>
         </div>
 
-        @if (initialErrors().length) {
+        @if (showAiErrors()) {
           <div class="rounded-xl p-3" role="alert" style="border: 1px solid var(--color-warning)">
             <p class="text-sm font-semibold mb-1" style="color: var(--color-text)">
               Revisa estos puntos que marcó la IA
@@ -246,6 +246,10 @@ export class TemplateJsonImportModalComponent implements OnInit {
   readonly initialErrors = input<{ path: string; message: string }[]>([]);
 
   readonly text = signal('');
+  /** AI-flagged errors refer to the prefilled draft: hide them once the user edits it. */
+  readonly showAiErrors = computed(
+    () => this.initialErrors().length > 0 && this.text() === this.initialText(),
+  );
   readonly showExample = signal(false);
   readonly checking = signal(false);
   readonly importing = signal(false);

@@ -68,7 +68,9 @@ export function checkTemplateDraftUpload(file: TemplateDraftUpload | undefined):
     return 'El archivo debe pesar como máximo 10 MB.';
   }
   const mime = (file.mimetype ?? '').trim().toLowerCase();
-  const extension = (file.originalname ?? '').split('.').pop()?.toLowerCase() ?? '';
+  const name = file.originalname ?? '';
+  // Camera/blob uploads may have no extension: then only the MIME and bytes count.
+  const extension = name.includes('.') ? (name.split('.').pop() ?? '').toLowerCase() : '';
   if (mime === 'image/heic' || mime === 'image/heif' || extension === 'heic' || extension === 'heif') {
     return 'Las fotos HEIC no son compatibles. Expórtala como JPG o PNG e inténtalo de nuevo.';
   }

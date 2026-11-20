@@ -19,6 +19,8 @@ describe('checkTemplateDraftUpload', () => {
   it('accepts a PDF and a PNG whose bytes match', () => {
     expect(checkTemplateDraftUpload(upload())).toBeNull();
     expect(checkTemplateDraftUpload(upload({ buffer: PNG, mimetype: 'image/png', size: PNG.length, originalname: 'foto.png' }))).toBeNull();
+    // A camera/blob upload without extension is judged by MIME + bytes only.
+    expect(checkTemplateDraftUpload(upload({ buffer: PNG, mimetype: 'image/png', size: PNG.length, originalname: 'image' }))).toBeNull();
   });
 
   it('rejects a missing or empty file', () => {

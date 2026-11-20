@@ -71,7 +71,7 @@ export function mapAiDraftStatus(res: AiDraftStatusResponse): AiDraftUiState {
   if (res.error_reason === 'not_configured' || res.error_code === 'AI_VISION_001') {
     return { kind: 'failed', message: AI_DRAFT_NO_VISION_MESSAGE };
   }
-  if (res.error_reason === 'plan_quota' || res.error_reason === 'credits') {
+  if (res.error_reason === 'plan_quota') {
     return { kind: 'failed', message: AI_DRAFT_QUOTA_MESSAGE };
   }
   return { kind: 'failed', message: res.message || 'No se pudo generar el borrador.' };

@@ -51,21 +51,30 @@ describe('template-ai-draft.util', () => {
     it('failed not_configured says there is no vision model', () => {
       const s = mapAiDraftStatus({ status: 'failed', error_code: null, error_reason: 'not_configured', message: 'x' });
       expect(s.kind).toBe('failed');
+      expect(s.kind).toBe('failed');
       if (s.kind === 'failed') expect(s.message).toContain('visión');
     });
 
     it('failed AI_VISION_001 says there is no vision model', () => {
       const s = mapAiDraftStatus({ status: 'failed', error_code: 'AI_VISION_001', message: 'x' });
+      expect(s.kind).toBe('failed');
       if (s.kind === 'failed') expect(s.message).toContain('visión');
+    });
+
+    it('failed credits keeps the server message (not the plan quota one)', () => {
+      const s = mapAiDraftStatus({ status: 'failed', error_code: 'AI_PROVIDER_003', error_reason: 'credits', message: 'Sin créditos del proveedor' });
+      expect(s).toEqual({ kind: 'failed', message: 'Sin créditos del proveedor' });
     });
 
     it('failed plan_quota says quota exhausted', () => {
       const s = mapAiDraftStatus({ status: 'failed', error_code: null, error_reason: 'plan_quota', message: 'x' });
+      expect(s.kind).toBe('failed');
       if (s.kind === 'failed') expect(s.message).toContain('cuota');
     });
 
     it('generic failed shows the server message', () => {
       const s = mapAiDraftStatus({ status: 'failed', error_code: 'X', message: 'No se pudo leer el PDF' });
+      expect(s.kind).toBe('failed');
       if (s.kind === 'failed') expect(s.message).toBe('No se pudo leer el PDF');
     });
   });
