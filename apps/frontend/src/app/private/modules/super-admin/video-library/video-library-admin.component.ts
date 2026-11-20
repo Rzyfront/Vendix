@@ -26,6 +26,7 @@ import {
 import {
   ResponsiveDataViewComponent,
   ItemListCardConfig,
+  PaginationComponent,
 } from '../../../../shared/components/index';
 import { ConfirmationModalComponent } from '../../../../shared/components/confirmation-modal/confirmation-modal.component';
 import { CardComponent } from '../../../../shared/components/card/card.component';
@@ -44,6 +45,7 @@ import { parseApiError } from '../../../../core/utils/parse-api-error';
     StatsComponent,
     InputsearchComponent,
     ResponsiveDataViewComponent,
+    PaginationComponent,
     ConfirmationModalComponent,
     CardComponent,
   ],
@@ -158,6 +160,19 @@ import { parseApiError } from '../../../../core/utils/parse-api-error';
               emptyMessage="No se encontraron videos de capacitación."
               emptySubMessage="Crea tu primer video para comenzar a capacitar a las tiendas."
             ></app-responsive-data-view>
+
+            @if (totalPages() > 1) {
+              <div class="flex justify-center pt-2">
+                <app-pagination
+                  [currentPage]="page()"
+                  [totalPages]="totalPages()"
+                  [total]="totalVideos()"
+                  [limit]="limit"
+                  infoStyle="range"
+                  (pageChange)="onPageChange($event)"
+                />
+              </div>
+            }
           </div>
         }
 
@@ -195,6 +210,10 @@ export class VideoLibraryAdminComponent implements OnInit {
 
   categories = signal<VideoCategory[]>([]);
   searchQuery = signal<string>('');
+  readonly limit = 10;
+  page = signal<number>(1);
+  totalPages = signal<number>(0);
+  totalVideos = signal<number>(0);
   categoryControl = new FormControl<string>('');
   statusControl = new FormControl<string>('');
 
@@ -300,13 +319,24 @@ export class VideoLibraryAdminComponent implements OnInit {
     this.loadCategories();
     this.loadVideos();
 
+    // A new filter changes the result set: start again from the first page.
     this.statusControl.valueChanges
       .pipe(takeUntilDestroyed(this.destroyRef))
-      .subscribe(() => this.loadVideos());
+      .subscribe(() => this.reloadFromFirstPage());
 
     this.categoryControl.valueChanges
       .pipe(takeUntilDestroyed(this.destroyRef))
-      .subscribe(() => this.loadVideos());
+      .subscribe(() => this.reloadFromFirstPage());
+  }
+
+  private reloadFromFirstPage() {
+    this.page.set(1);
+    this.loadVideos();
+  }
+
+  onPageChange(page: number) {
+    this.page.set(page);
+    this.loadVideos();
   }
 
   setTab(tab: 'videos' | 'categories') {
@@ -338,6 +368,8 @@ export class VideoLibraryAdminComponent implements OnInit {
   loadVideos() {
     this.loadingVideos.set(true);
     const query = {
+      page: this.page(),
+      limit: this.limit,
       search: this.searchQuery() || undefined,
       category: this.categoryControl.value || undefined,
       status: this.statusControl.value || undefined,
@@ -348,7 +380,17 @@ export class VideoLibraryAdminComponent implements OnInit {
       .pipe(takeUntilDestroyed(this.destroyRef))
       .subscribe({
         next: (res) => {
+          const totalPages = res.meta?.total_pages ?? 0;
+          // Deleting the only video of the last page leaves the requested page
+          // past the end: move to the last existing page instead of an empty list.
+          if (totalPages > 0 && this.page() > totalPages) {
+            this.page.set(totalPages);
+            this.loadVideos();
+            return;
+          }
           this.videos.set(res.data || []);
+          this.totalPages.set(totalPages);
+          this.totalVideos.set(res.meta?.total ?? 0);
           this.loadingVideos.set(false);
         },
         error: (err) => {
@@ -361,7 +403,7 @@ export class VideoLibraryAdminComponent implements OnInit {
 
   onSearch(query: string) {
     this.searchQuery.set(query);
-    this.loadVideos();
+    this.reloadFromFirstPage();
   }
 
   deleteVideo() {
