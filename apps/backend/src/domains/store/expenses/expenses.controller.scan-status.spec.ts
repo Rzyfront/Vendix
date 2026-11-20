@@ -15,6 +15,7 @@ function build(job: unknown) {
     queue as any,
     response as any,
     monitor as any,
+    {} as any, // s3 (ia-cargas F5a: scan enqueue stores the upload in S3)
   );
   return { controller, monitor, queue };
 }

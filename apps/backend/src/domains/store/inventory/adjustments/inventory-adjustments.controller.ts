@@ -375,7 +375,8 @@ export class InventoryAdjustmentsController {
     }
     const { job_id } = await this.aiScanJobs.enqueue(
       'inventory_count',
-      [scanFile],
+      // `assertValidScanFile` threw above when there was no file.
+      [scanFile!],
       { location_id: locationId },
     );
     return this.responseService.success({ job_id }, 'Escaneo encolado');
