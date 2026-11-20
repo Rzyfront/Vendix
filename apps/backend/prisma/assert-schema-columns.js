@@ -39,6 +39,20 @@ const { Client } = require('pg');
  * Formato: 'tabla.columna'.
  */
 const REQUIRED_COLUMNS = [
+  // --- Transferencias multi-producto: transporte y remisión (20261215090000) ---
+  // El despacho/recepción y las listas leen estas columnas: sin la migración,
+  // despachar o recibir da 500 y el listado de transferencias también.
+  'stock_transfers.movement_mode',
+  'stock_transfers.transport_method',
+  'stock_transfers.vehicle_id',
+  'stock_transfers.dispatch_note_id',
+  'stock_transfers.receipt_note_id',
+  'stock_transfers.is_external_destination',
+  'stock_transfers.no_support_alert',
+  'stock_transfers.shipping_cost',
+  'stock_transfer_items.quantity_dispatched',
+  'stock_transfer_items.quantity_lost',
+  'stock_transfer_items.batch_id',
   // --- CRM: apoyo en tareas y etapa destino (20261210090000) ---
   // Toda lectura de crm_tasks (lista, hoy, panel del cliente) trae
   // move_to_stage_id y las personas de apoyo: sin ellas Tareas da 500.
