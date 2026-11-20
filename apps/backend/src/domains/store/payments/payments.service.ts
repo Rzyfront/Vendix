@@ -3471,6 +3471,39 @@ export class PaymentsService {
         })),
     };
 
+    // Promociones por código YA aplicadas a esta orden (borrador adoptado o
+    // mesa): se conservan como manuales al cobrarla, aunque el POS no reenvíe
+    // el código.
+    if (existingOrderId != null) {
+      try {
+        const own = await this.prisma.order_promotions.findMany({
+          where: { order_id: existingOrderId, discount_amount: { gt: 0 } },
+          select: { promotion_id: true },
+        });
+        input.manual_promotion_ids = Array.from(
+          new Set([
+            ...(input.manual_promotion_ids ?? []),
+            ...own.map((r: { promotion_id: number }) => Number(r.promotion_id)),
+          ]),
+        );
+      } catch {
+        // Sin la lectura se cotiza como antes.
+      }
+    }
+
+    // Casilla única de código: si el código no es un cupón pero sí una
+    // promoción, entra al motor como promoción manual. Sus errores (fuera de
+    // día, sin cupo, no aplica…) se muestran al cajero, igual que un cupón
+    // inválido (QUI-783): nunca se cobra distinto de lo mostrado.
+    const codePromotionId = await this.resolveCodePromotionId(dto);
+    if (codePromotionId != null) {
+      const { quote } = await this.promotionEngine.quoteWithPromotionCode(
+        input,
+        codePromotionId,
+      );
+      return quote;
+    }
+
     try {
       return await this.promotionEngine.quoteDiscounts(input);
     } catch (error) {
@@ -3493,6 +3526,19 @@ export class PaymentsService {
         tier_progress: [],
       };
     }
+  }
+
+  /**
+   * Id de la promoción cuando el código de la casilla de cupón NO es un cupón
+   * sino una promoción (cupón primero). `null` si no hay código o es cupón.
+   */
+  private async resolveCodePromotionId(
+    dto: CreatePosPaymentDto,
+  ): Promise<number | null> {
+    const code = (dto.coupon_code || '').trim();
+    if (!code) return null;
+    const target = await this.promotionEngine.resolveDiscountCode(code);
+    return target.kind === 'promotion' ? target.promotion_id : null;
   }
 
   /**
@@ -3548,6 +3594,12 @@ export class PaymentsService {
     discount_amount: number;
     kept_inactive?: true;
   }> {
+    // Un código que resultó ser una PROMOCIÓN ya se cotizó en el motor de
+    // promociones (`calculatePosPromotionQuote`): aquí no es cupón.
+    if ((await this.resolveCodePromotionId(dto)) != null) {
+      return { coupon_id: null, coupon_code: null, discount_amount: 0 };
+    }
+
     let code = (dto.coupon_code || '').trim();
     let orderCouponId: number | null = null;
     if (existingOrderId != null && (code || dto.coupon_id != null)) {

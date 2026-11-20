@@ -2414,6 +2414,126 @@ describe('PromotionEngineService - auditoría y días de la semana', () => {
     });
   });
 
+  describe('casilla única de código (cupón primero, luego promoción)', () => {
+    beforeEach(() => {
+      prisma.coupons = { findFirst: jest.fn().mockResolvedValue(null) };
+    });
+
+    it('un código de cupón sigue siendo cupón aunque una promo tenga el mismo', async () => {
+      prisma.coupons.findFirst.mockResolvedValue({ id: 1 });
+      prisma.promotions.findFirst.mockResolvedValue({ id: 800 });
+      await expect(service.resolveDiscountCode('VERANO')).resolves.toEqual({
+        kind: 'coupon',
+      });
+      expect(prisma.promotions.findFirst).not.toHaveBeenCalled();
+    });
+
+    it('sin cupón, el código resuelve a la promoción (sin distinguir mayúsculas)', async () => {
+      prisma.promotions.findFirst.mockResolvedValue({ id: 800 });
+      await expect(service.resolveDiscountCode('martes2x1')).resolves.toEqual({
+        kind: 'promotion',
+        promotion_id: 800,
+      });
+      expect(prisma.promotions.findFirst.mock.calls[0][0].where).toEqual({
+        code: { equals: 'martes2x1', mode: 'insensitive' },
+      });
+    });
+
+    it('ni cupón ni promoción: none (el flujo de cupones responde CPN_FIND_001)', async () => {
+      prisma.promotions.findFirst.mockResolvedValue(null);
+      await expect(service.resolveDiscountCode('NOEXISTE')).resolves.toEqual({
+        kind: 'none',
+      });
+    });
+
+    it('aplica la promoción por código como manual y reporta lo que agrega', async () => {
+      prisma.promotions.findMany.mockImplementation(async ({ where }: any) => {
+        const manual =
+          JSON.stringify(where).includes('"in":[800]') ? [
+            buildPromotion({
+              id: 800,
+              code: 'MARTES20',
+              is_auto_apply: false,
+              value: 20,
+              active_weekdays: [2],
+            }),
+          ] : [];
+        return [buildPromotion({ id: 801, value: 5, priority: 5 }), ...manual];
+      });
+      const result = await service.quoteWithPromotionCode(
+        { items: [LINE], now: TUESDAY_10AM_BOGOTA },
+        800,
+      );
+      // Sin código: 5 % (auto). Con código: gana la de prioridad 0 → 20 %.
+      expect(result.quote.applied_promotions.map((p) => p.promotion_id)).toEqual([800]);
+      expect(result.quote.total_discount).toBe(20);
+      expect(result.code_discount).toBe(15);
+    });
+
+    it('fuera de su día el código se rechaza con el motivo concreto', async () => {
+      jest.useFakeTimers().setSystemTime(THURSDAY_10AM_BOGOTA);
+      try {
+        const promo = buildPromotion({
+          id: 800,
+          is_auto_apply: false,
+          active_weekdays: [2],
+        });
+        prisma.promotions.findMany.mockResolvedValue([promo]);
+        prisma.promotions.findFirst.mockResolvedValue(promo);
+        await expect(
+          service.quoteWithPromotionCode(
+            { items: [LINE], now: THURSDAY_10AM_BOGOTA },
+            800,
+          ),
+        ).rejects.toMatchObject({
+          response: { error_code: 'PROMOTION_NOT_TODAY_001' },
+        });
+      } finally {
+        jest.useRealTimers();
+      }
+    });
+
+    it('si no mejora el precio (gana otra promo de mayor prioridad) se rechaza', async () => {
+      const code = buildPromotion({
+        id: 802,
+        is_auto_apply: false,
+        value: 5,
+        priority: 9,
+      });
+      const auto = buildPromotion({ id: 803, value: 30, priority: 1 });
+      prisma.promotions.findMany.mockResolvedValue([auto, code]);
+      prisma.promotions.findFirst.mockResolvedValue(code);
+      await expect(
+        service.quoteWithPromotionCode(
+          { items: [LINE], now: TUESDAY_10AM_BOGOTA },
+          802,
+        ),
+      ).rejects.toMatchObject({
+        response: { error_code: 'PROMOTION_NOT_APPLICABLE_001' },
+      });
+    });
+
+    it('la vista previa del POS responde con la forma de un cupón', async () => {
+      prisma.promotions.findMany.mockImplementation(async ({ where }: any) =>
+        JSON.stringify(where).includes('"in":[800]')
+          ? [buildPromotion({ id: 800, code: 'MARTES20', is_auto_apply: false, value: 20 })]
+          : [],
+      );
+      const preview = await service.previewPromotionCode(800, {
+        items: [{ product_id: 1, line_total: 300, quantity: 3, unit_price: 100 }],
+      });
+      expect(preview).toMatchObject({
+        valid: true,
+        kind: 'promotion',
+        coupon_id: null,
+        promotion_id: 800,
+        coupon_code: 'MARTES20',
+        discount_type: 'PERCENTAGE',
+        discount_amount: 60,
+      });
+    });
+  });
+
   describe('conteo de usos', () => {
     it('applyPromotion no duplica la fila ni el uso si la orden ya la tenía', async () => {
       prisma.order_promotions.findFirst.mockResolvedValue({

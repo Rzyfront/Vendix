@@ -327,6 +327,147 @@ export class PromotionEngineService {
     return { promotion, discount: applied.discount_amount };
   }
 
+  /**
+   * Casilla única de código (POS y checkout ecommerce): decide si un código
+   * es un CUPÓN o una PROMOCIÓN. El cupón tiene prioridad: si existe un cupón
+   * con ese código (activo o no) el flujo de cupones sigue exactamente igual
+   * que antes, incluido su error `CPN_FIND_001` cuando no existe ninguno de
+   * los dos. Solo si no hay cupón se busca una promoción con ese código.
+   */
+  async resolveDiscountCode(
+    code?: string | null,
+  ): Promise<
+    | { kind: 'none' }
+    | { kind: 'coupon' }
+    | { kind: 'promotion'; promotion_id: number }
+  > {
+    const normalized = String(code ?? '').trim();
+    if (!normalized) return { kind: 'none' };
+    const coupon = await this.prisma.coupons.findFirst({
+      where: { code: { equals: normalized, mode: 'insensitive' } },
+      select: { id: true },
+    });
+    if (coupon) return { kind: 'coupon' };
+    const promotion = await this.prisma.promotions.findFirst({
+      where: { code: { equals: normalized, mode: 'insensitive' } },
+      select: { id: true },
+    });
+    return promotion
+      ? { kind: 'promotion', promotion_id: Number(promotion.id) }
+      : { kind: 'none' };
+  }
+
+  /**
+   * Cotiza el carrito aplicando la promoción que el cliente escribió en la
+   * casilla de código. La promoción entra como MANUAL al mismo motor (fechas
+   * y días en la zona de la tienda, límites, alcance, prioridad), así que el
+   * cobro la registra en `order_promotions` y consume su uso como cualquier
+   * otra.
+   *
+   * `code_discount` es lo que el código AGREGA frente a la compra sin él: es
+   * la cifra que la casilla muestra, y sumada al descuento automático que ya
+   * se veía da exactamente el total cobrado. Si el código no aplica o no
+   * mejora el precio (otra promoción de mayor prioridad ya gana), se rechaza
+   * con el motivo concreto en vez de cobrar distinto a lo mostrado.
+   */
+  async quoteWithPromotionCode(
+    input: PromotionQuoteInput,
+    promotionId: number,
+  ): Promise<{
+    quote: PromotionQuoteResult;
+    code_discount: number;
+    applied: PromotionQuoteApplied;
+  }> {
+    const otherManual = (input.manual_promotion_ids ?? []).filter(
+      (id) => Number(id) !== Number(promotionId),
+    );
+    const base = await this.quoteDiscounts({
+      ...input,
+      manual_promotion_ids: otherManual,
+    });
+    const withCode = await this.quoteDiscounts({
+      ...input,
+      manual_promotion_ids: [...otherManual, promotionId],
+    });
+    const applied = withCode.applied_promotions.find(
+      (p) => p.promotion_id === Number(promotionId),
+    );
+    const codeDiscount = this.roundMoney(
+      withCode.total_discount - base.total_discount,
+    );
+    if (applied && codeDiscount > 0) {
+      return { quote: withCode, code_discount: codeDiscount, applied };
+    }
+    if (!applied) {
+      // Motivo concreto (fuera de fechas, otro día, sin cupo, compra mínima,
+      // no aplica a los productos…). Si pasa, es que perdió por prioridad.
+      await this.validatePromotion(
+        promotionId,
+        input.items as any[],
+        input.customer_id ?? undefined,
+      );
+    }
+    throw new VendixHttpException(
+      ErrorCodes.PROMOTION_NOT_APPLICABLE_001,
+      'Este código no mejora el precio: la compra ya tiene una promoción igual o mejor',
+    );
+  }
+
+  /**
+   * Vista previa de un código de promoción escrito en la casilla de cupón del
+   * POS. Recibe el mismo cuerpo que la validación de cupones y responde con
+   * la misma forma (más `kind: 'promotion'`), para que el POS lo pinte igual
+   * que un cupón. `discount_amount` es lo que el código agrega.
+   */
+  async previewPromotionCode(
+    promotionId: number,
+    dto: {
+      customer_id?: number;
+      items?: Array<{
+        product_id?: number;
+        category_id?: number;
+        category_ids?: number[];
+        line_total: number;
+        quantity?: number;
+        unit_price?: number;
+      }>;
+    },
+  ) {
+    const items = (dto.items ?? [])
+      .filter((item) => Number(item.product_id) > 0)
+      .map((item, index) => {
+        const quantity = Number(item.quantity) > 0 ? Number(item.quantity) : 1;
+        const unitPrice =
+          item.unit_price != null
+            ? Number(item.unit_price)
+            : Number(item.line_total || 0) / quantity;
+        return {
+          line_id: index,
+          product_id: Number(item.product_id),
+          category_id: item.category_id ?? null,
+          category_ids: item.category_ids ?? null,
+          unit_price: unitPrice,
+          quantity,
+        };
+      });
+    const { code_discount, applied } = await this.quoteWithPromotionCode(
+      { items, customer_id: dto.customer_id ?? null },
+      promotionId,
+    );
+    return {
+      valid: true,
+      kind: 'promotion' as const,
+      coupon_id: null,
+      promotion_id: applied.promotion_id,
+      code: applied.code,
+      coupon_code: applied.code,
+      name: applied.name,
+      discount_type: applied.type === 'percentage' ? 'PERCENTAGE' : 'FIXED',
+      discount_value: Number(applied.value),
+      discount_amount: code_discount,
+    };
+  }
+
   /** Igual que `validatePromotion`, resolviendo la promoción por su código. */
   async validatePromotionByCode(
     code: string,

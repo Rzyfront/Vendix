@@ -255,6 +255,9 @@ describe('OrdersService', () => {
     forceOrderState: jest.fn(),
   };
   const mockPromotionEngine = {
+    // Casilla única de código: por defecto ningún código es de promoción.
+    resolveDiscountCode: jest.fn().mockResolvedValue({ kind: 'none' }),
+    quoteWithPromotionCode: jest.fn(),
     quoteDiscounts: jest.fn(async () => ({
       subtotal: 100,
       total_discount: 0,

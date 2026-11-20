@@ -6171,6 +6171,11 @@ export const ErrorCodes = {
     httpStatus: 422,
     devMessage: 'Promotion does not apply to any cart item',
   },
+  PROMOTION_CODE_DUP_001: {
+    code: 'PROMOTION_CODE_DUP_001',
+    httpStatus: 409,
+    devMessage: 'Code already used by another promotion or coupon of the store',
+  },
   PROMOTION_STATE_001: {
     code: 'PROMOTION_STATE_001',
     httpStatus: 409,

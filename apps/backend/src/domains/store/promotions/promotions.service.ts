@@ -253,6 +253,7 @@ export class PromotionsService {
 
     this.validateScopeSelection(scope, normalizedProductIds, normalizedCategoryIds);
     this.validateRuleTypeShape(rule_type, quantity_tiers);
+    await this.assertCodeAvailable(dto.code);
 
     const data: any = {
       ...promotionData,
@@ -366,6 +367,9 @@ export class PromotionsService {
       normalizedCategoryIds,
     );
     this.validateRuleTypeShape(effectiveRuleType, effectiveTiers);
+    if (dto.code) {
+      await this.assertCodeAvailable(dto.code, id);
+    }
 
     // Prepare date conversions
     const data: any = { ...updateData };
@@ -557,6 +561,37 @@ export class PromotionsService {
       });
       await tx.promotions.delete({ where: { id } });
     });
+  }
+
+  /**
+   * El código de una promoción se escribe en la MISMA casilla que los cupones
+   * (POS y checkout) y el cupón tiene prioridad: no puede repetirse con un
+   * cupón ni con otra promoción de la tienda (sin distinguir mayúsculas).
+   */
+  private async assertCodeAvailable(code?: string | null, selfId?: number) {
+    const normalized = String(code ?? '').trim();
+    if (!normalized) return;
+    const [coupon, promotion] = await Promise.all([
+      this.prisma.coupons.findFirst({
+        where: { code: { equals: normalized, mode: 'insensitive' } },
+        select: { id: true },
+      }),
+      this.prisma.promotions.findFirst({
+        where: {
+          code: { equals: normalized, mode: 'insensitive' },
+          ...(selfId != null ? { id: { not: selfId } } : {}),
+        },
+        select: { id: true },
+      }),
+    ]);
+    if (coupon || promotion) {
+      throw new VendixHttpException(
+        ErrorCodes.PROMOTION_CODE_DUP_001,
+        coupon
+          ? 'Ya existe un cupón con ese código'
+          : 'Ya existe otra promoción con ese código',
+      );
+    }
   }
 
   private validateScopeSelection(

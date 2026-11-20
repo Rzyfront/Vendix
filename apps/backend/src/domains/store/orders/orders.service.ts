@@ -4534,6 +4534,14 @@ export class OrdersService {
     let promotionDiscount = 0;
     let promotionSnapshots: { promotion_id: number; discount_amount: number }[] =
       [];
+    // Casilla única de código: si `coupon_code` no es un cupón sino una
+    // promoción, se cotiza como promoción manual y deja de tratarse como
+    // cupón en el paso 10.
+    const codeTarget = await this.promotionEngine.resolveDiscountCode(
+      dto.coupon_code,
+    );
+    const codePromotionId =
+      codeTarget.kind === 'promotion' ? codeTarget.promotion_id : null;
     try {
       // Categorías reales de cada producto: sin ellas una promoción por
       // categoría cotizaba 0 al editar la orden.
@@ -4578,8 +4586,27 @@ export class OrdersService {
             stock_units_consumed: null,
           })),
       };
+      // Las promociones que la orden ya tenía (p. ej. una aplicada por código
+      // antes) se conservan como manuales al re-cotizar.
+      const ownPromotionRows = await this.prisma.order_promotions.findMany({
+        where: { order_id: orderId, discount_amount: { gt: 0 } },
+        select: { promotion_id: true },
+      });
+      promotionInput.manual_promotion_ids = Array.from(
+        new Set([
+          ...promotionInput.manual_promotion_ids,
+          ...ownPromotionRows.map((r) => Number(r.promotion_id)),
+        ]),
+      );
       const promotionQuote =
-        await this.promotionEngine.quoteDiscounts(promotionInput);
+        codePromotionId != null
+          ? (
+              await this.promotionEngine.quoteWithPromotionCode(
+                promotionInput,
+                codePromotionId,
+              )
+            ).quote
+          : await this.promotionEngine.quoteDiscounts(promotionInput);
       promotionDiscount = promotionQuote.total_discount || 0;
       promotionSnapshots = (promotionQuote.order_promotions_snapshot || []).map(
         (s) => ({
@@ -4592,8 +4619,12 @@ export class OrdersService {
         `[editor] quoteDiscounts failed: ${(err as Error).message}`,
       );
       // El editor nunca devuelve éxito falso: si la cotización falla y el
-      // cliente envió `promotion_ids`, emitimos auditoría y rechazamos.
-      if (Array.isArray(dto.promotion_ids) && dto.promotion_ids.length > 0) {
+      // cliente envió `promotion_ids` o un código de promoción, emitimos
+      // auditoría y rechazamos.
+      if (
+        codePromotionId != null ||
+        (Array.isArray(dto.promotion_ids) && dto.promotion_ids.length > 0)
+      ) {
         await this.auditService.logCustom(
           userId,
           'order.editor.pricing_failed',
@@ -4609,6 +4640,11 @@ export class OrdersService {
           },
           orderId,
         );
+        // El motivo concreto del código de promoción (otro día, sin cupo…)
+        // llega tal cual al cajero.
+        if (codePromotionId != null && err instanceof VendixHttpException) {
+          throw err;
+        }
         throw new VendixHttpException(ErrorCodes.ORD_EDIT_PROMOTION_INVALID_001);
       }
     }
@@ -4701,7 +4737,8 @@ export class OrdersService {
     //     ajusta una vez si el código cambió.
     let couponId: number | null = existingOrder.coupon_id ?? null;
     let couponDiscount = 0;
-    const requestedCode = (dto.coupon_code || '').trim();
+    const requestedCode =
+      codePromotionId != null ? '' : (dto.coupon_code || '').trim();
     const currentCode = (existingOrder.coupon_code || '').trim();
     const couponChanged = requestedCode !== currentCode;
 

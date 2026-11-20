@@ -38,6 +38,8 @@ describe('PromotionsService', () => {
       order_promotions: {
         aggregate: jest.fn().mockResolvedValue({ _sum: { discount_amount: 0 } }),
       },
+      coupons: { findFirst: jest.fn().mockResolvedValue(null) },
+      $transaction: jest.fn(),
     };
     service = new PromotionsService(prisma);
     // Jueves 19-nov-2026 10:00 en Bogotá.
@@ -80,6 +82,37 @@ describe('PromotionsService', () => {
       );
       const result: any = await service.activate(1);
       expect(result.state).toBe('active');
+    });
+  });
+
+  describe('códigos compartidos con cupones', () => {
+    const dto: any = {
+      name: 'Martes',
+      code: 'MARTES20',
+      type: 'percentage',
+      value: 20,
+      start_date: '2026-11-01',
+    };
+
+    it('no permite crear una promo con el código de un cupón existente', async () => {
+      prisma.coupons.findFirst.mockResolvedValue({ id: 3 });
+      await expect(service.create(dto)).rejects.toMatchObject({
+        response: {
+          error_code: 'PROMOTION_CODE_DUP_001',
+          message: 'Ya existe un cupón con ese código',
+        },
+      });
+      expect(prisma.coupons.findFirst.mock.calls[0][0].where).toEqual({
+        code: { equals: 'MARTES20', mode: 'insensitive' },
+      });
+      expect(prisma.$transaction).not.toHaveBeenCalled();
+    });
+
+    it('no permite repetir el código de otra promoción', async () => {
+      prisma.promotions.findFirst.mockResolvedValue({ id: 9 });
+      await expect(service.create(dto)).rejects.toMatchObject({
+        response: { error_code: 'PROMOTION_CODE_DUP_001' },
+      });
     });
   });
 
