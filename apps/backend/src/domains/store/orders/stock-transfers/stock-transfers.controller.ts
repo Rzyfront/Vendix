@@ -12,6 +12,11 @@ import {
 import { Permissions } from '../../../auth/decorators/permissions.decorator';
 import { PermissionsGuard } from '../../../auth/guards/permissions.guard';
 import { StockTransfersService } from './stock-transfers.service';
+import {
+  parseIdList,
+  parseOptionalId,
+  parseRequiredId,
+} from './transfer-query-params';
 import { CreateTransferDto } from './dto/create-transfer.dto';
 import { UpdateTransferDto } from './dto/update-transfer.dto';
 import { TransferQueryDto } from './dto/transfer-query.dto';
@@ -102,6 +107,70 @@ export class StockTransfersController {
       limit ? +limit : 10,
     );
     return { success: true, data: result };
+  }
+
+  /** P3 — transporte, conductores, métodos de envío y categorías del origen. */
+  @Get('advanced-options')
+  @Permissions('store:stock-transfers:read')
+  async getAdvancedOptions(@Query('from_location_id') fromLocationId: string) {
+    const data = await this.stockTransfersService.getAdvancedOptions(
+      parseRequiredId(fromLocationId, 'from_location_id'),
+    );
+    return { success: true, data };
+  }
+
+  /** P3 — lotes de los productos en la bodega de origen (FEFO, D5). */
+  @Get('batches')
+  @Permissions('store:stock-transfers:read')
+  async getTransferBatches(
+    @Query('from_location_id') fromLocationId: string,
+    @Query('product_ids') productIds?: string,
+  ) {
+    const data = await this.stockTransfersService.getTransferBatches(
+      parseRequiredId(fromLocationId, 'from_location_id'),
+      parseIdList(productIds),
+    );
+    return { success: true, data };
+  }
+
+  /** P3 — todo el stock disponible de la bodega de origen (por categoría). */
+  @Get('location-stock')
+  @Permissions('store:stock-transfers:read')
+  async getLocationStock(
+    @Query('from_location_id') fromLocationId: string,
+    @Query('to_location_id') toLocationId?: string,
+    @Query('category_id') categoryId?: string,
+    @Query('limit') limit?: string,
+    @Query('product_ids') productIds?: string,
+  ) {
+    const page = await this.stockTransfersService.getLocationStock(
+      parseRequiredId(fromLocationId, 'from_location_id'),
+      parseOptionalId(toLocationId),
+      parseOptionalId(categoryId),
+      limit ? +limit : undefined,
+      parseIdList(productIds),
+    );
+    return {
+      success: true,
+      data: page.rows,
+      meta: { has_more: page.has_more, limit: page.limit },
+    };
+  }
+
+  /** P3 — escáner / pegar lista: SKU o código de barras exacto (M2). */
+  @Get('lookup-code')
+  @Permissions('store:stock-transfers:read')
+  async lookupTransferCode(
+    @Query('code') code: string,
+    @Query('from_location_id') fromLocationId: string,
+    @Query('to_location_id') toLocationId?: string,
+  ) {
+    const data = await this.stockTransfersService.lookupTransferCode(
+      code ?? '',
+      parseRequiredId(fromLocationId, 'from_location_id'),
+      parseOptionalId(toLocationId),
+    );
+    return { success: true, data };
   }
 
   @Get(':id')

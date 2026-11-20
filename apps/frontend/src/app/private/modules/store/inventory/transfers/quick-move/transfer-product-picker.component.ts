@@ -48,7 +48,9 @@ import {
 
       @if (!ready()) {
         <p class="text-xs text-text-secondary">
-          Elige primero la bodega de origen y la de destino para buscar productos.
+          {{ requireDestination()
+            ? 'Elige primero la bodega de origen y la de destino para buscar productos.'
+            : 'Elige primero la bodega de origen para buscar productos.' }}
         </p>
       } @else if (searching()) {
         <p class="text-xs text-text-secondary py-2" data-testid="picker-searching">
@@ -129,9 +131,11 @@ import {
                     <p class="text-xs font-semibold" [class.text-error]="noStock" [class.text-text-primary]="!noStock">
                       Origen: {{ row.stock_at_origin.quantity_available }}
                     </p>
-                    <p class="text-xs text-text-secondary">
-                      Destino: {{ row.stock_at_destination.quantity_available }}
-                    </p>
+                    @if (requireDestination()) {
+                      <p class="text-xs text-text-secondary">
+                        Destino: {{ row.stock_at_destination.quantity_available }}
+                      </p>
+                    }
                   </div>
                 </label>
               </li>
@@ -150,6 +154,11 @@ export class TransferProductPickerComponent {
   readonly searchFn = input.required<TransferProductSearchFn>();
   /** Claves producto+variante ya presentes en la orden. */
   readonly addedKeys = input<string[]>([]);
+  /**
+   * D8 — en una salida a destino externo no hay bodega de destino: la vista
+   * avanzada apaga este requisito y busca solo con el origen.
+   */
+  readonly requireDestination = input(true);
 
   readonly add = output<TransferPickerRow[]>();
 
@@ -164,6 +173,7 @@ export class TransferProductPickerComponent {
 
   readonly ready = computed(() => {
     const from = this.fromLocationId();
+    if (!this.requireDestination()) return !!from;
     const to = this.toLocationId();
     return !!from && !!to && from !== to;
   });
@@ -268,7 +278,10 @@ export class TransferProductPickerComponent {
 
   private runSearch(term: string): void {
     const from = this.fromLocationId();
-    const to = this.toLocationId();
+    // Sin destino (salida externa) el endpoint igual pide uno: se consulta
+    // con el origen y el disponible en destino no se muestra.
+    const to =
+      this.toLocationId() ?? (this.requireDestination() ? null : from);
     if (!from || !to) return;
     this.searching.set(true);
     this.searchSub = this.searchFn()(term, from, to)

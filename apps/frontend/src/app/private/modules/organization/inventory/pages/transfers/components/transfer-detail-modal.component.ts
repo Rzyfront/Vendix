@@ -15,6 +15,16 @@ import {
   OrgTransferItem,
   OrgTransferStatus,
 } from '../../../interfaces/org-transfer.interface';
+import {
+  TransferFlowPanelComponent,
+  type TransferCloseWithLossRequest,
+  type TransferDispatchRequest,
+} from '../../../../../store/inventory/transfers/advanced/transfer-flow-panel.component';
+import {
+  TransferFlowNote,
+  TransferFlowView,
+  isAdvancedTransfer,
+} from '../../../../../store/inventory/transfers/advanced/transfer-advanced';
 
 const STATUS_LABELS: Record<
   Exclude<OrgTransferStatus, 'draft' | 'completed'>,
@@ -25,7 +35,7 @@ const STATUS_LABELS: Record<
   in_transit: 'En tránsito',
   received: 'Recibida',
   cancelled: 'Cancelada',
-  partially_received: 'Recibida en parte',
+  partially_received: 'Parcialmente recibida',
   closed_with_loss: 'Cerrada con pérdida',
 };
 
@@ -58,13 +68,20 @@ const STATUS_ICONS: Record<
 @Component({
   selector: 'app-org-transfer-detail-modal',
   standalone: true,
-  imports: [DatePipe, FormsModule, ModalComponent, ButtonComponent, IconComponent],
+  imports: [
+    DatePipe,
+    FormsModule,
+    ModalComponent,
+    ButtonComponent,
+    IconComponent,
+    TransferFlowPanelComponent,
+  ],
   template: `
     <app-modal
       [isOpen]="isOpen()"
       [title]="modalTitle()"
       [subtitle]="statusLabel()"
-      size="md"
+      size="lg"
       (closed)="onClose()"
       (isOpenChange)="isOpenChange.emit($event)"
     >
@@ -82,6 +99,15 @@ const STATUS_ICONS: Record<
             />
             {{ statusLabel() }}
           </span>
+          @if (t.no_support_alert) {
+            <span
+              class="ml-2 inline-flex items-center px-3 py-1 rounded-full text-sm font-medium bg-red-100 text-red-700"
+              data-testid="detail-alert-badge"
+            >
+              <app-icon name="alert-triangle" [size]="14" class="mr-1.5" />
+              Con alerta
+            </span>
+          }
         </div>
 
         <!-- Locations -->
@@ -114,6 +140,18 @@ const STATUS_ICONS: Record<
             </div>
           </div>
         </div>
+
+        <!-- Orden avanzada: remisiones, transporte, despacho y pérdida (P3) -->
+        <app-transfer-flow-panel
+          [transfer]="flowView()"
+          surface="organization"
+          [isProcessing]="isProcessing()"
+          [allowDispatch]="canDispatch()"
+          [allowCloseWithLoss]="canComplete()"
+          (dispatch)="dispatchWithCount.emit($event)"
+          (closeWithLoss)="closeWithLoss.emit($event)"
+          (openNote)="openNote.emit($event)"
+        />
 
         <!-- Timeline -->
         <div
@@ -208,16 +246,19 @@ const STATUS_ICONS: Record<
             <div
               class="grid grid-cols-12 gap-2 p-3 bg-surface-secondary text-xs font-medium text-text-secondary border-b border-border"
             >
-              <div class="col-span-5">Producto</div>
-              <div class="col-span-2 text-right">Solicitado</div>
-              <div class="col-span-3 text-right">Recibido</div>
+              <div class="col-span-4">Producto</div>
+              <div class="col-span-2 text-right">Pedido</div>
+              <div class="col-span-2 text-right">Enviado</div>
+              <div class="col-span-2 text-right">
+                {{ isCompleting() ? 'Llegó ahora' : 'Recibido' }}
+              </div>
               <div class="col-span-2 text-right">Estado</div>
             </div>
             @for (item of t.stock_transfer_items; track item.id) {
               <div
                 class="grid grid-cols-12 gap-2 p-3 items-center border-b border-border last:border-b-0"
               >
-                <div class="col-span-5">
+                <div class="col-span-4 min-w-0">
                   <p class="text-sm font-medium text-text-primary">
                     {{ item.products?.name || 'Producto' }}
                   </p>
@@ -226,13 +267,21 @@ const STATUS_ICONS: Record<
                       {{ item.product_variants?.name }}
                     </p>
                   }
+                  @if (item.inventory_batches?.batch_number) {
+                    <p class="text-xs text-text-secondary">
+                      Lote {{ item.inventory_batches?.batch_number }}
+                    </p>
+                  }
                 </div>
                 <div
                   class="col-span-2 text-right text-sm font-medium text-text-primary"
                 >
                   {{ item.quantity }}
                 </div>
-                <div class="col-span-3 text-right">
+                <div class="col-span-2 text-right text-sm text-text-primary">
+                  {{ item.quantity_dispatched ?? (t.dispatched_at ? item.quantity : '-') }}
+                </div>
+                <div class="col-span-2 text-right">
                   @if (isCompleting()) {
                     <input
                       type="number"
@@ -249,13 +298,17 @@ const STATUS_ICONS: Record<
                   }
                 </div>
                 <div class="col-span-2 text-right">
-                  @if (item.quantity_received >= item.quantity) {
+                  @if (getMaxReceivable(item) === 0 && (item.quantity_lost ?? 0) > 0) {
+                    <span class="text-xs text-error font-medium">
+                      Pérdida {{ item.quantity_lost }}
+                    </span>
+                  } @else if (getMaxReceivable(item) === 0 && item.quantity_received > 0) {
                     <span class="text-xs text-success font-medium">
                       Completo
                     </span>
                   } @else if (item.quantity_received > 0) {
                     <span class="text-xs text-warning font-medium">
-                      Parcial
+                      Faltan {{ getMaxReceivable(item) }}
                     </span>
                   } @else {
                     <span class="text-xs text-text-secondary">Pendiente</span>
@@ -346,7 +399,7 @@ const STATUS_ICONS: Record<
             </app-button>
           }
 
-          @if (canDispatchCurrent() && !confirmDispatch()) {
+          @if (canDispatchCurrent() && !isAdvanced() && !confirmDispatch()) {
             <app-button
               variant="primary"
               (clicked)="confirmDispatch.set(true)"
@@ -356,7 +409,7 @@ const STATUS_ICONS: Record<
               Despachar
             </app-button>
           }
-          @if (canDispatchCurrent() && confirmDispatch()) {
+          @if (canDispatchCurrent() && !isAdvanced() && confirmDispatch()) {
             <app-button
               variant="primary"
               [loading]="isProcessing()"
@@ -451,6 +504,16 @@ export class OrgTransferDetailModalComponent {
   readonly closed = output<void>();
   readonly approveTransfer = output<OrgTransfer>();
   readonly dispatchTransfer = output<OrgTransfer>();
+  /** Despacho con conteo de salida desde el panel de la orden avanzada (D3). */
+  readonly dispatchWithCount = output<TransferDispatchRequest>();
+  readonly closeWithLoss = output<TransferCloseWithLossRequest>();
+  readonly openNote = output<TransferFlowNote>();
+
+  readonly flowView = computed(
+    () => this.transfer() as unknown as TransferFlowView | null,
+  );
+  /** La orden avanzada se despacha con conteo desde el panel. */
+  readonly isAdvanced = computed(() => isAdvancedTransfer(this.flowView()));
   readonly cancelTransfer = output<OrgTransfer>();
   readonly completeTransfer = output<{
     transfer: OrgTransfer;

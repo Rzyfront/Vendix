@@ -8,7 +8,7 @@ import {
 } from '@angular/core';
 import { takeUntilDestroyed } from '@angular/core/rxjs-interop';
 import { Observable } from 'rxjs';
-import { RouterLink } from '@angular/router';
+import { Router, RouterLink } from '@angular/router';
 
 import { AuthFacade } from '../../../../../../core/store/auth/auth.facade';
 import {
@@ -37,6 +37,11 @@ import { OrgTransferListComponent } from './components/transfer-list.component';
 import { OrgTransferCreateModalComponent } from './components/transfer-create-modal.component';
 import { OrgTransferDetailModalComponent } from './components/transfer-detail-modal.component';
 import { TransferQuickMoveModalComponent } from '../../../../store/inventory/transfers/quick-move/transfer-quick-move-modal.component';
+import type {
+  TransferCloseWithLossRequest,
+  TransferDispatchRequest,
+} from '../../../../store/inventory/transfers/advanced/transfer-flow-panel.component';
+import type { TransferFlowNote } from '../../../../store/inventory/transfers/advanced/transfer-advanced';
 import type {
   TransferPayload,
   TransferPickerRow,
@@ -181,6 +186,9 @@ import type {
           (closed)="showDetailModal.set(false)"
           (approveTransfer)="onApprove($event)"
           (dispatchTransfer)="onDispatch($event)"
+          (dispatchWithCount)="onDispatchWithCount($event)"
+          (closeWithLoss)="onCloseWithLoss($event)"
+          (openNote)="onOpenNote($event)"
           (completeTransfer)="onComplete($event.transfer, $event.items)"
           (cancelTransfer)="onCancel($event)"
         />
@@ -195,6 +203,7 @@ export class OrgTransfersComponent implements OnInit {
   private readonly orgTransfers = inject(OrgTransfersService);
   private readonly toast = inject(ToastService);
   private readonly dialog = inject(DialogService);
+  private readonly router = inject(Router);
 
   readonly transfers = signal<OrgTransfer[]>([]);
   readonly loading = signal(false);
@@ -224,6 +233,7 @@ export class OrgTransfersComponent implements OnInit {
 
   searchTerm = '';
   statusFilter: OrgTransferStatus | '' = '';
+  alertFilter = false;
 
   // ─── Permission / scope gating ──────────────────────────────────────────
   readonly isOrgScope = computed(
@@ -284,6 +294,7 @@ export class OrgTransfersComponent implements OnInit {
       page: pag.page,
       limit: pag.limit,
       ...(this.statusFilter ? { status: this.statusFilter } : {}),
+      ...(this.alertFilter ? { with_alert: true } : {}),
       ...(this.searchTerm ? { search: this.searchTerm } : {}),
     };
     this.orgTransfers
@@ -334,6 +345,7 @@ export class OrgTransfersComponent implements OnInit {
 
   onFilterChange(values: FilterValues): void {
     this.statusFilter = (values['status'] as OrgTransferStatus) || '';
+    this.alertFilter = values['alert'] === 'with_alert';
     this.pagination.update((p) => ({ ...p, page: 1 }));
     this.loadTransfers();
   }
@@ -341,6 +353,7 @@ export class OrgTransfersComponent implements OnInit {
   onClearFilters(): void {
     this.searchTerm = '';
     this.statusFilter = '';
+    this.alertFilter = false;
     this.pagination.update((p) => ({ ...p, page: 1 }));
     this.loadTransfers();
   }
@@ -363,6 +376,12 @@ export class OrgTransfersComponent implements OnInit {
       } else {
         this.showCreateModal.set(true);
       }
+    } else if (action === 'advanced') {
+      if (!this.canCreate()) {
+        this.toast.error('No tienes permisos para crear transferencias');
+        return;
+      }
+      void this.router.navigate(['/admin/inventory/transfers/new']);
     } else if (action === 'refresh') {
       this.refresh();
     }
@@ -371,6 +390,81 @@ export class OrgTransfersComponent implements OnInit {
   onViewDetail(transfer: OrgTransfer): void {
     this.selectedTransfer.set(transfer);
     this.showDetailModal.set(true);
+    // El detalle completo trae remisiones, lotes y transporte.
+    this.orgTransfers
+      .findOne(transfer.id)
+      .pipe(takeUntilDestroyed(this.destroyRef))
+      .subscribe({
+        next: (full) => {
+          if (full && this.selectedTransfer()?.id === transfer.id) {
+            this.selectedTransfer.set(full);
+          }
+        },
+        error: () => {
+          /* se conserva la fila del listado */
+        },
+      });
+  }
+
+  /** D3 — despacho con conteo de salida desde el panel de la orden avanzada. */
+  onDispatchWithCount(body: TransferDispatchRequest): void {
+    const transfer = this.selectedTransfer();
+    if (!transfer || !this.canDispatch() || this.isSubmitting()) return;
+    this.isSubmitting.set(true);
+    this.orgTransfers
+      .dispatch(transfer.id, body)
+      .pipe(takeUntilDestroyed(this.destroyRef))
+      .subscribe({
+        next: (updated) => {
+          this.toast.success(
+            updated?.dispatch_note
+              ? `Despachada. Remisión de salida ${updated.dispatch_note.dispatch_number}.`
+              : 'Transferencia despachada',
+          );
+          if (updated) this.selectedTransfer.set(updated);
+          this.isSubmitting.set(false);
+          this.refresh();
+        },
+        error: (err) => {
+          this.toast.error(err?.message || 'Error al despachar');
+          this.isSubmitting.set(false);
+        },
+      });
+  }
+
+  /** D4 — cierra el pendiente como pérdida (solo tras la fecha límite). */
+  onCloseWithLoss(body: TransferCloseWithLossRequest): void {
+    const transfer = this.selectedTransfer();
+    if (!transfer || !this.canComplete() || this.isSubmitting()) return;
+    this.isSubmitting.set(true);
+    this.orgTransfers
+      .closeWithLoss(transfer.id, body)
+      .pipe(takeUntilDestroyed(this.destroyRef))
+      .subscribe({
+        next: (updated) => {
+          this.toast.success('Pendiente cerrado como pérdida.');
+          if (updated) this.selectedTransfer.set(updated);
+          this.isSubmitting.set(false);
+          this.refresh();
+        },
+        error: (err) => {
+          this.toast.error(err?.message || 'Error al cerrar como pérdida');
+          this.isSubmitting.set(false);
+        },
+      });
+  }
+
+  /**
+   * Las remisiones viven en una tienda (`dispatch_notes` es por tienda) y el
+   * panel de organización no tiene módulo de remisiones: se indica dónde verla.
+   */
+  onOpenNote(note: TransferFlowNote): void {
+    const where = note.store?.name ? `la tienda ${note.store.name}` : 'su tienda';
+    this.toast.info(
+      `La remisión ${note.dispatch_number} está en ${where}: ábrela desde Remisiones de esa tienda para imprimirla.`,
+      undefined,
+      4000,
+    );
   }
 
   // ─── Mutations ─────────────────────────────────────────────────────────

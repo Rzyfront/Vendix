@@ -202,20 +202,56 @@ export function normalizeShippingCost(value?: number | null): number {
 }
 
 /**
- * Conductor de la transferencia: un usuario de la MISMA organización. Devuelve
- * su nombre para dejarlo como texto en la transferencia.
+ * Personal que puede figurar como transportador: usuario activo de la
+ * organización con al menos un rol que NO sea `customer` (los clientes del
+ * ecommerce también son filas de `users`), el mismo predicado que
+ * `StoreUsersService.staffLookup`. Con origen en una tienda, ese rol debe
+ * aplicar a la organización completa (`store_id` null) o a esa tienda: el
+ * personal de otra tienda que aquí solo es cliente queda fuera.
+ *
+ * Lo comparten el listado (`listTransferAdvancedOptions`) y la validación
+ * (`resolveTransferDriver`), así lo que se ofrece es lo que se acepta.
+ */
+export function transferStaffUserWhere(
+  organizationId: number,
+  storeId: number | null | undefined,
+) {
+  return {
+    organization_id: organizationId,
+    state: 'active' as const,
+    user_roles: {
+      some: {
+        ...(storeId != null
+          ? { OR: [{ store_id: null }, { store_id: storeId }] }
+          : {}),
+        roles: { name: { not: 'customer' } },
+      },
+    },
+  };
+}
+
+/**
+ * Conductor de la transferencia: personal activo de la MISMA organización
+ * (ver `transferStaffUserWhere`). Devuelve su nombre para dejarlo como texto
+ * en la transferencia.
  */
 export async function resolveTransferDriver(
   tx: any,
   organizationId: number,
   driverUserId: number,
+  storeId: number | null = null,
 ): Promise<{ id: number; name: string | null }> {
   const driver = await tx.users.findFirst({
-    where: { id: driverUserId, organization_id: organizationId },
+    where: {
+      id: driverUserId,
+      ...transferStaffUserWhere(organizationId, storeId),
+    },
     select: { id: true, first_name: true, last_name: true },
   });
   if (!driver) {
-    throw new BadRequestException(`El conductor #${driverUserId} no existe`);
+    throw new BadRequestException(
+      'El transportador elegido ya no está disponible: elige otro.',
+    );
   }
   return {
     id: driver.id,
@@ -286,7 +322,12 @@ export async function resolveTransferVehicle(
   if (existing) return existing.id;
 
   if (inline.primary_driver_id != null) {
-    await resolveTransferDriver(tx, organizationId, inline.primary_driver_id);
+    await resolveTransferDriver(
+      tx,
+      organizationId,
+      inline.primary_driver_id,
+      storeId,
+    );
   }
 
   const created = await tx.vehicles.create({
@@ -353,6 +394,7 @@ export async function resolveTransferTransport(
           tx,
           context.organization_id,
           input.driver_user_id,
+          context.store_id,
         );
         driver_name = driver_name ?? driver.name;
       }
@@ -380,6 +422,7 @@ export async function resolveTransferTransport(
           tx,
           context.organization_id,
           driver_user_id,
+          context.store_id,
         );
         driver_user_id = driver.id;
         driver_name = driver_name ?? driver.name;
@@ -555,6 +598,19 @@ export function requiresDispatchFirst(transfer: {
 }
 
 /**
+ * Predicado de organización para `inventory_batches`. `products` no tiene
+ * `organization_id`: se llega por la tienda del producto. Sin organización
+ * (superficie de tienda, que ya trae scope) no agrega nada.
+ */
+export function batchOrganizationFilter(
+  organizationId: number | null | undefined,
+) {
+  return organizationId != null
+    ? { products: { stores: { organization_id: organizationId } } }
+    : {};
+}
+
+/**
  * Lote de una línea. Si el usuario eligió uno, se valida producto/variante y
  * bodega; si no, se elige el más antiguo con saldo (FEFO: primero el que
  * vence antes; sin fecha de vencimiento, el creado antes), que es el criterio
@@ -574,11 +630,15 @@ export async function resolveLineBatch(
   },
   fromLocationId: number,
   explicitBatchId?: number | null,
-  options: { defaultToFefo?: boolean } = {},
+  options: { defaultToFefo?: boolean; organizationId?: number | null } = {},
 ): Promise<number | null> {
+  // En organización `inventory_batches` no tiene scope automático: el filtro
+  // por organización (vía la tienda del producto) se pone aquí. En tienda el
+  // scope relacional ya lo garantiza y no se pasa.
+  const orgFilter = batchOrganizationFilter(options.organizationId);
   if (explicitBatchId != null) {
     const batch = await tx.inventory_batches.findFirst({
-      where: { id: explicitBatchId },
+      where: { id: explicitBatchId, ...orgFilter },
       select: {
         id: true,
         product_id: true,
@@ -613,6 +673,7 @@ export async function resolveLineBatch(
       product_id: line.product_id,
       product_variant_id: line.product_variant_id ?? null,
       OR: [{ location_id: fromLocationId }, { location_id: null }],
+      ...orgFilter,
     },
     select: {
       id: true,
@@ -665,13 +726,28 @@ export function resolveTransferReceiptNoteStoreId(
  * en la tienda del contexto. El candado, el consecutivo y el documento usan esa
  * misma tienda; si se calcularan con otra, la lectura del último número
  * quedaría vacía y cada remisión del día chocaría con la `…0001`.
+ *
+ * Esa tienda tiene que ser parte de la transferencia: la de origen o la de
+ * destino. Con alcance de organización un administrador puede operar desde
+ * cualquier tienda, y sin esta regla la remisión de un traslado A→B quedaba
+ * como documento de una tercera tienda C.
  */
 export function resolveStoreSurfaceNoteStoreId(
   contextStoreId: number | null | undefined,
+  transferStores: {
+    from_store_id?: number | null;
+    to_store_id?: number | null;
+  },
 ): number {
   if (contextStoreId == null) {
     throw new BadRequestException(
       'Elige la tienda desde la que trabajas para emitir la remisión',
+    );
+  }
+  const allowed = [transferStores.from_store_id, transferStores.to_store_id];
+  if (!allowed.includes(contextStoreId)) {
+    throw new BadRequestException(
+      'La remisión de esta transferencia se emite desde la tienda de origen o la de destino: cambia a una de esas tiendas para continuar',
     );
   }
   return contextStoreId;
@@ -874,7 +950,7 @@ export async function accumulateTransferReceiptNoteInTx(
   if (!note) {
     if (params.on_missing_existing === 'reject') {
       throw new ConflictException(
-        'La remisión de entrada de esta transferencia está en otra tienda: registra la recepción desde la tienda que recibió la primera entrega',
+        'Las entregas de esta transferencia se están registrando en otra tienda: cambia a la tienda donde se registró la primera entrega para seguir recibiendo',
       );
     }
     // La FK es SetNull: si el documento se borró, se emite uno nuevo en vez de

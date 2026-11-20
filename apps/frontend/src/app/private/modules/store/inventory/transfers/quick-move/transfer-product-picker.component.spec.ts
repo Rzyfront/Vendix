@@ -135,6 +135,24 @@ describe('TransferProductPickerComponent', () => {
     expect(component.selectedCount()).toBe(0);
   });
 
+  it('en una salida externa busca solo con el origen y oculta el destino', () => {
+    const calls: Array<[string, number, number]> = [];
+    fixture.componentRef.setInput('searchFn', (t: string, f: number, to: number) => {
+      calls.push([t, f, to]);
+      return of(rows);
+    });
+    fixture.componentRef.setInput('toLocationId', null);
+    fixture.componentRef.setInput('requireDestination', false);
+    fixture.detectChanges();
+
+    expect(component.ready()).toBeTrue();
+    component.onSearch('cam');
+    fixture.detectChanges();
+
+    expect(calls).toEqual([['cam', 1, 1]]);
+    expect((fixture.nativeElement as HTMLElement).textContent).not.toContain('Destino:');
+  });
+
   it('un error de búsqueda se muestra y no deja resultados viejos', () => {
     fixture.componentRef.setInput('searchFn', () =>
       throwError(() => new Error('boom')),

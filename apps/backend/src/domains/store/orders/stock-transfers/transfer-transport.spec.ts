@@ -1060,7 +1060,7 @@ describe('StockTransfersService — P2 transporte, remisión y recepción', () =
           { transport_method: 'internal_carrier', driver_user_id: 80 },
           central,
         ),
-      ).rejects.toThrow(/El conductor #80 no existe/);
+      ).rejects.toThrow(/El transportador elegido ya no está disponible/);
 
       const ok = await resolveTransferTransport(
         tx,
@@ -1082,7 +1082,7 @@ describe('StockTransfersService — P2 transporte, remisión y recepción', () =
           },
           { organization_id: 1, store_id: 3 },
         ),
-      ).rejects.toThrow(/El conductor #80 no existe/);
+      ).rejects.toThrow(/El transportador elegido ya no está disponible/);
     });
 
     it('rechaza un vehículo de otra organización aunque el origen sea bodega central', async () => {
@@ -1114,7 +1114,7 @@ describe('StockTransfersService — P2 transporte, remisión y recepción', () =
           },
           { organization_id: 1, store_id: 3 },
         ),
-      ).rejects.toThrow(/El conductor #80 no existe/);
+      ).rejects.toThrow(/El transportador elegido ya no está disponible/);
       expect(tx.vehicles.create).not.toHaveBeenCalled();
     });
 
@@ -1335,6 +1335,49 @@ describe('StockTransfersService — P2 transporte, remisión y recepción', () =
         ).rejects.toBeInstanceOf(ConflictException);
         expect(h.tx.dispatch_notes.create).not.toHaveBeenCalled();
         expect(h.tx.stock_transfers.update).not.toHaveBeenCalled();
+      });
+
+      it('R3-1: rechaza la remisión de salida si la tienda del contexto no es origen ni destino', async () => {
+        const h = buildHarness({ transfer: { status: 'approved' } });
+        // Origen en la tienda 4 y destino en la 5: el contexto (3) es ajeno.
+        h.operatingScope.validateLocationScope.mockImplementation(
+          async (_org: number, ids: number[]) => ({
+            scope: 'ORGANIZATION',
+            locations: ids.map((id) => ({
+              id,
+              organization_id: 1,
+              store_id: id === 7 ? 4 : 5,
+            })),
+          }),
+        );
+
+        await expect(h.service.dispatch(1, {})).rejects.toThrow(
+          /tienda de origen o la de destino/,
+        );
+        expect(h.tx.dispatch_notes.create).not.toHaveBeenCalled();
+      });
+
+      it('R3-1: rechaza la recepción con remisión antes de mover stock si la tienda es ajena', async () => {
+        const h = buildHarness({
+          transfer: { status: 'in_transit', dispatched_at: new Date() },
+          items: dispatchedItems(),
+        });
+        h.operatingScope.validateLocationScope.mockImplementation(
+          async (_org: number, ids: number[]) => ({
+            scope: 'ORGANIZATION',
+            locations: ids.map((id) => ({
+              id,
+              organization_id: 1,
+              store_id: id === 7 ? 4 : 5,
+            })),
+          }),
+        );
+
+        await expect(
+          h.service.receive(1, [{ id: 11, quantity_received: 2 }]),
+        ).rejects.toThrow(/tienda de origen o la de destino/);
+        expect(h.stockLevelManager.updateStock).not.toHaveBeenCalled();
+        expect(h.tx.dispatch_notes.create).not.toHaveBeenCalled();
       });
 
       it('sin tienda en el contexto no emite remisión con otra tienda', async () => {

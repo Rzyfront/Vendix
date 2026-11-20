@@ -50,6 +50,12 @@ import {
   resolveStoreSurfaceNoteStoreId,
   resolveTransferTransport,
 } from './transfer-transport';
+import {
+  listTransferAdvancedOptions,
+  listTransferBatches,
+  listTransferLocationStockPage,
+  lookupTransferCode,
+} from './transfer-advanced-options';
 import { DispatchTransferDto } from './dto/transfer-advanced.dto';
 import { VendixHttpException, ErrorCodes } from '../../../../common/errors';
 
@@ -144,6 +150,9 @@ const TRANSFER_FLOW_INCLUDE = {
       status: true,
       subtype: true,
       emission_date: true,
+      // R3-2 — la UI avisa desde qué tienda se sigue el documento.
+      store_id: true,
+      store: { select: { id: true, name: true } },
     },
   },
   receipt_note: {
@@ -153,6 +162,9 @@ const TRANSFER_FLOW_INCLUDE = {
       status: true,
       subtype: true,
       emission_date: true,
+      // R3-2 — la UI avisa desde qué tienda se sigue el documento.
+      store_id: true,
+      store: { select: { id: true, name: true } },
     },
   },
 } as const;
@@ -707,6 +719,7 @@ export class StockTransfersService {
       from_location_id: query.from_location_id,
       to_location_id: query.to_location_id,
       status: statusGroup ? { in: statusGroup } : query.status,
+      ...(query.with_alert ? { no_support_alert: true } : {}),
     };
 
     if (query.transfer_date_from || query.transfer_date_to) {
@@ -1114,10 +1127,12 @@ export class StockTransfersService {
         stockTransfer.dispatch_note_id ?? null;
 
       if (wantsDispatchNote) {
-        // N3 — la remisión vive en la tienda del contexto: es donde el scope de
-        // `dispatch_notes` la crea y donde se lee el consecutivo.
+        // N3 / R3-1 — la remisión vive en la tienda del contexto (es donde el
+        // scope de `dispatch_notes` la crea y donde se lee el consecutivo), y
+        // esa tienda debe ser la de origen o la de destino de la transferencia.
         const noteStoreId = resolveStoreSurfaceNoteStoreId(
           RequestContextService.getStoreId(),
+          scope,
         );
         const note = await createTransferNoteInTx(tx, {
           store_id: noteStoreId,
@@ -1342,7 +1357,7 @@ export class StockTransfersService {
       }
 
       const context = RequestContextService.getContext();
-      await this.validateTransferScope(
+      const scope = await this.validateTransferScope(
         stockTransfer.organization_id,
         stockTransfer.from_location_id,
         stockTransfer.to_location_id,
@@ -1372,6 +1387,16 @@ export class StockTransfersService {
           'Despacha la transferencia antes de recibirla',
         );
       }
+
+      // R3-1 — la remisión de entrada se emite en la tienda del contexto, que
+      // debe ser la de origen o la de destino. Se valida antes de mover stock.
+      const receiptNoteStoreId =
+        stockTransfer.movement_mode === 'with_dispatch_notes'
+          ? resolveStoreSurfaceNoteStoreId(
+              RequestContextService.getStoreId(),
+              scope,
+            )
+          : null;
 
       const linesById = new Map<number, any>(
         stockTransfer.stock_transfer_items.map((line: any) => [
@@ -1492,19 +1517,18 @@ export class StockTransfersService {
       }
 
       let receiptNoteId = stockTransfer.receipt_note_id ?? null;
-      if (
-        stockTransfer.movement_mode === 'with_dispatch_notes' &&
-        stockTransfer.to_location_id != null
-      ) {
-        // N3 — la remisión de entrada queda en la tienda que recibe (la del
-        // contexto, la única donde el scope deja crearla y leerla). Si una
-        // recepción anterior la dejó en otra tienda, no se duplica.
+      if (receiptNoteStoreId != null && stockTransfer.to_location_id != null) {
+        // N3 / R3-1 — la remisión de entrada queda en la tienda del contexto,
+        // la única donde el scope de tienda deja crearla y leerla, y que ya se
+        // validó como origen o destino de la transferencia. Con alcance de
+        // tienda `validateTransferScope` exige que el contexto sea la tienda
+        // de origen, así que ahí la entrada queda en el origen (la superficie
+        // de organización la deja en el destino). Si una recepción anterior la
+        // dejó en otra tienda, no se duplica: se rechaza con 409.
         receiptNoteId = await accumulateTransferReceiptNoteInTx(tx, {
           existing_note_id: receiptNoteId,
           on_missing_existing: 'reject',
-          store_id: resolveStoreSurfaceNoteStoreId(
-            RequestContextService.getStoreId(),
-          ),
+          store_id: receiptNoteStoreId,
           direction: 'inbound',
           subtype: 'transfer_in',
           from_location_id: stockTransfer.from_location_id,
@@ -1847,6 +1871,106 @@ export class StockTransfersService {
    * importadores; el controller usa @Query sueltos) — documentado, JAMÁS
    * importado ni cableado. No revivirlo aquí.
    */
+  // ------------------------------------------------------------------
+  // P3 — lecturas de apoyo de la orden avanzada
+  // ------------------------------------------------------------------
+
+  private requireOrganizationId(): number {
+    const organizationId = RequestContextService.getContext()?.organization_id;
+    if (!organizationId) {
+      throw new BadRequestException(
+        'Elige la organización o tienda desde la que trabajas',
+      );
+    }
+    return organizationId;
+  }
+
+  /**
+   * Vehículos, conductores, métodos de envío y categorías para la orden
+   * avanzada desde la bodega de origen. Usa el mismo cliente y la misma
+   * validación de alcance que el despacho, así lo listado es lo que se acepta.
+   */
+  async getAdvancedOptions(fromLocationId: number) {
+    const organizationId = this.requireOrganizationId();
+    return this.prisma.$transaction(async (tx) => {
+      const scope = await this.validateTransferScope(
+        organizationId,
+        fromLocationId,
+        null,
+        tx,
+      );
+      return listTransferAdvancedOptions(tx, {
+        organization_id: organizationId,
+        from_store_id: scope.from_store_id,
+      });
+    });
+  }
+
+  /** Lotes de los productos en la bodega de origen, en orden FEFO (D5). */
+  async getTransferBatches(fromLocationId: number, productIds: number[]) {
+    const organizationId = this.requireOrganizationId();
+    return this.prisma.$transaction(async (tx) => {
+      await this.validateTransferScope(organizationId, fromLocationId, null, tx);
+      return listTransferBatches(tx, {
+        organization_id: organizationId,
+        location_id: fromLocationId,
+        product_ids: productIds,
+      });
+    });
+  }
+
+  /** "Agregar todo el stock de la bodega", con filtro opcional por categoría. */
+  async getLocationStock(
+    fromLocationId: number,
+    toLocationId: number | null,
+    categoryId: number | null,
+    limit?: number,
+    productIds: number[] = [],
+  ) {
+    const organizationId = this.requireOrganizationId();
+    return this.prisma.$transaction(async (tx) => {
+      await this.validateTransferScope(
+        organizationId,
+        fromLocationId,
+        toLocationId,
+        tx,
+      );
+      return listTransferLocationStockPage(tx, {
+        from_location_id: fromLocationId,
+        to_location_id: toLocationId,
+        category_id: categoryId,
+        product_ids: productIds,
+        limit,
+      });
+    });
+  }
+
+  /**
+   * Escáner y "pegar lista" (M2): coincidencia exacta por SKU o código de
+   * barras del producto o de la variante, con stock en el origen.
+   */
+  async lookupTransferCode(
+    code: string,
+    fromLocationId: number,
+    toLocationId: number | null,
+  ) {
+    const organizationId = this.requireOrganizationId();
+    return this.prisma.$transaction(async (tx) => {
+      await this.validateTransferScope(
+        organizationId,
+        fromLocationId,
+        toLocationId,
+        tx,
+      );
+      return lookupTransferCode(tx, {
+        organization_id: organizationId,
+        code,
+        from_location_id: fromLocationId,
+        to_location_id: toLocationId,
+      });
+    });
+  }
+
   async searchTransferableProducts(
     search: string,
     fromLocationId: number,

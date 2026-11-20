@@ -742,7 +742,7 @@ describe('OrgTransfersService — P2 transporte, remisión y recepción', () => 
       ]);
     });
 
-    it('rechaza un conductor de otra organización al crear', async () => {
+    it('rechaza un conductor de otra organización o que no sea personal al crear', async () => {
       const h = buildHarness();
       h.tx.users.findFirst.mockResolvedValue(null);
 
@@ -755,10 +755,21 @@ describe('OrgTransfersService — P2 transporte, remisión y recepción', () => 
           driver_user_id: 80,
           items: [{ product_id: 1, quantity: 1 }],
         } as any),
-      ).rejects.toThrow(/El conductor #80 no existe/);
+      ).rejects.toThrow(/El transportador elegido ya no está disponible/);
       expect(h.tx.users.findFirst).toHaveBeenCalledWith(
         expect.objectContaining({
-          where: { id: 80, organization_id: 1 },
+          // M1 (review P3): misma organización y solo personal, sin
+          // clientes del ecommerce.
+          where: expect.objectContaining({
+            id: 80,
+            organization_id: 1,
+            state: 'active',
+            user_roles: {
+              some: expect.objectContaining({
+                roles: { name: { not: 'customer' } },
+              }),
+            },
+          }),
         }),
       );
       expect(h.tx.stock_transfers.create).not.toHaveBeenCalled();
@@ -789,6 +800,52 @@ describe('OrgTransfersService — P2 transporte, remisión y recepción', () => 
         } as any),
       ).rejects.toThrow(VendixHttpException);
       expect(h.tx.stock_transfers.create).not.toHaveBeenCalled();
+    });
+  });
+
+  describe('lecturas de apoyo (review P3: B1, M2, m8)', () => {
+    it('getTransferBatches valida la bodega y acota los lotes a la organización', async () => {
+      const h = buildHarness();
+
+      await h.service.getTransferBatches(7, [1, 2]);
+
+      expect(h.operatingScope.enforceLocationAccess).toHaveBeenCalledWith(
+        1,
+        7,
+        { allowCentral: true },
+      );
+      expect(h.tx.inventory_batches.findMany).toHaveBeenCalledWith(
+        expect.objectContaining({
+          where: expect.objectContaining({
+            product_id: { in: [1, 2] },
+            products: { stores: { organization_id: 1 } },
+          }),
+        }),
+      );
+    });
+
+    it('getTransferBatches no consulta lotes si la bodega no es accesible', async () => {
+      const h = buildHarness();
+      h.operatingScope.enforceLocationAccess.mockRejectedValueOnce(
+        new Error('sin acceso'),
+      );
+
+      await expect(h.service.getTransferBatches(70, [1])).rejects.toThrow(
+        'sin acceso',
+      );
+      expect(h.tx.inventory_batches.findMany).not.toHaveBeenCalled();
+    });
+
+    it('lookupTransferCode valida las bodegas y acota la búsqueda a la organización', async () => {
+      const h = buildHarness();
+      h.tx.stock_levels.findMany = jest.fn().mockResolvedValue([]);
+
+      await h.service.lookupTransferCode('7701234567890', 7, 9);
+
+      expect(h.operatingScope.enforceLocationAccess).toHaveBeenCalledTimes(2);
+      const where = h.tx.stock_levels.findMany.mock.calls[0][0].where;
+      expect(where.location_id).toBe(7);
+      expect(where.products.stores).toEqual({ organization_id: 1 });
     });
   });
 });
