@@ -251,7 +251,9 @@ export class InvoiceScannerService {
       }),
     );
 
-    const merged = mergeInvoiceBatches(read.batches);
+    const merged = mergeInvoiceBatches(read.batches, {
+      decimalPlaces: currency.decimal_places,
+    });
     if (read.batches.length > 1) {
       this.logger.log(
         `[InvoiceScan] ${read.pages} page(s) read in ${read.batches.length} batches; ${merged.repeatedLines} repeated boundary line(s) merged.`,

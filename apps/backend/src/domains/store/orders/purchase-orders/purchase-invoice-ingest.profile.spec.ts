@@ -73,6 +73,24 @@ describe('purchase_invoice profile — schema (same answers the scanner accepted
     expect(copy.invoice_number).toBe(12345);
   });
 
+  it('keeps a numeric 1 in a boolean field as a number (never coerced to true)', () => {
+    // coerceTypes turns 1 into true inside a union that only has boolean/string,
+    // and the money path compares `=== true`: `prices_include_tax: 1` flipped
+    // the IVA from "por fuera" to "incluido" and `is_bonus: 1` zeroed a line.
+    const v1 = {
+      supplier: { name: 'ACME' },
+      prices_include_tax: 1,
+      line_items: [{ description: 'Lata', quantity: 2, unit_price: 1000, total: 2000, is_bonus: 1 }],
+      total: 2380,
+    };
+    const { ok, copy } = check(v1);
+    expect(ok).toBe(true);
+    expect(copy.prices_include_tax).toBe(1);
+    expect(copy.prices_include_tax).not.toBe(true);
+    expect(copy.line_items[0].is_bonus).toBe(1);
+    expect(copy.line_items[0].is_bonus).not.toBe(true);
+  });
+
   it('accepts a batch without supplier or lines (a middle page)', () => {
     expect(validate({ line_items: [] })).toBe(true);
     expect(validate({})).toBe(true);
@@ -225,13 +243,46 @@ describe('purchase_invoice profile — mergeInvoiceBatches', () => {
     expect(out.data.printed_total).toBe(5000);
   });
 
-  it('batches answered in different shapes (v1/v2) are flagged', () => {
-    const out = mergeInvoiceBatches([
-      { pages: [1], data: { schema_version: 2, line_items: [line('A', 1, 1)] } },
-      { pages: [2], data: { line_items: [{ description: 'B', quantity: 1, unit_price: 1, total: 1 }] } },
-    ]);
-    expect(out.data.schema_version).toBe(2);
+  it('mixed shapes: the v2 batch is converted to v1 so every line keeps its total', () => {
+    const v2Batch = {
+      schema_version: 2,
+      line_items: [
+        {
+          description: 'Aceite',
+          quantity: 1,
+          unit_price: 10000,
+          printed_line_total: 10000,
+          discount: { kind: 'percent', value: 10 },
+          taxes: [{ type: 'iva', treatment: 'gravado', rate: 19, amount: 1710 }],
+        },
+      ],
+    };
+    const v1Batch = {
+      line_items: [{ description: 'Jabón', quantity: 2, unit_price: 5000, total: 10000, discount_amount: 0 }],
+    };
+    const out = mergeInvoiceBatches(
+      [
+        { pages: [1, 2, 3, 4, 5], data: v2Batch as any },
+        { pages: [6], data: v1Batch as any },
+      ],
+      { decimalPlaces: 0 },
+    );
+    // One shape for the whole document: the legacy one.
+    expect(out.data.schema_version).toBeUndefined();
     expect(out.warnings.some((w) => w.includes('otro formato'))).toBe(true);
+    const lines = out.data.line_items as any[];
+    expect(lines).toHaveLength(2);
+    // The v2 line becomes v1 with its own money: no total 0, printed total and
+    // discount kept (the v1 shape keeps the printed figure and the discount
+    // apart, exactly like the legacy answer did).
+    const aceite = lines.find((l) => l.description === 'Aceite');
+    expect(aceite.total).toBe(10000);
+    expect(aceite.printed_line_total).toBe(10000);
+    expect(aceite.discount_percentage).toBe(10);
+    expect(aceite.discount_kind).toBe('percent');
+    expect(aceite.tax_rate).toBe(0.19);
+    const jabon = lines.find((l) => l.description === 'Jabón');
+    expect(jabon.total).toBe(10000);
   });
 
   it('more than 100 lines across batches: none is lost', () => {

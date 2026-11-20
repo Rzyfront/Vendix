@@ -19,7 +19,8 @@ import type { JsonSchema, ExtractionSchema } from '@common/ai-ingest/extraction/
 import type { AiDocumentPage } from '@common/ai-ingest/documents/document-pages.service';
 import type { ReadDocumentBatchContext } from '@common/ai-ingest/documents/document-reader';
 import type { DocumentIngestProfile } from '@common/ai-ingest/profiles/ingest-profile.interface';
-import { isInvoiceOcrV2 } from './invoice-ocr-v2.adapter';
+import { adaptInvoiceOcrV2ToV1, isInvoiceOcrV2 } from './invoice-ocr-v2.adapter';
+import type { InvoiceOcrV2Raw } from './invoice-ocr-v2.adapter';
 
 /** Same cap the scan endpoint always enforced (`INVOICE_SCAN_MAX_FILE_BYTES`). */
 export const PURCHASE_INVOICE_MAX_BYTES = 15 * 1024 * 1024;
@@ -29,7 +30,7 @@ export const PURCHASE_INVOICE_MAX_BYTES = 15 * 1024 * 1024;
 // keeps converting them exactly as it always did. ajv never coerces them.
 const NUM: JsonSchema = { type: ['number', 'string'] };
 const STR: JsonSchema = { type: ['string', 'number'] };
-const BOOL: JsonSchema = { type: ['boolean', 'string'] };
+const BOOL: JsonSchema = { type: ['boolean', 'string', 'number'] };
 
 const TAX: JsonSchema = {
   type: 'object',
@@ -246,6 +247,11 @@ export interface InvoiceBatchAnswer {
   data: RawInvoice;
 }
 
+export interface MergeInvoiceBatchesOptions {
+  /** Store decimals, the same the legacy path uses to convert a v2 answer. */
+  decimalPlaces?: number;
+}
+
 export interface MergedInvoiceAnswer {
   data: RawInvoice;
   /** Spanish, ready for `scan_warnings`. */
@@ -339,7 +345,10 @@ function linesOf(data: RawInvoice): RawInvoice[] {
  *   duplicate can be added back in the review.
  * - Confidence: the lowest of the batches.
  */
-export function mergeInvoiceBatches(batches: InvoiceBatchAnswer[]): MergedInvoiceAnswer {
+export function mergeInvoiceBatches(
+  batches: InvoiceBatchAnswer[],
+  options: MergeInvoiceBatchesOptions = {},
+): MergedInvoiceAnswer {
   if (batches.length === 0) return { data: {}, warnings: [], repeatedLines: 0 };
   if (batches.length === 1) {
     return { data: batches[0].data, warnings: [], repeatedLines: 0 };
@@ -348,13 +357,42 @@ export function mergeInvoiceBatches(batches: InvoiceBatchAnswer[]): MergedInvoic
   const warnings: string[] = [];
   const merged: RawInvoice = {};
 
+  // A batch answered in the other shape (v1 vs v2): each v2 batch is converted
+  // to the v1 shape with the SAME rules (and decimals) the legacy path used,
+  // then everything merges as v1. Before, the merged document was forced to v2
+  // and the adapter read v1 lines with v2 rules (total 0, no discount).
+  const withLines = batches.filter((b) => linesOf(b.data).length > 0);
+  const v2 = withLines.filter((b) => isInvoiceOcrV2(b.data));
+  const mixed = v2.length > 0 && v2.length < withLines.length;
+  const normalized: InvoiceBatchAnswer[] = mixed
+    ? batches.map((batch) =>
+        isInvoiceOcrV2(batch.data)
+          ? {
+              ...batch,
+              data: adaptInvoiceOcrV2ToV1(batch.data as InvoiceOcrV2Raw, {
+                decimalPlaces: options.decimalPlaces ?? 2,
+              }) as RawInvoice,
+            }
+          : batch,
+      )
+    : batches;
+  if (mixed) {
+    const odd = withLines.filter((b) => !isInvoiceOcrV2(b.data)).flatMap((b) => b.pages);
+    warnings.push(
+      `Las líneas de ${pagesLabel(odd)} se leyeron en otro formato que el resto de la factura. Se normalizaron al formato anterior para que los totales cuadren; verifica el resultado antes de confirmar.`,
+    );
+  }
+
   for (const key of HEADER_KEYS) {
-    const found = batches.find((b) => isPresent(b.data?.[key]));
+    // With mixed shapes every batch is normalized to v1, so the merged answer
+    // must not carry the v2 marker (it would re-adapt v1 lines as v2).
+    if (mixed && key === 'schema_version') continue;
+    const found = normalized.find((b) => isPresent(b.data?.[key]));
     if (found) merged[key] = found.data[key];
   }
 
   const supplier: RawInvoice = {};
-  for (const batch of batches) {
+  for (const batch of normalized) {
     const s = batch.data?.supplier;
     if (!s || typeof s !== 'object') continue;
     for (const [field, value] of Object.entries(s)) {
@@ -364,7 +402,7 @@ export function mergeInvoiceBatches(batches: InvoiceBatchAnswer[]): MergedInvoic
   if (Object.keys(supplier).length) merged.supplier = supplier;
 
   for (const key of FOOTER_KEYS) {
-    const candidates = batches.filter((b) => isPresent(b.data?.[key]));
+    const candidates = normalized.filter((b) => isPresent(b.data?.[key]));
     if (!candidates.length) continue;
     const meaningful = candidates.filter((b) => !isZeroish(b.data[key]));
     const pool = meaningful.length ? meaningful : candidates;
@@ -387,22 +425,10 @@ export function mergeInvoiceBatches(batches: InvoiceBatchAnswer[]): MergedInvoic
     .filter((n) => Number.isFinite(n));
   if (confidences.length) merged.confidence = Math.min(...confidences);
 
-  // A batch answered in the other shape (v1 vs v2) would have its discounts
-  // and taxes read with the wrong rules once merged: say which pages.
-  const withLines = batches.filter((b) => linesOf(b.data).length > 0);
-  const v2 = withLines.filter((b) => isInvoiceOcrV2(b.data));
-  if (v2.length && v2.length < withLines.length) {
-    const odd = withLines.filter((b) => !isInvoiceOcrV2(b.data)).flatMap((b) => b.pages);
-    warnings.push(
-      `Las líneas de ${pagesLabel(odd)} se leyeron en otro formato que el resto de la factura. Revisa sus descuentos e impuestos antes de confirmar.`,
-    );
-    merged.schema_version = 2;
-  }
-
   const lines: RawInvoice[] = [];
   let repeatedLines = 0;
   let previous: InvoiceBatchAnswer | null = null;
-  for (const batch of batches) {
+  for (const batch of normalized) {
     let next = linesOf(batch.data);
     const prevLines = previous ? linesOf(previous.data) : [];
     if (previous && prevLines.length && next.length) {
