@@ -35,6 +35,8 @@ export const VEX_LOG_DASHBOARD_QUERY = { tab: 'bitacora' } as const;
   host: { class: 'block h-full' },
   template: `
     <aside
+      id="vex-log-panel"
+      aria-label="Bitácora"
       class="h-full flex flex-col overflow-hidden bg-[var(--color-surface)] border-l border-[var(--color-border)] text-[var(--color-text-primary)] transition-[width] duration-200 motion-reduce:transition-none"
       [class.w-80]="!collapsed()"
       [class.w-14]="collapsed()"
@@ -44,19 +46,27 @@ export const VEX_LOG_DASHBOARD_QUERY = { tab: 'bitacora' } as const;
           <button
             type="button"
             class="relative w-10 h-10 flex items-center justify-center rounded-lg text-[var(--color-text-secondary)] hover:bg-[rgba(var(--color-text-primary-rgb),0.06)]"
-            title="Expandir bitácora"
-            aria-label="Expandir bitácora"
+            [class]="railButtonClass()"
+            title="Abrir bitácora"
+            [attr.aria-label]="railLabel()"
+            aria-controls="vex-log-panel"
+            [attr.aria-expanded]="false"
             (click)="collapsed.set(false)"
           >
             <app-icon name="panel-right-open" [size]="18" />
-            @if (store.attention_count() > 0) {
+            @if (store.pending_count() > 0) {
               <span
                 class="absolute top-0.5 right-0.5 min-w-4 h-4 px-1 rounded-full bg-[var(--color-primary)] text-[var(--color-text-on-primary)] text-[10px] leading-4 text-center"
+                [class]="badgePulseClass()"
+                aria-hidden="true"
               >
-                {{ store.attention_count() }}
+                {{ store.pending_count() }}
               </span>
             }
           </button>
+          <span class="sr-only" role="status" aria-live="polite">
+            {{ store.highlight() ? 'Nuevo recordatorio guardado en la bitácora' : '' }}
+          </span>
           @for (filter of filters; track filter.key) {
             <button
               type="button"
@@ -86,7 +96,10 @@ export const VEX_LOG_DASHBOARD_QUERY = { tab: 'bitacora' } as const;
           <button
             type="button"
             class="w-10 h-10 shrink-0 flex items-center justify-center rounded-lg text-[var(--color-text-secondary)] hover:bg-[rgba(var(--color-text-primary-rgb),0.06)]"
-            aria-label="Contraer bitácora"
+            title="Cerrar bitácora"
+            aria-label="Cerrar bitácora"
+            aria-controls="vex-log-panel"
+            [attr.aria-expanded]="true"
             (click)="collapsed.set(true)"
           >
             <app-icon name="panel-right-close" [size]="18" />
@@ -218,6 +231,21 @@ export class VexLogSidebarComponent {
   readonly filters = VEX_REMINDER_FILTERS;
   readonly dashboardLink = VEX_LOG_DASHBOARD_LINK;
   readonly dashboardQuery = VEX_LOG_DASHBOARD_QUERY;
+
+  readonly railLabel = computed(() => {
+    const count = this.store.pending_count();
+    if (count === 0) return 'Abrir bitácora';
+    return `Abrir bitácora, ${count} ${count === 1 ? 'recordatorio pendiente' : 'recordatorios pendientes'}`;
+  });
+
+  readonly badgePulseClass = computed(() =>
+    this.store.highlight() ? 'animate-pulse motion-reduce:animate-none' : '',
+  );
+
+  /** A new reminder briefly rings the rail button; the ring stays under reduced motion. */
+  readonly railButtonClass = computed(() =>
+    this.store.highlight() ? 'ring-2 ring-[var(--color-primary)]' : '',
+  );
 
   /**
    * Parsed routes of the links the user may open, by reminder id. A plain

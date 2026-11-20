@@ -19,6 +19,9 @@ import {
  */
 export const VEX_REMINDERS_PAGE_LIMIT = 200;
 
+/** How long the collapsed rail keeps its "new reminder" cue. */
+const HIGHLIGHT_MS = 3000;
+
 /** Wait for a burst of Vex activity (thread load, several receipts) to settle. */
 const ACTIVITY_REFRESH_DELAY_MS = 400;
 
@@ -47,6 +50,10 @@ export class VexLogStore {
   private readonly _server_timezone = signal<string | null>(null);
   private readonly _updating_ids = signal<ReadonlySet<number>>(new Set());
 
+  private readonly _highlight = signal(false);
+  private known_pending_ids: Set<number> | null = null;
+  private highlight_timer: ReturnType<typeof setTimeout> | null = null;
+
   private load_seq = 0;
   private refresh_timer: ReturnType<typeof setTimeout> | null = null;
   private destroyed = false;
@@ -56,10 +63,14 @@ export class VexLogStore {
   readonly loading = this._loading.asReadonly();
   readonly error = this._error.asReadonly();
   readonly updating_ids = this._updating_ids.asReadonly();
+  /** True for a moment after a new pending reminder shows up (collapsed rail cue). */
+  readonly highlight = this._highlight.asReadonly();
 
   readonly counts = computed(() => countReminders(this._items()));
   readonly filtered = computed(() => filterReminders(this._items(), this._active_filter()));
   /** Pending reminders due today or overdue: the badge on the sidebar header. */
+  /** Pending reminders in total: the counter of the collapsed rail. */
+  readonly pending_count = computed(() => this.counts().pending);
   readonly attention_count = computed(() => this.counts().today + this.counts().overdue);
 
   /** Zone the reminders are bucketed in (server), falling back to the store setting. */
@@ -69,6 +80,7 @@ export class VexLogStore {
     this.destroyRef.onDestroy(() => {
       this.destroyed = true;
       if (this.refresh_timer) clearTimeout(this.refresh_timer);
+      if (this.highlight_timer) clearTimeout(this.highlight_timer);
     });
 
     void this.refresh();
@@ -104,6 +116,7 @@ export class VexLogStore {
         ...(Array.isArray(pending?.items) ? pending.items : []),
         ...(Array.isArray(done?.items) ? done.items : []),
       ]);
+      this.noteNewPending(Array.isArray(pending?.items) ? pending.items : []);
       this._server_timezone.set(pending?.timezone || done?.timezone || null);
       this._error.set(false);
     } catch {
@@ -134,6 +147,23 @@ export class VexLogStore {
     } finally {
       if (!this.destroyed) this.setUpdating(item.id, false);
     }
+  }
+
+  /** Flags a pending reminder never seen before; the first load only seeds the set. */
+  private noteNewPending(pending: readonly Reminder[]): void {
+    const ids = new Set(pending.map((item) => item.id));
+    const previous = this.known_pending_ids;
+    this.known_pending_ids = ids;
+    if (!previous) return;
+    let fresh = false;
+    for (const id of ids) if (!previous.has(id)) fresh = true;
+    if (!fresh) return;
+    this._highlight.set(true);
+    if (this.highlight_timer) clearTimeout(this.highlight_timer);
+    this.highlight_timer = setTimeout(() => {
+      this.highlight_timer = null;
+      if (!this.destroyed) this._highlight.set(false);
+    }, HIGHLIGHT_MS);
   }
 
   private scheduleRefresh(): void {

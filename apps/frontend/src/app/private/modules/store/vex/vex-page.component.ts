@@ -1,4 +1,4 @@
-import { Component, computed, effect, inject, signal, viewChild } from '@angular/core';
+import { Component, computed, inject, signal, viewChild } from '@angular/core';
 import { RouterLink } from '@angular/router';
 import { IconComponent } from '../../../../shared/components/icon/icon.component';
 import { VexChatsSidebarComponent } from './components/vex-chats-sidebar/vex-chats-sidebar.component';
@@ -10,9 +10,6 @@ import { VexChatStore } from './state/vex-chat.store';
 import { VexLogStore } from './state/vex-log.store';
 
 const DESKTOP_QUERY = '(min-width: 1024px)';
-const CHATS_KEY = 'vex.chats_collapsed';
-const LOG_KEY = 'vex.log_collapsed';
-
 function isDesktop(): boolean {
   try {
     return (
@@ -20,24 +17,6 @@ function isDesktop(): boolean {
     );
   } catch {
     return false;
-  }
-}
-
-function readFlag(key: string): boolean {
-  if (!isDesktop()) return true;
-  try {
-    return localStorage.getItem(key) === 'true';
-  } catch {
-    return false;
-  }
-}
-
-function writeFlag(key: string, value: boolean): void {
-  if (!isDesktop()) return;
-  try {
-    localStorage.setItem(key, String(value));
-  } catch {
-    // storage no disponible: se ignora
   }
 }
 
@@ -60,13 +39,13 @@ function writeFlag(key: string, value: boolean): void {
     >
       @if (!chats_collapsed()) {
         <div
-          class="fixed inset-0 bg-black/40 z-30 lg:hidden"
+          class="fixed inset-0 bg-[rgba(var(--color-text-primary-rgb),0.4)] z-30 lg:hidden"
           (click)="chats_collapsed.set(true)"
         ></div>
       }
       @if (!log_collapsed()) {
         <div
-          class="fixed inset-0 bg-black/40 z-30 lg:hidden"
+          class="fixed inset-0 bg-[rgba(var(--color-text-primary-rgb),0.4)] z-30 lg:hidden"
           (click)="log_collapsed.set(true)"
         ></div>
       }
@@ -111,6 +90,8 @@ function writeFlag(key: string, value: boolean): void {
             type="button"
             class="lg:hidden w-10 h-10 rounded-full flex items-center justify-center text-[var(--color-text-secondary)] hover:text-[var(--color-text-primary)]"
             aria-label="Abrir chats"
+            aria-controls="vex-chats-panel"
+            [attr.aria-expanded]="!chats_collapsed()"
             (click)="openChats()"
           >
             <app-icon name="menu" [size]="20"></app-icon>
@@ -133,6 +114,8 @@ function writeFlag(key: string, value: boolean): void {
             type="button"
             class="lg:hidden w-10 h-10 rounded-full flex items-center justify-center text-[var(--color-text-secondary)] hover:text-[var(--color-text-primary)]"
             aria-label="Abrir bitácora"
+            aria-controls="vex-log-panel"
+            [attr.aria-expanded]="!log_collapsed()"
             (click)="openLog()"
           >
             <app-icon name="history" [size]="20"></app-icon>
@@ -171,8 +154,12 @@ function writeFlag(key: string, value: boolean): void {
 export class VexPageComponent {
   readonly store = inject(VexChatStore);
 
-  readonly chats_collapsed = signal<boolean>(readFlag(CHATS_KEY));
-  readonly log_collapsed = signal<boolean>(readFlag(LOG_KEY));
+  /**
+   * Both panels start collapsed on every visit, at any viewport. Nothing is
+   * stored: within the visit they open and close freely.
+   */
+  readonly chats_collapsed = signal<boolean>(true);
+  readonly log_collapsed = signal<boolean>(true);
 
   private readonly composer = viewChild(VexComposerComponent);
   readonly dragging = signal(false);
@@ -181,11 +168,6 @@ export class VexPageComponent {
   readonly conversation_title = computed(
     () => this.store.active_conversation()?.title ?? '',
   );
-
-  constructor() {
-    effect(() => writeFlag(CHATS_KEY, this.chats_collapsed()));
-    effect(() => writeFlag(LOG_KEY, this.log_collapsed()));
-  }
 
   private hasFiles(event: DragEvent): boolean {
     return Array.from(event.dataTransfer?.types ?? []).includes('Files');

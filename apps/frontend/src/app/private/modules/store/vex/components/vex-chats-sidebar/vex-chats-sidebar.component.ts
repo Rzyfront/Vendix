@@ -27,6 +27,8 @@ interface VexSidebarUser {
   host: { class: 'block h-full' },
   template: `
     <aside
+      id="vex-chats-panel"
+      aria-label="Chats"
       class="h-full flex flex-col overflow-hidden bg-[var(--color-surface)] border-r border-[var(--color-border)] text-[var(--color-text-primary)] transition-[width] duration-200"
       [class.w-72]="!collapsed()"
       [class.w-14]="collapsed()"
@@ -37,8 +39,10 @@ interface VexSidebarUser {
           <button
             type="button"
             class="w-10 h-10 flex items-center justify-center rounded-lg text-[var(--color-text-secondary)] hover:bg-[rgba(var(--color-text-primary-rgb),0.06)]"
-            title="Expandir chats"
-            aria-label="Expandir chats"
+            title="Abrir chats"
+            aria-label="Abrir chats"
+            aria-controls="vex-chats-panel"
+            [attr.aria-expanded]="false"
             (click)="collapsed.set(false)"
           >
             <app-icon name="panel-left-open" [size]="18" />
@@ -71,7 +75,10 @@ interface VexSidebarUser {
           <button
             type="button"
             class="w-10 h-10 flex items-center justify-center rounded-lg text-[var(--color-text-secondary)] hover:bg-[rgba(var(--color-text-primary-rgb),0.06)]"
-            aria-label="Contraer chats"
+            title="Cerrar chats"
+            aria-label="Cerrar chats"
+            aria-controls="vex-chats-panel"
+            [attr.aria-expanded]="true"
             (click)="collapsed.set(true)"
           >
             <app-icon name="panel-left-close" [size]="18" />
