@@ -77,7 +77,7 @@ export class ProductionOrdersController {
   @Get()
   @Permissions('store:production_orders:read')
   async findAll(@Query() query: ProductionOrderQueryDto) {
-    const { data, total } = await this.productionOrdersService.findAll(query);
+    const { data, total } = await this.productionOrdersService.findAll(query, 'kitchen');
     return this.responseService.paginated(
       data,
       total,
@@ -90,7 +90,7 @@ export class ProductionOrdersController {
   @Get('stats')
   @Permissions('store:production_orders:read')
   async stats() {
-    const result = await this.productionOrdersService.getStats();
+    const result = await this.productionOrdersService.getStats('kitchen');
     return this.responseService.success(
       result,
       'Estadísticas de producción obtenidas',
@@ -101,7 +101,7 @@ export class ProductionOrdersController {
   @Get('day')
   @Permissions('store:production_orders:read', 'store:manufacturing:orders:read')
   async findDay(@Query() query: ProductionDayQueryDto) {
-    const result = await this.productionOrdersService.findDay(query);
+    const result = await this.productionOrdersService.findDay(query, 'kitchen');
     return this.responseService.success(result, 'Lista de producción del día obtenida');
   }
 
@@ -109,7 +109,7 @@ export class ProductionOrdersController {
   @Get('day/supplies')
   @Permissions('store:production_orders:read', 'store:manufacturing:orders:read')
   async findDaySupplies(@Query() query: ProductionSuppliesQueryDto) {
-    const result = await this.productionOrdersService.findDaySupplies(query);
+    const result = await this.productionOrdersService.findDaySupplies(query, 'kitchen');
     return this.responseService.success(result, 'Consumo de insumos del día obtenido');
   }
 

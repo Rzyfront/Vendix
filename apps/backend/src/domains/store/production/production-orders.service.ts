@@ -22,6 +22,7 @@ import {
 } from './production-order-events';
 import { RequestContextService } from '../../../common/context/request-context.service';
 import { ProductionSaleLinkService } from './production-sale-link.service';
+import { type ProductionSite, productionSiteWhere } from './production-site.util';
 import {
   RECIPE_REQUIREMENT_SELECT,
   computeComponentRequirements as computeRequirements,
@@ -381,6 +382,8 @@ export class ProductionOrdersService {
         recipe_id: dto.recipe_id,
         planned_qty: new Prisma.Decimal(dto.planned_qty),
         status: 'draft',
+        // Born in Producción: never listed by Planta.
+        production_site: 'kitchen',
         // S1: the order is born knowing what it must consume (consumed_qty = 0).
         lines: {
           create: plannedLinesCreate(
@@ -400,7 +403,11 @@ export class ProductionOrdersService {
   }
 
   // -------------------------------------------------------------------- find
-  async findAll(query: ProductionOrderQueryDto) {
+  /**
+   * `site` scopes the list to the screen that owns the orders (Producción passes
+   * `kitchen`); without it, every order of the store (internal callers).
+   */
+  async findAll(query: ProductionOrderQueryDto, site?: ProductionSite) {
     const context = RequestContextService.getContext();
     const store_id = context?.store_id;
     if (!store_id) {
@@ -422,6 +429,7 @@ export class ProductionOrdersService {
     const skip = (page - 1) * limit;
 
     const where: Prisma.production_ordersWhereInput = {
+      ...(site && { AND: [productionSiteWhere(site)] }),
       ...(status && { status }),
       ...(product_id && { product_id }),
       ...(recipe_id && { recipe_id }),
@@ -1664,6 +1672,7 @@ export class ProductionOrdersService {
     store_id: number,
     queryDate?: string,
     plant_id?: number,
+    site?: ProductionSite,
   ): Promise<{
     date: string;
     timezone: string;
@@ -1679,6 +1688,8 @@ export class ProductionOrdersService {
       status: { not: 'cancelled' },
       // QUI-1013: a plant's production session only sees that plant's orders.
       ...(plant_id != null && { plant_id }),
+      // Each screen sees only its own orders (Producción `kitchen`, Planta `plant`).
+      ...(site && { AND: [productionSiteWhere(site)] }),
       OR: [
         { order_id: { not: null }, due_date: { gte: local.startDate, lte: local.endDate } },
         { order_id: null, due_date: { gte: naive.startDate, lte: naive.endDate } },
@@ -1706,7 +1717,7 @@ export class ProductionOrdersService {
    * carried over from earlier days first, then by their timeline time
    * (delivery for sales, creation for manual orders).
    */
-  async findDay(query: ProductionDayQueryDto) {
+  async findDay(query: ProductionDayQueryDto, site?: ProductionSite) {
     const context = RequestContextService.getContext();
     const store_id = context?.store_id;
     if (!store_id) {
@@ -1716,6 +1727,7 @@ export class ProductionOrdersService {
       store_id,
       query?.date,
       query?.plant_id,
+      site,
     );
     const select = {
       id: true,
@@ -1751,8 +1763,10 @@ export class ProductionOrdersService {
     // Paginación keyset (S20): el cursor es la última fila base de la página.
     const pageSize = query?.limit ?? PRODUCTION_DAY_PAGE_MAX;
     const cursor = query?.cursor ? decodeDayCursor(query.cursor) : null;
+    // The screen filter lives in `dayWhere.AND`; extra conditions append to it.
+    const siteAnd = (dayWhere.AND ?? []) as Prisma.production_ordersWhereInput[];
     const pageRows = await this.prisma.production_orders.findMany({
-      where: cursor ? { ...dayWhere, AND: [dayCursorWhere(cursor)] } : dayWhere,
+      where: cursor ? { ...dayWhere, AND: [...siteAnd, dayCursorWhere(cursor)] } : dayWhere,
       select,
       orderBy,
       take: pageSize + 1,
@@ -1771,7 +1785,7 @@ export class ProductionOrdersService {
     ];
     if ((cursor || hasMore) && saleIds.length > 0) {
       const siblings = await this.prisma.production_orders.findMany({
-        where: { ...dayWhere, AND: [{ order_id: { in: saleIds } }] },
+        where: { ...dayWhere, AND: [...siteAnd, { order_id: { in: saleIds } }] },
         select,
         orderBy,
       });
@@ -1885,7 +1899,7 @@ export class ProductionOrdersService {
    * - `difference`: sum of (consumed - planned) over the completed orders.
    * - `orders_without_breakdown`: completed orders with no lines (before the deploy).
    */
-  async findDaySupplies(query: ProductionSuppliesQueryDto) {
+  async findDaySupplies(query: ProductionSuppliesQueryDto, site?: ProductionSite) {
     const store_id = RequestContextService.getContext()?.store_id;
     if (!store_id) {
       throw new VendixHttpException(ErrorCodes.STORE_CONTEXT_001);
@@ -1894,6 +1908,7 @@ export class ProductionOrdersService {
       store_id,
       query?.date,
       query?.plant_id,
+      site,
     );
 
     const orders = await this.prisma.production_orders.findMany({
@@ -1973,13 +1988,15 @@ export class ProductionOrdersService {
     };
   }
 
-  async getStats() {
+  /** `site`: Producción counts only its own orders (`kitchen`). */
+  async getStats(site?: ProductionSite) {
     const context = RequestContextService.getContext();
     const store_id = context?.store_id;
     if (!store_id) {
       throw new VendixHttpException(ErrorCodes.STORE_CONTEXT_001);
     }
 
+    const siteFilter = site ? { AND: [productionSiteWhere(site)] } : {};
     const now = new Date();
     const startOfDay = new Date(
       now.getFullYear(),
@@ -2004,24 +2021,26 @@ export class ProductionOrdersService {
       month,
     ] = await Promise.all([
       this.prisma.production_orders.count({
-        where: { store_id, status: 'draft' },
+        where: { store_id, ...siteFilter, status: 'draft' },
       }),
       this.prisma.production_orders.count({
-        where: { store_id, status: 'in_progress' },
+        where: { store_id, ...siteFilter, status: 'in_progress' },
       }),
       this.prisma.production_orders.count({
         where: {
           store_id,
+          ...siteFilter,
           status: 'completed',
           produced_at: { gte: startOfMonth },
         },
       }),
       this.prisma.production_orders.count({
-        where: { store_id, status: 'cancelled' },
+        where: { store_id, ...siteFilter, status: 'cancelled' },
       }),
       this.prisma.production_orders.aggregate({
         where: {
           store_id,
+          ...siteFilter,
           status: 'completed',
           produced_at: { gte: startOfDay },
         },
@@ -2030,6 +2049,7 @@ export class ProductionOrdersService {
       this.prisma.production_orders.aggregate({
         where: {
           store_id,
+          ...siteFilter,
           status: 'completed',
           produced_at: { gte: startOfWeek },
         },
@@ -2038,6 +2058,7 @@ export class ProductionOrdersService {
       this.prisma.production_orders.aggregate({
         where: {
           store_id,
+          ...siteFilter,
           status: 'completed',
           produced_at: { gte: startOfMonth },
         },

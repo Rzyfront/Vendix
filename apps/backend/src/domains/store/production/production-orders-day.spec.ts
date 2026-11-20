@@ -1,6 +1,7 @@
 import { Prisma } from '@prisma/client';
 import { ProductionOrdersService } from './production-orders.service';
 import { RequestContextService } from '../../../common/context/request-context.service';
+import { productionSiteWhere } from './production-site.util';
 
 /**
  * QUI-996 — the production list of ONE day (store timezone): cards per sale
@@ -101,6 +102,35 @@ describe('ProductionOrdersService.findDay (QUI-996)', () => {
   it('QUI-1013: without plant_id the day is the whole store (previous behavior)', async () => {
     await service.findDay({ date: '2026-11-10' });
     expect(prisma.production_orders.findMany.mock.calls[0][0].where).not.toHaveProperty('plant_id');
+  });
+
+  describe('cada pantalla ve solo lo suyo (cocina vs planta)', () => {
+    it('Producción (kitchen) filters list, summary and supplies to kitchen orders', async () => {
+      prisma.production_orders.findMany.mockResolvedValue([]);
+      await service.findDay({ date: '2026-11-10' }, 'kitchen');
+      const kitchen = productionSiteWhere('kitchen');
+      expect(prisma.production_orders.findMany.mock.calls[0][0].where.AND).toEqual([kitchen]);
+      expect(prisma.production_orders.groupBy.mock.calls[0][0].where.AND).toEqual([kitchen]);
+
+      prisma.production_orders.findMany.mockClear();
+      await service.findDaySupplies({ date: '2026-11-10' }, 'kitchen');
+      expect(prisma.production_orders.findMany.mock.calls[0][0].where.AND).toEqual([kitchen]);
+    });
+
+    it('Planta (plant) filters to plant orders and keeps the filter with a cursor', async () => {
+      const cursor = Buffer.from(
+        JSON.stringify({ d: '2026-11-10T12:00:00.000Z', i: 2 }),
+      ).toString('base64url');
+      await service.findDay({ date: '2026-11-10', limit: 2, cursor }, 'plant');
+      const and = prisma.production_orders.findMany.mock.calls[0][0].where.AND;
+      expect(and[0]).toEqual(productionSiteWhere('plant'));
+      expect(and).toHaveLength(2);
+    });
+
+    it('without a site (internal callers) nothing is filtered (previous behavior)', async () => {
+      await service.findDay({ date: '2026-11-10' });
+      expect(prisma.production_orders.findMany.mock.calls[0][0].where.AND).toBeUndefined();
+    });
   });
 
   it('S16: carries over in-progress and partially completed orders from earlier days (multi-day production)', async () => {

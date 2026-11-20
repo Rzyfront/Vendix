@@ -16,6 +16,7 @@ import type { ManufacturingSettingsView } from '../settings/manufacturing-settin
 import { ManufacturingPlantsService } from '../plants/manufacturing-plants.service';
 import { findPlantLocations, type PlantLocations } from '../plants/plant-resolution.util';
 import { OrderSequenceService } from './order-sequence.service';
+import { productionSiteWhere } from '../../production/production-site.util';
 import {
   CompleteManufacturingOrderDto,
   CreateManufacturingOrderDto,
@@ -185,6 +186,8 @@ export class ManufacturingOrdersService {
 
     const where: Prisma.production_ordersWhereInput = {
       order_number: { not: null },
+      // Planta never lists kitchen orders (sales made in Producción).
+      AND: [productionSiteWhere('plant')],
       ...(status && { status }),
       ...(product_id && { product_id }),
       ...(plant_id && { plant_id }),
@@ -278,6 +281,7 @@ export class ManufacturingOrdersService {
             notes: dto.notes ?? null,
             created_by: context?.user_id ?? null,
             source: 'manual',
+            production_site: 'plant',
             planned_cost,
             lines: {
               create: requirements.map((r, index) => ({
