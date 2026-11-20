@@ -11,12 +11,12 @@
  *  b) Sin ninguna registrada que la cubra (cuenta de mesa abierta: aún no
  *     registra `order_promotions`), la promo automática vigente del mismo
  *     motor (`findActiveAutoPromotionsForProducts`) para el producto.
- *  c) Fallback "Promoción".
+ *  c) Si ninguna la nombra, la línea queda SIN etiqueta: el descuento puede
+ *     no venir de una promoción (descuento manual, reparto de una división,
+ *     promo borrada o vencida) y la UI no debe afirmar "Promoción".
  */
 
 import type { ActivePromotionProductInput } from '../dto/promotion-quote.interface';
-
-export const DEFAULT_PROMOTION_LABEL = 'Promoción';
 
 export interface PromotionLabelLine {
   id: number;
@@ -62,10 +62,11 @@ const coversLine = (
 };
 
 /**
- * Devuelve `Map<order_item_id, etiqueta>` SOLO para líneas con descuento.
- * El motor se consulta una vez, en lote, y solo para las líneas que no
- * quedaron cubiertas por una promo registrada. Un fallo del motor no rompe
- * la respuesta: cae al fallback.
+ * Devuelve `Map<order_item_id, etiqueta>` SOLO para líneas con descuento que
+ * matchean una promoción (registrada o vigente). El motor se consulta una
+ * vez, en lote, y solo para las líneas que no quedaron cubiertas por una
+ * promo registrada. Un fallo del motor no rompe la respuesta: esas líneas
+ * quedan sin etiqueta.
  */
 export async function resolveLinePromotionLabels(
   lines: PromotionLabelLine[],
@@ -117,7 +118,7 @@ export async function resolveLinePromotionLabels(
       line.product_id != null
         ? active.get(line.product_id)?.name?.trim()
         : undefined;
-    labels.set(line.id, name || DEFAULT_PROMOTION_LABEL);
+    if (name) labels.set(line.id, name);
   }
   return labels;
 }

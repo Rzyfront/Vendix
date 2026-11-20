@@ -1295,6 +1295,47 @@ describe('PromotionEngineService - quoteDiscounts', () => {
     });
   });
 
+  describe('reglas del alcance en el listado (findActiveAutoPromotionsForProducts)', () => {
+    it('expone el tope y la compra mínima de una promo plana, o null si no los tiene', async () => {
+      prisma.promotions.findMany.mockResolvedValue([
+        buildPromotion({
+          id: 301,
+          scope: 'product',
+          type: 'percentage',
+          value: 30,
+          max_discount_amount: 9000,
+          min_purchase_amount: 50000,
+          promotion_products: [{ product_id: 10 }],
+        }),
+        buildPromotion({
+          id: 302,
+          scope: 'product',
+          type: 'fixed_amount',
+          value: 5000,
+          max_discount_amount: null,
+          min_purchase_amount: null,
+          promotion_products: [{ product_id: 11 }],
+        }),
+      ]);
+
+      const map = await service.findActiveAutoPromotionsForProducts(
+        [
+          { product_id: 10, unit_price: 30000, category_ids: [] },
+          { product_id: 11, unit_price: 30000, category_ids: [] },
+        ],
+        REFERENCE_NOW,
+      );
+
+      expect(map.get(10)!.max_discount_amount).toBe(9000);
+      expect(map.get(10)!.min_purchase_amount).toBe(50000);
+      // El precio de UNA unidad no cambia: 30 % de 30.000 = 9.000 (el tope).
+      expect(map.get(10)!.promotional_price).toBe(21000);
+      expect(map.get(11)!.max_discount_amount).toBeNull();
+      expect(map.get(11)!.min_purchase_amount).toBeNull();
+      expect(map.get(11)!.promotional_price).toBe(25000);
+    });
+  });
+
   describe('quantity_tiered badge label (findActiveAutoPromotionsForProducts)', () => {
     function buildTier(overrides: Partial<Record<string, unknown>> = {}) {
       return {

@@ -961,6 +961,10 @@
   font-weight: 600;
   white-space: nowrap;
   vertical-align: middle;
+  // Nombre largo de promo: se corta con elipsis (el `title` lo trae completo).
+  max-width: 10rem;
+  overflow: hidden;
+  text-overflow: ellipsis;
 }
 
 /* Cancelled pill — D2 soft cancel */
