@@ -40,6 +40,8 @@ export interface AiJobProgress {
   total: number;
   /** Short Spanish step label, e.g. "Leyendo páginas". */
   stage?: string;
+  /** What `done/total` count, in Spanish plural ("filas", "páginas"); the web shows "120 de 800 filas". */
+  unit?: string;
 }
 
 /**
@@ -392,5 +394,6 @@ export function readProgress(progress: unknown): AiJobProgress | null {
     done: Math.max(0, Math.min(p.done, p.total)),
     total: p.total,
     ...(typeof p.stage === 'string' && p.stage ? { stage: p.stage } : {}),
+    ...(typeof p.unit === 'string' && p.unit ? { unit: p.unit.slice(0, 20) } : {}),
   };
 }

@@ -2369,6 +2369,24 @@ export const ErrorCodes = {
     httpStatus: 500,
     devMessage: 'AI provider request failed',
   },
+  // ai-ingest (ia-cargas F1): document-side failures, never retried as a job.
+  AI_INGEST_PARSE_FAIL: {
+    code: 'AI_INGEST_PARSE_FAIL',
+    httpStatus: 422,
+    devMessage:
+      'AI output did not match the extraction schema even after one repair attempt',
+  },
+  AI_INGEST_INCOMPLETE: {
+    code: 'AI_INGEST_INCOMPLETE',
+    httpStatus: 422,
+    devMessage:
+      'AI output was truncated (finish_reason=length) and the input cannot be split further',
+  },
+  AI_INGEST_INVALID_FILE: {
+    code: 'AI_INGEST_INVALID_FILE',
+    httpStatus: 400,
+    devMessage: 'Uploaded file is unreadable, empty or of an unsupported type',
+  },
   AI_CONFIG_002: {
     code: 'AI_CONFIG_002',
     httpStatus: 409,
