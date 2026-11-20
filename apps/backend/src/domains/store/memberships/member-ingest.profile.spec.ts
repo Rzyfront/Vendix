@@ -74,6 +74,7 @@ describe('member-ingest profile', () => {
         date_of_birth: '12/05',
         height_cm: '1,62',
         weight_kg: 'mucho',
+        gender: 'M',
         plan_name: 'Mensual',
       },
       { row: 9, sheet: 'Sede Norte' },
@@ -85,6 +86,7 @@ describe('member-ingest profile', () => {
       date_of_birth: null,
       height_cm: 162,
       weight_kg: null,
+      gender: 'masculino',
       source_row: 9,
       source_sheet: 'Sede Norte',
     });

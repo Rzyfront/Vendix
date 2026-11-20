@@ -392,6 +392,17 @@ export function parseSheetDate(value: string | null): string | null {
   return null;
 }
 
+/** Same vocabulary the roster OCR prompt uses: masculino | femenino | otro. */
+export function normalizeGender(value: string | null): string | null {
+  const v = clean(value);
+  if (!v) return null;
+  const key = fold(v);
+  if (/^(m|h|masculino|hombre|male|man|varon)$/.test(key)) return 'masculino';
+  if (/^(f|femenino|mujer|female|woman)$/.test(key)) return 'femenino';
+  if (/^(o|otro|otra|other|no binario|nb)$/.test(key)) return 'otro';
+  return null;
+}
+
 /** Height in cm; "1.75" / "1,75" (meters) → 175. */
 function parseHeightCm(value: string | null): number | null {
   const n = parseNumber(value);
@@ -457,6 +468,9 @@ export function normalizeMemberRow(
     } else dates[field] = parsed;
   }
 
+  if (raw.gender && !normalizeGender(raw.gender)) {
+    issue('gender', `Género "${raw.gender}" no reconocido; se dejó vacío.`);
+  }
   const height = raw.height_cm ? parseHeightCm(raw.height_cm) : null;
   if (raw.height_cm && height == null) issue('height_cm', `Estatura "${raw.height_cm}" no reconocida.`);
   const weight = raw.weight_kg ? parseWeightKg(raw.weight_kg) : null;
@@ -471,7 +485,7 @@ export function normalizeMemberRow(
     email,
     phone: normalizePhone(raw.phone ?? null),
     date_of_birth: dates.date_of_birth,
-    gender: clean(raw.gender),
+    gender: normalizeGender(raw.gender ?? null),
     emergency_contact_name: clean(raw.emergency_contact_name),
     emergency_contact_phone: normalizePhone(raw.emergency_contact_phone ?? null),
     medical_notes: clean(raw.medical_notes),
