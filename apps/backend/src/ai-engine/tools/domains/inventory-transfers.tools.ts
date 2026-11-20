@@ -802,6 +802,8 @@ export function createInventoryTransferTools(
                 ? `Transferencia${numberText} aplicada: se movieron ${units} unidades de ${products}.`
                 : `Orden de transferencia${numberText} creada y pendiente de aprobar: todavía no se movió inventario.`,
             transfer_id: transfer?.id ?? null,
+            // Identidad del efecto para la verificación del objetivo durable.
+            resource_ids: transfer?.id ? { transfer_id: transfer.id } : {},
             transfer_number: number,
             // No inventar estado: si el servicio no lo devuelve, se omite.
             ...(transfer?.status ? { status: transfer.status } : {}),

@@ -69,18 +69,6 @@
         "required": true
       },
       {
-        "key": "expected_status",
-        "description": "Estado solicitado según transición del dominio.",
-        "source": "user",
-        "required": true
-      },
-      {
-        "key": "transfer_id",
-        "description": "ID del traslado creado o leído.",
-        "source": "lookup",
-        "required": false
-      },
-      {
         "key": "product_id",
         "required": true,
         "source": "lookup",
@@ -148,8 +136,7 @@
           "mode": "${inputs.mode}",
           "from_location_id": "${inputs.from_location_id}",
           "to_location_id": "${inputs.to_location_id}",
-          "items": "${inputs.items}",
-          "documents": "${inputs.documents}"
+          "items": "${inputs.items}"
         }
       },
       {
@@ -173,7 +160,7 @@
         ],
         "approval": "none",
         "arguments": {
-          "path": "store/stock-transfers/${inputs.transfer_id}"
+          "path": "store/stock-transfers/${steps.transfer.transfer_id}"
         },
         "bridge": {
           "method": "GET",
@@ -189,7 +176,7 @@
           "from_location_id": 900100,
           "to_location_id": 900101,
           "items": [],
-          "expected_status": "in_transit"
+          "mode": "quick"
         },
         "observations": [
           {
@@ -237,7 +224,7 @@
               "id": 900102,
               "from_location_id": 900100,
               "to_location_id": 900101,
-              "status": "in_transit"
+              "status": "completed"
             },
             "after_step": "transfer",
             "bridge": {
@@ -255,7 +242,7 @@
           "from_location_id": 900100,
           "to_location_id": 900101,
           "items": [],
-          "expected_status": "in_transit"
+          "mode": "quick"
         },
         "observations": [
           {
@@ -334,8 +321,6 @@ Usar solo por intención explícita del usuario en este proceso. No usar para sa
 - `from_location_id` — obligatorio, resuelto desde lectura/recibo de dominio: Ubicación origen elegida.
 - `to_location_id` — obligatorio, resuelto desde lectura/recibo de dominio: Destino diferente y permitido.
 - `items` — obligatorio, confirmado por persona: Productos/variantes y cantidades.
-- `expected_status` — obligatorio, confirmado por persona: Estado solicitado según transición del dominio.
-- `transfer_id` — opcional/condicional, resuelto desde lectura/recibo de dominio: ID del traslado creado o leído.
 Si falta un campo obligatorio pedir exactamente ese campo. Los IDs simbólicos del contrato se sustituyen solo con lecturas/recibos del alcance autenticado; los fixtures numéricos son sintéticos y nunca argumentos por defecto.
 
 ## setup
