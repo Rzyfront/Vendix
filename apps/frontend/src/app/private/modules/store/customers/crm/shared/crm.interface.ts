@@ -23,6 +23,12 @@ export interface CrmTag {
   customers_count?: number;
 }
 
+/** Editable fields of a tag (`PATCH /store/customers/crm/tags/:id`). */
+export interface SaveCrmTag {
+  name?: string;
+  color?: string | null;
+}
+
 /** How a customer belongs to a segment: by its rules, added by hand, or both. */
 export type CrmSegmentMembershipVia = 'rule' | 'manual' | 'both';
 
