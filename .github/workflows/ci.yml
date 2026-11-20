@@ -406,6 +406,8 @@ jobs:
           src/common/ai-ingest/documents/document-pages.service.spec.ts
           src/common/ai-ingest/documents/page-content.spec.ts
           src/common/ai-ingest/images/image-prep.spec.ts
+          src/common/ai-ingest/documents/queued-document.spec.ts
+          src/ai-engine/toolbox/ai-toolbox.service.spec.ts
           src/common/ai-ingest/sheets/sheet-parser.service.spec.ts
           src/domains/store/memberships/member-bulk-scanner.controller.spec.ts
           src/domains/received-documents/services/received-document-pages.service.spec.ts
@@ -539,6 +541,12 @@ jobs:
           src/domains/store/orders/purchase-orders/purchase-orders.attachments.spec.ts
           src/domains/store/orders/purchase-orders/purchase-invoice-ingest.profile.spec.ts
           src/domains/store/orders/purchase-orders/invoice-scanner.ingest.spec.ts
+          src/domains/store/expenses/expense-scanner.ingest.spec.ts
+          src/domains/store/expenses/expense-scan.processor.spec.ts
+          src/domains/store/inventory/adjustments/inventory-count-scanner.service.spec.ts
+          src/domains/store/dispatch-routes/route-flow/route-sheet-scanner.service.spec.ts
+          src/domains/store/dispatch-notes/dispatch-notes.receipt-scan.ingest.spec.ts
+          src/domains/store/dispatch-notes/receipt-scan.processor.spec.ts
           src/domains/store/orders/purchase-orders/purchase-orders.multi-tax.spec.ts
           src/domains/store/orders/purchase-orders/purchase-orders.service.spec.ts
           src/domains/store/orders/purchase-orders/purchase-orders.uom-config.spec.ts

@@ -35,7 +35,24 @@ export interface MatchedCategory {
   confidence: number;
 }
 
+/**
+ * How the document was read (ia-cargas F5a). Optional: older clients ignore it.
+ */
+export interface ExpenseScanSource {
+  /** Pages (or the photo) read. */
+  pages: number;
+  /** Pages read from the PDF's native text. */
+  text_pages: number;
+  /** Model calls the document was cut into (1 = the whole document at once). */
+  batches: number;
+  /** Pages that could not be read. */
+  missing_pages?: number[];
+}
+
 export interface ExpenseScanResponse {
   scan: ExpenseScanResult;
   matched_category: MatchedCategory | null;
+  /** Spanish notices about the reading (pages left out, two totals…). Optional. */
+  warnings?: string[];
+  scan_source?: ExpenseScanSource;
 }

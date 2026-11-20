@@ -331,14 +331,10 @@ export class InventoryAdjustmentsController {
     if (!file) throw new VendixHttpException(ErrorCodes.INV_SCAN_NO_FILE);
     if (!location_id)
       throw new VendixHttpException(ErrorCodes.INV_SCAN_NO_FILE);
-    const allowed = [
-      'image/jpeg',
-      'image/png',
-      'image/webp',
-      'application/pdf',
-    ];
-    if (!allowed.includes(file.mimetype))
-      throw new VendixHttpException(ErrorCodes.INV_SCAN_INVALID_FILE);
+    // ia-cargas F5a: tipo REAL por firma (fotos, PDF y hojas de cálculo).
+    this.inventoryCountScanner.assertValidScanFile(
+      this.inventoryCountScanner.toScanFile(file),
+    );
     const result = await this.inventoryCountScanner.scanCount(
       file,
       +location_id,
@@ -379,7 +375,8 @@ export class InventoryAdjustmentsController {
     }
     const { job_id } = await this.aiScanJobs.enqueue(
       'inventory_count',
-      [scanFile],
+      // `assertValidScanFile` threw above when there was no file.
+      [scanFile!],
       { location_id: locationId },
     );
     return this.responseService.success({ job_id }, 'Escaneo encolado');
