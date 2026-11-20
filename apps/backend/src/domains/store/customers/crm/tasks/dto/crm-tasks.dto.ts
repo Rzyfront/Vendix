@@ -154,6 +154,30 @@ export class CreateCrmTaskDto {
 }
 
 /**
+ * Body of `POST /:id/complete`, optional. Empty, the task is just completed.
+ * With both fields (a task that moves nothing, the seller chose on the spot),
+ * completing it also moves that open opportunity of the task's customer to
+ * that stage. One without the other is rejected.
+ */
+export class CompleteCrmTaskDto {
+  @ValidateIf(
+    (dto: CompleteCrmTaskDto) =>
+      dto.opportunity_id !== undefined || dto.move_to_stage_id !== undefined,
+  )
+  @IsInt()
+  @Min(1)
+  opportunity_id?: number;
+
+  @ValidateIf(
+    (dto: CompleteCrmTaskDto) =>
+      dto.opportunity_id !== undefined || dto.move_to_stage_id !== undefined,
+  )
+  @IsInt()
+  @Min(1)
+  move_to_stage_id?: number;
+}
+
+/**
  * `null` clears `description`, `due_at`, `assigned_user_id` or
  * `move_to_stage_id`.
  */

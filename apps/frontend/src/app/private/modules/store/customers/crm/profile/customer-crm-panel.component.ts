@@ -1,4 +1,13 @@
-import { Component, computed, effect, inject, input, signal, untracked } from '@angular/core';
+import {
+  Component,
+  computed,
+  effect,
+  inject,
+  input,
+  signal,
+  untracked,
+  viewChild,
+} from '@angular/core';
 import { FormsModule } from '@angular/forms';
 import { RouterLink } from '@angular/router';
 import { firstValueFrom } from 'rxjs';
@@ -49,6 +58,7 @@ import {
   taskCompletedMessage,
   taskMoveLine,
 } from '../shared/crm.utils';
+import { TaskCompleteModalComponent } from '../shared/task-complete-modal.component';
 import { TaskFormModalComponent } from '../shared/task-form-modal.component';
 import { CustomerSectionComponent, CustomerSectionEmptyComponent } from '../../components/customer-section/customer-section.component';
 import { VendixAccountBlockComponent } from '../../../platform-crm/vendix-account-block.component';
@@ -92,6 +102,7 @@ const TAG_CHIP = `${CHIP} border-border bg-surface text-text-secondary`;
     SpinnerComponent,
     StoreUserSelectComponent,
     TextareaComponent,
+    TaskCompleteModalComponent,
     TaskFormModalComponent,
     CustomerSectionComponent,
     CustomerSectionEmptyComponent,
@@ -676,6 +687,8 @@ const TAG_CHIP = `${CHIP} border-border bg-surface text-text-secondary`;
         [fixedCustomer]="p.customer"
         (saved)="onTaskSaved()"
       ></app-crm-task-form-modal>
+
+      <app-crm-task-complete-modal></app-crm-task-complete-modal>
     }
   `,
 })
@@ -730,6 +743,8 @@ export class CustomerCrmPanelComponent {
   protected readonly tasksTotal = signal(0);
   protected readonly tasksLoading = signal(false);
   protected readonly completingId = signal<number | null>(null);
+  /** Asks whether to move the customer's opportunity when completing. */
+  private readonly completer = viewChild(TaskCompleteModalComponent);
 
   // Segments
   protected readonly memberships = signal<CustomerCrmMemberships | null>(null);
@@ -1011,7 +1026,12 @@ export class CustomerCrmPanelComponent {
     if (this.completingId()) return;
     this.completingId.set(task.id);
     try {
-      const completed = await firstValueFrom(this.crm.completeTask(task.id));
+      const completer = this.completer();
+      const completed = completer
+        ? await completer.complete(task)
+        : await firstValueFrom(this.crm.completeTask(task.id));
+      // Dismissed: nothing changed.
+      if (!completed) return;
       this.toast.success(taskCompletedMessage(completed, 'Seguimiento completado'));
       // The task may have moved one of the opportunities listed above.
       if (completed.opportunity_move?.moved) void this.loadBoard();
