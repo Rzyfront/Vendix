@@ -105,6 +105,20 @@ export function storeIsRestaurant(
 }
 
 /**
+ * Production destinations — true when the store includes `manufacturing`.
+ * A producible product sold there goes to production (Planta) with the same
+ * matrix restaurants use; KDS stays restaurant-only. Same OR semantics.
+ */
+export function storeIsManufacturing(
+  industries: industry_enum[] | string[] | null | undefined,
+): boolean {
+  if (!industries || industries.length === 0) {
+    return false;
+  }
+  return industries.some((industry) => industry === 'manufacturing');
+}
+
+/**
  * Industrias con estaciones de servicio (bahías, sillas, mesas de reparación):
  * espejo del frontend, donde `orders_service_stations` solo queda visible si la
  * tienda incluye `service`.

@@ -458,6 +458,24 @@ export class CreateProductDto {
   is_batch_produced?: boolean;
 
   /**
+   * Dónde se produce (producible): `kitchen` = Cocina (Producción), `plant` =
+   * Planta. `null` = lo decide la industria de la tienda. Obligatorio en
+   * tiendas restaurante + manufactura para productos producidos por lote.
+   */
+  @ApiPropertyOptional({ enum: ['kitchen', 'plant'], nullable: true })
+  @IsOptional()
+  @IsIn(['kitchen', 'plant'])
+  production_site?: 'kitchen' | 'plant' | null;
+
+  /** Planta concreta cuando `production_site = plant`; `null` = planta principal. */
+  @ApiPropertyOptional({ nullable: true })
+  @IsOptional()
+  @Type(() => Number)
+  @IsInt()
+  @Min(1)
+  production_plant_id?: number | null;
+
+  /**
    * Appointment redesign phase 2 — whether this product/service is
    * eligible for the customer's home (when
    * `bookings.service_location_type = 'home'`). When false, the ecommerce
@@ -1065,6 +1083,24 @@ export class UpdateProductDto {
   @IsBoolean()
   @Type(() => Boolean)
   is_batch_produced?: boolean;
+
+  /**
+   * Dónde se produce (producible): `kitchen` = Cocina (Producción), `plant` =
+   * Planta. `null` = lo decide la industria de la tienda. Obligatorio en
+   * tiendas restaurante + manufactura para productos producidos por lote.
+   */
+  @ApiPropertyOptional({ enum: ['kitchen', 'plant'], nullable: true })
+  @IsOptional()
+  @IsIn(['kitchen', 'plant'])
+  production_site?: 'kitchen' | 'plant' | null;
+
+  /** Planta concreta cuando `production_site = plant`; `null` = planta principal. */
+  @ApiPropertyOptional({ nullable: true })
+  @IsOptional()
+  @Type(() => Number)
+  @IsInt()
+  @Min(1)
+  production_plant_id?: number | null;
 
   /**
    * Appointment redesign phase 2 — whether this product/service is

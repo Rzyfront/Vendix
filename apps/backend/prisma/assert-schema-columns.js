@@ -88,6 +88,12 @@ const REQUIRED_COLUMNS = [
   'production_orders.plant_id',
   'manufacturing_plants.input_location_id',
   'manufacturing_plants.output_location_id',
+  // --- Dónde se produce cada producto (20261216090000) ---
+  // La lista de productos, el resolvedor de destino y Producción/Planta leen
+  // estas columnas: sin ellas el catálogo y ambas pantallas dan 500.
+  'products.production_site',
+  'products.production_plant_id',
+  'production_orders.production_site',
   // --- CRM Vendix Platform: enlace a una tienda (20261207090000) ---
   // Toda lectura y escritura de platform_crm_links la selecciona: sin ella el
   // bloque «Cuenta Vendix» de la ficha del prospecto da 500.

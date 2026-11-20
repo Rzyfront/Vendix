@@ -7291,6 +7291,17 @@ export const ErrorCodes = {
     devMessage:
       'La orden de producción cambió en otra operación; recarga e intenta de nuevo',
   },
+  PRODUCTION_SITE_REQUIRED: {
+    code: 'PRODUCTION_SITE_REQUIRED',
+    httpStatus: 422,
+    devMessage:
+      'Elige dónde se produce: la tienda es restaurante y manufactura, y un producto producido por lote debe decir si va a Cocina (Producción) o a Planta.',
+  },
+  PRODUCTION_SITE_PLANT_INVALID: {
+    code: 'PRODUCTION_SITE_PLANT_INVALID',
+    httpStatus: 422,
+    devMessage: 'La planta elegida no existe en esta tienda.',
+  },
   PRODUCTION_ORDER_NOT_BATCH: {
     code: 'PRODUCTION_ORDER_NOT_BATCH',
     httpStatus: 422,

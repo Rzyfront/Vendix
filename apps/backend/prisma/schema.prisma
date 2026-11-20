@@ -2352,6 +2352,12 @@ model products {
   is_ingredient                  Boolean                          @default(false)
   is_combo                       Boolean                          @default(false)
   is_batch_produced              Boolean                          @default(false)
+  /// Dónde se produce (producible: `is_batch_produced` + receta/fórmula):
+  /// `kitchen` = Producción (cocina), `plant` = Planta. NULL = lo decide la
+  /// industria de la tienda (solo manufactura → planta, si no → cocina).
+  production_site                String?                          @db.VarChar(20)
+  /// Planta concreta cuando `production_site = plant`; NULL = planta principal.
+  production_plant_id            Int?
   /// Naturaleza de uso: para qué existe el producto. `sale` se vende; `supply`
   /// (insumo) solo entra en recetas/producción/fórmulas; `internal_use` lo
   /// consume la operación. `supply` e `internal_use` NUNCA son vendibles en
@@ -2544,6 +2550,9 @@ model products {
   // Adiciones
   product_option_components  product_options[]                  @relation("product_option_component")
   product_option_assignments product_option_group_assignments[] @relation("product_option_group_assignment_product")
+  production_plant               manufacturing_plants?            @relation("products_production_plant", fields: [production_plant_id], references: [id], onDelete: SetNull, onUpdate: NoAction)
+
+  @@index([production_plant_id])
 }
 
 /// CP-pos-smart-search E.4 (F-069) — log append-only de selecciones del
@@ -13167,6 +13176,9 @@ model production_orders {
   /// NULL for restaurant orders and for stores without any plant (they keep the
   /// `manufacturing_settings` defaults, i.e. today's behaviour).
   plant_id     Int?
+  /// Pantalla dueña de la orden: `kitchen` (Producción) | `plant` (Planta).
+  /// NULL = filas anteriores: Planta las manuales con consecutivo, Producción el resto.
+  production_site String?                  @db.VarChar(20)
 
   store      stores   @relation(fields: [store_id], references: [id], onUpdate: NoAction)
   product    products @relation(fields: [product_id], references: [id], onUpdate: NoAction)
@@ -13255,6 +13267,7 @@ model manufacturing_plants {
   output_location   inventory_locations? @relation("manufacturing_plants_output_location", fields: [output_location_id], references: [id], onDelete: Restrict, onUpdate: NoAction)
   manager           users?               @relation("manufacturing_plants_manager", fields: [manager_user_id], references: [id], onDelete: SetNull, onUpdate: NoAction)
   production_orders production_orders[]
+  products_produced products[]           @relation("products_production_plant")
 
   @@unique([store_id, name])
   @@index([store_id, is_active])

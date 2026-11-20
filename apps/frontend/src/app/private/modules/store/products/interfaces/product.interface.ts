@@ -126,6 +126,10 @@ export interface Product {
   is_ingredient?: boolean;
   is_combo?: boolean;
   is_batch_produced?: boolean;
+  /** Dónde se produce: `kitchen` (Producción) | `plant` (Planta); null = por industria. */
+  production_site?: 'kitchen' | 'plant' | null;
+  /** Planta concreta cuando `production_site = plant`; null = planta principal. */
+  production_plant_id?: number | null;
   /** Hotelería (R5): tipo de habitación dueño de una noche "Noche – {tipo}". */
   lodging_unit_type?: { id: number; name: string } | null;
   /// Appointment redesign phase 2 — whether this product is eligible
@@ -435,6 +439,10 @@ export interface CreateProductDto {
   is_ingredient?: boolean;
   is_combo?: boolean;
   is_batch_produced?: boolean;
+  /** Dónde se produce: `kitchen` (Producción) | `plant` (Planta); null = por industria. */
+  production_site?: 'kitchen' | 'plant' | null;
+  /** Planta concreta cuando `production_site = plant`; null = planta principal. */
+  production_plant_id?: number | null;
   /// Appointment redesign phase 2 — whether this product is eligible
   /// to be performed at the customer's home. When false (default), the
   /// ecommerce booking flow forces `service_location_type='shop'` for
