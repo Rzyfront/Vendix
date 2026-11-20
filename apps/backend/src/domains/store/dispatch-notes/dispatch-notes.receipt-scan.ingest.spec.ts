@@ -133,6 +133,15 @@ describe('DispatchNotesService — receipt scan by pages (ia-cargas F5a)', () =>
     expect(payload).not.toHaveProperty('dataUri');
   });
 
+  it('enqueue: if the queue fails, the S3 copy is dropped and AI_QUEUE_001 is returned', async () => {
+    const { service, s3, queueMock } = build();
+    queueMock.add.mockRejectedValue(new Error('redis down'));
+    await expect(
+      service.enqueueReceiptScan({ buffer: PDF, mimetype: 'application/pdf', originalname: 'r.pdf', size: PDF.length } as any),
+    ).rejects.toMatchObject({ errorCode: 'AI_QUEUE_001' });
+    expect(s3.deleteFile).toHaveBeenCalledWith(s3.uploadFile.mock.calls[0][1]);
+  });
+
   it('enqueue: a file that is not a PDF/photo is rejected as a document problem before S3', async () => {
     const { service, s3, queueMock } = build();
     await expect(

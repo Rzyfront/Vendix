@@ -23,7 +23,10 @@ import { ExpensesService } from './expenses.service';
 import { ExpenseFlowService } from './expense-flow/expense-flow.service';
 import { ExpenseScannerService } from './expense-scanner.service';
 import { S3Service } from '../../../common/services/s3.service';
-import { stashQueuedDocument } from '../../../common/ai-ingest/documents/queued-document';
+import {
+  discardQueuedDocument,
+  stashQueuedDocument,
+} from '../../../common/ai-ingest/documents/queued-document';
 import { EXPENSE_SCAN_MAX_BYTES } from './expense-ingest.profile';
 import { RequestContextService } from '../../../common/context/request-context.service';
 import {
@@ -169,6 +172,8 @@ export class ExpensesController {
         'Escaneo de factura de gasto encolado',
       );
     } catch {
+      // Nothing will read the S3 copy: drop it (best effort).
+      await discardQueuedDocument(this.s3_service, document);
       throw new VendixHttpException(ErrorCodes.AI_QUEUE_001);
     }
   }

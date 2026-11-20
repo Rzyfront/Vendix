@@ -282,6 +282,8 @@ export class DispatchNotesService {
       return { job_id: job.id! };
     } catch (err: any) {
       this.logger.error(`[ReceiptScan] Failed to enqueue: ${err?.message}`);
+      // Nothing will read the S3 copy: drop it (best effort).
+      await this.requireReceiptReader().discard(document);
       throw new VendixHttpException(ErrorCodes.AI_QUEUE_001);
     }
   }
