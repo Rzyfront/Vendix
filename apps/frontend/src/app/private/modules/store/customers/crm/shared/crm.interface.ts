@@ -213,6 +213,12 @@ export interface SaveCrmTask {
   move_to_stage_id?: number | null;
 }
 
+/** Opportunity and stage chosen when completing a task that moves nothing. */
+export interface CompleteCrmTaskMove {
+  opportunity_id: number;
+  move_to_stage_id: number;
+}
+
 export type CrmOpportunityStatus = 'open' | 'won' | 'lost';
 
 export interface CrmOpportunity {

@@ -14,6 +14,7 @@ import { Permissions } from '../../../../auth/decorators/permissions.decorator';
 import { ResponseService } from '@common/responses/response.service';
 import { CRM_TASKS_PERMISSION, CrmTasksService } from './crm-tasks.service';
 import {
+  CompleteCrmTaskDto,
   CreateCrmTaskDto,
   CrmTaskStaffQueryDto,
   CrmTaskStatsQueryDto,
@@ -31,7 +32,7 @@ import {
  *   GET   /store/customers/crm/tasks/:id
  *   POST  /store/customers/crm/tasks
  *   PATCH /store/customers/crm/tasks/:id
- *   POST  /store/customers/crm/tasks/:id/complete
+ *   POST  /store/customers/crm/tasks/:id/complete   body? { opportunity_id, move_to_stage_id }
  *   POST  /store/customers/crm/tasks/:id/reopen
  */
 @Controller('store/customers/crm/tasks')
@@ -94,9 +95,12 @@ export class CrmTasksController {
 
   @Post(':id/complete')
   @Permissions(CRM_TASKS_PERMISSION)
-  async complete(@Param('id', ParseIntPipe) id: number) {
+  async complete(
+    @Param('id', ParseIntPipe) id: number,
+    @Body() dto: CompleteCrmTaskDto,
+  ) {
     return this.response.success(
-      await this.service.complete(id),
+      await this.service.complete(id, dto ?? {}),
       'Tarea completada',
     );
   }

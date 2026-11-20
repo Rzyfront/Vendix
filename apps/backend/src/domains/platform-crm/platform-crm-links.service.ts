@@ -2,7 +2,7 @@ import { Injectable, Logger } from '@nestjs/common';
 import { Prisma } from '@prisma/client';
 import { GlobalPrismaService } from '../../prisma/services/global-prisma.service';
 import { AuditAction, AuditService } from '../../common/audit/audit.service';
-import { ErrorCodes, VendixHttpException } from '../../common/errors';
+import { ErrorCodeEntry, ErrorCodes, VendixHttpException } from '../../common/errors';
 import { PlatformCrmContext } from './platform-store.guard';
 import {
   LinkPlatformCustomerDto,
@@ -12,6 +12,8 @@ import {
 export const PLATFORM_CRM_AUDIT_RESOURCE = 'platform_crm_links';
 const SEARCH_LIMIT = 10;
 const SUMMARY_STORES_LIMIT = 10;
+/** Tope de cordura de enlaces activos por cliente (D2): evita que un error de UI cree cientos. */
+export const MAX_ACTIVE_LINKS_PER_CUSTOMER = 25;
 
 export interface PlatformOrganizationSearchItem {
   id: number;
@@ -65,6 +67,46 @@ export interface PlatformCrmLinkView {
    * `subscriptions` trae solo la suscripción de esa tienda.
    */
   organization: PlatformOrganizationSummary | null;
+}
+
+/** Un enlace activo del cliente con su resumen cerrado (candado 7). */
+export interface PlatformCrmLinkItem {
+  id: number;
+  status: string;
+  note: string | null;
+  linked_at: Date;
+  linked_by: { id: number; first_name: string | null; last_name: string | null };
+  /** `organization` = la org entera; `store` = solo `linked_store`. */
+  scope: 'organization' | 'store';
+  linked_store: { id: number; name: string } | null;
+  organization: PlatformOrganizationSummary | null;
+}
+
+/** `GET store/platform-crm/customers/:customerId/links` */
+export interface PlatformCrmLinkList {
+  links: PlatformCrmLinkItem[];
+}
+
+/** `select` literal de un enlace: lo único que se lee de la fila. */
+const LINK_SELECT = {
+  id: true,
+  status: true,
+  note: true,
+  linked_at: true,
+  organization_id: true,
+  linked_by: { select: { id: true, first_name: true, last_name: true } },
+  linked_store: { select: { id: true, name: true } },
+} as const;
+
+/** Lo que devuelve {@link LINK_SELECT}, escrito a mano: `GetPayload` sobre este esquema dispara el typecheck. */
+interface LinkRow {
+  id: number;
+  status: string;
+  note: string | null;
+  linked_at: Date;
+  organization_id: number;
+  linked_by: { id: number; first_name: string | null; last_name: string | null };
+  linked_store: { id: number; name: string } | null;
 }
 
 /** Destino ya verificado de un enlace: la org entera o una de sus tiendas. */
@@ -154,6 +196,35 @@ export class PlatformCrmLinksService {
     };
   }
 
+  /** Todos los enlaces activos del cliente, del más antiguo al más nuevo. */
+  async listLinks(
+    ctx: PlatformCrmContext,
+    customerId: number,
+  ): Promise<PlatformCrmLinkList> {
+    await this.assertPlatformCustomer(ctx, customerId);
+    const rows = await this.db.platform_crm_links.findMany({
+      where: { store_id: ctx.store_id, customer_id: customerId, status: 'linked' },
+      select: LINK_SELECT,
+      orderBy: [{ linked_at: 'asc' }, { id: 'asc' }],
+      take: MAX_ACTIVE_LINKS_PER_CUSTOMER,
+    });
+    const links: PlatformCrmLinkItem[] = [];
+    for (const row of rows) {
+      const view = await this.toView(row);
+      links.push({
+        ...view.link!,
+        scope: row.linked_store ? 'store' : 'organization',
+        organization: view.organization,
+      });
+    }
+    return { links };
+  }
+
+  /**
+   * @deprecated Compatibilidad con el front de un solo enlace: devuelve el
+   * enlace activo MÁS ANTIGUO. Usar {@link listLinks}; se borra en un PR
+   * posterior.
+   */
   async getLink(
     ctx: PlatformCrmContext,
     customerId: number,
@@ -162,40 +233,14 @@ export class PlatformCrmLinksService {
 
     const link = await this.db.platform_crm_links.findFirst({
       where: { store_id: ctx.store_id, customer_id: customerId, status: 'linked' },
-      select: {
-        id: true,
-        status: true,
-        note: true,
-        linked_at: true,
-        organization_id: true,
-        linked_by: { select: { id: true, first_name: true, last_name: true } },
-        linked_store: { select: { id: true, name: true } },
-      },
+      select: LINK_SELECT,
+      orderBy: [{ linked_at: 'asc' }, { id: 'asc' }],
     });
     if (!link) return { link: null, organization: null };
-
-    return {
-      link: {
-        id: link.id,
-        status: link.status,
-        note: link.note,
-        linked_at: link.linked_at,
-        linked_by: {
-          id: link.linked_by.id,
-          first_name: link.linked_by.first_name ?? null,
-          last_name: link.linked_by.last_name ?? null,
-        },
-        linked_store: link.linked_store
-          ? { id: link.linked_store.id, name: link.linked_store.name }
-          : null,
-      },
-      organization: await this.readOrganizationSummary(
-        link.organization_id,
-        link.linked_store?.id ?? null,
-      ),
-    };
+    return this.toView(link);
   }
 
+  /** Un cliente puede tener varios enlaces (D2); devuelve el que se acaba de crear. */
   async link(
     ctx: PlatformCrmContext,
     customerId: number,
@@ -208,9 +253,11 @@ export class PlatformCrmLinksService {
     let created: { id: number };
     try {
       created = await this.db.$transaction(async (tx) => {
-        // Serializa los enlaces de una misma organización: la regla «la org
-        // entera choca con cualquiera de sus tiendas» cruza dos índices
-        // parciales distintos, y ningún único la cubre sola.
+        // Siempre en este orden (cliente → org) para no cruzar candados.
+        // Cliente: serializa el tope de enlaces y el «ya es tuyo».
+        // Org: la regla «la org entera choca con cualquiera de sus tiendas»
+        // cruza dos índices parciales distintos, y ningún único la cubre sola.
+        await tx.$executeRaw`SELECT pg_advisory_xact_lock(hashtext(${`platform_crm_link_customer:${customerId}`}))`;
         await tx.$executeRaw`SELECT pg_advisory_xact_lock(hashtext(${`platform_crm_link_org:${target.organization_id}`}))`;
         await this.assertNoActiveLink(tx, customerId, target);
         return tx.platform_crm_links.create({
@@ -226,14 +273,16 @@ export class PlatformCrmLinksService {
         });
       });
     } catch (error) {
-      // Carrera entre dos enlaces simultáneos: los únicos parciales de la
-      // migración deciden; se traduce al mismo 409 del chequeo previo.
+      // Carrera que los candados no cubran: los únicos parciales de las
+      // migraciones deciden; se traduce al mismo 409 del chequeo previo.
       if (
         error instanceof Prisma.PrismaClientKnownRequestError &&
         error.code === 'P2002'
       ) {
         await this.assertNoActiveLink(this.db, customerId, target);
-        throw new VendixHttpException(ErrorCodes.PLATFORM_CRM_003);
+        throw new VendixHttpException(
+          target.store ? ErrorCodes.PLATFORM_CRM_007 : ErrorCodes.PLATFORM_CRM_004,
+        );
       }
       throw error;
     }
@@ -259,9 +308,18 @@ export class PlatformCrmLinksService {
       },
     });
 
-    return this.getLink(ctx, customerId);
+    const row = await this.db.platform_crm_links.findFirst({
+      where: { id: created.id, store_id: ctx.store_id },
+      select: LINK_SELECT,
+    });
+    return row ? this.toView(row) : { link: null, organization: null };
   }
 
+  /**
+   * @deprecated Compatibilidad con el front de un solo enlace. Con más de un
+   * enlace activo responde 409 (`PLATFORM_CRM_011`): hay que indicar cuál con
+   * {@link unlinkById}. Se borra en un PR posterior.
+   */
   async unlink(
     ctx: PlatformCrmContext,
     customerId: number,
@@ -269,24 +327,63 @@ export class PlatformCrmLinksService {
   ): Promise<PlatformCrmLinkView> {
     await this.assertPlatformCustomer(ctx, customerId);
 
-    const active = await this.db.platform_crm_links.findFirst({
+    const active = await this.db.platform_crm_links.findMany({
       where: { store_id: ctx.store_id, customer_id: customerId, status: 'linked' },
+      select: { id: true },
+      take: 2,
+    });
+    if (active.length === 0) throw new VendixHttpException(ErrorCodes.PLATFORM_CRM_005);
+    if (active.length > 1) throw new VendixHttpException(ErrorCodes.PLATFORM_CRM_011);
+
+    await this.deactivate(ctx, customerId, active[0].id, dto, ErrorCodes.PLATFORM_CRM_005);
+    return { link: null, organization: null };
+  }
+
+  /**
+   * Desenlaza UN enlace del cliente. Anti-IDOR: el `linkId` debe ser un enlace
+   * activo de ese cliente en esta tienda plataforma; si no, 404 sin escribir.
+   * Devuelve los enlaces que le quedan.
+   */
+  async unlinkById(
+    ctx: PlatformCrmContext,
+    customerId: number,
+    linkId: number,
+    dto: UnlinkPlatformCustomerDto,
+  ): Promise<PlatformCrmLinkList> {
+    await this.assertPlatformCustomer(ctx, customerId);
+    await this.deactivate(ctx, customerId, linkId, dto, ErrorCodes.PLATFORM_CRM_012);
+    return this.listLinks(ctx, customerId);
+  }
+
+  /** Nunca borra: pasa a `unlinked` y conserva quién y cuándo, con auditoría. */
+  private async deactivate(
+    ctx: PlatformCrmContext,
+    customerId: number,
+    linkId: number,
+    dto: UnlinkPlatformCustomerDto,
+    notFound: ErrorCodeEntry,
+  ): Promise<void> {
+    const where = {
+      id: linkId,
+      store_id: ctx.store_id,
+      customer_id: customerId,
+      status: 'linked' as const,
+    };
+    const active = await this.db.platform_crm_links.findFirst({
+      where,
       select: { id: true, organization_id: true, linked_store_id: true },
     });
-    if (!active) throw new VendixHttpException(ErrorCodes.PLATFORM_CRM_005);
+    if (!active) throw new VendixHttpException(notFound);
 
-    // Nunca borra: pasa a `unlinked` y conserva quién y cuándo.
     const result = await this.db.platform_crm_links.updateMany({
-      where: { id: active.id, store_id: ctx.store_id, status: 'linked' },
+      where,
       data: {
         status: 'unlinked',
         unlinked_by_user_id: ctx.user_id,
         unlinked_at: new Date(),
       },
     });
-    if (result.count !== 1) {
-      throw new VendixHttpException(ErrorCodes.PLATFORM_CRM_005);
-    }
+    if (result.count !== 1) throw new VendixHttpException(notFound);
 
     const reason = dto.reason?.length ? dto.reason : null;
     await this.audit.log({
@@ -304,8 +401,30 @@ export class PlatformCrmLinksService {
       newValues: { status: 'unlinked' },
       metadata: { action: 'platform_crm_unlink', customer_id: customerId, reason },
     });
+  }
 
-    return { link: null, organization: null };
+  /** Fila del enlace → vista con su resumen cerrado (candado 7). */
+  private async toView(link: LinkRow): Promise<PlatformCrmLinkView> {
+    return {
+      link: {
+        id: link.id,
+        status: link.status,
+        note: link.note,
+        linked_at: link.linked_at,
+        linked_by: {
+          id: link.linked_by.id,
+          first_name: link.linked_by.first_name ?? null,
+          last_name: link.linked_by.last_name ?? null,
+        },
+        linked_store: link.linked_store
+          ? { id: link.linked_store.id, name: link.linked_store.name }
+          : null,
+      },
+      organization: await this.readOrganizationSummary(
+        link.organization_id,
+        link.linked_store?.id ?? null,
+      ),
+    };
   }
 
   /**
@@ -377,7 +496,9 @@ export class PlatformCrmLinksService {
 
   /**
    * Unicidad (los únicos parciales de las migraciones la respaldan):
-   * - un cliente, un enlace activo;
+   * - un cliente, VARIOS enlaces (D2), hasta {@link MAX_ACTIVE_LINKS_PER_CUSTOMER};
+   *   lo que ya cubre uno de sus enlaces no se vuelve a enlazar (`009`), y la
+   *   org entera no se enlaza si ya tiene una de sus tiendas suelta (`013`);
    * - la org entera, un solo prospecto, y ninguna de sus tiendas enlazada a
    *   otro: el enlace a la org reclama todas sus tiendas;
    * - una tienda, un solo prospecto; varias tiendas de una misma org sí pueden
@@ -388,11 +509,31 @@ export class PlatformCrmLinksService {
     customerId: number,
     target: LinkTarget,
   ): Promise<void> {
-    const own = await client.platform_crm_links.findFirst({
+    const own = await client.platform_crm_links.findMany({
       where: { status: 'linked', customer_id: customerId },
-      select: { id: true },
+      select: { organization_id: true, linked_store_id: true },
     });
-    if (own) throw new VendixHttpException(ErrorCodes.PLATFORM_CRM_003);
+    const sameOrg = own.filter((l) => l.organization_id === target.organization_id);
+    if (target.store) {
+      // La misma tienda, o la org entera que ya la cubre.
+      if (
+        sameOrg.some(
+          (l) => l.linked_store_id === null || l.linked_store_id === target.store!.id,
+        )
+      ) {
+        throw new VendixHttpException(ErrorCodes.PLATFORM_CRM_009);
+      }
+    } else {
+      if (sameOrg.some((l) => l.linked_store_id === null)) {
+        throw new VendixHttpException(ErrorCodes.PLATFORM_CRM_009);
+      }
+      if (sameOrg.length > 0) {
+        throw new VendixHttpException(ErrorCodes.PLATFORM_CRM_013);
+      }
+    }
+    if (own.length >= MAX_ACTIVE_LINKS_PER_CUSTOMER) {
+      throw new VendixHttpException(ErrorCodes.PLATFORM_CRM_010);
+    }
 
     const taken = await client.platform_crm_links.findFirst({
       where: {

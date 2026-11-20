@@ -6,6 +6,7 @@ import { of, throwError } from 'rxjs';
 import { VendixAccountLinkModalComponent } from './vendix-account-link-modal.component';
 import { PlatformCrmService } from './platform-crm.service';
 import {
+  PlatformCrmLinkItem,
   PlatformCrmLinkView,
   PlatformOrganizationSearchItem,
   PlatformStoreSearchItem,
@@ -229,5 +230,42 @@ describe('VendixAccountLinkModalComponent', () => {
     expect(linked).toEqual([]);
     expect(modal.isOpen()).toBeTrue();
     expect(modal['saving']()).toBeFalse();
+  });
+  it('lo que el cliente ya tiene sale «Ya enlazada» y no se puede elegir (org completa cubre sus tiendas)', async () => {
+    const OTHER_STORE: PlatformStoreSearchItem = {
+      ...STORE,
+      id: 80,
+      name: 'Kiosko Sur',
+      organization: { id: 50, name: 'Café Arábigo' },
+    };
+    service.searchAccounts.and.returnValue(of({ organizations: [ORG], stores: [STORE, OTHER_STORE] }));
+    const whole: PlatformCrmLinkItem = {
+      ...VIEW.link!,
+      scope: 'organization',
+      organization: VIEW.organization,
+    };
+    fixture.componentRef.setInput('linkedAccounts', [whole]);
+    await typeInto('pan');
+
+    for (const label of ['la-espiga', 'Sede Norte']) {
+      const option = optionWith(label)!;
+      expect(option.disabled).withContext(label).toBeTrue();
+      expect(option.textContent).withContext(label).toContain('Ya enlazada');
+    }
+    const free = optionWith('Kiosko Sur')!;
+    expect(free.disabled).toBeFalse();
+    expect(free.textContent).not.toContain('Ya enlazada');
+
+    optionWith('Sede Norte')!.click();
+    await render();
+    expect(modal['canSubmit']()).toBeFalse();
+
+    // Una tienda suelta enlazada marca solo esa tienda, no su organización.
+    const single: PlatformCrmLinkItem = { ...whole, scope: 'store', linked_store: { id: 80, name: 'Kiosko Sur' } };
+    fixture.componentRef.setInput('linkedAccounts', [single]);
+    await render();
+    expect(optionWith('Kiosko Sur')!.disabled).toBeTrue();
+    expect(optionWith('la-espiga')!.disabled).toBeFalse();
+    expect(optionWith('Sede Norte')!.disabled).toBeFalse();
   });
 });

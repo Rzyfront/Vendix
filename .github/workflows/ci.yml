@@ -567,6 +567,7 @@ jobs:
         run: >-
           npx jest --ci --runInBand --forceExit --config jest.isolated.config.js --runTestsByPath
           src/domains/platform-crm/platform-crm-links.controller.spec.ts
+          src/domains/platform-crm/platform-crm-links.service.spec.ts
           src/domains/platform-crm/platform-crm.seed.spec.ts
           src/domains/platform-crm/platform-permission-assignment.spec.ts
           src/domains/organization/onboarding/onboarding-wizard-org-admin-role.spec.ts
@@ -769,6 +770,7 @@ jobs:
           --include='**/workflows/services/workflow-limits-api.service.spec.ts'
           --include='**/workflows/utils/workflow-errors.util.spec.ts'
           --include='**/customers/crm/shared/task-form-modal.component.spec.ts'
+          --include='**/customers/crm/shared/task-complete-modal.component.spec.ts'
           --include='**/workflows/records/pages/record-detail-page/record-detail-page.component.spec.ts'
           --include='**/documents/pages/templates-editor/templates-editor-page.component.spec.ts'
           --include='**/super-admin/subscriptions/pages/plans/plan-form.component.spec.ts'

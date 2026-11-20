@@ -53,6 +53,32 @@ export class PlatformCrmLinksController {
     return this.response.success(await this.service.searchAccounts(query.q));
   }
 
+  /** Todas las cuentas Vendix enlazadas del cliente (D2: puede tener varias). */
+  @Get('customers/:customerId/links')
+  @Permissions(PLATFORM_CRM_LINK_PERMISSIONS.READ)
+  async listLinks(
+    @PlatformCrmCtx() ctx: PlatformCrmContext,
+    @Param('customerId', ParseIntPipe) customerId: number,
+  ) {
+    return this.response.success(await this.service.listLinks(ctx, customerId));
+  }
+
+  /** Desenlaza UNA cuenta; el enlace debe ser de este cliente (si no, 404). */
+  @Delete('customers/:customerId/links/:linkId')
+  @Permissions(PLATFORM_CRM_LINK_PERMISSIONS.MANAGE)
+  async unlinkById(
+    @PlatformCrmCtx() ctx: PlatformCrmContext,
+    @Param('customerId', ParseIntPipe) customerId: number,
+    @Param('linkId', ParseIntPipe) linkId: number,
+    @Body() dto: UnlinkPlatformCustomerDto,
+  ) {
+    return this.response.success(
+      await this.service.unlinkById(ctx, customerId, linkId, dto),
+      'Enlace deshecho',
+    );
+  }
+
+  /** @deprecated Usar `GET customers/:customerId/links`. Devuelve el enlace más antiguo. */
   @Get('customers/:customerId/link')
   @Permissions(PLATFORM_CRM_LINK_PERMISSIONS.READ)
   async getLink(
@@ -75,6 +101,10 @@ export class PlatformCrmLinksController {
     );
   }
 
+  /**
+   * @deprecated Usar `DELETE customers/:customerId/links/:linkId`. Con más de
+   * un enlace activo responde 409 (`PLATFORM_CRM_011`).
+   */
   @Delete('customers/:customerId/link')
   @Permissions(PLATFORM_CRM_LINK_PERMISSIONS.MANAGE)
   async unlink(

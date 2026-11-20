@@ -1,6 +1,6 @@
 import { Logger } from '@nestjs/common';
 import { RequestContextService } from '@common/context/request-context.service';
-import { VendixHttpException } from '../../../../../common/errors';
+import { ErrorCodes, VendixHttpException } from '../../../../../common/errors';
 import { CrmTasksService } from './crm-tasks.service';
 
 const STORE = 10;
@@ -760,6 +760,169 @@ describe('CrmTasksService', () => {
 
       await service.complete(50);
       expect(pipeline.moveForTask).toHaveBeenCalledTimes(1);
+    });
+
+    it('race: a PATCH with status and title saves the title and does not move the opportunity', async () => {
+      as('owner');
+      const { service, prisma, pipeline } = setup({
+        task: { opportunity_id: 500, move_to_stage_id: 102 },
+      });
+      // Read pending; another request completes it before this one writes.
+      const write = prisma.crm_tasks.updateMany.getMockImplementation()!;
+      prisma.crm_tasks.updateMany.mockImplementation(async (args: any) =>
+        args.where.status ? { count: 0 } : write(args),
+      );
+      const task = await service.update(50, { status: 'done', title: 'Nuevo título' });
+
+      expect(prisma.crm_tasks.updateMany).toHaveBeenCalledTimes(2);
+      expect(prisma.crm_tasks.updateMany.mock.calls[0][0]).toEqual({
+        where: { id: 50, store_id: STORE },
+        data: { title: 'Nuevo título' },
+      });
+      expect(prisma.crm_tasks.updateMany.mock.calls[1][0]).toEqual({
+        where: { id: 50, store_id: STORE, status: { not: 'done' } },
+        data: { status: 'done', completed_at: expect.any(Date) },
+      });
+      expect(task.title).toBe('Nuevo título');
+      expect(pipeline.moveForTask).not.toHaveBeenCalled();
+      expect(task).not.toHaveProperty('opportunity_move');
+    });
+  });
+
+  describe('choosing the opportunity to move when completing', () => {
+    const chosen = { opportunity_id: 500, move_to_stage_id: 103 };
+
+    it('without a body it completes as before and moves nothing', async () => {
+      as('seller');
+      const { service, prisma, pipeline } = setup();
+      const done = await service.complete(50, {});
+      expect(done).toMatchObject({ status: 'done', opportunity_move: null });
+      expect(prisma.crm_opportunities.count).not.toHaveBeenCalled();
+      expect(pipeline.assertTaskTargetStage).not.toHaveBeenCalled();
+      expect(pipeline.moveForTask).not.toHaveBeenCalled();
+    });
+
+    it('completes the task and moves the chosen open opportunity of its customer', async () => {
+      as('seller');
+      const { service, prisma, pipeline } = setup();
+      const done = await service.complete(50, chosen);
+
+      expect(prisma.crm_opportunities.count).toHaveBeenCalledWith({
+        where: {
+          id: 500,
+          customer_id: CUSTOMER,
+          status: 'open',
+          owner_user_id: SELLER,
+        },
+      });
+      expect(pipeline.assertTaskTargetStage).toHaveBeenCalledWith(500, 103);
+      expect(prisma.crm_tasks.updateMany.mock.calls[0][0]).toEqual({
+        where: { id: 50, store_id: STORE, status: { not: 'done' } },
+        data: { status: 'done', completed_at: expect.any(Date) },
+      });
+      expect(pipeline.moveForTask).toHaveBeenCalledWith(500, 103);
+      expect(done).toMatchObject({
+        status: 'done',
+        opportunity_move: { moved: true, reason: null },
+      });
+      // The choice is not saved on the task: reopening and completing again
+      // moves nothing.
+      expect(done.move_to_stage).toBeNull();
+    });
+
+    it('an opportunity of another customer (or closed) is rejected and nothing is written', async () => {
+      as('owner');
+      const { service, prisma, pipeline } = setup();
+      prisma.crm_opportunities.count.mockResolvedValueOnce(0);
+      expect(await codeOf(service.complete(50, chosen))).toBe('CRM_OPPORTUNITY_001');
+      expect(prisma.crm_opportunities.count).toHaveBeenCalledWith({
+        where: { id: 500, customer_id: CUSTOMER, status: 'open' },
+      });
+      expect(prisma.$transaction).not.toHaveBeenCalled();
+      expect(prisma.crm_tasks.updateMany).not.toHaveBeenCalled();
+      expect(pipeline.moveForTask).not.toHaveBeenCalled();
+    });
+
+    it('a stage of another board, inactive or lost is rejected and nothing is written', async () => {
+      as('owner');
+      const { service, prisma, pipeline } = setup();
+      pipeline.assertTaskTargetStage.mockRejectedValueOnce(
+        new VendixHttpException(ErrorCodes.CRM_TASK_002),
+      );
+      expect(await codeOf(service.complete(50, chosen))).toBe('CRM_TASK_002');
+      expect(prisma.crm_tasks.updateMany).not.toHaveBeenCalled();
+      expect(pipeline.moveForTask).not.toHaveBeenCalled();
+    });
+
+    it('who does not see the opportunity on the board cannot move it', async () => {
+      // The seller helps on a task of STAFF; the opportunity is STAFF's.
+      as('seller');
+      const { service, prisma, pipeline } = setup({
+        task: {
+          assigned_user_id: STAFF,
+          created_by_user_id: OWNER,
+          supporters: [{ user: person(SELLER) }],
+        },
+      });
+      prisma.crm_opportunities.count.mockResolvedValueOnce(0);
+      expect(await codeOf(service.complete(50, chosen))).toBe('CRM_OPPORTUNITY_001');
+      expect(prisma.crm_opportunities.count.mock.calls[0][0].where).toMatchObject({
+        owner_user_id: SELLER,
+      });
+      expect(prisma.crm_tasks.updateMany).not.toHaveBeenCalled();
+      expect(pipeline.moveForTask).not.toHaveBeenCalled();
+    });
+
+    it('a task without customer cannot move anything', async () => {
+      as('owner');
+      const { service, prisma } = setup({ task: { customer_id: null, customer: null } });
+      expect(await codeOf(service.complete(50, chosen))).toBe('CRM_OPPORTUNITY_001');
+      expect(prisma.crm_opportunities.count).not.toHaveBeenCalled();
+      expect(prisma.crm_tasks.updateMany).not.toHaveBeenCalled();
+    });
+
+    it('a task that already moves its opportunity does not take another choice', async () => {
+      as('owner');
+      const { service, prisma, pipeline } = setup({
+        task: { opportunity_id: 500, move_to_stage_id: 102 },
+      });
+      expect(await codeOf(service.complete(50, chosen))).toBe('CRM_TASK_004');
+      expect(prisma.crm_tasks.updateMany).not.toHaveBeenCalled();
+      expect(pipeline.moveForTask).not.toHaveBeenCalled();
+    });
+
+    it('a task already done moves nothing', async () => {
+      as('owner');
+      const { service, prisma, pipeline } = setup({
+        task: { status: 'done', completed_at: new Date('2026-11-18T12:00:00Z') },
+      });
+      const task = await service.complete(50, chosen);
+      expect(task.status).toBe('done');
+      expect(task).not.toHaveProperty('opportunity_move');
+      expect(prisma.crm_opportunities.count).not.toHaveBeenCalled();
+      expect(prisma.crm_tasks.updateMany).not.toHaveBeenCalled();
+      expect(pipeline.moveForTask).not.toHaveBeenCalled();
+    });
+
+    it('completed by someone else meanwhile: the guard leaves it and nothing moves', async () => {
+      as('owner');
+      const { service, prisma, pipeline } = setup();
+      prisma.crm_tasks.updateMany.mockResolvedValueOnce({ count: 0 });
+      const task = await service.complete(50, chosen);
+      expect(pipeline.assertTaskTargetStage).toHaveBeenCalledWith(500, 103);
+      expect(pipeline.moveForTask).not.toHaveBeenCalled();
+      expect(task).not.toHaveProperty('opportunity_move');
+    });
+
+    it('a failing move leaves the task completed and answers failed', async () => {
+      as('owner');
+      const { service, pipeline } = setup();
+      jest.spyOn(Logger.prototype, 'warn').mockImplementation(() => undefined);
+      pipeline.moveForTask.mockRejectedValueOnce(new Error('boom'));
+      expect(await service.complete(50, chosen)).toMatchObject({
+        status: 'done',
+        opportunity_move: { moved: false, reason: 'failed', stage: null },
+      });
     });
   });
 

@@ -14,7 +14,7 @@ import { parseApiError } from '../../../../core/utils/parse-api-error';
 import { CustomerSectionComponent } from '../customers/components/customer-section/customer-section.component';
 import { PlatformCrmService } from './platform-crm.service';
 import {
-  PlatformCrmLinkView,
+  PlatformCrmLinkItem,
   PlatformOrganizationSubscription,
   canManageVendixAccount,
   organizationStateLabel,
@@ -33,10 +33,16 @@ function formatInstantDate(iso: string | null): string {
   });
 }
 
+/** Tope del backend (`UnlinkPlatformCustomerDto.reason`). */
+const MAX_REASON = 300;
+
 type BlockState = 'loading' | 'ready' | 'error' | 'hidden';
 
 /**
  * Bloque "Cuenta Vendix" de la ficha CRM del cliente (solo Vendix Platform).
+ *
+ * Un cliente puede tener varias cuentas enlazadas (organizaciones completas
+ * y/o tiendas sueltas): una tarjeta por cuenta, cada una con su desenlace.
  *
  * El panel lo monta únicamente con `platform:crm_link:read`. Si aun así el
  * backend responde 404 (otra tienda, o el cliente no es del CRM plataforma)
@@ -58,7 +64,7 @@ type BlockState = 'loading' | 'ready' | 'error' | 'hidden';
       <app-customer-section
         title="Cuenta Vendix"
         icon="building-2"
-        hint="Organización o tienda que este cliente creó y paga en Vendix."
+        hint="Organizaciones o tiendas que este cliente creó y paga en Vendix."
       >
         @if (state() === 'loading') {
           <div class="flex justify-center py-4"><app-spinner size="sm"></app-spinner></div>
@@ -67,50 +73,79 @@ type BlockState = 'loading' | 'ready' | 'error' | 'hidden';
             <span>No pudimos cargar la cuenta Vendix.</span>
             <app-button variant="outline" size="sm" (clicked)="reload()">Reintentar</app-button>
           </div>
-        } @else if (view()?.link && view()?.organization) {
+        } @else if (links().length) {
           <div class="flex flex-col gap-3">
-            <div class="flex flex-wrap items-center gap-2">
-              <app-badge variant="success" size="sm">Cliente consolidado</app-badge>
-              <span class="font-semibold text-text-primary">{{ view()!.organization!.name }}</span>
-              <app-badge variant="neutral" size="xs">{{ organizationState() }}</app-badge>
+            <div class="flex flex-wrap items-center justify-between gap-2">
+              <div class="flex flex-wrap items-center gap-2">
+                <app-badge variant="success" size="sm">Cliente consolidado</app-badge>
+                <span class="text-sm text-text-secondary">{{ countLabel() }}</span>
+              </div>
+              @if (canManage()) {
+                <app-button variant="outline" size="sm" (clicked)="modalOpen.set(true)">
+                  <app-icon slot="icon" name="link" [size]="14"></app-icon>
+                  Enlazar otra cuenta
+                </app-button>
+              }
             </div>
 
-            <p class="text-sm text-text-secondary" data-testid="vendix-account-scope">
-              @if (view()!.link!.linked_store; as store) {
-                Enlazado a la tienda
-                <span class="font-medium text-text-primary">{{ store.name }}</span>
-                de esta organización.
-              } @else {
-                Enlazado a la organización completa.
-              }
-            </p>
+            @for (item of links(); track item.id) {
+              <article
+                class="flex flex-col gap-2 rounded-lg border border-border bg-surface p-3"
+                data-testid="vendix-account-card"
+              >
+                <div class="flex flex-wrap items-center gap-2">
+                  <span class="font-semibold text-text-primary">
+                    {{ item.organization?.name || 'Organización no disponible' }}
+                  </span>
+                  @if (item.organization) {
+                    <app-badge variant="neutral" size="xs">{{ organizationState(item) }}</app-badge>
+                  }
+                </div>
 
-            @for (sub of view()!.organization!.subscriptions; track $index) {
-              <div class="flex flex-wrap items-center gap-x-3 gap-y-1 text-sm">
-                <span class="text-text-secondary">{{ sub.store_name }}</span>
-                <span class="font-medium text-text-primary">{{ sub.plan_name || 'Sin plan' }}</span>
-                @if (sub.state) {
-                  <app-badge variant="neutral" size="xs">{{ subscriptionState(sub) }}</app-badge>
+                <p class="text-sm text-text-secondary" data-testid="vendix-account-scope">
+                  @if (item.linked_store; as store) {
+                    Tienda
+                    <span class="font-medium text-text-primary">{{ store.name }}</span>
+                    de esta organización.
+                  } @else {
+                    Organización completa.
+                  }
+                </p>
+
+                @for (sub of item.organization?.subscriptions ?? []; track $index) {
+                  <div class="flex flex-wrap items-center gap-x-3 gap-y-1 text-sm">
+                    <span class="text-text-secondary">{{ sub.store_name }}</span>
+                    <span class="font-medium text-text-primary">{{ sub.plan_name || 'Sin plan' }}</span>
+                    @if (sub.state) {
+                      <app-badge variant="neutral" size="xs">{{ subscriptionState(sub) }}</app-badge>
+                    }
+                    @if (renewalText(sub); as renewal) {
+                      <span class="text-xs text-text-secondary">{{ renewal }}</span>
+                    }
+                  </div>
+                } @empty {
+                  <p class="text-sm text-text-secondary">Aún no tiene tiendas con suscripción.</p>
                 }
-                @if (renewalText(sub); as renewal) {
-                  <span class="text-xs text-text-secondary">{{ renewal }}</span>
+
+                @if (item.note) {
+                  <p class="text-sm text-text-secondary">{{ item.note }}</p>
                 }
-              </div>
-            } @empty {
-              <p class="text-sm text-text-secondary">La organización aún no tiene tiendas con suscripción.</p>
-            }
 
-            @if (view()!.link!.note) {
-              <p class="text-sm text-text-secondary">{{ view()!.link!.note }}</p>
-            }
-
-            @if (canManage()) {
-              <div class="flex justify-end">
-                <app-button variant="outline" size="sm" [loading]="unlinking()" (clicked)="unlink()">
-                  <app-icon slot="icon" name="x-circle" [size]="14"></app-icon>
-                  Desenlazar
-                </app-button>
-              </div>
+                @if (canManage()) {
+                  <div class="flex justify-end">
+                    <app-button
+                      variant="outline"
+                      size="sm"
+                      [loading]="unlinkingId() === item.id"
+                      [disabled]="unlinkingId() !== null && unlinkingId() !== item.id"
+                      (clicked)="unlink(item)"
+                    >
+                      <app-icon slot="icon" name="x-circle" [size]="14"></app-icon>
+                      Desenlazar
+                    </app-button>
+                  </div>
+                }
+              </article>
             }
           </div>
         } @else {
@@ -129,9 +164,10 @@ type BlockState = 'loading' | 'ready' | 'error' | 'hidden';
       @if (canManage()) {
         <app-vendix-account-link-modal
           [customerId]="customerId()"
+          [linkedAccounts]="links()"
           [isOpen]="modalOpen()"
           (isOpenChange)="modalOpen.set($event)"
-          (linked)="onLinked($event)"
+          (linked)="reload()"
         ></app-vendix-account-link-modal>
       }
     }
@@ -146,13 +182,15 @@ export class VendixAccountBlockComponent {
   readonly customerId = input.required<number>();
 
   protected readonly state = signal<BlockState>('loading');
-  protected readonly view = signal<PlatformCrmLinkView | null>(null);
+  protected readonly links = signal<PlatformCrmLinkItem[]>([]);
   protected readonly modalOpen = signal(false);
-  protected readonly unlinking = signal(false);
+  /** Enlace que se está desenlazando (uno a la vez). */
+  protected readonly unlinkingId = signal<number | null>(null);
   protected readonly canManage = computed(() => canManageVendixAccount(this.auth));
-  protected readonly organizationState = computed(() =>
-    organizationStateLabel(this.view()?.organization?.state),
-  );
+  protected readonly countLabel = computed(() => {
+    const count = this.links().length;
+    return count === 1 ? '1 cuenta enlazada' : `${count} cuentas enlazadas`;
+  });
 
   constructor() {
     effect(() => {
@@ -168,45 +206,50 @@ export class VendixAccountBlockComponent {
   private async load(customerId: number): Promise<void> {
     this.state.set('loading');
     try {
-      const view = await firstValueFrom(this.service.getLink(customerId));
+      const { links } = await firstValueFrom(this.service.getLinks(customerId));
       if (customerId !== this.customerId()) return;
-      this.view.set(view);
+      this.links.set(links);
       this.state.set('ready');
     } catch (error) {
       if (customerId !== this.customerId()) return;
-      this.view.set(null);
+      this.links.set([]);
       this.state.set(
         error instanceof HttpErrorResponse && error.status === 404 ? 'hidden' : 'error',
       );
     }
   }
 
-  protected onLinked(view: PlatformCrmLinkView): void {
-    this.view.set(view);
-    this.state.set('ready');
-  }
-
-  protected async unlink(): Promise<void> {
-    const organization = this.view()?.organization;
-    if (!organization || this.unlinking()) return;
-    const confirmed = await this.dialog.confirm({
+  protected async unlink(item: PlatformCrmLinkItem): Promise<void> {
+    if (this.unlinkingId() !== null) return;
+    const name = item.linked_store
+      ? `la tienda ${item.linked_store.name}`
+      : (item.organization?.name ?? 'esta cuenta');
+    const reason = await this.dialog.prompt({
       title: 'Desenlazar cuenta Vendix',
-      message: `El cliente deja de estar enlazado con ${organization.name}. El historial del enlace se conserva y puedes volver a enlazarlo.`,
+      message: `El cliente deja de estar enlazado con ${name}. Sus demás cuentas siguen enlazadas, el historial del enlace se conserva y puedes volver a enlazarlo.`,
+      placeholder: 'Motivo (opcional)',
       confirmText: 'Desenlazar',
       cancelText: 'Cancelar',
-      confirmVariant: 'danger',
     });
-    if (!confirmed) return;
+    if (reason === undefined) return;
 
-    this.unlinking.set(true);
+    const trimmed = reason.trim().slice(0, MAX_REASON);
+    this.unlinkingId.set(item.id);
     try {
-      this.view.set(await firstValueFrom(this.service.unlink(this.customerId())));
+      const { links } = await firstValueFrom(
+        this.service.unlinkById(this.customerId(), item.id, trimmed ? { reason: trimmed } : {}),
+      );
+      this.links.set(links);
       this.toast.success('Enlace deshecho');
     } catch (error) {
       this.toast.error(parseApiError(error).userMessage);
     } finally {
-      this.unlinking.set(false);
+      this.unlinkingId.set(null);
     }
+  }
+
+  protected organizationState(item: PlatformCrmLinkItem): string {
+    return organizationStateLabel(item.organization?.state);
   }
 
   protected subscriptionState(sub: PlatformOrganizationSubscription): string {

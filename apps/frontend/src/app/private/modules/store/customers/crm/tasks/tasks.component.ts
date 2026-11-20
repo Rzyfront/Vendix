@@ -1,4 +1,4 @@
-import { Component, computed, effect, inject, signal, untracked } from '@angular/core';
+import { Component, computed, effect, inject, signal, untracked, viewChild } from '@angular/core';
 import { FormsModule } from '@angular/forms';
 import { RouterLink } from '@angular/router';
 import { firstValueFrom } from 'rxjs';
@@ -31,6 +31,7 @@ import {
   taskCompletedMessage,
   taskMoveLine,
 } from '../shared/crm.utils';
+import { TaskCompleteModalComponent } from '../shared/task-complete-modal.component';
 import { TaskFormModalComponent } from '../shared/task-form-modal.component';
 
 type TaskTab = 'today' | 'overdue' | 'week' | 'open' | 'done';
@@ -58,6 +59,7 @@ const PAGE_SIZE = 30;
     SpinnerComponent,
     StatsComponent,
     StickyHeaderComponent,
+    TaskCompleteModalComponent,
     TaskFormModalComponent,
   ],
   template: `
@@ -182,7 +184,7 @@ const PAGE_SIZE = 30;
                   [attr.aria-label]="(task.status === 'done' ? 'Reabrir ' : 'Completar ') + task.title"
                   [checked]="task.status === 'done'"
                   [disabled]="busyId() === task.id"
-                  (change)="toggle(task)"
+                  (change)="toggle(task, $event)"
                 />
                 <div class="min-w-0 flex-1">
                   <button
@@ -251,6 +253,8 @@ const PAGE_SIZE = 30;
         [task]="editing()"
         (saved)="refresh()"
       ></app-crm-task-form-modal>
+
+      <app-crm-task-complete-modal></app-crm-task-complete-modal>
     </section>
   `,
 })
@@ -284,6 +288,8 @@ export class TasksComponent {
   protected readonly busyId = signal<number | null>(null);
   protected readonly modalOpen = signal(false);
   protected readonly editing = signal<CrmTask | null>(null);
+  /** Asks whether to move the customer's opportunity when completing. */
+  private readonly completer = viewChild.required(TaskCompleteModalComponent);
 
   protected readonly canSeeAll = computed(() => crmCanSeeAll(this.auth));
   /** Whose tasks the counters count: the same filter as the list. */
@@ -334,12 +340,19 @@ export class TasksComponent {
     void this.load(false);
   }
 
-  async toggle(task: CrmTask): Promise<void> {
+  async toggle(task: CrmTask, event?: Event): Promise<void> {
     this.busyId.set(task.id);
     try {
-      const updated = await firstValueFrom(
-        task.status === 'done' ? this.crm.reopenTask(task.id) : this.crm.completeTask(task.id),
-      );
+      const updated =
+        task.status === 'done'
+          ? await firstValueFrom(this.crm.reopenTask(task.id))
+          : await this.completer().complete(task);
+      if (!updated) {
+        // Dismissed: nothing changed, so the checkbox goes back.
+        const box = event?.target as HTMLInputElement | null;
+        if (box) box.checked = task.status === 'done';
+        return;
+      }
       this.rows.update((rows) => rows.map((row) => (row.id === updated.id ? updated : row)));
       this.toast.success(
         updated.status === 'done' ? taskCompletedMessage(updated) : 'Tarea reabierta',

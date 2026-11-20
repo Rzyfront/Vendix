@@ -20,6 +20,7 @@ import {
   resolveCrmViewer,
 } from '../shared/crm-access';
 import {
+  CompleteCrmTaskDto,
   CreateCrmTaskDto,
   CrmTaskStaffQueryDto,
   CrmTaskStatsQueryDto,
@@ -50,6 +51,12 @@ const TASK_INCLUDE = {
 
 type TaskRow = Prisma.crm_tasksGetPayload<{ include: typeof TASK_INCLUDE }>;
 
+/** Opportunity and stage the seller chose when completing the task. */
+interface ChosenMove {
+  opportunity_id: number;
+  move_to_stage_id: number;
+}
+
 interface DayWindow {
   now: Date;
   todayStart: Date;
@@ -67,6 +74,8 @@ interface DayWindow {
  *
  * A task linked to an opportunity can "move" it: when the task is completed
  * the opportunity goes to `move_to_stage_id` through the pipeline service.
+ * A task that moves nothing can still move an open opportunity of its
+ * customer chosen when completing it (`complete` with a body).
  *
  * "Today" and "overdue" are measured in the store's timezone, not the
  * server's (skill vendix-date-timezone).
@@ -272,11 +281,21 @@ export class CrmTasksService {
     return this.toTask(created, new Date());
   }
 
-  async update(id: number, dto: UpdateCrmTaskDto) {
+  async update(
+    id: number,
+    dto: UpdateCrmTaskDto,
+    options: { move?: ChosenMove } = {},
+  ) {
     const viewer = this.viewer();
     const current = await this.findVisible(viewer, id);
     this.assertSupportOnlyEdit(viewer, current, dto);
+    const completing = dto.status === 'done' && current.status !== 'done';
+    // A task already done moves nothing, so its choice is not even checked.
+    const chosen = completing ? options.move : undefined;
+    if (chosen) await this.assertChosenMove(viewer, current, chosen);
+    // Plain fields are written as asked; the status step is guarded apart.
     const data: Prisma.crm_tasksUncheckedUpdateManyInput = {};
+    const state: Prisma.crm_tasksUncheckedUpdateManyInput = {};
 
     if (dto.title !== undefined) data.title = dto.title.trim();
     if (dto.description !== undefined) {
@@ -292,10 +311,9 @@ export class CrmTasksService {
       await this.assertAssignee(viewer, dto.assigned_user_id ?? null);
       data.assigned_user_id = dto.assigned_user_id;
     }
-    const completing = dto.status === 'done' && current.status !== 'done';
     if (dto.status !== undefined && dto.status !== current.status) {
-      data.status = dto.status;
-      data.completed_at = dto.status === 'done' ? new Date() : null;
+      state.status = dto.status;
+      state.completed_at = dto.status === 'done' ? new Date() : null;
     }
     if (
       dto.move_to_stage_id !== undefined &&
@@ -322,22 +340,29 @@ export class CrmTasksService {
     // The task and its support set change together or not at all. The tx
     // client is unscoped: every write names the store. Completing is guarded
     // on the row, so of two simultaneous completions only one moves the
-    // opportunity.
+    // opportunity; the other fields of the same request are saved anyway.
     let completed = false;
     if (
       Object.keys(data).length ||
+      Object.keys(state).length ||
       support.removed.length ||
       support.added.length
     ) {
       await this.prisma.$transaction(async (tx: Prisma.TransactionClient) => {
         if (Object.keys(data).length) {
+          await tx.crm_tasks.updateMany({
+            where: { id, store_id: viewer.store_id },
+            data,
+          });
+        }
+        if (Object.keys(state).length) {
           const { count } = await tx.crm_tasks.updateMany({
             where: {
               id,
               store_id: viewer.store_id,
               ...(completing ? { status: { not: 'done' as const } } : {}),
             },
-            data,
+            data: state,
           });
           completed = completing && count === 1;
         }
@@ -375,12 +400,31 @@ export class CrmTasksService {
     if (!completed) return task;
     return {
       ...task,
-      opportunity_move: await this.moveLinkedOpportunity(updated),
+      opportunity_move: chosen
+        ? await this.moveOpportunity(
+            updated.id,
+            chosen.opportunity_id,
+            chosen.move_to_stage_id,
+            null,
+          )
+        : await this.moveLinkedOpportunity(updated),
     };
   }
 
-  complete(id: number) {
-    return this.update(id, { status: 'done' });
+  /**
+   * Without a body the task is just completed (and moves its opportunity if
+   * it was set up to). With `opportunity_id` and `move_to_stage_id` it also
+   * moves that opportunity, see {@link assertChosenMove}.
+   */
+  complete(id: number, dto: CompleteCrmTaskDto = {}) {
+    const move =
+      dto.opportunity_id && dto.move_to_stage_id
+        ? {
+            opportunity_id: dto.opportunity_id,
+            move_to_stage_id: dto.move_to_stage_id,
+          }
+        : undefined;
+    return this.update(id, { status: 'done' }, { move });
   }
 
   reopen(id: number) {
@@ -583,6 +627,36 @@ export class CrmTasksService {
   }
 
   /**
+   * A move chosen when completing: only for a task that moves nothing by
+   * itself (CRM_TASK_004), and with the same rules as setting one up: the
+   * opportunity is an open one of the task's customer that the viewer sees
+   * on the board (CRM_OPPORTUNITY_001), and the stage an active, non-lost
+   * stage of its board (CRM_TASK_002). Checked before anything is written.
+   */
+  private async assertChosenMove(
+    viewer: CrmViewer,
+    current: TaskRow,
+    chosen: ChosenMove,
+  ): Promise<void> {
+    if (current.move_to_stage_id) {
+      throw new VendixHttpException(ErrorCodes.CRM_TASK_004);
+    }
+    if (!current.customer_id) {
+      throw new VendixHttpException(ErrorCodes.CRM_OPPORTUNITY_001);
+    }
+    await this.assertOpportunityVisible(
+      viewer,
+      chosen.opportunity_id,
+      current.customer_id,
+      true,
+    );
+    await this.pipeline.assertTaskTargetStage(
+      chosen.opportunity_id,
+      chosen.move_to_stage_id,
+    );
+  }
+
+  /**
    * Same visibility as the pipeline: a seller only reaches their own. With a
    * customer, the opportunity must be that customer's, so a task of one
    * customer never moves another customer's opportunity.
@@ -591,11 +665,13 @@ export class CrmTasksService {
     viewer: CrmViewer,
     opportunityId: number,
     customerId?: number,
+    openOnly = false,
   ): Promise<void> {
     const found = await this.prisma.crm_opportunities.count({
       where: {
         id: opportunityId,
         ...(customerId ? { customer_id: customerId } : {}),
+        ...(openOnly ? { status: 'open' as const } : {}),
         ...(viewer.can_see_all ? {} : { owner_user_id: viewer.user_id }),
       },
     });
@@ -637,14 +713,30 @@ export class CrmTasksService {
     if (!task.opportunity_id) {
       return { moved: false, reason: 'opportunity_missing', stage };
     }
+    return this.moveOpportunity(
+      task.id,
+      task.opportunity_id,
+      task.move_to_stage_id,
+      stage,
+    );
+  }
+
+  /**
+   * Moves the opportunity through the pipeline (same move, audit and
+   * customer stage as the board). A failure leaves the task completed and
+   * answers `failed`.
+   */
+  private async moveOpportunity(
+    taskId: number,
+    opportunityId: number,
+    stageId: number,
+    stage: CrmTaskOpportunityMove['stage'],
+  ): Promise<CrmTaskOpportunityMove> {
     try {
-      return await this.pipeline.moveForTask(
-        task.opportunity_id,
-        task.move_to_stage_id,
-      );
+      return await this.pipeline.moveForTask(opportunityId, stageId);
     } catch (error) {
       this.logger.warn(
-        `Task ${task.id}: opportunity ${task.opportunity_id} not moved: ${
+        `Task ${taskId}: opportunity ${opportunityId} not moved: ${
           error instanceof Error ? error.message : String(error)
         }`,
       );
