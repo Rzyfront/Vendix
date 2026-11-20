@@ -3,16 +3,34 @@ import { ErrorCodes, VendixHttpException } from '@common/errors';
 import { computeNitDv, onlyDigits } from '@common/utils/nit.util';
 import { AIEngineService } from '../../../../ai-engine/ai-engine.service';
 import {
-  AIMessage,
-  AIMessageContentPart,
-} from '../../../../ai-engine/interfaces/ai-provider.interface';
-import { parseAiJson } from '../../../../ai-engine/utils/ai-json.util';
-import {
   TECHNICAL_KEY_LENGTHS_LABEL,
   isWellFormedTechnicalKey,
 } from '../fiscal-document-requirements';
 import { AiScanFile } from '@common/ai-scan-jobs/interfaces/ai-scan-job.interface';
-const sharp: typeof import('sharp').default = require('sharp'); // eslint-disable-line @typescript-eslint/no-require-imports, @typescript-eslint/no-unsafe-assignment -- sharp 0.35 types are ESM-only (export default) but CJS runtime exports the function
+import type { AiJobProgress } from '@common/ai-scan-jobs/ai-job-monitor.service';
+import {
+  AiExtractionService,
+  newIngestQuotaKey,
+} from '@common/ai-ingest/extraction/ai-extraction.service';
+import { toScannerError } from '@common/ai-ingest/extraction/scanner-errors';
+import { DocumentPagesService } from '@common/ai-ingest/documents/document-pages.service';
+import {
+  readDocumentsWithAi,
+  ReadDocumentsResult,
+} from '@common/ai-ingest/documents/document-reader';
+import { detectQueuedDocument } from '@common/ai-ingest/documents/queued-document';
+import { mergeFormAnswers } from '@common/ai-ingest/documents/merge-answers';
+import {
+  buildFormInstruction,
+  conflictWarnings,
+  DocumentScanSource,
+  scanSourceOf,
+} from '@common/ai-ingest/documents/form-instruction';
+import {
+  HABILITATION_FIELD_LABELS,
+  HABILITATION_INGEST_PROFILE,
+  habilitationInstruction,
+} from './habilitation-ingest.profile';
 
 /**
  * One extracted field, already checked against the shape the DIAN actually
@@ -71,6 +89,10 @@ export interface DianHabilitationScanResult {
   extraction_notes: string | null;
   /** How many documents the model actually received. */
   documents_scanned: number;
+  /** Avisos de lectura en español (páginas sin leer, valores en conflicto). Opcional. */
+  warnings?: string[];
+  /** Qué se leyó (documentos, páginas, llamadas). Opcional. */
+  scan_source?: DocumentScanSource;
 }
 
 /** Keys the scanner reports on, in the order the form renders them. */
@@ -128,7 +150,11 @@ const ENVIRONMENTS = new Set<ScannedHabilitationEnvironment>([
 export class DianHabilitationScannerService {
   private readonly logger = new Logger(DianHabilitationScannerService.name);
 
-  constructor(private readonly aiEngine: AIEngineService) {}
+  constructor(
+    private readonly aiEngine: AIEngineService,
+    private readonly extraction: AiExtractionService,
+    private readonly documentPages: DocumentPagesService,
+  ) {}
 
   /**
    * Reads 1-3 DIAN habilitación documents and returns every field of the DIAN
@@ -159,9 +185,22 @@ export class DianHabilitationScannerService {
     await this.aiEngine.assertVisionModelLinked('dian_habilitation_scanner');
   }
 
-  /** Núcleo del escaneo: recibe buffer+mime (handler de la cola `ai-scan`). */
+  /**
+   * Núcleo del escaneo (handler `dian_habilitation` de la cola `ai-scan`), por
+   * el lector común de ai-ingest (plan ia-cargas F5b, #14):
+   *
+   * - Cada archivo se prepara por páginas (tipo real por firma; PDF con texto
+   *   nativo E imagen de cada página; foto enderezada a 1536 px). Nunca viaja
+   *   el PDF crudo.
+   * - Las páginas de los 1-3 archivos van JUNTAS en UNA llamada, rotuladas por
+   *   documento, igual que antes: el modelo llena un solo resultado con las dos
+   *   pantallas del portal DIAN (software y resolución de pruebas).
+   * - Esquema + una reparación; desde ahí la misma `normalizeResponse`: Test
+   *   set id, Software id, PIN y demás campos idénticos con la misma respuesta.
+   */
   async scanHabilitationFromFiles(
     files: AiScanFile[],
+    options: { reportProgress?: (progress: AiJobProgress) => Promise<void> } = {},
   ): Promise<DianHabilitationScanResult> {
     this.logger.debug(
       `[HabilitationScan] ${files.length} file(s): ${files
@@ -175,105 +214,70 @@ export class DianHabilitationScannerService {
     // guarda como bueno y solo descubre cuando la DIAN nunca clasifica.
     await this.assertReady();
 
-    const content: AIMessageContentPart[] = [
-      {
-        type: 'text',
-        text:
-          files.length > 1
-            ? `Extract the DIAN habilitación (software + test set + test numbering resolution) data from these ${files.length} Colombian DIAN documents. They are pages of the SAME habilitación process: merge them into a single JSON object. Return ONLY the JSON object matching the schema defined in your system instructions.`
-            : 'Extract the DIAN habilitación (software + test set + test numbering resolution) data from this Colombian DIAN document. Return ONLY the JSON object matching the schema defined in your system instructions.',
-      },
-    ];
+    const typed = files.map((file) => ({
+      buffer: file.buffer,
+      originalName: file.originalName ?? null,
+      mimeType: detectQueuedDocument(
+        { buffer: file.buffer, originalname: file.originalName, mimetype: file.mimeType },
+        'Los documentos de habilitación deben ser PDF o fotos (JPG, PNG o WebP).',
+      ).mime,
+    }));
 
-    for (const file of files) {
-      const { base64, mimeType } = await this.preprocessImage(file);
-      content.push({
-        type: 'image_url',
-        image_url: { url: `data:${mimeType};base64,${base64}`, detail: 'high' },
+    let read: ReadDocumentsResult<Record<string, unknown>>;
+    try {
+      read = await readDocumentsWithAi<Record<string, unknown>>({
+        files: typed,
+        pages: this.documentPages,
+        extraction: this.extraction,
+        appKey: 'dian_habilitation_scanner',
+        schema: HABILITATION_INGEST_PROFILE.documentSchema,
+        instruction: (batch, context) =>
+          buildFormInstruction(habilitationInstruction(files.length), batch, context),
+        limits: HABILITATION_INGEST_PROFILE.limits,
+        maxBytes: HABILITATION_INGEST_PROFILE.limits.maxBytes,
+        splitTallImages: false,
+        renderTextPages: true,
+        quotaKey: newIngestQuotaKey(),
+        reportProgress: options.reportProgress,
+        logLabel: 'HabilitationScan',
+        rawExtractionErrors: true,
+      });
+    } catch (err) {
+      this.logger.error(
+        `AI DIAN habilitation extraction failed: ${(err as Error)?.message}`,
+      );
+      // Se propaga el error del proveedor: "la foto está ilegible" y "el modelo
+      // enlazado a esta app no acepta imágenes" no se arreglan igual.
+      throw toScannerError(err, {
+        parseFail: ErrorCodes.HABILITATION_SCAN_PARSE_FAIL,
+        aiFail: ErrorCodes.HABILITATION_SCAN_AI_FAIL,
+        aiFailMessage: (e) => `La IA no pudo leer los documentos de habilitación: ${e}`,
       });
     }
 
-    const documentMessage: AIMessage = { role: 'user', content };
-
-    const response = await this.aiEngine.run('dian_habilitation_scanner', {}, [
-      documentMessage,
-    ]);
-
-    this.logger.debug(
-      `[HabilitationScan] AI response: success=${response.success}, contentLength=${response.content?.length ?? 0}, model=${response.model}, error=${response.error}`,
-    );
-
-    if (!response.success || !response.content) {
-      this.logger.error(`AI DIAN habilitation extraction failed: ${response.error}`);
-      // Se propaga el error del proveedor: "la foto está ilegible" y "el modelo
-      // enlazado a esta app no acepta imágenes" son causas distintas y la
-      // segunda no se arregla tomando otra foto.
-      throw new VendixHttpException(
-        ErrorCodes.HABILITATION_SCAN_AI_FAIL,
-        response.error
-          ? `La IA no pudo leer los documentos de habilitación: ${response.error}`
-          : undefined,
-      );
-    }
-
+    const merged = mergeFormAnswers(read.batches.map((b) => b.data));
+    let result: DianHabilitationScanResult;
     try {
-      const parsed = parseAiJson(response.content);
-      return this.normalizeResponse(parsed, files.length);
+      result = this.normalizeResponse(merged.data, files.length);
     } catch (err) {
       if (err instanceof VendixHttpException) throw err;
       this.logger.error(
-        `Failed to parse AI DIAN habilitation response: ${response.content}`,
+        `Failed to normalize AI DIAN habilitation response: ${(err as Error)?.message}`,
       );
       throw new VendixHttpException(ErrorCodes.HABILITATION_SCAN_PARSE_FAIL);
     }
+    const warnings = [
+      ...read.warnings,
+      ...conflictWarnings(merged.conflicts, HABILITATION_FIELD_LABELS),
+    ];
+    return {
+      ...result,
+      ...(warnings.length ? { warnings } : {}),
+      scan_source: scanSourceOf(read),
+    };
   }
 
   // --- Private helpers ---
-
-  /**
-   * Same two-path preprocessing as the RUT and resolution scanners: sharp for
-   * images, raw passthrough when sharp throws (PDFs and unsupported formats),
-   * so a PDF reaches the vision model untouched instead of failing the request.
-   */
-  private async preprocessImage(
-    file: AiScanFile,
-  ): Promise<{ base64: string; mimeType: string }> {
-    const MAX_DIMENSION = 1536;
-    const JPEG_QUALITY = 85;
-
-    try {
-      const metadata = await sharp(file.buffer).metadata();
-      const needsResize =
-        (metadata.width && metadata.width > MAX_DIMENSION) ||
-        (metadata.height && metadata.height > MAX_DIMENSION);
-
-      let pipeline = sharp(file.buffer);
-
-      if (needsResize) {
-        pipeline = pipeline.resize(MAX_DIMENSION, MAX_DIMENSION, {
-          fit: 'inside',
-          withoutEnlargement: true,
-        });
-      }
-
-      const processedBuffer = await pipeline
-        .jpeg({ quality: JPEG_QUALITY })
-        .toBuffer();
-
-      return {
-        base64: processedBuffer.toString('base64'),
-        mimeType: 'image/jpeg',
-      };
-    } catch (err) {
-      this.logger.warn(
-        `[HabilitationScan] Image preprocessing failed, using raw: ${err.message}`,
-      );
-      return {
-        base64: file.buffer.toString('base64'),
-        mimeType: file.mimeType,
-      };
-    }
-  }
 
   private normalizeResponse(
     raw: unknown,
