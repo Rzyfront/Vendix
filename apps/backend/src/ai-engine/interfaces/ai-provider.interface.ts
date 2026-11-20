@@ -77,6 +77,12 @@ export interface AIRequestOptions {
    * is sent and the caller still validates the text answer itself.
    */
   responseSchema?: AIResponseSchema;
+  /**
+   * Server-only quota dedupe key; never serialized into a provider body. A
+   * job that makes several calls (ai-ingest batches) passes the same key so
+   * a per-call category (`async_queue`) charges ONE unit per job, as before.
+   */
+  quotaKey?: string;
 }
 
 export interface AIResponseSchema {

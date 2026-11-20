@@ -191,6 +191,55 @@ describe('AiExtractionService', () => {
     expect(peak).toBe(3);
   });
 
+  it('acepta null en opcionales (salida estricta) y números donde va texto, sin reparar', async () => {
+    run.mockResolvedValue({
+      success: true,
+      finish_reason: 'stop',
+      content: '{"rows":[{"id":"7","name":1020304050},{"id":8,"name":null}]}',
+    });
+    const out = await service.extract<{ rows: { id: number; name?: string }[] }>({
+      appKey: 'app',
+      schema: ROWS_SCHEMA,
+      messages: [{ role: 'user', content: 'x' }],
+    });
+    expect(run).toHaveBeenCalledTimes(1);
+    expect(out.rows).toEqual([{ id: 7, name: '1020304050' }, { id: 8 }]);
+  });
+
+  it('cuota: todas las llamadas de una carga comparten quotaKey (1 unidad por carga)', async () => {
+    // Lote 1 se corta y se parte; el primer medio llega inválido y se repara.
+    let calls = 0;
+    run.mockImplementation(async (_app, _vars, messages: AIMessage[]) => {
+      calls++;
+      const ids = idsOf(messages);
+      if (ids.length > 2) return { success: true, content: '{"rows":[', finish_reason: 'length' };
+      if (calls === 2) return { success: true, content: '{"rows":[{"id":"uno"}]}' };
+      return { success: true, content: JSON.stringify({ rows: ids.map((id) => ({ id })) }) };
+    });
+    await service.extractBatches({
+      appKey: 'app',
+      schema: ROWS_SCHEMA,
+      items: [1, 2, 3, 4, 5, 6],
+      batchSize: 4,
+      concurrency: 1,
+      buildMessages: (batch) => [{ role: 'user', content: `ids: ${batch.join(',')}` }],
+      quotaKey: 'ai-ingest:job-1',
+    });
+    const keys = run.mock.calls.map((c) => c[3]?.quotaKey);
+    expect(run.mock.calls.length).toBeGreaterThan(3);
+    expect(new Set(keys)).toEqual(new Set(['ai-ingest:job-1']));
+
+    // Sin clave explícita: una por ejecución, distinta entre cargas.
+    run.mockReset();
+    run.mockResolvedValue({ success: true, content: '{"rows":[]}' });
+    const one = { appKey: 'app', schema: ROWS_SCHEMA, messages: [{ role: 'user' as const, content: 'x' }] };
+    await service.extract(one);
+    await service.extract(one);
+    const [a, b] = run.mock.calls.map((c) => c[3]?.quotaKey);
+    expect(a).toMatch(/^ai-ingest:/);
+    expect(a).not.toBe(b);
+  });
+
   it('toStrictJsonSchema vuelve nullable lo opcional, también en enums', () => {
     const strict = toStrictJsonSchema({
       type: 'object',

@@ -1,4 +1,5 @@
 import { Injectable, Logger } from '@nestjs/common';
+import { randomUUID } from 'crypto';
 import Ajv, { ErrorObject, ValidateFunction } from 'ajv';
 import { AIEngineService } from '../../../ai-engine/ai-engine.service';
 import {
@@ -64,10 +65,21 @@ export class AiExtractionError extends Error {
   }
 }
 
+/**
+ * Quota key shared by every provider call of ONE load (mapping, batches,
+ * repairs, splits). `async_queue` dedupes on `<request id>:<quotaKey>`, so a
+ * load charges one unit, as the single call did before ai-ingest.
+ */
+export function newIngestQuotaKey(): string {
+  return `ai-ingest:${randomUUID()}`;
+}
+
 export interface ExtractOptions {
   appKey: string;
   schema: ExtractionSchema;
   messages: AIMessage[];
+  /** Share it across the calls of one load; default: one key per `extract`. */
+  quotaKey?: string;
 }
 
 export interface ExtractBatchesOptions<TItem> {
@@ -81,6 +93,8 @@ export interface ExtractBatchesOptions<TItem> {
   /** How many times a truncated batch may be halved. Default 3. */
   maxSplitDepth?: number;
   buildMessages: (batch: TItem[]) => AIMessage[];
+  /** Share it across the calls of one load; default: one key per run. */
+  quotaKey?: string;
   /** Real progress: items finished (ok or failed) out of `items.length`. */
   onProgress?: (done: number, total: number) => Promise<void> | void;
 }
@@ -103,6 +117,21 @@ export interface ExtractBatchesResult<TItem, TOut> {
 }
 
 const MAX_ECHO_CHARS = 20_000;
+
+/**
+ * Removes object keys whose value is `null`, at any depth (array items stay).
+ * Strict structured output answers optional fields with `null`; the lenient
+ * schema ajv uses treats them as absent, as the old hand-written parser did.
+ */
+export function dropNullKeys(value: unknown): unknown {
+  if (Array.isArray(value)) return value.map(dropNullKeys);
+  if (!value || typeof value !== 'object') return value;
+  const out: Record<string, unknown> = {};
+  for (const [key, inner] of Object.entries(value as Record<string, unknown>)) {
+    if (inner !== null) out[key] = dropNullKeys(inner);
+  }
+  return out;
+}
 const MAX_ERRORS_SHOWN = 12;
 
 /**
@@ -159,7 +188,16 @@ function nullable(node: JsonSchema): JsonSchema {
 @Injectable()
 export class AiExtractionService {
   private readonly logger = new Logger(AiExtractionService.name);
-  private readonly ajv = new Ajv({ allErrors: true, strict: false });
+  /**
+   * `coerceTypes`: a model that writes a document number as 900123456 (number)
+   * instead of "900123456" is still valid, as the old hand-written parser
+   * accepted; nothing else is coerced (no scalar → array).
+   */
+  private readonly ajv = new Ajv({
+    allErrors: true,
+    strict: false,
+    coerceTypes: true,
+  });
   private readonly validators = new Map<string, ValidateFunction>();
 
   constructor(private readonly aiEngine: AIEngineService) {}
@@ -172,7 +210,13 @@ export class AiExtractionService {
       schema: toStrictJsonSchema(options.schema.schema),
     };
 
-    const first = await this.call(options.appKey, options.messages, responseSchema);
+    const quotaKey = options.quotaKey ?? newIngestQuotaKey();
+    const first = await this.call(
+      options.appKey,
+      options.messages,
+      responseSchema,
+      quotaKey,
+    );
     const firstCheck = this.check<T>(first.content ?? '', validate);
     if (firstCheck.ok) return firstCheck.data;
 
@@ -195,7 +239,12 @@ export class AiExtractionService {
         ].join('\n'),
       },
     ];
-    const second = await this.call(options.appKey, repairMessages, responseSchema);
+    const second = await this.call(
+      options.appKey,
+      repairMessages,
+      responseSchema,
+      quotaKey,
+    );
     const secondCheck = this.check<T>(second.content ?? '', validate);
     if (secondCheck.ok) return secondCheck.data;
 
@@ -217,6 +266,7 @@ export class AiExtractionService {
   ): Promise<ExtractBatchesResult<TItem, TOut>> {
     const total = options.items.length;
     const maxDepth = options.maxSplitDepth ?? 3;
+    const quotaKey = options.quotaKey ?? newIngestQuotaKey();
     const results: ExtractedBatch<TItem, TOut>[] = [];
     const failed: FailedBatch<TItem>[] = [];
     let done = 0;
@@ -236,6 +286,7 @@ export class AiExtractionService {
           appKey: options.appKey,
           schema: options.schema,
           messages: options.buildMessages(items),
+          quotaKey,
         });
         results.push({ items, data });
         await advance(items.length);
@@ -271,9 +322,11 @@ export class AiExtractionService {
     appKey: string,
     messages: AIMessage[],
     responseSchema: { name: string; schema: JsonSchema },
+    quotaKey: string,
   ): Promise<AIResponse> {
     const response = await this.aiEngine.run(appKey, {}, messages, {
       responseSchema,
+      quotaKey,
     });
     if (!response.success) {
       throw new AiExtractionError(
@@ -301,6 +354,9 @@ export class AiExtractionService {
         errors: [`The answer is not valid JSON (${(error as Error).message}).`],
       };
     }
+    // The provider gets the strict schema (optional = nullable) but ajv checks
+    // the lenient one: a `null` optional means "absent", so drop it first.
+    parsed = dropNullKeys(parsed);
     if (validate(parsed)) return { ok: true, data: parsed as T };
     return { ok: false, errors: this.describe(validate.errors) };
   }
@@ -311,11 +367,13 @@ export class AiExtractionService {
     );
   }
 
+  /** Cached by name AND content: two profiles may reuse a name with other fields. */
   private validator(schema: ExtractionSchema): ValidateFunction {
-    let validate = this.validators.get(schema.name);
+    const key = `${schema.name}:${JSON.stringify(schema.schema)}`;
+    let validate = this.validators.get(key);
     if (!validate) {
       validate = this.ajv.compile(schema.schema);
-      this.validators.set(schema.name, validate);
+      this.validators.set(key, validate);
     }
     return validate;
   }
