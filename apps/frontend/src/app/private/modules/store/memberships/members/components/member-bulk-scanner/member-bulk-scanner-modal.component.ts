@@ -37,7 +37,10 @@ import {
 } from '../../../../../../../shared/components/index';
 import { CurrencyPipe } from '../../../../../../../shared/pipes/currency/currency.pipe';
 
-import { MemberBulkScannerService } from '../../services/member-bulk-scanner.service';
+import {
+  MEMBER_ANALYZE_CHUNK,
+  MemberBulkScannerService,
+} from '../../services/member-bulk-scanner.service';
 import { BulkUploadLogService } from '../../../../bulk-uploads/services/bulk-upload-log.service';
 import {
   BulkUploadFileInfo,
@@ -313,6 +316,11 @@ function isSheetFile(file: File): boolean {
               [showRetry]="!!selectedFile()"
               (retry)="startScan()"
             />
+            @if (analyzeProgress(); as ap) {
+              <p class="text-xs text-text-secondary">
+                Revisando socios existentes y planes: {{ ap.done }} de {{ ap.total }}
+              </p>
+            }
             @if (aiProgress.error()) {
               <app-button variant="outline" (clicked)="backToUpload()">
                 Elegir otro archivo
@@ -798,6 +806,8 @@ export class MemberBulkScannerModalComponent {
     }
     return map;
   });
+  /** ia-cargas F2 — progress of a chunked analyze (big sheets only). */
+  readonly analyzeProgress = signal<{ done: number; total: number } | null>(null);
   /** Cards rendered at once; "Mostrar más" adds a page. */
   readonly visibleCount = signal(PREVIEW_PAGE_SIZE);
   readonly visibleMembers = computed(() =>
@@ -1010,8 +1020,15 @@ export class MemberBulkScannerModalComponent {
           // backend analyzes 200 per request.
           return from(
             this.service
-              .analyzeRosterInChunks(res.data)
-              .then((data) => ({ success: true, data, message: undefined as string | undefined })),
+              .analyzeRosterInChunks(res.data, (done, total) =>
+                this.analyzeProgress.set(
+                  total > MEMBER_ANALYZE_CHUNK ? { done, total } : null,
+                ),
+              )
+              .then((data) => {
+                this.analyzeProgress.set(null);
+                return { success: true, data, message: undefined as string | undefined };
+              }),
           );
         }),
         tap((res) => {
@@ -1032,6 +1049,7 @@ export class MemberBulkScannerModalComponent {
                   'Error al procesar el documento';
             this.toast.error(display);
           }
+          this.analyzeProgress.set(null);
           if (!this.aiProgress.error()) this.aiProgress.onFailed(err);
           return of(null);
         }),
@@ -1432,6 +1450,7 @@ export class MemberBulkScannerModalComponent {
     this.editablePlans.set([]);
     this.editableMembers.set([]);
     this.visibleCount.set(PREVIEW_PAGE_SIZE);
+    this.analyzeProgress.set(null);
     // Obligatorio: el contenido proyectado en app-modal no se destruye al
     // cerrar, así que sin este reset la segunda apertura traería el check ya
     // marcado y el guard quedaría anulado.
