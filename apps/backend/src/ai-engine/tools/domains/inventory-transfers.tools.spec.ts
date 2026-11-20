@@ -220,7 +220,7 @@ describe('inventory-transfers.tools · P4 transferencias multi-producto', () => 
       [
         'modo desconocido',
         { ...QUICK_ARGS, mode: 'now' },
-        /mode=quick/,
+        /se hace ahora|orden pendiente/,
       ],
       [
         'destino externo sin nombre',
@@ -304,6 +304,17 @@ describe('inventory-transfers.tools · P4 transferencias multi-producto', () => 
       expect(preview.message).toBe(
         'iPhone 15 Pro maneja variantes: hay que elegir cuál se mueve.',
       );
+      expect(visibleText(preview)).not.toMatch(JARGON);
+    });
+
+    it('un modo no reconocido se pide en lenguaje de comerciante', async () => {
+      const { tools } = buildTools();
+      const preview = await getTool(tools, 'create_stock_transfer').preview!(
+        { ...QUICK_ARGS, mode: 'mass_only' },
+        CONTEXT,
+      );
+      expect(preview.status).toBe('error');
+      expect(visibleText(preview)).not.toMatch(JARGON);
     });
 
     it('no propone si no alcanza el disponible en origen', async () => {
@@ -339,7 +350,7 @@ describe('inventory-transfers.tools · P4 transferencias multi-producto', () => 
             .fn()
             .mockRejectedValue(
               new BadRequestException(
-                'No tienes permiso para transferir entre tiendas',
+                'Cross-store stock transfers are not allowed in STORE operating scope',
               ),
             ),
         } as any,
@@ -349,9 +360,11 @@ describe('inventory-transfers.tools · P4 transferencias multi-producto', () => 
         CONTEXT,
       );
       expect(preview.status).toBe('error');
-      expect(preview.message).toBe(
-        'No tienes permiso para transferir entre tiendas',
-      );
+      // El servicio responde en inglés y con vocabulario de sistema: la persona
+      // ve la frase en español, no el texto crudo.
+      expect(preview.message).toMatch(/desde la organización/i);
+      expect(visibleText(preview)).not.toMatch(JARGON);
+      expect(visibleText(preview)).not.toContain('Cross-store');
     });
 
     it('destino externo como orden pendiente: avisa la alerta sin soporte y no consulta destino', async () => {

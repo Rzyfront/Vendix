@@ -136,6 +136,55 @@ function describeError(error: unknown): { code?: string; message: string } {
     };
   }
   if (error instanceof Error) return { message: error.message };
+  return { message: 'No se pudo completar la operación.' };
+}
+
+/**
+ * El servicio responde en inglés y con vocabulario de sistema (alcance, cross-store).
+ * La persona ve la frase en español; el texto original queda como guía para el modelo.
+ */
+function humanizeServiceError(error: unknown): {
+  code?: string;
+  message: string;
+  detail?: string;
+} {
+  const info = describeError(error);
+  const raw = info.message ?? '';
+  const known: Array<[RegExp, string]> = [
+    [
+      /cross-store stock transfers/i,
+      'No puedes mover inventario entre tiendas desde el alcance de una sola tienda. Hazlo desde la organización.',
+    ],
+    [
+      /organization context is required/i,
+      'Necesitas elegir la organización desde la que trabajas.',
+    ],
+    [
+      /source and destination locations must be different/i,
+      'La bodega de origen y la de destino no pueden ser la misma.',
+    ],
+    [
+      /insufficient stock/i,
+      'No hay existencias suficientes en la bodega de origen para esa cantidad.',
+    ],
+  ];
+  for (const [pattern, spanish] of known) {
+    if (pattern.test(raw)) {
+      return { code: info.code, message: spanish, detail: raw };
+    }
+  }
+  // Los mensajes que ya escribe el dominio en español se muestran tal cual:
+  // traducirlos perdería el detalle útil (producto, bodega, cantidades).
+  const spanish =
+    /[áéíóúñ¿¡]/i.test(raw) ||
+    /\b(no|sin|falta|stock insuficiente|no hay|bodega|producto|permiso)\b/i.test(
+      raw,
+    );
+  return {
+    code: info.code,
+    message: spanish || !raw ? raw : 'No se pudo completar el movimiento de inventario.',
+    detail: raw,
+  };
   return { message: 'Error desconocido' };
 }
 
@@ -156,7 +205,7 @@ export function parseTransferRequest(args: Record<string, any>):
     return {
       ok: false,
       message:
-        'Indica si el movimiento se hace ya entre tus bodegas (mode=quick) o si se prepara como orden pendiente de aprobar (mode=draft).',
+        'Dime si el movimiento se hace ahora entre tus bodegas o si se prepara como orden pendiente de aprobar.',
     };
   }
 
@@ -187,7 +236,7 @@ export function parseTransferRequest(args: Record<string, any>):
       return {
         ok: false,
         message:
-          'El movimiento inmediato solo funciona entre tus propias bodegas. Un envío a un destino externo se prepara como orden pendiente (mode=draft) con remisión de salida.',
+          'El movimiento inmediato solo funciona entre tus propias bodegas. Un envío a un destino externo queda como orden pendiente, con remisión de salida.',
       };
     }
     if (!external.name) {
@@ -201,7 +250,7 @@ export function parseTransferRequest(args: Record<string, any>):
     ) {
       return {
         ok: false,
-        message: `Tipo de documento soporte no válido. Usa uno de: ${TRANSFER_SUPPORT_DOCUMENT_TYPES.join(', ')}.`,
+        message: 'Ese tipo de soporte no lo reconozco: dime si es orden de venta, factura, orden de compra, devolución u otro.',
       };
     }
   }
@@ -221,14 +270,14 @@ export function parseTransferRequest(args: Record<string, any>):
   if (!(DOCUMENT_MODES as readonly string[]).includes(String(documents))) {
     return {
       ok: false,
-      message: 'documents solo acepta "none" o "dispatch_notes".',
+      message: 'Dime si el traslado lleva remisión de salida o no la lleva.',
     };
   }
   if (mode === 'quick' && documents === 'dispatch_notes') {
     return {
       ok: false,
       message:
-        'El movimiento inmediato no genera remisiones. Si necesitas remisión, prepara la orden pendiente (mode=draft).',
+        'El movimiento inmediato no genera remisiones. Si necesitas remisión, déjalo como orden pendiente.',
     };
   }
 
@@ -276,7 +325,7 @@ export function parseTransferRequest(args: Record<string, any>):
       return {
         ok: false,
         message:
-          'El movimiento inmediato no elige lotes. Para escoger lote por producto prepara la orden pendiente (mode=draft).',
+          'El movimiento inmediato no elige lotes. Para escoger el lote por producto, déjalo como orden pendiente.',
       };
     }
     const line: ToolLine = {
@@ -641,7 +690,7 @@ export function createInventoryTransferTools(
             domain: 'inventory',
           };
         } catch (error) {
-          return previewError(target, describeError(error).message);
+          return previewError(target, humanizeServiceError(error).message);
         }
       },
       handler: async (args) => {
@@ -655,8 +704,25 @@ export function createInventoryTransferTools(
           parsed.mode === 'draft' && typeof args.expected_date === 'string'
             ? new Date(args.expected_date)
             : undefined;
-        if (expected && Number.isNaN(expected.getTime())) {
-          return toolError('La fecha límite no es válida (usa AAAA-MM-DD).');
+        if (typeof args.expected_date === 'string' && parsed.mode === 'draft') {
+          const raw = args.expected_date.trim();
+          const match = /^(\d{4})-(\d{2})-(\d{2})$/.exec(raw);
+          const real =
+            !!match &&
+            (() => {
+              const [, y, m, d] = match;
+              const date = new Date(`${y}-${m}-${d}T00:00:00Z`);
+              return (
+                date.getUTCFullYear() === Number(y) &&
+                date.getUTCMonth() + 1 === Number(m) &&
+                date.getUTCDate() === Number(d)
+              );
+            })();
+          if (!real) {
+            return toolError(
+              'La fecha límite no es válida: usa una fecha real en formato AAAA-MM-DD.',
+            );
+          }
         }
 
         const plain: Record<string, unknown> = {
@@ -737,9 +803,8 @@ export function createInventoryTransferTools(
                 : `Orden de transferencia${numberText} creada y pendiente de aprobar: todavía no se movió inventario.`,
             transfer_id: transfer?.id ?? null,
             transfer_number: number,
-            status:
-              transfer?.status ??
-              (parsed.mode === 'quick' ? 'completed' : 'pending'),
+            // No inventar estado: si el servicio no lo devuelve, se omite.
+            ...(transfer?.status ? { status: transfer.status } : {}),
             modo: parsed.mode === 'quick' ? 'inmediato' : 'orden pendiente',
             unidades: units,
             productos: parsed.lines.length,
@@ -751,7 +816,7 @@ export function createInventoryTransferTools(
               : {}),
           });
         } catch (error) {
-          const info = describeError(error);
+          const info = humanizeServiceError(error);
           return toolError(
             info.message,
             'Revisa el disponible con find_transfer_products y vuelve a proponer; no repitas el movimiento sin confirmar que no quedó aplicado.',

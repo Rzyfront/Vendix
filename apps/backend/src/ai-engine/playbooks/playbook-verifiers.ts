@@ -397,7 +397,7 @@ const RULES: Record<string, Rule> = {
     bridgePath: (_i, o) =>
       `store/stock-transfers/${o.resource_ids.transfer_id}`,
     required: ['from_location_id', 'to_location_id', 'expected_status'],
-    effects: [['transfer', 'manage_stock_transfers']],
+    effects: [['transfer', 'create_stock_transfer']],
     predicate: (d, i, obs) =>
       !same(i.from_location_id, i.to_location_id) &&
       d.status === i.expected_status &&
