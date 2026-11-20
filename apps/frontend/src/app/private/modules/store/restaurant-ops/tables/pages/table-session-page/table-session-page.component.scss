@@ -803,6 +803,14 @@
   color: var(--color-success, #16a34a);
 }
 
+// Monto descontado en la línea (referencia junto al total ya descontado).
+.item-money__discount {
+  display: block;
+  font-size: 0.68rem;
+  font-weight: 600;
+  color: var(--color-success, #16a34a);
+}
+
 .item-action {
   grid-area: action;
   display: flex;
@@ -934,6 +942,21 @@
   border-radius: 999px;
   background-color: color-mix(in srgb, var(--color-warning) 15%, var(--color-surface));
   color: var(--color-warning, #b45309);
+  font-size: 0.68rem;
+  font-weight: 600;
+  white-space: nowrap;
+  vertical-align: middle;
+}
+
+// Promo de la línea: mismo pill que "Para llevar", en el verde de éxito.
+.item-promo {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.2rem;
+  padding: 0.1rem 0.4rem;
+  border-radius: 999px;
+  background-color: color-mix(in srgb, var(--color-success, #16a34a) 14%, var(--color-surface));
+  color: var(--color-success, #16a34a);
   font-size: 0.68rem;
   font-weight: 600;
   white-space: nowrap;

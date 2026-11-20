@@ -158,6 +158,27 @@
         margin-left: auto;
         font-size: 0.85rem;
       }
+
+      // Promo vigente: precio de lista tachado + precio que cobra la cuenta.
+      .price--promo {
+        color: var(--color-success, #15803d);
+      }
+
+      .promo-tag {
+        display: inline-flex;
+        align-items: center;
+        gap: 0.2rem;
+        max-width: 10rem;
+        padding: 0.05rem 0.4rem;
+        border-radius: 999px;
+        font-size: 0.7rem;
+        font-weight: 600;
+        white-space: nowrap;
+        overflow: hidden;
+        text-overflow: ellipsis;
+        color: var(--color-success, #15803d);
+        background: color-mix(in srgb, var(--color-success, #15803d) 12%, transparent);
+      }
     }
   }
 
@@ -607,4 +628,11 @@
   80% {
     transform: translateX(3px);
   }
+}
+
+// Precio de lista tachado cuando hay promo (fila y botones de variante).
+.price-regular {
+  font-weight: 400;
+  color: var(--color-text-secondary, #6b7280);
+  margin-right: 0.25rem;
 }

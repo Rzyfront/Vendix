@@ -28,6 +28,7 @@ describe('order-breakdown.util', () => {
         ],
         tax_total: 4444.44,
         total: 60000,
+        total_before_discount: 60000,
       });
     });
 
@@ -40,6 +41,41 @@ describe('order-breakdown.util', () => {
       expect(line.discount).toBe(16666.67);
       expect(line.tax_total).toBe(3111.11);
       expect(line.total).toBe(42000);
+    });
+
+    it('línea con promo: el precio antes del descuento reescala el impuesto a la base completa', () => {
+      // Pinchos de pollo (Pollo Árabe): 30.000 con INC incluido, promo 30 %.
+      // El INC persistido (1.555,56) es sobre la base descontada; el precio
+      // tachado debe ser 30.000, no base + impuesto descontado (29.333,34).
+      const line = buildOrderLineBreakdown({
+        total_price: '27777.78',
+        discount_amount: '8333.34',
+        order_item_taxes: [inc(1555.56)],
+      });
+      expect(line.total).toBe(21000);
+      expect(line.total_before_discount).toBe(30000);
+    });
+
+    it('impuesto sin tasa utilizable: reescala proporcional a la base', () => {
+      const line = buildOrderLineBreakdown({
+        total_price: '10000',
+        discount_amount: '5000',
+        order_item_taxes: [
+          { tax_name: 'IVA', tax_rate: null, tax_amount: '950.00' },
+        ],
+      });
+      expect(line.total).toBe(5950);
+      expect(line.total_before_discount).toBe(11900);
+    });
+
+    it('línea con promo sin filas de impuesto: antes del descuento es la base', () => {
+      const line = buildOrderLineBreakdown({
+        total_price: '10000',
+        discount_amount: '2500',
+        order_item_taxes: [],
+      });
+      expect(line.total).toBe(7500);
+      expect(line.total_before_discount).toBe(10000);
     });
 
     it('línea vieja sin desglose: no inventa impuesto', () => {
