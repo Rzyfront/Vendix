@@ -532,6 +532,16 @@ export const TOOL_DISCOVERY_QUERIES_ES: Readonly<
     'Necesito dar de baja unas unidades vencidas',
     'Hazme la corrección de conteo porque faltan unidades en esa sede',
   ],
+  create_stock_transfer: [
+    'Pásame 10 cargadores, 5 audífonos y 3 forros de la bodega principal a la tienda',
+    'Mueve ya estos productos a la otra bodega, varios de una',
+    'Traslada a la sede norte 2 camisetas talla M y 3 talla L',
+    'Oe, haz un traslado masivo de la bodega a la tienda del centro',
+    'Prepara una transferencia con remisión para mandar mercancía a la otra sede',
+    'Deja lista una orden de traslado pendiente de aprobar con estos productos',
+    'Saca esta mercancía para un cliente externo con su remisión de salida',
+    'Necesito pasar inventario entre bodegas, son como veinte referencias',
+  ],
   create_store_role: [
     'Necesito crear un rol nuevo para los vendedores de la tienda',
     'Quiero armar un perfil de cajero con permisos específicos',
@@ -663,6 +673,14 @@ export const TOOL_DISCOVERY_QUERIES_ES: Readonly<
     "Muéstrame los proveedores que coincidan con 'Lácteos'",
     'Lista mis proveedores',
     '¿Qué proveedores tengo registrados?',
+  ],
+  find_transfer_products: [
+    '¿Cuántos cargadores tengo en la bodega para pasar a la tienda?',
+    'Busca estos productos en la bodega principal antes de trasladarlos',
+    '¿Qué variantes de la camiseta hay disponibles para mover a la otra sede?',
+    'Mira si alcanza el stock en bodega para mandar estos productos a la tienda',
+    'Oe, cuánto hay disponible de esto en origen y en destino',
+    'Antes del traslado dime qué hay de cada producto en la bodega',
   ],
   fire_kitchen_order: [
     'Manda esos platos a la cocina ya',

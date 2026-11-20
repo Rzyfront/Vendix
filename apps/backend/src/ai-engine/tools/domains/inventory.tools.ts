@@ -15,6 +15,7 @@ import { CompleteTransferDto } from '../../../domains/store/orders/stock-transfe
 import { CreateLocationDto } from '../../../domains/store/inventory/locations/dto/create-location.dto';
 import { UpdateLocationDto } from '../../../domains/store/inventory/locations/dto/update-location.dto';
 import { SourcingSuggestionQueryDto } from '../../../domains/store/inventory/stock-levels/dto/sourcing-suggestion-query.dto';
+import { createInventoryTransferTools } from './inventory-transfers.tools';
 
 export interface InventoryToolServices {
   stockLevelsService: StockLevelsService;
@@ -651,7 +652,7 @@ export function createInventoryTools(
       version: '1',
       domain: 'inventory',
       description:
-        'Crea, edita, aprueba, completa o cancela transferencias de stock entre bodegas. Flujo: create (borrador) → approve (reserva en origen, pasa a tránsito) → complete (mueve el stock a destino) o cancel (libera reservas). Lee primero get_stock_levels y resuelve bodegas con get_inventory_locations.',
+        'Edita, aprueba, completa o cancela transferencias de stock existentes entre bodegas. Flujo: approve (reserva en origen, pasa a tránsito) → complete (mueve el stock a destino) o cancel (libera reservas). Para crear una transferencia nueva (uno o varios productos, mover ya o dejarla pendiente) usa create_stock_transfer; create aquí queda solo por compatibilidad. Lee primero get_stock_levels y resuelve bodegas con get_inventory_locations.',
       parameters: {
         type: 'object',
         properties: {
@@ -1901,7 +1902,7 @@ export function createInventoryTools(
             sourcing.suggestion === 'available'
               ? 'Vende desde la bodega principal: tiene suficiente.'
               : sourcing.suggestion === 'transfer'
-                ? 'Mueve el faltante con manage_stock_transfers desde una bodega con existencias.'
+                ? 'Mueve el faltante con create_stock_transfer (mode=quick) desde una bodega con existencias.'
                 : 'Ninguna bodega cubre: crea una orden de compra (manage_purchase_orders).';
 
           return JSON.stringify({
@@ -1934,5 +1935,8 @@ export function createInventoryTools(
         }
       },
     },
+
+    // ─── P4: transferencias multi-producto (find + create) ─────────────
+    ...createInventoryTransferTools(services),
   ];
 }
