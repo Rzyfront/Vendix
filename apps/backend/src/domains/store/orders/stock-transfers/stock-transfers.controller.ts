@@ -141,12 +141,34 @@ export class StockTransfersController {
     @Query('to_location_id') toLocationId?: string,
     @Query('category_id') categoryId?: string,
     @Query('limit') limit?: string,
+    @Query('product_ids') productIds?: string,
   ) {
-    const data = await this.stockTransfersService.getLocationStock(
+    const page = await this.stockTransfersService.getLocationStock(
       parseRequiredId(fromLocationId, 'from_location_id'),
       parseOptionalId(toLocationId),
       parseOptionalId(categoryId),
       limit ? +limit : undefined,
+      parseIdList(productIds),
+    );
+    return {
+      success: true,
+      data: page.rows,
+      meta: { has_more: page.has_more, limit: page.limit },
+    };
+  }
+
+  /** P3 — escáner / pegar lista: SKU o código de barras exacto (M2). */
+  @Get('lookup-code')
+  @Permissions('store:stock-transfers:read')
+  async lookupTransferCode(
+    @Query('code') code: string,
+    @Query('from_location_id') fromLocationId: string,
+    @Query('to_location_id') toLocationId?: string,
+  ) {
+    const data = await this.stockTransfersService.lookupTransferCode(
+      code ?? '',
+      parseRequiredId(fromLocationId, 'from_location_id'),
+      parseOptionalId(toLocationId),
     );
     return { success: true, data };
   }

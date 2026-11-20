@@ -4,6 +4,8 @@ import {
   listTransferAdvancedOptions,
   listTransferBatches,
   listTransferLocationStock,
+  listTransferLocationStockPage,
+  lookupTransferCode,
   shippingMethodScope,
 } from './transfer-advanced-options';
 import {
@@ -11,7 +13,12 @@ import {
   parseOptionalId,
   parseRequiredId,
 } from './transfer-query-params';
-import { resolveStoreSurfaceNoteStoreId } from './transfer-transport';
+import {
+  resolveLineBatch,
+  resolveStoreSurfaceNoteStoreId,
+  resolveTransferDriver,
+  transferStaffUserWhere,
+} from './transfer-transport';
 
 function buildClient() {
   return {
@@ -61,9 +68,17 @@ describe('transfer-advanced-options (P3)', () => {
         is_active: true,
         store_id: 3,
       });
+      // M1: solo personal (rol distinto de `customer`) que aplique a la
+      // organización completa o a la tienda de origen.
       expect(client.users.findMany.mock.calls[0][0].where).toEqual({
         organization_id: 1,
         state: 'active',
+        user_roles: {
+          some: {
+            OR: [{ store_id: null }, { store_id: 3 }],
+            roles: { name: { not: 'customer' } },
+          },
+        },
       });
       expect(
         client.shipping_methods.findMany.mock.calls[0][0].where.OR,
@@ -103,6 +118,134 @@ describe('transfer-advanced-options (P3)', () => {
         state: 'active',
         stores: { organization_id: 1 },
       });
+      // Bodega central: cualquier rol de personal de la organización.
+      expect(client.users.findMany.mock.calls[0][0].where).toEqual({
+        organization_id: 1,
+        state: 'active',
+        user_roles: { some: { roles: { name: { not: 'customer' } } } },
+      });
+    });
+  });
+
+  describe('M1 — transportador: solo personal, sin clientes del ecommerce', () => {
+    const users = [
+      // Personal de la tienda 3.
+      {
+        id: 1,
+        organization_id: 1,
+        state: 'active',
+        roles: [{ name: 'Cajero', store_id: 3 }],
+      },
+      // Administrador de toda la organización (rol sin tienda).
+      {
+        id: 2,
+        organization_id: 1,
+        state: 'active',
+        roles: [{ name: 'admin', store_id: null }],
+      },
+      // Cliente del ecommerce: solo rol customer.
+      {
+        id: 3,
+        organization_id: 1,
+        state: 'active',
+        roles: [{ name: 'customer', store_id: null }],
+      },
+      // Personal de otra tienda que aquí solo es cliente.
+      {
+        id: 4,
+        organization_id: 1,
+        state: 'active',
+        roles: [
+          { name: 'Cajero', store_id: 30 },
+          { name: 'customer', store_id: null },
+        ],
+      },
+      // Sin roles.
+      { id: 5, organization_id: 1, state: 'active', roles: [] },
+      // Personal de otra organización.
+      {
+        id: 6,
+        organization_id: 2,
+        state: 'active',
+        roles: [{ name: 'admin', store_id: null }],
+      },
+    ];
+
+    /** Evalúa el `where` de Prisma que arma `transferStaffUserWhere`. */
+    function matches(user: (typeof users)[number], where: any) {
+      if (where.id !== undefined && user.id !== where.id) return false;
+      if (user.organization_id !== where.organization_id) return false;
+      if (user.state !== where.state) return false;
+      const some = where.user_roles.some;
+      return user.roles.some(
+        (role) =>
+          role.name !== some.roles.name.not &&
+          (!some.OR ||
+            some.OR.some((alt: any) => alt.store_id === role.store_id)),
+      );
+    }
+
+    function staffClient() {
+      return {
+        users: {
+          findMany: jest.fn(async ({ where }: any) =>
+            users
+              .filter((u) => matches(u, where))
+              .map((u) => ({
+                id: u.id,
+                first_name: `U${u.id}`,
+                last_name: '',
+              })),
+          ),
+          findFirst: jest.fn(
+            async ({ where }: any) =>
+              users
+                .filter((u) => matches(u, where))
+                .map((u) => ({
+                  id: u.id,
+                  first_name: `U${u.id}`,
+                  last_name: '',
+                }))[0] ?? null,
+          ),
+        },
+      };
+    }
+
+    it('con origen en tienda lista al personal de esa tienda y al de la organización', async () => {
+      const client: any = { ...buildClient(), ...staffClient() };
+      const result = await listTransferAdvancedOptions(client, {
+        organization_id: 1,
+        from_store_id: 3,
+      });
+      expect(result.drivers.map((d) => d.id)).toEqual([1, 2]);
+    });
+
+    it('con bodega central lista a todo el personal de la organización', async () => {
+      const client: any = { ...buildClient(), ...staffClient() };
+      const result = await listTransferAdvancedOptions(client, {
+        organization_id: 1,
+        from_store_id: null,
+      });
+      expect(result.drivers.map((d) => d.id)).toEqual([1, 2, 4]);
+    });
+
+    it('la validación del despacho acepta y rechaza lo mismo que el listado', async () => {
+      const client = staffClient();
+      await expect(resolveTransferDriver(client, 1, 1, 3)).resolves.toEqual(
+        expect.objectContaining({ id: 1 }),
+      );
+      await expect(resolveTransferDriver(client, 1, 2, 3)).resolves.toEqual(
+        expect.objectContaining({ id: 2 }),
+      );
+      for (const id of [3, 4, 5, 6]) {
+        await expect(resolveTransferDriver(client, 1, id, 3)).rejects.toThrow(
+          BadRequestException,
+        );
+      }
+      expect(client.users.findFirst.mock.calls[0][0].where).toEqual({
+        id: 1,
+        ...transferStaffUserWhere(1, 3),
+      });
     });
   });
 
@@ -139,6 +282,7 @@ describe('transfer-advanced-options (P3)', () => {
       ]);
 
       const result = await listTransferBatches(client, {
+        organization_id: 1,
         location_id: 7,
         product_ids: [1, 1, 0, -2],
       });
@@ -147,6 +291,7 @@ describe('transfer-advanced-options (P3)', () => {
       expect(args.where).toEqual({
         product_id: { in: [1] },
         OR: [{ location_id: 7 }, { location_id: null }],
+        products: { stores: { organization_id: 1 } },
       });
       expect(args.orderBy).toEqual([
         { expiration_date: 'asc' },
@@ -158,9 +303,96 @@ describe('transfer-advanced-options (P3)', () => {
     it('sin productos no consulta', async () => {
       const client = buildClient();
       expect(
-        await listTransferBatches(client, { location_id: 7, product_ids: [] }),
+        await listTransferBatches(client, {
+          organization_id: 1,
+          location_id: 7,
+          product_ids: [],
+        }),
       ).toEqual([]);
       expect(client.inventory_batches.findMany).not.toHaveBeenCalled();
+    });
+
+    it('B1: ids de productos de otra organización no devuelven sus lotes', async () => {
+      // Lotes sin bodega (location_id null) de dos organizaciones; el producto
+      // 2 es de una tienda de la organización 2.
+      const batches = [
+        {
+          id: 10,
+          product_id: 1,
+          org: 1,
+          location_id: null,
+          batch_number: 'PROPIO',
+        },
+        {
+          id: 20,
+          product_id: 2,
+          org: 2,
+          location_id: null,
+          batch_number: 'AJENO',
+        },
+      ];
+      const client = buildClient();
+      client.inventory_batches.findMany.mockImplementation(
+        async ({ where }: any) =>
+          batches
+            .filter(
+              (b) =>
+                where.product_id.in.includes(b.product_id) &&
+                where.OR.some(
+                  (alt: any) => alt.location_id === b.location_id,
+                ) &&
+                (where.products?.stores?.organization_id === undefined ||
+                  where.products.stores.organization_id === b.org),
+            )
+            .map((b) => ({
+              ...b,
+              product_variant_id: null,
+              expiration_date: null,
+              quantity: 5,
+              quantity_used: 0,
+            })),
+      );
+
+      const result = await listTransferBatches(client, {
+        organization_id: 1,
+        location_id: 7,
+        product_ids: [1, 2],
+      });
+      expect(result.map((b) => b.batch_number)).toEqual(['PROPIO']);
+    });
+
+    it('B1: resolveLineBatch en organización filtra el lote elegido y el FEFO', async () => {
+      const tx = {
+        inventory_batches: {
+          findFirst: jest.fn().mockResolvedValue(null),
+          findMany: jest.fn().mockResolvedValue([]),
+        },
+      };
+      await expect(
+        resolveLineBatch(tx, { product_id: 2 }, 7, 20, { organizationId: 1 }),
+      ).rejects.toThrow(/El lote #20 no existe/);
+      expect(tx.inventory_batches.findFirst.mock.calls[0][0].where).toEqual({
+        id: 20,
+        products: { stores: { organization_id: 1 } },
+      });
+
+      await resolveLineBatch(tx, { product_id: 2 }, 7, null, {
+        defaultToFefo: true,
+        organizationId: 1,
+      });
+      expect(tx.inventory_batches.findMany.mock.calls[0][0].where).toEqual(
+        expect.objectContaining({
+          products: { stores: { organization_id: 1 } },
+        }),
+      );
+
+      // Superficie de tienda (sin organización): el predicado no cambia.
+      await resolveLineBatch(tx, { product_id: 2 }, 7, null, {
+        defaultToFefo: true,
+      });
+      expect(
+        tx.inventory_batches.findMany.mock.calls[1][0].where.products,
+      ).toBeUndefined();
     });
   });
 
@@ -234,6 +466,143 @@ describe('transfer-advanced-options (P3)', () => {
       });
       expect(client.stock_levels.findMany).toHaveBeenCalledTimes(1);
       expect(rows[0].stock_at_destination.quantity_available).toBe(0);
+    });
+
+    it('m4: avisa has_more cuando la bodega supera el tope', async () => {
+      const row = (id: number) => ({
+        product_id: id,
+        product_variant_id: null,
+        location_id: 7,
+        quantity_on_hand: 1,
+        quantity_reserved: 0,
+        quantity_available: 1,
+        products: { id, name: `P${id}`, sku: null },
+        product_variants: null,
+      });
+      const client = buildClient();
+      client.stock_levels.findMany.mockResolvedValueOnce([
+        row(1),
+        row(2),
+        row(3),
+      ]);
+      const page = await listTransferLocationStockPage(client, {
+        from_location_id: 7,
+        limit: 2,
+      });
+      expect(client.stock_levels.findMany.mock.calls[0][0].take).toBe(3);
+      expect(page.has_more).toBe(true);
+      expect(page.limit).toBe(2);
+      expect(page.rows.map((r) => r.product_id)).toEqual([1, 2]);
+
+      const exact = buildClient();
+      exact.stock_levels.findMany.mockResolvedValueOnce([row(1), row(2)]);
+      const full = await listTransferLocationStockPage(exact, {
+        from_location_id: 7,
+        limit: 2,
+      });
+      expect(full.has_more).toBe(false);
+      expect(full.rows).toHaveLength(2);
+    });
+
+    it('m2: con product_ids refresca solo esos productos, aunque estén en cero', async () => {
+      const client = buildClient();
+      await listTransferLocationStockPage(client, {
+        from_location_id: 7,
+        to_location_id: 9,
+        product_ids: [3, 3, 5, 0],
+      });
+      const where = client.stock_levels.findMany.mock.calls[0][0].where;
+      expect(where.product_id).toEqual({ in: [3, 5] });
+      expect(where.quantity_available).toBeUndefined();
+    });
+  });
+
+  describe('M2 — lookupTransferCode (escáner y pegar lista)', () => {
+    const level = (
+      productId: number,
+      variant: { id: number; name: string; sku: string } | null,
+    ) => ({
+      product_id: productId,
+      product_variant_id: variant?.id ?? null,
+      location_id: 7,
+      quantity_on_hand: 4,
+      quantity_reserved: 0,
+      quantity_available: 4,
+      products: { id: productId, name: 'Camisa', sku: 'CAM' },
+      product_variants: variant,
+    });
+
+    it('busca exacto por SKU y código de barras del producto y de la variante, acotado a la organización', async () => {
+      const client = buildClient();
+      client.stock_levels.findMany.mockResolvedValueOnce([
+        level(1, { id: 11, name: 'Talla M', sku: 'CAM-M' }),
+      ]);
+      const rows = await lookupTransferCode(client, {
+        organization_id: 1,
+        code: ' 7701234567890 ',
+        from_location_id: 7,
+      });
+
+      const args = client.stock_levels.findMany.mock.calls[0][0];
+      const equals = { equals: '7701234567890', mode: 'insensitive' };
+      expect(args.where).toEqual({
+        location_id: 7,
+        products: {
+          state: { not: 'archived' },
+          stores: { organization_id: 1 },
+        },
+        OR: [
+          { products: { sku: equals } },
+          { products: { barcode: equals } },
+          { product_variants: { sku: equals } },
+          { product_variants: { barcode: equals } },
+        ],
+      });
+      // Sin destino no consulta el destino.
+      expect(client.stock_levels.findMany).toHaveBeenCalledTimes(1);
+      expect(rows).toEqual([
+        expect.objectContaining({
+          product_id: 1,
+          product_variant_id: 11,
+          variant_name: 'Talla M',
+          sku: 'CAM-M',
+        }),
+      ]);
+    });
+
+    it('con destino trae el disponible del destino', async () => {
+      const client = buildClient();
+      client.stock_levels.findMany
+        .mockResolvedValueOnce([level(1, null)])
+        .mockResolvedValueOnce([
+          {
+            product_id: 1,
+            product_variant_id: null,
+            location_id: 9,
+            quantity_on_hand: 3,
+            quantity_reserved: 0,
+            quantity_available: 3,
+          },
+        ]);
+      const rows = await lookupTransferCode(client, {
+        organization_id: 1,
+        code: 'CAM',
+        from_location_id: 7,
+        to_location_id: 9,
+      });
+      expect(rows[0].stock_at_destination.quantity_available).toBe(3);
+    });
+
+    it('un código vacío no consulta', async () => {
+      const client = buildClient();
+      expect(
+        await lookupTransferCode(client, {
+          organization_id: 1,
+          code: '   ',
+          from_location_id: 7,
+        }),
+      ).toEqual([]);
+      expect(client.stock_levels.findMany).not.toHaveBeenCalled();
     });
   });
 

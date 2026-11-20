@@ -133,14 +133,35 @@ export class OrgTransfersController {
     @Query('to_location_id') toLocationId?: string,
     @Query('category_id') categoryId?: string,
     @Query('limit') limit?: string,
+    @Query('product_ids') productIds?: string,
   ) {
-    const data = await this.transfers.getLocationStock(
+    const page = await this.transfers.getLocationStock(
       parseRequiredId(fromLocationId, 'from_location_id'),
       parseOptionalId(toLocationId),
       parseOptionalId(categoryId),
       limit ? +limit : undefined,
+      parseIdList(productIds),
     );
-    return this.responseService.success(data, 'Stock de la bodega');
+    return this.responseService.success(page.rows, 'Stock de la bodega', {
+      has_more: page.has_more,
+      limit: page.limit,
+    });
+  }
+
+  /** P3 — escáner / pegar lista: SKU o código de barras exacto (M2). */
+  @Get('lookup-code')
+  @Permissions('organization:inventory:transfers:read')
+  async lookupTransferCode(
+    @Query('code') code: string,
+    @Query('from_location_id') fromLocationId: string,
+    @Query('to_location_id') toLocationId?: string,
+  ) {
+    const data = await this.transfers.lookupTransferCode(
+      code ?? '',
+      parseRequiredId(fromLocationId, 'from_location_id'),
+      parseOptionalId(toLocationId),
+    );
+    return this.responseService.success(data, 'Productos por código');
   }
 
   @Get(':id')

@@ -53,7 +53,8 @@ import {
 import {
   listTransferAdvancedOptions,
   listTransferBatches,
-  listTransferLocationStock,
+  listTransferLocationStockPage,
+  lookupTransferCode,
 } from './transfer-advanced-options';
 import { DispatchTransferDto } from './dto/transfer-advanced.dto';
 import { VendixHttpException, ErrorCodes } from '../../../../common/errors';
@@ -1877,7 +1878,9 @@ export class StockTransfersService {
   private requireOrganizationId(): number {
     const organizationId = RequestContextService.getContext()?.organization_id;
     if (!organizationId) {
-      throw new BadRequestException('Organization context is required');
+      throw new BadRequestException(
+        'Elige la organización o tienda desde la que trabajas',
+      );
     }
     return organizationId;
   }
@@ -1909,6 +1912,7 @@ export class StockTransfersService {
     return this.prisma.$transaction(async (tx) => {
       await this.validateTransferScope(organizationId, fromLocationId, null, tx);
       return listTransferBatches(tx, {
+        organization_id: organizationId,
         location_id: fromLocationId,
         product_ids: productIds,
       });
@@ -1921,6 +1925,7 @@ export class StockTransfersService {
     toLocationId: number | null,
     categoryId: number | null,
     limit?: number,
+    productIds: number[] = [],
   ) {
     const organizationId = this.requireOrganizationId();
     return this.prisma.$transaction(async (tx) => {
@@ -1930,11 +1935,38 @@ export class StockTransfersService {
         toLocationId,
         tx,
       );
-      return listTransferLocationStock(tx, {
+      return listTransferLocationStockPage(tx, {
         from_location_id: fromLocationId,
         to_location_id: toLocationId,
         category_id: categoryId,
+        product_ids: productIds,
         limit,
+      });
+    });
+  }
+
+  /**
+   * Escáner y "pegar lista" (M2): coincidencia exacta por SKU o código de
+   * barras del producto o de la variante, con stock en el origen.
+   */
+  async lookupTransferCode(
+    code: string,
+    fromLocationId: number,
+    toLocationId: number | null,
+  ) {
+    const organizationId = this.requireOrganizationId();
+    return this.prisma.$transaction(async (tx) => {
+      await this.validateTransferScope(
+        organizationId,
+        fromLocationId,
+        toLocationId,
+        tx,
+      );
+      return lookupTransferCode(tx, {
+        organization_id: organizationId,
+        code,
+        from_location_id: fromLocationId,
+        to_location_id: toLocationId,
       });
     });
   }

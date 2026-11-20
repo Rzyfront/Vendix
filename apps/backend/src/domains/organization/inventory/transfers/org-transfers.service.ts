@@ -42,7 +42,8 @@ import {
 import {
   listTransferAdvancedOptions,
   listTransferBatches,
-  listTransferLocationStock,
+  listTransferLocationStockPage,
+  lookupTransferCode,
 } from '../../../store/orders/stock-transfers/transfer-advanced-options';
 import { VendixHttpException, ErrorCodes } from '@common/errors';
 
@@ -459,7 +460,7 @@ export class OrgTransfersService {
             item,
             dto.from_location_id,
             item.batch_id ?? null,
-            { defaultToFefo: false },
+            { defaultToFefo: false, organizationId: organization_id },
           ),
         });
       }
@@ -782,6 +783,7 @@ export class OrgTransfersService {
     await this.validateTransferLocations(organization_id, fromLocationId, null);
     return this.orgPrisma.$transaction((tx: any) =>
       listTransferBatches(tx, {
+        organization_id,
         location_id: fromLocationId,
         product_ids: productIds,
       }),
@@ -794,6 +796,7 @@ export class OrgTransfersService {
     toLocationId: number | null,
     categoryId: number | null,
     limit?: number,
+    productIds: number[] = [],
   ) {
     const organization_id = this.requireOrgId();
     await this.validateTransferLocations(
@@ -802,11 +805,37 @@ export class OrgTransfersService {
       toLocationId,
     );
     return this.orgPrisma.$transaction((tx: any) =>
-      listTransferLocationStock(tx, {
+      listTransferLocationStockPage(tx, {
         from_location_id: fromLocationId,
         to_location_id: toLocationId,
         category_id: categoryId,
+        product_ids: productIds,
         limit,
+      }),
+    );
+  }
+
+  /**
+   * Escáner y "pegar lista" (M2): coincidencia exacta por SKU o código de
+   * barras del producto o de la variante, con stock en el origen.
+   */
+  async lookupTransferCode(
+    code: string,
+    fromLocationId: number,
+    toLocationId: number | null,
+  ) {
+    const organization_id = this.requireOrgId();
+    await this.validateTransferLocations(
+      organization_id,
+      fromLocationId,
+      toLocationId,
+    );
+    return this.orgPrisma.$transaction((tx: any) =>
+      lookupTransferCode(tx, {
+        organization_id,
+        code,
+        from_location_id: fromLocationId,
+        to_location_id: toLocationId,
       }),
     );
   }
@@ -998,7 +1027,7 @@ export class OrgTransfersService {
           entry.line,
           transfer.from_location_id,
           entry.batch_id,
-          { defaultToFefo: true },
+          { defaultToFefo: true, organizationId: organization_id },
         );
         if (entry.batch_id != null && !batchNumbers.has(entry.batch_id)) {
           const batch = await tx.inventory_batches.findFirst({
