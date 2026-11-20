@@ -8,9 +8,12 @@ import {
   IsOptional,
   IsPositive,
   IsString,
+  Min,
+  ValidateIf,
   ValidateNested,
 } from 'class-validator';
 import { Type } from 'class-transformer';
+import { TransferAdvancedFieldsDto } from '../../../../store/orders/stock-transfers/dto/transfer-advanced.dto';
 
 export class CreateOrgTransferItemDto {
   @IsInt()
@@ -20,6 +23,12 @@ export class CreateOrgTransferItemDto {
   @IsOptional()
   @IsInt()
   product_variant_id?: number;
+
+  /** D5 — lote elegido por fila (opcional; al despachar se usa el más antiguo). */
+  @IsOptional()
+  @IsInt()
+  @Min(1)
+  batch_id?: number;
 
   @IsInt()
   @IsPositive()
@@ -41,14 +50,16 @@ export class CreateOrgTransferItemDto {
  * organization (validated via `OperatingScopeService.enforceLocationAccess`
  * with `allowCentral: true`).
  */
-export class CreateOrgTransferDto {
+export class CreateOrgTransferDto extends TransferAdvancedFieldsDto {
   @IsInt()
   @IsNotEmpty()
   from_location_id!: number;
 
+  /** D8: el destino es obligatorio salvo en una salida a destino externo. */
+  @ValidateIf((dto: CreateOrgTransferDto) => !dto.is_external_destination)
   @IsInt()
   @IsNotEmpty()
-  to_location_id!: number;
+  to_location_id?: number;
 
   @IsOptional()
   @IsDate()
