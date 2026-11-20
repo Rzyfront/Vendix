@@ -2050,6 +2050,34 @@ export const ErrorCodes = {
     httpStatus: 404,
     devMessage: 'Stock transfer not found',
   },
+  INV_TRANSFER_EXTERNAL_REQUIRES_DISPATCH_NOTE: {
+    code: 'INV_TRANSFER_EXTERNAL_REQUIRES_DISPATCH_NOTE',
+    httpStatus: 400,
+    devMessage:
+      'External destination transfers require remisiones (with_dispatch_notes)',
+  },
+  INV_TRANSFER_QUICK_EXTERNAL_FORBIDDEN: {
+    code: 'INV_TRANSFER_QUICK_EXTERNAL_FORBIDDEN',
+    httpStatus: 400,
+    devMessage:
+      'Quick stock movements only run between own warehouses, not to external destinations',
+  },
+  INV_TRANSFER_NOT_DISPATCHED: {
+    code: 'INV_TRANSFER_NOT_DISPATCHED',
+    httpStatus: 400,
+    devMessage: 'Stock transfer has not been dispatched yet',
+  },
+  INV_TRANSFER_LOSS_NOT_DUE: {
+    code: 'INV_TRANSFER_LOSS_NOT_DUE',
+    httpStatus: 400,
+    devMessage:
+      'The loss can only be closed after the expected delivery date',
+  },
+  INV_TRANSFER_LOSS_REASON_REQUIRED: {
+    code: 'INV_TRANSFER_LOSS_REASON_REQUIRED',
+    httpStatus: 400,
+    devMessage: 'A reason is required to close the pending balance as a loss',
+  },
 
   // Serial number tracking (QUI-431)
   SERIAL_REQUIRED_001: {
