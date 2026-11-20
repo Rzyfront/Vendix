@@ -69,6 +69,21 @@ export interface AIRequestOptions {
     | 'auto'
     | 'none'
     | { type: 'function'; function: { name: string } };
+  /**
+   * Structured output request (ai-ingest). Opt-in per provider config: it only
+   * reaches the wire when the config declares `settings.supports_json_schema`
+   * (`openai_compatible` → `response_format: json_schema` strict;
+   * `anthropic_compatible` → forced `emit_result` tool). Otherwise nothing new
+   * is sent and the caller still validates the text answer itself.
+   */
+  responseSchema?: AIResponseSchema;
+}
+
+export interface AIResponseSchema {
+  /** `^[a-zA-Z0-9_-]{1,64}$` (OpenAI `json_schema.name`). */
+  name: string;
+  /** JSON Schema in strict form: every property required, no extra keys. */
+  schema: Record<string, unknown>;
 }
 
 export type AIImageSize =

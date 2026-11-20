@@ -142,6 +142,7 @@ export class OpenAICompatibleProvider implements AIProvider {
               tool_choice: options.tool_choice as any,
             }),
             ...this.reasoningControl(options),
+            ...this.responseFormat(options),
           },
           ...(deadline
             ? ([{ signal: deadline.signal }] as const)
@@ -240,6 +241,23 @@ export class OpenAICompatibleProvider implements AIProvider {
     } finally {
       deadline?.dispose();
     }
+  }
+
+  /**
+   * ai-ingest structured output. Opt-in: only a config that declares
+   * `settings.supports_json_schema: true` gets `response_format` on the wire;
+   * any other config receives exactly the request it received before.
+   */
+  private responseFormat(options?: AIRequestOptions): Record<string, unknown> {
+    const rs = options?.responseSchema;
+    if (!rs || options?.agenticStream || options?.tools?.length) return {};
+    if (this.config.settings?.supports_json_schema !== true) return {};
+    return {
+      response_format: {
+        type: 'json_schema',
+        json_schema: { name: rs.name, strict: true, schema: rs.schema },
+      },
+    };
   }
 
   async complete(
