@@ -17,6 +17,8 @@ import {
 } from './utils/entity-resolver.util';
 import { CreateSubmissionDto } from './dto/create-submission.dto';
 import { FieldResponseDto } from './dto/submit-response.dto';
+import { SubmissionDocumentsService } from './submission-documents.service';
+import { readStoredDocuments } from './template-json/template-json.contract';
 import { Observable } from 'rxjs';
 import * as crypto from 'crypto';
 
@@ -101,7 +103,18 @@ export class SubmissionsService {
     private readonly metadataValues: MetadataValuesService,
     private readonly eventEmitter: EventEmitter2,
     private readonly aiEngine: AIEngineService,
+    private readonly documents: SubmissionDocumentsService,
   ) {}
+
+  /** Public upload of one attachment; `fieldId` ties it to a documents field of the form. */
+  async uploadDocument(
+    token: string,
+    file: Express.Multer.File,
+    fieldId?: number,
+  ) {
+    const submission = await this.getByToken(token);
+    return this.documents.upload(submission, file, fieldId);
+  }
 
   async createSubmission(dto: CreateSubmissionDto) {
     const context = RequestContextService.getContext();
@@ -185,7 +198,7 @@ export class SubmissionsService {
         .withoutScope()
         .entity_metadata_fields.findUnique({
           where: { id: resp.field_id },
-          select: { id: true, entity_type: true },
+          select: { id: true, entity_type: true, field_type: true },
         });
       if (!field) continue;
 
@@ -205,13 +218,27 @@ export class SubmissionsService {
           values: [],
         });
       }
+      // Documents answer: `{ files }` is checked (store prefix, count) and
+      // the first key is mirrored in value_text. A value_text-only answer is
+      // the legacy single-file shape and is stored untouched.
+      const storedFiles =
+        field.field_type === 'file' &&
+        resp.value_json &&
+        typeof resp.value_json === 'object' &&
+        'files' in resp.value_json
+          ? await this.documents.buildStoredValue(
+              submission,
+              resp.field_id,
+              resp.value_json,
+            )
+          : null;
       byEntity.get(key)!.values.push({
         field_id: resp.field_id,
-        value_text: resp.value_text,
+        value_text: storedFiles ? storedFiles.value_text : resp.value_text,
         value_number: resp.value_number,
         value_date: resp.value_date,
         value_bool: resp.value_bool,
-        value_json: resp.value_json,
+        value_json: storedFiles ? storedFiles.value_json : resp.value_json,
       });
     }
 
@@ -567,23 +594,33 @@ export class SubmissionsService {
     }
 
     // Filter to only fields in this template and reshape
-    const responses = allValues
-      .filter(
-        (v: any) =>
-          templateFieldIds.size === 0 || templateFieldIds.has(v.field_id),
-      )
-      .map((v: any) => ({
-        id: v.id,
-        field_id: v.field_id,
-        field: v.field,
-        value_text: v.value_text,
-        value_number: v.value_number,
-        value_date: v.value_date,
-        value_bool: v.value_bool,
-        value_json: v.value_json,
-        created_at: v.created_at,
-        updated_at: v.updated_at,
-      }));
+    const responses = await Promise.all(
+      allValues
+        .filter(
+          (v: any) =>
+            templateFieldIds.size === 0 || templateFieldIds.has(v.field_id),
+        )
+        .map(async (v: any) => ({
+          id: v.id,
+          field_id: v.field_id,
+          field: v.field,
+          value_text: v.value_text,
+          value_number: v.value_number,
+          value_date: v.value_date,
+          value_bool: v.value_bool,
+          value_json: v.value_json,
+          created_at: v.created_at,
+          updated_at: v.updated_at,
+          // Documents fields also expose their attachments with signed URLs.
+          ...(v.field?.field_type === 'file'
+            ? {
+                files: await this.documents.signFiles(
+                  readStoredDocuments(v),
+                ),
+              }
+            : {}),
+        })),
+    );
 
     return { ...submission, responses };
   }

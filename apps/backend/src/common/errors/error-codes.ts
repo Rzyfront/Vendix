@@ -5721,6 +5721,33 @@ export const ErrorCodes = {
     httpStatus: 409,
     devMessage: 'Another template was marked as the CRM default at the same time.',
   },
+  // Importación de plantillas desde JSON (contrato vendix.data-collection-template/v1).
+  DCOL_IMPORT_001: {
+    code: 'DCOL_IMPORT_001',
+    httpStatus: 422,
+    devMessage: 'The template JSON has errors (see details.errors).',
+  },
+  // Adjuntos del formulario público de recolección de datos.
+  DCOL_UPLOAD_001: {
+    code: 'DCOL_UPLOAD_001',
+    httpStatus: 400,
+    devMessage: 'File type or content not allowed for this field.',
+  },
+  DCOL_UPLOAD_002: {
+    code: 'DCOL_UPLOAD_002',
+    httpStatus: 400,
+    devMessage: 'File exceeds the maximum size for this field.',
+  },
+  DCOL_UPLOAD_003: {
+    code: 'DCOL_UPLOAD_003',
+    httpStatus: 400,
+    devMessage: 'The field is not a documents field of this form.',
+  },
+  DCOL_UPLOAD_004: {
+    code: 'DCOL_UPLOAD_004',
+    httpStatus: 400,
+    devMessage: 'Attachment does not belong to this store or too many files.',
+  },
 
   // Customer History
   CUST_HISTORY_001: {

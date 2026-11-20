@@ -13,6 +13,7 @@ import {
 } from '@nestjs/common';
 import { ServiceIndustryGuard } from '../../../common/guards/service-industry.guard';
 import { TemplatesService } from './templates.service';
+import { TemplateImportService } from './template-import.service';
 import { CreateTemplateDto } from './dto/create-template.dto';
 import { UpdateTemplateDto } from './dto/update-template.dto';
 import { SetProductTemplateDto } from './dto/set-product-template.dto';
@@ -25,6 +26,7 @@ import { ResponseService } from '@common/responses/response.service';
 export class TemplatesController {
   constructor(
     private readonly service: TemplatesService,
+    private readonly importService: TemplateImportService,
     private readonly responseService: ResponseService,
   ) {}
 
@@ -76,6 +78,27 @@ export class TemplatesController {
     return this.responseService.success(
       result,
       'Plantilla creada correctamente',
+    );
+  }
+
+  /**
+   * Imports a template from the portable JSON contract. The body is raw JSON
+   * (`@Body() body: unknown` reflects as Object, so the global whitelist
+   * ValidationPipe leaves it intact; the contract validates it).
+   */
+  @Post('import')
+  @Permissions('store:settings:write')
+  async importTemplate(
+    @Body() body: unknown,
+    @Query('dry_run') dryRun?: string,
+  ) {
+    const isDryRun = dryRun === 'true' || dryRun === '1';
+    const result = await this.importService.import(body, isDryRun);
+    return this.responseService.success(
+      result,
+      isDryRun
+        ? 'La plantilla JSON es válida'
+        : 'Plantilla importada como borrador',
     );
   }
 

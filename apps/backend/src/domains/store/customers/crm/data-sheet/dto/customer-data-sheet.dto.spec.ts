@@ -33,6 +33,15 @@ describe('SaveCustomerDataSheetValuesDto', () => {
     ).toEqual([]);
   });
 
+  it('value_json also accepts a documents answer { files }, and nothing else object-shaped', async () => {
+    const file = { key: 'a/b.pdf', name: 'b.pdf', size: 3, mime_type: 'application/pdf' };
+    expect(await errorsFor({ value_json: { files: [file] } })).toEqual([]);
+    expect(await errorsFor({ value_json: { files: [] } })).toEqual([]);
+    expect(await errorsFor({ value_json: { files: [{ name: 'x' }] } })).toEqual(['value_json']);
+    expect(await errorsFor({ value_json: { files: [file], other: 1 } })).toEqual(['value_json']);
+    expect(await errorsFor({ value_json: { files: Array(11).fill(file) } })).toEqual(['value_json']);
+  });
+
   it('rejects numbers outside Decimal(12, 4)', async () => {
     expect(await errorsFor({ value_number: 100_000_000 })).toEqual(['value_number']);
     expect(await errorsFor({ value_number: -100_000_000 })).toEqual(['value_number']);

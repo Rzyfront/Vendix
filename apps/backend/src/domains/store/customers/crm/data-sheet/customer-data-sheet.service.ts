@@ -6,6 +6,12 @@ import { S3PathHelper } from '@common/helpers/s3-path.helper';
 import { StorePrismaService } from '../../../../../prisma/services/store-prisma.service';
 import { ErrorCodes, VendixHttpException } from '../../../../../common/errors';
 import { TemplatesService } from '../../../data-collection/templates.service';
+import { sanitizeUploadFileName } from '../../../data-collection/utils/file-name.util';
+import {
+  DOCUMENT_MAX_FILES,
+  StoredDocument,
+  readStoredDocuments,
+} from '../../../data-collection/template-json/template-json.contract';
 import { isStoreCustomer } from '../shared/crm-access';
 import { CustomerDataSheetValueDto } from './dto/customer-data-sheet.dto';
 
@@ -128,15 +134,33 @@ export class CustomerDataSheetService {
             entity_id: customerId,
             field_id: { in: fileIds },
           },
-          select: { field_id: true, value_text: true },
+          select: { field_id: true, value_text: true, value_json: true },
         })
       : [];
     const prefix = fileIds.length ? await this.filePrefix(customerId) : '';
 
+    // Several attachments: `value_json = { files }`; value_text mirrors the first key.
+    const fileAnswers = new Map<number, StoredDocument[]>();
     for (const value of values) {
       const field = fields.get(value.field_id);
       if (!field) throw new VendixHttpException(ErrorCodes.CRM_DATA_SHEET_001);
-      if (field.field_type === 'file' && value.value_text) {
+      if (field.field_type === 'file' && this.hasFiles(value.value_json)) {
+        const files = readStoredDocuments({ value_json: value.value_json });
+        if (files.length > DOCUMENT_MAX_FILES) {
+          throw new VendixHttpException(ErrorCodes.CRM_DATA_SHEET_002);
+        }
+        const known = new Set(
+          storedFiles
+            .filter((row) => row.field_id === value.field_id)
+            .flatMap((row) => readStoredDocuments(row).map((doc) => doc.key)),
+        );
+        for (const doc of files) {
+          if (!known.has(doc.key) && !this.isOwnFileKey(doc.key, prefix)) {
+            throw new VendixHttpException(ErrorCodes.CRM_DATA_SHEET_002);
+          }
+        }
+        fileAnswers.set(value.field_id, files);
+      } else if (field.field_type === 'file' && value.value_text) {
         const unchanged = storedFiles.some(
           (row) =>
             row.field_id === value.field_id &&
@@ -150,15 +174,17 @@ export class CustomerDataSheetService {
 
     const storeId = this.storeId();
     for (const value of values) {
+      const files = fileAnswers.get(value.field_id);
       const data = {
-        value_text: value.value_text ?? null,
+        value_text: files ? (files[0]?.key ?? null) : (value.value_text ?? null),
         value_number: value.value_number ?? null,
         value_date: value.value_date
           ? new Date(`${value.value_date}T00:00:00.000Z`)
           : null,
         value_bool: value.value_bool ?? null,
-        value_json:
-          value.value_json === undefined || value.value_json === null
+        value_json: files
+          ? ({ files } as unknown as Prisma.InputJsonValue)
+          : value.value_json === undefined || value.value_json === null
             ? Prisma.DbNull
             : (value.value_json as Prisma.InputJsonValue),
       };
@@ -213,16 +239,10 @@ export class CustomerDataSheetService {
     }
     await this.assertCustomer(customerId);
     const prefix = await this.filePrefix(customerId);
-    const safe =
-      original
-        .normalize('NFKD')
-        .replace(/[\u0300-\u036f]/g, '')
-        .replace(/[^\w.-]+/g, '_')
-        .replace(/\.{2,}/g, '.')
-        .replace(/_+/g, '_')
-        .slice(-120) || 'archivo';
+    const safe = sanitizeUploadFileName(original);
     const stamp = Date.now();
     let key: string;
+    let storedMime = mimetype;
     try {
       if (mimetype.startsWith('image/')) {
         const stem = safe.replace(/\.[^.]*$/, '') || 'imagen';
@@ -231,6 +251,7 @@ export class CustomerDataSheetService {
           `${prefix}/${stamp}-${stem}.webp`,
         );
         key = result.key;
+        storedMime = 'image/webp';
       } else {
         key = await this.s3.uploadFile(
           file.buffer,
@@ -248,7 +269,34 @@ export class CustomerDataSheetService {
       key,
       url: (await this.sign(key)) ?? null,
       original_name: original,
+      name: original,
+      size: file.size ?? file.buffer.length,
+      mime_type: storedMime,
+      uploaded_at: new Date(stamp).toISOString(),
     };
+  }
+
+  /** True when a value_json carries the `{ files: [...] }` documents shape. */
+  private hasFiles(valueJson: unknown): boolean {
+    return (
+      !!valueJson &&
+      typeof valueJson === 'object' &&
+      !Array.isArray(valueJson) &&
+      'files' in valueJson
+    );
+  }
+
+  /** Attachments of a stored answer with signed URLs (url null if signing fails). */
+  private async signedFiles(row: {
+    value_text: string | null;
+    value_json: unknown;
+  }) {
+    return Promise.all(
+      readStoredDocuments(row).map(async (doc) => ({
+        ...doc,
+        url: (await this.sign(doc.key)) ?? null,
+      })),
+    );
   }
 
   private async build(customerId: number) {
@@ -369,6 +417,7 @@ export class CustomerDataSheetService {
       value_bool: row.value_bool,
       value_json: row.value_json ?? null,
       file_url: isFile && row.value_text ? await this.sign(row.value_text) : null,
+      files: isFile ? await this.signedFiles(row) : [],
       updated_at: row.updated_at,
     };
   }
