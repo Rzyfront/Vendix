@@ -1292,6 +1292,84 @@ describe('OrdersService', () => {
       expect(item.unit_price).toBe(50);
       expect(item.total_price).toBe(50);
     });
+
+    it('hotfix promos mesa — el detalle expone el desglose PERSISTIDO por línea y los totales por tipo de impuesto', async () => {
+      mockPrismaService.orders.findFirst.mockResolvedValue({
+        id: 9,
+        order_number: 'ORD009',
+        discount_amount: 16666.67,
+        tax_amount: 3911.11,
+        shipping_cost: 0,
+        tip_amount: 0,
+        grand_total: 52800,
+        order_items: [
+          {
+            id: 90,
+            product_id: null,
+            unit_price: 27777.78,
+            quantity: 2,
+            total_price: 55555.56,
+            discount_amount: 16666.67,
+            cancelled_at: null,
+            order_item_taxes: [
+              {
+                tax_name: 'INC 8%',
+                tax_rate: 0.08,
+                tax_type: 'inc',
+                tax_amount: 3111.11,
+              },
+            ],
+            products: {},
+          },
+          {
+            id: 91,
+            product_id: null,
+            unit_price: 10000,
+            quantity: 1,
+            total_price: 10000,
+            discount_amount: 0,
+            cancelled_at: null,
+            order_item_taxes: [
+              {
+                tax_name: 'INC 8%',
+                tax_rate: 0.08,
+                tax_type: 'inc',
+                tax_amount: 800,
+              },
+            ],
+            products: {},
+          },
+        ],
+        order_promotions: [],
+        coupon_uses: [],
+      });
+
+      const result = (await service.findOne(9)) as any;
+
+      expect(result.order_items[0].line_breakdown).toEqual({
+        base: 55555.56,
+        discount: 16666.67,
+        taxes: [
+          { name: 'INC 8%', rate: 0.08, tax_type: 'inc', amount: 3111.11 },
+        ],
+        tax_total: 3111.11,
+        total: 42000,
+      });
+      // La base persistida no cambia de magnitud para el lector viejo.
+      expect(result.order_items[0].total_price).toBe(55555.56);
+      expect(result.totals_breakdown).toEqual({
+        subtotal_base: 65555.56,
+        discount: 16666.67,
+        taxes: [
+          { name: 'INC 8%', rate: 0.08, tax_type: 'inc', amount: 3911.11 },
+        ],
+        tax_total: 3911.11,
+        shipping: 0,
+        tip: 0,
+        grand_total: 52800,
+        reconciles: true,
+      });
+    });
   });
 
   // ----------------------------------------------------------------

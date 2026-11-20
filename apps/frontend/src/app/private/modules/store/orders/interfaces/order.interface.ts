@@ -66,7 +66,42 @@ export interface OrderCustomer {
   person_type?: 'NATURAL' | 'JURIDICA' | string | null;
 }
 
+/** Impuesto persistido de una línea o agrupado por tipo en la orden. */
+export interface OrderBreakdownTax {
+  name: string;
+  rate: number | null;
+  tax_type: string | null;
+  amount: number;
+}
+
+/**
+ * Desglose de la línea leído de lo persistido (`findOne`): base sin
+ * impuesto, descuento de línea, impuesto por tasa y total con impuesto
+ * (= base − descuento + impuesto).
+ */
+export interface OrderLineBreakdown {
+  base: number;
+  discount: number;
+  taxes: OrderBreakdownTax[];
+  tax_total: number;
+  total: number;
+}
+
+/** Totales de la orden desde las líneas vivas; `grand_total` es el persistido. */
+export interface OrderTotalsBreakdown {
+  subtotal_base: number;
+  discount: number;
+  taxes: OrderBreakdownTax[];
+  tax_total: number;
+  shipping: number;
+  tip: number;
+  grand_total: number;
+  reconciles: boolean;
+}
+
 export interface Order {
+  /** Desglose sin impuesto / descuento / impuesto por tipo (aditivo). */
+  totals_breakdown?: OrderTotalsBreakdown | null;
   id: number;
   customer_id: number;
   // Carril B - B1: alias de venta para consumidor final. Persiste en
@@ -441,6 +476,8 @@ export interface OrderItem {
    */
   final_unit_price?: number | null;
   final_total_price?: number | null;
+  /** Desglose persistido de la línea (aditivo; cocina no lo recibe). */
+  line_breakdown?: OrderLineBreakdown | null;
   tax_rate?: number;
   tax_amount_item?: number;
   /**
