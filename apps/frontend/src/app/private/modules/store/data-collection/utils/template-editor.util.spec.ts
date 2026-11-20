@@ -66,6 +66,13 @@ describe('template-editor.util', () => {
     expect(none.documents.accept).toEqual(['pdf']);
   });
 
+  it('patchDocumentsRules on a legacy item (no documents config) starts from the permissive legacy policy', () => {
+    const out = patchDocumentsRules({ min: 1 }, { multiple: true }) as { documents: { multiple: boolean; accept: string[]; max_size_mb: number } };
+    expect(out.documents.multiple).toBeTrue();
+    expect(out.documents.accept).toEqual(['pdf', 'image', 'word', 'excel', 'powerpoint', 'text']);
+    expect(out.documents.max_size_mb).toBe(20);
+  });
+
   it('toggleAcceptedKind adds, removes and refuses to empty the list', () => {
     expect(toggleAcceptedKind(['pdf'], 'image')).toEqual(['pdf', 'image']);
     expect(toggleAcceptedKind(['pdf', 'image'], 'pdf')).toEqual(['image']);

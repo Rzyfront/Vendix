@@ -4,6 +4,7 @@ import {
   documentAcceptAttribute,
   readStoredDocuments,
   resolveDocumentConfig,
+  resolveItemDocumentConfig,
   TEMPLATE_FIELD_TYPES,
   TEMPLATE_JSON_SCHEMA_ID,
   templateToJson,
@@ -189,6 +190,18 @@ describe('documents policy', () => {
     expect(resolveDocumentConfig({ documents: { max_size_mb: 500 } }).max_size_mb).toBe(20);
     expect(resolveDocumentConfig(null)).toEqual({ multiple: false, accept: ['pdf', 'image'], max_size_mb: 10 });
     expect(documentAcceptAttribute(config)).toBe('application/pdf,.pdf');
+  });
+
+  it('items without documents config keep the legacy policy; configured ones use their config', () => {
+    const legacy = { multiple: false, accept: ['pdf', 'image', 'word', 'excel', 'powerpoint', 'text'], max_size_mb: 20 };
+    expect(resolveItemDocumentConfig(null)).toEqual(legacy);
+    expect(resolveItemDocumentConfig({ min: 1 })).toEqual(legacy);
+    expect(resolveItemDocumentConfig({ documents: {} })).toEqual(resolveDocumentConfig({ documents: {} }));
+    expect(resolveItemDocumentConfig({ documents: { accept: ['pdf'], max_size_mb: 3 } })).toEqual({
+      multiple: false,
+      accept: ['pdf'],
+      max_size_mb: 3,
+    });
   });
 
   it('reads value_json files and the legacy single key', () => {

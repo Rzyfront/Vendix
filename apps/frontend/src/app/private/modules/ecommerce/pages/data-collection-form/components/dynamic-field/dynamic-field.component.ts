@@ -22,7 +22,7 @@ import {
   DOCUMENT_KINDS,
   DOCUMENT_MAX_FILES,
   documentAcceptAttribute,
-  resolveDocumentConfig,
+  resolveItemDocumentConfig,
   StoredDocument,
 } from '../../../../../store/data-collection/utils/template-json.contract';
 import {
@@ -211,7 +211,7 @@ export class DynamicFieldComponent {
   /** Signed URLs of files uploaded in this session (restored files have none). */
   private urlsByKey = signal<Record<string, string>>({});
 
-  readonly docsConfig = computed(() => resolveDocumentConfig(this.validationRules()));
+  readonly docsConfig = computed(() => resolveItemDocumentConfig(this.validationRules()));
   readonly acceptAttribute = computed(() => documentAcceptAttribute(this.docsConfig()));
   /** Attached documents; the value may be a list or a legacy single key. */
   readonly docs = computed<StoredDocument[]>(() => normalizeDocumentsValue(this.value()));

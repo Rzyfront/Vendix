@@ -50,6 +50,7 @@ import {
   DOCUMENT_MAX_SIZE_MB_LIMIT,
   DocumentKind,
   resolveDocumentConfig,
+  resolveItemDocumentConfig,
   templateToJson,
 } from '../../utils/template-json.contract';
 import { templateJsonFilename } from '../../utils/template-json-import.util';
@@ -1998,7 +1999,7 @@ export class TemplateEditorComponent implements OnInit {
   readonly selectedDocsConfig = computed(() => {
     const item = this.selectedItem();
     if (!item || this.getFieldType(item.metadata_field_id) !== 'file') return null;
-    return resolveDocumentConfig(item.validation_rules);
+    return resolveItemDocumentConfig(item.validation_rules);
   });
 
   setDocsMultiple(multiple: boolean) {

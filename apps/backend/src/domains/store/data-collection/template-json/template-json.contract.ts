@@ -126,6 +126,18 @@ export const DEFAULT_DOCUMENT_CONFIG: DocumentFieldConfig = {
 };
 
 /**
+ * Config of a `file` item saved before documents configs existed (no
+ * `validation_rules.documents`): every known kind up to the absolute ceiling,
+ * so forms already in use keep accepting what they accepted before.
+ * `DEFAULT_DOCUMENT_CONFIG` only applies to fields created with the new config.
+ */
+export const LEGACY_DOCUMENT_CONFIG: DocumentFieldConfig = {
+  multiple: false,
+  accept: [...DOCUMENT_KIND_KEYS],
+  max_size_mb: DOCUMENT_MAX_SIZE_MB_LIMIT,
+};
+
+/**
  * One stored attachment. `entity_metadata_values.value_json = { files: [...] }`
  * and `value_text` keeps the first key, so readers that only know the legacy
  * single-file shape keep working.
@@ -152,6 +164,19 @@ export function resolveDocumentConfig(validationRules: unknown): DocumentFieldCo
     max_size_mb:
       size > 0 ? Math.min(size, DOCUMENT_MAX_SIZE_MB_LIMIT) : DEFAULT_DOCUMENT_CONFIG.max_size_mb,
   };
+}
+
+/**
+ * Effective config of a template item: its `validation_rules.documents` when
+ * present, otherwise the permissive legacy config. Use it wherever a stored
+ * item is validated (uploads, saved answers, editors).
+ */
+export function resolveItemDocumentConfig(validationRules: unknown): DocumentFieldConfig {
+  const raw = isPlainObject(validationRules) ? validationRules['documents'] : undefined;
+  if (!isPlainObject(raw)) {
+    return { ...LEGACY_DOCUMENT_CONFIG, accept: [...LEGACY_DOCUMENT_CONFIG.accept] };
+  }
+  return resolveDocumentConfig(validationRules);
 }
 
 /** Allowed MIME → extensions of a configuration. */

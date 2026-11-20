@@ -26,6 +26,21 @@ describe('responseAttachments', () => {
     expect(responseAttachments({ value_text: 'organizations/1/f.png' })[0].url).toBeNull();
   });
 
+  it('links a legacy http value_text that comes back as an unsigned file', () => {
+    const url = 'https://s3/bucket/cedula.pdf?sig=1';
+    const items = responseAttachments({
+      value_text: url,
+      files: [{ key: url, name: 'cedula.pdf', size: 0, mime_type: '', url: null }],
+    });
+    expect(items.length).toBe(1);
+    expect(items[0].url).toBe(url);
+    const own = responseAttachments({
+      value_text: 'organizations/1/a.pdf',
+      files: [{ key: 'organizations/1/a.pdf', name: 'a.pdf', url: null }],
+    });
+    expect(own[0].url).toBeNull();
+  });
+
   it('returns nothing without value', () => {
     expect(responseAttachments({})).toEqual([]);
     expect(responseAttachments({ value_text: '[object File]' })).toEqual([]);

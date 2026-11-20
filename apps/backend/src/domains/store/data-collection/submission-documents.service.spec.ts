@@ -96,6 +96,27 @@ describe('SubmissionDocumentsService.upload (S3)', () => {
     expect(await codeOf(service.upload(submission() as any, big, 5))).toBe('DCOL_UPLOAD_002');
   });
 
+  it('a file field without documents config keeps the legacy policy: any known kind up to 20 MB', async () => {
+    const { service, s3 } = setup();
+    const legacy = submission([fileItem(null)]);
+    const DOCX = Buffer.from([0x50, 0x4b, 0x03, 0x04, 0, 0]);
+    const docx = mkFile(
+      'contrato.docx',
+      'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
+      DOCX,
+      15 * 1024 * 1024,
+    );
+    const out = await service.upload(legacy as any, docx, 5);
+    expect(out.key).toMatch(new RegExp(`^${PREFIX}/9/\\d+-contrato\\.docx$`));
+    expect(s3.uploadFile).toHaveBeenCalled();
+    const xlsx = mkFile('a.xlsx', 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet', DOCX);
+    await expect(service.upload(legacy as any, xlsx, 5)).resolves.toBeDefined();
+    const legacyNoKey = submission([fileItem({ min: 1 })]);
+    await expect(service.upload(legacyNoKey as any, xlsx, 5)).resolves.toBeDefined();
+    const huge = mkFile('a.pdf', 'application/pdf', PDF, 21 * 1024 * 1024);
+    expect(await codeOf(service.upload(legacy as any, huge, 5))).toBe('DCOL_UPLOAD_002');
+  });
+
   it('rejects when the bytes do not match the declared type (pdf name with PNG bytes)', async () => {
     const { service, s3 } = setup();
     const code = await codeOf(service.upload(submission() as any, mkFile('a.pdf', 'application/pdf', PNG), 5));
