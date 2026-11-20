@@ -64,6 +64,18 @@ export interface PlatformCrmLinkView {
   organization: PlatformOrganizationSummary | null;
 }
 
+/** Una cuenta Vendix enlazada al cliente (puede tener varias). */
+export interface PlatformCrmLinkItem extends PlatformCrmLink {
+  /** `organization` = la org completa; `store` = solo `linked_store`. */
+  scope: 'organization' | 'store';
+  organization: PlatformOrganizationSummary | null;
+}
+
+/** `GET store/platform-crm/customers/:customerId/links` */
+export interface PlatformCrmLinkList {
+  links: PlatformCrmLinkItem[];
+}
+
 const SUBSCRIPTION_STATE_LABELS: Record<string, string> = {
   draft: 'Borrador',
   trial: 'En prueba',
