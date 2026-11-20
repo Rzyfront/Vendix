@@ -14,6 +14,7 @@ import { parseApiError } from '../../../../core/utils/parse-api-error';
 import { CustomerSectionComponent } from '../customers/components/customer-section/customer-section.component';
 import { PlatformCrmService } from './platform-crm.service';
 import {
+  CoveredStore,
   PlatformCrmLinkItem,
   PlatformOrganizationSubscription,
   canManageVendixAccount,
@@ -21,6 +22,8 @@ import {
   subscriptionStateLabel,
 } from './platform-crm.interface';
 import { VendixAccountLinkModalComponent } from './vendix-account-link-modal.component';
+import { VendixAccountMovementsComponent } from './vendix-account-movements.component';
+import { VendixAccountActivityComponent } from './vendix-account-activity.component';
 
 /** Fecha de un instante (fin de periodo o de trial) en hora de Colombia. */
 function formatInstantDate(iso: string | null): string {
@@ -43,6 +46,8 @@ type BlockState = 'loading' | 'ready' | 'error' | 'hidden';
  *
  * Un cliente puede tener varias cuentas enlazadas (organizaciones completas
  * y/o tiendas sueltas): una tarjeta por cuenta, cada una con su desenlace.
+ * Debajo, los movimientos de la suscripción y la actividad de cada comercio
+ * (esta última carga diferida al entrar en pantalla).
  *
  * El panel lo monta únicamente con `platform:crm_link:read`. Si aun así el
  * backend responde 404 (otra tienda, o el cliente no es del CRM plataforma)
@@ -58,6 +63,8 @@ type BlockState = 'loading' | 'ready' | 'error' | 'hidden';
     SpinnerComponent,
     CustomerSectionComponent,
     VendixAccountLinkModalComponent,
+    VendixAccountMovementsComponent,
+    VendixAccountActivityComponent,
   ],
   template: `
     @if (state() !== 'hidden') {
@@ -147,6 +154,23 @@ type BlockState = 'loading' | 'ready' | 'error' | 'hidden';
                 }
               </article>
             }
+
+            <app-vendix-account-movements
+              class="mt-2 block"
+              [customerId]="customerId()"
+              [reloadKey]="linksKey()"
+              (storesLoaded)="coveredStores.set($event)"
+            ></app-vendix-account-movements>
+
+            @defer (on viewport) {
+              <app-vendix-account-activity
+                class="mt-2 block"
+                [customerId]="customerId()"
+                [stores]="coveredStores()"
+              ></app-vendix-account-activity>
+            } @placeholder {
+              <div class="h-24" aria-hidden="true"></div>
+            }
           </div>
         } @else {
           <div class="flex flex-wrap items-center justify-between gap-3">
@@ -187,6 +211,10 @@ export class VendixAccountBlockComponent {
   /** Enlace que se está desenlazando (uno a la vez). */
   protected readonly unlinkingId = signal<number | null>(null);
   protected readonly canManage = computed(() => canManageVendixAccount(this.auth));
+  /** Cambia al enlazar o desenlazar: el historial vuelve a cargarse. */
+  protected readonly linksKey = computed(() => this.links().map((l) => l.id).join(','));
+  /** Comercios cubiertos, según el historial; alimentan el selector de Actividad. */
+  protected readonly coveredStores = signal<CoveredStore[]>([]);
   protected readonly countLabel = computed(() => {
     const count = this.links().length;
     return count === 1 ? '1 cuenta enlazada' : `${count} cuentas enlazadas`;

@@ -7,6 +7,9 @@ import {
   PlatformCrmLinkList,
   PlatformCrmLinkTarget,
   PlatformCrmLinkView,
+  PlatformStoreActivityView,
+  SubscriptionMovementsQuery,
+  SubscriptionMovementsView,
 } from './platform-crm.interface';
 
 interface ApiEnvelope<T> {
@@ -44,6 +47,40 @@ export class PlatformCrmService {
       .delete<ApiEnvelope<PlatformCrmLinkList>>(
         `${this.base}/customers/${customerId}/links/${linkId}`,
         { body },
+      )
+      .pipe(map((r) => r.data));
+  }
+
+  /** Facturas, pagos y cambios de la suscripción de las cuentas enlazadas, con métricas. */
+  getSubscriptionMovements(
+    customerId: number,
+    query: SubscriptionMovementsQuery = {},
+  ): Observable<SubscriptionMovementsView> {
+    let params = new HttpParams();
+    for (const [key, value] of Object.entries(query)) {
+      if (value !== undefined && value !== null && value !== '') params = params.set(key, String(value));
+    }
+    return this.http
+      .get<ApiEnvelope<SubscriptionMovementsView>>(
+        `${this.base}/customers/${customerId}/subscription-movements`,
+        { params },
+      )
+      .pipe(map((r) => r.data));
+  }
+
+  /** Gráfica de actividad de un comercio enlazado (`from`/`to` en `YYYY-MM-DD`). */
+  getStoreActivity(
+    customerId: number,
+    storeId: number,
+    range: { from?: string; to?: string } = {},
+  ): Observable<PlatformStoreActivityView> {
+    let params = new HttpParams();
+    if (range.from) params = params.set('from', range.from);
+    if (range.to) params = params.set('to', range.to);
+    return this.http
+      .get<ApiEnvelope<PlatformStoreActivityView>>(
+        `${this.base}/customers/${customerId}/stores/${storeId}/activity`,
+        { params },
       )
       .pipe(map((r) => r.data));
   }
