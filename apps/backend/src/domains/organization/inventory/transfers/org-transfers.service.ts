@@ -306,6 +306,7 @@ export class OrgTransfersService {
       receivedLegacy,
       partiallyReceived,
       cancelled,
+      closedWithLoss,
     ] = await Promise.all([
       this.orgPrisma.stock_transfers.count(),
       this.orgPrisma.stock_transfers.count({
@@ -343,6 +344,9 @@ export class OrgTransfersService {
       this.orgPrisma.stock_transfers.count({
         where: { status: transfer_status_enum.cancelled },
       }),
+      this.orgPrisma.stock_transfers.count({
+        where: { status: transfer_status_enum.closed_with_loss },
+      }),
     ]);
 
     return {
@@ -354,6 +358,7 @@ export class OrgTransfersService {
       partially_received: partiallyReceived,
       received: receivedNew + receivedLegacy,
       cancelled,
+      closed_with_loss: closedWithLoss,
     };
   }
 
@@ -416,6 +421,7 @@ export class OrgTransfersService {
 
     return this.orgPrisma.$transaction(async (tx: any) => {
       const transportResolved = await resolveTransferTransport(tx, dto, {
+        organization_id,
         store_id: scope.from_store_id,
         user_id,
       });
@@ -847,8 +853,17 @@ export class OrgTransfersService {
 
       // Reclamo atómico: dos despachos simultáneos compiten por la misma fila;
       // el segundo no vuelve a descontar stock.
+      // El estado va en la condición: un cancelar concurrente que ya cambió la
+      // fila hace que este reclamo no encuentre nada que despachar.
       const claim = await tx.stock_transfers.updateMany({
-        where: { id, organization_id, dispatched_at: null },
+        where: {
+          id,
+          organization_id,
+          dispatched_at: null,
+          status: {
+            in: [transfer_status_enum.approved, transfer_status_enum.draft],
+          },
+        },
         data: { dispatched_at: new Date(), dispatched_by_user_id: user_id },
       });
       if (claim.count === 0) {
@@ -926,10 +941,16 @@ export class OrgTransfersService {
         }
       }
 
-      const transport = await resolveTransferTransport(tx, dto, {
-        store_id: scope.from_store_id,
-        user_id,
-      });
+      // El transporte se guarda al crear; el despacho solo lo reemplaza si
+      // trae un método. Sin `transport_method` las columnas no se tocan.
+      const transport =
+        dto.transport_method !== undefined
+          ? await resolveTransferTransport(tx, dto, {
+              organization_id,
+              store_id: scope.from_store_id,
+              user_id,
+            })
+          : {};
 
       const wantsDispatchNote =
         transfer.movement_mode === 'with_dispatch_notes' || isExternal;
@@ -974,7 +995,17 @@ export class OrgTransfersService {
 
       const sourceCosts = new Map<number, number>();
       for (const entry of plan) {
-        if (entry.quantity_dispatched <= 0) continue;
+        // Toda línea del plan deja su conteo de salida, incluido el 0: NULL se
+        // lee como "salió completa" (fila histórica) y recibir, cancelar o
+        // cerrar con pérdida operarían sobre unidades que nunca salieron.
+        if (entry.quantity_dispatched <= 0) {
+          await tx.stock_transfer_items.update({
+            where: { id: entry.line.id },
+            data: { quantity_dispatched: 0 },
+          });
+          entry.line.quantity_dispatched = 0;
+          continue;
+        }
         const source = await this.stockLevelManager.updateStock(
           {
             product_id: entry.line.product_id,
@@ -1181,6 +1212,19 @@ export class OrgTransfersService {
           (line: any) => line.quantity_dispatched == null,
         );
 
+      // Flujo histórico: una transferencia aprobada desde la tienda reservó el
+      // origen. Se consume la reserva antes de descontar (igual que la tienda);
+      // sin reservas activas esto no hace nada.
+      if (legacyUndispatched) {
+        await this.stockLevelManager.releaseReservationsByReference(
+          'transfer',
+          transfer.id,
+          'consumed',
+          tx,
+          { decrementOnHand: false },
+        );
+      }
+
       for (const entry of toReceive) {
         const line = entry.line;
         let unitCost = await this.resolveOriginUnitCost(
@@ -1320,6 +1364,13 @@ export class OrgTransfersService {
     const user_id = this.requireUserId();
 
     return this.orgPrisma.$transaction(async (tx: any) => {
+      // Mismo candado de fila que `receive`: recepción y cierre simultáneos
+      // se serializan y el segundo lee saldo y estado ya actualizados.
+      await tx.stock_transfers.updateMany({
+        where: { id, organization_id },
+        data: { updated_at: new Date() },
+      });
+
       const transfer = await tx.stock_transfers.findFirst({
         where: { id, organization_id },
         include: { stock_transfer_items: true },
@@ -1381,6 +1432,14 @@ export class OrgTransfersService {
         );
 
       if (legacyUndispatched) {
+        // La reserva del aprobar de tienda se consume antes de la merma.
+        await this.stockLevelManager.releaseReservationsByReference(
+          'transfer',
+          transfer.id,
+          'consumed',
+          tx,
+          { decrementOnHand: false },
+        );
         for (const entry of pendingLines) {
           await this.stockLevelManager.updateStock(
             {
@@ -1461,7 +1520,35 @@ export class OrgTransfersService {
       transfer.status === transfer_status_enum.in_transit ||
       transfer.status === transfer_status_enum.partially_received
     ) {
+      const legacyUndispatched =
+        transfer.dispatched_at == null &&
+        transfer.stock_transfer_items.every(
+          (item: any) => item.quantity_dispatched == null,
+        );
+
       const updated = await this.orgPrisma.$transaction(async (tx: any) => {
+        // Flujo histórico (aprobada desde la tienda, nunca despachada): el
+        // origen no se descontó, solo se reservó. Se libera la reserva y no se
+        // devuelve nada, igual que la tienda; devolver crearía stock fantasma.
+        if (legacyUndispatched) {
+          await this.stockLevelManager.releaseReservationsByReference(
+            'transfer',
+            transfer.id,
+            'cancelled',
+            tx,
+          );
+          return tx.stock_transfers.update({
+            where: { id },
+            data: {
+              status: transfer_status_enum.cancelled,
+              cancelled_at: new Date(),
+              cancelled_by_user_id: user_id,
+              cancellation_reason: dto?.reason ?? null,
+            },
+            include: TRANSFER_RESPONSE_INCLUDE,
+          });
+        }
+
         // Devuelve al origen lo pendiente (despachado y no recibido).
         for (const item of transfer.stock_transfer_items) {
           const pending = pendingQuantity(item);

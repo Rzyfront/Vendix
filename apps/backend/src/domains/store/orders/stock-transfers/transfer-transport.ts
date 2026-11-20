@@ -73,6 +73,13 @@ export interface TransferTransportInput {
 }
 
 export interface TransferTransportContext {
+  /**
+   * Organización de la transferencia. Obligatoria: vehículos, conductores y
+   * métodos de envío se filtran SIEMPRE por ella, porque dentro de la
+   * transacción esos modelos no traen scope automático (y con origen en bodega
+   * central no hay tienda contra la cual comparar).
+   */
+  organization_id: number;
   /** Tienda de la bodega de origen (null si es bodega central de la org). */
   store_id: number | null;
   user_id?: number | null;
@@ -195,9 +202,33 @@ export function normalizeShippingCost(value?: number | null): number {
 }
 
 /**
+ * Conductor de la transferencia: un usuario de la MISMA organización. Devuelve
+ * su nombre para dejarlo como texto en la transferencia.
+ */
+export async function resolveTransferDriver(
+  tx: any,
+  organizationId: number,
+  driverUserId: number,
+): Promise<{ id: number; name: string | null }> {
+  const driver = await tx.users.findFirst({
+    where: { id: driverUserId, organization_id: organizationId },
+    select: { id: true, first_name: true, last_name: true },
+  });
+  if (!driver) {
+    throw new BadRequestException(`El conductor #${driverUserId} no existe`);
+  }
+  return {
+    id: driver.id,
+    name:
+      `${driver.first_name ?? ''} ${driver.last_name ?? ''}`.trim() || null,
+  };
+}
+
+/**
  * Resuelve el vehículo de la transferencia. Si llega un id, se valida que sea
- * de la tienda; si llega `vehicle` inline (sin id), se crea en `vehicles` de la
- * misma tienda y, si la placa ya existe, se reutiliza (D6).
+ * de la organización y de la tienda de origen; si llega `vehicle` inline (sin
+ * id), se crea en `vehicles` de la misma tienda y, si la placa ya existe, se
+ * reutiliza (D6).
  */
 export async function resolveTransferVehicle(
   tx: any,
@@ -206,10 +237,14 @@ export async function resolveTransferVehicle(
     vehicle_id?: number | null;
     vehicle?: InlineVehicleInput | null;
   },
+  organizationId: number,
 ): Promise<number> {
   if (input.vehicle_id != null) {
     const vehicle = await tx.vehicles.findFirst({
-      where: { id: input.vehicle_id },
+      where: {
+        id: input.vehicle_id,
+        store: { organization_id: organizationId },
+      },
       select: { id: true, store_id: true },
     });
     if (!vehicle) {
@@ -249,6 +284,10 @@ export async function resolveTransferVehicle(
     select: { id: true },
   });
   if (existing) return existing.id;
+
+  if (inline.primary_driver_id != null) {
+    await resolveTransferDriver(tx, organizationId, inline.primary_driver_id);
+  }
 
   const created = await tx.vehicles.create({
     data: {
@@ -299,16 +338,30 @@ export async function resolveTransferTransport(
 
   switch (method) {
     case 'internal_vehicle': {
-      const vehicle_id = await resolveTransferVehicle(tx, context.store_id, {
-        vehicle_id: input.vehicle_id,
-        vehicle: input.vehicle,
-      });
+      const vehicle_id = await resolveTransferVehicle(
+        tx,
+        context.store_id,
+        {
+          vehicle_id: input.vehicle_id,
+          vehicle: input.vehicle,
+        },
+        context.organization_id,
+      );
+      let driver_name = cleanText(input.driver_name);
+      if (input.driver_user_id != null) {
+        const driver = await resolveTransferDriver(
+          tx,
+          context.organization_id,
+          input.driver_user_id,
+        );
+        driver_name = driver_name ?? driver.name;
+      }
       return {
         ...base,
         transport_method: method,
         vehicle_id,
         driver_user_id: input.driver_user_id ?? null,
-        driver_name: cleanText(input.driver_name),
+        driver_name,
       };
     }
 
@@ -323,20 +376,13 @@ export async function resolveTransferTransport(
       }
 
       if (driver_user_id != null) {
-        const driver = await tx.users.findFirst({
-          where: { id: driver_user_id },
-          select: { id: true, first_name: true, last_name: true },
-        });
-        if (!driver) {
-          throw new BadRequestException(
-            `El conductor #${driver_user_id} no existe`,
-          );
-        }
-        if (driver_name == null) {
-          driver_name =
-            `${driver.first_name ?? ''} ${driver.last_name ?? ''}`.trim() ||
-            null;
-        }
+        const driver = await resolveTransferDriver(
+          tx,
+          context.organization_id,
+          driver_user_id,
+        );
+        driver_user_id = driver.id;
+        driver_name = driver_name ?? driver.name;
       }
 
       return {
@@ -365,8 +411,16 @@ export async function resolveTransferTransport(
         );
       }
 
+      // Métodos propios de una tienda de la organización o de sistema
+      // (`store_id` NULL). Nunca el de otra organización.
       const shippingMethod = await tx.shipping_methods.findFirst({
-        where: { id: input.shipping_method_id },
+        where: {
+          id: input.shipping_method_id,
+          OR: [
+            { store_id: null },
+            { store: { organization_id: context.organization_id } },
+          ],
+        },
         select: { id: true, name: true, store_id: true, is_active: true },
       });
       if (!shippingMethod || shippingMethod.is_active === false) {
@@ -618,6 +672,24 @@ function isUniqueViolation(error: unknown): boolean {
 }
 
 /**
+ * Serializa la numeración `REM…` de la tienda hasta el fin de la transacción.
+ *
+ * Reintentar tras un P2002 dentro de la misma transacción interactiva no
+ * sirve en PostgreSQL: el error aborta la transacción (25P02) y todo lo que
+ * siga falla. Por eso el número se calcula con el candado tomado y, si aun así
+ * choca (otro camino de remisiones que no usa este candado), se responde un
+ * conflicto claro para reintentar la operación completa.
+ *
+ * `pg_advisory_xact_lock` devuelve void: va por `$executeRawUnsafe`.
+ */
+async function lockDispatchNumbering(tx: any, storeId: number): Promise<void> {
+  await tx.$executeRawUnsafe(
+    'SELECT pg_advisory_xact_lock(hashtext($1))',
+    `dispatch_notes:number:${storeId}`,
+  );
+}
+
+/**
  * Crea una remisión en la transacción de la transferencia. `transfer_out` va
  * con el conteo de salida al despachar; `transfer_in` con el conteo de entrada
  * al recibir. Se emite en `draft` a propósito: marcar `delivered` dispararía el
@@ -639,75 +711,70 @@ export async function createTransferNoteInTx(
     0,
   );
 
-  let lastError: unknown;
-  for (let attempt = 0; attempt < 3; attempt++) {
-    const dispatch_number = await nextDispatchNumber(tx, params.store_id);
-    try {
-      return await tx.dispatch_notes.create({
-        data: {
-          store_id: params.store_id,
-          dispatch_number,
-          status: 'draft',
-          direction: params.direction,
-          subtype: params.subtype,
-          customer_id: null,
-          customer_name: cleanText(params.external?.name),
-          customer_tax_id: cleanText(params.external?.tax_id),
-          ...(cleanText(params.external?.address)
-            ? {
-                customer_address: {
-                  address: cleanText(params.external?.address),
-                },
-              }
-            : {}),
-          from_location_id: params.from_location_id,
-          to_location_id: params.to_location_id,
-          dispatch_location_id:
-            params.direction === 'outbound'
-              ? params.from_location_id
-              : params.to_location_id,
-          emission_date: params.emission_date ?? new Date(),
-          subtotal_amount: subtotal,
-          discount_amount: 0,
-          tax_amount: 0,
-          grand_total: subtotal,
-          currency: 'COP',
-          notes: cleanText(params.notes),
-          internal_notes: cleanText(params.internal_notes),
-          created_by_user_id: params.user_id ?? null,
-          updated_at: new Date(),
-          dispatch_note_items: {
-            create: params.items.map((item) => ({
-              product_id: item.product_id,
-              product_variant_id: item.product_variant_id ?? null,
-              location_id:
-                params.direction === 'outbound'
-                  ? params.from_location_id
-                  : params.to_location_id,
-              ordered_quantity: item.quantity,
-              dispatched_quantity: item.quantity,
-              unit_price: item.unit_price ?? 0,
-              discount_amount: 0,
-              tax_amount: 0,
-              total_price:
-                Number(item.unit_price ?? 0) * Number(item.quantity ?? 0),
-              lot_serial: cleanText(item.lot_serial),
-            })),
-          },
+  await lockDispatchNumbering(tx, params.store_id);
+  const dispatch_number = await nextDispatchNumber(tx, params.store_id);
+  try {
+    return await tx.dispatch_notes.create({
+      data: {
+        store_id: params.store_id,
+        dispatch_number,
+        status: 'draft',
+        direction: params.direction,
+        subtype: params.subtype,
+        customer_id: null,
+        customer_name: cleanText(params.external?.name),
+        customer_tax_id: cleanText(params.external?.tax_id),
+        ...(cleanText(params.external?.address)
+          ? {
+              customer_address: {
+                address: cleanText(params.external?.address),
+              },
+            }
+          : {}),
+        from_location_id: params.from_location_id,
+        to_location_id: params.to_location_id,
+        dispatch_location_id:
+          params.direction === 'outbound'
+            ? params.from_location_id
+            : params.to_location_id,
+        emission_date: params.emission_date ?? new Date(),
+        subtotal_amount: subtotal,
+        discount_amount: 0,
+        tax_amount: 0,
+        grand_total: subtotal,
+        currency: 'COP',
+        notes: cleanText(params.notes),
+        internal_notes: cleanText(params.internal_notes),
+        created_by_user_id: params.user_id ?? null,
+        updated_at: new Date(),
+        dispatch_note_items: {
+          create: params.items.map((item) => ({
+            product_id: item.product_id,
+            product_variant_id: item.product_variant_id ?? null,
+            location_id:
+              params.direction === 'outbound'
+                ? params.from_location_id
+                : params.to_location_id,
+            ordered_quantity: item.quantity,
+            dispatched_quantity: item.quantity,
+            unit_price: item.unit_price ?? 0,
+            discount_amount: 0,
+            tax_amount: 0,
+            total_price:
+              Number(item.unit_price ?? 0) * Number(item.quantity ?? 0),
+            lot_serial: cleanText(item.lot_serial),
+          })),
         },
-        select: { id: true, dispatch_number: true },
-      });
-    } catch (error) {
-      lastError = error;
-      if (!isUniqueViolation(error)) throw error;
-    }
+      },
+      select: { id: true, dispatch_number: true },
+    });
+  } catch (error) {
+    if (!isUniqueViolation(error)) throw error;
+    // La transacción ya quedó abortada: no se reintenta acá.
+    throw new ConflictException(
+      'Otra remisión de la tienda tomó el mismo número al mismo tiempo: intenta de nuevo',
+    );
   }
-
-  throw new ConflictException(
-    `No se pudo generar un número de remisión único después de varios intentos${
-      lastError instanceof Error ? `: ${lastError.message}` : ''
-    }`,
-  );
 }
 
 /**

@@ -293,6 +293,7 @@ export class StockTransfersService {
       partially_received,
       received,
       cancelled,
+      closed_with_loss,
     ] = await Promise.all([
       this.prisma.stock_transfers.count(),
       this.prisma.stock_transfers.count({
@@ -311,6 +312,11 @@ export class StockTransfersService {
         where: { status: { in: ['received', 'completed'] } },
       }),
       this.prisma.stock_transfers.count({ where: { status: 'cancelled' } }),
+      // D4 — cierre con pérdida: terminal y propio, para que las tarjetas
+      // sumen el total aunque la pantalla aún no lo muestre.
+      this.prisma.stock_transfers.count({
+        where: { status: 'closed_with_loss' },
+      }),
     ]);
 
     return {
@@ -323,6 +329,7 @@ export class StockTransfersService {
         partially_received,
         received,
         cancelled,
+        closed_with_loss,
         // Alias de compatibilidad para consumidores que aún leen los nombres
         // legacy (frontend web y móvil, hasta que se alineen a los canónicos).
         draft: pending,
@@ -394,6 +401,7 @@ export class StockTransfersService {
         tx,
         createTransferDto,
         {
+          organization_id: context.organization_id,
           store_id: scope.from_store_id,
           user_id: context.user_id,
         },
@@ -981,9 +989,20 @@ export class StockTransfersService {
 
       // Reclamo atómico del despacho: dos peticiones simultáneas (doble clic,
       // dos pestañas) compiten por la misma fila; la segunda encuentra
-      // `dispatched_at` ya escrito y no vuelve a descontar stock.
+      // `dispatched_at` ya escrito y no vuelve a descontar stock. El estado va
+      // en la condición para que un cancelar concurrente no deje despachar una
+      // transferencia que ya dejó de estar aprobada.
       const claim = await tx.stock_transfers.updateMany({
-        where: { id, dispatched_at: null },
+        where: {
+          id,
+          dispatched_at: null,
+          status: {
+            in: [
+              transfer_status_enum.approved,
+              transfer_status_enum.in_transit,
+            ],
+          },
+        },
         data: {
           dispatched_at: new Date(),
           dispatched_by_user_id: context?.user_id ?? null,
@@ -1063,10 +1082,17 @@ export class StockTransfersService {
         }
       }
 
-      const transport = await resolveTransferTransport(tx, dto, {
-        store_id: scope.from_store_id,
-        user_id: context?.user_id,
-      });
+      // El transporte se guarda al crear; el despacho solo lo reemplaza si
+      // trae un método. Sin `transport_method` las columnas no se tocan (antes
+      // se resolvía un bloque vacío y borraba vehículo, conductor y costo).
+      const transport =
+        dto.transport_method !== undefined
+          ? await resolveTransferTransport(tx, dto, {
+              organization_id: stockTransfer.organization_id,
+              store_id: scope.from_store_id,
+              user_id: context?.user_id,
+            })
+          : {};
 
       const wantsDispatchNote =
         stockTransfer.movement_mode === 'with_dispatch_notes' || isExternal;
@@ -1113,7 +1139,18 @@ export class StockTransfersService {
 
       const sourceCosts = new Map<number, number>();
       for (const entry of plan) {
-        if (entry.quantity_dispatched <= 0) continue;
+        // Toda línea del plan deja su conteo de salida, incluido el 0: un
+        // `quantity_dispatched` NULL se lee como "salió completa" (fila
+        // histórica) y recibir, cancelar o cerrar con pérdida operarían sobre
+        // unidades que nunca salieron del origen.
+        if (entry.quantity_dispatched <= 0) {
+          await tx.stock_transfer_items.update({
+            where: { id: entry.line.id },
+            data: { quantity_dispatched: 0 },
+          });
+          entry.line.quantity_dispatched = 0;
+          continue;
+        }
         const source = await this.stockLevelManager.updateStock(
           {
             product_id: entry.line.product_id,
@@ -1550,6 +1587,14 @@ export class StockTransfersService {
     notes?: string,
   ) {
     return this.prisma.$transaction(async (tx) => {
+      // Mismo candado de fila que `receive`: una recepción y un cierre con
+      // pérdida simultáneos se serializan y el segundo lee el saldo y el
+      // estado ya actualizados (no puede dar de baja lo que acaba de entrar).
+      await tx.stock_transfers.updateMany({
+        where: { id },
+        data: { updated_at: new Date() },
+      });
+
       const stockTransfer = await tx.stock_transfers.findUnique({
         where: { id },
         include: { stock_transfer_items: true },
