@@ -25,6 +25,7 @@ import {
 } from './dto/scan-roster.dto';
 import { IndustryModuleGuard } from '../../../common/guards/industry-module.guard';
 import { IndustryModule } from '../../../common/decorators/industry-module.decorator';
+import { detectIngestFile } from '@common/ai-ingest/ingest-file.detector';
 
 /**
  * Member bulk scanner controller.
@@ -117,6 +118,18 @@ export class MemberBulkScannerController {
     try {
       if (!file) {
         throw new VendixHttpException(ErrorCodes.MEMBER_SCAN_NO_FILE);
+      }
+      // The mimetype above is what the client claims: the real type comes
+      // from the bytes. This synchronous path runs inside the API, so it only
+      // takes images and PDFs; spreadsheets go through `bulk-scan/async`.
+      const detected = detectIngestFile(this.scannerService.toScanFile(file));
+      if (!detected || (detected.kind !== 'image' && detected.kind !== 'pdf')) {
+        throw new VendixHttpException(
+          ErrorCodes.MEMBER_SCAN_INVALID_FILE,
+          detected?.kind === 'sheet'
+            ? 'Las hojas de cálculo se cargan con el escaneo en segundo plano; este envío solo acepta imágenes o PDF.'
+            : 'El archivo no es una imagen ni un PDF válido.',
+        );
       }
       const result = await this.scannerService.scanRoster(file);
       const fileInfo = await this.bulkUploadLogs.describeFile(

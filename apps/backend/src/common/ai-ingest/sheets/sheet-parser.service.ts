@@ -22,6 +22,24 @@ export interface SheetParseOptions {
 const HEADER_SCAN_ROWS = 20;
 const CSV_DELIMITERS = [',', ';', '\t', '|'];
 
+/**
+ * Hard bounds of the source rectangle, applied BEFORE any matrix is built: a
+ * 16 KB xlsx can declare `A1:XFD1048576` and a CSV line can hold millions of
+ * separators. Rows past `maxRows + HEADER_SCAN_ROWS + ROW_MARGIN` are never
+ * read (reported as one `limit` range) and columns past `MAX_COLUMNS` are
+ * ignored with a warning, so memory and CPU stay bounded whatever the file says.
+ */
+export const MAX_COLUMNS = 200;
+/** Blank rows, titles and totals around the data that still fit under the cap. */
+const ROW_MARGIN = 100;
+/** Longest CSV line accepted (a 200-column customer row is a few KB). */
+export const MAX_CSV_LINE_CHARS = 64 * 1024;
+
+/** Source rows read at most (1-based row numbers `1..cap`). */
+export function sheetRowCap(maxRows: number): number {
+  return maxRows + HEADER_SCAN_ROWS + ROW_MARGIN;
+}
+
 interface RawRow {
   /** 1-based row number in the source. */
   row: number;
@@ -31,6 +49,8 @@ interface RawRow {
 interface RawSheet {
   name: string;
   rows: RawRow[];
+  /** Source rows past the row cap that were not read (1-based, inclusive). */
+  cut?: { row: number; row_end: number };
 }
 
 /** Dates and periods ("31/01/2024", "2024-01-31", "2024-2025") are fine in a header. */
@@ -79,10 +99,11 @@ export class SheetParserService {
     options: SheetParseOptions,
   ): SheetParseResult {
     const warnings: string[] = [];
+    const rowCap = sheetRowCap(options.maxRows);
     const sheets =
       format === 'csv'
-        ? [this.readCsv(buffer)]
-        : this.readWorkbook(buffer, warnings);
+        ? [this.readCsv(buffer, rowCap, warnings)]
+        : this.readWorkbook(buffer, warnings, rowCap);
 
     const skipped: IngestSkippedRow[] = [];
     const tables: SheetTable[] = [];
@@ -90,9 +111,20 @@ export class SheetParserService {
     let totalRows = 0;
     const multi = sheets.filter((s) => s.rows.length > 0).length > 1;
 
+    const limitMessage = `Supera el máximo de ${options.maxRows} filas por carga; divide el archivo para cargar estas filas.`;
     for (const sheet of sheets) {
       const built = this.buildTable(sheet, multi);
-      if (!built) continue;
+      if (!built) {
+        if (sheet.cut) {
+          skipped.push({
+            ...sheet.cut,
+            ...(multi ? { sheet: sheet.name } : {}),
+            reason: 'limit',
+            message: limitMessage,
+          });
+        }
+        continue;
+      }
       const { table, dataRows, skipped: sheetSkipped } = built;
       skipped.push(...sheetSkipped);
       if (table.header_row === 0) {
@@ -110,13 +142,15 @@ export class SheetParserService {
         table.row_numbers.push(r.row);
       }
       kept += take.length;
-      if (over.length) {
+      // Rows read past `maxRows` and rows never read (past the row cap) are
+      // the same `limit` range for the user.
+      if (over.length || sheet.cut) {
         skipped.push({
-          row: over[0].row,
-          row_end: over[over.length - 1].row,
+          row: over.length ? over[0].row : sheet.cut!.row,
+          row_end: sheet.cut?.row_end ?? over[over.length - 1].row,
           ...(multi ? { sheet: sheet.name } : {}),
           reason: 'limit',
-          message: `Supera el máximo de ${options.maxRows} filas por carga; divide el archivo para cargar estas filas.`,
+          message: limitMessage,
         });
       }
       if (table.rows.length) tables.push(table);
@@ -129,7 +163,11 @@ export class SheetParserService {
   // Readers
   // ─────────────────────────────────────────────────────────────────────────
 
-  private readWorkbook(buffer: Buffer, warnings: string[]): RawSheet[] {
+  private readWorkbook(
+    buffer: Buffer,
+    warnings: string[],
+    rowCap: number,
+  ): RawSheet[] {
     let workbook: XLSX.WorkBook;
     try {
       workbook = XLSX.read(buffer, {
@@ -137,6 +175,9 @@ export class SheetParserService {
         cellDates: true,
         cellNF: true,
         cellText: true,
+        // SheetJS stops reading cells past this row (xlsx, xls and HTML
+        // tables); the declared range is kept in `!fullref`.
+        sheetRows: rowCap,
       });
     } catch {
       // Inside the ai-scan job only the CODE reaches the user; this one has
@@ -158,26 +199,76 @@ export class SheetParserService {
         }
         return;
       }
-      out.push({ name, rows: this.sheetRows(sheet) });
+      const read = this.sheetRows(sheet, rowCap);
+      if (read.columnsCut) {
+        warnings.push(
+          `${workbook.SheetNames.length > 1 ? `En la hoja "${name}" se` : 'Se'} ignoraron las columnas después de la ${XLSX.utils.encode_col(MAX_COLUMNS - 1)} (máximo ${MAX_COLUMNS} columnas).`,
+        );
+      }
+      out.push({ name, rows: read.rows, ...(read.cut ? { cut: read.cut } : {}) });
     });
     return out;
+  }
+
+  /**
+   * Source rows past the cap: the declared range (`!fullref`, set by
+   * `sheetRows` when it trimmed the sheet) or cells read anyway beyond it.
+   */
+  private cutRows(
+    sheet: XLSX.WorkSheet,
+    rowCap: number,
+    lastIgnoredRow: number,
+  ): { row: number; row_end: number } | undefined {
+    let last = lastIgnoredRow;
+    const full: unknown = sheet['!fullref'];
+    if (typeof full === 'string') {
+      try {
+        last = Math.max(last, XLSX.utils.decode_range(full).e.r);
+      } catch {
+        // A malformed declared range only loses the end of the report.
+      }
+    }
+    // `last` is 0-based; the cap is a count of 1-based rows.
+    return last >= rowCap ? { row: rowCap + 1, row_end: last + 1 } : undefined;
   }
 
   private hasCells(sheet: XLSX.WorkSheet): boolean {
     return Object.keys(sheet).some((k) => !k.startsWith('!'));
   }
 
-  /** Text matrix of a worksheet with merged ranges filled in. */
-  private sheetRows(sheet: XLSX.WorkSheet): RawRow[] {
+  /**
+   * Text matrix of a worksheet with merged ranges filled in, bounded to rows
+   * `0..rowCap-1` and columns `0..MAX_COLUMNS-1`. Only the cells that exist
+   * are visited; the declared range is never used to allocate.
+   */
+  private sheetRows(
+    sheet: XLSX.WorkSheet,
+    rowCap: number,
+  ): {
+    rows: RawRow[];
+    cut?: { row: number; row_end: number };
+    columnsCut: boolean;
+  } {
     let maxR = -1;
     let maxC = -1;
     let minR = Number.MAX_SAFE_INTEGER;
+    let lastIgnoredRow = -1;
+    let columnsCut = false;
     const cells = new Map<number, Map<number, string>>();
     for (const key of Object.keys(sheet)) {
       if (key.startsWith('!')) continue;
       const { r, c } = XLSX.utils.decode_cell(key);
+      if (r < 0 || c < 0) continue;
       const text = this.cellText(sheet[key] as XLSX.CellObject);
       if (!text) continue;
+      if (r >= rowCap) {
+        if (r > lastIgnoredRow) lastIgnoredRow = r;
+        continue;
+      }
+      if (c >= MAX_COLUMNS) {
+        columnsCut = true;
+        continue;
+      }
       let row = cells.get(r);
       if (!row) cells.set(r, (row = new Map()));
       row.set(c, text);
@@ -186,13 +277,20 @@ export class SheetParserService {
       if (c > maxC) maxC = c;
     }
 
+    // Merges are clipped to the same rectangle, and their total fill to its
+    // area: thousands of overlapping full-sheet merges stay one rectangle.
+    let mergeBudget = rowCap * MAX_COLUMNS;
     for (const merge of sheet['!merges'] ?? []) {
+      if (mergeBudget <= 0) break;
       const value = cells.get(merge.s.r)?.get(merge.s.c);
       if (!value) continue;
-      for (let r = merge.s.r; r <= merge.e.r; r++) {
+      const endR = Math.min(merge.e.r, rowCap - 1);
+      const endC = Math.min(merge.e.c, MAX_COLUMNS - 1);
+      for (let r = merge.s.r; r <= endR && mergeBudget > 0; r++) {
         let row = cells.get(r);
         if (!row) cells.set(r, (row = new Map()));
-        for (let c = merge.s.c; c <= merge.e.c; c++) {
+        for (let c = merge.s.c; c <= endC && mergeBudget > 0; c++) {
+          mergeBudget--;
           if (!row.has(c)) row.set(c, value);
           if (c > maxC) maxC = c;
         }
@@ -200,7 +298,8 @@ export class SheetParserService {
       }
     }
 
-    if (maxR < 0) return [];
+    const cut = this.cutRows(sheet, rowCap, lastIgnoredRow);
+    if (maxR < 0) return { rows: [], cut, columnsCut };
     const rows: RawRow[] = [];
     for (let r = minR; r <= maxR; r++) {
       const row = cells.get(r);
@@ -208,7 +307,7 @@ export class SheetParserService {
       for (let c = 0; c <= maxC; c++) values.push(row?.get(c) ?? '');
       rows.push({ row: r + 1, cells: values });
     }
-    return rows;
+    return { rows, cut, columnsCut };
   }
 
   /** A cell as the text a person reads, keeping every digit of codes. */
@@ -247,8 +346,14 @@ export class SheetParserService {
     return String(value);
   }
 
-  private readCsv(buffer: Buffer): RawSheet {
+  private readCsv(buffer: Buffer, rowCap: number, warnings: string[]): RawSheet {
     const text = this.decodeText(buffer);
+    if (this.longestLine(text) > MAX_CSV_LINE_CHARS) {
+      throw new VendixHttpException(
+        ErrorCodes.AI_INGEST_INVALID_FILE,
+        `El CSV tiene una línea de más de ${MAX_CSV_LINE_CHARS / 1024} KB. Verifica que el archivo sea una tabla de datos (máximo ${MAX_COLUMNS} columnas).`,
+      );
+    }
     const delimiter = this.detectDelimiter(text);
     let records: string[][];
     try {
@@ -265,13 +370,49 @@ export class SheetParserService {
         'No se pudo leer el CSV. Verifica que el archivo no esté dañado.',
       );
     }
-    const width = records.reduce((n, r) => Math.max(n, r.length), 0);
-    const rows: RawRow[] = records.map((record, index) => {
+    // Rows past the cap are reported, never padded; the width is measured on
+    // the columns kept, so one wide line cannot widen every other row.
+    let cut: RawSheet['cut'];
+    for (let i = records.length - 1; i >= rowCap; i--) {
+      if (records[i].some((v) => v && v.trim())) {
+        cut = { row: rowCap + 1, row_end: i + 1 };
+        break;
+      }
+    }
+    const kept = records.slice(0, rowCap);
+    let columnsCut = false;
+    const trimmed = kept.map((record) => {
+      if (record.length <= MAX_COLUMNS) return record;
+      if (!columnsCut) {
+        columnsCut = record.slice(MAX_COLUMNS).some((v) => v && v.trim());
+      }
+      return record.slice(0, MAX_COLUMNS);
+    });
+    if (columnsCut) {
+      warnings.push(
+        `Se ignoraron las columnas después de la ${XLSX.utils.encode_col(MAX_COLUMNS - 1)} (máximo ${MAX_COLUMNS} columnas).`,
+      );
+    }
+    const width = trimmed.reduce((n, r) => Math.max(n, r.length), 0);
+    const rows: RawRow[] = trimmed.map((record, index) => {
       const cells: string[] = [];
       for (let c = 0; c < width; c++) cells.push(this.csvCell(record[c]));
       return { row: index + 1, cells };
     });
-    return { name: 'CSV', rows };
+    return { name: 'CSV', rows, ...(cut ? { cut } : {}) };
+  }
+
+  /** Characters of the longest physical line, without splitting the text. */
+  private longestLine(text: string): number {
+    let longest = 0;
+    let start = 0;
+    for (;;) {
+      const end = text.indexOf('\n', start);
+      const stop = end === -1 ? text.length : end;
+      if (stop - start > longest) longest = stop - start;
+      if (end === -1) return longest;
+      start = end + 1;
+    }
   }
 
   /** Excel writes `="00123"` to keep leading zeros in a CSV. */
