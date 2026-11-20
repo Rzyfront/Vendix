@@ -11,10 +11,12 @@ import { resolveTimezoneCascade } from '../../../common/utils/store-timezone.uti
 import {
   PromotionClock,
   buildPromotionClock,
+  isPromotionEnded,
   isPromotionActiveOnWeekday,
   normalizeActiveWeekdays,
   promotionDateWindowWhere,
 } from './promotion-schedule.util';
+import { normalizePromotionDate } from './utils/promotion-date.util';
 
 /**
  * Tipo de regla de promoción. Alias local (igual que en
@@ -60,9 +62,7 @@ export class PromotionsService {
     if (promo.state !== 'active' && promo.state !== 'scheduled') {
       return promo.state;
     }
-    if (promo.end_date && new Date(promo.end_date) < clock.day_start) {
-      return 'expired';
-    }
+    if (isPromotionEnded(promo.end_date, clock)) return 'expired';
     if (new Date(promo.start_date) > clock.wall_now) return 'scheduled';
     return 'active';
   }
@@ -254,6 +254,7 @@ export class PromotionsService {
     this.validateScopeSelection(scope, normalizedProductIds, normalizedCategoryIds);
     this.validateRuleTypeShape(rule_type, quantity_tiers);
     await this.assertCodeAvailable(dto.code);
+    const { timezone } = await this.getStoreClock();
 
     const data: any = {
       ...promotionData,
@@ -265,8 +266,10 @@ export class PromotionsService {
       is_auto_apply: dto.is_auto_apply ?? false,
       priority: dto.priority ?? 0,
       active_weekdays: normalizeActiveWeekdays(dto.active_weekdays),
-      start_date: new Date(dto.start_date),
-      end_date: dto.end_date ? new Date(dto.end_date) : null,
+      start_date: normalizePromotionDate(dto.start_date, 'start', timezone),
+      end_date: dto.end_date
+        ? normalizePromotionDate(dto.end_date, 'end', timezone)
+        : null,
       state: 'draft',
       usage_count: 0,
     };
@@ -375,10 +378,20 @@ export class PromotionsService {
     const data: any = { ...updateData };
     if (dto.scope) data.scope = effectiveScope;
     if (dto.rule_type) data.rule_type = effectiveRuleType;
-    if (dto.start_date) data.start_date = new Date(dto.start_date);
-    if (dto.end_date !== undefined) {
-      data.end_date = dto.end_date ? new Date(dto.end_date) : null;
+    if (dto.start_date || dto.end_date) {
+      const { timezone } = await this.getStoreClock();
+      if (dto.start_date) {
+        data.start_date = normalizePromotionDate(
+          dto.start_date,
+          'start',
+          timezone,
+        );
+      }
+      if (dto.end_date) {
+        data.end_date = normalizePromotionDate(dto.end_date, 'end', timezone);
+      }
     }
+    if (dto.end_date !== undefined && !dto.end_date) data.end_date = null;
     if (dto.active_weekdays !== undefined) {
       data.active_weekdays = normalizeActiveWeekdays(dto.active_weekdays);
     }

@@ -1,10 +1,11 @@
-import { provideZonelessChangeDetection } from '@angular/core';
+import { provideZonelessChangeDetection, signal } from '@angular/core';
 import { ComponentFixture, TestBed } from '@angular/core/testing';
 import { of } from 'rxjs';
 import { PromotionFormModalComponent } from './promotion-form-modal.component';
 import { ProductsService } from '../../../../products/services/products.service';
 import { CategoriesService } from '../../../../products/services/categories.service';
 import { Promotion } from '../../interfaces/promotion.interface';
+import { StoreSettingsFacade } from '../../../../../../../core/store/store-settings/store-settings.facade';
 
 describe('PromotionFormModalComponent — días de la semana al editar', () => {
   let fixture: ComponentFixture<PromotionFormModalComponent>;
@@ -22,6 +23,10 @@ describe('PromotionFormModalComponent — días de la semana al editar', () => {
           },
         },
         { provide: CategoriesService, useValue: { getCategories: () => of([]) } },
+        {
+          provide: StoreSettingsFacade,
+          useValue: { timezone: signal('America/Bogota') },
+        },
       ],
     })
       .overrideComponent(PromotionFormModalComponent, {
@@ -83,5 +88,60 @@ describe('PromotionFormModalComponent — días de la semana al editar', () => {
     const component = open(savedPromo([2, 4]));
     component.toggleWeekday(5);
     expect(component.form.get('active_weekdays')?.value).toEqual([2, 4, 5]);
+  });
+
+  describe('fecha y hora opcional', () => {
+    const submit = (component: PromotionFormModalComponent): any => {
+      let sent: any;
+      component.save.subscribe((dto) => (sent = dto));
+      component.onSubmit();
+      return sent;
+    };
+
+    it('sin hora envía solo YYYY-MM-DD (día completo de la tienda)', () => {
+      const component = open({
+        ...savedPromo([]),
+        start_date: '2026-11-20T00:00:00.000Z',
+        end_date: '2026-11-21T23:59:59.999Z',
+      });
+      expect(component.form.get('start_time')?.value).toBe('');
+      expect(component.form.get('end_time')?.value).toBe('');
+      const dto = submit(component);
+      expect(dto.start_date).toBe('2026-11-20');
+      expect(dto.end_date).toBe('2026-11-21');
+      expect('start_time' in dto).toBeFalse();
+      expect('end_time' in dto).toBeFalse();
+    });
+
+    it('con hora envía ISO con el offset de la zona de la tienda', () => {
+      const component = open(savedPromo([]));
+      component.form.patchValue({
+        start_date: '2026-11-20',
+        start_time: '08:30',
+        end_date: '2026-11-21',
+        end_time: '15:00',
+      });
+      const dto = submit(component);
+      expect(dto.start_date).toBe('2026-11-20T08:30:00-05:00');
+      expect(dto.end_date).toBe('2026-11-21T15:00:00-05:00');
+    });
+
+    it('al editar carga la hora guardada (reloj de la tienda)', () => {
+      const component = open({
+        ...savedPromo([]),
+        end_date: '2026-11-21T15:00:00.000Z',
+      });
+      expect(component.form.get('end_date')?.value).toBe('2026-11-21');
+      expect(component.form.get('end_time')?.value).toBe('15:00');
+    });
+
+    it('una promo antigua con fin a medianoche se lee como todo el día', () => {
+      const component = open({
+        ...savedPromo([]),
+        end_date: '2026-11-21T00:00:00.000Z',
+      });
+      expect(component.form.get('end_date')?.value).toBe('2026-11-21');
+      expect(component.form.get('end_time')?.value).toBe('');
+    });
   });
 });

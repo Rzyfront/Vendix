@@ -25,7 +25,7 @@ import {
   PromotionQuantityTier,
 } from '../../interfaces/promotion.interface';
 import { selectPromotionsMeta } from '../../state/selectors/promotions.selectors';
-import { formatDateOnlyUTC } from '../../../../../../../shared/utils/date.util';
+import { formatPromotionDate } from '../../utils/promotion-date.util';
 import { formatWeekdaysShort } from '../../utils/promotion-weekdays.util';
 
 /**
@@ -60,9 +60,11 @@ const STATE_LABELS: Record<string, string> = {
   cancelled: 'Cancelada',
 };
 
-/** Fechas de promoción = fechas de calendario guardadas a medianoche UTC. */
-const formatPromotionDate = (val: string): string =>
-  val ? formatDateOnlyUTC(val) : '-';
+/** Fecha de la promo (reloj de la tienda); muestra la hora solo si la tiene. */
+const formatStartDate = (val: string): string =>
+  formatPromotionDate(val, 'start') || '-';
+const formatEndDate = (val: string): string =>
+  formatPromotionDate(val, 'end') || '-';
 
 @Component({
   selector: 'app-promotion-list',
@@ -391,13 +393,13 @@ export class PromotionListComponent {
       key: 'start_date',
       label: 'Inicio',
       priority: 3,
-      transform: formatPromotionDate,
+      transform: formatStartDate,
     },
     {
       key: 'end_date',
       label: 'Fin',
       priority: 3,
-      transform: formatPromotionDate,
+      transform: formatEndDate,
       defaultValue: 'Sin fin',
     },
     {
@@ -464,7 +466,7 @@ export class PromotionListComponent {
         key: 'start_date',
         label: 'Inicio',
         icon: 'calendar',
-        transform: formatPromotionDate,
+        transform: formatStartDate,
       },
       {
         key: 'usage_count',

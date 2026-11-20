@@ -80,13 +80,34 @@ export function buildPromotionClock(
 
 /**
  * Filtro Prisma de vigencia por fechas: empezó (hora local) y su `end_date`
- * no es anterior al día local de hoy (el día de fin cuenta completo).
+ * no ha pasado en el reloj de la tienda.
+ *
+ * `end_date` tiene dos formas válidas:
+ *  - con hora (incluye 23:59:59.999 = "todo el día", que es como se guarda
+ *    hoy una fecha sin hora): vigente mientras `end_date >= wall_now`.
+ *  - medianoche exacta (forma heredada de las promos guardadas antes de la
+ *    hora opcional): el día de fin cuenta completo, o sea vigente mientras
+ *    sea hoy (`end_date = day_start`) o un día futuro (cubierto por `gte`).
  */
 export function promotionDateWindowWhere(clock: PromotionClock) {
   return {
     start_date: { lte: clock.wall_now },
-    OR: [{ end_date: null }, { end_date: { gte: clock.day_start } }],
+    OR: [
+      { end_date: null },
+      { end_date: { gte: clock.wall_now } },
+      { end_date: clock.day_start },
+    ],
   };
+}
+
+/** Mismo criterio que `promotionDateWindowWhere`, para evaluar en memoria. */
+export function isPromotionEnded(
+  end_date: Date | string | null | undefined,
+  clock: PromotionClock,
+): boolean {
+  if (!end_date) return false;
+  const end = new Date(end_date).getTime();
+  return end < clock.wall_now.getTime() && end !== clock.day_start.getTime();
 }
 
 /** Normaliza la lista de días: enteros 0..6, sin duplicados, ordenados.
