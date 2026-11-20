@@ -1,4 +1,4 @@
-import { IsOptional, IsString, IsInt, Min, Max } from 'class-validator';
+import { IsOptional, IsString, IsInt, Min, Max, Matches } from 'class-validator';
 import { Type } from 'class-transformer';
 
 /**
@@ -23,4 +23,13 @@ export class QueryStaffLookupDto {
   @Min(1)
   @Max(20)
   limit?: number;
+
+  /**
+   * Comma-separated `users.id` list (max 50) to resolve staff names by id, so
+   * a preset selection renders the person's name instead of `Usuario #id`.
+   * Still staff-only (non-customer role) but not limited to active users.
+   */
+  @IsOptional()
+  @Matches(/^\d+(,\d+){0,49}$/, { message: 'ids debe ser una lista de ids separados por coma (máx. 50)' })
+  ids?: string;
 }

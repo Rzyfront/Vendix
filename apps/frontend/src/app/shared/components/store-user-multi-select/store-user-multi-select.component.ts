@@ -207,8 +207,7 @@ export class StoreUserMultiSelectComponent
   readonly lookupMode = input<'default' | 'staff'>('default');
   /**
    * Users whose name is already known (e.g. the ones saved on a record), so
-   * an incoming id never renders as `Usuario #id`: the staff lookup has no
-   * single-user route.
+   * an incoming id renders its name without a lookup round-trip.
    */
   readonly knownUsers = input<StoreUserOption[]>([]);
   /**
@@ -241,6 +240,9 @@ export class StoreUserMultiSelectComponent
     const excluded = new Set([...this.selectedIds(), ...this.excludeIds()]);
     return this.results().filter((u) => !excluded.has(u.id));
   });
+
+  /** Bumped on every write so a slow name lookup never overwrites a newer value. */
+  private writeRequest = 0;
 
   // ControlValueAccessor callbacks
   private onChange: (value: number[]) => void = () => {};
@@ -276,11 +278,16 @@ export class StoreUserMultiSelectComponent
   writeValue(value: number[] | null): void {
     const ids = value ?? [];
     if (ids.length === 0) {
+      this.writeRequest++;
       this.selected.set([]);
       return;
     }
-    // Resolve name/avatar for each incoming id; known users skip the lookup.
-    const known = new Map(this.knownUsers().map((user) => [user.id, user]));
+    // Resolve name/avatar for each incoming id; known users (given by the
+    // caller or already chosen here) skip the lookup.
+    const known = new Map(
+      [...this.knownUsers(), ...this.selected()].map((user) => [user.id, user]),
+    );
+    const request = ++this.writeRequest;
     forkJoin(
       ids.map((id) => {
         const user = known.get(id);
@@ -289,6 +296,8 @@ export class StoreUserMultiSelectComponent
     )
       .pipe(takeUntilDestroyed(this.destroyRef))
       .subscribe((resolved) => {
+        // A newer writeValue/selection already replaced this one.
+        if (request !== this.writeRequest) return;
         this.selected.set(
           resolved.map((user, index) =>
             user ?? { id: ids[index], name: `Usuario #${ids[index]}` },
@@ -352,6 +361,7 @@ export class StoreUserMultiSelectComponent
   add(user: StoreUserOption): void {
     if (this.isDisabled()) return;
     if (this.selectedIds().includes(user.id)) return;
+    this.writeRequest++;
     this.selected.update((current) => [...current, user]);
     this.query.set('');
     this.isOpen.set(false);
@@ -361,6 +371,7 @@ export class StoreUserMultiSelectComponent
   remove(id: number, event: Event): void {
     event.stopPropagation();
     if (this.isDisabled()) return;
+    this.writeRequest++;
     this.selected.update((current) => current.filter((u) => u.id !== id));
     this.emit();
   }

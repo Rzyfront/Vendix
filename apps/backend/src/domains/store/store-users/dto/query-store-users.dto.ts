@@ -1,4 +1,4 @@
-import { IsOptional, IsString, IsInt, Min, IsIn } from 'class-validator';
+import { IsOptional, IsString, IsInt, Min, IsIn, Matches } from 'class-validator';
 import { Type } from 'class-transformer';
 
 export class QueryStoreUsersDto {
@@ -34,6 +34,16 @@ export class QueryStoreUsersDto {
   @IsOptional()
   @IsString()
   state?: string;
+
+  /**
+   * Comma-separated `users.id` list (max 50) to resolve specific users by id,
+   * e.g. the name of an already-assigned user in `app-store-user-select`.
+   * Bypasses the default active-only filter so a deactivated assignee still
+   * shows by name; ignores `page`.
+   */
+  @IsOptional()
+  @Matches(/^\d+(,\d+){0,49}$/, { message: 'ids debe ser una lista de ids separados por coma (máx. 50)' })
+  ids?: string;
 
   @IsOptional()
   @IsString()

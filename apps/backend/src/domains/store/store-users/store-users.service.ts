@@ -38,14 +38,20 @@ export class StoreUsersService {
       sort_by = 'created_at',
       sort_order = 'desc',
     } = query;
+    const ids = parseIdList(query.ids);
 
-    const skip = (page - 1) * limit;
+    // Resolving specific ids (selected user name) skips paging and the
+    // active-only default: a deactivated assignee must still show by name.
+    const skip = ids ? 0 : (page - 1) * limit;
+    const take = ids ? ids.length : limit;
 
-    const where: any = {
-      user: {
-        state: 'active', // Only show active users by default
-      },
-    };
+    const where: any = ids
+      ? { user: { id: { in: ids } } }
+      : {
+          user: {
+            state: 'active', // Only show active users by default
+          },
+        };
 
     if (search) {
       where.user = {
@@ -109,7 +115,7 @@ export class StoreUsersService {
           },
         },
         skip,
-        take: limit,
+        take,
         orderBy: {
           [orderByField]: sort_order,
         },
@@ -151,12 +157,17 @@ export class StoreUsersService {
    * granted to both roles) is safe to gate it with. `id` is `users.id`
    * (not `store_users.id`), matching `orders.tip_waiter_id`'s FK target.
    */
-  async staffLookup(query: { search?: string; limit?: number }) {
-    const limit = Math.min(Math.max(Number(query.limit) || 10, 1), 20);
+  async staffLookup(query: { search?: string; limit?: number; ids?: string }) {
+    const ids = parseIdList(query.ids);
+    const limit = ids
+      ? ids.length
+      : Math.min(Math.max(Number(query.limit) || 10, 1), 20);
 
     const where: any = {
       user: {
-        state: 'active',
+        // Resolving ids (name of a preset selection) also covers staff that
+        // was deactivated after being assigned; searching stays active-only.
+        ...(ids ? { id: { in: ids } } : { state: 'active' }),
         // Ecommerce customers are also `store_users` rows — customers.service
         // upserts a store_users link on registration — so filtering on
         // `state: 'active'` alone let customers show up in this staff-only
@@ -234,4 +245,24 @@ export class StoreUsersService {
       where: { id },
     });
   }
+}
+
+/** Max ids accepted by the `ids` filter (mirrors the DTO validation). */
+const MAX_ID_LIST = 50;
+
+/**
+ * Parses the `ids` query filter (`"3,7,9"`) into unique positive ints.
+ * Returns `null` when absent or empty so callers keep their default listing.
+ */
+export function parseIdList(raw: unknown): number[] | null {
+  if (raw == null || raw === '') return null;
+  const ids = [
+    ...new Set(
+      String(raw)
+        .split(',')
+        .map((part) => Number(part.trim()))
+        .filter((id) => Number.isInteger(id) && id > 0),
+    ),
+  ].slice(0, MAX_ID_LIST);
+  return ids.length ? ids : null;
 }

@@ -1,6 +1,6 @@
 import { Injectable, inject } from '@angular/core';
 import { HttpClient, HttpParams } from '@angular/common/http';
-import { Observable, catchError, map, of } from 'rxjs';
+import { Observable, catchError, map, of, tap } from 'rxjs';
 import { shareReplay } from 'rxjs/operators';
 import { environment } from '../../../environments/environment';
 
@@ -58,8 +58,6 @@ export interface StoreUserSearchOptions {
 }
 
 const DEFAULT_LIMIT = 10;
-/** Wider page used when resolving a single user by id (no `:id` endpoint exists). */
-const GET_BY_ID_LIMIT = 100;
 
 /**
  * Store-scoped lookup for users (`GET /store/users`).
@@ -76,17 +74,17 @@ export class StoreUserLookupService {
   private readonly staffLookupUrl = `${environment.apiUrl}/store/users/staff-lookup`;
 
   /**
-   * Cache of the full active-user page used by {@link getById}. Store staff
-   * lists are small, so a single shared, replayed request is enough to resolve
-   * `writeValue(id)` across many selector instances without refetching.
+   * Resolved users by `mode:id`, shared across every selector instance so a
+   * board full of pickers asks for each person once. Misses are evicted, so a
+   * user created later still resolves on the next attempt.
    */
-  private allActiveUsers$: Observable<StoreUserOption[]> | null = null;
+  private readonly byIdCache = new Map<string, Observable<StoreUserOption | null>>();
 
   /**
    * Remote search against `GET /store/users?search=&limit=&state=ACTIVE`, or,
    * with `opts.mode === 'staff'`, `GET /store/users/staff-lookup?search=&limit=`
    * (see {@link StoreUserSearchOptions.mode}). The staff endpoint's DTO is
-   * whitelist-validated with only `search`/`limit`, so `state`/`exclude_role`
+   * whitelist-validated with only `search`/`limit`/`ids`, so `state`/`exclude_role`
    * are never sent on that path — they would 400 under `forbidNonWhitelisted`.
    *
    * @param term Free-text search (matches first name / last name / email).
@@ -126,44 +124,43 @@ export class StoreUserLookupService {
 
   /**
    * Resolve a single user by id so `writeValue(id)`/the `value` input can
-   * render a name.
+   * render a name. Returns `null` when the id is not found.
    *
-   * Default mode: the backend has no public `GET /store/users/:id` returning
-   * the flat option shape, so this fetches the (small) active-user list once
-   * and resolves locally. Returns `null` when the id is not found.
-   *
-   * Staff mode: `staff-lookup` has no single-resource route (deliberately —
-   * B9 keeps it name-search-only), so this returns a `Usuario #id` placeholder
-   * without a network call. In practice the POS waiter-tip picker only ever
-   * feeds an id it just resolved via `select()`, so this path is a rarely-hit
-   * fallback (e.g. a persisted draft carrying a stale id).
+   * Asks the backend for that exact id (`?ids=<id>`) on the same endpoint the
+   * mode searches with. It used to scan only the first page of store users
+   * (customers included) in default mode and never call the API in staff
+   * mode, so any assignee outside that page — or every assignee in the CRM —
+   * rendered as `Usuario #id`.
    */
   getById(id: number, opts?: { mode?: 'default' | 'staff' }): Observable<StoreUserOption | null> {
     if (id == null) {
       return of(null);
     }
-    if (opts?.mode === 'staff') {
-      return of({ id, name: `Usuario #${id}` });
+    const isStaffMode = opts?.mode === 'staff';
+    const key = `${isStaffMode ? 'staff' : 'default'}:${id}`;
+    const cached = this.byIdCache.get(key);
+    if (cached) {
+      return cached;
     }
-    return this.loadAllActiveUsers().pipe(
-      map((users) => users.find((u) => u.id === id) ?? null),
-      catchError(() => of(null)),
-    );
-  }
 
-  private loadAllActiveUsers(): Observable<StoreUserOption[]> {
-    if (!this.allActiveUsers$) {
-      const params = new HttpParams()
-        .set('limit', String(GET_BY_ID_LIMIT))
-        .set('state', 'ACTIVE');
-      this.allActiveUsers$ = this.http
-        .get<PaginatedEnvelope<RawStoreUser>>(this.baseUrl, { params })
-        .pipe(
-          map((res) => (res?.data ?? []).map(toStoreUserOption)),
-          shareReplay({ bufferSize: 1, refCount: false }),
-        );
-    }
-    return this.allActiveUsers$;
+    const params = new HttpParams().set('ids', String(id)).set('limit', '1');
+    const request$ = this.http
+      .get<PaginatedEnvelope<RawStoreUser>>(isStaffMode ? this.staffLookupUrl : this.baseUrl, {
+        params,
+      })
+      .pipe(
+        map((res) => {
+          const raw = (res?.data ?? []).find((u) => u.id === id);
+          return raw ? toStoreUserOption(raw) : null;
+        }),
+        catchError(() => of(null)),
+        tap((user) => {
+          if (!user) this.byIdCache.delete(key);
+        }),
+        shareReplay({ bufferSize: 1, refCount: false }),
+      );
+    this.byIdCache.set(key, request$);
+    return request$;
   }
 }
 

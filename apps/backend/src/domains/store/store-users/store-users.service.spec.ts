@@ -1,5 +1,5 @@
 import { Test, TestingModule } from '@nestjs/testing';
-import { StoreUsersService } from './store-users.service';
+import { StoreUsersService, parseIdList } from './store-users.service';
 import { StorePrismaService } from '../../../prisma/services/store-prisma.service';
 
 /**
@@ -20,6 +20,7 @@ describe('StoreUsersService — staffLookup excludes customers', () => {
   const mockPrismaService = {
     store_users: {
       findMany: jest.fn(),
+      count: jest.fn(),
     },
   };
 
@@ -107,5 +108,66 @@ describe('StoreUsersService — staffLookup excludes customers', () => {
     expect(
       mockPrismaService.store_users.findMany.mock.calls[1][0].take,
     ).toBe(1);
+  });
+});
+
+/**
+ * Regresión «Usuario #id»: el selector de responsable resolvía el nombre
+ * buscando el id en la primera página de usuarios (clientes incluidos) o, en
+ * modo staff, sin llamar al API. El filtro `ids` pide esas personas exactas.
+ */
+describe('StoreUsersService — resolver usuarios por ids', () => {
+  let service: StoreUsersService;
+  const prisma = {
+    store_users: { findMany: jest.fn(), count: jest.fn() },
+  };
+
+  beforeEach(async () => {
+    const module: TestingModule = await Test.createTestingModule({
+      providers: [
+        StoreUsersService,
+        { provide: StorePrismaService, useValue: prisma },
+      ],
+    }).compile();
+    service = module.get<StoreUsersService>(StoreUsersService);
+    jest.clearAllMocks();
+    prisma.store_users.findMany.mockResolvedValue([]);
+    prisma.store_users.count.mockResolvedValue(0);
+  });
+
+  it('staffLookup con ids filtra por esos usuarios, sigue excluyendo clientes y no exige activo', async () => {
+    await service.staffLookup({ ids: '42,7' });
+
+    const call = prisma.store_users.findMany.mock.calls[0][0];
+    expect(call.where.user.id).toEqual({ in: [42, 7] });
+    expect(call.where.user.state).toBeUndefined();
+    expect(call.where.user.user_roles).toEqual({
+      some: { roles: { name: { not: 'customer' } } },
+    });
+    expect(call.take).toBe(2);
+  });
+
+  it('findAll con ids ignora la paginación y el filtro de activos', async () => {
+    await service.findAll({ ids: '1500', page: 3, limit: 10 });
+
+    const call = prisma.store_users.findMany.mock.calls[0][0];
+    expect(call.where).toEqual({ user: { id: { in: [1500] } } });
+    expect(call.skip).toBe(0);
+    expect(call.take).toBe(1);
+  });
+
+  it('findAll sin ids conserva el listado normal de activos', async () => {
+    await service.findAll({ page: 2, limit: 10 });
+
+    const call = prisma.store_users.findMany.mock.calls[0][0];
+    expect(call.where).toEqual({ user: { state: 'active' } });
+    expect(call.skip).toBe(10);
+    expect(call.take).toBe(10);
+  });
+
+  it('parseIdList descarta basura, duplicados y vacíos', () => {
+    expect(parseIdList(undefined)).toBeNull();
+    expect(parseIdList('')).toBeNull();
+    expect(parseIdList('3,3,x,0,9')).toEqual([3, 9]);
   });
 });
