@@ -24,6 +24,7 @@ import {
   CustomerCrmProfile,
   SaveCrmOpportunity,
   SaveCrmStageTemplate,
+  SaveCrmTag,
   SaveCrmTask,
   UpdateCustomerCrmProfile,
 } from './crm.interface';
@@ -169,6 +170,20 @@ export class CrmService {
   createTag(body: { name: string; color?: string | null }): Observable<CrmTag> {
     return this.http
       .post<ApiResponse<CrmTag>>(`${this.base}/crm/tags`, body)
+      .pipe(map((r) => r.data));
+  }
+
+  /** Renames and/or recolors a tag; its customers keep it. */
+  updateTag(id: number, body: SaveCrmTag): Observable<CrmTag> {
+    return this.http
+      .patch<ApiResponse<CrmTag>>(`${this.base}/crm/tags/${id}`, body)
+      .pipe(map((r) => r.data));
+  }
+
+  /** Deletes a tag and its assignments; customers are never deleted. */
+  deleteTag(id: number): Observable<{ id: number }> {
+    return this.http
+      .delete<ApiResponse<{ id: number }>>(`${this.base}/crm/tags/${id}`)
       .pipe(map((r) => r.data));
   }
 
