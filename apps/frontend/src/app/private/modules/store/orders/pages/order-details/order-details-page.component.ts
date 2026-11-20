@@ -1234,6 +1234,15 @@ export class OrderDetailsPageComponent {
       ),
   );
 
+  /**
+   * Totales leídos de lo persistido: subtotal SIN impuesto, descuento,
+   * impuesto por tipo. `null` = el API no lo envió (rol cocina o backend
+   * anterior) y el resumen cae al desglose en bruto de siempre.
+   */
+  readonly totalsBreakdown = computed(
+    () => this.order()?.totals_breakdown ?? null,
+  );
+
   // ── Discount snapshots (read-only from order; never recalculated) ──
   readonly appliedPromotions = computed(() =>
     (this.order()?.order_promotions ?? []).map((op) => ({

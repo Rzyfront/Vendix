@@ -21,6 +21,7 @@ import { SplitAccountPaymentService } from './split-account-payment.service';
 import { SplitEffectsSweepJob } from './jobs/split-effects-sweep.job';
 import { PaymentsModule } from '../payments/payments.module';
 import { OrderHistoryModule } from '../orders/order-history/order-history.module';
+import { PromotionsModule } from '../promotions/promotions.module';
 
 /**
  * TablesModule — Restaurant Suite Fase E
@@ -55,6 +56,9 @@ import { OrderHistoryModule } from '../orders/order-history/order-history.module
     OrderFlowModule,
     S3Module,
     OrderHistoryModule,
+    // Cuenta abierta con promo: sin ciclo (PromotionsModule sólo importa
+    // Prisma/Response/Coupons).
+    PromotionsModule,
   ],
   controllers: [
     TablesController,
