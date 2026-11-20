@@ -1,5 +1,6 @@
 import { ComponentFixture, TestBed } from '@angular/core/testing';
 
+import { CurrencyFormatService } from '../../../../../../shared/pipes/currency';
 import { TransferFlowPanelComponent } from './transfer-flow-panel.component';
 import type { TransferFlowView } from './transfer-advanced';
 
@@ -37,6 +38,15 @@ describe('TransferFlowPanelComponent', () => {
   beforeEach(async () => {
     await TestBed.configureTestingModule({
       imports: [TransferFlowPanelComponent],
+      providers: [
+        {
+          provide: CurrencyFormatService,
+          useValue: {
+            loadCurrency: () => undefined,
+            format: (value: number) => `$ ${value.toLocaleString('es-CO')}`,
+          },
+        },
+      ],
     }).compileComponents();
     fixture = TestBed.createComponent(TransferFlowPanelComponent);
     component = fixture.componentInstance;
@@ -56,6 +66,11 @@ describe('TransferFlowPanelComponent', () => {
 
   const q = (el: HTMLElement, id: string) =>
     el.querySelector(`[data-testid="${id}"]`);
+
+  it('m6: muestra el costo de transporte con formato de moneda', () => {
+    const el = render(transfer({ shipping_cost: 25000 } as any));
+    expect(q(el, 'shipping-cost')?.textContent?.trim()).toBe('$ 25.000');
+  });
 
   it('muestra "Cerrar pendiente como pérdida" solo con la fecha límite vencida', () => {
     let el = render(transfer());

@@ -10,6 +10,8 @@ import {
 import { DatePipe } from '@angular/common';
 import { FormsModule } from '@angular/forms';
 
+import { CurrencyPipe } from '../../../../../../shared/pipes/currency';
+
 import {
   ButtonComponent,
   IconComponent,
@@ -52,7 +54,13 @@ export interface TransferCloseWithLossRequest {
 @Component({
   selector: 'app-transfer-flow-panel',
   standalone: true,
-  imports: [DatePipe, FormsModule, ButtonComponent, IconComponent],
+  imports: [
+    DatePipe,
+    FormsModule,
+    ButtonComponent,
+    IconComponent,
+    CurrencyPipe,
+  ],
   template: `
     @if (transfer(); as t) {
       @if (alert()) {
@@ -116,7 +124,9 @@ export interface TransferCloseWithLossRequest {
           @if (shippingCost() > 0) {
             <div class="flex flex-wrap gap-x-4 gap-y-1">
               <span class="text-text-secondary">Costo de transporte:</span>
-              <span class="text-text-primary">{{ shippingCost() }}</span>
+              <span class="text-text-primary" data-testid="shipping-cost">{{
+                shippingCost() | currency
+              }}</span>
             </div>
           }
           @if (t.dispatch_note || t.receipt_note) {

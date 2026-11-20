@@ -3,7 +3,7 @@ import { takeUntilDestroyed } from '@angular/core/rxjs-interop';
 import { FormsModule } from '@angular/forms';
 import { Router } from '@angular/router';
 import { from as fromArray, of } from 'rxjs';
-import { catchError, map, mergeMap, toArray } from 'rxjs/operators';
+import { catchError, map, mergeMap, switchMap, toArray } from 'rxjs/operators';
 
 import {
   ButtonComponent,
@@ -20,6 +20,7 @@ import {
   TransferPickerRow,
   TransferProductSearchFn,
   lineHasValidQuantity,
+  pickerRowKey,
   totalUnits,
 } from './transfer-draft';
 import { TransferProductPickerComponent } from './transfer-product-picker.component';
@@ -41,6 +42,7 @@ import {
   applyScan,
   batchesForLine,
   buildAdvancedPayload,
+  chooseLineBatch,
   effectiveMode,
   emptyAdvancedForm,
   findRowForCode,
@@ -288,6 +290,51 @@ export class TransferAdvancedPageComponent {
 
   onToChange(value: number | null): void {
     this.patch({ to_location_id: value ? Number(value) : null });
+    this.refreshAvailability();
+  }
+
+  /**
+   * Al cambiar el destino, vuelve a leer el disponible de origen y destino de
+   * las líneas que ya están en la orden: el que traían se calculó con el
+   * destino anterior (o sin destino).
+   */
+  private refreshAvailability(): void {
+    const fromId = this.form().from_location_id;
+    const toId = this.form().to_location_id;
+    const productIds = [...new Set(this.lines().map((l) => l.product_id))];
+    if (!fromId || !toId || productIds.length === 0) return;
+    this.api
+      .getLocationStock(fromId, toId, null, productIds)
+      .pipe(takeUntilDestroyed(this.destroyRef))
+      .subscribe({
+        next: (page) => {
+          const f = this.form();
+          if (f.from_location_id !== fromId || f.to_location_id !== toId) {
+            return;
+          }
+          const byKey = new Map(page.rows.map((r) => [pickerRowKey(r), r]));
+          this.patch({
+            lines: f.lines.map((l) => {
+              const r = byKey.get(l.key);
+              return r
+                ? {
+                    ...l,
+                    available_at_origin: Number(
+                      r.stock_at_origin?.quantity_available ?? 0,
+                    ),
+                    available_at_destination: Number(
+                      r.stock_at_destination?.quantity_available ?? 0,
+                    ),
+                  }
+                : l;
+            }),
+          });
+        },
+        error: () =>
+          this.toast.warning(
+            'No se pudo actualizar el disponible del destino. Vuelve a elegirlo.',
+          ),
+      });
   }
 
   /** Carga las opciones de transporte y los lotes del origen. */
@@ -376,9 +423,7 @@ export class TransferAdvancedPageComponent {
     const batchId = raw ? Number(raw) : null;
     this.form.update((f) => ({
       ...f,
-      lines: f.lines.map((l) =>
-        l.key === key ? { ...l, batch_id: batchId } : l,
-      ),
+      lines: chooseLineBatch(f.lines, key, batchId),
     }));
   }
 
@@ -404,9 +449,19 @@ export class TransferAdvancedPageComponent {
       return;
     }
     this.scanning.set(true);
+    const toId = this.form().to_location_id;
+    // Primero el código exacto (SKU o código de barras, de producto o de
+    // variante); si no aparece, el buscador por nombre con resultado único.
     this.api
-      .searchProducts(code, fromId, this.form().to_location_id || fromId)
-      .pipe(takeUntilDestroyed(this.destroyRef))
+      .lookupCode(code, fromId, toId)
+      .pipe(
+        switchMap((rows) =>
+          rows.length > 0
+            ? of(rows)
+            : this.api.searchProducts(code, fromId, toId || fromId),
+        ),
+        takeUntilDestroyed(this.destroyRef),
+      )
       .subscribe({
         next: (rows) => {
           this.scanning.set(false);
@@ -417,7 +472,7 @@ export class TransferAdvancedPageComponent {
               kind: 'error',
               text:
                 rows.length > 1
-                  ? `"${code}" coincide con varios productos: búscalo por nombre.`
+                  ? `"${code}" coincide con varios productos o variantes: escanea el código de la variante o búscalo por nombre.`
                   : `No encontramos "${code}" con disponible en la bodega de origen.`,
             });
             return;
@@ -468,13 +523,13 @@ export class TransferAdvancedPageComponent {
       this.pasteReport.set({ added: 0, invalid });
       return;
     }
-    const toId = this.form().to_location_id || fromId;
+    const toId = this.form().to_location_id;
     this.pasteProcessing.set(true);
     fromArray(entries)
       .pipe(
         mergeMap(
           (entry) =>
-            this.api.searchProducts(entry.sku, fromId, toId).pipe(
+            this.api.lookupCode(entry.sku, fromId, toId).pipe(
               map((rows) => ({ entry, rows })),
               catchError(() => of({ entry, rows: [] as TransferPickerRow[] })),
             ),
@@ -490,22 +545,21 @@ export class TransferAdvancedPageComponent {
         results
           .sort((a, b) => a.entry.line - b.entry.line)
           .forEach(({ entry, rows }) => {
-            const wanted = entry.sku.toLowerCase();
-            const exact = rows.filter(
-              (r) => (r.sku ?? '').trim().toLowerCase() === wanted,
-            );
-            if (exact.length !== 1) {
+            // El código ya llega filtrado por coincidencia exacta (SKU o
+            // código de barras, de producto o de variante).
+            const match = findRowForCode(rows, entry.sku);
+            if (!match) {
               problems.push({
                 line: entry.line,
                 raw: `${entry.sku};${entry.quantity}`,
                 reason:
-                  exact.length > 1
-                    ? 'El SKU corresponde a varios productos'
-                    : 'SKU no encontrado en la bodega de origen',
+                  rows.length > 1
+                    ? 'El código corresponde a varios productos o variantes: usa el de la variante'
+                    : 'Código no encontrado en la bodega de origen',
               });
               return;
             }
-            const applied = applyPastedEntry(lines, exact[0], entry.quantity);
+            const applied = applyPastedEntry(lines, match, entry.quantity);
             if (applied.error) {
               problems.push({
                 line: entry.line,
@@ -545,9 +599,9 @@ export class TransferAdvancedPageComponent {
       )
       .pipe(takeUntilDestroyed(this.destroyRef))
       .subscribe({
-        next: (rows) => {
+        next: (page) => {
           this.loadingAllStock.set(false);
-          const result = addRowsToLines(this.lines(), rows, {
+          const result = addRowsToLines(this.lines(), page.rows, {
             fullStock: true,
           });
           this.patch({ lines: result.lines });
@@ -556,6 +610,11 @@ export class TransferAdvancedPageComponent {
               ? `Se agregaron ${result.added} producto(s) con todo su disponible.`
               : 'No hay productos nuevos con disponible para agregar.',
           );
+          if (page.has_more) {
+            this.toast.warning(
+              `La bodega tiene más de ${page.limit} productos con disponible y solo se cargaron los primeros ${page.limit}. Filtra por categoría para agregar el resto.`,
+            );
+          }
           this.ensureBatches();
         },
         error: (e: Error) => {

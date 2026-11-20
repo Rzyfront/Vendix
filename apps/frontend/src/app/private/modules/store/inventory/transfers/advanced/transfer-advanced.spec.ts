@@ -13,6 +13,7 @@ import {
   buildReceiveBody,
   canCloseWithLoss,
   canDispatch,
+  chooseLineBatch,
   defaultBatchId,
   deliveryDeadlinePassed,
   effectiveMode,
@@ -246,6 +247,31 @@ describe('transfer-advanced (P3) — lógica de la orden avanzada', () => {
         batches,
       );
       expect(lines.map((l) => l.batch_id)).toEqual([2, 99]);
+    });
+
+    it('m1: "el más antiguo al despachar" elegido a propósito no se rellena después', () => {
+      // Se asignó el default y luego el usuario eligió la opción vacía.
+      let lines = applyDefaultBatches([line()], batches);
+      expect(lines[0].batch_id).toBe(2);
+      lines = chooseLineBatch(lines, lines[0].key, null);
+      expect(lines[0]).toEqual(
+        jasmine.objectContaining({ batch_id: null, batch_decided: true }),
+      );
+      // Agregar otro producto vuelve a aplicar defaults: esta fila no cambia.
+      lines = applyDefaultBatches(
+        [...lines, line({ key: '10:7', product_variant_id: 7 })],
+        batches,
+      );
+      expect(lines.map((l) => l.batch_id)).toEqual([null, 4]);
+    });
+
+    it('m1: sin lotes cargados todavía deja la fila sin decidir', () => {
+      const [pending] = applyDefaultBatches(
+        [line({ product_id: 99 })],
+        batches,
+      );
+      expect(pending.batch_id).toBeNull();
+      expect(pending.batch_decided).toBeFalsy();
     });
   });
 

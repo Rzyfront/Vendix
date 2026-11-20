@@ -12,6 +12,7 @@ import {
   TransferAdvancedApi,
 } from '../advanced/transfer-advanced-api';
 import { EMPTY_ADVANCED_OPTIONS } from '../advanced/transfer-advanced';
+import { ToastService } from '../../../../../../shared/components/toast/toast.service';
 
 function row(over: Partial<TransferPickerRow> = {}): TransferPickerRow {
   return {
@@ -65,6 +66,7 @@ describe('TransferAdvancedPageComponent — orden avanzada', () => {
         'getOptions',
         'getBatches',
         'getLocationStock',
+        'lookupCode',
         'create',
       ],
       {
@@ -101,8 +103,16 @@ describe('TransferAdvancedPageComponent — orden avanzada', () => {
       ]),
     );
     api.searchProducts.and.returnValue(of([row()]));
+    api.lookupCode.and.returnValue(of([]));
     api.getLocationStock.and.returnValue(
-      of([row(), row({ id: 11, product_id: 11, sku: 'AZU', name: 'Azúcar' })]),
+      of({
+        rows: [
+          row(),
+          row({ id: 11, product_id: 11, sku: 'AZU', name: 'Azúcar' }),
+        ],
+        has_more: false,
+        limit: 500,
+      }),
     );
     api.create.and.returnValue(of({ id: 99, transfer_number: 'TRF-0099' }));
 
@@ -165,6 +175,9 @@ describe('TransferAdvancedPageComponent — orden avanzada', () => {
   });
 
   it('el escáner suma 1 por lectura', () => {
+    api.lookupCode.and.callFake((code: string) =>
+      of(code.toUpperCase() === 'CAF-500' ? [row()] : []),
+    );
     setup();
     component.onFromChange(1);
     component.onToChange(2);
@@ -176,10 +189,44 @@ describe('TransferAdvancedPageComponent — orden avanzada', () => {
     expect(component.lines().length).toBe(1);
     expect(component.lines()[0].quantity).toBe(2);
     expect(component.scanMessage()?.kind).toBe('ok');
+    expect(api.lookupCode).toHaveBeenCalledWith('caf-500', 1, 2);
+    // Con coincidencia exacta no usa el buscador por nombre.
+    expect(api.searchProducts).not.toHaveBeenCalled();
+  });
+
+  it('M2: el escáner encuentra la variante por su código de barras', () => {
+    const variant = row({
+      product_variant_id: 7,
+      variant_name: 'Molido 250 g',
+      sku: 'CAF-250',
+    });
+    api.lookupCode.and.callFake((code: string) =>
+      of(code === '7701234567890' ? [variant] : []),
+    );
+    setup();
+    component.onFromChange(1);
+    component.scanCode.set('7701234567890');
+    component.onScan();
+
+    expect(component.lines().length).toBe(1);
+    expect(component.lines()[0].product_variant_id).toBe(7);
+    // Sin destino elegido no manda destino.
+    expect(api.lookupCode).toHaveBeenCalledWith('7701234567890', 1, null);
+  });
+
+  it('M2: si el código no es exacto, cae al buscador por nombre', () => {
+    setup();
+    component.onFromChange(1);
+    component.onToChange(2);
+    component.scanCode.set('café');
+    component.onScan();
+
+    expect(api.searchProducts).toHaveBeenCalledWith('café', 1, 2);
+    expect(component.lines().length).toBe(1);
   });
 
   it('pegar lista agrega las válidas y reporta las inválidas', () => {
-    api.searchProducts.and.callFake((term: string) =>
+    api.lookupCode.and.callFake((term: string) =>
       of(term.toUpperCase() === 'CAF-500' ? [row()] : []),
     );
     setup();
@@ -195,6 +242,27 @@ describe('TransferAdvancedPageComponent — orden avanzada', () => {
     expect(report.invalid[0].reason).toContain('no encontrado');
   });
 
+  it('M2: pegar lista acepta el SKU de una variante', () => {
+    const variant = row({
+      product_variant_id: 7,
+      variant_name: 'Molido 250 g',
+      sku: 'CAF-250',
+    });
+    api.lookupCode.and.callFake((term: string) =>
+      of(term === 'CAF-250' ? [variant] : []),
+    );
+    setup();
+    component.onFromChange(1);
+    component.onToChange(2);
+    component.pasteText.set('CAF-250;2');
+    component.processPaste();
+
+    expect(component.lines()[0]).toEqual(
+      jasmine.objectContaining({ product_variant_id: 7, quantity: 2 }),
+    );
+    expect(component.pasteReport()!.invalid).toEqual([]);
+  });
+
   it('agrega todo el stock de la bodega con su disponible', () => {
     setup();
     component.onFromChange(1);
@@ -204,6 +272,60 @@ describe('TransferAdvancedPageComponent — orden avanzada', () => {
 
     expect(api.getLocationStock).toHaveBeenCalledWith(1, 2, 4);
     expect(component.lines().map((l) => l.quantity)).toEqual([5, 5]);
+  });
+
+  it('m4: avisa cuando la bodega supera el tope de 500', () => {
+    api.getLocationStock.and.returnValue(
+      of({ rows: [row()], has_more: true, limit: 500 }),
+    );
+    setup();
+    const toast = TestBed.inject(ToastService);
+    spyOn(toast, 'warning');
+    component.onFromChange(1);
+    component.addAllStock();
+
+    expect(toast.warning).toHaveBeenCalledWith(
+      jasmine.stringMatching(/solo se cargaron los primeros 500/),
+    );
+  });
+
+  it('m2: al elegir el destino refresca el disponible de las líneas', () => {
+    setup();
+    component.onFromChange(1);
+    component.onAddRows([row()]);
+    api.getLocationStock.and.returnValue(
+      of({
+        rows: [
+          row({
+            stock_at_destination: {
+              quantity_on_hand: 9,
+              quantity_reserved: 0,
+              quantity_available: 9,
+            },
+          }),
+        ],
+        has_more: false,
+        limit: 500,
+      }),
+    );
+    component.onToChange(2);
+
+    expect(api.getLocationStock).toHaveBeenCalledWith(1, 2, null, [10]);
+    expect(component.lines()[0].available_at_destination).toBe(9);
+  });
+
+  it('m1: el lote vacío elegido a propósito no se reemplaza al agregar productos', () => {
+    setup();
+    component.onFromChange(1);
+    component.onToChange(2);
+    component.onAddRows([row()]);
+    expect(component.lines()[0].batch_id).toBe(70);
+    component.updateBatch('10:base', '');
+    component.onAddRows([
+      row({ id: 11, product_id: 11, sku: 'AZU', name: 'Azúcar' }),
+    ]);
+
+    expect(component.lines()[0].batch_id).toBeNull();
   });
 
   it('no envía si faltan datos y muestra los errores', () => {

@@ -111,6 +111,12 @@ export const EMPTY_ADVANCED_OPTIONS: TransferAdvancedOptions = {
 export interface AdvancedLine extends TransferDraftLine {
   /** `null` = el despacho toma el más antiguo con saldo. */
   batch_id: number | null;
+  /**
+   * El lote de la fila ya quedó decidido (por defecto al cargar sus lotes, o
+   * elegido por el usuario, incluida la opción "el más antiguo al despachar").
+   * Una fila decidida no se vuelve a rellenar al agregar otros productos.
+   */
+  batch_decided?: boolean;
 }
 
 export interface AdvancedTransportForm {
@@ -266,17 +272,34 @@ export function defaultBatchId(
 }
 
 /**
- * Asigna el lote por defecto a las líneas que todavía no tienen uno, sin pisar
- * el que el usuario ya eligió.
+ * Asigna el lote por defecto solo a las líneas cuyo lote no está decidido y
+ * cuyos lotes ya llegaron. No pisa el que el usuario eligió, ni la opción
+ * "el más antiguo al despachar" (`null`) si la eligió a propósito.
  */
 export function applyDefaultBatches(
   lines: AdvancedLine[],
   batches: TransferBatchOption[],
 ): AdvancedLine[] {
-  return lines.map((line) =>
-    line.batch_id != null
-      ? line
-      : { ...line, batch_id: defaultBatchId(batches, line) },
+  return lines.map((line) => {
+    if (line.batch_id != null || line.batch_decided) return line;
+    // Sin lotes cargados todavía para el producto: se decide cuando lleguen.
+    if (batchesForLine(batches, line).length === 0) return line;
+    return {
+      ...line,
+      batch_id: defaultBatchId(batches, line),
+      batch_decided: true,
+    };
+  });
+}
+
+/** El usuario eligió lote (o "el más antiguo al despachar") en la fila. */
+export function chooseLineBatch(
+  lines: AdvancedLine[],
+  key: string,
+  batchId: number | null,
+): AdvancedLine[] {
+  return lines.map((l) =>
+    l.key === key ? { ...l, batch_id: batchId, batch_decided: true } : l,
   );
 }
 

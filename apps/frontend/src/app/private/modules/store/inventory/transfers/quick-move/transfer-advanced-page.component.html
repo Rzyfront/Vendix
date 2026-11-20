@@ -580,7 +580,8 @@
                       >
                         Origen {{ proj.origin_after }}
                       </span>
-                      @if (!form().is_external) {
+                      <!-- Sin destino elegido no hay proyección de destino que mostrar. -->
+                      @if (!form().is_external && form().to_location_id) {
                         <span class="text-text-secondary">
                           · Destino {{ proj.destination_after }}</span
                         >
