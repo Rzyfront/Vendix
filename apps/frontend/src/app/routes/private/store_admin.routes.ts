@@ -1,5 +1,5 @@
 import { inject, provideEnvironmentInitializer } from '@angular/core';
-import { Router, Routes } from '@angular/router';
+import { Router, Routes, UrlMatchResult, UrlSegment } from '@angular/router';
 import { provideState } from '@ngrx/store';
 import { provideEffects } from '@ngrx/effects';
 import { AuthGuard } from '../../core/guards/auth.guard';
@@ -26,12 +26,26 @@ import { StoreUsersEffects } from '../../private/modules/store/settings/users/st
 import { layawayReducer } from '../../private/modules/store/layaway/state/reducers/layaway.reducer';
 import { LayawayEffects } from '../../private/modules/store/layaway/state/effects/layaway.effects';
 
+/** `admin/vex` y `admin/vex/c/:id`: misma ruta, el id llega como parámetro. */
+export function vexRouteMatcher(segments: UrlSegment[]): UrlMatchResult | null {
+  if (segments[0]?.path !== 'admin' || segments[1]?.path !== 'vex') return null;
+  if (segments.length === 2) return { consumed: segments };
+  if (segments.length === 4 && segments[2].path === 'c') {
+    return { consumed: segments, posParams: { id: segments[3] } };
+  }
+  return null;
+}
+
 export const storeAdminRoutes: Routes = [
   // Agente Vex — vista a pantalla completa, fuera del layout admin.
   // `vexAccessGuard` exige owner/admin + `vex.enabled`; el gate del plan
   // (`vex_agent`) lo aplica el backend y no se duplica aquí.
+  // La conversación abierta vive en la URL (`/admin/vex/c/:id`): recargar,
+  // compartir el enlace o usar atrás/adelante conserva el lugar. Un solo
+  // `matcher` (misma ruta) para que cambiar de conversación NO destruya la
+  // página ni su estado.
   {
-    path: 'admin/vex',
+    matcher: vexRouteMatcher,
     canActivate: [AuthGuard, onboardingGuard, vexAccessGuard],
     loadComponent: () =>
       import('../../private/modules/store/vex/vex-page.component').then(

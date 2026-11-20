@@ -209,7 +209,8 @@ export interface VexStreamChunk {
     | 'done'
     | 'error'
     | 'audio'
-    | 'timing';
+    | 'timing'
+    | 'conversation_title';
   audio_base64?: string;
   content_type?: string;
   index?: number;
@@ -233,6 +234,11 @@ export interface VexStreamChunk {
     totalTokens: number;
   };
   error?: string;
+  /** Closed error code of an `error` frame, when the backend sends one. */
+  error_code?: string;
+  /** `conversation_title` frame: the generated title, sent just before `done` of the first turn. */
+  conversation_id?: number;
+  title?: string;
 }
 
 export interface VexAttachment {

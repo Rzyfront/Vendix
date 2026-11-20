@@ -47,12 +47,36 @@ import { VexPlanCardComponent } from '../vex-plan-card/vex-plan-card.component';
         }
         @for (message of messages(); track message.id) {
           @if (message.role === 'user') {
-            <div class="flex justify-end">
+            <div class="flex flex-col items-end gap-1">
               <div
-                class="max-w-[80%] rounded-2xl bg-[var(--color-surface)] border border-[var(--color-border)] px-4 py-2 whitespace-pre-wrap leading-relaxed text-[var(--color-text-primary)]"
+                class="max-w-[80%] rounded-2xl bg-[var(--color-surface)] border px-4 py-2 whitespace-pre-wrap leading-relaxed text-[var(--color-text-primary)]"
+                [class]="message.send_failed ? 'border-[var(--color-error)]' : 'border-[var(--color-border)]'"
               >
                 {{ message.content }}
               </div>
+              @if (message.send_failed) {
+                <div
+                  class="flex items-center gap-2 flex-wrap justify-end text-sm text-[var(--color-error)]"
+                  role="alert"
+                >
+                  <app-icon name="alert-triangle" [size]="14"></app-icon>
+                  <span>No se envió</span>
+                  <span aria-hidden="true">·</span>
+                  <button
+                    type="button"
+                    class="min-h-10 px-2 rounded-lg font-medium underline hover:no-underline focus-visible:outline-2 focus-visible:outline-[var(--color-primary)]"
+                    [disabled]="store.is_agent_typing()"
+                    (click)="store.retrySend(message.id)"
+                  >
+                    Reintentar
+                  </button>
+                </div>
+                @if (message.error) {
+                  <p class="max-w-[80%] text-xs text-[var(--color-text-secondary)] text-right">
+                    {{ message.error }}
+                  </p>
+                }
+              }
             </div>
           } @else {
             <div class="flex items-start gap-3 min-w-0">
@@ -132,6 +156,17 @@ import { VexPlanCardComponent } from '../vex-plan-card/vex-plan-card.component';
                   >
                     {{ message.error }}
                   </p>
+                  @if (message.can_retry) {
+                    <button
+                      type="button"
+                      class="self-start min-h-10 inline-flex items-center gap-2 rounded-full border border-[var(--color-border)] px-3 text-sm text-[var(--color-text-primary)] hover:bg-[rgba(var(--color-text-primary-rgb),0.06)]"
+                      [disabled]="store.is_agent_typing()"
+                      (click)="store.retryAnswer()"
+                    >
+                      <app-icon name="rotate-cw" [size]="14"></app-icon>
+                      Reintentar
+                    </button>
+                  }
                   @if (message.restart_suggested) {
                     <button
                       type="button"

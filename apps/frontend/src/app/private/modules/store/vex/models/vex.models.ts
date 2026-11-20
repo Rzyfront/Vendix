@@ -198,6 +198,12 @@ export interface VexMessage {
   error?: string | null;
   /** The conversation is blocked or busy: offer "Empezar de nuevo". */
   restart_suggested?: boolean;
+  /** User message that never reached the server: offer «Reintentar». */
+  send_failed?: boolean;
+  /** Attachment handles sent with a user message, kept to resend them on retry. */
+  attachment_ids?: string[];
+  /** The answer was cut: offer «Reintentar» (resends the last user message). */
+  can_retry?: boolean;
 }
 
 export interface VexConversation {
@@ -207,6 +213,8 @@ export interface VexConversation {
   created_at: Date;
   updated_at: Date;
   status?: string;
+  /** Not created on the server yet (its first message could not be sent). Hidden from the list. */
+  local?: boolean;
 }
 
 export interface VexModelOption {

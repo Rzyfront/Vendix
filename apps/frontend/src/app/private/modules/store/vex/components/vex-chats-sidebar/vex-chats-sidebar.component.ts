@@ -1,13 +1,19 @@
 import {
   ChangeDetectionStrategy,
   Component,
+  ElementRef,
   computed,
+  effect,
   inject,
   model,
   output,
+  viewChild,
 } from '@angular/core';
 import { AuthFacade } from '../../../../../../core/store/auth/auth.facade';
 import { IconComponent } from '../../../../../../shared/components/icon/icon.component';
+import { EmptyStateComponent } from '../../../../../../shared/components/empty-state/empty-state.component';
+import { InputsearchComponent } from '../../../../../../shared/components/inputsearch/inputsearch.component';
+import { SpinnerComponent } from '../../../../../../shared/components/spinner/spinner.component';
 import { UserAvatarComponent } from '../../../../../../shared/components/user-avatar/user-avatar.component';
 import { VexChatStore } from '../../state/vex-chat.store';
 
@@ -22,7 +28,13 @@ interface VexSidebarUser {
 @Component({
   selector: 'vendix-vex-chats-sidebar',
   standalone: true,
-  imports: [IconComponent, UserAvatarComponent],
+  imports: [
+    IconComponent,
+    UserAvatarComponent,
+    InputsearchComponent,
+    SpinnerComponent,
+    EmptyStateComponent,
+  ],
   changeDetection: ChangeDetectionStrategy.OnPush,
   host: { class: 'block h-full' },
   template: `
@@ -79,7 +91,7 @@ interface VexSidebarUser {
             aria-label="Cerrar chats"
             aria-controls="vex-chats-panel"
             [attr.aria-expanded]="true"
-            (click)="collapsed.set(true)"
+            (click)="onClose()"
           >
             <app-icon name="panel-left-close" [size]="18" />
           </button>
@@ -94,28 +106,22 @@ interface VexSidebarUser {
             <app-icon name="square-pen" [size]="18" />
             <span>Nuevo chat</span>
           </button>
-          <div
-            class="flex items-center gap-2 min-h-10 px-3 rounded-lg border border-[var(--color-border)] text-[var(--color-text-secondary)]"
-          >
-            <app-icon name="search" [size]="18" />
-            <input
-              type="text"
-              class="flex-1 min-w-0 bg-transparent outline-none text-sm text-[var(--color-text-primary)] placeholder:text-[var(--color-text-secondary)]"
-              placeholder="Buscar chats"
-              aria-label="Buscar chats"
-              [value]="chat_store.search_term()"
-              (input)="onSearch($event)"
-            />
-          </div>
+          <app-inputsearch
+            size="sm"
+            placeholder="Buscar chats"
+            ariaLabel="Buscar chats"
+            [debounceTime]="0"
+            (searchChange)="onSearch($event)"
+          />
         </div>
 
-        <div class="flex-1 overflow-y-auto px-2 pb-2">
+        <div #scroller class="flex-1 overflow-y-auto px-2 pb-2">
           <p
             class="px-2 pt-2 pb-1 text-xs font-medium uppercase tracking-wide text-[var(--color-text-secondary)]"
           >
-            Recientes
+            {{ chat_store.search_term().trim() ? 'Resultados' : 'Recientes' }}
           </p>
-          @for (conversation of chat_store.filtered_conversations(); track conversation.id) {
+          @for (conversation of chat_store.conversations(); track conversation.id) {
             <div
               class="group relative flex items-center rounded-lg cursor-pointer min-h-10 hover:bg-[rgba(var(--color-text-primary-rgb),0.06)]"
               [style.background-color]="conversation.id === chat_store.active_id() ? 'rgba(var(--color-primary-rgb),0.12)' : null"
@@ -125,6 +131,7 @@ interface VexSidebarUser {
                 type="button"
                 class="flex-1 min-w-0 text-left px-3 py-2 text-sm truncate"
                 [class.font-medium]="conversation.id === chat_store.active_id()"
+                [attr.aria-current]="conversation.id === chat_store.active_id() ? 'true' : null"
                 [title]="conversation.title"
               >
                 {{ conversation.title }}
@@ -139,9 +146,25 @@ interface VexSidebarUser {
               </button>
             </div>
           } @empty {
-            <p class="px-3 py-4 text-sm text-[var(--color-text-secondary)]">
-              Sin resultados
-            </p>
+            @if (chat_store.loading_list()) {
+              <app-spinner size="sm" text="Cargando chats…" [center]="true" />
+            } @else {
+              <app-empty-state
+                size="xsm"
+                icon="search"
+                [title]="chat_store.search_term().trim() ? 'Sin resultados' : 'Aún no hay chats'"
+                [description]="chat_store.search_term().trim() ? 'Prueba con otra palabra.' : 'Tu primer chat con Vex aparecerá aquí.'"
+                [showActionButton]="false"
+              />
+            }
+          }
+          @if (chat_store.has_more()) {
+            <div #sentinel class="h-6" aria-hidden="true"></div>
+          }
+          @if (chat_store.loading_more()) {
+            <div role="status" aria-live="polite">
+              <app-spinner size="sm" text="Cargando más chats…" [center]="true" />
+            </div>
           }
         </div>
 
@@ -177,6 +200,31 @@ export class VexChatsSidebarComponent {
   readonly collapsed = model<boolean>(false);
   readonly conversationSelected = output<void>();
 
+  private readonly scroller = viewChild<ElementRef<HTMLElement>>('scroller');
+  private readonly sentinel = viewChild<ElementRef<HTMLElement>>('sentinel');
+
+  constructor() {
+    // Progressive loading: the sentinel at the end of the list asks for the
+    // next page when it scrolls into view. The observer is rebuilt after each
+    // page so a sentinel still in view (short list) fires again.
+    effect((onCleanup) => {
+      const el = this.sentinel()?.nativeElement;
+      this.chat_store.conversations();
+      this.chat_store.loading_more();
+      if (!el || typeof IntersectionObserver === 'undefined') return;
+      const observer = new IntersectionObserver(
+        (entries) => {
+          if (entries.some((entry) => entry.isIntersecting)) {
+            this.chat_store.loadMore();
+          }
+        },
+        { root: this.scroller()?.nativeElement ?? null, rootMargin: '120px' },
+      );
+      observer.observe(el);
+      onCleanup(() => observer.disconnect());
+    });
+  }
+
   protected readonly current_user = computed<VexSidebarUser | null>(
     () => (this.auth.user() as VexSidebarUser | null) ?? null,
   );
@@ -197,6 +245,12 @@ export class VexChatsSidebarComponent {
     return (this.display_name().charAt(0) || 'U').toUpperCase();
   });
 
+  /** Closing the panel also drops the search, so reopening shows the full list. */
+  onClose(): void {
+    this.chat_store.setSearchTerm('');
+    this.collapsed.set(true);
+  }
+
   onNewChat(): void {
     this.chat_store.newConversation();
     this.conversationSelected.emit();
@@ -212,7 +266,7 @@ export class VexChatsSidebarComponent {
     this.chat_store.deleteConversation(id);
   }
 
-  onSearch(event: Event): void {
-    this.chat_store.setSearchTerm((event.target as HTMLInputElement).value);
+  onSearch(term: string): void {
+    this.chat_store.setSearchTerm(term);
   }
 }

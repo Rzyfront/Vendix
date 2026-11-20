@@ -1,5 +1,7 @@
-import { Component, computed, inject, signal, viewChild } from '@angular/core';
-import { RouterLink } from '@angular/router';
+import { Component, computed, effect, inject, signal, untracked, viewChild } from '@angular/core';
+import { toSignal } from '@angular/core/rxjs-interop';
+import { ActivatedRoute, Router, RouterLink } from '@angular/router';
+import { map } from 'rxjs';
 import { IconComponent } from '../../../../shared/components/icon/icon.component';
 import { VexChatsSidebarComponent } from './components/vex-chats-sidebar/vex-chats-sidebar.component';
 import { VexLogSidebarComponent } from './components/vex-log-sidebar/vex-log-sidebar.component';
@@ -153,6 +155,14 @@ function isDesktop(): boolean {
 })
 export class VexPageComponent {
   readonly store = inject(VexChatStore);
+  private readonly router = inject(Router);
+  private readonly route = inject(ActivatedRoute);
+
+  /** `:id` of `/admin/vex/c/:id`; `null` on `/admin/vex`. */
+  private readonly route_id = toSignal(
+    this.route.paramMap.pipe(map((params) => params.get('id'))),
+    { initialValue: this.route.snapshot.paramMap.get('id') },
+  );
 
   /**
    * Both panels start collapsed on every visit, at any viewport. Nothing is
@@ -168,6 +178,38 @@ export class VexPageComponent {
   readonly conversation_title = computed(
     () => this.store.active_conversation()?.title ?? '',
   );
+
+  constructor() {
+    // URL -> store: first load, reload, back/forward and shared links.
+    effect(() => {
+      const id = this.route_id();
+      untracked(() => {
+        this.store.openFromRoute(id);
+        // An id the store refused (not a number) leaves the URL stale.
+        const active = this.store.route_id();
+        if (id !== null && active !== id && this.store.active_id() !== id) {
+          this.navigateTo(active, true);
+        }
+      });
+    });
+    // Store -> URL: picking, creating, deleting or a missing conversation.
+    effect(() => {
+      const active = this.store.route_id();
+      untracked(() => {
+        if (active === this.route_id()) {
+          this.store.takeReplaceNavigation();
+          return;
+        }
+        this.navigateTo(active, this.store.takeReplaceNavigation());
+      });
+    });
+  }
+
+  private navigateTo(id: string | null, replaceUrl: boolean): void {
+    void this.router.navigate(id ? ['/admin/vex/c', id] : ['/admin/vex'], {
+      replaceUrl,
+    });
+  }
 
   private hasFiles(event: DragEvent): boolean {
     return Array.from(event.dataTransfer?.types ?? []).includes('Files');
