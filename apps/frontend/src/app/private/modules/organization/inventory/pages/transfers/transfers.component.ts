@@ -356,7 +356,13 @@ export class OrgTransfersComponent implements OnInit {
         this.toast.error('No tienes permisos para crear transferencias');
         return;
       }
-      this.showQuickMoveModal.set(true);
+      // El movimiento rápido despacha y recibe en un paso: el backend exige
+      // `dispatch`. Sin ese permiso se abre el asistente detallado.
+      if (this.canDispatch()) {
+        this.showQuickMoveModal.set(true);
+      } else {
+        this.showCreateModal.set(true);
+      }
     } else if (action === 'refresh') {
       this.refresh();
     }
