@@ -16,8 +16,13 @@ import {
   BulkFileNameField,
 } from '../../../bulk-uploads/dto/bulk-upload-log.dto';
 
+/** Customers per `analyze` / `commit` request; the web sends bigger loads in chunks. */
 export const IMPORT_MAX_CUSTOMERS = 200;
 export const IMPORT_MAX_LOCATIONS = 50;
+/** Data rows read from one spreadsheet (ia-cargas F1; it used to be 200 customers). */
+export const IMPORT_MAX_SHEET_ROWS = 5000;
+/** Source row numbers kept per customer (rows merged by document). */
+export const IMPORT_MAX_SOURCE_ROWS = 500;
 
 export type ImportPersonType = 'NATURAL' | 'JURIDICA';
 export type ImportCommitAction =
@@ -56,11 +61,54 @@ export interface ImportCustomer {
   email: string | null;
   phone: string | null;
   locations: ImportLocation[];
+  /** Spreadsheet rows this customer came from (absent for images/PDF). */
+  source_rows?: number[];
+  /** Sheet name, only for workbooks with several sheets. */
+  source_sheet?: string;
+}
+
+/** A row that did not become a customer, with the reason (nothing is dropped silently). */
+export interface ImportSkippedRow {
+  row: number;
+  row_end?: number;
+  sheet?: string;
+  reason: 'empty' | 'total' | 'header' | 'limit' | 'unreadable' | 'duplicate';
+  message: string;
+}
+
+/** Something the user should check on a source row (it was still imported). */
+export interface ImportRowIssue {
+  row: number;
+  sheet?: string;
+  level: 'warning' | 'error';
+  field?: string;
+  message: string;
+}
+
+export interface ImportColumnMapping {
+  sheet?: string;
+  column: string;
+  /** Customer field, or null when the column was ignored. */
+  field: string | null;
 }
 
 export interface CustomerImportScanResult {
   customers: ImportCustomer[];
   warnings: string[];
+  /** ia-cargas F1 — all optional so old clients keep working. */
+  skipped?: ImportSkippedRow[];
+  row_issues?: ImportRowIssue[];
+  columns?: ImportColumnMapping[];
+  stats?: {
+    source: 'sheet' | 'document';
+    total_rows: number;
+    imported_rows: number;
+    skipped_rows: number;
+    /** Rows whose ambiguous cells went to the model. */
+    ai_rows: number;
+    /** How the columns were recognized. */
+    mapping: 'synonyms' | 'ai' | null;
+  };
 }
 
 // ── Request DTOs ──────────────────────────────────────────────────────────
@@ -88,6 +136,16 @@ export class ImportCustomerDto {
   @IsOptional() @IsString() @MaxLength(2) verification_digit?: string | null;
   @IsOptional() @IsString() @MaxLength(255) email?: string | null;
   @IsOptional() @IsString() @MaxLength(50) phone?: string | null;
+
+  /** Echo of the scan, so the preview keeps the source row numbers. */
+  @IsOptional()
+  @IsArray()
+  @ArrayMaxSize(IMPORT_MAX_SOURCE_ROWS)
+  @IsInt({ each: true })
+  @Min(1, { each: true })
+  source_rows?: number[];
+
+  @IsOptional() @IsString() @MaxLength(120) source_sheet?: string;
 
   @IsArray()
   @ArrayMaxSize(IMPORT_MAX_LOCATIONS)
@@ -129,6 +187,21 @@ export class CommitCustomerImportDto {
 
   @BulkFileHashField()
   file_hash?: string;
+
+  /**
+   * ia-cargas F1 — a load bigger than one request is committed in chunks with
+   * the same id, so the upload log keeps ONE row for the whole file.
+   */
+  @IsOptional()
+  @IsString()
+  @MaxLength(64)
+  session_id?: string;
+
+  /** Customers of the whole load (all chunks), for the upload log. */
+  @IsOptional()
+  @IsInt()
+  @Min(1)
+  total_customers?: number;
 }
 
 // ── Response shapes ───────────────────────────────────────────────────────

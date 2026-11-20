@@ -26,6 +26,7 @@ describe('CustomerAiImportController · registro de cargas masivas', () => {
     bulkUploadLogs = {
       describeFile: jest.fn().mockResolvedValue(FILE_INFO),
       trackUpload: jest.fn().mockResolvedValue(undefined),
+      trackSessionPage: jest.fn().mockResolvedValue(undefined),
     };
     controller = new CustomerAiImportController(
       importService,
@@ -81,5 +82,32 @@ describe('CustomerAiImportController · registro de cargas masivas', () => {
       failed: 1,
       skipped: 1,
     });
+  });
+
+  it('una carga en tramos suma sobre la misma fila del registro (session_id)', async () => {
+    importService.commit.mockResolvedValue({
+      created: 1,
+      updated: 0,
+      locations_added: 0,
+      locations_already_registered: 0,
+      skipped: 0,
+      failed: 0,
+      results: [{ outcome: 'created' }],
+    });
+    const dto: any = {
+      customers: [{}],
+      file_name: 'clientes.xlsx',
+      file_hash: FILE_INFO.file_hash,
+      session_id: 'customers_ai-1',
+      total_customers: 800,
+    };
+    await controller.commit(dto);
+    expect(bulkUploadLogs.trackUpload).not.toHaveBeenCalled();
+    expect(bulkUploadLogs.trackSessionPage).toHaveBeenCalledWith(
+      'customers_ai',
+      'customers_ai-1',
+      dto,
+      { total: 800, successful: 1, created: 1, failed: 0, skipped: 0 },
+    );
   });
 });

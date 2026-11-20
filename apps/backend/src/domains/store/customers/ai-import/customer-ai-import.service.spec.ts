@@ -2,6 +2,9 @@ import * as XLSX from 'xlsx';
 import { RequestContextService } from '@common/context/request-context.service';
 import { VendixHttpException, ErrorCodes } from '@common/errors';
 import { CustomerAiImportService } from './customer-ai-import.service';
+import { SheetParserService } from '@common/ai-ingest/sheets/sheet-parser.service';
+import { AiExtractionService } from '@common/ai-ingest/extraction/ai-extraction.service';
+import { IngestProfileRegistry } from '@common/ai-ingest/profiles/registry';
 import { CommitCustomerItemDto } from './dto/customer-ai-import.dto';
 
 describe('CustomerAiImportService', () => {
@@ -88,11 +91,13 @@ describe('CustomerAiImportService', () => {
     };
     registryMock = { register: jest.fn() };
     service = new CustomerAiImportService(
-      aiMock as any,
       prismaMock as any,
       customersMock as any,
       addressesMock as any,
       registryMock as any,
+      new SheetParserService(),
+      new AiExtractionService(aiMock as any),
+      new IngestProfileRegistry(),
     );
   });
 
@@ -104,13 +109,15 @@ describe('CustomerAiImportService', () => {
     );
   });
 
+  const PDF = Buffer.from('%PDF-1.4\n%fake');
+
   it('normalize fusiona el mismo documento en un cliente con N ubicaciones', async () => {
     const scan = await service.scanFromFiles([
       {
-        buffer: Buffer.from('x'),
+        buffer: PDF,
         mimeType: 'application/pdf',
         originalName: 'c.pdf',
-        size: 1,
+        size: PDF.length,
       },
     ]);
     expect(scan.customers).toHaveLength(1);
@@ -124,42 +131,55 @@ describe('CustomerAiImportService', () => {
       'customer_import_ocr',
       {},
       expect.any(Array),
+      { responseSchema: expect.objectContaining({ name: 'customer_document' }) },
     );
   });
 
-  it('xlsx se envía como texto (sin imagen)', async () => {
+  it('PDF: una respuesta cortada por longitud da un error claro y no reintentable', async () => {
+    aiMock.run.mockResolvedValue({
+      success: true,
+      content: '{"customers":[{"legal_name":"Ac',
+      finish_reason: 'length',
+    });
+    await expect(
+      service.scanFromFiles([
+        { buffer: PDF, mimeType: 'image/jpeg', originalName: 'k', size: PDF.length },
+      ]),
+    ).rejects.toMatchObject({ errorCode: 'AI_INGEST_INCOMPLETE' });
+  });
+
+  it('xlsx con columnas reconocibles no llama a la IA', async () => {
     const ws = XLSX.utils.aoa_to_sheet([
-      ['nit', 'razon', 'direccion'],
+      ['nit', 'razon social', 'direccion'],
       ['900123456', 'Acme', 'Cra 1 # 2-3'],
     ]);
     const wb = XLSX.utils.book_new();
     XLSX.utils.book_append_sheet(wb, ws, 'Hoja1');
     const buffer = XLSX.write(wb, { type: 'buffer', bookType: 'xlsx' });
 
-    await service.scanFromFiles([
-      {
-        buffer,
-        mimeType:
-          'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
-        originalName: 'c.xlsx',
-        size: buffer.length,
-      },
+    // El mimetype que la cola reconstruye desde la key de S3 era image/jpeg.
+    const scan = await service.scanFromFiles([
+      { buffer, mimeType: 'image/jpeg', originalName: '1-c.xlsx', size: buffer.length },
     ]);
 
-    const messages = aiMock.run.mock.calls[0][2];
-    expect(typeof messages[0].content).toBe('string');
-    expect(messages[0].content).toContain('900123456,Acme,Cra 1 # 2-3');
-    expect(JSON.stringify(messages)).not.toContain('image_url');
+    expect(aiMock.run).not.toHaveBeenCalled();
+    expect(scan.customers).toHaveLength(1);
+    expect(scan.customers[0]).toMatchObject({
+      legal_name: 'Acme',
+      document_type: 'NIT',
+      document_number: '900123456',
+      source_rows: [2],
+    });
   });
 
   it('rechaza un formato no soportado', async () => {
     await expect(
       service.scanFromFiles([
         {
-          buffer: Buffer.from('x'),
-          mimeType: 'text/plain',
-          originalName: 'a.txt',
-          size: 1,
+          buffer: Buffer.from([0, 1, 2, 3, 0]),
+          mimeType: 'application/octet-stream',
+          originalName: 'a.bin',
+          size: 5,
         },
       ]),
     ).rejects.toBeInstanceOf(VendixHttpException);
