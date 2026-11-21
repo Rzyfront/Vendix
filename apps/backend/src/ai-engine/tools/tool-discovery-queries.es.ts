@@ -3035,6 +3035,24 @@ export const TOOL_DISCOVERY_QUERIES_ES: Readonly<
     'Dame el total de cartera vencida',
     'Necesito un indicador de stock bajo',
   ],
+  vex_render_timeline: [
+    'Muéstrame la línea de tiempo de esta orden',
+    'Hazme un historial de eventos del pedido',
+    'Oe, ponme la cronología de los pagos',
+    'Quiero ver la secuencia de cambios de estado',
+    'Parce, muéstrame el historial en línea de tiempo',
+    'Necesito una línea de tiempo de la auditoría',
+    'Dame la cronología de lo que pasó con esa factura',
+  ],
+  vex_render_list: [
+    'Muéstrame una lista de tarjetas con los pedidos pendientes',
+    'Hazme una lista con los clientes y su estado',
+    'Oe, ponme las alertas en una lista',
+    'Quiero ver los registros como tarjetas',
+    'Parce, muéstrame una lista con detalle de cada cliente',
+    'Necesito una lista de los pedidos con su estado',
+    'Dame una lista de las órdenes atrasadas',
+  ],
   vex_render_table: [
     'Muéstrame una tabla de ventas por día',
     'Hazme una tabla con los productos de stock bajo',
@@ -3131,6 +3149,15 @@ export const TOOL_DISCOVERY_QUERIES_ES: Readonly<
     'Oe, revise si el flujo se puede publicar o le falta algo',
     'Chequee que los roles del flujo sí existan en la tienda',
     'Qué errores tiene la definición del flujo 12',
+  ],
+  // F7/T48 — cálculo exacto (escritas a mano, sin datos de clientes).
+  compute: [
+    '¿Cuánto creció este mes frente al anterior en porcentaje?',
+    'Calcula el margen de ganancia con estos ingresos y costos',
+    'Qué porcentaje representa esto del total',
+    'Hazme una proyección simple del próximo mes',
+    'Saca el promedio y la variación de estas cifras',
+    'Cuánto es el 19% de esa cifra',
   ],
   // F1/T5 — sugerencia de seguimiento (escritas a mano, sin datos de clientes).
   suggest_followup: [

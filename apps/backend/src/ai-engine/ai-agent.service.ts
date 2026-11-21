@@ -336,7 +336,15 @@ export interface AgentPlanApprovalHook {
 export interface AgentBlockSink {
   save(input: {
     conversation_id?: number;
-    kind: 'table' | 'chart' | 'kpi' | 'image' | 'file' | 'markdown';
+    kind:
+      | 'table'
+      | 'chart'
+      | 'kpi'
+      | 'image'
+      | 'file'
+      | 'markdown'
+      | 'timeline'
+      | 'list';
     spec?: Record<string, any>;
     data: unknown;
   }): Promise<string>;
@@ -1004,11 +1012,15 @@ export class AIAgentService {
           ? 'chart'
           : toolName === 'vex_render_kpi'
             ? 'kpi'
-            : toolName === 'vex_render_image'
-              ? 'image'
-              : toolName === 'vex_render_file'
-                ? 'file'
-                : null;
+            : toolName === 'vex_render_timeline'
+              ? 'timeline'
+              : toolName === 'vex_render_list'
+                ? 'list'
+                : toolName === 'vex_render_image'
+                  ? 'image'
+                  : toolName === 'vex_render_file'
+                    ? 'file'
+                    : null;
     if (!renderKind && toolName !== 'vex_block_transform') return null;
     try {
       const parsed = JSON.parse(result) as {
@@ -1032,7 +1044,16 @@ export class AIAgentService {
       const kind =
         renderKind ??
         (typeof data.kind === 'string' &&
-        ['table', 'chart', 'kpi', 'image', 'file', 'markdown'].includes(
+        [
+          'table',
+          'chart',
+          'kpi',
+          'image',
+          'file',
+          'markdown',
+          'timeline',
+          'list',
+        ].includes(
           data.kind,
         )
           ? (data.kind as NonNullable<AIStreamChunk['ui_block']>['kind'])

@@ -66,10 +66,14 @@ const PUBLIC_TOOLS = [
   'vex_render_table',
   'vex_render_chart',
   'vex_render_kpi',
+  'vex_render_timeline',
+  'vex_render_list',
   'vex_render_image',
   'vex_render_file',
   'vex_block_read',
   'vex_block_transform',
+  // pure decimal arithmetic over the arguments: reads no business table
+  'compute',
   // the caller's own reminders
   'list_reminders',
   'create_reminder',

@@ -141,6 +141,172 @@ describe('VexBlockService', () => {
     expect(page.rows).toEqual([{ total: 3 }]);
   });
 
+  describe('timeline, list y chart ampliado', () => {
+    const chart = (chart_type: string, data: Record<string, any>) =>
+      service.create({
+        conversation_id: 1,
+        kind: 'chart',
+        spec: { chart_type },
+        data,
+      });
+
+    it('acepta timeline válido y lo pagina como filas', async () => {
+      const b = await service.create({
+        conversation_id: 1,
+        kind: 'timeline',
+        spec: { title: 'Orden' },
+        data: {
+          events: [
+            { title: 'Creada', timestamp: '2026-01-02T10:00:00Z' },
+            { title: 'Pagada', status: 'success', actor: 'Ana' },
+          ],
+        },
+      });
+      const page = await service.readPaged(b.id, 1, 1);
+      expect(page.total_rows).toBe(2);
+      expect(page.rows).toEqual([
+        { title: 'Creada', timestamp: '2026-01-02T10:00:00Z' },
+      ]);
+      const ui = await service.toUiBlock(b);
+      expect(ui.kind).toBe('timeline');
+      expect(ui.data.events).toHaveLength(2);
+    });
+
+    it.each([
+      [{ events: [] }],
+      [{ events: [{ title: '' }] }],
+      [{ events: [{ title: 'x', timestamp: 'no-fecha' }] }],
+      [{ events: [{ title: 'x', status: 'raro' }] }],
+      [{ events: Array.from({ length: 201 }, () => ({ title: 'x' })) }],
+    ])('rechaza timeline inválido %#', async (data) => {
+      await expect(
+        service.create({
+          conversation_id: 1,
+          kind: 'timeline',
+          spec: {},
+          data,
+        }),
+      ).rejects.toThrow(/Bloque timeline inválido/);
+    });
+
+    it('acepta list válido y lo pagina como filas', async () => {
+      const b = await service.create({
+        conversation_id: 1,
+        kind: 'list',
+        spec: { layout: 'rows' },
+        data: {
+          items: [
+            {
+              title: 'A',
+              badge: { label: 'Ok', tone: 'success' },
+              fields: [{ label: 'Total', value: 5 }],
+            },
+          ],
+        },
+      });
+      expect((await service.readPaged(b.id)).rows).toHaveLength(1);
+      expect((await service.toUiBlock(b)).spec.layout).toBe('rows');
+    });
+
+    it.each([
+      [{ layout: 'grid' }, { items: [{ title: 'A' }] }],
+      [{}, { items: [] }],
+      [{}, { items: [{ subtitle: 'sin título' }] }],
+      [{}, { items: [{ title: 'A', badge: { label: 'x', tone: 'raro' } }] }],
+      [
+        {},
+        {
+          items: [
+            {
+              title: 'A',
+              fields: Array.from({ length: 9 }, () => ({
+                label: 'l',
+                value: 1,
+              })),
+            },
+          ],
+        },
+      ],
+    ])('rechaza list inválido %#', async (spec, data) => {
+      await expect(
+        service.create({ conversation_id: 1, kind: 'list', spec, data }),
+      ).rejects.toThrow(/Bloque list inválido/);
+    });
+
+    it.each(['rose', 'funnel', 'stacked_bar', 'doughnut', 'bar'])(
+      'acepta chart_type %s',
+      async (type) => {
+        await expect(
+          chart(type, { labels: ['a', 'b'], series: [{ name: 's', data: [1, 2] }] }),
+        ).resolves.toBeDefined();
+      },
+    );
+
+    it('combo acepta type bar/line y rechaza otro', async () => {
+      await expect(
+        chart('combo', {
+          labels: ['a'],
+          series: [
+            { name: 'v', data: [1], type: 'bar' },
+            { name: 'm', data: [2], type: 'line' },
+            { name: 'z', data: [3] },
+          ],
+        }),
+      ).resolves.toBeDefined();
+      await expect(
+        chart('combo', {
+          labels: ['a'],
+          series: [{ name: 'v', data: [1], type: 'pie' }],
+        }),
+      ).rejects.toThrow(/series\[\]\.type/);
+    });
+
+    it('heatmap exige data del largo de labels', async () => {
+      await expect(
+        chart('heatmap', {
+          labels: ['L', 'M'],
+          series: [{ name: 'Mañana', data: [1, 2] }],
+        }),
+      ).resolves.toBeDefined();
+      await expect(
+        chart('heatmap', {
+          labels: ['L', 'M'],
+          series: [{ name: 'Mañana', data: [1] }],
+        }),
+      ).rejects.toThrow(/heatmap/);
+    });
+
+    it('chart_type desconocido y kind desconocido siguen rechazados', async () => {
+      await expect(
+        chart('sunburst', { labels: [], series: [{ name: 's', data: [1] }] }),
+      ).rejects.toThrow(/chart_type/);
+      await expect(
+        service.create({
+          conversation_id: 1,
+          kind: 'nope' as any,
+          spec: {},
+          data: {},
+        }),
+      ).rejects.toThrow(/kind debe ser uno de/);
+    });
+
+    it('chart bar y table existentes siguen igual', async () => {
+      const c = await chart('bar', {
+        labels: ['a'],
+        series: [{ name: 'x', data: [1] }],
+      });
+      const ui = await service.toUiBlock(c);
+      expect(ui.spec.chart_type).toBe('bar');
+      expect(ui.data.rows).toEqual([{ label: 'a', s0_x: 1 }]);
+      const t = await service.create({
+        conversation_id: 1,
+        kind: 'table',
+        data: { columns: [{ key: 'a', label: 'A' }], rows: [{ a: 1 }] },
+      });
+      expect((await service.readPaged(t.id)).rows).toEqual([{ a: 1 }]);
+    });
+  });
+
   it.each(['plain', 'escaped'])(
     'reconstructs long %s markdown by cursor without recursive compaction',
     async (kind) => {
@@ -486,6 +652,257 @@ describe('VexBlockService', () => {
     await expect(service.transform(kpi.id, {})).rejects.toMatchObject({
       errorCode: 'SYS_VALIDATION_001',
     });
+  });
+
+  it('derives decimal columns and rebuilds the column list', async () => {
+    const created = await service.create({
+      conversation_id: 1,
+      kind: 'table',
+      data: {
+        columns: [
+          { key: 'producto', label: 'Producto' },
+          { key: 'ingreso', label: 'Ingreso' },
+          { key: 'costo', label: 'Costo' },
+        ],
+        rows: [
+          { producto: 'café', ingreso: 200, costo: 150 },
+          { producto: 'té', ingreso: 0, costo: 10 },
+        ],
+      },
+    });
+
+    const derived = await service.transform(created.id, {
+      derive: [{ name: 'margen', expression: 'margin(ingreso, costo)' }],
+    });
+
+    const data = derived.data as any;
+    expect(data.rows[0].margen).toBe('25');
+    // Sin ingreso no hay margen: null, nunca un número inventado.
+    expect(data.rows[1].margen).toBeNull();
+    expect(data.columns).toEqual([
+      { key: 'producto', label: 'Producto' },
+      { key: 'ingreso', label: 'Ingreso' },
+      { key: 'costo', label: 'Costo' },
+      { key: 'margen', label: 'margen' },
+    ]);
+    const original = await service.getById(created.id);
+    expect((original.data as any).rows[0].margen).toBeUndefined();
+  });
+
+  describe('derived decimal columns through filter, sort and aggregate', () => {
+    const marginTable = () =>
+      service.create({
+        conversation_id: 1,
+        kind: 'table',
+        data: {
+          columns: [
+            { key: 'categoria', label: 'Categoría' },
+            { key: 'ingreso', label: 'Ingreso' },
+            { key: 'costo', label: 'Costo' },
+          ],
+          rows: [
+            { categoria: 'pan', ingreso: 100, costo: 91 }, // 9
+            { categoria: 'café', ingreso: 1000, costo: 548 }, // 45.2
+            { categoria: 'agua', ingreso: 50, costo: 0 }, // 100
+            { categoria: 'regalo', ingreso: 0, costo: 10 }, // sin base
+          ],
+        },
+      });
+    const derive = [{ name: 'margen', expression: 'margin(ingreso, costo)' }];
+
+    it('derive + sort ranks by number, not by text', async () => {
+      const created = await marginTable();
+      const out = await service.transform(created.id, {
+        derive,
+        sort: [{ field: 'margen', direction: 'desc' }],
+      });
+      expect((out.data as any).rows.map((r: any) => r.margen)).toEqual([
+        '100',
+        '45.2',
+        '9',
+        null,
+      ]);
+    });
+
+    it('derive + filter keeps the rows above the threshold', async () => {
+      const created = await marginTable();
+      const out = await service.transform(created.id, {
+        derive,
+        filter: [{ field: 'margen', op: 'gt', value: 5 }],
+      });
+      expect((out.data as any).rows.map((r: any) => r.categoria)).toEqual([
+        'pan',
+        'café',
+        'agua',
+      ]);
+    });
+
+    it('derive + aggregate adds the derived column', async () => {
+      const created = await marginTable();
+      const sum = await service.transform(created.id, {
+        derive,
+        aggregate: { field: 'margen', function: 'sum' },
+      });
+      expect((sum.data as any).rows).toEqual([{ sum_margen: '154.2' }]);
+      const max = await service.transform(created.id, {
+        derive,
+        aggregate: { field: 'margen', function: 'max' },
+      });
+      expect((max.data as any).rows).toEqual([{ max_margen: '100' }]);
+    });
+
+    it('compare + sort ranks pct_change by number, and aggregates it', async () => {
+      const created = await service.create({
+        conversation_id: 1,
+        kind: 'table',
+        data: {
+          columns: [
+            { key: 'categoria', label: 'Categoría' },
+            { key: 'mes', label: 'Mes' },
+            { key: 'total', label: 'Total' },
+          ],
+          rows: [
+            { categoria: 'pan', mes: '2026-09', total: 100 },
+            { categoria: 'pan', mes: '2026-10', total: 109 }, // 9
+            { categoria: 'café', mes: '2026-09', total: 100 },
+            { categoria: 'café', mes: '2026-10', total: 200 }, // 100
+            { categoria: 'té', mes: '2026-09', total: 100 },
+            { categoria: 'té', mes: '2026-10', total: 55 }, // -45
+          ],
+        },
+      });
+      const compare = {
+        key: 'categoria',
+        period_field: 'mes',
+        current: '2026-10',
+        previous: '2026-09',
+        value_field: 'total',
+      };
+      const sorted = await service.transform(created.id, {
+        compare,
+        sort: [{ field: 'pct_change', direction: 'desc' }],
+      });
+      expect(
+        (sorted.data as any).rows.map((r: any) => [r.categoria, r.pct_change]),
+      ).toEqual([
+        ['café', '100'],
+        ['pan', '9'],
+        ['té', '-45'],
+      ]);
+      const grew = await service.transform(created.id, {
+        compare,
+        filter: [{ field: 'pct_change', op: 'gte', value: 9 }],
+        aggregate: { field: 'delta', function: 'sum' },
+      });
+      expect((grew.data as any).rows).toEqual([{ sum_delta: '109' }]);
+    });
+
+    it('a range filter on a text column is a validation error, not zero rows', async () => {
+      const created = await marginTable();
+      await expect(
+        service.transform(created.id, {
+          filter: [{ field: 'categoria', op: 'gt', value: 5 }],
+        }),
+      ).rejects.toMatchObject({
+        errorCode: 'SYS_VALIDATION_001',
+        message: expect.stringContaining('no aplica a "categoria"'),
+      });
+    });
+  });
+
+  it('compares two periods per key with a null variation when there is no base', async () => {
+    const created = await service.create({
+      conversation_id: 1,
+      kind: 'table',
+      data: {
+        columns: [
+          { key: 'categoria', label: 'Categoría' },
+          { key: 'mes', label: 'Mes' },
+          { key: 'total', label: 'Total' },
+        ],
+        rows: [
+          { categoria: 'café', mes: '2026-09', total: 100 },
+          { categoria: 'café', mes: '2026-10', total: 125 },
+          { categoria: 'té', mes: '2026-10', total: 40 },
+        ],
+      },
+    });
+
+    const derived = await service.transform(created.id, {
+      compare: {
+        key: 'categoria',
+        period_field: 'mes',
+        current: '2026-10',
+        previous: '2026-09',
+        value_field: 'total',
+      },
+    });
+
+    expect((derived.data as any).rows).toEqual([
+      {
+        categoria: 'café',
+        current: '125',
+        previous: '100',
+        delta: '25',
+        pct_change: '25',
+      },
+      {
+        categoria: 'té',
+        current: '40',
+        previous: null,
+        delta: null,
+        pct_change: null,
+      },
+    ]);
+  });
+
+  it('joins another table of the same conversation and refuses other threads', async () => {
+    const ventas = await service.create({
+      conversation_id: 1,
+      kind: 'table',
+      data: {
+        columns: [
+          { key: 'sku', label: 'SKU' },
+          { key: 'ventas', label: 'Ventas' },
+        ],
+        rows: [
+          { sku: 'A', ventas: 10 },
+          { sku: 'B', ventas: 3 },
+        ],
+      },
+    });
+    const stock = await service.create({
+      conversation_id: 1,
+      kind: 'table',
+      data: {
+        columns: [
+          { key: 'sku', label: 'SKU' },
+          { key: 'stock', label: 'Stock' },
+        ],
+        rows: [{ sku: 'A', stock: 7 }],
+      },
+    });
+
+    const joined = await service.transform(ventas.id, {
+      join: { block_id: stock.id, on: 'sku' },
+    });
+    expect((joined.data as any).rows).toEqual([
+      { sku: 'A', ventas: 10, stock: 7 },
+    ]);
+
+    const kpi = await service.create({
+      conversation_id: 1,
+      kind: 'kpi',
+      data: { label: 'Ventas', value: 100 },
+    });
+    await expect(
+      service.transform(ventas.id, { join: { block_id: kpi.id, on: 'sku' } }),
+    ).rejects.toMatchObject({ errorCode: 'SYS_VALIDATION_001' });
+    await expect(
+      service.transform(ventas.id, {
+        derive: [{ name: 'x', expression: 'process.exit()' }],
+      }),
+    ).rejects.toMatchObject({ errorCode: 'SYS_VALIDATION_001' });
   });
 
   it('stores S3 keys only and signs them at read time', async () => {

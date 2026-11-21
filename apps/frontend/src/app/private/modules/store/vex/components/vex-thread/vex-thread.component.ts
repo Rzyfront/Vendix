@@ -17,11 +17,7 @@ import { VEX_COPY } from '../../vex-copy';
 import { VEXI_RESTART_LABEL } from '../../../../../../core/store/vexi/vexi-user-copy.utils';
 import { VexBlockInteraction, VexUiBlock } from '../../models/vex.models';
 import { VexMarkdownComponent } from '../vex-markdown/vex-markdown.component';
-import { VexBlockTableComponent } from '../vex-blocks/vex-block-table.component';
-import { VexBlockChartComponent } from '../vex-blocks/vex-block-chart.component';
-import { VexBlockKpiComponent } from '../vex-blocks/vex-block-kpi.component';
-import { VexBlockImageComponent } from '../vex-blocks/vex-block-image.component';
-import { VexBlockFileComponent } from '../vex-blocks/vex-block-file.component';
+import { VexBlockHostComponent } from '../vex-blocks/vex-block-host.component';
 import { VexToolTraceComponent } from '../vex-tool-trace/vex-tool-trace.component';
 import { VexPlanCardComponent } from '../vex-plan-card/vex-plan-card.component';
 import { VexFollowupChipComponent } from '../vex-followup-chip/vex-followup-chip.component';
@@ -35,11 +31,7 @@ import { StoreSettingsFacade } from '../../../../../../core/store/store-settings
     SpinnerComponent,
     IconComponent,
     VexMarkdownComponent,
-    VexBlockTableComponent,
-    VexBlockChartComponent,
-    VexBlockKpiComponent,
-    VexBlockImageComponent,
-    VexBlockFileComponent,
+    VexBlockHostComponent,
     VexToolTraceComponent,
     VexPlanCardComponent,
     VexFollowupChipComponent,
@@ -114,32 +106,10 @@ import { StoreSettingsFacade } from '../../../../../../core/store/store-settings
                   <vendix-vex-markdown [content]="message.content" />
                 }
                 @for (block of message.blocks ?? []; track block.block_id) {
-                  @switch (block.kind) {
-                    @case ('table') {
-                      <vendix-vex-block-table
-                        [block]="block"
-                        (interaction)="onBlockInteraction(block, $event)"
-                      />
-                    }
-                    @case ('chart') {
-                      <vendix-vex-block-chart
-                        [block]="block"
-                        (interaction)="onBlockInteraction(block, $event)"
-                      />
-                    }
-                    @case ('kpi') {
-                      <vendix-vex-block-kpi [block]="block" />
-                    }
-                    @case ('image') {
-                      <vendix-vex-block-image [block]="block" />
-                    }
-                    @case ('file') {
-                      <vendix-vex-block-file [block]="block" />
-                    }
-                    @case ('markdown') {
-                      <vendix-vex-markdown [content]="blockMarkdown(block)" />
-                    }
-                  }
+                  <vendix-vex-block-host
+                    [block]="block"
+                    (interaction)="onBlockInteraction(block, $event)"
+                  />
                 }
                 @if (message.plan) {
                   <vendix-vex-plan-card
@@ -302,11 +272,6 @@ export class VexThreadComponent {
         { injector: this.injector },
       );
     });
-  }
-
-  blockMarkdown(block: VexUiBlock): string {
-    const content = block.data['content'] ?? block.data['text'];
-    return typeof content === 'string' ? content : '';
   }
 
   onBlockInteraction(

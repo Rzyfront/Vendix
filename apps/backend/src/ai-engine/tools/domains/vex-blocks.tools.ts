@@ -119,7 +119,7 @@ export function createVexBlockTools({
       domain: 'vex_blocks',
       readOnly: true,
       description:
-        'Muestra un gráfico a la persona y guarda sus datos para seguir trabajando con ellos. chart_type: bar, line, pie, area, radar, scatter o gauge. series es la lista de series con sus datos; labels el eje de categorías cuando aplica. Devuelve el block_id para lecturas posteriores.',
+        'Muestra un gráfico a la persona y guarda sus datos para seguir trabajando con ellos. chart_type: bar, line, pie, area, radar, scatter, gauge, rose, stacked_bar, combo, funnel o heatmap. series es la lista de series con sus datos; labels el eje de categorías cuando aplica. rose y funnel: como pie (una serie + labels). stacked_bar: como bar con varias series. combo: como bar, y cada serie puede traer type "bar" o "line" (si falta, la primera es barra y el resto línea). heatmap: labels es el eje X y cada serie es una fila del eje Y (name) con un valor por label. Devuelve el block_id para lecturas posteriores.',
       parameters: {
         type: 'object',
         properties: {
@@ -131,7 +131,20 @@ export function createVexBlockTools({
           title: { type: 'string', description: 'Título del gráfico.' },
           chart_type: {
             type: 'string',
-            enum: ['bar', 'line', 'pie', 'area', 'radar', 'scatter', 'gauge'],
+            enum: [
+              'bar',
+              'line',
+              'pie',
+              'area',
+              'radar',
+              'scatter',
+              'gauge',
+              'rose',
+              'stacked_bar',
+              'combo',
+              'funnel',
+              'heatmap',
+            ],
             description: 'Tipo de gráfico.',
           },
           labels: {
@@ -141,7 +154,8 @@ export function createVexBlockTools({
           },
           series: {
             type: 'array',
-            description: 'Series con sus datos: [{name, data}].',
+            description:
+              'Series con sus datos: [{name, data, type?}]. type (bar|line) solo aplica a combo.',
             items: { type: 'object' },
           },
         },
@@ -239,6 +253,170 @@ export function createVexBlockTools({
               'vex_render_kpi',
               error?.message ?? 'No pude guardar el indicador.',
               'Revisa label/value y vuelve a intentarlo.',
+            ),
+          );
+        }
+      },
+    },
+    {
+      name: 'vex_render_timeline',
+      access: 'public',
+      accessReason:
+        "Renders or reads blocks of the caller's own Vex conversation from data already in the turn; reads no business table.",
+      version: '1',
+      domain: 'vex_blocks',
+      readOnly: true,
+      description:
+        'Muestra una línea de tiempo a la persona: eventos en orden con título, fecha, estado y responsable. Úsala para historiales y secuencias (estados de una orden, auditoría, pagos). De 1 a 200 eventos. Devuelve el block_id.',
+      parameters: {
+        type: 'object',
+        properties: {
+          conversation_id: {
+            type: 'number',
+            description:
+              'Conversación donde vive el bloque. Opcional: el servidor usa la actual.',
+          },
+          title: { type: 'string', description: 'Título de la línea de tiempo.' },
+          events: {
+            type: 'array',
+            description:
+              'Eventos: [{id?, title, description?, timestamp? (ISO 8601), status? (success|warning|error|info|neutral), actor?}]. Máximo 200.',
+            items: {
+              type: 'object',
+              properties: {
+                id: { type: 'string' },
+                title: { type: 'string' },
+                description: { type: 'string' },
+                timestamp: { type: 'string' },
+                status: {
+                  type: 'string',
+                  enum: ['success', 'warning', 'error', 'info', 'neutral'],
+                },
+                actor: { type: 'string' },
+              },
+              required: ['title'],
+            },
+          },
+        },
+        required: ['events'],
+      },
+      handler: async (args) => {
+        const conversationId = conversationIdOf(args);
+        if (!conversationId) return needsConversation('vex_render_timeline');
+        try {
+          const block = await blocks.create({
+            conversation_id: conversationId,
+            kind: 'timeline',
+            spec: { title: args.title },
+            data: { events: args.events },
+          });
+          return JSON.stringify(
+            buildToolSuccessEnvelope('vex_render_timeline', {
+              block_id: block.id,
+              kind: 'timeline',
+              version: block.version,
+              block: await blocks.toUiBlock(block),
+            }),
+          );
+        } catch (error: any) {
+          return JSON.stringify(
+            buildToolErrorEnvelope(
+              'vex_render_timeline',
+              error?.message ?? 'No pude guardar la línea de tiempo.',
+              'Revisa que events traiga de 1 a 200 eventos con title y fechas ISO 8601, y vuelve a intentarlo.',
+            ),
+          );
+        }
+      },
+    },
+    {
+      name: 'vex_render_list',
+      access: 'public',
+      accessReason:
+        "Renders or reads blocks of the caller's own Vex conversation from data already in the turn; reads no business table.",
+      version: '1',
+      domain: 'vex_blocks',
+      readOnly: true,
+      description:
+        'Muestra una lista de tarjetas o filas a la persona: cada ítem con título, subtítulo, insignia y campos. Úsala para pocos registros con detalle (pedidos, clientes, alertas); si son muchas filas homogéneas usa vex_render_table. De 1 a 200 ítems. Devuelve el block_id.',
+      parameters: {
+        type: 'object',
+        properties: {
+          conversation_id: {
+            type: 'number',
+            description:
+              'Conversación donde vive el bloque. Opcional: el servidor usa la actual.',
+          },
+          title: { type: 'string', description: 'Título de la lista.' },
+          layout: {
+            type: 'string',
+            enum: ['cards', 'rows'],
+            description: 'Presentación: tarjetas o filas.',
+          },
+          items: {
+            type: 'array',
+            description:
+              'Ítems: [{id?, title, subtitle?, description?, badge? {label, tone?}, fields? [{label, value}] (máx 8)}]. Máximo 200.',
+            items: {
+              type: 'object',
+              properties: {
+                id: { type: 'string' },
+                title: { type: 'string' },
+                subtitle: { type: 'string' },
+                description: { type: 'string' },
+                badge: {
+                  type: 'object',
+                  properties: {
+                    label: { type: 'string' },
+                    tone: {
+                      type: 'string',
+                      enum: ['success', 'warning', 'error', 'info', 'neutral'],
+                    },
+                  },
+                  required: ['label'],
+                },
+                fields: {
+                  type: 'array',
+                  items: {
+                    type: 'object',
+                    properties: {
+                      label: { type: 'string' },
+                      value: { type: ['string', 'number'] },
+                    },
+                    required: ['label', 'value'],
+                  },
+                },
+              },
+              required: ['title'],
+            },
+          },
+        },
+        required: ['items'],
+      },
+      handler: async (args) => {
+        const conversationId = conversationIdOf(args);
+        if (!conversationId) return needsConversation('vex_render_list');
+        try {
+          const block = await blocks.create({
+            conversation_id: conversationId,
+            kind: 'list',
+            spec: { title: args.title, layout: args.layout },
+            data: { items: args.items },
+          });
+          return JSON.stringify(
+            buildToolSuccessEnvelope('vex_render_list', {
+              block_id: block.id,
+              kind: 'list',
+              version: block.version,
+              block: await blocks.toUiBlock(block),
+            }),
+          );
+        } catch (error: any) {
+          return JSON.stringify(
+            buildToolErrorEnvelope(
+              'vex_render_list',
+              error?.message ?? 'No pude guardar la lista.',
+              'Revisa que items traiga de 1 a 200 ítems con title y hasta 8 fields, y vuelve a intentarlo.',
             ),
           );
         }
@@ -482,7 +660,7 @@ export function createVexBlockTools({
       domain: 'vex_blocks',
       readOnly: true,
       description:
-        'Deriva una NUEVA versión de un bloque de tabla aplicando filtro, orden, agrupación y agregación. El bloque original queda intacto. filter: [{field, op, value}] con op en eq, neq, gt, gte, lt, lte, contains, in. sort: [{field, direction}]. group_by + aggregate {field, function: sum|avg|count|min|max} resumen por grupo. Devuelve el block_id de la nueva versión: úsalo de ahí en adelante.',
+        'Deriva una NUEVA versión de un bloque de tabla aplicando filtro, orden, agrupación y agregación. El bloque original queda intacto. filter: [{field, op, value}] con op en eq, neq, gt, gte, lt, lte, contains, in. sort: [{field, direction}]. group_by + aggregate {field, function: sum|avg|count|min|max} resumen por grupo. derive: [{name, expression}] añade columnas calculadas por fila con aritmética decimal exacta (las columnas numéricas son las variables; funciones round, abs, min, max, pct, pct_change, margin), p. ej. {name: "margen", expression: "margin(ingreso, costo)"}. compare: {key, period_field, current, previous, value_field} compara dos periodos y deja una fila por key con current, previous, delta y pct_change (null si no hay base). join: {block_id, on, right_on?, type: inner|left} une otra tabla de esta conversación. Orden de aplicación: join, derive, compare, filter, sort, aggregate; las columnas calculadas se filtran, ordenan y agregan como números. gt, gte, lt y lte solo aplican a columnas numéricas: sobre texto devuelven error. Úsalo en vez de calcular de cabeza. Devuelve el block_id de la nueva versión: úsalo de ahí en adelante.',
       parameters: {
         type: 'object',
         properties: {
@@ -516,6 +694,51 @@ export function createVexBlockTools({
             },
             required: ['field', 'function'],
           },
+          derive: {
+            type: 'array',
+            description:
+              'Columnas derivadas: [{name, expression}], máximo 10.',
+            items: {
+              type: 'object',
+              properties: {
+                name: { type: 'string' },
+                expression: { type: 'string' },
+              },
+              required: ['name', 'expression'],
+            },
+          },
+          compare: {
+            type: 'object',
+            description:
+              'Comparación entre periodos: {key, period_field, current, previous, value_field}.',
+            properties: {
+              key: { type: 'string' },
+              period_field: { type: 'string' },
+              current: { type: 'string' },
+              previous: { type: 'string' },
+              value_field: { type: 'string' },
+            },
+            required: [
+              'key',
+              'period_field',
+              'current',
+              'previous',
+              'value_field',
+            ],
+          },
+          join: {
+            type: 'object',
+            description:
+              'Unión con otra tabla de la conversación: {block_id, on, right_on?, type}.',
+            properties: {
+              block_id: { type: 'string' },
+              on: { type: 'string' },
+              right_on: { type: 'string' },
+              type: { type: 'string', enum: ['inner', 'left'] },
+              right_prefix: { type: 'string' },
+            },
+            required: ['block_id', 'on'],
+          },
         },
         required: ['block_id'],
       },
@@ -538,6 +761,9 @@ export function createVexBlockTools({
             sort: args.sort,
             group_by: args.group_by,
             aggregate: args.aggregate,
+            derive: args.derive,
+            compare: args.compare,
+            join: args.join,
           });
           const rows = ((block.data as Record<string, any>)?.rows ??
             []) as unknown[];

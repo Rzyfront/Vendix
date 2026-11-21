@@ -20,6 +20,7 @@ import {
   VexUiBlock,
 } from '../../models/vex.models';
 import { VEX_COPY } from '../../vex-copy';
+import { VexBlockExportMenuComponent } from './vex-block-export-menu.component';
 
 type SortDir = 'asc' | 'desc';
 
@@ -34,20 +35,19 @@ interface IndexedRow {
 @Component({
   selector: 'vendix-vex-block-table',
   standalone: true,
-  imports: [ButtonComponent, IconComponent],
+  imports: [ButtonComponent, IconComponent, VexBlockExportMenuComponent],
   changeDetection: ChangeDetectionStrategy.OnPush,
   template: `
     <section
       class="rounded-2xl border border-border bg-surface overflow-hidden"
       [attr.aria-label]="spec().title || copy.label"
     >
-      @if (spec().title) {
-        <header class="px-4 pt-3 pb-1">
-          <h4 class="text-sm font-semibold text-text-primary">
-            {{ spec().title }}
-          </h4>
-        </header>
-      }
+      <header class="px-4 pt-3 pb-1 flex items-center justify-between gap-2">
+        <h4 class="text-sm font-semibold text-text-primary min-w-0 truncate">
+          {{ spec().title || copy.label }}
+        </h4>
+        <vendix-vex-block-export-menu [block]="block()" />
+      </header>
 
       <div class="px-4 py-2 flex items-center gap-2">
         <div
