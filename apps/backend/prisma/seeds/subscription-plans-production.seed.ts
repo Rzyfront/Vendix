@@ -1,5 +1,6 @@
 import { PrismaClient, Prisma } from '@prisma/client';
 import { getPrismaClient } from './shared/client';
+import { syncSeedPlanAIEntitlements } from './shared/plan-ai-entitlements';
 
 /**
  * Subscription Plans Production Seed — CANONICAL plans for Vendix SaaS
@@ -283,7 +284,7 @@ export async function seedSubscriptionPlansProduction(
     };
 
     if (existing) {
-      await client.subscription_plans.update({
+      const saved = await client.subscription_plans.update({
         where: { code: plan.code },
         data: {
           ...writeData,
@@ -293,17 +294,19 @@ export async function seedSubscriptionPlansProduction(
           updated_at: new Date(),
         },
       });
+      await syncSeedPlanAIEntitlements(client, saved.id, plan.ai_feature_flags);
       plansUpdated++;
       console.log(
         `    Updated: ${plan.code} (${plan.name}, ${plan.billing_cycle}, ${plan.base_price} COP)`,
       );
     } else {
-      await client.subscription_plans.create({
+      const saved = await client.subscription_plans.create({
         data: {
           code: plan.code,
           ...writeData,
         },
       });
+      await syncSeedPlanAIEntitlements(client, saved.id, plan.ai_feature_flags);
       plansCreated++;
       console.log(
         `    Created: ${plan.code} (${plan.name}, ${plan.billing_cycle}, ${plan.base_price} COP)`,

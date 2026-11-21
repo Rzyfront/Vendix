@@ -315,9 +315,10 @@ export function legacyCapToCapValue(raw: unknown): number | null {
  * `AILegacySource`.
  *
  * - `complete` (a plan): one row per catalog capability; a capability whose
- *   legacy feature is absent migrates as `defaultAIEntitlement` with the
- *   `always` switch kept on, which is exactly what migration
- *   20261223100000_plan_ai_entitlements_backfill writes.
+ *   legacy feature is absent migrates switched off (the `always` ones on)
+ *   with no cap and `warn` (the legacy gate reads a missing degradation as
+ *   warn); one with no legacy source takes `defaultAIEntitlement`. Migration
+ *   20261223100000_plan_ai_entitlements_backfill writes exactly this.
  * - `patch` (a partner override): only the capabilities whose legacy feature
  *   key is present, so a restriction never invents rows it did not set.
  */
