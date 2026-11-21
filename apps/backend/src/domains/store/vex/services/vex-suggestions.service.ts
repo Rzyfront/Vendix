@@ -6,6 +6,8 @@ import {
   resolveStoreTimezone,
   zonedWallClockToUtc,
 } from '../../../../common/utils/store-timezone.util';
+import { industryAllowsKey } from '../../../../common/access/module-industries';
+import { hasPrivilegedRole } from '../../../../common/utils/privileged-roles.util';
 
 /**
  * What the welcome screen needs to know about the store right now. Counts
@@ -44,11 +46,29 @@ export interface VexSuggestion {
 export const VEX_SUGGESTIONS_MAX = 4;
 
 /**
+ * Panel module that must be visible for a suggestion to be offered. Keys are
+ * the `panel_ui` / `MODULE_INDUSTRIES` keys; reminders have no module gate.
+ */
+export const VEX_SUGGESTION_MODULE: Partial<Record<VexSuggestionId, string>> = {
+  cash_close: 'settings_cash_registers',
+  restock: 'inventory',
+  sales_today: 'orders_sales',
+  top_products: 'products',
+  overdue_receivables: 'cartera_receivables',
+};
+
+/** Decides if a suggestion may be offered (industry, store and user panel_ui, role). */
+export type VexSuggestionVisibility = (id: VexSuggestionId) => boolean;
+
+/**
  * Orders the welcome suggestions for one store: real pending work first
  * (reminders due, an open cash register, stock under its minimum), then the
  * evergreen questions. A store without inventory never sees stock questions.
  */
-export function buildVexSuggestions(snapshot: VexStoreSnapshot): VexSuggestion[] {
+export function buildVexSuggestions(
+  snapshot: VexStoreSnapshot,
+  isVisible: VexSuggestionVisibility = () => true,
+): VexSuggestion[] {
   const suggestions: VexSuggestion[] = [];
   if (snapshot.reminders_due_today > 0) {
     suggestions.push({ id: 'reminders_today', count: snapshot.reminders_due_today });
@@ -62,7 +82,47 @@ export function buildVexSuggestions(snapshot: VexStoreSnapshot): VexSuggestion[]
   suggestions.push({ id: 'sales_today' });
   if (snapshot.has_inventory) suggestions.push({ id: 'top_products' });
   suggestions.push({ id: 'overdue_receivables' });
-  return suggestions.slice(0, VEX_SUGGESTIONS_MAX);
+  return suggestions
+    .filter((suggestion) => isVisible(suggestion.id))
+    .slice(0, VEX_SUGGESTIONS_MAX);
+}
+
+type PanelUiMap = Record<string, unknown> | undefined;
+
+function asRecord(value: unknown): Record<string, unknown> | undefined {
+  return value && typeof value === 'object' && !Array.isArray(value)
+    ? (value as Record<string, unknown>)
+    : undefined;
+}
+
+/** `panel_ui.STORE_ADMIN` of a settings blob; anything malformed means «no data». */
+function storeAdminPanelUi(blob: unknown): PanelUiMap {
+  return asRecord(asRecord(asRecord(blob)?.panel_ui)?.STORE_ADMIN);
+}
+
+/**
+ * Same chain as the sidebar (`vendix-panel-ui`, AND): industry, store panel
+ * UI (`=== false` hides), user panel UI (`=== false` hides for privileged
+ * roles, whose defaults fill absent keys; others need `=== true`; the owner
+ * bypasses it). Missing data never restricts.
+ */
+export function buildVexVisibility(input: {
+  industries?: readonly string[] | null;
+  storePanelUi?: PanelUiMap;
+  userPanelUi?: PanelUiMap;
+  isOwner: boolean;
+  roles: readonly string[];
+}): VexSuggestionVisibility {
+  const privileged = input.isOwner || hasPrivilegedRole(input.roles);
+  return (id) => {
+    const key = VEX_SUGGESTION_MODULE[id];
+    if (!key) return true;
+    if (!industryAllowsKey(key, input.industries)) return false;
+    if (input.storePanelUi?.[key] === false) return false;
+    if (input.isOwner) return true;
+    const userValue = input.userPanelUi?.[key];
+    return privileged ? userValue !== false : userValue === true;
+  };
 }
 
 /** Snapshot used when a count cannot be read: only the evergreen questions. */
@@ -81,7 +141,65 @@ export class VexSuggestionsService {
 
   /** Welcome suggestions for the caller's store and user. */
   async getSuggestions(): Promise<VexSuggestion[]> {
-    return buildVexSuggestions(await this.readSnapshot());
+    const [snapshot, isVisible] = await Promise.all([
+      this.readSnapshot(),
+      this.readVisibility(),
+    ]);
+    return buildVexSuggestions(snapshot, isVisible);
+  }
+
+  /**
+   * Industry and `panel_ui` of the caller's store and user. Every read is
+   * keyed by the context store/user; a failed or missing read means «no
+   * extra restriction» (never throws).
+   */
+  async readVisibility(): Promise<VexSuggestionVisibility> {
+    const context = RequestContextService.getContext();
+    const storeId = context?.store_id;
+    const userId = context?.user_id;
+    if (!storeId) return () => true;
+
+    const [store, storeSettings, userSettings] = await Promise.all([
+      this.safeRead('industries', () =>
+        this.prisma.stores.findUnique({
+          where: { id: storeId },
+          select: { industries: true },
+        }),
+      ),
+      this.safeRead('store panel_ui', () =>
+        this.prisma.store_settings.findFirst({
+          where: { store_id: storeId },
+          select: { settings: true },
+        }),
+      ),
+      userId
+        ? this.safeRead('user panel_ui', () =>
+            this.prisma.user_settings.findFirst({
+              where: { user_id: userId },
+              select: { config: true },
+            }),
+          )
+        : Promise.resolve(null),
+    ]);
+
+    return buildVexVisibility({
+      industries: store?.industries,
+      storePanelUi: storeAdminPanelUi(storeSettings?.settings),
+      userPanelUi: storeAdminPanelUi(userSettings?.config),
+      isOwner: context?.is_owner === true,
+      roles: context?.roles ?? [],
+    });
+  }
+
+  private async safeRead<T>(label: string, read: () => Promise<T>): Promise<T | null> {
+    try {
+      return await read();
+    } catch (error) {
+      this.logger.warn(
+        `Vex suggestions: could not read ${label}: ${error instanceof Error ? error.message : String(error)}`,
+      );
+      return null;
+    }
   }
 
   /**

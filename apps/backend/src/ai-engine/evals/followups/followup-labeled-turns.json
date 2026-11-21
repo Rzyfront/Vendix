@@ -1,0 +1,395 @@
+{
+  "_meta": {
+    "version": "followups-es-v1",
+    "synthetic": true,
+    "note": "Conjunto SINTETICO escrito a mano. No contiene datos de produccion, nombres reales de personas ni de negocios. Las etiquetas son juicio del autor segun la regla de la tool suggest_followup; no estan validadas por un segundo etiquetador.",
+    "kinds": ["reminder", "log_entry"]
+  },
+  "turns": [
+    {
+      "id": "f01",
+      "industry": "retail",
+      "context": [],
+      "user_message": "Listo, el viernes llamo al proveedor de lácteos para cuadrar el pedido de diciembre",
+      "expects_followup": true,
+      "kind": "reminder",
+      "expects_date": true,
+      "rationale": "Compromiso propio con fecha (viernes) y contraparte (proveedor)."
+    },
+    {
+      "id": "f02",
+      "industry": "restaurant",
+      "context": [],
+      "user_message": "Quedamos en que la señora Marta pasa a pagar la cuenta el martes en la tarde",
+      "expects_followup": true,
+      "kind": "reminder",
+      "expects_date": true,
+      "rationale": "Acuerdo con un cliente con fecha y franja (martes en la tarde)."
+    },
+    {
+      "id": "f03",
+      "industry": "retail",
+      "context": ["¿Cómo va la cartera vencida?"],
+      "user_message": "Ok, el viernes reviso la cartera con calma y le escribo a los que sigan debiendo",
+      "expects_followup": true,
+      "kind": "reminder",
+      "expects_date": true,
+      "rationale": "Compromiso implícito (sin decir 'recuérdame') con fecha relativa."
+    },
+    {
+      "id": "f04",
+      "industry": "services",
+      "context": [],
+      "user_message": "Mañana a primera hora llamo al técnico para que revise el aire de la oficina",
+      "expects_followup": true,
+      "kind": "reminder",
+      "expects_date": true,
+      "rationale": "Compromiso con fecha (mañana) y acción concreta."
+    },
+    {
+      "id": "f05",
+      "industry": "gym",
+      "context": ["Se venció la membresía de tres socios."],
+      "user_message": "Les escribo el lunes para ofrecerles la renovación con descuento",
+      "expects_followup": true,
+      "kind": "reminder",
+      "expects_date": true,
+      "rationale": "Compromiso con fecha (lunes) y contraparte (socios)."
+    },
+    {
+      "id": "f06",
+      "industry": "restaurant",
+      "context": ["El proveedor de pollo subió el precio."],
+      "user_message": "Voy a pedirle cotización a otro proveedor la semana entrante",
+      "expects_followup": true,
+      "kind": "reminder",
+      "expects_date": true,
+      "rationale": "Pendiente con proveedor y plazo vago (semana entrante); se espera una fecha aproximada."
+    },
+    {
+      "id": "f07",
+      "industry": "retail",
+      "context": [],
+      "user_message": "El 30 vence el pago de la cuota del local, no se me puede pasar",
+      "expects_followup": true,
+      "kind": "reminder",
+      "expects_date": true,
+      "rationale": "Fecha límite explícita mencionada por la persona (el 30)."
+    },
+    {
+      "id": "f08",
+      "industry": "services",
+      "context": ["Le mandé la cotización al cliente de la clínica."],
+      "user_message": "Si no responde en tres días lo llamo yo",
+      "expects_followup": true,
+      "kind": "reminder",
+      "expects_date": true,
+      "rationale": "Compromiso condicional pero con plazo (tres días); caso difícil."
+    },
+    {
+      "id": "f09",
+      "industry": "retail",
+      "context": ["Te propongo subir 5 % el precio de la línea de aseo."],
+      "user_message": "Sí, hagámoslo, y el primero de mes revisamos cómo cayó la venta",
+      "expects_followup": true,
+      "kind": "reminder",
+      "expects_date": true,
+      "rationale": "Decisión tomada más revisión posterior con fecha (primero de mes)."
+    },
+    {
+      "id": "f10",
+      "industry": "restaurant",
+      "context": [],
+      "user_message": "Hoy hablé con el domiciliario y quedamos en que desde el sábado cobra por viaje y no por hora",
+      "expects_followup": true,
+      "kind": "log_entry",
+      "expects_date": false,
+      "rationale": "Acuerdo ya cerrado que conviene dejar en la bitácora; no hay acción futura puntual."
+    },
+    {
+      "id": "f11",
+      "industry": "gym",
+      "context": ["¿Qué hago con el torniquete que falla?"],
+      "user_message": "Decidí cambiar el torniquete en vez de repararlo; lo dejo anotado",
+      "expects_followup": true,
+      "kind": "log_entry",
+      "expects_date": false,
+      "rationale": "Decisión de negocio que vale la pena registrar sin fecha."
+    },
+    {
+      "id": "f12",
+      "industry": "retail",
+      "context": [],
+      "user_message": "Acordé con Don Pedro que me da 45 días de plazo en la próxima compra",
+      "expects_followup": true,
+      "kind": "log_entry",
+      "expects_date": false,
+      "rationale": "Acuerdo comercial con proveedor, sin fecha: nota de bitácora."
+    },
+    {
+      "id": "f13",
+      "industry": "services",
+      "context": ["Apliqué la nueva tarifa a todos los servicios de mantenimiento."],
+      "user_message": "Perfecto, ojalá no se quejen los clientes antiguos",
+      "assistant_reply": "Quedó aplicada la tarifa nueva. Te sugiero revisar en dos semanas cuántos clientes cancelaron.",
+      "expects_followup": true,
+      "kind": "reminder",
+      "expects_date": true,
+      "rationale": "Acción aplicada que conviene revisar después; el asistente propone un plazo (dos semanas)."
+    },
+    {
+      "id": "f14",
+      "industry": "restaurant",
+      "context": [],
+      "user_message": "Me dijeron que la nevera nueva llega el jueves, ese día tengo que estar en el local",
+      "expects_followup": true,
+      "kind": "reminder",
+      "expects_date": true,
+      "rationale": "Evento con fecha y obligación de presencia de la persona."
+    },
+    {
+      "id": "f15",
+      "industry": "gym",
+      "context": ["Hay una socia con la cuota atrasada hace dos meses."],
+      "user_message": "Hablo con ella en persona cuando venga, seguro esta semana",
+      "expects_followup": true,
+      "kind": "reminder",
+      "expects_date": true,
+      "rationale": "Compromiso implícito con plazo difuso (esta semana); caso difícil."
+    },
+    {
+      "id": "f16",
+      "industry": "retail",
+      "context": ["Hoy se agotó el producto estrella."],
+      "user_message": "Tengo que reponerlo antes del fin de semana porque llega el puente",
+      "expects_followup": true,
+      "kind": "reminder",
+      "expects_date": true,
+      "rationale": "Pendiente con fecha límite (antes del fin de semana)."
+    },
+    {
+      "id": "f17",
+      "industry": "services",
+      "context": [],
+      "user_message": "El cliente de la constructora me prometió el anticipo para el 15; si no llega, paro la obra",
+      "expects_followup": true,
+      "kind": "reminder",
+      "expects_date": true,
+      "rationale": "Pendiente de un tercero con fecha (el 15) y consecuencia."
+    },
+    {
+      "id": "f18",
+      "industry": "restaurant",
+      "context": [],
+      "user_message": "Cambié la receta del arroz y bajó el costo por plato; me quedo con esa versión",
+      "expects_followup": true,
+      "kind": "log_entry",
+      "expects_date": false,
+      "rationale": "Decisión de negocio (adopción de una receta) digna de bitácora."
+    },
+    {
+      "id": "f19",
+      "industry": "retail",
+      "context": ["Voy a probar horario extendido en diciembre."],
+      "user_message": "Dale, el 8 de enero comparamos las ventas contra el año pasado",
+      "expects_followup": true,
+      "kind": "reminder",
+      "expects_date": true,
+      "rationale": "Revisión acordada con fecha explícita."
+    },
+    {
+      "id": "f20",
+      "industry": "gym",
+      "context": [],
+      "user_message": "Mañana viene el contador y tengo que tener listos los comprobantes del mes",
+      "expects_followup": true,
+      "kind": "reminder",
+      "expects_date": true,
+      "rationale": "Obligación con fecha (mañana) y contraparte."
+    },
+    {
+      "id": "f21",
+      "industry": "services",
+      "context": [],
+      "user_message": "Quedé de enviarle la propuesta a la dueña de la tienda de mascotas el miércoles",
+      "expects_followup": true,
+      "kind": "reminder",
+      "expects_date": true,
+      "rationale": "Compromiso con cliente potencial y fecha."
+    },
+    {
+      "id": "f22",
+      "industry": "retail",
+      "context": ["Ayer pasó que un cliente reclamó por un producto vencido."],
+      "user_message": "Le ofrecí cambio y descuento; lo dejo como incidente para tenerlo presente",
+      "expects_followup": true,
+      "kind": "log_entry",
+      "expects_date": false,
+      "rationale": "Incidente con cliente que la persona quiere dejar registrado."
+    },
+    {
+      "id": "f23",
+      "industry": "restaurant",
+      "context": ["Contraté a una persona nueva para la cocina."],
+      "user_message": "Le doy un mes de prueba y al terminar decido si se queda",
+      "expects_followup": true,
+      "kind": "reminder",
+      "expects_date": true,
+      "rationale": "Decisión futura con plazo relativo (un mes); caso difícil sin 'recuérdame'."
+    },
+    {
+      "id": "f24",
+      "industry": "gym",
+      "context": [],
+      "user_message": "Habíamos quedado con el proveedor de máquinas en que la visita técnica es el último viernes del mes",
+      "expects_followup": true,
+      "kind": "reminder",
+      "expects_date": true,
+      "rationale": "Fecha acordada con proveedor expresada de forma relativa (último viernes del mes)."
+    },
+    {
+      "id": "f25",
+      "industry": "retail",
+      "context": [],
+      "user_message": "Recuérdame mañana a las 9 revisar el inventario de bebidas",
+      "expects_followup": false,
+      "expects_date": false,
+      "rationale": "Petición explícita: la tool dice usar create_reminder directo y NO suggest_followup; no debe salir ficha."
+    },
+    {
+      "id": "f26",
+      "industry": "restaurant",
+      "context": [],
+      "user_message": "Crea un recordatorio para el lunes: pagar el arriendo",
+      "expects_followup": false,
+      "expects_date": false,
+      "rationale": "Orden explícita de guardar: va directo a create_reminder, sin ficha sugerida."
+    },
+    {
+      "id": "f27",
+      "industry": "retail",
+      "context": [],
+      "user_message": "¿Cuánto vendí ayer?",
+      "expects_followup": false,
+      "expects_date": false,
+      "rationale": "Pregunta pura de consulta; sin compromiso."
+    },
+    {
+      "id": "f28",
+      "industry": "services",
+      "context": [],
+      "user_message": "Buenos días Vex, ¿cómo amaneciste?",
+      "expects_followup": false,
+      "expects_date": false,
+      "rationale": "Saludo; charla trivial."
+    },
+    {
+      "id": "f29",
+      "industry": "gym",
+      "context": [],
+      "user_message": "Muéstrame los socios que vencen esta semana",
+      "expects_followup": false,
+      "expects_date": false,
+      "rationale": "Consulta con palabra de fecha, pero es lectura pura (falso positivo tentador)."
+    },
+    {
+      "id": "f30",
+      "industry": "restaurant",
+      "context": ["Ayer quedó pendiente llamar al proveedor de verduras."],
+      "user_message": "Ya lo llamé esta mañana y quedó todo resuelto",
+      "expects_followup": false,
+      "expects_date": false,
+      "rationale": "Acción ya completada; no queda nada por hacer (caso difícil: menciona proveedor y pendiente en pasado)."
+    },
+    {
+      "id": "f31",
+      "industry": "retail",
+      "context": [],
+      "user_message": "Si algún día abro una segunda sede, ¿qué debería tener en cuenta?",
+      "expects_followup": false,
+      "expects_date": false,
+      "rationale": "Hipotético sin compromiso ni fecha."
+    },
+    {
+      "id": "f32",
+      "industry": "services",
+      "context": [],
+      "user_message": "Gracias, eso era todo por hoy",
+      "expects_followup": false,
+      "expects_date": false,
+      "rationale": "Cierre de conversación sin compromiso."
+    },
+    {
+      "id": "f33",
+      "industry": "retail",
+      "context": [],
+      "user_message": "¿Qué producto es el que más me deja margen?",
+      "expects_followup": false,
+      "expects_date": false,
+      "rationale": "Pregunta analítica pura."
+    },
+    {
+      "id": "f34",
+      "industry": "restaurant",
+      "context": [],
+      "user_message": "Ayer cerré la caja y cuadró perfecto, el lunes pasado también",
+      "expects_followup": false,
+      "expects_date": false,
+      "rationale": "Relato de hechos pasados con fechas; ninguna acción futura (caso difícil)."
+    },
+    {
+      "id": "f35",
+      "industry": "gym",
+      "context": [],
+      "user_message": "Ya registré el pago de Camilo y le renové el plan",
+      "expects_followup": false,
+      "expects_date": false,
+      "rationale": "Acción completada sin seguimiento pendiente."
+    },
+    {
+      "id": "f36",
+      "industry": "services",
+      "context": [],
+      "user_message": "Algún día me gustaría contratar a alguien de planta, pero no sé cuándo",
+      "expects_followup": false,
+      "expects_date": false,
+      "rationale": "Deseo vago sin compromiso ni plazo (caso difícil)."
+    },
+    {
+      "id": "f37",
+      "industry": "retail",
+      "context": [],
+      "user_message": "¿Cómo se registra una devolución de mercancía al proveedor?",
+      "expects_followup": false,
+      "expects_date": false,
+      "rationale": "Pregunta de procedimiento; menciona proveedor pero no hay pendiente."
+    },
+    {
+      "id": "f38",
+      "industry": "restaurant",
+      "context": [],
+      "user_message": "El menú del viernes es pollo asado, ¿lo puedes poner en el título del reporte?",
+      "expects_followup": false,
+      "expects_date": false,
+      "rationale": "Menciona viernes pero es una instrucción de redacción, no un compromiso (caso difícil)."
+    },
+    {
+      "id": "f39",
+      "industry": "gym",
+      "context": [],
+      "user_message": "Qué buena idea lo de las clases de sábado, cuéntame más sobre cómo funcionan en otros gimnasios",
+      "expects_followup": false,
+      "expects_date": false,
+      "rationale": "Curiosidad sobre una idea; sin decisión ni compromiso."
+    },
+    {
+      "id": "f40",
+      "industry": "services",
+      "context": [],
+      "user_message": "Dime la diferencia entre IVA e impuesto al consumo",
+      "expects_followup": false,
+      "expects_date": false,
+      "rationale": "Consulta conceptual sin compromiso."
+    }
+  ]
+}
