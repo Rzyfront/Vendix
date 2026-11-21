@@ -10,36 +10,49 @@ export interface AgentContextBudgetOptions {
   safetyTokens?: number;
 }
 
+/** Fixed token cost charged per `image_url` part. Providers bill 85-1 600
+ * tokens per image depending on resolution and `detail`, and a signed URL
+ * carries no size information, so the estimate is a flat, pessimistic middle
+ * value instead of rejecting the turn. */
+export const AGENT_IMAGE_PART_TOKENS = 1000;
+
+/** Estimated tokens of one message: JSON byte length (+ overhead) for text,
+ * tool calls and results; images are charged `AGENT_IMAGE_PART_TOKENS` each
+ * and never stringified (a data URI would otherwise count its base64 bytes). */
+function estimateMessageTokens(message: AIMessage): number {
+  let content = message.content;
+  let images = 0;
+  if (Array.isArray(content)) {
+    if (content.some((part) => part.type === 'input_audio')) {
+      throw new Error('AI_AGENT_CONTEXT_UNCOUNTED_MULTIMODAL');
+    }
+    images = content.filter((part) => part.type === 'image_url').length;
+    if (images) content = content.filter((part) => part.type !== 'image_url');
+  }
+  return (
+    24 +
+    Buffer.byteLength(
+      JSON.stringify({
+        role: message.role,
+        content,
+        ...(message.tool_calls ? { tool_calls: message.tool_calls } : {}),
+        ...(message.tool_call_id ? { tool_call_id: message.tool_call_id } : {}),
+      }),
+      'utf8',
+    ) +
+    images * AGENT_IMAGE_PART_TOKENS
+  );
+}
+
 /** Not a tokenizer: a deliberately pessimistic byte-fallback estimate plus
  * per-message/schema overhead. Never report it as provider-observed tokens.
- * Remote images/audio have unknown tokenization and cannot be budgeted safely
- * here; the agent works with attachment references instead of binaries. */
+ * Images carry a fixed cost; audio has unknown tokenization and is rejected. */
 export function estimateAgentInputTokens(
   messages: AIMessage[],
   tools: AIToolDefinition[],
 ): number {
   let estimate = 32;
-  for (const message of messages) {
-    if (
-      Array.isArray(message.content) &&
-      message.content.some((part) => part.type !== 'text')
-    ) {
-      throw new Error('AI_AGENT_CONTEXT_UNCOUNTED_MULTIMODAL');
-    }
-    estimate +=
-      24 +
-      Buffer.byteLength(
-        JSON.stringify({
-          role: message.role,
-          content: message.content,
-          ...(message.tool_calls ? { tool_calls: message.tool_calls } : {}),
-          ...(message.tool_call_id
-            ? { tool_call_id: message.tool_call_id }
-            : {}),
-        }),
-        'utf8',
-      );
-  }
+  for (const message of messages) estimate += estimateMessageTokens(message);
   return (
     estimate +
     (tools.length ? 32 + Buffer.byteLength(JSON.stringify(tools), 'utf8') : 0)

@@ -61,6 +61,8 @@ import {
 import { VexBlockService } from '../vex/services/vex-block.service';
 import { PlanApprovalService } from '../vex/services/plan-approval.service';
 import { VexiConfirmationService } from '../vexi/vexi-confirmation.service';
+import { VexiAttachmentsService } from '../vexi/vexi-attachments.service';
+import { buildVisionImageParts, configSupportsVision } from './vex-vision';
 import { Prisma } from '@prisma/client';
 import {
   CHAT_WINDOW_MESSAGES,
@@ -77,6 +79,7 @@ import { randomUUID } from 'node:crypto';
 import { VendixHttpException, ErrorCodes } from '../../../common/errors';
 import {
   AIMessage,
+  AIMessageContentPart,
   AIStreamChunk,
 } from '../../../ai-engine/interfaces/ai-provider.interface';
 import {
@@ -323,6 +326,9 @@ export class AIChatService {
     // Resumen automático de hilos largos de Vex (T22). Opcional-final como
     // los demás: sin él el hilo conserva la ventana de los últimos mensajes.
     @Optional() private readonly compactor?: ConversationCompactorService,
+    // Native vision (T42): signs the turn's image handles. Optional-final;
+    // without it every turn stays text + handles.
+    @Optional() private readonly vexAttachments?: VexiAttachmentsService,
   ) {}
 
   async createConversation(dto: CreateConversationDto) {
@@ -1066,6 +1072,11 @@ export class AIChatService {
       const agentStream = this.aiAgent.runAgentStream({
         goal,
         ...base,
+        ...(await this.visionGoalImages(
+          agentKey,
+          base.app_key,
+          intent.attachment_ids,
+        )),
         // El mismo flag que enciende la síntesis enciende el registro hablado.
         // Derivarlo del intent y no de un ajuste de tienda es lo que mantiene los
         // dos en fase: si se dicta, se responde para ser oído — y si el mismo
@@ -2039,6 +2050,49 @@ export class AIChatService {
    * - `plan_approval` + `block_sink`: SOLO cuando el agente es `vex`. Vexi y
    *   los demás agentes reciben exactamente lo de antes, sin esas llaves.
    */
+  /**
+   * Image parts of the current Vex turn, only when the app's resolved config
+   * declares `settings.supports_vision`. Any failure degrades to text-only:
+   * the handles and `ai_extract_document` still carry the images.
+   */
+  private async visionGoalImages(
+    agentKey: string | undefined,
+    appKey: string | undefined,
+    attachmentIds: string[] | undefined,
+  ): Promise<{ goal_images?: AIMessageContentPart[] }> {
+    if (
+      agentKey !== VEX_AGENT_KEY ||
+      !this.vexAttachments ||
+      !attachmentIds?.length ||
+      !appKey
+    ) {
+      return {};
+    }
+    try {
+      const app = await this.globalPrisma.ai_engine_applications.findUnique({
+        where: { key: appKey },
+        select: { config: { select: { settings: true } } },
+      });
+      const config =
+        app?.config ??
+        (await this.globalPrisma.ai_engine_configs.findFirst({
+          where: { is_default: true, is_active: true },
+          select: { settings: true },
+        }));
+      if (!configSupportsVision(config?.settings)) return {};
+      const goal_images = await buildVisionImageParts(
+        this.vexAttachments,
+        attachmentIds,
+      );
+      return goal_images.length ? { goal_images } : {};
+    } catch (error) {
+      this.logger.warn(
+        `Vision parts skipped: ${(error as Error)?.message ?? 'unknown'}`,
+      );
+      return {};
+    }
+  }
+
   private resolveAgentLoopArgs(
     agent: ResolvedChatAgent | null,
     conversation: ConversationWithMessages,

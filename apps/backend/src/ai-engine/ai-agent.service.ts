@@ -170,6 +170,12 @@ const SUPERADMIN_MAX_ITERATIONS = 60;
 
 export interface AgentRunParams {
   goal: string;
+  /**
+   * `image_url` parts of the CURRENT turn (vision-capable configs only; the
+   * caller gates on `settings.supports_vision`). Absent = text-only turn,
+   * byte-identical to before.
+   */
+  goal_images?: AIMessageContentPart[];
   system_prompt?: string;
   app_key?: string;
   tools?: string[];
@@ -1967,7 +1973,12 @@ export class AIAgentService {
       );
     }
 
-    messages.push({ role: 'user', content: params.goal });
+    messages.push({
+      role: 'user',
+      content: params.goal_images?.length
+        ? [{ type: 'text', text: params.goal }, ...params.goal_images]
+        : params.goal,
+    });
 
     const toolsUsed: AgentResult['tools_used'] = [];
     let pendingConfirmation: AgentResult['pending_confirmation'];

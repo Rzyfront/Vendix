@@ -157,7 +157,9 @@ describe('H conservative agent context budget', () => {
       ),
     ).toBeGreaterThan(ascii);
   });
-  it('rejects uncounted remote multimodal content and invalid reserves', () => {
+  // F6/T42: image parts are now counted at a fixed cost (see
+  // agent-context-budget.multimodal.spec.ts); audio stays uncounted and rejected.
+  it('rejects uncounted audio content and invalid reserves', () => {
     expect(() =>
       apply([
         {
@@ -169,6 +171,19 @@ describe('H conservative agent context budget', () => {
             },
           ],
         },
+      ]),
+    ).not.toThrow();
+    expect(() =>
+      apply([
+        {
+          role: 'user',
+          content: [
+            {
+              type: 'input_audio',
+              input_audio: { data: 'AAAA', format: 'wav' },
+            },
+          ],
+        } as never,
       ]),
     ).toThrow('AI_AGENT_CONTEXT_UNCOUNTED_MULTIMODAL');
     expect(() =>
