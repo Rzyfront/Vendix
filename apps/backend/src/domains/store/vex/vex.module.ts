@@ -17,6 +17,10 @@ import { VexSuggestionsService } from './services/vex-suggestions.service';
 import { AIToolRegistry } from '../../../ai-engine/tools/ai-tool-registry';
 import { createComputeTools } from '../../../ai-engine/tools/domains/compute.tools';
 import { createVexBlockTools } from '../../../ai-engine/tools/domains/vex-blocks.tools';
+import { createWriteBatchTools } from '../../../ai-engine/tools/domains/write-batch.tools';
+import { WriteBatchService } from './services/write-batch.service';
+import { WriteBatchExecutorService } from './services/write-batch-executor.service';
+import { WriteBatchCompensationService } from './services/write-batch-compensation.service';
 import { VexiVoiceConfirmationService } from '../vexi/vexi-voice-confirmation.service';
 import { SubscriptionAccessService } from '../subscriptions/services/subscription-access.service';
 import { RequestContextService } from '../../../common/context/request-context.service';
@@ -52,6 +56,9 @@ import { randomUUID } from 'node:crypto';
     VexActivityFeedService,
     AgentHistoryService,
     VexSuggestionsService,
+    WriteBatchService,
+    WriteBatchExecutorService,
+    WriteBatchCompensationService,
     VexEnabledGuard,
     VexiActivityService,
   ],
@@ -64,6 +71,7 @@ export class VexModule implements OnModuleInit {
     private readonly voiceConfirmations: VexiVoiceConfirmationService,
     private readonly planApproval: PlanApprovalService,
     private readonly access: SubscriptionAccessService,
+    private readonly writeBatches: WriteBatchService,
   ) {}
 
   onModuleInit(): void {
@@ -102,5 +110,9 @@ export class VexModule implements OnModuleInit {
       createVexBlockTools({ blocks: this.blocks }),
     );
     this.toolRegistry.registerMany(createComputeTools());
+    // F5/T34: the batch circuit's entry; it proposes, the card approves.
+    this.toolRegistry.registerMany(
+      createWriteBatchTools({ batches: this.writeBatches }),
+    );
   }
 }

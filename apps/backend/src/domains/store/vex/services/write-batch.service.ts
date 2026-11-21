@@ -9,10 +9,11 @@ import {
 } from '../../../../ai-engine/tools/ai-tool-registry';
 import type { RegisteredTool } from '../../../../ai-engine/tools/interfaces/tool.interface';
 import { PlanApprovalService } from './plan-approval.service';
-import { VexBlockService } from './vex-block.service';
+import { VexBlockService, type VexUiBlockView } from './vex-block.service';
 import {
   WRITE_BATCH_MAX_RECORDS,
   WRITE_BATCH_MAX_STEPS,
+  WRITE_BATCH_STALE_EXECUTING_MS,
   WRITE_BATCH_TTL_MS,
   WRITE_BATCH_UNDO_WINDOW_MS,
 } from './write-batch.types';
@@ -37,6 +38,8 @@ export interface WriteBatchProposal {
     part_total: number;
     step_count: number;
     block_id?: string;
+    /** Panel-ready view of the part's `write_batch` block (stream frame). */
+    block?: VexUiBlockView;
   }>;
 }
 
@@ -287,6 +290,7 @@ export class WriteBatchService {
     const result: WriteBatchProposal['batches'] = [];
     for (const row of rows) {
       let blockId: string | undefined;
+      let blockView: VexUiBlockView | undefined;
       if (input.conversationId) {
         try {
           const block = await this.blocks.create({
@@ -301,6 +305,7 @@ export class WriteBatchService {
             },
           });
           blockId = block.id;
+          blockView = await this.blocks.toUiBlock(block);
         } catch (error) {
           // The batch is valid and approvable by id; only the reload-proof
           // card is missing. Never fail the proposal for it.
@@ -317,6 +322,7 @@ export class WriteBatchService {
         part_total: row.part_total,
         step_count: row.step_count,
         ...(blockId ? { block_id: blockId } : {}),
+        ...(blockView ? { block: blockView } : {}),
       });
     }
     return { group_id: groupId, batches: result };
@@ -502,13 +508,101 @@ export class WriteBatchService {
           ? { ...row, status: 'expired', steps }
           : await this.loadOwned(batchId, userId);
     }
+    if (
+      row.status === 'executing' &&
+      row.started_at &&
+      now.getTime() - new Date(row.started_at).getTime() >
+        WRITE_BATCH_STALE_EXECUTING_MS
+    ) {
+      row = await this.reconcileInterrupted(row, now, userId);
+    }
     return toWriteBatchView(row, now);
   }
+
+  /**
+   * A run that died with the process (deploy, OOM) leaves the batch
+   * `executing`. Nothing is retried: the step that was running may have landed,
+   * so it becomes `unknown` (needs review), never-run steps become `skipped`,
+   * and the batch `unknown_effect`. Conditional on `version`, so a live
+   * executor that is merely slow keeps ownership if it writes first.
+   */
+  private async reconcileInterrupted(
+    row: WriteBatchRow,
+    now: Date,
+    userId: number | undefined,
+  ): Promise<WriteBatchRow> {
+    const steps = (row.steps ?? []).map((step) =>
+      step.status === 'running'
+        ? {
+            ...step,
+            status: 'unknown' as const,
+            error:
+              step.error ??
+              'No se pudo confirmar si este cambio se aplicó; revísalo antes de reintentar.',
+            finished_at: now.toISOString(),
+          }
+        : step.status === 'pending'
+          ? { ...step, status: 'skipped' as const }
+          : step,
+    );
+    const summary = summarizeInterrupted(steps);
+    const { count } = await this.batches.updateMany({
+      where: {
+        id: row.id,
+        store_id: row.store_id,
+        status: 'executing',
+        version: row.version,
+      },
+      data: {
+        status: 'unknown_effect',
+        steps,
+        summary,
+        finished_at: now,
+        version: { increment: 1 },
+        updated_at: now,
+      },
+    });
+    return count > 0
+      ? {
+          ...row,
+          status: 'unknown_effect',
+          steps,
+          summary,
+          finished_at: now,
+          version: row.version + 1,
+        }
+      : this.loadOwned(row.id, userId);
+  }
+}
+
+/** D2 sentence for a run interrupted mid-way (see `reconcileInterrupted`). */
+function summarizeInterrupted(
+  steps: WriteBatchStepRecord[],
+): WriteBatchSummary {
+  const count = (status: WriteBatchStepRecord['status']) =>
+    steps.filter((s) => s.status === status).length;
+  const applied = steps.filter((s) => s.status === 'applied');
+  const unknownStep = steps.find((s) => s.status === 'unknown');
+  const appliedThrough = applied.reduce((max, s) => Math.max(max, s.order), 0);
+  return {
+    applied: applied.length,
+    failed: count('failed'),
+    unknown: count('unknown'),
+    skipped: count('skipped'),
+    unselected: count('unselected'),
+    compensable: applied.filter((s) => s.compensable).length,
+    applied_through_order: appliedThrough,
+    message: unknownStep
+      ? `El paso ${unknownStep.order} quedó sin verificar; revisa antes de reintentar. El resto se omitió.`
+      : applied.length > 0
+        ? `Se aplicó hasta el paso ${appliedThrough}, el resto se omitió.`
+        : 'No se aplicó ningún cambio.',
+  };
 }
 
 /**
  * Pure projection row → client view. Strips `compensation_snapshot`,
- * `args_hash` and `preview_hash`. A step offers undo only when it is applied,
+ * `compensation_output`, `args_hash` and `preview_hash`. A step offers undo only when it is applied,
  * its tool is compensable, a snapshot was captured and the window is open.
  */
 export function toWriteBatchView(
@@ -524,6 +618,7 @@ export function toWriteBatchView(
   const steps = (row.steps ?? []).map((step) => {
     const {
       compensation_snapshot,
+      compensation_output: _compensationOutput,
       args_hash: _argsHash,
       preview_hash: _previewHash,
       ...safe

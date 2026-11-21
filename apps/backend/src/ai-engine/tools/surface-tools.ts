@@ -13,6 +13,8 @@ export const VEX_ONLY_TOOL_NAMES: ReadonlySet<string> = new Set([
   // memories born in it; never from the tool arguments.
   'remember',
   'forget',
+  // F5: the batch card only exists on the Vex surface.
+  'propose_write_batch',
 ]);
 
 export function isVexOnlyTool(name: string): boolean {

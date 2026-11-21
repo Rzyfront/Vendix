@@ -9,8 +9,10 @@ import { USER_NOTICES } from '../../../../ai-engine/agent-execution.contract';
 import { VexiConfirmationService } from '../../vexi/vexi-confirmation.service';
 import { VexiPlanStateService } from '../../vexi/vexi-plan-state.service';
 import { VexiActivityService } from '../../vexi/vexi-activity.service';
+import { SubscriptionAccessService } from '../../subscriptions/services/subscription-access.service';
 import { WriteBatchService, writeBatchArgsHash } from './write-batch.service';
 import {
+  WRITE_BATCH_COMPENSATION_OUTPUT_MAX,
   writeBatchOperationId,
   type WriteBatchStatus,
   type WriteBatchStepRecord,
@@ -85,6 +87,11 @@ export function summarizeWriteBatch(
   };
 }
 
+/** Dedupe key of the batch's single metering unit (one turn, N4). */
+export function writeBatchQuotaRequestId(batchId: string): string {
+  return `vex-batch:${batchId}:turn`;
+}
+
 /** Terminal batch status from the post-run steps. */
 export function writeBatchTerminalStatus(
   steps: Pick<WriteBatchStepRecord, 'status'>[],
@@ -98,7 +105,7 @@ export function writeBatchTerminalStatus(
 }
 
 type StepOutcome =
-  | { outcome: 'applied'; summary: string }
+  | { outcome: 'applied'; summary: string; output: string }
   | { outcome: 'failed' | 'unknown'; error: string };
 
 /**
@@ -129,6 +136,7 @@ export class WriteBatchExecutorService {
     private readonly planState: VexiPlanStateService,
     private readonly activity: VexiActivityService,
     private readonly audit: AuditService,
+    private readonly access: SubscriptionAccessService,
   ) {}
 
   async approve(input: {
@@ -191,6 +199,9 @@ export class WriteBatchExecutorService {
     const state: { running?: WriteBatchStepRecord; dispatching: boolean } = {
       dispatching: false,
     };
+    // Raw outputs of applied steps, for the activity receipts (never persisted
+    // in the batch row beyond the compensation budget).
+    const outputs = new Map<string, string>();
     try {
       await this.persistSteps(input.batchId, steps);
       let stopped = false;
@@ -211,6 +222,7 @@ export class WriteBatchExecutorService {
         if (outcome.outcome === 'applied') {
           step.status = 'applied';
           step.result_summary = outcome.summary;
+          outputs.set(step.step_id, outcome.output);
         } else {
           step.status = outcome.outcome;
           step.error = outcome.error;
@@ -248,7 +260,7 @@ export class WriteBatchExecutorService {
     const terminal = writeBatchTerminalStatus(steps);
     const summary = summarizeWriteBatch(steps);
     await this.finalize(input.batchId, terminal, steps, summary);
-    await this.afterFinish(row, input.userId, terminal, steps, summary);
+    await this.afterFinish(row, input.userId, terminal, steps, summary, outputs);
 
     return {
       batch: await this.batches.getView(input.batchId, input.userId),
@@ -302,6 +314,7 @@ export class WriteBatchExecutorService {
 
     step.compensable = false;
     step.compensation_snapshot = undefined;
+    step.compensation_output = undefined;
     if (registered.compensate) {
       try {
         const snapshot = await registered.compensate.capture(
@@ -358,9 +371,16 @@ export class WriteBatchExecutorService {
           ? { outcome: 'unknown', error: USER_NOTICES.unknown_effect }
           : { outcome: 'failed', error: USER_NOTICES.apply_failed };
       }
+      if (step.compensable) {
+        step.compensation_output = String(execution.output ?? '').slice(
+          0,
+          WRITE_BATCH_COMPENSATION_OUTPUT_MAX,
+        );
+      }
       return {
         outcome: 'applied',
         summary: this.humanSummary(execution.output, step.label),
+        output: String(execution.output ?? ''),
       };
     } catch (error) {
       state.dispatching = false;
@@ -449,14 +469,56 @@ export class WriteBatchExecutorService {
 
   // ── after a terminal status ───────────────────────────────────────────
 
-  /** Narration + audit. Best-effort: the writes already landed. */
+  /**
+   * Receipts + narration + metering + audit (T38). Best-effort: the writes
+   * already landed, so none of these may turn an applied batch into an error.
+   */
   private async afterFinish(
     row: { id: string; conversation_id: number | null; goal?: string },
     userId: number | undefined,
     status: WriteBatchStatus,
     steps: WriteBatchStepRecord[],
     summary: WriteBatchSummary,
+    outputs: Map<string, string> = new Map(),
   ): Promise<void> {
+    // One `role: 'tool'` receipt per applied step, attributed to Vex: the
+    // business log and the store history (T18) rebuild applied actions from
+    // these rows, exactly like a single approved write.
+    for (const step of steps) {
+      if (step.status !== 'applied') continue;
+      try {
+        await this.activity.recordApplied({
+          conversationId: row.conversation_id ?? undefined,
+          tool: step.tool,
+          args: step.arguments,
+          output: outputs.get(step.step_id) ?? '',
+          agent_key: 'vex',
+        });
+      } catch (error) {
+        this.logger.warn(
+          `Batch receipt failed (${row.id}/${step.step_id}): ${(error as Error)?.message}`,
+        );
+      }
+    }
+    // Metering (N4): the batch counts as ONE turn of the `vex_agent` cap,
+    // deduplicated by batch id; there is no per-action quota.
+    if (summary.applied > 0) {
+      const storeId = RequestContextService.getContext()?.store_id;
+      if (storeId) {
+        try {
+          await this.access.consumeAIQuota(
+            storeId,
+            'vex_agent',
+            1,
+            writeBatchQuotaRequestId(row.id),
+          );
+        } catch (error) {
+          this.logger.warn(
+            `Batch metering failed (${row.id}): ${(error as Error)?.message}`,
+          );
+        }
+      }
+    }
     try {
       await this.activity.recordAppliedNarration({
         conversationId: row.conversation_id ?? undefined,

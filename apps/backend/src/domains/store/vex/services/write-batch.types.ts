@@ -33,6 +33,12 @@ export const WRITE_BATCH_MAX_STEPS = 25;
 export const WRITE_BATCH_MAX_RECORDS = 500;
 /** A proposed batch not approved within this window expires. */
 export const WRITE_BATCH_TTL_MS = 30 * 60 * 1000;
+/**
+ * An `executing` batch whose run started longer ago than this is treated as
+ * interrupted (process restart mid-run): on read, its `running` step becomes
+ * `unknown`, the rest `skipped`, and the batch `unknown_effect`.
+ */
+export const WRITE_BATCH_STALE_EXECUTING_MS = 10 * 60 * 1000;
 /** "Deshacer" is offered for this long after the batch finished. */
 export const WRITE_BATCH_UNDO_WINDOW_MS = 30 * 60 * 1000;
 
@@ -137,6 +143,11 @@ export interface WriteBatchStepRecord {
   error?: string;
   /** Opaque state `compensate.capture` returned before the step ran. */
   compensation_snapshot?: unknown;
+  /**
+   * Raw handler output of an applied compensable step (truncated), handed to
+   * `compensate.undo` as `handlerOutput`. Server-only: never in the view.
+   */
+  compensation_output?: string;
   started_at?: string;
   finished_at?: string;
   compensated_at?: string;
@@ -174,7 +185,10 @@ export interface WriteBatchView {
   steps: Array<
     Omit<
       WriteBatchStepRecord,
-      'compensation_snapshot' | 'args_hash' | 'preview_hash'
+      | 'compensation_snapshot'
+      | 'compensation_output'
+      | 'args_hash'
+      | 'preview_hash'
     > & { can_undo: boolean }
   >;
   summary: WriteBatchSummary | null;
@@ -185,6 +199,9 @@ export interface WriteBatchView {
   undo_until: string | null;
   created_at: string;
 }
+
+/** Max chars of the handler output kept for `compensate.undo`. */
+export const WRITE_BATCH_COMPENSATION_OUTPUT_MAX = 8000;
 
 /** Operation id of one batch step in `ai_agent_effects` (idempotency key). */
 export function writeBatchOperationId(batchId: string, stepId: string): string {

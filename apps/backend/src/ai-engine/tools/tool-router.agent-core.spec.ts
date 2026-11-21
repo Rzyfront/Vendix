@@ -31,6 +31,8 @@ import { createSalesTools } from './domains/sales.tools';
 import { createTaskTools } from './domains/tasks.tools';
 import { uiTools } from './domains/ui.tools';
 import { createVexBlockTools } from './domains/vex-blocks.tools';
+import { createWriteBatchTools } from './domains/write-batch.tools';
+import { createComputeTools } from './domains/compute.tools';
 import {
   createCustomerWriteTools,
   createInventoryWriteTools,
@@ -60,6 +62,9 @@ function realRegistry(): AIToolRegistry {
   registry.registerMany(createTaskTools(deps));
   registry.registerMany(createReportTools(deps));
   registry.registerMany(createVexBlockTools(deps));
+  // VexModule registers these next to the block tools (F7/T48, F5/T34).
+  registry.registerMany(createComputeTools());
+  registry.registerMany(createWriteBatchTools(deps));
   registry.registerMany(createFollowupTools(deps));
   for (const factory of [
     createAccountingTools,
