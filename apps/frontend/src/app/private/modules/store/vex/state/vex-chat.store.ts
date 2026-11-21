@@ -13,7 +13,7 @@ import {
   inject,
   signal,
 } from '@angular/core';
-import { Subscription, firstValueFrom } from 'rxjs';
+import { Observable, Subscription, firstValueFrom } from 'rxjs';
 import {
   VexiApiService,
   VexiObjective,
@@ -39,6 +39,8 @@ import {
 import {
   VexBlockInteraction,
   VexConversation,
+  VexFollowup,
+  VexFollowupEdits,
   VexMessage,
   VexPlanProposal,
   VexPlanStatus,
@@ -274,6 +276,18 @@ function adaptPersistedPlan(raw: unknown): VexPlanProposal | null {
   return { plan_id: raw['plan_id'], title, steps, status };
 }
 
+/** Persisted `metadata.followups` → cards; anything malformed is dropped. */
+function adaptPersistedFollowups(raw: unknown): VexFollowup[] {
+  if (!Array.isArray(raw)) return [];
+  return raw.filter(
+    (item): item is VexFollowup =>
+      !!item &&
+      typeof item === 'object' &&
+      typeof (item as VexFollowup).id === 'string' &&
+      typeof (item as VexFollowup).title === 'string',
+  );
+}
+
 function adaptMessage(row: VexBackendMessage): {
   message: VexMessage;
   refs: VexBlockRef[];
@@ -282,6 +296,7 @@ function adaptMessage(row: VexBackendMessage): {
   const meta = (row.metadata ?? {}) as Record<string, unknown>;
   const { hydrated, refs } = splitPersistedBlocks(meta['blocks']);
   const plan = adaptPersistedPlan(meta['plan']);
+  const followups = adaptPersistedFollowups(meta['followups']);
   return {
     message: {
       id: `m-${row.id}`,
@@ -290,6 +305,7 @@ function adaptMessage(row: VexBackendMessage): {
       created_at: new Date(row.created_at),
       blocks: hydrated.length > 0 ? hydrated : undefined,
       plan,
+      followups: followups.length > 0 ? followups : undefined,
     },
     refs,
   };
@@ -334,6 +350,9 @@ function argsEqual(
   }
 }
 
+/** Read-only tool behind the follow-up card; never listed as a work step. */
+const FOLLOWUP_TOOL = 'suggest_followup';
+
 function adaptConversation(
   row: VexBackendConversation,
   messages: VexMessage[] = [],
@@ -345,6 +364,7 @@ function adaptConversation(
     created_at: new Date(row.created_at),
     updated_at: new Date(row.updated_at),
     status: row.status,
+    followups_muted: row.metadata?.['followups_muted'] === true,
   };
 }
 
@@ -360,6 +380,7 @@ export class VexChatStore {
   private stream_sub?: Subscription;
   private stream_generation = 0;
   private readonly _stream_progress = signal('');
+  private readonly _busy_followup_ids = signal<ReadonlySet<string>>(new Set());
   readonly stream_progress = this._stream_progress.asReadonly();
   private readonly loaded_ids = new Set<string>();
   /**
@@ -2084,6 +2105,7 @@ export class VexChatStore {
       objective?: VexiObjective;
       conversation_id?: number;
       title?: string;
+      followup?: VexFollowup;
     },
   ): void {
     if (chunk.objective?.conversation_id === Number(conversation_id)) {
@@ -2114,6 +2136,8 @@ export class VexChatStore {
       }
       case 'tool_call': {
         if (!chunk.tool) return;
+        // The suggestion shows as its own card, never as a work step.
+        if (chunk.tool.name === FOLLOWUP_TOOL) return;
         const step = {
           id: chunk.tool.id,
           name: chunk.tool.name,
@@ -2145,6 +2169,7 @@ export class VexChatStore {
       }
       case 'tool_result': {
         if (!chunk.tool) return;
+        if (chunk.tool.name === FOLLOWUP_TOOL) return;
         const tool = chunk.tool;
         this._conversations.update((list) =>
           list.map((conversation) =>
@@ -2202,6 +2227,17 @@ export class VexChatStore {
       case 'plan_approval': {
         if (!chunk.plan) return;
         this.mergeProposal(conversation_id, message_id, chunk.plan);
+        return;
+      }
+      case 'followup_suggestion': {
+        const followup = chunk.followup;
+        if (!followup?.id) return;
+        const current =
+          this.findMessage(conversation_id, message_id)?.followups ?? [];
+        if (current.some((item) => item.id === followup.id)) return;
+        this.patchMessage(conversation_id, message_id, {
+          followups: [...current, followup],
+        });
         return;
       }
       case 'conversation_title': {
@@ -2327,6 +2363,100 @@ export class VexChatStore {
       message_id,
       extractApiErrorMessage(error),
     );
+  }
+
+  private findMessage(
+    conversation_id: string,
+    message_id: string,
+  ): VexMessage | undefined {
+    return this._conversations()
+      .find((c) => c.id === conversation_id)
+      ?.messages.find((m) => m.id === message_id);
+  }
+
+  /** Follow-up ids with a request in flight (their card shows it). */
+  readonly busy_followup_ids = this._busy_followup_ids.asReadonly();
+
+  /** The person asked Vex not to suggest follow-ups in the open chat. */
+  readonly followups_muted = computed(
+    () => this.active_conversation()?.followups_muted === true,
+  );
+
+  /**
+   * «Guardar» on a follow-up card: the approval. Creates the reminder
+   * server-side; the bitácora panel re-reads itself when the card settles.
+   */
+  async saveFollowup(
+    message_id: string,
+    followup_id: string,
+    edits: VexFollowupEdits = {},
+  ): Promise<boolean> {
+    return this.settleFollowup(message_id, followup_id, (conversation) =>
+      this.api.saveFollowup(conversation, followup_id, edits),
+    );
+  }
+
+  /** «No» on a follow-up card: it closes and is not suggested again. */
+  async dismissFollowup(message_id: string, followup_id: string): Promise<boolean> {
+    return this.settleFollowup(message_id, followup_id, (conversation) =>
+      this.api.dismissFollowup(conversation, followup_id),
+    );
+  }
+
+  /** «No sugerir en este chat» and its undo. */
+  async muteFollowups(muted: boolean): Promise<boolean> {
+    const conversation_id = this._active_id();
+    const numeric = this.activeNumericId();
+    if (!conversation_id || numeric === null) return false;
+    try {
+      const value = await firstValueFrom(this.api.muteFollowups(numeric, muted));
+      this._conversations.update((list) =>
+        list.map((c) =>
+          c.id === conversation_id ? { ...c, followups_muted: value } : c,
+        ),
+      );
+      return true;
+    } catch (err) {
+      this.toast.error(parseApiError(err).userMessage);
+      return false;
+    }
+  }
+
+  private async settleFollowup(
+    message_id: string,
+    followup_id: string,
+    request: (conversation: number) => Observable<VexFollowup>,
+  ): Promise<boolean> {
+    const conversation_id = this._active_id();
+    const numeric = this.activeNumericId();
+    if (!conversation_id || numeric === null) return false;
+    if (this._busy_followup_ids().has(followup_id)) return false;
+    this.setFollowupBusy(followup_id, true);
+    try {
+      const settled = await firstValueFrom(request(numeric));
+      const current =
+        this.findMessage(conversation_id, message_id)?.followups ?? [];
+      this.patchMessage(conversation_id, message_id, {
+        followups: current.map((item) =>
+          item.id === followup_id ? { ...item, ...settled } : item,
+        ),
+      });
+      return true;
+    } catch (err) {
+      this.toast.error(parseApiError(err).userMessage);
+      return false;
+    } finally {
+      this.setFollowupBusy(followup_id, false);
+    }
+  }
+
+  private setFollowupBusy(id: string, on: boolean): void {
+    this._busy_followup_ids.update((current) => {
+      const next = new Set(current);
+      if (on) next.add(id);
+      else next.delete(id);
+      return next;
+    });
   }
 
   private patchMessage(

@@ -221,3 +221,24 @@ export function storeToday(tz: string): string {
   const p = getStoreCivilParts(new Date(), tz);
   return `${p.year}-${pad2(p.month)}-${pad2(p.day)}`;
 }
+
+/** Store-local wall clock `YYYY-MM-DDTHH:mm` of a UTC instant (for datetime-local inputs). */
+export function toStoreWallClock(iso: string, tz: string): string {
+  const date = new Date(iso);
+  if (Number.isNaN(date.getTime())) return '';
+  const map: Record<string, string> = {};
+  const parts = new Intl.DateTimeFormat('en-US', {
+    timeZone: tz,
+    hourCycle: 'h23',
+    year: 'numeric',
+    month: '2-digit',
+    day: '2-digit',
+    hour: '2-digit',
+    minute: '2-digit',
+  }).formatToParts(date);
+  for (const part of parts) {
+    if (part.type !== 'literal') map[part.type] = part.value;
+  }
+  const hour = map['hour'] === '24' ? '00' : map['hour'];
+  return `${map['year']}-${map['month']}-${map['day']}T${hour}:${map['minute']}`;
+}

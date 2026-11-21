@@ -181,6 +181,34 @@ export interface VexToolStep {
   status: 'running' | 'done' | 'failed' | 'waiting' | 'unknown';
 }
 
+export type VexFollowupKind = 'reminder' | 'log_entry';
+export type VexFollowupStatus = 'suggested' | 'saved' | 'dismissed';
+
+/**
+ * A follow-up Vex suggested on its own (never written until the person saves
+ * it). Persisted server-side in the message metadata, so it survives a reload.
+ */
+export interface VexFollowup {
+  id: string;
+  kind: VexFollowupKind;
+  title: string;
+  note?: string | null;
+  /** ISO instant (UTC); `null` for a dateless log entry. */
+  remind_at?: string | null;
+  link_label?: string | null;
+  source_phrase?: string | null;
+  status: VexFollowupStatus;
+  reminder_id?: number | null;
+}
+
+/** What the person changed on the card before saving. */
+export interface VexFollowupEdits {
+  title?: string;
+  note?: string | null;
+  /** Store-local wall clock `YYYY-MM-DDTHH:mm`, or `null` for no date. */
+  remind_at?: string | null;
+}
+
 export interface VexMessage {
   id: string;
   role: VexMessageRole;
@@ -204,6 +232,8 @@ export interface VexMessage {
   attachment_ids?: string[];
   /** The answer was cut: offer «Reintentar» (resends the last user message). */
   can_retry?: boolean;
+  /** Follow-ups Vex suggested in this turn (at most one per turn). */
+  followups?: VexFollowup[];
 }
 
 export interface VexConversation {
@@ -213,6 +243,8 @@ export interface VexConversation {
   created_at: Date;
   updated_at: Date;
   status?: string;
+  /** «No sugerir en este chat»: Vex stops suggesting follow-ups here. */
+  followups_muted?: boolean;
   /** Not created on the server yet (its first message could not be sent). Hidden from the list. */
   local?: boolean;
 }

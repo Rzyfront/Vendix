@@ -92,10 +92,15 @@ export function vexActivityFingerprint(
   busy_plan_id: string | null,
 ): string {
   let settled = 0;
+  let saved = 0;
   for (const conversation of conversations) {
     for (const message of conversation.messages) {
       if (message.role === 'agent' && !message.streaming) settled++;
+      // A follow-up card the person just saved created a reminder.
+      for (const followup of message.followups ?? []) {
+        if (followup.status === 'saved') saved++;
+      }
     }
   }
-  return `${settled}|${busy_plan_id ?? ''}`;
+  return `${settled}|${busy_plan_id ?? ''}|${saved}`;
 }

@@ -1,12 +1,14 @@
 import {
   Component,
   ElementRef,
+  computed,
   afterNextRender,
   effect,
   inject,
   Injector,
   viewChild,
 } from '@angular/core';
+import { ButtonComponent } from '../../../../../../shared/components/button/button.component';
 import { IconComponent } from '../../../../../../shared/components/icon/icon.component';
 import { VexChatStore } from '../../state/vex-chat.store';
 import { VexPresenceStore } from '../../state/vex-presence.store';
@@ -21,11 +23,14 @@ import { VexBlockImageComponent } from '../vex-blocks/vex-block-image.component'
 import { VexBlockFileComponent } from '../vex-blocks/vex-block-file.component';
 import { VexToolTraceComponent } from '../vex-tool-trace/vex-tool-trace.component';
 import { VexPlanCardComponent } from '../vex-plan-card/vex-plan-card.component';
+import { VexFollowupChipComponent } from '../vex-followup-chip/vex-followup-chip.component';
+import { StoreSettingsFacade } from '../../../../../../core/store/store-settings/store-settings.facade';
 
 @Component({
   selector: 'vendix-vex-thread',
   standalone: true,
   imports: [
+    ButtonComponent,
     IconComponent,
     VexMarkdownComponent,
     VexBlockTableComponent,
@@ -35,6 +40,7 @@ import { VexPlanCardComponent } from '../vex-plan-card/vex-plan-card.component';
     VexBlockFileComponent,
     VexToolTraceComponent,
     VexPlanCardComponent,
+    VexFollowupChipComponent,
   ],
   template: `
     <div #scroller class="h-full overflow-y-auto" role="log" aria-live="polite">
@@ -165,6 +171,18 @@ import { VexPlanCardComponent } from '../vex-plan-card/vex-plan-card.component';
                     "
                   />
                 }
+                @if (!store.followups_muted()) {
+                  @for (followup of message.followups ?? []; track followup.id) {
+                    <vendix-vex-followup-chip
+                      [followup]="followup"
+                      [timezone]="timezone()"
+                      [busy]="store.busy_followup_ids().has(followup.id)"
+                      (save)="store.saveFollowup(message.id, followup.id, $event)"
+                      (dismiss)="store.dismissFollowup(message.id, followup.id)"
+                      (mute)="store.muteFollowups(true)"
+                    />
+                  }
+                }
                 @if (message.error) {
                   <p
                     class="rounded-xl border border-[var(--color-error)] bg-[rgba(var(--color-error-rgb),0.07)] px-3 py-2 text-sm text-[var(--color-error)]"
@@ -234,6 +252,16 @@ import { VexPlanCardComponent } from '../vex-plan-card/vex-plan-card.component';
             </div>
           }
         }
+        @if (store.followups_muted()) {
+          <div
+            class="flex flex-wrap items-center justify-center gap-2 text-xs text-text-secondary"
+          >
+            <span>{{ followupCopy.muted_notice }}</span>
+            <app-button variant="ghost" size="xsm" (clicked)="store.muteFollowups(false)">
+              {{ followupCopy.unmute }}
+            </app-button>
+          </div>
+        }
         @if (store.stream_progress()) {
           <p
             role="status"
@@ -262,7 +290,11 @@ import { VexPlanCardComponent } from '../vex-plan-card/vex-plan-card.component';
 export class VexThreadComponent {
   readonly store = inject(VexChatStore);
   protected readonly presence = inject(VexPresenceStore);
+  private readonly settings = inject(StoreSettingsFacade);
+  /** Zone follow-up dates are shown and edited in. */
+  protected readonly timezone = computed(() => this.settings.timezone());
   protected readonly copy = VEX_COPY.presence;
+  protected readonly followupCopy = VEX_COPY.followup;
   protected readonly restartLabel = VEXI_RESTART_LABEL;
   private readonly injector = inject(Injector);
   private readonly scroller = viewChild<ElementRef<HTMLElement>>('scroller');

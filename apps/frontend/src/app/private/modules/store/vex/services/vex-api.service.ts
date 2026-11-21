@@ -11,6 +11,8 @@ import type { VexiToolExecution } from '../../../../../core/services/vexi-api.se
 import { environment } from '../../../../../../environments/environment';
 import {
   VexBlockInteraction,
+  VexFollowup,
+  VexFollowupEdits,
   VexPlanProposal,
   VexPlanStep,
   VexUiBlock,
@@ -210,7 +212,8 @@ export interface VexStreamChunk {
     | 'error'
     | 'audio'
     | 'timing'
-    | 'conversation_title';
+    | 'conversation_title'
+    | 'followup_suggestion';
   audio_base64?: string;
   content_type?: string;
   index?: number;
@@ -239,6 +242,8 @@ export interface VexStreamChunk {
   /** `conversation_title` frame: the generated title, sent just before `done` of the first turn. */
   conversation_id?: number;
   title?: string;
+  /** `followup_suggestion` frame: the card of this turn, sent just before `done`. */
+  followup?: VexFollowup;
 }
 
 export interface VexAttachment {
@@ -385,6 +390,48 @@ export class VexApiService {
         data?: VexBackendConversation;
       }>(`${this.chatBase}/conversations/${id}/title`, { title })
       .pipe(map((res) => res?.data ?? null));
+  }
+
+  /** Saves a suggested follow-up: creates the reminder in the bitácora. */
+  saveFollowup(
+    conversationId: number,
+    followupId: string,
+    edits: VexFollowupEdits = {},
+  ): Observable<VexFollowup> {
+    return this.http
+      .post<{
+        data: { followup: VexFollowup };
+      }>(
+        `${this.chatBase}/conversations/${conversationId}/followups/${followupId}/save`,
+        edits,
+      )
+      .pipe(map((res) => res.data.followup));
+  }
+
+  /** Discards a suggested follow-up; it is never suggested again. */
+  dismissFollowup(
+    conversationId: number,
+    followupId: string,
+  ): Observable<VexFollowup> {
+    return this.http
+      .post<{
+        data: { followup: VexFollowup };
+      }>(
+        `${this.chatBase}/conversations/${conversationId}/followups/${followupId}/dismiss`,
+        {},
+      )
+      .pipe(map((res) => res.data.followup));
+  }
+
+  /** «No sugerir en este chat» (and its undo). */
+  muteFollowups(conversationId: number, muted: boolean): Observable<boolean> {
+    return this.http
+      .patch<{
+        data: { followups_muted: boolean };
+      }>(`${this.chatBase}/conversations/${conversationId}/followups/mute`, {
+        muted,
+      })
+      .pipe(map((res) => res.data.followups_muted));
   }
 
   /**
