@@ -7,9 +7,8 @@ import { EmbeddingService } from './embedding.service';
 import { RAGService } from './rag.service';
 import { EmbeddingEventsListener } from './embedding-events.listener';
 import { EmbeddingBackfillService } from './embedding-backfill.service';
-import { GlobalPrismaService } from '../../prisma/services/global-prisma.service';
 import { AIToolRegistry } from '../tools/ai-tool-registry';
-import { createHelpTools, HelpToolsPrisma } from '../tools/domains/help.tools';
+import { createHelpTools } from '../tools/domains/help.tools';
 import { HelpKnowledgeIndexerService } from './help-knowledge-indexer.service';
 import { AIEmbeddingProcessor } from '../queue/processors/ai-embedding.processor';
 
@@ -30,17 +29,13 @@ import { AIEmbeddingProcessor } from '../queue/processors/ai-embedding.processor
 export class EmbeddingModule implements OnModuleInit {
   constructor(
     private readonly toolRegistry: AIToolRegistry,
-    private readonly prisma: GlobalPrismaService,
     private readonly helpIndexer: HelpKnowledgeIndexerService,
   ) {}
 
   /** T28: Vex help tools (search_help, get_help_article, get_learning_path, mark_learning_progress). */
   onModuleInit(): void {
     this.toolRegistry.registerMany(
-      createHelpTools({
-        prisma: this.prisma as unknown as HelpToolsPrisma,
-        indexer: this.helpIndexer,
-      }),
+      createHelpTools({ knowledge: this.helpIndexer }),
     );
   }
 }

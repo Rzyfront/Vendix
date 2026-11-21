@@ -196,16 +196,128 @@ interface RawHit {
   similarity?: number | null;
 }
 
-/** Minimal structural view of the F4 delegates the generated client may not type yet. */
+/**
+ * Minimal structural view of the F4 delegates the generated client may not type
+ * yet. The agent reads also go through it: `help_articles.video_id` is F4 too.
+ */
 interface F4Delegates {
+  help_articles: {
+    findFirst(args: unknown): Promise<AgentHelpArticle | null>;
+    findMany<T>(args: unknown): Promise<T[]>;
+  };
+  videos: {
+    findFirst<T>(args: unknown): Promise<T | null>;
+    findMany(args: unknown): Promise<AgentHelpVideo[]>;
+  };
   video_series: {
     findUnique(args: unknown): Promise<SeriesRow | null>;
-    findMany(args: unknown): Promise<Array<{ id: number }>>;
+    findFirst(args: unknown): Promise<AgentLearningPath | null>;
+    findMany<T = { id: number }>(args: unknown): Promise<T[]>;
   };
   video_series_items: {
     findMany(args: unknown): Promise<Array<{ series_id: number }>>;
   };
+  user_learning_progress: {
+    findMany(args: unknown): Promise<AgentLearningProgress[]>;
+    upsert(args: unknown): Promise<AgentLearningProgress>;
+  };
 }
+
+// ── Agent-facing rows (Vex help tools, T28) ─────────────────────────────
+
+/** An article or learning path addressed by id, or by slug when there is no id. */
+export interface AgentHelpRef {
+  id?: number | null;
+  slug?: string | null;
+}
+
+export interface AgentHelpArticleRef {
+  id: number;
+  title: string;
+  slug: string;
+  summary: string;
+}
+
+export interface AgentHelpArticleHit extends AgentHelpArticleRef {
+  video_id: number | null;
+}
+
+export interface AgentHelpArticle extends AgentHelpArticleHit {
+  content: string;
+  type: string;
+  module: string | null;
+  cover_image_url: string | null;
+}
+
+export interface AgentHelpVideo {
+  id: number;
+  title: string;
+  slug: string;
+  summary: string;
+  video_url: string;
+  video_source: string;
+  external_id: string | null;
+  duration_seconds: number;
+  thumbnail_url: string | null;
+}
+
+export interface AgentLearningPathSummary {
+  id: number;
+  title: string;
+  slug: string;
+  summary: string | null;
+  module?: string | null;
+}
+
+export interface AgentLearningPath {
+  id: number;
+  title: string;
+  slug: string;
+  summary: string | null;
+  items: Array<{ video_id: number; article_id: number | null; position: number }>;
+}
+
+export interface AgentLearningProgress {
+  video_id: number;
+  series_id: number | null;
+  seconds_watched: number;
+  completed: boolean;
+}
+
+/** Fields left undefined keep their stored value on update. */
+export interface AgentLearningProgressInput {
+  video_id: number;
+  series_id?: number | null;
+  seconds_watched?: number;
+  completed?: boolean;
+}
+
+/** Columns the agent may see of a video: enough to play it, nothing editorial. */
+const AGENT_VIDEO_SELECT = {
+  id: true,
+  title: true,
+  slug: true,
+  summary: true,
+  video_url: true,
+  video_source: true,
+  external_id: true,
+  duration_seconds: true,
+  thumbnail_url: true,
+} as const;
+
+const AGENT_ARTICLE_REF_SELECT = {
+  id: true,
+  title: true,
+  slug: true,
+  summary: true,
+} as const;
+
+function agentWhere(ref: AgentHelpRef): { id: number } | { slug: string } | null {
+  if (ref.id) return { id: ref.id };
+  const slug = ref.slug?.trim();
+  return slug ? { slug } : null;
+}
+
 interface SeriesRow {
   id: number;
   title: string;
@@ -620,6 +732,162 @@ export class HelpKnowledgeIndexerService implements OnApplicationBootstrap {
         ...hit,
         score: Math.round(Math.min(1, raw / max) * 100) / 100,
       }));
+  }
+
+  // ── Agent reads (Vex help tools, T28) ─────────────────────────────────
+  // The help tools never query the database themselves
+  // (scripts/check-tools-no-prisma.sh): every row they hand to the model comes
+  // from these methods, PUBLISHED only, and learning progress is always the
+  // caller's own (the user id the tool takes from its execution context).
+
+  /** Published rows behind search hits: a stale or unpublished index entry resolves to nothing. */
+  async resolvePublishedHitsForAgent(ids: {
+    articles: number[];
+    videos: number[];
+    paths: number[];
+  }): Promise<{
+    articles: AgentHelpArticleHit[];
+    videos: AgentHelpVideo[];
+    paths: AgentLearningPathSummary[];
+  }> {
+    const [articles, videos, paths] = await Promise.all([
+      ids.articles.length
+        ? this.f4.help_articles.findMany<AgentHelpArticleHit>({
+            where: { id: { in: ids.articles }, status: 'PUBLISHED' },
+            select: { ...AGENT_ARTICLE_REF_SELECT, video_id: true },
+          })
+        : [],
+      ids.videos.length
+        ? this.f4.videos.findMany({
+            where: { id: { in: ids.videos }, status: 'PUBLISHED' },
+            select: AGENT_VIDEO_SELECT,
+          })
+        : [],
+      ids.paths.length
+        ? this.f4.video_series.findMany<AgentLearningPathSummary>({
+            where: { id: { in: ids.paths }, status: 'PUBLISHED' },
+            select: { id: true, title: true, slug: true, summary: true },
+          })
+        : [],
+    ]);
+    return { articles, videos, paths };
+  }
+
+  /** One PUBLISHED article (by id or slug) and its linked video when that video is published too. */
+  async findPublishedArticleForAgent(
+    ref: AgentHelpRef,
+  ): Promise<{ article: AgentHelpArticle; video: AgentHelpVideo | null } | null> {
+    const by = agentWhere(ref);
+    if (!by) return null;
+    const article = await this.f4.help_articles.findFirst({
+      where: { status: 'PUBLISHED', ...by },
+    });
+    if (!article) return null;
+    const video = article.video_id
+      ? await this.f4.videos.findFirst<AgentHelpVideo>({
+          where: { id: article.video_id, status: 'PUBLISHED' },
+          select: AGENT_VIDEO_SELECT,
+        })
+      : null;
+    return { article, video };
+  }
+
+  /** Up to 20 PUBLISHED learning paths, in catalog order. */
+  listPublishedLearningPathsForAgent(): Promise<AgentLearningPathSummary[]> {
+    return this.f4.video_series.findMany<AgentLearningPathSummary>({
+      where: { status: 'PUBLISHED' },
+      orderBy: [{ sort_order: 'asc' }, { title: 'asc' }],
+      select: { id: true, title: true, slug: true, summary: true, module: true },
+      take: 20,
+    });
+  }
+
+  /**
+   * A PUBLISHED learning path with its items in order, the PUBLISHED videos and
+   * articles they point to, and `userId`'s own progress on those videos (none
+   * without a user).
+   */
+  async findPublishedLearningPathForAgent(
+    ref: AgentHelpRef,
+    userId: number | null,
+  ): Promise<{
+    series: AgentLearningPath;
+    videos: AgentHelpVideo[];
+    articles: AgentHelpArticleRef[];
+    progress: AgentLearningProgress[];
+  } | null> {
+    const by = agentWhere(ref);
+    if (!by) return null;
+    const series = await this.f4.video_series.findFirst({
+      where: { status: 'PUBLISHED', ...by },
+      include: { items: { orderBy: { position: 'asc' } } },
+    });
+    if (!series) return null;
+    const videoIds = series.items.map((i) => i.video_id);
+    const articleIds = series.items
+      .map((i) => i.article_id)
+      .filter((v): v is number => !!v);
+    const [videos, articles, progress] = await Promise.all([
+      videoIds.length
+        ? this.f4.videos.findMany({
+            where: { id: { in: videoIds }, status: 'PUBLISHED' },
+            select: AGENT_VIDEO_SELECT,
+          })
+        : [],
+      articleIds.length
+        ? this.f4.help_articles.findMany<AgentHelpArticleRef>({
+            where: { id: { in: articleIds }, status: 'PUBLISHED' },
+            select: AGENT_ARTICLE_REF_SELECT,
+          })
+        : [],
+      userId && videoIds.length
+        ? this.f4.user_learning_progress.findMany({
+            where: { user_id: userId, video_id: { in: videoIds } },
+          })
+        : [],
+    ]);
+    return { series, videos, articles, progress };
+  }
+
+  /**
+   * Saves `userId`'s own progress on a PUBLISHED video (one row per user and
+   * video). On update only the given fields change. `null` when the video is
+   * not published, and then nothing is written.
+   */
+  async saveLearningProgressForAgent(
+    userId: number,
+    input: AgentLearningProgressInput,
+  ): Promise<{
+    video: { id: number; title: string };
+    progress: AgentLearningProgress;
+  } | null> {
+    const video = await this.f4.videos.findFirst<{ id: number; title: string }>({
+      where: { id: input.video_id, status: 'PUBLISHED' },
+      select: { id: true, title: true },
+    });
+    if (!video) return null;
+    const { series_id, seconds_watched, completed } = input;
+    const now = new Date();
+    const progress = await this.f4.user_learning_progress.upsert({
+      where: { user_id_video_id: { user_id: userId, video_id: input.video_id } },
+      create: {
+        user_id: userId,
+        video_id: input.video_id,
+        series_id: series_id ?? null,
+        seconds_watched: seconds_watched ?? 0,
+        completed: completed ?? false,
+        completed_at: completed ? now : null,
+      },
+      update: {
+        ...(series_id ? { series_id } : {}),
+        ...(seconds_watched !== undefined ? { seconds_watched } : {}),
+        ...(completed !== undefined
+          ? { completed, completed_at: completed ? now : null }
+          : {}),
+        updated_at: now,
+      },
+    });
+    return { video, progress };
   }
 }
 
