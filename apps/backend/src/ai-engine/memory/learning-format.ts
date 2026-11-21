@@ -28,7 +28,7 @@ const ALIASES: Readonly<Record<string, LearningFormat>> = {
   posts: 'post',
   'paso a paso': 'post',
   articulo: 'post',
-  'artículo': 'post',
+  artículo: 'post',
 };
 
 /** Canonical value for a stored or typed text, or null when it is not a format. */

@@ -8,13 +8,18 @@ import { AiAgentMemoryController } from './ai-agent-memory.controller';
 
 function httpContext(storeId: number): ExecutionContext {
   return {
-    switchToHttp: () => ({ getRequest: () => ({ user: { store_id: storeId } }) }),
+    switchToHttp: () => ({
+      getRequest: () => ({ user: { store_id: storeId } }),
+    }),
   } as unknown as ExecutionContext;
 }
 
 describe('AiAgentMemoryController guards (H5)', () => {
   it('shares the Vex gate: owner/admin roles and the store Vex switch', () => {
-    const guards = Reflect.getMetadata(GUARDS_METADATA, AiAgentMemoryController);
+    const guards = Reflect.getMetadata(
+      GUARDS_METADATA,
+      AiAgentMemoryController,
+    );
     expect(guards).toEqual([RolesGuard, VexEnabledGuard]);
     expect(Reflect.getMetadata(ROLES_KEY, AiAgentMemoryController)).toEqual([
       UserRole.OWNER,
