@@ -195,7 +195,7 @@ function buildOption(
   rows: Array<Record<string, unknown>>,
   palette: string[],
 ): EChartsOption {
-  const series_defs =
+  const series_defs: NonNullable<VexChartSpec['series']> =
     spec.series?.length
       ? spec.series
       : inferSeries(rows, spec.x_axis_key);
