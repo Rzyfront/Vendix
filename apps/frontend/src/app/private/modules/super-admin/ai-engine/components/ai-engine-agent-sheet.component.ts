@@ -237,7 +237,7 @@ import { AiToolPickerComponent } from './ai-tool-picker/ai-tool-picker.component
                 type="number"
                 [control]="maxIterationsControl"
                 [disabled]="saving()"
-                helpText="Entre 1 y 50. Vacío = valor por defecto"
+                helpText="Entre 1 y 60. Vacío = valor por defecto"
               ></app-input>
               <app-input
                 formControlName="timeout_seconds"
@@ -313,7 +313,7 @@ export class AIEngineAgentSheetComponent {
     denied_tools: [[] as string[], [Validators.maxLength(500)]],
     max_iterations: [
       null as number | null,
-      [Validators.min(1), Validators.max(50)],
+      [Validators.min(1), Validators.max(60)],
     ],
     timeout_seconds: [
       null as number | null,

@@ -60,7 +60,7 @@ export class UpdateAgentRuntimeDto {
   @IsOptional()
   @IsInt()
   @Min(1)
-  @Max(50)
+  @Max(60)
   max_iterations?: number | null;
 
   @IsOptional()
