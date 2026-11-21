@@ -4,7 +4,9 @@ import {
   computed,
   inject,
   input,
+  signal,
 } from '@angular/core';
+import { DocumentViewerComponent, documentViewerKind } from '../../../../../../shared/components/record-documents/document-viewer.component';
 import { IconComponent } from '../../../../../../shared/components/icon/icon.component';
 import { CurrencyFormatService } from '../../../../../../shared/pipes/currency/currency.pipe';
 import { StoreSettingsFacade } from '../../../../../../core/store/store-settings/store-settings.facade';
@@ -21,7 +23,7 @@ import { VexFileSpec, VexUiBlock } from '../../models/vex.models';
 @Component({
   selector: 'vendix-vex-block-file',
   standalone: true,
-  imports: [IconComponent],
+  imports: [IconComponent, DocumentViewerComponent],
   changeDetection: ChangeDetectionStrategy.OnPush,
   template: `
     <section
@@ -42,6 +44,17 @@ import { VexFileSpec, VexUiBlock } from '../../models/vex.models';
           <p class="text-xs text-text-secondary">{{ meta_line() }}</p>
         }
       </div>
+      @if (url() && viewable()) {
+        <button
+          type="button"
+          class="shrink-0 min-h-10 inline-flex items-center gap-2 px-4 rounded-xl border border-border text-sm font-medium text-text-primary hover:bg-surface"
+          [attr.aria-label]="copy.view + ' ' + filename()"
+          (click)="viewer_open.set(true)"
+        >
+          <app-icon name="eye" [size]="16"></app-icon>
+          {{ copy.view }}
+        </button>
+      }
       @if (url()) {
         <a
           [href]="url()"
@@ -59,6 +72,12 @@ import { VexFileSpec, VexUiBlock } from '../../models/vex.models';
         </span>
       }
     </section>
+    <app-document-viewer
+      [(isOpen)]="viewer_open"
+      [url]="url()"
+      [mimeType]="mime()"
+      [name]="filename()"
+    />
   `,
 })
 export class VexBlockFileComponent {
@@ -99,6 +118,17 @@ export class VexBlockFileComponent {
     if (typeof size === 'number' && size > 0) parts.push(formatBytes(size, this.number_locale()));
     return parts.join(' · ');
   });
+
+  readonly viewer_open = signal(false);
+
+  readonly mime = computed(() => {
+    const mime = this.spec().mime_type ?? this.block().data['mime_type'];
+    return typeof mime === 'string' ? mime : null;
+  });
+
+  readonly viewable = computed(
+    () => documentViewerKind(this.mime(), this.filename()) !== 'other',
+  );
 
   readonly icon = computed(() => {
     const mime = String(

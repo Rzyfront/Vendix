@@ -576,6 +576,29 @@ export class VexController {
     return this.responseService.created(stored, 'Documento recibido');
   }
 
+  /**
+   * Short-lived signed read URL of a staged attachment, so the chat can open an
+   * image or PDF inline. Tenant-scoped through the attachments service: a
+   * handle from another store resolves to nothing.
+   */
+  @Get('attachments/:handle/url')
+  @UseGuards(AiAccessGuard)
+  @RequireAIFeature('vex_agent' as AIFeatureKey)
+  async attachmentUrl(@Param('handle') handle: string) {
+    const [meta] = await this.attachments.describeMany([handle]);
+    if (!meta) {
+      throw new VendixHttpException(
+        ErrorCodes.AI_AGENT_003,
+        'El documento adjunto no existe o ya no está disponible.',
+      );
+    }
+    const url = await this.attachments.signedUrl(handle, 300);
+    return this.responseService.success(
+      { url, mime_type: meta.mime_type, original_name: meta.original_name },
+      'Documento adjunto',
+    );
+  }
+
   // ── internals ─────────────────────────────────────────────────────────
 
   /**

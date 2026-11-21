@@ -1068,10 +1068,13 @@ export interface InvoiceCardView {
   data: InvoiceCardData;
 }
 
+import { RecordDocumentsComponent } from '../../../../../../shared/components/record-documents/record-documents.component';
+
 @Component({
   selector: 'app-order-details-page',
   standalone: true,
   imports: [ProviderNamePipe, 
+    RecordDocumentsComponent,
     SplitAccountsPanelComponent,
     RouterModule,
     ReactiveFormsModule,
