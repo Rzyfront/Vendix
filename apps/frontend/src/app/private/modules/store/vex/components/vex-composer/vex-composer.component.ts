@@ -14,6 +14,12 @@ import { ButtonComponent } from '../../../../../../shared/components/button/butt
 import { IconComponent } from '../../../../../../shared/components/icon/icon.component';
 import { ToastService } from '../../../../../../shared/components/toast/toast.service';
 import { extractApiErrorMessage } from '../../../../../../core/utils/api-error-handler';
+import {
+  AI_ATTACHMENT_MAX_BYTES,
+  AI_ATTACHMENT_MAX_FILES,
+  acceptAttribute,
+  resolveAttachmentType,
+} from '../../../../../../shared/constants/ai-attachments';
 import { VexApiService } from '../../services/vex-api.service';
 import { VexChatStore } from '../../state/vex-chat.store';
 import { VexPresenceStore } from '../../state/vex-presence.store';
@@ -21,15 +27,13 @@ import { VEX_COPY } from '../../vex-copy';
 import { VexPresenceComponent } from '../vex-presence/vex-presence.component';
 
 const MAX_LINES = 8;
-const MAX_FILES = 5;
-const MAX_FILE_BYTES = 15 * 1024 * 1024;
-/** Mirror of the "+" input's `accept` attribute (drops and pastes bypass it). */
-const ACCEPTED_EXTENSIONS = ['.pdf', '.csv', '.xlsx', '.xls', '.txt'];
+const MAX_FILES = AI_ATTACHMENT_MAX_FILES;
+const MAX_FILE_BYTES = AI_ATTACHMENT_MAX_BYTES;
+/** Same accept list as the server; drops and pastes bypass the input's `accept`. */
+const ACCEPT_ATTRIBUTE = acceptAttribute();
 
 function isAcceptedFile(file: File): boolean {
-  if (file.type.startsWith('image/')) return true;
-  const name = file.name.toLowerCase();
-  return ACCEPTED_EXTENSIONS.some((ext) => name.endsWith(ext));
+  return resolveAttachmentType(file.type, file.name) !== null;
 }
 
 interface StagedFile {
@@ -129,7 +133,7 @@ interface StagedFile {
           type="file"
           class="hidden"
           multiple
-          accept="image/*,.pdf,.csv,.xlsx,.xls,.txt"
+          [attr.accept]="accept"
           [attr.aria-label]="copy.attach"
           (change)="onFilesPicked($event)"
         />
@@ -212,6 +216,7 @@ interface StagedFile {
 })
 export class VexComposerComponent {
   protected readonly copy = VEX_COPY.composer;
+  protected readonly accept = ACCEPT_ATTRIBUTE;
   protected readonly pipeline = inject(VexiVoicePipelineService);
   private readonly realtime = inject(VexiRealtimeService);
   private readonly destroyRef = inject(DestroyRef);

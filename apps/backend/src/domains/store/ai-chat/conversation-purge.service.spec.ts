@@ -254,6 +254,47 @@ describe('ConversationPurgeService.purge', () => {
     });
   });
 
+  it('queues the derived text key of an unlinked attachment next to its original', async () => {
+    const { service, tx, cleaner } = build({
+      attachments: [
+        {
+          id: 1,
+          s3_key: 'a/1.xlsx',
+          derived_text_key: 'a/derived/1.json',
+          linked_entity_type: null,
+          linked_entity_id: null,
+        },
+      ],
+    });
+    await run(() => service.purge(CONV));
+    const data = tx.ai_conversation_purges.create.mock.calls[0][0].data;
+    expect(data.pending_s3_keys).toEqual(['a/1.xlsx', 'a/derived/1.json']);
+    expect(cleaner.clean).toHaveBeenCalledTimes(1);
+  });
+
+  it('a linked attachment is detached, not deleted, and its derived text is kept', async () => {
+    const { service, tx } = build({
+      attachments: [
+        {
+          id: 2,
+          s3_key: 'a/2.pdf',
+          derived_text_key: 'a/derived/2.json',
+          stored_file_id: 77,
+          linked_entity_type: null,
+          linked_entity_id: null,
+        },
+      ],
+    });
+    await run(() => service.purge(CONV));
+    expect(tx.ai_attachments.deleteMany).not.toHaveBeenCalled();
+    expect(tx.ai_attachments.updateMany.mock.calls[0][0]).toMatchObject({
+      where: { id: { in: [2] } },
+      data: { conversation_id: null },
+    });
+    const data = tx.ai_conversation_purges.create.mock.calls[0][0].data;
+    expect(data.pending_s3_keys).toEqual([]);
+  });
+
   it('does not touch user_reminders (not even defined on the tx)', async () => {
     const { service, tx } = build();
     expect('user_reminders' in tx).toBe(false);

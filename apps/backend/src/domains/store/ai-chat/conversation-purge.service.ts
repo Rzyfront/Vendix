@@ -252,15 +252,23 @@ export class ConversationPurgeService {
       select: {
         id: true,
         s3_key: true,
+        derived_text_key: true,
+        stored_file_id: true,
         linked_entity_type: true,
         linked_entity_id: true,
       },
     });
     const linked = attachmentRows.filter(
-      (a) => a.linked_entity_type !== null || a.linked_entity_id !== null,
+      (a) =>
+        a.linked_entity_type !== null ||
+        a.linked_entity_id !== null ||
+        (a.stored_file_id ?? null) !== null,
     );
     const unlinked = attachmentRows.filter(
-      (a) => a.linked_entity_type === null && a.linked_entity_id === null,
+      (a) =>
+        a.linked_entity_type === null &&
+        a.linked_entity_id === null &&
+        (a.stored_file_id ?? null) === null,
     );
     if (linked.length > 0) {
       await tx.ai_attachments.updateMany({
@@ -281,7 +289,15 @@ export class ConversationPurgeService {
         },
       });
     }
-    const s3Keys = [...new Set(unlinked.map((a) => a.s3_key))];
+    // Original and derived text of an unlinked attachment are both deleted;
+    // linked ones are only detached and keep their derived text.
+    const s3Keys = [
+      ...new Set(
+        unlinked.flatMap((a) =>
+          a.derived_text_key ? [a.s3_key, a.derived_text_key] : [a.s3_key],
+        ),
+      ),
+    ];
 
     // 6. Mensajes y, al final, la conversación (el resumen va en su fila).
     const messages = await tx.ai_messages.deleteMany({

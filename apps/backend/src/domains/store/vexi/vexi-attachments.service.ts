@@ -1,27 +1,18 @@
-import { Injectable, Logger } from '@nestjs/common';
+import { Injectable, Logger, Optional } from '@nestjs/common';
 import { randomUUID } from 'node:crypto';
 import { StorePrismaService } from '../../../prisma/services/store-prisma.service';
 import { S3Service } from '../../../common/services/s3.service';
 import { RequestContextService } from '@common/context/request-context.service';
 import { VendixHttpException, ErrorCodes } from '../../../common/errors';
-
-/**
- * Same ceiling and same MIME whitelist the native scanners enforce
- * (`purchase-orders.controller.ts`, `expenses.controller.ts`). Kept identical
- * on purpose: a document Vexi accepts must be a document those endpoints
- * accept, or the flow dies after the user already approved the write.
- */
-const MAX_FILE_BYTES = 10 * 1024 * 1024;
-
-const ALLOWED_MIMETYPES = new Set([
-  'image/jpeg',
-  'image/jpg',
-  'image/png',
-  'image/webp',
-  'image/heic',
-  'image/heif',
-  'application/pdf',
-]);
+import { S3PathHelper } from '../../../common/helpers/s3-path.helper';
+import { bytesMatchMime } from '../documents/file-signature';
+import {
+  AI_ATTACHMENT_LABEL,
+  AI_ATTACHMENT_MAX_BYTES,
+  resolveAttachmentType,
+} from './ai-attachments';
+import type { AttachmentContent } from './attachment-content.types';
+import { extractAttachmentContent } from './attachment-text-extractor';
 
 const HANDLE_PREFIX = 'att_';
 
@@ -65,7 +56,14 @@ export class VexiAttachmentsService {
   constructor(
     private readonly prisma: StorePrismaService,
     private readonly s3: S3Service,
-  ) {}
+    // Plain class without dependencies; the fallback keeps this service
+    // constructible by hand without registering a provider in AIEngineModule.
+    @Optional() paths?: S3PathHelper,
+  ) {
+    this.paths = paths ?? new S3PathHelper();
+  }
+
+  private readonly paths: S3PathHelper;
 
   /**
    * Validates, uploads and registers a document.
@@ -81,17 +79,26 @@ export class VexiAttachmentsService {
       throw new VendixHttpException(ErrorCodes.INV_SCAN_NO_FILE);
     }
 
-    if (!ALLOWED_MIMETYPES.has(file.mimetype)) {
+    const type = resolveAttachmentType(file.mimetype, file.originalname);
+    if (!type) {
       throw new VendixHttpException(
         ErrorCodes.INV_SCAN_INVALID_FILE,
-        `El tipo de archivo "${file.mimetype}" no se puede leer. Acepto fotos (JPG, PNG, WEBP, HEIC) y PDF.`,
+        `El tipo de archivo "${file.mimetype || file.originalname}" no se puede leer. Acepto: ${AI_ATTACHMENT_LABEL}.`,
       );
     }
 
-    if (file.size > MAX_FILE_BYTES) {
+    const size = file.size ?? file.buffer.length;
+    if (size > AI_ATTACHMENT_MAX_BYTES) {
       throw new VendixHttpException(
         ErrorCodes.INV_SCAN_INVALID_FILE,
-        `El archivo pesa ${Math.round(file.size / 1024 / 1024)} MB y el máximo son 10 MB. Manda una foto más liviana.`,
+        `El archivo pesa ${Math.round(size / 1024 / 1024)} MB y el máximo son ${AI_ATTACHMENT_MAX_BYTES / 1024 / 1024} MB. Acepto: ${AI_ATTACHMENT_LABEL}.`,
+      );
+    }
+
+    if (!bytesMatchMime(file.buffer, type.mime)) {
+      throw new VendixHttpException(
+        ErrorCodes.INV_SCAN_INVALID_FILE,
+        `El contenido de "${this.safeName(file.originalname)}" no coincide con su extensión. Acepto: ${AI_ATTACHMENT_LABEL}.`,
       );
     }
 
@@ -107,9 +114,36 @@ export class VexiAttachmentsService {
       );
     }
 
-    const key = `vexi-attachments/stores/${storeId}/${randomUUID()}${this.extensionOf(file)}`;
+    const [store, organization] = await Promise.all([
+      this.prisma.stores.findFirst({
+        where: { id: storeId, organization_id: organizationId },
+        select: { id: true, slug: true },
+      }),
+      this.prisma.organizations.findFirst({
+        where: { id: organizationId },
+        select: { id: true, slug: true },
+      }),
+    ]);
+    if (!store || !organization) {
+      throw new VendixHttpException(
+        ErrorCodes.AI_AGENT_004,
+        'No hay contexto de tienda para guardar el documento.',
+      );
+    }
 
-    await this.s3.uploadFile(file.buffer, key, file.mimetype);
+    const basePath = `${this.paths.buildStorePath(organization, store)}/ai-attachments`;
+    const id = randomUUID();
+    const key = `${basePath}/${id}.${type.extensions[0]}`;
+
+    await this.s3.uploadFile(file.buffer, key, type.mime);
+
+    const originalName = this.safeName(file.originalname);
+    const derivedKey = await this.storeDerived(
+      `${basePath}/derived/${id}.json`,
+      file.buffer,
+      type.mime,
+      originalName,
+    );
 
     const row = await this.prisma.ai_attachments.create({
       data: {
@@ -118,9 +152,10 @@ export class VexiAttachmentsService {
         user_id: userId,
         conversation_id: conversationId ?? null,
         s3_key: key,
-        mime_type: file.mimetype,
-        size_bytes: file.size,
-        original_name: this.safeName(file.originalname),
+        mime_type: type.mime,
+        size_bytes: size,
+        original_name: originalName,
+        derived_text_key: derivedKey,
       },
       select: {
         id: true,
@@ -140,6 +175,31 @@ export class VexiAttachmentsService {
       mime_type: row.mime_type,
       size_bytes: row.size_bytes,
     };
+  }
+
+  /**
+   * Extracted content of a document (table / text / image marker), for the
+   * `read_attachment` tool. Uses the derived JSON when present; legacy rows
+   * (uploaded before T41) are extracted on the fly and nothing is written.
+   */
+  async readContent(handle: string): Promise<AttachmentContent> {
+    const record = await this.requireRecord(handle);
+    if (record.derived_text_key) {
+      try {
+        const raw = await this.s3.downloadFile(record.derived_text_key);
+        return JSON.parse(raw.toString('utf8')) as AttachmentContent;
+      } catch (error) {
+        this.logger.warn(
+          `Derived content of ${handle} unreadable, extracting from the original: ${(error as Error)?.message}`,
+        );
+      }
+    }
+    const buffer = await this.s3.downloadFile(record.s3_key);
+    return extractAttachmentContent(
+      buffer,
+      record.mime_type,
+      record.original_name,
+    );
   }
 
   /** The bytes behind a handle, for a vision tool or a multipart forward. */
@@ -339,6 +399,7 @@ export class VexiAttachmentsService {
         s3_key: true,
         mime_type: true,
         original_name: true,
+        derived_text_key: true,
       },
     });
 
@@ -371,10 +432,31 @@ export class VexiAttachmentsService {
     return Number.isSafeInteger(id) && id > 0 ? id : null;
   }
 
-  private extensionOf(file: Express.Multer.File): string {
-    if (file.mimetype === 'application/pdf') return '.pdf';
-    const match = /^image\/(jpeg|jpg|png|webp|heic|heif)$/.exec(file.mimetype);
-    return match ? `.${match[1] === 'jpeg' ? 'jpg' : match[1]}` : '';
+  /**
+   * Extracts and uploads the derived JSON next to the original. Never throws:
+   * a failed extraction or upload leaves `derived_text_key` null and the
+   * original untouched (readContent extracts on the fly).
+   */
+  private async storeDerived(
+    key: string,
+    buffer: Buffer,
+    mime: string,
+    originalName: string,
+  ): Promise<string | null> {
+    try {
+      const content = await extractAttachmentContent(buffer, mime, originalName);
+      await this.s3.uploadFile(
+        Buffer.from(JSON.stringify(content), 'utf8'),
+        key,
+        'application/json',
+      );
+      return key;
+    } catch (error) {
+      this.logger.warn(
+        `Derived content not stored for ${originalName}: ${(error as Error)?.message}`,
+      );
+      return null;
+    }
   }
 
   /** Keeps the name recognisable to the user without letting it shape a path. */

@@ -27,7 +27,17 @@ export function bytesMatchMime(buffer: Buffer, mime: string): boolean {
     case XLSX_MIME:
       return startsWith(buffer, [0x50, 0x4b, 0x03, 0x04]) && buffer.includes('xl/');
     case 'text/plain':
+    case 'text/csv':
       return !buffer.includes(0x00);
+    case 'image/heic':
+    case 'image/heif':
+      // ISO-BMFF: `ftyp` at offset 4 followed by a HEIF-family brand.
+      return (
+        startsWith(buffer, [0x66, 0x74, 0x79, 0x70], 4) &&
+        ['heic', 'heix', 'mif1', 'msf1', 'heif'].includes(
+          buffer.subarray(8, 12).toString('latin1'),
+        )
+      );
     default:
       return false;
   }
