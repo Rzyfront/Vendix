@@ -287,6 +287,32 @@ export class AIToolRegistry {
   }
 
   /**
+   * T36: the SAME T13 gate the tool itself applies (`isPermitted` over the
+   * request's permissions, falling back to roles when the list resolved
+   * empty), exposed so the undo of a batch step goes through the tool's own
+   * permission check. Throws `AI_AGENT_003` for an unknown tool and
+   * `AI_AGENT_004` when the caller no longer holds the permissions. Pure: it
+   * runs nothing and changes no registry state.
+   */
+  assertPermitted(name: string): void {
+    const resolved = this.resolveToolName(name);
+    const tool = resolved ? this.tools.get(resolved) : undefined;
+    if (!tool) {
+      throw new VendixHttpException(
+        ErrorCodes.AI_AGENT_003,
+        `La herramienta "${name}" no existe.`,
+      );
+    }
+    const requestContext = RequestContextService.getContext();
+    const granted = requestContext?.permissions?.length
+      ? requestContext.permissions
+      : (requestContext?.roles ?? []);
+    if (!this.isPermitted(tool, granted)) {
+      throw new VendixHttpException(ErrorCodes.AI_AGENT_004);
+    }
+  }
+
+  /**
    * Permissions the caller lacks among the tools hidden from them, sorted and
    * deduplicated. Lets the turn tell the model which areas the role cannot use
    * (T13) without listing the hidden tools themselves.

@@ -37,11 +37,17 @@ Vex is configuration: superadmin edits prompt, model, voice, `max_iterations` an
 2. A hallucinated denied `ui_*` call dies at execution with `AI_AGENT_TOOL_NOT_ALLOWED` before the `clientSide` branch: no browser dispatch, no execution, no quota.
 3. Never reintroduce `ui_context` into the Vex snapshot (`buildVexSnapshot`, with `vex_blocks`).
 
-## One write per approval
+## One write per approval (hidden plan) and write batches
 
 - Hidden-plan flow proposes **one business write per turn**: the first proposal closes the turn with one single-step `plan_approval` frame (`plan_id` + steps, hashes via `setStepHashes`); a second write in the same response is deferred. Never tell the user a whole workflow was approved after one card.
 - `PlanApprovalService` / `POST store/vex/plans/:id/approve` keep legacy plan tokens (TTL 900 s, ordered canonical arg hashes, single-use, user/plan-bound). Approve validates conversation ownership (else 403) and server hashes (`getStepHashes`; client `steps` only select a subset). Steps are identified by `step_id`, never tool name. Irreversible or drifted/missing/replayed steps return to their own card; execution still goes through `executeTool` with fresh permission checks.
-- Compatibility is not policy: never restore multi-write collection or auto-execute the rest of a plan.
+- Compatibility is not policy: never restore multi-write collection or auto-execute the rest of a plan. `PlanApprovalService.approvePlan` (`slice(0,1)`) stays unchanged.
+- **Multi-write only through `propose_write_batch`** (Vex only, `access:'public'`, readOnly scratch tool; contract in `write-batch.types.ts`). One approval click covers up to 25 steps / 500 records; more than 25 steps split into parts, each with its own approval.
+  - Every step passes the T13 role gate `AIToolRegistry.previewForConsent` BEFORE the batch exists. One denied step = no batch and no card: Vex says «tu rol no permite …». Irreversible tools never enter a batch; they keep their own card.
+  - Endpoints: `GET/POST store/vex/batches/:id`, `/approve`, `/reject`, `/steps/:step_id/undo`. Approval claims atomically (`proposed→executing` conditional update); a second approval returns the current state with `replayed: true` and never re-runs.
+  - Execution is sequential with permissions re-validated per step; the first failure stops the batch and the rest end `skipped` (never `pending/running`). Summary: «Se aplicó hasta el paso N, el resto se omitió.»
+  - Undo only for tools that declare `compensate`, inside the undo window, with optimistic re-check; otherwise «No reversible desde Vex».
+  - Audit: one `audit_logs` row per batch (`metadata.source='ai_agent'`, `batch_id`) plus `ai_agent_effects.batch_id` per step. No action quota (N4): the proposing turn consumes messages/tokens as usual.
 - `agent_key='vex'` turns ALWAYS receive `plan_approval` (PlanApprovalService + VexiPlanStateService) and `block_sink` (VexBlockService); Vexi turns receive neither. Assert at the seam — a spec that mocks the loop proves nothing (`vendix-known-errors`).
 - Irreversible flag and coverage spec: `vendix-ai-agent-tools`.
 

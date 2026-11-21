@@ -513,6 +513,45 @@ describe('VexiPlanStateService durable adapter', () => {
   );
 
   scopedIt(
+    'links the effect row to its write batch only when a batchId is passed',
+    async () => {
+      const f = fixture();
+      f.prisma.ai_agent_effects = {
+        updateMany: jest.fn(async () => ({ count: 1 })),
+      };
+      const dispatch = jest.fn(async () =>
+        JSON.stringify({ applied: true, id: 99 }),
+      );
+      await f.svc.applyDurableEffect(
+        {
+          conversationId: 1,
+          stepId: 'plain',
+          tool: 'create_customer',
+          args: { name: 'Juan' },
+        },
+        dispatch,
+      );
+      expect(f.prisma.ai_agent_effects.updateMany).not.toHaveBeenCalled();
+
+      await f.svc.applyDurableEffect(
+        {
+          conversationId: 1,
+          stepId: 'vex-batch:b1:s1',
+          batchId: 'b1',
+          tool: 'create_customer',
+          args: { name: 'Ana' },
+        },
+        dispatch,
+      );
+      expect(f.prisma.ai_agent_effects.updateMany).toHaveBeenCalledTimes(1);
+      expect(f.prisma.ai_agent_effects.updateMany).toHaveBeenCalledWith({
+        where: { operation_id: expect.any(String) },
+        data: { batch_id: 'b1' },
+      });
+    },
+  );
+
+  scopedIt(
     'a timeout after dispatch becomes unknown and a later approval cannot replay it',
     async () => {
       const f = fixture();

@@ -30,7 +30,7 @@ metadata:
 
 ## Tool contract and categories
 
-`RegisteredTool`: `name`, `domain`, `description`, `parameters` (JSON Schema), `requiredPermissions?`, `requiresConfirmation?`, `readOnly?`, `clientSide?`, `irreversible?`, `preview?`, `handler?` (returns a string; `JSON.stringify` structured data; absent for clientSide).
+`RegisteredTool`: `name`, `domain`, `description`, `parameters` (JSON Schema), `requiredPermissions?`, `requiresConfirmation?`, `readOnly?`, `clientSide?`, `irreversible?`, `compensate?`, `preview?`, `handler?` (returns a string; `JSON.stringify` structured data; absent for clientSide).
 
 | Category | Declares | Executes | Voice (historical: realtime retired) |
 |---|---|---|---|
@@ -55,6 +55,12 @@ metadata:
 - `ToolPreview` mirrors `BulkEditPreviewItemDto`; `domain` tells the browser which module to refresh. Name a human subject ("Coca Cola 1L", not "#4821").
 - A write without `preview` makes the user approve blind; `create_stock_adjustment` (`inventory.tools.ts`) still lacks one.
 - Result semantics (`ok`, `unknown_effect`, `applied`): `vendix-agent-execution-contract`.
+
+## Compensation and write batches
+
+- `compensate?: ToolCompensation` (`tool.interface.ts`) = `{ label, capture(args, ctx) → snapshot|null, undo({args, snapshot, handlerOutput, context}) → string }`. `capture` runs before the handler; `undo` is the inverse and is what Vex's batch «Deshacer» calls.
+- Declare it only when the inverse is exact and safe: a field edit restorable from the snapshot, with an optimistic re-check that the current value still equals what the tool wrote (else refuse, never overwrite a later change). Never on `irreversible: true` tools or anything with external effects (DIAN, payments, messages, stock movements that cascade). A tool without `compensate` is still batchable but its step reads «No reversible desde Vex».
+- Batch rules for tool authors: a tool needs a good `preview` (the batch card is built from it and `previewForConsent` gates it), honest `irreversible` (those never enter a batch), and a handler that re-verifies preconditions (steps run sequentially, first failure stops the rest). Batches are proposed only via `propose_write_batch`; do not build another multi-write path. Contract: `domains/store/vex/services/write-batch.types.ts`; behavior: `vendix-vex-agent`.
 
 ## Registration is decentralized
 

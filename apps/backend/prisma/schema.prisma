@@ -7434,16 +7434,55 @@ model ai_agent_effects {
   domain_receipt     Json?
   domain_reference   String?  @db.VarChar(300)
   evidence_result_id String?  @db.Uuid
+  // F5: lote de escritura de Vex al que pertenece el efecto (NULL fuera de lotes).
+  batch_id           String?  @db.Uuid
   history            Json     @default("[]")
   created_at         DateTime @default(now()) @db.Timestamptz(6)
   updated_at         DateTime @default(now()) @db.Timestamptz(6)
 
   evidence_result ai_agent_tool_results? @relation(fields: [evidence_result_id], references: [id], onDelete: Restrict, onUpdate: Restrict)
+  batch           ai_agent_write_batches? @relation(fields: [batch_id], references: [id], onDelete: Restrict, onUpdate: Restrict, map: "ai_agent_effects_batch_id_fkey")
   objective ai_agent_objectives? @relation(fields: [objective_id, store_id, organization_id, user_id], references: [id, store_id, organization_id, user_id], onDelete: Restrict, onUpdate: Restrict, map: "ai_agent_effects_objective_scope_fkey")
 
   @@unique([objective_id, step_id, proposal_hash], map: "ai_agent_effects_proposal_uq")
   @@index([store_id, organization_id, user_id, objective_id, status], map: "ai_agent_effects_owner_objective_status_idx")
   @@index([evidence_result_id])
+  @@index([batch_id], map: "ai_agent_effects_batch_id_idx")
+}
+
+/// Lote de escrituras de Vex (F5): hasta 25 escrituras reversibles que la persona
+/// aprueba con un clic. `steps` guarda cada paso con sus hashes y estado;
+/// `version` es la concurrencia optimista del deshacer. `conversation_id` es un
+/// entero plano sin FK (la purga puede borrar la conversación y el lote aplicado
+/// sobrevive). Una saga, no una transacción: ver `write-batch.types.ts`.
+model ai_agent_write_batches {
+  id                  String    @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  store_id            Int
+  organization_id     Int
+  user_id             Int
+  conversation_id     Int?
+  goal                String    @db.VarChar(500)
+  status              String    @default("proposed") @db.VarChar(20)
+  steps               Json      @default("[]")
+  step_count          Int
+  affected_records    Int       @default(0)
+  part_index          Int       @default(1)
+  part_total          Int       @default(1)
+  group_id            String?   @db.Uuid
+  version             Int       @default(0)
+  approved_by_user_id Int?
+  approved_at         DateTime? @db.Timestamptz(6)
+  started_at          DateTime? @db.Timestamptz(6)
+  finished_at         DateTime? @db.Timestamptz(6)
+  summary             Json?
+  expires_at          DateTime  @db.Timestamptz(6)
+  created_at          DateTime  @default(now()) @db.Timestamptz(6)
+  updated_at          DateTime  @default(now()) @db.Timestamptz(6)
+
+  effects ai_agent_effects[]
+
+  @@index([store_id, organization_id, user_id, status], map: "ai_agent_write_batches_owner_status_idx")
+  @@index([conversation_id], map: "ai_agent_write_batches_conversation_id_idx")
 }
 
 /// Constancia del borrado físico de una conversación de Vex: quién, cuándo y
