@@ -971,6 +971,37 @@ export class AIEngineService implements OnModuleInit {
 
       let messages = this.applicationMessages(app, variables, extraMessages);
       const options = this.applicationOptions(app, optionsOverride);
+      // Window, output reservation and budget belong to the config that
+      // serves: recomputed from the untrimmed messages when the fallback
+      // takes over (its window may be smaller than the primary's).
+      const requestedMaxTokens = options.maxTokens;
+      let untrimmedMessages: AIMessage[] = messages;
+      const fitContextBudget = (configId: number | null) => {
+        const settings = configId
+          ? this.configSettings.get(configId)
+          : undefined;
+        const configured =
+          settings?.agent_context_window_tokens ??
+          settings?.context_window_tokens;
+        const contextWindowTokens = configured ?? 32768;
+        const maxOutputTokens =
+          requestedMaxTokens ?? settings?.maxTokens ?? 1024;
+        const budget = applyAgentContextBudget(
+          untrimmedMessages,
+          options.tools ?? [],
+          { contextWindowTokens, maxOutputTokens },
+        );
+        options.maxTokens = maxOutputTokens;
+        reservedOutputTokens = maxOutputTokens;
+        messages = budget.messages;
+        contextBudget = {
+          estimated_input_tokens: budget.estimatedInputTokens,
+          omitted_messages: budget.omittedMessages,
+          context_window_tokens: contextWindowTokens,
+          provenance: configured === undefined ? 'fallback' : 'configured',
+          method: budget.method,
+        };
+      };
       if (agentic) {
         // Account for exactly the base override sent to the SDK, without
         // overriding later runtime/tenant/pending-approval system messages.
@@ -989,29 +1020,8 @@ export class AIEngineService implements OnModuleInit {
         }
         options.tools = canonicalAgentTools(options.tools);
         tools = options.tools;
-        const settings = resolvedConfigId
-          ? this.configSettings.get(resolvedConfigId)
-          : undefined;
-        const configured =
-          settings?.agent_context_window_tokens ??
-          settings?.context_window_tokens;
-        const contextWindowTokens = configured ?? 32768;
-        const maxOutputTokens =
-          options.maxTokens ?? settings?.maxTokens ?? 1024;
-        options.maxTokens = maxOutputTokens;
-        reservedOutputTokens = maxOutputTokens;
-        const budget = applyAgentContextBudget(messages, options.tools ?? [], {
-          contextWindowTokens,
-          maxOutputTokens,
-        });
-        messages = budget.messages;
-        contextBudget = {
-          estimated_input_tokens: budget.estimatedInputTokens,
-          omitted_messages: budget.omittedMessages,
-          context_window_tokens: contextWindowTokens,
-          provenance: configured === undefined ? 'fallback' : 'configured',
-          method: budget.method,
-        };
+        untrimmedMessages = messages;
+        fitContextBudget(resolvedConfigId);
       }
       // Always own an abortable operation for H, including bare consumer return().
       deadline = createAgentOperation(
@@ -1160,8 +1170,19 @@ export class AIEngineService implements OnModuleInit {
             return;
           }
         } catch (error: any) {
+          // The fallback serves with ITS window: re-fit the budget first; a
+          // request that cannot fit there is not retried on it.
+          let fallbackFits = !!fallbackTarget;
+          if (fallbackTarget && agentic && !emitted) {
+            try {
+              fitContextBudget(fallbackTarget.configId);
+            } catch {
+              fallbackFits = false;
+            }
+          }
           if (
             fallbackTarget &&
+            fallbackFits &&
             !emitted &&
             !(deadline && isAgentAbort(error, deadline.signal))
           ) {

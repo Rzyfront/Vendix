@@ -1,4 +1,5 @@
 import { AIChatService } from './ai-chat.service';
+import { renderTurnActionsLine } from '../../../ai-engine/context/agent-context-budget';
 
 type Msg = {
   id: number;
@@ -108,6 +109,49 @@ describe('T22/T23 buildContextWindow', () => {
       { metadata: null },
     );
     expect(out[0].content).toBe('Listo.');
+  });
+
+  it('borde agent_key: a Vexi thread ignores a stored summary and keeps its window', () => {
+    const out = windowOf(rows(30), {
+      summary: 'Resumen escrito bajo Vex',
+      summary_through_message_id: 25,
+      metadata: null,
+    });
+    expect(out).toHaveLength(21);
+    expect(out.some((m) => m.content.includes('Resumen'))).toBe(false);
+    expect(out[0].content).toBe('m11');
+  });
+
+  it('T23: block refs carry the row count production writes (plan §3.4)', async () => {
+    const service = Object.create(AIChatService.prototype) as any;
+    const vexTurn = { blocks: new Map(), plan: null };
+    service.collectVexFrame(vexTurn, {
+      type: 'ui_block',
+      ui_block: {
+        block_id: 'ab12cd34ef',
+        kind: 'table',
+        version: 2,
+        data: { rows: Array.from({ length: 12 }, () => ({})) },
+      },
+    });
+    Object.assign(service, {
+      vexBlocks: {
+        create: jest
+          .fn()
+          .mockResolvedValue({ id: 'cd56ef7890', kind: 'table', version: 1 }),
+      },
+    });
+    await service
+      .blockSinkFor({ id: 1 }, vexTurn)
+      .save({ kind: 'table', spec: {}, data: { rows: [1, 2, 3] } });
+    const refs = [...vexTurn.blocks.values()];
+    expect(refs).toEqual([
+      { block_id: 'ab12cd34ef', kind: 'table', version: 2, rows: 12 },
+      { block_id: 'cd56ef7890', kind: 'table', version: 1, rows: 3 },
+    ]);
+    expect(renderTurnActionsLine(undefined, { blocks: refs })).toBe(
+      '[Bloques: table#ab12cd34 (12 filas), table#cd56ef78 (3 filas)]',
+    );
   });
 
   it('T23: assistant rows without tools or blocks stay untouched', () => {

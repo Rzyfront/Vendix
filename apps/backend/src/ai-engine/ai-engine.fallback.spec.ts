@@ -173,4 +173,58 @@ describe('AIEngineService fallback model + real cost (T24)', () => {
     const unknown = (await collect(service)).find((c) => c.type === 'done');
     expect(unknown).not.toHaveProperty('cost_usd');
   });
+
+  it('(e) agentic fallback re-fits the budget and maxTokens to ITS window', async () => {
+    const { service } = build(9);
+    (service as any).configSettings.set(5, {
+      ...PRICING,
+      context_window_tokens: 128000,
+      maxTokens: 4096,
+    });
+    (service as any).configSettings.set(9, {
+      ...PRICING,
+      context_window_tokens: 16000,
+      maxTokens: 1500,
+    });
+    (service as any).prisma.ai_engine_applications.findUnique.mockResolvedValue(
+      { ...appRow(9), max_tokens: null },
+    );
+    const sentMaxTokens: Array<number | undefined> = [];
+    const primary = jest.fn(async function* (_m: unknown, options: any) {
+      sentMaxTokens.push(options.maxTokens);
+      yield { type: 'error', error: 'upstream 503' } as AIStreamChunk;
+    });
+    const backup = jest.fn(async function* (_m: unknown, options: any) {
+      sentMaxTokens.push(options.maxTokens);
+      yield { type: 'text', content: 'ok' } as AIStreamChunk;
+      yield {
+        type: 'done',
+        usage: USAGE,
+        finish_reason: 'stop',
+      } as AIStreamChunk;
+    });
+    const metered = () => true;
+    (service as any).providers.set(5, {
+      chat: jest.fn(),
+      chatStream: primary,
+      supportsMeteredAgentStream: metered,
+    });
+    (service as any).providers.set(9, {
+      chat: jest.fn(),
+      chatStream: backup,
+      supportsMeteredAgentStream: metered,
+    });
+
+    const chunks: AIStreamChunk[] = [];
+    for await (const c of service.runAgentStream('vex_chat', undefined, [
+      { role: 'user', content: 'hola' },
+    ]))
+      chunks.push(c);
+
+    expect(backup).toHaveBeenCalledTimes(1);
+    expect(sentMaxTokens).toEqual([4096, 1500]);
+    const done = chunks.find((c) => c.type === 'done');
+    expect(done?.context_budget?.context_window_tokens).toBe(16000);
+    expect(done?.context_budget?.provenance).toBe('configured');
+  });
 });

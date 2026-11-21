@@ -248,7 +248,6 @@ export interface VexStreamChunk {
   };
   /** `done` frame: share of the context window the next turn would use. */
   context_budget?: VexContextBudget;
-  cost_usd?: number;
   /** `context_compacted` frame: the new summary and the last message it covers. */
   summary?: string;
   summary_through_message_id?: number;

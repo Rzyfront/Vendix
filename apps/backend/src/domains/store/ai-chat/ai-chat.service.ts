@@ -229,6 +229,17 @@ interface VexBlockRef {
   block_id: string;
   kind: string;
   version: number;
+  /** Row count of tabular blocks (plan §3.4: id, tipo, filas); absent otherwise. */
+  rows?: number;
+}
+
+/** `rows` of a block ref: length of `data.rows` when the payload is tabular. */
+function blockRowsOf(data: unknown): { rows?: number } {
+  const rows =
+    data && typeof data === 'object' && !Array.isArray(data)
+      ? (data as Record<string, unknown>).rows
+      : undefined;
+  return Array.isArray(rows) ? { rows: rows.length } : {};
 }
 
 /** Estados que `metadata.plan.status` puede tomar en un hilo de Vex. */
@@ -1332,8 +1343,9 @@ export class AIChatService {
     }
 
     if (doneChunk) {
-      // Client boundary: model guidance never rides on the final frame.
-      const safeDone = clientSafeChunk(doneChunk);
+      // Client boundary: model guidance never rides on the final frame, and
+      // neither does the provider cost (internal; persisted in the row only).
+      const { cost_usd: _cost, ...safeDone } = clientSafeChunk(doneChunk);
       // T21: el anillo «Contexto N %» de Vex recibe el mismo valor persistido.
       const withBudget: AIStreamChunk = turnBudget
         ? { ...safeDone, context_budget: turnBudget }
@@ -2137,6 +2149,7 @@ export class AIChatService {
           block_id: row.id,
           kind: row.kind,
           version: row.version,
+          ...blockRowsOf(data),
         });
         return row.id;
       },
@@ -2209,6 +2222,7 @@ export class AIChatService {
         block_id: uiBlock.block_id,
         kind: uiBlock.kind,
         version: typeof uiBlock.version === 'number' ? uiBlock.version : 1,
+        ...blockRowsOf(uiBlock.data),
       });
     }
     const approval = chunk.plan_approval;
@@ -2265,6 +2279,7 @@ export class AIChatService {
           block_id,
           kind,
           version: typeof rawVersion === 'number' ? rawVersion : 1,
+          ...blockRowsOf(view?.data ?? data?.data),
         });
       } catch {
         // Resultado compactado o no-JSON: el barrido de huérfanos lo cubre.
@@ -2312,6 +2327,7 @@ export class AIChatService {
               block_id: row.id,
               kind: row.kind,
               version: row.version,
+              ...blockRowsOf(row.data),
             });
           }
         }
@@ -2415,7 +2431,13 @@ export class AIChatService {
     conversation: ConversationWithMessages;
     frame: ContextCompactedFrame | null;
   }> {
-    if (agentKey !== VEX_AGENT_KEY || !this.compactor) {
+    // Only a Vex thread reads the summary back (`buildContextWindow`): a
+    // per-message Vex override on another thread must not move its pointer.
+    if (
+      agentKey !== VEX_AGENT_KEY ||
+      this.conversationAgentKey(conversation) !== VEX_AGENT_KEY ||
+      !this.compactor
+    ) {
       return { conversation, frame: null };
     }
     // One measure: the budget the ring showed after the last answer. Without
@@ -2481,22 +2503,24 @@ export class AIChatService {
 
     // T22: a stored summary replaces everything it covers; only newer rows
     // travel verbatim. Without a summary the window is the previous last-N.
+    // Only Vex threads read it: a thread compacted under Vex (e.g. `agent_key`
+    // per POST) and answered by Vexi keeps Vexi's byte-identical window.
+    const isVexThread =
+      this.conversationAgentKey(conversation) === VEX_AGENT_KEY;
     const through = conversation.summary_through_message_id ?? null;
-    if (conversation.summary && through !== null) {
+    const summarized = isVexThread && !!conversation.summary && through !== null;
+    if (summarized) {
       messages.push({
         role: 'system',
         content: `Resumen de la conversación anterior: ${conversation.summary}`,
       });
     }
-    const covered =
-      conversation.summary && through !== null
-        ? conversation.messages.filter((m) => m.id > through)
-        : conversation.messages;
+    const covered = summarized
+      ? conversation.messages.filter((m) => m.id > through!)
+      : conversation.messages;
 
     // Add recent messages from history (last N)
     const recentMessages = covered.slice(-this.MAX_CONTEXT_MESSAGES);
-    const isVexThread =
-      this.conversationAgentKey(conversation) === VEX_AGENT_KEY;
 
     for (const msg of recentMessages) {
       if (

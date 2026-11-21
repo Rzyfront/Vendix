@@ -206,6 +206,8 @@ describe('T21 context budget: one measure for ring and compaction', () => {
     const frames = await stream(b.service);
     const done = frames.find((f) => f.type === 'done');
     expect(done.context_budget).toEqual(budgetOf(81000));
+    // Provider cost is internal: persisted on the row, never sent to the store browser.
+    expect(done).not.toHaveProperty('cost_usd');
     const row = assistantRow(b.prisma);
     expect(row.metadata.context_budget).toEqual(budgetOf(81000));
     expect(row.cost_usd).toBe(0.002);
@@ -224,6 +226,19 @@ describe('T21 context budget: one measure for ring and compaction', () => {
     expect(assistantRow(b.prisma).metadata.context_budget).toEqual(
       done.context_budget,
     );
+  });
+
+  it('Vexi turn: done carries neither a budget nor the provider cost', async () => {
+    const b = build({
+      metadata: null,
+      chunks: [
+        { type: 'text', content: 'hola' },
+        { type: 'done', cost_usd: 0.01, context_budget: budgetOf(5000) },
+      ],
+    });
+    const frames = await stream(b.service);
+    const done = frames.find((f) => f.type === 'done');
+    expect(done).not.toHaveProperty('cost_usd');
   });
 
   it('compaction decides on the budget persisted with the last answer', async () => {
@@ -260,6 +275,19 @@ describe('T21 context budget: one measure for ring and compaction', () => {
     const compacted = frames.findIndex((f) => f.type === 'context_compacted');
     expect(compacted).toBeGreaterThanOrEqual(0);
     expect(compacted).toBeLessThan(frames.findIndex((f) => f.type === 'done'));
+  });
+
+  it('a per-message Vex override on a Vexi thread never compacts it', async () => {
+    const compactIfNeeded = jest.fn();
+    const b = build({
+      metadata: null,
+      compactor: { compactIfNeeded },
+      chunks: [],
+    });
+    await RequestContextService.runIsolated(ctx, () =>
+      b.service.sendMessage(7, { content: 'hola', agent_key: 'vex' } as any),
+    );
+    expect(compactIfNeeded).not.toHaveBeenCalled();
   });
 });
 
