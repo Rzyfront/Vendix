@@ -21,16 +21,6 @@ const M3 = readFileSync(
   ),
   'utf8',
 );
-const FIX = readFileSync(
-  join(
-    BACKEND,
-    'prisma/migrations/20261224090000_plan_ai_entitlements_backfill_fix/migration.sql',
-  ),
-  'utf8',
-);
-const FIX_STATEMENTS = FIX.split('\n')
-  .filter((line) => !line.trimStart().startsWith('--'))
-  .join('\n');
 const STATEMENTS = M3.split('\n')
   .filter((line) => !line.trimStart().startsWith('--'))
   .join('\n');
@@ -80,20 +70,6 @@ function evaluateM3(flags: unknown): AIEntitlement[] {
   });
 }
 
-/** The VALUES list of the corrective migration, parsed like M3's. */
-function fixSources(): SourceRow[] {
-  const block = FIX_STATEMENTS.slice(
-    FIX_STATEMENTS.indexOf('VALUES'),
-    FIX_STATEMENTS.indexOf(') AS s ('),
-  );
-  return [...block.matchAll(/\(([^()]*)\)/g)].map((m) =>
-    m[1].split(',').map((v) => {
-      const t = v.trim();
-      return t === 'NULL' ? null : t.replace(/^'|'$/g, '');
-    }) as SourceRow,
-  );
-}
-
 describe('M3 — backfill of plan_ai_entitlements from ai_feature_flags (T11)', () => {
   it('encodes exactly the catalog legacy mapping, one VALUES row per capability in order', () => {
     expect(m3Sources()).toEqual(
@@ -132,7 +108,7 @@ describe('M3 — backfill of plan_ai_entitlements from ai_feature_flags (T11)', 
     }
   });
 
-  it('still copies a feature without a boolean enabled as off: the reason for the corrective migration', () => {
+  it('still copies a feature without a boolean enabled as off: the reason for the corrective migration (separate data PR)', () => {
     const flags = { vex_agent: { daily_messages_cap: 10 } };
     expect(evaluateM3(flags).find((r) => r.agent_key === 'vex' && r.capability_key === 'agent')).toMatchObject({
       enabled: false,
@@ -201,34 +177,6 @@ describe('catalog translation mirrors the gate (F1, F6)', () => {
     const flags = { vex_agent: { enabled: true, daily_messages_cap: 3.7 } };
     expect(find(flags, 'vex', 'agent').cap_value).toBe(3);
   });
-});
-
-describe('M4 — corrective migration of the backfill (F1, F6)', () => {
-  it('uses the same capability -> legacy key mapping as M3', () => {
-    expect(fixSources()).toEqual(m3Sources());
-  });
-
-  it('is a bounded UPDATE only: no DELETE, TRUNCATE, DROP, CASCADE, INSERT or ALTER', () => {
-    expect(FIX_STATEMENTS).not.toMatch(/\b(DELETE|DROP|TRUNCATE|CASCADE|INSERT|ALTER)\b/i);
-    expect(FIX_STATEMENTS.match(/\bUPDATE\b/g)).toHaveLength(1);
-    expect(FIX_STATEMENTS).toMatch(/UPDATE "plan_ai_entitlements"/);
-    expect(FIX_STATEMENTS).toMatch(/\bWHERE e\."plan_id" = f\.plan_id/);
-  });
-
-  it('only touches rows still written by the backfill', () => {
-    expect(FIX_STATEMENTS).toMatch(/e\."updated_at" = e\."created_at"/);
-  });
-
-  it('re-enables only a legacy feature whose enabled is not a boolean (F1), never a JSON true', () => {
-    // A plan saved from the matrix with Vex voice on and Vexi voice off writes
-    // realtime_voice.enabled = true (OR of both voices) and its rows can carry
-    // updated_at = created_at too: keying on "not false" would switch the Vexi
-    // voice back on. Only a non-boolean enabled is what M3 copied wrong.
-    expect(FIX_STATEMENTS).toMatch(
-      /jsonb_typeof\(p\."ai_feature_flags" -> s\.source_feature -> 'enabled'\)\s+IS DISTINCT FROM 'boolean'/,
-    );
-    expect(FIX_STATEMENTS).not.toMatch(/IS DISTINCT FROM 'false'::jsonb/);
-  });
 
   it('the matrix always writes a boolean enabled for every gated legacy feature', () => {
     const rows = legacyFlagsToAIEntitlements({}).map((row) =>
@@ -242,14 +190,6 @@ describe('M4 — corrective migration of the backfill (F1, F6)', () => {
     for (const feature of ['vex_agent', 'streaming_chat', 'text_generation', 'rag_embeddings']) {
       expect(typeof (flags[feature] as Record<string, unknown>).enabled).toBe('boolean');
     }
-  });
-
-  it('carries the required header', () => {
-    expect(FIX).toMatch(/-- DATA IMPACT:/);
-    expect(FIX).toMatch(/-- {3}Approval:[\s\S]*PENDING/);
-    expect(FIX).toMatch(/-- {3}Rollback:/);
-    expect(FIX).toMatch(/jsonb_each\(p\.ai_feature_flags\)/);
-    expect(FIX).not.toMatch(/Rafael (dijo|aprobó|ordenó|said|approved)/i);
   });
 });
 
