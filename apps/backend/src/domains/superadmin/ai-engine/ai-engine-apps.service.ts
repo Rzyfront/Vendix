@@ -12,6 +12,27 @@ export class AIEngineAppsService {
     private readonly aiEngine: AIEngineService,
   ) {}
 
+  /**
+   * `fallback_config_id` must be an active config different from the primary.
+   * Reuses AI_CONFIG_001 (missing/inactive) and AI_APP_005 (same as primary).
+   */
+  private async assertValidFallback(
+    fallbackConfigId: number | null | undefined,
+    primaryConfigId: number | null | undefined,
+  ): Promise<void> {
+    if (!fallbackConfigId) return;
+    if (fallbackConfigId === primaryConfigId) {
+      throw new VendixHttpException(ErrorCodes.AI_APP_005);
+    }
+    const config = await this.prisma.ai_engine_configs.findUnique({
+      where: { id: fallbackConfigId },
+      select: { id: true, is_active: true },
+    });
+    if (!config || !config.is_active) {
+      throw new VendixHttpException(ErrorCodes.AI_CONFIG_001);
+    }
+  }
+
   async create(dto: CreateAIAppDto) {
     const existing = await this.prisma.ai_engine_applications.findUnique({
       where: { key: dto.key },
@@ -45,6 +66,8 @@ export class AIEngineAppsService {
       throw new VendixHttpException(ErrorCodes.AI_APP_005);
     }
 
+    await this.assertValidFallback(dto.fallback_config_id, dto.config_id);
+
     // Effective model_type for the new app: dto value, else config value, else 'text'.
     const effectiveModelType: ai_model_type_enum =
       dto.model_type ?? configModelType ?? 'text';
@@ -55,6 +78,7 @@ export class AIEngineAppsService {
         name: dto.name,
         description: dto.description,
         config_id: dto.config_id || null,
+        fallback_config_id: dto.fallback_config_id || null,
         system_prompt: dto.system_prompt,
         prompt_template: dto.prompt_template,
         temperature: dto.temperature,
@@ -206,6 +230,16 @@ export class AIEngineAppsService {
         throw new VendixHttpException(ErrorCodes.AI_CONFIG_001);
       }
       configModelType = config.model_type;
+    }
+
+    if (dto.fallback_config_id !== undefined || dto.config_id !== undefined) {
+      await this.assertValidFallback(
+        dto.fallback_config_id !== undefined
+          ? dto.fallback_config_id
+          : (existing as { fallback_config_id?: number | null })
+              .fallback_config_id,
+        dto.config_id !== undefined ? dto.config_id : existing.config_id,
+      );
     }
 
     // Effective model_type after the update: incoming dto value, else current row value.

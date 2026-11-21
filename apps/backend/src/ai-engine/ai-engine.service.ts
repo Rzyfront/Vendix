@@ -274,6 +274,55 @@ export class AIEngineService implements OnModuleInit {
   }
 
   /**
+   * Fallback target of an application (`fallback_config_id`). Only an active,
+   * loaded config different from the primary qualifies. `stream` additionally
+   * requires `chatStream`, and `agentic` the metered-usage capability.
+   */
+  private resolveFallbackTarget(
+    app: { fallback_config_id?: number | null; key?: string },
+    primaryConfigId: number | null,
+    mode: { stream?: boolean; agentic?: boolean } = {},
+  ): { provider: AIProvider; configId: number } | null {
+    const fallbackId = app.fallback_config_id;
+    if (!fallbackId || fallbackId === primaryConfigId) return null;
+    const provider = this.providers.get(fallbackId);
+    if (!provider) return null;
+    if (mode.stream && !provider.chatStream) return null;
+    if (mode.agentic && provider.supportsMeteredAgentStream?.() !== true)
+      return null;
+    if (mode.agentic && this.degradedAgentStreamConfigs.has(fallbackId))
+      return null;
+    return { provider, configId: fallbackId };
+  }
+
+  /** Attributes a failed primary attempt to its own config before the fallback serves. */
+  private logFailedPrimaryAttempt(
+    appKey: string,
+    configId: number | null,
+    error: string | undefined,
+    startTime: number,
+  ): void {
+    this.logger.warn(
+      `AI app "${appKey}" primary config ${configId ?? 'default'} failed; using fallback`,
+    );
+    const context = RequestContextService.asyncLocalStorage.getStore();
+    this.aiLoggingService.logRequest({
+      request_id: context?.request_id,
+      app_key: appKey,
+      config_id: configId ?? undefined,
+      organization_id: context?.organization_id,
+      store_id: context?.store_id,
+      user_id: context?.user_id,
+      prompt_tokens: 0,
+      completion_tokens: 0,
+      cost_usd: 0,
+      latency_ms: Date.now() - startTime,
+      status: 'error',
+      error_message: error,
+    });
+  }
+
+  /**
    * Resolves the provider for an application that ships without an explicit
    * `config_id`.
    *
@@ -587,68 +636,98 @@ export class AIEngineService implements OnModuleInit {
         error: 'No attempt made',
       };
 
-      for (let attempt = 0; attempt <= maxRetries; attempt++) {
-        lastResponse = await this.withProviderDeadline(options, (scoped) =>
-          this.observeProviderAttempt(
+      // Primary first; one fallback attempt (no retries) when configured.
+      const fallbackTarget = this.resolveFallbackTarget(app, resolvedConfigId);
+      const targets: Array<{ provider: AIProvider; configId: number | null }> =
+        [{ provider, configId: resolvedConfigId }];
+      if (fallbackTarget) targets.push(fallbackTarget);
+
+      for (let t = 0; t < targets.length; t++) {
+        const target = targets[t];
+        if (t > 0) {
+          this.logFailedPrimaryAttempt(
+            appKey,
             resolvedConfigId,
-            messages,
-            scoped,
-            () => provider.chat(messages, scoped),
-            attempt + 1,
-          ),
-        );
-        // Cancellation is terminal even when the application's existing retry
-        // policy allows another request. Never spend a closing/retry inference.
-        if (
-          ['AGENT_CANCELLED', 'AGENT_DEADLINE_EXCEEDED'].includes(
-            lastResponse.error_code ?? '',
-          )
-        ) {
-          logResponse = lastResponse;
-          return lastResponse;
+            lastResponse.error,
+            startTime,
+          );
+          resolvedConfigId = target.configId;
         }
-
-        if (lastResponse.success) {
-          // Sanitize thinking blocks based on config setting
-          const configId = app.config_id || this.defaultConfigId;
-          const thinking = this.isThinkingEnabled(configId);
-          lastResponse = this.sanitizeResponse(lastResponse, thinking);
-
-          // Post-process output format
-          lastResponse.content = this.formatOutput(
-            lastResponse.content || '',
-            app.output_format,
-          );
-
-          // Subscription quota consumption (best-effort; never throws).
-          await this.consumeSubscriptionQuota(
-            app.ai_feature_category,
-            lastResponse.usage?.totalTokens ??
-              (lastResponse.usage?.promptTokens ?? 0) +
-                (lastResponse.usage?.completionTokens ?? 0),
-            // ai-ingest: every call of one job shares `quotaKey` → 1 unit.
-            { appKey: app.key ?? appKey, callId: optionsOverride?.quotaKey ?? callId },
-          );
-
-          logStatus = 'success';
-          logResponse = lastResponse;
-          noteProviderOutcome(lastResponse, appKey);
-          return lastResponse;
-        }
-
-        if (attempt < maxRetries) {
-          this.logger.warn(
-            `AI app "${appKey}" attempt ${attempt + 1} failed, retrying in ${delayMs}ms`,
-          );
-          const wait = () => this.waitForProviderRetry(delayMs, options);
+        const attempts = t === 0 ? maxRetries : 0;
+        for (let attempt = 0; attempt <= attempts; attempt++) {
           try {
-            if (this.providerObserver)
-              await this.providerObserver.retry(delayMs, wait);
-            else await wait();
-          } catch (error) {
-            if (!isAgentAbort(error, options.signal)) throw error;
-            logResponse = agentAbortFailure(error, options.signal);
-            return logResponse;
+            lastResponse = await this.withProviderDeadline(options, (scoped) =>
+              this.observeProviderAttempt(
+                resolvedConfigId,
+                messages,
+                scoped,
+                () => target.provider.chat(messages, scoped),
+                attempt + 1,
+              ),
+            );
+          } catch (error: any) {
+            // Without a fallback the failure surfaces exactly as before.
+            if (t > 0 || !fallbackTarget) throw error;
+            lastResponse = { success: false, error: error?.message };
+          }
+          // Cancellation is terminal even when the application's existing retry
+          // policy allows another request. Never spend a closing/retry inference.
+          if (
+            ['AGENT_CANCELLED', 'AGENT_DEADLINE_EXCEEDED'].includes(
+              lastResponse.error_code ?? '',
+            )
+          ) {
+            logResponse = lastResponse;
+            return lastResponse;
+          }
+
+          if (lastResponse.success) {
+            // Sanitize thinking blocks based on config setting
+            const configId = resolvedConfigId;
+            const thinking = this.isThinkingEnabled(configId);
+            lastResponse = this.sanitizeResponse(lastResponse, thinking);
+            const stepCost = this.agentStreamCost(configId, lastResponse.usage);
+            if (stepCost !== null) lastResponse.cost_usd = stepCost;
+
+            // Post-process output format
+            lastResponse.content = this.formatOutput(
+              lastResponse.content || '',
+              app.output_format,
+            );
+
+            // Subscription quota consumption (best-effort; never throws).
+            await this.consumeSubscriptionQuota(
+              app.ai_feature_category,
+              lastResponse.usage?.totalTokens ??
+                (lastResponse.usage?.promptTokens ?? 0) +
+                  (lastResponse.usage?.completionTokens ?? 0),
+              // ai-ingest: every call of one job shares `quotaKey` → 1 unit.
+              {
+                appKey: app.key ?? appKey,
+                callId: optionsOverride?.quotaKey ?? callId,
+              },
+            );
+
+            logStatus = 'success';
+            logResponse = lastResponse;
+            noteProviderOutcome(lastResponse, appKey);
+            return lastResponse;
+          }
+
+          if (attempt < attempts) {
+            this.logger.warn(
+              `AI app "${appKey}" attempt ${attempt + 1} failed, retrying in ${delayMs}ms`,
+            );
+            const wait = () => this.waitForProviderRetry(delayMs, options);
+            try {
+              if (this.providerObserver)
+                await this.providerObserver.retry(delayMs, wait);
+              else await wait();
+            } catch (error) {
+              if (!isAgentAbort(error, options.signal)) throw error;
+              logResponse = agentAbortFailure(error, options.signal);
+              return logResponse;
+            }
           }
         }
       }
@@ -708,6 +787,15 @@ export class AIEngineService implements OnModuleInit {
         store_id: context?.store_id,
       });
     }
+  }
+
+  /** Adds the serving config's real cost to a `done` frame; absent when unknown. */
+  private withStreamCost(
+    chunk: AIStreamChunk,
+    configId: number | null,
+  ): AIStreamChunk {
+    const cost = this.agentStreamCost(configId, chunk.usage);
+    return cost === null ? chunk : { ...chunk, cost_usd: cost };
   }
 
   /** Decide the transport before spending a provider request, never after tokens. */
@@ -939,125 +1027,184 @@ export class AIEngineService implements OnModuleInit {
         options.deadlineMs = deadline.deadlineMs;
       }
 
-      try {
-        deadline?.assertCanStart();
-        if (agentic) {
-          if (meter) await meter.dispatch();
+      let activeProvider: AIProvider = provider;
+      let fallbackTarget = this.resolveFallbackTarget(app, resolvedConfigId, {
+        stream: true,
+        agentic,
+      });
+      // True once any frame reached the consumer: a fallback is then unsafe.
+      let emitted = false;
+      const isAbortCode = (code?: string) =>
+        code === 'AGENT_CANCELLED' || code === 'AGENT_DEADLINE_EXCEEDED';
+
+      while (true) {
+        try {
           deadline?.assertCanStart();
-          providerDispatched = true;
-        }
-        const stream =
-          this.providerObserver && this.trace?.currentSpan()
-            ? this.providerObserver.attemptStream(
-                resolvedConfigId
-                  ? this.configSettings.get(resolvedConfigId)
-                  : undefined,
-                this.providerAttributes(resolvedConfigId, messages, options),
-                () => provider.chatStream!(messages, options),
-              )
-            : provider.chatStream(messages, options);
-        for await (const chunk of agentDeadlineStream(stream, deadline)) {
           if (agentic) {
-            if (pendingTerminal)
-              throw new Error('Provider emitted data after a terminal frame');
-            // Only a complete terminal batch may become execution candidates.
-            if (chunk.type === 'tool_call' || chunk.type === 'tool_result')
-              throw new Error(
-                'Agent stream provider emitted a non-terminal tool call',
-              );
-            if (chunk.type === 'text')
-              accumulatedContent += chunk.content ?? '';
-            if (chunk.type === 'done' || chunk.type === 'error') {
-              pendingTerminal = chunk;
-              resultUsage = reportedAgentUsage(chunk.usage);
-              continue;
-            }
+            if (meter) await meter.dispatch();
+            deadline?.assertCanStart();
+            providerDispatched = true;
           }
-          lastChunk = chunk;
-          yield chunk;
-        }
-        if (agentic) {
-          if (!pendingTerminal)
-            throw new Error('Provider stream ended without a terminal result');
-          await recordMeter(resultUsage);
-          if (pendingTerminal.type === 'error') {
+          const stream =
+            this.providerObserver && this.trace?.currentSpan()
+              ? this.providerObserver.attemptStream(
+                  resolvedConfigId
+                    ? this.configSettings.get(resolvedConfigId)
+                    : undefined,
+                  this.providerAttributes(resolvedConfigId, messages, options),
+                  () => activeProvider.chatStream!(messages, options),
+                )
+              : activeProvider.chatStream!(messages, options);
+          for await (const chunk of agentDeadlineStream(stream, deadline)) {
+            if (agentic) {
+              if (pendingTerminal)
+                throw new Error('Provider emitted data after a terminal frame');
+              // Only a complete terminal batch may become execution candidates.
+              if (chunk.type === 'tool_call' || chunk.type === 'tool_result')
+                throw new Error(
+                  'Agent stream provider emitted a non-terminal tool call',
+                );
+              if (chunk.type === 'text')
+                accumulatedContent += chunk.content ?? '';
+              if (chunk.type === 'done' || chunk.type === 'error') {
+                pendingTerminal = chunk;
+                resultUsage = reportedAgentUsage(chunk.usage);
+                continue;
+              }
+            }
+            if (
+              !agentic &&
+              chunk.type === 'error' &&
+              !emitted &&
+              fallbackTarget &&
+              !isAbortCode(chunk.error_code)
+            )
+              throw new Error(chunk.error ?? 'Provider stream failed');
+            lastChunk =
+              chunk.type === 'done' && !agentic
+                ? this.withStreamCost(chunk, resolvedConfigId)
+                : chunk;
+            emitted = true;
+            yield lastChunk;
+          }
+          if (agentic) {
+            if (!pendingTerminal)
+              throw new Error(
+                'Provider stream ended without a terminal result',
+              );
+            await recordMeter(resultUsage);
+            if (pendingTerminal.type === 'error') {
+              if (
+                !emitted &&
+                fallbackTarget &&
+                !isAbortCode(pendingTerminal.error_code)
+              )
+                throw new Error(
+                  pendingTerminal.error ?? 'Provider stream failed',
+                );
+              lastChunk = {
+                ...pendingTerminal,
+                usage: resultUsage,
+                usage_state: resultUsage ? 'reported' : 'unknown',
+              };
+              yield lastChunk;
+              return;
+            }
+            if (!resultUsage) {
+              if (resolvedConfigId !== null)
+                this.degradedAgentStreamConfigs.add(resolvedConfigId);
+              throw Object.assign(
+                new Error('Provider stream completed without reported usage'),
+                {
+                  code: 'AI_STREAM_USAGE_UNAVAILABLE',
+                },
+              );
+            }
+            const completedCalls = validateAgentToolCalls(
+              pendingTerminal.tool_calls ?? [],
+              tools,
+            );
+            if (
+              (pendingTerminal.finish_reason === 'tool_calls' &&
+                !completedCalls.length) ||
+              (pendingTerminal.tool_calls?.length &&
+                pendingTerminal.finish_reason !== 'tool_calls')
+            )
+              throw new Error('Incomplete agent tool batch');
+            // Complete accounting before exposing done. Closing at this frame
+            // cannot turn the inference into a free or cancelled provider attempt.
+            await this.consumeSubscriptionQuota(
+              app.ai_feature_category,
+              resultUsage?.totalTokens ?? 0,
+              { appKey: app.key ?? appKey, callId },
+            );
+            quotaConsumed = true;
+            terminal = true;
+            const sanitized = this.sanitizeResponse(
+              { success: true, content: accumulatedContent },
+              this.isThinkingEnabled(resolvedConfigId),
+            );
             lastChunk = {
               ...pendingTerminal,
+              ...(completedCalls.length && { tool_calls: completedCalls }),
               usage: resultUsage,
+              content: this.formatOutput(
+                sanitized.content ?? '',
+                app.output_format,
+              ),
               usage_state: resultUsage ? 'reported' : 'unknown',
+              context_budget: contextBudget,
             };
+            lastChunk = this.withStreamCost(lastChunk, resolvedConfigId);
             yield lastChunk;
             return;
           }
-          if (!resultUsage) {
-            if (resolvedConfigId !== null)
-              this.degradedAgentStreamConfigs.add(resolvedConfigId);
-            throw Object.assign(
-              new Error('Provider stream completed without reported usage'),
-              {
-                code: 'AI_STREAM_USAGE_UNAVAILABLE',
-              },
-            );
-          }
-          const completedCalls = validateAgentToolCalls(
-            pendingTerminal.tool_calls ?? [],
-            tools,
-          );
+        } catch (error: any) {
           if (
-            (pendingTerminal.finish_reason === 'tool_calls' &&
-              !completedCalls.length) ||
-            (pendingTerminal.tool_calls?.length &&
-              pendingTerminal.finish_reason !== 'tool_calls')
-          )
-            throw new Error('Incomplete agent tool batch');
-          // Complete accounting before exposing done. Closing at this frame
-          // cannot turn the inference into a free or cancelled provider attempt.
-          await this.consumeSubscriptionQuota(
-            app.ai_feature_category,
-            resultUsage?.totalTokens ?? 0,
-            { appKey: app.key ?? appKey, callId },
-          );
-          quotaConsumed = true;
-          terminal = true;
-          const sanitized = this.sanitizeResponse(
-            { success: true, content: accumulatedContent },
-            this.isThinkingEnabled(resolvedConfigId),
-          );
+            fallbackTarget &&
+            !emitted &&
+            !(deadline && isAgentAbort(error, deadline.signal))
+          ) {
+            // Close the failed primary attempt on its own config, then switch once.
+            if (agentic) await recordMeter(resultUsage);
+            this.logFailedPrimaryAttempt(
+              appKey,
+              resolvedConfigId,
+              error?.message,
+              startTime,
+            );
+            activeProvider = fallbackTarget.provider;
+            resolvedConfigId = fallbackTarget.configId;
+            fallbackTarget = null;
+            pendingTerminal = undefined;
+            accumulatedContent = '';
+            resultUsage = undefined;
+            providerDispatched = false;
+            metered = false;
+            continue;
+          }
           lastChunk = {
-            ...pendingTerminal,
-            ...(completedCalls.length && { tool_calls: completedCalls }),
-            usage: resultUsage,
-            content: this.formatOutput(
-              sanitized.content ?? '',
-              app.output_format,
-            ),
-            usage_state: resultUsage ? 'reported' : 'unknown',
-            context_budget: contextBudget,
+            type: 'error',
+            ...(agentic && {
+              error_code:
+                deadline && isAgentAbort(error, deadline.signal)
+                  ? agentAbortFailure(error, deadline.signal).error_code
+                  : error?.code === 'AI_STREAM_USAGE_UNAVAILABLE'
+                    ? error.code
+                    : 'AI_STREAM_INVALID',
+              usage: resultUsage,
+              usage_state: resultUsage
+                ? ('reported' as const)
+                : ('unknown' as const),
+            }),
+            error:
+              deadline && isAgentAbort(error, deadline.signal)
+                ? agentAbortFailure(error, deadline.signal).error
+                : error.message,
           };
           yield lastChunk;
-          return;
         }
-      } catch (error: any) {
-        lastChunk = {
-          type: 'error',
-          ...(agentic && {
-            error_code:
-              deadline && isAgentAbort(error, deadline.signal)
-                ? agentAbortFailure(error, deadline.signal).error_code
-                : error?.code === 'AI_STREAM_USAGE_UNAVAILABLE'
-                  ? error.code
-                  : 'AI_STREAM_INVALID',
-            usage: resultUsage,
-            usage_state: resultUsage
-              ? ('reported' as const)
-              : ('unknown' as const),
-          }),
-          error:
-            deadline && isAgentAbort(error, deadline.signal)
-              ? agentAbortFailure(error, deadline.signal).error
-              : error.message,
-        };
-        yield lastChunk;
+        break;
       }
 
       // Consume quota on successful completion.

@@ -4,6 +4,7 @@ import {
   IsBoolean,
   IsNotEmpty,
   IsNumber,
+  IsInt,
   IsObject,
   IsIn,
   MaxLength,
@@ -55,6 +56,12 @@ export class CreateAIAppDto {
   @IsOptional()
   @IsNumber()
   config_id?: number | null;
+
+  /** Backup model: used once when the primary provider fails before output. */
+  @IsOptional()
+  @IsInt()
+  @Min(1)
+  fallback_config_id?: number | null;
 
   @IsOptional()
   @IsString()
