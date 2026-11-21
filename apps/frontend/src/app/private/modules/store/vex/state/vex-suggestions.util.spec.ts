@@ -1,4 +1,7 @@
-import { resolveWelcomeSuggestions } from './vex-suggestions.util';
+import {
+  resolveWelcomeSuggestions,
+  type VexSuggestionId,
+} from './vex-suggestions.util';
 
 describe('resolveWelcomeSuggestions (welcome chips follow the store)', () => {
   it('shows «¿Qué debo reabastecer?» when the store has stock under its minimum', () => {
@@ -25,7 +28,11 @@ describe('resolveWelcomeSuggestions (welcome chips follow the store)', () => {
   });
 
   it('falls back to the default questions when nothing usable arrives', () => {
-    const fallback = ['sales_today', 'top_products', 'overdue_receivables'];
+    const fallback: VexSuggestionId[] = [
+      'sales_today',
+      'top_products',
+      'overdue_receivables',
+    ];
     expect(resolveWelcomeSuggestions(null).map((chip) => chip.id)).toEqual(fallback);
     expect(resolveWelcomeSuggestions([]).map((chip) => chip.id)).toEqual(fallback);
     expect(resolveWelcomeSuggestions([{ id: 'made_up' }]).map((chip) => chip.id)).toEqual(
