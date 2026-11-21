@@ -49,6 +49,7 @@ export { createShippingTools } from './domains/shipping.tools';
 export { createNotificationTools } from './domains/notifications.tools';
 export { createReminderTools } from './domains/reminders.tools';
 export { createFollowupTools } from './domains/followup.tools';
+export { createComputeTools } from './domains/compute.tools';
 export { createSearchTools } from './domains/search.tools';
 export { createBusinessTools } from './domains/business.tools';
 export { createApiBridgeTools } from './bridge/api-bridge.tools';

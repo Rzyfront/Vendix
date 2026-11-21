@@ -220,7 +220,15 @@ export interface AIStreamChunk {
   /** Present on `ui_block`: the rendered block reference and payload. */
   ui_block?: {
     block_id: string;
-    kind: 'table' | 'chart' | 'kpi' | 'image' | 'file' | 'markdown';
+    kind:
+      | 'table'
+      | 'chart'
+      | 'kpi'
+      | 'image'
+      | 'file'
+      | 'markdown'
+      | 'timeline'
+      | 'list';
     version?: number;
     spec?: Record<string, any>;
     data?: unknown;
