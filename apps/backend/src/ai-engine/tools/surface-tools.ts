@@ -8,6 +8,10 @@
  */
 export const VEX_ONLY_TOOL_NAMES: ReadonlySet<string> = new Set([
   'suggest_followup',
+  // F4 T31: store memory is Vex-only (D7); the turn injects conversation_id so
+  // the purge of a conversation can delete the memories born in it.
+  'remember',
+  'forget',
 ]);
 
 export function isVexOnlyTool(name: string): boolean {
