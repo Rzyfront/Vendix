@@ -163,6 +163,22 @@ export class AgentMemoryService {
     };
   }
 
+  /**
+   * Whether the store switched Vex on: only an explicit
+   * `settings.vex.enabled === true` counts, the same fail-closed reading as
+   * `VexEnabledGuard` (missing row, missing block or `false` answer false).
+   * The memory tools check it themselves because they also run where that
+   * guard does not exist (`/mcp`).
+   */
+  async isVexEnabledForAgent(storeId: number): Promise<boolean> {
+    const row = await this.prisma.store_settings.findUnique({
+      where: { store_id: storeId },
+      select: { settings: true },
+    });
+    const settings = row?.settings as { vex?: { enabled?: boolean } } | null;
+    return settings?.vex?.enabled === true;
+  }
+
   /** Whole-store rows plus the actor's own rows (always store-wide today). */
   private visible(actor: MemoryActor) {
     return {
@@ -205,7 +221,10 @@ export class AgentMemoryService {
     input: RememberInput,
   ): Promise<{ item: MemoryItem; replaced: boolean }> {
     const key = this.normalizeKey(input.key);
-    const content = this.canonicalContent(key, this.normalizeContent(input.content));
+    const content = this.canonicalContent(
+      key,
+      this.normalizeContent(input.content),
+    );
     this.assertNoSecret(key, content);
     const kind: MemoryKind = input.kind ?? 'preference';
     if (!MEMORY_KINDS.includes(kind)) {
@@ -436,14 +455,19 @@ export class AgentMemoryService {
     const others = rows.filter((row) => row.id !== replacing?.id);
     const entries = others.length + 1;
     const chars =
-      others.reduce((sum, row) => sum + memoryBlockCost(row.key, row.content), 0) +
-      memoryBlockCost(key, content);
+      others.reduce(
+        (sum, row) => sum + memoryBlockCost(row.key, row.content),
+        0,
+      ) + memoryBlockCost(key, content);
     if (entries > MEMORY_MAX_ENTRIES || chars > MEMORY_MAX_CHARS) {
       throw new VendixHttpException(ErrorCodes.AI_MEMORY_LIMIT_001);
     }
   }
 
-  private async findVisible(actor: MemoryActor, id: number): Promise<MemoryRow> {
+  private async findVisible(
+    actor: MemoryActor,
+    id: number,
+  ): Promise<MemoryRow> {
     const row = (await this.prisma.ai_agent_memories.findFirst({
       where: { id, ...this.visible(actor) },
     })) as MemoryRow | null;

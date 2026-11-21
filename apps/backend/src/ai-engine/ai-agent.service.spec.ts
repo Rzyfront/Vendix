@@ -56,6 +56,8 @@ const step = (order: number, status: any) => ({
 describe('AIAgentService.runAgentStream', () => {
   let chat: jest.Mock;
   let executeTool: jest.Mock;
+  /** Execution options the loop handed the registry, by tool name (H6). */
+  let executionOptions: jest.Mock;
   let awaitResult: jest.Mock;
   let emit: jest.Mock;
   let registry: any;
@@ -73,6 +75,7 @@ describe('AIAgentService.runAgentStream', () => {
     } as any);
     chat = jest.fn();
     executeTool = jest.fn().mockResolvedValue('{"ok":true}');
+    executionOptions = jest.fn();
     awaitResult = jest.fn().mockResolvedValue('{"ui":"ok"}');
     emit = jest.fn();
     const definitions = [
@@ -128,6 +131,7 @@ describe('AIAgentService.runAgentStream', () => {
       isClientSide: (n: string) => n.startsWith('ui_'),
       executeTool,
       executeToolResult: async (name, args, options) => {
+        executionOptions(name, options);
         try {
           return normalizeToolResult(
             options?.confirmationToken
@@ -764,11 +768,19 @@ describe('AIAgentService.runAgentStream', () => {
       ([name]) => name === 'remember',
     );
     expect(remembered).toHaveLength(1);
+    // P0-1: the arguments never carry a conversation; the turn's travels in
+    // the execution options, which the registry puts in the tool context.
     expect(remembered[0][1]).toEqual({
       key: 'learning.format',
       content: 'video',
-      conversation_id: 7,
     });
+    const options = executionOptions.mock.calls.filter(
+      ([name]) => name === 'remember',
+    );
+    expect(options).toHaveLength(1);
+    expect(options[0][1]).toEqual(
+      expect.objectContaining({ conversationId: 7 }),
+    );
   });
 
   it('(vex-v) a render tool success emits a ui_block frame', async () => {

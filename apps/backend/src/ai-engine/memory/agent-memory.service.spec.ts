@@ -64,7 +64,11 @@ function fakePrisma() {
 
 const ana: MemoryActor = { store_id: 1, organization_id: 10, user_id: 7 };
 const beto: MemoryActor = { store_id: 1, organization_id: 10, user_id: 8 };
-const otherStore: MemoryActor = { store_id: 2, organization_id: 20, user_id: 9 };
+const otherStore: MemoryActor = {
+  store_id: 2,
+  organization_id: 20,
+  user_id: 9,
+};
 
 function setup() {
   const fake = fakePrisma();
@@ -105,7 +109,10 @@ describe('AgentMemoryService', () => {
 
   it('upserts by key, recording source conversation and the writer', async () => {
     const { service, rows } = setup();
-    const first = await service.remember(ana, agentWrite('learning.format', 'video'));
+    const first = await service.remember(
+      ana,
+      agentWrite('learning.format', 'video'),
+    );
     expect(first.replaced).toBe(false);
     const second = await service.remember(
       beto,
@@ -125,11 +132,19 @@ describe('AgentMemoryService', () => {
 
   it('edit changes the snapshot text and turns the row manual, detached from its conversation', async () => {
     const { service, rows } = setup();
-    const { item } = await service.remember(ana, agentWrite('learning.format', 'video'));
-    expect(await service.buildSnapshotBlock(1)).toContain('- learning.format: video');
+    const { item } = await service.remember(
+      ana,
+      agentWrite('learning.format', 'video'),
+    );
+    expect(await service.buildSnapshotBlock(1)).toContain(
+      '- learning.format: video',
+    );
 
     const edited = await service.edit(beto, item.id, 'post');
-    expect(edited).toMatchObject({ origin: 'manual', source_conversation_id: null });
+    expect(edited).toMatchObject({
+      origin: 'manual',
+      source_conversation_id: null,
+    });
     expect(edited.updated_by).toEqual({ id: 8, name: 'Beto' });
     const snapshot = await service.buildSnapshotBlock(1);
     expect(snapshot).toContain('- learning.format: post');
@@ -138,7 +153,10 @@ describe('AgentMemoryService', () => {
 
     // an agent write on a manual row never downgrades it
     await service.remember(ana, agentWrite('learning.format', 'video', 300));
-    expect(rows[0]).toMatchObject({ origin: 'manual', source_conversation_id: null });
+    expect(rows[0]).toMatchObject({
+      origin: 'manual',
+      source_conversation_id: null,
+    });
   });
 
   it('delete removes the memory from the snapshot; delete all clears the store only', async () => {
@@ -186,8 +204,12 @@ describe('AgentMemoryService', () => {
     const { service } = setup();
     // each line costs `- c.N: ` (7) + content + newline (1)
     const full = 'a'.repeat(500);
-    for (let i = 0; i < 3; i++) await service.remember(ana, agentWrite(`c.${i}`, full));
-    await service.remember(ana, agentWrite('c.3', 'a'.repeat(2000 - 3 * 508 - 8)));
+    for (let i = 0; i < 3; i++)
+      await service.remember(ana, agentWrite(`c.${i}`, full));
+    await service.remember(
+      ana,
+      agentWrite('c.3', 'a'.repeat(2000 - 3 * 508 - 8)),
+    );
     expect((await service.list(ana)).limits.used_chars).toBe(2000);
     await expect(
       service.remember(ana, agentWrite('c.4', 'una más')),
@@ -197,8 +219,12 @@ describe('AgentMemoryService', () => {
     ).rejects.toMatchObject({ errorCode: 'AI_MEMORY_LIMIT_001' });
     // editing a row counts the total without its old text
     const c0 = (await service.list(ana)).items.find((i) => i.key === 'c.0')!;
-    await expect(service.edit(ana, c0.id, 'b'.repeat(500))).resolves.toBeDefined();
-    await expect(service.edit(ana, c0.id, 'b'.repeat(501))).rejects.toMatchObject({
+    await expect(
+      service.edit(ana, c0.id, 'b'.repeat(500)),
+    ).resolves.toBeDefined();
+    await expect(
+      service.edit(ana, c0.id, 'b'.repeat(501)),
+    ).rejects.toMatchObject({
       errorCode: 'AI_MEMORY_LIMIT_001',
     });
   });
@@ -211,19 +237,28 @@ describe('AgentMemoryService', () => {
     'cédula del cliente 1.020.304.050',
     'usa la api key: abcd1234efgh5678',
     'sk_live_abcdefghijklmnop',
-  ])('rejects secret-like content "%s" with AI_MEMORY_FORBIDDEN_001', async (text) => {
-    const { service, rows } = setup();
-    await expect(
-      service.remember(ana, agentWrite('x.secret', text)),
-    ).rejects.toMatchObject({ errorCode: 'AI_MEMORY_FORBIDDEN_001' });
-    expect(rows).toHaveLength(0);
-    expect(looksLikeSecret(text)).toBe(true);
-  });
+  ])(
+    'rejects secret-like content "%s" with AI_MEMORY_FORBIDDEN_001',
+    async (text) => {
+      const { service, rows } = setup();
+      await expect(
+        service.remember(ana, agentWrite('x.secret', text)),
+      ).rejects.toMatchObject({ errorCode: 'AI_MEMORY_FORBIDDEN_001' });
+      expect(rows).toHaveLength(0);
+      expect(looksLikeSecret(text)).toBe(true);
+    },
+  );
 
   it('accepts ordinary preferences and rejects invalid keys', async () => {
     const { service } = setup();
     await expect(
-      service.remember(ana, agentWrite('tone.reports', 'Reportes cortos, sin emojis, desde el 15 de marzo de 2026')),
+      service.remember(
+        ana,
+        agentWrite(
+          'tone.reports',
+          'Reportes cortos, sin emojis, desde el 15 de marzo de 2026',
+        ),
+      ),
     ).resolves.toBeDefined();
     await expect(
       service.remember(ana, agentWrite('Mala Clave!', 'x')),
@@ -255,13 +290,22 @@ describe('AgentMemoryService', () => {
     const { service, rows } = setup();
     await service.remember(ana, agentWrite('p.agent', 'a', 100));
     await service.remember(ana, agentWrite('p.other', 'b', 101));
-    const edited = await service.remember(ana, agentWrite('p.edited', 'c', 100));
+    const edited = await service.remember(
+      ana,
+      agentWrite('p.edited', 'c', 100),
+    );
     await service.edit(ana, edited.item.id, 'c editado');
     await service.remember(otherStore, agentWrite('p.foreign', 'd', 100));
 
-    const count = await service.deleteUnEditedFromConversation(100, { storeId: 1 });
+    const count = await service.deleteUnEditedFromConversation(100, {
+      storeId: 1,
+    });
     expect(count).toBe(1);
-    expect(rows.map((r) => r.key).sort()).toEqual(['p.edited', 'p.foreign', 'p.other']);
+    expect(rows.map((r) => r.key).sort()).toEqual([
+      'p.edited',
+      'p.foreign',
+      'p.other',
+    ]);
   });
 
   it('every memory the caps accept reaches the block Vex receives', async () => {
@@ -299,7 +343,8 @@ describe('AgentMemoryService', () => {
     const header = (await service.buildSnapshotBlock(1)).split('\n')[0];
     const block = await service.buildSnapshotBlock(1);
     expect(block.length - header.length).toBe(2000);
-    for (let i = 0; i < 4; i++) expect(block).toContain(`- e.${i}: ${'z'.repeat(492)}`);
+    for (let i = 0; i < 4; i++)
+      expect(block).toContain(`- e.${i}: ${'z'.repeat(492)}`);
 
     await expect(
       service.edit(ana, rows[0].id, 'z'.repeat(493)),
@@ -308,5 +353,38 @@ describe('AgentMemoryService', () => {
       service.remember(ana, agentWrite('e.4', 'z')),
     ).rejects.toMatchObject({ errorCode: 'AI_MEMORY_LIMIT_001' });
     expect(rows).toHaveLength(4);
+  });
+});
+
+describe('AgentMemoryService.isVexEnabledForAgent (P0-1)', () => {
+  const withSettings = (row: { settings: unknown } | null) => {
+    const findUnique = jest.fn(async () => row);
+    const service = new AgentMemoryService({
+      store_settings: { findUnique },
+    } as never);
+    return { service, findUnique };
+  };
+
+  it('is true only for an explicit vex.enabled === true of that store', async () => {
+    const { service, findUnique } = withSettings({
+      settings: { vex: { enabled: true } },
+    });
+    await expect(service.isVexEnabledForAgent(1)).resolves.toBe(true);
+    expect(findUnique).toHaveBeenCalledWith({
+      where: { store_id: 1 },
+      select: { settings: true },
+    });
+  });
+
+  it.each([
+    ['enabled false', { settings: { vex: { enabled: false } } }],
+    ['enabled as a string', { settings: { vex: { enabled: 'true' } } }],
+    ['no vex block', { settings: { vexi: { enabled: true } } }],
+    ['null settings', { settings: null }],
+    ['no row', null],
+  ])('fails closed: %s', async (_case, row) => {
+    await expect(
+      withSettings(row).service.isVexEnabledForAgent(1),
+    ).resolves.toBe(false);
   });
 });

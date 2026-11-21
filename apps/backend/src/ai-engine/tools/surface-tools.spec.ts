@@ -1,24 +1,17 @@
 import { withTurnConversationId } from './surface-tools';
 
 describe('withTurnConversationId (H6)', () => {
-  it('remember always carries the turn conversation, even when the model invents one', () => {
+  it('remember never carries a conversation_id argument: the turn binds it outside the args', () => {
     expect(
       withTurnConversationId(
         'remember',
         { key: 'learning.format', content: 'video', conversation_id: 999 },
         55,
       ),
-    ).toEqual({
-      key: 'learning.format',
-      content: 'video',
-      conversation_id: 55,
-    });
+    ).toEqual({ key: 'learning.format', content: 'video' });
     expect(
       withTurnConversationId('remember', { key: 'k', content: 'c' }, 55),
-    ).toEqual({ key: 'k', content: 'c', conversation_id: 55 });
-  });
-
-  it('remember drops a model conversation id when the turn has none', () => {
+    ).toEqual({ key: 'k', content: 'c' });
     expect(
       withTurnConversationId(
         'remember',

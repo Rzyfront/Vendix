@@ -33,6 +33,7 @@ describe('mcp-tool.provider · T5 sunset en el catálogo', () => {
     const registry = {
       getAvailableDefinitions: jest.fn().mockReturnValue(DEFINITIONS),
       getToolVersion: jest.fn().mockReturnValue('1'),
+      canonicalName: jest.fn((name: string) => name),
       getDeprecation: jest.fn((name: string) =>
         name === 'fetch_order'
           ? { since: '1', sunset: 'v9', replacedBy: 'get_order' }
