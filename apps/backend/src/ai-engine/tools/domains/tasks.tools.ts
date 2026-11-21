@@ -86,6 +86,9 @@ export function createTaskTools({
   return [
     {
       name: 'queue_task',
+      access: 'public',
+      accessReason:
+        'Only enqueues or parses what the caller attached; every write later runs through permission-checked tools (live permissions ∩ the task authority snapshot).',
       version: '1',
       domain: 'tasks',
       readOnly: true,
@@ -138,6 +141,9 @@ export function createTaskTools({
     },
     {
       name: 'bulk_prepare',
+      access: 'public',
+      accessReason:
+        'Only enqueues or parses what the caller attached; every write later runs through permission-checked tools (live permissions ∩ the task authority snapshot).',
       version: '1',
       domain: 'tasks',
       readOnly: true,

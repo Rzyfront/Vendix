@@ -11,6 +11,9 @@ export function createProceduralRecipeTools(): RegisteredTool[] {
   return [
     {
       name: 'search_recipes',
+      access: 'public',
+      accessReason:
+        'Agent procedural memory; reads no business data.',
       version: '1',
       domain: 'procedural_memory',
       readOnly: true,
@@ -29,6 +32,9 @@ export function createProceduralRecipeTools(): RegisteredTool[] {
     },
     {
       name: 'load_recipe',
+      access: 'public',
+      accessReason:
+        'Agent procedural memory; reads no business data.',
       version: '1',
       domain: 'procedural_memory',
       readOnly: true,

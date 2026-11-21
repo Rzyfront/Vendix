@@ -6,7 +6,7 @@ import { ActivatedRoute, Router, convertToParamMap } from '@angular/router';
 import { provideMockStore } from '@ngrx/store/testing';
 import { of } from 'rxjs';
 import { ToastService } from '../../../../../../shared/components/toast/toast.service';
-import { AIEngineService } from '../../../ai-engine/services/ai-engine.service';
+import { AI_CAPABILITIES } from '../../../../../../shared/constants/ai-capabilities';
 import { SubscriptionAdminService } from '../../services/subscription-admin.service';
 import { PlanFormComponent } from './plan-form.component';
 
@@ -17,6 +17,7 @@ describe('PlanFormComponent: Límites de Flujos (P7.1)', () => {
     getPlanById: jasmine.createSpy('getPlanById'),
     updatePlan: jasmine.createSpy('updatePlan'),
     createPlan: jasmine.createSpy('createPlan'),
+    getPlans: jasmine.createSpy('getPlans'),
   };
 
   let fixture: ComponentFixture<PlanFormComponent>;
@@ -25,6 +26,10 @@ describe('PlanFormComponent: Límites de Flujos (P7.1)', () => {
     service.getPlanById.calls.reset();
     service.updatePlan.calls.reset();
     service.createPlan.calls.reset();
+    service.getPlans.calls.reset();
+    service.getPlans.and.returnValue(
+      of({ success: true, data: [], meta: { total: 0, page: 1, limit: 100, totalPages: 0 } }),
+    );
     service.getPlanById.and.returnValue(of({ success: true, data: plan }));
     service.updatePlan.and.returnValue(of({ success: true }));
     service.createPlan.and.returnValue(of({ success: true }));
@@ -36,15 +41,6 @@ describe('PlanFormComponent: Límites de Flujos (P7.1)', () => {
         provideHttpClientTesting(),
         provideMockStore({ initialState: { tenant: { domainConfig: null } } }),
         { provide: SubscriptionAdminService, useValue: service },
-        {
-          provide: AIEngineService,
-          useValue: {
-            getConfigs: () => of({ data: [] }),
-            getApps: () => of({ data: [] }),
-            getAgents: () => of({ data: [] }),
-            getTools: () => of([]),
-          },
-        },
         { provide: ToastService, useValue: { warning: jasmine.createSpy(), error: jasmine.createSpy() } },
         { provide: Router, useValue: { navigate: jasmine.createSpy('navigate') } },
         {
@@ -132,5 +128,35 @@ describe('PlanFormComponent: Límites de Flujos (P7.1)', () => {
     const cmp = setup('7', stored({ workflow_limits: limits }));
     cmp.onSubmit();
     expect(service.updatePlan.calls.mostRecent().args[1].workflow_limits).toEqual(limits);
+  });
+
+  it('a new plan sends the complete catalog list in ai_entitlements and no ai_feature_flags', () => {
+    const cmp = setup(null);
+    cmp.form.patchValue({ code: 'nuevo', name: 'Nuevo' });
+    cmp.onSubmit();
+    const payload = service.createPlan.calls.mostRecent().args[0] as unknown as Record<string, unknown>;
+    const rows = payload['ai_entitlements'] as { agent_key: string; capability_key: string; enabled: boolean }[];
+    expect(rows.map((r) => `${r.agent_key}.${r.capability_key}`)).toEqual(
+      AI_CAPABILITIES.map((c) => `${c.agent_key}.${c.capability_key}`),
+    );
+    expect(rows.find((r) => r.agent_key === 'vex' && r.capability_key === 'agent')!.enabled).toBeFalse();
+    expect('ai_feature_flags' in payload).toBeFalse();
+  });
+
+  it('saving a stored plan keeps its rows and fills the missing ones, never dropping a capability', () => {
+    const cmp = setup(
+      '7',
+      stored({
+        ai_entitlements: [
+          { agent_key: 'vex', capability_key: 'agent', enabled: true, cap_value: 200, on_limit: 'warn' },
+        ],
+      }),
+    );
+    cmp.onSubmit();
+    const rows = service.updatePlan.calls.mostRecent().args[1].ai_entitlements!;
+    expect(rows.length).toBe(AI_CAPABILITIES.length);
+    expect(rows[0]).toEqual(
+      { agent_key: 'vex', capability_key: 'agent', enabled: true, cap_value: 200, on_limit: 'warn' },
+    );
   });
 });

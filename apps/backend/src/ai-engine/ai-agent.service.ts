@@ -1,3 +1,4 @@
+import { roleDeniedAreasPrompt } from './tools/role-denied-areas';
 import { ProceduralMemoryService } from './memory/procedural-memory.service';
 import { RecipeSession } from './memory/recipe.interface';
 import { compactRecoverableToolResult } from './context/tool-result-compaction';
@@ -236,8 +237,8 @@ export interface AgentRunParams {
    */
   agent_key?: string;
   /**
-   * Agent-row tool scope. Intersected with the caller's permissions and the
-   * plan allowlist (`allowed_tools` when non-empty), minus `denied_tools`
+   * Agent-row tool scope. Intersected with the caller's permissions
+   * (`allowed_tools` when non-empty), minus `denied_tools`
    * LAST — a deny always wins, never inverted.
    */
   agent_allowed_tools?: string[];
@@ -537,37 +538,35 @@ export class AIAgentService {
   }
 
   /**
-   * F3 — allowlist efectiva de tools del plan (`tools_allowed` de la feature
-   * de cuota del turno: `vex_agent` en turnos Vex, `tool_agents` en el resto).
+   * Agent gate of the turn (N4: the plan never restricts tools). It has ONE
+   * meaning: the agent is disabled for the plan (`SUBSCRIPTION_005`), the quota
+   * is exhausted (`SUBSCRIPTION_006`) or the subscription is in a terminal
+   * state. The tools themselves are limited only by the caller's role
+   * permissions (validated again on every tool) and by the agent row's
+   * technical exclusions; a plan's legacy `tools_allowed` is inert.
    *
-   * - Sin `storeId` → `null`: llamada interna, sin alcance de plan.
-   * - Gate bloqueado (feature deshabilitada → `SUBSCRIPTION_005`, cuota
-   *   agotada → `SUBSCRIPTION_006`, estado terminal) → set vacío: el turno
-   *   sigue sin tools en lugar de ofrecer el catálogo completo.
-   * - Gate permitido + `tools_allowed` declarado → `*` habilita el catálogo
-   *   permitido, un dominio habilita sus tools y un nombre solo esa tool.
-   * - Gate permitido + sin lista declarada → `null` (el plan no acota).
-   * - Fallo del gate → `null` + warn: no se rompe el turno por un fallo de
-   *   infraestructura de metering; cada iteración sigue pasando por el gate
-   *   de `run()` (F2).
-   *
-   * El filtrado aplica siempre, también en modo log-only: la lista es alcance
-   * del plan, no enforcement — ofrecer tools que el plan no incluye sería
-   * regalar capacidad que la tienda no compró.
+   * Returns `true` when the turn may be offered tools.
+   * - No `storeId` → `true`: internal call, no plan scope.
+   * - Gate denied → `false`: the turn is left with no tools instead of the
+   *   whole catalog. The upstream gates (`AiAccessGuard`,
+   *   `AIEngineService.runSubscriptionGate` on every iteration) already cut the
+   *   turn with the user-facing error; this keeps the catalog fail-closed too.
+   * - Lookup failure → `!failClosed` + warn: durable tasks fail closed, an
+   *   interactive turn is not broken by a metering infrastructure failure
+   *   (every iteration still goes through the `run()` gate).
    */
-  private async resolvePlanToolAllowlist(
+  private async isAgentGateOpen(
     storeId: number | undefined,
     agentKey?: string,
     failClosed = false,
-  ): Promise<Set<string> | null> {
-    if (!storeId) return null;
+  ): Promise<boolean> {
+    if (!storeId) return true;
     const feature = this.quotaFeatureFor(agentKey);
     try {
-      const [gate, config] = await Promise.all([
-        this.subscriptionAccess.canUseAIFeature(storeId, feature),
-        this.subscriptionAccess.getAIFeatureConfig(storeId, feature),
-      ]);
-
+      const gate = await this.subscriptionAccess.canUseAIFeature(
+        storeId,
+        feature,
+      );
       this.logger.log(
         JSON.stringify({
           event: 'AI_TOOLS_GATE',
@@ -575,24 +574,14 @@ export class AIAgentService {
           feature,
           allowed: gate.allowed,
           reason: gate.reason ?? null,
-          tools_allowed_declared: Array.isArray(config?.tools_allowed)
-            ? config.tools_allowed.length
-            : null,
         }),
       );
-
-      if (!gate.allowed) return new Set();
-      if (!config || !Array.isArray(config.tools_allowed)) return null;
-      return new Set(
-        config.tools_allowed.map((name) =>
-          this.toolRegistry.canonicalName(name),
-        ),
-      );
+      return gate.allowed;
     } catch (err) {
       this.logger.warn(
         `AI_TOOLS_GATE lookup failed for store=${storeId}: REDACTED_ERROR`,
       );
-      return failClosed ? new Set() : null;
+      return !failClosed;
     }
   }
 
@@ -1325,7 +1314,7 @@ export class AIAgentService {
       allowed_tools: params.agent_allowed_tools,
       denied_tools: params.agent_denied_tools,
     });
-    const plan = await this.resolvePlanToolAllowlist(
+    const gateOpen = await this.isAgentGateOpen(
       context?.store_id,
       params.agent_key,
       true,
@@ -1335,9 +1324,7 @@ export class AIAgentService {
       : null;
     const allowed = permissionTools.filter(
       (d) =>
-        (plan === null ||
-          plan.has('*') ||
-          this.toolRegistry.matchesScope(d.function.name, plan)) &&
+        gateOpen &&
         (!scope || this.toolRegistry.matchesScope(d.function.name, scope)),
     );
     // Existing plan-only scaffold exception. Never add bridge/business/discovery here;
@@ -1488,8 +1475,7 @@ export class AIAgentService {
         : (context?.roles ?? []);
     // Agent scope narrows the permission catalog: user perms ∩ agent
     // allowed_tools (when non-empty) − agent denied_tools, deny applied last.
-    // The plan allowlist intersects below, so the final catalog is the triple
-    // intersection minus the deny list. Without agent scope this is exactly
+    // Without agent scope this is exactly
     // `getAvailableDefinitions` and Vexi behaves as before.
     const hasAgentScope =
       (params.agent_allowed_tools?.length ?? 0) > 0 ||
@@ -1504,22 +1490,15 @@ export class AIAgentService {
           })
         : this.toolRegistry.getAvailableDefinitions(authScopes);
 
-    // F3 — el plan del tenant filtra el catálogo del turno: el modelo solo ve
-    // la intersección entre los permisos del caller y `tools_allowed`. Sin
-    // store_id (llamadas internas, cron, super-admin) se conserva el
-    // comportamiento actual. `null` = sin alcance de plan; un `Set` (quizá
-    // vacío) = alcance aplicado.
-    const planAllowed = await this.resolvePlanToolAllowlist(
+    // N4 — the plan does not restrict tools: the catalog is the caller's role
+    // permissions (+ agent scope). The plan only decides whether the agent may
+    // run at all (disabled / quota exhausted → no tools, fail-closed).
+    const gateOpen = await this.isAgentGateOpen(
       context?.store_id,
       params.agent_key,
       !!params.durable,
     );
-    const toolDefinitions =
-      planAllowed === null || planAllowed.has('*')
-        ? permissionTools
-        : permissionTools.filter((tool) =>
-            this.toolRegistry.matchesScope(tool.function.name, planAllowed),
-          );
+    const toolDefinitions = gateOpen ? permissionTools : [];
 
     // The caller's narrowing uses the SAME domain/name/alias semantics as the
     // agent row. Exact-name filtering here used to erase authorized domains.
@@ -1537,8 +1516,8 @@ export class AIAgentService {
     let toolCachePrefix: number | undefined;
 
     // The plan tools are the loop's own scaffolding, not tenant capability: with
-    // a hook present they must be offered even if the tenant allowlist or the
-    // caller's `tools` narrowing left them out, or the model could never close
+    // a hook present they must be offered even if the
+    // caller's `tools` narrowing or a closed gate left them out, or the model could never close
     // a plan. They come from the permission-filtered catalog so they still
     // respect the caller's scopes.
     if (params.plan) {
@@ -1719,6 +1698,20 @@ export class AIAgentService {
         role: 'system',
         content: `${limits.join(' ')} Explica esa limitación con claridad y no prometas una acción que no puedes ejecutar.`,
       });
+    }
+
+    // N4: the role is the only tool limit, so tell the model WHICH areas the
+    // caller's role lacks (areas only, never tool names) and let it answer
+    // «tu rol no permite…» instead of a generic refusal. Only when the caller
+    // has a real permission set: internal runs without one stay untouched.
+    if (
+      granted?.length &&
+      typeof this.toolRegistry.getDeniedPermissions === 'function'
+    ) {
+      const deniedAreas = roleDeniedAreasPrompt(
+        this.toolRegistry.getDeniedPermissions(authScopes),
+      );
+      if (deniedAreas) messages.push({ role: 'system', content: deniedAreas });
     }
 
     if (routingSession) {

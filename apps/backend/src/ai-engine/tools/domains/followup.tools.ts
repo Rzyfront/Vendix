@@ -146,6 +146,9 @@ export function createFollowupTools(deps: FollowupToolDeps): RegisteredTool[] {
   return [
     {
       name: 'suggest_followup',
+      access: 'public',
+      accessReason:
+        "Suggests a follow-up inside the caller's own conversation; reads no business data.",
       version: '1',
       domain: 'followups',
       readOnly: true,

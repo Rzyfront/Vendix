@@ -43,6 +43,8 @@ const tool = (
   description = name,
 ): RegisteredTool => ({
   name,
+  access: 'public',
+  accessReason: 'test fixture',
   domain,
   description,
   parameters: { type: 'object', properties: {} },
@@ -146,6 +148,8 @@ describe('ToolRouterService B: relevance is not authority', () => {
     });
     registry.register({
       ...tool('restricted', 'admin', 'SECRET DESCRIPTION'),
+      access: undefined,
+      accessReason: undefined,
       requiredPermissions: ['admin'],
     });
     const session = router.createSession('prepare', 'sig', ['prepare']);

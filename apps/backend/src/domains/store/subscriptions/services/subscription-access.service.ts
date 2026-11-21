@@ -3,6 +3,7 @@ import {
   Injectable,
   InternalServerErrorException,
   Logger,
+  Optional,
 } from '@nestjs/common';
 import Redis from 'ioredis';
 import { Prisma, store_subscription_state_enum } from '@prisma/client';
@@ -21,6 +22,8 @@ import {
   ResolvedSubscription,
 } from '../types/access.types';
 import { SubscriptionResolverService } from './subscription-resolver.service';
+import { AIEntitlementsShadowService } from './ai-entitlements-shadow.service';
+import { AIEntitlementsResolverService } from './ai-entitlements-resolver.service';
 import {
   AI_USAGE_GROUPS,
   AiUsageGroup,
@@ -170,6 +173,12 @@ export class SubscriptionAccessService {
     private readonly resolver: SubscriptionResolverService,
     @Inject(REDIS_CLIENT) private readonly redis: Redis,
     private readonly prisma: GlobalPrismaService,
+    // T10 — shadow mode of plan_ai_entitlements. Optional so a missing
+    // provider (or a unit test) keeps the legacy gate untouched.
+    @Optional()
+    private readonly entitlementsShadow?: AIEntitlementsShadowService,
+    @Optional()
+    private readonly entitlementsResolver?: AIEntitlementsResolverService,
   ) {}
 
   // ------------------------------------------------------------------
@@ -219,6 +228,10 @@ export class SubscriptionAccessService {
         has_record: false,
       };
     }
+
+    // T10 — compare the new entitlements model with the legacy features this
+    // gate decides with. Fire-and-forget: it never changes the result below.
+    this.observeEntitlementsShadow(storeId, feature, resolved);
 
     const lockReason = await this.readLockReason(storeId, resolved.state);
     const stateMode = this.stateToMode(
@@ -289,9 +302,9 @@ export class SubscriptionAccessService {
 
   /**
    * F3 — expone la `FeatureConfig` resuelta de una feature IA para el loop
-   * del agente (`tools_allowed` de `tool_agents`). El resolver ya aplica
-   * base + restricción de partner + unión promo, así que lo devuelto es la
-   * lista efectiva del plan.
+   * del agente (cupos y flags). El resolver ya aplica base + restricción de
+   * partner + unión promo. El plan no restringe herramientas (N4): un
+   * `tools_allowed` guardado es inerte.
    *
    * Nunca lanza: ante fila ausente o fallo interno devuelve null y el
    * llamador conserva el comportamiento sin plan (solo filtro por permisos
@@ -552,6 +565,21 @@ export class SubscriptionAccessService {
 
   async invalidateCache(storeId: number): Promise<void> {
     await this.resolver.invalidate(storeId);
+    await this.entitlementsResolver?.invalidate(storeId);
+  }
+
+  private observeEntitlementsShadow(
+    storeId: number,
+    feature: AIFeatureKey,
+    resolved: ResolvedSubscription,
+  ): void {
+    try {
+      this.entitlementsShadow?.observe(storeId, feature, resolved.features);
+    } catch (err) {
+      this.logger.warn(
+        `AI entitlements shadow hook failed for store ${storeId}: ${(err as Error).message}`,
+      );
+    }
   }
 
   /**

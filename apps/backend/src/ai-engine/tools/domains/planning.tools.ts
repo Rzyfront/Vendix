@@ -114,6 +114,9 @@ export function createPlanningTools(): RegisteredTool[] {
   const tools: RegisteredTool[] = [
     {
       name: PROPOSE_PLAN_TOOL,
+      access: 'public',
+      accessReason:
+        'Agent plan scaffolding over the current conversation; every step runs its own permission-checked tool.',
       version: '1',
       domain: 'planning',
       readOnly: true,
@@ -183,6 +186,9 @@ export function createPlanningTools(): RegisteredTool[] {
     },
     {
       name: 'update_plan_step',
+      access: 'public',
+      accessReason:
+        'Agent plan scaffolding over the current conversation; every step runs its own permission-checked tool.',
       version: '1',
       domain: 'planning',
       readOnly: true,
@@ -209,6 +215,9 @@ export function createPlanningTools(): RegisteredTool[] {
     },
     {
       name: 'verify_deliverables',
+      access: 'public',
+      accessReason:
+        'Agent plan scaffolding over the current conversation; every step runs its own permission-checked tool.',
       version: '1',
       domain: 'planning',
       readOnly: true,
@@ -237,6 +246,9 @@ export function createPlanningTools(): RegisteredTool[] {
     },
     {
       name: 'ask_user',
+      access: 'public',
+      accessReason:
+        'Agent plan scaffolding over the current conversation; every step runs its own permission-checked tool.',
       version: '1',
       domain: 'planning',
       readOnly: true,
@@ -261,6 +273,9 @@ export function createPlanningTools(): RegisteredTool[] {
     },
     {
       name: 'revise_plan',
+      access: 'public',
+      accessReason:
+        'Agent plan scaffolding over the current conversation; every step runs its own permission-checked tool.',
       version: '1',
       domain: 'planning',
       readOnly: true,
@@ -310,6 +325,9 @@ export function createPlanningTools(): RegisteredTool[] {
     },
     {
       name: 'pause_plan',
+      access: 'public',
+      accessReason:
+        'Agent plan scaffolding over the current conversation; every step runs its own permission-checked tool.',
       version: '1',
       domain: 'planning',
       readOnly: true,
@@ -324,6 +342,9 @@ export function createPlanningTools(): RegisteredTool[] {
     },
     {
       name: 'resume_plan',
+      access: 'public',
+      accessReason:
+        'Agent plan scaffolding over the current conversation; every step runs its own permission-checked tool.',
       version: '1',
       domain: 'planning',
       readOnly: true,

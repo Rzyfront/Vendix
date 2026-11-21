@@ -5,6 +5,9 @@ export function createDiscoveryTools(): RegisteredTool[] {
   return [
     {
       name: 'search_tools',
+      access: 'public',
+      accessReason:
+        "Searches the tool catalog of the turn, which is already filtered by the caller's permissions; it grants nothing.",
       version: '1',
       domain: 'discovery',
       readOnly: true,

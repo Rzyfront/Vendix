@@ -45,6 +45,8 @@ describe('ai-tool-registry · T3 validación en el borde', () => {
     const registry = new AIToolRegistry(confirmations as any);
     const tool: RegisteredTool = {
       name: 'get_order_probe',
+      access: 'public',
+      accessReason: 'test fixture',
       domain: 'orders',
       readOnly: true,
       description: 'Sonda de prueba para la validación de borde.',
@@ -198,6 +200,8 @@ describe('ai-tool-registry · T2 versionado + alias + envelope', () => {
     const registry = new AIToolRegistry(confirmations as any);
     const tool: RegisteredTool = {
       name: 'get_order',
+      access: 'public',
+      accessReason: 'test fixture',
       domain: 'orders',
       readOnly: true,
       description: 'Sonda de prueba para el versionado.',
@@ -326,6 +330,8 @@ describe('ai-tool-registry · T5 deprecación + remoción', () => {
     const handler = jest.fn().mockResolvedValue(JSON.stringify({ ok: true }));
     registry.register({
       name: 'get_order_v2',
+      access: 'public',
+      accessReason: 'test fixture',
       domain: 'orders',
       readOnly: true,
       description: 'Sonda vigente.',
@@ -335,6 +341,8 @@ describe('ai-tool-registry · T5 deprecación + remoción', () => {
     });
     registry.register({
       name: 'get_order',
+      access: 'public',
+      accessReason: 'test fixture',
       domain: 'orders',
       readOnly: true,
       description: 'Sonda deprecada.',
@@ -418,6 +426,8 @@ describe('ai-tool-registry · T5 deprecación + remoción', () => {
     // El alias sobrevivió: re-registrar el destino revive el nombre viejo.
     registry.register({
       name: 'get_order_v2',
+      access: 'public',
+      accessReason: 'test fixture',
       domain: 'orders',
       readOnly: true,
       description: 'Sonda vigente re-registrada.',
@@ -449,6 +459,8 @@ describe('ai-tool-registry · RX2 denied_tools con alcance de agente', () => {
     registry.registerMany(uiTools);
     registry.register({
       name: 'list_orders',
+      access: 'public',
+      accessReason: 'test fixture',
       domain: 'orders',
       readOnly: true,
       description: 'Sonda de lectura del dominio orders.',
@@ -556,6 +568,8 @@ describe('AIToolRegistry D0 execution contract', () => {
     const registry = new AIToolRegistry(confirmations as any);
     registry.register({
       name: 'qa_tool',
+      access: 'public',
+      accessReason: 'test fixture',
       domain: 'qa',
       description: 'qa',
       parameters: {
@@ -677,6 +691,8 @@ describe('AIToolRegistry D0 execution contract', () => {
     const registry = new AIToolRegistry(confirmations as any);
     registry.register({
       name: 'qa_bridge',
+      access: 'public',
+      accessReason: 'test fixture',
       domain: 'qa',
       description: 'qa',
       parameters: { type: 'object', properties: {} },
@@ -749,6 +765,8 @@ describe('G registry proposal and preview fences', () => {
     });
     registry.register({
       name: 'read_record',
+      access: 'public',
+      accessReason: 'test fixture',
       domain: 'records',
       description: 'Read',
       readOnly: true,

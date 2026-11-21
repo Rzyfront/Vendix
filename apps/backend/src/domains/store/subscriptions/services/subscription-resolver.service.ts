@@ -49,29 +49,6 @@ function assertValidStoreId(storeId: number): asserts storeId is number {
   }
 }
 
-/** `*` is the unrestricted tool scope; an absent list is unrestricted too. */
-function intersectToolScopes(
-  base?: string[],
-  restriction?: string[],
-): string[] | undefined {
-  if (!base) return restriction ? [...restriction] : undefined;
-  if (!restriction) return [...base];
-  if (base.includes('*')) return [...restriction];
-  if (restriction.includes('*')) return [...base];
-  const restricted = new Set(restriction);
-  return base.filter((name) => restricted.has(name));
-}
-
-/** Promotional scope is a union, so either unrestricted side wins. */
-function unionToolScopes(
-  base?: string[],
-  overlay?: string[],
-): string[] | undefined {
-  if (!base || !overlay) return undefined;
-  if (base.includes('*') || overlay.includes('*')) return ['*'];
-  return [...new Set([...base, ...overlay])];
-}
-
 /**
  * Materializes the effective AI feature flags for a store's subscription.
  *
@@ -335,7 +312,8 @@ export class SubscriptionResolverService {
    * Apply partner override as a restriction-only patch.
    * - boolean.enabled: result = base AND override (never enable if base=false)
    * - numeric caps: result = min(base, override) when both set
-   * - tools_allowed: result = intersection(base, override) when both set
+   * - tool lists: not merged (a plan never restricts tools; stored
+   *   `tools_allowed` is inert and is not carried into the merged result)
    * - missing keys in override: passthrough base
    */
   private applyPartnerRestriction(
@@ -381,14 +359,6 @@ export class SubscriptionResolverService {
         // If partner sets a cap where base had none, IGNORE (can't raise).
       }
 
-      // An absent list and '*' both mean all tools. The partner may restrict
-      // either one, but must never turn a declared empty list into full access.
-      const restrictedTools = intersectToolScopes(
-        b.tools_allowed,
-        o.tools_allowed,
-      );
-      if (restrictedTools) merged.tools_allowed = restrictedTools;
-
       if (b.period) merged.period = b.period;
 
       result[key] = merged;
@@ -400,7 +370,6 @@ export class SubscriptionResolverService {
    * Apply promo overlay as union-of-max.
    * - boolean.enabled: result = base OR overlay
    * - numeric caps: result = max(base, overlay)
-   * - tools_allowed: result = union(base, overlay)
    * - missing keys in overlay: passthrough base
    * - missing keys in base but present in overlay: add as new feature
    */
@@ -454,12 +423,6 @@ export class SubscriptionResolverService {
         }
       }
 
-      // Disabled features contribute no tools to the promotional union.
-      const bTools = b!.enabled ? b!.tools_allowed : [];
-      const oTools = o!.enabled ? o!.tools_allowed : [];
-      const combinedTools = unionToolScopes(bTools, oTools);
-      if (combinedTools) merged.tools_allowed = combinedTools;
-
       if (b!.period || o!.period) merged.period = b!.period ?? o!.period;
 
       result[key] = merged;
@@ -476,30 +439,7 @@ export class SubscriptionResolverService {
     promoRules: unknown,
     appliedAt: Date | null,
   ): { overlayActive: boolean; overlayExpiresAt: Date | null } {
-    if (!appliedAt || !promoRules || typeof promoRules !== 'object') {
-      return { overlayActive: false, overlayExpiresAt: null };
-    }
-    const rules = promoRules as Record<string, unknown>;
-    const durationRaw = rules['duration_days'];
-    const durationDays =
-      typeof durationRaw === 'number'
-        ? durationRaw
-        : typeof durationRaw === 'string'
-          ? parseInt(durationRaw, 10)
-          : NaN;
-
-    if (!Number.isFinite(durationDays) || durationDays <= 0) {
-      // No expiry declared -> treat as indefinite while promotional_plan_id set.
-      return { overlayActive: true, overlayExpiresAt: null };
-    }
-
-    const expiresAt = new Date(
-      appliedAt.getTime() + durationDays * 24 * 60 * 60 * 1000,
-    );
-    return {
-      overlayActive: Date.now() < expiresAt.getTime(),
-      overlayExpiresAt: expiresAt,
-    };
+    return computePromoOverlayState(promoRules, appliedAt);
   }
 
   /**
@@ -555,4 +495,39 @@ export class SubscriptionResolverService {
       );
     }
   }
+}
+
+/**
+ * Promo overlay window from `promo_rules.duration_days` and
+ * `promotional_applied_at` (never `current_period_end`). Shared by the legacy
+ * resolver and the AI entitlements resolver (T10) so both read one window.
+ */
+export function computePromoOverlayState(
+  promoRules: unknown,
+  appliedAt: Date | null,
+): { overlayActive: boolean; overlayExpiresAt: Date | null } {
+  if (!appliedAt || !promoRules || typeof promoRules !== 'object') {
+    return { overlayActive: false, overlayExpiresAt: null };
+  }
+  const rules = promoRules as Record<string, unknown>;
+  const durationRaw = rules['duration_days'];
+  const durationDays =
+    typeof durationRaw === 'number'
+      ? durationRaw
+      : typeof durationRaw === 'string'
+        ? parseInt(durationRaw, 10)
+        : NaN;
+
+  if (!Number.isFinite(durationDays) || durationDays <= 0) {
+    // No expiry declared -> treat as indefinite while promotional_plan_id set.
+    return { overlayActive: true, overlayExpiresAt: null };
+  }
+
+  const expiresAt = new Date(
+    appliedAt.getTime() + durationDays * 24 * 60 * 60 * 1000,
+  );
+  return {
+    overlayActive: Date.now() < expiresAt.getTime(),
+    overlayExpiresAt: expiresAt,
+  };
 }

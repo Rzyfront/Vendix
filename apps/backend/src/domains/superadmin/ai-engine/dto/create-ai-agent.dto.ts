@@ -54,8 +54,8 @@ export class CreateAIAgentDto {
   system_prompt?: string | null;
 
   /**
-   * Filtro adicional sobre las tools del turno, aplicado ENCIMA de la
-   * intersección permisos-del-caller × `tools_allowed` del plan (F3).
+   * Filtro adicional sobre las tools del turno, aplicado ENCIMA de los
+   * permisos del rol del caller (el plan no restringe herramientas).
    * Vacío = sin filtro adicional. Tope 500 (el catálogo ronda ~304 tools). Los nombres desconocidos NO rechazan el
    * request (validación blanda): se aceptan y se registran en warn, porque el
    * catálogo del registry vive en memoria y un deploy con tools nuevas no

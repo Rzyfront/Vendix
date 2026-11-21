@@ -387,8 +387,6 @@ export class SandboxPolicyService {
       gate.reason === 'SUBSCRIPTION_INTERNAL_ERROR' ||
       !config ||
       config.enabled !== true ||
-      !Array.isArray(config.tools_allowed) ||
-      !config.tools_allowed.every((name) => typeof name === 'string') ||
       !Array.isArray(agent.allowed_tools) ||
       !Array.isArray(agent.denied_tools)
     )
@@ -424,9 +422,6 @@ export class SandboxPolicyService {
       (permission) =>
         currentPermissions.has(permission) && objective.has(permission),
     );
-    const planScopes = new Set(
-      config.tools_allowed.map((name) => this.registry.canonicalName(name)),
-    );
     const catalog = this.registry.getAgentDefinitions(base.permissions, {
       allowed_tools: agent.allowed_tools,
       denied_tools: agent.denied_tools,
@@ -437,8 +432,7 @@ export class SandboxPolicyService {
     const names = manifest.filter(
       (name) =>
         offered.has(name) &&
-        this.eligible(this.registry.get(name)) &&
-        (planScopes.has('*') || this.registry.matchesScope(name, planScopes)),
+        this.eligible(this.registry.get(name)),
     );
     if (!names.length) this.deny();
     return { context: base, names };

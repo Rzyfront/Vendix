@@ -805,6 +805,10 @@ export class GlobalPrismaService extends BasePrismaService {
     return this.baseClient.plan_module_rules;
   }
 
+  get plan_ai_entitlements() {
+    return this.baseClient.plan_ai_entitlements;
+  }
+
   get platform_settings() {
     return this.baseClient.platform_settings;
   }

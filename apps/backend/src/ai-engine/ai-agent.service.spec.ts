@@ -112,6 +112,11 @@ describe('AIAgentService.runAgentStream', () => {
           return true;
         }),
       ),
+      getDeniedPermissions: jest.fn((scopes: string[] = []) =>
+        ['store:orders:cancel', 'store:orders:read', 'store:customers:read']
+          .filter((p) => !scopes.includes(p))
+          .sort(),
+      ),
       canonicalName: (n: string) => n,
       matchesScope: (n: string, scopes: Set<string>) =>
         !!domains[n] && (scopes.has(n) || scopes.has(domains[n])),
@@ -236,7 +241,7 @@ describe('AIAgentService.runAgentStream', () => {
     });
   });
 
-  it('offers only tools in the allowed domain', async () => {
+  it('a plan tools_allowed that omits a permitted tool no longer narrows the catalog (N4)', async () => {
     configureStorePlan(
       ['orders'],
       ['store:orders:read', 'store:customers:read'],
@@ -244,25 +249,20 @@ describe('AIAgentService.runAgentStream', () => {
 
     await drain({});
 
-    expect(offeredToolNames()).toContain('list_orders');
-    expect(offeredToolNames()).not.toContain('list_customers');
-    expect(offeredToolNames()).not.toContain('ui_navigate');
-    expect(chat.mock.calls[0][0]).toEqual(
-      expect.arrayContaining([
-        expect.objectContaining({
-          role: 'system',
-          content: expect.stringContaining('No puedes mover la pantalla'),
-        }),
-      ]),
+    expect(offeredToolNames()).toEqual(
+      expect.arrayContaining(['list_orders', 'list_customers', 'ui_navigate']),
     );
   });
 
-  it('offers only an exact tool name from the plan', async () => {
-    configureStorePlan(['list_orders']);
+  it('an exact-name plan list does not hide the other tools the role allows', async () => {
+    configureStorePlan(['list_orders'], [
+      'store:orders:read',
+      'store:customers:read',
+    ]);
 
     await drain({});
 
-    expect(offeredToolNames()).toEqual(['list_orders']);
+    expect(offeredToolNames()).toContain('list_customers');
   });
 
   it('preserves a narrower agent filter after applying the plan', async () => {
@@ -273,22 +273,12 @@ describe('AIAgentService.runAgentStream', () => {
     expect(offeredToolNames()).toEqual(['list_orders']);
   });
 
-  it('does not offer operational tools for an explicit empty plan list', async () => {
-    configureStorePlan([]);
+  it('an explicit empty plan list is inert: role permissions still drive the catalog', async () => {
+    configureStorePlan([], ['store:orders:read']);
 
     await drain({});
 
-    expect(offeredToolNames()).toEqual([]);
-    expect(chat.mock.calls[0][0]).toEqual(
-      expect.arrayContaining([
-        expect.objectContaining({
-          role: 'system',
-          content: expect.stringContaining(
-            'No tienes herramientas operativas para consultar datos actuales',
-          ),
-        }),
-      ]),
-    );
+    expect(offeredToolNames()).toContain('list_orders');
   });
 
   it('does not offer operational tools when the subscription gate denies access', async () => {
@@ -298,6 +288,36 @@ describe('AIAgentService.runAgentStream', () => {
     await drain({});
 
     expect(offeredToolNames()).toEqual([]);
+  });
+
+  it('tells the model which areas the role cannot use, without tool names (T13)', async () => {
+    configureStorePlan(['*'], ['store:orders:read']);
+
+    await drain({});
+
+    const system = (chat.mock.calls[0][0] as any[])
+      .filter((m) => m.role === 'system')
+      .map((m) => m.content as string)
+      .join('\n');
+    expect(system).toContain('Áreas que el rol de este usuario no permite');
+    expect(system).toContain('orders (cancel)');
+    expect(system).toContain('customers (read)');
+    expect(system).not.toContain('list_customers');
+  });
+
+  it('adds no denied-areas fragment for a role that holds every permission', async () => {
+    configureStorePlan(
+      ['*'],
+      ['store:orders:cancel', 'store:orders:read', 'store:customers:read'],
+    );
+
+    await drain({});
+
+    const system = (chat.mock.calls[0][0] as any[])
+      .filter((m) => m.role === 'system')
+      .map((m) => m.content as string)
+      .join('\n');
+    expect(system).not.toContain('Áreas que el rol de este usuario no permite');
   });
 
   it('keeps the permission filter when the plan allows all tools', async () => {
@@ -999,7 +1019,6 @@ describe('AIAgentService.runAgentStream', () => {
     await drain({ agent_key: 'vex' });
 
     expect(canUseAIFeature).toHaveBeenCalledWith(42, 'vex_agent');
-    expect(getAIFeatureConfig).toHaveBeenCalledWith(42, 'vex_agent');
     expect(consumeAIQuota).toHaveBeenCalledWith(
       42,
       'vex_agent',
@@ -1679,7 +1698,7 @@ describe('AIAgentService.runAgentStream', () => {
     it('not-offered UI is blocked before dispatch, with an alternative and terminal metadata', async () => {
       configureStorePlan(['list_things']);
       chat.mockResolvedValue(ok({ tool_calls: [call('t1', 'ui_navigate')] }));
-      const { chunks, result } = await drain({});
+      const { chunks, result } = await drain({ tools: ['list_things'] });
       // A tool outside the turn's authority is a model mistake, never the
       // «tu usuario o plan / administrador» notice.
       expect(result.execution?.outcome).not.toBe('blocked');
@@ -1736,6 +1755,8 @@ describe('AIAgentService.runAgentStream', () => {
       } as any);
       realRegistry.register({
         name: 'create_expense',
+        access: 'public',
+        accessReason: 'test fixture',
         domain: 'expenses',
         description: 'qa',
         parameters: {},
@@ -1772,6 +1793,8 @@ describe('AIAgentService.runAgentStream', () => {
       const realRegistry = new AIToolRegistry({} as any);
       realRegistry.register({
         name: 'list_things',
+        access: 'public',
+        accessReason: 'test fixture',
         domain: 'qa',
         description: 'qa',
         parameters: {},
@@ -1868,6 +1891,8 @@ describe('AIAgentService B routed catalog boundary', () => {
     for (let i = 0; i < 50; i++)
       registry.register({
         name: `operation_${String(i).padStart(2, '0')}`,
+        access: 'public',
+        accessReason: 'test fixture',
         domain: 'inventory',
         description: `operation_${i}`,
         parameters: { type: 'object', properties: {} },
@@ -1980,6 +2005,8 @@ describe('AIAgentService B routed catalog boundary', () => {
   it('never emits an unauthorized UI tool_call nor dispatches to the browser', async () => {
     registry.register({
       name: 'zz_ui',
+      access: 'public',
+      accessReason: 'test fixture',
       domain: 'ui',
       description: 'UI',
       parameters: {},
@@ -2017,10 +2044,26 @@ describe('AIAgentService B routed catalog boundary', () => {
     expect(names(0)).toContain('search_tools');
     expect(handler).not.toHaveBeenCalled();
   });
+  it('routed authority ignores a plan tools_allowed that omits a permitted tool (N4)', async () => {
+    access.getAIFeatureConfig.mockResolvedValue({
+      enabled: true,
+      tools_allowed: ['search_tools'],
+    });
+    const authority = await service.resolveToolAuthority({
+      goal: 'x',
+    } as never);
+    expect(authority.map((d) => d.function.name)).toContain('operation_00');
+    access.canUseAIFeature.mockResolvedValue({ allowed: false, mode: 'block' });
+    expect(
+      await service.resolveToolAuthority({ goal: 'x' } as never),
+    ).toEqual([]);
+  });
   it('revokes a tool between provider response and execution, including cached working sets', async () => {
     chat.mockImplementationOnce(async () => {
-      access.getAIFeatureConfig.mockResolvedValue({
-        tools_allowed: ['search_tools'],
+      // The only plan-side revocation left is the agent gate (disabled / quota).
+      access.canUseAIFeature.mockResolvedValue({
+        allowed: false,
+        mode: 'block',
       });
       return ok({ tool_calls: [call('revoked', 'operation_00')] });
     });
@@ -2063,7 +2106,7 @@ describe('AIAgentService B routed catalog boundary', () => {
     expect(system).toContain('Pregunta antes solo por un dato');
   });
   it('fails authorization closed on plan lookup outage with routing ON', async () => {
-    access.getAIFeatureConfig.mockRejectedValue(new Error('redis down'));
+    access.canUseAIFeature.mockRejectedValue(new Error('redis down'));
     await drain();
     expect(chat.mock.calls[0][1].tools).toBeUndefined();
     expect(handler).not.toHaveBeenCalled();
@@ -2071,6 +2114,8 @@ describe('AIAgentService B routed catalog boundary', () => {
   it('does not smuggle a denied planning tool through the plan-hook shortcut', async () => {
     registry.register({
       name: 'ask_user',
+      access: 'public',
+      accessReason: 'test fixture',
       domain: 'planning',
       description: 'Pregunta',
       parameters: {},
@@ -2087,6 +2132,8 @@ describe('AIAgentService B routed catalog boundary', () => {
   it('keeps write approvals and never runs the write handler after discovery', async () => {
     registry.register({
       name: 'write_rare',
+      access: 'public',
+      accessReason: 'test fixture',
       domain: 'orders',
       description: 'Cambio raro',
       parameters: {},
@@ -2241,6 +2288,8 @@ describe('D1 durable loop seam', () => {
   it('persists proposed intent before showing a card and stops the rest of the batch without dispatch', async () => {
     registry.register({
       name: 'create_product',
+      access: 'public',
+      accessReason: 'test fixture',
       domain: 'products',
       description: 'Crear',
       parameters: {},
@@ -2275,6 +2324,8 @@ describe('D1 durable loop seam', () => {
   it('a refused preview checkpoints a recoverable receipt, never an uncertain effect', async () => {
     registry.register({
       name: 'create_product',
+      access: 'public',
+      accessReason: 'test fixture',
       domain: 'products',
       description: 'Crear',
       parameters: {},
@@ -2305,6 +2356,8 @@ describe('D1 durable loop seam', () => {
     const enqueue = jest.fn().mockResolvedValue('{"queued":true}');
     registry.register({
       name: 'queue_task',
+      access: 'public',
+      accessReason: 'test fixture',
       domain: 'tasks',
       description: 'Revisar',
       parameters: {},

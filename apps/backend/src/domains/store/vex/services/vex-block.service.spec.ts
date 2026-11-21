@@ -258,6 +258,8 @@ describe('VexBlockService', () => {
             const initialRead = jest.fn().mockResolvedValue(raw);
             registry.register({
               name: 'read_dataset',
+              access: 'public',
+              accessReason: 'test fixture',
               domain: 'probe',
               readOnly: true,
               description: 'Leer',

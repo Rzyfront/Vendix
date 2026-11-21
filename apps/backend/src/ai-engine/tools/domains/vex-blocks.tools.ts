@@ -42,6 +42,9 @@ export function createVexBlockTools({
   return [
     {
       name: 'vex_render_table',
+      access: 'public',
+      accessReason:
+        "Renders or reads blocks of the caller's own Vex conversation from data already in the turn; reads no business table.",
       version: '1',
       domain: 'vex_blocks',
       readOnly: true,
@@ -109,6 +112,9 @@ export function createVexBlockTools({
     },
     {
       name: 'vex_render_chart',
+      access: 'public',
+      accessReason:
+        "Renders or reads blocks of the caller's own Vex conversation from data already in the turn; reads no business table.",
       version: '1',
       domain: 'vex_blocks',
       readOnly: true,
@@ -172,6 +178,9 @@ export function createVexBlockTools({
     },
     {
       name: 'vex_render_kpi',
+      access: 'public',
+      accessReason:
+        "Renders or reads blocks of the caller's own Vex conversation from data already in the turn; reads no business table.",
       version: '1',
       domain: 'vex_blocks',
       readOnly: true,
@@ -237,6 +246,9 @@ export function createVexBlockTools({
     },
     {
       name: 'vex_render_image',
+      access: 'public',
+      accessReason:
+        "Renders or reads blocks of the caller's own Vex conversation from data already in the turn; reads no business table.",
       version: '1',
       domain: 'vex_blocks',
       readOnly: true,
@@ -289,6 +301,9 @@ export function createVexBlockTools({
     },
     {
       name: 'vex_render_file',
+      access: 'public',
+      accessReason:
+        "Renders or reads blocks of the caller's own Vex conversation from data already in the turn; reads no business table.",
       version: '1',
       domain: 'vex_blocks',
       readOnly: true,
@@ -349,6 +364,9 @@ export function createVexBlockTools({
     },
     {
       name: 'vex_block_read',
+      access: 'public',
+      accessReason:
+        "Renders or reads blocks of the caller's own Vex conversation from data already in the turn; reads no business table.",
       version: '1',
       domain: 'vex_blocks',
       readOnly: true,
@@ -457,6 +475,9 @@ export function createVexBlockTools({
     },
     {
       name: 'vex_block_transform',
+      access: 'public',
+      accessReason:
+        "Renders or reads blocks of the caller's own Vex conversation from data already in the turn; reads no business table.",
       version: '1',
       domain: 'vex_blocks',
       readOnly: true,

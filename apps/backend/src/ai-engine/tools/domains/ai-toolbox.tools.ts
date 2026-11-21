@@ -47,6 +47,9 @@ export function createAiToolboxTools({
   return [
     {
       name: 'ai_extract_document',
+      access: 'public',
+      accessReason:
+        "Reads only a document uploaded to this store's Vex/Vexi chat and returns what it says; reads no business table.",
       version: '1',
       domain: 'ai-toolbox',
       readOnly: true,
@@ -99,6 +102,9 @@ export function createAiToolboxTools({
     },
     {
       name: 'validate_extraction',
+      access: 'public',
+      accessReason:
+        'Each section checks the read permission of the table it matches (suppliers, products, customers, expense categories) and reports a section the role cannot read as denied.',
       version: '1',
       domain: 'ai-toolbox',
       readOnly: true,
@@ -147,8 +153,17 @@ export function createAiToolboxTools({
       handler: async (args, context) => {
         const domain = String(args.domain);
         const result: Record<string, unknown> = { domain };
+        const denied: string[] = [];
+        const canRead = (section: keyof typeof VALIDATION_READ_PERMISSION) => {
+          if (callerHolds(VALIDATION_READ_PERMISSION[section])) return true;
+          denied.push(VALIDATION_SECTION_LABEL[section]);
+          return false;
+        };
 
-        if (args.supplier_name || args.supplier_tax_id) {
+        if (
+          (args.supplier_name || args.supplier_tax_id) &&
+          canRead('supplier')
+        ) {
           result.supplier = await toolbox.matchExtractionSupplier({
             organizationId: context.organization_id,
             name: args.supplier_name
@@ -160,22 +175,38 @@ export function createAiToolboxTools({
           });
         }
 
-        if (Array.isArray(args.items) && args.items.length) {
+        if (Array.isArray(args.items) && args.items.length && canRead('items')) {
           result.items = await toolbox.matchExtractionItems(
             args.items as any[],
           );
         }
 
-        if (Array.isArray(args.documents) && args.documents.length) {
+        if (
+          Array.isArray(args.documents) &&
+          args.documents.length &&
+          canRead('people')
+        ) {
           result.people = await toolbox.matchExtractionPeople(
             args.documents as any[],
             context.store_id,
           );
         }
 
-        if (domain === 'gastos') {
+        if (domain === 'gastos' && canRead('expense_categories')) {
           result.expense_categories =
             await toolbox.listExpenseCategoriesForExtraction();
+        }
+
+        if (denied.length) {
+          return JSON.stringify({
+            ...result,
+            denied,
+            summary: {
+              verdict: `Tu rol no permite consultar ${denied.join(', ')}.`,
+            },
+            next_step:
+              'Dile a la persona que su rol no permite consultar esos datos y que se lo pida al dueño. No propongas la escritura ni adivines los identificadores.',
+          });
         }
 
         const unmatched = countUnmatched(result);
@@ -198,6 +229,9 @@ export function createAiToolboxTools({
     },
     {
       name: 'ai_summarize',
+      access: 'public',
+      accessReason:
+        'Transforms text the model passes in; reads no business data.',
       version: '1',
       domain: 'ai-toolbox',
       readOnly: true,
@@ -232,6 +266,9 @@ export function createAiToolboxTools({
     },
     {
       name: 'ai_write_copy',
+      access: 'public',
+      accessReason:
+        'Transforms text the model passes in; reads no business data.',
       version: '1',
       domain: 'ai-toolbox',
       readOnly: true,
@@ -262,6 +299,9 @@ export function createAiToolboxTools({
     },
     {
       name: 'ai_generate_image',
+      access: 'public',
+      accessReason:
+        'Generates an image from a prompt; reads no business data.',
       version: '1',
       domain: 'ai-toolbox',
       readOnly: true,
@@ -331,6 +371,9 @@ export function createAiToolboxTools({
     },
     {
       name: 'list_attachments',
+      access: 'public',
+      accessReason:
+        "Lists the caller's own chat attachments (filtered by user id).",
       version: '1',
       domain: 'ai-toolbox',
       readOnly: true,
@@ -391,6 +434,36 @@ export function createAiToolboxTools({
 // de adjuntos a `VexiAttachmentsService.listRecentAttachments`. La razón del
 // hogar —registrar desde el `@Global()` ai-engine module sin importar dominios
 // que cerrarían un ciclo— sigue valiendo: ambos servicios resuelven standalone.
+
+/**
+ * T13: `validate_extraction` reads a different business table per section, so
+ * each section needs the read permission of the screen that shows that table.
+ */
+const VALIDATION_READ_PERMISSION = {
+  supplier: 'store:inventory:suppliers:read',
+  items: 'store:products:read',
+  people: 'store:customers:read',
+  expense_categories: 'store:expenses:read',
+} as const;
+
+const VALIDATION_SECTION_LABEL: Record<
+  keyof typeof VALIDATION_READ_PERMISSION,
+  string
+> = {
+  supplier: 'proveedores',
+  items: 'productos',
+  people: 'clientes',
+  expense_categories: 'categorías de gasto',
+};
+
+/** Same permission source as `AIToolRegistry.executeTool`. */
+function callerHolds(permission: string): boolean {
+  const context = RequestContextService.getContext();
+  const granted = context?.permissions?.length
+    ? context.permissions
+    : (context?.roles ?? []);
+  return granted.includes(permission);
+}
 
 function countUnmatched(result: Record<string, unknown>): number {
   let unmatched = 0;

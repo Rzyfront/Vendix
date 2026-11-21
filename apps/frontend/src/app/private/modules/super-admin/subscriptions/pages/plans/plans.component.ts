@@ -1,7 +1,11 @@
 import { Component, DestroyRef, inject, signal } from '@angular/core';
 import { Router, RouterModule } from '@angular/router';
 import { takeUntilDestroyed } from '@angular/core/rxjs-interop';
-import { SubscriptionAdminService } from '../../services/subscription-admin.service';
+import {
+  AIEntitlementsShadowReport,
+  SubscriptionAdminService,
+} from '../../services/subscription-admin.service';
+import { AIEntitlementsShadowReportModalComponent } from '../../components/ai-entitlements-shadow-report-modal/ai-entitlements-shadow-report-modal.component';
 import { SubscriptionPlan, SubscriptionStats } from '../../interfaces/subscription-admin.interface';
 import { StatsComponent } from '../../../../../../shared/components/stats/stats.component';
 import { InputsearchComponent } from '../../../../../../shared/components/inputsearch/inputsearch.component';
@@ -27,6 +31,7 @@ import { ResponsiveDataViewComponent, TableColumn, TableAction, ItemListCardConf
     RouterModule,
     PaginationComponent,
     ResponsiveDataViewComponent,
+    AIEntitlementsShadowReportModalComponent,
   ],
   template: `
     <div class="w-full">
@@ -78,6 +83,15 @@ import { ResponsiveDataViewComponent, TableColumn, TableAction, ItemListCardConf
                   [debounceTime]="500"
                   (searchChange)="onSearch($event)"
                 />
+                <app-button
+                  variant="outline"
+                  size="md"
+                  customClasses="shrink-0 !rounded-[10px]"
+                  (clicked)="openShadowReport()"
+                  title="Comparar la configuración de IA guardada con el modelo de capacidades"
+                >
+                  Modelo nuevo vs actual
+                </app-button>
                 <app-button
                   variant="outline"
                   size="md"
@@ -135,6 +149,13 @@ import { ResponsiveDataViewComponent, TableColumn, TableAction, ItemListCardConf
           }
         </app-card>
       </div>
+
+      <app-ai-entitlements-shadow-report-modal
+        [(isOpen)]="shadowOpen"
+        [report]="shadowReport()"
+        [loading]="shadowLoading()"
+        [errorMessage]="shadowError()"
+      />
     </div>
   `,
 })
@@ -146,6 +167,11 @@ export class PlansComponent {
   readonly plans = signal<SubscriptionPlan[]>([]);
   readonly loading = signal(false);
   readonly searchTerm = signal('');
+
+  readonly shadowOpen = signal(false);
+  readonly shadowLoading = signal(false);
+  readonly shadowError = signal('');
+  readonly shadowReport = signal<AIEntitlementsShadowReport | null>(null);
 
   readonly stats = signal<SubscriptionStats>({
     totalPlans: 0,
@@ -250,6 +276,25 @@ export class PlansComponent {
           this.loading.set(false);
         },
         error: () => this.loading.set(false),
+      });
+  }
+
+  openShadowReport(): void {
+    this.shadowOpen.set(true);
+    this.shadowLoading.set(true);
+    this.shadowError.set('');
+    this.service
+      .getAIEntitlementsShadowReport()
+      .pipe(takeUntilDestroyed(this.destroyRef))
+      .subscribe({
+        next: (report) => {
+          this.shadowReport.set(report);
+          this.shadowLoading.set(false);
+        },
+        error: () => {
+          this.shadowError.set('No se pudo cargar la comparación. Inténtalo de nuevo.');
+          this.shadowLoading.set(false);
+        },
       });
   }
 

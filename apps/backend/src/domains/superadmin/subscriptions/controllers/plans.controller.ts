@@ -13,6 +13,7 @@ import {
 import { ApiTags, ApiOperation } from '@nestjs/swagger';
 import { Permissions } from '../../../auth/decorators/permissions.decorator';
 import { PlansService } from '../services/plans.service';
+import { AIEntitlementsShadowService } from '../../../store/subscriptions/services/ai-entitlements-shadow.service';
 import { ResponseService } from '../../../../common/responses/response.service';
 import { CreatePlanDto, UpdatePlanDto, PlanQueryDto } from '../dto';
 import { RolesGuard } from '../../../auth/guards/roles.guard';
@@ -27,6 +28,7 @@ export class PlansController {
   constructor(
     private readonly plansService: PlansService,
     private readonly responseService: ResponseService,
+    private readonly aiEntitlementsShadow: AIEntitlementsShadowService,
   ) {}
 
   @Permissions('superadmin:subscriptions:plans:create')
@@ -49,6 +51,19 @@ export class PlansController {
       result.meta.limit,
       'Plans retrieved',
     );
+  }
+
+  /**
+   * T10 — shadow comparison of the AI entitlements model against
+   * `ai_feature_flags`: per-plan differences plus runtime gate counters.
+   * Declared before `:id` so the literal segment is not parsed as an id.
+   */
+  @Permissions('superadmin:subscriptions:plans:read')
+  @Get('ai-entitlements/shadow-report')
+  @ApiOperation({ summary: 'AI entitlements shadow report' })
+  async aiEntitlementsShadowReport() {
+    const result = await this.aiEntitlementsShadow.buildReport();
+    return this.responseService.success(result, 'AI entitlements shadow report');
   }
 
   @Permissions('superadmin:subscriptions:plans:read')

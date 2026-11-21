@@ -1,4 +1,7 @@
 import type { PlanIncludedItem } from '../../../../../shared/utils/plan-features.util';
+import type { AIEntitlement } from '../../../../../shared/constants/ai-capabilities';
+
+export type { AIEntitlement } from '../../../../../shared/constants/ai-capabilities';
 
 export type PlanType = 'base' | 'partner_custom' | 'promotional';
 export type PlanState = 'draft' | 'active' | 'archived';
@@ -138,6 +141,11 @@ export interface SubscriptionPlan {
   // Lectura: forma canonica de arreglo + forma de objeto legada (compat).
   feature_matrix: PlanIncludedItem[] | Record<string, unknown>;
   ai_feature_flags: AIFeatureFlags;
+  /**
+   * T9 — one row per AI capability of the plan (catalog in
+   * `shared/constants/ai-capabilities.ts`). `cap_value` null = no limit.
+   */
+  ai_entitlements?: AIEntitlement[];
   /** P7.1 — Flujos limits (`null` = platform defaults; a `null` key = unlimited). */
   workflow_limits?: WorkflowLimitsValue | null;
 
@@ -432,6 +440,8 @@ export interface CreatePlanDto {
   is_default?: boolean;
   // Feature matrices
   ai_feature_flags?: AIFeatureFlags;
+  /** T9 — full set of AI capability rows; omitted = untouched. */
+  ai_entitlements?: AIEntitlement[];
   /** P7.1 — `null` clears the limits (defaults apply). */
   workflow_limits?: WorkflowLimitsValue | null;
   // Escritura: siempre arreglo (el backend rechaza el objeto con 400).

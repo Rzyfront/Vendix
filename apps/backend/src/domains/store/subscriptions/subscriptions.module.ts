@@ -6,6 +6,8 @@ import { PrismaModule } from '../../../prisma/prisma.module';
 import { ResponseModule } from '../../../common/responses/response.module';
 import { SubscriptionResolverService } from './services/subscription-resolver.service';
 import { SubscriptionAccessService } from './services/subscription-access.service';
+import { AIEntitlementsResolverService } from './services/ai-entitlements-resolver.service';
+import { AIEntitlementsShadowService } from './services/ai-entitlements-shadow.service';
 import { SubscriptionStateService } from './services/subscription-state.service';
 import { SubscriptionAccessController } from './controllers/subscription-access.controller';
 import { StoreSubscriptionsController } from './controllers/store-subscriptions.controller';
@@ -72,6 +74,8 @@ import { NotificationsModule } from '../notifications/notifications.module';
   providers: [
     SubscriptionResolverService,
     SubscriptionAccessService,
+    AIEntitlementsResolverService,
+    AIEntitlementsShadowService,
     SubscriptionStateService,
     AiAccessGuard,
     StoreOperationsGuard,
@@ -118,6 +122,8 @@ import { NotificationsModule } from '../notifications/notifications.module';
   exports: [
     SubscriptionResolverService,
     SubscriptionAccessService,
+    AIEntitlementsResolverService,
+    AIEntitlementsShadowService,
     SubscriptionStateService,
     AiAccessGuard,
     StoreOperationsGuard,

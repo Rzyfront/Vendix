@@ -4,6 +4,8 @@ import { AIEmbeddingProcessor } from '../queue/processors/ai-embedding.processor
 import { RequestContextService } from '../../common/context/request-context.service';
 const tool = (name: string, version = '1') => ({
   name,
+  access: 'public' as const,
+  accessReason: 'test fixture',
   version,
   domain: 'orders',
   description: `Consulta sintética ${name}`,

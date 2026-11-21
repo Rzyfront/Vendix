@@ -8,6 +8,9 @@ export function createCodeExecutionTools(
   return [
     {
       name: 'run_readonly_script',
+      access: 'public',
+      accessReason:
+        "The sandbox re-derives the caller's live permissions and only exposes the tools they hold (SandboxPolicyService).",
       version: '1',
       domain: 'sandbox',
       readOnly: true,

@@ -1776,8 +1776,9 @@ export class AIChatService {
    *   conversación): con `app_key` el engine lee el prompt de la fila de la
    *   app e ignoraría este (contrato de `AIAgentService`), así que pasarlo
    *   sería prometer algo que no se cumple.
-   * - `allowed_tools` no vacío como filtro adicional sobre el plan (F3); el
-   *   loop lo intersecta con permisos del caller y `tools_allowed`.
+   * - `allowed_tools` no vacío como filtro adicional (exclusión técnica); el
+   *   loop lo intersecta con los permisos del rol del caller (el plan no
+   *   restringe herramientas).
    * - `max_iterations` de la fila cuando está definido.
    * - `agent_key` + `agent_allowed_tools` / `agent_denied_tools`: alcance de
    *   la fila (sin esto Vex vería las `ui_*` que tiene denegadas y correría

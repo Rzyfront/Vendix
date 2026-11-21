@@ -445,6 +445,9 @@ export function createApiBridgeTools({
   return [
     {
       name: 'list_endpoints',
+      access: 'public',
+      accessReason:
+        "API bridge: before dispatch it checks the route's catalog permissions against the caller, and it replays the caller's own token, so the route's own guards decide.",
       version: '1',
       domain: 'api-bridge',
       readOnly: true,
@@ -635,6 +638,9 @@ export function createApiBridgeTools({
     },
     {
       name: 'call_endpoint',
+      access: 'public',
+      accessReason:
+        "API bridge: before dispatch it checks the route's catalog permissions against the caller, and it replays the caller's own token, so the route's own guards decide.",
       version: '1',
       domain: 'api-bridge',
       readOnly: true,
@@ -756,6 +762,9 @@ export function createApiBridgeTools({
     },
     {
       name: 'write_endpoint',
+      access: 'public',
+      accessReason:
+        "API bridge: before dispatch it checks the route's catalog permissions against the caller, and it replays the caller's own token, so the route's own guards decide.",
       version: '1',
       domain: 'api-bridge',
       // The effect crosses HTTP: the handler states `applied` itself.
