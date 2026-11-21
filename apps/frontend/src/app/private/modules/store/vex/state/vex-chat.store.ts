@@ -2133,6 +2133,9 @@ export class VexChatStore {
               content_type: chunk.content_type || 'audio/mpeg',
               filler: chunk.filler,
             });
+          // T14: the answer arrives as text only; say why once.
+          if (chunk.type === 'voice_notice' && chunk.message)
+            this.voice.notice(chunk.message);
           if (chunk.type === 'done' || chunk.type === 'error')
             this.voice.finishTurn(stream_id);
           this.applyChunk(conversation_id, target, chunk);

@@ -3,6 +3,7 @@ import { HttpClient } from '@angular/common/http';
 import { firstValueFrom } from 'rxjs';
 import { map } from 'rxjs/operators';
 import { VexiVoiceSafetyService } from './vexi-voice-safety.service';
+import { ToastService } from '../../shared/components/toast/toast.service';
 import { environment } from '../../../environments/environment';
 
 /**
@@ -113,7 +114,15 @@ export function micLevelFromSamples(samples: ArrayLike<number>): number {
 export class VexiVoicePipelineService {
   private readonly http = inject(HttpClient);
   private readonly safety = inject(VexiVoiceSafetyService);
+  private readonly toast = inject(ToastService);
   private readonly baseUrl = `${environment.apiUrl}/store/vexi/voice`;
+
+  /**
+   * T14 — why the last answer came as text only: the plan does not include
+   * this agent's voice, or the month's reading seconds ran out. `null` while
+   * the voice works.
+   */
+  readonly voiceNotice = signal<string | null>(null);
 
   readonly state = signal<VexiPipelineState>('idle');
   readonly errorMessage = signal<string | null>(null);
@@ -375,6 +384,17 @@ export class VexiVoicePipelineService {
     if (streamId !== this.acceptingStreamId) return;
     this.turnFinished = true;
     this.pump();
+  }
+
+  /**
+   * T14 — the answer will not be read aloud. Says why once, with the server's
+   * own sentence, and keeps it readable in `voiceNotice` for the surface.
+   */
+  notice(message: string): void {
+    const text = message.trim();
+    if (!text) return;
+    this.voiceNotice.set(text);
+    this.toast.show({ description: text, variant: 'info', duration: 5000 });
   }
 
   /** Stops playback and drops everything queued. */

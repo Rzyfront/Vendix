@@ -412,10 +412,10 @@ describe('SettingsService — guard de transición de caja (QUI-560)', () => {
       expect(stored.vexi.voice_engine).toBe('realtime');
     });
 
-    it('cambiar el motor conserva el interruptor', async () => {
+    it('el motor (obsoleto, T16) se ignora y conserva el interruptor', async () => {
       await service.updateSettings({ vexi: { voice_engine: 'pipeline' } });
 
-      expect(stored.vexi.voice_engine).toBe('pipeline');
+      expect(stored.vexi.voice_engine).toBe('realtime');
       expect(stored.vexi.enabled).toBe(true);
     });
 
@@ -433,9 +433,10 @@ describe('SettingsService — guard de transición de caja (QUI-560)', () => {
         vexi: { enabled: false, voice_engine: 'pipeline' },
       });
 
+      // `voice_engine` obsoleto: se ignora, queda el valor legado.
       expect(stored.vexi).toEqual({
         enabled: false,
-        voice_engine: 'pipeline',
+        voice_engine: 'realtime',
       });
     });
 

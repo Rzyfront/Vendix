@@ -17,6 +17,7 @@ import { PrismaModule } from '../prisma/prisma.module';
 import { ApiCatalogService } from './tools/bridge/api-catalog.service';
 import { createApiBridgeTools } from './tools/bridge/api-bridge.tools';
 import { AIEngineService } from './ai-engine.service';
+import { AgentRuntimeConfigService } from './agent-runtime-config.service';
 import { AILoggingService } from './ai-logging.service';
 import { AgentTraceService } from './observability/agent-trace.service';
 import { AIQueueModule } from './queue/ai-queue.module';
@@ -81,6 +82,7 @@ import { S3Service } from '../common/services/s3.service';
   controllers: [AIStreamController],
   providers: [
     AIEngineService,
+    AgentRuntimeConfigService,
     AILoggingService,
     AgentTraceService,
     AIAgentService,
@@ -139,6 +141,7 @@ import { S3Service } from '../common/services/s3.service';
     AgentDurableSessionService,
     AgentVerifierService,
     AIEngineService,
+    AgentRuntimeConfigService,
     AILoggingService,
     AgentTraceService,
     AIAgentService,

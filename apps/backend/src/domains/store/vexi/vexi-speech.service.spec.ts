@@ -516,6 +516,21 @@ describe('VexiSpeechService', () => {
 
       expect(aiEngine.runSpeech).toHaveBeenCalledTimes(2);
     });
+
+    it('T14: marca el audio generado con sus segundos y el acierto de caché como gratis', async () => {
+      const text = 'Tenés cuarenta y siete ventas hoy.';
+      const first = await service.synthesize(text, params);
+      const second = await service.synthesize(text, params);
+
+      // 'AAAA' no es un MP3 legible: cae al estimado por texto (15 car/s).
+      expect(first).toEqual(
+        expect.objectContaining({ generated: true, audioBase64: 'AAAA' }),
+      );
+      expect(first!.seconds).toBeCloseTo(text.length / 15, 5);
+      expect(second).toEqual(
+        expect.objectContaining({ generated: false, seconds: 0 }),
+      );
+    });
   });
 
   describe('fillers', () => {

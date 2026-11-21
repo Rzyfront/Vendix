@@ -27,6 +27,11 @@ import {
   AIAppHealthQuery,
   AIAppHealthReport,
 } from '../interfaces';
+import {
+  AgentRuntimeSheet,
+  AgentVoicePreview,
+  UpdateAgentRuntimeDto,
+} from '../interfaces/agent-runtime.interface';
 
 interface CacheEntry<T> {
   observable: T;
@@ -241,6 +246,40 @@ export class AIEngineService {
     return this.http.delete<void>(
       `${this.apiUrl}/superadmin/ai-engine/agents/${id}`,
     );
+  }
+
+  // --- Ficha única del agente (Vex / Vexi): modelo, proveedor y voz ---
+
+  getAgentSheet(agentKey: string): Observable<AgentRuntimeSheet> {
+    return this.http
+      .get<{ data: AgentRuntimeSheet }>(
+        `${this.apiUrl}/superadmin/ai-engine/agent-runtime/${agentKey}`,
+      )
+      .pipe(map((r) => r.data));
+  }
+
+  updateAgentSheet(
+    agentKey: string,
+    data: UpdateAgentRuntimeDto,
+  ): Observable<AgentRuntimeSheet> {
+    return this.http
+      .patch<{ data: AgentRuntimeSheet }>(
+        `${this.apiUrl}/superadmin/ai-engine/agent-runtime/${agentKey}`,
+        data,
+      )
+      .pipe(map((r) => r.data));
+  }
+
+  previewAgentVoice(
+    agentKey: string,
+    text?: string,
+  ): Observable<AgentVoicePreview> {
+    return this.http
+      .post<{ data: AgentVoicePreview }>(
+        `${this.apiUrl}/superadmin/ai-engine/agent-runtime/${agentKey}/voice-preview`,
+        text ? { text } : {},
+      )
+      .pipe(map((r) => r.data));
   }
 
   invalidateCache(): void {

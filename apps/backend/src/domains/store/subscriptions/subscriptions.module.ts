@@ -8,6 +8,7 @@ import { SubscriptionResolverService } from './services/subscription-resolver.se
 import { SubscriptionAccessService } from './services/subscription-access.service';
 import { AIEntitlementsResolverService } from './services/ai-entitlements-resolver.service';
 import { AIEntitlementsShadowService } from './services/ai-entitlements-shadow.service';
+import { AgentQuotaService } from './services/agent-quota.service';
 import { SubscriptionStateService } from './services/subscription-state.service';
 import { SubscriptionAccessController } from './controllers/subscription-access.controller';
 import { StoreSubscriptionsController } from './controllers/store-subscriptions.controller';
@@ -76,6 +77,7 @@ import { NotificationsModule } from '../notifications/notifications.module';
     SubscriptionAccessService,
     AIEntitlementsResolverService,
     AIEntitlementsShadowService,
+    AgentQuotaService,
     SubscriptionStateService,
     AiAccessGuard,
     StoreOperationsGuard,
@@ -124,6 +126,7 @@ import { NotificationsModule } from '../notifications/notifications.module';
     SubscriptionAccessService,
     AIEntitlementsResolverService,
     AIEntitlementsShadowService,
+    AgentQuotaService,
     SubscriptionStateService,
     AiAccessGuard,
     StoreOperationsGuard,

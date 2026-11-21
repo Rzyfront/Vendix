@@ -7,6 +7,8 @@ import { VexiModule } from '../vexi/vexi.module';
 import { NotificationsModule } from '../notifications/notifications.module';
 import { VexiActivityService } from '../vexi/vexi-activity.service';
 import { VexController } from './vex.controller';
+import { AgentHistoryController } from './agent-history.controller';
+import { AgentHistoryService } from './services/agent-history.service';
 import { VexEnabledGuard } from './guards/vex-enabled.guard';
 import { PlanApprovalService } from './services/plan-approval.service';
 import { VexBlockService } from './services/vex-block.service';
@@ -42,11 +44,12 @@ import { randomUUID } from 'node:crypto';
     // `VexiActivityService` pushes applied actions over the notifications SSE.
     NotificationsModule,
   ],
-  controllers: [VexController],
+  controllers: [VexController, AgentHistoryController],
   providers: [
     PlanApprovalService,
     VexBlockService,
     VexActivityFeedService,
+    AgentHistoryService,
     VexSuggestionsService,
     VexEnabledGuard,
     VexiActivityService,

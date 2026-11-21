@@ -753,3 +753,14 @@
   >
   </app-ai-engine-agent-modal>
 }
+
+@defer (when showAgentSheet()) {
+  <app-ai-engine-agent-sheet
+    [isOpen]="showAgentSheet()"
+    (isOpenChange)="showAgentSheet.set($event)"
+    [agentKey]="sheetAgentKey()"
+    [tools]="tools()"
+    (saved)="loadAgents()"
+  >
+  </app-ai-engine-agent-sheet>
+}

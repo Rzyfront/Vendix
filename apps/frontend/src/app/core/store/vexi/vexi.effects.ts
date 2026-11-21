@@ -967,6 +967,11 @@ export class VexiEffects {
                 }
                 break;
 
+              case 'voice_notice':
+                // T14: the answer arrives as text only; say why once.
+                if (chunk.message) this.voice.notice(chunk.message);
+                break;
+
               case 'done':
                 if (chunk.objective)
                   subscriber.next(

@@ -4,8 +4,9 @@ import { ActivatedRoute, Router } from '@angular/router';
 import { IconComponent } from '../../../../../shared/components/icon/icon.component';
 import { VexiSettingsComponent } from '../vexi/vexi-settings.component';
 import { VexSettingsComponent } from './vex-settings.component';
+import { AgentHistoryComponent } from './history/agent-history.component';
 
-type AiAgentsTab = 'vexi' | 'vex';
+type AiAgentsTab = 'vexi' | 'vex' | 'history';
 
 /**
  * "Agentes IA" settings page (`/admin/settings/ai-agents`).
@@ -21,15 +22,20 @@ type AiAgentsTab = 'vexi' | 'vex';
 @Component({
   selector: 'app-ai-agents-settings',
   standalone: true,
-  imports: [IconComponent, VexiSettingsComponent, VexSettingsComponent],
+  imports: [
+    IconComponent,
+    VexiSettingsComponent,
+    VexSettingsComponent,
+    AgentHistoryComponent,
+  ],
   template: `
-    <div class="w-full max-w-3xl">
+    <div class="w-full" [class.max-w-3xl]="activeTab() !== 'history'">
       <div class="mb-6">
         <h1 class="text-3xl font-bold text-[var(--color-text-primary)] mb-2">Agentes IA</h1>
         <p class="text-[var(--color-text-secondary)]">
           Los asistentes de inteligencia artificial de tu tienda. Cada uno se
-          activa por separado y solo lo configuran el propietario y los
-          administradores.
+          activa por separado; solo el propietario y los administradores lo
+          encienden, y aquí queda el historial de lo que hicieron.
         </p>
       </div>
 
@@ -70,15 +76,35 @@ type AiAgentsTab = 'vexi' | 'vex';
           <app-icon name="sparkles" [size]="16" />
           Vex
         </button>
+        <button
+          type="button"
+          role="tab"
+          [attr.aria-selected]="activeTab() === 'history'"
+          [attr.tabindex]="activeTab() === 'history' ? 0 : -1"
+          (click)="selectTab('history')"
+          class="flex-1 inline-flex items-center justify-center gap-2 rounded-md px-4 py-2 text-sm font-semibold transition-colors"
+          [class.bg-surface]="activeTab() === 'history'"
+          [class.shadow-sm]="activeTab() === 'history'"
+          [class.text-[var(--color-text-primary)]]="activeTab() === 'history'"
+          [class.text-[var(--color-text-secondary)]]="activeTab() !== 'history'"
+          [class.hover:text-[var(--color-text-primary)]]="activeTab() !== 'history'"
+        >
+          <app-icon name="history" [size]="16" />
+          Historial
+        </button>
       </div>
 
       @if (activeTab() === 'vexi') {
         <div role="tabpanel" aria-label="Configuración de Vexi">
           <app-vexi-settings />
         </div>
-      } @else {
+      } @else if (activeTab() === 'vex') {
         <div role="tabpanel" aria-label="Configuración de Vex">
           <app-vex-settings />
+        </div>
+      } @else {
+        <div role="tabpanel" aria-label="Historial de los agentes">
+          <app-agent-history />
         </div>
       }
     </div>
@@ -97,17 +123,19 @@ export class AiAgentsSettingsComponent {
   private readonly router = inject(Router);
 
   readonly activeTab = signal<AiAgentsTab>(
-    this.route.snapshot.queryParamMap.get('tab') === 'vex' ? 'vex' : 'vexi',
+    ((tab) => (tab === 'vex' || tab === 'history' ? tab : 'vexi'))(
+      this.route.snapshot.queryParamMap.get('tab'),
+    ),
   );
 
   selectTab(tab: AiAgentsTab): void {
     if (tab === this.activeTab()) return;
     this.activeTab.set(tab);
-    // `vexi` is the default tab and keeps a clean URL; only `vex` persists
+    // `vexi` is the default tab and keeps a clean URL; `vex` and `history` persist
     // the query param so the link stays shareable.
     void this.router.navigate([], {
       relativeTo: this.route,
-      queryParams: { tab: tab === 'vex' ? 'vex' : null },
+      queryParams: { tab: tab === 'vexi' ? null : tab },
       queryParamsHandling: 'merge',
     });
   }
