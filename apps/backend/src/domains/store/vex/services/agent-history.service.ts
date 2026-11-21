@@ -54,6 +54,11 @@ export interface HistoryQuery {
 }
 
 export const HISTORY_MAX_LIMIT = 50;
+/**
+ * Changes merge three sources in memory, so page N reads N * limit rows of
+ * each: the page is capped to keep that read bounded.
+ */
+export const HISTORY_MAX_PAGE = 20;
 const DEFAULT_LIMIT = 20;
 /** Settings audit rows scanned in memory (no JSON predicate on `new_values`). */
 const SWITCH_SCAN_WINDOW = 300;
@@ -86,7 +91,7 @@ export class AgentHistoryService {
     query: HistoryQuery,
   ): Promise<HistoryPage<HistoryChangeEvent>> {
     const storeId = RequestContextService.getStoreId();
-    const { page, limit } = this.paging(query);
+    const { page, limit } = this.paging(query, HISTORY_MAX_PAGE);
     const agent = this.agentFilter(query.agent);
     if (!storeId) return { items: [], total: 0, page, limit };
 
@@ -274,8 +279,14 @@ export class AgentHistoryService {
 
   // ── helpers ────────────────────────────────────────────────────────────
 
-  private paging(query: HistoryQuery): { page: number; limit: number } {
-    const page = Math.max(Math.floor(Number(query.page)) || 1, 1);
+  private paging(
+    query: HistoryQuery,
+    maxPage = Number.MAX_SAFE_INTEGER,
+  ): { page: number; limit: number } {
+    const page = Math.min(
+      Math.max(Math.floor(Number(query.page)) || 1, 1),
+      maxPage,
+    );
     const limit = Math.min(
       Math.max(Math.floor(Number(query.limit)) || DEFAULT_LIMIT, 1),
       HISTORY_MAX_LIMIT,

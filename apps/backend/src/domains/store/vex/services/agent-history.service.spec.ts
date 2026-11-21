@@ -1,5 +1,5 @@
 import { RequestContextService } from '../../../../common/context/request-context.service';
-import { AgentHistoryService } from './agent-history.service';
+import { AgentHistoryService, HISTORY_MAX_PAGE } from './agent-history.service';
 
 const STORE_ID = 7;
 
@@ -35,6 +35,18 @@ describe('AgentHistoryService', () => {
   afterEach(() => jest.restoreAllMocks());
 
   describe('listChanges', () => {
+    it('una página absurda no se traduce en una lectura sin tope', async () => {
+      const { service, feed, prisma } = setup({});
+
+      const page = await service.listChanges({ page: 1_000_000, limit: 50 });
+
+      expect(page.page).toBe(HISTORY_MAX_PAGE);
+      expect(feed.recentAgentActions).toHaveBeenCalledWith(HISTORY_MAX_PAGE * 50);
+      expect(prisma.ai_conversation_purges.findMany).toHaveBeenCalledWith(
+        expect.objectContaining({ take: HISTORY_MAX_PAGE * 50 }),
+      );
+    });
+
     it('mezcla las tres fuentes por fecha descendente', async () => {
       const { service } = setup({
         audits: [
