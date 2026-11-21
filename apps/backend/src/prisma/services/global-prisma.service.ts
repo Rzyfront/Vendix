@@ -468,6 +468,36 @@ export class GlobalPrismaService extends BasePrismaService {
     return this.baseClient.ai_conversation_purges;
   }
 
+  // F4 T31: sin scoping. Solo para el borrado de una conversación (filtra por
+  // source_conversation_id de la propia constancia) y tareas de sistema; el
+  // tráfico de la tienda va por StorePrismaService.ai_agent_memories.
+  get ai_agent_memories() {
+    return this.baseClient.ai_agent_memories;
+  }
+
+  // F4 T32–T33: skills de Vex (contenido global administrado en superadmin).
+  get ai_agent_skills() {
+    return this.baseClient.ai_agent_skills;
+  }
+
+  get ai_agent_skill_versions() {
+    return this.baseClient.ai_agent_skill_versions;
+  }
+
+  // F4 T27: series de videos y progreso de aprendizaje (contenido global; el
+  // progreso se filtra por user_id en el servicio).
+  get video_series() {
+    return this.baseClient.video_series;
+  }
+
+  get video_series_items() {
+    return this.baseClient.video_series_items;
+  }
+
+  get user_learning_progress() {
+    return this.baseClient.user_learning_progress;
+  }
+
   get ai_agent_script_runs() {
     return this.baseClient.ai_agent_script_runs;
   }
