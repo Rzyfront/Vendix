@@ -146,6 +146,7 @@ function build(opts: {
     undefined,
     undefined,
     undefined,
+    undefined, // agentQuota (T14)
     opts.compactor as any,
   );
   jest
