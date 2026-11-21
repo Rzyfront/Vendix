@@ -11,6 +11,7 @@ import type { VexiToolExecution } from '../../../../../core/services/vexi-api.se
 import { environment } from '../../../../../../environments/environment';
 import {
   VexBlockInteraction,
+  VexContextBudget,
   VexFollowup,
   VexFollowupEdits,
   VexPlanProposal,
@@ -186,6 +187,9 @@ export interface VexBackendConversation {
   created_at: string;
   updated_at: string;
   messages?: VexBackendMessage[];
+  /** Rolling summary of the compacted part of the conversation, when Vex compacted it. */
+  summary?: string | null;
+  summary_through_message_id?: number | null;
 }
 
 export interface VexBackendMessage {
@@ -213,7 +217,8 @@ export interface VexStreamChunk {
     | 'audio'
     | 'timing'
     | 'conversation_title'
-    | 'followup_suggestion';
+    | 'followup_suggestion'
+    | 'context_compacted';
   audio_base64?: string;
   content_type?: string;
   index?: number;
@@ -236,6 +241,12 @@ export interface VexStreamChunk {
     completionTokens: number;
     totalTokens: number;
   };
+  /** `done` frame: share of the context window the next turn would use. */
+  context_budget?: VexContextBudget;
+  cost_usd?: number;
+  /** `context_compacted` frame: the new summary and the last message it covers. */
+  summary?: string;
+  summary_through_message_id?: number;
   error?: string;
   /** Closed error code of an `error` frame, when the backend sends one. */
   error_code?: string;

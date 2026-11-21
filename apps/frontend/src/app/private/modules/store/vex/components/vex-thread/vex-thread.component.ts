@@ -6,8 +6,10 @@ import {
   effect,
   inject,
   Injector,
+  signal,
   viewChild,
 } from '@angular/core';
+import { NgTemplateOutlet } from '@angular/common';
 import { SpinnerComponent } from '../../../../../../shared/components/spinner/spinner.component';
 import { ButtonComponent } from '../../../../../../shared/components/button/button.component';
 import { IconComponent } from '../../../../../../shared/components/icon/icon.component';
@@ -25,12 +27,14 @@ import { VexBlockFileComponent } from '../vex-blocks/vex-block-file.component';
 import { VexToolTraceComponent } from '../vex-tool-trace/vex-tool-trace.component';
 import { VexPlanCardComponent } from '../vex-plan-card/vex-plan-card.component';
 import { VexFollowupChipComponent } from '../vex-followup-chip/vex-followup-chip.component';
+import { ModalComponent } from '../../../../../../shared/components/modal/modal.component';
 import { StoreSettingsFacade } from '../../../../../../core/store/store-settings/store-settings.facade';
 
 @Component({
   selector: 'vendix-vex-thread',
   standalone: true,
   imports: [
+    NgTemplateOutlet,
     ButtonComponent,
     SpinnerComponent,
     IconComponent,
@@ -43,6 +47,7 @@ import { StoreSettingsFacade } from '../../../../../../core/store/store-settings
     VexToolTraceComponent,
     VexPlanCardComponent,
     VexFollowupChipComponent,
+    ModalComponent,
   ],
   template: `
     <div #scroller class="h-full overflow-y-auto" role="log" aria-live="polite">
@@ -51,6 +56,9 @@ import { StoreSettingsFacade } from '../../../../../../core/store/store-settings
           <div class="flex justify-center py-8" role="status">
             <app-spinner size="sm" [text]="threadCopy.loading"></app-spinner>
           </div>
+        }
+        @if (divider_anchor() === top_anchor) {
+          <ng-container *ngTemplateOutlet="compacted_divider" />
         }
         @for (message of messages(); track message.id) {
           @if (message.role === 'user') {
@@ -239,6 +247,9 @@ import { StoreSettingsFacade } from '../../../../../../core/store/store-settings
               </div>
             </div>
           }
+          @if (divider_anchor() === message.id) {
+            <ng-container *ngTemplateOutlet="compacted_divider" />
+          }
         }
         @if (store.followups_muted()) {
           <div
@@ -273,6 +284,26 @@ import { StoreSettingsFacade } from '../../../../../../core/store/store-settings
         }
       </div>
     </div>
+    <ng-template #compacted_divider>
+      <div class="flex items-center gap-3 text-xs text-text-secondary" role="separator">
+        <span class="flex-1 h-px bg-border" aria-hidden="true"></span>
+        <span>{{ threadCopy.compacted }}</span>
+        <app-button variant="ghost" size="xsm" (clicked)="summary_open.set(true)">
+          {{ threadCopy.view_summary }}
+        </app-button>
+        <span class="flex-1 h-px bg-border" aria-hidden="true"></span>
+      </div>
+    </ng-template>
+    <app-modal
+      [(isOpen)]="summary_open"
+      [title]="threadCopy.summary_title"
+      size="md"
+      [closeOnBackdrop]="true"
+    >
+      <p class="whitespace-pre-wrap leading-relaxed text-text-primary">
+        {{ store.active_compaction()?.summary }}
+      </p>
+    </app-modal>
   `,
 })
 export class VexThreadComponent {
@@ -289,6 +320,21 @@ export class VexThreadComponent {
   private readonly scroller = viewChild<ElementRef<HTMLElement>>('scroller');
 
   readonly messages = () => this.store.active_conversation()?.messages ?? [];
+
+  protected readonly summary_open = signal(false);
+  protected readonly top_anchor = '__top__';
+  /**
+   * Where the «Resumí la conversación anterior» divider goes: after the message
+   * the summary covers up to, or at the top when that message is not loaded.
+   */
+  protected readonly divider_anchor = computed(() => {
+    const compaction = this.store.active_compaction();
+    if (!compaction) return null;
+    const through = compaction.through_message_id;
+    return through && this.messages().some((m) => m.id === through)
+      ? through
+      : this.top_anchor;
+  });
 
   constructor() {
     effect(() => {

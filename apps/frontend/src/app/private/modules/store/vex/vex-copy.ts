@@ -114,6 +114,10 @@ export const VEX_COPY = {
     rename_aria: (title: string) => `Renombrar la conversación: ${title}`,
   },
   thread: {
+    compacted: 'Resumí la conversación anterior',
+    view_summary: 'Ver resumen',
+    summary_title: 'Resumen de la conversación anterior',
+    summary_close: 'Cerrar',
     loading: 'Abriendo conversación…',
     writing: 'Vex está escribiendo',
     retry: 'Reintentar',
@@ -178,6 +182,10 @@ export const VEX_COPY = {
   },
   composer: {
     brand: 'Vex',
+    context_label: (percent: number) => `Contexto ${percent} %`,
+    context_title: (used: number, window: number) =>
+      `Contexto estimado: ${used.toLocaleString('es-CO')} de ${window.toLocaleString('es-CO')} tokens`,
+    context_warning: 'Contexto casi lleno: resumiré lo anterior',
     attachments_label: 'Archivos adjuntos',
     remove_aria: (name: string) => `Quitar ${name}`,
     attach: 'Adjuntar archivos',
