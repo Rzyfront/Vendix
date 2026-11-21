@@ -75,6 +75,11 @@ import {
 } from './chat-stream-replay';
 import { resumeReferenceBlock } from './resume-reference';
 import {
+  ConversationPurgePreview,
+  ConversationPurgeResult,
+  ConversationPurgeService,
+} from './conversation-purge.service';
+import {
   ConversationTitleFrame,
   ConversationTitleService,
   TITLE_TIMEOUT_MS,
@@ -262,6 +267,8 @@ export class AIChatService {
     // Título generado de los hilos de Vex. Opcional-final como los demás: sin
     // él el hilo conserva el título del cliente y no se emite el frame.
     @Optional() private readonly titles?: ConversationTitleService,
+    // Borrado físico de hilos de Vex (T4). Opcional-final como los demás.
+    @Optional() private readonly purges?: ConversationPurgeService,
   ) {}
 
   async createConversation(dto: CreateConversationDto) {
@@ -1240,6 +1247,27 @@ export class AIChatService {
     // claim to expire on its own TTL, which is the safe direction — a stale claim
     // rejects results, it never accepts a wrong one.
     await this.uiChannel.releaseTurn(streamId);
+  }
+
+  /** Cifras reales que muestra el aviso de borrado de un hilo de Vex. */
+  async previewConversationPurge(
+    id: number,
+  ): Promise<ConversationPurgePreview> {
+    return this.requirePurges().preview(id);
+  }
+
+  /** Borra de verdad un hilo de Vex (solo dueño; ver `ConversationPurgeService`). */
+  async purgeConversation(id: number): Promise<ConversationPurgeResult> {
+    const result = await this.requirePurges().purge(id);
+    // El búfer de reanudación vive en memoria de este proceso.
+    const storeId = RequestContextService.getContext()?.store_id;
+    if (storeId) this.streamReplay.evictConversation(storeId, id);
+    return result;
+  }
+
+  private requirePurges(): ConversationPurgeService {
+    if (!this.purges) throw new VendixHttpException(ErrorCodes.AI_CHAT_001);
+    return this.purges;
   }
 
   /** Título de Vexi/legacy: el primer mensaje recortado a 80 caracteres. */

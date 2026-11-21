@@ -462,6 +462,12 @@ export class GlobalPrismaService extends BasePrismaService {
     return this.baseClient.ai_agent_recipe_events;
   }
 
+  // Sin scoping: lo usa el job de reintento de S3, que corre sin contexto de
+  // tienda. Filtra por la propia fila de la constancia.
+  get ai_conversation_purges() {
+    return this.baseClient.ai_conversation_purges;
+  }
+
   get ai_agent_script_runs() {
     return this.baseClient.ai_agent_script_runs;
   }

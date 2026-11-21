@@ -132,6 +132,8 @@ export class StorePrismaService extends BasePrismaService {
     // devolvería un delegate SIN scoping y un bloque sería legible por id
     // desde otra tienda.
     'ai_ui_blocks',
+    // Constancia de borrado de conversaciones: `store_id` propio, sin contenido.
+    'ai_conversation_purges',
     'dispatch_notes',
     'employee_stores',
     'accounts_receivable',
@@ -1787,6 +1789,10 @@ export class StorePrismaService extends BasePrismaService {
 
   get ai_ui_blocks() {
     return this.scoped_client.ai_ui_blocks;
+  }
+
+  get ai_conversation_purges() {
+    return this.scoped_client.ai_conversation_purges;
   }
 
   // Order Installments

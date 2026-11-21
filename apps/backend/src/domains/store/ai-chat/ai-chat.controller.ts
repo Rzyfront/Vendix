@@ -3,6 +3,7 @@ import {
   Get,
   Post,
   Patch,
+  Delete,
   Body,
   Param,
   Query,
@@ -65,6 +66,19 @@ export class AIChatController {
   async getConversation(@Param('id', ParseIntPipe) id: number) {
     const conversation = await this.chatService.getConversation(id);
     return this.responseService.success(conversation, 'Conversation retrieved');
+  }
+
+  @Get('conversations/:id/purge-preview')
+  async purgePreview(@Param('id', ParseIntPipe) id: number) {
+    const preview = await this.chatService.previewConversationPurge(id);
+    return this.responseService.success(preview, 'Purge preview retrieved');
+  }
+
+  // Borrado físico: solo el dueño y solo hilos de Vex (lo valida el servicio).
+  @Delete('conversations/:id')
+  async purgeConversation(@Param('id', ParseIntPipe) id: number) {
+    const result = await this.chatService.purgeConversation(id);
+    return this.responseService.success(result, 'Conversation deleted');
   }
 
   @Post('conversations/:id/messages')

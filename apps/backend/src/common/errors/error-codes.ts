@@ -2536,6 +2536,12 @@ export const ErrorCodes = {
     httpStatus: 400,
     devMessage: 'Message content is required',
   },
+  AI_CHAT_005: {
+    code: 'AI_CHAT_005',
+    httpStatus: 409,
+    devMessage:
+      'Conversation has a running or pending task; stop it before deleting',
+  },
 
   // Invoicing
   INVOICING_FIND_001: {
