@@ -572,7 +572,7 @@ export class AIEngineConfigModalComponent implements OnChanges {
         is_default: c.is_default,
         is_active: c.is_active,
         thinking: c.settings?.thinking ?? false,
-        supports_vision: c.settings?.supports_vision === true,
+        supports_vision: c.settings?.['supports_vision'] === true,
         ...this.embeddingFormValues(c),
         ...this.audioFormValues(c),
       });
@@ -594,7 +594,7 @@ export class AIEngineConfigModalComponent implements OnChanges {
         is_default: false,
         is_active: p.is_active,
         thinking: p.settings?.thinking ?? false,
-        supports_vision: p.settings?.supports_vision === true,
+        supports_vision: p.settings?.['supports_vision'] === true,
         ...this.embeddingFormValues(p),
         ...this.audioFormValues(p),
       });
