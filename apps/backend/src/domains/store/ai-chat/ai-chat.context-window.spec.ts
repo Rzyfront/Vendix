@@ -111,6 +111,24 @@ describe('T22/T23 buildContextWindow', () => {
     expect(out[0].content).toBe('Listo.');
   });
 
+  it('B3: in a Vex thread applied-write tool rows take no slot; Vexi keeps its raw last-20', () => {
+    const mixed: Msg[] = [];
+    for (let id = 1; id <= 30; id++)
+      mixed.push(
+        id % 3 === 0
+          ? { id, role: 'tool', content: '' }
+          : { id, role: id % 3 === 1 ? 'user' : 'assistant', content: `m${id}` },
+      );
+    const vex = windowOf(mixed);
+    // 20 conversational rows (+ the new turn): m1 is the 20th newest one.
+    expect(vex).toHaveLength(21);
+    expect(vex[0].content).toBe('m1');
+    const vexi = windowOf(mixed, { metadata: null });
+    // Previous behavior: the last 20 raw rows, tool rows dropped afterwards.
+    expect(vexi[0].content).toBe('m11');
+    expect(vexi).toHaveLength(13 + 1);
+  });
+
   it('borde agent_key: a Vexi thread ignores a stored summary and keeps its window', () => {
     const out = windowOf(rows(30), {
       summary: 'Resumen escrito bajo Vex',

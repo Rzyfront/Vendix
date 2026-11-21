@@ -62,6 +62,7 @@ import { PlanApprovalService } from '../vex/services/plan-approval.service';
 import { VexiConfirmationService } from '../vexi/vexi-confirmation.service';
 import { Prisma } from '@prisma/client';
 import {
+  CHAT_WINDOW_MESSAGES,
   ConversationCompactorService,
   type ContextCompactedFrame,
 } from '../../../ai-engine/context/conversation-compactor.service';
@@ -268,7 +269,8 @@ interface VexTurnCollection {
 @Injectable()
 export class AIChatService {
   private readonly logger = new Logger(AIChatService.name);
-  private readonly MAX_CONTEXT_MESSAGES = 20;
+  /** Rows that travel verbatim; shared with the compactor (B3). */
+  private readonly MAX_CONTEXT_MESSAGES = CHAT_WINDOW_MESSAGES;
   private readonly streamReplay = new ChatStreamReplay<ChatStreamFrame>();
 
   constructor(
@@ -2440,8 +2442,8 @@ export class AIChatService {
     ) {
       return { conversation, frame: null };
     }
-    // One measure: the budget the ring showed after the last answer. Without
-    // a persisted one (legacy thread) nothing compacts; the turn persists it.
+    // Two triggers: live rows the window would leave out (always, legacy
+    // threads included) and the budget the ring showed after the last answer.
     const result = await this.compactor.compactIfNeeded(
       conversation,
       latestPersistedContextBudget(conversation.messages),
@@ -2519,8 +2521,21 @@ export class AIChatService {
       ? conversation.messages.filter((m) => m.id > through!)
       : conversation.messages;
 
-    // Add recent messages from history (last N)
-    const recentMessages = covered.slice(-this.MAX_CONTEXT_MESSAGES);
+    // Add recent messages from history (last N). In a Vex thread the N slots
+    // are conversational rows only, the same rows the compactor counts, so a
+    // live row is either here or in the summary (B3); applied-write `tool`
+    // rows never reach the model and must not take a slot. Vexi keeps its
+    // byte-identical window.
+    const recentMessages = (
+      isVexThread
+        ? covered.filter(
+            (m) =>
+              m.role === 'system' ||
+              m.role === 'user' ||
+              m.role === 'assistant',
+          )
+        : covered
+    ).slice(-this.MAX_CONTEXT_MESSAGES);
 
     for (const msg of recentMessages) {
       if (

@@ -1,4 +1,5 @@
 import {
+  CHAT_WINDOW_MESSAGES,
   ConversationCompactorService,
   MAX_KEEP_MESSAGES,
   MAX_SUMMARY_CHARS,
@@ -40,13 +41,13 @@ function build(run: jest.Mock) {
 const down = () => jest.fn().mockRejectedValue(new Error('app inactive'));
 
 describe('T22 ConversationCompactorService', () => {
-  it('uses the ring measure: below 75 % or without a budget nothing runs', async () => {
+  it('rows that fit the window: below 75 % or without a budget nothing runs', async () => {
     const { service, update, run } = build(jest.fn());
     const conv = {
       id: 7,
       summary: null,
       summary_through_message_id: null,
-      messages: msgs(60),
+      messages: msgs(CHAT_WINDOW_MESSAGES),
     };
     expect(await service.compactIfNeeded(conv, budgetOf(74))).toBeNull();
     expect(await service.compactIfNeeded(conv, null)).toBeNull();
@@ -54,7 +55,25 @@ describe('T22 ConversationCompactorService', () => {
     expect(update).not.toHaveBeenCalled();
   });
 
-  it('keeps 20 literal rows when they fit (never fewer than before the PR)', async () => {
+  it('B3: live rows past the window compact even under 75 % or without a budget', async () => {
+    const { service } = build(down());
+    const conv = {
+      id: 7,
+      summary: null,
+      summary_through_message_id: null,
+      messages: msgs(CHAT_WINDOW_MESSAGES + 1),
+    };
+    const low = await service.compactIfNeeded(conv, budgetOf(20));
+    expect(low!.summary_through_message_id).toBe(
+      CHAT_WINDOW_MESSAGES + 1 - MAX_KEEP_MESSAGES,
+    );
+    const legacy = await service.compactIfNeeded(conv, null);
+    expect(legacy!.summary_through_message_id).toBe(
+      low!.summary_through_message_id,
+    );
+  });
+
+  it('keeps half the window literal when it fits, so a pass always frees room', async () => {
     const { service } = build(down());
     const out = await service.compactIfNeeded(
       { id: 7, summary: null, summary_through_message_id: null, messages: msgs(40) },
@@ -63,7 +82,7 @@ describe('T22 ConversationCompactorService', () => {
     expect(out!.summary_through_message_id).toBe(40 - MAX_KEEP_MESSAGES);
   });
 
-  it('keeps fewer (never under 10) when the recent rows do not fit the window share', async () => {
+  it('keeps fewer (never under the last exchange) when the recent rows do not fit the window share', async () => {
     const { service } = build(down());
     const out = await service.compactIfNeeded(
       {
@@ -95,19 +114,46 @@ describe('T22 ConversationCompactorService', () => {
     );
     expect(out).toEqual({
       summary: 'Resumen del modelo',
-      summary_through_message_id: 20,
+      summary_through_message_id: 40 - MAX_KEEP_MESSAGES,
     });
     const [appKey, vars, , options] = run.mock.calls[0];
     expect(appKey).toBe(VEX_SUMMARIZER_APP_KEY);
     expect(vars.previous_summary).toBe('previo');
     expect(vars.transcript).toContain('assistant: Hecho. Total de la respuesta 2');
     expect(vars.transcript).toContain('list_orders (ok)');
-    expect(vars.transcript).not.toContain('pregunta 21 ');
+    expect(vars.transcript).toContain('pregunta 29 ');
+    expect(vars.transcript).not.toContain('pregunta 31 ');
     expect(options.signal).toBeInstanceOf(AbortSignal);
     expect(update).toHaveBeenCalledWith({
       where: { id: 7 },
-      data: { summary: 'Resumen del modelo', summary_through_message_id: 20 },
+      data: {
+        summary: 'Resumen del modelo',
+        summary_through_message_id: 40 - MAX_KEEP_MESSAGES,
+      },
     });
+  });
+
+  it('B3 model path: a transcript too long gives every older row an even share, none is cut off', async () => {
+    const run = jest
+      .fn()
+      .mockResolvedValue({ success: true, content: 'Resumen del modelo' });
+    const { service } = build(run);
+    const out = await service.compactIfNeeded(
+      {
+        id: 7,
+        summary: null,
+        summary_through_message_id: null,
+        messages: msgs(300, 400),
+      },
+      budgetOf(80, 1_000_000),
+    );
+    expect(out!.summary_through_message_id).toBe(300 - MAX_KEEP_MESSAGES);
+    const transcript: string = run.mock.calls[0][1].transcript;
+    expect(transcript.length).toBeLessThanOrEqual(60_000);
+    const rows = transcript.split('\n');
+    expect(rows).toHaveLength(300 - MAX_KEEP_MESSAGES);
+    expect(rows[0]).toContain('pregunta 1 ');
+    expect(rows[rows.length - 1]).toContain('respuesta 290');
   });
 
   it('timeout aborts the summarizer call and falls back to the extractive summary', async () => {
@@ -140,12 +186,12 @@ describe('T22 ConversationCompactorService', () => {
       { id: 7, summary: null, summary_through_message_id: null, messages },
       budgetOf(80),
     );
-    expect(out!.summary_through_message_id).toBe(20);
+    expect(out!.summary_through_message_id).toBe(40 - MAX_KEEP_MESSAGES);
     expect(out!.summary).toContain('- Persona: pregunta 1 ');
     expect(out!.summary).toContain('- Vex: Hecho. Total de la respuesta 2: $2.000.');
     expect(out!.summary).toContain('create_product (ok), list_orders (error)');
-    expect(out!.summary).toContain('pregunta 19 ');
-    expect(out!.summary).toContain('respuesta 20');
+    expect(out!.summary).toContain('pregunta 29 ');
+    expect(out!.summary).toContain('respuesta 30');
     expect(out!.summary.length).toBeLessThanOrEqual(MAX_SUMMARY_CHARS);
   });
 
@@ -182,7 +228,7 @@ describe('T22 ConversationCompactorService', () => {
     expect(update).toHaveBeenCalledTimes(2);
   });
 
-  it('never moves the pointer past rows whose content did not fit', async () => {
+  it('B3: covers every older row in one pass; what does not fit is counted, never dropped', async () => {
     const { service } = build(down());
     const messages = msgs(300, 200);
     const out = await service.compactIfNeeded(
@@ -190,12 +236,17 @@ describe('T22 ConversationCompactorService', () => {
       budgetOf(80, 1_000_000),
     );
     const through = out!.summary_through_message_id;
-    // Not every older row fit: the pointer stops at the covered prefix…
-    expect(through).toBeLessThan(300 - MAX_KEEP_MESSAGES);
-    // …and every covered row is in the summary.
-    for (let id = 1; id <= through; id += 2)
-      expect(out!.summary).toContain(`pregunta ${id} `);
-    expect(out!.summary).not.toContain(`pregunta ${through + 2} `);
+    // The pointer reaches the last older row: no gap before the window…
+    expect(through).toBe(300 - MAX_KEEP_MESSAGES);
+    const lines = out!.summary.split('\n').slice(1);
+    // …the beginning and the newest covered rows keep their line…
+    expect(out!.summary).toContain('pregunta 1 ');
+    expect(out!.summary).toContain(`respuesta ${through}`);
+    // …and the rows in between are counted in the marker: one point per row.
+    const marker = lines.find((l) => /puntos intermedios omitidos/.test(l));
+    const omitted = Number(/(\d+) puntos/.exec(marker!)![1]);
+    expect(lines.length - 1 + omitted).toBe(through);
+    expect(out!.summary.length).toBeLessThanOrEqual(MAX_SUMMARY_CHARS);
   });
 
   it('a failed persist is no compaction: no result, so no «Resumí…» notice', async () => {
