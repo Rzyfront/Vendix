@@ -5,7 +5,7 @@ description: >
 license: MIT
 metadata:
   author: rzyfront
-  version: "1.3"
+  version: "1.4"
   scope: [root]
   auto_invoke:
     - "Working with the Vex full-screen business agent (/admin/vex)"
@@ -31,7 +31,7 @@ Vex is the second agent on the existing engine: row `vex` in `ai_agents` + app `
 
 ## Managed row with `denied_tools`
 
-Vex is configuration: superadmin edits prompt, model, `max_tokens`, `max_iterations` and tool scope without a deploy. Catalog = permissions ∩ plan ∩ `allowed_tools` (if non-empty) − `denied_tools`, deny last (`vendix-ai-tool-routing`). Vex denies the 25 `ui_*` tools; Vexi denies nothing.
+Vex is configuration: superadmin edits prompt, model, voice, `max_iterations` and timeout in the single agent sheet (`superadmin/ai-engine/agent-runtime/vex`, `AgentRuntimeConfigService`); the store configures nothing agentic. Catalog = user's role permissions ∩ `allowed_tools` (if non-empty) − `denied_tools`, deny last (`vendix-ai-tool-routing`). The plan does NOT cut tools (`tools_allowed` is inert): the role is the only limit, and Vex explains it ("tu rol no permite <acción>"). Vex denies the 25 `ui_*` tools; Vexi denies nothing.
 
 1. A new `ui_*` tool goes into the Vex `denied_tools` in the seed AND a corrective migration.
 2. A hallucinated denied `ui_*` call dies at execution with `AI_AGENT_TOOL_NOT_ALLOWED` before the `clientSide` branch: no browser dispatch, no execution, no quota.
@@ -55,9 +55,9 @@ Vex is configuration: superadmin edits prompt, model, `max_tokens`, `max_iterati
 
 ## Gate and threads
 
-- Opens only for owner/admin with `store_settings.settings.vex.enabled === true` (default `false`, independent from Vexi) and plan feature `vex_agent` (`monthly_tool_calls_cap`, `daily_messages_cap`, `monthly_tokens_cap`). `VexController` uses `RolesGuard + VexEnabledGuard`; `AiAccessGuard` only on `attachments` (approve/apply/interaction/feed spend no provider tokens). In `ai-chat` the `vex_agent` check is inline (decorators cannot see `agent_key`).
+- Opens only for owner/admin with `store_settings.settings.vex.enabled === true` (default `false`, independent from Vexi) and the plan's Vex entitlements: switch + caps of messages/day, tokens/month and voice-readout seconds/month in `plan_ai_entitlements` (`NULL` = unlimited, `0` = nothing; `agent-quota.service.ts`). There is no action quota in the new model (the legacy `monthly_tool_calls_cap` is still metered by `consumeToolCallQuota` until it is retired). `AI_ENTITLEMENTS_MODE=shadow` (default) still decides with the legacy `vex_agent` flags; `enforce` decides with the rows (`vendix-subscription-gate`). An exhausted quota is announced before the turn starts, with no tool call. `VexController` uses `RolesGuard + VexEnabledGuard`; `AiAccessGuard` only on `attachments` (approve/apply/interaction/feed spend no provider tokens). In `ai-chat` the `vex_agent` check is inline (decorators cannot see `agent_key`).
 - Threads by `metadata.agent_key`: `vex` lists only Vex; `vexi` lists Vexi + legacy NULL; unfiltered lists exclude Vex.
-- Frontend: `/admin/vex` behind `vexAccessGuard`; `/admin/settings/ai-agents` (model picker hidden). `activity-feed` unions domain notifications with applied Vex/Vexi actions over the notifications SSE.
+- Frontend: `/admin/vex` behind `vexAccessGuard`; `/admin/settings/ai-agents` (two switches, usage bars, history; no model picker, no voice mode). Voice is only per-reply TTS via API; realtime voice is retired. `activity-feed` unions domain notifications with applied Vex/Vexi actions over the notifications SSE.
 
 ## Measurement
 
