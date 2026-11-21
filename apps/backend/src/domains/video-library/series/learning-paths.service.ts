@@ -143,6 +143,20 @@ export class LearningPathsService {
   }
 
   async saveProgress(userId: number, dto: LearningProgressDto) {
+    // Same rule as the agent path (`saveLearningProgressForAgent`): progress
+    // only on a video that exists and is published. The table has no FK, so
+    // without this check an unknown id would leave an orphan row.
+    const video = await this.prisma.videos.findFirst({
+      where: { id: dto.video_id, status: 'PUBLISHED' },
+      select: { id: true },
+    });
+    if (!video) {
+      throw new VendixHttpException(
+        ErrorCodes.SYS_NOT_FOUND_001,
+        'No se encontró el video publicado.',
+      );
+    }
+
     const existing = await this.prisma.user_learning_progress.findUnique({
       where: { user_id_video_id: { user_id: userId, video_id: dto.video_id } },
     });
