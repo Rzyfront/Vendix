@@ -7,3 +7,8 @@ export { AIAppQueryDto } from './ai-app-query.dto';
 export { CreateAIAgentDto } from './create-ai-agent.dto';
 export { UpdateAIAgentDto } from './update-ai-agent.dto';
 export { AIAgentQueryDto } from './ai-agent-query.dto';
+export {
+  UpdateAgentRuntimeDto,
+  AgentVoiceDto,
+  VoicePreviewDto,
+} from './update-agent-runtime.dto';

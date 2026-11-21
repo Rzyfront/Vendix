@@ -2444,6 +2444,16 @@ export const ErrorCodes = {
     httpStatus: 502,
     devMessage: 'The transcription provider did not return text',
   },
+  // N5: realtime voice is withdrawn from every surface. Only the creation of a
+  // NEW session answers this; tool-call and session/close stay alive so a
+  // session opened before the deploy still closes and bills.
+  VEXI_REALTIME_UNAVAILABLE: {
+    code: 'VEXI_REALTIME_UNAVAILABLE',
+    httpStatus: 410,
+    devMessage:
+      'Realtime voice is no longer available for new sessions; use dictation ' +
+      'and spoken replies (pipeline voice) instead',
+  },
   AI_APP_001: {
     code: 'AI_APP_001',
     httpStatus: 404,

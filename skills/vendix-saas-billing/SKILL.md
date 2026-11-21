@@ -5,7 +5,7 @@ description: >
 license: Apache-2.0
 metadata:
   author: rzyfront
-  version: "2.2"
+  version: "2.3"
   scope: [root]
   auto_invoke:
     - "Creating SaaS subscription invoices or rev-share splits"
@@ -113,6 +113,8 @@ Manual/offline payments are implemented.
 - `is_free` forces `base_price=0`; `plan_type` is `base` | `partner_custom` | `promotional`; one default plan (`setDefault()` in a serializable transaction).
 - Partners are `organizations.is_partner=true`; overrides `partner_plan_overrides(organization_id, base_plan_id)` enforce `margin_pct <= plan.max_partner_margin_pct`. Overrides on promotional plans are not fully blocked (billing skips commission for promotional plans).
 - Known gap: `commission-accrual.job.ts` promotes commissions to `pending_payout`, but `partner-payout-batch.job.ts` (`0 4 5 * *`) selects only `accrued`. Verify before changing payouts.
+
+- AI in a plan is **per agent** (Vex, Vexi): a switch, capabilities and caps of messages/day, tokens/month and voice-readout seconds/month in `plan_ai_entitlements` (`NULL` = unlimited, `0` = nothing). A plan has no tool list and no action quota (`tools_allowed` is inert and the legacy `monthly_tool_calls_cap` is only metered until retired; the role limits tools). `async_queue` is engine config that a new plan receives from `AI_ENGINE_PLAN_DEFAULTS`. Details and the `AI_ENTITLEMENTS_MODE` shadow/enforce switch: `vendix-subscription-gate`.
 
 Detail (services, jobs, payout approve/reject/markPaid): `references/partners-commissions.md` (read on demand).
 

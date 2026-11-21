@@ -16,6 +16,8 @@ import {
 import { StoreSettings } from '../../../../../core/models/store-settings.interface';
 import { formatStoreDate } from '../../../../../shared/utils/date.util';
 import { parseApiError } from '../../../../../core/utils/parse-api-error';
+import { AgentStatusService, AgentStatusView } from './agent-status.service';
+import { AgentUsageMetersComponent } from './agent-usage-meters.component';
 
 /**
  * Vex tab inside "Agentes IA" (`/admin/settings/ai-agents?tab=vex`).
@@ -37,17 +39,34 @@ import { parseApiError } from '../../../../../core/utils/parse-api-error';
     RouterModule,
     SettingToggleComponent,
     IconComponent,
+    AgentUsageMetersComponent,
   ],
   template: `
     <div class="w-full max-w-3xl">
       <div class="bg-surface rounded-lg shadow-sm border border-[var(--color-border)] p-6">
-        <app-setting-toggle
-          label="Activar a Vex en esta tienda"
-          [description]="toggleDescription()"
-          [disabled]="saving()"
-          [ngModel]="enabled()"
-          (ngModelChange)="onToggle($event)"
-        />
+        <div
+          role="group"
+          aria-label="Usar Vex"
+          [attr.aria-describedby]="reason() ? 'vex-reason' : null"
+        >
+          <app-setting-toggle
+            label="Usar Vex"
+            [description]="toggleDescription()"
+            [disabled]="saving() || blockedByPlan()"
+            [ngModel]="enabled()"
+            (ngModelChange)="onToggle($event)"
+          />
+        </div>
+
+        @if (reason()) {
+          <p
+            id="vex-reason"
+            class="mt-3 text-sm text-[var(--color-text-secondary)]"
+            role="status"
+          >
+            {{ reason() }}
+          </p>
+        }
 
         @if (!enabled()) {
           <div
@@ -120,6 +139,8 @@ import { parseApiError } from '../../../../../core/utils/parse-api-error';
           </div>
         </div>
       </div>
+
+      <app-agent-usage-meters agent="vex" />
 
       <!-- Uso del periodo (día o mes). getAiUsage nunca lanza: ante error retorna un objeto
            vacio, asi que un snapshot ausente se lee como "sin datos", no
@@ -213,6 +234,13 @@ export class VexSettingsComponent {
   readonly vexBlockReason =
     this.subscriptionAccess.aiBlockReason('vex_agent');
 
+  private readonly statusService = inject(AgentStatusService);
+
+  /** `null` until `GET /store/ai-agents/status` answers, or if it fails. */
+  readonly status = signal<AgentStatusView | null>(null);
+  readonly blockedByPlan = computed(() => this.status()?.plan_includes === false);
+  readonly reason = computed(() => this.status()?.reason ?? null);
+
   readonly vexUsage = signal<AiUsageEntry | null>(null);
   readonly loadingUsage = signal(false);
 
@@ -246,6 +274,7 @@ export class VexSettingsComponent {
   });
 
   constructor() {
+    void this.statusService.loadFor('vex').then((s) => this.status.set(s));
     void this.loadUsage();
   }
 
@@ -282,7 +311,7 @@ export class VexSettingsComponent {
   );
 
   async onToggle(next: boolean): Promise<void> {
-    if (this.saving() || next === this.enabled()) {
+    if (this.saving() || this.blockedByPlan() || next === this.enabled()) {
       return;
     }
 

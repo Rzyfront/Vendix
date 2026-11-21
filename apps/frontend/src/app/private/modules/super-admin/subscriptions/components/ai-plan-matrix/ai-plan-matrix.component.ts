@@ -14,6 +14,7 @@ import {
   aiCapabilityId,
   aiCapabilitiesForAgent,
   describeAIEntitlements,
+  findAICapability,
 } from '../../../../../../shared/constants/ai-capabilities';
 import {
   ConfirmationModalComponent,
@@ -23,6 +24,7 @@ import {
 } from '../../../../../../shared/components';
 import { IconComponent } from '../../../../../../shared/components/icon/icon.component';
 import { completeAIEntitlements } from '../../utils/ai-feature-flags.util';
+import { AI_CAPABILITIES_NOT_YET_ENFORCED, AI_ENGINE_CONFIG_LINES } from './ai-plan-matrix.constants';
 
 export interface AIPlanMatrixPlanOption {
   id: string;
@@ -43,6 +45,12 @@ interface AIRowView {
   /** Lowest value the input takes, in its display unit (0 only where a 0 is enforced). */
   minDisplay: number;
   capHint: string;
+  /** Set while the switch has no runtime effect yet: when it starts to. */
+  pendingNote: string | null;
+  /** Accessible name of the cap input (agent, capability and unit). */
+  capLabel: string;
+  /** Accessible name of the unlimited switch. */
+  unlimitedLabel: string;
 }
 
 interface AICardView {
@@ -112,6 +120,15 @@ const ON_LIMIT_OPTIONS: { value: AIOnLimit; label: string }[] = [
                   <div class="space-y-0.5 min-w-0">
                     <p class="text-sm font-medium text-text-primary">{{ item.def.label }}</p>
                     <p class="text-xs text-text-secondary">{{ item.def.description }}</p>
+                    @if (item.pendingNote) {
+                      <p
+                        class="text-xs text-warning"
+                        role="note"
+                        [attr.data-testid]="'ai-pending-' + item.id"
+                      >
+                        Aún sin efecto: {{ item.pendingNote }}
+                      </p>
+                    }
                   </div>
                   @if (item.showSwitch) {
                     <app-toggle
@@ -128,24 +145,22 @@ const ON_LIMIT_OPTIONS: { value: AIOnLimit; label: string }[] = [
                     <div class="grid grid-cols-[1fr_auto] gap-3 items-end">
                       <app-input
                         type="number"
-                        [label]="item.unitText"
+                        [label]="item.capLabel"
                         [min]="item.minDisplay"
                         [helperText]="item.capHint"
                         [disabled]="item.locked || item.unlimited"
                         [ngModel]="item.inputValue"
                         (ngModelChange)="setCap(item.def, $event)"
                       ></app-input>
-                      <label class="flex items-center gap-2 pb-3 text-sm text-text-primary cursor-pointer">
-                        <input
-                          type="checkbox"
-                          class="h-4 w-4 rounded border-border accent-[var(--color-primary)]"
+                      <div class="pb-2">
+                        <app-toggle
+                          label="Sin límite"
                           [checked]="item.unlimited"
                           [disabled]="item.locked"
-                          [attr.aria-label]="item.def.label + ': sin límite'"
-                          (change)="setUnlimited(item.def, $any($event.target).checked)"
-                        />
-                        <span>Sin límite</span>
-                      </label>
+                          [ariaLabel]="item.unlimitedLabel"
+                          (toggled)="setUnlimited(item.def, $event)"
+                        ></app-toggle>
+                      </div>
                     </div>
                     <app-selector
                       label="Al llegar al tope"
@@ -169,6 +184,14 @@ const ON_LIMIT_OPTIONS: { value: AIOnLimit; label: string }[] = [
         </h3>
         <ul class="space-y-1 text-sm text-text-secondary" data-testid="ai-plan-summary">
           @for (line of summary(); track line) {
+            <li>{{ line }}</li>
+          }
+        </ul>
+        <h3 class="pt-2 text-sm font-semibold text-text-primary uppercase tracking-wide">
+          Configuración del motor (igual para todos los planes)
+        </h3>
+        <ul class="space-y-1 text-sm text-text-secondary" data-testid="ai-engine-config">
+          @for (line of engineLines; track line) {
             <li>{{ line }}</li>
           }
         </ul>
@@ -196,6 +219,7 @@ export class AIPlanMatrixComponent {
   readonly copyFromPlan = output<string>();
 
   readonly onLimitOptions = ON_LIMIT_OPTIONS;
+  readonly engineLines = AI_ENGINE_CONFIG_LINES;
   readonly pendingCopy = signal<AIPlanMatrixPlanOption | null>(null);
   readonly copyPickerValue = signal<string | null>(null);
 
@@ -205,7 +229,28 @@ export class AIPlanMatrixComponent {
 
   private readonly complete = computed(() => completeAIEntitlements(this.entitlements()));
 
-  readonly summary = computed(() => describeAIEntitlements(this.complete()));
+  /**
+   * Summary of what the plan enforces. While a switch has no runtime effect
+   * yet it is described as allowed (that is what happens), never as off, and
+   * a trailing line names the ones the editor turned off without effect.
+   */
+  readonly summary = computed(() => {
+    const rows = this.complete();
+    const isPending = (row: AIEntitlement) =>
+      aiCapabilityId(row.agent_key, row.capability_key) in AI_CAPABILITIES_NOT_YET_ENFORCED;
+    const effective = rows.map((row) =>
+      isPending(row) ? { ...row, enabled: true, cap_value: null } : row,
+    );
+    const lines = describeAIEntitlements(effective);
+    const ignored = rows
+      .filter((row) => isPending(row) && (!row.enabled || row.cap_value === 0))
+      .map((row) => findAICapability(row.agent_key, row.capability_key)?.label)
+      .filter((label): label is string => !!label);
+    if (ignored.length > 0) {
+      lines.push(`Aún sin efecto (siguen permitidos): ${ignored.join(', ')}.`);
+    }
+    return lines;
+  });
 
   readonly cards = computed<AICardView[]>(() => {
     const byId = new Map(
@@ -233,6 +278,9 @@ export class AIPlanMatrixComponent {
           inputValue: unlimited ? '' : String(this.toDisplay(def, row.cap_value as number)),
           unitText: this.unitText(def),
           minDisplay: zeroOk ? 0 : this.toDisplay(def, this.minPositiveCap(def)),
+          pendingNote: AI_CAPABILITIES_NOT_YET_ENFORCED[id] ?? null,
+          capLabel: `${AI_AGENT_LABELS[agent]} · ${def.label}: ${this.unitText(def)}`,
+          unlimitedLabel: `${AI_AGENT_LABELS[agent]} · ${def.label}: sin límite`,
           capHint: unlimited
             ? ''
             : row.cap_value === 0

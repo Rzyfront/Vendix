@@ -49,10 +49,12 @@ export type AIOnLimit = (typeof AI_ON_LIMIT_MODES)[number];
  * resolver of T10 compares both models through it.
  *
  * - `feature`: legacy feature key read (`vex_agent`, `streaming_chat`, ...).
- * - `enabled_from`: `feature` copies `<feature>.enabled === true`; `always`
- *   stores `true` (cap-only rows, gated by the agent switch).
- * - `cap_field`: legacy cap copied when it is a number > 0; anything else
- *   (absent, 0, negative) meant "unlimited" and becomes NULL.
+ * - `enabled_from`: `feature` mirrors the gate: a feature present as an object
+ *   is on unless `enabled === false` (absent feature = off); `always` stores
+ *   `true` (cap-only rows, gated by the agent switch).
+ * - `cap_field`: legacy cap copied (truncated) when it is a finite number
+ *   >= 1 and < 2^63; anything else (absent, non-numeric, <= 0, a fraction
+ *   below 1, >= 2^63) meant "unlimited" and becomes NULL.
  * - `on_limit` copies `<feature>.degradation === 'block'`, else `warn`.
  */
 export interface AILegacySource {
@@ -318,11 +320,30 @@ function legacyObject(raw: unknown): Record<string, unknown> | null {
     : null;
 }
 
-/** Legacy cap rule: a number > 0 is a cap; anything else meant unlimited. */
+/** 2^63: the first value a BIGINT column cannot hold. */
+const BIGINT_LIMIT = 9223372036854775808;
+
+/**
+ * Legacy cap rule: a number that truncates to a positive BIGINT is a cap;
+ * anything else (absent, non-numeric, <= 0, NaN/Infinity, a fraction below 1,
+ * >= 2^63) meant unlimited. Never 0, which means "nothing" in the new model.
+ */
 export function legacyCapToCapValue(raw: unknown): number | null {
-  return typeof raw === 'number' && Number.isFinite(raw) && raw > 0
-    ? Math.trunc(raw)
-    : null;
+  if (typeof raw !== 'number' || !Number.isFinite(raw)) return null;
+  if (raw <= 0 || raw >= BIGINT_LIMIT) return null;
+  const whole = Math.trunc(raw);
+  return whole > 0 ? whole : null;
+}
+
+/**
+ * What the gate decides for a legacy feature: it only blocks when the feature
+ * is missing or `enabled === false` (`subscription-access.service.ts`), so a
+ * present object without a boolean `enabled` (or with `"true"`) has access.
+ */
+export function legacyFeatureEnabled(
+  feature: Record<string, unknown> | null,
+): boolean {
+  return feature !== null && feature['enabled'] !== false;
 }
 
 /**
@@ -355,7 +376,7 @@ export function legacyFlagsToAIEntitlements(
       agent_key: def.agent_key,
       capability_key: def.capability_key,
       enabled:
-        src.enabled_from === 'always' ? true : feature?.['enabled'] === true,
+        src.enabled_from === 'always' ? true : legacyFeatureEnabled(feature),
       cap_value: src.cap_field
         ? legacyCapToCapValue(feature?.[src.cap_field])
         : null,

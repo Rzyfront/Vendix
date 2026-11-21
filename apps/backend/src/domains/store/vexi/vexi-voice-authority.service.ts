@@ -2,6 +2,7 @@ import {
   ConflictException,
   Injectable,
   NotFoundException,
+  Optional,
 } from '@nestjs/common';
 import { randomUUID } from 'node:crypto';
 import { AsyncLocalStorage } from 'node:async_hooks';
@@ -24,6 +25,7 @@ import {
 } from '../../../ai-engine/tools/tool-result.normalizer';
 import { isAgentPlanTool } from '../../../ai-engine/interfaces/agent-plan.interface';
 import { SubscriptionAccessService } from '../subscriptions/services/subscription-access.service';
+import { AgentQuotaService } from '../subscriptions/services/agent-quota.service';
 import { VexiPlanStateService } from './vexi-plan-state.service';
 
 export interface VoiceAuthority {
@@ -53,6 +55,9 @@ export class VexiVoiceAuthorityService {
     private readonly access: SubscriptionAccessService,
     private readonly plans: VexiPlanStateService,
     private readonly objectives: AgentObjectiveRepository,
+    // T14 — voz por agente. Opcional y al final por las construcciones
+    // posicionales; sin él decide la clave legada `realtime_voice`.
+    @Optional() private readonly agentQuota?: AgentQuotaService,
   ) {}
 
   async prepareAuthority(
@@ -73,6 +78,24 @@ export class VexiVoiceAuthorityService {
       return this.resolveAuthority(conversationId, expectedAgentKey);
     }
     return current;
+  }
+
+  /**
+   * T14 — la voz del agente del hilo está en el plan. Solo la voz apagada en
+   * el plan bloquea: con el cupo de lectura agotado la persona sigue dictando
+   * y confirmando por voz (el cupo mide segundos de lectura, no de dictado), y
+   * una decisión no disponible no bloquea (fail-open, como el chat).
+   */
+  private async voiceAllowed(storeId: number, agentKey: string): Promise<boolean> {
+    if (!this.agentQuota) {
+      return (await this.access.canUseAIFeature(storeId, 'realtime_voice'))
+        .allowed;
+    }
+    const decision = await this.agentQuota.checkAgentVoice(
+      storeId,
+      agentKey === 'vex' ? 'vex' : 'vexi',
+    );
+    return decision.status !== 'disabled';
   }
 
   async resolveAuthority(
@@ -123,7 +146,7 @@ export class VexiVoiceAuthorityService {
         where: { store_id: ctx.store_id },
         select: { settings: true },
       }),
-      this.access.canUseAIFeature(ctx.store_id, 'realtime_voice'),
+      this.voiceAllowed(ctx.store_id, agentKey),
       this.access.canUseAIFeature(
         ctx.store_id,
         agentKey === 'vex' ? 'vex_agent' : 'tool_agents',
@@ -136,7 +159,7 @@ export class VexiVoiceAuthorityService {
     if (
       !row?.is_active ||
       toggles?.[agentKey]?.enabled !== true ||
-      !voiceGate.allowed ||
+      !voiceGate ||
       !toolsGate.allowed
     )
       throw new ConflictException(

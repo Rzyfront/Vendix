@@ -265,7 +265,6 @@ export class PlanComparisonTableComponent {
       text_generation: [{ field: 'monthly_tokens_cap', suffix: 'tokens/mes' }],
       streaming_chat: [{ field: 'daily_messages_cap', suffix: 'msj/día' }],
       conversations: [{ field: 'retention_days', suffix: 'días' }],
-      tool_agents: [{ field: 'tools_allowed' }],
       rag_embeddings: [{ field: 'indexed_docs_cap', suffix: 'docs' }],
       async_queue: [{ field: 'monthly_jobs_cap', suffix: 'jobs/mes' }],
     };
@@ -287,7 +286,7 @@ export class PlanComparisonTableComponent {
     }
     const raw = value[field];
 
-    // tools_allowed is a string[]
+    // Defensive: an array-valued field renders as a count (no sub-row uses it today)
     if (Array.isArray(raw)) {
       if (raw.length === 0) return { kind: 'x' };
       if (raw.includes('*')) {

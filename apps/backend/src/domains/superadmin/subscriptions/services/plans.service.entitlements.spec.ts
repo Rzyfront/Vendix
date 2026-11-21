@@ -6,6 +6,7 @@ import { PromotionalService } from './promotional.service';
 import { PlanModuleRulesService } from '../../../../common/access/plan-module-rules.service';
 import { VendixHttpException, ErrorCodes } from '../../../../common/errors';
 import { CreatePlanDto } from '../dto';
+import { AI_ENGINE_PLAN_DEFAULTS } from '../../../store/subscriptions/services/ai-engine-plan-defaults';
 import {
   AI_CAPABILITIES,
   AIEntitlement,
@@ -221,7 +222,7 @@ describe('PlansService — ai_entitlements (T12)', () => {
       });
     });
 
-    it('without ai_entitlements, the rows are the legacy translation and the flags stay as sent', async () => {
+    it('without ai_entitlements, the rows are the legacy translation and the flags stay as sent plus the engine defaults', async () => {
       prisma.subscription_plans.findUnique.mockResolvedValue(null);
 
       await service.create({
@@ -232,7 +233,7 @@ describe('PlansService — ai_entitlements (T12)', () => {
       } as any);
 
       const data = prisma.subscription_plans.create.mock.calls[0][0].data;
-      expect(data.ai_feature_flags).toEqual(LEGACY_FLAGS);
+      expect(data.ai_feature_flags).toEqual({ ...LEGACY_FLAGS, ...AI_ENGINE_PLAN_DEFAULTS });
       expect(nestedCreateRows(data)).toEqual(
         legacyFlagsToAIEntitlements(LEGACY_FLAGS).map((r) => ({
           ...r,
@@ -286,6 +287,38 @@ describe('PlansService — ai_entitlements (T12)', () => {
       expect(response.message).toContain(message);
       expect(prisma.subscription_plans.create).not.toHaveBeenCalled();
       expect(prisma.$transaction).not.toHaveBeenCalled();
+    });
+
+    it('F5: a new plan is born with the engine defaults (async_queue enabled), whatever AI fields it sends', async () => {
+      prisma.subscription_plans.findUnique.mockResolvedValue(null);
+
+      await service.create({ code: 'pro', name: 'Pro', base_price: 99000 } as any);
+      await service.create({
+        code: 'pro2',
+        name: 'Pro 2',
+        base_price: 99000,
+        ai_entitlements: [row('vex.agent', { cap_value: 5 })],
+      } as any);
+
+      for (const call of prisma.subscription_plans.create.mock.calls) {
+        const flags = call[0].data.ai_feature_flags;
+        expect(flags.async_queue).toEqual(AI_ENGINE_PLAN_DEFAULTS.async_queue);
+        expect(flags.async_queue.enabled).toBe(true);
+      }
+    });
+
+    it('a flag sent for async_queue wins over the engine default', async () => {
+      prisma.subscription_plans.findUnique.mockResolvedValue(null);
+
+      await service.create({
+        code: 'pro',
+        name: 'Pro',
+        base_price: 99000,
+        ai_feature_flags: { async_queue: { enabled: false } },
+      } as any);
+
+      const flags = prisma.subscription_plans.create.mock.calls[0][0].data.ai_feature_flags;
+      expect(flags.async_queue).toEqual({ enabled: false });
     });
   });
 
@@ -427,6 +460,42 @@ describe('PlansService — ai_entitlements (T12)', () => {
       expect(tx.plan_ai_entitlements.findMany).not.toHaveBeenCalled();
       expect(tx.plan_ai_entitlements.upsert).not.toHaveBeenCalled();
       expect(tx.subscription_plans.updateMany.mock.calls[0][0].data).not.toHaveProperty('ai_feature_flags');
+    });
+
+    it('F5: an AI save keeps the legacy keys without a catalog capability byte for byte', async () => {
+      const engineKeys = {
+        async_queue: { enabled: true, monthly_jobs_cap: 777, degradation: 'warn' },
+        retention_days: 45,
+        agents_allowed: ['vex', 'vexi'],
+        monthly_tool_calls_cap: 1234,
+      };
+      prisma.subscription_plans.findUnique.mockResolvedValue(
+        plan({ ai_feature_flags: { ...STORED_FLAGS, ...engineKeys } }),
+      );
+      groupOf([1]);
+
+      await service.update(1, {
+        ai_entitlements: [row('vex.agent', { cap_value: 10 })],
+      } as any);
+
+      const persisted = tx.subscription_plans.updateMany.mock.calls[0][0].data.ai_feature_flags;
+      for (const [key, value] of Object.entries(engineKeys)) {
+        expect(JSON.stringify(persisted[key])).toBe(JSON.stringify(value));
+      }
+      expect(persisted.tools_allowed).toEqual(['products.search']);
+      expect(persisted.vex_agent.daily_messages_cap).toBe(10);
+    });
+
+    it('previous behaviour: an AI save on an existing plan does not add engine defaults', async () => {
+      groupOf([1]);
+
+      await service.update(1, {
+        ai_entitlements: [row('vex.agent', { cap_value: 10 })],
+      } as any);
+
+      const persisted = tx.subscription_plans.updateMany.mock.calls[0][0].data.ai_feature_flags;
+      expect(persisted).not.toHaveProperty('async_queue');
+      expect(persisted.tools_allowed).toEqual(['products.search']);
     });
 
     it('rejects an unknown capability before opening the transaction', async () => {

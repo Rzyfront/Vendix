@@ -7,12 +7,18 @@ import { AIEngineAppsController } from './ai-engine-apps.controller';
 import { AIEngineAppsService } from './ai-engine-apps.service';
 import { AIAgentsController } from './ai-agents.controller';
 import { AIAgentsService } from './ai-agents.service';
+import { AgentRuntimeController } from './agent-runtime.controller';
 
 @Module({
   imports: [PrismaModule, ResponseModule],
   // Orden intencional: los controladores con prefijo largo van antes que
   // AIEngineController, cuyo @Get(':id') atraparía '/agents' como id='agents'.
-  controllers: [AIEngineAppsController, AIAgentsController, AIEngineController],
+  controllers: [
+    AIEngineAppsController,
+    AgentRuntimeController,
+    AIAgentsController,
+    AIEngineController,
+  ],
   providers: [AIEngineConfigService, AIEngineAppsService, AIAgentsService],
   exports: [AIEngineConfigService, AIEngineAppsService, AIAgentsService],
 })
