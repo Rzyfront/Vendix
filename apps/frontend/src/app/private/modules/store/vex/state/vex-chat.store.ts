@@ -1,5 +1,6 @@
 import { vexApplyState } from './vex-plan-state';
 import { validateConversationTitle } from './vex-conversation-groups.util';
+import { computeContextPercent, isContextWarning } from './vex-context-meter.util';
 import { VexiVoiceSafetyService } from '../../../../../core/services/vexi-voice-safety.service';
 import { VexiVoicePipelineService } from '../../../../../core/services/vexi-voice-pipeline.service';
 import {
@@ -39,6 +40,8 @@ import {
 } from '../services/vex-api.service';
 import {
   VexBlockInteraction,
+  VexCompaction,
+  VexContextBudget,
   VexConversation,
   VexFollowup,
   VexFollowupEdits,
@@ -397,6 +400,10 @@ export class VexChatStore {
 
   private readonly _conversations = signal<VexConversation[]>([]);
   private readonly _active_id = signal<string | null>(null);
+  /** Context budget of the last answer, per conversation (absent = unknown, never 0). */
+  private readonly _context_budgets = signal<Record<string, VexContextBudget>>({});
+  /** Compaction summary per conversation. */
+  private readonly _compactions = signal<Record<string, VexCompaction>>({});
   private readonly _search_term = signal('');
   private readonly _is_agent_typing = signal(false);
   private readonly _loading_list = signal(false);
@@ -439,6 +446,21 @@ export class VexChatStore {
   /** More pages remain on the server for the current list or search. */
   readonly has_more = this._has_more.asReadonly();
   readonly active_id = this._active_id.asReadonly();
+  /** Budget of the open conversation, or null (new chat / not answered yet). */
+  readonly active_context_budget = computed(() => {
+    const id = this._active_id();
+    return id ? (this._context_budgets()[id] ?? null) : null;
+  });
+  /** «Contexto N %» of the open conversation; null while unknown. */
+  readonly context_percent = computed(() =>
+    computeContextPercent(this.active_context_budget()),
+  );
+  readonly context_warning = computed(() => isContextWarning(this.context_percent()));
+  /** Compaction summary of the open conversation, or null. */
+  readonly active_compaction = computed(() => {
+    const id = this._active_id();
+    return id ? (this._compactions()[id] ?? null) : null;
+  });
   /** Id of the open conversation as the URL shows it: `null` for the new chat and for unsent ones. */
   readonly route_id = computed(() => {
     const id = this._active_id();
@@ -783,6 +805,21 @@ export class VexChatStore {
     return 'purged';
   }
 
+  private clearContextState(id: string): void {
+    this._context_budgets.update((all) => {
+      if (!(id in all)) return all;
+      const rest = { ...all };
+      delete rest[id];
+      return rest;
+    });
+    this._compactions.update((all) => {
+      if (!(id in all)) return all;
+      const rest = { ...all };
+      delete rest[id];
+      return rest;
+    });
+  }
+
   /** Drops a conversation from every local cache; the open one returns to the new chat. */
   private forgetConversation(id: string): void {
     this._conversations.update((list) => list.filter((c) => c.id !== id));
@@ -794,6 +831,7 @@ export class VexChatStore {
     });
     this.loaded_ids.delete(id);
     this.first_turn_ids.delete(id);
+    this.clearContextState(id);
     this.title_received.delete(id);
     this.user_titled.delete(id);
     this._objectives.update((values) => {
@@ -1691,6 +1729,7 @@ export class VexChatStore {
           ),
         );
         this.loaded_ids.add(id);
+        this.hydrateCompaction(id, row);
         // Blocks arrive as refs; their payloads (with fresh signed URLs)
         // land per message as each read resolves. Plans need no fetch —
         // their steps + status already adapted above.
@@ -1706,6 +1745,28 @@ export class VexChatStore {
         this.toast.error(extractApiErrorMessage(error), VEX_COPY.store.open_failed);
       })
       .finally(() => this._loading_thread.set(false));
+  }
+
+  /** Loads the persisted summary of a conversation (cleared when the server has none). */
+  private hydrateCompaction(id: string, row: VexBackendConversation): void {
+    const summary = row.summary?.trim();
+    this._compactions.update((all) => {
+      if (!summary) {
+        if (!(id in all)) return all;
+        const rest = { ...all };
+        delete rest[id];
+        return rest;
+      }
+      const through = row.summary_through_message_id;
+      return {
+        ...all,
+        [id]: {
+          summary,
+          through_message_id:
+            typeof through === 'number' ? `m-${through}` : null,
+        },
+      };
+    });
   }
 
   /**
@@ -2199,6 +2260,9 @@ export class VexChatStore {
     chunk: {
       type: string;
       content?: string;
+      context_budget?: VexContextBudget;
+      summary?: string;
+      summary_through_message_id?: number;
       tool?: {
         id: string;
         name: string;
@@ -2359,7 +2423,33 @@ export class VexChatStore {
         if (!this.user_titled.has(target)) this.setTitle(target, title);
         return;
       }
+      case 'context_compacted': {
+        const summary = chunk.summary?.trim();
+        if (!summary) return;
+        const target =
+          chunk.conversation_id !== undefined && chunk.conversation_id !== null
+            ? String(chunk.conversation_id)
+            : conversation_id;
+        const through = chunk.summary_through_message_id;
+        this._compactions.update((all) => ({
+          ...all,
+          [target]: {
+            summary,
+            through_message_id:
+              typeof through === 'number' ? `m-${through}` : null,
+          },
+        }));
+        return;
+      }
       case 'done': {
+        // Absent budget keeps the previous value (never resets to 0).
+        if (computeContextPercent(chunk.context_budget) !== null) {
+          const budget = chunk.context_budget as VexContextBudget;
+          this._context_budgets.update((all) => ({
+            ...all,
+            [conversation_id]: budget,
+          }));
+        }
         this._stream_progress.set('');
         this.scheduleTitleFallback(conversation_id);
         const now = new Date();

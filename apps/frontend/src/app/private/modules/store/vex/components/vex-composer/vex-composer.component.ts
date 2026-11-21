@@ -87,6 +87,40 @@ interface StagedFile {
           }
         </div>
       }
+      @let pct = store.context_percent();
+      @if (pct !== null) {
+        <div class="mb-2 px-2 flex items-center gap-2 text-xs">
+          <span
+            role="meter"
+            class="inline-flex items-center gap-1.5"
+            [class]="store.context_warning() ? 'text-warning' : 'text-text-secondary'"
+            aria-valuemin="0"
+            aria-valuemax="100"
+            [attr.aria-valuenow]="pct"
+            [attr.aria-label]="copy.context_label(pct)"
+            [attr.title]="contextTitle()"
+          >
+            <svg width="20" height="20" viewBox="0 0 20 20" aria-hidden="true">
+              <circle cx="10" cy="10" r="8" fill="none" stroke="currentColor" stroke-opacity="0.25" stroke-width="2.5" />
+              <circle
+                cx="10"
+                cy="10"
+                r="8"
+                fill="none"
+                stroke="currentColor"
+                stroke-width="2.5"
+                stroke-linecap="round"
+                transform="rotate(-90 10 10)"
+                [attr.stroke-dasharray]="ringDash(pct)"
+              />
+            </svg>
+            {{ copy.context_label(pct) }}
+          </span>
+          @if (store.context_warning()) {
+            <span class="text-warning" role="status">{{ copy.context_warning }}</span>
+          }
+        </div>
+      }
       <div
         class="rounded-3xl bg-surface border border-border shadow-lg px-3 py-2 flex items-end gap-2"
       >
@@ -194,6 +228,23 @@ export class VexComposerComponent {
       this.pipeline.cancelRecording();
       this.pipeline.interrupt();
     });
+  }
+
+  /** Tooltip with the estimated tokens; empty until the first answer. */
+  readonly contextTitle = computed(() => {
+    const budget = this.store.active_context_budget();
+    return budget
+      ? this.copy.context_title(
+          budget.estimated_input_tokens,
+          budget.context_window_tokens,
+        )
+      : null;
+  });
+
+  /** `stroke-dasharray` of the ring (circumference = 2π·8). */
+  ringDash(percent: number): string {
+    const circumference = 2 * Math.PI * 8;
+    return `${(circumference * percent) / 100} ${circumference}`;
   }
 
   voiceDown(event: Event): void {
