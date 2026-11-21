@@ -82,7 +82,10 @@ import { ErrorCodes, VendixHttpException } from '../common/errors';
 import { VexiUiChannelService } from '../domains/store/vexi/vexi-ui-channel.service';
 import { PROPOSE_PLAN_TOOL } from './tools/domains/planning.tools';
 import { DISCREPANCY_GUIDANCE_BLOCK } from './tools/discrepancy-signal';
-import { isForeignSurfaceTool, isVexOnlyTool } from './tools/surface-tools';
+import {
+  isForeignSurfaceTool,
+  withTurnConversationId,
+} from './tools/surface-tools';
 import { IRREVERSIBLE_DOMAIN_SEGMENTS } from './tools/bridge/capability-registry.service';
 import {
   AgentPlan,
@@ -2560,12 +2563,11 @@ export class AIAgentService {
                 this.toolRegistry.canonicalName(d.function.name) ===
                 call.tool_name,
             );
-            if (
-              isVexOnlyTool(call.tool_name) &&
-              params.conversation_id != null &&
-              !Number.isInteger(call.arguments.conversation_id)
-            )
-              call.arguments.conversation_id = params.conversation_id;
+            call.arguments = withTurnConversationId(
+              call.tool_name,
+              call.arguments,
+              params.conversation_id,
+            );
             const check =
               definition &&
               validateToolArgs(
@@ -3503,16 +3505,12 @@ export class AIAgentService {
               // Las `vex_*` de bloques viven bajo una conversación que el modelo
               // no conoce: el turno inyecta su id como default para que la
               // herramienta no tenga que inventarlo (y no falle validación).
-              if (
-                isVexOnlyTool(toolName) &&
-                params.conversation_id != null &&
-                !Number.isInteger(toolArgs.conversation_id)
-              ) {
-                toolArgs = {
-                  ...toolArgs,
-                  conversation_id: params.conversation_id,
-                };
-              }
+              // `remember` recibe SIEMPRE el id del turno (H6).
+              toolArgs = withTurnConversationId(
+                toolName,
+                toolArgs,
+                params.conversation_id,
+              );
               const execute = async () => {
                 if (['search_recipes', 'load_recipe'].includes(toolName)) {
                   if (!recipeSession || !this.proceduralMemory)

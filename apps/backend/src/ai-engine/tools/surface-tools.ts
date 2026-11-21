@@ -21,3 +21,37 @@ export function isVexOnlyTool(name: string): boolean {
 export function isForeignSurfaceTool(name: string, agentKey?: string): boolean {
   return agentKey !== 'vex' && isVexOnlyTool(name);
 }
+
+/**
+ * Tools whose `conversation_id` is always the turn's (H6). `remember` ties a
+ * memory to the conversation whose purge may delete it, so a model-chosen id
+ * would bind it to another conversation of the store.
+ */
+const TURN_CONVERSATION_TOOL_NAMES: ReadonlySet<string> = new Set(['remember']);
+
+/**
+ * Tool arguments with the conversation the turn owns. `remember` always gets
+ * the turn's id (or none when the turn has no conversation); the other
+ * Vex-only tools get it only as a default when the model sent no integer.
+ */
+export function withTurnConversationId(
+  name: string,
+  args: Record<string, unknown>,
+  turnConversationId: number | null | undefined,
+): Record<string, unknown> {
+  if (TURN_CONVERSATION_TOOL_NAMES.has(name)) {
+    const rest = { ...args };
+    delete rest.conversation_id;
+    return turnConversationId != null
+      ? { ...rest, conversation_id: turnConversationId }
+      : rest;
+  }
+  if (
+    isVexOnlyTool(name) &&
+    turnConversationId != null &&
+    !Number.isInteger(args.conversation_id)
+  ) {
+    return { ...args, conversation_id: turnConversationId };
+  }
+  return args;
+}
