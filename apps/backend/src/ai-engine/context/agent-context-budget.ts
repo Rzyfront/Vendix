@@ -135,3 +135,92 @@ export function applyAgentContextBudget(
     method: 'conservative_estimate',
   };
 }
+
+/** Window the engine assumes when the application row configures none. */
+export const DEFAULT_CONTEXT_WINDOW_TOKENS = 32768;
+
+export interface ContextBudgetReport {
+  estimated_input_tokens: number;
+  omitted_messages: number;
+  context_window_tokens: number;
+  provenance: 'configured' | 'fallback';
+  method: 'conservative_estimate';
+}
+
+/** Estimate-only budget for turns that did not run through the agentic engine
+ * path: same estimator, default window, provenance `fallback`. */
+export function estimateContextBudget(
+  messages: AIMessage[],
+  contextWindowTokens: number = DEFAULT_CONTEXT_WINDOW_TOKENS,
+): ContextBudgetReport {
+  return {
+    estimated_input_tokens: estimateAgentInputTokens(messages, []),
+    omitted_messages: 0,
+    context_window_tokens: contextWindowTokens,
+    provenance: 'fallback',
+    method: 'conservative_estimate',
+  };
+}
+
+export const TURN_ACTIONS_LINE_MAX_CHARS = 300;
+
+function asRecord(value: unknown): Record<string, unknown> | null {
+  return value && typeof value === 'object' && !Array.isArray(value)
+    ? (value as Record<string, unknown>)
+    : null;
+}
+
+function toolCallFailed(call: Record<string, unknown>): boolean {
+  const execution = asRecord(call.execution);
+  if (execution && typeof execution.status === 'string') {
+    return execution.status !== 'ok';
+  }
+  const result = call.result;
+  if (typeof result === 'string') {
+    return /"success"\s*:\s*false|"error"\s*:/.test(result.slice(0, 400));
+  }
+  const record = asRecord(result);
+  return !!record && (record.success === false || 'error' in record);
+}
+
+/** Pure, bounded one-liner of what a past assistant turn did (tool names with
+ * ok/error, Vex block ids/kinds/rows). Never includes arguments, results or
+ * confirmation tokens. `null` when the turn did nothing worth recalling. */
+export function renderTurnActionsLine(
+  toolCalls: unknown,
+  metadata: unknown,
+): string | null {
+  const tools: string[] = [];
+  if (Array.isArray(toolCalls)) {
+    for (const raw of toolCalls) {
+      const call = asRecord(raw);
+      if (!call || typeof call.name !== 'string') continue;
+      tools.push(`${call.name} (${toolCallFailed(call) ? 'error' : 'ok'})`);
+    }
+  }
+  const blocks: string[] = [];
+  const rawBlocks = asRecord(metadata)?.blocks;
+  if (Array.isArray(rawBlocks)) {
+    for (const raw of rawBlocks) {
+      const block = asRecord(raw);
+      if (!block || typeof block.block_id !== 'string') continue;
+      const kind = typeof block.kind === 'string' ? block.kind : 'block';
+      const rows =
+        typeof block.rows === 'number'
+          ? block.rows
+          : typeof block.row_count === 'number'
+            ? block.row_count
+            : null;
+      blocks.push(
+        `${kind}#${block.block_id.slice(0, 8)}${rows !== null ? ` (${rows} filas)` : ''}`,
+      );
+    }
+  }
+  if (tools.length === 0 && blocks.length === 0) return null;
+  const parts: string[] = [];
+  if (tools.length) parts.push(`Acciones de este turno: ${tools.join(', ')}`);
+  if (blocks.length) parts.push(`Bloques: ${blocks.join(', ')}`);
+  const line = `[${parts.join(' · ')}]`;
+  if (line.length <= TURN_ACTIONS_LINE_MAX_CHARS) return line;
+  return `${line.slice(0, TURN_ACTIONS_LINE_MAX_CHARS - 2).trimEnd()}…]`;
+}
