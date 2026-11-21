@@ -20,7 +20,15 @@ function setup(opts: {
     },
     users: { findMany: jest.fn(async () => opts.users ?? []) },
   };
-  const feed = { recentAgentActions: jest.fn(async () => opts.actions ?? []) };
+  // Fake with the feed's contract: the agent filter is applied in its query,
+  // before its own cut at `limit`.
+  const feed = {
+    recentAgentActions: jest.fn(async (limit: number, agent?: string) =>
+      (opts.actions ?? [])
+        .filter((entry) => !agent || entry.ref?.agent === agent)
+        .slice(0, limit),
+    ),
+  };
   const service = new AgentHistoryService(prisma as any, feed as any);
   return { service, prisma, feed };
 }
@@ -41,10 +49,90 @@ describe('AgentHistoryService', () => {
       const page = await service.listChanges({ page: 1_000_000, limit: 50 });
 
       expect(page.page).toBe(HISTORY_MAX_PAGE);
-      expect(feed.recentAgentActions).toHaveBeenCalledWith(HISTORY_MAX_PAGE * 50);
+      expect(feed.recentAgentActions).toHaveBeenCalledWith(
+        HISTORY_MAX_PAGE * 50,
+        undefined,
+      );
       expect(prisma.ai_conversation_purges.findMany).toHaveBeenCalledWith(
         expect.objectContaining({ take: HISTORY_MAX_PAGE * 50 }),
       );
+    });
+
+    it('con filtro por agente filtra cada fuente antes del corte y el total no cambia al paginar', async () => {
+      // Ventana dominada por Vexi: sus 100 acciones son más recientes que las
+      // 30 de Vex.
+      const at = (day: number, i: number) =>
+        new Date(Date.UTC(2026, 10, day, 12, 0, 0) - i * 1000);
+      const vexi = Array.from({ length: 100 }, (_, i) => ({
+        id: `agent-vexi-${i}`,
+        title: 'Vexi aplicó',
+        description: '',
+        created_at: at(20, i),
+        ref: { agent: 'vexi' },
+      }));
+      const vex = Array.from({ length: 30 }, (_, i) => ({
+        id: `agent-vex-${i}`,
+        title: 'Vex aplicó',
+        description: '',
+        created_at: at(19, i),
+        ref: { agent: 'vex' },
+      }));
+      const { service, prisma } = setup({ actions: [...vexi, ...vex] });
+
+      const first = await service.listChanges({ agent: 'vex', page: 1, limit: 10 });
+      const second = await service.listChanges({ agent: 'vex', page: 2, limit: 10 });
+
+      expect(first.items.map((e) => e.id)).toEqual(vex.slice(0, 10).map((a) => a.id));
+      expect(second.items.map((e) => e.id)).toEqual(vex.slice(10, 20).map((a) => a.id));
+      expect(first.total).toBe(30);
+      expect(second.total).toBe(30);
+      expect(prisma.ai_conversation_purges.findMany).toHaveBeenCalledWith(
+        expect.objectContaining({
+          where: { store_id: STORE_ID, agent_key: 'vex' },
+          take: HISTORY_MAX_PAGE * 10,
+        }),
+      );
+    });
+
+    it('el filtro Vexi deja las constancias que no son de Vex y solo sus interruptores', async () => {
+      const { service, prisma } = setup({
+        audits: [
+          {
+            id: 1,
+            user_id: 1,
+            created_at: d('2026-11-01T10:00:00Z'),
+            new_values: {
+              vex: { old: { enabled: false }, new: { enabled: true } },
+              vexi: { old: { enabled: true }, new: { enabled: false } },
+            },
+          },
+        ],
+      });
+
+      const page = await service.listChanges({ agent: 'vexi' });
+
+      expect(page.items.map((e) => e.summary)).toEqual(['Apagó Vexi']);
+      expect(page.total).toBe(1);
+      expect(prisma.ai_conversation_purges.findMany).toHaveBeenCalledWith(
+        expect.objectContaining({
+          where: { store_id: STORE_ID, agent_key: { not: 'vex' } },
+        }),
+      );
+    });
+
+    it('el total se acota a la última página alcanzable', async () => {
+      const actions = Array.from({ length: HISTORY_MAX_PAGE + 5 }, (_, i) => ({
+        id: `agent-${i}`,
+        title: 'Vex aplicó',
+        description: '',
+        created_at: new Date(Date.UTC(2026, 10, 1) - i * 1000),
+        ref: { agent: 'vex' },
+      }));
+      const { service } = setup({ actions });
+
+      const page = await service.listChanges({ limit: 1 });
+
+      expect(page.total).toBe(HISTORY_MAX_PAGE);
     });
 
     it('mezcla las tres fuentes por fecha descendente', async () => {
@@ -191,7 +279,10 @@ describe('AgentHistoryService', () => {
       expect(vex.total).toBe(30);
       expect(vex.items).toHaveLength(10);
       expect(vex.items.every((e) => e.agent_key === 'vex')).toBe(true);
-      expect(feed.recentAgentActions).toHaveBeenLastCalledWith(20);
+      expect(feed.recentAgentActions).toHaveBeenLastCalledWith(
+        HISTORY_MAX_PAGE * 10,
+        'vex',
+      );
     });
   });
 

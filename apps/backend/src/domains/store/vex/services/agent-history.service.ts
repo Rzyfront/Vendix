@@ -7,6 +7,7 @@ import {
   AuditResource,
 } from '../../../../common/audit/audit.service';
 import { VexActivityFeedService } from './vex-activity-feed.service';
+import { conversationAgentWhere } from './agent-conversation-filter';
 
 export type HistoryAgentKey = 'vex' | 'vexi';
 export type HistoryChangeKind =
@@ -55,8 +56,9 @@ export interface HistoryQuery {
 
 export const HISTORY_MAX_LIMIT = 50;
 /**
- * Changes merge three sources in memory, so page N reads N * limit rows of
- * each: the page is capped to keep that read bounded.
+ * Changes merge three sources in memory: each source reads up to
+ * `HISTORY_MAX_PAGE * limit` rows (the last reachable page), whatever page is
+ * asked, so the read stays bounded and `total` does not move while paging.
  */
 export const HISTORY_MAX_PAGE = 20;
 const DEFAULT_LIMIT = 20;
@@ -95,13 +97,14 @@ export class AgentHistoryService {
     const agent = this.agentFilter(query.agent);
     if (!storeId) return { items: [], total: 0, page, limit };
 
-    const window = page * limit;
+    // The agent filter goes into each source BEFORE its cut: filtering the
+    // merged rows afterwards hid one agent's events behind the other's.
+    const reach = HISTORY_MAX_PAGE * limit;
     const [switches, actions, purges] = await Promise.all([
-      this.switchEvents(storeId),
-      // Bracket access: the feed owns this read and keeps it private; calling
-      // it avoids duplicating the tool-trace parsing.
-      this.feed['recentAgentActions'](window),
-      this.purgeEvents(storeId, window),
+      this.switchEvents(storeId, agent),
+      // Reused, not re-implemented: the feed owns the tool-trace parsing.
+      this.feed.recentAgentActions(reach, agent),
+      this.purgeEvents(storeId, reach, agent),
     ]);
 
     const actionEvents: HistoryChangeEvent[] = actions.map((entry) => ({
@@ -115,9 +118,9 @@ export class AgentHistoryService {
       created_at: entry.created_at,
     }));
 
-    const merged = [...switches, ...actionEvents, ...purges]
-      .filter((event) => !agent || event.agent_key === agent)
-      .sort((a, b) => b.created_at.getTime() - a.created_at.getTime());
+    const merged = [...switches, ...actionEvents, ...purges].sort(
+      (a, b) => b.created_at.getTime() - a.created_at.getTime(),
+    );
 
     const items = merged.slice((page - 1) * limit, page * limit);
     const names = await this.userNames(
@@ -133,7 +136,11 @@ export class AgentHistoryService {
         };
       }
     }
-    return { items, total: merged.length, page, limit };
+    // Real count of the filtered sources (switches within the settings audit
+    // window, actions within the feed's scan window, purges), capped at the
+    // last reachable page: each source reads `reach` rows, so the count is
+    // exact below the cap and the same on every page.
+    return { items, total: Math.min(merged.length, reach), page, limit };
   }
 
   async listConversations(
@@ -145,24 +152,15 @@ export class AgentHistoryService {
     const agent = this.agentFilter(query.agent);
     if (!storeId) return { items: [], total: 0, page, limit };
 
-    const where: Record<string, unknown> = {
+    const where: Prisma.ai_conversationsWhereInput = {
       store_id: storeId,
       status: { not: 'deleted' },
+      ...(agent && conversationAgentWhere(agent)),
     };
-    // Same agent split as `AiChatService.listConversations`: legacy threads
-    // (NULL metadata) belong to Vexi.
-    if (agent === 'vex') {
-      where.metadata = { path: ['agent_key'], equals: 'vex' };
-    } else if (agent === 'vexi') {
-      where.OR = [
-        { metadata: { path: ['agent_key'], equals: 'vexi' } },
-        { metadata: { equals: Prisma.AnyNull } },
-      ];
-    }
 
     const [rows, total] = await Promise.all([
       this.prisma.ai_conversations.findMany({
-        where: where as any,
+        where,
         orderBy: { updated_at: 'desc' },
         skip: (page - 1) * limit,
         take: limit,
@@ -177,7 +175,7 @@ export class AgentHistoryService {
           _count: { select: { messages: true } },
         },
       }),
-      this.prisma.ai_conversations.count({ where: where as any }),
+      this.prisma.ai_conversations.count({ where }),
     ]);
 
     const names = await this.userNames(rows.map((row) => row.user_id));
@@ -202,7 +200,10 @@ export class AgentHistoryService {
   // ── sources ────────────────────────────────────────────────────────────
 
   /** Who flipped «Usar Vex» / «Usar Vexi». Reads the settings audit rows. */
-  private async switchEvents(storeId: number): Promise<HistoryChangeEvent[]> {
+  private async switchEvents(
+    storeId: number,
+    agent?: HistoryAgentKey,
+  ): Promise<HistoryChangeEvent[]> {
     const rows = await this.prisma.audit_logs.findMany({
       where: {
         resource: AuditResource.SETTINGS,
@@ -220,7 +221,7 @@ export class AgentHistoryService {
         string,
         { old?: { enabled?: unknown }; new?: { enabled?: unknown } }
       >;
-      for (const key of ['vex', 'vexi'] as const) {
+      for (const key of agent ? [agent] : (['vex', 'vexi'] as const)) {
         const section = sections[key];
         if (!section) continue;
         const before = section.old?.enabled === true;
@@ -246,9 +247,17 @@ export class AgentHistoryService {
   private async purgeEvents(
     storeId: number,
     take: number,
+    agent?: HistoryAgentKey,
   ): Promise<HistoryChangeEvent[]> {
+    // Same attribution as the mapping below: anything that is not Vex is Vexi.
+    const agentWhere =
+      agent === 'vex'
+        ? { agent_key: 'vex' }
+        : agent === 'vexi'
+          ? { agent_key: { not: 'vex' } }
+          : {};
     const rows = await this.prisma.ai_conversation_purges.findMany({
-      where: { store_id: storeId },
+      where: { store_id: storeId, ...agentWhere },
       orderBy: { created_at: 'desc' },
       take,
       select: {
