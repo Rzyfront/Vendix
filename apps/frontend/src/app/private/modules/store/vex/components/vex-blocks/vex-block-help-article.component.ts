@@ -1,5 +1,5 @@
 import { ChangeDetectionStrategy, Component, computed, inject, input, signal } from '@angular/core';
-import { IconComponent } from '../../../../../../../shared/components/icon/icon.component';
+import { IconComponent } from '../../../../../../shared/components/icon/icon.component';
 import { VexUiBlock } from '../../models/vex.models';
 import { VexMediaDockService } from '../../services/vex-media-dock.service';
 import { VexMarkdownComponent } from '../vex-markdown/vex-markdown.component';
