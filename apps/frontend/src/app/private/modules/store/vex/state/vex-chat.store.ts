@@ -477,7 +477,11 @@ export class VexChatStore {
     this.closeStream();
     this._error.set(null);
     this._active_id.set(id);
-    if (!this.loaded_ids.has(id)) {
+    // The messages decide, not only the set: a conversation that left the list
+    // (a search that did not match it) comes back from the server without
+    // them, and its id may still be marked as loaded.
+    const conversation = this._conversations().find((c) => c.id === id);
+    if (!this.loaded_ids.has(id) || !conversation?.messages.length) {
       void this.loadThread(id);
     }
   }
@@ -1585,6 +1589,14 @@ export class VexChatStore {
           const kept = current.filter(
             (c) => !incoming_ids.has(c.id) && (c.local || c.id === active),
           );
+          // Whatever leaves the list loses its messages with it: it is no
+          // longer "loaded", so opening it again fetches the thread.
+          const kept_ids = new Set(kept.map((c) => c.id));
+          for (const c of current) {
+            if (!incoming_ids.has(c.id) && !kept_ids.has(c.id)) {
+              this.loaded_ids.delete(c.id);
+            }
+          }
           return [...incoming, ...kept];
         });
         this._search_ids.update((ids) => {
@@ -1722,6 +1734,8 @@ export class VexChatStore {
     attachment_ids: string[],
     speak = false,
     retry_message_id?: string,
+    /** The user row of this turn is already stored: the server must not write it again. */
+    skip_user_message = false,
   ): Promise<void> {
     this.voiceSafety.invalidate();
     this.closeStream();
@@ -1789,6 +1803,7 @@ export class VexChatStore {
           this.api.createStreamIntent(numeric, text, {
             attachmentIds: attachment_ids.length ? attachment_ids : undefined,
             ...(speak ? { speak: true } : {}),
+            ...(skip_user_message ? { skipUserMessage: true } : {}),
           }),
         )
           .then((stream_id) => {
@@ -1828,8 +1843,14 @@ export class VexChatStore {
     );
   }
 
-  /** Resends the last user message after a cut answer; the broken answer is dropped. */
-  retryAnswer(): void {
+  /**
+   * Resends the last user message after a cut answer; the broken answer is
+   * dropped. The server writes the user row before it calls the model, so a
+   * cut turn has normally stored the question already: the retry asks the
+   * server what it holds and, when the row is there, tells it not to write it
+   * again (otherwise a reload shows the question twice).
+   */
+  async retryAnswer(): Promise<void> {
     if (this._is_agent_typing()) return;
     const conversation = this.active_conversation();
     if (!conversation) return;
@@ -1844,6 +1865,19 @@ export class VexChatStore {
         .map((m) => m.id),
     );
     if (failed_ids.size === 0) return;
+    // Taken before the read below, so a second click cannot start another turn.
+    this._is_agent_typing.set(true);
+    const generation = this.stream_generation;
+    const local_user_count = conversation.messages
+      .slice(0, index + 1)
+      .filter((m) => m.role === 'user').length;
+    const stored = await this.userRowStored(conversation.id, local_user_count);
+    if (
+      generation !== this.stream_generation ||
+      this._active_id() !== conversation.id
+    ) {
+      return;
+    }
     this._conversations.update((list) =>
       list.map((c) =>
         c.id === conversation.id
@@ -1851,7 +1885,34 @@ export class VexChatStore {
           : c,
       ),
     );
-    void this.runTurn(user.content, user.attachment_ids ?? [], false, user.id);
+    void this.runTurn(
+      user.content,
+      user.attachment_ids ?? [],
+      false,
+      user.id,
+      stored,
+    );
+  }
+
+  /**
+   * Whether the server already holds the user row of the turn being retried:
+   * it does when it stores at least as many user messages as the thread shows.
+   * When the read fails the row is assumed stored — the common case after a
+   * cut answer, and the one that keeps the question from doubling.
+   */
+  private userRowStored(
+    conversation_id: string,
+    local_user_count: number,
+  ): Promise<boolean> {
+    const numeric = Number(conversation_id);
+    if (!Number.isFinite(numeric)) return Promise.resolve(false);
+    return firstValueFrom(this.api.getConversation(numeric))
+      .then(
+        (row) =>
+          (row.messages ?? []).filter((m) => m.role === 'user').length >=
+          local_user_count,
+      )
+      .catch(() => true);
   }
 
   private markSendFailed(
