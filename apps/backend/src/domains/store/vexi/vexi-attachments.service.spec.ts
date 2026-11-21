@@ -188,3 +188,59 @@ describe('VexiAttachmentsService.readContent', () => {
     expect(s3.uploadFile).not.toHaveBeenCalled();
   });
 });
+
+describe('VexiAttachmentsService · métodos para el agente (T44)', () => {
+  it('findAttachmentForAgent devuelve la fila con su archivo promovido', async () => {
+    const { service, prisma } = build();
+    const row = {
+      id: 41,
+      s3_key: 'org/store/ai-attachments/abc.pdf',
+      mime_type: 'application/pdf',
+      size_bytes: 2048,
+      original_name: 'factura.pdf',
+      stored_file_id: 31,
+    };
+    prisma.ai_attachments.findFirst.mockResolvedValue(row);
+    await expect(service.findAttachmentForAgent(41)).resolves.toEqual(row);
+    expect(prisma.ai_attachments.findFirst).toHaveBeenCalledWith({
+      where: { id: 41 },
+      select: {
+        id: true,
+        s3_key: true,
+        mime_type: true,
+        size_bytes: true,
+        original_name: true,
+        stored_file_id: true,
+      },
+    });
+  });
+
+  it('findAttachmentForAgent devuelve null si el adjunto no es de esta tienda', async () => {
+    const { service, prisma } = build();
+    prisma.ai_attachments.findFirst.mockResolvedValue(null);
+    await expect(service.findAttachmentForAgent(999)).resolves.toBeNull();
+  });
+
+  it('markSavedToRecordForAgent estampa registro y archivo dentro de la transacción recibida', async () => {
+    const { service, prisma } = build();
+    const tx = {
+      ai_attachments: { updateMany: jest.fn().mockResolvedValue({ count: 1 }) },
+    };
+    await service.markSavedToRecordForAgent(tx, {
+      attachmentId: 41,
+      entityType: 'customer',
+      entityId: 5,
+      storedFileId: 77,
+    });
+    expect(tx.ai_attachments.updateMany).toHaveBeenCalledWith({
+      where: { id: 41 },
+      data: {
+        linked_entity_type: 'customer',
+        linked_entity_id: 5,
+        linked_at: expect.any(Date),
+        stored_file_id: 77,
+      },
+    });
+    expect(prisma.ai_attachments.create).not.toHaveBeenCalled();
+  });
+});

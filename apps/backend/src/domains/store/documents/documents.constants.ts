@@ -25,3 +25,14 @@ export const ALLOWED_MIME_TYPES = Object.keys(ALLOWED_MIME_EXTENSIONS);
 
 /** Vida de la URL firmada de descarga (máximo 5 minutos). */
 export const DOWNLOAD_URL_TTL_SECONDS = 300;
+
+/** Registros donde Vex puede guardar un adjunto del chat (una tool de escritura por cada uno, T44). */
+export const ATTACHABLE_ENTITY_TYPES = [
+  'customer',
+  'order',
+  'purchase_order',
+  'supplier',
+  'expense',
+  'product',
+] as const;
+export type AttachableEntityType = (typeof ATTACHABLE_ENTITY_TYPES)[number];

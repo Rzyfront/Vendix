@@ -30,6 +30,24 @@ export interface AttachmentPayload {
   record: { id: number; s3_key: string };
 }
 
+/** What the document tools (T44) need to save a chat attachment into a record. */
+export interface AgentAttachmentRow {
+  id: number;
+  s3_key: string;
+  mime_type: string;
+  size_bytes: number;
+  original_name: string;
+  /** Set once the attachment was promoted to the document module. */
+  stored_file_id: number | null;
+}
+
+export interface MarkSavedToRecordInput {
+  attachmentId: number;
+  entityType: string;
+  entityId: number;
+  storedFileId: number;
+}
+
 /**
  * The document channel between the person and Vexi's vision tools.
  *
@@ -377,6 +395,46 @@ export class VexiAttachmentsService {
       },
       orderBy: { id: 'desc' },
       take: params.take ?? 10,
+    });
+  }
+
+  /**
+   * The attachment row behind `att_<id>` for the document tools (T44), or null
+   * when it does not exist in the current store. Scoped by `StorePrismaService`:
+   * another store's id simply does not resolve.
+   */
+  async findAttachmentForAgent(id: number): Promise<AgentAttachmentRow | null> {
+    const row = await this.prisma.ai_attachments.findFirst({
+      where: { id },
+      select: {
+        id: true,
+        s3_key: true,
+        mime_type: true,
+        size_bytes: true,
+        original_name: true,
+        stored_file_id: true,
+      },
+    });
+    return (row ?? null) as AgentAttachmentRow | null;
+  }
+
+  /**
+   * Stamps, inside the caller's transaction, the record a chat attachment was
+   * saved into and its promoted stored file. The conversation purge keeps rows
+   * with these columns set, so the stamp commits or rolls back with the rest.
+   */
+  async markSavedToRecordForAgent(
+    tx: any,
+    input: MarkSavedToRecordInput,
+  ): Promise<void> {
+    await tx.ai_attachments.updateMany({
+      where: { id: input.attachmentId },
+      data: {
+        linked_entity_type: input.entityType,
+        linked_entity_id: input.entityId,
+        linked_at: new Date(),
+        stored_file_id: input.storedFileId,
+      },
     });
   }
 
