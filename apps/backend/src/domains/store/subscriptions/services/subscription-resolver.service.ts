@@ -476,30 +476,7 @@ export class SubscriptionResolverService {
     promoRules: unknown,
     appliedAt: Date | null,
   ): { overlayActive: boolean; overlayExpiresAt: Date | null } {
-    if (!appliedAt || !promoRules || typeof promoRules !== 'object') {
-      return { overlayActive: false, overlayExpiresAt: null };
-    }
-    const rules = promoRules as Record<string, unknown>;
-    const durationRaw = rules['duration_days'];
-    const durationDays =
-      typeof durationRaw === 'number'
-        ? durationRaw
-        : typeof durationRaw === 'string'
-          ? parseInt(durationRaw, 10)
-          : NaN;
-
-    if (!Number.isFinite(durationDays) || durationDays <= 0) {
-      // No expiry declared -> treat as indefinite while promotional_plan_id set.
-      return { overlayActive: true, overlayExpiresAt: null };
-    }
-
-    const expiresAt = new Date(
-      appliedAt.getTime() + durationDays * 24 * 60 * 60 * 1000,
-    );
-    return {
-      overlayActive: Date.now() < expiresAt.getTime(),
-      overlayExpiresAt: expiresAt,
-    };
+    return computePromoOverlayState(promoRules, appliedAt);
   }
 
   /**
@@ -555,4 +532,39 @@ export class SubscriptionResolverService {
       );
     }
   }
+}
+
+/**
+ * Promo overlay window from `promo_rules.duration_days` and
+ * `promotional_applied_at` (never `current_period_end`). Shared by the legacy
+ * resolver and the AI entitlements resolver (T10) so both read one window.
+ */
+export function computePromoOverlayState(
+  promoRules: unknown,
+  appliedAt: Date | null,
+): { overlayActive: boolean; overlayExpiresAt: Date | null } {
+  if (!appliedAt || !promoRules || typeof promoRules !== 'object') {
+    return { overlayActive: false, overlayExpiresAt: null };
+  }
+  const rules = promoRules as Record<string, unknown>;
+  const durationRaw = rules['duration_days'];
+  const durationDays =
+    typeof durationRaw === 'number'
+      ? durationRaw
+      : typeof durationRaw === 'string'
+        ? parseInt(durationRaw, 10)
+        : NaN;
+
+  if (!Number.isFinite(durationDays) || durationDays <= 0) {
+    // No expiry declared -> treat as indefinite while promotional_plan_id set.
+    return { overlayActive: true, overlayExpiresAt: null };
+  }
+
+  const expiresAt = new Date(
+    appliedAt.getTime() + durationDays * 24 * 60 * 60 * 1000,
+  );
+  return {
+    overlayActive: Date.now() < expiresAt.getTime(),
+    overlayExpiresAt: expiresAt,
+  };
 }

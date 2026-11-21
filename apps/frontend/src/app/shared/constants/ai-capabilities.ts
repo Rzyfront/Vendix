@@ -348,3 +348,103 @@ export function legacyFlagsToAIEntitlements(
   }
   return out;
 }
+
+/** Lower-case noun used by the plan summary ("con …", "sin …"). */
+const SUMMARY_NOUNS: Record<string, string> = {
+  'vex.voice_readout': 'lectura en voz',
+  'vex.files': 'archivos e imágenes',
+  'vex.code_analysis': 'análisis con código',
+  'vex.advanced_model': 'modelo avanzado',
+  'vexi.voice_readout': 'lectura en voz',
+  'platform.smart_search': 'búsqueda inteligente',
+};
+
+function formatCount(value: number): string {
+  if (value >= 1_000_000) {
+    const millions = Math.round((value / 1_000_000) * 10) / 10;
+    return `${millions.toLocaleString('es-CO')} M`;
+  }
+  return value.toLocaleString('es-CO');
+}
+
+/**
+ * Human value of a cap, e.g. `200 mensajes al día`, `50 M de tokens al mes`,
+ * `60 minutos al mes` (voice is stored in seconds and read in minutes) or
+ * `sin límite`.
+ */
+export function formatAICapValue(
+  def: AICapabilityDefinition,
+  capValue: number | null,
+): string {
+  if (!def.cap_unit || !def.cap_period) return '';
+  if (capValue === null) return 'sin límite';
+  const period = AI_CAP_PERIOD_LABELS[def.cap_period];
+  if (def.cap_unit === 'seconds') {
+    const minutes = Math.floor(capValue / 60);
+    return `${formatCount(minutes)} ${minutes === 1 ? 'minuto' : 'minutos'} ${period}`;
+  }
+  const count = formatCount(capValue);
+  const unit = AI_CAP_UNIT_LABELS[def.cap_unit];
+  const joiner = capValue >= 1_000_000 ? ' de ' : ' ';
+  return `${count}${joiner}${unit} ${period}`;
+}
+
+/**
+ * One plain-language sentence per agent of what a store on this plan gets
+ * (super-admin plan form, §3.11): "Vex: 200 mensajes al día, 50 M de tokens al
+ * mes, 60 minutos de lectura en voz al mes, sin análisis con código." Rows not
+ * present fall back to `defaultAIEntitlement`.
+ */
+export function describeAIEntitlements(rows: AIEntitlement[]): string[] {
+  const byId = new Map(
+    rows.map((r) => [aiCapabilityId(r.agent_key, r.capability_key), r]),
+  );
+  const get = (def: AICapabilityDefinition): AIEntitlement =>
+    byId.get(aiCapabilityId(def.agent_key, def.capability_key)) ??
+    defaultAIEntitlement(def);
+
+  return AI_AGENT_KEYS.map((agent) => {
+    const defs = aiCapabilitiesForAgent(agent);
+    const name = AI_AGENT_LABELS[agent];
+    // An agent with an `agent` row is off when that row is; the platform has
+    // none and is off only when every row is.
+    const head = findAICapability(agent, 'agent');
+    const isOn = (row: AIEntitlement) => row.enabled && row.cap_value !== 0;
+    const included = head
+      ? isOn(get(head))
+      : defs.some((def) => def.kind !== 'cap' && isOn(get(def)));
+    if (!included) {
+      return `${name}: no incluido.`;
+    }
+    const parts: string[] = [];
+    for (const def of defs) {
+      const row = get(def);
+      const id = aiCapabilityId(def.agent_key, def.capability_key);
+      const noun = SUMMARY_NOUNS[id];
+      const on = isOn(row);
+      if (def.kind === 'toggle') {
+        parts.push(`${on ? 'con' : 'sin'} ${noun}`);
+        continue;
+      }
+      if (def.kind === 'toggle_cap' && !on) {
+        parts.push(`sin ${noun ?? def.label.toLowerCase()}`);
+        continue;
+      }
+      const value = formatAICapValue(def, row.cap_value);
+      if (row.cap_value === null) {
+        const what =
+          noun ?? (def.cap_unit ? AI_CAP_UNIT_LABELS[def.cap_unit] : def.label);
+        parts.push(`${what} sin límite`);
+      } else if (noun) {
+        parts.push(
+          def.cap_unit === 'seconds'
+            ? value.replace(/(minutos?)/, `$1 de ${noun}`)
+            : `${noun} de ${value}`,
+        );
+      } else {
+        parts.push(value);
+      }
+    }
+    return `${name}: ${parts.join(', ')}.`;
+  });
+}

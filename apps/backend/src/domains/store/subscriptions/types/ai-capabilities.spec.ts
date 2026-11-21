@@ -5,7 +5,9 @@ import {
   AI_CAPABILITIES,
   aiCapabilityId,
   defaultAIEntitlement,
+  describeAIEntitlements,
   findAICapability,
+  formatAICapValue,
   legacyCapToCapValue,
   legacyFlagsToAIEntitlements,
 } from './ai-capabilities';
@@ -284,6 +286,55 @@ describe('ai-capabilities — single catalog of plan AI capabilities (T9)', () =
         cap_value: null,
         on_limit: 'block',
       });
+    });
+  });
+  describe('plain-language summary (S11)', () => {
+    const rows = (patch: Record<string, Partial<ReturnType<typeof defaultAIEntitlement>>>) =>
+      AI_CAPABILITIES.map((def) => ({
+        ...defaultAIEntitlement(def),
+        ...(patch[aiCapabilityId(def.agent_key, def.capability_key)] ?? {}),
+      }));
+
+    it('formats caps with their unit in words; voice is read in minutes', () => {
+      expect(formatAICapValue(findAICapability('vex', 'agent')!, 200)).toBe(
+        '200 mensajes al día',
+      );
+      expect(formatAICapValue(findAICapability('vex', 'model_tokens')!, 50_000_000)).toBe(
+        '50 M de tokens al mes',
+      );
+      expect(formatAICapValue(findAICapability('vex', 'voice_readout')!, 3600)).toBe(
+        '60 minutos al mes',
+      );
+      expect(formatAICapValue(findAICapability('vex', 'agent')!, null)).toBe('sin límite');
+      expect(formatAICapValue(findAICapability('vex', 'files')!, null)).toBe('');
+    });
+
+    it('writes one sentence per agent with what the plan includes and lacks', () => {
+      const lines = describeAIEntitlements(
+        rows({
+          'vex.agent': { enabled: true, cap_value: 200 },
+          'vex.model_tokens': { cap_value: 50_000_000 },
+          'vex.voice_readout': { enabled: true, cap_value: 3600 },
+          'vex.files': { enabled: true },
+          'platform.smart_search': { enabled: true, cap_value: null },
+        }),
+      );
+      expect(lines).toEqual([
+        'Vex: 200 mensajes al día, 50 M de tokens al mes, 60 minutos de lectura en voz al mes, con archivos e imágenes, sin análisis con código, sin modelo avanzado.',
+        'Vexi: no incluido.',
+        expect.stringMatching(/^IA en los módulos: .*búsqueda inteligente sin límite\.$/),
+      ]);
+    });
+
+    it('an agent switched off or capped at 0 is "no incluido"; the platform only when every row is off', () => {
+      const lines = describeAIEntitlements(
+        rows({ 'vex.agent': { enabled: true, cap_value: 0 } }),
+      );
+      expect(lines).toEqual([
+        'Vex: no incluido.',
+        'Vexi: no incluido.',
+        'IA en los módulos: no incluido.',
+      ]);
     });
   });
 });
