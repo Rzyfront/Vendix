@@ -296,6 +296,21 @@ export interface VexApplyStepResult {
   execution?: VexiToolExecution;
 }
 
+/** `GET conversations/:id/purge-preview`: figures shown before deleting. */
+export interface VexPurgePreview {
+  messages: number;
+  attachments: number;
+  blocks: number;
+  memories: number;
+  has_running_task: boolean;
+}
+
+/** `DELETE conversations/:id`. */
+export interface VexPurgeResult {
+  purged: boolean;
+  counts?: Partial<Record<'messages' | 'attachments' | 'blocks' | 'memories', number>>;
+}
+
 export interface VexConversationsPage {
   data: VexBackendConversation[];
   meta: { total: number; page: number; limit: number; totalPages: number };
@@ -372,11 +387,28 @@ export class VexApiService {
       .pipe(map((res) => res?.data ?? null));
   }
 
-  archiveConversation(id: number): Observable<VexBackendConversation> {
+  /**
+   * What a real deletion would erase, for the confirmation dialog. Read-only:
+   * nothing is deleted here. 404 when the conversation is not the user's.
+   */
+  purgePreview(id: number): Observable<VexPurgePreview> {
     return this.http
-      .patch<{
-        data: VexBackendConversation;
-      }>(`${this.chatBase}/conversations/${id}/archive`, {})
+      .get<{
+        data: VexPurgePreview;
+      }>(`${this.chatBase}/conversations/${id}/purge-preview`)
+      .pipe(map((res) => res.data));
+  }
+
+  /**
+   * Deletes the conversation for real (messages, blocks, attachments in S3,
+   * durable tasks). 409 while a task of the conversation is running; 404 when
+   * it is not the user's.
+   */
+  purgeConversation(id: number): Observable<VexPurgeResult> {
+    return this.http
+      .delete<{
+        data: VexPurgeResult;
+      }>(`${this.chatBase}/conversations/${id}`)
       .pipe(map((res) => res.data));
   }
 

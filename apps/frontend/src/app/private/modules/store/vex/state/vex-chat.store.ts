@@ -34,6 +34,7 @@ import {
   VexApplyStepResult,
   VexBackendConversation,
   VexBackendMessage,
+  VexPurgePreview,
 } from '../services/vex-api.service';
 import {
   VexBlockInteraction,
@@ -691,21 +692,74 @@ export class VexChatStore {
     void this.runTurn(text, attachment_ids);
   }
 
-  deleteConversation(id: string): void {
+  /** Figures of what deleting the conversation erases, or `null` (with a toast) when they cannot be read. */
+  async previewPurge(id: string): Promise<VexPurgePreview | null> {
     const numeric = Number(id);
-    this._conversations.update((list) => list.filter((c) => c.id !== id));
-    this.loaded_ids.delete(id);
-    if (this._active_id() === id) {
-      this.closeStream();
-      this._active_id.set(null);
+    if (!Number.isFinite(numeric)) return null;
+    try {
+      return await firstValueFrom(this.api.purgePreview(numeric));
+    } catch (error) {
+      this.toast.error(
+        parseApiError(error).userMessage,
+        'No se pudo preparar el borrado',
+      );
+      return null;
     }
-    if (!Number.isFinite(numeric)) return;
-    void firstValueFrom(this.api.archiveConversation(numeric)).catch(
-      (error) => {
-        this.toast.error(extractApiErrorMessage(error), 'No se pudo eliminar');
-        void this.loadConversations();
-      },
-    );
+  }
+
+  /**
+   * Deletes the conversation for real (the server answers 409 while one of its
+   * tasks is running: nothing is deleted then). On success it leaves the list
+   * and, if it was the open one, the view returns to the new chat.
+   */
+  async purgeConversation(id: string): Promise<'purged' | 'running' | 'failed'> {
+    const numeric = Number(id);
+    if (!Number.isFinite(numeric)) return 'failed';
+    try {
+      await firstValueFrom(this.api.purgeConversation(numeric));
+    } catch (error) {
+      const status = (error as { status?: number } | null)?.status;
+      if (status === 409) return 'running';
+      if (status === 404) {
+        this.forgetConversation(id);
+        this.toast.error('Esa conversación ya no existe.', 'No se pudo borrar');
+        return 'failed';
+      }
+      this.toast.error(parseApiError(error).userMessage, 'No se pudo borrar');
+      return 'failed';
+    }
+    this.forgetConversation(id);
+    this.toast.success('Conversación borrada');
+    return 'purged';
+  }
+
+  /** Drops a conversation from every local cache; the open one returns to the new chat. */
+  private forgetConversation(id: string): void {
+    this._conversations.update((list) => list.filter((c) => c.id !== id));
+    this._search_ids.update((ids) => {
+      if (!ids?.has(id)) return ids;
+      const next = new Set(ids);
+      next.delete(id);
+      return next;
+    });
+    this.loaded_ids.delete(id);
+    this.first_turn_ids.delete(id);
+    this.title_received.delete(id);
+    this.user_titled.delete(id);
+    this._objectives.update((values) => {
+      if (!(id in values)) return values;
+      const rest = { ...values };
+      delete rest[id];
+      return rest;
+    });
+    if (this._active_id() === id) {
+      this.voiceSafety.invalidate();
+      this.voice.interrupt();
+      this.closeStream();
+      this._is_agent_typing.set(false);
+      this._active_id.set(null);
+      this.replace_nav = true;
+    }
   }
 
   /**

@@ -12,6 +12,7 @@ import {
   signal,
   viewChild,
 } from '@angular/core';
+import { DialogService } from '../../../../../../shared/components/dialog/dialog.service';
 import { AuthFacade } from '../../../../../../core/store/auth/auth.facade';
 import { IconComponent } from '../../../../../../shared/components/icon/icon.component';
 import { EmptyStateComponent } from '../../../../../../shared/components/empty-state/empty-state.component';
@@ -19,6 +20,10 @@ import { InputsearchComponent } from '../../../../../../shared/components/inputs
 import { SpinnerComponent } from '../../../../../../shared/components/spinner/spinner.component';
 import { UserAvatarComponent } from '../../../../../../shared/components/user-avatar/user-avatar.component';
 import { VexChatStore } from '../../state/vex-chat.store';
+import {
+  VEX_PURGE_RUNNING_MESSAGE,
+  purgeConfirmMessage,
+} from '../../state/vex-conversation-purge.util';
 import { groupConversationsByDate } from '../../state/vex-conversation-groups.util';
 import { VexTitleEditorComponent } from '../vex-title-editor/vex-title-editor.component';
 
@@ -273,6 +278,7 @@ export class VexChatsSidebarComponent {
     groupConversationsByDate(this.chat_store.conversations()),
   );
 
+  private readonly dialog = inject(DialogService);
   private readonly host = inject<ElementRef<HTMLElement>>(ElementRef);
   private readonly injector = inject(Injector);
 
@@ -336,9 +342,45 @@ export class VexChatsSidebarComponent {
     this.conversationSelected.emit();
   }
 
-  onDelete(id: string): void {
+  /**
+   * Real deletion: reads what would be erased, asks with the shared
+   * confirmation dialog and only then deletes. A running task blocks it.
+   */
+  async onDelete(id: string): Promise<void> {
     this.menu_id.set(null);
-    this.chat_store.deleteConversation(id);
+    const preview = await this.chat_store.previewPurge(id);
+    if (!preview) return;
+    if (preview.has_running_task) {
+      await this.explainRunningTask(id);
+      return;
+    }
+    const confirmed = await this.dialog.confirm({
+      title: 'Borrar conversación',
+      message: purgeConfirmMessage(preview),
+      confirmText: 'Borrar definitivamente',
+      cancelText: 'Cancelar',
+      confirmVariant: 'danger',
+    });
+    if (!confirmed) {
+      this.focusAfterRender(`[data-vex-chat-title="${id}"]`);
+      return;
+    }
+    const result = await this.chat_store.purgeConversation(id);
+    if (result === 'running') await this.explainRunningTask(id);
+  }
+
+  /** The conversation has a task running: nothing is deleted; offers to stop it when the store can. */
+  private async explainRunningTask(id: string): Promise<void> {
+    const can_stop =
+      this.chat_store.active_id() === id && this.chat_store.is_agent_typing();
+    const accepted = await this.dialog.confirm({
+      title: 'No se puede borrar todavía',
+      message: VEX_PURGE_RUNNING_MESSAGE,
+      confirmText: can_stop ? 'Detener tarea' : 'Entendido',
+      cancelText: can_stop ? 'Cancelar' : 'Cerrar',
+      confirmVariant: 'primary',
+    });
+    if (accepted && can_stop) this.chat_store.stopStream();
   }
 
   // ── Rename ──────────────────────────────────────────────────────────
