@@ -7012,7 +7012,9 @@ model ai_engine_configs {
   created_at     DateTime?          @default(now()) @db.Timestamp(6)
   updated_at     DateTime?          @default(now()) @db.Timestamp(6)
 
-  applications ai_engine_applications[]
+  applications          ai_engine_applications[] @relation("ai_engine_application_config")
+  /// F3 T24: aplicaciones que usan esta configuración como respaldo.
+  fallback_applications ai_engine_applications[] @relation("ai_engine_application_fallback_config")
   logs         ai_engine_logs[]
 
   @@unique([provider, model_id])
@@ -7025,6 +7027,8 @@ model ai_engine_applications {
   name                String             @db.VarChar(255)
   description         String?            @db.Text
   config_id           Int?
+  /// F3 T24: configuración de respaldo; ante error del proveedor o timeout el motor reintenta una vez con ella.
+  fallback_config_id  Int?
   system_prompt       String?            @db.Text
   prompt_template     String?            @db.Text
   temperature         Decimal?           @db.Decimal(3, 2)
@@ -7039,9 +7043,11 @@ model ai_engine_applications {
   created_at          DateTime?          @default(now()) @db.Timestamp(6)
   updated_at          DateTime?          @default(now()) @db.Timestamp(6)
 
-  config ai_engine_configs? @relation(fields: [config_id], references: [id], onDelete: SetNull)
+  config          ai_engine_configs? @relation("ai_engine_application_config", fields: [config_id], references: [id], onDelete: SetNull)
+  fallback_config ai_engine_configs? @relation("ai_engine_application_fallback_config", fields: [fallback_config_id], references: [id], onDelete: SetNull)
 
   @@index([config_id])
+  @@index([fallback_config_id])
   @@index([ai_feature_category])
   @@index([model_type])
 }
@@ -7217,6 +7223,8 @@ model ai_conversations {
   user_id         Int
   title           String?                     @db.VarChar(255)
   summary         String?                     @db.Text
+  /// F3 T22: id del último ai_messages cubierto por `summary` (sin FK: los mensajes solo se borran con la conversación).
+  summary_through_message_id Int?
   app_key         String?                     @db.VarChar(100)
   status          ai_conversation_status_enum @default(active)
   metadata        Json?
