@@ -60,12 +60,16 @@ export const AGENT_TOOL_CORE: Readonly<Record<string, readonly string[]>> = {
     'vex_render_table',
     'vex_render_chart',
     'vex_render_kpi',
+    'vex_render_timeline',
+    'vex_render_list',
     'vex_render_image',
     'vex_render_file',
     'vex_block_read',
     'vex_block_transform',
     // Evaluated on every turn (F1/T5): the prompt orders it, so it is in hand.
     'suggest_followup',
+    // F7/T48: exact arithmetic, so the model never computes percentages by head.
+    'compute',
   ],
 };
 /**

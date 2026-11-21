@@ -2047,13 +2047,17 @@ export class AIChatService {
             ? 'chart'
             : tool.name === 'vex_render_kpi'
               ? 'kpi'
-              : tool.name === 'vex_render_image'
-                ? 'image'
-                : tool.name === 'vex_render_file'
-                  ? 'file'
-                  : tool.name === 'vex_block_transform'
-                    ? 'table'
-                    : null;
+              : tool.name === 'vex_render_timeline'
+                ? 'timeline'
+                : tool.name === 'vex_render_list'
+                  ? 'list'
+                  : tool.name === 'vex_render_image'
+                    ? 'image'
+                    : tool.name === 'vex_render_file'
+                      ? 'file'
+                      : tool.name === 'vex_block_transform'
+                        ? 'table'
+                        : null;
       if (!fallbackKind) continue;
       try {
         const data = (JSON.parse(tool.result) as any)?.data;

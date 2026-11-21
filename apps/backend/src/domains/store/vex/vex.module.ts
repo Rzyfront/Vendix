@@ -13,6 +13,7 @@ import { VexBlockService } from './services/vex-block.service';
 import { VexActivityFeedService } from './services/vex-activity-feed.service';
 import { VexSuggestionsService } from './services/vex-suggestions.service';
 import { AIToolRegistry } from '../../../ai-engine/tools/ai-tool-registry';
+import { createComputeTools } from '../../../ai-engine/tools/domains/compute.tools';
 import { createVexBlockTools } from '../../../ai-engine/tools/domains/vex-blocks.tools';
 import { VexiVoiceConfirmationService } from '../vexi/vexi-voice-confirmation.service';
 import { SubscriptionAccessService } from '../subscriptions/services/subscription-access.service';
@@ -97,5 +98,6 @@ export class VexModule implements OnModuleInit {
     this.toolRegistry.registerMany(
       createVexBlockTools({ blocks: this.blocks }),
     );
+    this.toolRegistry.registerMany(createComputeTools());
   }
 }

@@ -6,7 +6,9 @@ export type VexUiBlockKind =
   | 'kpi'
   | 'image'
   | 'file'
-  | 'markdown';
+  | 'markdown'
+  | 'timeline'
+  | 'list';
 
 /**
  * A UI block Vex rendered inside a turn.
@@ -29,7 +31,9 @@ export type VexBlockSpec =
   | VexKpiSpec
   | VexImageSpec
   | VexFileSpec
-  | VexMarkdownSpec;
+  | VexMarkdownSpec
+  | VexTimelineSpec
+  | VexListSpec;
 
 export interface VexTableColumn {
   key: string;
@@ -51,6 +55,8 @@ export interface VexTableSpec {
 export interface VexChartSeries {
   key: string;
   label?: string;
+  /** Per-series geometry for `combo` charts (default: first bar, rest line). */
+  type?: 'bar' | 'line';
 }
 
 export interface VexChartSpec {
@@ -64,7 +70,12 @@ export interface VexChartSpec {
     | 'area'
     | 'radar'
     | 'scatter'
-    | 'gauge';
+    | 'gauge'
+    | 'rose'
+    | 'stacked_bar'
+    | 'combo'
+    | 'funnel'
+    | 'heatmap';
   /** Key of each row holding the category label (bar/line/area). */
   x_axis_key?: string;
   /** Keys of each row holding the series values. */
@@ -100,6 +111,46 @@ export interface VexFileSpec {
 export interface VexMarkdownSpec {
   kind: 'markdown';
   title?: string;
+}
+
+export type VexBlockTone = 'success' | 'warning' | 'error' | 'info' | 'neutral';
+
+export interface VexTimelineSpec {
+  kind: 'timeline';
+  title?: string;
+}
+
+export interface VexTimelineEvent {
+  id?: string;
+  title: string;
+  description?: string;
+  /** ISO 8601 instant. */
+  timestamp?: string;
+  status?: VexBlockTone;
+  actor?: string;
+}
+
+export interface VexTimelineData {
+  events: VexTimelineEvent[];
+}
+
+export interface VexListSpec {
+  kind: 'list';
+  title?: string;
+  layout?: 'cards' | 'rows';
+}
+
+export interface VexListItem {
+  id?: string;
+  title: string;
+  subtitle?: string;
+  description?: string;
+  badge?: { label: string; tone?: VexBlockTone };
+  fields?: Array<{ label: string; value: string | number }>;
+}
+
+export interface VexListData {
+  items: VexListItem[];
 }
 
 /** Table/chart payload shape: rows plus the total the server counted. */

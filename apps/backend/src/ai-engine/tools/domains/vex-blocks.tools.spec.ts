@@ -79,6 +79,8 @@ describe('vex-blocks.tools · render + read/transform', () => {
     'vex_render_table',
     'vex_render_chart',
     'vex_render_kpi',
+    'vex_render_timeline',
+    'vex_render_list',
     'vex_render_image',
     'vex_render_file',
     'vex_block_read',
@@ -87,7 +89,7 @@ describe('vex-blocks.tools · render + read/transform', () => {
 
   // ─── (d)+(e) Registro ─────────────────────────────────────────────
   describe('registro', () => {
-    it('expone exactamente las 7 tools del dominio vex_blocks', () => {
+    it('expone exactamente las 9 tools del dominio vex_blocks', () => {
       const { tools } = buildTools();
       expect(tools.map((tool) => tool.name)).toEqual(TOOL_NAMES);
       for (const tool of tools) {
@@ -97,7 +99,7 @@ describe('vex-blocks.tools · render + read/transform', () => {
       }
     });
 
-    it('las 7 son readOnly puras: sin confirmación ni preview', () => {
+    it('las 9 son readOnly puras: sin confirmación ni preview', () => {
       const { tools } = buildTools();
       for (const name of TOOL_NAMES) {
         const tool = getTool(tools, name);
@@ -130,6 +132,11 @@ describe('vex-blocks.tools · render + read/transform', () => {
         'radar',
         'scatter',
         'gauge',
+        'rose',
+        'stacked_bar',
+        'combo',
+        'funnel',
+        'heatmap',
       ]);
 
       expect(byName('vex_render_kpi').required).toEqual(['label', 'value']);
@@ -517,6 +524,82 @@ describe('vex-blocks.tools · render + read/transform', () => {
 
       expect(answer.tool).toBe('vex_block_transform');
       expect(answer.error).toContain('no es tabla');
+    });
+  });
+
+  describe('timeline, list y chart ampliado', () => {
+    it('vex_render_timeline devuelve block_id y guarda events', async () => {
+      const { tools, blocks } = buildTools();
+      const events = [{ title: 'Pago recibido', status: 'success' }];
+      const out = await run(tools, 'vex_render_timeline', {
+        conversation_id: 1,
+        title: 'Orden 5',
+        events,
+      });
+      expect(out.data.block_id).toBe('blk_1');
+      expect(out.data.kind).toBe('timeline');
+      expect(blocks.create).toHaveBeenCalledWith({
+        conversation_id: 1,
+        kind: 'timeline',
+        spec: { title: 'Orden 5' },
+        data: { events },
+      });
+    });
+
+    it('vex_render_list devuelve block_id y guarda items', async () => {
+      const { tools, blocks } = buildTools();
+      const items = [{ title: 'Cliente A', badge: { label: 'Activo' } }];
+      const out = await run(tools, 'vex_render_list', {
+        conversation_id: 1,
+        layout: 'cards',
+        items,
+      });
+      expect(out.data.block_id).toBe('blk_1');
+      expect(out.data.kind).toBe('list');
+      expect(blocks.create).toHaveBeenCalledWith({
+        conversation_id: 1,
+        kind: 'list',
+        spec: { title: undefined, layout: 'cards' },
+        data: { items },
+      });
+    });
+
+    it('las nuevas piden conversation_id y devuelven error en español', async () => {
+      const { tools, blocks } = buildTools();
+      for (const name of ['vex_render_timeline', 'vex_render_list']) {
+        const out = await run(tools, name, {});
+        expect(out.error).toContain('conversation_id');
+      }
+      expect(blocks.create).not.toHaveBeenCalled();
+      blocks.create.mockRejectedValueOnce(new Error('Bloque list inválido: x'));
+      const out = await run(tools, 'vex_render_list', {
+        conversation_id: 1,
+        items: [],
+      });
+      expect(out.error).toContain('inválido');
+      expect(out.next_step).toBeTruthy();
+    });
+
+    it('vex_render_table y vex_render_chart bar siguen igual', async () => {
+      const { tools, blocks } = buildTools();
+      await run(tools, 'vex_render_chart', {
+        conversation_id: 1,
+        chart_type: 'bar',
+        labels: ['a'],
+        series: [{ name: 'x', data: [1] }],
+      });
+      expect(blocks.create).toHaveBeenLastCalledWith({
+        conversation_id: 1,
+        kind: 'chart',
+        spec: { title: undefined, chart_type: 'bar' },
+        data: { labels: ['a'], series: [{ name: 'x', data: [1] }] },
+      });
+      const t = await run(tools, 'vex_render_table', {
+        conversation_id: 1,
+        columns: [{ key: 'a', label: 'A' }],
+        rows: [{ a: 1 }],
+      });
+      expect(t.data.rows).toBe(1);
     });
   });
 });

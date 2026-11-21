@@ -9,6 +9,19 @@ import {
   ArtifactAggregate,
   readArtifactPage,
 } from '../../../../ai-engine/context/tool-result-compaction';
+import {
+  applyAggregate,
+  applyCompare,
+  applyDerive,
+  applyFilters,
+  applyJoin,
+  applySort,
+  VexBlockCompareSpec,
+  VexBlockDeriveError,
+  VexBlockDeriveSpec,
+  VexBlockJoinSpec,
+} from './vex-block-derive';
+import { ExpressionError } from '../../../../ai-engine/tools/compute/decimal-expression';
 
 export type VexBlockKind =
   | 'table'
@@ -16,7 +29,9 @@ export type VexBlockKind =
   | 'kpi'
   | 'image'
   | 'file'
-  | 'markdown';
+  | 'markdown'
+  | 'timeline'
+  | 'list';
 
 export const VEX_BLOCK_KINDS: readonly VexBlockKind[] = [
   'table',
@@ -25,7 +40,31 @@ export const VEX_BLOCK_KINDS: readonly VexBlockKind[] = [
   'image',
   'file',
   'markdown',
+  'timeline',
+  'list',
 ];
+
+/** Chart types Vex can render; `doughnut` stays accepted for older blocks. */
+export const VEX_CHART_TYPES: readonly string[] = [
+  'bar',
+  'line',
+  'pie',
+  'area',
+  'radar',
+  'scatter',
+  'gauge',
+  'doughnut',
+  'rose',
+  'stacked_bar',
+  'combo',
+  'funnel',
+  'heatmap',
+];
+
+const BLOCK_TONES = ['success', 'warning', 'error', 'info', 'neutral'];
+/** Timeline events / list items per block. */
+const MAX_COLLECTION_ITEMS = 200;
+const MAX_LIST_FIELDS = 8;
 
 /** Beyond this a block is a data export, and it belongs in the module. */
 export const MAX_BLOCK_ROWS = 5000;
@@ -83,6 +122,12 @@ export interface VexBlockTransform {
     field: string;
     function: 'sum' | 'avg' | 'count' | 'min' | 'max';
   };
+  /** Joins another table block of the SAME conversation before anything else. */
+  join?: VexBlockJoinSpec & { block_id: string };
+  /** Derived columns, computed per row with decimal arithmetic. */
+  derive?: VexBlockDeriveSpec[];
+  /** Period-over-period comparison; replaces the rows with one per key. */
+  compare?: VexBlockCompareSpec;
 }
 
 export interface VexBlockInteraction {
@@ -317,6 +362,10 @@ export class VexBlockService {
             series: series.map((s, i) => ({
               key: keys[i],
               ...(typeof s.name === 'string' ? { label: s.name } : {}),
+              // `combo` draws each series as its own mark; the panel needs it.
+              ...(s.type === 'bar' || s.type === 'line'
+                ? { type: s.type }
+                : {}),
             })),
           },
           data: { rows },
@@ -375,6 +424,31 @@ export class VexBlockService {
           },
         };
       }
+      case 'timeline':
+        return {
+          block_id: row.id,
+          kind: 'timeline',
+          version: row.version,
+          spec: {
+            kind: 'timeline',
+            ...(typeof spec.title === 'string' ? { title: spec.title } : {}),
+          },
+          data: { events: Array.isArray(data.events) ? data.events : [] },
+        };
+      case 'list':
+        return {
+          block_id: row.id,
+          kind: 'list',
+          version: row.version,
+          spec: {
+            kind: 'list',
+            ...(typeof spec.title === 'string' ? { title: spec.title } : {}),
+            ...(spec.layout === 'cards' || spec.layout === 'rows'
+              ? { layout: spec.layout }
+              : {}),
+          },
+          data: { items: Array.isArray(data.items) ? data.items : [] },
+        };
       case 'markdown':
       default:
         return {
@@ -537,7 +611,53 @@ export class VexBlockService {
         `Solo los bloques table se pueden transformar; este es ${row.kind}.`,
       );
     }
-    const rows = this.applyOps(this.rowsOf(row), ops);
+    let source = this.rowsOf(row);
+    let columns: unknown = row.data?.columns;
+    try {
+      if (ops.join) {
+        // `findOwnedBlock` keeps the store + owner boundary; the conversation
+        // check keeps a join from pulling rows out of another thread.
+        const other = await this.findOwnedBlock(String(ops.join.block_id));
+        if (
+          other.kind !== 'table' ||
+          other.conversation_id !== row.conversation_id
+        ) {
+          throw new VendixHttpException(
+            ErrorCodes.SYS_VALIDATION_001,
+            'join.block_id debe ser otro bloque table de esta misma conversación.',
+          );
+        }
+        source = applyJoin(source, this.rowsOf(other), ops.join);
+      }
+      if (ops.derive?.length) source = applyDerive(source, ops.derive);
+      if (ops.compare) source = applyCompare(source, ops.compare);
+    } catch (error) {
+      if (
+        error instanceof VexBlockDeriveError ||
+        error instanceof ExpressionError
+      ) {
+        throw new VendixHttpException(
+          ErrorCodes.SYS_VALIDATION_001,
+          error.message,
+        );
+      }
+      throw error;
+    }
+    const rows = this.applyOps(source, ops);
+    if (ops.join || ops.derive?.length || ops.compare) {
+      // The row shape changed: stale column definitions would hide the new
+      // fields, so the columns are rebuilt from the rows actually stored.
+      const keys: string[] = [];
+      for (const r of rows.slice(0, 50)) {
+        for (const k of Object.keys(r)) if (!keys.includes(k)) keys.push(k);
+      }
+      const known = new Map<string, unknown>(
+        (Array.isArray(columns) ? columns : [])
+          .filter(isRecord)
+          .map((c) => [String(c.key), c]),
+      );
+      columns = keys.map((k) => known.get(k) ?? { key: k, label: k });
+    }
     if (rows.length > MAX_BLOCK_ROWS) {
       throw new VendixHttpException(
         ErrorCodes.SYS_VALIDATION_001,
@@ -552,7 +672,11 @@ export class VexBlockService {
         message_id: row.message_id,
         kind: row.kind,
         spec: { ...row.spec, derived_from: row.id, transform: ops },
-        data: { ...row.data, rows },
+        data: {
+          ...row.data,
+          ...(columns !== undefined ? { columns } : {}),
+          rows,
+        },
         version: row.version + 1,
       },
     });
@@ -703,14 +827,139 @@ export class VexBlockService {
       }
       case 'chart': {
         const errors: string[] = [];
-        if (typeof spec.chart_type !== 'string' || !spec.chart_type) {
+        if (
+          typeof spec.chart_type !== 'string' ||
+          !VEX_CHART_TYPES.includes(spec.chart_type)
+        ) {
           errors.push(
-            'spec.chart_type es obligatorio (bar, line, pie, area, radar, scatter, gauge).',
+            `spec.chart_type es obligatorio y debe ser uno de: ${VEX_CHART_TYPES.join(', ')}.`,
           );
         }
         if (!Array.isArray(data.series) || data.series.length === 0) {
           errors.push('data.series debe ser una lista no vacía.');
+          return errors;
         }
+        if (spec.chart_type === 'combo') {
+          const bad = data.series.some(
+            (s: unknown) =>
+              isRecord(s) &&
+              s.type !== undefined &&
+              s.type !== 'bar' &&
+              s.type !== 'line',
+          );
+          if (bad) {
+            errors.push("series[].type debe ser 'bar' o 'line'.");
+          }
+        }
+        if (spec.chart_type === 'heatmap') {
+          const labels = Array.isArray(data.labels) ? data.labels : [];
+          const bad = data.series.some(
+            (s: unknown) =>
+              !isRecord(s) ||
+              !Array.isArray(s.data) ||
+              s.data.length !== labels.length,
+          );
+          if (labels.length === 0 || bad) {
+            errors.push(
+              'En heatmap, labels no puede ir vacío y cada series[].data debe tener un valor por label.',
+            );
+          }
+        }
+        return errors;
+      }
+      case 'timeline': {
+        const errors: string[] = [];
+        const events = data.events;
+        if (
+          !Array.isArray(events) ||
+          events.length === 0 ||
+          events.length > MAX_COLLECTION_ITEMS
+        ) {
+          return [
+            `data.events debe ser una lista de 1 a ${MAX_COLLECTION_ITEMS} eventos.`,
+          ];
+        }
+        events.forEach((e: unknown, i: number) => {
+          if (!isRecord(e)) {
+            errors.push(`events[${i}] debe ser un objeto.`);
+            return;
+          }
+          if (typeof e.title !== 'string' || !e.title.trim()) {
+            errors.push(`events[${i}].title es obligatorio.`);
+          }
+          if (
+            e.timestamp !== undefined &&
+            (typeof e.timestamp !== 'string' ||
+              Number.isNaN(Date.parse(e.timestamp)))
+          ) {
+            errors.push(`events[${i}].timestamp debe ser una fecha ISO 8601.`);
+          }
+          if (e.status !== undefined && !BLOCK_TONES.includes(e.status)) {
+            errors.push(
+              `events[${i}].status debe ser uno de: ${BLOCK_TONES.join(', ')}.`,
+            );
+          }
+        });
+        return errors;
+      }
+      case 'list': {
+        const errors: string[] = [];
+        if (
+          spec.layout !== undefined &&
+          spec.layout !== 'cards' &&
+          spec.layout !== 'rows'
+        ) {
+          errors.push("spec.layout debe ser 'cards' o 'rows'.");
+        }
+        const items = data.items;
+        if (
+          !Array.isArray(items) ||
+          items.length === 0 ||
+          items.length > MAX_COLLECTION_ITEMS
+        ) {
+          errors.push(
+            `data.items debe ser una lista de 1 a ${MAX_COLLECTION_ITEMS} ítems.`,
+          );
+          return errors;
+        }
+        items.forEach((it: unknown, i: number) => {
+          if (!isRecord(it)) {
+            errors.push(`items[${i}] debe ser un objeto.`);
+            return;
+          }
+          if (typeof it.title !== 'string' || !it.title.trim()) {
+            errors.push(`items[${i}].title es obligatorio.`);
+          }
+          if (it.badge !== undefined) {
+            if (
+              !isRecord(it.badge) ||
+              typeof it.badge.label !== 'string' ||
+              !it.badge.label ||
+              (it.badge.tone !== undefined &&
+                !BLOCK_TONES.includes(it.badge.tone))
+            ) {
+              errors.push(
+                `items[${i}].badge debe traer label y, si hay tone, uno de: ${BLOCK_TONES.join(', ')}.`,
+              );
+            }
+          }
+          if (it.fields !== undefined) {
+            if (
+              !Array.isArray(it.fields) ||
+              it.fields.length > MAX_LIST_FIELDS ||
+              it.fields.some(
+                (f: unknown) =>
+                  !isRecord(f) ||
+                  typeof f.label !== 'string' ||
+                  (typeof f.value !== 'string' && typeof f.value !== 'number'),
+              )
+            ) {
+              errors.push(
+                `items[${i}].fields admite hasta ${MAX_LIST_FIELDS} {label, value} con value texto o número.`,
+              );
+            }
+          }
+        });
         return errors;
       }
       case 'kpi': {
@@ -771,131 +1020,36 @@ export class VexBlockService {
   }
 
   private rowsOf(row: VexBlockRow): Array<Record<string, any>> {
-    const rows = (row.data as Record<string, any>)?.rows;
+    const data = row.data as Record<string, any>;
+    const rows =
+      row.kind === 'timeline'
+        ? data?.events
+        : row.kind === 'list'
+          ? data?.items
+          : data?.rows;
     return Array.isArray(rows) ? rows : [];
   }
 
   // ── transform ops ─────────────────────────────────────────────────────
 
+  /** filter → sort → aggregate, numeric-aware (see vex-block-derive.ts). */
   private applyOps(
     rows: Array<Record<string, any>>,
     ops: VexBlockTransform,
   ): Array<Record<string, any>> {
-    let out = [...rows];
-    for (const f of ops.filter ?? []) {
-      out = out.filter((r) => this.matches(r[f.field], f.op, f.value));
-    }
-    const sorts = ops.sort ?? [];
-    if (sorts.length > 0) {
-      out.sort((a, b) => {
-        for (const s of sorts) {
-          const dir = s.direction === 'desc' ? -1 : 1;
-          const av = a[s.field];
-          const bv = b[s.field];
-          if (av === bv) continue;
-          if (av === null || av === undefined) return 1;
-          if (bv === null || bv === undefined) return -1;
-          return (av < bv ? -1 : 1) * dir;
-        }
-        return 0;
-      });
-    }
-    if (ops.group_by || ops.aggregate) {
-      out = this.aggregate(out, ops.group_by, ops.aggregate);
-    }
-    return out;
-  }
-
-  private matches(field: unknown, op: string, value: unknown): boolean {
-    switch (op) {
-      case 'eq':
-        return field === value;
-      case 'neq':
-        return field !== value;
-      case 'gt':
-        return (
-          typeof field === 'number' &&
-          typeof value === 'number' &&
-          field > value
+    try {
+      let out = applyFilters(rows, ops.filter ?? []);
+      out = applySort(out, ops.sort ?? []);
+      if (ops.aggregate) out = applyAggregate(out, ops.group_by, ops.aggregate);
+      return out;
+    } catch (error) {
+      if (error instanceof VexBlockDeriveError) {
+        throw new VendixHttpException(
+          ErrorCodes.SYS_VALIDATION_001,
+          error.message,
         );
-      case 'gte':
-        return (
-          typeof field === 'number' &&
-          typeof value === 'number' &&
-          field >= value
-        );
-      case 'lt':
-        return (
-          typeof field === 'number' &&
-          typeof value === 'number' &&
-          field < value
-        );
-      case 'lte':
-        return (
-          typeof field === 'number' &&
-          typeof value === 'number' &&
-          field <= value
-        );
-      case 'contains':
-        return (
-          typeof field === 'string' &&
-          typeof value === 'string' &&
-          field.toLowerCase().includes(value.toLowerCase())
-        );
-      case 'in':
-        return Array.isArray(value) && value.includes(field);
-      default:
-        return false;
-    }
-  }
-
-  private aggregate(
-    rows: Array<Record<string, any>>,
-    groupBy: string | undefined,
-    aggregate: VexBlockTransform['aggregate'],
-  ): Array<Record<string, any>> {
-    if (!aggregate) return rows;
-    const groups = new Map<string, Array<Record<string, any>>>();
-    for (const row of rows) {
-      const key = groupBy ? String(row[groupBy] ?? '—') : 'total';
-      const bucket = groups.get(key);
-      if (bucket) bucket.push(row);
-      else groups.set(key, [row]);
-    }
-    const out: Array<Record<string, any>> = [];
-    for (const [key, bucket] of groups) {
-      const numbers = bucket
-        .map((r) => r[aggregate.field])
-        .filter((v): v is number => typeof v === 'number');
-      let value: number;
-      switch (aggregate.function) {
-        case 'sum':
-          value = numbers.reduce((a, b) => a + b, 0);
-          break;
-        case 'avg':
-          value = numbers.length
-            ? numbers.reduce((a, b) => a + b, 0) / numbers.length
-            : 0;
-          break;
-        case 'count':
-          value = bucket.length;
-          break;
-        case 'min':
-          value = numbers.length ? Math.min(...numbers) : 0;
-          break;
-        case 'max':
-          value = numbers.length ? Math.max(...numbers) : 0;
-          break;
       }
-      out.push(
-        groupBy
-          ? {
-              [groupBy]: key,
-              [`${aggregate.function}_${aggregate.field}`]: value,
-            }
-          : { [`${aggregate.function}_${aggregate.field}`]: value },
-      );
+      throw error;
     }
-    return out;
   }
 }
