@@ -1016,11 +1016,11 @@ export class AIAgentService {
               ? 'timeline'
               : toolName === 'vex_render_list'
                 ? 'list'
-            : toolName === 'vex_render_image'
-              ? 'image'
-              : toolName === 'vex_render_file'
-                ? 'file'
-                : null;
+                : toolName === 'vex_render_image'
+                  ? 'image'
+                  : toolName === 'vex_render_file'
+                    ? 'file'
+                    : null;
     if (!renderKind && toolName !== 'vex_block_transform') return null;
     try {
       const parsed = JSON.parse(result) as {
