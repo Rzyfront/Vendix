@@ -227,7 +227,8 @@ describe('SubscriptionResolverService', () => {
     const resolved = await service.resolveSubscription(10);
     expect(resolved.features.tool_agents?.enabled).toBe(true);
     expect(
-      (resolved.features.tool_agents as Record<string, unknown>).tools_allowed,
+      (resolved.features.tool_agents as unknown as Record<string, unknown>)
+        .tools_allowed,
     ).toBeUndefined();
   });
 

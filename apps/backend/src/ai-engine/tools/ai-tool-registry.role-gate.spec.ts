@@ -368,7 +368,7 @@ describe('T13 role gate — API bridge', () => {
         permissions: ['store:products:read'],
         access_token: 'user-token',
       },
-      () => callEndpoint().handler({ path: 'store/orders' }, {} as any),
+      () => callEndpoint().handler!({ path: 'store/orders' }, {} as any),
     );
     expect(JSON.parse(out as string).error).toMatch(/store:orders:read/);
     expect(fetchSpy).not.toHaveBeenCalled();
@@ -376,7 +376,7 @@ describe('T13 role gate — API bridge', () => {
 
   it('dispatches with the caller own token, never a service credential', async () => {
     await inContext({ ...OWNER_CTX, access_token: 'user-token' }, () =>
-      callEndpoint().handler({ path: 'store/orders' }, {} as any),
+      callEndpoint().handler!({ path: 'store/orders' }, {} as any),
     );
     expect(fetchSpy).toHaveBeenCalledTimes(1);
     const [, init] = fetchSpy.mock.calls[0];
@@ -385,7 +385,7 @@ describe('T13 role gate — API bridge', () => {
 
   it('without the caller credential it does not dispatch at all', async () => {
     const out = await inContext({ ...OWNER_CTX, access_token: undefined }, () =>
-      callEndpoint().handler({ path: 'store/orders' }, {} as any),
+      callEndpoint().handler!({ path: 'store/orders' }, {} as any),
     );
     expect(JSON.parse(out as string).error).toMatch(/credencial/);
     expect(fetchSpy).not.toHaveBeenCalled();
@@ -417,7 +417,7 @@ describe('T13 role gate — validate_extraction reads each table only with its p
   it('a role without supplier and expense reads gets «tu rol no permite» and those tables are never read', async () => {
     const out = JSON.parse(
       (await inContext(ctx(['store:products:read']), () =>
-        validate().handler(args, { store_id: 10, organization_id: 100 } as any),
+        validate().handler!(args, { store_id: 10, organization_id: 100 } as any),
       )) as string,
     );
     expect(out.denied).toEqual(['proveedores', 'categorías de gasto']);
@@ -439,7 +439,7 @@ describe('T13 role gate — validate_extraction reads each table only with its p
           'store:customers:read',
           'store:expenses:read',
         ]),
-        () => validate().handler(args, { store_id: 10, organization_id: 100 } as any),
+        () => validate().handler!(args, { store_id: 10, organization_id: 100 } as any),
       )) as string,
     );
     expect(out.denied).toBeUndefined();

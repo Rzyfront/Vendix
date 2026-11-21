@@ -133,7 +133,9 @@ describe('PlansService — ai_entitlements (T12)', () => {
   }
 
   function nestedCreateRows(data: any) {
-    return data.ai_entitlements.create as Array<Record<string, unknown>>;
+    return data.ai_entitlements.create as Array<
+      { agent_key: string; capability_key: string } & Record<string, unknown>
+    >;
   }
 
   describe('DTO', () => {
