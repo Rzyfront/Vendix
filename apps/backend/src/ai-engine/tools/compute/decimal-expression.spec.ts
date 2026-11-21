@@ -1,6 +1,7 @@
 import {
   ExpressionError,
   evaluateDecimalExpression as ev,
+  parseBoundedDecimal,
 } from './decimal-expression';
 import {
   computeGrowth,
@@ -107,5 +108,90 @@ describe('evaluateDecimalExpression', () => {
       const mine = ev('round(margin(revenue, cost), 2)', { revenue, cost }).value;
       expect(mine === null ? null : Number(mine)).toBe(m);
     }
+  });
+
+  describe('magnitud acotada (sin DoS por exponente)', () => {
+    it.each(['1e9999999', '1e50000000', '2E5', '1e-9999999', '1.5e+3'])(
+      'rechaza notación científica en un literal: %s',
+      (src) => {
+        expect(() => ev(src)).toThrow(/Notación científica/);
+      },
+    );
+
+    it('rechaza un literal con más dígitos que el rango', () => {
+      expect(() => ev('9'.repeat(40))).toThrow(/fuera del rango/);
+    });
+
+    it.each(['1e30000000', '1e9999999', '1E5', '0x1p9999999', '1e-9999999'])(
+      'una variable con exponente no entra al cálculo: %s',
+      (raw) => {
+        expect(() => ev('a + 1', { a: raw })).toThrow(ExpressionError);
+      },
+    );
+
+    it('una variable numérica fuera de rango se rechaza al usarla, no antes', () => {
+      expect(() => ev('a + 1', { a: 1e300 })).toThrow(/no es un decimal admitido/);
+      expect(() => ev('a + 1', { a: 1e-300 })).toThrow(/no es un decimal admitido/);
+      // Sin usarla, la expresión no se ve afectada.
+      expect(ev('b + 1', { a: '1e30000000', b: 2 }).value).toBe('3');
+    });
+
+    it('el desbordamiento da null con motivo, nunca Infinity ni NaN', () => {
+      const big = '9'.repeat(30);
+      const over = ev(`${big} * ${big}`);
+      expect(over.value).toBeNull();
+      expect(over.reason).toMatch(/Fuera de rango/);
+      // Antes: Infinity - Infinity devolvía "NaN" como resultado válido.
+      const nan = ev(`${big} * ${big} - ${big} * ${big}`);
+      expect(nan.value).toBeNull();
+      expect(nan.reason).toMatch(/Fuera de rango/);
+      expect(ev(`sum(${big}, ${big}) * ${big}`).value).toBeNull();
+      expect(ev(`pct(${big}, 0.${'0'.repeat(25)}1)`).value).toBeNull();
+    });
+
+    it('el subdesbordamiento da null con motivo, nunca un 0 inventado', () => {
+      const tiny = `0.${'0'.repeat(25)}1`;
+      const r = ev(`${tiny} * ${tiny}`);
+      expect(r.value).toBeNull();
+      expect(r.reason).toMatch(/Fuera de rango/);
+      expect(ev(`${tiny} / ${'9'.repeat(30)}`).value).toBeNull();
+      // Un cero real sigue siendo cero.
+      expect(ev(`0 * ${tiny}`).value).toBe('0');
+      expect(ev('0 / 5').value).toBe('0');
+    });
+
+    it('ningún resultado supera 128 caracteres', () => {
+      const cases = [
+        '1 / 3',
+        `${'9'.repeat(30)} / 7`,
+        `1 / ${'9'.repeat(30)}`,
+        `0.${'0'.repeat(25)}1 / 3`,
+        'avg(1, 2, 2)',
+      ];
+      for (const src of cases) {
+        const { value } = ev(src);
+        expect(value).not.toBeNull();
+        expect(value!.length).toBeLessThanOrEqual(128);
+        // Un resultado siempre puede volver a entrar como variable.
+        expect(parseBoundedDecimal(value)).not.toBe('out_of_range');
+      }
+    });
+
+    it('parseBoundedDecimal distingue número, texto y fuera de rango', () => {
+      expect(String(parseBoundedDecimal('12.50'))).toBe('12.5');
+      expect(String(parseBoundedDecimal(-3))).toBe('-3');
+      expect(String(parseBoundedDecimal(' 7 '))).toBe('7');
+      expect(parseBoundedDecimal('café')).toBeNull();
+      expect(parseBoundedDecimal('')).toBeNull();
+      expect(parseBoundedDecimal(null)).toBeNull();
+      expect(parseBoundedDecimal(true)).toBeNull();
+      expect(parseBoundedDecimal('Infinity')).toBeNull();
+      expect(parseBoundedDecimal('0x10')).toBeNull();
+      expect(parseBoundedDecimal(NaN)).toBeNull();
+      expect(parseBoundedDecimal('1e20000000')).toBe('out_of_range');
+      expect(parseBoundedDecimal('9'.repeat(200))).toBe('out_of_range');
+      expect(parseBoundedDecimal(Infinity)).toBe('out_of_range');
+      expect(parseBoundedDecimal(1e300)).toBe('out_of_range');
+    });
   });
 });

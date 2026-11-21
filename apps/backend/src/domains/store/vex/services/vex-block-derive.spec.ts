@@ -125,3 +125,75 @@ describe('applyJoin', () => {
     );
   });
 });
+
+describe('magnitud acotada en celdas (sin DoS por exponente)', () => {
+  it('derive rechaza una celda con exponente cuando la expresión la usa', () => {
+    const started = Date.now();
+    expect(() =>
+      applyDerive(
+        [{ a: '1e20000000', b: 2 }],
+        [{ name: 'x', expression: 'a * 2' }],
+      ),
+    ).toThrow(VexBlockDeriveError);
+    expect(() =>
+      applyDerive([{ a: 1e300 }], [{ name: 'x', expression: 'a * 2' }]),
+    ).toThrow(/no es un decimal admitido/);
+    expect(Date.now() - started).toBeLessThan(500);
+  });
+
+  it('derive ignora una celda con exponente que la expresión no usa', () => {
+    const out = applyDerive(
+      [{ a: '1e20000000', b: 2 }],
+      [{ name: 'x', expression: 'b * 2' }],
+    );
+    expect(out[0].x).toBe('4');
+  });
+
+  it('derive da null, no Infinity, cuando una fila se desborda', () => {
+    const big = Number('9'.repeat(15));
+    const out = applyDerive(
+      [{ a: big }],
+      [{ name: 'x', expression: 'a * a * a' }],
+    );
+    expect(out[0].x).toBeNull();
+  });
+
+  it('compare rechaza una celda con exponente en value_field', () => {
+    const started = Date.now();
+    expect(() =>
+      applyCompare(
+        [
+          { prod: 'A', mes: '2026-10', v: '1e20000000' },
+          { prod: 'A', mes: '2026-09', v: 100 },
+        ],
+        {
+          key: 'prod',
+          period_field: 'mes',
+          current: '2026-10',
+          previous: '2026-09',
+          value_field: 'v',
+        },
+      ),
+    ).toThrow(/celda "v" de la fila 1/);
+    expect(Date.now() - started).toBeLessThan(500);
+  });
+
+  it('compare mantiene salidas cortas con valores al límite del rango', () => {
+    const out = applyCompare(
+      [
+        { prod: 'A', mes: '2026-10', v: '9'.repeat(30) },
+        { prod: 'A', mes: '2026-09', v: `0.${'0'.repeat(25)}1` },
+      ],
+      {
+        key: 'prod',
+        period_field: 'mes',
+        current: '2026-10',
+        previous: '2026-09',
+        value_field: 'v',
+      },
+    );
+    for (const v of Object.values(out[0])) {
+      expect(String(v).length).toBeLessThanOrEqual(128);
+    }
+  });
+});

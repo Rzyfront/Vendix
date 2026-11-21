@@ -7,6 +7,7 @@ import {
 import {
   ExpressionError,
   evaluateDecimalExpression,
+  parseBoundedDecimal,
 } from '../compute/decimal-expression';
 
 export const COMPUTE_MAX_EXPRESSIONS = 20;
@@ -102,6 +103,12 @@ export function createComputeTools(): RegisteredTool[] {
                 'Las variables deben ser numéricas.',
               );
             }
+            if (parseBoundedDecimal(v) === 'out_of_range') {
+              return fail(
+                `La variable "${k}" está fuera del rango admitido.`,
+                'Envía el número completo, sin notación científica y dentro de ±1e30.',
+              );
+            }
             scope[k] = v;
           }
         }
@@ -135,6 +142,8 @@ export function createComputeTools(): RegisteredTool[] {
             if (r.value === null) {
               results.push({ name, value: null, reason: r.reason });
             } else {
+              // r.value is bounded by the evaluator (no exponent, ~105
+              // characters at most), so re-parsing it cannot blow up.
               const value = new Decimal(r.value)
                 .toDecimalPlaces(decimals, Decimal.ROUND_HALF_UP)
                 .toFixed(decimals);

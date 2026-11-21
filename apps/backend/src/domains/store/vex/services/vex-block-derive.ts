@@ -1,7 +1,9 @@
 import Decimal from 'decimal.js';
 import {
   ExpressionError,
+  MAX_DECIMAL_EXPONENT,
   evaluateDecimalExpression,
+  parseBoundedDecimal,
 } from '../../../../ai-engine/tools/compute/decimal-expression';
 
 /**
@@ -52,17 +54,21 @@ export function normalizeColumnName(name: string): string {
   return /^[0-9]/.test(base) ? `_${base}` : base;
 }
 
-function toNumeric(value: unknown): number | string | null {
-  if (typeof value === 'number' && Number.isFinite(value)) return value;
-  if (typeof value === 'string' && value.trim() !== '') {
-    try {
-      return new Decimal(value.trim()).isFinite() ? value.trim() : null;
-    } catch {
-      return null;
-    }
-  }
-  return null;
+/**
+ * Bounded decimal of a cell, or null when the cell is not a number (text,
+ * null, boolean). Same entry as the evaluator: a cell in scientific notation
+ * or outside ±1e30 is never turned into a Decimal.
+ */
+export function numericCell(
+  value: unknown,
+): Decimal | null | 'out_of_range' {
+  return parseBoundedDecimal(value);
 }
+
+const outOfRangeCell = (column: string, row: number) =>
+  new VexBlockDeriveError(
+    `La celda "${column}" de la fila ${row} no es un decimal admitido: sin notación científica y dentro de ±1e${MAX_DECIMAL_EXPONENT}.`,
+  );
 
 export function applyDerive(rows: Row[], derive: VexBlockDeriveSpec[]): Row[] {
   if (!Array.isArray(derive) || derive.length === 0) {
@@ -77,8 +83,11 @@ export function applyDerive(rows: Row[], derive: VexBlockDeriveSpec[]): Row[] {
     const out: Row = { ...row };
     const vars: Record<string, number | string> = {};
     for (const [k, v] of Object.entries(row)) {
-      const n = toNumeric(v);
-      if (n !== null) vars[normalizeColumnName(k)] = n;
+      // An out-of-range cell stays in scope as raw text: the evaluator rejects
+      // it by name only if an expression actually uses it.
+      if (numericCell(v) !== null) {
+        vars[normalizeColumnName(k)] = v as number | string;
+      }
     }
     for (const d of derive) {
       try {
@@ -104,20 +113,23 @@ export function applyCompare(rows: Row[], compare: VexBlockCompareSpec): Row[] {
     string,
     { key: unknown; cur: Decimal | null; prev: Decimal | null }
   >();
-  const sum = (acc: Decimal | null, v: unknown): Decimal | null => {
-    const n = toNumeric(v);
+  const sum = (acc: Decimal | null, v: unknown, row: number): Decimal | null => {
+    const n = numericCell(v);
     if (n === null) return acc;
+    if (n === 'out_of_range') throw outOfRangeCell(value_field, row);
     return (acc ?? new Decimal(0)).plus(n);
   };
+  let rowNumber = 0;
   for (const row of rows) {
+    rowNumber++;
     const k = row[key];
     const id = String(k);
     const g = groups.get(id) ?? { key: k, cur: null, prev: null };
     const period = row[period_field];
     if (String(period) === String(compare.current))
-      g.cur = sum(g.cur, row[value_field]);
+      g.cur = sum(g.cur, row[value_field], rowNumber);
     else if (String(period) === String(compare.previous))
-      g.prev = sum(g.prev, row[value_field]);
+      g.prev = sum(g.prev, row[value_field], rowNumber);
     groups.set(id, g);
   }
   return [...groups.values()].map((g) => {

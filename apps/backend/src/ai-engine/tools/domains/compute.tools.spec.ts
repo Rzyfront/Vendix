@@ -89,4 +89,47 @@ describe('compute tool', () => {
     });
     expect(r.error).toBeTruthy();
   });
+
+  it('rechaza exponentes: ni DoS ni salida gigante', async () => {
+    const started = Date.now();
+    const literal = await run({
+      expressions: [{ name: 'a', expression: '1e9999999' }],
+    });
+    expect(literal.error).toMatch(/Notación científica/);
+    const variable = await run({
+      variables: { x: '1e30000000' },
+      expressions: [{ name: 'a', expression: 'x + 1' }],
+    });
+    expect(variable.error).toMatch(/fuera del rango/);
+    expect(Date.now() - started).toBeLessThan(500);
+  });
+
+  it('un resultado no finito es null con motivo y no se encadena como número', async () => {
+    const big = '9'.repeat(30);
+    const r = await run({
+      expressions: [
+        { name: 'a', expression: `${big} * ${big}` },
+        { name: 'b', expression: `${big} * ${big} - ${big} * ${big}` },
+      ],
+    });
+    expect(r.data.results[0].value).toBeNull();
+    expect(r.data.results[0].reason).toMatch(/Fuera de rango/);
+    expect(r.data.results[1].value).toBeNull();
+    expect(JSON.stringify(r)).not.toMatch(/Infinity|NaN/);
+  });
+
+  it('20 expresiones al límite del rango devuelven una salida corta', async () => {
+    const big = '9'.repeat(30);
+    const out = await tool.handler!(
+      {
+        decimals: 6,
+        expressions: Array.from({ length: COMPUTE_MAX_EXPRESSIONS }, (_, i) => ({
+          name: `e${i}`,
+          expression: `${big} / 7`,
+        })),
+      },
+      {},
+    );
+    expect(out.length).toBeLessThan(4000);
+  });
 });
