@@ -23,6 +23,7 @@ import {
   planAIEntitlements,
   writeAIEntitlementsToLegacyFlags,
 } from '../../../store/subscriptions/services/ai-entitlements.logic';
+import { withAIEngineDefaults } from './ai-engine-plan-defaults';
 import {
   aiEntitlementRowData,
   loadPlanAIEntitlements,
@@ -333,7 +334,7 @@ export class PlansService {
     dto: CreatePlanDto,
     parsed: AIEntitlement[] | undefined,
   ): PlanAIWrite {
-    const flags = dto.ai_feature_flags ?? {};
+    const flags = withAIEngineDefaults(dto.ai_feature_flags);
     const legacy = legacyFlagsToAIEntitlements(flags);
     if (parsed === undefined) return { flags, rows: legacy };
     const rows = completeAIEntitlements(parsed, legacy);
