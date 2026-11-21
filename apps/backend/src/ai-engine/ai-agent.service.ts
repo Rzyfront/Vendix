@@ -353,6 +353,8 @@ export interface AgentResult {
     execution?: ToolExecutionReceipt;
   }>;
   total_tokens: number;
+  /** Real USD cost summed over every provider call of the turn; absent = unknown. */
+  cost_usd?: number;
   success: boolean;
   error?: string;
   execution?: AgentExecutionSummary;
@@ -410,6 +412,11 @@ export class AIAgentService {
   private readonly scheduler = new ToolSchedulerService();
   private readonly DEFAULT_MAX_ITERATIONS = 10;
   private readonly DEFAULT_TIMEOUT_MS = 60000;
+  /** Per-turn real-cost accumulator (every provider step, fallback included). */
+  private readonly turnCosts = new WeakMap<
+    AgentRunParams,
+    { sum: number; unknown: boolean }
+  >();
 
   constructor(
     private readonly aiEngine: AIEngineService,
@@ -1109,6 +1116,7 @@ export class AIAgentService {
             turn_id: params.turn_id,
           })
         : undefined;
+    this.turnCosts.set(params, { sum: 0, unknown: false });
     const runLoop = (observe?: (outcome: AgentOutcome) => void) => {
       const loop = this.runAgentLoop(params, observe);
 
@@ -1119,7 +1127,8 @@ export class AIAgentService {
     };
     // Model instructions (`next_action`, objective `next_step`) never leave
     // the server: every frame is client-safe; the AgentResult stays intact.
-    if (!root || !this.trace) return yield* clientSafeStream(runLoop());
+    if (!root || !this.trace)
+      return yield* this.withTurnCost(clientSafeStream(runLoop()), params);
 
     let outcome: AgentOutcome = 'partial';
     let returned = false;
@@ -1190,7 +1199,71 @@ export class AIAgentService {
         }
       }
     };
-    return yield* clientSafeStream(trace.runGenerator(root, observedLoop));
+    return yield* this.withTurnCost(
+      clientSafeStream(trace.runGenerator(root, observedLoop)),
+      params,
+    );
+  }
+
+  /** `streamAgentInference` drops `cost_usd`; read it from the raw `done` frame. */
+  private async *tapStepCost(
+    params: AgentRunParams,
+    source: AsyncGenerator<AIStreamChunk>,
+  ): AsyncGenerator<AIStreamChunk> {
+    let sawDone = false;
+    try {
+      for await (const chunk of source) {
+        if (chunk.type === 'done') {
+          sawDone = true;
+          this.noteStepCost(params, chunk.cost_usd);
+        }
+        yield chunk;
+      }
+    } finally {
+      // A stream that never completed has no known cost.
+      if (!sawDone) this.noteStepCost(params, undefined);
+    }
+  }
+
+  private noteStepCost(params: AgentRunParams, cost: number | undefined): void {
+    const acc = this.turnCosts.get(params);
+    if (!acc) return;
+    if (typeof cost === 'number' && Number.isFinite(cost)) acc.sum += cost;
+    else acc.unknown = true;
+  }
+
+  /** Exposes the accumulated turn cost on the final `done` frame and the result. */
+  private async *withTurnCost(
+    source: AsyncGenerator<AIStreamChunk, AgentResult>,
+    params: AgentRunParams,
+  ): AsyncGenerator<AIStreamChunk, AgentResult> {
+    const cost = () => {
+      const acc = this.turnCosts.get(params);
+      return acc && !acc.unknown ? acc.sum : undefined;
+    };
+    try {
+      let step = await source.next();
+      while (!step.done) {
+        let input: unknown;
+        const frame = step.value;
+        const total = cost();
+        try {
+          input = yield frame.type === 'done' && total !== undefined
+            ? { ...frame, cost_usd: total }
+            : frame;
+        } catch (error) {
+          step = await source.throw(error);
+          continue;
+        }
+        step = await source.next(input);
+      }
+      const total = cost();
+      if (total !== undefined) step.value.cost_usd = total;
+      return step.value;
+    } finally {
+      await source.return(undefined as never);
+      this.turnCosts.delete(params);
+    }
   }
 
   private async *withDurableSession(
@@ -2013,6 +2086,7 @@ export class AIAgentService {
           status: lastCall?.success === false ? 'error' : 'ok',
         });
         totalTokens += lastCall?.usage?.totalTokens ?? 0;
+        this.noteStepCost(params, lastCall?.cost_usd);
         const text = (lastCall?.content ?? '').trim();
         if (LEAKED_TOOL_MARKUP.test(text))
           this.logger.warn('Closing inference leaked tool-call markup');
@@ -2218,11 +2292,14 @@ export class AIAgentService {
         const callStreamingProvider = () =>
           streamAgentInference(
             () =>
-              this.aiEngine.runAgentStream(
-                params.app_key!,
-                params.variables,
-                messages,
-                toolOptions,
+              this.tapStepCost(
+                params,
+                this.aiEngine.runAgentStream(
+                  params.app_key!,
+                  params.variables,
+                  messages,
+                  toolOptions,
+                ),
               ),
             (consume) =>
               withinDeadline(() =>
@@ -2276,6 +2353,7 @@ export class AIAgentService {
         }
 
         if (!response.success) totalTokens += response.usage?.totalTokens ?? 0;
+        if (!streaming) this.noteStepCost(params, response.cost_usd);
         if (!response.success) {
           yield { type: 'error', error: response.error || 'AI request failed' };
           return {

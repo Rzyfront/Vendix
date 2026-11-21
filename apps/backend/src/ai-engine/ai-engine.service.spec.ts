@@ -894,7 +894,8 @@ describe('AIEngineService phase A provider attempts and quota isolation', () => 
     });
     expect(chunks).toEqual([
       { type: 'text', content: 'ok' },
-      { type: 'done', usage: success.usage },
+      // T24: `done` now carries the real cost of the serving config.
+      { type: 'done', usage: success.usage, cost_usd: 0.14 },
     ]);
     expect(
       [...rows.values()].filter((row) => row.kind === 'provider_call'),
