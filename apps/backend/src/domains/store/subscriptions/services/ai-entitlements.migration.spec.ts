@@ -5,6 +5,7 @@ import {
   aiFeatureFlagsFor,
 } from '../../../../../prisma/seeds/plan-commercial-lines.seed';
 import { syncSeedPlanAIEntitlements } from '../../../../../prisma/seeds/shared/plan-ai-entitlements';
+import { writeAIEntitlementsToLegacyFlags } from './ai-entitlements.logic';
 import {
   AI_CAPABILITIES,
   AIEntitlement,
@@ -216,6 +217,31 @@ describe('M4 — corrective migration of the backfill (F1, F6)', () => {
 
   it('only touches rows still written by the backfill', () => {
     expect(FIX_STATEMENTS).toMatch(/e\."updated_at" = e\."created_at"/);
+  });
+
+  it('re-enables only a legacy feature whose enabled is not a boolean (F1), never a JSON true', () => {
+    // A plan saved from the matrix with Vex voice on and Vexi voice off writes
+    // realtime_voice.enabled = true (OR of both voices) and its rows can carry
+    // updated_at = created_at too: keying on "not false" would switch the Vexi
+    // voice back on. Only a non-boolean enabled is what M3 copied wrong.
+    expect(FIX_STATEMENTS).toMatch(
+      /jsonb_typeof\(p\."ai_feature_flags" -> s\.source_feature -> 'enabled'\)\s+IS DISTINCT FROM 'boolean'/,
+    );
+    expect(FIX_STATEMENTS).not.toMatch(/IS DISTINCT FROM 'false'::jsonb/);
+  });
+
+  it('the matrix always writes a boolean enabled for every gated legacy feature', () => {
+    const rows = legacyFlagsToAIEntitlements({}).map((row) =>
+      row.agent_key === 'vex' &&
+      (row.capability_key === 'agent' || row.capability_key === 'voice_readout')
+        ? { ...row, enabled: true }
+        : { ...row, enabled: false },
+    );
+    const flags = writeAIEntitlementsToLegacyFlags({ realtime_voice: {} }, rows);
+    expect((flags.realtime_voice as Record<string, unknown>).enabled).toBe(true);
+    for (const feature of ['vex_agent', 'streaming_chat', 'text_generation', 'rag_embeddings']) {
+      expect(typeof (flags[feature] as Record<string, unknown>).enabled).toBe('boolean');
+    }
   });
 
   it('carries the required header', () => {

@@ -16,7 +16,12 @@
 -- What this migration does (one bounded UPDATE over plan_ai_entitlements):
 --   (a) enabled = false  ->  true  when the source legacy feature in
 --       subscription_plans.ai_feature_flags is a JSON object whose `enabled`
---       is not the JSON boolean false (missing, null, text, number...).
+--       is not a JSON boolean (missing, null, text, number...). That is
+--       exactly what M3 copied wrong: a boolean true was copied as on and a
+--       boolean false as off. A boolean true is never "fixed": the matrix
+--       writes the legacy JSON as the OR of the agents sharing a key (Vex and
+--       Vexi voice share realtime_voice; vex.agent and vex.files share
+--       vex_agent), so `true` there does not prove that THIS row should be on.
 --   (b) cap_value = 0    ->  NULL  when the source legacy cap is a JSON number
 --       strictly between 0 and 1.
 --   The capability -> legacy feature / cap field mapping is the VALUES list of
@@ -27,8 +32,12 @@
 --   CURRENT_TIMESTAMP, and every write of the app (Prisma @updatedAt) moves
 --   updated_at, so a row a superadmin edited after M3 keeps being skipped.
 --   Limit of that proof: a raw SQL edit that does not touch updated_at is
---   indistinguishable from the backfill; there is no other column that proves
---   it (M2 has no author or version column).
+--   indistinguishable from the backfill, and a row created by the app with a
+--   nested Prisma create can also carry updated_at = created_at. Neither can
+--   be hurt by (a): every plan the app saves gets its legacy JSON rewritten
+--   with a boolean `enabled` for each gated key (writeAIEntitlementsToLegacyFlags),
+--   so it never matches the non-boolean predicate; and (b) only matches a
+--   fractional cap, which the app never writes (it writes BIGINT caps).
 --   updated_at is left as is on purpose, so the predicate stays provable.
 --
 -- Read-only pre-check from the audit (rows whose legacy feature has a
@@ -87,8 +96,8 @@ FROM (
       s.source_feature IS NOT NULL
         AND s.enabled_from = 'feature'
         AND jsonb_typeof(p."ai_feature_flags" -> s.source_feature) = 'object'
-        AND (p."ai_feature_flags" -> s.source_feature -> 'enabled')
-          IS DISTINCT FROM 'false'::jsonb,
+        AND jsonb_typeof(p."ai_feature_flags" -> s.source_feature -> 'enabled')
+          IS DISTINCT FROM 'boolean',
       false
     ) AS fix_enabled,
     -- Nested WHEN, not AND: Postgres does not promise AND evaluation order, and
