@@ -233,3 +233,37 @@ describe('VideoLibraryAdminService', () => {
     });
   });
 });
+
+describe('VideoLibraryAdminService — help index (T26)', () => {
+  const build = (video: Record<string, unknown>) => {
+    const prisma: any = {
+      videos: {
+        findUnique: jest.fn().mockResolvedValue({ id: 9, ...video }),
+        delete: jest.fn().mockResolvedValue({}),
+      },
+    };
+    const events = { emit: jest.fn() };
+    const s3 = { signUrl: jest.fn(), sanitizeForStorage: jest.fn((u: string) => u) };
+    return { events, service: new VideoLibraryAdminService(prisma, s3 as any, events as any) };
+  };
+
+  it('flags a title-only video as having insufficient search text', async () => {
+    const { service } = build({ title: 'Solo título', summary: 'Corto', tags: [], keywords: [], video_url: 'https://x.test/v' });
+    const detail = await service.findVideoById(9);
+    expect(detail.search_text_insufficient).toBe(true);
+    expect(detail.search_text_length).toBe(5);
+  });
+
+  it('does not flag a video with a real description', async () => {
+    const { service } = build({
+      title: 'Cierre', summary: 'Resumen del video', description: 'd'.repeat(150), tags: ['caja'], keywords: [], video_url: 'https://x.test/v',
+    });
+    expect((await service.findVideoById(9)).search_text_insufficient).toBe(false);
+  });
+
+  it('emits help.video.changed when a video is deleted', async () => {
+    const { service, events } = build({ title: 't', summary: 's' });
+    await service.deleteVideo(9);
+    expect(events.emit).toHaveBeenCalledWith('help.video.changed', { id: 9 });
+  });
+});

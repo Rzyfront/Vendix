@@ -1,4 +1,6 @@
-import { Injectable } from '@nestjs/common';
+import { Injectable, Optional } from '@nestjs/common';
+import { EventEmitter2 } from '@nestjs/event-emitter';
+import { HELP_ARTICLE_CHANGED } from '../../../ai-engine/embeddings/help-knowledge-indexer.service';
 import { GlobalPrismaService } from '../../../prisma/services/global-prisma.service';
 import { S3Service } from '../../../common/services/s3.service';
 import { S3PathHelper } from '../../../common/helpers/s3-path.helper';
@@ -20,7 +22,22 @@ export class HelpCenterAdminService {
     private readonly globalPrisma: GlobalPrismaService,
     private readonly s3Service: S3Service,
     private readonly s3PathHelper: S3PathHelper,
+    @Optional() private readonly events?: EventEmitter2,
   ) {}
+
+  /** The help knowledge indexer re-reads the row: published indexes, anything else retires. */
+  private notifyArticleChanged(id: number): void {
+    this.events?.emit(HELP_ARTICLE_CHANGED, { id });
+  }
+
+  private async assertVideoExists(videoId: number | null | undefined) {
+    if (videoId == null) return;
+    const video = await this.globalPrisma.videos.findUnique({
+      where: { id: videoId },
+      select: { id: true },
+    });
+    if (!video) throw new VendixHttpException(ErrorCodes.VIDEO_NOT_FOUND);
+  }
 
   // ==========================================
   // ARTICLES CRUD
@@ -95,6 +112,8 @@ export class HelpCenterAdminService {
       throw new VendixHttpException(ErrorCodes.HELP_ARTICLE_NOT_FOUND);
     }
 
+    this.notifyArticleChanged(article.id);
+
     return {
       ...article,
       cover_image_url: article.cover_image_url
@@ -125,6 +144,8 @@ export class HelpCenterAdminService {
       throw new VendixHttpException(ErrorCodes.HELP_CATEGORY_NOT_FOUND);
     }
 
+    await this.assertVideoExists(dto.video_id);
+
     // Sanitize cover_image_url before storage
     const cover_image_url = dto.cover_image_url
       ? this.s3Service.sanitizeForStorage(dto.cover_image_url)
@@ -145,6 +166,7 @@ export class HelpCenterAdminService {
         cover_image_url,
         is_featured: dto.is_featured || false,
         sort_order: dto.sort_order || 0,
+        ...(dto.video_id != null && { video_id: dto.video_id }),
         created_by_id: userId,
       },
       include: {
@@ -193,6 +215,8 @@ export class HelpCenterAdminService {
       }
     }
 
+    await this.assertVideoExists(dto.video_id);
+
     // Sanitize cover_image_url
     const cover_image_url =
       dto.cover_image_url !== undefined
@@ -217,6 +241,7 @@ export class HelpCenterAdminService {
         ...(cover_image_url !== undefined && { cover_image_url }),
         ...(dto.is_featured !== undefined && { is_featured: dto.is_featured }),
         ...(dto.sort_order !== undefined && { sort_order: dto.sort_order }),
+        ...(dto.video_id !== undefined && { video_id: dto.video_id }),
         updated_at: new Date(),
       },
       include: {
@@ -225,6 +250,8 @@ export class HelpCenterAdminService {
         },
       },
     });
+
+    this.notifyArticleChanged(id);
 
     return {
       ...updated,
@@ -245,6 +272,7 @@ export class HelpCenterAdminService {
     }
 
     await this.globalPrisma.help_articles.delete({ where: { id } });
+    this.notifyArticleChanged(id);
 
     return { deleted: true };
   }
