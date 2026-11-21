@@ -1,15 +1,11 @@
 import {
   ConversationCompactorService,
-  KEEP_LAST_MESSAGES,
-  MAX_FALLBACK_SUMMARY_CHARS,
+  MAX_KEEP_MESSAGES,
+  MAX_SUMMARY_CHARS,
+  MIN_KEEP_MESSAGES,
+  VEX_SUMMARIZER_APP_KEY,
+  type CompactableMessage,
 } from './conversation-compactor.service';
-
-const msgs = (n: number, size = 40) =>
-  Array.from({ length: n }, (_, i) => ({
-    id: i + 1,
-    role: i % 2 === 0 ? 'user' : 'assistant',
-    content: `${i % 2 === 0 ? 'pregunta' : 'respuesta'} ${i + 1} ${'x'.repeat(size)}`,
-  }));
 
 const budgetOf = (percent: number, window = 32768) => ({
   estimated_input_tokens: Math.round((window * percent) / 100),
@@ -18,6 +14,19 @@ const budgetOf = (percent: number, window = 32768) => ({
   provenance: 'configured' as const,
   method: 'conservative_estimate' as const,
 });
+
+/** Alternating turns; assistant rows answer with a figure. */
+const msgs = (n: number, size = 40, from = 1): CompactableMessage[] =>
+  Array.from({ length: n }, (_, i) => {
+    const id = from + i;
+    return i % 2 === 0
+      ? { id, role: 'user', content: `pregunta ${id} ${'x'.repeat(size)}` }
+      : {
+          id,
+          role: 'assistant',
+          content: `Hecho. Total de la respuesta ${id}: $${id}.000. ${'y'.repeat(size)}`,
+        };
+  });
 
 function build(run: jest.Mock) {
   const update = jest.fn().mockResolvedValue({});
@@ -28,84 +37,174 @@ function build(run: jest.Mock) {
   return { service, update, run };
 }
 
+const down = () => jest.fn().mockRejectedValue(new Error('app inactive'));
+
 describe('T22 ConversationCompactorService', () => {
-  it('does nothing under 75 % of the ring measure or without a budget', async () => {
+  it('uses the ring measure: below 75 % or without a budget nothing runs', async () => {
     const { service, update, run } = build(jest.fn());
     const conv = {
       id: 7,
       summary: null,
       summary_through_message_id: null,
-      messages: msgs(40),
+      messages: msgs(60),
     };
     expect(await service.compactIfNeeded(conv, budgetOf(74))).toBeNull();
-    const out = await service.compactIfNeeded(conv, null);
-    expect(out).toBeNull();
+    expect(await service.compactIfNeeded(conv, null)).toBeNull();
     expect(run).not.toHaveBeenCalled();
     expect(update).not.toHaveBeenCalled();
   });
 
-  it('summarizes older messages with the model, keeps last 10, persists', async () => {
+  it('keeps 20 literal rows when they fit (never fewer than before the PR)', async () => {
+    const { service } = build(down());
+    const out = await service.compactIfNeeded(
+      { id: 7, summary: null, summary_through_message_id: null, messages: msgs(40) },
+      budgetOf(80),
+    );
+    expect(out!.summary_through_message_id).toBe(40 - MAX_KEEP_MESSAGES);
+  });
+
+  it('keeps fewer (never under 10) when the recent rows do not fit the window share', async () => {
+    const { service } = build(down());
+    const out = await service.compactIfNeeded(
+      {
+        id: 7,
+        summary: null,
+        summary_through_message_id: null,
+        messages: msgs(40, 3000),
+      },
+      budgetOf(80),
+    );
+    const kept = 40 - out!.summary_through_message_id;
+    expect(kept).toBeGreaterThanOrEqual(MIN_KEEP_MESSAGES);
+    expect(kept).toBeLessThan(MAX_KEEP_MESSAGES);
+  });
+
+  it('model path: transcript carries assistant turns and actions; the call is cancellable', async () => {
     const run = jest
       .fn()
       .mockResolvedValue({ success: true, content: 'Resumen del modelo' });
     const { service, update } = build(run);
+    const messages = msgs(40);
+    messages[1] = {
+      ...messages[1],
+      tool_calls: [{ name: 'list_orders', result: '{"success":true}' }],
+    };
     const out = await service.compactIfNeeded(
-      {
-        id: 7,
-        summary: 'previo',
-        summary_through_message_id: 2,
-        messages: msgs(40),
-      },
-      budgetOf(80),
+      { id: 7, summary: 'previo', summary_through_message_id: null, messages },
+      budgetOf(90),
     );
     expect(out).toEqual({
       summary: 'Resumen del modelo',
-      summary_through_message_id: 40 - KEEP_LAST_MESSAGES,
+      summary_through_message_id: 20,
     });
-    expect(run).toHaveBeenCalledWith(
-      'vex_context_summarizer',
-      expect.objectContaining({
-        previous_summary: 'previo',
-        transcript: expect.stringContaining('pregunta 3'),
-      }),
-    );
-    const transcript = run.mock.calls[0][1].transcript as string;
-    expect(transcript).not.toContain('pregunta 1 ');
-    expect(transcript).not.toContain('respuesta 40');
+    const [appKey, vars, , options] = run.mock.calls[0];
+    expect(appKey).toBe(VEX_SUMMARIZER_APP_KEY);
+    expect(vars.previous_summary).toBe('previo');
+    expect(vars.transcript).toContain('assistant: Hecho. Total de la respuesta 2');
+    expect(vars.transcript).toContain('list_orders (ok)');
+    expect(vars.transcript).not.toContain('pregunta 21 ');
+    expect(options.signal).toBeInstanceOf(AbortSignal);
     expect(update).toHaveBeenCalledWith({
       where: { id: 7 },
-      data: { summary: 'Resumen del modelo', summary_through_message_id: 30 },
+      data: { summary: 'Resumen del modelo', summary_through_message_id: 20 },
     });
   });
 
-  it('falls back to a bounded extractive summary when the model fails', async () => {
-    const run = jest.fn().mockRejectedValue(new Error('app inactive'));
-    const { service, update } = build(run);
+  it('timeout aborts the summarizer call and falls back to the extractive summary', async () => {
+    let signal: AbortSignal | undefined;
+    const run = jest.fn((_k, _v, _m, options) => {
+      signal = options.signal;
+      return new Promise(() => undefined);
+    });
+    const { service } = build(run as jest.Mock);
     const out = await service.compactIfNeeded(
+      { id: 7, summary: null, summary_through_message_id: null, messages: msgs(40) },
+      budgetOf(80),
+      20,
+    );
+    expect(signal?.aborted).toBe(true);
+    expect(out!.summary).toContain('- Persona: pregunta 1 ');
+  });
+
+  it('first extractive compaction: the person and Vex (figures + actions), all covered', async () => {
+    const { service } = build(down());
+    const messages = msgs(40);
+    messages[3] = {
+      ...messages[3],
+      tool_calls: [
+        { name: 'create_product', result: '{"success":true}' },
+        { name: 'list_orders', result: '{"success":false,"error":"x"}' },
+      ],
+    };
+    const out = await service.compactIfNeeded(
+      { id: 7, summary: null, summary_through_message_id: null, messages },
+      budgetOf(80),
+    );
+    expect(out!.summary_through_message_id).toBe(20);
+    expect(out!.summary).toContain('- Persona: pregunta 1 ');
+    expect(out!.summary).toContain('- Vex: Hecho. Total de la respuesta 2: $2.000.');
+    expect(out!.summary).toContain('create_product (ok), list_orders (error)');
+    expect(out!.summary).toContain('pregunta 19 ');
+    expect(out!.summary).toContain('respuesta 20');
+    expect(out!.summary.length).toBeLessThanOrEqual(MAX_SUMMARY_CHARS);
+  });
+
+  it('second compaction: the full previous summary is re-summarized, the new rows enter and the beginning survives', async () => {
+    const { service, update } = build(down());
+    const first = await service.compactIfNeeded(
       {
         id: 7,
-        summary: 'previo',
+        summary: null,
         summary_through_message_id: null,
-        messages: msgs(200, 60),
+        messages: msgs(80, 120),
       },
       budgetOf(80),
     );
-    expect(out).not.toBeNull();
-    expect(out!.summary.startsWith('previo')).toBe(true);
-    expect(out!.summary).toContain('pregunta 1 ');
-    expect(out!.summary.length).toBeLessThanOrEqual(MAX_FALLBACK_SUMMARY_CHARS);
-    expect(out!.summary_through_message_id).toBe(190);
-    expect(update).toHaveBeenCalledTimes(1);
+    expect(first!.summary.length).toBeGreaterThan(MAX_SUMMARY_CHARS * 0.8);
+    const second = await service.compactIfNeeded(
+      {
+        id: 7,
+        summary: first!.summary,
+        summary_through_message_id: first!.summary_through_message_id,
+        messages: msgs(120, 120),
+      },
+      budgetOf(80),
+    );
+    expect(second).not.toBeNull();
+    const s = second!.summary;
+    expect(s.length).toBeLessThanOrEqual(MAX_SUMMARY_CHARS);
+    // What was said at the very beginning is still there…
+    expect(s).toContain('pregunta 1 ');
+    // …and the rows this pass covers made it in, up to the new pointer.
+    const through = second!.summary_through_message_id;
+    expect(through).toBeGreaterThan(first!.summary_through_message_id);
+    expect(s).toContain(`respuesta ${through % 2 === 0 ? through : through - 1}`);
+    expect(update).toHaveBeenCalledTimes(2);
   });
 
-  it('still returns the summary when persisting fails (turn never fails)', async () => {
-    const run = jest.fn().mockResolvedValue({ success: false });
-    const { service, update } = build(run);
+  it('never moves the pointer past rows whose content did not fit', async () => {
+    const { service } = build(down());
+    const messages = msgs(300, 200);
+    const out = await service.compactIfNeeded(
+      { id: 7, summary: null, summary_through_message_id: null, messages },
+      budgetOf(80, 1_000_000),
+    );
+    const through = out!.summary_through_message_id;
+    // Not every older row fit: the pointer stops at the covered prefix…
+    expect(through).toBeLessThan(300 - MAX_KEEP_MESSAGES);
+    // …and every covered row is in the summary.
+    for (let id = 1; id <= through; id += 2)
+      expect(out!.summary).toContain(`pregunta ${id} `);
+    expect(out!.summary).not.toContain(`pregunta ${through + 2} `);
+  });
+
+  it('a failed persist is no compaction: no result, so no «Resumí…» notice', async () => {
+    const { service, update } = build(down());
     update.mockRejectedValue(new Error('db'));
     const out = await service.compactIfNeeded(
       { id: 7, summary: null, summary_through_message_id: null, messages: msgs(60) },
       budgetOf(80),
     );
-    expect(out?.summary_through_message_id).toBe(50);
+    expect(out).toBeNull();
   });
 });
