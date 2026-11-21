@@ -6,6 +6,11 @@ import { StorePrismaService } from '../../prisma/services/store-prisma.service';
 /** F4 T31 (D7, N3): store memory of an agent, MEMORY.md style. */
 export const MEMORY_AGENT_KEY = 'vex';
 export const MEMORY_MAX_ENTRIES = 40;
+/**
+ * Chars of the snapshot block (after its header). Writes, the Ajustes counter
+ * and the block share one measure, `memoryBlockCost`, so every memory the cap
+ * accepts reaches Vex.
+ */
 export const MEMORY_MAX_CHARS = 2000;
 export const MEMORY_MAX_CONTENT = 500;
 export const MEMORY_KINDS = ['preference', 'fact'] as const;
@@ -67,6 +72,19 @@ interface MemoryRow {
   last_used_at: Date | null;
   created_at: Date;
   updated_at: Date;
+}
+
+/** One line of the snapshot block. */
+export function memorySnapshotLine(key: string, content: string): string {
+  return `- ${key}: ${content}`;
+}
+
+/**
+ * Block chars one memory takes: its whole line (`- key: content`) plus the
+ * newline that separates it. The cap and the block both count this.
+ */
+export function memoryBlockCost(key: string, content: string): number {
+  return memorySnapshotLine(key, content).length + 1;
 }
 
 /** Rows a conversation purge may delete: born from it and never edited by hand. */
@@ -159,7 +177,10 @@ export class AgentMemoryService {
         max_entries: MEMORY_MAX_ENTRIES,
         max_chars: MEMORY_MAX_CHARS,
         used_entries: rows.length,
-        used_chars: rows.reduce((sum, row) => sum + row.content.length, 0),
+        used_chars: rows.reduce(
+          (sum, row) => sum + memoryBlockCost(row.key, row.content),
+          0,
+        ),
       },
     };
   }
@@ -186,7 +207,7 @@ export class AgentMemoryService {
     const existing = (await this.prisma.ai_agent_memories.findFirst({
       where: { ...this.storeWide(actor), user_id: null, key },
     })) as MemoryRow | null;
-    await this.assertCaps(actor, content, existing);
+    await this.assertCaps(actor, key, content, existing);
 
     const now = new Date();
     let row: MemoryRow;
@@ -236,7 +257,7 @@ export class AgentMemoryService {
     const current = await this.findVisible(actor, id);
     const content = this.normalizeContent(contentInput);
     this.assertNoSecret(current.key, content);
-    await this.assertCaps(actor, content, current);
+    await this.assertCaps(actor, current.key, content, current);
     const row = (await this.prisma.ai_agent_memories.update({
       where: { id: current.id },
       data: {
@@ -302,7 +323,9 @@ export class AgentMemoryService {
 
   /**
    * "Memoria de la tienda" block of the Vex system prompt: every store memory,
-   * capped at 40 entries / 2000 chars. Reading it marks the rows as used.
+   * capped at 40 entries / 2000 chars measured with `memoryBlockCost`, the
+   * same measure `assertCaps` enforces on writes. Reading it marks the rows
+   * as used.
    */
   async buildSnapshotBlock(storeId?: number): Promise<string> {
     const store = storeId ?? RequestContextService.getStoreId();
@@ -318,11 +341,12 @@ export class AgentMemoryService {
     const used: number[] = [];
     let chars = 0;
     for (const row of rows) {
-      const line = `- ${row.key}: ${row.content}`;
-      if (chars + line.length > MEMORY_MAX_CHARS) break;
-      lines.push(line);
+      const cost = memoryBlockCost(row.key, row.content);
+      // Defensive only: the write cap uses the same cost, so accepted rows fit.
+      if (chars + cost > MEMORY_MAX_CHARS) break;
+      lines.push(memorySnapshotLine(row.key, row.content));
       used.push(row.id);
-      chars += line.length;
+      chars += cost;
     }
     if (!lines.length) return '';
 
@@ -368,20 +392,25 @@ export class AgentMemoryService {
     }
   }
 
-  /** 40 entries / 2000 chars of the whole store, counting the new text. */
+  /**
+   * 40 entries / 2000 block chars of the whole store, counting the new line.
+   * Measured with `memoryBlockCost`, exactly like `buildSnapshotBlock`.
+   */
   private async assertCaps(
     actor: MemoryActor,
+    key: string,
     content: string,
     replacing: MemoryRow | null,
   ): Promise<void> {
     const rows = (await this.prisma.ai_agent_memories.findMany({
       where: this.storeWide(actor),
-      select: { id: true, content: true },
-    })) as Array<Pick<MemoryRow, 'id' | 'content'>>;
+      select: { id: true, key: true, content: true },
+    })) as Array<Pick<MemoryRow, 'id' | 'key' | 'content'>>;
     const others = rows.filter((row) => row.id !== replacing?.id);
     const entries = others.length + 1;
     const chars =
-      others.reduce((sum, row) => sum + row.content.length, 0) + content.length;
+      others.reduce((sum, row) => sum + memoryBlockCost(row.key, row.content), 0) +
+      memoryBlockCost(key, content);
     if (entries > MEMORY_MAX_ENTRIES || chars > MEMORY_MAX_CHARS) {
       throw new VendixHttpException(ErrorCodes.AI_MEMORY_LIMIT_001);
     }

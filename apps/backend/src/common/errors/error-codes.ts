@@ -2568,7 +2568,7 @@ export const ErrorCodes = {
     code: 'AI_MEMORY_LIMIT_001',
     httpStatus: 409,
     devMessage:
-      'La memoria de la tienda llegó a su tope (40 recuerdos o 2000 caracteres). Edita o borra uno antes de agregar otro.',
+      'La memoria de la tienda llegó a su tope (40 recuerdos o 2000 caracteres contando la clave de cada uno). Edita o borra uno antes de agregar otro.',
   },
   AI_MEMORY_FORBIDDEN_001: {
     code: 'AI_MEMORY_FORBIDDEN_001',

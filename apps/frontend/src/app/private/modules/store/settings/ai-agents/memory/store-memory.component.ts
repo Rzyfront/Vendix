@@ -108,7 +108,7 @@ const DAY = 24 * HOUR;
               <div class="min-w-0 sm:flex-1">
                 <p class="text-sm font-medium text-[var(--color-text-primary)]">
                   {{ limits().used_entries }} de {{ limits().max_entries }} recuerdos ·
-                  {{ limits().used_chars }} de {{ limits().max_chars }} caracteres
+                  {{ limits().used_chars }} de {{ limits().max_chars }} caracteres (clave incluida)
                 </p>
                 <div
                   class="mt-2 h-2 w-full overflow-hidden rounded-full bg-[var(--color-surface-secondary)]"

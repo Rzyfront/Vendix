@@ -92,7 +92,8 @@ describe('AgentMemoryService', () => {
       max_entries: 40,
       max_chars: 2000,
       used_entries: 1,
-      used_chars: 5,
+      // the counter measures the snapshot line, not the bare content
+      used_chars: '- learning.format: video\n'.length,
     });
 
     expect((await service.list(otherStore)).items).toEqual([]);
@@ -181,19 +182,25 @@ describe('AgentMemoryService', () => {
     ).resolves.toMatchObject({ replaced: true });
   });
 
-  it('enforces the 2000-char total and the 500-char entry cap', async () => {
+  it('enforces the 2000-char block total (key and format included) and the 500-char entry cap', async () => {
     const { service } = setup();
-    const four = 'a'.repeat(500);
-    for (let i = 0; i < 4; i++) await service.remember(ana, agentWrite(`c.${i}`, four));
+    // each line costs `- c.N: ` (7) + content + newline (1)
+    const full = 'a'.repeat(500);
+    for (let i = 0; i < 3; i++) await service.remember(ana, agentWrite(`c.${i}`, full));
+    await service.remember(ana, agentWrite('c.3', 'a'.repeat(2000 - 3 * 508 - 8)));
+    expect((await service.list(ana)).limits.used_chars).toBe(2000);
     await expect(
       service.remember(ana, agentWrite('c.4', 'una más')),
     ).rejects.toMatchObject({ errorCode: 'AI_MEMORY_LIMIT_001' });
     await expect(
       service.remember(ana, agentWrite('c.big', 'a'.repeat(501))),
     ).rejects.toMatchObject({ errorCode: 'AI_MEMORY_LIMIT_001' });
-    // editing a row to a longer text counts the total without the old text
-    const [first] = (await service.list(ana)).items;
-    await expect(service.edit(ana, first.id, 'b'.repeat(500))).resolves.toBeDefined();
+    // editing a row counts the total without its old text
+    const c0 = (await service.list(ana)).items.find((i) => i.key === 'c.0')!;
+    await expect(service.edit(ana, c0.id, 'b'.repeat(500))).resolves.toBeDefined();
+    await expect(service.edit(ana, c0.id, 'b'.repeat(501))).rejects.toMatchObject({
+      errorCode: 'AI_MEMORY_LIMIT_001',
+    });
   });
 
   it.each([
@@ -236,13 +243,49 @@ describe('AgentMemoryService', () => {
     expect(rows.map((r) => r.key).sort()).toEqual(['p.edited', 'p.foreign', 'p.other']);
   });
 
-  it('caps the snapshot block at 2000 chars', async () => {
-    const { service } = setup();
+  it('every memory the caps accept reaches the block Vex receives', async () => {
+    const { service, rows } = setup();
+    const accepted: string[] = [];
+    let rejected = 0;
+    // 6 x 330 chars of content (1980) used to pass the cap while only 5 lines fit
     for (let i = 0; i < 6; i++) {
-      await service.remember(ana, agentWrite(`s.${i}`, 'a'.repeat(330)));
+      try {
+        await service.remember(ana, agentWrite(`s.${i}`, 'a'.repeat(330)));
+        accepted.push(`s.${i}`);
+      } catch (error) {
+        expect(error).toMatchObject({ errorCode: 'AI_MEMORY_LIMIT_001' });
+        rejected++;
+      }
     }
+    expect(rejected).toBe(1);
+    expect(rows.map((r) => r.key)).toEqual(accepted);
+
     const block = await service.buildSnapshotBlock(1);
-    expect(block.split('\n').slice(1).join('\n').length).toBeLessThanOrEqual(2000);
     expect(block.startsWith('Memoria de la tienda')).toBe(true);
+    for (const key of accepted) {
+      expect(block).toContain(`- ${key}: ${'a'.repeat(330)}`);
+    }
+    expect(block.split('\n')).toHaveLength(accepted.length + 1);
+    expect(rows.every((r) => r.last_used_at instanceof Date)).toBe(true);
+  });
+
+  it('a store exactly at the 2000-char cap sends every memory; one more char is rejected', async () => {
+    const { service, rows } = setup();
+    // 4 lines of `- e.N: ` (7) + 492 + newline (1) = 4 x 500 = 2000
+    for (let i = 0; i < 4; i++) {
+      await service.remember(ana, agentWrite(`e.${i}`, 'z'.repeat(492)));
+    }
+    const header = (await service.buildSnapshotBlock(1)).split('\n')[0];
+    const block = await service.buildSnapshotBlock(1);
+    expect(block.length - header.length).toBe(2000);
+    for (let i = 0; i < 4; i++) expect(block).toContain(`- e.${i}: ${'z'.repeat(492)}`);
+
+    await expect(
+      service.edit(ana, rows[0].id, 'z'.repeat(493)),
+    ).rejects.toMatchObject({ errorCode: 'AI_MEMORY_LIMIT_001' });
+    await expect(
+      service.remember(ana, agentWrite('e.4', 'z')),
+    ).rejects.toMatchObject({ errorCode: 'AI_MEMORY_LIMIT_001' });
+    expect(rows).toHaveLength(4);
   });
 });
