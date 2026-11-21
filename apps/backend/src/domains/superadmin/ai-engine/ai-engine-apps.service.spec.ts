@@ -336,6 +336,63 @@ describe('AIEngineAppsService', () => {
       expect(prismaFull.ai_engine_applications.update).not.toHaveBeenCalled();
     });
 
+    it('create: rejects a fallback config of another model_type (AI_APP_005)', async () => {
+      prismaFull.ai_engine_applications.findUnique.mockResolvedValueOnce(null);
+      prismaFull.ai_engine_configs.findUnique
+        .mockResolvedValueOnce({ id: 1, model_type: 'text' })
+        .mockResolvedValueOnce({ id: 2, is_active: true, model_type: 'image' });
+
+      await expect(
+        serviceFull.create({
+          key: 'chat_app',
+          name: 'Chat',
+          config_id: 1,
+          fallback_config_id: 2,
+        } as any),
+      ).rejects.toMatchObject({ errorCode: 'AI_APP_005' });
+      expect(prismaFull.ai_engine_applications.create).not.toHaveBeenCalled();
+    });
+
+    it('create: accepts an active fallback of the same model_type', async () => {
+      prismaFull.ai_engine_applications.findUnique.mockResolvedValueOnce(null);
+      prismaFull.ai_engine_configs.findUnique
+        .mockResolvedValueOnce({ id: 1, model_type: 'text' })
+        .mockResolvedValueOnce({ id: 2, is_active: true, model_type: 'text' });
+      prismaFull.ai_engine_applications.create.mockResolvedValueOnce({ id: 5 });
+
+      await serviceFull.create({
+        key: 'chat_app',
+        name: 'Chat',
+        config_id: 1,
+        fallback_config_id: 2,
+      } as any);
+      expect(prismaFull.ai_engine_applications.create).toHaveBeenCalledWith(
+        expect.objectContaining({
+          data: expect.objectContaining({ fallback_config_id: 2 }),
+        }),
+      );
+    });
+
+    it('update: changing model_type re-validates the stored fallback (AI_APP_005)', async () => {
+      prismaFull.ai_engine_applications.findUnique.mockResolvedValueOnce({
+        id: 50,
+        key: 'chat_app',
+        model_type: 'text',
+        config_id: null,
+        fallback_config_id: 9,
+      });
+      prismaFull.ai_engine_configs.findUnique.mockResolvedValueOnce({
+        id: 9,
+        is_active: true,
+        model_type: 'text',
+      });
+
+      await expect(
+        serviceFull.update(50, { model_type: 'image' } as any),
+      ).rejects.toMatchObject({ errorCode: 'AI_APP_005' });
+      expect(prismaFull.ai_engine_applications.update).not.toHaveBeenCalled();
+    });
+
     it('findAll: passes the model_type filter to the Prisma where clause', async () => {
       prismaFull.ai_engine_applications.findMany.mockResolvedValueOnce([]);
       prismaFull.ai_engine_applications.count.mockResolvedValueOnce(0);

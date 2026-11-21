@@ -33,6 +33,18 @@ import {
 } from './dto';
 import { VexFollowupService } from './vex-followup.service';
 
+/**
+ * T24: `ai_messages.cost_usd` is the provider's real cost, internal to the
+ * platform. Message rows leave the store API without it.
+ */
+export function withoutMessageCost<T extends object>(conversation: T): T {
+  if (!('messages' in conversation) || !Array.isArray(conversation.messages))
+    return conversation;
+  const rows = conversation.messages as Array<Record<string, unknown>>;
+  const messages = rows.map(({ cost_usd: _cost, ...rest }) => rest);
+  return { ...conversation, messages };
+}
+
 @Controller('store/ai-chat')
 export class AIChatController {
   constructor(
@@ -61,7 +73,7 @@ export class AIChatController {
   async listConversations(@Query() query: ConversationQueryDto) {
     const result = await this.chatService.listConversations(query);
     return this.responseService.success(
-      result.data,
+      result.data.map(withoutMessageCost),
       'Conversations retrieved',
       result.meta,
     );
@@ -70,7 +82,10 @@ export class AIChatController {
   @Get('conversations/:id')
   async getConversation(@Param('id', ParseIntPipe) id: number) {
     const conversation = await this.chatService.getConversation(id);
-    return this.responseService.success(conversation, 'Conversation retrieved');
+    return this.responseService.success(
+      withoutMessageCost(conversation),
+      'Conversation retrieved',
+    );
   }
 
   @Get('conversations/:id/purge-preview')

@@ -61,6 +61,17 @@ import { VexBlockService } from '../vex/services/vex-block.service';
 import { PlanApprovalService } from '../vex/services/plan-approval.service';
 import { VexiConfirmationService } from '../vexi/vexi-confirmation.service';
 import { Prisma } from '@prisma/client';
+import {
+  CHAT_WINDOW_MESSAGES,
+  ConversationCompactorService,
+  type ContextCompactedFrame,
+} from '../../../ai-engine/context/conversation-compactor.service';
+import {
+  estimateContextBudget,
+  latestPersistedContextBudget,
+  renderTurnActionsLine,
+  withAnswerRow,
+} from '../../../ai-engine/context/agent-context-budget';
 import { randomUUID } from 'node:crypto';
 import { VendixHttpException, ErrorCodes } from '../../../common/errors';
 import {
@@ -169,6 +180,7 @@ export type ChatStreamFrame = (
   | VexiVoiceFrame
   | ConversationTitleFrame
   | FollowupSuggestionFrame
+  | ContextCompactedFrame
 ) & {
   replay?: ChatReplayCursor;
   reconcile_required?: boolean;
@@ -219,6 +231,17 @@ interface VexBlockRef {
   block_id: string;
   kind: string;
   version: number;
+  /** Row count of tabular blocks (plan §3.4: id, tipo, filas); absent otherwise. */
+  rows?: number;
+}
+
+/** `rows` of a block ref: length of `data.rows` when the payload is tabular. */
+function blockRowsOf(data: unknown): { rows?: number } {
+  const rows =
+    data && typeof data === 'object' && !Array.isArray(data)
+      ? (data as Record<string, unknown>).rows
+      : undefined;
+  return Array.isArray(rows) ? { rows: rows.length } : {};
 }
 
 /** Estados que `metadata.plan.status` puede tomar en un hilo de Vex. */
@@ -247,7 +270,8 @@ interface VexTurnCollection {
 @Injectable()
 export class AIChatService {
   private readonly logger = new Logger(AIChatService.name);
-  private readonly MAX_CONTEXT_MESSAGES = 20;
+  /** Rows that travel verbatim; shared with the compactor (B3). */
+  private readonly MAX_CONTEXT_MESSAGES = CHAT_WINDOW_MESSAGES;
   private readonly streamReplay = new ChatStreamReplay<ChatStreamFrame>();
 
   constructor(
@@ -295,6 +319,9 @@ export class AIChatService {
     // milisegundos. Opcional-final como los demás: sin él la voz se comporta
     // como antes de T14 (habla sin cupo por agente).
     @Optional() private readonly agentQuota?: AgentQuotaService,
+    // Resumen automático de hilos largos de Vex (T22). Opcional-final como
+    // los demás: sin él el hilo conserva la ventana de los últimos mensajes.
+    @Optional() private readonly compactor?: ConversationCompactorService,
   ) {}
 
   async createConversation(dto: CreateConversationDto) {
@@ -453,7 +480,7 @@ export class AIChatService {
     // Inicio del turno: el barrido de bloques huérfanos solo adopta los
     // creados desde aquí (ver `resolveVexTurnBlocks`).
     const turnStartedAt = new Date();
-    const conversation = await this.getConversation(conversationId);
+    let conversation = await this.getConversation(conversationId);
 
     if (conversation.status === 'archived') {
       throw new VendixHttpException(ErrorCodes.AI_CHAT_002);
@@ -464,6 +491,8 @@ export class AIChatService {
     // turno de Vex denegado no deje una pregunta huérfana en el hilo.
     const agentKey = this.turnAgentKey(conversation, dto.agent_key);
     await this.assertVexTurnAccess(agentKey);
+    conversation = (await this.compactVexHistory(conversation, agentKey))
+      .conversation;
 
     // Save user message
     await this.prisma.ai_messages.create({
@@ -493,6 +522,10 @@ export class AIChatService {
     let execution: AgentExecutionSummary | undefined;
     let objective: ObjectiveProgress | undefined;
     let tokensUsed = 0;
+    // Costo real del turno; 0 solo cuando el motor no lo informó.
+    let turnCostUsd = 0;
+    // Presupuesto real del último paso del motor (ruta agéntica en stream).
+    let turnContextBudget: AIStreamChunk['context_budget'];
     // Solo los turnos Vex coleccionan: en cualquier otro agente es `null` y
     // el cierre persiste byte-idéntico a hoy.
     const vexTurn: VexTurnCollection | null =
@@ -538,6 +571,8 @@ export class AIChatService {
         agentResult.objective && clientSafeObjective(agentResult.objective);
       responseContent = agentResult.content;
       tokensUsed = agentResult.total_tokens;
+      turnCostUsd = agentResult.cost_usd ?? 0;
+      turnContextBudget = agentResult.context_budget;
       vexPlan = agentResult.pending_plan ?? null;
       vexToolsUsed = agentResult.tools_used ?? [];
     } else {
@@ -583,19 +618,29 @@ export class AIChatService {
       vexPlan ?? vexTurn?.plan ?? null,
       vexTurn ? extractSuggestedFollowups(vexToolsUsed) : [],
     );
+    // T21: the ring (and the next turn's compaction) read this exact value:
+    // the window the turn opened with plus this answer as it will travel.
+    const openingBudget = vexTurn
+      ? (turnContextBudget ??
+        this.estimateTurnBudget(conversation, dto.content))
+      : undefined;
+    const turnBudget = openingBudget
+      ? withAnswerRow(openingBudget, responseContent, undefined, vexMetadata)
+      : undefined;
     const assistantMessage = await this.prisma.ai_messages.create({
       data: {
         conversation_id: conversationId,
         role: 'assistant',
         content: responseContent,
         tokens_used: tokensUsed,
-        cost_usd: 0,
-        ...(vexMetadata || execution || objective
+        cost_usd: turnCostUsd,
+        ...(vexMetadata || execution || objective || turnBudget
           ? {
               metadata: {
                 ...vexMetadata,
                 ...(execution ? { execution } : {}),
                 ...(objective ? { objective } : {}),
+                ...(turnBudget ? { context_budget: turnBudget } : {}),
               } as unknown as Prisma.InputJsonValue,
             }
           : {}),
@@ -770,7 +815,7 @@ export class AIChatService {
       return;
     }
 
-    const conversation = await this.getConversation(conversationId);
+    let conversation = await this.getConversation(conversationId);
 
     if (conversation.status === 'archived') {
       yield { type: 'error', error: 'Conversation is archived' };
@@ -908,6 +953,11 @@ export class AIChatService {
       yield { type: 'error', error: (err as Error).message };
       return;
     }
+    // T22: hilos largos de Vex se resumen antes de armar la ventana; el frame
+    // le avisa a la UI («Resumí la conversación anterior»).
+    const compaction = await this.compactVexHistory(conversation, agentKey);
+    conversation = compaction.conversation;
+    if (compaction.frame) yield compaction.frame;
     const chatAgent = await this.resolveChatAgent(agentKey);
 
     const appKey =
@@ -1191,6 +1241,25 @@ export class AIChatService {
       vexPlan ?? vexTurn?.plan ?? null,
       turnFollowups,
     );
+    // T21: presupuesto real con el que el motor abrió el turno (primer paso,
+    // reenviado por el agente; estimado solo si no lo informó) más esta
+    // respuesta tal como viajará en la ventana siguiente (P2-4).
+    const openingBudget = vexTurn
+      ? ((doneChunk as AIStreamChunk | null)?.context_budget ??
+        this.estimateTurnBudget(conversation, intent.content))
+      : undefined;
+    const turnBudget = openingBudget
+      ? withAnswerRow(
+          openingBudget,
+          fullContent,
+          toolsUsed.map((tool) => ({
+            name: tool.name,
+            result: tool.result,
+            execution: tool.execution,
+          })),
+          vexMetadata,
+        )
+      : undefined;
     let assistantMessage: { id: number } | null = null;
     if (
       fullContent ||
@@ -1209,6 +1278,9 @@ export class AIChatService {
         ...{ stream_id: streamId },
         ...(pendingProposal ? { pending_confirmation: pendingProposal } : {}),
         ...vexMetadata,
+        // T21: lo que el anillo pinta tras recargar y lo que decide la
+        // compactación del turno siguiente (una sola medida).
+        ...(turnBudget ? { context_budget: turnBudget } : {}),
         ...(execution ? { execution } : {}),
         ...(objective ? { objective } : {}),
         ...(intent.continuation
@@ -1226,6 +1298,8 @@ export class AIChatService {
           role: 'assistant',
           content: fullContent,
           tokens_used: totalTokens,
+          // Costo real que informa el motor en `done`; 0 solo si falta.
+          cost_usd: (doneChunk as AIStreamChunk | null)?.cost_usd ?? 0,
           // The agent already computed this and it was being thrown away, so
           // a reopened conversation lost every trace of what Vexi actually
           // did — the transcript said "ajusté el stock" with nothing behind it.
@@ -1289,11 +1363,16 @@ export class AIChatService {
     }
 
     if (doneChunk) {
-      // Client boundary: model guidance never rides on the final frame.
-      const safeDone = clientSafeChunk(doneChunk);
-      yield assistantMessage
-        ? { ...safeDone, message_id: assistantMessage.id }
+      // Client boundary: model guidance never rides on the final frame, and
+      // neither does the provider cost (internal; persisted in the row only).
+      const { cost_usd: _cost, ...safeDone } = clientSafeChunk(doneChunk);
+      // T21: el anillo «Contexto N %» de Vex recibe el mismo valor persistido.
+      const withBudget: AIStreamChunk = turnBudget
+        ? { ...safeDone, context_budget: turnBudget }
         : safeDone;
+      yield assistantMessage
+        ? { ...withBudget, message_id: assistantMessage.id }
+        : withBudget;
     }
 
     // Vex genera su título arriba (`titleTask`); Vexi y los hilos legacy
@@ -2090,6 +2169,7 @@ export class AIChatService {
           block_id: row.id,
           kind: row.kind,
           version: row.version,
+          ...blockRowsOf(data),
         });
         return row.id;
       },
@@ -2162,6 +2242,7 @@ export class AIChatService {
         block_id: uiBlock.block_id,
         kind: uiBlock.kind,
         version: typeof uiBlock.version === 'number' ? uiBlock.version : 1,
+        ...blockRowsOf(uiBlock.data),
       });
     }
     const approval = chunk.plan_approval;
@@ -2218,6 +2299,7 @@ export class AIChatService {
           block_id,
           kind,
           version: typeof rawVersion === 'number' ? rawVersion : 1,
+          ...blockRowsOf(view?.data ?? data?.data),
         });
       } catch {
         // Resultado compactado o no-JSON: el barrido de huérfanos lo cubre.
@@ -2265,6 +2347,7 @@ export class AIChatService {
               block_id: row.id,
               kind: row.kind,
               version: row.version,
+              ...blockRowsOf(row.data),
             });
           }
         }
@@ -2341,6 +2424,65 @@ export class AIChatService {
   }
 
   /**
+   * Estimate for turns whose engine path reported no budget (buffered POST,
+   * non-agentic stream): same estimator over the same window that is sent.
+   */
+  private estimateTurnBudget(
+    conversation: ConversationWithMessages,
+    content: string | undefined,
+  ): AIStreamChunk['context_budget'] | undefined {
+    try {
+      return estimateContextBudget(
+        this.buildContextWindow(conversation, content),
+      );
+    } catch {
+      return undefined;
+    }
+  }
+
+  /**
+   * T22: compacts a long Vex thread (never throws). Returns the conversation
+   * with the fresh summary applied, and the chat frame when it compacted.
+   */
+  private async compactVexHistory(
+    conversation: ConversationWithMessages,
+    agentKey: string | undefined | null,
+  ): Promise<{
+    conversation: ConversationWithMessages;
+    frame: ContextCompactedFrame | null;
+  }> {
+    // Only a Vex thread reads the summary back (`buildContextWindow`): a
+    // per-message Vex override on another thread must not move its pointer.
+    if (
+      agentKey !== VEX_AGENT_KEY ||
+      this.conversationAgentKey(conversation) !== VEX_AGENT_KEY ||
+      !this.compactor
+    ) {
+      return { conversation, frame: null };
+    }
+    // Two triggers: live rows the window would leave out (always, legacy
+    // threads included) and the budget the ring showed after the last answer.
+    const result = await this.compactor.compactIfNeeded(
+      conversation,
+      latestPersistedContextBudget(conversation.messages),
+    );
+    if (!result) return { conversation, frame: null };
+    return {
+      conversation: {
+        ...conversation,
+        summary: result.summary,
+        summary_through_message_id: result.summary_through_message_id,
+      },
+      frame: {
+        type: 'context_compacted',
+        conversation_id: conversation.id,
+        summary: result.summary,
+        summary_through_message_id: result.summary_through_message_id,
+      },
+    };
+  }
+
+  /**
    * Last N turns of the conversation, oldest first.
    *
    * `newMessage` is optional because the two consumers need different shapes:
@@ -2379,10 +2521,39 @@ export class AIChatService {
       messages.push({ role: 'system', content: SPEECH_REGISTER_BLOCK });
     }
 
-    // Add recent messages from history (last N)
-    const recentMessages = conversation.messages.slice(
-      -this.MAX_CONTEXT_MESSAGES,
-    );
+    // T22: a stored summary replaces everything it covers; only newer rows
+    // travel verbatim. Without a summary the window is the previous last-N.
+    // Only Vex threads read it: a thread compacted under Vex (e.g. `agent_key`
+    // per POST) and answered by Vexi keeps Vexi's byte-identical window.
+    const isVexThread =
+      this.conversationAgentKey(conversation) === VEX_AGENT_KEY;
+    const through = conversation.summary_through_message_id ?? null;
+    const summarized = isVexThread && !!conversation.summary && through !== null;
+    if (summarized) {
+      messages.push({
+        role: 'system',
+        content: `Resumen de la conversación anterior: ${conversation.summary}`,
+      });
+    }
+    const covered = summarized
+      ? conversation.messages.filter((m) => m.id > through!)
+      : conversation.messages;
+
+    // Add recent messages from history (last N). In a Vex thread the N slots
+    // are conversational rows only, the same rows the compactor counts, so a
+    // live row is either here or in the summary (B3); applied-write `tool`
+    // rows never reach the model and must not take a slot. Vexi keeps its
+    // byte-identical window.
+    const recentMessages = (
+      isVexThread
+        ? covered.filter(
+            (m) =>
+              m.role === 'system' ||
+              m.role === 'user' ||
+              m.role === 'assistant',
+          )
+        : covered
+    ).slice(-this.MAX_CONTEXT_MESSAGES);
 
     for (const msg of recentMessages) {
       if (
@@ -2390,9 +2561,15 @@ export class AIChatService {
         msg.role === 'user' ||
         msg.role === 'assistant'
       ) {
+        // T23: assistant turns recall their real actions/blocks (names only).
+        // Solo hilos de Vex (S9): la ventana de Vexi queda byte-idéntica.
+        const actions =
+          isVexThread && msg.role === 'assistant'
+            ? renderTurnActionsLine(msg.tool_calls, msg.metadata)
+            : null;
         messages.push({
           role: msg.role,
-          content: msg.content,
+          content: actions ? `${msg.content}\n${actions}` : msg.content,
         });
       }
     }

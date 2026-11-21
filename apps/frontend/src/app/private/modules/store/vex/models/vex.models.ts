@@ -287,6 +287,26 @@ export interface VexMessage {
   followups?: VexFollowup[];
 }
 
+/** `context_budget` of the `done` frame: how full the model window is for the next turn. */
+export interface VexContextBudget {
+  estimated_input_tokens: number;
+  omitted_messages: number;
+  context_window_tokens: number;
+  provenance: 'configured' | 'fallback';
+  method: 'conservative_estimate';
+  /** Output the engine reserved for the answer. */
+  max_output_tokens?: number;
+  /** Percent at which the ring warns and the server compacts (≤ 75, under the engine ceiling). */
+  compaction_percent?: number;
+}
+
+/** Rolling summary of the older part of a conversation (compaction). */
+export interface VexCompaction {
+  summary: string;
+  /** Local message id (`m-<row id>`) after which the divider renders; null = top of the thread. */
+  through_message_id: string | null;
+}
+
 export interface VexConversation {
   id: string;
   title: string;

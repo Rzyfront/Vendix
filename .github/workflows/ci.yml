@@ -730,6 +730,7 @@ jobs:
           --include='**/store/vex/state/vex-chat.store.spec.ts'
           --include='**/store/vex/state/vex-conversation-groups.util.spec.ts'
           --include='**/store/vex/state/vex-conversation-purge.util.spec.ts'
+          --include='**/store/vex/state/vex-context-meter.util.spec.ts'
           --include='**/store/vex/state/vex-presence.state.spec.ts'
           --include='**/store/vex/state/vex-suggestions.util.spec.ts'
           --include='**/store/vex/components/vex-followup-chip/vex-followup-chip.spec.ts'
