@@ -118,6 +118,17 @@ describe('AgentQuotaService (T14)', () => {
       );
     });
 
+    it('un cupo de voz 0 es «nada»: la voz no está en el plan, no «se acabó»', async () => {
+      entitlements.resolveForStore.mockResolvedValue({
+        found: true,
+        rows: rowsWith({ 'vex.voice_readout': { enabled: true, cap_value: 0 } }),
+      });
+
+      await expect(service.checkAgentVoice(STORE, 'vex')).resolves.toEqual(
+        expect.objectContaining({ status: 'disabled', cap: 0 }),
+      );
+    });
+
     it('en modo enforce decide solo el modelo nuevo', async () => {
       process.env.AI_ENTITLEMENTS_MODE = 'enforce';
       resolver.resolveSubscription.mockResolvedValue({

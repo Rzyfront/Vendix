@@ -243,7 +243,8 @@ export class AgentQuotaService {
           agentCounterKey(storeId, agent, 'voice_ms', this.periodKey('monthly')),
         ),
       );
-      if (!row || !row.enabled) {
+      // A cap of 0 is "nothing" in the plan, not a month already spent.
+      if (!row || !row.enabled || row.cap_value === 0) {
         return { status: 'disabled', cap: row?.cap_value ?? null, used };
       }
       if (row.cap_value !== null && used >= row.cap_value) {
