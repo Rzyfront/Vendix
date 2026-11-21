@@ -70,6 +70,7 @@ import {
   estimateContextBudget,
   latestPersistedContextBudget,
   renderTurnActionsLine,
+  withAnswerRow,
 } from '../../../ai-engine/context/agent-context-budget';
 import { randomUUID } from 'node:crypto';
 import { VendixHttpException, ErrorCodes } from '../../../common/errors';
@@ -617,10 +618,14 @@ export class AIChatService {
       vexPlan ?? vexTurn?.plan ?? null,
       vexTurn ? extractSuggestedFollowups(vexToolsUsed) : [],
     );
-    // T21: the ring (and the next turn's compaction) read this exact value.
-    const turnBudget = vexTurn
+    // T21: the ring (and the next turn's compaction) read this exact value:
+    // the window the turn opened with plus this answer as it will travel.
+    const openingBudget = vexTurn
       ? (turnContextBudget ??
         this.estimateTurnBudget(conversation, dto.content))
+      : undefined;
+    const turnBudget = openingBudget
+      ? withAnswerRow(openingBudget, responseContent, undefined, vexMetadata)
       : undefined;
     const assistantMessage = await this.prisma.ai_messages.create({
       data: {
@@ -1236,11 +1241,24 @@ export class AIChatService {
       vexPlan ?? vexTurn?.plan ?? null,
       turnFollowups,
     );
-    // T21: presupuesto real que el motor midió en el último paso del turno
-    // (reenviado por el agente); estimado solo si el motor no lo informó.
-    const turnBudget = vexTurn
+    // T21: presupuesto real con el que el motor abrió el turno (primer paso,
+    // reenviado por el agente; estimado solo si no lo informó) más esta
+    // respuesta tal como viajará en la ventana siguiente (P2-4).
+    const openingBudget = vexTurn
       ? ((doneChunk as AIStreamChunk | null)?.context_budget ??
         this.estimateTurnBudget(conversation, intent.content))
+      : undefined;
+    const turnBudget = openingBudget
+      ? withAnswerRow(
+          openingBudget,
+          fullContent,
+          toolsUsed.map((tool) => ({
+            name: tool.name,
+            result: tool.result,
+            execution: tool.execution,
+          })),
+          vexMetadata,
+        )
       : undefined;
     let assistantMessage: { id: number } | null = null;
     if (

@@ -4,6 +4,8 @@ import {
   compactionPercentOf,
   estimateAgentInputTokens,
   historicalAssistantProse,
+  renderTurnActionsLine,
+  withAnswerRow,
 } from './agent-context-budget';
 import type {
   AIMessage,
@@ -229,5 +231,39 @@ describe('F3 P1-2 compaction threshold under the engine hard ceiling', () => {
     expect(compactionPercentOf({ ...base, max_output_tokens: 8192 })).toBe(54);
     expect(compactionPercentOf(base)).toBe(67);
     expect(compactionPercentOf({ ...base, compaction_percent: -1 })).toBe(67);
+  });
+});
+
+describe('F3 P2-4 ring for the next turn', () => {
+  const opening = {
+    estimated_input_tokens: 10000,
+    omitted_messages: 0,
+    context_window_tokens: 32768,
+    provenance: 'configured' as const,
+    method: 'conservative_estimate' as const,
+    compaction_percent: 67,
+  };
+
+  it('adds the answer row exactly as the next window carries it, actions line included', () => {
+    const tools = [{ name: 'list_orders', result: '{"success":true}' }];
+    const metadata = { blocks: [{ block_id: 'abcdef123', kind: 'table', rows: 3 }] };
+    const out = withAnswerRow(opening, 'Tienes 3 pedidos.', tools, metadata);
+    const row = `Tienes 3 pedidos.\n${renderTurnActionsLine(tools, metadata)}`;
+    expect(out).toEqual({
+      ...opening,
+      estimated_input_tokens:
+        10000 +
+        estimateAgentInputTokens([{ role: 'assistant', content: row }], []) -
+        estimateAgentInputTokens([], []),
+    });
+  });
+
+  it('a plain answer adds only its own text', () => {
+    const out = withAnswerRow(opening, 'ok', undefined, null);
+    expect(out.estimated_input_tokens).toBe(
+      10000 +
+        estimateAgentInputTokens([{ role: 'assistant', content: 'ok' }], []) -
+        32,
+    );
   });
 });

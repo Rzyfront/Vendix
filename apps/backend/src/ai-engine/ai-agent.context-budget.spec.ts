@@ -108,7 +108,7 @@ describe('AIAgentService T21 context_budget forwarding (agentic stream)', () => 
     expect(result.context_budget).toEqual(budgetOf(96000));
   });
 
-  it('uses the LAST step budget when the turn ran several inferences', async () => {
+  it('P2-4: uses the FIRST step budget (the window the turn opened with), not the one swollen by tool results', async () => {
     const toolStep: AIStreamChunk[] = [
       {
         type: 'done',
@@ -137,8 +137,8 @@ describe('AIAgentService T21 context_budget forwarding (agentic stream)', () => 
     const { chunks, result } = await drain(service);
     expect(runAgentStream).toHaveBeenCalledTimes(2);
     const done = chunks.filter((c) => c.type === 'done');
-    expect(done[done.length - 1].context_budget).toEqual(budgetOf(52000));
-    expect(result.context_budget).toEqual(budgetOf(52000));
+    expect(done[done.length - 1].context_budget).toEqual(budgetOf(40000));
+    expect(result.context_budget).toEqual(budgetOf(40000));
   });
 
   it('leaves done without a budget when the engine reported none', async () => {

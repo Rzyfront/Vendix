@@ -281,6 +281,31 @@ export function estimateContextBudget(
   };
 }
 
+/**
+ * «Contexto N %» for the next turn: the window this turn OPENED with (its
+ * first engine step, before this turn's tool results, which never travel
+ * again) plus the answer row as the next window will carry it (content and
+ * its actions line). Without the answer the ring would trail one turn behind;
+ * with the last step it overestimated after tool-heavy turns (F3 r2 P2-4).
+ */
+export function withAnswerRow(
+  budget: ContextBudgetReport,
+  content: string,
+  toolCalls: unknown,
+  metadata: unknown,
+): ContextBudgetReport {
+  const actions = renderTurnActionsLine(toolCalls, metadata);
+  const row =
+    estimateAgentInputTokens(
+      [{ role: 'assistant', content: actions ? `${content}\n${actions}` : content }],
+      [],
+    ) - estimateAgentInputTokens([], []);
+  return {
+    ...budget,
+    estimated_input_tokens: budget.estimated_input_tokens + row,
+  };
+}
+
 export const TURN_ACTIONS_LINE_MAX_CHARS = 300;
 
 function asRecord(value: unknown): Record<string, unknown> | null {

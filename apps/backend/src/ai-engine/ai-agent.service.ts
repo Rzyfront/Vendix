@@ -1237,8 +1237,10 @@ export class AIAgentService {
 
   /**
    * `streamAgentInference` drops `cost_usd` and `context_budget`; read both
-   * from the raw engine `done` frame. The last step's budget wins: it is the
-   * fullest window the turn sent.
+   * from the raw engine `done` frame. The FIRST step's budget wins: the
+   * window the turn opened with. Later steps add this turn's tool results,
+   * which never travel to the next turn (only the actions line does); the
+   * chat adds the answer row (`withAnswerRow`).
    */
   private async *tapStepCost(
     params: AgentRunParams,
@@ -1251,7 +1253,7 @@ export class AIAgentService {
           sawDone = true;
           this.noteStepCost(params, chunk.cost_usd);
           const acc = this.turnCosts.get(params);
-          if (acc && chunk.context_budget)
+          if (acc && chunk.context_budget && !acc.contextBudget)
             acc.contextBudget = chunk.context_budget;
         }
         yield chunk;
@@ -1270,7 +1272,7 @@ export class AIAgentService {
   }
 
   /**
-   * Exposes the accumulated turn cost and the engine's last context budget on
+   * Exposes the accumulated turn cost and the engine's first-step context budget on
    * the final `done` frame and the result (T21: the chat forwards the budget
    * to the «Contexto N %» ring instead of re-estimating it).
    */

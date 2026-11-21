@@ -1,4 +1,5 @@
 import { AIChatService } from './ai-chat.service';
+import { estimateAgentInputTokens } from '../../../ai-engine/context/agent-context-budget';
 import { RequestContextService } from '@common/context/request-context.service';
 import {
   contextUsagePercent,
@@ -36,6 +37,11 @@ function agentGen(chunks: any[], result: any) {
     return result;
   });
 }
+
+/** Tokens one assistant row adds to the window (same estimator as the engine). */
+const answerTokens = (content: string) =>
+  estimateAgentInputTokens([{ role: 'assistant', content }], []) -
+  estimateAgentInputTokens([], []);
 
 function build(opts: {
   chunks: any[];
@@ -206,11 +212,13 @@ describe('T21 context budget: one measure for ring and compaction', () => {
     });
     const frames = await stream(b.service);
     const done = frames.find((f) => f.type === 'done');
-    expect(done.context_budget).toEqual(budgetOf(81000));
+    // P2-4: the opening window plus this answer as the next window carries it.
+    const next = budgetOf(81000 + answerTokens('Tienes 3 pedidos.'));
+    expect(done.context_budget).toEqual(next);
     // Provider cost is internal: persisted on the row, never sent to the store browser.
     expect(done).not.toHaveProperty('cost_usd');
     const row = assistantRow(b.prisma);
-    expect(row.metadata.context_budget).toEqual(budgetOf(81000));
+    expect(row.metadata.context_budget).toEqual(next);
     expect(row.cost_usd).toBe(0.002);
   });
 
