@@ -4,7 +4,8 @@
  * commercial levers and have no capability in the catalog, so the plan screen
  * has no editor for them; without this default a new plan would lack
  * `async_queue`, which still protects received-document scanning
- * (store-received-documents.controller.ts). Existing plans keep their stored
+ * (received-documents/store-received-documents.controller.ts). Lives in the
+ * store domain because the enforce gate (T20) reads it too. Existing plans keep their stored
  * value: updates never touch these keys.
  */
 export const AI_ENGINE_PLAN_DEFAULTS: Readonly<

@@ -185,7 +185,7 @@ export function applyPromoOverlay(
 }
 
 /** A row grants when it is on, unless it is a cap of 0 that blocks (nothing). */
-function entitlementGrants(row: AIEntitlement): boolean {
+export function entitlementGrants(row: AIEntitlement): boolean {
   return row.enabled && !(row.cap_value === 0 && row.on_limit === 'block');
 }
 

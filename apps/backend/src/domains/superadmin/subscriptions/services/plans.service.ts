@@ -23,7 +23,7 @@ import {
   planAIEntitlements,
   writeAIEntitlementsToLegacyFlags,
 } from '../../../store/subscriptions/services/ai-entitlements.logic';
-import { withAIEngineDefaults } from './ai-engine-plan-defaults';
+import { withAIEngineDefaults } from '../../../store/subscriptions/services/ai-engine-plan-defaults';
 import {
   aiEntitlementRowData,
   loadPlanAIEntitlements,

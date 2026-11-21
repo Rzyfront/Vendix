@@ -6,7 +6,7 @@ import { PromotionalService } from './promotional.service';
 import { PlanModuleRulesService } from '../../../../common/access/plan-module-rules.service';
 import { VendixHttpException, ErrorCodes } from '../../../../common/errors';
 import { CreatePlanDto } from '../dto';
-import { AI_ENGINE_PLAN_DEFAULTS } from './ai-engine-plan-defaults';
+import { AI_ENGINE_PLAN_DEFAULTS } from '../../../store/subscriptions/services/ai-engine-plan-defaults';
 import {
   AI_CAPABILITIES,
   AIEntitlement,

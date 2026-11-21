@@ -24,6 +24,11 @@ import {
 import { SubscriptionResolverService } from './subscription-resolver.service';
 import { AIEntitlementsShadowService } from './ai-entitlements-shadow.service';
 import { AIEntitlementsResolverService } from './ai-entitlements-resolver.service';
+import { aiEntitlementsMode } from './ai-entitlements-mode';
+import {
+  EnforcedFeatureDecision,
+  enforcedFeatureDecision,
+} from './ai-entitlements-enforce';
 import {
   AI_USAGE_GROUPS,
   AiUsageGroup,
@@ -233,10 +238,25 @@ export class SubscriptionAccessService {
     // gate decides with. Fire-and-forget: it never changes the result below.
     this.observeEntitlementsShadow(storeId, feature, resolved);
 
+    // T20 — `enforce` decides with plan_ai_entitlements only (never the
+    // legacy JSON); `shadow`, the default, keeps the legacy JSON deciding.
+    let featureConfig: FeatureConfig | undefined = resolved.features[feature];
+    let quotaExhausted = false;
+    if (aiEntitlementsMode() === 'enforce') {
+      const decision = await this.enforcedFeature(storeId, feature);
+      quotaExhausted = decision.kind === 'exhausted';
+      featureConfig =
+        decision.kind === 'on'
+          ? decision.config
+          : quotaExhausted
+            ? { enabled: true }
+            : undefined;
+    }
+
     const lockReason = await this.readLockReason(storeId, resolved.state);
     const stateMode = this.stateToMode(
       resolved.state,
-      resolved.features[feature],
+      featureConfig,
       lockReason,
     );
     if (stateMode.mode === 'block') {
@@ -251,13 +271,26 @@ export class SubscriptionAccessService {
       };
     }
 
-    const featureConfig = resolved.features[feature];
     if (!featureConfig || featureConfig.enabled === false) {
       return {
         allowed: false,
         mode: 'block',
         severity: 'blocker',
         reason: 'SUBSCRIPTION_005',
+        subscription_state: resolved.state,
+        plan_id: resolved.planId,
+        has_record: resolved.found,
+      };
+    }
+
+    // A cap of 0 is "nothing" in the new model; the legacy quota path below
+    // would read it as unlimited, so it is decided here.
+    if (quotaExhausted) {
+      return {
+        allowed: false,
+        mode: 'block',
+        severity: 'critical',
+        reason: 'SUBSCRIPTION_006',
         subscription_state: resolved.state,
         plan_id: resolved.planId,
         has_record: resolved.found,
@@ -566,6 +599,32 @@ export class SubscriptionAccessService {
   async invalidateCache(storeId: number): Promise<void> {
     await this.resolver.invalidate(storeId);
     await this.entitlementsResolver?.invalidate(storeId);
+  }
+
+  /**
+   * T20 — enforce-mode decision for one legacy feature key from the rows.
+   * Fails closed: no resolver, an unreadable table or a store without plan
+   * rows means the feature is off, never the legacy JSON.
+   */
+  private async enforcedFeature(
+    storeId: number,
+    feature: AIFeatureKey,
+  ): Promise<EnforcedFeatureDecision> {
+    if (!this.entitlementsResolver) return { kind: 'off' };
+    try {
+      const resolvedRows = await this.entitlementsResolver.resolveForStore(storeId);
+      if (!resolvedRows.found || resolvedRows.planId === null) {
+        return { kind: 'off' };
+      }
+      return enforcedFeatureDecision(feature, resolvedRows.rows);
+    } catch (err) {
+      this.logger.warn(
+        `AI_ENTITLEMENTS_ENFORCE_UNAVAILABLE store=${storeId} feature=${feature}: ${
+          err instanceof Error ? err.message : String(err)
+        }`,
+      );
+      return { kind: 'off' };
+    }
   }
 
   private observeEntitlementsShadow(
