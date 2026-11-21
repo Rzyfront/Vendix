@@ -53,6 +53,7 @@ import { AgentEvidenceService } from './tasks/agent-evidence.service';
 import { AgentDurableSessionService } from './tasks/agent-durable-session.service';
 import { S3Module } from '../common/services/s3.module';
 import { S3Service } from '../common/services/s3.service';
+import { ConversationCompactorService } from './context/conversation-compactor.service';
 
 /**
  * Tool registration is decentralized: each domain module registers its own
@@ -133,6 +134,7 @@ import { S3Service } from '../common/services/s3.service';
     // the worker needs `AIAgentService`, which lives in this module — the reverse
     // import would close a cycle.
     AIAgentProcessor,
+    ConversationCompactorService,
   ],
   exports: [
     AgentObjectiveRepository,
@@ -158,6 +160,7 @@ import { S3Service } from '../common/services/s3.service';
     CapabilityRegistryService,
     AIQueueModule,
     EmbeddingModule,
+    ConversationCompactorService,
   ],
 })
 export class AIEngineModule implements OnModuleInit {
