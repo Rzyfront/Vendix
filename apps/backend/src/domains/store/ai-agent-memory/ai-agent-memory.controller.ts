@@ -13,6 +13,7 @@ import { ResponseService } from '../../../common/responses/response.service';
 import { Roles } from '../../auth/decorators/roles.decorator';
 import { RolesGuard } from '../../auth/guards/roles.guard';
 import { UserRole } from '../../auth/enums/user-role.enum';
+import { VexEnabledGuard } from '../vex/guards/vex-enabled.guard';
 import { AgentMemoryService } from '../../../ai-engine/memory/agent-memory.service';
 import {
   CreateAgentMemoryDto,
@@ -20,9 +21,10 @@ import {
 } from './dto/ai-agent-memory.dto';
 
 /**
- * F4 T31 — store memory of Vex (Ajustes → Agentes IA). Owner and admin only,
- * same guard shape as `VexController`. Every operation is bound to the
- * session's store by `AgentMemoryService`.
+ * F4 T31 — store memory of Vex (Ajustes → Agentes IA). Owner and admin only
+ * and only while the store has Vex switched on: the same guards as
+ * `VexController`, so a store without Vex cannot write memory nobody reads.
+ * Every operation is bound to the session's store by `AgentMemoryService`.
  *
  *   GET    /store/ai-agents/memory        { items, limits }
  *   POST   /store/ai-agents/memory        { content, key?, kind? }  → origin manual
@@ -31,7 +33,7 @@ import {
  *   DELETE /store/ai-agents/memory        { deleted: n }
  */
 @Controller('store/ai-agents/memory')
-@UseGuards(RolesGuard)
+@UseGuards(RolesGuard, VexEnabledGuard)
 @Roles(UserRole.OWNER, UserRole.ADMIN)
 export class AiAgentMemoryController {
   constructor(

@@ -10,6 +10,8 @@ import { ModalComponent } from '../../../../../../shared/components/modal/modal.
 import { TextareaComponent } from '../../../../../../shared/components/textarea/textarea.component';
 import { ToastService } from '../../../../../../shared/components/toast/toast.service';
 import { StoreSettingsFacade } from '../../../../../../core/store/store-settings/store-settings.facade';
+import { AuthFacade } from '../../../../../../core/store/auth/auth.facade';
+import { canConfigureAiAgents } from '../../../../../../core/guards/vexi-settings.guard';
 import { parseApiError } from '../../../../../../core/utils/parse-api-error';
 import { formatStoreDateTime } from '../../../../../../shared/utils/date.util';
 import {
@@ -37,8 +39,10 @@ const DAY = 24 * HOUR;
  *
  * Lists what Vex remembers about the store (shared by every user of the
  * store) and lets the owner/admin add, edit and delete entries. The page is
- * already gated by `aiAgentsSettingsGuard`; limits and secret-content rules
- * are enforced server-side and their messages are shown as returned.
+ * already gated by `aiAgentsSettingsGuard`; the block repeats the same role
+ * check so any other role sees nothing (and never calls the API) instead of
+ * a 403. Limits and secret-content rules are enforced server-side and their
+ * messages are shown as returned.
  */
 @Component({
   selector: 'app-store-memory',
@@ -53,6 +57,7 @@ const DAY = 24 * HOUR;
     TextareaComponent,
   ],
   template: `
+    @if (canManage()) {
     <section
       class="mt-6 bg-surface rounded-lg shadow-sm border border-[var(--color-border)] p-4 sm:p-6"
       aria-labelledby="store-memory-title"
@@ -257,6 +262,7 @@ const DAY = 24 * HOUR;
       confirmVariant="danger"
       (confirm)="clearAll()"
     />
+    }
   `,
   styles: [
     `
@@ -271,6 +277,10 @@ export class StoreMemoryComponent {
   private readonly service = inject(StoreMemoryService);
   private readonly toast = inject(ToastService);
   private readonly settingsFacade = inject(StoreSettingsFacade);
+  private readonly authFacade = inject(AuthFacade);
+
+  /** Same owner/admin rule as the backend `@Roles(OWNER, ADMIN)`. */
+  readonly canManage = computed(() => canConfigureAiAgents(this.authFacade));
 
   readonly maxEntryChars = MAX_ENTRY_CHARS;
 
@@ -316,7 +326,7 @@ export class StoreMemoryComponent {
 
   constructor() {
     // Load once so the entry shows its count before it is expanded.
-    void this.load(true);
+    if (this.canManage()) void this.load(true);
   }
 
   toggle(): void {
