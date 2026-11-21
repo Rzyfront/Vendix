@@ -42,6 +42,8 @@ export const VEX_COPY = {
     greeting: '¿Con qué seguimos?',
     greeting_named: (first_name: string) => `¿Con qué seguimos, ${first_name}?`,
     suggestions_label: 'Sugerencias para empezar',
+    tasks_title: 'Tareas',
+    tasks_label: 'Tareas prediseñadas de Vex',
     how_it_works: '¿Cómo funciona Vex?',
     suggestions: {
       reminders_today: {

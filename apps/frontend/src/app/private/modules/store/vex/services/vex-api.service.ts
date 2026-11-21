@@ -16,6 +16,7 @@ import {
   VexFollowupEdits,
   VexPlanProposal,
   VexPlanStep,
+  VexLaunchablePlaybook,
   VexUiBlock,
   VexWriteBatch,
   VexWriteBatchResult,
@@ -346,6 +347,15 @@ export class VexApiService {
   private readonly chatBase = `${environment.apiUrl}/store/ai-chat`;
   private readonly vexBase = `${environment.apiUrl}/store/vex`;
   private readonly vexiBase = `${environment.apiUrl}/store/vexi`;
+
+  /** F5/T39: playbooks the person can start from the welcome gallery. */
+  getLaunchablePlaybooks(): Observable<VexLaunchablePlaybook[]> {
+    return this.http
+      .get<{ data: VexLaunchablePlaybook[] }>(
+        `${this.vexBase}/playbooks/launchable`,
+      )
+      .pipe(map((res) => res.data ?? []));
+  }
 
   /** F5: current state of a write batch (the card polls this while executing). */
   getBatch(batchId: string): Observable<VexWriteBatch> {

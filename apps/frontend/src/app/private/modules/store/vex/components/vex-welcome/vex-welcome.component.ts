@@ -10,6 +10,7 @@ import {
 import { firstValueFrom } from 'rxjs';
 import { AuthFacade } from '../../../../../../core/store/auth/auth.facade';
 import { ButtonComponent } from '../../../../../../shared/components/button/button.component';
+import { VexLaunchablePlaybook } from '../../models/vex.models';
 import { VexApiService } from '../../services/vex-api.service';
 import { VexChatStore } from '../../state/vex-chat.store';
 import {
@@ -49,6 +50,35 @@ import { VEX_COPY } from '../../vex-copy';
           </app-button>
         }
       </div>
+      @if (tasks().length > 0) {
+        <section
+          class="w-full max-w-2xl flex flex-col gap-2 text-left"
+          data-tour="vex-tasks"
+          [attr.aria-label]="copy.tasks_label"
+        >
+          <h2 class="text-sm font-semibold text-text-secondary m-0">
+            {{ copy.tasks_title }}
+          </h2>
+          <ul class="list-none m-0 p-0 grid gap-2 sm:grid-cols-2">
+            @for (task of tasks(); track task.id) {
+              <li class="min-w-0">
+                <button
+                  type="button"
+                  class="w-full h-full text-left rounded-xl border border-border bg-surface px-3 py-2.5 flex flex-col gap-0.5 cursor-pointer hover:border-primary focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-primary"
+                  (click)="store.sendMessage(task.prompt)"
+                >
+                  <span class="text-sm font-medium text-text-primary break-words">
+                    {{ task.title }}
+                  </span>
+                  <span class="text-xs text-text-secondary break-words">
+                    {{ task.description }}
+                  </span>
+                </button>
+              </li>
+            }
+          </ul>
+        </section>
+      }
       <span data-tour="vex-help">
         <app-button variant="ghost" size="sm" (clicked)="helpRequested.emit()">
           {{ copy.how_it_works }}
@@ -69,6 +99,8 @@ export class VexWelcomeComponent {
   protected readonly copy = VEX_COPY.welcome;
 
   private readonly server_suggestions = signal<VexServerSuggestion[] | null>(null);
+  /** T39: empty (or failed) list hides the gallery. */
+  protected readonly tasks = signal<VexLaunchablePlaybook[]>([]);
   readonly suggestions = computed(() =>
     resolveWelcomeSuggestions(this.server_suggestions()),
   );
@@ -85,6 +117,11 @@ export class VexWelcomeComponent {
     firstValueFrom(this.api.getSuggestions())
       .then((items) => {
         if (!destroyed) this.server_suggestions.set(items);
+      })
+      .catch(() => undefined);
+    firstValueFrom(this.api.getLaunchablePlaybooks())
+      .then((items) => {
+        if (!destroyed && Array.isArray(items)) this.tasks.set(items);
       })
       .catch(() => undefined);
   }

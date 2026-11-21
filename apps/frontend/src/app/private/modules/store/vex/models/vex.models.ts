@@ -429,3 +429,11 @@ export interface VexWriteBatchResult {
   batch: VexWriteBatch;
   replayed: boolean;
 }
+
+/** T39: a prebuilt task offered in the welcome gallery «Tareas». */
+export interface VexLaunchablePlaybook {
+  id: string;
+  title: string;
+  description: string;
+  prompt: string;
+}
