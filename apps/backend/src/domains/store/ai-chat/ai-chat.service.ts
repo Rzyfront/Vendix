@@ -524,6 +524,7 @@ export class AIChatService {
         agentKey ?? 'vexi',
         goal,
         base,
+        { storeMemory: variables.store_memory },
       );
       const agentResult = await this.aiAgent.runAgent({
         goal,
@@ -986,6 +987,7 @@ export class AIChatService {
         {
           speak: intent.speak,
           continuation: !!intent.continuation,
+          storeMemory: variables.store_memory,
         },
       );
       if (durableArgs.durable) {
@@ -1830,7 +1832,12 @@ export class AIChatService {
     agentKey: string,
     goal: string,
     base: { plan_approval?: AgentPlanApprovalHook },
-    options: { speak?: boolean; continuation?: boolean } = {},
+    options: {
+      speak?: boolean;
+      continuation?: boolean;
+      /** F4 T31: "Memoria de la tienda" block from `buildVexSnapshot`. */
+      storeMemory?: string;
+    } = {},
   ) {
     if (!this.durableSessions)
       throw new BadRequestException('AI_OBJECTIVE_UNAVAILABLE');
@@ -1865,6 +1872,13 @@ export class AIChatService {
         const resume = resumeReferenceBlock(conversation.messages, goal);
         if (resume) messages.push({ role: 'system', content: resume });
       }
+      // F4 T31: the store memory travels as a turn system message, NOT as a
+      // {{placeholder}} in the stored `system_prompt` (same reasoning as the
+      // speech register in buildContextWindow: an operator can edit that prompt
+      // from Super Admin, and a migration inserting the placeholder would
+      // overwrite production edits). Vex only; Vexi never receives it.
+      if (agentKey === VEX_AGENT_KEY && options.storeMemory?.trim())
+        messages.unshift({ role: 'system', content: options.storeMemory });
       // Durable structured facts take precedence; transcript is a bounded secondary window.
       if (session.context)
         messages.unshift({ role: 'system', content: session.context });

@@ -2563,6 +2563,25 @@ export const ErrorCodes = {
     devMessage: 'Follow-up suggestion was already dismissed',
   },
 
+  // Vex store memory (F4 T31)
+  AI_MEMORY_LIMIT_001: {
+    code: 'AI_MEMORY_LIMIT_001',
+    httpStatus: 409,
+    devMessage:
+      'La memoria de la tienda llegó a su tope (40 recuerdos o 2000 caracteres). Edita o borra uno antes de agregar otro.',
+  },
+  AI_MEMORY_FORBIDDEN_001: {
+    code: 'AI_MEMORY_FORBIDDEN_001',
+    httpStatus: 422,
+    devMessage:
+      'No guardo contraseñas, datos de pago ni documentos de identidad en la memoria.',
+  },
+  AI_MEMORY_NOT_FOUND_001: {
+    code: 'AI_MEMORY_NOT_FOUND_001',
+    httpStatus: 404,
+    devMessage: 'El recuerdo no existe en la memoria de esta tienda.',
+  },
+
   // Invoicing
   INVOICING_FIND_001: {
     code: 'INVOICING_FIND_001',

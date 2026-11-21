@@ -100,6 +100,7 @@ import { ServiceDepositsModule } from './service-deposits/service-deposits.modul
 import { ServiceRemindersModule } from './service-reminders/service-reminders.module';
 import { ServiceBudgetsModule } from './service-budgets/service-budgets.module';
 import { RemindersModule } from './reminders/reminders.module';
+import { AiAgentMemoryModule } from './ai-agent-memory/ai-agent-memory.module';
 
 @Module({
   imports: [
@@ -203,6 +204,7 @@ import { RemindersModule } from './reminders/reminders.module';
     ServiceRemindersModule,
     ServiceBudgetsModule,
     RemindersModule,
+    AiAgentMemoryModule,
   ],
   exports: [PrintFormatsModule],
 })

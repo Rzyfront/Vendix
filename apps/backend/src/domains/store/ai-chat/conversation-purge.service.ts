@@ -6,6 +6,7 @@ import { ErrorCodes, VendixHttpException } from '../../../common/errors';
 import { REDIS_CLIENT } from '../../../common/redis/redis.module';
 import { StorePrismaService } from '../../../prisma/services/store-prisma.service';
 import { ConversationPurgeS3Cleaner } from './conversation-purge-s3.cleaner';
+import { unEditedMemoriesWhere } from '../../../ai-engine/memory/agent-memory.service';
 
 const VEX_AGENT_KEY = 'vex';
 /** Una tarea `queued`/`running` más vieja que esto se da por abandonada. */
@@ -68,11 +69,15 @@ export class ConversationPurgeService {
   async preview(id: number): Promise<ConversationPurgePreview> {
     const scope = this.requireScope();
     await this.requireOwnedVexConversation(id, scope);
-    const [messages, blocks, attachments, hasRunning] = await Promise.all([
+    const [messages, blocks, attachments, memories, hasRunning] =
+      await Promise.all([
       this.prisma.ai_messages.count({ where: { conversation_id: id } }),
       this.prisma.ai_ui_blocks.count({ where: { conversation_id: id } }),
       this.prisma.ai_attachments.count({
         where: { conversation_id: id, ...UNLINKED_ATTACHMENT },
+      }),
+      this.prisma.ai_agent_memories.count({
+        where: unEditedMemoriesWhere(scope.store_id, id),
       }),
       this.hasRunningTask(id),
     ]);
@@ -80,7 +85,7 @@ export class ConversationPurgeService {
       messages,
       attachments,
       blocks,
-      memories: 0,
+      memories,
       has_running_task: hasRunning,
     };
   }
@@ -166,14 +171,20 @@ export class ConversationPurgeService {
   }
 
   /**
-   * Punto de extensión de F4: los recuerdos de la memoria que nacieron de esta
-   * conversación y nadie editó a mano. Hoy no existen; devuelve cuántos borró.
+   * Los recuerdos de la memoria de la tienda que nacieron de esta conversación
+   * (origin `agent`) y nadie editó a mano; devuelve cuántos borró. Los editados
+   * a mano (origin `manual`) son de la tienda y se conservan. El cliente
+   * transaccional no lleva scoping: el filtro repite la tienda.
    */
   protected async purgeDerivedMemories(
-    _tx: Prisma.TransactionClient,
-    _conversationId: number,
+    tx: Prisma.TransactionClient,
+    conversationId: number,
+    storeId: number,
   ): Promise<number> {
-    return 0;
+    const result = await tx.ai_agent_memories.deleteMany({
+      where: unEditedMemoriesWhere(storeId, conversationId),
+    });
+    return result.count;
   }
 
   private async purgeInTransaction(
@@ -276,7 +287,7 @@ export class ConversationPurgeService {
     const messages = await tx.ai_messages.deleteMany({
       where: { conversation_id: id, conversation: { ...owner } },
     });
-    const memories = await this.purgeDerivedMemories(tx, id);
+    const memories = await this.purgeDerivedMemories(tx, id, scope.store_id);
 
     // 7. Uso y costo: se anonimiza, no se borra.
     const logs = await tx.ai_engine_logs.updateMany({
