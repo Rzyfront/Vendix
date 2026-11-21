@@ -70,6 +70,8 @@ export const AGENT_TOOL_CORE: Readonly<Record<string, readonly string[]>> = {
     'suggest_followup',
     // F7/T48: exact arithmetic, so the model never computes percentages by head.
     'compute',
+    // F6/T43: spreadsheets and documents the owner uploads to /admin/vex.
+    'read_attachment',
   ],
 };
 /**
