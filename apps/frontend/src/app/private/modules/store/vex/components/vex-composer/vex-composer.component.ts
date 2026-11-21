@@ -1,13 +1,8 @@
 import { VexiVoicePipelineService } from '../../../../../../core/services/vexi-voice-pipeline.service';
 import { VexiRealtimeService } from '../../../../../../core/services/vexi-realtime.service';
-import { VexiApiService } from '../../../../../../core/services/vexi-api.service';
-import type { VoiceConsentApplied } from '../../../../../../core/services/vexi-voice-consent.model';
-import { VexiConfirmationCardComponent } from '../../../../../../shared/components/vexi-dock/vexi-confirmation-card.component';
 import {
   Component,
   DestroyRef,
-  effect,
-  untracked,
   ElementRef,
   computed,
   inject,
@@ -49,7 +44,7 @@ interface StagedFile {
 @Component({
   selector: 'vendix-vex-composer',
   standalone: true,
-  imports: [ButtonComponent, IconComponent, VexiConfirmationCardComponent, VexPresenceComponent],
+  imports: [ButtonComponent, IconComponent, VexPresenceComponent],
   template: `
     <div class="w-full">
       <div class="mb-2 px-2 min-h-8 flex items-center">
@@ -146,15 +141,6 @@ interface StagedFile {
               [size]="20"
             />
           </button>
-          <button
-            type="button"
-            class="min-w-11 min-h-11 px-2 py-1 rounded-2xl bg-surface text-text-primary touch-none focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-primary"
-            (click)="toggleRealtime()"
-            [attr.aria-pressed]="realtimeActive()"
-            [attr.aria-label]="copy.realtime_aria"
-          >
-            {{ realtimeActive() ? copy.realtime_stop : copy.realtime_start }}
-          </button>
         } @else {
           <button
             type="button"
@@ -181,20 +167,8 @@ interface StagedFile {
       </div>
       @if (voiceEnabled()) {
         <p class="text-xs text-text-secondary" role="status">
-          {{
-            pipeline.errorMessage() || realtime.errorMessage() || voiceHint()
-          }}
+          {{ pipeline.errorMessage() || voiceHint() }}
         </p>
-      }
-      @if (realtimeProposal(); as pending) {
-        <app-vexi-confirmation-card
-          [proposal]="pending.proposal"
-          [voiceContext]="pending.context"
-          [agentLabel]="copy.brand"
-          (approve)="approveRealtime()"
-          (reject)="rejectRealtime()"
-          (voiceApplied)="acceptRealtime($event)"
-        />
       }
       <p class="mt-2 text-center text-xs text-text-secondary">
         {{ copy.disclaimer }}
@@ -205,20 +179,11 @@ interface StagedFile {
 export class VexComposerComponent {
   protected readonly copy = VEX_COPY.composer;
   protected readonly pipeline = inject(VexiVoicePipelineService);
-  protected readonly realtime = inject(VexiRealtimeService);
-  private readonly voiceApi = inject(VexiApiService);
+  private readonly realtime = inject(VexiRealtimeService);
   private readonly destroyRef = inject(DestroyRef);
   readonly voiceEnabled = signal(false);
-  readonly realtimeActive = signal(false);
   readonly voiceHint = signal<string>(VEX_COPY.composer.voice_hint);
   private voiceHeld = false;
-  readonly realtimeProposal = computed(() => {
-    const pending = this.realtime.pendingProposal();
-    return pending?.context.agent_key === 'vex' &&
-      String(pending.context.conversation_id) === this.store.active_id()
-      ? pending
-      : null;
-  });
 
   constructor() {
     void this.realtime
@@ -228,20 +193,6 @@ export class VexComposerComponent {
       this.voiceHeld = false;
       this.pipeline.cancelRecording();
       this.pipeline.interrupt();
-      if (this.realtimeActive()) void this.realtime.stop();
-    });
-    let previous: string | null = null;
-    effect(() => {
-      const id = this.store.active_id();
-      if (id !== previous) {
-        previous = id;
-        untracked(() => {
-          if (this.realtimeActive()) {
-            this.realtimeActive.set(false);
-            void this.realtime.stop();
-          }
-        });
-      }
     });
   }
 
@@ -254,10 +205,6 @@ export class VexComposerComponent {
       (event.currentTarget as HTMLElement).setPointerCapture?.(
         pointer.pointerId,
       );
-    if (this.realtimeActive()) {
-      this.realtimeActive.set(false);
-      void this.realtime.stop();
-    }
     void this.store.ensureVoiceConversation().then(async (conversation_id) => {
       if (
         !conversation_id ||
@@ -283,75 +230,6 @@ export class VexComposerComponent {
       if (text && this.store.active_id() === conversation)
         this.store.sendVoiceMessage(text);
     });
-  }
-
-  async toggleRealtime(): Promise<void> {
-    if (!this.voiceEnabled()) return;
-    if (this.realtimeActive()) {
-      this.realtimeActive.set(false);
-      await this.realtime.stop();
-      return;
-    }
-    this.pipeline.cancelRecording();
-    this.pipeline.interrupt();
-    const conversation_id = await this.store.ensureVoiceConversation();
-    if (!conversation_id || this.store.activeNumericId() !== conversation_id)
-      return;
-    const opened = await this.realtime.start({
-      conversation_id,
-      agent_key: 'vex',
-    });
-    this.realtimeActive.set(opened);
-    if (!opened)
-      this.voiceHint.set(this.copy.realtime_denied);
-  }
-
-  async approveRealtime(): Promise<void> {
-    const pending = this.realtimeProposal();
-    if (
-      !pending?.context.session_id ||
-      !pending.context.proposal_id ||
-      pending.proposal.applying
-    )
-      return;
-    this.realtime.pendingProposal.set({
-      ...pending,
-      proposal: { ...pending.proposal, applying: true },
-    });
-    try {
-      const receipt = await firstValueFrom(
-        this.voiceApi.applyDisplayedVoiceProposal(pending.context, true),
-      );
-      this.acceptRealtime({
-        context: pending.context,
-        confirmationToken: pending.proposal.confirmationToken,
-        receipt,
-      });
-    } catch (error) {
-      this.realtime.clearProposal();
-      this.toast.error(
-        extractApiErrorMessage(error),
-        this.copy.approve_error_title,
-      );
-    }
-  }
-
-  acceptRealtime(result: VoiceConsentApplied): void {
-    this.store.acceptRealtimeVoiceReceipt(result);
-    if (
-      this.realtimeProposal()?.context.proposal_id ===
-      result.context.proposal_id
-    ) {
-      this.realtime.clearProposal();
-      this.realtimeActive.set(false);
-      void this.realtime.stop();
-    }
-  }
-
-  rejectRealtime(): void {
-    this.realtime.clearProposal();
-    this.realtimeActive.set(false);
-    void this.realtime.stop();
   }
 
   readonly store = inject(VexChatStore);
