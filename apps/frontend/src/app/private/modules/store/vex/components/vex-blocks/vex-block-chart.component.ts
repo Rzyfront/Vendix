@@ -2,6 +2,7 @@ import {
   ChangeDetectionStrategy,
   Component,
   DestroyRef,
+  ElementRef,
   PLATFORM_ID,
   computed,
   inject,
@@ -11,6 +12,9 @@ import {
 } from '@angular/core';
 import { isPlatformBrowser } from '@angular/common';
 import type { EChartsOption } from 'echarts';
+import * as echarts from 'echarts/core';
+import { FunnelChart, HeatmapChart } from 'echarts/charts';
+import { VisualMapComponent } from 'echarts/components';
 import { ChartComponent } from '../../../../../../shared/components/chart/chart.component';
 import {
   VexBlockInteraction,
@@ -19,6 +23,12 @@ import {
   VexUiBlock,
 } from '../../models/vex.models';
 import { VEX_COPY } from '../../vex-copy';
+import { VexBlockExportMenuComponent } from './vex-block-export-menu.component';
+import { blockToExportTable, downloadDataUrl } from './vex-block-export.util';
+
+// `echarts.use` is global and idempotent: the shared wrapper registers the
+// base charts; Vex adds the ones only its advanced chart types need.
+echarts.use([FunnelChart, HeatmapChart, VisualMapComponent]);
 
 /**
  * SSR/no-DOM fallback. Mirrors the `:root` defaults in `styles.scss`
@@ -48,17 +58,22 @@ const FALLBACK_PALETTE = [
 @Component({
   selector: 'vendix-vex-block-chart',
   standalone: true,
-  imports: [ChartComponent],
+  imports: [ChartComponent, VexBlockExportMenuComponent],
   changeDetection: ChangeDetectionStrategy.OnPush,
   template: `
     <figure
       class="rounded-2xl border border-border bg-surface overflow-hidden m-0"
     >
-      @if (spec().title) {
-        <figcaption class="px-4 pt-3 text-sm font-semibold text-text-primary">
-          {{ spec().title }}
-        </figcaption>
-      }
+      <figcaption
+        class="px-4 pt-3 flex items-center justify-between gap-2 text-sm font-semibold text-text-primary"
+      >
+        <span class="min-w-0 truncate">{{ spec().title || copy.label }}</span>
+        <vendix-vex-block-export-menu
+          [block]="block()"
+          [allowImage]="true"
+          (exportImage)="exportImage()"
+        />
+      </figcaption>
       @if (has_rows()) {
         <app-chart
           [options]="options()"
@@ -89,6 +104,7 @@ export class VexBlockChartComponent {
   readonly has_rows = computed(() => this.rows().length > 0);
 
   private readonly destroyRef = inject(DestroyRef);
+  private readonly host = inject<ElementRef<HTMLElement>>(ElementRef);
   private readonly isBrowser = isPlatformBrowser(inject(PLATFORM_ID));
 
   /**
@@ -121,6 +137,21 @@ export class VexBlockChartComponent {
   readonly options = computed<EChartsOption>(() =>
     buildOption(this.spec(), this.rows(), this.palette()),
   );
+
+  /** PNG of what is on screen, painted over the theme surface color. */
+  exportImage(): void {
+    const el = this.host.nativeElement.querySelector<HTMLElement>('.echarts-chart');
+    const instance = el ? echarts.getInstanceByDom(el) : undefined;
+    if (!instance) return;
+    const surface =
+      getComputedStyle(document.documentElement)
+        .getPropertyValue('--color-surface')
+        .trim() || FALLBACK_PALETTE[6];
+    downloadDataUrl(
+      instance.getDataURL({ type: 'png', pixelRatio: 2, backgroundColor: surface }),
+      blockToExportTable(this.block())?.filename ?? 'vex-grafico',
+    );
+  }
 
   onChartClick(event: unknown): void {
     const point = toPoint(event);
@@ -189,6 +220,91 @@ function buildOption(
         ],
       };
     }
+    case 'rose': {
+      const value_key = series_defs[0]?.key;
+      const label_key = spec.x_axis_key ?? firstTextKey(rows, value_key);
+      return {
+        color: palette,
+        tooltip: { trigger: 'item' },
+        legend: { bottom: 0 },
+        series: [
+          {
+            type: 'pie',
+            roseType: 'area',
+            radius: ['15%', '65%'],
+            data: rows.map((row) => ({
+              name: String(row[label_key] ?? ''),
+              value: readNumber(value_key ? row[value_key] : undefined),
+            })),
+          },
+        ],
+      };
+    }
+    case 'funnel': {
+      const value_key = series_defs[0]?.key;
+      const label_key = spec.x_axis_key ?? firstTextKey(rows, value_key);
+      return {
+        color: palette,
+        tooltip: { trigger: 'item' },
+        legend: { bottom: 0 },
+        series: [
+          {
+            type: 'funnel',
+            sort: 'descending',
+            left: '8%',
+            width: '84%',
+            top: 16,
+            bottom: 48,
+            gap: 2,
+            label: { show: true, position: 'inside' },
+            data: rows.map((row) => ({
+              name: String(row[label_key] ?? ''),
+              value: readNumber(value_key ? row[value_key] : undefined),
+            })),
+          },
+        ],
+      };
+    }
+    case 'heatmap': {
+      // x = row labels; every series is one Y row with a value per label.
+      const label_key = spec.x_axis_key ?? firstTextKey(rows, series_defs[0]?.key);
+      const x_labels = rows.map((row) => String(row[label_key] ?? ''));
+      const y_labels = series_defs.map((def) => def.label ?? def.key);
+      const cells = series_defs.flatMap((def, y) =>
+        rows.map((row, x) => [x, y, readNumber(row[def.key])]),
+      );
+      const values = cells.map((cell) => cell[2]);
+      const show_labels = x_labels.length <= 12 && y_labels.length <= 10;
+      return {
+        tooltip: {
+          trigger: 'item',
+          formatter: (params: unknown) => {
+            const value = (params as { value?: number[] }).value ?? [];
+            return `${x_labels[value[0]] ?? ''} · ${y_labels[value[1]] ?? ''}: ${value[2] ?? ''}`;
+          },
+        },
+        grid: { left: 8, right: 12, top: 16, bottom: 72, containLabel: true },
+        xAxis: { type: 'category', data: x_labels, splitArea: { show: true } },
+        yAxis: { type: 'category', data: y_labels, splitArea: { show: true } },
+        visualMap: {
+          min: values.length ? Math.min(...values) : 0,
+          max: values.length ? Math.max(...values) : 1,
+          calculable: true,
+          orient: 'horizontal',
+          left: 'center',
+          bottom: 4,
+          // One accent: the theme primary, from transparent-ish to solid.
+          inRange: { color: [palette[0]], colorAlpha: [0.1, 1] },
+        },
+        series: [
+          {
+            type: 'heatmap',
+            data: cells,
+            label: { show: show_labels },
+          },
+        ],
+      };
+    }
     case 'gauge': {
       const value_key = series_defs[0]?.key;
       const value = rows.length
@@ -238,9 +354,14 @@ function buildOption(
       };
     }
     default: {
-      // bar | line | area
+      // bar | line | area | stacked_bar | combo
       const label_key = spec.x_axis_key ?? firstTextKey(rows, series_defs[0]?.key);
-      const echarts_type = spec.chart_type === 'area' ? 'line' : spec.chart_type;
+      const is_combo = spec.chart_type === 'combo';
+      const is_stacked = spec.stacked || spec.chart_type === 'stacked_bar';
+      const base_type: 'bar' | 'line' =
+        spec.chart_type === 'area' || spec.chart_type === 'line'
+          ? 'line'
+          : 'bar';
       return {
         color: palette,
         tooltip: { trigger: 'axis' },
@@ -251,10 +372,10 @@ function buildOption(
           data: rows.map((row) => String(row[label_key] ?? '')),
         },
         yAxis: { type: 'value' },
-        series: series_defs.map((def) => ({
+        series: series_defs.map((def, index) => ({
           name: def.label ?? def.key,
-          type: echarts_type,
-          stack: spec.stacked ? 'vex' : undefined,
+          type: is_combo ? (def.type ?? (index === 0 ? 'bar' : 'line')) : base_type,
+          stack: is_stacked && !is_combo ? 'vex' : undefined,
           areaStyle: spec.chart_type === 'area' ? {} : undefined,
           data: rows.map((row) => readNumber(row[def.key])),
         })),

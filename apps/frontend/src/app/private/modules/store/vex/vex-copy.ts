@@ -298,7 +298,41 @@ export const VEX_COPY = {
       empty_value: '—',
     },
     chart: {
+      label: 'Gráfico de Vex',
       empty: 'Sin datos para graficar',
+    },
+    unknown: {
+      message:
+        'Vex envió un tipo de contenido que esta versión aún no puede mostrar',
+    },
+    timeline: {
+      label: 'Línea de tiempo de Vex',
+      empty: 'Sin eventos para mostrar',
+      no_date: 'Sin fecha',
+    },
+    list: {
+      label: 'Lista de Vex',
+      empty: 'Sin elementos para mostrar',
+    },
+    export: {
+      button: 'Exportar',
+      button_aria: 'Exportar los datos de este bloque',
+      menu_label: 'Formatos de exportación',
+      xlsx: 'Excel (XLSX)',
+      csv: 'CSV',
+      png: 'Imagen PNG',
+      failed: 'No se pudo exportar. Intenta de nuevo.',
+      default_filename: 'vex',
+      sheet_name: 'Datos',
+      header_label: 'Etiqueta',
+      header_title: 'Título',
+      header_subtitle: 'Subtítulo',
+      header_description: 'Descripción',
+      header_badge: 'Estado',
+      header_date: 'Fecha',
+      header_event: 'Evento',
+      header_actor: 'Responsable',
+      point_fallback: (position: number) => `Punto ${position}`,
     },
     table: {
       label: 'Tabla de Vex',
