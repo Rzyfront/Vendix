@@ -51,6 +51,7 @@ import {
   USER_NOTICES,
 } from '../../../ai-engine/agent-execution.contract';
 import { VexActivityFeedService } from './services/vex-activity-feed.service';
+import { VexSuggestionsService } from './services/vex-suggestions.service';
 
 /**
  * Vex's surface: whole-plan approval, plan-token applies, UI blocks, the
@@ -84,6 +85,7 @@ export class VexController {
     private readonly feed: VexActivityFeedService,
     private readonly attachments: VexiAttachmentsService,
     private readonly subscriptionAccess: SubscriptionAccessService,
+    private readonly suggestions: VexSuggestionsService,
   ) {}
 
   /**
@@ -494,6 +496,19 @@ export class VexController {
    * One UI block. Signed URLs for image/file kinds are minted fresh per read
    * and never persisted — see `VexBlockService`.
    */
+  /**
+   * Welcome suggestions for this store: ids only, ordered by real pending work
+   * (reminders due, open cash register, stock under its minimum). Read-only
+   * counts; no provider call, so it is not behind `AiAccessGuard`.
+   */
+  @Get('suggestions')
+  async getSuggestions() {
+    return this.responseService.success(
+      { suggestions: await this.suggestions.getSuggestions() },
+      'Sugerencias',
+    );
+  }
+
   @Get('blocks/:id')
   async getBlock(@Param('id', ParseUUIDPipe) id: string) {
     const block = await this.blocks.getUiBlock(id);

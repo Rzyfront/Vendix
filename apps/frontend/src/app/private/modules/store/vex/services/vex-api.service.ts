@@ -423,6 +423,15 @@ export class VexApiService {
       .pipe(map((res) => res.data.followup));
   }
 
+  /** Welcome suggestions for this store (ids only; wording lives in `vex-copy.ts`). */
+  getSuggestions(): Observable<{ id: string; count?: number }[]> {
+    return this.http
+      .get<{
+        data: { suggestions: { id: string; count?: number }[] };
+      }>(`${this.vexBase}/suggestions`)
+      .pipe(map((res) => res.data?.suggestions ?? []));
+  }
+
   /** «No sugerir en este chat» (and its undo). */
   muteFollowups(conversationId: number, muted: boolean): Observable<boolean> {
     return this.http

@@ -11,6 +11,7 @@ import { VexEnabledGuard } from './guards/vex-enabled.guard';
 import { PlanApprovalService } from './services/plan-approval.service';
 import { VexBlockService } from './services/vex-block.service';
 import { VexActivityFeedService } from './services/vex-activity-feed.service';
+import { VexSuggestionsService } from './services/vex-suggestions.service';
 import { AIToolRegistry } from '../../../ai-engine/tools/ai-tool-registry';
 import { createVexBlockTools } from '../../../ai-engine/tools/domains/vex-blocks.tools';
 import { VexiVoiceConfirmationService } from '../vexi/vexi-voice-confirmation.service';
@@ -46,6 +47,7 @@ import { randomUUID } from 'node:crypto';
     PlanApprovalService,
     VexBlockService,
     VexActivityFeedService,
+    VexSuggestionsService,
     VexEnabledGuard,
     VexiActivityService,
   ],

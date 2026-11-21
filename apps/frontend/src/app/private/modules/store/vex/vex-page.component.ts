@@ -24,6 +24,11 @@ import { VexChatStore } from './state/vex-chat.store';
 import { VexLogStore } from './state/vex-log.store';
 import { VexPresenceStore } from './state/vex-presence.store';
 import { VexPresenceComponent } from './components/vex-presence/vex-presence.component';
+import { VexHelpComponent } from './components/vex-help/vex-help.component';
+import { TourModalComponent } from '../../../../shared/components/tour/tour-modal/tour-modal.component';
+import { TourService } from '../../../../shared/components/tour/services/tour.service';
+import { VEX_TOUR_CONFIG } from '../../../../shared/components/tour/configs/vex-tour.config';
+import { VEX_COPY } from './vex-copy';
 
 const DESKTOP_QUERY = '(min-width: 1024px)';
 function isDesktop(): boolean {
@@ -49,6 +54,8 @@ function isDesktop(): boolean {
     VexWelcomeComponent,
     VexTitleEditorComponent,
     VexPresenceComponent,
+    VexHelpComponent,
+    TourModalComponent,
   ],
   providers: [VexChatStore, VexLogStore, VexPresenceStore],
   template: `
@@ -74,6 +81,7 @@ function isDesktop(): boolean {
             ? 'hidden lg:flex shrink-0'
             : 'fixed inset-y-0 left-0 z-40 flex lg:static lg:z-auto shrink-0'
         "
+        data-tour="vex-chats"
       >
         <vendix-vex-chats-sidebar
           [(collapsed)]="chats_collapsed"
@@ -94,7 +102,7 @@ function isDesktop(): boolean {
             role="status"
           >
             <app-icon name="upload" [size]="32"></app-icon>
-            <span class="text-sm font-semibold">Suelta para adjuntar</span>
+            <span class="text-sm font-semibold">{{ copy.drop_to_attach }}</span>
           </div>
         }
         <div
@@ -107,7 +115,8 @@ function isDesktop(): boolean {
           <button
             type="button"
             class="lg:hidden w-10 h-10 rounded-full flex items-center justify-center text-[var(--color-text-secondary)] hover:text-[var(--color-text-primary)]"
-            aria-label="Abrir chats"
+            [attr.aria-label]="copy.open_chats"
+            data-tour="vex-chats-button"
             aria-controls="vex-chats-panel"
             [attr.aria-expanded]="!chats_collapsed()"
             (click)="openChats()"
@@ -117,10 +126,10 @@ function isDesktop(): boolean {
           <a
             routerLink="/admin/dashboard"
             class="min-h-10 px-3 rounded-full flex items-center gap-2 text-sm text-[var(--color-text-secondary)] hover:text-[var(--color-text-primary)]"
-            aria-label="Volver al panel"
+            [attr.aria-label]="copy.back_aria"
           >
             <app-icon name="arrow-left" [size]="18"></app-icon>
-            <span>Panel</span>
+            <span>{{ copy.back }}</span>
           </a>
           <div class="flex-1 min-w-0 flex items-center justify-center gap-3">
             @if (renaming_title() && header_conversation(); as current) {
@@ -136,8 +145,8 @@ function isDesktop(): boolean {
                 #titleButton
                 type="button"
                 class="group min-h-10 max-w-full px-3 rounded-full flex items-center gap-2 text-sm text-[var(--color-text-secondary)] hover:text-[var(--color-text-primary)] hover:bg-[rgba(var(--color-text-primary-rgb),0.06)]"
-                [attr.aria-label]="'Renombrar la conversación: ' + current.title"
-                title="Renombrar"
+                [attr.aria-label]="copy.rename_aria(current.title)"
+                [title]="copy.rename"
                 (click)="renaming_title.set(true)"
               >
                 <span class="truncate">{{ current.title }}</span>
@@ -150,8 +159,18 @@ function isDesktop(): boolean {
           </div>
           <button
             type="button"
+            class="w-10 h-10 rounded-full flex items-center justify-center text-[var(--color-text-secondary)] hover:text-[var(--color-text-primary)]"
+            [attr.aria-label]="helpCopy.open_aria"
+            [title]="helpCopy.open"
+            (click)="help_open.set(true)"
+          >
+            <app-icon name="help-circle" [size]="20"></app-icon>
+          </button>
+          <button
+            type="button"
             class="lg:hidden w-10 h-10 rounded-full flex items-center justify-center text-[var(--color-text-secondary)] hover:text-[var(--color-text-primary)]"
-            aria-label="Abrir bitácora"
+            [attr.aria-label]="copy.open_log"
+            data-tour="vex-log-button"
             aria-controls="vex-log-panel"
             [attr.aria-expanded]="!log_collapsed()"
             (click)="openLog()"
@@ -164,15 +183,17 @@ function isDesktop(): boolean {
           <div class="relative z-10 flex-1 min-h-0">
             <vendix-vex-thread />
           </div>
-          <div class="relative z-10 max-w-3xl mx-auto w-full px-4 pb-4">
+          <div class="relative z-10 max-w-3xl mx-auto w-full px-4 pb-4" data-tour="vex-composer">
             <vendix-vex-composer />
           </div>
         } @else {
           <div
             class="relative z-10 flex-1 flex flex-col items-center justify-center gap-8 max-w-3xl mx-auto w-full px-4 pb-16"
           >
-            <vendix-vex-welcome />
-            <vendix-vex-composer />
+            <vendix-vex-welcome (helpRequested)="help_open.set(true)" />
+            <div class="w-full" data-tour="vex-composer">
+              <vendix-vex-composer />
+            </div>
           </div>
         }
       </main>
@@ -183,14 +204,25 @@ function isDesktop(): boolean {
             ? 'hidden lg:flex shrink-0'
             : 'fixed inset-y-0 right-0 z-40 flex lg:static lg:z-auto shrink-0'
         "
+        data-tour="vex-log"
       >
         <vendix-vex-log-sidebar [(collapsed)]="log_collapsed" />
       </div>
     </div>
+    <vendix-vex-help [(isOpen)]="help_open" (tourRequested)="tour_open.set(true)" />
+    <app-tour-modal [(isOpen)]="tour_open" [tourConfig]="tourConfig"></app-tour-modal>
   `,
 })
 export class VexPageComponent {
   readonly store = inject(VexChatStore);
+  private readonly tours = inject(TourService);
+  protected readonly copy = VEX_COPY.page;
+  protected readonly helpCopy = VEX_COPY.help;
+  protected readonly tourConfig = VEX_TOUR_CONFIG;
+  /** «¿Cómo funciona Vex?» */
+  readonly help_open = signal(false);
+  /** Guided tour: opens by itself only on the first visit. */
+  readonly tour_open = signal(false);
   private readonly router = inject(Router);
   private readonly route = inject(ActivatedRoute);
 
@@ -221,6 +253,10 @@ export class VexPageComponent {
   private readonly injector = inject(Injector);
 
   constructor() {
+    // First visit only: completing or skipping it is remembered per user.
+    afterNextRender(() => {
+      if (this.tours.canShowTour(VEX_TOUR_CONFIG.id)) this.tour_open.set(true);
+    });
     // Switching conversation drops a half-edited header title.
     effect(() => {
       this.store.active_id();
