@@ -160,6 +160,11 @@ describe('skill retrieval (T32)', () => {
     ];
     const hits = await search.search('cierre de caja', { limit: 10 });
     expect(hits.map((h) => h.key)).not.toContain('cierre-de-caja');
+    // load applies the same agent filter as search (H7)
+    expect(await search.load('cierre-de-caja')).toBeNull();
+    expect(
+      await search.load('cierre-de-caja', { agent_key: 'vexi' }),
+    ).toMatchObject({ key: 'cierre-de-caja' });
   });
 
   // Moved from tools/domains/skill.tools.spec.ts: what `load_skill` serves is

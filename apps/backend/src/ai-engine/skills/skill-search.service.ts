@@ -74,9 +74,17 @@ export class SkillSearchService {
       });
   }
 
-  /** Body of the PUBLISHED version, bounded to the playbook token budget. */
-  async load(key: string): Promise<LoadedSkill | null> {
-    const skill = await this.repository.findPublishedByKey(key);
+  /**
+   * Body of the PUBLISHED version, bounded to the playbook token budget. Same
+   * agent filter as `search`: a skill of another agent is not found.
+   */
+  async load(
+    key: string,
+    options: { agent_key?: string } = {},
+  ): Promise<LoadedSkill | null> {
+    const skill = await this.repository.findPublishedByKey(key, {
+      agent_key: options.agent_key ?? SKILL_AGENT_KEY_DEFAULT,
+    });
     if (!skill) return null;
     const lines = skill.content.body.split('\n');
     let truncated = false;

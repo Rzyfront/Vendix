@@ -182,9 +182,19 @@ export class SkillRepository {
     return this.resolvePublished(skills);
   }
 
-  async findPublishedByKey(key: string): Promise<PublishedSkill | null> {
+  async findPublishedByKey(
+    key: string,
+    filter: { agent_key?: string } = {},
+  ): Promise<PublishedSkill | null> {
     const skill = (await this.prisma.ai_agent_skills.findFirst({
-      where: { key, status: 'published', published_version: { not: null } },
+      where: {
+        key,
+        status: 'published',
+        published_version: { not: null },
+        ...(filter.agent_key
+          ? { agent_keys: { has: filter.agent_key } }
+          : {}),
+      },
     })) as SkillRow | null;
     return skill ? ((await this.resolvePublished([skill]))[0] ?? null) : null;
   }
