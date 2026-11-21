@@ -8,7 +8,12 @@ import { environment } from '../../../../../../environments/environment';
 export interface AgentStatusView {
   agent_key: 'vex' | 'vexi';
   label: 'Vex' | 'Vexi';
-  state: 'on' | 'off_by_plan' | 'off_by_store' | 'no_subscription';
+  state:
+    | 'on'
+    | 'off_by_plan'
+    | 'off_by_store'
+    | 'no_subscription'
+    | 'subscription_blocked';
   plan_includes: boolean;
   store_enabled: boolean;
   reason: string | null;

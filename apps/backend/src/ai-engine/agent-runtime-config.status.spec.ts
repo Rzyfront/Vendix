@@ -2,12 +2,16 @@ import { AgentQuotaService } from '../domains/store/subscriptions/services/agent
 import { AgentRuntimeConfigService } from './agent-runtime-config.service';
 
 describe('AgentRuntimeConfigService.getAgentStatuses', () => {
-  const row = (agent_key: string, enabled: boolean) => ({
+  const row = (
+    agent_key: string,
+    enabled: boolean,
+    on_limit: 'block' | 'warn' = 'block',
+  ) => ({
     agent_key,
     capability_key: 'agent',
     enabled,
     cap_value: null,
-    on_limit: 'block',
+    on_limit,
   });
   let resolve: jest.Mock;
   let findSettings: jest.Mock;
@@ -29,8 +33,9 @@ describe('AgentRuntimeConfigService.getAgentStatuses', () => {
     hasPlan: boolean,
     rows: any[],
     settings: any,
+    state: string = 'active',
   ) => {
-    resolve.mockResolvedValue({ found, hasPlan, rows });
+    resolve.mockResolvedValue({ found, hasPlan, rows, state });
     findSettings.mockResolvedValue({ settings });
   };
 
@@ -81,6 +86,58 @@ describe('AgentRuntimeConfigService.getAgentStatuses', () => {
     expect((await service.getAgentStatuses(5))[0].state).toBe(
       'no_subscription',
     );
+  });
+
+  const bothOn = { vex: { enabled: true }, vexi: { enabled: true } };
+
+  it('a suspended or blocked subscription is not «on»: the gate blocks it first', async () => {
+    setup(true, true, [row('vex', true), row('vexi', true)], bothOn, 'suspended');
+    const [vex, vexi] = await service.getAgentStatuses(5);
+    expect(vex.state).toBe('subscription_blocked');
+    expect(vex.reason).toBe(
+      'La suscripción de la tienda está suspendida; Vex no responde hasta que vuelva a estar activa.',
+    );
+    expect(vexi.state).toBe('subscription_blocked');
+
+    setup(true, true, [row('vex', true), row('vexi', true)], bothOn, 'blocked');
+    expect((await service.getAgentStatuses(5))[0].reason).toBe(
+      'La suscripción de la tienda está bloqueada; Vex no responde hasta que vuelva a estar activa.',
+    );
+  });
+
+  it('the subscription block wins over the plan and the store switch, like the gate', async () => {
+    setup(true, true, [row('vex', false), row('vexi', true)], {}, 'cancelled');
+    const [vex, vexi] = await service.getAgentStatuses(5);
+    expect(vex.state).toBe('subscription_blocked');
+    expect(vexi.state).toBe('subscription_blocked');
+    expect(vex.plan_includes).toBe(false);
+  });
+
+  it('grace_hard blocks only the agent whose plan degrades to block', async () => {
+    setup(
+      true,
+      true,
+      [row('vex', true, 'block'), row('vexi', true, 'warn')],
+      bothOn,
+      'grace_hard',
+    );
+    const [vex, vexi] = await service.getAgentStatuses(5);
+    expect(vex.state).toBe('subscription_blocked');
+    expect(vexi.state).toBe('on');
+  });
+
+  it('states the gate lets through keep the agent on', async () => {
+    for (const state of ['active', 'trial', 'grace_soft', 'pending_payment']) {
+      setup(true, true, [row('vex', true), row('vexi', true)], bothOn, state);
+      expect((await service.getAgentStatuses(5))[0].state).toBe('on');
+    }
+  });
+
+  it('a draft or plan-less subscription reads as no active subscription', async () => {
+    for (const state of ['draft', 'no_plan']) {
+      setup(true, true, [row('vex', true)], bothOn, state);
+      expect((await service.getAgentStatuses(5))[0].state).toBe('no_subscription');
+    }
   });
 
   it('store without settings row is off_by_store', async () => {

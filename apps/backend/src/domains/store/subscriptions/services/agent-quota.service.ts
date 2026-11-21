@@ -6,6 +6,7 @@ import {
   Optional,
 } from '@nestjs/common';
 import Redis from 'ioredis';
+import { store_subscription_state_enum } from '@prisma/client';
 import { REDIS_CLIENT } from '../../../../common/redis/redis.module';
 import {
   AI_AGENT_LABELS,
@@ -177,6 +178,11 @@ export interface EffectiveAIEntitlements {
   found: boolean;
   hasPlan: boolean;
   rows: AIEntitlement[];
+  /**
+   * Subscription state of the record, when there is one: the gate blocks by
+   * state before it looks at the rows (`subscriptionStateToGateMode`).
+   */
+  state?: store_subscription_state_enum;
 }
 
 /**
@@ -350,7 +356,7 @@ export class AgentQuotaService {
       aiEntitlementsMode() === 'enforce'
         ? table?.found === true && table.planId !== null
         : true;
-    return { found: true, hasPlan, rows };
+    return { found: true, hasPlan, rows, state: resolved.state };
   }
 
   /** The rows the gate decides with; `null` without a subscription record. */

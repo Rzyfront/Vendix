@@ -1,10 +1,11 @@
 import { Injectable } from '@nestjs/common';
-import { Prisma } from '@prisma/client';
+import { Prisma, store_subscription_state_enum } from '@prisma/client';
 import { GlobalPrismaService } from '../prisma/services/global-prisma.service';
 import { AuditAction, AuditService } from '../common/audit/audit.service';
 import { VendixHttpException, ErrorCodes } from '../common/errors';
 import { AIEngineService } from './ai-engine.service';
 import { AgentQuotaService } from '../domains/store/subscriptions/services/agent-quota.service';
+import { subscriptionStateToGateMode } from '../domains/store/subscriptions/services/subscription-access.service';
 
 /** App TTS that holds the base voice (`metadata.speech`). */
 export const VOICE_TTS_APP_KEY = 'vexi_voice_tts';
@@ -25,7 +26,12 @@ export interface AgentVoice {
 export interface AgentStatusView {
   agent_key: RuntimeAgentKey;
   label: 'Vex' | 'Vexi';
-  state: 'on' | 'off_by_plan' | 'off_by_store' | 'no_subscription';
+  state:
+    | 'on'
+    | 'off_by_plan'
+    | 'off_by_store'
+    | 'no_subscription'
+    | 'subscription_blocked';
   plan_includes: boolean;
   store_enabled: boolean;
   /** `null` when `state = 'on'`. Same text for store and super admin. */
@@ -89,13 +95,40 @@ export function agentVoiceFromSpeechMetadata(
   return result;
 }
 
+/** How the status names a subscription state that blocks the agent. */
+const BLOCKING_STATE_LABEL: Partial<
+  Record<store_subscription_state_enum, string>
+> = {
+  suspended: 'suspendida',
+  blocked: 'bloqueada',
+  cancelled: 'cancelada',
+  expired: 'vencida',
+  grace_hard: 'en periodo de gracia',
+};
+
+/**
+ * States without a usable subscription: the gate blocks them and the status
+ * reads them as «no active subscription», like a missing record.
+ */
+const NO_SUBSCRIPTION_STATES: ReadonlySet<store_subscription_state_enum> =
+  new Set<store_subscription_state_enum>(['draft', 'no_plan']);
+
 export function agentStatusReason(
   state: AgentStatusView['state'],
   label: string,
+  subscriptionState?: store_subscription_state_enum,
 ): string | null {
   switch (state) {
     case 'no_subscription':
       return 'La tienda no tiene una suscripción activa.';
+    case 'subscription_blocked': {
+      // The state, never a cause: a retired plan locks a store that owes
+      // nothing, so the text must not say «falta de pago».
+      const named =
+        (subscriptionState && BLOCKING_STATE_LABEL[subscriptionState]) ??
+        'inactiva';
+      return `La suscripción de la tienda está ${named}; ${label} no responde hasta que vuelva a estar activa.`;
+    }
     case 'off_by_plan':
       return `El plan de la tienda no incluye ${label}.`;
     case 'off_by_store':
@@ -409,8 +442,24 @@ export class AgentRuntimeConfigService {
       const block = (settings as Record<string, unknown>)[agentKey];
       const store_enabled = isRecord(block) && block.enabled === true;
 
+      // Same order as the gate: the subscription state blocks before the
+      // plan rows are read, with the agent's own degradation for grace_hard.
+      const subscriptionBlocks =
+        resolved.state !== undefined &&
+        subscriptionStateToGateMode(resolved.state, {
+          enabled: true,
+          degradation: planRow?.on_limit ?? 'warn',
+        }).mode === 'block';
+
       let state: AgentStatusView['state'];
-      if (!resolved.found || !resolved.hasPlan) state = 'no_subscription';
+      if (
+        !resolved.found ||
+        !resolved.hasPlan ||
+        (resolved.state !== undefined &&
+          NO_SUBSCRIPTION_STATES.has(resolved.state))
+      ) {
+        state = 'no_subscription';
+      } else if (subscriptionBlocks) state = 'subscription_blocked';
       else if (!plan_includes) state = 'off_by_plan';
       else if (!store_enabled) state = 'off_by_store';
       else state = 'on';
@@ -421,7 +470,7 @@ export class AgentRuntimeConfigService {
         state,
         plan_includes,
         store_enabled,
-        reason: agentStatusReason(state, label),
+        reason: agentStatusReason(state, label, resolved.state),
       };
     });
   }

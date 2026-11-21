@@ -305,6 +305,18 @@ describe('AgentQuotaService (T14)', () => {
       expect(effective).toEqual({ found: true, hasPlan: false, rows: [] });
     });
 
+    it('lleva el estado de la suscripción para que el estado del agente bloquee como el gate', async () => {
+      resolver.resolveSubscription.mockResolvedValue({
+        found: true,
+        state: 'suspended',
+        features: legacyFeatures(),
+      });
+
+      const effective = await service.resolveEffectiveEntitlements(STORE);
+
+      expect(effective.state).toBe('suspended');
+    });
+
     it('sin suscripción: found false y sin filas', async () => {
       resolver.resolveSubscription.mockResolvedValue({ found: false });
 
