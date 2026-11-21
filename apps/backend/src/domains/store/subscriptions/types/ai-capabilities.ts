@@ -355,11 +355,11 @@ export function legacyFlagsToAIEntitlements(
       agent_key: def.agent_key,
       capability_key: def.capability_key,
       enabled:
-        src.enabled_from === 'always' ? true : feature?.enabled === true,
+        src.enabled_from === 'always' ? true : feature?.['enabled'] === true,
       cap_value: src.cap_field
         ? legacyCapToCapValue(feature?.[src.cap_field])
         : null,
-      on_limit: feature?.degradation === 'block' ? 'block' : 'warn',
+      on_limit: feature?.['degradation'] === 'block' ? 'block' : 'warn',
     });
   }
   return out;
