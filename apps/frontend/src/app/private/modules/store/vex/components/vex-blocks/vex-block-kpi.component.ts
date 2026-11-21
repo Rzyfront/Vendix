@@ -23,29 +23,29 @@ import { VexKpiSpec, VexUiBlock } from '../../models/vex.models';
   changeDetection: ChangeDetectionStrategy.OnPush,
   template: `
     <section
-      class="rounded-2xl border border-[var(--color-border)] bg-[var(--color-surface)] px-4 py-3 flex items-center gap-3"
+      class="rounded-2xl border border-border bg-surface px-4 py-3 flex items-center gap-3"
       [attr.aria-label]="spec().label"
     >
       @if (spec().icon) {
         <span
-          class="w-11 h-11 shrink-0 rounded-xl grid place-items-center bg-[rgba(var(--color-primary-rgb,46,204,113),0.12)] text-[var(--color-primary)]"
+          class="w-11 h-11 shrink-0 rounded-xl grid place-items-center bg-primary/10 text-primary"
           aria-hidden="true"
         >
           <app-icon [name]="spec().icon ?? 'info'" [size]="22"></app-icon>
         </span>
       }
       <div class="min-w-0">
-        <p class="text-xs font-medium uppercase tracking-wide text-[var(--color-text-secondary)] truncate">
+        <p class="text-xs font-medium uppercase tracking-wide text-text-secondary truncate">
           {{ spec().label }}
         </p>
-        <p class="text-2xl font-semibold text-[var(--color-text-primary)] leading-tight">
+        <p class="text-2xl font-semibold text-text-primary leading-tight">
           {{ formatted_value() }}
         </p>
         @if (delta_text()) {
           <p class="text-xs mt-0.5" [class]="delta_class()">
             {{ delta_text() }}
             @if (spec().delta_label) {
-              <span class="text-[var(--color-text-secondary)]">· {{ spec().delta_label }}</span>
+              <span class="text-text-secondary">· {{ spec().delta_label }}</span>
             }
           </p>
         }
@@ -103,9 +103,9 @@ export class VexBlockKpiComponent {
 
   readonly delta_class = computed(() => {
     const numeric = toNumber(this.raw_delta());
-    if (numeric === null || numeric === 0) return 'text-[var(--color-text-secondary)]';
+    if (numeric === null || numeric === 0) return 'text-text-secondary';
     const positive = numeric > 0 !== (this.spec().invert_delta ?? false);
-    return positive ? 'text-[var(--color-success)]' : 'text-[var(--color-error)]';
+    return positive ? 'text-success' : 'text-error';
   });
 
   constructor() {

@@ -8,6 +8,7 @@ import {
   Injector,
   viewChild,
 } from '@angular/core';
+import { SpinnerComponent } from '../../../../../../shared/components/spinner/spinner.component';
 import { ButtonComponent } from '../../../../../../shared/components/button/button.component';
 import { IconComponent } from '../../../../../../shared/components/icon/icon.component';
 import { VexChatStore } from '../../state/vex-chat.store';
@@ -31,6 +32,7 @@ import { StoreSettingsFacade } from '../../../../../../core/store/store-settings
   standalone: true,
   imports: [
     ButtonComponent,
+    SpinnerComponent,
     IconComponent,
     VexMarkdownComponent,
     VexBlockTableComponent,
@@ -46,41 +48,38 @@ import { StoreSettingsFacade } from '../../../../../../core/store/store-settings
     <div #scroller class="h-full overflow-y-auto" role="log" aria-live="polite">
       <div class="max-w-3xl mx-auto w-full px-4 py-4 flex flex-col gap-6">
         @if (store.loading_thread()) {
-          <div
-            class="flex items-center justify-center gap-2 py-8 text-[var(--color-text-secondary)]"
-          >
-            <app-icon name="loader-2" [size]="18" [spin]="true"></app-icon>
-            <span class="text-sm">Abriendo conversación…</span>
+          <div class="flex justify-center py-8" role="status">
+            <app-spinner size="sm" [text]="threadCopy.loading"></app-spinner>
           </div>
         }
         @for (message of messages(); track message.id) {
           @if (message.role === 'user') {
             <div class="flex flex-col items-end gap-1">
               <div
-                class="max-w-[80%] rounded-2xl bg-[var(--color-surface)] border px-4 py-2 whitespace-pre-wrap leading-relaxed text-[var(--color-text-primary)]"
-                [class]="message.send_failed ? 'border-[var(--color-error)]' : 'border-[var(--color-border)]'"
+                class="max-w-xl rounded-2xl bg-surface border px-4 py-2 whitespace-pre-wrap leading-relaxed text-text-primary"
+                [class]="message.send_failed ? 'border-error' : 'border-border'"
               >
                 {{ message.content }}
               </div>
               @if (message.send_failed) {
                 <div
-                  class="flex items-center gap-2 flex-wrap justify-end text-sm text-[var(--color-error)]"
+                  class="flex items-center gap-2 flex-wrap justify-end text-sm text-error"
                   role="alert"
                 >
                   <app-icon name="alert-triangle" [size]="14"></app-icon>
                   <span>No se envió</span>
                   <span aria-hidden="true">·</span>
-                  <button
-                    type="button"
-                    class="min-h-10 px-2 rounded-lg font-medium underline hover:no-underline focus-visible:outline-2 focus-visible:outline-[var(--color-primary)]"
+                  <app-button
+                    variant="ghost"
+                    size="sm"
                     [disabled]="store.is_agent_typing()"
-                    (click)="store.retrySend(message.id)"
+                    (clicked)="store.retrySend(message.id)"
                   >
-                    Reintentar
-                  </button>
+                    {{ threadCopy.retry }}
+                  </app-button>
                 </div>
                 @if (message.error) {
-                  <p class="max-w-[80%] text-xs text-[var(--color-text-secondary)] text-right">
+                  <p class="max-w-xl text-xs text-text-secondary text-right">
                     {{ message.error }}
                   </p>
                 }
@@ -185,30 +184,32 @@ import { StoreSettingsFacade } from '../../../../../../core/store/store-settings
                 }
                 @if (message.error) {
                   <p
-                    class="rounded-xl border border-[var(--color-error)] bg-[rgba(var(--color-error-rgb),0.07)] px-3 py-2 text-sm text-[var(--color-error)]"
+                    class="rounded-xl border border-error bg-error/10 px-3 py-2 text-sm text-error"
                     role="alert"
                   >
                     {{ message.error }}
                   </p>
                   @if (message.can_retry) {
-                    <button
-                      type="button"
-                      class="self-start min-h-10 inline-flex items-center gap-2 rounded-full border border-[var(--color-border)] px-3 text-sm text-[var(--color-text-primary)] hover:bg-[rgba(var(--color-text-primary-rgb),0.06)]"
+                    <app-button
+                      class="self-start"
+                      variant="outline"
+                      size="sm"
                       [disabled]="store.is_agent_typing()"
-                      (click)="store.retryAnswer()"
+                      (clicked)="store.retryAnswer()"
                     >
-                      <app-icon name="rotate-cw" [size]="14"></app-icon>
-                      Reintentar
-                    </button>
+                      <app-icon slot="icon" name="rotate-cw" [size]="14"></app-icon>
+                      {{ threadCopy.retry }}
+                    </app-button>
                   }
                   @if (message.restart_suggested) {
-                    <button
-                      type="button"
-                      class="self-start rounded-full border border-[var(--color-border)] px-3 py-1 text-sm text-[var(--color-text-primary)] hover:bg-[var(--color-surface-hover,rgba(0,0,0,0.04))]"
-                      (click)="store.newConversation()"
+                    <app-button
+                      class="self-start"
+                      variant="outline"
+                      size="sm"
+                      (clicked)="store.newConversation()"
                     >
                       {{ restartLabel }}
-                    </button>
+                    </app-button>
                   }
                 }
                 @if (
@@ -220,11 +221,7 @@ import { StoreSettingsFacade } from '../../../../../../core/store/store-settings
                     class="inline-flex items-center gap-1.5 text-xs text-text-secondary"
                     aria-hidden="true"
                   >
-                    <span class="inline-flex items-center gap-0.5">
-                      <span class="w-1.5 h-1.5 rounded-full bg-text-secondary motion-safe:animate-pulse"></span>
-                      <span class="w-1.5 h-1.5 rounded-full bg-text-secondary motion-safe:animate-pulse [animation-delay:150ms]"></span>
-                      <span class="w-1.5 h-1.5 rounded-full bg-text-secondary motion-safe:animate-pulse [animation-delay:300ms]"></span>
-                    </span>
+                    <span class="w-1.5 h-1.5 rounded-full bg-text-secondary motion-safe:animate-pulse"></span>
                     {{ copy.still_writing }}
                   </p>
                 }
@@ -233,20 +230,11 @@ import { StoreSettingsFacade } from '../../../../../../core/store/store-settings
                   !message.content &&
                   !message.blocks?.length
                 ) {
-                  <div
-                    class="flex items-center gap-1 py-1"
-                    aria-label="Vex está escribiendo"
-                  >
-                    <span
-                      class="w-2 h-2 rounded-full bg-[var(--color-text-secondary)] animate-bounce"
-                    ></span>
-                    <span
-                      class="w-2 h-2 rounded-full bg-[var(--color-text-secondary)] animate-bounce [animation-delay:150ms]"
-                    ></span>
-                    <span
-                      class="w-2 h-2 rounded-full bg-[var(--color-text-secondary)] animate-bounce [animation-delay:300ms]"
-                    ></span>
-                  </div>
+                  <app-spinner
+                    size="sm"
+                    color="text-text-secondary"
+                    [attr.aria-label]="threadCopy.writing"
+                  ></app-spinner>
                 }
               </div>
             </div>
@@ -265,22 +253,22 @@ import { StoreSettingsFacade } from '../../../../../../core/store/store-settings
         @if (store.stream_progress()) {
           <p
             role="status"
-            class="text-sm text-center text-[var(--color-text-secondary)]"
+            class="text-sm text-center text-text-secondary"
           >
             {{ store.stream_progress() }}
           </p>
         }
         @if (store.is_agent_typing()) {
           <div class="flex justify-center">
-            <button
-              type="button"
-              class="min-h-10 inline-flex items-center gap-2 px-4 rounded-full border border-[var(--color-border)] bg-[var(--color-surface)] text-sm text-[var(--color-text-secondary)] hover:text-[var(--color-text-primary)]"
-              aria-label="Detener respuesta"
-              (click)="store.stopStream()"
+            <app-button
+              variant="outline"
+              size="sm"
+              [ariaLabel]="threadCopy.stop_aria"
+              (clicked)="store.stopStream()"
             >
-              <app-icon name="x" [size]="16"></app-icon>
-              Detener
-            </button>
+              <app-icon slot="icon" name="x" [size]="16"></app-icon>
+              {{ threadCopy.stop }}
+            </app-button>
           </div>
         }
       </div>
@@ -295,6 +283,7 @@ export class VexThreadComponent {
   protected readonly timezone = computed(() => this.settings.timezone());
   protected readonly copy = VEX_COPY.presence;
   protected readonly followupCopy = VEX_COPY.followup;
+  protected readonly threadCopy = VEX_COPY.thread;
   protected readonly restartLabel = VEXI_RESTART_LABEL;
   private readonly injector = inject(Injector);
   private readonly scroller = viewChild<ElementRef<HTMLElement>>('scroller');

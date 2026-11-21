@@ -15,22 +15,22 @@ import { VexImageSpec, VexUiBlock } from '../../models/vex.models';
   changeDetection: ChangeDetectionStrategy.OnPush,
   template: `
     <figure
-      class="rounded-2xl border border-[var(--color-border)] bg-[var(--color-surface)] overflow-hidden m-0"
+      class="rounded-2xl border border-border bg-surface overflow-hidden m-0"
     >
       @if (url()) {
         <img
           [src]="url()"
           [alt]="spec().alt || 'Imagen generada por Vex'"
-          class="w-full max-h-96 object-contain bg-[var(--color-background)]"
+          class="w-full max-h-96 object-contain bg-background"
           loading="lazy"
         />
       } @else {
-        <p class="px-4 py-6 text-sm text-center text-[var(--color-text-secondary)]">
+        <p class="px-4 py-6 text-sm text-center text-text-secondary">
           La imagen expiró o aún no está disponible. Pídele a Vex que la regenere.
         </p>
       }
       @if (spec().caption) {
-        <figcaption class="px-4 py-2 text-xs text-[var(--color-text-secondary)]">
+        <figcaption class="px-4 py-2 text-xs text-text-secondary">
           {{ spec().caption }}
         </figcaption>
       }

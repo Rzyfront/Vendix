@@ -12,6 +12,7 @@ import {
 } from '@angular/core';
 import type { VexiProposal } from '../../../../../../core/store/vexi/vexi.actions';
 import { VexiConfirmationCardComponent } from '../../../../../../shared/components/vexi-dock/vexi-confirmation-card.component';
+import { ButtonComponent } from '../../../../../../shared/components/button/button.component';
 import { IconComponent } from '../../../../../../shared/components/icon/icon.component';
 import { VexPlanProposal, VexPlanStep } from '../../models/vex.models';
 
@@ -26,31 +27,31 @@ import { VexPlanProposal, VexPlanStep } from '../../models/vex.models';
 @Component({
   selector: 'vendix-vex-plan-card',
   standalone: true,
-  imports: [IconComponent, VexiConfirmationCardComponent],
+  imports: [ButtonComponent, IconComponent, VexiConfirmationCardComponent],
   changeDetection: ChangeDetectionStrategy.OnPush,
   template: `
     @if (single_step(); as step) {
       <section
-        class="rounded-2xl border border-[var(--color-primary)] bg-[var(--color-surface)] p-3 flex flex-col gap-3"
+        class="rounded-2xl border border-primary bg-surface p-3 flex flex-col gap-3"
         role="group"
         aria-label="Acción propuesta por Vex"
       >
         <header class="flex items-start gap-2">
           <span
-            class="w-8 h-8 shrink-0 rounded-lg grid place-items-center bg-[rgba(var(--color-primary-rgb,46,204,113),0.14)] text-[var(--color-primary)]"
+            class="w-8 h-8 shrink-0 rounded-lg grid place-items-center bg-primary/15 text-primary"
             aria-hidden="true"
           >
             <app-icon name="sparkles" [size]="18"></app-icon>
           </span>
           <div class="min-w-0 flex-1">
             <h4
-              class="text-sm font-semibold text-[var(--color-text-primary)] m-0"
+              class="text-sm font-semibold text-text-primary m-0"
             >
               Vex quiere:
               {{ step.summary || step.preview?.target || step.tool }}
             </h4>
             <p
-              class="text-xs text-[var(--color-text-secondary)] m-0"
+              class="text-xs text-text-secondary m-0"
               role="status"
             >
               {{ single_status_label(step) }}
@@ -58,7 +59,7 @@ import { VexPlanProposal, VexPlanStep } from '../../models/vex.models';
           </div>
           @if (step.irreversible) {
             <span
-              class="shrink-0 inline-flex items-center gap-1 px-2 py-1 rounded-lg text-xs font-medium bg-[rgba(var(--color-error-rgb),0.1)] text-[var(--color-error)]"
+              class="shrink-0 inline-flex items-center gap-1 px-2 py-1 rounded-lg text-xs font-medium bg-error/10 text-error"
             >
               <app-icon name="alert-triangle" [size]="14"></app-icon>
               Irreversible
@@ -79,43 +80,41 @@ import { VexPlanProposal, VexPlanStep } from '../../models/vex.models';
         @if (
           (step.status === 'failed' || step.status === 'unknown') && step.error
         ) {
-          <p class="text-xs text-[var(--color-error)] m-0" role="alert">
+          <p class="text-xs text-error m-0" role="alert">
             {{ step.error }}
           </p>
         }
 
         @if (is_open() || show_own_card(step)) {
           <footer class="flex gap-2">
-            <button
-              type="button"
-              class="flex-1 min-h-11 px-4 rounded-xl border border-[var(--color-error)] text-[var(--color-error)] text-sm font-semibold disabled:opacity-50"
+            <app-button
+              class="flex-1"
+              variant="outline-danger"
+              [fullWidth]="true"
               [disabled]="isBusy()"
-              (click)="cancel.emit()"
+              (clicked)="cancel.emit()"
             >
               Cancelar
-            </button>
-            <button
-              type="button"
-              class="flex-1 min-h-11 px-4 rounded-xl text-sm font-semibold disabled:opacity-50 inline-flex items-center justify-center gap-2"
-              [class.bg-[var(--color-primary)]]="!step.irreversible"
-              [class.text-[var(--color-text-on-primary)]]="!step.irreversible"
-              [class.bg-[var(--color-error)]]="step.irreversible"
-              [class.text-white]="step.irreversible"
+            </app-button>
+            <app-button
+              class="flex-1"
+              [variant]="step.irreversible ? 'danger' : 'primary'"
+              [fullWidth]="true"
+              [loading]="isBusy()"
+              [showTextWhileLoading]="true"
               [disabled]="isBusy() || step.preview?.status === 'error'"
-              (click)="is_open() ? approve.emit() : onStepApprove(step)"
+              (clicked)="is_open() ? approve.emit() : onStepApprove(step)"
             >
               @if (isBusy()) {
-                <app-icon name="loader-2" [size]="16" [spin]="true"></app-icon>
                 Aplicando…
               } @else {
-                <app-icon name="check" [size]="16"></app-icon>
                 {{ step.irreversible ? 'Confirmar (irreversible)' : 'Aprobar' }}
               }
-            </button>
+            </app-button>
           </footer>
           @if (step.irreversible) {
             <p
-              class="text-xs text-[var(--color-error)] m-0 text-center"
+              class="text-xs text-error m-0 text-center"
               role="note"
             >
               Esta acción no se puede deshacer
@@ -125,28 +124,28 @@ import { VexPlanProposal, VexPlanStep } from '../../models/vex.models';
       </section>
     } @else {
       <section
-        class="rounded-2xl border border-[var(--color-primary)] bg-[var(--color-surface)] p-3 flex flex-col gap-3"
+        class="rounded-2xl border border-primary bg-surface p-3 flex flex-col gap-3"
         role="group"
         aria-label="Plan propuesto por Vex"
       >
         <header class="flex items-start gap-2">
           <span
-            class="w-8 h-8 shrink-0 rounded-lg grid place-items-center bg-[rgba(var(--color-primary-rgb,46,204,113),0.14)] text-[var(--color-primary)]"
+            class="w-8 h-8 shrink-0 rounded-lg grid place-items-center bg-primary/15 text-primary"
             aria-hidden="true"
           >
             <app-icon name="sparkles" [size]="18"></app-icon>
           </span>
           <div class="min-w-0 flex-1">
-            <h4 class="text-sm font-semibold text-[var(--color-text-primary)]">
+            <h4 class="text-sm font-semibold text-text-primary">
               {{ plan().title || 'Vex propone un plan' }}
             </h4>
-            <p class="text-xs text-[var(--color-text-secondary)]">
+            <p class="text-xs text-text-secondary">
               {{ plan().steps.length }} paso(s) · {{ status_label() }}
             </p>
           </div>
           @if (irreversible_count() > 0) {
             <span
-              class="shrink-0 inline-flex items-center gap-1 px-2 py-1 rounded-lg text-xs font-medium bg-[rgba(var(--color-error-rgb),0.1)] text-[var(--color-error)]"
+              class="shrink-0 inline-flex items-center gap-1 px-2 py-1 rounded-lg text-xs font-medium bg-error/10 text-error"
             >
               <app-icon name="alert-triangle" [size]="14"></app-icon>
               {{ irreversible_count() }} irreversible(s)
@@ -159,24 +158,24 @@ import { VexPlanProposal, VexPlanStep } from '../../models/vex.models';
             <li class="flex flex-col gap-1.5">
               <div class="flex items-center gap-2 text-xs">
                 <span
-                  class="w-6 h-6 shrink-0 rounded-full grid place-items-center font-semibold bg-[rgba(var(--color-text-primary-rgb,0,0,0),0.07)] text-[var(--color-text-primary)]"
+                  class="w-6 h-6 shrink-0 rounded-full grid place-items-center font-semibold bg-text-primary/5 text-text-primary"
                   aria-hidden="true"
                 >
                   {{ i + 1 }}
                 </span>
                 <span
-                  class="flex-1 min-w-0 truncate font-medium text-[var(--color-text-primary)]"
+                  class="flex-1 min-w-0 truncate font-medium text-text-primary"
                 >
                   {{ step.summary }}
                 </span>
                 @if (step.irreversible) {
                   <span
-                    class="shrink-0 px-2 py-0.5 rounded-lg font-medium bg-[rgba(var(--color-error-rgb),0.1)] text-[var(--color-error)]"
+                    class="shrink-0 px-2 py-0.5 rounded-lg font-medium bg-error/10 text-error"
                   >
                     Irreversible
                   </span>
                 }
-                <span class="shrink-0 text-[var(--color-text-secondary)]">
+                <span class="shrink-0 text-text-secondary">
                   {{ step_status_label(step.status) }}
                 </span>
               </div>
@@ -184,7 +183,7 @@ import { VexPlanProposal, VexPlanStep } from '../../models/vex.models';
                 (step.status === 'failed' || step.status === 'unknown') &&
                 step.error
               ) {
-                <p class="text-xs text-[var(--color-error)] m-0" role="alert">
+                <p class="text-xs text-error m-0" role="alert">
                   {{ step.error }}
                 </p>
               }
@@ -208,7 +207,7 @@ import { VexPlanProposal, VexPlanStep } from '../../models/vex.models';
                   agentLabel="Vex"
                 ></app-vexi-confirmation-card>
                 @if (step.irreversible && is_open()) {
-                  <p class="text-xs text-[var(--color-text-secondary)] m-0">
+                  <p class="text-xs text-text-secondary m-0">
                     Este paso pedirá tu confirmación por separado al aprobar el
                     plan.
                   </p>
@@ -221,7 +220,7 @@ import { VexPlanProposal, VexPlanStep } from '../../models/vex.models';
         @if (is_open()) {
           @if (irreversible_count() > 0) {
             <p
-              class="text-xs text-[var(--color-text-secondary)] m-0"
+              class="text-xs text-text-secondary m-0"
               role="note"
             >
               Esta aprobación cubre una acción. Cada cambio restante pedirá su
@@ -229,31 +228,28 @@ import { VexPlanProposal, VexPlanStep } from '../../models/vex.models';
             </p>
           }
           <footer class="flex gap-2">
-            <button
-              type="button"
-              class="flex-1 min-h-11 px-4 rounded-xl border border-[var(--color-error)] text-[var(--color-error)] text-sm font-semibold disabled:opacity-50"
+            <app-button
+              class="flex-1"
+              variant="outline-danger"
+              [fullWidth]="true"
               [disabled]="isBusy()"
-              (click)="cancel.emit()"
+              (clicked)="cancel.emit()"
             >
               Cancelar
-            </button>
-            <button
-              type="button"
-              class="flex-1 min-h-11 px-4 rounded-xl bg-[var(--color-primary)] text-[var(--color-text-on-primary)] text-sm font-semibold disabled:opacity-50 inline-flex items-center justify-center gap-2"
+            </app-button>
+            <app-button
+              class="flex-1"
+              [fullWidth]="true"
+              [loading]="isBusy()"
+              [showTextWhileLoading]="true"
               [disabled]="isBusy()"
-              (click)="approve.emit()"
+              (clicked)="approve.emit()"
             >
-              @if (isBusy()) {
-                <app-icon name="loader-2" [size]="16" [spin]="true"></app-icon>
-                Aprobando…
-              } @else {
-                <app-icon name="check" [size]="16"></app-icon>
-                Aprobar plan
-              }
-            </button>
+              {{ isBusy() ? 'Aprobando…' : 'Aprobar plan' }}
+            </app-button>
           </footer>
         } @else {
-          <p class="text-xs text-[var(--color-text-secondary)]" role="status">
+          <p class="text-xs text-text-secondary" role="status">
             {{ closed_note() }}
           </p>
         }

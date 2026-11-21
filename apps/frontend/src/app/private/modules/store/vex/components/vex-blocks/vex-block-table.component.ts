@@ -36,12 +36,12 @@ interface IndexedRow {
   changeDetection: ChangeDetectionStrategy.OnPush,
   template: `
     <section
-      class="rounded-2xl border border-[var(--color-border)] bg-[var(--color-surface)] overflow-hidden"
+      class="rounded-2xl border border-border bg-surface overflow-hidden"
       [attr.aria-label]="spec().title || 'Tabla de Vex'"
     >
       @if (spec().title) {
         <header class="px-4 pt-3 pb-1">
-          <h4 class="text-sm font-semibold text-[var(--color-text-primary)]">
+          <h4 class="text-sm font-semibold text-text-primary">
             {{ spec().title }}
           </h4>
         </header>
@@ -49,12 +49,12 @@ interface IndexedRow {
 
       <div class="px-4 py-2 flex items-center gap-2">
         <div
-          class="flex-1 flex items-center gap-2 min-h-10 px-3 rounded-xl border border-[var(--color-border)] text-[var(--color-text-secondary)]"
+          class="flex-1 flex items-center gap-2 min-h-10 px-3 rounded-xl border border-border text-text-secondary"
         >
           <app-icon name="search" [size]="16"></app-icon>
           <input
             type="text"
-            class="flex-1 min-w-0 bg-transparent outline-none text-sm text-[var(--color-text-primary)] placeholder:text-[var(--color-text-secondary)]"
+            class="flex-1 min-w-0 bg-transparent outline-none text-sm text-text-primary placeholder:text-text-secondary"
             placeholder="Filtrar filas"
             aria-label="Filtrar filas de la tabla"
             [value]="filter()"
@@ -63,7 +63,7 @@ interface IndexedRow {
           @if (filter()) {
             <button
               type="button"
-              class="w-8 h-8 flex items-center justify-center rounded-lg hover:text-[var(--color-text-primary)]"
+              class="w-8 h-8 flex items-center justify-center rounded-lg hover:text-text-primary"
               aria-label="Limpiar filtro"
               (click)="clearFilter()"
             >
@@ -74,11 +74,11 @@ interface IndexedRow {
       </div>
 
       @if (selected_count() > 0) {
-        <p class="px-4 pb-1 text-xs text-[var(--color-text-secondary)]" role="status">
+        <p class="px-4 pb-1 text-xs text-text-secondary" role="status">
           {{ selected_count() }} fila(s) seleccionada(s) — se enviarán a Vex con tu próximo mensaje.
           <button
             type="button"
-            class="underline underline-offset-2 hover:text-[var(--color-text-primary)]"
+            class="underline underline-offset-2 hover:text-text-primary"
             (click)="clearSelection()"
           >
             Limpiar
@@ -87,14 +87,14 @@ interface IndexedRow {
       }
 
       <div class="overflow-x-auto">
-        <table class="w-full text-sm border-collapse min-w-[480px]">
+        <table class="w-full text-sm border-collapse min-w-96">
           <thead>
-            <tr class="border-y border-[var(--color-border)] bg-[rgba(var(--color-text-primary-rgb,0,0,0),0.04)]">
+            <tr class="border-y border-border bg-text-primary/5">
               @if (selectable()) {
                 <th class="w-10 px-3 py-2" scope="col">
                   <input
                     type="checkbox"
-                    class="w-4 h-4 accent-[var(--color-primary)]"
+                    class="w-4 h-4 accent-primary"
                     aria-label="Seleccionar filas visibles"
                     [checked]="all_visible_selected()"
                     [indeterminate]="some_visible_selected()"
@@ -105,7 +105,7 @@ interface IndexedRow {
               @for (column of spec().columns; track column.key) {
                 <th
                   scope="col"
-                  class="px-3 py-2 font-semibold text-[var(--color-text-primary)] whitespace-nowrap"
+                  class="px-3 py-2 font-semibold text-text-primary whitespace-nowrap"
                   [class.text-left]="(column.align ?? 'left') === 'left'"
                   [class.text-right]="column.align === 'right'"
                   [class.text-center]="column.align === 'center'"
@@ -113,7 +113,7 @@ interface IndexedRow {
                   @if (column.sortable !== false) {
                     <button
                       type="button"
-                      class="inline-flex items-center gap-1 min-h-10 hover:text-[var(--color-primary)]"
+                      class="inline-flex items-center gap-1 min-h-10 hover:text-primary"
                       [attr.aria-label]="'Ordenar por ' + column.label"
                       (click)="toggleSort(column.key)"
                     >
@@ -135,14 +135,14 @@ interface IndexedRow {
           <tbody>
             @for (item of page_rows(); track item.index) {
               <tr
-                class="border-b border-[var(--color-border)] last:border-0 hover:bg-[rgba(var(--color-primary-rgb,46,204,113),0.05)]"
-                [class.bg-[rgba(var(--color-primary-rgb,46,204,113),0.08)]]="isSelected(item.index)"
+                class="border-b border-border last:border-0 hover:bg-primary/5"
+                [class.bg-primary/10]="isSelected(item.index)"
               >
                 @if (selectable()) {
                   <td class="px-3 py-2">
                     <input
                       type="checkbox"
-                      class="w-4 h-4 accent-[var(--color-primary)]"
+                      class="w-4 h-4 accent-primary"
                       [attr.aria-label]="'Seleccionar fila ' + (item.index + 1)"
                       [checked]="isSelected(item.index)"
                       (change)="toggleRow(item.index)"
@@ -151,7 +151,7 @@ interface IndexedRow {
                 }
                 @for (column of spec().columns; track column.key) {
                   <td
-                    class="px-3 py-2 text-[var(--color-text-primary)] whitespace-nowrap"
+                    class="px-3 py-2 text-text-primary whitespace-nowrap"
                     [class.text-left]="(column.align ?? 'left') === 'left'"
                     [class.text-right]="column.align === 'right'"
                     [class.text-center]="column.align === 'center'"
@@ -163,7 +163,7 @@ interface IndexedRow {
             } @empty {
               <tr>
                 <td
-                  class="px-3 py-6 text-center text-[var(--color-text-secondary)]"
+                  class="px-3 py-6 text-center text-text-secondary"
                   [attr.colspan]="spec().columns.length + (selectable() ? 1 : 0)"
                 >
                   Sin filas para mostrar
@@ -174,13 +174,13 @@ interface IndexedRow {
         </table>
       </div>
 
-      <div class="px-4 py-2 flex items-center justify-between gap-2 text-xs text-[var(--color-text-secondary)]">
+      <div class="px-4 py-2 flex items-center justify-between gap-2 text-xs text-text-secondary">
         <span>{{ total_rows() }} fila(s)</span>
         @if (total_pages() > 1) {
           <div class="flex items-center gap-1">
             <button
               type="button"
-              class="min-w-10 min-h-10 px-2 rounded-lg border border-[var(--color-border)] disabled:opacity-40"
+              class="min-w-10 min-h-10 px-2 rounded-lg border border-border disabled:opacity-40"
               aria-label="Página anterior"
               [disabled]="page() <= 1"
               (click)="goTo(page() - 1)"
@@ -192,7 +192,7 @@ interface IndexedRow {
             </span>
             <button
               type="button"
-              class="min-w-10 min-h-10 px-2 rounded-lg border border-[var(--color-border)] disabled:opacity-40"
+              class="min-w-10 min-h-10 px-2 rounded-lg border border-border disabled:opacity-40"
               aria-label="Página siguiente"
               [disabled]="page() >= total_pages()"
               (click)="goTo(page() + 1)"

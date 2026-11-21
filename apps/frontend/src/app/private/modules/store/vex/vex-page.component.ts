@@ -60,17 +60,17 @@ function isDesktop(): boolean {
   providers: [VexChatStore, VexLogStore, VexPresenceStore],
   template: `
     <div
-      class="h-dvh w-full flex overflow-hidden bg-[var(--color-background)] text-[var(--color-text-primary)]"
+      class="h-dvh w-full flex overflow-hidden bg-background text-text-primary"
     >
       @if (!chats_collapsed()) {
         <div
-          class="fixed inset-0 bg-[rgba(var(--color-text-primary-rgb),0.4)] z-30 lg:hidden"
+          class="fixed inset-0 bg-text-primary/40 z-30 lg:hidden"
           (click)="chats_collapsed.set(true)"
         ></div>
       }
       @if (!log_collapsed()) {
         <div
-          class="fixed inset-0 bg-[rgba(var(--color-text-primary-rgb),0.4)] z-30 lg:hidden"
+          class="fixed inset-0 bg-text-primary/40 z-30 lg:hidden"
           (click)="log_collapsed.set(true)"
         ></div>
       }
@@ -98,7 +98,7 @@ function isDesktop(): boolean {
       >
         @if (dragging()) {
           <div
-            class="absolute inset-3 z-30 rounded-3xl border-2 border-dashed border-[var(--color-primary)] bg-[rgba(var(--color-primary-rgb),0.1)] flex flex-col items-center justify-center gap-2 pointer-events-none text-[var(--color-primary)]"
+            class="absolute inset-3 z-30 rounded-3xl border-2 border-dashed border-primary bg-primary/10 flex flex-col items-center justify-center gap-2 pointer-events-none text-primary"
             role="status"
           >
             <app-icon name="upload" [size]="32"></app-icon>
@@ -114,7 +114,7 @@ function isDesktop(): boolean {
         <header class="relative z-10 h-14 shrink-0 flex items-center gap-2 px-2">
           <button
             type="button"
-            class="lg:hidden w-10 h-10 rounded-full flex items-center justify-center text-[var(--color-text-secondary)] hover:text-[var(--color-text-primary)]"
+            class="lg:hidden w-10 h-10 rounded-full flex items-center justify-center text-text-secondary hover:text-text-primary"
             [attr.aria-label]="copy.open_chats"
             data-tour="vex-chats-button"
             aria-controls="vex-chats-panel"
@@ -125,7 +125,7 @@ function isDesktop(): boolean {
           </button>
           <a
             routerLink="/admin/dashboard"
-            class="min-h-10 px-3 rounded-full flex items-center gap-2 text-sm text-[var(--color-text-secondary)] hover:text-[var(--color-text-primary)]"
+            class="min-h-10 px-3 rounded-full flex items-center gap-2 text-sm text-text-secondary hover:text-text-primary"
             [attr.aria-label]="copy.back_aria"
           >
             <app-icon name="arrow-left" [size]="18"></app-icon>
@@ -144,7 +144,7 @@ function isDesktop(): boolean {
               <button
                 #titleButton
                 type="button"
-                class="group min-h-10 max-w-full px-3 rounded-full flex items-center gap-2 text-sm text-[var(--color-text-secondary)] hover:text-[var(--color-text-primary)] hover:bg-[rgba(var(--color-text-primary-rgb),0.06)]"
+                class="group min-h-10 max-w-full px-3 rounded-full flex items-center gap-2 text-sm text-text-secondary hover:text-text-primary hover:bg-text-primary/5"
                 [attr.aria-label]="copy.rename_aria(current.title)"
                 [title]="copy.rename"
                 (click)="renaming_title.set(true)"
@@ -159,7 +159,7 @@ function isDesktop(): boolean {
           </div>
           <button
             type="button"
-            class="w-10 h-10 rounded-full flex items-center justify-center text-[var(--color-text-secondary)] hover:text-[var(--color-text-primary)]"
+            class="w-10 h-10 rounded-full flex items-center justify-center text-text-secondary hover:text-text-primary"
             [attr.aria-label]="helpCopy.open_aria"
             [title]="helpCopy.open"
             (click)="help_open.set(true)"
@@ -168,7 +168,7 @@ function isDesktop(): boolean {
           </button>
           <button
             type="button"
-            class="lg:hidden w-10 h-10 rounded-full flex items-center justify-center text-[var(--color-text-secondary)] hover:text-[var(--color-text-primary)]"
+            class="lg:hidden w-10 h-10 rounded-full flex items-center justify-center text-text-secondary hover:text-text-primary"
             [attr.aria-label]="copy.open_log"
             data-tour="vex-log-button"
             aria-controls="vex-log-panel"

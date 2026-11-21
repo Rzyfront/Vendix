@@ -28,8 +28,8 @@ let nextEditorId = 0;
     <input
       #field
       type="text"
-      class="w-full min-h-10 px-3 rounded-lg bg-[var(--color-background)] text-sm text-[var(--color-text-primary)] border outline-none focus-visible:ring-2 focus-visible:ring-[var(--color-primary)]"
-      [class]="error() ? 'border-[var(--color-error)]' : 'border-[var(--color-border)]'"
+      class="w-full min-h-10 px-3 rounded-lg bg-background text-sm text-text-primary border outline-none focus-visible:ring-2 focus-visible:ring-primary"
+      [class]="error() ? 'border-error' : 'border-border'"
       [value]="draft()"
       [attr.aria-label]="label()"
       [attr.aria-invalid]="error() ? 'true' : null"
@@ -41,7 +41,7 @@ let nextEditorId = 0;
       (blur)="onBlur()"
     />
     @if (error(); as message) {
-      <p [id]="error_id" class="px-1 pt-1 text-xs text-[var(--color-error)]" role="alert">
+      <p [id]="error_id" class="px-1 pt-1 text-xs text-error" role="alert">
         {{ message }}
       </p>
     }

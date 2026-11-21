@@ -58,10 +58,10 @@ interface StagedFile {
           @for (file of staged(); track file.local_id) {
             <span
               class="inline-flex items-center gap-2 max-w-full pl-3 pr-1.5 py-1.5 rounded-xl border text-xs"
-              [class.border-[var(--color-border)]]="file.status !== 'error'"
-              [class.bg-[var(--color-surface)]]="file.status !== 'error'"
-              [class.border-[var(--color-error)]]="file.status === 'error'"
-              [class.bg-[rgba(var(--color-error-rgb),0.07)]]="
+              [class.border-border]="file.status !== 'error'"
+              [class.bg-surface]="file.status !== 'error'"
+              [class.border-error]="file.status === 'error'"
+              [class.bg-error/10]="
                 file.status === 'error'
               "
             >
@@ -71,14 +71,14 @@ interface StagedFile {
                 <app-icon name="file" [size]="14"></app-icon>
               }
               <span
-                class="truncate max-w-40 text-[var(--color-text-primary)]"
+                class="truncate max-w-40 text-text-primary"
                 [title]="file.error || file.name"
               >
                 {{ file.name }}
               </span>
               <button
                 type="button"
-                class="w-8 h-8 shrink-0 rounded-lg grid place-items-center text-[var(--color-text-secondary)] hover:text-[var(--color-text-primary)]"
+                class="w-8 h-8 shrink-0 rounded-lg grid place-items-center text-text-secondary hover:text-text-primary"
                 [attr.aria-label]="'Quitar ' + file.name"
                 (click)="removeStaged(file.local_id)"
               >
@@ -89,7 +89,7 @@ interface StagedFile {
         </div>
       }
       <div
-        class="rounded-3xl bg-[var(--color-surface)] border border-[var(--color-border)] shadow-lg px-3 py-2 flex items-end gap-2"
+        class="rounded-3xl bg-surface border border-border shadow-lg px-3 py-2 flex items-end gap-2"
       >
         <input
           #file_input
@@ -102,7 +102,7 @@ interface StagedFile {
         />
         <button
           type="button"
-          class="w-10 h-10 shrink-0 rounded-full flex items-center justify-center text-[var(--color-text-secondary)] hover:text-[var(--color-text-primary)] transition-colors disabled:opacity-40"
+          class="w-10 h-10 shrink-0 rounded-full flex items-center justify-center text-text-secondary hover:text-text-primary transition-colors disabled:opacity-40"
           aria-label="Adjuntar archivos"
           title="Adjuntar (máx. 5 archivos de 15 MB)"
           [disabled]="store.is_agent_typing()"
@@ -114,7 +114,7 @@ interface StagedFile {
         <textarea
           #input
           rows="1"
-          class="flex-1 min-w-0 resize-none bg-transparent outline-none border-0 py-2 text-[var(--color-text-primary)] placeholder:text-[var(--color-text-secondary)]"
+          class="flex-1 min-w-0 resize-none bg-transparent outline-none border-0 py-2 text-text-primary placeholder:text-text-secondary"
           placeholder="Pregúntale a Vex"
           aria-label="Mensaje para Vex"
           [value]="text()"
@@ -126,7 +126,7 @@ interface StagedFile {
         @if (voiceEnabled()) {
           <button
             type="button"
-            class="voice-button"
+            class="min-w-11 min-h-11 px-2 py-1 rounded-2xl bg-surface text-text-primary touch-none focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-primary"
             aria-label="Mantén para dictar un mensaje a Vex; no confirma cambios"
             [attr.aria-pressed]="pipeline.recording()"
             (pointerdown)="voiceDown($event)"
@@ -144,7 +144,7 @@ interface StagedFile {
           </button>
           <button
             type="button"
-            class="voice-button"
+            class="min-w-11 min-h-11 px-2 py-1 rounded-2xl bg-surface text-text-primary touch-none focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-primary"
             (click)="toggleRealtime()"
             [attr.aria-pressed]="realtimeActive()"
             aria-label="Iniciar o detener conversación de voz en tiempo real con Vex"
@@ -156,7 +156,7 @@ interface StagedFile {
             type="button"
             disabled
             aria-disabled="true"
-            class="w-10 h-10 shrink-0 rounded-full flex items-center justify-center text-[var(--color-text-secondary)] opacity-40 cursor-not-allowed"
+            class="w-10 h-10 shrink-0 rounded-full flex items-center justify-center text-text-secondary opacity-40 cursor-not-allowed"
             aria-label="Dictar por voz"
             title="Próximamente"
           >
@@ -167,7 +167,7 @@ interface StagedFile {
         @if (can_send()) {
           <button
             type="button"
-            class="w-10 h-10 shrink-0 rounded-full flex items-center justify-center bg-[var(--color-primary)] text-[var(--color-text-on-primary)] transition-opacity hover:opacity-90"
+            class="w-10 h-10 shrink-0 rounded-full flex items-center justify-center bg-primary text-on-primary transition-opacity hover:opacity-90"
             aria-label="Enviar"
             (click)="send()"
           >
@@ -176,7 +176,7 @@ interface StagedFile {
         }
       </div>
       @if (voiceEnabled()) {
-        <p class="text-xs text-[var(--color-text-secondary)]" role="status">
+        <p class="text-xs text-text-secondary" role="status">
           {{
             pipeline.errorMessage() || realtime.errorMessage() || voiceHint()
           }}
@@ -192,28 +192,11 @@ interface StagedFile {
           (voiceApplied)="acceptRealtime($event)"
         />
       }
-      <p class="mt-2 text-center text-xs text-[var(--color-text-secondary)]">
+      <p class="mt-2 text-center text-xs text-text-secondary">
         Vex puede cometer errores. Verifica la información importante.
       </p>
     </div>
   `,
-  styles: [
-    `
-      .voice-button {
-        min-width: 44px;
-        min-height: 44px;
-        padding: 4px 8px;
-        border-radius: 16px;
-        background: var(--color-surface);
-        color: var(--color-text-primary);
-        touch-action: none;
-      }
-      .voice-button:focus-visible {
-        outline: 2px solid var(--color-primary);
-        outline-offset: 2px;
-      }
-    `,
-  ],
 })
 export class VexComposerComponent {
   protected readonly pipeline = inject(VexiVoicePipelineService);

@@ -51,10 +51,10 @@ const FALLBACK_PALETTE = [
   changeDetection: ChangeDetectionStrategy.OnPush,
   template: `
     <figure
-      class="rounded-2xl border border-[var(--color-border)] bg-[var(--color-surface)] overflow-hidden m-0"
+      class="rounded-2xl border border-border bg-surface overflow-hidden m-0"
     >
       @if (spec().title) {
-        <figcaption class="px-4 pt-3 text-sm font-semibold text-[var(--color-text-primary)]">
+        <figcaption class="px-4 pt-3 text-sm font-semibold text-text-primary">
           {{ spec().title }}
         </figcaption>
       }
@@ -66,7 +66,7 @@ const FALLBACK_PALETTE = [
           (chartClick)="onChartClick($event)"
         ></app-chart>
       } @else {
-        <p class="px-4 py-6 text-sm text-center text-[var(--color-text-secondary)]">
+        <p class="px-4 py-6 text-sm text-center text-text-secondary">
           Sin datos para graficar
         </p>
       }

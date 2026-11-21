@@ -110,9 +110,11 @@ export const VEX_COPY = {
     rename_aria: (title: string) => `Renombrar la conversación: ${title}`,
   },
   thread: {
-    loading: 'Cargando la conversación',
+    loading: 'Abriendo conversación…',
     writing: 'Vex está escribiendo',
     retry: 'Reintentar',
+    stop: 'Detener',
+    stop_aria: 'Detener respuesta',
     copy_code: 'Copiar',
     copied_code: 'Copiado',
     copy_code_aria: 'Copiar el código',
