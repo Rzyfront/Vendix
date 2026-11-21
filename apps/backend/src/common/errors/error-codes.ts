@@ -2542,6 +2542,16 @@ export const ErrorCodes = {
     devMessage:
       'Conversation has a running or pending task; stop it before deleting',
   },
+  AI_CHAT_006: {
+    code: 'AI_CHAT_006',
+    httpStatus: 404,
+    devMessage: 'Follow-up suggestion not found in this conversation',
+  },
+  AI_CHAT_007: {
+    code: 'AI_CHAT_007',
+    httpStatus: 409,
+    devMessage: 'Follow-up suggestion was already dismissed',
+  },
 
   // Invoicing
   INVOICING_FIND_001: {

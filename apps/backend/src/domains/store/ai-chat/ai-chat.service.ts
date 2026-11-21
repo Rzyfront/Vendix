@@ -80,6 +80,10 @@ import {
   ConversationPurgeService,
 } from './conversation-purge.service';
 import {
+  extractSuggestedFollowups,
+  Followup,
+} from '../../../ai-engine/tools/domains/followup.tools';
+import {
   ConversationTitleFrame,
   ConversationTitleService,
   TITLE_TIMEOUT_MS,
@@ -155,10 +159,19 @@ export type ChatStreamFrame = (
   | AIStreamChunk
   | VexiVoiceFrame
   | ConversationTitleFrame
+  | FollowupSuggestionFrame
 ) & {
   replay?: ChatReplayCursor;
   reconcile_required?: boolean;
 };
+
+/** Sugerencia de seguimiento del turno (F1/T5), enlazada a su mensaje. */
+export interface FollowupSuggestionFrame {
+  type: 'followup_suggestion';
+  conversation_id: number;
+  message_id: number;
+  followup: Followup;
+}
 
 /**
  * Fila de `ai_agents` tal como la consume el turno (F4).
@@ -555,6 +568,7 @@ export class AIChatService {
     const vexMetadata = this.vexTurnMetadata(
       vexBlockRefs,
       vexPlan ?? vexTurn?.plan ?? null,
+      vexTurn ? extractSuggestedFollowups(vexToolsUsed) : [],
     );
     const assistantMessage = await this.prisma.ai_messages.create({
       data: {
@@ -629,7 +643,14 @@ export class AIChatService {
     // En SSE no hay override por mensaje: el gate decide con el agente fijado
     // en el hilo. Acá el error viaja como HTTP con su código; el stream lo
     // re-valida y lo emite como frame `error` (ver `sendMessageStream`).
-    await this.assertVexTurnAccess(this.turnAgentKey(conversation));
+    const agentKey = this.turnAgentKey(conversation);
+    await this.assertVexTurnAccess(agentKey);
+
+    // Solo hilos de Vex (los únicos que se borran de verdad): el adjunto del
+    // primer turno se subió sin conversación y hay que atarlo a esta.
+    if (agentKey === VEX_AGENT_KEY && dto.attachment_ids?.length) {
+      await this.purges?.claimAttachments(conversationId, dto.attachment_ids);
+    }
 
     return this.streamIntents.create({
       conversation_id: conversationId,
@@ -1135,9 +1156,11 @@ export class AIChatService {
       toolsUsed,
       turnStartedAt,
     );
+    const turnFollowups = vexTurn ? extractSuggestedFollowups(toolsUsed) : [];
     const vexMetadata = this.vexTurnMetadata(
       vexBlockRefs,
       vexPlan ?? vexTurn?.plan ?? null,
+      turnFollowups,
     );
     let assistantMessage: { id: number } | null = null;
     if (
@@ -1218,6 +1241,20 @@ export class AIChatService {
           type: 'conversation_title',
           conversation_id: conversationId,
           title,
+        };
+      }
+    }
+
+    // La ficha de seguimiento viaja en su propio frame, ya con el `message_id`
+    // de la fila persistida (el resumen de `tool_result` se recorta y no sirve
+    // de transporte). Antes de `done`: el cliente cierra el SSE al recibirlo.
+    if (assistantMessage) {
+      for (const followup of turnFollowups) {
+        yield {
+          type: 'followup_suggestion',
+          conversation_id: conversationId,
+          message_id: assistantMessage.id,
+          followup,
         };
       }
     }
@@ -2104,10 +2141,14 @@ export class AIChatService {
   private vexTurnMetadata(
     blocks: VexBlockRef[],
     plan: VexTurnCollection['plan'] | null,
+    followups: Followup[] = [],
   ): Record<string, unknown> | null {
-    if (blocks.length === 0 && !plan) return null;
+    if (blocks.length === 0 && !plan && followups.length === 0) return null;
     return {
       ...(blocks.length > 0 ? { blocks } : {}),
+      // Sugerencias de seguimiento del turno (F1/T5): viven en el mensaje
+      // para sobrevivir a recargar; la ficha las mueve a saved/dismissed.
+      ...(followups.length > 0 ? { followups } : {}),
       ...(plan
         ? {
             // Contrato del ciclo de vida: estado del plan + estado por paso.

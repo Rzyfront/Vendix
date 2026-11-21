@@ -3,3 +3,4 @@ export { SendMessageDto } from './send-message.dto';
 export { ConversationQueryDto } from './conversation-query.dto';
 export { StreamIntentDto, UiContextDto } from './stream-intent.dto';
 export { UpdateConversationTitleDto } from './update-conversation-title.dto';
+export { SaveFollowupDto, MuteFollowupsDto } from './followup.dto';

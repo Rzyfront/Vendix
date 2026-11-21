@@ -11,6 +11,7 @@ import {
   Sse,
   MessageEvent,
   ParseIntPipe,
+  ParseUUIDPipe,
   UseGuards,
 } from '@nestjs/common';
 import { Observable } from 'rxjs';
@@ -27,13 +28,17 @@ import {
   ConversationQueryDto,
   StreamIntentDto,
   UpdateConversationTitleDto,
+  SaveFollowupDto,
+  MuteFollowupsDto,
 } from './dto';
+import { VexFollowupService } from './vex-followup.service';
 
 @Controller('store/ai-chat')
 export class AIChatController {
   constructor(
     private readonly chatService: AIChatService,
     private readonly responseService: ResponseService,
+    private readonly followups: VexFollowupService,
   ) {}
 
   // Gate de Vex (paso 3): cuando la conversación es de `agent_key='vex'` el
@@ -242,5 +247,36 @@ export class AIChatController {
   ) {
     const conversation = await this.chatService.updateTitle(id, dto.title);
     return this.responseService.success(conversation, 'Title updated');
+  }
+
+  /** Guardar la ficha de seguimiento: crea el recordatorio en la bitácora. */
+  @Post('conversations/:id/followups/:followupId/save')
+  async saveFollowup(
+    @Param('id', ParseIntPipe) id: number,
+    @Param('followupId', ParseUUIDPipe) followupId: string,
+    @Body() dto: SaveFollowupDto,
+  ) {
+    const result = await this.followups.save(id, followupId, dto);
+    return this.responseService.success(result, 'Follow-up saved');
+  }
+
+  /** «No»: descarta la ficha y no vuelve a sugerirse. */
+  @Post('conversations/:id/followups/:followupId/dismiss')
+  async dismissFollowup(
+    @Param('id', ParseIntPipe) id: number,
+    @Param('followupId', ParseUUIDPipe) followupId: string,
+  ) {
+    const result = await this.followups.dismiss(id, followupId);
+    return this.responseService.success(result, 'Follow-up dismissed');
+  }
+
+  /** «No sugerir en este chat». */
+  @Patch('conversations/:id/followups/mute')
+  async muteFollowups(
+    @Param('id', ParseIntPipe) id: number,
+    @Body() dto: MuteFollowupsDto,
+  ) {
+    const result = await this.followups.setMuted(id, dto.muted);
+    return this.responseService.success(result, 'Follow-up preference updated');
   }
 }
