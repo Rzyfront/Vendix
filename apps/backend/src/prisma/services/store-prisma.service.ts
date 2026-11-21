@@ -134,6 +134,9 @@ export class StorePrismaService extends BasePrismaService {
     'ai_ui_blocks',
     // Constancia de borrado de conversaciones: `store_id` propio, sin contenido.
     'ai_conversation_purges',
+    // F4 T31: memoria de la tienda de Vex. `store_id` propio y NO nullable:
+    // sin este registro un recuerdo sería legible por id desde otra tienda.
+    'ai_agent_memories',
     'dispatch_notes',
     'employee_stores',
     'accounts_receivable',
@@ -1793,6 +1796,10 @@ export class StorePrismaService extends BasePrismaService {
 
   get ai_conversation_purges() {
     return this.scoped_client.ai_conversation_purges;
+  }
+
+  get ai_agent_memories() {
+    return this.scoped_client.ai_agent_memories;
   }
 
   // Order Installments

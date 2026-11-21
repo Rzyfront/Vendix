@@ -9,7 +9,15 @@ import { validateToolArgs } from './tool-args.validator';
 import { TOOL_DISCOVERY_QUERIES_ES } from './tool-discovery-queries.es';
 
 export const KNOWLEDGE_DIMENSION = 1536;
-export const KNOWLEDGE_TYPES = ['tool', 'skill', 'process', 'recipe'] as const;
+export const KNOWLEDGE_TYPES = [
+  'tool',
+  'skill',
+  'process',
+  'recipe',
+  'help_article',
+  'help_video',
+  'learning_path',
+] as const;
 export const BUSINESS_TYPES = [
   'product',
   'customer',

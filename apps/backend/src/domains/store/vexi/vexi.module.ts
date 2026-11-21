@@ -3,6 +3,7 @@ import { AIToolRegistry } from '../../../ai-engine/tools/ai-tool-registry';
 import { createBusinessTools } from '../../../ai-engine/tools/domains/business.tools';
 import { createTaskTools } from '../../../ai-engine/tools/domains/tasks.tools';
 import { ResponseModule } from '../../../common/responses/response.module';
+import { AiAgentMemoryModule } from '../ai-agent-memory/ai-agent-memory.module';
 import { AIEngineModule } from '../../../ai-engine/ai-engine.module';
 import { SubscriptionsModule } from '../subscriptions/subscriptions.module';
 import { SettingsModule } from '../settings/settings.module';
@@ -49,6 +50,8 @@ import { VexiVoiceConfirmationService } from './vexi-voice-confirmation.service'
     WeeklyReportModule,
     // A background task's only way to reach the person after they walked away.
     NotificationsModule,
+    // F4 T31: AgentMemoryService for the "Memoria de la tienda" snapshot block.
+    AiAgentMemoryModule,
   ],
   controllers: [
     VexiRealtimeController,

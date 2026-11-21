@@ -4,6 +4,7 @@ import { ActivatedRoute, Router } from '@angular/router';
 import { IconComponent } from '../../../../../shared/components/icon/icon.component';
 import { VexiSettingsComponent } from '../vexi/vexi-settings.component';
 import { VexSettingsComponent } from './vex-settings.component';
+import { StoreMemoryComponent } from './memory/store-memory.component';
 
 type AiAgentsTab = 'vexi' | 'vex';
 
@@ -21,7 +22,12 @@ type AiAgentsTab = 'vexi' | 'vex';
 @Component({
   selector: 'app-ai-agents-settings',
   standalone: true,
-  imports: [IconComponent, VexiSettingsComponent, VexSettingsComponent],
+  imports: [
+    IconComponent,
+    VexiSettingsComponent,
+    VexSettingsComponent,
+    StoreMemoryComponent,
+  ],
   template: `
     <div class="w-full max-w-3xl">
       <div class="mb-6">
@@ -81,6 +87,8 @@ type AiAgentsTab = 'vexi' | 'vex';
           <app-vex-settings />
         </div>
       }
+
+      <app-store-memory />
     </div>
   `,
   styles: [

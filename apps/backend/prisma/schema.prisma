@@ -7460,6 +7460,77 @@ model ai_conversation_purges {
   @@index([s3_completed_at, s3_attempts])
 }
 
+/// F4 T31 (M6, D7, N3): store memory, MEMORY.md style, loaded into every Vex session of the store.
+/// user_id NULL = whole store (always NULL today; ready for per-user memory without migration).
+/// Partial unique indexes live in SQL: (store_id, agent_key, key) WHERE user_id IS NULL and
+/// (store_id, agent_key, user_id, key) WHERE user_id IS NOT NULL.
+model ai_agent_memories {
+  id                     Int       @id @default(autoincrement())
+  store_id               Int
+  organization_id        Int
+  agent_key              String    @default("vex") @db.VarChar(80)
+  user_id                Int?
+  key                    String    @db.VarChar(120)
+  content                String    @db.VarChar(500)
+  kind                   String    @default("preference") @db.VarChar(20)
+  origin                 String    @default("agent") @db.VarChar(20)
+  source_conversation_id Int?
+  created_by_user_id     Int?
+  updated_by_user_id     Int?
+  last_used_at           DateTime? @db.Timestamp(6)
+  created_at             DateTime  @default(now()) @db.Timestamp(6)
+  updated_at             DateTime  @default(now()) @db.Timestamp(6)
+
+  @@index([store_id, agent_key])
+  @@index([source_conversation_id])
+}
+
+/// F4 T32 (M8, D5): "how is X done in Vendix" guides, global, editable from superadmin.
+model ai_agent_skills {
+  id                 Int       @id @default(autoincrement())
+  key                String    @unique @db.VarChar(120)
+  title              String    @db.VarChar(200)
+  module             String?   @db.VarChar(50)
+  body               String    @db.Text
+  candidate_tools    String[]  @default([])
+  help_article_id    Int?
+  video_id           Int?
+  agent_keys         String[]  @default(["vex"])
+  status             String    @default("draft") @db.VarChar(20)
+  version            Int       @default(1)
+  published_version  Int?
+  created_by_user_id Int?
+  updated_by_user_id Int?
+  published_at       DateTime? @db.Timestamp(6)
+  created_at         DateTime  @default(now()) @db.Timestamp(6)
+  updated_at         DateTime  @default(now()) @db.Timestamp(6)
+
+  versions ai_agent_skill_versions[]
+
+  @@index([status, module])
+}
+
+/// F4 T32 (M8, D5): immutable skill versions (insert-only; restore creates a new version).
+model ai_agent_skill_versions {
+  id              Int      @id @default(autoincrement())
+  skill_id        Int
+  version         Int
+  title           String   @db.VarChar(200)
+  module          String?  @db.VarChar(50)
+  body            String   @db.Text
+  candidate_tools String[] @default([])
+  help_article_id Int?
+  video_id        Int?
+  agent_keys      String[] @default(["vex"])
+  change_note     String?  @db.VarChar(500)
+  author_user_id  Int?
+  created_at      DateTime @default(now()) @db.Timestamp(6)
+
+  skill ai_agent_skills @relation(fields: [skill_id], references: [id], onDelete: Restrict)
+
+  @@unique([skill_id, version])
+}
+
 /// E system audit sink. Owner ACL and seven-day expiry enforced by SandboxAuditRepository.
 /// Source is authenticated ciphertext only; no plaintext accessor or business cascade.
 model ai_agent_script_runs {
@@ -7598,11 +7669,15 @@ model help_articles {
   created_by_id   Int?
   is_featured     Boolean                  @default(false)
   sort_order      Int                      @default(0)
+  /// F4 T27 (M7): optional video linked to the article (help center <-> video library).
+  video_id        Int?
   created_at      DateTime?                @default(now()) @db.Timestamp(6)
   updated_at      DateTime?                @default(now()) @db.Timestamp(6)
 
-  category   help_article_categories @relation(fields: [category_id], references: [id])
-  created_by users?                  @relation("help_article_author", fields: [created_by_id], references: [id], onDelete: SetNull)
+  category           help_article_categories @relation(fields: [category_id], references: [id])
+  created_by         users?                  @relation("help_article_author", fields: [created_by_id], references: [id], onDelete: SetNull)
+  video              videos?                 @relation("help_article_video", fields: [video_id], references: [id], onDelete: SetNull)
+  video_series_items video_series_items[]
 
   @@index([category_id])
   @@index([status])
@@ -7610,6 +7685,7 @@ model help_articles {
   @@index([module])
   @@index([is_featured])
   @@index([created_by_id])
+  @@index([video_id])
 }
 
 // ── Video Library ────────────────────────────────────────────────
@@ -7666,8 +7742,10 @@ model videos {
   created_at       DateTime?              @default(now()) @db.Timestamp(6)
   updated_at       DateTime?              @default(now()) @db.Timestamp(6)
 
-  category   video_categories @relation(fields: [category_id], references: [id])
-  created_by users?           @relation("video_author", fields: [created_by_id], references: [id], onDelete: SetNull)
+  category           video_categories     @relation(fields: [category_id], references: [id])
+  created_by         users?               @relation("video_author", fields: [created_by_id], references: [id], onDelete: SetNull)
+  help_articles      help_articles[]      @relation("help_article_video")
+  video_series_items video_series_items[]
 
   @@index([category_id])
   @@index([status])
@@ -7676,6 +7754,61 @@ model videos {
   @@index([is_featured])
   @@index([created_by_id])
   @@index([store_id])
+}
+
+/// F4 T27 (M7): ordered series of published videos (learning paths). Global content.
+model video_series {
+  id            Int               @id @default(autoincrement())
+  title         String            @db.VarChar(255)
+  slug          String            @unique @db.VarChar(280)
+  summary       String?           @db.VarChar(500)
+  description   String?           @db.Text
+  module        String?           @db.VarChar(50)
+  thumbnail_url String?           @db.Text
+  status        video_status_enum @default(DRAFT)
+  sort_order    Int               @default(0)
+  created_by_id Int?
+  created_at    DateTime          @default(now()) @db.Timestamp(6)
+  updated_at    DateTime          @default(now()) @db.Timestamp(6)
+
+  items video_series_items[]
+
+  @@index([status])
+  @@index([module])
+}
+
+/// F4 T27 (M7): items of a series. FKs RESTRICT on purpose: the app deletes items explicitly.
+model video_series_items {
+  id         Int      @id @default(autoincrement())
+  series_id  Int
+  video_id   Int
+  article_id Int?
+  position   Int
+  created_at DateTime @default(now()) @db.Timestamp(6)
+
+  series  video_series   @relation(fields: [series_id], references: [id], onDelete: Restrict)
+  video   videos         @relation(fields: [video_id], references: [id], onDelete: Restrict)
+  article help_articles? @relation(fields: [article_id], references: [id], onDelete: SetNull)
+
+  @@unique([series_id, video_id])
+  @@index([series_id, position])
+  @@index([video_id])
+}
+
+/// F4 T27 (M7): per-user learning progress on help videos. No FK to users on purpose (content progress).
+model user_learning_progress {
+  id              Int       @id @default(autoincrement())
+  user_id         Int
+  series_id       Int?
+  video_id        Int
+  seconds_watched Int       @default(0)
+  completed       Boolean   @default(false)
+  completed_at    DateTime? @db.Timestamp(6)
+  created_at      DateTime  @default(now()) @db.Timestamp(6)
+  updated_at      DateTime  @default(now()) @db.Timestamp(6)
+
+  @@unique([user_id, video_id])
+  @@index([user_id, series_id])
 }
 
 // ===== ELECTRONIC INVOICING DOMAIN =====

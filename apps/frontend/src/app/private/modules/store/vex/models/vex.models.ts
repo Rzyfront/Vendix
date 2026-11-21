@@ -6,7 +6,11 @@ export type VexUiBlockKind =
   | 'kpi'
   | 'image'
   | 'file'
-  | 'markdown';
+  | 'markdown'
+  // F4 T29: learning blocks (help center post, video, learning path).
+  | 'help_article'
+  | 'video'
+  | 'learning_path';
 
 /**
  * A UI block Vex rendered inside a turn.
@@ -29,7 +33,8 @@ export type VexBlockSpec =
   | VexKpiSpec
   | VexImageSpec
   | VexFileSpec
-  | VexMarkdownSpec;
+  | VexMarkdownSpec
+  | VexLearningSpec;
 
 export interface VexTableColumn {
   key: string;
@@ -99,6 +104,12 @@ export interface VexFileSpec {
 
 export interface VexMarkdownSpec {
   kind: 'markdown';
+  title?: string;
+}
+
+/** F4 T29: payload lives in `data` (article / video / series), see CONTRACT. */
+export interface VexLearningSpec {
+  kind: 'help_article' | 'video' | 'learning_path';
   title?: string;
 }
 
