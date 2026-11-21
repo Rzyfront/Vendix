@@ -2056,8 +2056,8 @@ export class AIChatService {
    * the handles and `ai_extract_document` still carry the images.
    */
   private async visionGoalImages(
-    agentKey: string | undefined,
-    appKey: string | undefined,
+    agentKey: string | null | undefined,
+    appKey: string | null | undefined,
     attachmentIds: string[] | undefined,
   ): Promise<{ goal_images?: AIMessageContentPart[] }> {
     if (

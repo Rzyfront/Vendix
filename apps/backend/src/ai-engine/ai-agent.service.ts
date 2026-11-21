@@ -95,6 +95,7 @@ import {
 import {
   AIToolDefinition,
   AIMessage,
+  AIMessageContentPart,
   AIStreamChunk,
 } from './interfaces/ai-provider.interface';
 
