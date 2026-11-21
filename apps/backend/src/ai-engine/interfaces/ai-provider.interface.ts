@@ -211,6 +211,10 @@ export interface AIStreamChunk {
     context_window_tokens: number;
     provenance: 'configured' | 'fallback';
     method: 'conservative_estimate';
+    /** Output reserved for the answer. */
+    max_output_tokens?: number;
+    /** Ring percent at which the UI warns and the next turn compacts. */
+    compaction_percent?: number;
   };
   /** Transport cursor is observational and grants no execution authority. */
   replay?: {

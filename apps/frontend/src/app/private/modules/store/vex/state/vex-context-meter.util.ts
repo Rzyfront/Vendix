@@ -1,6 +1,10 @@
 import type { VexContextBudget } from '../models/vex.models';
 
-/** Context usage at or above this percent shows the «summarizing soon» warning. */
+/**
+ * Default «summarizing soon» threshold. The server stamps the real one on the
+ * budget (`compaction_percent`: ≤ 75, kept under the engine's hard ceiling for
+ * the configured window and output), and that one wins.
+ */
 export const VEX_CONTEXT_WARNING_PERCENT = 75;
 
 interface ContextMeterInput {
@@ -25,8 +29,15 @@ export function computeContextPercent(
   return Math.round(Math.min(100, (used / window) * 100));
 }
 
-export function isContextWarning(percent: number | null | undefined): boolean {
-  return typeof percent === 'number' && percent >= VEX_CONTEXT_WARNING_PERCENT;
+const validPercent = (n: unknown): n is number =>
+  typeof n === 'number' && Number.isFinite(n) && n >= 0 && n <= 100;
+
+export function isContextWarning(
+  percent: number | null | undefined,
+  threshold?: number | null,
+): boolean {
+  const at = validPercent(threshold) ? threshold : VEX_CONTEXT_WARNING_PERCENT;
+  return typeof percent === 'number' && percent >= at;
 }
 
 interface PersistedMessage {
@@ -59,6 +70,12 @@ export function latestContextBudget(
       context_window_tokens: budget.context_window_tokens as number,
       provenance: budget.provenance,
       method: 'conservative_estimate',
+      ...(typeof budget.max_output_tokens === 'number'
+        ? { max_output_tokens: budget.max_output_tokens }
+        : {}),
+      ...(validPercent(budget.compaction_percent)
+        ? { compaction_percent: budget.compaction_percent }
+        : {}),
     };
   }
   return null;

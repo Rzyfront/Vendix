@@ -294,6 +294,10 @@ export interface VexContextBudget {
   context_window_tokens: number;
   provenance: 'configured' | 'fallback';
   method: 'conservative_estimate';
+  /** Output the engine reserved for the answer. */
+  max_output_tokens?: number;
+  /** Percent at which the ring warns and the server compacts (≤ 75, under the engine ceiling). */
+  compaction_percent?: number;
 }
 
 /** Rolling summary of the older part of a conversation (compaction). */

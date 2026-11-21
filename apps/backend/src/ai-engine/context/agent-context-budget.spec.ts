@@ -1,5 +1,7 @@
 import {
   applyAgentContextBudget,
+  compactionPercentFor,
+  compactionPercentOf,
   estimateAgentInputTokens,
   historicalAssistantProse,
 } from './agent-context-budget';
@@ -173,5 +175,59 @@ describe('H conservative agent context budget', () => {
         maxOutputTokens: 100,
       }),
     ).toThrow('AI_AGENT_CONTEXT_INVALID_BUDGET');
+  });
+});
+
+describe('F3 P1-2 compaction threshold under the engine hard ceiling', () => {
+  /** Highest input the engine accepts, as a ring percent (exact, unrounded). */
+  const ceiling = (window: number, output: number) =>
+    ((window - output - Math.max(1024, Math.ceil(window * 0.1))) / window) *
+    100;
+
+  it.each([
+    [32768, 4096, 67],
+    [32768, 8192, 54],
+    [64000, 4096, 73],
+    [128000, 4096, 75],
+    [8192, 4096, 27],
+  ])('window %i with %i of output compacts at %i %%', (window, output, expected) => {
+    const threshold = compactionPercentFor(window, output);
+    expect(threshold).toBe(expected);
+    expect(threshold).toBeLessThanOrEqual(75);
+    // Always under the ceiling with room for the next exchange.
+    expect(threshold).toBeLessThanOrEqual(ceiling(window, output) - 10);
+  });
+
+  it('the input that reaches the threshold is still accepted by the engine', () => {
+    for (const [window, output] of [
+      [32768, 4096],
+      [32768, 8192],
+      [16000, 1500],
+    ]) {
+      const atThreshold = Math.ceil(
+        (window * compactionPercentFor(window, output)) / 100,
+      );
+      const content = 'x'.repeat(Math.max(0, atThreshold - 32 - 24 - 40));
+      expect(() =>
+        applyAgentContextBudget([{ role: 'user', content }], [], {
+          contextWindowTokens: window,
+          maxOutputTokens: output,
+        }),
+      ).not.toThrow();
+    }
+  });
+
+  it('a stamped threshold wins; older budgets assume the 4 096 Vex reserve', () => {
+    const base = {
+      estimated_input_tokens: 1,
+      omitted_messages: 0,
+      context_window_tokens: 32768,
+      provenance: 'configured' as const,
+      method: 'conservative_estimate' as const,
+    };
+    expect(compactionPercentOf({ ...base, compaction_percent: 42 })).toBe(42);
+    expect(compactionPercentOf({ ...base, max_output_tokens: 8192 })).toBe(54);
+    expect(compactionPercentOf(base)).toBe(67);
+    expect(compactionPercentOf({ ...base, compaction_percent: -1 })).toBe(67);
   });
 });

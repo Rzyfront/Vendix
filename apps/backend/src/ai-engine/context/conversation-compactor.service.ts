@@ -3,9 +3,9 @@ import type { Prisma } from '@prisma/client';
 import { AIEngineService } from '../ai-engine.service';
 import { StorePrismaService } from '../../prisma/services/store-prisma.service';
 import {
-  CONTEXT_COMPACTION_PERCENT,
   type ContextBudgetReport,
   DEFAULT_CONTEXT_WINDOW_TOKENS,
+  compactionPercentOf,
   contextUsagePercent,
   estimateAgentInputTokens,
   renderTurnActionsLine,
@@ -193,11 +193,11 @@ export class ConversationCompactorService {
         (m) => m.id > through && CONVERSATIONAL_ROLES.has(m.role),
       );
       // Rows the window would leave out are always summarized (B3); the ring
-      // threshold is the second trigger.
+      // threshold, kept under the engine's hard ceiling, is the second.
       const overflow = live.length > CHAT_WINDOW_MESSAGES;
       const percent = contextUsagePercent(budget);
       const overBudget =
-        percent !== null && percent >= CONTEXT_COMPACTION_PERCENT;
+        percent !== null && percent >= compactionPercentOf(budget!);
       if (!overflow && !overBudget) return null;
 
       const keep = this.keepCount(

@@ -226,5 +226,8 @@ describe('AIEngineService fallback model + real cost (T24)', () => {
     const done = chunks.find((c) => c.type === 'done');
     expect(done?.context_budget?.context_window_tokens).toBe(16000);
     expect(done?.context_budget?.provenance).toBe('configured');
+    // P1-2: the threshold is the backup's own, under its hard ceiling.
+    expect(done?.context_budget?.max_output_tokens).toBe(1500);
+    expect(done?.context_budget?.compaction_percent).toBe(70);
   });
 });

@@ -17,7 +17,10 @@ import {
   reportedAgentUsage,
   validateAgentToolCalls,
 } from './providers/agent-stream-contract';
-import { applyAgentContextBudget } from './context/agent-context-budget';
+import {
+  applyAgentContextBudget,
+  compactionPercentFor,
+} from './context/agent-context-budget';
 import {
   objectiveProviderMeter,
   objectiveMeteredFetch,
@@ -1000,6 +1003,12 @@ export class AIEngineService implements OnModuleInit {
           context_window_tokens: contextWindowTokens,
           provenance: configured === undefined ? 'fallback' : 'configured',
           method: budget.method,
+          // The compaction threshold stays under this config's hard ceiling.
+          max_output_tokens: maxOutputTokens,
+          compaction_percent: compactionPercentFor(
+            contextWindowTokens,
+            maxOutputTokens,
+          ),
         };
       };
       if (agentic) {

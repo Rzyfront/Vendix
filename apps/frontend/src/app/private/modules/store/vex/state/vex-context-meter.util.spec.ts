@@ -50,6 +50,15 @@ describe('isContextWarning', () => {
     expect(isContextWarning(null)).toBe(false);
     expect(isContextWarning(undefined)).toBe(false);
   });
+
+  it('warns at the threshold the server compacts at, when the budget carries one', () => {
+    // 32 768 window with 8 192 of output: the engine refuses past 65 %.
+    expect(isContextWarning(53, 54)).toBe(false);
+    expect(isContextWarning(54, 54)).toBe(true);
+    // Invalid thresholds fall back to 75.
+    expect(isContextWarning(74, -1)).toBe(false);
+    expect(isContextWarning(75, null)).toBe(true);
+  });
 });
 
 describe('latestContextBudget', () => {
@@ -84,6 +93,13 @@ describe('latestContextBudget', () => {
         { role: 'assistant', metadata: null },
       ]),
     ).toEqual(budget(3000));
+  });
+
+  it('keeps the threshold and output reserve stamped on the persisted budget', () => {
+    const stamped = { ...budget(6000), max_output_tokens: 4096, compaction_percent: 67 };
+    expect(
+      latestContextBudget([{ role: 'assistant', metadata: { context_budget: stamped } }]),
+    ).toEqual(stamped);
   });
 
   it('returns null when no answer carries a budget', () => {

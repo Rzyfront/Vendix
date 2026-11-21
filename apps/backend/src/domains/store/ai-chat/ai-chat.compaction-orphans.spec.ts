@@ -1,5 +1,6 @@
 import { AIChatService } from './ai-chat.service';
 import { ConversationCompactorService } from '../../../ai-engine/context/conversation-compactor.service';
+import { estimateAgentInputTokens } from '../../../ai-engine/context/agent-context-budget';
 
 /**
  * B3 (F3 r2): every live row after the summary pointer either travels to the
@@ -93,6 +94,14 @@ function orphansOf(service: Harness, conversation: Conversation): number[] {
     .map((m) => m.id);
 }
 
+/** Estimated tokens of the history the window sends (the part compaction controls). */
+function windowTokens(service: Harness, conversation: Conversation): number {
+  return estimateAgentInputTokens(
+    service.buildContextWindow(conversation, 'nuevo') as never,
+    [],
+  );
+}
+
 async function turn(service: Harness, conversation: Conversation) {
   return (await service.compactVexHistory(conversation, 'vex')).conversation;
 }
@@ -129,6 +138,35 @@ describe('B3 no live row is left out of the window without being summarized', ()
       }
       expect(orphans).toEqual([[], [], []]);
       expect(update).toHaveBeenCalledTimes(3);
+    });
+  });
+
+  describe('P1-1 compacting lowers what the next turn sends', () => {
+    it.each([60, 200])('%i rows over the threshold: the window shrinks', async (n) => {
+      const { service } = harness();
+      const before = fresh(turnRows(1, n, 80));
+      const after = await turn(service, before);
+      expect(after).not.toBe(before);
+      expect(windowTokens(service, after)).toBeLessThan(
+        windowTokens(service, before),
+      );
+    });
+
+    it('every one of three passes shrinks the window', async () => {
+      const { service } = harness();
+      let conversation = fresh(turnRows(1, 48, 80));
+      for (let pass = 0; pass < 3; pass++) {
+        const after = await turn(service, conversation);
+        expect(after).not.toBe(conversation);
+        expect(windowTokens(service, after)).toBeLessThan(
+          windowTokens(service, conversation),
+        );
+        const next = after.messages.length + 1;
+        conversation = {
+          ...after,
+          messages: [...after.messages, ...turnRows(next, 24, 80)],
+        };
+      }
     });
   });
 

@@ -459,7 +459,13 @@ export class VexChatStore {
   readonly context_percent = computed(() =>
     computeContextPercent(this.active_context_budget()),
   );
-  readonly context_warning = computed(() => isContextWarning(this.context_percent()));
+  /** Same threshold the server compacts at (stamped on the budget). */
+  readonly context_warning = computed(() =>
+    isContextWarning(
+      this.context_percent(),
+      this.active_context_budget()?.compaction_percent,
+    ),
+  );
   /** Compaction summary of the open conversation, or null. */
   readonly active_compaction = computed(() => {
     const id = this._active_id();

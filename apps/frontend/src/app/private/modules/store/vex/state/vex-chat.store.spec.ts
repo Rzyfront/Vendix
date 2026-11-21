@@ -462,6 +462,17 @@ describe('VexChatStore', () => {
       expect(store.context_warning()).toBeTrue();
     });
 
+    it('warns at the threshold stamped on the budget, the one the server compacts at (F3 P1-2)', async () => {
+      const newest = message(14, 'assistant', 'Listo.');
+      newest.metadata = {
+        context_budget: { ...budget(60000), max_output_tokens: 8192, compaction_percent: 54 },
+      };
+      api.rows[0].messages = [message(13, 'user', '¿Y el mes?'), newest];
+      await open('1');
+      expect(store.context_percent()).toBe(60);
+      expect(store.context_warning()).toBeTrue();
+    });
+
     it('shows no ring when no answer carries a budget', async () => {
       await open('2');
       expect(store.context_percent()).toBeNull();

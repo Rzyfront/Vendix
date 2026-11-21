@@ -41,7 +41,7 @@ function build(run: jest.Mock) {
 const down = () => jest.fn().mockRejectedValue(new Error('app inactive'));
 
 describe('T22 ConversationCompactorService', () => {
-  it('rows that fit the window: below 75 % or without a budget nothing runs', async () => {
+  it('rows that fit the window: below the threshold or without a budget nothing runs', async () => {
     const { service, update, run } = build(jest.fn());
     const conv = {
       id: 7,
@@ -49,13 +49,44 @@ describe('T22 ConversationCompactorService', () => {
       summary_through_message_id: null,
       messages: msgs(CHAT_WINDOW_MESSAGES),
     };
-    expect(await service.compactIfNeeded(conv, budgetOf(74))).toBeNull();
+    // 32 768 with the assumed 4 096 reserve: threshold 67.
+    expect(await service.compactIfNeeded(conv, budgetOf(66))).toBeNull();
+    // A large window keeps the 75 cap.
+    expect(
+      await service.compactIfNeeded(conv, budgetOf(74, 1_000_000)),
+    ).toBeNull();
     expect(await service.compactIfNeeded(conv, null)).toBeNull();
     expect(run).not.toHaveBeenCalled();
     expect(update).not.toHaveBeenCalled();
   });
 
-  it('B3: live rows past the window compact even under 75 % or without a budget', async () => {
+  it('P1-2: with 32 768 and 8 192 of output it compacts at 60 % (the engine refuses past 65 %)', async () => {
+    const { service } = build(down());
+    const conv = {
+      id: 7,
+      summary: null,
+      summary_through_message_id: null,
+      messages: msgs(CHAT_WINDOW_MESSAGES),
+    };
+    const at = (percent: number) => ({
+      ...budgetOf(percent),
+      max_output_tokens: 8192,
+    });
+    expect(await service.compactIfNeeded(conv, at(53))).toBeNull();
+    const out = await service.compactIfNeeded(conv, at(60));
+    expect(out!.summary_through_message_id).toBe(
+      CHAT_WINDOW_MESSAGES - MAX_KEEP_MESSAGES,
+    );
+    // The engine-stamped threshold is the one used.
+    expect(
+      await service.compactIfNeeded(conv, {
+        ...budgetOf(40),
+        compaction_percent: 40,
+      }),
+    ).not.toBeNull();
+  });
+
+  it('B3: live rows past the window compact even under the threshold or without a budget', async () => {
     const { service } = build(down());
     const conv = {
       id: 7,

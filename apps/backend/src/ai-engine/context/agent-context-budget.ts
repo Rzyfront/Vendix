@@ -61,6 +61,11 @@ export function historicalAssistantProse(message: AIMessage): boolean {
   );
 }
 
+/** Margin the engine keeps under `window − output` when none is given. */
+export function defaultSafetyTokens(contextWindowTokens: number): number {
+  return Math.max(1024, Math.ceil(contextWindowTokens * 0.1));
+}
+
 export function applyAgentContextBudget(
   messages: AIMessage[],
   tools: AIToolDefinition[],
@@ -73,8 +78,7 @@ export function applyAgentContextBudget(
 } {
   const { contextWindowTokens, maxOutputTokens } = options;
   const safety =
-    options.safetyTokens ??
-    Math.max(1024, Math.ceil(contextWindowTokens * 0.1));
+    options.safetyTokens ?? defaultSafetyTokens(contextWindowTokens);
   if (
     ![contextWindowTokens, maxOutputTokens, safety].every(
       (n) => Number.isFinite(n) && n >= 0,
@@ -145,6 +149,10 @@ export interface ContextBudgetReport {
   context_window_tokens: number;
   provenance: 'configured' | 'fallback';
   method: 'conservative_estimate';
+  /** Output the engine reserved for the answer (absent in older rows). */
+  max_output_tokens?: number;
+  /** Ring percent at which the UI warns and the next turn compacts. */
+  compaction_percent?: number;
 }
 
 /**
@@ -168,8 +176,61 @@ export function contextUsagePercent(
   return Math.round(Math.min(100, (used / window) * 100));
 }
 
-/** At or above this percent the ring warns and the next turn compacts. */
+/** Highest ring percent at which the ring warns and the next turn compacts. */
 export const CONTEXT_COMPACTION_PERCENT = 75;
+/**
+ * Points kept between the compaction threshold and the engine's hard ceiling
+ * (`AI_AGENT_CONTEXT_REQUIRED_OVERFLOW`): room for the next exchange.
+ */
+export const CONTEXT_CEILING_MARGIN_PERCENT = 10;
+/**
+ * Output reserve assumed for budgets persisted before `max_output_tokens`
+ * existed: `vex_assistant`'s (migration 20261001120000_vex_agent_registration).
+ */
+export const ASSUMED_MAX_OUTPUT_TOKENS = 4096;
+
+/**
+ * Compaction threshold for a real window and output reserve:
+ * `min(75, ceiling − margin)`, where the ceiling is the ring percent past
+ * which the engine refuses the turn (input over window − output − safety).
+ * With 32 768 / 4 096 it is 67; with 32 768 / 8 192, 54 (the fixed 75 never
+ * fired there: the engine failed first).
+ */
+export function compactionPercentFor(
+  contextWindowTokens: number,
+  maxOutputTokens: number,
+): number {
+  const available =
+    contextWindowTokens -
+    maxOutputTokens -
+    defaultSafetyTokens(contextWindowTokens);
+  const ceiling = (available / contextWindowTokens) * 100;
+  return Math.max(
+    0,
+    Math.min(
+      CONTEXT_COMPACTION_PERCENT,
+      Math.floor(ceiling - CONTEXT_CEILING_MARGIN_PERCENT),
+    ),
+  );
+}
+
+const validCount = (n: unknown): n is number =>
+  typeof n === 'number' && Number.isFinite(n) && n >= 0;
+
+/**
+ * Threshold the compactor and the ring read for this budget: the one the
+ * engine stamped on it, else computed from its window and output reserve.
+ */
+export function compactionPercentOf(budget: ContextBudgetReport): number {
+  const stamped = budget.compaction_percent;
+  if (validCount(stamped) && stamped <= 100) return stamped;
+  return compactionPercentFor(
+    budget.context_window_tokens,
+    validCount(budget.max_output_tokens)
+      ? budget.max_output_tokens
+      : ASSUMED_MAX_OUTPUT_TOKENS,
+  );
+}
 
 export function isContextBudgetReport(
   value: unknown,
@@ -213,6 +274,10 @@ export function estimateContextBudget(
     context_window_tokens: contextWindowTokens,
     provenance: 'fallback',
     method: 'conservative_estimate',
+    compaction_percent: compactionPercentFor(
+      contextWindowTokens,
+      ASSUMED_MAX_OUTPUT_TOKENS,
+    ),
   };
 }
 
