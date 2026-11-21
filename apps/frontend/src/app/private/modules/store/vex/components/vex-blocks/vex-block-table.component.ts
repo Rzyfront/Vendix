@@ -9,6 +9,7 @@ import {
   signal,
 } from '@angular/core';
 import { AuthFacade } from '../../../../../../core/store/auth/auth.facade';
+import { ButtonComponent } from '../../../../../../shared/components/button/button.component';
 import { IconComponent } from '../../../../../../shared/components/icon/icon.component';
 import { CurrencyFormatService } from '../../../../../../shared/pipes/currency/currency.pipe';
 import { formatDateOnlyUTC } from '../../../../../../shared/utils/date.util';
@@ -18,6 +19,7 @@ import {
   VexTableSpec,
   VexUiBlock,
 } from '../../models/vex.models';
+import { VEX_COPY } from '../../vex-copy';
 
 type SortDir = 'asc' | 'desc';
 
@@ -32,12 +34,12 @@ interface IndexedRow {
 @Component({
   selector: 'vendix-vex-block-table',
   standalone: true,
-  imports: [IconComponent],
+  imports: [ButtonComponent, IconComponent],
   changeDetection: ChangeDetectionStrategy.OnPush,
   template: `
     <section
       class="rounded-2xl border border-border bg-surface overflow-hidden"
-      [attr.aria-label]="spec().title || 'Tabla de Vex'"
+      [attr.aria-label]="spec().title || copy.label"
     >
       @if (spec().title) {
         <header class="px-4 pt-3 pb-1">
@@ -55,34 +57,30 @@ interface IndexedRow {
           <input
             type="text"
             class="flex-1 min-w-0 bg-transparent outline-none text-sm text-text-primary placeholder:text-text-secondary"
-            placeholder="Filtrar filas"
-            aria-label="Filtrar filas de la tabla"
+            [attr.placeholder]="copy.filter_placeholder"
+            [attr.aria-label]="copy.filter_aria"
             [value]="filter()"
             (input)="onFilter($event)"
           />
           @if (filter()) {
-            <button
-              type="button"
-              class="w-8 h-8 flex items-center justify-center rounded-lg hover:text-text-primary"
-              aria-label="Limpiar filtro"
-              (click)="clearFilter()"
+            <app-button
+              variant="ghost"
+              size="sm"
+              [ariaLabel]="copy.clear_filter_aria"
+              (clicked)="clearFilter()"
             >
-              <app-icon name="x" [size]="16"></app-icon>
-            </button>
+              <app-icon slot="icon" name="x" [size]="16"></app-icon>
+            </app-button>
           }
         </div>
       </div>
 
       @if (selected_count() > 0) {
         <p class="px-4 pb-1 text-xs text-text-secondary" role="status">
-          {{ selected_count() }} fila(s) seleccionada(s) — se enviarán a Vex con tu próximo mensaje.
-          <button
-            type="button"
-            class="underline underline-offset-2 hover:text-text-primary"
-            (click)="clearSelection()"
-          >
-            Limpiar
-          </button>
+          {{ copy.selected(selected_count()) }}
+          <app-button variant="ghost" size="xsm" (clicked)="clearSelection()">
+            {{ copy.clear }}
+          </app-button>
         </p>
       }
 
@@ -95,7 +93,7 @@ interface IndexedRow {
                   <input
                     type="checkbox"
                     class="w-4 h-4 accent-primary"
-                    aria-label="Seleccionar filas visibles"
+                    [attr.aria-label]="copy.select_visible"
                     [checked]="all_visible_selected()"
                     [indeterminate]="some_visible_selected()"
                     (change)="toggleAllVisible()"
@@ -111,20 +109,22 @@ interface IndexedRow {
                   [class.text-center]="column.align === 'center'"
                 >
                   @if (column.sortable !== false) {
-                    <button
-                      type="button"
-                      class="inline-flex items-center gap-1 min-h-10 hover:text-primary"
-                      [attr.aria-label]="'Ordenar por ' + column.label"
-                      (click)="toggleSort(column.key)"
+                    <app-button
+                      variant="ghost"
+                      size="sm"
+                      customClasses="min-h-10"
+                      [ariaLabel]="copy.sort_by(column.label)"
+                      (clicked)="toggleSort(column.key)"
                     >
                       {{ column.label }}
                       @if (sort_key() === column.key) {
                         <app-icon
+                          slot="icon"
                           [name]="sort_dir() === 'asc' ? 'arrow-up' : 'arrow-down'"
                           [size]="14"
                         ></app-icon>
                       }
-                    </button>
+                    </app-button>
                   } @else {
                     {{ column.label }}
                   }
@@ -143,7 +143,7 @@ interface IndexedRow {
                     <input
                       type="checkbox"
                       class="w-4 h-4 accent-primary"
-                      [attr.aria-label]="'Seleccionar fila ' + (item.index + 1)"
+                      [attr.aria-label]="copy.select_row(item.index + 1)"
                       [checked]="isSelected(item.index)"
                       (change)="toggleRow(item.index)"
                     />
@@ -166,7 +166,7 @@ interface IndexedRow {
                   class="px-3 py-6 text-center text-text-secondary"
                   [attr.colspan]="spec().columns.length + (selectable() ? 1 : 0)"
                 >
-                  Sin filas para mostrar
+                  {{ copy.empty }}
                 </td>
               </tr>
             }
@@ -175,30 +175,32 @@ interface IndexedRow {
       </div>
 
       <div class="px-4 py-2 flex items-center justify-between gap-2 text-xs text-text-secondary">
-        <span>{{ total_rows() }} fila(s)</span>
+        <span>{{ copy.rows_count(total_rows()) }}</span>
         @if (total_pages() > 1) {
           <div class="flex items-center gap-1">
-            <button
-              type="button"
-              class="min-w-10 min-h-10 px-2 rounded-lg border border-border disabled:opacity-40"
-              aria-label="Página anterior"
+            <app-button
+              variant="outline-secondary"
+              size="sm"
+              customClasses="min-w-10 min-h-10"
+              [ariaLabel]="copy.prev_page"
               [disabled]="page() <= 1"
-              (click)="goTo(page() - 1)"
+              (clicked)="goTo(page() - 1)"
             >
               ‹
-            </button>
+            </app-button>
             <span class="px-2" aria-live="polite">
               {{ page() }} / {{ total_pages() }}
             </span>
-            <button
-              type="button"
-              class="min-w-10 min-h-10 px-2 rounded-lg border border-border disabled:opacity-40"
-              aria-label="Página siguiente"
+            <app-button
+              variant="outline-secondary"
+              size="sm"
+              customClasses="min-w-10 min-h-10"
+              [ariaLabel]="copy.next_page"
               [disabled]="page() >= total_pages()"
-              (click)="goTo(page() + 1)"
+              (clicked)="goTo(page() + 1)"
             >
               ›
-            </button>
+            </app-button>
           </div>
         }
       </div>
@@ -206,6 +208,7 @@ interface IndexedRow {
   `,
 })
 export class VexBlockTableComponent {
+  protected readonly copy = VEX_COPY.blocks.table;
   private readonly currencyFormat = inject(CurrencyFormatService);
   private readonly auth = inject(AuthFacade);
 
@@ -380,7 +383,7 @@ export class VexBlockTableComponent {
   }
 
   formatCell(type: string, value: unknown): string {
-    if (value === null || value === undefined || value === '') return '—';
+    if (value === null || value === undefined || value === '') return this.copy.empty_cell;
     const numeric =
       typeof value === 'number'
         ? value

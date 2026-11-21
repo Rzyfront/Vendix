@@ -14,6 +14,7 @@ import {
 } from '@angular/core';
 import { DialogService } from '../../../../../../shared/components/dialog/dialog.service';
 import { AuthFacade } from '../../../../../../core/store/auth/auth.facade';
+import { ButtonComponent } from '../../../../../../shared/components/button/button.component';
 import { IconComponent } from '../../../../../../shared/components/icon/icon.component';
 import { EmptyStateComponent } from '../../../../../../shared/components/empty-state/empty-state.component';
 import { InputsearchComponent } from '../../../../../../shared/components/inputsearch/inputsearch.component';
@@ -25,6 +26,7 @@ import {
   purgeConfirmMessage,
 } from '../../state/vex-conversation-purge.util';
 import { groupConversationsByDate } from '../../state/vex-conversation-groups.util';
+import { VEX_COPY } from '../../vex-copy';
 import { VexTitleEditorComponent } from '../vex-title-editor/vex-title-editor.component';
 
 interface VexSidebarUser {
@@ -39,6 +41,7 @@ interface VexSidebarUser {
   selector: 'vendix-vex-chats-sidebar',
   standalone: true,
   imports: [
+    ButtonComponent,
     IconComponent,
     UserAvatarComponent,
     InputsearchComponent,
@@ -54,7 +57,7 @@ interface VexSidebarUser {
   template: `
     <aside
       id="vex-chats-panel"
-      aria-label="Chats"
+      [attr.aria-label]="copy.panel_label"
       class="h-full flex flex-col overflow-hidden bg-surface border-r border-border text-text-primary transition-[width] duration-200"
       [class.w-72]="!collapsed()"
       [class.w-14]="collapsed()"
@@ -65,8 +68,8 @@ interface VexSidebarUser {
           <button
             type="button"
             class="w-10 h-10 flex items-center justify-center rounded-lg text-text-secondary hover:bg-text-primary/5"
-            title="Abrir chats"
-            aria-label="Abrir chats"
+            [attr.title]="copy.open"
+            [attr.aria-label]="copy.open"
             aria-controls="vex-chats-panel"
             [attr.aria-expanded]="false"
             (click)="collapsed.set(false)"
@@ -76,8 +79,8 @@ interface VexSidebarUser {
           <button
             type="button"
             class="w-10 h-10 flex items-center justify-center rounded-lg text-text-secondary hover:bg-text-primary/5"
-            title="Nuevo chat"
-            aria-label="Nuevo chat"
+            [attr.title]="copy.new_chat"
+            [attr.aria-label]="copy.new_chat"
             (click)="onNewChat()"
           >
             <app-icon name="square-pen" [size]="18" />
@@ -85,8 +88,8 @@ interface VexSidebarUser {
           <button
             type="button"
             class="w-10 h-10 flex items-center justify-center rounded-lg text-text-secondary hover:bg-text-primary/5"
-            title="Buscar chats"
-            aria-label="Buscar chats"
+            [attr.title]="copy.search"
+            [attr.aria-label]="copy.search"
             (click)="collapsed.set(false)"
           >
             <app-icon name="search" [size]="18" />
@@ -96,13 +99,13 @@ interface VexSidebarUser {
         <div class="flex items-center justify-between gap-2 px-3 py-3 shrink-0">
           <div class="flex items-center gap-2 min-w-0">
             <img src="assets/vex/vexicon-96.webp" alt="" class="w-7 h-7" />
-            <span class="font-semibold">Vex</span>
+            <span class="font-semibold">{{ copy.brand }}</span>
           </div>
           <button
             type="button"
             class="w-10 h-10 flex items-center justify-center rounded-lg text-text-secondary hover:bg-text-primary/5"
-            title="Cerrar chats"
-            aria-label="Cerrar chats"
+            [attr.title]="copy.close_panel"
+            [attr.aria-label]="copy.close_panel"
             aria-controls="vex-chats-panel"
             [attr.aria-expanded]="true"
             (click)="onClose()"
@@ -112,18 +115,20 @@ interface VexSidebarUser {
         </div>
 
         <div class="px-3 pb-2 flex flex-col gap-2 shrink-0">
-          <button
-            type="button"
-            class="w-full min-h-10 flex items-center gap-2 px-3 rounded-lg border border-border text-sm font-medium hover:bg-text-primary/5"
-            (click)="onNewChat()"
+          <app-button
+            variant="outline"
+            size="md"
+            [fullWidth]="true"
+            customClasses="min-h-10"
+            (clicked)="onNewChat()"
           >
-            <app-icon name="square-pen" [size]="18" />
-            <span>Nuevo chat</span>
-          </button>
+            <app-icon slot="icon" name="square-pen" [size]="18" />
+            {{ copy.new_chat }}
+          </app-button>
           <app-inputsearch
             size="sm"
-            placeholder="Buscar chats"
-            ariaLabel="Buscar chats"
+            [placeholder]="copy.search"
+            [ariaLabel]="copy.search"
             [debounceTime]="0"
             (searchChange)="onSearch($event)"
           />
@@ -160,7 +165,7 @@ interface VexSidebarUser {
                           [class.font-medium]="conversation.id === chat_store.active_id()"
                           [attr.aria-current]="conversation.id === chat_store.active_id() ? 'true' : null"
                           [attr.data-vex-chat-title]="conversation.id"
-                          [title]="conversation.title"
+                          [attr.title]="conversation.title"
                           (click)="onSelect(conversation.id)"
                           (dblclick)="startRename(conversation.id)"
                         >
@@ -172,7 +177,7 @@ interface VexSidebarUser {
                           [class]="menuTriggerClass(conversation.id)"
                           aria-haspopup="menu"
                           [attr.aria-expanded]="menu_id() === conversation.id"
-                          [attr.aria-label]="'Acciones de ' + conversation.title"
+                          [attr.aria-label]="copy.actions_of(conversation.title)"
                           [attr.data-vex-chat-menu]="conversation.id"
                           (click)="toggleMenu($event, conversation.id)"
                           (keydown.arrowdown)="openMenu($event, conversation.id)"
@@ -183,7 +188,7 @@ interface VexSidebarUser {
                       @if (menu_id() === conversation.id) {
                         <div
                           role="menu"
-                          aria-label="Acciones del chat"
+                          [attr.aria-label]="copy.menu_label"
                           class="mx-2 mb-1 flex flex-col rounded-lg border border-border bg-background p-1"
                           (keydown)="onMenuKeydown($event, conversation.id)"
                         >
@@ -194,7 +199,7 @@ interface VexSidebarUser {
                             (click)="startRename(conversation.id)"
                           >
                             <app-icon name="pencil" [size]="16" />
-                            <span>Renombrar</span>
+                            <span>{{ copy.rename }}</span>
                           </button>
                           <button
                             type="button"
@@ -203,7 +208,7 @@ interface VexSidebarUser {
                             (click)="onDelete(conversation.id)"
                           >
                             <app-icon name="trash-2" [size]="16" />
-                            <span>Eliminar</span>
+                            <span>{{ copy.delete }}</span>
                           </button>
                         </div>
                       }
@@ -214,23 +219,38 @@ interface VexSidebarUser {
             </section>
           } @empty {
             @if (chat_store.loading_list()) {
-              <app-spinner size="sm" text="Cargando chats…" [center]="true" />
+              <app-spinner size="sm" [text]="copy.loading" [center]="true" />
             } @else {
               <app-empty-state
                 size="xsm"
                 icon="search"
-                [title]="chat_store.search_term().trim() ? 'Sin resultados' : 'Aún no hay chats'"
-                [description]="chat_store.search_term().trim() ? 'Prueba con otra palabra.' : 'Tu primer chat con Vex aparecerá aquí.'"
+                [title]="chat_store.search_term().trim() ? copy.empty_search_title : copy.empty_title"
+                [description]="chat_store.search_term().trim() ? copy.empty_search_description : copy.empty_description"
                 [showActionButton]="false"
               />
             }
           }
-          @if (chat_store.has_more()) {
+          @if (chat_store.has_more() && !chat_store.load_more_failed()) {
             <div #sentinel class="h-6" aria-hidden="true"></div>
+          }
+          @if (chat_store.load_more_failed()) {
+            <div
+              role="status"
+              class="flex flex-wrap items-center justify-center gap-2 px-2 py-3 text-xs text-text-secondary"
+            >
+              <span>{{ copy.load_more_failed }}</span>
+              <app-button
+                variant="ghost"
+                size="sm"
+                (clicked)="chat_store.retryLoadMore()"
+              >
+                {{ copy.retry }}
+              </app-button>
+            </div>
           }
           @if (chat_store.loading_more()) {
             <div role="status" aria-live="polite">
-              <app-spinner size="sm" text="Cargando más chats…" [center]="true" />
+              <app-spinner size="sm" [text]="copy.loading_more" [center]="true" />
             </div>
           }
         </div>
@@ -261,6 +281,7 @@ interface VexSidebarUser {
   `,
 })
 export class VexChatsSidebarComponent {
+  protected readonly copy = VEX_COPY.chats;
   readonly chat_store = inject(VexChatStore);
   readonly auth = inject(AuthFacade);
 
@@ -310,9 +331,9 @@ export class VexChatsSidebarComponent {
 
   readonly display_name = computed(() => {
     const user = this.current_user();
-    if (!user) return 'Usuario';
+    if (!user) return this.copy.user_fallback;
     const full = `${user.first_name ?? ''} ${user.last_name ?? ''}`.trim();
-    return full || user.username || user.email || 'Usuario';
+    return full || user.username || user.email || this.copy.user_fallback;
   });
 
   readonly initials = computed(() => {
@@ -355,10 +376,10 @@ export class VexChatsSidebarComponent {
       return;
     }
     const confirmed = await this.dialog.confirm({
-      title: 'Borrar conversación',
+      title: this.copy.delete_title,
       message: purgeConfirmMessage(preview),
-      confirmText: 'Borrar definitivamente',
-      cancelText: 'Cancelar',
+      confirmText: this.copy.delete_confirm,
+      cancelText: this.copy.cancel,
       confirmVariant: 'danger',
     });
     if (!confirmed) {
@@ -374,10 +395,10 @@ export class VexChatsSidebarComponent {
     const can_stop =
       this.chat_store.active_id() === id && this.chat_store.is_agent_typing();
     const accepted = await this.dialog.confirm({
-      title: 'No se puede borrar todavía',
+      title: this.copy.running_title,
       message: VEX_PURGE_RUNNING_MESSAGE,
-      confirmText: can_stop ? 'Detener tarea' : 'Entendido',
-      cancelText: can_stop ? 'Cancelar' : 'Cerrar',
+      confirmText: can_stop ? this.copy.stop_task : this.copy.understood,
+      cancelText: can_stop ? this.copy.cancel : this.copy.close,
       confirmVariant: 'primary',
     });
     if (accepted && can_stop) this.chat_store.stopStream();

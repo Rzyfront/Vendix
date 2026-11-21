@@ -13,6 +13,7 @@ import {
 import { toSignal } from '@angular/core/rxjs-interop';
 import { ActivatedRoute, Router, RouterLink } from '@angular/router';
 import { map } from 'rxjs';
+import { ButtonComponent } from '../../../../shared/components/button/button.component';
 import { IconComponent } from '../../../../shared/components/icon/icon.component';
 import { VexChatsSidebarComponent } from './components/vex-chats-sidebar/vex-chats-sidebar.component';
 import { VexLogSidebarComponent } from './components/vex-log-sidebar/vex-log-sidebar.component';
@@ -46,6 +47,7 @@ function isDesktop(): boolean {
   standalone: true,
   imports: [
     RouterLink,
+    ButtonComponent,
     IconComponent,
     VexChatsSidebarComponent,
     VexLogSidebarComponent,
@@ -146,7 +148,7 @@ function isDesktop(): boolean {
                 type="button"
                 class="group min-h-10 min-w-0 px-3 rounded-full flex items-center gap-2 text-sm text-text-secondary hover:text-text-primary hover:bg-text-primary/5"
                 [attr.aria-label]="copy.rename_aria(current.title)"
-                [title]="copy.rename"
+                [attr.title]="copy.rename"
                 (click)="renaming_title.set(true)"
               >
                 <span class="truncate">{{ current.title }}</span>
@@ -157,15 +159,15 @@ function isDesktop(): boolean {
               <vendix-vex-presence variant="header" />
             </span>
           </div>
-          <button
-            type="button"
-            class="w-10 h-10 rounded-full flex items-center justify-center text-text-secondary hover:text-text-primary"
-            [attr.aria-label]="helpCopy.open_aria"
-            [title]="helpCopy.open"
-            (click)="help_open.set(true)"
+          <app-button
+            variant="ghost"
+            size="md"
+            customClasses="!w-10 !h-10 !px-0 !rounded-full text-text-secondary"
+            [ariaLabel]="helpCopy.open_aria"
+            (clicked)="help_open.set(true)"
           >
-            <app-icon name="help-circle" [size]="20"></app-icon>
-          </button>
+            <app-icon slot="icon" name="help-circle" [size]="20"></app-icon>
+          </app-button>
           <button
             type="button"
             class="relative lg:hidden w-10 h-10 rounded-full flex items-center justify-center text-text-secondary hover:text-text-primary"

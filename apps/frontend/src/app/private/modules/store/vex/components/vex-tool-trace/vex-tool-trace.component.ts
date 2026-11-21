@@ -6,6 +6,7 @@ import {
   signal,
 } from '@angular/core';
 import { IconComponent } from '../../../../../../shared/components/icon/icon.component';
+import { VEX_COPY } from '../../vex-copy';
 import { VexToolStep } from '../../models/vex.models';
 import { vexiIsScaffoldTool } from '../../../../../../core/store/vexi/vexi-user-copy.utils';
 
@@ -33,7 +34,7 @@ import { vexiIsScaffoldTool } from '../../../../../../core/store/vexi/vexi-user-
           <app-icon name="info" [size]="14"></app-icon>
           <span class="font-medium">
             {{
-              running_count() > 0 ? 'Vex está trabajando' : 'Actividad de Vex'
+              running_count() > 0 ? copy.working : copy.activity
             }}
             ({{ visibleSteps().length }})
           </span>
@@ -100,6 +101,7 @@ import { vexiIsScaffoldTool } from '../../../../../../core/store/vexi/vexi-user-
   `,
 })
 export class VexToolTraceComponent {
+  protected readonly copy = VEX_COPY.tool_trace;
   readonly steps = input<VexToolStep[]>([]);
   readonly open = signal(false);
 

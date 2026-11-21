@@ -1,4 +1,5 @@
 import { ChangeDetectionStrategy, Component, computed, input } from '@angular/core';
+import { VEX_COPY } from '../../vex-copy';
 import { VexImageSpec, VexUiBlock } from '../../models/vex.models';
 
 /**
@@ -20,13 +21,13 @@ import { VexImageSpec, VexUiBlock } from '../../models/vex.models';
       @if (url()) {
         <img
           [src]="url()"
-          [alt]="spec().alt || 'Imagen generada por Vex'"
+          [alt]="spec().alt || copy.alt"
           class="w-full max-h-96 object-contain bg-background"
           loading="lazy"
         />
       } @else {
         <p class="px-4 py-6 text-sm text-center text-text-secondary">
-          La imagen expiró o aún no está disponible. Pídele a Vex que la regenere.
+          {{ copy.unavailable }}
         </p>
       }
       @if (spec().caption) {
@@ -38,6 +39,7 @@ import { VexImageSpec, VexUiBlock } from '../../models/vex.models';
   `,
 })
 export class VexBlockImageComponent {
+  protected readonly copy = VEX_COPY.blocks.image;
   readonly block = input.required<VexUiBlock>();
 
   readonly spec = computed(() => this.block().spec as VexImageSpec);

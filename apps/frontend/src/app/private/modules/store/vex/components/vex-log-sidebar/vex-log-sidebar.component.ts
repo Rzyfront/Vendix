@@ -6,22 +6,20 @@ import {
   model,
 } from '@angular/core';
 import { Router, RouterLink, UrlTree } from '@angular/router';
+import { ButtonComponent } from '../../../../../../shared/components/button/button.component';
+import { EmptyStateComponent } from '../../../../../../shared/components/empty-state/empty-state.component';
 import { IconComponent } from '../../../../../../shared/components/icon/icon.component';
+import { SpinnerComponent } from '../../../../../../shared/components/spinner/spinner.component';
 import { formatStoreDateTime } from '../../../../../../shared/utils/date.util';
 import { Reminder } from '../../../dashboard/services/reminders.service';
+import { VEX_COPY } from '../../vex-copy';
 import { VexLogStore } from '../../state/vex-log.store';
 import {
   VEX_REMINDER_FILTERS,
   VexReminderFilter,
 } from '../../state/vex-reminders.util';
 
-const EMPTY_TEXT: Record<VexReminderFilter, string> = {
-  pending: 'No tienes recordatorios pendientes',
-  today: 'Nada para hoy',
-  overdue: 'No tienes recordatorios vencidos',
-  upcoming: 'Sin recordatorios próximos',
-  done: 'Aún no has completado recordatorios',
-};
+const EMPTY_TEXT: Record<VexReminderFilter, string> = VEX_COPY.log.empty;
 
 /** Same deep link the reminder notification uses (`REMINDERS_ROUTE` in the backend). */
 export const VEX_LOG_DASHBOARD_LINK = '/admin/dashboard';
@@ -30,13 +28,19 @@ export const VEX_LOG_DASHBOARD_QUERY = { tab: 'bitacora' } as const;
 @Component({
   selector: 'vendix-vex-log-sidebar',
   standalone: true,
-  imports: [IconComponent, RouterLink],
+  imports: [
+    ButtonComponent,
+    EmptyStateComponent,
+    IconComponent,
+    RouterLink,
+    SpinnerComponent,
+  ],
   changeDetection: ChangeDetectionStrategy.OnPush,
   host: { class: 'block h-full' },
   template: `
     <aside
       id="vex-log-panel"
-      aria-label="Bitácora"
+      [attr.aria-label]="copy.panel_label"
       class="h-full flex flex-col overflow-hidden bg-surface border-l border-border text-text-primary transition-[width] duration-200 motion-reduce:transition-none"
       [class.w-80]="!collapsed()"
       [class.w-14]="collapsed()"
@@ -47,7 +51,7 @@ export const VEX_LOG_DASHBOARD_QUERY = { tab: 'bitacora' } as const;
             type="button"
             class="relative w-10 h-10 flex items-center justify-center rounded-lg text-text-secondary hover:bg-text-primary/5"
             [class]="railButtonClass()"
-            title="Abrir bitácora"
+            [attr.title]="copy.open"
             [attr.aria-label]="railLabel()"
             aria-controls="vex-log-panel"
             [attr.aria-expanded]="false"
@@ -65,13 +69,13 @@ export const VEX_LOG_DASHBOARD_QUERY = { tab: 'bitacora' } as const;
             }
           </button>
           <span class="sr-only" role="status" aria-live="polite">
-            {{ store.highlight() ? 'Nuevo recordatorio guardado en la bitácora' : '' }}
+            {{ store.highlight() ? copy.saved_notice : '' }}
           </span>
           @for (filter of filters; track filter.key) {
             <button
               type="button"
               class="w-10 h-10 flex items-center justify-center rounded-lg text-text-secondary hover:bg-text-primary/5"
-              [title]="filter.label"
+              [attr.title]="filter.label"
               [attr.aria-label]="filter.label"
               (click)="onFilter(filter.key)"
             >
@@ -83,11 +87,11 @@ export const VEX_LOG_DASHBOARD_QUERY = { tab: 'bitacora' } as const;
         <div class="flex items-center justify-between gap-2 px-3 py-3 shrink-0">
           <div class="flex items-center gap-2 min-w-0">
             <app-icon name="notebook-pen" [size]="18" />
-            <span class="font-semibold truncate">Bitácora empresarial</span>
+            <span class="font-semibold truncate">{{ copy.title }}</span>
             @if (store.attention_count() > 0) {
               <span
                 class="shrink-0 min-w-5 h-5 px-1.5 rounded-full bg-primary text-on-primary text-xs leading-5 text-center"
-                [attr.aria-label]="store.attention_count() + ' para hoy o vencidos'"
+                [attr.aria-label]="copy.attention_aria(store.attention_count())"
               >
                 {{ store.attention_count() }}
               </span>
@@ -96,8 +100,8 @@ export const VEX_LOG_DASHBOARD_QUERY = { tab: 'bitacora' } as const;
           <button
             type="button"
             class="w-10 h-10 shrink-0 flex items-center justify-center rounded-lg text-text-secondary hover:bg-text-primary/5"
-            title="Cerrar bitácora"
-            aria-label="Cerrar bitácora"
+            [attr.title]="copy.close"
+            [attr.aria-label]="copy.close"
             aria-controls="vex-log-panel"
             [attr.aria-expanded]="true"
             (click)="collapsed.set(true)"
@@ -109,37 +113,41 @@ export const VEX_LOG_DASHBOARD_QUERY = { tab: 'bitacora' } as const;
         <div
           class="flex gap-2 overflow-x-auto scrollbar-none px-3 pb-2 shrink-0"
           role="group"
-          aria-label="Filtrar recordatorios"
+          [attr.aria-label]="copy.filter_label"
         >
           @for (filter of filters; track filter.key) {
-            <button
-              type="button"
-              class="shrink-0 min-h-10 px-3 rounded-full text-sm border flex items-center gap-1.5"
-              [class]="chipClass(store.active_filter() === filter.key)"
-              [attr.aria-pressed]="store.active_filter() === filter.key"
-              (click)="store.setFilter(filter.key)"
+            <app-button
+              class="shrink-0"
+              size="sm"
+              [variant]="store.active_filter() === filter.key ? 'primary' : 'ghost'"
+              [customClasses]="chipClass(store.active_filter() === filter.key)"
+              [ariaPressed]="store.active_filter() === filter.key"
+              (clicked)="store.setFilter(filter.key)"
             >
               <span>{{ filter.label }}</span>
-              <span class="text-xs opacity-80">{{ store.counts()[filter.key] }}</span>
-            </button>
+              <span class="ml-1.5 text-xs opacity-80">{{ store.counts()[filter.key] }}</span>
+            </app-button>
           }
         </div>
 
         <div class="flex-1 overflow-y-auto px-3 pb-3">
           @if (store.loading()) {
-            <p class="py-4 text-sm text-text-secondary">Cargando recordatorios…</p>
+            <div class="py-4" role="status">
+              <app-spinner size="sm" [text]="copy.loading" [center]="true" />
+            </div>
           } @else if (store.error()) {
             <div class="py-4 flex flex-col items-start gap-2">
               <p class="text-sm text-text-secondary">
-                No se pudieron cargar los recordatorios
+                {{ copy.error }}
               </p>
-              <button
-                type="button"
-                class="min-h-10 text-sm text-primary hover:underline"
-                (click)="store.refresh()"
+              <app-button
+                variant="ghost"
+                size="sm"
+                customClasses="min-h-10"
+                (clicked)="store.refresh()"
               >
-                Reintentar
-              </button>
+                {{ copy.retry }}
+              </app-button>
             </div>
           } @else {
             @for (item of store.filtered(); track item.id) {
@@ -152,7 +160,7 @@ export const VEX_LOG_DASHBOARD_QUERY = { tab: 'bitacora' } as const;
                   class="mt-0.5 shrink-0 w-6 h-6 rounded-full border-2 flex items-center justify-center transition-colors motion-reduce:transition-none disabled:opacity-50"
                   [class]="checkClass(item)"
                   [disabled]="store.updating_ids().has(item.id)"
-                  [attr.aria-label]="item.status === 'done' ? 'Reabrir recordatorio' : 'Marcar como hecho'"
+                  [attr.aria-label]="item.status === 'done' ? copy.reopen : copy.mark_done"
                   (click)="store.toggleStatus(item)"
                 >
                   @if (item.status === 'done') {
@@ -168,7 +176,7 @@ export const VEX_LOG_DASHBOARD_QUERY = { tab: 'bitacora' } as const;
                       <span
                         class="shrink-0 text-xs font-semibold px-1.5 py-0.5 rounded-full bg-primary/10 text-primary"
                       >
-                        Vex
+                        {{ copy.brand }}
                       </span>
                     }
                   </div>
@@ -193,7 +201,7 @@ export const VEX_LOG_DASHBOARD_QUERY = { tab: 'bitacora' } as const;
                           </a>
                         } @else {
                           <span class="truncate">{{ item.link.type_label }} · {{ item.link.label }}</span>
-                          <span class="shrink-0 italic">(no disponible)</span>
+                          <span class="shrink-0 italic">{{ copy.link_unavailable }}</span>
                         }
                       </span>
                     }
@@ -201,9 +209,13 @@ export const VEX_LOG_DASHBOARD_QUERY = { tab: 'bitacora' } as const;
                 </div>
               </div>
             } @empty {
-              <p class="py-4 text-sm text-text-secondary">
-                {{ emptyText(store.active_filter()) }}
-              </p>
+              <app-empty-state
+                size="xsm"
+                icon="notebook-pen"
+                [title]="emptyText(store.active_filter())"
+                description=""
+                [showActionButton]="false"
+              />
             }
           }
         </div>
@@ -215,7 +227,7 @@ export const VEX_LOG_DASHBOARD_QUERY = { tab: 'bitacora' } as const;
             class="min-h-10 flex items-center gap-1.5 text-sm text-primary hover:underline"
           >
             <app-icon name="external-link" [size]="14" />
-            Gestionar en el panel
+            {{ copy.manage }}
           </a>
         </div>
       }
@@ -223,6 +235,7 @@ export const VEX_LOG_DASHBOARD_QUERY = { tab: 'bitacora' } as const;
   `,
 })
 export class VexLogSidebarComponent {
+  protected readonly copy = VEX_COPY.log;
   readonly store = inject(VexLogStore);
   private readonly router = inject(Router);
 
@@ -234,8 +247,7 @@ export class VexLogSidebarComponent {
 
   readonly railLabel = computed(() => {
     const count = this.store.pending_count();
-    if (count === 0) return 'Abrir bitácora';
-    return `Abrir bitácora, ${count} ${count === 1 ? 'recordatorio pendiente' : 'recordatorios pendientes'}`;
+    return VEX_COPY.page.open_log_pending(count);
   });
 
   readonly badgePulseClass = computed(() =>
@@ -285,8 +297,8 @@ export class VexLogSidebarComponent {
 
   chipClass(active: boolean): string {
     return active
-      ? 'bg-primary text-on-primary border-transparent'
-      : 'border-border text-text-secondary hover:bg-text-primary/5';
+      ? 'min-h-10 !rounded-full'
+      : 'min-h-10 !rounded-full border border-border !text-text-secondary';
   }
 
   onFilter(filter: VexReminderFilter): void {

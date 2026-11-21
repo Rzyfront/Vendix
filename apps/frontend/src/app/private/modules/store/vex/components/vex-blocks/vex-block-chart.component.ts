@@ -18,6 +18,7 @@ import {
   VexChartSpec,
   VexUiBlock,
 } from '../../models/vex.models';
+import { VEX_COPY } from '../../vex-copy';
 
 /**
  * SSR/no-DOM fallback. Mirrors the `:root` defaults in `styles.scss`
@@ -67,13 +68,14 @@ const FALLBACK_PALETTE = [
         ></app-chart>
       } @else {
         <p class="px-4 py-6 text-sm text-center text-text-secondary">
-          Sin datos para graficar
+          {{ copy.empty }}
         </p>
       }
     </figure>
   `,
 })
 export class VexBlockChartComponent {
+  protected readonly copy = VEX_COPY.blocks.chart;
   readonly block = input.required<VexUiBlock>();
   readonly interaction = output<VexBlockInteraction>();
 

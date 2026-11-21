@@ -8,6 +8,7 @@ import {
   signal,
   viewChild,
 } from '@angular/core';
+import { VEX_COPY } from '../../vex-copy';
 import { validateConversationTitle } from '../../state/vex-conversation-groups.util';
 
 let nextEditorId = 0;
@@ -49,7 +50,7 @@ let nextEditorId = 0;
 })
 export class VexTitleEditorComponent {
   readonly value = input.required<string>();
-  readonly label = input('Nombre de la conversación');
+  readonly label = input<string>(VEX_COPY.title_editor.label);
 
   readonly saved = output<string>();
   readonly cancelled = output<void>();

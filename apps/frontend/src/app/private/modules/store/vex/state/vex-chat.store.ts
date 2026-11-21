@@ -27,6 +27,7 @@ import { cancelVexToolSteps, settleVexToolStep } from './vex-tool-state';
 import { ToastService } from '../../../../../shared/components/toast/toast.service';
 import { extractApiErrorMessage } from '../../../../../core/utils/api-error-handler';
 import { parseApiError } from '../../../../../core/utils/parse-api-error';
+import { VEX_COPY } from '../vex-copy';
 import { vexiObjectiveConflictNotice } from '../../../../../core/store/vexi/vexi-user-copy.utils';
 import {
   VEX_SINGLE_PLAN_PREFIX,
@@ -55,7 +56,7 @@ const LIST_PAGE_SIZE = 30;
 const SEARCH_DEBOUNCE_MS = 300;
 /** Wait for the `conversation_title` frame this long after the first turn before refetching the row. */
 const TITLE_FALLBACK_DELAY_MS = 5000;
-const STREAM_CUT_MESSAGE = 'Se perdió la conexión con Vex.';
+const STREAM_CUT_MESSAGE: string = VEX_COPY.store.stream_cut;
 const LOCAL_ID_PREFIX = 'local-';
 
 function isNotFoundError(error: unknown): boolean {
@@ -269,10 +270,10 @@ function adaptPersistedPlan(raw: unknown): VexPlanProposal | null {
     typeof raw['title'] === 'string' && raw['title'].trim()
       ? raw['title']
       : steps.length === 1 && steps[0].preview?.target?.trim()
-        ? `Vex propone: ${steps[0].preview?.target?.trim()}`
+        ? VEX_COPY.store.plan_title_target(steps[0].preview?.target?.trim() ?? '')
         : steps.length > 1
-          ? `Vex propone un plan (${steps.length} pasos)`
-          : 'Vex propone un plan';
+          ? VEX_COPY.store.plan_title_steps(steps.length)
+          : VEX_COPY.store.plan_title;
   return { plan_id: raw['plan_id'], title, steps, status };
 }
 
@@ -359,7 +360,7 @@ function adaptConversation(
 ): VexConversation {
   return {
     id: String(row.id),
-    title: row.title?.trim() ? row.title : 'Conversación',
+    title: row.title?.trim() ? row.title : VEX_COPY.store.default_title,
     messages,
     created_at: new Date(row.created_at),
     updated_at: new Date(row.updated_at),
@@ -514,7 +515,7 @@ export class VexChatStore {
         ...list,
         {
           id,
-          title: 'Conversación',
+          title: VEX_COPY.store.default_title,
           messages: [],
           created_at: epoch,
           updated_at: epoch,
@@ -562,7 +563,7 @@ export class VexChatStore {
     this._objective_loading.set(true);
     void firstValueFrom(this.objectiveApi.getObjective(objectiveId, 'vex'))
       .then((objective) => this.rememberObjective(objective))
-      .catch(() => this._error.set('No pude consultar el objetivo.'))
+      .catch(() => this._error.set(VEX_COPY.store.objective_query_failed))
       .finally(() => this._objective_loading.set(false));
   }
 
@@ -576,7 +577,7 @@ export class VexChatStore {
       !canResumeObjective(objective, confirmExpired)
     ) {
       this._error.set(
-        'Selecciona el objetivo y confirma explícitamente si expiró antes de reanudarlo.',
+        VEX_COPY.store.objective_resume_blocked,
       );
       return;
     }
@@ -594,7 +595,7 @@ export class VexChatStore {
       .then((resumed) => this.rememberObjective(resumed))
       .catch(() =>
         this._error.set(
-          'No se reanudó el objetivo. Actualiza su estado e inténtalo de nuevo.',
+          VEX_COPY.store.objective_resume_failed,
         ),
       )
       .finally(() => this._objective_loading.set(false));
@@ -617,7 +618,7 @@ export class VexChatStore {
   }
 
   async ensureVoiceConversation(): Promise<number | null> {
-    const id = await this.ensureConversation('Conversación por voz');
+    const id = await this.ensureConversation(VEX_COPY.store.voice_title);
     return id ? Number(id) : null;
   }
 
@@ -659,7 +660,7 @@ export class VexChatStore {
     );
     const text =
       result.receipt.summary?.trim() ||
-      (applied ? 'Cambio aplicado.' : 'Resultado pendiente de verificación.');
+      (applied ? VEX_COPY.store.receipt_applied : VEX_COPY.store.receipt_pending);
     this._conversations.update((list) =>
       list.map((conversation) =>
         conversation.id === conversation_id
@@ -699,8 +700,8 @@ export class VexChatStore {
     const text =
       result.receipt.summary?.trim() ||
       (applied
-        ? 'Cambio aplicado.'
-        : 'Resultado sin verificar. Consulta el estado.');
+        ? VEX_COPY.store.receipt_applied
+        : VEX_COPY.store.receipt_unverified);
     this._conversations.update((list) =>
       list.map((conversation) =>
         conversation.id === conversation_id
@@ -750,7 +751,7 @@ export class VexChatStore {
     } catch (error) {
       this.toast.error(
         parseApiError(error).userMessage,
-        'No se pudo preparar el borrado',
+        VEX_COPY.store.purge_prepare_failed,
       );
       return null;
     }
@@ -771,14 +772,14 @@ export class VexChatStore {
       if (status === 409) return 'running';
       if (status === 404) {
         this.forgetConversation(id);
-        this.toast.error('Esa conversación ya no existe.', 'No se pudo borrar');
+        this.toast.error(VEX_COPY.store.purge_missing, VEX_COPY.store.purge_failed);
         return 'failed';
       }
-      this.toast.error(parseApiError(error).userMessage, 'No se pudo borrar');
+      this.toast.error(parseApiError(error).userMessage, VEX_COPY.store.purge_failed);
       return 'failed';
     }
     this.forgetConversation(id);
-    this.toast.success('Conversación borrada');
+    this.toast.success(VEX_COPY.store.purged);
     return 'purged';
   }
 
@@ -837,7 +838,7 @@ export class VexChatStore {
       this.setTitle(id, previous);
       this.toast.error(
         parseApiError(error).userMessage,
-        'No se pudo renombrar',
+        VEX_COPY.store.rename_failed,
       );
       return false;
     }
@@ -893,8 +894,8 @@ export class VexChatStore {
         );
       } else {
         this.toast.error(
-          'Esta propuesta venció. Vuelve a pedirle a Vex que la proponga.',
-          'No se pudo aprobar',
+          VEX_COPY.store.proposal_expired_retry,
+          VEX_COPY.store.approve_failed,
         );
       }
       return;
@@ -976,7 +977,7 @@ export class VexChatStore {
         },
       );
       this.patchPlan(conversation_id, message_id, { status: 'failed' });
-      this.toast.error(message, 'No se pudo aplicar');
+      this.toast.error(message, VEX_COPY.store.apply_failed);
     } finally {
       this._busy_plan_id.set(null);
     }
@@ -1114,7 +1115,7 @@ export class VexChatStore {
             );
             this.toast.error(
               extractApiErrorMessage(error),
-              'Necesita confirmación propia',
+              VEX_COPY.store.own_confirmation,
             );
             continue;
           }
@@ -1129,7 +1130,7 @@ export class VexChatStore {
             },
           );
           this.patchPlan(conversation_id, message_id, { status: 'failed' });
-          this.toast.error(extractApiErrorMessage(error), 'No se pudo aplicar');
+          this.toast.error(extractApiErrorMessage(error), VEX_COPY.store.apply_failed);
           // The server recorded the failure: adopt its plan state when the
           // plan was persisted (the local `failed` above is the fallback).
           await this.syncPlanFromServer(numeric, conversation_id, plan.plan_id);
@@ -1145,7 +1146,7 @@ export class VexChatStore {
       }
     } catch (error) {
       this.patchPlan(conversation_id, message_id, { status: 'proposed' });
-      this.toast.error(extractApiErrorMessage(error), 'No se pudo aprobar');
+      this.toast.error(extractApiErrorMessage(error), VEX_COPY.store.approve_failed);
     } finally {
       this._busy_plan_id.set(null);
     }
@@ -1290,7 +1291,7 @@ export class VexChatStore {
       });
       this.plan_tokens.delete(plan.plan_id);
     } catch (error) {
-      this.toast.error(extractApiErrorMessage(error), 'No se pudo cancelar');
+      this.toast.error(extractApiErrorMessage(error), VEX_COPY.store.cancel_failed);
       await this.syncPlanFromServer(numeric, conversation_id, plan.plan_id);
       return;
     } finally {
@@ -1351,8 +1352,8 @@ export class VexChatStore {
       return;
     }
     this.toast.error(
-      'Esta propuesta venció. Solicita una propuesta nueva.',
-      'Falta la aprobación',
+      VEX_COPY.store.proposal_expired_new,
+      VEX_COPY.store.approval_missing,
     );
   }
 
@@ -1528,10 +1529,10 @@ export class VexChatStore {
           confirmation_token: undefined,
         },
       );
-      this.toast.error(extractApiErrorMessage(error), 'No se pudo aplicar');
+      this.toast.error(extractApiErrorMessage(error), VEX_COPY.store.apply_failed);
       return;
     }
-    this.toast.error(extractApiErrorMessage(error), 'No se pudo aplicar');
+    this.toast.error(extractApiErrorMessage(error), VEX_COPY.store.apply_failed);
     await this.syncPlanFromServer(numeric, conversation_id, plan_id);
   }
 
@@ -1571,7 +1572,7 @@ export class VexChatStore {
     ).catch((error) => {
       this.toast.error(
         extractApiErrorMessage(error),
-        'No se pudo enviar la selección',
+        VEX_COPY.store.interaction_failed,
       );
     });
   }
@@ -1658,8 +1659,8 @@ export class VexChatStore {
       this.replace_nav = true;
     }
     this.toast.error(
-      'Esa conversación ya no existe o no está disponible.',
-      'No se pudo abrir',
+      VEX_COPY.store.conversation_missing,
+      VEX_COPY.store.open_failed,
     );
   }
 
@@ -1702,7 +1703,7 @@ export class VexChatStore {
           this.handleMissingConversation(id);
           return;
         }
-        this.toast.error(extractApiErrorMessage(error), 'No se pudo abrir');
+        this.toast.error(extractApiErrorMessage(error), VEX_COPY.store.open_failed);
       })
       .finally(() => this._loading_thread.set(false));
   }
@@ -1974,7 +1975,7 @@ export class VexChatStore {
     const id = `${LOCAL_ID_PREFIX}${crypto.randomUUID()}`;
     this._conversations.update((list) => [
       ...list,
-      { id, title: 'Conversación', messages: [], created_at: now, updated_at: now, local: true },
+      { id, title: VEX_COPY.store.default_title, messages: [], created_at: now, updated_at: now, local: true },
     ]);
     this._active_id.set(id);
     return id;
@@ -2389,7 +2390,7 @@ export class VexChatStore {
           message_id,
           chunk.error_code
             ? parseApiError({ error_code: chunk.error_code }).userMessage
-            : 'Vex no pudo completar la respuesta.',
+            : VEX_COPY.store.answer_failed,
           false,
           true,
         );

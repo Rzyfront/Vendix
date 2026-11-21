@@ -8,6 +8,7 @@ import {
 import { IconComponent } from '../../../../../../shared/components/icon/icon.component';
 import { CurrencyFormatService } from '../../../../../../shared/pipes/currency/currency.pipe';
 import { StoreSettingsFacade } from '../../../../../../core/store/store-settings/store-settings.facade';
+import { VEX_COPY } from '../../vex-copy';
 import { VexFileSpec, VexUiBlock } from '../../models/vex.models';
 
 /**
@@ -25,7 +26,7 @@ import { VexFileSpec, VexUiBlock } from '../../models/vex.models';
   template: `
     <section
       class="rounded-2xl border border-border bg-surface px-4 py-3 flex items-center gap-3"
-      aria-label="Archivo de Vex"
+      [attr.aria-label]="copy.label"
     >
       <span
         class="w-11 h-11 shrink-0 rounded-xl grid place-items-center bg-primary/10 text-primary"
@@ -50,17 +51,18 @@ import { VexFileSpec, VexUiBlock } from '../../models/vex.models';
           class="shrink-0 min-h-10 inline-flex items-center gap-2 px-4 rounded-xl bg-primary text-on-primary text-sm font-medium hover:opacity-90"
         >
           <app-icon name="download" [size]="16"></app-icon>
-          Descargar
+          {{ copy.download }}
         </a>
       } @else {
         <span class="shrink-0 text-xs text-text-secondary">
-          Enlace expirado
+          {{ copy.expired }}
         </span>
       }
     </section>
   `,
 })
 export class VexBlockFileComponent {
+  protected readonly copy = VEX_COPY.blocks.file;
   private readonly settingsFacade = inject(StoreSettingsFacade);
   private readonly currencyFormat = inject(CurrencyFormatService);
 
@@ -86,7 +88,7 @@ export class VexBlockFileComponent {
     const from_spec = this.spec().filename;
     if (from_spec) return from_spec;
     const from_data = this.block().data['filename'];
-    return typeof from_data === 'string' && from_data ? from_data : 'Archivo';
+    return typeof from_data === 'string' && from_data ? from_data : this.copy.default_name;
   });
 
   readonly meta_line = computed(() => {

@@ -3,6 +3,7 @@ import { firstValueFrom, forkJoin } from 'rxjs';
 import { StoreSettingsFacade } from '../../../../../core/store/store-settings/store-settings.facade';
 import { ToastService } from '../../../../../shared/components/toast/toast.service';
 import { extractApiError } from '../../../../../shared/utils/http-error.util';
+import { VEX_COPY } from '../vex-copy';
 import { Reminder, RemindersService } from '../../dashboard/services/reminders.service';
 import { VexChatStore } from './vex-chat.store';
 import {
@@ -141,7 +142,7 @@ export class VexLogStore {
     } catch (err) {
       if (!this.destroyed) {
         this.toast.error(
-          extractApiError(err).message ?? 'No se pudo actualizar el recordatorio',
+          extractApiError(err).message ?? VEX_COPY.store.update_failed,
         );
       }
     } finally {

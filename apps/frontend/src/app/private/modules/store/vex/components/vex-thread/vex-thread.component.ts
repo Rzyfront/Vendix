@@ -67,7 +67,7 @@ import { StoreSettingsFacade } from '../../../../../../core/store/store-settings
                   role="alert"
                 >
                   <app-icon name="alert-triangle" [size]="14"></app-icon>
-                  <span>No se envió</span>
+                  <span>{{ threadCopy.send_failed }}</span>
                   <span aria-hidden="true">·</span>
                   <app-button
                     variant="ghost"

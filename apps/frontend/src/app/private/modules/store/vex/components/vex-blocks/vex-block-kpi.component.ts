@@ -8,6 +8,7 @@ import {
 import { IconComponent } from '../../../../../../shared/components/icon/icon.component';
 import { CurrencyFormatService } from '../../../../../../shared/pipes/currency/currency.pipe';
 import { StoreSettingsFacade } from '../../../../../../core/store/store-settings/store-settings.facade';
+import { VEX_COPY } from '../../vex-copy';
 import { VexKpiSpec, VexUiBlock } from '../../models/vex.models';
 
 /**
@@ -96,7 +97,7 @@ export class VexBlockKpiComponent {
     if (numeric === null) return String(delta);
     const sign = numeric > 0 ? '+' : '';
     if (this.spec().format === 'percent') {
-      return `${sign}${numeric.toLocaleString(this.number_locale(), { maximumFractionDigits: 2 })} pts`;
+      return `${sign}${numeric.toLocaleString(this.number_locale(), { maximumFractionDigits: 2 })}${VEX_COPY.blocks.kpi.points_suffix}`;
     }
     return `${sign}${this.format(this.spec().format ?? 'number', numeric)}`;
   });
@@ -113,7 +114,7 @@ export class VexBlockKpiComponent {
   }
 
   private format(format: string, value: unknown): string {
-    if (value === null || value === undefined || value === '') return '—';
+    if (value === null || value === undefined || value === '') return VEX_COPY.blocks.kpi.empty_value;
     const numeric = toNumber(value);
     if (numeric === null) return String(value);
     switch (format) {

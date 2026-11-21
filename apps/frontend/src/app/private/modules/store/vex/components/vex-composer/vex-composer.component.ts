@@ -15,12 +15,14 @@ import {
   viewChild,
 } from '@angular/core';
 import { firstValueFrom } from 'rxjs';
+import { ButtonComponent } from '../../../../../../shared/components/button/button.component';
 import { IconComponent } from '../../../../../../shared/components/icon/icon.component';
 import { ToastService } from '../../../../../../shared/components/toast/toast.service';
 import { extractApiErrorMessage } from '../../../../../../core/utils/api-error-handler';
 import { VexApiService } from '../../services/vex-api.service';
 import { VexChatStore } from '../../state/vex-chat.store';
 import { VexPresenceStore } from '../../state/vex-presence.store';
+import { VEX_COPY } from '../../vex-copy';
 import { VexPresenceComponent } from '../vex-presence/vex-presence.component';
 
 const MAX_LINES = 8;
@@ -47,14 +49,14 @@ interface StagedFile {
 @Component({
   selector: 'vendix-vex-composer',
   standalone: true,
-  imports: [IconComponent, VexiConfirmationCardComponent, VexPresenceComponent],
+  imports: [ButtonComponent, IconComponent, VexiConfirmationCardComponent, VexPresenceComponent],
   template: `
     <div class="w-full">
       <div class="mb-2 px-2 min-h-8 flex items-center">
         <vendix-vex-presence variant="chip" [live]="true" />
       </div>
       @if (staged().length > 0) {
-        <div class="flex flex-wrap gap-2 mb-2" aria-label="Archivos adjuntos">
+        <div class="flex flex-wrap gap-2 mb-2" [attr.aria-label]="copy.attachments_label">
           @for (file of staged(); track file.local_id) {
             <span
               class="inline-flex items-center gap-2 max-w-full pl-3 pr-1.5 py-1.5 rounded-xl border text-xs"
@@ -72,18 +74,20 @@ interface StagedFile {
               }
               <span
                 class="truncate max-w-40 text-text-primary"
-                [title]="file.error || file.name"
+                [attr.title]="file.error || file.name"
               >
                 {{ file.name }}
               </span>
-              <button
-                type="button"
-                class="w-8 h-8 shrink-0 rounded-lg grid place-items-center text-text-secondary hover:text-text-primary"
-                [attr.aria-label]="'Quitar ' + file.name"
-                (click)="removeStaged(file.local_id)"
+              <app-button
+                class="shrink-0"
+                variant="ghost"
+                size="sm"
+                customClasses="!w-8 !h-8 !px-0 !rounded-lg text-text-secondary"
+                [ariaLabel]="copy.remove_aria(file.name)"
+                (clicked)="removeStaged(file.local_id)"
               >
-                <app-icon name="x" [size]="14"></app-icon>
-              </button>
+                <app-icon slot="icon" name="x" [size]="14"></app-icon>
+              </app-button>
             </span>
           }
         </div>
@@ -97,14 +101,14 @@ interface StagedFile {
           class="hidden"
           multiple
           accept="image/*,.pdf,.csv,.xlsx,.xls,.txt"
-          aria-label="Adjuntar archivos"
+          [attr.aria-label]="copy.attach"
           (change)="onFilesPicked($event)"
         />
         <button
           type="button"
           class="w-10 h-10 shrink-0 rounded-full flex items-center justify-center text-text-secondary hover:text-text-primary transition-colors disabled:opacity-40"
-          aria-label="Adjuntar archivos"
-          title="Adjuntar (máx. 5 archivos de 15 MB)"
+          [attr.aria-label]="copy.attach"
+          [attr.title]="copy.attach_title"
           [disabled]="store.is_agent_typing()"
           (click)="file_input.click()"
         >
@@ -115,8 +119,8 @@ interface StagedFile {
           #input
           rows="1"
           class="flex-1 min-w-0 resize-none bg-transparent outline-none border-0 py-2 text-text-primary placeholder:text-text-secondary"
-          placeholder="Pregúntale a Vex"
-          aria-label="Mensaje para Vex"
+          [attr.placeholder]="copy.placeholder"
+          [attr.aria-label]="copy.message_label"
           [value]="text()"
           (input)="onInput($event)"
           (keydown)="onKeydown($event)"
@@ -127,7 +131,7 @@ interface StagedFile {
           <button
             type="button"
             class="min-w-11 min-h-11 px-2 py-1 rounded-2xl bg-surface text-text-primary touch-none focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-primary"
-            aria-label="Mantén para dictar un mensaje a Vex; no confirma cambios"
+            [attr.aria-label]="copy.hold_to_dictate"
             [attr.aria-pressed]="pipeline.recording()"
             (pointerdown)="voiceDown($event)"
             (pointerup)="voiceUp($event)"
@@ -147,9 +151,9 @@ interface StagedFile {
             class="min-w-11 min-h-11 px-2 py-1 rounded-2xl bg-surface text-text-primary touch-none focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-primary"
             (click)="toggleRealtime()"
             [attr.aria-pressed]="realtimeActive()"
-            aria-label="Iniciar o detener conversación de voz en tiempo real con Vex"
+            [attr.aria-label]="copy.realtime_aria"
           >
-            {{ realtimeActive() ? 'Detener voz' : 'Voz en vivo' }}
+            {{ realtimeActive() ? copy.realtime_stop : copy.realtime_start }}
           </button>
         } @else {
           <button
@@ -157,8 +161,8 @@ interface StagedFile {
             disabled
             aria-disabled="true"
             class="w-10 h-10 shrink-0 rounded-full flex items-center justify-center text-text-secondary opacity-40 cursor-not-allowed"
-            aria-label="Dictar por voz"
-            title="Próximamente"
+            [attr.aria-label]="copy.dictate_aria"
+            [attr.title]="copy.soon"
           >
             <app-icon name="mic" [size]="20" />
           </button>
@@ -168,7 +172,7 @@ interface StagedFile {
           <button
             type="button"
             class="w-10 h-10 shrink-0 rounded-full flex items-center justify-center bg-primary text-on-primary transition-opacity hover:opacity-90"
-            aria-label="Enviar"
+            [attr.aria-label]="copy.send"
             (click)="send()"
           >
             <app-icon name="send" [size]="18"></app-icon>
@@ -186,28 +190,27 @@ interface StagedFile {
         <app-vexi-confirmation-card
           [proposal]="pending.proposal"
           [voiceContext]="pending.context"
-          agentLabel="Vex"
+          [agentLabel]="copy.brand"
           (approve)="approveRealtime()"
           (reject)="rejectRealtime()"
           (voiceApplied)="acceptRealtime($event)"
         />
       }
       <p class="mt-2 text-center text-xs text-text-secondary">
-        Vex puede cometer errores. Verifica la información importante.
+        {{ copy.disclaimer }}
       </p>
     </div>
   `,
 })
 export class VexComposerComponent {
+  protected readonly copy = VEX_COPY.composer;
   protected readonly pipeline = inject(VexiVoicePipelineService);
   protected readonly realtime = inject(VexiRealtimeService);
   private readonly voiceApi = inject(VexiApiService);
   private readonly destroyRef = inject(DestroyRef);
   readonly voiceEnabled = signal(false);
   readonly realtimeActive = signal(false);
-  readonly voiceHint = signal(
-    'Mantén el micrófono para enviar un mensaje. El dictado no aprueba cambios.',
-  );
+  readonly voiceHint = signal<string>(VEX_COPY.composer.voice_hint);
   private voiceHeld = false;
   readonly realtimeProposal = computed(() => {
     const pending = this.realtime.pendingProposal();
@@ -268,9 +271,7 @@ export class VexComposerComponent {
       });
       if (!this.voiceHeld && started) this.pipeline.cancelRecording();
       if (!started)
-        this.voiceHint.set(
-          'Autoriza el micrófono y mantén otra vez para dictar.',
-        );
+        this.voiceHint.set(this.copy.mic_denied);
     });
   }
 
@@ -302,7 +303,7 @@ export class VexComposerComponent {
     });
     this.realtimeActive.set(opened);
     if (!opened)
-      this.voiceHint.set('Autoriza el micrófono y abre de nuevo Voz en vivo.');
+      this.voiceHint.set(this.copy.realtime_denied);
   }
 
   async approveRealtime(): Promise<void> {
@@ -330,7 +331,7 @@ export class VexComposerComponent {
       this.realtime.clearProposal();
       this.toast.error(
         extractApiErrorMessage(error),
-        'Consulta el estado antes de volver a proponer',
+        this.copy.approve_error_title,
       );
     }
   }
@@ -397,7 +398,7 @@ export class VexComposerComponent {
   send(): void {
     if (!this.can_send()) return;
     const ids = this.ready_ids();
-    const text = this.text().trim() || 'Te adjunté archivo(s). Revísalos.';
+    const text = this.text().trim() || this.copy.attached_default;
     this.presence.clearTyping();
     this.store.sendMessage(text, ids);
     this.text.set('');
@@ -432,24 +433,24 @@ export class VexComposerComponent {
 
     const room = MAX_FILES - this.staged().length;
     if (room <= 0) {
-      this.toast.warning(`Máximo ${MAX_FILES} archivos por mensaje.`);
+      this.toast.warning(this.copy.max_files(MAX_FILES));
       return;
     }
     for (const file of files.slice(0, room)) {
       if (!isAcceptedFile(file)) {
         this.toast.warning(
-          `${file.name || 'El archivo'} no es un tipo permitido.`,
+          this.copy.not_allowed(file.name || this.copy.file_fallback),
         );
         continue;
       }
       if (file.size > MAX_FILE_BYTES) {
-        this.toast.warning(`${file.name} supera los 15 MB.`);
+        this.toast.warning(this.copy.too_big(file.name));
         continue;
       }
       void this.uploadOne(file);
     }
     if (files.length > room) {
-      this.toast.warning(`Solo se adjuntaron ${room} archivo(s).`);
+      this.toast.warning(this.copy.only_attached(room));
     }
   }
 
@@ -498,7 +499,7 @@ export class VexComposerComponent {
               : f,
           ),
         );
-        this.toast.error(message, 'No se pudo adjuntar');
+        this.toast.error(message, this.copy.attach_failed);
       });
   }
 
