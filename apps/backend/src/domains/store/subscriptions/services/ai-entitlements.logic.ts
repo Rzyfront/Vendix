@@ -19,6 +19,7 @@ import {
   formatAICapValue,
   isAIAgentKey,
   legacyCapToCapValue,
+  legacyFeatureEnabled,
   legacyFlagsToAIEntitlements,
 } from '../types/ai-capabilities';
 
@@ -309,7 +310,8 @@ function legacyFieldMismatch(
     if (!d?.legacy || d.kind === 'toggle' || d.legacy.enabled_from !== 'feature')
       return false;
     const projected = projection[d.legacy.feature]?.enabled;
-    const actual = asObject(legacyRoot[d.legacy.feature])?.enabled === true;
+    // The gate's own decision: a present feature is on unless enabled === false.
+    const actual = legacyFeatureEnabled(asObject(legacyRoot[d.legacy.feature]));
     return projected !== undefined && projected !== actual;
   };
   if (!def.legacy) return false;
@@ -340,6 +342,9 @@ function legacyFieldMismatch(
 
 /**
  * Compare the decision the legacy JSON gives with the one the rows give.
+ * The legacy side is `legacyFlagsToAIEntitlements`, which mirrors the gate
+ * itself (a present feature is on unless `enabled === false`), so a plan the
+ * gate lets through but whose row is off is reported, not copied silently.
  * `only` narrows the capabilities (the runtime shadow compares the ones of
  * the legacy feature the gate is deciding).
  */
