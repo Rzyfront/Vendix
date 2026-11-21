@@ -35,7 +35,7 @@ function buildPrisma() {
       }),
       update: jest.fn().mockResolvedValue({}),
     },
-    videos: { findMany: jest.fn() },
+    videos: { findMany: jest.fn(), findFirst: jest.fn() },
     help_articles: { findMany: jest.fn().mockResolvedValue([]) },
     user_learning_progress: {
       findUnique: jest.fn(),
@@ -212,6 +212,7 @@ describe('LearningPathsService (store side)', () => {
   });
 
   it('upserts progress keyed by the current user and never lowers completion', async () => {
+    prisma.videos.findFirst.mockResolvedValue({ id: 11 });
     prisma.user_learning_progress.findUnique.mockResolvedValue({
       seconds_watched: 90,
       completed: true,
@@ -219,10 +220,22 @@ describe('LearningPathsService (store side)', () => {
     });
     await service.saveProgress(3, { video_id: 11, series_id: 7, seconds_watched: 20 });
 
+    expect(prisma.videos.findFirst.mock.calls[0][0].where).toEqual({
+      id: 11,
+      status: 'PUBLISHED',
+    });
     const arg = prisma.user_learning_progress.upsert.mock.calls[0][0];
     expect(arg.where).toEqual({ user_id_video_id: { user_id: 3, video_id: 11 } });
     expect(arg.create).toMatchObject({ user_id: 3, video_id: 11, series_id: 7 });
     expect(arg.update.completed).toBe(true);
     expect(arg.update.seconds_watched).toBe(90);
+  });
+
+  it('refuses progress for a video that is not published', async () => {
+    prisma.videos.findFirst.mockResolvedValue(null);
+    await expect(
+      service.saveProgress(3, { video_id: 99, series_id: 7, seconds_watched: 10 }),
+    ).rejects.toBeDefined();
+    expect(prisma.user_learning_progress.upsert).not.toHaveBeenCalled();
   });
 });
