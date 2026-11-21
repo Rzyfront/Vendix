@@ -1,5 +1,9 @@
 import { AIChatService } from './ai-chat.service';
 import {
+  ErrorCodes,
+  VendixHttpException,
+} from '../../../common/errors';
+import {
   ConversationTitleService,
   fallbackTitle,
   sanitizeGeneratedTitle,
@@ -71,6 +75,21 @@ describe('T2 generated conversation title', () => {
       agent_key: 'vex',
       title_source: 'fallback',
     });
+  });
+
+  // M12 retenida: sin la fila `vex_title_generator` el motor responde
+  // AI_APP_001 y el título sale del primer mensaje, nunca vacío ni con error.
+  it('without the vex_title_generator row (AI_APP_001) it still titles the conversation', async () => {
+    const run = jest
+      .fn()
+      .mockRejectedValue(new VendixHttpException(ErrorCodes.AI_APP_001));
+    const { service, update } = buildTitles({ run });
+    await expect(
+      service.start(5, '¿Cuánto vendí esta semana en la tienda del centro?'),
+    ).resolves.toBe('¿Cuánto vendí esta semana en la tienda del centro?');
+    expect(run).toHaveBeenCalledWith('vex_title_generator', expect.anything());
+    expect(update).toHaveBeenCalledTimes(1);
+    expect(update.mock.calls[0][0].data.metadata.title_source).toBe('fallback');
   });
 
   it('falls back when the response is unsuccessful or empty', async () => {
