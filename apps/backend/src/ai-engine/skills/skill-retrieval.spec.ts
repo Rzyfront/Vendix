@@ -161,6 +161,46 @@ describe('skill retrieval (T32)', () => {
     const hits = await search.search('cierre de caja', { limit: 10 });
     expect(hits.map((h) => h.key)).not.toContain('cierre-de-caja');
   });
+
+  // Moved from tools/domains/skill.tools.spec.ts: what `load_skill` serves is
+  // decided here, the tool only passes it through.
+  it('load returns the PUBLISHED version body within the token limit', async () => {
+    const { prisma, repository, search } = build();
+    const row = prisma.skills.find((s: any) => s.key === 'cierre-de-caja');
+    await repository.saveVersion(row.id, { ...row, body: 'BORRADOR NUEVO' }, 1, null);
+    const out = await search.load('cierre-de-caja');
+    expect(out).toMatchObject({ key: 'cierre-de-caja', version: 1, truncated: false });
+    expect(out?.body).toContain('Cierre de caja');
+    expect(out?.body).not.toContain('BORRADOR NUEVO');
+    expect(out?.estimated_tokens).toBeLessThanOrEqual(2000);
+    expect(out?.candidate_tools).toContain('close_cash_session');
+  });
+
+  it('load truncates an oversized legacy body to the playbook budget', async () => {
+    const { prisma, search } = build();
+    const row = prisma.skills[0];
+    prisma.versions[0].body = Array.from(
+      { length: 900 },
+      (_, i) => `línea ${i} con texto de relleno largo`,
+    ).join('\n');
+    const out = await search.load(row.key);
+    expect(out?.truncated).toBe(true);
+    expect(out?.estimated_tokens).toBeLessThanOrEqual(2000);
+  });
+
+  it('load never serves a draft, an archived or an unknown key', async () => {
+    const { prisma, repository, search } = build();
+    await repository.create(
+      'solo-borrador',
+      { title: 't', module: null, body: 'b', candidate_tools: [], help_article_id: null, video_id: null, agent_keys: ['vex'] },
+      1,
+      null,
+    );
+    await repository.archive(prisma.skills[0].id, 1);
+    for (const key of ['solo-borrador', prisma.skills[0].key, 'no-existe']) {
+      expect(await search.load(key)).toBeNull();
+    }
+  });
 });
 
 describe('skill indexer (managed documents)', () => {
