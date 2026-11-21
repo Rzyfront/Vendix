@@ -6,7 +6,6 @@ import {
   AI_FEATURE_KEYS,
   isAIFeatureKey,
 } from '../../../store/subscriptions/types/access.types';
-import { AIToolRegistry } from '../../../../ai-engine/tools/ai-tool-registry';
 import { PlanModuleRulesService } from '../../../../common/access/plan-module-rules.service';
 import {
   CreatePlanDto,
@@ -44,16 +43,8 @@ interface PlanAIWrite {
 export class PlansService {
   private readonly logger = new Logger(PlansService.name);
 
-  /**
-   * F6 — `toolRegistry` es opcional a propósito: `AIEngineModule` es `@Global()`
-   * y en producción siempre resuelve, pero los specs unitarios históricos
-   * construyen el servicio con `new PlansService(prisma)` y deben seguir
-   * compilando. Sin registry, cualquier `tools_allowed` declarado se rechaza
-   * (fail-closed): no se puede probar el enlace, así que no se puede guardar.
-   */
   constructor(
     private readonly prisma: GlobalPrismaService,
-    @Optional() private readonly toolRegistry?: AIToolRegistry,
     // AccessModule es @Global: se resuelve sin importarlo en el módulo.
     @Optional() private readonly planModuleRules?: PlanModuleRulesService,
   ) {}
@@ -64,20 +55,17 @@ export class PlansService {
    * Reglas (todas → 400 `SUBSCRIPTION_VALIDATION`, nunca 500 crudo):
    *  1. Cada key superior de `ai_feature_flags` debe ser una categoría IA
    *     canónica (el mismo dominio que `ai_engine_applications`
-   *     usa en `ai_feature_category`) o un allowlist conocido
-   *     (`agents_allowed` / `tools_allowed`). Una key desconocida es una
+   *     usa en `ai_feature_category`) o un campo conocido
+   *     (`agents_allowed`; `tools_allowed` se tolera como inerte). Una key desconocida es una
    *     referencia rota: el gate nunca la evaluaría.
    *  2. Cada entrada de `agents_allowed` (nivel superior o anidada en la
    *     config de una feature, p. ej. `tool_agents.agents_allowed`) debe
    *     existir como `key` en `ai_agents`.
-   *  3. Cada entrada de `tools_allowed` debe existir en el `AIToolRegistry`
-   *     (resolución por nombre canónico, igual que el filtro F3 del turno).
-   *     Excepción: `['*']` como ÚNICO valor = todas las tools del registro,
-   *     incluidas las futuras (el runtime F3 y el resolver lo soportan).
-   *     `'*'` mezclado con otros nombres es ambiguo → 400. `[]` sigue
-   *     significando ninguna tool.
+   *  3. `tools_allowed` ya no se valida: el plan no restringe herramientas
+   *     (N4, las limita el rol), así que un valor heredado es inerte y se
+   *     acepta tal cual.
    *
-   * En update, las tools/agents desconocidas que YA estaban guardadas en el
+   * En update, los agents desconocidos que YA estaban guardadas en el
    * mismo punto (`persistedFlags`, por feature) se toleran con warn: las
    * persistió una versión anterior del catálogo/frontend y el form las
    * reenvía; solo se rechaza lo desconocido que se AÑADE. En create
@@ -85,7 +73,7 @@ export class PlansService {
    *
    * Los refs se validen estén o no habilitadas las features: un typo con el
    * switch apagado rompería igual al encenderlo. Sin tablas nuevas: solo
-   * lecturas a `ai_agents` + registry en memoria.
+   * lecturas a `ai_agents`.
    */
   private async assertAIFlagsLinked(
     flags: unknown,
@@ -103,10 +91,14 @@ export class PlansService {
 
     const raw = flags as Record<string, unknown>;
     const knownCategories = new Set<string>(AI_FEATURE_KEYS as readonly string[]);
-    const allowlistFields = new Set(['agents_allowed', 'tools_allowed']);
+    const allowlistFields = new Set(['agents_allowed']);
+    // Legacy key: accepted anywhere it used to be, never validated (inert).
+    const inertFields = new Set(['tools_allowed']);
 
     const unknownKeys = Object.keys(raw).filter(
-      (key) => !knownCategories.has(key) && !allowlistFields.has(key),
+      (key) => !knownCategories.has(key) &&
+        !allowlistFields.has(key) &&
+        !inertFields.has(key),
     );
     if (unknownKeys.length > 0) {
       throw new VendixHttpException(
@@ -121,7 +113,6 @@ export class PlansService {
     }
 
     const agentKeys = new Set<string>();
-    const toolNames = new Set<string>();
     // Valor ya guardado por ubicación (`path` + campo) para tolerar heredados.
     const persistedByLocation = new Map<string, Set<string>>();
     const locationsByItem = new Map<string, Set<string>>();
@@ -174,18 +165,8 @@ export class PlansService {
             { field: location },
           );
         }
-        if (field === 'tools_allowed' && (value as string[]).includes('*')) {
-          if ((value as string[]).length > 1) {
-            throw new VendixHttpException(
-              ErrorCodes.SUBSCRIPTION_VALIDATION,
-              `Plan declares '${location}' mixing the '*' wildcard with other tools: use ['*'] alone to allow every tool, or list tools explicitly`,
-              { field: location },
-            );
-          }
-          continue;
-        }
         for (const item of value as string[]) {
-          (field === 'agents_allowed' ? agentKeys : toolNames).add(item);
+          agentKeys.add(item);
           const mapKey = `${field}|${item}`;
           const locs = locationsByItem.get(mapKey) ?? new Set<string>();
           locs.add(path);
@@ -243,35 +224,6 @@ export class PlansService {
           ErrorCodes.SUBSCRIPTION_VALIDATION,
           `Plan references unknown AI agents: ${missing.join(', ')}`,
           { field: 'ai_feature_flags.agents_allowed', unknown_agents: missing },
-        );
-      }
-    }
-
-    if (toolNames.size > 0) {
-      const wanted = [...toolNames];
-      const allMissing = wanted.filter((name) => {
-        if (!this.toolRegistry) return true;
-        return !this.toolRegistry.get(this.toolRegistry.canonicalName(name));
-      });
-      const inheritedMissing = allMissing.filter((name) =>
-        isInherited('tools_allowed', name),
-      );
-      const missing = allMissing.filter((name) => !inheritedMissing.includes(name));
-      if (inheritedMissing.length > 0) {
-        this.logger.warn(
-          JSON.stringify({
-            event: 'PLAN_INHERITED_UNKNOWN_AI_REFS',
-            plan_id: planId,
-            feature: 'tools_allowed',
-            unknown_tools: inheritedMissing,
-          }),
-        );
-      }
-      if (missing.length > 0) {
-        throw new VendixHttpException(
-          ErrorCodes.SUBSCRIPTION_VALIDATION,
-          `Plan references unknown AI tools: ${missing.join(', ')}`,
-          { field: 'ai_feature_flags.tools_allowed', unknown_tools: missing },
         );
       }
     }

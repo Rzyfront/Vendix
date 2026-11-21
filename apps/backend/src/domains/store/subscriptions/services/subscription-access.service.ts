@@ -302,9 +302,9 @@ export class SubscriptionAccessService {
 
   /**
    * F3 — expone la `FeatureConfig` resuelta de una feature IA para el loop
-   * del agente (`tools_allowed` de `tool_agents`). El resolver ya aplica
-   * base + restricción de partner + unión promo, así que lo devuelto es la
-   * lista efectiva del plan.
+   * del agente (cupos y flags). El resolver ya aplica base + restricción de
+   * partner + unión promo. El plan no restringe herramientas (N4): un
+   * `tools_allowed` guardado es inerte.
    *
    * Nunca lanza: ante fila ausente o fallo interno devuelve null y el
    * llamador conserva el comportamiento sin plan (solo filtro por permisos

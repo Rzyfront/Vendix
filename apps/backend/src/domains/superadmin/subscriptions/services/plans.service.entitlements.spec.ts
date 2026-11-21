@@ -100,7 +100,7 @@ describe('PlansService — ai_entitlements (T12)', () => {
       },
       $transaction: jest.fn((fn: any) => fn(tx)),
     };
-    service = new PlansService(prisma, undefined, {
+    service = new PlansService(prisma, {
       invalidate: jest.fn(),
     } as unknown as PlanModuleRulesService);
   });

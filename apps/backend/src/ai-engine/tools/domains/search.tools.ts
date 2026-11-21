@@ -20,6 +20,7 @@ export function createSearchTools({
   return [
     {
       name: 'semantic_search',
+      requiredPermissions: ['store:products:read', 'store:customers:read', 'store:orders:read', 'store:inventory:suppliers:read', 'store:expenses:read'],
       version: '1',
       domain: 'search',
       readOnly: true,

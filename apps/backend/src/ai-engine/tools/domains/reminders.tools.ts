@@ -166,6 +166,9 @@ export function createReminderTools(deps: ReminderToolDeps): RegisteredTool[] {
   return [
     {
       name: 'list_reminders',
+      access: 'public',
+      accessReason:
+        "Reminders are scoped to the caller's own user and store.",
       version: '1',
       domain: 'reminders',
       description:
@@ -211,6 +214,9 @@ export function createReminderTools(deps: ReminderToolDeps): RegisteredTool[] {
 
     {
       name: 'create_reminder',
+      access: 'public',
+      accessReason:
+        "Reminders are scoped to the caller's own user and store.",
       version: '1',
       domain: 'reminders',
       description:
@@ -247,6 +253,9 @@ export function createReminderTools(deps: ReminderToolDeps): RegisteredTool[] {
 
     {
       name: 'update_reminder',
+      access: 'public',
+      accessReason:
+        "Reminders are scoped to the caller's own user and store.",
       version: '1',
       domain: 'reminders',
       description:
@@ -284,6 +293,9 @@ export function createReminderTools(deps: ReminderToolDeps): RegisteredTool[] {
 
     {
       name: 'complete_reminder',
+      access: 'public',
+      accessReason:
+        "Reminders are scoped to the caller's own user and store.",
       version: '1',
       domain: 'reminders',
       description:
@@ -317,6 +329,9 @@ export function createReminderTools(deps: ReminderToolDeps): RegisteredTool[] {
 
     {
       name: 'delete_reminder',
+      access: 'public',
+      accessReason:
+        "Reminders are scoped to the caller's own user and store.",
       version: '1',
       domain: 'reminders',
       description:

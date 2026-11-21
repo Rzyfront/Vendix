@@ -104,7 +104,20 @@ export interface RegisteredTool {
    * implanta T5.
    */
   deprecated?: ToolDeprecation;
+  /**
+   * T13 (N4) — the user's role is the only limit on a tool; the plan never
+   * removes one. Every tool declares exactly one of:
+   *  - `requiredPermissions`: every listed permission must be held, or
+   *  - `access: 'public'` + `accessReason`: no role can be denied it. Only for
+   *    agent scaffolding (planning, discovery, blocks) and data already scoped
+   *    to the caller (own reminders, own attachments); never for business data.
+   * `AIToolRegistry.register` throws on a tool that declares neither, so the
+   * backend does not boot with an open tool.
+   */
   requiredPermissions?: string[];
+  access?: 'public';
+  /** Written reason a public tool needs no permission. Required with `access`. */
+  accessReason?: string;
   requiresConfirmation?: boolean;
   /**
    * Marks a write whose effect cannot be walked back (DIAN issuance/voids,

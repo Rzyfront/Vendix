@@ -21,6 +21,28 @@ import { validateToolArgs } from './tool-args.validator';
 import { createHash } from 'node:crypto';
 import { canonicalJson } from '../../domains/store/vexi/vexi-confirmation.service';
 
+/**
+ * T13 (N4): why a tool's access rule is invalid, or `null` when it is valid.
+ * Exactly one of a non-empty `requiredPermissions` or `access: 'public'` with
+ * a written `accessReason`.
+ */
+export function toolAccessProblem(tool: RegisteredTool): string | null {
+  const hasPermissions = (tool.requiredPermissions?.length ?? 0) > 0;
+  if (tool.access === 'public') {
+    if (hasPermissions) return 'it is public and also requires permissions';
+    if (!tool.accessReason?.trim()) return 'a public tool needs an accessReason';
+    return null;
+  }
+  if (tool.access !== undefined) return `unknown access "${String(tool.access)}"`;
+  if (!hasPermissions) {
+    return "it declares neither requiredPermissions nor access: 'public'";
+  }
+  if (tool.requiredPermissions!.some((p) => typeof p !== 'string' || !p.trim())) {
+    return 'requiredPermissions has an empty entry';
+  }
+  return null;
+}
+
 export interface ToolExecutionOptions {
   confirmationToken?: string;
   /** Server turn binding for newly issued G proposals, never from tool args. */
@@ -69,6 +91,10 @@ export class AIToolRegistry {
   constructor(private readonly confirmations: VexiConfirmationService) {}
 
   register(tool: RegisteredTool): void {
+    const accessProblem = toolAccessProblem(tool);
+    if (accessProblem) {
+      throw new Error(`Tool "${tool.name}" cannot be registered: ${accessProblem}`);
+    }
     if (this.tools.has(tool.name)) {
       this.logger.warn(`Tool "${tool.name}" is being overwritten`);
     }
@@ -260,13 +286,36 @@ export class AIToolRegistry {
     return resolved ? this.tools.get(resolved)?.irreversible === true : false;
   }
 
+  /**
+   * Permissions the caller lacks among the tools hidden from them, sorted and
+   * deduplicated. Lets the turn tell the model which areas the role cannot use
+   * (T13) without listing the hidden tools themselves.
+   */
+  getDeniedPermissions(userPermissions?: string[]): string[] {
+    const held = new Set(userPermissions ?? []);
+    const denied = new Set<string>();
+    for (const tool of this.tools.values()) {
+      if (this.isPermitted(tool, userPermissions)) continue;
+      for (const p of tool.requiredPermissions ?? []) {
+        if (!held.has(p)) denied.add(p);
+      }
+    }
+    return [...denied].sort();
+  }
+
+  /**
+   * T13: fail-closed. A public tool needs no permission; any other tool needs
+   * a non-empty `requiredPermissions` fully held. A tool that declares neither
+   * (only reachable if someone bypasses `register`) is denied to everyone.
+   */
   private isPermitted(
     tool: RegisteredTool,
     userPermissions?: string[],
   ): boolean {
-    if (!tool.requiredPermissions?.length) return true;
+    if (toolAccessProblem(tool)) return false;
+    if (tool.access === 'public') return true;
     if (!userPermissions) return false;
-    return tool.requiredPermissions.every((p) => userPermissions.includes(p));
+    return tool.requiredPermissions!.every((p) => userPermissions.includes(p));
   }
 
   /**
@@ -392,9 +441,11 @@ export class AIToolRegistry {
       ? context.permissions
       : (context.roles ?? []);
     if (
-      tool.requiredPermissions?.some(
-        (permission) => !granted.includes(permission),
-      )
+      toolAccessProblem(tool) ||
+      (tool.access !== 'public' &&
+        tool.requiredPermissions!.some(
+          (permission) => !granted.includes(permission),
+        ))
     )
       throw new VendixHttpException(ErrorCodes.AI_AGENT_004);
     const validation = validateToolArgs(canonicalName, tool.parameters, args);
@@ -502,8 +553,16 @@ export class AIToolRegistry {
         : {}),
     };
 
+    // T13: fail-closed. Only a public tool skips the check; a tool with no
+    // access rule at all is denied (register() already refuses it).
+    if (toolAccessProblem(tool)) {
+      throw new VendixHttpException(
+        ErrorCodes.AI_AGENT_004,
+        `Tool "${name}" declares no access rule`,
+      );
+    }
     // Check permissions — use granular permissions if available, fall back to roles
-    if (tool.requiredPermissions?.length) {
+    if (tool.access !== 'public' && tool.requiredPermissions?.length) {
       // `[]` is truthy, so `permissions || roles` never reaches the fallback
       // for a user whose permission list resolved empty. Check length.
       const granted = requestContext?.permissions;
