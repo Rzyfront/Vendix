@@ -35,13 +35,18 @@ type Internals = {
   assertVexTurnQuota(agentKey: string | null): Promise<void>;
 };
 
-function serviceWith(fields: Record<string, unknown>): AIChatService &
-  Internals {
+/**
+ * `AIChatService & Internals` collapses to `never` because both methods are
+ * private on the class; the mapped `Omit` keeps only the public surface.
+ */
+type TestableChatService = Omit<AIChatService, keyof Internals> & Internals;
+
+function serviceWith(fields: Record<string, unknown>): TestableChatService {
   return Object.assign(
     Object.create(AIChatService.prototype) as AIChatService,
     { logger: { warn: jest.fn(), log: jest.fn(), error: jest.fn() } },
     fields,
-  ) as AIChatService & Internals;
+  ) as unknown as TestableChatService;
 }
 
 async function collect(generator: AsyncGenerator<unknown>): Promise<unknown[]> {
