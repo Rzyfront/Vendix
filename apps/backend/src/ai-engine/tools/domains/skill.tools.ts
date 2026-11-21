@@ -1,22 +1,9 @@
 import { RegisteredTool } from '../interfaces/tool.interface';
+import type { SkillSearchService } from '../../skills/skill-search.service';
 
 export interface SkillToolsDeps {
-  search(
-    query: string,
-    limit?: number,
-  ): Promise<Array<{ key: string; title: string; module: string | null; score: number }>>;
-  load(key: string): Promise<{
-    key: string;
-    title: string;
-    module: string | null;
-    version: number;
-    body: string;
-    candidate_tools: string[];
-    help_article_id: number | null;
-    video_id: number | null;
-    estimated_tokens: number;
-    truncated: boolean;
-  } | null>;
+  /** Published-only search/load; the tools never read skills from the database themselves. */
+  skills: Pick<SkillSearchService, 'search' | 'load'>;
 }
 
 const ACCESS_REASON =
@@ -52,7 +39,7 @@ export function createSkillTools(deps: SkillToolsDeps): RegisteredTool[] {
       },
       handler: async (args) => {
         const query = typeof args.query === 'string' ? args.query : '';
-        const results = await deps.search(query, args.limit);
+        const results = await deps.skills.search(query, { limit: args.limit });
         return JSON.stringify({
           results,
           next_step: results.length
@@ -80,7 +67,7 @@ export function createSkillTools(deps: SkillToolsDeps): RegisteredTool[] {
       },
       handler: async (args) => {
         const key = typeof args.key === 'string' ? args.key : '';
-        const skill = await deps.load(key);
+        const skill = await deps.skills.load(key);
         if (!skill)
           return JSON.stringify({
             error_code: 'SKILL_NOT_FOUND',

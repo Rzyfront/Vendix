@@ -35,11 +35,6 @@ export class SkillsModule implements OnModuleInit {
   ) {}
 
   onModuleInit(): void {
-    this.registry.registerMany(
-      createSkillTools({
-        search: (query, limit) => this.search.search(query, { limit }),
-        load: (key) => this.search.load(key),
-      }),
-    );
+    this.registry.registerMany(createSkillTools({ skills: this.search }));
   }
 }
