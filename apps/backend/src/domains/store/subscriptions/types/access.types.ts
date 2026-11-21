@@ -1,6 +1,26 @@
 import { store_subscription_state_enum } from '@prisma/client';
 
 /**
+ * T9 — the plan AI capability catalog (Vex, Vexi, platform) lives once in
+ * `ai-capabilities.ts`, a byte-identical copy of
+ * `libs/shared-types/ai-capabilities.ts`. The legacy `AIFeatureKey` model below
+ * keeps deciding the gate until the shadow comparison of T10 reaches zero.
+ */
+export {
+  AI_AGENT_KEYS,
+  AI_CAPABILITIES,
+  aiCapabilityId,
+  findAICapability,
+  legacyFlagsToAIEntitlements,
+} from './ai-capabilities';
+export type {
+  AIAgentKey,
+  AICapabilityDefinition,
+  AIEntitlement,
+  AIOnLimit,
+} from './ai-capabilities';
+
+/**
  * Canonical AI feature keys consumed by the gate.
  * Keep in sync with `subscription_plans.ai_feature_flags` JSON shape and
  * with `ai_engine_applications.ai_feature_category` column values.

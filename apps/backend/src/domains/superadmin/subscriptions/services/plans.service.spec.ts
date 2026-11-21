@@ -28,6 +28,9 @@ describe('PlansService', () => {
       plan_module_rules: {
         deleteMany: jest.fn().mockResolvedValue({ count: 0 }),
       },
+      plan_ai_entitlements: {
+        deleteMany: jest.fn().mockResolvedValue({ count: 0 }),
+      },
     };
 
     prisma = {
@@ -547,6 +550,13 @@ describe('PlansService', () => {
       expect(
         tx.plan_module_rules.deleteMany.mock.invocationCallOrder[0],
       ).toBeLessThan(tx.subscription_plans.delete.mock.invocationCallOrder[0]);
+      // T9: plan_ai_entitlements.plan_id is also ON DELETE RESTRICT.
+      expect(tx.plan_ai_entitlements.deleteMany).toHaveBeenCalledWith({
+        where: { plan_id: 2 },
+      });
+      expect(
+        tx.plan_ai_entitlements.deleteMany.mock.invocationCallOrder[0],
+      ).toBeLessThan(tx.subscription_plans.delete.mock.invocationCallOrder[0]);
       expect(rulesCache.invalidate).toHaveBeenCalledTimes(1);
     });
 
@@ -563,6 +573,7 @@ describe('PlansService', () => {
       } as any);
 
       expect(tx.plan_module_rules.deleteMany).not.toHaveBeenCalled();
+      expect(tx.plan_ai_entitlements.deleteMany).not.toHaveBeenCalled();
       expect(rulesCache.invalidate).not.toHaveBeenCalled();
     });
 
@@ -725,6 +736,12 @@ describe('PlansService', () => {
       });
       expect(
         tx.plan_module_rules.deleteMany.mock.invocationCallOrder[0],
+      ).toBeLessThan(tx.subscription_plans.delete.mock.invocationCallOrder[0]);
+      expect(tx.plan_ai_entitlements.deleteMany).toHaveBeenCalledWith({
+        where: { plan_id: 1 },
+      });
+      expect(
+        tx.plan_ai_entitlements.deleteMany.mock.invocationCallOrder[0],
       ).toBeLessThan(tx.subscription_plans.delete.mock.invocationCallOrder[0]);
       expect(prisma.subscription_plans.delete).not.toHaveBeenCalled();
       expect(rulesCache.invalidate).toHaveBeenCalledTimes(1);

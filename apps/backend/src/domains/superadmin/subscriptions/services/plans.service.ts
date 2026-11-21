@@ -919,9 +919,13 @@ export class PlansService {
                 },
               });
             } else {
-              // plan_module_rules.plan_id es ON DELETE RESTRICT: sus reglas
-              // se borran primero, en la misma transacción.
+              // plan_module_rules.plan_id y plan_ai_entitlements.plan_id son
+              // ON DELETE RESTRICT: sus filas se borran primero, en la misma
+              // transacción.
               await tx.plan_module_rules.deleteMany({
+                where: { plan_id: row.id },
+              });
+              await tx.plan_ai_entitlements.deleteMany({
                 where: { plan_id: row.id },
               });
               await tx.subscription_plans.delete({ where: { id: row.id } });
@@ -1029,9 +1033,11 @@ export class PlansService {
       throw new VendixHttpException(ErrorCodes.SYS_NOT_FOUND_001);
     }
 
-    // Las reglas de la matriz (FK RESTRICT) caen antes que el plan, atómico.
+    // Las reglas de la matriz y los derechos de IA (FK RESTRICT) caen antes
+    // que el plan, atómico.
     await this.prisma.$transaction(async (tx) => {
       await tx.plan_module_rules.deleteMany({ where: { plan_id: id } });
+      await tx.plan_ai_entitlements.deleteMany({ where: { plan_id: id } });
       await tx.subscription_plans.delete({ where: { id } });
     });
     this.planModuleRules?.invalidate();
