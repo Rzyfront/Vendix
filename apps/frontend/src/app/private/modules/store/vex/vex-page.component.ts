@@ -25,6 +25,8 @@ import { VexChatStore } from './state/vex-chat.store';
 import { VexLogStore } from './state/vex-log.store';
 import { VexPresenceStore } from './state/vex-presence.store';
 import { VexPresenceComponent } from './components/vex-presence/vex-presence.component';
+import { VexMediaDockComponent } from './components/vex-media-dock/vex-media-dock.component';
+import { VexMediaDockService } from './services/vex-media-dock.service';
 import { VexHelpComponent } from './components/vex-help/vex-help.component';
 import { TourModalComponent } from '../../../../shared/components/tour/tour-modal/tour-modal.component';
 import { TourService } from '../../../../shared/components/tour/services/tour.service';
@@ -57,9 +59,10 @@ function isDesktop(): boolean {
     VexTitleEditorComponent,
     VexPresenceComponent,
     VexHelpComponent,
+    VexMediaDockComponent,
     TourModalComponent,
   ],
-  providers: [VexChatStore, VexLogStore, VexPresenceStore],
+  providers: [VexChatStore, VexLogStore, VexPresenceStore, VexMediaDockService],
   template: `
     <div
       class="h-dvh w-full flex overflow-hidden bg-background text-text-primary"
@@ -222,6 +225,7 @@ function isDesktop(): boolean {
         <vendix-vex-log-sidebar [(collapsed)]="log_collapsed" />
       </div>
     </div>
+    <vendix-vex-media-dock />
     <vendix-vex-help [(isOpen)]="help_open" (tourRequested)="tour_open.set(true)" />
     <app-tour-modal [(isOpen)]="tour_open" [tourConfig]="tourConfig"></app-tour-modal>
   `,

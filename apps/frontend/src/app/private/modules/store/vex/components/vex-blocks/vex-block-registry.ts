@@ -1,13 +1,16 @@
 import type { Type } from '@angular/core';
 import { VexBlockChartComponent } from './vex-block-chart.component';
 import { VexBlockFileComponent } from './vex-block-file.component';
+import { VexBlockHelpArticleComponent } from './vex-block-help-article.component';
 import { VexBlockImageComponent } from './vex-block-image.component';
 import { VexBlockKpiComponent } from './vex-block-kpi.component';
+import { VexBlockLearningPathComponent } from './vex-block-learning-path.component';
 import { VexBlockListComponent } from './vex-block-list.component';
 import { VexBlockMarkdownComponent } from './vex-block-markdown.component';
 import { VexBlockTableComponent } from './vex-block-table.component';
 import { VexBlockTimelineComponent } from './vex-block-timeline.component';
 import { VexBlockUnknownComponent } from './vex-block-unknown.component';
+import { VexBlockVideoComponent } from './vex-block-video.component';
 
 /**
  * `kind → component`. Every entry takes a `block` input; interactive ones
@@ -23,6 +26,9 @@ export const VEX_BLOCK_REGISTRY: Readonly<Record<string, Type<unknown>>> = {
   markdown: VexBlockMarkdownComponent,
   timeline: VexBlockTimelineComponent,
   list: VexBlockListComponent,
+  help_article: VexBlockHelpArticleComponent,
+  video: VexBlockVideoComponent,
+  learning_path: VexBlockLearningPathComponent,
 };
 
 /** Never returns `undefined`: unknown kinds get the notice component. */

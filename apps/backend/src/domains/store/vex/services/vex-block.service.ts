@@ -31,7 +31,10 @@ export type VexBlockKind =
   | 'file'
   | 'markdown'
   | 'timeline'
-  | 'list';
+  | 'list'
+  | 'help_article'
+  | 'video'
+  | 'learning_path';
 
 export const VEX_BLOCK_KINDS: readonly VexBlockKind[] = [
   'table',
@@ -42,6 +45,9 @@ export const VEX_BLOCK_KINDS: readonly VexBlockKind[] = [
   'markdown',
   'timeline',
   'list',
+  'help_article',
+  'video',
+  'learning_path',
 ];
 
 /** Chart types Vex can render; `doughnut` stays accepted for older blocks. */
@@ -65,6 +71,19 @@ const BLOCK_TONES = ['success', 'warning', 'error', 'info', 'neutral'];
 /** Timeline events / list items per block. */
 const MAX_COLLECTION_ITEMS = 200;
 const MAX_LIST_FIELDS = 8;
+
+
+/** Learning blocks (Vex Plus F4 T29): payload caps and enums. */
+export const VEX_VIDEO_SOURCES = [
+  'YOUTUBE',
+  'VIMEO',
+  'LOOM',
+  'DIRECT_S3',
+] as const;
+const MAX_LEARNING_PATH_ITEMS = 20;
+const MAX_ARTICLE_CONTENT_CHARS = 20000;
+const MAX_LEARNING_TEXT_CHARS = 500;
+const MAX_LEARNING_URL_CHARS = 2048;
 
 /** Beyond this a block is a data export, and it belongs in the module. */
 export const MAX_BLOCK_ROWS = 5000;
@@ -448,6 +467,33 @@ export class VexBlockService {
               : {}),
           },
           data: { items: Array.isArray(data.items) ? data.items : [] },
+        };
+      case 'help_article':
+        return {
+          block_id: row.id,
+          kind: 'help_article',
+          version: row.version,
+          spec: { kind: 'help_article' },
+          data: { article: data.article ?? null },
+        };
+      case 'video':
+        return {
+          block_id: row.id,
+          kind: 'video',
+          version: row.version,
+          spec: { kind: 'video' },
+          data: {
+            video: data.video ?? null,
+            ...(data.autoplay === true ? { autoplay: true } : {}),
+          },
+        };
+      case 'learning_path':
+        return {
+          block_id: row.id,
+          kind: 'learning_path',
+          version: row.version,
+          spec: { kind: 'learning_path' },
+          data: { series: data.series ?? null },
         };
       case 'markdown':
       default:
@@ -998,7 +1044,282 @@ export class VexBlockService {
         }
         return [];
       }
+      case 'help_article':
+        return this.validateHelpArticleData(data);
+      case 'video':
+        return this.validateVideoData(data);
+      case 'learning_path':
+        return this.validateLearningPathData(data);
     }
+  }
+
+  // ── learning blocks (T29): strict payloads, unknown fields rejected ───
+
+  private unknownKeys(
+    value: Record<string, any>,
+    allowed: readonly string[],
+    path: string,
+  ): string[] {
+    return Object.keys(value)
+      .filter((key) => !allowed.includes(key))
+      .map((key) => `${path}.${key} no es un campo permitido.`);
+  }
+
+  private isHttpUrl(value: unknown): value is string {
+    if (typeof value !== 'string' || value.length > MAX_LEARNING_URL_CHARS) {
+      return false;
+    }
+    try {
+      const protocol = new URL(value).protocol;
+      return protocol === 'http:' || protocol === 'https:';
+    } catch {
+      return false;
+    }
+  }
+
+  private optionalText(
+    value: unknown,
+    path: string,
+    max = MAX_LEARNING_TEXT_CHARS,
+  ): string[] {
+    if (value === undefined || value === null) return [];
+    if (typeof value !== 'string' || value.length > max) {
+      return [`${path} debe ser texto de máximo ${max} caracteres.`];
+    }
+    return [];
+  }
+
+  private requiredText(
+    value: unknown,
+    path: string,
+    max = MAX_LEARNING_TEXT_CHARS,
+  ): string[] {
+    if (typeof value !== 'string' || !value.trim() || value.length > max) {
+      return [`${path} es obligatorio (texto de máximo ${max} caracteres).`];
+    }
+    return [];
+  }
+
+  private positiveInt(value: unknown, path: string): string[] {
+    return Number.isSafeInteger(value) && (value as number) > 0
+      ? []
+      : [`${path} debe ser un entero positivo.`];
+  }
+
+  private validateVideoRef(value: unknown, path: string): string[] {
+    if (!isRecord(value)) return [`${path} debe ser un objeto.`];
+    const errors = this.unknownKeys(
+      value,
+      [
+        'id',
+        'title',
+        'slug',
+        'summary',
+        'video_url',
+        'video_source',
+        'external_id',
+        'duration_seconds',
+        'thumbnail_url',
+      ],
+      path,
+    );
+    errors.push(...this.positiveInt(value.id, `${path}.id`));
+    errors.push(...this.requiredText(value.title, `${path}.title`, 255));
+    errors.push(...this.requiredText(value.slug, `${path}.slug`, 280));
+    errors.push(...this.optionalText(value.summary, `${path}.summary`));
+    if (!this.isHttpUrl(value.video_url)) {
+      errors.push(`${path}.video_url debe ser una URL http(s).`);
+    }
+    if (
+      typeof value.video_source !== 'string' ||
+      !(VEX_VIDEO_SOURCES as readonly string[]).includes(value.video_source)
+    ) {
+      errors.push(
+        `${path}.video_source debe ser uno de: ${VEX_VIDEO_SOURCES.join(', ')}.`,
+      );
+    }
+    errors.push(
+      ...this.optionalText(value.external_id, `${path}.external_id`, 255),
+    );
+    if (
+      value.duration_seconds !== undefined &&
+      value.duration_seconds !== null &&
+      !(
+        Number.isSafeInteger(value.duration_seconds) &&
+        value.duration_seconds >= 0
+      )
+    ) {
+      errors.push(`${path}.duration_seconds debe ser un entero >= 0.`);
+    }
+    if (
+      value.thumbnail_url !== undefined &&
+      value.thumbnail_url !== null &&
+      !this.isHttpUrl(value.thumbnail_url)
+    ) {
+      errors.push(`${path}.thumbnail_url debe ser una URL http(s).`);
+    }
+    return errors;
+  }
+
+  private validateHelpArticleData(data: Record<string, any>): string[] {
+    const errors = this.unknownKeys(data, ['article'], 'data');
+    const article = data.article;
+    if (!isRecord(article))
+      return [...errors, 'data.article debe ser un objeto.'];
+    errors.push(
+      ...this.unknownKeys(
+        article,
+        [
+          'id',
+          'title',
+          'slug',
+          'summary',
+          'content',
+          'type',
+          'module',
+          'cover_image_url',
+          'video',
+        ],
+        'data.article',
+      ),
+    );
+    errors.push(...this.positiveInt(article.id, 'data.article.id'));
+    errors.push(...this.requiredText(article.title, 'data.article.title', 255));
+    errors.push(...this.requiredText(article.slug, 'data.article.slug', 280));
+    errors.push(...this.optionalText(article.summary, 'data.article.summary'));
+    if (
+      typeof article.content !== 'string' ||
+      !article.content.trim() ||
+      article.content.length > MAX_ARTICLE_CONTENT_CHARS
+    ) {
+      errors.push(
+        `data.article.content es obligatorio (markdown de máximo ${MAX_ARTICLE_CONTENT_CHARS} caracteres).`,
+      );
+    }
+    errors.push(...this.optionalText(article.type, 'data.article.type', 50));
+    errors.push(
+      ...this.optionalText(article.module, 'data.article.module', 50),
+    );
+    if (
+      article.cover_image_url !== undefined &&
+      article.cover_image_url !== null &&
+      !this.isHttpUrl(article.cover_image_url)
+    ) {
+      errors.push('data.article.cover_image_url debe ser una URL http(s).');
+    }
+    if (article.video !== undefined && article.video !== null) {
+      errors.push(
+        ...this.validateVideoRef(article.video, 'data.article.video'),
+      );
+    }
+    return errors;
+  }
+
+  private validateVideoData(data: Record<string, any>): string[] {
+    const errors = this.unknownKeys(data, ['video', 'autoplay'], 'data');
+    errors.push(...this.validateVideoRef(data.video, 'data.video'));
+    if (data.autoplay !== undefined && typeof data.autoplay !== 'boolean') {
+      errors.push('data.autoplay debe ser booleano.');
+    }
+    return errors;
+  }
+
+  private validateLearningPathData(data: Record<string, any>): string[] {
+    const errors = this.unknownKeys(data, ['series'], 'data');
+    const series = data.series;
+    if (!isRecord(series))
+      return [...errors, 'data.series debe ser un objeto.'];
+    errors.push(
+      ...this.unknownKeys(
+        series,
+        ['id', 'title', 'summary', 'items'],
+        'data.series',
+      ),
+    );
+    errors.push(...this.positiveInt(series.id, 'data.series.id'));
+    errors.push(...this.requiredText(series.title, 'data.series.title', 255));
+    errors.push(...this.optionalText(series.summary, 'data.series.summary'));
+    if (
+      !Array.isArray(series.items) ||
+      series.items.length === 0 ||
+      series.items.length > MAX_LEARNING_PATH_ITEMS
+    ) {
+      errors.push(
+        `data.series.items debe tener entre 1 y ${MAX_LEARNING_PATH_ITEMS} elementos.`,
+      );
+      return errors;
+    }
+    series.items.forEach((item: unknown, index: number) => {
+      const path = `data.series.items[${index}]`;
+      if (!isRecord(item)) {
+        errors.push(`${path} debe ser un objeto.`);
+        return;
+      }
+      errors.push(
+        ...this.unknownKeys(
+          item,
+          ['position', 'video', 'article', 'progress'],
+          path,
+        ),
+      );
+      errors.push(...this.positiveInt(item.position, `${path}.position`));
+      errors.push(...this.validateVideoRef(item.video, `${path}.video`));
+      if (item.article !== undefined && item.article !== null) {
+        if (!isRecord(item.article)) {
+          errors.push(`${path}.article debe ser un objeto.`);
+        } else {
+          errors.push(
+            ...this.unknownKeys(
+              item.article,
+              ['id', 'title', 'slug'],
+              `${path}.article`,
+            ),
+          );
+          errors.push(
+            ...this.positiveInt(item.article.id, `${path}.article.id`),
+          );
+          errors.push(
+            ...this.requiredText(
+              item.article.title,
+              `${path}.article.title`,
+              255,
+            ),
+          );
+          errors.push(
+            ...this.requiredText(
+              item.article.slug,
+              `${path}.article.slug`,
+              280,
+            ),
+          );
+        }
+      }
+      if (item.progress !== undefined && item.progress !== null) {
+        if (!isRecord(item.progress)) {
+          errors.push(`${path}.progress debe ser un objeto.`);
+        } else {
+          errors.push(
+            ...this.unknownKeys(
+              item.progress,
+              ['seconds_watched', 'completed'],
+              `${path}.progress`,
+            ),
+          );
+          if (
+            !Number.isSafeInteger(item.progress.seconds_watched) ||
+            item.progress.seconds_watched < 0
+          ) {
+            errors.push(
+              `${path}.progress.seconds_watched debe ser un entero >= 0.`,
+            );
+          }
+          if (typeof item.progress.completed !== 'boolean') {
+            errors.push(`${path}.progress.completed debe ser booleano.`);
+          }
+        }
+      }
+    });
+    return errors;
   }
 
   // ── reads ─────────────────────────────────────────────────────────────
