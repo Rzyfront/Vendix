@@ -74,6 +74,20 @@ import {
   ChatReplayCursor,
 } from './chat-stream-replay';
 import { resumeReferenceBlock } from './resume-reference';
+import {
+  ConversationPurgePreview,
+  ConversationPurgeResult,
+  ConversationPurgeService,
+} from './conversation-purge.service';
+import {
+  extractSuggestedFollowups,
+  Followup,
+} from '../../../ai-engine/tools/domains/followup.tools';
+import {
+  ConversationTitleFrame,
+  ConversationTitleService,
+  TITLE_TIMEOUT_MS,
+} from './conversation-title.service';
 
 /**
  * The stored trace is for the human reading the transcript later, not for the
@@ -141,10 +155,23 @@ const PLAN_MESSAGE_RULES_BLOCK =
  * would make every implementation carry a case it cannot reach. The SSE
  * controller only serializes what it is handed, so the transport needs no change.
  */
-export type ChatStreamFrame = (AIStreamChunk | VexiVoiceFrame) & {
+export type ChatStreamFrame = (
+  | AIStreamChunk
+  | VexiVoiceFrame
+  | ConversationTitleFrame
+  | FollowupSuggestionFrame
+) & {
   replay?: ChatReplayCursor;
   reconcile_required?: boolean;
 };
+
+/** Sugerencia de seguimiento del turno (F1/T5), enlazada a su mensaje. */
+export interface FollowupSuggestionFrame {
+  type: 'followup_suggestion';
+  conversation_id: number;
+  message_id: number;
+  followup: Followup;
+}
 
 /**
  * Fila de `ai_agents` tal como la consume el turno (F4).
@@ -250,6 +277,11 @@ export class AIChatService {
     @Optional() private readonly planApproval?: PlanApprovalService,
     @Optional() private readonly confirmations?: VexiConfirmationService,
     @Optional() private readonly durableSessions?: AgentDurableSessionService,
+    // Título generado de los hilos de Vex. Opcional-final como los demás: sin
+    // él el hilo conserva el título del cliente y no se emite el frame.
+    @Optional() private readonly titles?: ConversationTitleService,
+    // Borrado físico de hilos de Vex (T4). Opcional-final como los demás.
+    @Optional() private readonly purges?: ConversationPurgeService,
   ) {}
 
   async createConversation(dto: CreateConversationDto) {
@@ -378,7 +410,9 @@ export class AIChatService {
     const [data, total] = await Promise.all([
       this.prisma.ai_conversations.findMany({
         where,
-        orderBy: { updated_at: 'desc' },
+        // `id` desempata: sin él, filas con el mismo `updated_at` saltan de
+        // página en página y el scroll infinito repite o pierde chats.
+        orderBy: [{ updated_at: 'desc' }, { id: 'desc' }],
         skip,
         take: limit,
         include: {
@@ -534,6 +568,7 @@ export class AIChatService {
     const vexMetadata = this.vexTurnMetadata(
       vexBlockRefs,
       vexPlan ?? vexTurn?.plan ?? null,
+      vexTurn ? extractSuggestedFollowups(vexToolsUsed) : [],
     );
     const assistantMessage = await this.prisma.ai_messages.create({
       data: {
@@ -608,7 +643,14 @@ export class AIChatService {
     // En SSE no hay override por mensaje: el gate decide con el agente fijado
     // en el hilo. Acá el error viaja como HTTP con su código; el stream lo
     // re-valida y lo emite como frame `error` (ver `sendMessageStream`).
-    await this.assertVexTurnAccess(this.turnAgentKey(conversation));
+    const agentKey = this.turnAgentKey(conversation);
+    await this.assertVexTurnAccess(agentKey);
+
+    // Solo hilos de Vex (los únicos que se borran de verdad): el adjunto del
+    // primer turno se subió sin conversación y hay que atarlo a esta.
+    if (agentKey === VEX_AGENT_KEY && dto.attachment_ids?.length) {
+      await this.purges?.claimAttachments(conversationId, dto.attachment_ids);
+    }
 
     return this.streamIntents.create({
       conversation_id: conversationId,
@@ -864,6 +906,17 @@ export class AIChatService {
     const vexTurn: VexTurnCollection | null =
       agentKey === VEX_AGENT_KEY ? { blocks: new Map(), plan: null } : null;
     let vexPlan: VexTurnCollection['plan'] = null;
+    // Título generado: solo hilos de Vex, solo el primer turno. Arranca ya, en
+    // paralelo al modelo, y su promesa nunca rechaza (ver el servicio).
+    const titleDeadline = Date.now() + TITLE_TIMEOUT_MS;
+    const titleTask =
+      vexTurn &&
+      this.titles &&
+      conversation.messages.length === 0 &&
+      !intent.continuation &&
+      intent.content
+        ? this.titles.start(conversationId, intent.content, TITLE_TIMEOUT_MS)
+        : null;
     // Held back until after the audio and timing frames. Both the SSE controller
     // and the browser close the connection the moment `done` arrives, so anything
     // emitted after it is never seen. See the agent branch below for the original
@@ -1103,9 +1156,11 @@ export class AIChatService {
       toolsUsed,
       turnStartedAt,
     );
+    const turnFollowups = vexTurn ? extractSuggestedFollowups(toolsUsed) : [];
     const vexMetadata = this.vexTurnMetadata(
       vexBlockRefs,
       vexPlan ?? vexTurn?.plan ?? null,
+      turnFollowups,
     );
     let assistantMessage: { id: number } | null = null;
     if (
@@ -1176,6 +1231,34 @@ export class AIChatService {
     // `done` sale DESPUÉS de persistir: lleva `message_id` de la fila nueva para
     // que el frontend enlace la continuación (el cliente cierra el SSE al
     // recibirlo, así que nada que viaje después se vería).
+    // Frame extra con el título, justo antes de `done` (el cliente cierra el SSE
+    // al recibirlo). Si aún no está, la promesa lo persiste al resolver y el
+    // cliente refresca el listado.
+    if (titleTask && this.titles) {
+      const title = await this.titles.waitFor(titleTask, titleDeadline);
+      if (title) {
+        yield {
+          type: 'conversation_title',
+          conversation_id: conversationId,
+          title,
+        };
+      }
+    }
+
+    // La ficha de seguimiento viaja en su propio frame, ya con el `message_id`
+    // de la fila persistida (el resumen de `tool_result` se recorta y no sirve
+    // de transporte). Antes de `done`: el cliente cierra el SSE al recibirlo.
+    if (assistantMessage) {
+      for (const followup of turnFollowups) {
+        yield {
+          type: 'followup_suggestion',
+          conversation_id: conversationId,
+          message_id: assistantMessage.id,
+          followup,
+        };
+      }
+    }
+
     if (doneChunk) {
       // Client boundary: model guidance never rides on the final frame.
       const safeDone = clientSafeChunk(doneChunk);
@@ -1184,16 +1267,10 @@ export class AIChatService {
         : safeDone;
     }
 
-    // Auto-generate title if first message
-    if (
-      conversation.messages.length === 0 &&
-      !conversation.title &&
-      intent.content
-    ) {
-      await this.prisma.ai_conversations.update({
-        where: { id: conversationId },
-        data: { title: intent.content.substring(0, 80) },
-      });
+    // Vex genera su título arriba (`titleTask`); Vexi y los hilos legacy
+    // conservan el primer mensaje recortado.
+    if (!vexTurn) {
+      await this.applyLegacyTitle(conversation, intent.content);
     }
 
     this.eventEmitter.emit('ai.message.sent', {
@@ -1207,6 +1284,40 @@ export class AIChatService {
     // claim to expire on its own TTL, which is the safe direction — a stale claim
     // rejects results, it never accepts a wrong one.
     await this.uiChannel.releaseTurn(streamId);
+  }
+
+  /** Cifras reales que muestra el aviso de borrado de un hilo de Vex. */
+  async previewConversationPurge(
+    id: number,
+  ): Promise<ConversationPurgePreview> {
+    return this.requirePurges().preview(id);
+  }
+
+  /** Borra de verdad un hilo de Vex (solo dueño; ver `ConversationPurgeService`). */
+  async purgeConversation(id: number): Promise<ConversationPurgeResult> {
+    const result = await this.requirePurges().purge(id);
+    // El búfer de reanudación vive en memoria de este proceso.
+    const storeId = RequestContextService.getContext()?.store_id;
+    if (storeId) this.streamReplay.evictConversation(storeId, id);
+    return result;
+  }
+
+  private requirePurges(): ConversationPurgeService {
+    if (!this.purges) throw new VendixHttpException(ErrorCodes.AI_CHAT_001);
+    return this.purges;
+  }
+
+  /** Título de Vexi/legacy: el primer mensaje recortado a 80 caracteres. */
+  private async applyLegacyTitle(
+    conversation: ConversationWithMessages,
+    content: string | undefined,
+  ): Promise<void> {
+    if (conversation.messages.length === 0 && !conversation.title && content) {
+      await this.prisma.ai_conversations.update({
+        where: { id: conversation.id },
+        data: { title: content.substring(0, 80) },
+      });
+    }
   }
 
   async archiveConversation(id: number) {
@@ -1235,9 +1346,25 @@ export class AIChatService {
       throw new VendixHttpException(ErrorCodes.AI_CHAT_001);
     }
 
+    // `title_source = 'user'` blinda el nombre puesto a mano: el título
+    // generado nunca lo sobrescribe. Se fusiona con `metadata` para no perder
+    // `agent_key` ni otras claves.
+    const previous =
+      conversation.metadata &&
+      typeof conversation.metadata === 'object' &&
+      !Array.isArray(conversation.metadata)
+        ? (conversation.metadata as Record<string, unknown>)
+        : {};
     return this.prisma.ai_conversations.update({
       where: { id },
-      data: { title, updated_at: new Date() },
+      data: {
+        title,
+        metadata: {
+          ...previous,
+          title_source: 'user',
+        } as Prisma.InputJsonValue,
+        updated_at: new Date(),
+      },
     });
   }
 
@@ -2014,10 +2141,14 @@ export class AIChatService {
   private vexTurnMetadata(
     blocks: VexBlockRef[],
     plan: VexTurnCollection['plan'] | null,
+    followups: Followup[] = [],
   ): Record<string, unknown> | null {
-    if (blocks.length === 0 && !plan) return null;
+    if (blocks.length === 0 && !plan && followups.length === 0) return null;
     return {
       ...(blocks.length > 0 ? { blocks } : {}),
+      // Sugerencias de seguimiento del turno (F1/T5): viven en el mensaje
+      // para sobrevivir a recargar; la ficha las mueve a saved/dismissed.
+      ...(followups.length > 0 ? { followups } : {}),
       ...(plan
         ? {
             // Contrato del ciclo de vida: estado del plan + estado por paso.

@@ -7415,7 +7415,10 @@ model ai_agent_effects {
   store_id           Int
   organization_id    Int
   user_id            Int
-  objective_id       String   @db.Uuid
+  // Nullable desde el borrado de conversaciones: el efecto aplicado en el negocio
+  // sobrevive a la conversación y queda desvinculado (objective_id = NULL). El FK
+  // compuesto no se aplica con una columna NULL (MATCH SIMPLE).
+  objective_id       String?  @db.Uuid
   operation_id       String   @unique @db.VarChar(200)
   proposal_hash      String   @db.VarChar(64)
   step_id            String   @db.VarChar(200)
@@ -7428,11 +7431,33 @@ model ai_agent_effects {
   updated_at         DateTime @default(now()) @db.Timestamptz(6)
 
   evidence_result ai_agent_tool_results? @relation(fields: [evidence_result_id], references: [id], onDelete: Restrict, onUpdate: Restrict)
-  objective ai_agent_objectives @relation(fields: [objective_id, store_id, organization_id, user_id], references: [id, store_id, organization_id, user_id], onDelete: Restrict, onUpdate: Restrict, map: "ai_agent_effects_objective_scope_fkey")
+  objective ai_agent_objectives? @relation(fields: [objective_id, store_id, organization_id, user_id], references: [id, store_id, organization_id, user_id], onDelete: Restrict, onUpdate: Restrict, map: "ai_agent_effects_objective_scope_fkey")
 
   @@unique([objective_id, step_id, proposal_hash], map: "ai_agent_effects_proposal_uq")
   @@index([store_id, organization_id, user_id, objective_id, status], map: "ai_agent_effects_owner_objective_status_idx")
   @@index([evidence_result_id])
+}
+
+/// Constancia del borrado físico de una conversación de Vex: quién, cuándo y
+/// cuántos elementos. NUNCA guarda título ni contenido. `conversation_id` es un
+/// entero plano sin FK (la fila de la conversación ya no existe).
+/// `pending_s3_keys` es la lista de objetos S3 aún por borrar; un job la vacía
+/// con reintentos (`s3_attempts`) y marca `s3_completed_at` al terminar.
+model ai_conversation_purges {
+  id              Int       @id @default(autoincrement())
+  store_id        Int
+  organization_id Int
+  user_id         Int
+  conversation_id Int
+  agent_key       String    @db.VarChar(80)
+  counts          Json
+  pending_s3_keys Json      @default("[]")
+  s3_attempts     Int       @default(0)
+  s3_completed_at DateTime? @db.Timestamp(6)
+  created_at      DateTime  @default(now()) @db.Timestamp(6)
+
+  @@index([store_id])
+  @@index([s3_completed_at, s3_attempts])
 }
 
 /// E system audit sink. Owner ACL and seven-day expiry enforced by SandboxAuditRepository.

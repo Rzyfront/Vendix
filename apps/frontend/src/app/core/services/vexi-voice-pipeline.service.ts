@@ -94,6 +94,21 @@ interface QueuedAudio {
  * playback is imperative browser state, like the `HTMLAudioElement` the realtime
  * engine holds.
  */
+/**
+ * Loudness (0..1) of one window of 8-bit time-domain samples (128 = silence):
+ * root mean square, scaled so normal speech fills most of the range.
+ */
+export function micLevelFromSamples(samples: ArrayLike<number>): number {
+  if (samples.length === 0) return 0;
+  let sum = 0;
+  for (let index = 0; index < samples.length; index++) {
+    const centered = (samples[index] - 128) / 128;
+    sum += centered * centered;
+  }
+  const rms = Math.sqrt(sum / samples.length);
+  return Math.min(1, Math.max(0, rms * 4));
+}
+
 @Injectable({ providedIn: 'root' })
 export class VexiVoicePipelineService {
   private readonly http = inject(HttpClient);
@@ -120,6 +135,12 @@ export class VexiVoicePipelineService {
 
   readonly recording = computed(() => this.state() === 'recording');
   readonly speaking = computed(() => this.state() === 'speaking');
+  /**
+   * Loudness of the microphone while recording, 0 (quiet) to 1 (loud). `null`
+   * when nothing is being captured or the browser cannot measure it; whoever
+   * draws a wave falls back to a generic one then.
+   */
+  readonly micLevel = signal<number | null>(null);
 
   readonly marks = signal<VexiVoiceMarks>({ server: {} });
 
@@ -129,6 +150,8 @@ export class VexiVoicePipelineService {
   private captureContext: { conversation_id: number; agent_key: 'vex' } | null =
     null;
   private micStream: MediaStream | null = null;
+  private levelContext: AudioContext | null = null;
+  private levelFrame: number | null = null;
   private turnId: string | null = null;
   private mimeType = '';
   private recordingStartedAt = 0;
@@ -363,7 +386,50 @@ export class VexiVoicePipelineService {
 
   // --- internals -----------------------------------------------------------
 
+  /**
+   * Measures the microphone loudness for the listening wave. Reads the same
+   * stream the recorder uses through an analyser that is never connected to the
+   * speakers; the audio that is uploaded is untouched. Any failure only leaves
+   * `micLevel` at `null`.
+   */
+  private startLevelMeter(): void {
+    this.stopLevelMeter();
+    const stream = this.micStream;
+    if (!stream || typeof AudioContext === 'undefined') return;
+    try {
+      const context = new AudioContext();
+      const analyser = context.createAnalyser();
+      analyser.fftSize = 256;
+      context.createMediaStreamSource(stream).connect(analyser);
+      const samples = new Uint8Array(analyser.fftSize);
+      this.levelContext = context;
+      let last = 0;
+      const tick = (now: number): void => {
+        if (this.levelContext !== context) return;
+        this.levelFrame = requestAnimationFrame(tick);
+        // ~15 readings per second are enough for a wave and cheap to render.
+        if (now - last < 66) return;
+        last = now;
+        analyser.getByteTimeDomainData(samples);
+        this.micLevel.set(micLevelFromSamples(samples));
+      };
+      this.levelFrame = requestAnimationFrame(tick);
+    } catch {
+      this.stopLevelMeter();
+    }
+  }
+
+  private stopLevelMeter(): void {
+    if (this.levelFrame !== null) cancelAnimationFrame(this.levelFrame);
+    this.levelFrame = null;
+    const context = this.levelContext;
+    this.levelContext = null;
+    if (context) void context.close().catch(() => undefined);
+    this.micLevel.set(null);
+  }
+
   private beginCapture(): void {
+    this.startLevelMeter();
     this.turnId = this.newTurnId();
     this.mimeType = this.pickMimeType();
     this.uploadedBytes = 0;
@@ -553,6 +619,7 @@ export class VexiVoicePipelineService {
   }
 
   private releaseMic(): void {
+    this.stopLevelMeter();
     this.micStream?.getTracks().forEach((track) => track.stop());
     this.micStream = null;
   }

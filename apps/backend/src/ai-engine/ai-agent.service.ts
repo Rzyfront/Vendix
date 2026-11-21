@@ -81,6 +81,7 @@ import { ErrorCodes, VendixHttpException } from '../common/errors';
 import { VexiUiChannelService } from '../domains/store/vexi/vexi-ui-channel.service';
 import { PROPOSE_PLAN_TOOL } from './tools/domains/planning.tools';
 import { DISCREPANCY_GUIDANCE_BLOCK } from './tools/discrepancy-signal';
+import { isForeignSurfaceTool, isVexOnlyTool } from './tools/surface-tools';
 import { IRREVERSIBLE_DOMAIN_SEGMENTS } from './tools/bridge/capability-registry.service';
 import {
   AgentPlan,
@@ -162,17 +163,6 @@ const AGENT_TIMEOUT_CEILING_MS = 600_000;
  * is respected instead of forced up to a fixed constant.
  */
 const SUPERADMIN_MAX_ITERATIONS = 60;
-
-/**
- * `vex_*` block tools render only in the Vex workspace (/admin/vex). Offering
- * them to Vexi (whose panel cannot paint a block) produced «Aquí están los 3
- * productos» with nothing visible once the full authorized catalog is offered.
- * Mirror of the Vex row denying `ui_*`: a surface tool of another agent is
- * never part of this agent's authority.
- */
-function isForeignSurfaceTool(name: string, agentKey?: string): boolean {
-  return agentKey !== 'vex' && name.startsWith('vex_');
-}
 
 export interface AgentRunParams {
   goal: string;
@@ -2557,7 +2547,7 @@ export class AIAgentService {
                 call.tool_name,
             );
             if (
-              call.tool_name.startsWith('vex_') &&
+              isVexOnlyTool(call.tool_name) &&
               params.conversation_id != null &&
               !Number.isInteger(call.arguments.conversation_id)
             )
@@ -3500,7 +3490,7 @@ export class AIAgentService {
               // no conoce: el turno inyecta su id como default para que la
               // herramienta no tenga que inventarlo (y no falle validación).
               if (
-                toolName.startsWith('vex_') &&
+                isVexOnlyTool(toolName) &&
                 params.conversation_id != null &&
                 !Number.isInteger(toolArgs.conversation_id)
               ) {

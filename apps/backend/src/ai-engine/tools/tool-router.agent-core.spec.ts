@@ -17,6 +17,7 @@ import { createDiscoveryTools } from './domains/discovery.tools';
 import { createExpenseTools } from './domains/expenses.tools';
 import { createFiscalTools } from './domains/fiscal.tools';
 import { createInventoryTools } from './domains/inventory.tools';
+import { createFollowupTools } from './domains/followup.tools';
 import { createInvoicingTools } from './domains/invoicing.tools';
 import { createOrdersTools } from './domains/orders.tools';
 import { createPaymentTools } from './domains/payments.tools';
@@ -59,6 +60,7 @@ function realRegistry(): AIToolRegistry {
   registry.registerMany(createTaskTools(deps));
   registry.registerMany(createReportTools(deps));
   registry.registerMany(createVexBlockTools(deps));
+  registry.registerMany(createFollowupTools(deps));
   for (const factory of [
     createAccountingTools,
     createAiToolboxTools,

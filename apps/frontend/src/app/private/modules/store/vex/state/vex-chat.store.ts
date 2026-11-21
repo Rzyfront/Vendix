@@ -1,4 +1,5 @@
 import { vexApplyState } from './vex-plan-state';
+import { validateConversationTitle } from './vex-conversation-groups.util';
 import { VexiVoiceSafetyService } from '../../../../../core/services/vexi-voice-safety.service';
 import { VexiVoicePipelineService } from '../../../../../core/services/vexi-voice-pipeline.service';
 import {
@@ -12,7 +13,7 @@ import {
   inject,
   signal,
 } from '@angular/core';
-import { Subscription, firstValueFrom } from 'rxjs';
+import { Observable, Subscription, firstValueFrom } from 'rxjs';
 import {
   VexiApiService,
   VexiObjective,
@@ -26,6 +27,7 @@ import { cancelVexToolSteps, settleVexToolStep } from './vex-tool-state';
 import { ToastService } from '../../../../../shared/components/toast/toast.service';
 import { extractApiErrorMessage } from '../../../../../core/utils/api-error-handler';
 import { parseApiError } from '../../../../../core/utils/parse-api-error';
+import { VEX_COPY } from '../vex-copy';
 import { vexiObjectiveConflictNotice } from '../../../../../core/store/vexi/vexi-user-copy.utils';
 import {
   VEX_SINGLE_PLAN_PREFIX,
@@ -33,10 +35,13 @@ import {
   VexApplyStepResult,
   VexBackendConversation,
   VexBackendMessage,
+  VexPurgePreview,
 } from '../services/vex-api.service';
 import {
   VexBlockInteraction,
   VexConversation,
+  VexFollowup,
+  VexFollowupEdits,
   VexMessage,
   VexPlanProposal,
   VexPlanStatus,
@@ -45,11 +50,18 @@ import {
   VexUiBlock,
 } from '../models/vex.models';
 
+/** Optimistic placeholder only: the generated title replaces it after the first turn. */
 const TITLE_MAX_LENGTH = 40;
-const LIST_PAGE_SIZE = 50;
+const LIST_PAGE_SIZE = 30;
+const SEARCH_DEBOUNCE_MS = 300;
+/** Wait for the `conversation_title` frame this long after the first turn before refetching the row. */
+const TITLE_FALLBACK_DELAY_MS = 5000;
+const STREAM_CUT_MESSAGE: string = VEX_COPY.store.stream_cut;
+const LOCAL_ID_PREFIX = 'local-';
 
-function normalizeText(value: string): string {
-  return value.normalize('NFD').replace(/[̀-ͯ]/g, '').toLowerCase();
+function isNotFoundError(error: unknown): boolean {
+  const e = error as { status?: number; error?: { statusCode?: number } } | null;
+  return e?.status === 404 || e?.error?.statusCode === 404;
 }
 
 function buildMessage(
@@ -258,11 +270,23 @@ function adaptPersistedPlan(raw: unknown): VexPlanProposal | null {
     typeof raw['title'] === 'string' && raw['title'].trim()
       ? raw['title']
       : steps.length === 1 && steps[0].preview?.target?.trim()
-        ? `Vex propone: ${steps[0].preview?.target?.trim()}`
+        ? VEX_COPY.store.plan_title_target(steps[0].preview?.target?.trim() ?? '')
         : steps.length > 1
-          ? `Vex propone un plan (${steps.length} pasos)`
-          : 'Vex propone un plan';
+          ? VEX_COPY.store.plan_title_steps(steps.length)
+          : VEX_COPY.store.plan_title;
   return { plan_id: raw['plan_id'], title, steps, status };
+}
+
+/** Persisted `metadata.followups` → cards; anything malformed is dropped. */
+function adaptPersistedFollowups(raw: unknown): VexFollowup[] {
+  if (!Array.isArray(raw)) return [];
+  return raw.filter(
+    (item): item is VexFollowup =>
+      !!item &&
+      typeof item === 'object' &&
+      typeof (item as VexFollowup).id === 'string' &&
+      typeof (item as VexFollowup).title === 'string',
+  );
 }
 
 function adaptMessage(row: VexBackendMessage): {
@@ -273,6 +297,7 @@ function adaptMessage(row: VexBackendMessage): {
   const meta = (row.metadata ?? {}) as Record<string, unknown>;
   const { hydrated, refs } = splitPersistedBlocks(meta['blocks']);
   const plan = adaptPersistedPlan(meta['plan']);
+  const followups = adaptPersistedFollowups(meta['followups']);
   return {
     message: {
       id: `m-${row.id}`,
@@ -281,6 +306,7 @@ function adaptMessage(row: VexBackendMessage): {
       created_at: new Date(row.created_at),
       blocks: hydrated.length > 0 ? hydrated : undefined,
       plan,
+      followups: followups.length > 0 ? followups : undefined,
     },
     refs,
   };
@@ -325,17 +351,21 @@ function argsEqual(
   }
 }
 
+/** Read-only tool behind the follow-up card; never listed as a work step. */
+const FOLLOWUP_TOOL = 'suggest_followup';
+
 function adaptConversation(
   row: VexBackendConversation,
   messages: VexMessage[] = [],
 ): VexConversation {
   return {
     id: String(row.id),
-    title: row.title?.trim() ? row.title : 'Conversación',
+    title: row.title?.trim() ? row.title : VEX_COPY.store.default_title,
     messages,
     created_at: new Date(row.created_at),
     updated_at: new Date(row.updated_at),
     status: row.status,
+    followups_muted: row.metadata?.['followups_muted'] === true,
   };
 }
 
@@ -351,7 +381,11 @@ export class VexChatStore {
   private stream_sub?: Subscription;
   private stream_generation = 0;
   private readonly _stream_progress = signal('');
+  private readonly _busy_followup_ids = signal<ReadonlySet<string>>(new Set());
   readonly stream_progress = this._stream_progress.asReadonly();
+  /** Message whose audio was last handed to the voice pipeline (the one being read aloud). */
+  private readonly _spoken_message_id = signal<string | null>(null);
+  readonly spoken_message_id = this._spoken_message_id.asReadonly();
   private readonly loaded_ids = new Set<string>();
   /**
    * Plan tokens minted by approve, keyed by `plan_id`. In-memory only (TTL
@@ -376,13 +410,40 @@ export class VexChatStore {
     return id ? (this._objectives()[id] ?? null) : null;
   });
   private readonly _busy_plan_id = signal<string | null>(null);
+  private readonly _loading_more = signal(false);
+  private readonly _has_more = signal(false);
+  /** The last "next page" request failed: loading more waits for a manual retry. */
+  private readonly _load_more_failed = signal(false);
+  readonly load_more_failed = this._load_more_failed.asReadonly();
+  /** Ids the server returned for the active search; `null` while no search is active. */
+  private readonly _search_ids = signal<ReadonlySet<string> | null>(null);
+  private list_page = 1;
+  private list_seq = 0;
+  private search_timer: ReturnType<typeof setTimeout> | null = null;
+  private readonly title_timers = new Set<ReturnType<typeof setTimeout>>();
+  /** Conversations created in this visit whose first turn is still to close. */
+  private readonly first_turn_ids = new Set<string>();
+  private readonly title_received = new Set<string>();
+  /** Conversations renamed by hand in this visit: a generated title never replaces them. */
+  private readonly user_titled = new Set<string>();
+  private replace_nav = false;
 
-  readonly conversations = computed(() =>
-    [...this._conversations()].sort(
-      (a, b) => b.updated_at.getTime() - a.updated_at.getTime(),
-    ),
-  );
+  /** Conversations of the list: server-filtered by the search, newest activity first. */
+  readonly conversations = computed(() => {
+    const ids = this._search_ids();
+    return this._conversations()
+      .filter((c) => !c.local && (!ids || ids.has(c.id)))
+      .sort((a, b) => b.updated_at.getTime() - a.updated_at.getTime());
+  });
+  readonly loading_more = this._loading_more.asReadonly();
+  /** More pages remain on the server for the current list or search. */
+  readonly has_more = this._has_more.asReadonly();
   readonly active_id = this._active_id.asReadonly();
+  /** Id of the open conversation as the URL shows it: `null` for the new chat and for unsent ones. */
+  readonly route_id = computed(() => {
+    const id = this._active_id();
+    return id && !id.startsWith(LOCAL_ID_PREFIX) ? id : null;
+  });
   readonly activeNumericId = computed(() =>
     this._active_id() ? Number(this._active_id()) : null,
   );
@@ -392,16 +453,6 @@ export class VexChatStore {
     return this._conversations().find((c) => c.id === id) ?? null;
   });
   readonly search_term = this._search_term.asReadonly();
-  readonly filtered_conversations = computed(() => {
-    const term = normalizeText(this._search_term().trim());
-    const all = this.conversations();
-    if (!term) return all;
-    return all.filter(
-      (c) =>
-        normalizeText(c.title).includes(term) ||
-        c.messages.some((m) => normalizeText(m.content).includes(term)),
-    );
-  });
   readonly is_agent_typing = this._is_agent_typing.asReadonly();
   readonly loading_list = this._loading_list.asReadonly();
   readonly loading_thread = this._loading_thread.asReadonly();
@@ -409,7 +460,12 @@ export class VexChatStore {
   readonly busy_plan_id = this._busy_plan_id.asReadonly();
 
   constructor() {
-    this.destroyRef.onDestroy(() => this.closeStream());
+    this.destroyRef.onDestroy(() => {
+      this.closeStream();
+      if (this.search_timer) clearTimeout(this.search_timer);
+      for (const timer of this.title_timers) clearTimeout(timer);
+      this.title_timers.clear();
+    });
     void this.loadConversations();
   }
 
@@ -428,9 +484,78 @@ export class VexChatStore {
     this.closeStream();
     this._error.set(null);
     this._active_id.set(id);
-    if (!this.loaded_ids.has(id)) {
+    // The messages decide, not only the set: a conversation that left the list
+    // (a search that did not match it) comes back from the server without
+    // them, and its id may still be marked as loaded.
+    const conversation = this._conversations().find((c) => c.id === id);
+    if (!this.loaded_ids.has(id) || !conversation?.messages.length) {
       void this.loadThread(id);
     }
+  }
+
+  /**
+   * Opens the conversation the URL names (`/admin/vex/c/:id`), or the empty
+   * "new chat" screen for `null`. A conversation outside the loaded pages is
+   * fetched by id; one the server does not know falls back to the new chat
+   * with a notice (see `loadThread`).
+   */
+  openFromRoute(id: string | null): void {
+    if (id === null) {
+      if (this._active_id() !== null) this.newConversation();
+      return;
+    }
+    if (id === this._active_id()) return;
+    if (!/^\d+$/.test(id)) {
+      this.handleMissingConversation(id);
+      return;
+    }
+    if (!this._conversations().some((c) => c.id === id)) {
+      const epoch = new Date(0);
+      this._conversations.update((list) => [
+        ...list,
+        {
+          id,
+          title: VEX_COPY.store.default_title,
+          messages: [],
+          created_at: epoch,
+          updated_at: epoch,
+        },
+      ]);
+    }
+    this.selectConversation(id);
+  }
+
+  /**
+   * True once when the last change of the open conversation must replace the
+   * URL instead of pushing a history entry (a new conversation got its id, or
+   * the one asked for does not exist). Reading it clears it.
+   */
+  takeReplaceNavigation(): boolean {
+    const replace = this.replace_nav;
+    this.replace_nav = false;
+    return replace;
+  }
+
+  /** Loads the next page of the list (or of the search). */
+  loadMore(): void {
+    if (
+      !this._has_more() ||
+      this._loading_more() ||
+      this._loading_list() ||
+      // A failed page is not asked again by the scroll: it would fire in a
+      // burst while the end of the list stays in view. The person retries.
+      this._load_more_failed()
+    ) {
+      return;
+    }
+    void this.loadConversations(this.list_page + 1);
+  }
+
+  /** Asks again for the page that failed. */
+  retryLoadMore(): void {
+    if (!this._load_more_failed()) return;
+    this._load_more_failed.set(false);
+    this.loadMore();
   }
 
   /** A state read only: opening a thread must never trigger an inference. */
@@ -438,7 +563,7 @@ export class VexChatStore {
     this._objective_loading.set(true);
     void firstValueFrom(this.objectiveApi.getObjective(objectiveId, 'vex'))
       .then((objective) => this.rememberObjective(objective))
-      .catch(() => this._error.set('No pude consultar el objetivo.'))
+      .catch(() => this._error.set(VEX_COPY.store.objective_query_failed))
       .finally(() => this._objective_loading.set(false));
   }
 
@@ -452,7 +577,7 @@ export class VexChatStore {
       !canResumeObjective(objective, confirmExpired)
     ) {
       this._error.set(
-        'Selecciona el objetivo y confirma explícitamente si expiró antes de reanudarlo.',
+        VEX_COPY.store.objective_resume_blocked,
       );
       return;
     }
@@ -470,7 +595,7 @@ export class VexChatStore {
       .then((resumed) => this.rememberObjective(resumed))
       .catch(() =>
         this._error.set(
-          'No se reanudó el objetivo. Actualiza su estado e inténtalo de nuevo.',
+          VEX_COPY.store.objective_resume_failed,
         ),
       )
       .finally(() => this._objective_loading.set(false));
@@ -481,12 +606,19 @@ export class VexChatStore {
     this._objectives.update((values) => ({ ...values, [key]: objective }));
   }
 
+  /** Debounced server search: every change restarts the pagination at page 1. */
   setSearchTerm(term: string): void {
+    if (term === this._search_term()) return;
     this._search_term.set(term);
+    if (this.search_timer) clearTimeout(this.search_timer);
+    this.search_timer = setTimeout(() => {
+      this.search_timer = null;
+      void this.loadConversations(1);
+    }, SEARCH_DEBOUNCE_MS);
   }
 
   async ensureVoiceConversation(): Promise<number | null> {
-    const id = await this.ensureConversation('Conversación por voz');
+    const id = await this.ensureConversation(VEX_COPY.store.voice_title);
     return id ? Number(id) : null;
   }
 
@@ -528,7 +660,7 @@ export class VexChatStore {
     );
     const text =
       result.receipt.summary?.trim() ||
-      (applied ? 'Cambio aplicado.' : 'Resultado pendiente de verificación.');
+      (applied ? VEX_COPY.store.receipt_applied : VEX_COPY.store.receipt_pending);
     this._conversations.update((list) =>
       list.map((conversation) =>
         conversation.id === conversation_id
@@ -549,6 +681,8 @@ export class VexChatStore {
     ) {
       const id = `voice-receipt-${Date.now()}`;
       this.voice.startTurn(id);
+      // The receipt just appended above is the message this audio reads.
+      this._spoken_message_id.set(this.lastAgentMessageId(conversation_id));
       this.voice.enqueue(id, {
         index: 0,
         audio_base64: result.receipt.audio_base64,
@@ -566,8 +700,8 @@ export class VexChatStore {
     const text =
       result.receipt.summary?.trim() ||
       (applied
-        ? 'Cambio aplicado.'
-        : 'Resultado sin verificar. Consulta el estado.');
+        ? VEX_COPY.store.receipt_applied
+        : VEX_COPY.store.receipt_unverified);
     this._conversations.update((list) =>
       list.map((conversation) =>
         conversation.id === conversation_id
@@ -588,6 +722,8 @@ export class VexChatStore {
     ) {
       const id = `voice-receipt-${Date.now()}`;
       this.voice.startTurn(id);
+      // The receipt just appended above is the message this audio reads.
+      this._spoken_message_id.set(this.lastAgentMessageId(conversation_id));
       this.voice.enqueue(id, {
         index: 0,
         audio_base64: result.receipt.audio_base64,
@@ -606,21 +742,106 @@ export class VexChatStore {
     void this.runTurn(text, attachment_ids);
   }
 
-  deleteConversation(id: string): void {
+  /** Figures of what deleting the conversation erases, or `null` (with a toast) when they cannot be read. */
+  async previewPurge(id: string): Promise<VexPurgePreview | null> {
     const numeric = Number(id);
-    this._conversations.update((list) => list.filter((c) => c.id !== id));
-    this.loaded_ids.delete(id);
-    if (this._active_id() === id) {
-      this.closeStream();
-      this._active_id.set(null);
+    if (!Number.isFinite(numeric)) return null;
+    try {
+      return await firstValueFrom(this.api.purgePreview(numeric));
+    } catch (error) {
+      this.toast.error(
+        parseApiError(error).userMessage,
+        VEX_COPY.store.purge_prepare_failed,
+      );
+      return null;
     }
-    if (!Number.isFinite(numeric)) return;
-    void firstValueFrom(this.api.archiveConversation(numeric)).catch(
-      (error) => {
-        this.toast.error(extractApiErrorMessage(error), 'No se pudo eliminar');
-        void this.loadConversations();
-      },
-    );
+  }
+
+  /**
+   * Deletes the conversation for real (the server answers 409 while one of its
+   * tasks is running: nothing is deleted then). On success it leaves the list
+   * and, if it was the open one, the view returns to the new chat.
+   */
+  async purgeConversation(id: string): Promise<'purged' | 'running' | 'failed'> {
+    const numeric = Number(id);
+    if (!Number.isFinite(numeric)) return 'failed';
+    try {
+      await firstValueFrom(this.api.purgeConversation(numeric));
+    } catch (error) {
+      const status = (error as { status?: number } | null)?.status;
+      if (status === 409) return 'running';
+      if (status === 404) {
+        this.forgetConversation(id);
+        this.toast.error(VEX_COPY.store.purge_missing, VEX_COPY.store.purge_failed);
+        return 'failed';
+      }
+      this.toast.error(parseApiError(error).userMessage, VEX_COPY.store.purge_failed);
+      return 'failed';
+    }
+    this.forgetConversation(id);
+    this.toast.success(VEX_COPY.store.purged);
+    return 'purged';
+  }
+
+  /** Drops a conversation from every local cache; the open one returns to the new chat. */
+  private forgetConversation(id: string): void {
+    this._conversations.update((list) => list.filter((c) => c.id !== id));
+    this._search_ids.update((ids) => {
+      if (!ids?.has(id)) return ids;
+      const next = new Set(ids);
+      next.delete(id);
+      return next;
+    });
+    this.loaded_ids.delete(id);
+    this.first_turn_ids.delete(id);
+    this.title_received.delete(id);
+    this.user_titled.delete(id);
+    this._objectives.update((values) => {
+      if (!(id in values)) return values;
+      const rest = { ...values };
+      delete rest[id];
+      return rest;
+    });
+    if (this._active_id() === id) {
+      this.voiceSafety.invalidate();
+      this.voice.interrupt();
+      this.closeStream();
+      this._is_agent_typing.set(false);
+      this._active_id.set(null);
+      this.replace_nav = true;
+    }
+  }
+
+  /**
+   * Renames a conversation: optimistic, rolled back with an error toast if the
+   * server refuses. A name set by hand is never replaced by the generated title.
+   * Resolves `true` when the name was saved (or already was the same).
+   */
+  async renameConversation(id: string, raw_title: string): Promise<boolean> {
+    const numeric = Number(id);
+    const current = this._conversations().find((c) => c.id === id);
+    if (!current || !Number.isFinite(numeric)) return false;
+    if (validateConversationTitle(raw_title)) return false;
+    const title = raw_title.trim();
+    if (title === current.title) return true;
+    const previous = current.title;
+    this.title_received.add(id);
+    this.user_titled.add(id);
+    this.setTitle(id, title);
+    try {
+      const row = await firstValueFrom(this.api.renameConversation(numeric, title));
+      const confirmed = row?.title?.trim();
+      if (confirmed && confirmed !== title) this.setTitle(id, confirmed);
+      return true;
+    } catch (error) {
+      this.user_titled.delete(id);
+      this.setTitle(id, previous);
+      this.toast.error(
+        parseApiError(error).userMessage,
+        VEX_COPY.store.rename_failed,
+      );
+      return false;
+    }
   }
 
   /** Stops the live stream; the turn already persisted stays as-is. */
@@ -673,8 +894,8 @@ export class VexChatStore {
         );
       } else {
         this.toast.error(
-          'Esta propuesta venció. Vuelve a pedirle a Vex que la proponga.',
-          'No se pudo aprobar',
+          VEX_COPY.store.proposal_expired_retry,
+          VEX_COPY.store.approve_failed,
         );
       }
       return;
@@ -756,7 +977,7 @@ export class VexChatStore {
         },
       );
       this.patchPlan(conversation_id, message_id, { status: 'failed' });
-      this.toast.error(message, 'No se pudo aplicar');
+      this.toast.error(message, VEX_COPY.store.apply_failed);
     } finally {
       this._busy_plan_id.set(null);
     }
@@ -894,7 +1115,7 @@ export class VexChatStore {
             );
             this.toast.error(
               extractApiErrorMessage(error),
-              'Necesita confirmación propia',
+              VEX_COPY.store.own_confirmation,
             );
             continue;
           }
@@ -909,7 +1130,7 @@ export class VexChatStore {
             },
           );
           this.patchPlan(conversation_id, message_id, { status: 'failed' });
-          this.toast.error(extractApiErrorMessage(error), 'No se pudo aplicar');
+          this.toast.error(extractApiErrorMessage(error), VEX_COPY.store.apply_failed);
           // The server recorded the failure: adopt its plan state when the
           // plan was persisted (the local `failed` above is the fallback).
           await this.syncPlanFromServer(numeric, conversation_id, plan.plan_id);
@@ -925,7 +1146,7 @@ export class VexChatStore {
       }
     } catch (error) {
       this.patchPlan(conversation_id, message_id, { status: 'proposed' });
-      this.toast.error(extractApiErrorMessage(error), 'No se pudo aprobar');
+      this.toast.error(extractApiErrorMessage(error), VEX_COPY.store.approve_failed);
     } finally {
       this._busy_plan_id.set(null);
     }
@@ -1070,7 +1291,7 @@ export class VexChatStore {
       });
       this.plan_tokens.delete(plan.plan_id);
     } catch (error) {
-      this.toast.error(extractApiErrorMessage(error), 'No se pudo cancelar');
+      this.toast.error(extractApiErrorMessage(error), VEX_COPY.store.cancel_failed);
       await this.syncPlanFromServer(numeric, conversation_id, plan.plan_id);
       return;
     } finally {
@@ -1131,8 +1352,8 @@ export class VexChatStore {
       return;
     }
     this.toast.error(
-      'Esta propuesta venció. Solicita una propuesta nueva.',
-      'Falta la aprobación',
+      VEX_COPY.store.proposal_expired_new,
+      VEX_COPY.store.approval_missing,
     );
   }
 
@@ -1308,10 +1529,10 @@ export class VexChatStore {
           confirmation_token: undefined,
         },
       );
-      this.toast.error(extractApiErrorMessage(error), 'No se pudo aplicar');
+      this.toast.error(extractApiErrorMessage(error), VEX_COPY.store.apply_failed);
       return;
     }
-    this.toast.error(extractApiErrorMessage(error), 'No se pudo aplicar');
+    this.toast.error(extractApiErrorMessage(error), VEX_COPY.store.apply_failed);
     await this.syncPlanFromServer(numeric, conversation_id, plan_id);
   }
 
@@ -1351,35 +1572,96 @@ export class VexChatStore {
     ).catch((error) => {
       this.toast.error(
         extractApiErrorMessage(error),
-        'No se pudo enviar la selección',
+        VEX_COPY.store.interaction_failed,
       );
     });
   }
 
-  private loadConversations(): Promise<void> {
-    this._loading_list.set(true);
+  private loadConversations(page = 1): Promise<void> {
+    const seq = ++this.list_seq;
+    const term = this._search_term().trim();
+    if (page === 1) this._loading_list.set(true);
+    else this._loading_more.set(true);
     return firstValueFrom(
-      this.api.listConversations({ page: 1, limit: LIST_PAGE_SIZE }),
+      this.api.listConversations({
+        page,
+        limit: LIST_PAGE_SIZE,
+        ...(term ? { search: term } : {}),
+      }),
     )
-      .then((page) => {
-        const active = this._active_id();
-        this._conversations.set(
-          page.data.map((row) => {
-            const previous =
-              active === String(row.id)
-                ? this._conversations().find((c) => c.id === active)
-                : undefined;
-            // Keep live messages of the open thread; the list carries none.
-            const adapted = adaptConversation(row, previous?.messages ?? []);
-            if (previous) this.loaded_ids.add(adapted.id);
-            return adapted;
-          }),
-        );
+      .then((res) => {
+        if (seq !== this.list_seq) return;
+        const known = new Map(this._conversations().map((c) => [c.id, c]));
+        const incoming = res.data.map((row) => {
+          // Keep live messages of conversations already opened; the list carries none.
+          const previous = known.get(String(row.id));
+          const adapted = adaptConversation(row, previous?.messages ?? []);
+          if (previous && previous.messages.length > 0) {
+            this.loaded_ids.add(adapted.id);
+          }
+          return adapted;
+        });
+        const incoming_ids = new Set(incoming.map((c) => c.id));
+        this._conversations.update((current) => {
+          if (page > 1) {
+            return [
+              ...current,
+              ...incoming.filter((c) => !current.some((o) => o.id === c.id)),
+            ];
+          }
+          // First page replaces the list; the open and unsent conversations stay.
+          const active = this._active_id();
+          const kept = current.filter(
+            (c) => !incoming_ids.has(c.id) && (c.local || c.id === active),
+          );
+          // Whatever leaves the list loses its messages with it: it is no
+          // longer "loaded", so opening it again fetches the thread.
+          const kept_ids = new Set(kept.map((c) => c.id));
+          for (const c of current) {
+            if (!incoming_ids.has(c.id) && !kept_ids.has(c.id)) {
+              this.loaded_ids.delete(c.id);
+            }
+          }
+          return [...incoming, ...kept];
+        });
+        this._search_ids.update((ids) => {
+          if (!term) return null;
+          const next = new Set(page > 1 && ids ? ids : []);
+          for (const id of incoming_ids) next.add(id);
+          return next;
+        });
+        this.list_page = page;
+        this._has_more.set(page < (res.meta?.totalPages ?? 1));
+        this._load_more_failed.set(false);
       })
       .catch((error) => {
+        if (seq !== this.list_seq) return;
+        if (page > 1) {
+          this._load_more_failed.set(true);
+          return;
+        }
         this._error.set(extractApiErrorMessage(error));
       })
-      .finally(() => this._loading_list.set(false));
+      .finally(() => {
+        if (seq !== this.list_seq) return;
+        this._loading_list.set(false);
+        this._loading_more.set(false);
+      });
+  }
+
+  /** The conversation the URL names does not exist (or is not the user's): back to the new chat. */
+  private handleMissingConversation(id: string): void {
+    this._conversations.update((list) => list.filter((c) => c.id !== id));
+    this.loaded_ids.delete(id);
+    if (this._active_id() === id) {
+      this.closeStream();
+      this._active_id.set(null);
+      this.replace_nav = true;
+    }
+    this.toast.error(
+      VEX_COPY.store.conversation_missing,
+      VEX_COPY.store.open_failed,
+    );
   }
 
   private loadThread(id: string): Promise<void> {
@@ -1417,7 +1699,11 @@ export class VexChatStore {
         }
       })
       .catch((error) => {
-        this.toast.error(extractApiErrorMessage(error), 'No se pudo abrir');
+        if (isNotFoundError(error)) {
+          this.handleMissingConversation(id);
+          return;
+        }
+        this.toast.error(extractApiErrorMessage(error), VEX_COPY.store.open_failed);
       })
       .finally(() => this._loading_thread.set(false));
   }
@@ -1477,6 +1763,9 @@ export class VexChatStore {
     text: string,
     attachment_ids: string[],
     speak = false,
+    retry_message_id?: string,
+    /** The user row of this turn is already stored: the server must not write it again. */
+    skip_user_message = false,
   ): Promise<void> {
     this.voiceSafety.invalidate();
     this.closeStream();
@@ -1484,27 +1773,48 @@ export class VexChatStore {
     this._error.set(null);
     this._is_agent_typing.set(true);
 
-    return this.ensureConversation(text)
+    // The user's message goes into the thread first, so no text is ever lost:
+    // a failure below marks it «No se envió» instead of aborting silently.
+    const now = new Date();
+    const active = this._active_id();
+    let holder_id =
+      active && this._conversations().some((c) => c.id === active)
+        ? active
+        : this.openLocalConversation(now);
+    let user_message_id = retry_message_id ?? '';
+    if (retry_message_id) {
+      this.patchMessage(holder_id, retry_message_id, {
+        send_failed: false,
+        error: null,
+      });
+    } else {
+      const user_message: VexMessage = {
+        ...buildMessage('user', text, now),
+        attachment_ids: attachment_ids.length ? attachment_ids : undefined,
+      };
+      user_message_id = user_message.id;
+      this._conversations.update((list) =>
+        list.map((c) =>
+          c.id === holder_id
+            ? { ...c, messages: [...c.messages, user_message], updated_at: now }
+            : c,
+        ),
+      );
+    }
+    const is_local = holder_id.startsWith(LOCAL_ID_PREFIX);
+    const ready: Promise<string | null> = is_local
+      ? this.promoteLocalConversation(holder_id, text, user_message_id)
+      : Promise.resolve(holder_id);
+
+    return ready
       .then((conversation_id) => {
         if (generation !== this.stream_generation) return;
         if (!conversation_id) {
           this._is_agent_typing.set(false);
           return;
         }
-        const now = new Date();
-        const user_message = buildMessage('user', text, now);
-        this._conversations.update((list) =>
-          list.map((c) =>
-            c.id === conversation_id
-              ? {
-                  ...c,
-                  messages: [...c.messages, user_message],
-                  updated_at: now,
-                }
-              : c,
-          ),
-        );
-        const agent_message = buildMessage('agent', '', now);
+        holder_id = conversation_id;
+        const agent_message = buildMessage('agent', '', new Date());
         const full: VexMessage = {
           ...agent_message,
           blocks: [],
@@ -1523,22 +1833,189 @@ export class VexChatStore {
           this.api.createStreamIntent(numeric, text, {
             attachmentIds: attachment_ids.length ? attachment_ids : undefined,
             ...(speak ? { speak: true } : {}),
+            ...(skip_user_message ? { skipUserMessage: true } : {}),
           }),
         )
           .then((stream_id) => {
             if (generation !== this.stream_generation) return;
-            if (speak) this.voice.startTurn(stream_id);
+            if (speak) {
+              this.voice.startTurn(stream_id);
+              this._spoken_message_id.set(full.id);
+            }
             this.subscribeStream(numeric, conversation_id, full.id, stream_id);
           })
           .catch((error) => {
             if (generation !== this.stream_generation) return;
-            this.failFromError(conversation_id, full.id, error);
+            if (vexiObjectiveConflictNotice(error)) {
+              this.failFromError(conversation_id, full.id, error);
+              return;
+            }
+            // The message never reached the server: keep it, offer a retry.
+            this.removeMessage(conversation_id, full.id);
+            this.markSendFailed(conversation_id, user_message_id, error);
           });
       })
       .catch((error) => {
         this._is_agent_typing.set(false);
-        this.toast.error(extractApiErrorMessage(error), 'No se pudo enviar');
+        this.markSendFailed(holder_id, user_message_id, error);
       });
+  }
+
+  /** Resends a user message that never reached the server (same text and attachments). */
+  retrySend(message_id: string): void {
+    if (this._is_agent_typing()) return;
+    const message = this.active_conversation()?.messages.find(
+      (m) => m.id === message_id,
+    );
+    if (!message || !message.send_failed) return;
+    void this.runTurn(
+      message.content,
+      message.attachment_ids ?? [],
+      false,
+      message.id,
+    );
+  }
+
+  /**
+   * Resends the last user message after a cut answer; the broken answer is
+   * dropped. The server writes the user row before it calls the model, so a
+   * cut turn has normally stored the question already: the retry asks the
+   * server what it holds and, when the row is there, tells it not to write it
+   * again (otherwise a reload shows the question twice).
+   */
+  async retryAnswer(): Promise<void> {
+    if (this._is_agent_typing()) return;
+    const conversation = this.active_conversation();
+    if (!conversation) return;
+    let index = conversation.messages.length - 1;
+    while (index >= 0 && conversation.messages[index].role !== 'user') index--;
+    if (index < 0) return;
+    const user = conversation.messages[index];
+    const failed_ids = new Set(
+      conversation.messages
+        .slice(index + 1)
+        .filter((m) => m.role === 'agent' && m.can_retry)
+        .map((m) => m.id),
+    );
+    if (failed_ids.size === 0) return;
+    // Taken before the read below, so a second click cannot start another turn.
+    this._is_agent_typing.set(true);
+    const generation = this.stream_generation;
+    const local_user_count = conversation.messages
+      .slice(0, index + 1)
+      .filter((m) => m.role === 'user').length;
+    const stored = await this.userRowStored(conversation.id, local_user_count);
+    if (
+      generation !== this.stream_generation ||
+      this._active_id() !== conversation.id
+    ) {
+      return;
+    }
+    this._conversations.update((list) =>
+      list.map((c) =>
+        c.id === conversation.id
+          ? { ...c, messages: c.messages.filter((m) => !failed_ids.has(m.id)) }
+          : c,
+      ),
+    );
+    void this.runTurn(
+      user.content,
+      user.attachment_ids ?? [],
+      false,
+      user.id,
+      stored,
+    );
+  }
+
+  /**
+   * Whether the server already holds the user row of the turn being retried:
+   * it does when it stores at least as many user messages as the thread shows.
+   * When the read fails the row is assumed stored — the common case after a
+   * cut answer, and the one that keeps the question from doubling.
+   */
+  private userRowStored(
+    conversation_id: string,
+    local_user_count: number,
+  ): Promise<boolean> {
+    const numeric = Number(conversation_id);
+    if (!Number.isFinite(numeric)) return Promise.resolve(false);
+    return firstValueFrom(this.api.getConversation(numeric))
+      .then(
+        (row) =>
+          (row.messages ?? []).filter((m) => m.role === 'user').length >=
+          local_user_count,
+      )
+      .catch(() => true);
+  }
+
+  private markSendFailed(
+    conversation_id: string,
+    message_id: string,
+    error: unknown,
+  ): void {
+    this._is_agent_typing.set(false);
+    this.patchMessage(conversation_id, message_id, {
+      send_failed: true,
+      error: parseApiError(error).userMessage,
+    });
+  }
+
+  private removeMessage(conversation_id: string, message_id: string): void {
+    this._conversations.update((list) =>
+      list.map((c) =>
+        c.id === conversation_id
+          ? { ...c, messages: c.messages.filter((m) => m.id !== message_id) }
+          : c,
+      ),
+    );
+  }
+
+  /** A conversation that only exists in the browser until its first message is accepted. */
+  private openLocalConversation(now: Date): string {
+    const id = `${LOCAL_ID_PREFIX}${crypto.randomUUID()}`;
+    this._conversations.update((list) => [
+      ...list,
+      { id, title: VEX_COPY.store.default_title, messages: [], created_at: now, updated_at: now, local: true },
+    ]);
+    this._active_id.set(id);
+    return id;
+  }
+
+  /**
+   * Creates the server conversation behind a local one, keeping its messages.
+   * The title is the first words of the message as a placeholder; the
+   * generated title arrives after the first turn.
+   */
+  private promoteLocalConversation(
+    local_id: string,
+    text: string,
+    user_message_id: string,
+  ): Promise<string | null> {
+    return firstValueFrom(
+      this.api.createConversation(text.slice(0, TITLE_MAX_LENGTH)),
+    ).then(
+      (row) => {
+        const created = adaptConversation(row, []);
+        this._conversations.update((list) =>
+          list.map((c) =>
+            c.id === local_id
+              ? { ...created, messages: c.messages, updated_at: c.updated_at }
+              : c,
+          ),
+        );
+        this.loaded_ids.add(created.id);
+        this.first_turn_ids.add(created.id);
+        if (this._active_id() === local_id) {
+          this.replace_nav = true;
+          this._active_id.set(created.id);
+        }
+        return created.id;
+      },
+      (error) => {
+        this.markSendFailed(local_id, user_message_id, error);
+        return null;
+      },
+    );
   }
 
   private ensureConversation(text: string): Promise<string | null> {
@@ -1553,6 +2030,8 @@ export class VexChatStore {
         const created = adaptConversation(row, []);
         this._conversations.update((list) => [created, ...list]);
         this.loaded_ids.add(created.id);
+        this.first_turn_ids.add(created.id);
+        this.replace_nav = true;
         this._active_id.set(created.id);
         return created.id;
       },
@@ -1668,9 +2147,11 @@ export class VexChatStore {
           this.failMessage(
             conversation_id,
             target,
-            error instanceof Error
+            error instanceof Error && error.message
               ? error.message
-              : 'Se perdió la conexión con Vex.',
+              : STREAM_CUT_MESSAGE,
+            false,
+            true,
           );
         },
         complete: () => {
@@ -1679,11 +2160,22 @@ export class VexChatStore {
       });
   }
 
+  private lastAgentMessageId(conversation_id: string): string | null {
+    const messages =
+      this._conversations().find((c) => c.id === conversation_id)?.messages ??
+      [];
+    for (let index = messages.length - 1; index >= 0; index--) {
+      if (messages[index].role === 'agent') return messages[index].id;
+    }
+    return null;
+  }
+
   private renameMessage(
     conversation_id: string,
     from: string,
     to: string,
   ): void {
+    if (this._spoken_message_id() === from) this._spoken_message_id.set(to);
     this._conversations.update((list) =>
       list.map((c) =>
         c.id === conversation_id && !c.messages.some((m) => m.id === to)
@@ -1714,7 +2206,11 @@ export class VexChatStore {
       block?: VexUiBlock;
       plan?: VexPlanProposal;
       error?: string;
+      error_code?: string;
       objective?: VexiObjective;
+      conversation_id?: number;
+      title?: string;
+      followup?: VexFollowup;
     },
   ): void {
     if (chunk.objective?.conversation_id === Number(conversation_id)) {
@@ -1745,6 +2241,8 @@ export class VexChatStore {
       }
       case 'tool_call': {
         if (!chunk.tool) return;
+        // The suggestion shows as its own card, never as a work step.
+        if (chunk.tool.name === FOLLOWUP_TOOL) return;
         const step = {
           id: chunk.tool.id,
           name: chunk.tool.name,
@@ -1776,6 +2274,7 @@ export class VexChatStore {
       }
       case 'tool_result': {
         if (!chunk.tool) return;
+        if (chunk.tool.name === FOLLOWUP_TOOL) return;
         const tool = chunk.tool;
         this._conversations.update((list) =>
           list.map((conversation) =>
@@ -1835,8 +2334,31 @@ export class VexChatStore {
         this.mergeProposal(conversation_id, message_id, chunk.plan);
         return;
       }
+      case 'followup_suggestion': {
+        const followup = chunk.followup;
+        if (!followup?.id) return;
+        const current =
+          this.findMessage(conversation_id, message_id)?.followups ?? [];
+        if (current.some((item) => item.id === followup.id)) return;
+        this.patchMessage(conversation_id, message_id, {
+          followups: [...current, followup],
+        });
+        return;
+      }
+      case 'conversation_title': {
+        const title = chunk.title?.trim();
+        if (!title) return;
+        const target =
+          chunk.conversation_id !== undefined && chunk.conversation_id !== null
+            ? String(chunk.conversation_id)
+            : conversation_id;
+        this.title_received.add(target);
+        if (!this.user_titled.has(target)) this.setTitle(target, title);
+        return;
+      }
       case 'done': {
         this._stream_progress.set('');
+        this.scheduleTitleFallback(conversation_id);
         const now = new Date();
         this._conversations.update((list) =>
           list.map((c) =>
@@ -1860,12 +2382,17 @@ export class VexChatStore {
           this.failMessage(conversation_id, message_id, conflict, true);
           return;
         }
-        // Closed catalog, like Vexi: the frame's text comes from the provider
-        // or an exception and is written for the logs, never for the person.
+        // The frame's text comes from the provider or an exception and is
+        // written for the logs, never for the person: only a closed error
+        // code maps to copy; otherwise a generic sentence.
         this.failMessage(
           conversation_id,
           message_id,
-          'Vex no pudo completar la respuesta.',
+          chunk.error_code
+            ? parseApiError({ error_code: chunk.error_code }).userMessage
+            : VEX_COPY.store.answer_failed,
+          false,
+          true,
         );
         return;
       }
@@ -1879,14 +2406,47 @@ export class VexChatStore {
     message_id: string,
     error: string,
     restart_suggested = false,
+    can_retry = false,
   ): void {
     this._stream_progress.set('');
     this.patchMessage(conversation_id, message_id, {
       streaming: false,
       error,
       restart_suggested,
+      can_retry,
     });
     this._is_agent_typing.set(false);
+  }
+
+  private setTitle(conversation_id: string, title: string): void {
+    this._conversations.update((list) =>
+      list.map((c) => (c.id === conversation_id ? { ...c, title } : c)),
+    );
+  }
+
+  /**
+   * After the first turn of a new conversation the backend sends the generated
+   * title just before `done`. If that frame never came, read the row once
+   * ~5 s later so the placeholder does not stay as the final title.
+   */
+  private scheduleTitleFallback(conversation_id: string): void {
+    if (!this.first_turn_ids.delete(conversation_id)) return;
+    if (this.title_received.has(conversation_id)) return;
+    const numeric = Number(conversation_id);
+    if (!Number.isFinite(numeric)) return;
+    const timer = setTimeout(() => {
+      this.title_timers.delete(timer);
+      if (this.title_received.has(conversation_id)) return;
+      void firstValueFrom(this.api.getConversation(numeric))
+        .then((row) => {
+          const title = row.title?.trim();
+          if (title && !this.user_titled.has(conversation_id)) {
+            this.setTitle(conversation_id, title);
+          }
+        })
+        .catch(() => undefined);
+    }, TITLE_FALLBACK_DELAY_MS);
+    this.title_timers.add(timer);
   }
 
   /**
@@ -1908,6 +2468,100 @@ export class VexChatStore {
       message_id,
       extractApiErrorMessage(error),
     );
+  }
+
+  private findMessage(
+    conversation_id: string,
+    message_id: string,
+  ): VexMessage | undefined {
+    return this._conversations()
+      .find((c) => c.id === conversation_id)
+      ?.messages.find((m) => m.id === message_id);
+  }
+
+  /** Follow-up ids with a request in flight (their card shows it). */
+  readonly busy_followup_ids = this._busy_followup_ids.asReadonly();
+
+  /** The person asked Vex not to suggest follow-ups in the open chat. */
+  readonly followups_muted = computed(
+    () => this.active_conversation()?.followups_muted === true,
+  );
+
+  /**
+   * «Guardar» on a follow-up card: the approval. Creates the reminder
+   * server-side; the bitácora panel re-reads itself when the card settles.
+   */
+  async saveFollowup(
+    message_id: string,
+    followup_id: string,
+    edits: VexFollowupEdits = {},
+  ): Promise<boolean> {
+    return this.settleFollowup(message_id, followup_id, (conversation) =>
+      this.api.saveFollowup(conversation, followup_id, edits),
+    );
+  }
+
+  /** «No» on a follow-up card: it closes and is not suggested again. */
+  async dismissFollowup(message_id: string, followup_id: string): Promise<boolean> {
+    return this.settleFollowup(message_id, followup_id, (conversation) =>
+      this.api.dismissFollowup(conversation, followup_id),
+    );
+  }
+
+  /** «No sugerir en este chat» and its undo. */
+  async muteFollowups(muted: boolean): Promise<boolean> {
+    const conversation_id = this._active_id();
+    const numeric = this.activeNumericId();
+    if (!conversation_id || numeric === null) return false;
+    try {
+      const value = await firstValueFrom(this.api.muteFollowups(numeric, muted));
+      this._conversations.update((list) =>
+        list.map((c) =>
+          c.id === conversation_id ? { ...c, followups_muted: value } : c,
+        ),
+      );
+      return true;
+    } catch (err) {
+      this.toast.error(parseApiError(err).userMessage);
+      return false;
+    }
+  }
+
+  private async settleFollowup(
+    message_id: string,
+    followup_id: string,
+    request: (conversation: number) => Observable<VexFollowup>,
+  ): Promise<boolean> {
+    const conversation_id = this._active_id();
+    const numeric = this.activeNumericId();
+    if (!conversation_id || numeric === null) return false;
+    if (this._busy_followup_ids().has(followup_id)) return false;
+    this.setFollowupBusy(followup_id, true);
+    try {
+      const settled = await firstValueFrom(request(numeric));
+      const current =
+        this.findMessage(conversation_id, message_id)?.followups ?? [];
+      this.patchMessage(conversation_id, message_id, {
+        followups: current.map((item) =>
+          item.id === followup_id ? { ...item, ...settled } : item,
+        ),
+      });
+      return true;
+    } catch (err) {
+      this.toast.error(parseApiError(err).userMessage);
+      return false;
+    } finally {
+      this.setFollowupBusy(followup_id, false);
+    }
+  }
+
+  private setFollowupBusy(id: string, on: boolean): void {
+    this._busy_followup_ids.update((current) => {
+      const next = new Set(current);
+      if (on) next.add(id);
+      else next.delete(id);
+      return next;
+    });
   }
 
   private patchMessage(

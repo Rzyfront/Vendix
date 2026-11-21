@@ -11,6 +11,8 @@ import type { VexiToolExecution } from '../../../../../core/services/vexi-api.se
 import { environment } from '../../../../../../environments/environment';
 import {
   VexBlockInteraction,
+  VexFollowup,
+  VexFollowupEdits,
   VexPlanProposal,
   VexPlanStep,
   VexUiBlock,
@@ -209,7 +211,9 @@ export interface VexStreamChunk {
     | 'done'
     | 'error'
     | 'audio'
-    | 'timing';
+    | 'timing'
+    | 'conversation_title'
+    | 'followup_suggestion';
   audio_base64?: string;
   content_type?: string;
   index?: number;
@@ -233,6 +237,13 @@ export interface VexStreamChunk {
     totalTokens: number;
   };
   error?: string;
+  /** Closed error code of an `error` frame, when the backend sends one. */
+  error_code?: string;
+  /** `conversation_title` frame: the generated title, sent just before `done` of the first turn. */
+  conversation_id?: number;
+  title?: string;
+  /** `followup_suggestion` frame: the card of this turn, sent just before `done`. */
+  followup?: VexFollowup;
 }
 
 export interface VexAttachment {
@@ -288,6 +299,21 @@ export interface VexApplyStepResult {
   step_status?: VexServerStepStatus;
   plan_status?: VexServerPlanStatus;
   execution?: VexiToolExecution;
+}
+
+/** `GET conversations/:id/purge-preview`: figures shown before deleting. */
+export interface VexPurgePreview {
+  messages: number;
+  attachments: number;
+  blocks: number;
+  memories: number;
+  has_running_task: boolean;
+}
+
+/** `DELETE conversations/:id`. */
+export interface VexPurgeResult {
+  purged: boolean;
+  counts?: Partial<Record<'messages' | 'attachments' | 'blocks' | 'memories', number>>;
 }
 
 export interface VexConversationsPage {
@@ -354,11 +380,91 @@ export class VexApiService {
       .pipe(map((res) => res.data));
   }
 
-  archiveConversation(id: number): Observable<VexBackendConversation> {
+  /** Renames a conversation (1–80 characters, validated server-side too). */
+  renameConversation(
+    id: number,
+    title: string,
+  ): Observable<VexBackendConversation | null> {
     return this.http
       .patch<{
-        data: VexBackendConversation;
-      }>(`${this.chatBase}/conversations/${id}/archive`, {})
+        data?: VexBackendConversation;
+      }>(`${this.chatBase}/conversations/${id}/title`, { title })
+      .pipe(map((res) => res?.data ?? null));
+  }
+
+  /** Saves a suggested follow-up: creates the reminder in the bitácora. */
+  saveFollowup(
+    conversationId: number,
+    followupId: string,
+    edits: VexFollowupEdits = {},
+  ): Observable<VexFollowup> {
+    return this.http
+      .post<{
+        data: { followup: VexFollowup };
+      }>(
+        `${this.chatBase}/conversations/${conversationId}/followups/${followupId}/save`,
+        edits,
+      )
+      .pipe(map((res) => res.data.followup));
+  }
+
+  /** Discards a suggested follow-up; it is never suggested again. */
+  dismissFollowup(
+    conversationId: number,
+    followupId: string,
+  ): Observable<VexFollowup> {
+    return this.http
+      .post<{
+        data: { followup: VexFollowup };
+      }>(
+        `${this.chatBase}/conversations/${conversationId}/followups/${followupId}/dismiss`,
+        {},
+      )
+      .pipe(map((res) => res.data.followup));
+  }
+
+  /** Welcome suggestions for this store (ids only; wording lives in `vex-copy.ts`). */
+  getSuggestions(): Observable<{ id: string; count?: number }[]> {
+    return this.http
+      .get<{
+        data: { suggestions: { id: string; count?: number }[] };
+      }>(`${this.vexBase}/suggestions`)
+      .pipe(map((res) => res.data?.suggestions ?? []));
+  }
+
+  /** «No sugerir en este chat» (and its undo). */
+  muteFollowups(conversationId: number, muted: boolean): Observable<boolean> {
+    return this.http
+      .patch<{
+        data: { followups_muted: boolean };
+      }>(`${this.chatBase}/conversations/${conversationId}/followups/mute`, {
+        muted,
+      })
+      .pipe(map((res) => res.data.followups_muted));
+  }
+
+  /**
+   * What a real deletion would erase, for the confirmation dialog. Read-only:
+   * nothing is deleted here. 404 when the conversation is not the user's.
+   */
+  purgePreview(id: number): Observable<VexPurgePreview> {
+    return this.http
+      .get<{
+        data: VexPurgePreview;
+      }>(`${this.chatBase}/conversations/${id}/purge-preview`)
+      .pipe(map((res) => res.data));
+  }
+
+  /**
+   * Deletes the conversation for real (messages, blocks, attachments in S3,
+   * durable tasks). 409 while a task of the conversation is running; 404 when
+   * it is not the user's.
+   */
+  purgeConversation(id: number): Observable<VexPurgeResult> {
+    return this.http
+      .delete<{
+        data: VexPurgeResult;
+      }>(`${this.chatBase}/conversations/${id}`)
       .pipe(map((res) => res.data));
   }
 

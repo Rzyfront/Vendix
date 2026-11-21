@@ -3132,6 +3132,16 @@ export const TOOL_DISCOVERY_QUERIES_ES: Readonly<
     'Chequee que los roles del flujo sí existan en la tienda',
     'Qué errores tiene la definición del flujo 12',
   ],
+  // F1/T5 — sugerencia de seguimiento (escritas a mano, sin datos de clientes).
+  suggest_followup: [
+    'El viernes llamo al proveedor para cuadrar el pedido',
+    'Quedamos en que el cliente pasa a pagar el martes',
+    'Mañana tengo que revisar si llegó la mercancía',
+    'Le dije a la distribuidora que le confirmaba la otra semana',
+    'Acordamos con el proveedor un descuento por pronto pago',
+    'Hay que volver a mirar ese precio en quince días',
+    'El contador me pidió los soportes antes del lunes',
+  ],
   // QUI-580 — bitácora personal de recordatorios (escritas a mano, sin datos de clientes).
   complete_reminder: [
     'Ya revisé el stock, marca ese recordatorio como hecho',
