@@ -197,8 +197,15 @@ export function exportTableToCsv(table: VexBlockExportTable): string {
   const escape = (value: VexExportCell): string => {
     if (value === null) return '';
     let text = String(value);
-    // Neutralise spreadsheet formula injection on text cells only.
-    if (typeof value === 'string' && /^[=+@\t\r]/.test(text)) text = `'${text}`;
+    // Neutralise spreadsheet formula injection on text cells only. A plain
+    // decimal ("-12.50", "+5") is data, not a formula, and stays untouched.
+    if (
+      typeof value === 'string' &&
+      /^\s*[=+\-@\t\r]/.test(text) &&
+      !/^[+-]?(?:\d+\.?\d*|\.\d+)$/.test(text)
+    ) {
+      text = `'${text}`;
+    }
     return /[",\r\n]/.test(text) ? `"${text.replace(/"/g, '""')}"` : text;
   };
   const lines = [table.headers, ...table.rows].map((line) =>

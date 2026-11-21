@@ -734,6 +734,8 @@ jobs:
           --include='**/store/vex/state/vex-suggestions.util.spec.ts'
           --include='**/store/vex/components/vex-followup-chip/vex-followup-chip.spec.ts'
           --include='**/store/vex/components/vex-markdown/vex-code-highlight.util.spec.ts'
+          --include='**/store/vex/components/vex-blocks/vex-block-export.util.spec.ts'
+          --include='**/store/vex/components/vex-blocks/vex-block-registry.spec.ts'
           --include='**/workflows/services/workflow-templates-api.service.spec.ts'
           --include='**/workflows/editor/components/tabs/config/stage-ai-config.utils.spec.ts'
           --include='**/workflows/editor/components/tabs/config/stage-ai-test.component.spec.ts'

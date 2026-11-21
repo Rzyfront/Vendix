@@ -158,4 +158,30 @@ describe('exportTableToCsv', () => {
     });
     expect(csv.slice(1)).toBe("a,b\r\n'=SUM(A1),-5");
   });
+
+  it('neutralises a leading minus, plus, at or padded formula in text cells', () => {
+    const csv = exportTableToCsv({
+      headers: ['a'],
+      rows: [
+        ["-2+3+cmd|' /C calc'!A0"],
+        ['+1+1'],
+        ['@SUM(A1)'],
+        ['  =1+1'],
+        ['-'],
+      ],
+      filename: 'x',
+    });
+    expect(csv.slice(1)).toBe(
+      "a\r\n'-2+3+cmd|' /C calc'!A0\r\n'+1+1\r\n'@SUM(A1)\r\n'  =1+1\r\n'-",
+    );
+  });
+
+  it('keeps legitimate negative and signed decimals in text cells as they are', () => {
+    const csv = exportTableToCsv({
+      headers: ['a'],
+      rows: [['-12.50'], ['+5'], ['-.5'], ['-3']],
+      filename: 'x',
+    });
+    expect(csv.slice(1)).toBe('a\r\n-12.50\r\n+5\r\n-.5\r\n-3');
+  });
 });
