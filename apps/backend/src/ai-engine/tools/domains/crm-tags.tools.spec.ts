@@ -462,4 +462,67 @@ describe('crm-tags.tools · etiquetas del CRM', () => {
       expect(deps.crmTagsService.list).not.toHaveBeenCalled();
     });
   });
+  describe('tag_customers · compensate (T36)', () => {
+    const membership = (id: number, tags: number[]) => ({
+      customer_id: id,
+      tags: tags.map((t) => ({ id: t })),
+    });
+
+    it('capture keeps the previous and applied tag sets of the customers that change', async () => {
+      const { byName } = buildTools({
+        segmentMembersService: {
+          membershipsOf: jest
+            .fn()
+            .mockResolvedValue([membership(5, [2]), membership(6, [1])]),
+        },
+      });
+      const snap = await byName.tag_customers.compensate!.capture(
+        { customer_ids: [5, 6], add_tag_ids: [1] },
+        CONTEXT,
+      );
+      expect(snap).toEqual({
+        customers: [{ id: 5, before: [2], after: [2, 1] }],
+      });
+    });
+
+    it('undo restores the previous tags when they are still the applied ones', async () => {
+      const { deps, byName } = buildTools({
+        segmentMembersService: {
+          membershipsOf: jest.fn().mockResolvedValue([membership(5, [1, 2])]),
+        },
+      });
+      const out = await byName.tag_customers.compensate!.undo({
+        args: {},
+        snapshot: { customers: [{ id: 5, before: [2], after: [2, 1] }] },
+        handlerOutput: '',
+        context: CONTEXT,
+      });
+      expect(deps.customerCrmService.setTags).toHaveBeenCalledWith(5, [2]);
+      expect(out).toBe('Etiquetas restauradas en 1 cliente.');
+    });
+
+    it('undo throws and writes nothing when a customer tags moved after the batch', async () => {
+      const { deps, byName } = buildTools({
+        segmentMembersService: {
+          membershipsOf: jest
+            .fn()
+            .mockResolvedValue([membership(5, [2, 1]), membership(6, [3])]),
+        },
+      });
+      await expect(
+        byName.tag_customers.compensate!.undo({
+          args: {},
+          snapshot: {
+            customers: [
+              { id: 5, before: [2], after: [2, 1] },
+              { id: 6, before: [1], after: [1, 2] },
+            ],
+          },
+          handlerOutput: '',
+          context: CONTEXT,
+        }),
+      ).rejects.toThrow();
+      expect(deps.customerCrmService.setTags).not.toHaveBeenCalled();
+    });
+  });
 });

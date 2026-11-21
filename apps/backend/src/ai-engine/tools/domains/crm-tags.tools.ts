@@ -1,3 +1,4 @@
+import { ErrorCodes, VendixHttpException } from '../../../common/errors';
 import { AuditService } from '../../../common/audit/audit.service';
 import { CustomersService } from '../../../domains/store/customers/customers.service';
 import { CrmTagsService } from '../../../domains/store/customers/crm/tags/crm-tags.service';
@@ -46,6 +47,11 @@ export interface CrmTagToolDeps {
 const MAX_TAGS_PER_CUSTOMER = 50;
 /** `membershipsOf` accepts up to this many customers per call. */
 const MEMBERSHIPS_CHUNK = 100;
+
+/** State kept by `tag_customers.compensate.capture`. */
+interface TagUndoSnapshot {
+  customers: Array<{ id: number; before: number[]; after: number[] }>;
+}
 
 interface TagRow {
   id: number;
@@ -740,6 +746,61 @@ export function createCrmTagTools(deps: CrmTagToolDeps): RegisteredTool[] {
         } catch (error) {
           return crmToolFailure('etiquetar a los clientes', error);
         }
+      },
+      // T36 "Deshacer": the inverse is the exact tag set each customer had
+      // before (`setTags` replaces the set). It never touches a customer whose
+      // tags moved after the batch.
+      compensate: {
+        label: 'Restaurar las etiquetas anteriores',
+        capture: async (args, context) => {
+          const store = requireStoreId(context);
+          if (!store.ok) return null;
+          const result = await planTagCustomers(deps, args, store.storeId);
+          if (!result.ok) return null;
+          const customers = result.plan.rows
+            .filter((row) => row.changed)
+            .map((row) => ({
+              id: row.id,
+              before: row.beforeIds,
+              after: row.mergedIds,
+            }));
+          return customers.length ? ({ customers } satisfies TagUndoSnapshot) : null;
+        },
+        undo: async ({ snapshot }) => {
+          const snap = snapshot as TagUndoSnapshot;
+          const sameSet = (a: number[], b: number[]) =>
+            a.length === b.length && a.every((id) => b.includes(id));
+          const current = new Map<number, number[]>();
+          const ids = snap.customers.map((c) => c.id);
+          for (let i = 0; i < ids.length; i += MEMBERSHIPS_CHUNK) {
+            const memberships = await deps.segmentMembersService.membershipsOf(
+              ids.slice(i, i + MEMBERSHIPS_CHUNK),
+            );
+            for (const entry of memberships ?? []) {
+              current.set(
+                Number(entry.customer_id),
+                (entry.tags ?? []).map((tag) => Number(tag.id)),
+              );
+            }
+          }
+          // Check everything BEFORE writing anything: all or nothing.
+          const toRestore: TagUndoSnapshot['customers'] = [];
+          for (const customer of snap.customers) {
+            const now = current.get(customer.id) ?? [];
+            if (sameSet(now, customer.before)) continue; // never applied
+            if (!sameSet(now, customer.after)) {
+              throw new VendixHttpException(
+                ErrorCodes.SYS_CONFLICT_001,
+                'El valor cambió después del lote; no lo revertí.',
+              );
+            }
+            toRestore.push(customer);
+          }
+          for (const customer of toRestore) {
+            await deps.customerCrmService.setTags(customer.id, customer.before);
+          }
+          return `Etiquetas restauradas en ${toRestore.length} ${toRestore.length === 1 ? 'cliente' : 'clientes'}.`;
+        },
       },
     },
   ];

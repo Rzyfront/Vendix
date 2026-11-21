@@ -1,6 +1,7 @@
 import {
   createCustomerWriteTools,
   createInventoryWriteTools,
+  createProductWriteTools,
 } from './writes.tools';
 
 /**
@@ -212,5 +213,143 @@ describe('writes.tools · adjust_stock pre-verificación guiada del conteo', () 
     );
     expect(tool.parameters.properties.discrepancy_reason.type).toBe('string');
     expect(tool.parameters.required).toEqual(['product_id', 'quantity_after']);
+  });
+});
+
+describe('writes.tools · update_product_price compensate (T36)', () => {
+  const ctx = { store_id: 10, organization_id: 6, user_id: 1 } as any;
+  const baseProduct = (over: Record<string, unknown> = {}) => ({
+    id: 5,
+    name: 'Café',
+    sku: 'CAF-1',
+    state: 'active',
+    base_price: 100,
+    sale_price: null,
+    is_on_sale: false,
+    product_tax_assignments: [],
+    product_variants: [],
+    ...over,
+  });
+
+  function build(product: any) {
+    const productsService = {
+      findProductForPriceChangeForAgent: jest.fn(async () => product),
+      hasActiveStockReservationsForAgent: jest.fn(async () => false),
+      update: jest.fn(async () => ({})),
+      updateVariant: jest.fn(async () => ({})),
+    } as any;
+    const tool = createProductWriteTools({ productsService }).find(
+      (t) => t.name === 'update_product_price',
+    )!;
+    return { productsService, tool };
+  }
+
+  it('declares compensate and is not irreversible', () => {
+    const { tool } = build(baseProduct());
+    expect(tool.compensate?.label).toBe('Restaurar el precio anterior');
+    expect(tool.irreversible).toBeFalsy();
+  });
+
+  it('capture returns the previous base price and the applied one', async () => {
+    const { tool } = build(baseProduct());
+    const snap = await tool.compensate!.capture(
+      { product_id: 5, new_price: 120 },
+      ctx,
+    );
+    expect(snap).toEqual({
+      product_id: 5,
+      variant_id: null,
+      field: 'base_price',
+      previous: 100,
+      applied: 120,
+    });
+  });
+
+  it('capture returns null (not reversible) for the sale price', async () => {
+    const { tool } = build(baseProduct());
+    const snap = await tool.compensate!.capture(
+      { product_id: 5, new_price: 80, apply_to: 'sale' },
+      ctx,
+    );
+    expect(snap).toBeNull();
+  });
+
+  it('capture returns null for a variant that inherited the product price', async () => {
+    const { tool } = build(
+      baseProduct({
+        product_variants: [{ id: 9, name: 'XL', price_override: null }],
+      }),
+    );
+    const snap = await tool.compensate!.capture(
+      { product_id: 5, product_variant_id: 9, new_price: 130 },
+      ctx,
+    );
+    expect(snap).toBeNull();
+  });
+
+  it('undo restores the previous base price when the value is still the applied one', async () => {
+    const { tool, productsService } = build(baseProduct({ base_price: 120 }));
+    const out = await tool.compensate!.undo({
+      args: {},
+      snapshot: {
+        product_id: 5,
+        variant_id: null,
+        field: 'base_price',
+        previous: 100,
+        applied: 120,
+      },
+      handlerOutput: '',
+      context: ctx,
+    });
+    expect(productsService.update).toHaveBeenCalledTimes(1);
+    expect(productsService.update.mock.calls[0][0]).toBe(5);
+    expect(productsService.update.mock.calls[0][1]).toMatchObject({
+      base_price: 100,
+    });
+    expect(out).toBe('Precio restaurado a 100.');
+  });
+
+  it('undo restores a variant override', async () => {
+    const { tool, productsService } = build(
+      baseProduct({
+        product_variants: [{ id: 9, name: 'XL', price_override: 130 }],
+      }),
+    );
+    await tool.compensate!.undo({
+      args: {},
+      snapshot: {
+        product_id: 5,
+        variant_id: 9,
+        field: 'price_override',
+        previous: 110,
+        applied: 130,
+      },
+      handlerOutput: '',
+      context: ctx,
+    });
+    expect(productsService.updateVariant).toHaveBeenCalledWith(
+      9,
+      expect.objectContaining({ price_override: 110 }),
+    );
+  });
+
+  it('undo throws and writes nothing when the price changed after the batch', async () => {
+    const { tool, productsService } = build(baseProduct({ base_price: 150 }));
+    await expect(
+      tool.compensate!.undo({
+        args: {},
+        snapshot: {
+          product_id: 5,
+          variant_id: null,
+          field: 'base_price',
+          previous: 100,
+          applied: 120,
+        },
+        handlerOutput: '',
+        context: ctx,
+      }),
+    ).rejects.toThrow();
+    expect(productsService.update).not.toHaveBeenCalled();
+    expect(productsService.updateVariant).not.toHaveBeenCalled();
   });
 });
