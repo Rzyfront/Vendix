@@ -360,6 +360,8 @@ import {
   Clapperboard,
   Hotel,
   BedDouble,
+  Volume2,
+  BellOff,
 } from 'lucide-angular';
 
 /**
@@ -806,6 +808,10 @@ export const ICON_REGISTRY: Record<string, LucideIconData> = {
   'square-pen': SquarePen,
   'panel-right-close': PanelRightClose,
   'panel-right-open': PanelRightOpen,
+
+  // Vex: presence badge (speaking) and «No sugerir en este chat».
+  'volume-2': Volume2,
+  'bell-off': BellOff,
 } as const;
 
 export type IconName = keyof typeof ICON_REGISTRY;

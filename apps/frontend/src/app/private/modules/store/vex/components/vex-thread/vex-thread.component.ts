@@ -9,6 +9,8 @@ import {
 } from '@angular/core';
 import { IconComponent } from '../../../../../../shared/components/icon/icon.component';
 import { VexChatStore } from '../../state/vex-chat.store';
+import { VexPresenceStore } from '../../state/vex-presence.store';
+import { VEX_COPY } from '../../vex-copy';
 import { VEXI_RESTART_LABEL } from '../../../../../../core/store/vexi/vexi-user-copy.utils';
 import { VexBlockInteraction, VexUiBlock } from '../../models/vex.models';
 import { VexMarkdownComponent } from '../vex-markdown/vex-markdown.component';
@@ -79,13 +81,27 @@ import { VexPlanCardComponent } from '../vex-plan-card/vex-plan-card.component';
               }
             </div>
           } @else {
-            <div class="flex items-start gap-3 min-w-0">
+            <div
+              class="flex items-start gap-3 min-w-0 rounded-2xl transition-colors"
+              [class]="
+                presence.speaking_message_id() === message.id
+                  ? 'bg-primary/5 ring-2 ring-primary/20 p-2 -m-2'
+                  : ''
+              "
+              [attr.aria-current]="presence.speaking_message_id() === message.id ? 'true' : null"
+            >
               <img
                 src="assets/vex/vexicon-96.webp"
                 alt=""
                 class="w-7 h-7 object-contain shrink-0"
               />
               <div class="flex-1 min-w-0 flex flex-col gap-3">
+                @if (presence.speaking_message_id() === message.id) {
+                  <p class="inline-flex items-center gap-1.5 text-xs font-semibold text-primary-on-tint">
+                    <app-icon name="volume-2" [size]="14" />
+                    {{ copy.reading_aloud }}
+                  </p>
+                }
                 @if (message.tool_steps?.length) {
                   <vendix-vex-tool-trace [steps]="message.tool_steps ?? []" />
                 }
@@ -179,6 +195,23 @@ import { VexPlanCardComponent } from '../vex-plan-card/vex-plan-card.component';
                 }
                 @if (
                   message.streaming &&
+                  (message.content || message.blocks?.length) &&
+                  !message.error
+                ) {
+                  <p
+                    class="inline-flex items-center gap-1.5 text-xs text-text-secondary"
+                    aria-hidden="true"
+                  >
+                    <span class="inline-flex items-center gap-0.5">
+                      <span class="w-1.5 h-1.5 rounded-full bg-text-secondary motion-safe:animate-pulse"></span>
+                      <span class="w-1.5 h-1.5 rounded-full bg-text-secondary motion-safe:animate-pulse [animation-delay:150ms]"></span>
+                      <span class="w-1.5 h-1.5 rounded-full bg-text-secondary motion-safe:animate-pulse [animation-delay:300ms]"></span>
+                    </span>
+                    {{ copy.still_writing }}
+                  </p>
+                }
+                @if (
+                  message.streaming &&
                   !message.content &&
                   !message.blocks?.length
                 ) {
@@ -228,6 +261,8 @@ import { VexPlanCardComponent } from '../vex-plan-card/vex-plan-card.component';
 })
 export class VexThreadComponent {
   readonly store = inject(VexChatStore);
+  protected readonly presence = inject(VexPresenceStore);
+  protected readonly copy = VEX_COPY.presence;
   protected readonly restartLabel = VEXI_RESTART_LABEL;
   private readonly injector = inject(Injector);
   private readonly scroller = viewChild<ElementRef<HTMLElement>>('scroller');

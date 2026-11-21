@@ -20,6 +20,8 @@ import { ToastService } from '../../../../../../shared/components/toast/toast.se
 import { extractApiErrorMessage } from '../../../../../../core/utils/api-error-handler';
 import { VexApiService } from '../../services/vex-api.service';
 import { VexChatStore } from '../../state/vex-chat.store';
+import { VexPresenceStore } from '../../state/vex-presence.store';
+import { VexPresenceComponent } from '../vex-presence/vex-presence.component';
 
 const MAX_LINES = 8;
 const MAX_FILES = 5;
@@ -45,9 +47,12 @@ interface StagedFile {
 @Component({
   selector: 'vendix-vex-composer',
   standalone: true,
-  imports: [IconComponent, VexiConfirmationCardComponent],
+  imports: [IconComponent, VexiConfirmationCardComponent, VexPresenceComponent],
   template: `
     <div class="w-full">
+      <div class="mb-2 px-2 min-h-8 flex items-center">
+        <vendix-vex-presence variant="chip" [live]="true" />
+      </div>
       @if (staged().length > 0) {
         <div class="flex flex-wrap gap-2 mb-2" aria-label="Archivos adjuntos">
           @for (file of staged(); track file.local_id) {
@@ -366,6 +371,7 @@ export class VexComposerComponent {
   }
 
   readonly store = inject(VexChatStore);
+  private readonly presence = inject(VexPresenceStore);
   private readonly api = inject(VexApiService);
   private readonly toast = inject(ToastService);
   private readonly input =
@@ -391,7 +397,10 @@ export class VexComposerComponent {
   );
 
   onInput(event: Event): void {
-    this.text.set((event.target as HTMLTextAreaElement).value);
+    const value = (event.target as HTMLTextAreaElement).value;
+    this.text.set(value);
+    if (value.length > 0) this.presence.noteTyping();
+    else this.presence.clearTyping();
     this.resize();
   }
 
@@ -406,6 +415,7 @@ export class VexComposerComponent {
     if (!this.can_send()) return;
     const ids = this.ready_ids();
     const text = this.text().trim() || 'Te adjunté archivo(s). Revísalos.';
+    this.presence.clearTyping();
     this.store.sendMessage(text, ids);
     this.text.set('');
     this.staged.set([]);

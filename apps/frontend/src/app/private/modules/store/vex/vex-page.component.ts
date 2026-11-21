@@ -22,6 +22,8 @@ import { VexThreadComponent } from './components/vex-thread/vex-thread.component
 import { VexWelcomeComponent } from './components/vex-welcome/vex-welcome.component';
 import { VexChatStore } from './state/vex-chat.store';
 import { VexLogStore } from './state/vex-log.store';
+import { VexPresenceStore } from './state/vex-presence.store';
+import { VexPresenceComponent } from './components/vex-presence/vex-presence.component';
 
 const DESKTOP_QUERY = '(min-width: 1024px)';
 function isDesktop(): boolean {
@@ -46,8 +48,9 @@ function isDesktop(): boolean {
     VexThreadComponent,
     VexWelcomeComponent,
     VexTitleEditorComponent,
+    VexPresenceComponent,
   ],
-  providers: [VexChatStore, VexLogStore],
+  providers: [VexChatStore, VexLogStore, VexPresenceStore],
   template: `
     <div
       class="h-dvh w-full flex overflow-hidden bg-[var(--color-background)] text-[var(--color-text-primary)]"
@@ -119,7 +122,7 @@ function isDesktop(): boolean {
             <app-icon name="arrow-left" [size]="18"></app-icon>
             <span>Panel</span>
           </a>
-          <div class="flex-1 min-w-0 flex items-center justify-center">
+          <div class="flex-1 min-w-0 flex items-center justify-center gap-3">
             @if (renaming_title() && header_conversation(); as current) {
               <div class="w-full max-w-md">
                 <vendix-vex-title-editor
@@ -141,6 +144,9 @@ function isDesktop(): boolean {
                 <app-icon name="pencil" [size]="14" class="shrink-0 opacity-60 group-hover:opacity-100" />
               </button>
             }
+            <span class="hidden sm:inline-flex shrink-0">
+              <vendix-vex-presence variant="header" />
+            </span>
           </div>
           <button
             type="button"
