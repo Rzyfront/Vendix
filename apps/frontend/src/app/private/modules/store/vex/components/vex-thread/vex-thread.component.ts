@@ -22,6 +22,9 @@ import { VexBlockChartComponent } from '../vex-blocks/vex-block-chart.component'
 import { VexBlockKpiComponent } from '../vex-blocks/vex-block-kpi.component';
 import { VexBlockImageComponent } from '../vex-blocks/vex-block-image.component';
 import { VexBlockFileComponent } from '../vex-blocks/vex-block-file.component';
+import { VexBlockHelpArticleComponent } from '../vex-blocks/vex-block-help-article.component';
+import { VexBlockVideoComponent } from '../vex-blocks/vex-block-video.component';
+import { VexBlockLearningPathComponent } from '../vex-blocks/vex-block-learning-path.component';
 import { VexToolTraceComponent } from '../vex-tool-trace/vex-tool-trace.component';
 import { VexPlanCardComponent } from '../vex-plan-card/vex-plan-card.component';
 import { VexFollowupChipComponent } from '../vex-followup-chip/vex-followup-chip.component';
@@ -39,6 +42,9 @@ import { StoreSettingsFacade } from '../../../../../../core/store/store-settings
     VexBlockChartComponent,
     VexBlockKpiComponent,
     VexBlockImageComponent,
+    VexBlockHelpArticleComponent,
+    VexBlockVideoComponent,
+    VexBlockLearningPathComponent,
     VexBlockFileComponent,
     VexToolTraceComponent,
     VexPlanCardComponent,
@@ -138,6 +144,15 @@ import { StoreSettingsFacade } from '../../../../../../core/store/store-settings
                     }
                     @case ('markdown') {
                       <vendix-vex-markdown [content]="blockMarkdown(block)" />
+                    }
+                    @case ('help_article') {
+                      <vendix-vex-block-help-article [block]="block" />
+                    }
+                    @case ('video') {
+                      <vendix-vex-block-video [block]="block" />
+                    }
+                    @case ('learning_path') {
+                      <vendix-vex-block-learning-path [block]="block" />
                     }
                   }
                 }

@@ -416,6 +416,151 @@ describe('VexBlockService', () => {
     ).rejects.toMatchObject({ errorCode: 'SYS_VALIDATION_001' });
   });
 
+  describe('learning blocks (help_article, video, learning_path)', () => {
+    const video = (id = 1, extra: Record<string, unknown> = {}) => ({
+      id,
+      title: `Video ${id}`,
+      slug: `video-${id}`,
+      summary: 'Resumen',
+      video_url: 'https://www.youtube.com/watch?v=abc',
+      video_source: 'YOUTUBE',
+      external_id: 'abc',
+      duration_seconds: 120,
+      thumbnail_url: 'https://img.example.com/t.jpg',
+      ...extra,
+    });
+    const article = (extra: Record<string, unknown> = {}) => ({
+      id: 5,
+      title: 'Crear un producto',
+      slug: 'crear-un-producto',
+      summary: 'Paso a paso',
+      content: '## Paso 1\nAbre Productos.',
+      type: 'TUTORIAL',
+      module: 'products',
+      cover_image_url: null,
+      video: video(2),
+      ...extra,
+    });
+
+    it('accepts valid payloads for the three kinds and maps them for the panel', async () => {
+      const a = await service.create({
+        conversation_id: 1,
+        kind: 'help_article',
+        data: { article: article() },
+      });
+      const v = await service.create({
+        conversation_id: 1,
+        kind: 'video',
+        data: { video: video(), autoplay: true },
+      });
+      const p = await service.create({
+        conversation_id: 1,
+        kind: 'learning_path',
+        data: {
+          series: {
+            id: 3,
+            title: 'Ruta de inventario',
+            summary: null,
+            items: [
+              {
+                position: 1,
+                video: video(1),
+                article: { id: 5, title: 'A', slug: 'a' },
+                progress: { seconds_watched: 30, completed: false },
+              },
+              { position: 2, video: video(2, { video_source: 'DIRECT_S3' }) },
+            ],
+          },
+        },
+      });
+      const ui = await service.toUiBlock(a);
+      expect(ui.kind).toBe('help_article');
+      expect((ui.data as any).article.title).toBe('Crear un producto');
+      expect((await service.toUiBlock(v)).data).toMatchObject({
+        video: { id: 1 },
+        autoplay: true,
+      });
+      const path = await service.toUiBlock(p);
+      expect(path.kind).toBe('learning_path');
+      expect((path.data as any).series.items).toHaveLength(2);
+    });
+
+    it.each([
+      [
+        'non-http video url',
+        { video: video(1, { video_url: 'javascript:alert(1)' }) },
+      ],
+      ['unknown video_source', { video: video(1, { video_source: 'TIKTOK' }) }],
+      ['unknown field', { video: video(), extra: 1 }],
+      ['unknown field in VideoRef', { video: video(1, { hacked: true }) }],
+      [
+        'non-http thumbnail',
+        { video: video(1, { thumbnail_url: 'ftp://x/y.png' }) },
+      ],
+    ])('rejects a video block with %s', async (_label, data) => {
+      await expect(
+        service.create({
+          conversation_id: 1,
+          kind: 'video',
+          data: data as any,
+        }),
+      ).rejects.toMatchObject({ errorCode: 'SYS_VALIDATION_001' });
+      expect(delegate.rows).toHaveLength(0);
+    });
+
+    it('rejects oversized articles, unknown article fields and over-long paths', async () => {
+      await expect(
+        service.create({
+          conversation_id: 1,
+          kind: 'help_article',
+          data: { article: article({ content: 'x'.repeat(20001) }) },
+        }),
+      ).rejects.toMatchObject({ errorCode: 'SYS_VALIDATION_001' });
+      await expect(
+        service.create({
+          conversation_id: 1,
+          kind: 'help_article',
+          data: { article: article({ owner_email: 'a@b.co' }) },
+        }),
+      ).rejects.toMatchObject({ errorCode: 'SYS_VALIDATION_001' });
+      await expect(
+        service.create({
+          conversation_id: 1,
+          kind: 'learning_path',
+          data: {
+            series: {
+              id: 3,
+              title: 'Larga',
+              items: Array.from({ length: 21 }, (_, i) => ({
+                position: i + 1,
+                video: video(i + 1),
+              })),
+            },
+          },
+        }),
+      ).rejects.toMatchObject({ errorCode: 'SYS_VALIDATION_001' });
+      await expect(
+        service.create({
+          conversation_id: 1,
+          kind: 'learning_path',
+          data: { series: { id: 3, title: 'Vacía', items: [] } },
+        }),
+      ).rejects.toMatchObject({ errorCode: 'SYS_VALIDATION_001' });
+    });
+
+    it('keeps validating a previous block type unchanged', async () => {
+      const kpi = await service.create({
+        conversation_id: 1,
+        kind: 'kpi',
+        data: { label: 'Ventas', value: 10 },
+      });
+      expect(kpi.kind).toBe('kpi');
+      await expect(
+        service.create({ conversation_id: 1, kind: 'kpi', data: { value: 1 } }),
+      ).rejects.toMatchObject({ errorCode: 'SYS_VALIDATION_001' });
+    });
+  });
+
   it('isolates blocks by store: another store id answers 404', async () => {
     const created = await service.create({
       conversation_id: 1,
