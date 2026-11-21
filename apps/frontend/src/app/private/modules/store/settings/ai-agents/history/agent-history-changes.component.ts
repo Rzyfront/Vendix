@@ -73,7 +73,7 @@ interface ChangeRow {
         [totalPages]="totalPages()"
         [total]="total()"
         [limit]="limit"
-        infoStyle="default"
+        infoStyle="range"
         (pageChange)="goTo($event)"
       />
     </div>
