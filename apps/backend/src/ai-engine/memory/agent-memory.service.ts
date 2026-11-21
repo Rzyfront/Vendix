@@ -2,6 +2,10 @@ import { Injectable } from '@nestjs/common';
 import { RequestContextService } from '../../common/context/request-context.service';
 import { ErrorCodes, VendixHttpException } from '../../common/errors';
 import { StorePrismaService } from '../../prisma/services/store-prisma.service';
+import {
+  LEARNING_FORMAT_KEY,
+  normalizeLearningFormat,
+} from './learning-format';
 
 /** F4 T31 (D7, N3): store memory of an agent, MEMORY.md style. */
 export const MEMORY_AGENT_KEY = 'vex';
@@ -74,9 +78,16 @@ interface MemoryRow {
   updated_at: Date;
 }
 
-/** One line of the snapshot block. */
+/**
+ * One line of the snapshot block. A `learning.format` row saved with an older
+ * word (e.g. `paso a paso`) is shown with its canonical value.
+ */
 export function memorySnapshotLine(key: string, content: string): string {
-  return `- ${key}: ${content}`;
+  const shown =
+    key === LEARNING_FORMAT_KEY
+      ? (normalizeLearningFormat(content) ?? content)
+      : content;
+  return `- ${key}: ${shown}`;
 }
 
 /**
@@ -194,7 +205,7 @@ export class AgentMemoryService {
     input: RememberInput,
   ): Promise<{ item: MemoryItem; replaced: boolean }> {
     const key = this.normalizeKey(input.key);
-    const content = this.normalizeContent(input.content);
+    const content = this.canonicalContent(key, this.normalizeContent(input.content));
     this.assertNoSecret(key, content);
     const kind: MemoryKind = input.kind ?? 'preference';
     if (!MEMORY_KINDS.includes(kind)) {
@@ -255,7 +266,10 @@ export class AgentMemoryService {
     contentInput: string,
   ): Promise<MemoryItem> {
     const current = await this.findVisible(actor, id);
-    const content = this.normalizeContent(contentInput);
+    const content = this.canonicalContent(
+      current.key,
+      this.normalizeContent(contentInput),
+    );
     this.assertNoSecret(current.key, content);
     await this.assertCaps(actor, current.key, content, current);
     const row = (await this.prisma.ai_agent_memories.update({
@@ -384,6 +398,19 @@ export class AgentMemoryService {
       throw new VendixHttpException(ErrorCodes.AI_MEMORY_LIMIT_001);
     }
     return content;
+  }
+
+  /** `learning.format` only stores `video` or `post`; aliases are mapped to them. */
+  private canonicalContent(key: string, content: string): string {
+    if (key !== LEARNING_FORMAT_KEY) return content;
+    const format = normalizeLearningFormat(content);
+    if (!format) {
+      throw new VendixHttpException(
+        ErrorCodes.SYS_VALIDATION_001,
+        'learning.format solo acepta video o post (paso a paso).',
+      );
+    }
+    return format;
   }
 
   private assertNoSecret(key: string, content: string): void {

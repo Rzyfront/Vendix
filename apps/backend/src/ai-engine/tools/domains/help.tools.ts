@@ -5,6 +5,11 @@ import {
   HelpKnowledgeType,
   HelpSearchHit,
 } from '../../embeddings/help-knowledge-indexer.service';
+import {
+  LEARNING_FORMAT_DELIVERY_TEXT,
+  LEARNING_FORMAT_KEY,
+  LEARNING_FORMAT_VALUES_TEXT,
+} from '../../memory/learning-format';
 
 /**
  * Agent-facing slice of the help knowledge service. These tools never read the
@@ -27,8 +32,7 @@ export interface HelpToolDeps {
 
 const MAX_CONTENT_CHARS = 8000;
 
-const LEARNING_FORMAT_RULE =
-  'Si la persona quiere aprender algo y la memoria de la tienda NO tiene `learning.format`, pregúntale «¿Video o paso a paso?» y, con su respuesta, llama a `remember` con key `learning.format` (video o paso a paso). Si ya existe `learning.format`, úsalo sin preguntar: video → entrega el video; paso a paso → entrega el artículo. Cita siempre el título devuelto.';
+const LEARNING_FORMAT_RULE = `Si la persona quiere aprender algo y la memoria de la tienda NO tiene \`${LEARNING_FORMAT_KEY}\`, pregúntale «¿Video o paso a paso?» y, con su respuesta, llama a \`remember\` con key \`${LEARNING_FORMAT_KEY}\`: ${LEARNING_FORMAT_VALUES_TEXT}. Si ya existe \`${LEARNING_FORMAT_KEY}\`, úsalo sin preguntar: ${LEARNING_FORMAT_DELIVERY_TEXT}. Cita siempre el título devuelto.`;
 
 const json = (value: unknown) => JSON.stringify(value);
 const guidedError = (error: string, next_step?: string) =>

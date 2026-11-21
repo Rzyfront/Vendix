@@ -230,6 +230,27 @@ describe('AgentMemoryService', () => {
     ).rejects.toMatchObject({ errorCode: 'SYS_VALIDATION_001' });
   });
 
+  it('learning.format keeps one vocabulary: aliases are stored as video or post, anything else is rejected', async () => {
+    const { service, rows } = setup();
+    await service.remember(ana, agentWrite('learning.format', 'Paso a paso'));
+    expect(rows[0].content).toBe('post');
+    await service.edit(beto, rows[0].id, 'videos');
+    expect(rows[0].content).toBe('video');
+    await expect(
+      service.remember(ana, agentWrite('learning.format', 'audio')),
+    ).rejects.toMatchObject({ errorCode: 'SYS_VALIDATION_001' });
+    expect(rows[0].content).toBe('video');
+  });
+
+  it('a learning.format row saved with the old value reaches Vex as the canonical one', async () => {
+    const { service, rows } = setup();
+    await service.remember(ana, agentWrite('learning.format', 'video'));
+    rows[0].content = 'paso a paso'; // written before the vocabulary was unified
+    const block = await service.buildSnapshotBlock(1);
+    expect(block).toContain('- learning.format: post');
+    expect(block).not.toContain('paso a paso');
+  });
+
   it('purge hook deletes only un-edited agent rows born in that conversation', async () => {
     const { service, rows } = setup();
     await service.remember(ana, agentWrite('p.agent', 'a', 100));
