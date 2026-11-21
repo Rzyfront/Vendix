@@ -4,7 +4,19 @@ import {
   ToolExecutionContext,
   ToolPreview,
 } from '../interfaces/tool.interface';
-import { ALLOWED_MIME_EXTENSIONS } from '../../../domains/store/documents/documents.constants';
+import {
+  ALLOWED_MIME_EXTENSIONS,
+  ATTACHABLE_ENTITY_TYPES,
+  type AttachableEntityType,
+} from '../../../domains/store/documents/documents.constants';
+import type {
+  AttachableRecord,
+  RecordAttachmentsService,
+} from '../../../domains/store/documents/record-attachments.service';
+import type {
+  AgentAttachmentRow,
+  VexiAttachmentsService,
+} from '../../../domains/store/vexi/vexi-attachments.service';
 
 /**
  * Document family of Vex (T44, odd/tasks/vex-agente-avanzado.md §3.5):
@@ -27,26 +39,14 @@ import { ALLOWED_MIME_EXTENSIONS } from '../../../domains/store/documents/docume
  * Circuit: propose (preview) -> confirm -> execute, the same as every other
  * write tool (`requiresConfirmation` + `preview`).
  *
- * Execution (all inside one transaction, S3 compensated on failure):
- *  1. promote the chat attachment (`ai_attachments`) to the document module
- *     (`stored_files`, a SEPARATE S3 object, so purging the conversation's
- *     objects never touches it);
- *  2. file it in the record's folder (dossier with `subject_type/subject_id`);
- *  3. purchase orders also get a `purchase_order_attachments` row (with its own
- *     S3 copy: removing a PO attachment deletes the object behind `file_url`);
- *  4. stamp the attachment row (`linked_*`, `stored_file_id`) - the criterion
- *     the conversation purge uses to keep it.
+ * The tool is a facade: it checks the permission and the file type, and turns
+ * the outcome into text for Vex. Reading the attachment and the record, and the
+ * whole save (one transaction, S3 compensated on failure), live in the owner
+ * services: `VexiAttachmentsService` and `RecordAttachmentsService`.
  */
 
-export const ATTACHABLE_ENTITY_TYPES = [
-  'customer',
-  'order',
-  'purchase_order',
-  'supplier',
-  'expense',
-  'product',
-] as const;
-export type AttachableEntityType = (typeof ATTACHABLE_ENTITY_TYPES)[number];
+export { ATTACHABLE_ENTITY_TYPES };
+export type { AttachableEntityType };
 
 /**
  * Write permission each entity's own controller asks to edit/attach on it.
@@ -88,48 +88,14 @@ const ENTITY_NAME_ES: Readonly<Record<AttachableEntityType, string>> = {
 };
 
 const DEFAULT_DOC_TYPE = 'vex_attachment';
-const DOSSIER_STAGE = 'records';
 
-/** Minimal shape of the services this family needs; typed loosely like the other families. */
+/** Owner services of every read and write this family needs (no direct database access here). */
 export interface DocumentToolDeps {
-  /** StorePrismaService: tenant-scoped reads, `$transaction` and the stamp. */
-  prisma: any;
-  storedFiles: {
-    upload(input: Record<string, any>, tx?: any): Promise<Record<string, any>>;
-    discardObject(key: string): Promise<void>;
-  };
-  dossiers: {
-    ensureForSubject(tx: any, input: Record<string, any>): Promise<any>;
-    addSubjectFileItem(tx: any, input: Record<string, any>): Promise<any>;
-  };
-  s3: {
-    downloadFile(key: string): Promise<Buffer>;
-    uploadFile(buffer: Buffer, key: string, mime: string): Promise<string>;
-    deleteFile(key: string): Promise<void>;
-  };
-  /** S3PathHelper (only `buildPurchaseOrderAttachmentPath` is used). */
-  paths: {
-    buildPurchaseOrderAttachmentPath(
-      org: { id: number; slug: string },
-      store: { id: number; slug: string },
-      purchaseOrderId: number,
-    ): string;
-  };
-}
-
-interface RecordInfo {
-  id: number;
-  /** Human label shown next to the id (order number, name...). */
-  label: string | null;
-}
-
-interface AttachmentRow {
-  id: number;
-  s3_key: string;
-  mime_type: string;
-  size_bytes: number;
-  original_name: string;
-  stored_file_id: number | null;
+  attachments: Pick<VexiAttachmentsService, 'findAttachmentForAgent'>;
+  recordAttachments: Pick<
+    RecordAttachmentsService,
+    'findRecordForAgent' | 'saveAttachmentToRecordForAgent'
+  >;
 }
 
 function describeError(error: any): string {
@@ -189,85 +155,18 @@ export function unsupportedDocumentReason(
 }
 
 export function createDocumentTools(deps: DocumentToolDeps): RegisteredTool[] {
-  async function loadAttachment(handle: unknown): Promise<AttachmentRow | null> {
+  async function loadAttachment(
+    handle: unknown,
+  ): Promise<AgentAttachmentRow | null> {
     const id = parseHandle(handle);
     if (!id) return null;
-    const row = await deps.prisma.ai_attachments.findFirst({
-      where: { id },
-      select: {
-        id: true,
-        s3_key: true,
-        mime_type: true,
-        size_bytes: true,
-        original_name: true,
-        stored_file_id: true,
-      },
-    });
-    return (row ?? null) as AttachmentRow | null;
+    return deps.attachments.findAttachmentForAgent(id);
   }
 
-  /** The record in the CURRENT store (scoped prisma), or null. */
-  async function loadRecord(
-    type: AttachableEntityType,
-    id: number,
-  ): Promise<RecordInfo | null> {
-    const db = deps.prisma;
-    const ctx = RequestContextService.getContext();
-    switch (type) {
-      case 'customer': {
-        const row = await db.users.findFirst({
-          where: {
-            id,
-            store_users: { some: { store_id: ctx?.store_id } },
-            user_roles: { some: { roles: { name: 'customer' } } },
-          },
-          select: { id: true, first_name: true, last_name: true },
-        });
-        if (!row) return null;
-        const name = [row.first_name, row.last_name]
-          .filter(Boolean)
-          .join(' ')
-          .trim();
-        return { id: row.id, label: name || null };
-      }
-      case 'order': {
-        const row = await db.orders.findFirst({
-          where: { id },
-          select: { id: true, order_number: true },
-        });
-        return row ? { id: row.id, label: row.order_number ?? null } : null;
-      }
-      case 'purchase_order': {
-        const row = await db.purchase_orders.findFirst({
-          where: { id },
-          select: { id: true, order_number: true },
-        });
-        return row ? { id: row.id, label: row.order_number ?? null } : null;
-      }
-      case 'supplier': {
-        const row = await db.suppliers.findFirst({
-          where: { id, organization_id: ctx?.organization_id },
-          select: { id: true, name: true },
-        });
-        return row ? { id: row.id, label: row.name ?? null } : null;
-      }
-      case 'expense': {
-        const row = await db.expenses.findFirst({
-          where: { id },
-          select: { id: true, description: true },
-        });
-        return row
-          ? { id: row.id, label: row.description?.trim().slice(0, 60) || null }
-          : null;
-      }
-      case 'product': {
-        const row = await db.products.findFirst({
-          where: { id },
-          select: { id: true, name: true },
-        });
-        return row ? { id: row.id, label: row.name ?? null } : null;
-      }
-    }
+  function recordTitle(type: AttachableEntityType, record: AttachableRecord): string {
+    return record.label
+      ? `${ENTITY_NAME_ES[type]} #${record.id} · ${record.label}`
+      : `${ENTITY_NAME_ES[type]} #${record.id}`;
   }
 
   function previewError(target: string, message: string): ToolPreview {
@@ -279,7 +178,12 @@ export function createDocumentTools(deps: DocumentToolDeps): RegisteredTool[] {
     const noun = ENTITY_NOUN[type];
 
     async function resolve(args: Record<string, any>): Promise<
-      | { ok: true; attachment: AttachmentRow; record: RecordInfo; docType: string }
+      | {
+          ok: true;
+          attachment: AgentAttachmentRow;
+          record: AttachableRecord;
+          docType: string;
+        }
       | { ok: false; error: string; next_step: string }
     > {
       const entityId = toPositiveInt(args?.entity_id);
@@ -307,7 +211,10 @@ export function createDocumentTools(deps: DocumentToolDeps): RegisteredTool[] {
           next_step: 'Consulta los adjuntos con list_attachments.',
         };
       }
-      const record = await loadRecord(type, entityId);
+      const record = await deps.recordAttachments.findRecordForAgent(
+        type,
+        entityId,
+      );
       if (!record) {
         return {
           ok: false,
@@ -405,8 +312,6 @@ export function createDocumentTools(deps: DocumentToolDeps): RegisteredTool[] {
             'Pídele a un administrador con ese permiso que lo guarde.',
           );
         }
-        let uploadedKey = null as string | null;
-        let poCopyKey = null as string | null;
         try {
           const found = await resolve(args ?? {});
           if (!found.ok) return fail(found.error, found.next_step);
@@ -422,108 +327,20 @@ export function createDocumentTools(deps: DocumentToolDeps): RegisteredTool[] {
             );
           }
 
-          const store_id = context?.store_id ?? RequestContextService.getStoreId();
-          const organization_id =
-            context?.organization_id ?? RequestContextService.getOrganizationId();
-          const user_id = context?.user_id ?? RequestContextService.getUserId() ?? null;
-          const actor = { type: 'ai' as const, id: user_id };
-
-          // The bytes are needed to promote the object and for the PO copy.
-          const buffer = await deps.s3.downloadFile(attachment.s3_key);
-
-          const outcome = await deps.prisma.$transaction(async (tx: any) => {
-            // 1. Promote to the document module: a separate S3 object. When the
-            //    attachment was already promoted (saved before in another
-            //    record), reuse that stored file instead of uploading again.
-            let storedFile: Record<string, any>;
-            if (attachment.stored_file_id) {
-              storedFile = { id: attachment.stored_file_id, reused: true };
-            } else {
-              storedFile = await deps.storedFiles.upload(
-                {
-                  buffer,
-                  originalName: attachment.original_name,
-                  mimeType: attachment.mime_type,
-                  source: 'upload',
-                  folder: `records/${type}/${record.id}`,
-                  actor,
-                },
-                tx,
-              );
-              uploadedKey = storedFile.s3_key as string;
-            }
-
-            // 2. The record's folder + the item.
-            const title = record.label
-              ? `${ENTITY_NAME_ES[type]} #${record.id} · ${record.label}`
-              : `${ENTITY_NAME_ES[type]} #${record.id}`;
-            const dossier = await deps.dossiers.ensureForSubject(tx, {
-              subject_type: type,
-              subject_id: record.id,
-              title,
+          const outcome =
+            await deps.recordAttachments.saveAttachmentToRecordForAgent({
+              entityType: type,
+              record,
+              attachment,
+              docType,
+              dossierTitle: recordTitle(type, record),
+              storeId: context?.store_id ?? RequestContextService.getStoreId(),
+              organizationId:
+                context?.organization_id ??
+                RequestContextService.getOrganizationId(),
+              userId:
+                context?.user_id ?? RequestContextService.getUserId() ?? null,
             });
-            const item = await deps.dossiers.addSubjectFileItem(tx, {
-              dossier_id: dossier.id,
-              file_id: storedFile.id,
-              stage_key: DOSSIER_STAGE,
-              field_key: docType,
-              note: 'Guardado por Vex',
-              actor,
-            });
-
-            // 3. Purchase orders: where their attachments are shown today.
-            let poAttachmentId: number | null = null;
-            if (type === 'purchase_order') {
-              const [store, organization] = await Promise.all([
-                deps.prisma.stores.findFirst({
-                  where: { id: store_id, organization_id },
-                  select: { id: true, slug: true },
-                }),
-                deps.prisma.organizations.findFirst({
-                  where: { id: organization_id },
-                  select: { id: true, slug: true },
-                }),
-              ]);
-              if (!store || !organization) {
-                throw new Error('No se pudo resolver la tienda para guardar el archivo.');
-              }
-              poCopyKey = await deps.s3.uploadFile(
-                buffer,
-                `${deps.paths.buildPurchaseOrderAttachmentPath(organization, store, record.id)}/${Date.now()}-${attachment.original_name}`,
-                attachment.mime_type,
-              );
-              const poAttachment = await tx.purchase_order_attachments.create({
-                data: {
-                  purchase_order_id: record.id,
-                  file_url: poCopyKey,
-                  file_name: attachment.original_name,
-                  file_type: attachment.mime_type,
-                  file_size: attachment.size_bytes,
-                  notes: 'Guardado por Vex',
-                  uploaded_by_user_id: user_id,
-                },
-              });
-              poAttachmentId = poAttachment.id;
-            }
-
-            // 4. Stamp the attachment: the purge keeps rows with these set.
-            await tx.ai_attachments.updateMany({
-              where: { id: attachment.id },
-              data: {
-                linked_entity_type: type,
-                linked_entity_id: record.id,
-                linked_at: new Date(),
-                stored_file_id: storedFile.id,
-              },
-            });
-
-            return {
-              stored_file_id: storedFile.id as number,
-              dossier_id: dossier.id as number,
-              dossier_item_id: item.id as number,
-              purchase_order_attachment_id: poAttachmentId,
-            };
-          });
 
           return JSON.stringify({
             resumen: `${attachment.original_name} guardado en ${noun} #${record.id}.`,
@@ -532,9 +349,7 @@ export function createDocumentTools(deps: DocumentToolDeps): RegisteredTool[] {
             ...outcome,
           });
         } catch (error: any) {
-          // Compensate the objects whose rows did not commit.
-          if (uploadedKey) await deps.storedFiles.discardObject(uploadedKey);
-          if (poCopyKey) await deps.storedFiles.discardObject(poCopyKey);
+          // The service already discarded the S3 objects whose rows did not commit.
           return JSON.stringify({
             error: describeError(error),
             next_step: 'No se guardó nada. Vuelve a intentarlo o avisa a soporte.',

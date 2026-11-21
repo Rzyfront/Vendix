@@ -1,14 +1,13 @@
 import { Module, OnModuleInit } from '@nestjs/common';
-import { S3Service } from '@common/services/s3.service';
-import { S3PathHelper } from '@common/helpers/s3-path.helper';
-import { StorePrismaService } from '../../../prisma/services/store-prisma.service';
 import { AIToolRegistry } from '../../../ai-engine/tools/ai-tool-registry';
+import { VexiAttachmentsService } from '../vexi/vexi-attachments.service';
 import { createDocumentTools } from '../../../ai-engine/tools/domains/documents.tools';
 import { ResponseModule } from '@common/responses/response.module';
 import { S3Module } from '@common/services/s3.module';
 import { PrismaModule } from '../../../prisma/prisma.module';
 import { DossiersController } from './documents.controller';
 import { DossiersService } from './dossiers.service';
+import { RecordAttachmentsService } from './record-attachments.service';
 import { StoredFilesService } from './stored-files.service';
 import { ReceivedDocumentPagesService } from '../../received-documents/services/received-document-pages.service';
 import { BasePdfPagesService } from './templates/base-pdf-pages.service';
@@ -74,6 +73,8 @@ import { DocumentSearchService } from './search/document-search.service';
   providers: [
     StoredFilesService,
     DossiersService,
+    // T44: Vex saves a chat attachment into a record's folder.
+    RecordAttachmentsService,
     // P4.4/P4.6/P4.7: perfil del archivo, retención y purga, vencimientos, búsqueda y carpetas.
     DocumentFileProfilesService,
     DocumentRetentionService,
@@ -112,22 +113,17 @@ import { DocumentSearchService } from './search/document-search.service';
 export class DocumentsModule implements OnModuleInit {
   constructor(
     private readonly toolRegistry: AIToolRegistry,
-    private readonly prisma: StorePrismaService,
-    private readonly storedFiles: StoredFilesService,
-    private readonly dossiers: DossiersService,
-    private readonly s3: S3Service,
-    private readonly paths: S3PathHelper,
+    // Provided by the @Global() AIEngineModule, like AIToolRegistry.
+    private readonly attachments: VexiAttachmentsService,
+    private readonly recordAttachments: RecordAttachmentsService,
   ) {}
 
   /** T44: Vex saves a chat attachment into a record's folder (permission per target entity). */
   onModuleInit(): void {
     this.toolRegistry.registerMany(
       createDocumentTools({
-        prisma: this.prisma,
-        storedFiles: this.storedFiles,
-        dossiers: this.dossiers,
-        s3: this.s3,
-        paths: this.paths,
+        attachments: this.attachments,
+        recordAttachments: this.recordAttachments,
       }),
     );
   }
