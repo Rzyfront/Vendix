@@ -10,8 +10,8 @@ import {
   applyPartnerRestriction,
   applyPromoOverlay,
   completeAIEntitlements,
-  normalizeCapValue,
   partnerOverrideToPatch,
+  planAIEntitlements,
 } from './ai-entitlements.logic';
 import { computePromoOverlayState } from './subscription-resolver.service';
 
@@ -101,18 +101,7 @@ export class AIEntitlementsResolverService {
     rows: AIEntitlement[];
     source: Exclude<AIEntitlementsBaseSource, 'none'>;
   } {
-    const legacy = legacyFlagsToAIEntitlements(plan.ai_feature_flags);
-    if (!plan.ai_entitlements?.length) {
-      return { rows: legacy, source: 'legacy_fallback' };
-    }
-    const stored = plan.ai_entitlements.map((r) => ({
-      agent_key: r.agent_key,
-      capability_key: r.capability_key,
-      enabled: r.enabled,
-      cap_value: normalizeCapValue(r.cap_value),
-      on_limit: r.on_limit,
-    })) as AIEntitlement[];
-    return { rows: completeAIEntitlements(stored, legacy), source: 'table' };
+    return planAIEntitlements(plan.ai_feature_flags, plan.ai_entitlements);
   }
 
   private async resolveFromDatabase(

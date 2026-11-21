@@ -182,16 +182,36 @@ export function applyPromoOverlay(
   });
 }
 
+/** A row grants when it is on, unless it is a cap of 0 that blocks (nothing). */
+function entitlementGrants(row: AIEntitlement): boolean {
+  return row.enabled && !(row.cap_value === 0 && row.on_limit === 'block');
+}
+
+/**
+ * Legacy features the plan folds into the Vexi agent (§3.11: Vexi =
+ * `streaming_chat` + `conversations` + `tool_agents`). They have no row of
+ * their own; while the gate decides with the legacy JSON, their `enabled`
+ * follows `vexi.agent`, so a plan saved from the new screen keeps Vexi's
+ * conversations and voice working.
+ */
+export const LEGACY_FEATURES_FOLDED_INTO_VEXI = ['conversations', 'tool_agents'] as const;
+
 /**
  * Legacy fields the rows own (T12 dual-write and the shadow classification).
  *
  * - Switch-only rows (`kind: 'toggle'`, e.g. Vex files) are new granularity:
  *   they never write a legacy field.
- * - `enabled` is the OR of the gate rows of a feature (one voice switch in the
- *   legacy JSON serves both agents).
- * - each cap field takes the higher cap of the rows that are on (all rows when
- *   none is on); NULL = unlimited wins.
+ * - A row grants when it is on, unless it is a cap of 0 that blocks (it gives
+ *   nothing, the same as off).
+ * - `enabled` is the OR of the granting gate rows of a feature (one voice
+ *   switch in the legacy JSON serves both agents).
+ * - each cap field takes the higher cap of the granting rows (all rows when
+ *   none grants); NULL = unlimited wins.
  * - `degradation` is `block` when any of those rows blocks at the limit.
+ *
+ * A cap of 0 is not representable in the legacy JSON (absent or <= 0 meant
+ * unlimited): the shadow comparison reads it as new granularity, never as a
+ * legacy field out of step.
  */
 export function projectAIEntitlementsToLegacy(
   rows: readonly AIEntitlement[],
@@ -211,8 +231,9 @@ export function projectAIEntitlementsToLegacy(
 
   const out: AILegacyProjection = {};
   for (const [feature, members] of groups) {
+    const grants = (m: { row: AIEntitlement }) => entitlementGrants(m.row);
     const gates = members.filter((m) => m.def.legacy!.enabled_from === 'feature');
-    const live = members.filter((m) => m.row.enabled);
+    const live = members.filter(grants);
     const pool = live.length ? live : members;
     const caps: Record<string, number | null> = {};
     for (const m of members) {
@@ -227,7 +248,7 @@ export function projectAIEntitlementsToLegacy(
         .reduce<number | null>((acc, v, i) => (i === 0 ? v : maxCapValue(acc, v)), null);
     }
     out[feature] = {
-      ...(gates.length ? { enabled: gates.some((g) => g.row.enabled) } : {}),
+      ...(gates.length ? { enabled: gates.some(grants) } : {}),
       caps,
       degradation: pool.some((p) => p.row.on_limit === 'block') ? 'block' : 'warn',
     };
@@ -304,7 +325,11 @@ function legacyFieldMismatch(
     if (dim === 'cap') {
       const field = def.legacy!.cap_field;
       if (!field || !(field in entry.caps)) return false;
-      return entry.caps[field] !== legacyCapToCapValue(feature?.[field]);
+      // Compare what the legacy JSON can hold: a projected 0 reads as unlimited.
+      return (
+        legacyCapToCapValue(entry.caps[field]) !==
+        legacyCapToCapValue(feature?.[field])
+      );
     }
     const actual: AIOnLimit = feature?.degradation === 'block' ? 'block' : 'warn';
     return entry.degradation !== actual;
@@ -356,4 +381,80 @@ export function aiEntitlementDiffSignature(diffs: AIEntitlementDiff[]): string {
   return diffs
     .map((d) => `${d.capability}:${d.kind}:${d.legacy}>${d.current}`)
     .join('|');
+}
+
+/**
+ * Dual write (T12): the `ai_feature_flags` JSON a plan must keep while the gate
+ * still decides with it, given the rows the superadmin saved. Only the fields
+ * the rows own change (`enabled` of a gated feature, its cap fields and
+ * `degradation`); a NULL or 0 cap removes the field (absent = unlimited in the
+ * old model, which cannot hold "0 = nothing"). `conversations` and
+ * `tool_agents` take the `enabled` of the Vexi agent (they fold into it); their
+ * other fields stay. Every other key (`tools_allowed`, `agents_allowed`, other features,
+ * unknown fields) is kept as it was. Never mutates `flags`.
+ */
+export function writeAIEntitlementsToLegacyFlags(
+  flags: unknown,
+  rows: readonly AIEntitlement[],
+): Record<string, unknown> {
+  const root: Record<string, unknown> =
+    flags && typeof flags === 'object' && !Array.isArray(flags)
+      ? { ...(flags as Record<string, unknown>) }
+      : {};
+  for (const [feature, entry] of Object.entries(projectAIEntitlementsToLegacy(rows))) {
+    const current = root[feature];
+    const next: Record<string, unknown> =
+      current && typeof current === 'object' && !Array.isArray(current)
+        ? { ...(current as Record<string, unknown>) }
+        : {};
+    if (entry.enabled !== undefined) next.enabled = entry.enabled;
+    for (const [field, cap] of Object.entries(entry.caps)) {
+      if (cap === null || cap <= 0) delete next[field];
+      else next[field] = cap;
+    }
+    next.degradation = entry.degradation;
+    root[feature] = next;
+  }
+  const vexiAgent = completeAIEntitlements(rows).find(
+    (r) => r.agent_key === 'vexi' && r.capability_key === 'agent',
+  );
+  for (const feature of LEGACY_FEATURES_FOLDED_INTO_VEXI) {
+    const current = root[feature];
+    root[feature] = {
+      ...(current && typeof current === 'object' && !Array.isArray(current)
+        ? (current as Record<string, unknown>)
+        : {}),
+      enabled: vexiAgent ? entitlementGrants(vexiAgent) : false,
+    };
+  }
+  return root;
+}
+
+/** A `plan_ai_entitlements` row as Prisma returns it (BIGINT cap). */
+export interface StoredAIEntitlementRow {
+  agent_key: string;
+  capability_key: string;
+  enabled: boolean;
+  cap_value: bigint | number | null;
+  on_limit: string;
+}
+
+/**
+ * The 11 rows of a plan: its table rows (a missing one takes the legacy
+ * translation), or the legacy translation alone when the plan has no row yet.
+ */
+export function planAIEntitlements(
+  flags: unknown,
+  stored: readonly StoredAIEntitlementRow[] | null | undefined,
+): { rows: AIEntitlement[]; source: 'table' | 'legacy_fallback' } {
+  const legacy = legacyFlagsToAIEntitlements(flags);
+  if (!stored?.length) return { rows: legacy, source: 'legacy_fallback' };
+  const rows = stored.map((r) => ({
+    agent_key: r.agent_key,
+    capability_key: r.capability_key,
+    enabled: r.enabled,
+    cap_value: normalizeCapValue(r.cap_value),
+    on_limit: r.on_limit,
+  })) as AIEntitlement[];
+  return { rows: completeAIEntitlements(rows, legacy), source: 'table' };
 }

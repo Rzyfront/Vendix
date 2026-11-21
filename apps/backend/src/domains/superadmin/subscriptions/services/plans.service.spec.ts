@@ -30,6 +30,8 @@ describe('PlansService', () => {
       },
       plan_ai_entitlements: {
         deleteMany: jest.fn().mockResolvedValue({ count: 0 }),
+        findMany: jest.fn().mockResolvedValue([]),
+        upsert: jest.fn().mockResolvedValue({}),
       },
     };
 
