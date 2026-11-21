@@ -105,6 +105,10 @@ export const VEX_COPY = {
     back_aria: 'Volver al panel',
     open_chats: 'Abrir chats',
     open_log: 'Abrir bitácora',
+    open_log_pending: (count: number) =>
+      count === 0
+        ? 'Abrir bitácora'
+        : `Abrir bitácora, ${count} ${count === 1 ? 'recordatorio pendiente' : 'recordatorios pendientes'}`,
     drop_to_attach: 'Suelta para adjuntar',
     rename: 'Renombrar',
     rename_aria: (title: string) => `Renombrar la conversación: ${title}`,

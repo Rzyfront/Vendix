@@ -4,6 +4,7 @@ import { VexChatStore } from './vex-chat.store';
 import {
   VEX_TYPING_IDLE_MS,
   VexPresenceState,
+  resolveSpokenMessageId,
   resolveVexPresence,
 } from './vex-presence.state';
 
@@ -67,15 +68,17 @@ export class VexPresenceStore {
   /** True when the answer is being read aloud (not just written). */
   readonly reading_aloud = computed(() => this.pipeline.speaking());
 
-  /** Message highlighted in the thread while it is read aloud. */
-  readonly speaking_message_id = computed<string | null>(() => {
-    if (!this.pipeline.speaking()) return null;
-    const messages = this.chat.active_conversation()?.messages ?? [];
-    for (let index = messages.length - 1; index >= 0; index--) {
-      if (messages[index].role === 'agent') return messages[index].id;
-    }
-    return null;
-  });
+  /** Message highlighted in the thread while it is read aloud: the one that sounds. */
+  readonly speaking_message_id = computed<string | null>(() =>
+    resolveSpokenMessageId(
+      this.pipeline.speaking(),
+      this.chat.spoken_message_id(),
+      (this.chat.active_conversation()?.messages ?? []).map((m) => m.id),
+    ),
+  );
+
+  /** Microphone loudness (0..1) while dictating; `null` when it cannot be measured. */
+  readonly mic_level = computed(() => this.pipeline.micLevel());
 
   constructor() {
     this.destroyRef.onDestroy(() => this.clearTyping());

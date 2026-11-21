@@ -382,6 +382,9 @@ export class VexChatStore {
   private readonly _stream_progress = signal('');
   private readonly _busy_followup_ids = signal<ReadonlySet<string>>(new Set());
   readonly stream_progress = this._stream_progress.asReadonly();
+  /** Message whose audio was last handed to the voice pipeline (the one being read aloud). */
+  private readonly _spoken_message_id = signal<string | null>(null);
+  readonly spoken_message_id = this._spoken_message_id.asReadonly();
   private readonly loaded_ids = new Set<string>();
   /**
    * Plan tokens minted by approve, keyed by `plan_id`. In-memory only (TTL
@@ -408,6 +411,9 @@ export class VexChatStore {
   private readonly _busy_plan_id = signal<string | null>(null);
   private readonly _loading_more = signal(false);
   private readonly _has_more = signal(false);
+  /** The last "next page" request failed: loading more waits for a manual retry. */
+  private readonly _load_more_failed = signal(false);
+  readonly load_more_failed = this._load_more_failed.asReadonly();
   /** Ids the server returned for the active search; `null` while no search is active. */
   private readonly _search_ids = signal<ReadonlySet<string> | null>(null);
   private list_page = 1;
@@ -531,10 +537,24 @@ export class VexChatStore {
 
   /** Loads the next page of the list (or of the search). */
   loadMore(): void {
-    if (!this._has_more() || this._loading_more() || this._loading_list()) {
+    if (
+      !this._has_more() ||
+      this._loading_more() ||
+      this._loading_list() ||
+      // A failed page is not asked again by the scroll: it would fire in a
+      // burst while the end of the list stays in view. The person retries.
+      this._load_more_failed()
+    ) {
       return;
     }
     void this.loadConversations(this.list_page + 1);
+  }
+
+  /** Asks again for the page that failed. */
+  retryLoadMore(): void {
+    if (!this._load_more_failed()) return;
+    this._load_more_failed.set(false);
+    this.loadMore();
   }
 
   /** A state read only: opening a thread must never trigger an inference. */
@@ -660,6 +680,8 @@ export class VexChatStore {
     ) {
       const id = `voice-receipt-${Date.now()}`;
       this.voice.startTurn(id);
+      // The receipt just appended above is the message this audio reads.
+      this._spoken_message_id.set(this.lastAgentMessageId(conversation_id));
       this.voice.enqueue(id, {
         index: 0,
         audio_base64: result.receipt.audio_base64,
@@ -699,6 +721,8 @@ export class VexChatStore {
     ) {
       const id = `voice-receipt-${Date.now()}`;
       this.voice.startTurn(id);
+      // The receipt just appended above is the message this audio reads.
+      this._spoken_message_id.set(this.lastAgentMessageId(conversation_id));
       this.voice.enqueue(id, {
         index: 0,
         audio_base64: result.receipt.audio_base64,
@@ -1607,9 +1631,14 @@ export class VexChatStore {
         });
         this.list_page = page;
         this._has_more.set(page < (res.meta?.totalPages ?? 1));
+        this._load_more_failed.set(false);
       })
       .catch((error) => {
         if (seq !== this.list_seq) return;
+        if (page > 1) {
+          this._load_more_failed.set(true);
+          return;
+        }
         this._error.set(extractApiErrorMessage(error));
       })
       .finally(() => {
@@ -1808,7 +1837,10 @@ export class VexChatStore {
         )
           .then((stream_id) => {
             if (generation !== this.stream_generation) return;
-            if (speak) this.voice.startTurn(stream_id);
+            if (speak) {
+              this.voice.startTurn(stream_id);
+              this._spoken_message_id.set(full.id);
+            }
             this.subscribeStream(numeric, conversation_id, full.id, stream_id);
           })
           .catch((error) => {
@@ -2127,11 +2159,22 @@ export class VexChatStore {
       });
   }
 
+  private lastAgentMessageId(conversation_id: string): string | null {
+    const messages =
+      this._conversations().find((c) => c.id === conversation_id)?.messages ??
+      [];
+    for (let index = messages.length - 1; index >= 0; index--) {
+      if (messages[index].role === 'agent') return messages[index].id;
+    }
+    return null;
+  }
+
   private renameMessage(
     conversation_id: string,
     from: string,
     to: string,
   ): void {
+    if (this._spoken_message_id() === from) this._spoken_message_id.set(to);
     this._conversations.update((list) =>
       list.map((c) =>
         c.id === conversation_id && !c.messages.some((m) => m.id === to)

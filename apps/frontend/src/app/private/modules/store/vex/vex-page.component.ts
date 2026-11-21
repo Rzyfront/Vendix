@@ -129,7 +129,7 @@ function isDesktop(): boolean {
             [attr.aria-label]="copy.back_aria"
           >
             <app-icon name="arrow-left" [size]="18"></app-icon>
-            <span>{{ copy.back }}</span>
+            <span class="hidden sm:inline">{{ copy.back }}</span>
           </a>
           <div class="flex-1 min-w-0 flex items-center justify-center gap-3">
             @if (renaming_title() && header_conversation(); as current) {
@@ -144,7 +144,7 @@ function isDesktop(): boolean {
               <button
                 #titleButton
                 type="button"
-                class="group min-h-10 max-w-full px-3 rounded-full flex items-center gap-2 text-sm text-text-secondary hover:text-text-primary hover:bg-text-primary/5"
+                class="group min-h-10 min-w-0 px-3 rounded-full flex items-center gap-2 text-sm text-text-secondary hover:text-text-primary hover:bg-text-primary/5"
                 [attr.aria-label]="copy.rename_aria(current.title)"
                 [title]="copy.rename"
                 (click)="renaming_title.set(true)"
@@ -153,7 +153,7 @@ function isDesktop(): boolean {
                 <app-icon name="pencil" [size]="14" class="shrink-0 opacity-60 group-hover:opacity-100" />
               </button>
             }
-            <span class="hidden sm:inline-flex shrink-0">
+            <span class="inline-flex shrink-0">
               <vendix-vex-presence variant="header" />
             </span>
           </div>
@@ -168,14 +168,25 @@ function isDesktop(): boolean {
           </button>
           <button
             type="button"
-            class="lg:hidden w-10 h-10 rounded-full flex items-center justify-center text-text-secondary hover:text-text-primary"
-            [attr.aria-label]="copy.open_log"
+            class="relative lg:hidden w-10 h-10 rounded-full flex items-center justify-center text-text-secondary hover:text-text-primary"
+            [class]="log.highlight() ? 'ring-2 ring-primary' : ''"
+            [attr.aria-label]="copy.open_log_pending(log.pending_count())"
             data-tour="vex-log-button"
             aria-controls="vex-log-panel"
             [attr.aria-expanded]="!log_collapsed()"
             (click)="openLog()"
           >
             <app-icon name="history" [size]="20"></app-icon>
+            @if (log.pending_count() > 0) {
+              <span
+                class="absolute top-0.5 right-0.5 min-w-4 h-4 px-1 rounded-full bg-primary text-on-primary text-xs leading-4 text-center"
+                [class]="log.highlight() ? 'animate-pulse motion-reduce:animate-none' : ''"
+                data-testid="vex-log-pending-badge"
+                aria-hidden="true"
+              >
+                {{ log.pending_count() }}
+              </span>
+            }
           </button>
         </header>
 
@@ -215,6 +226,8 @@ function isDesktop(): boolean {
 })
 export class VexPageComponent {
   readonly store = inject(VexChatStore);
+  /** Bitácora: its pending count also shows on the header button (the rail is desktop-only). */
+  protected readonly log = inject(VexLogStore);
   private readonly tours = inject(TourService);
   protected readonly copy = VEX_COPY.page;
   protected readonly helpCopy = VEX_COPY.help;

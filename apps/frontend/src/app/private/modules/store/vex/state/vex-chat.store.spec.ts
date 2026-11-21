@@ -155,8 +155,10 @@ async function settle(): Promise<void> {
 describe('VexChatStore', () => {
   let api: FakeVexApi;
   let store: VexChatStore;
+  let spoken_streams: string[];
 
   beforeEach(async () => {
+    spoken_streams = [];
     jasmine.clock().install();
     api = new FakeVexApi();
     api.rows = [
@@ -178,7 +180,7 @@ describe('VexChatStore', () => {
           provide: VexiVoicePipelineService,
           useValue: {
             interrupt: () => undefined,
-            startTurn: () => undefined,
+            startTurn: (stream_id: string) => spoken_streams.push(stream_id),
             finishTurn: () => undefined,
             enqueue: () => undefined,
           },
@@ -355,6 +357,83 @@ describe('VexChatStore', () => {
       expect(api.intents.length).toBe(1);
       expect(api.intents[0].options?.skipUserMessage).toBeUndefined();
       expect(api.userRows(1).filter((c) => c === QUESTION).length).toBe(1);
+    });
+  });
+
+  describe('message read aloud (T6)', () => {
+    it('points at the answer of the spoken turn, even after a newer written one', async () => {
+      await open('1');
+      store.sendVoiceMessage('¿Cómo cerró la caja?');
+      await settle();
+      expect(spoken_streams.length).toBe(1);
+      const spoken = store.active_conversation()?.messages.at(-1);
+      expect(spoken?.role).toBe('agent');
+      expect(store.spoken_message_id()).toBe(spoken!.id);
+
+      api.streams.at(-1)!.next({ type: 'done' } as VexStreamChunk);
+      api.streams.at(-1)!.complete();
+      await settle();
+      store.sendMessage('Gracias');
+      await settle();
+
+      const last = store.active_conversation()?.messages.at(-1);
+      expect(last?.id).not.toBe(spoken!.id);
+      // The audio that may still be playing belongs to the earlier answer.
+      expect(store.spoken_message_id()).toBe(spoken!.id);
+    });
+
+    it('a written turn is never marked as spoken', async () => {
+      await open('1');
+      store.sendMessage('Hola');
+      await settle();
+      expect(spoken_streams.length).toBe(0);
+      expect(store.spoken_message_id()).toBeNull();
+    });
+  });
+
+  describe('loading more chats (N1)', () => {
+    beforeEach(async () => {
+      api.totalPages = 2;
+      await search('ventas');
+      await search('');
+      expect(store.has_more()).toBe(true);
+    });
+
+    it('stops asking after a failed page until the person retries', async () => {
+      api.failListPages.add(2);
+      const before = api.listCalls.length;
+
+      store.loadMore();
+      await settle();
+      expect(api.listCalls.length).toBe(before + 1);
+      expect(store.load_more_failed()).toBe(true);
+      expect(store.loading_more()).toBe(false);
+
+      // The end of the list is still in view: the observer keeps firing.
+      store.loadMore();
+      store.loadMore();
+      store.loadMore();
+      await settle();
+      expect(api.listCalls.length).toBe(before + 1);
+
+      api.failListPages.clear();
+      store.retryLoadMore();
+      await settle();
+      expect(api.listCalls.length).toBe(before + 2);
+      expect(api.listCalls.at(-1)?.page).toBe(2);
+      expect(store.load_more_failed()).toBe(false);
+    });
+
+    it('keeps the chats already listed when a page fails', async () => {
+      api.failListPages.add(2);
+      store.loadMore();
+      await settle();
+      expect(
+        store
+          .conversations()
+          .map((c) => c.id)
+          .sort(),
+      ).toEqual(['1', '2']);
     });
   });
 });

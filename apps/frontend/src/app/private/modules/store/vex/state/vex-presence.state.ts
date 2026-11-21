@@ -53,3 +53,32 @@ export function formatVexElapsed(total_seconds: number): string {
   const seconds = safe % 60;
   return `${String(minutes).padStart(2, '0')}:${String(seconds).padStart(2, '0')}`;
 }
+
+/**
+ * Message to highlight as "being read aloud": the one whose audio is playing,
+ * and only while it plays and is still on screen. Never a guess — when the
+ * spoken message is not in the open thread, nothing is highlighted.
+ */
+export function resolveSpokenMessageId(
+  voice_speaking: boolean,
+  spoken_message_id: string | null,
+  thread_message_ids: readonly string[],
+): string | null {
+  if (!voice_speaking || !spoken_message_id) return null;
+  return thread_message_ids.includes(spoken_message_id)
+    ? spoken_message_id
+    : null;
+}
+
+/** Relative height of each of the seven bars of the listening wave (center tallest). */
+export const VEX_WAVE_SHAPE = [0.45, 0.7, 0.9, 1, 0.9, 0.7, 0.45] as const;
+
+/**
+ * `scaleY` of one wave bar for a microphone level (0..1): a quiet room leaves
+ * the bars at their floor, speech lifts them in proportion to the volume.
+ */
+export function vexWaveBarScale(level: number, weight: number): number {
+  const safe = Number.isFinite(level) ? Math.min(1, Math.max(0, level)) : 0;
+  const floor = 0.15;
+  return Math.round((floor + (1 - floor) * safe * weight) * 100) / 100;
+}

@@ -3,7 +3,12 @@ import { ButtonComponent } from '../../../../../../shared/components/button/butt
 import { IconComponent } from '../../../../../../shared/components/icon/icon.component';
 import { VexChatStore } from '../../state/vex-chat.store';
 import { VexPresenceStore } from '../../state/vex-presence.store';
-import { VexPresenceState, formatVexElapsed } from '../../state/vex-presence.state';
+import {
+  VEX_WAVE_SHAPE,
+  VexPresenceState,
+  formatVexElapsed,
+  vexWaveBarScale,
+} from '../../state/vex-presence.state';
 import { VEX_COPY } from '../../vex-copy';
 
 const STATIC_ICONS: Record<VexPresenceState, string> = {
@@ -18,8 +23,8 @@ const STATIC_ICONS: Record<VexPresenceState, string> = {
  * The Vex mark, animated by the ONE presence state (`VexPresenceStore`):
  *
  * - `listening_text`: soft halo that pulses.
- * - `listening_voice`: round wave + mm:ss timer (generic wave: the voice
- *   pipeline does not expose the microphone level).
+ * - `listening_voice`: round wave that follows the microphone volume + mm:ss
+ *   timer (a generic wave only where the browser cannot measure the level).
  * - `thinking`: continuous orbit (+ the progress line in the `chip` variant).
  * - `speaking`: stepped equalizer bars, visibly different from the wave.
  * - `silent`: still mark.
@@ -61,9 +66,17 @@ const STATIC_ICONS: Record<VexPresenceState, string> = {
 
       @switch (state()) {
         @case ('listening_voice') {
-          <span class="vex-fx vex-wave" aria-hidden="true">
-            <i></i><i></i><i></i><i></i><i></i><i></i><i></i>
-          </span>
+          @if (wave_scales(); as scales) {
+            <span class="vex-fx vex-wave vex-wave--live" aria-hidden="true">
+              @for (scale of scales; track $index) {
+                <i [style.transform]="'scaleY(' + scale + ')'"></i>
+              }
+            </span>
+          } @else {
+            <span class="vex-fx vex-wave" aria-hidden="true">
+              <i></i><i></i><i></i><i></i><i></i><i></i><i></i>
+            </span>
+          }
         }
         @case ('speaking') {
           <span class="vex-fx vex-eq" aria-hidden="true">
@@ -173,6 +186,12 @@ const STATIC_ICONS: Record<VexPresenceState, string> = {
         animation: vex-wave-move 0.9s ease-in-out infinite;
       }
 
+      /* Live wave: each bar follows the microphone, no canned animation. */
+      .vex-wave--live i {
+        animation: none;
+        transition: transform 80ms linear;
+      }
+
       .vex-wave i:nth-child(2n) {
         animation-delay: -0.3s;
       }
@@ -272,6 +291,13 @@ export class VexPresenceComponent {
   protected readonly elapsed = computed(() =>
     formatVexElapsed(this.presence.recording_seconds()),
   );
+
+  /** `scaleY` of each wave bar from the real microphone level; `null` = generic wave. */
+  protected readonly wave_scales = computed<number[] | null>(() => {
+    const level = this.presence.mic_level();
+    if (level === null) return null;
+    return VEX_WAVE_SHAPE.map((weight) => vexWaveBarScale(level, weight));
+  });
 
   protected readonly label = computed(() => {
     switch (this.state()) {
