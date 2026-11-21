@@ -403,11 +403,13 @@ describe('ConversationPurgeService.preview', () => {
 
 describe('ConversationPurgeS3Cleaner', () => {
   function cleanerFixture(row: Record<string, unknown> | null) {
-    const update = jest.fn(async () => ({}));
+    // Typed with their argument: a zero-parameter mock types `mock.calls[0]`
+    // as an empty tuple and the assertions below stop compiling.
+    const update = jest.fn(async (_args: any) => ({}));
     const prisma = {
       ai_conversation_purges: {
-        findFirst: jest.fn(async () => row),
-        findMany: jest.fn(async () => [{ id: 7 }]),
+        findFirst: jest.fn(async (_args?: any) => row),
+        findMany: jest.fn(async (_args: any) => [{ id: 7 }]),
         update,
       },
     };
@@ -475,5 +477,45 @@ describe('ConversationPurgeS3Cleaner', () => {
       new Error('db'),
     );
     await expect(f.cleaner.clean(7)).resolves.toBe(false);
+  });
+});
+
+describe('ConversationPurgeService.claimAttachments', () => {
+  function claimFixture(result: { count: number } | Error = { count: 2 }) {
+    const f = build();
+    const updateMany = jest.fn(async (_args: any) => {
+      if (result instanceof Error) throw result;
+      return result;
+    });
+    Object.assign(f.prisma.ai_attachments, { updateMany });
+    return { ...f, updateMany };
+  }
+
+  it('binds the first-turn uploads of this user and store, only when unowned', async () => {
+    const f = claimFixture();
+    const claimed = await run(() =>
+      f.service.claimAttachments(CONV, ['att_11', 'att_12', 'att_11', 'x', '12']),
+    );
+    expect(claimed).toBe(2);
+    expect(f.updateMany).toHaveBeenCalledTimes(1);
+    expect(f.updateMany.mock.calls[0][0]).toEqual({
+      where: {
+        id: { in: [11, 12] },
+        store_id: ctx.store_id,
+        user_id: ctx.user_id,
+        conversation_id: null,
+      },
+      data: { conversation_id: CONV },
+    });
+  });
+
+  it('does nothing without valid handles and never breaks the turn', async () => {
+    const empty = claimFixture();
+    expect(await run(() => empty.service.claimAttachments(CONV, []))).toBe(0);
+    expect(await run(() => empty.service.claimAttachments(CONV, ['nope']))).toBe(0);
+    expect(empty.updateMany).not.toHaveBeenCalled();
+
+    const failing = claimFixture(new Error('db'));
+    expect(await run(() => failing.service.claimAttachments(CONV, ['att_1']))).toBe(0);
   });
 });

@@ -85,6 +85,51 @@ export class ConversationPurgeService {
     };
   }
 
+  /**
+   * Ata a la conversación los adjuntos que el turno trae y que aún no tienen
+   * dueño. En un chat nuevo el archivo se sube ANTES de que la conversación
+   * exista, así que su fila nace con `conversation_id` NULL; sin este paso el
+   * borrado no la encontraría y el archivo quedaría huérfano en base y en S3.
+   *
+   * Solo filas del mismo usuario y tienda, y solo las que están en NULL: un
+   * adjunto ya atado a otro hilo nunca se mueve. Mejor esfuerzo: un fallo acá
+   * no puede tumbar el turno.
+   */
+  async claimAttachments(
+    conversationId: number,
+    handles: readonly string[] | undefined,
+  ): Promise<number> {
+    const ids = [
+      ...new Set(
+        (handles ?? [])
+          .map((handle) => /^att_(\d+)$/.exec(String(handle))?.[1])
+          .filter((id): id is string => !!id)
+          .map(Number),
+      ),
+    ];
+    if (ids.length === 0) return 0;
+    try {
+      const scope = this.requireScope();
+      const { count } = await this.prisma.ai_attachments.updateMany({
+        where: {
+          id: { in: ids },
+          store_id: scope.store_id,
+          user_id: scope.user_id,
+          conversation_id: null,
+        },
+        data: { conversation_id: conversationId },
+      });
+      return count;
+    } catch (error) {
+      this.logger.warn(
+        `No se pudieron atar adjuntos a la conversación ${conversationId}: ${
+          (error as Error)?.message ?? 'unknown'
+        }`,
+      );
+      return 0;
+    }
+  }
+
   async purge(id: number): Promise<ConversationPurgeResult> {
     const scope = this.requireScope();
     await this.requireOwnedVexConversation(id, scope);
