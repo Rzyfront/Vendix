@@ -10,6 +10,7 @@ import { SpinnerComponent } from '../../../../../shared/components/spinner/spinn
 import { HelpCenterService } from '../services/help-center.service';
 import { HelpArticle, HelpCategory } from '../models/help-article.model';
 import { HelpArticleCardComponent } from './components/help-article-card/help-article-card.component';
+import { LearningPathsSectionComponent } from '../learning-paths/components/learning-paths-section.component';
 
 @Component({
   selector: 'app-help-center',
@@ -20,6 +21,7 @@ import { HelpArticleCardComponent } from './components/help-article-card/help-ar
     IconComponent,
     SpinnerComponent,
     HelpArticleCardComponent,
+    LearningPathsSectionComponent,
   ],
   template: `
     <div class="help-center-container">
@@ -40,6 +42,11 @@ import { HelpArticleCardComponent } from './components/help-article-card/help-ar
         </a>
       </div>
     
+      <!-- Learning paths (published video series) -->
+      @if (!searchQuery()) {
+        <app-learning-paths-section></app-learning-paths-section>
+      }
+
       <!-- Search Bar -->
       <div class="search-section">
         <div class="search-input-wrapper">
