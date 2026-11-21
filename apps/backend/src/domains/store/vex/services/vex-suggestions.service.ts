@@ -184,8 +184,12 @@ export class VexSuggestionsService {
 
     return buildVexVisibility({
       industries: store?.industries,
-      storePanelUi: storeAdminPanelUi(storeSettings?.settings),
-      userPanelUi: storeAdminPanelUi(userSettings?.config),
+      storePanelUi: storeAdminPanelUi(
+        (storeSettings as { settings?: unknown } | null)?.settings,
+      ),
+      userPanelUi: storeAdminPanelUi(
+        (userSettings as { config?: unknown } | null)?.config,
+      ),
       isOwner: context?.is_owner === true,
       roles: context?.roles ?? [],
     });
