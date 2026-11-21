@@ -1,5 +1,4 @@
 import { Component, computed, inject, signal } from '@angular/core';
-import { DecimalPipe } from '@angular/common';
 import { FormsModule } from '@angular/forms';
 import { RouterModule } from '@angular/router';
 import { firstValueFrom } from 'rxjs';
@@ -9,12 +8,8 @@ import { IconComponent } from '../../../../../shared/components/icon/icon.compon
 import { ToastService } from '../../../../../shared/components/toast/toast.service';
 import { StoreSettingsService } from '../general/services/store-settings.service';
 import { StoreSettingsFacade } from '../../../../../core/store/store-settings/store-settings.facade';
-import {
-  AiUsageEntry,
-  SubscriptionAccessService,
-} from '../../../../../core/services/subscription-access.service';
+import { SubscriptionAccessService } from '../../../../../core/services/subscription-access.service';
 import { StoreSettings } from '../../../../../core/models/store-settings.interface';
-import { formatStoreDate } from '../../../../../shared/utils/date.util';
 import { parseApiError } from '../../../../../core/utils/parse-api-error';
 import { AgentStatusService, AgentStatusView } from './agent-status.service';
 import { AgentUsageMetersComponent } from './agent-usage-meters.component';
@@ -25,7 +20,8 @@ import { AgentUsageMetersComponent } from './agent-usage-meters.component';
  * Store-wide master switch for the Vex agent: only owner/admin reach this tab
  * (same `aiAgentsSettingsGuard` as the whole page), and Vex itself additionally
  * requires the `vex_agent` plan feature — enforced server-side, surfaced here
- * as plan state + monthly usage so the toggle is never flipped blind.
+ * as plan state + the consumption bars (`app-agent-usage-meters`, the only
+ * usage view) so the toggle is never flipped blind.
  *
  * Vex ships OFF per store, independent from `vexi.enabled`: enabling one agent
  * never enables the other.
@@ -34,7 +30,6 @@ import { AgentUsageMetersComponent } from './agent-usage-meters.component';
   selector: 'app-vex-settings',
   standalone: true,
   imports: [
-    DecimalPipe,
     FormsModule,
     RouterModule,
     SettingToggleComponent,
@@ -52,7 +47,7 @@ import { AgentUsageMetersComponent } from './agent-usage-meters.component';
           <app-setting-toggle
             label="Usar Vex"
             [description]="toggleDescription()"
-            [disabled]="saving() || blockedByPlan()"
+            [disabled]="saving() || toggleLocked()"
             [ngModel]="enabled()"
             (ngModelChange)="onToggle($event)"
           />
@@ -141,77 +136,6 @@ import { AgentUsageMetersComponent } from './agent-usage-meters.component';
       </div>
 
       <app-agent-usage-meters agent="vex" />
-
-      <!-- Uso del periodo (día o mes). getAiUsage nunca lanza: ante error retorna un objeto
-           vacio, asi que un snapshot ausente se lee como "sin datos", no
-           como cero. -->
-      <div class="bg-surface rounded-lg shadow-sm border border-[var(--color-border)] p-6 mt-6">
-        <div class="flex items-start justify-between gap-4 mb-2">
-          <div>
-            <h2 class="text-lg font-semibold text-[var(--color-text-primary)]">
-              {{ usageTitle() }}
-            </h2>
-            <p class="text-sm text-[var(--color-text-secondary)]">
-              Consumo de Vex en el periodo vigente.
-            </p>
-          </div>
-          <button
-            type="button"
-            class="text-sm text-primary-600 hover:underline shrink-0"
-            [disabled]="loadingUsage()"
-            (click)="loadUsage()"
-          >
-            {{ loadingUsage() ? 'Cargando…' : 'Actualizar' }}
-          </button>
-        </div>
-
-        @if (loadingUsage() && !vexUsage()) {
-          <p class="text-sm text-[var(--color-text-secondary)]">Midiendo el consumo reciente…</p>
-        } @else if (!vexUsage()) {
-          <p class="text-sm text-[var(--color-text-secondary)]">
-            Todavía no hay consumo de Vex registrado en este periodo.
-          </p>
-        } @else {
-          @if (vexUsage(); as usage) {
-            <div class="mt-2">
-              <div class="flex items-baseline justify-between text-sm">
-                <span class="text-[var(--color-text-primary)] font-semibold">
-                  {{ usage.used | number }}
-                  @if (usage.cap !== null) {
-                    <span class="font-normal text-[var(--color-text-secondary)]">
-                      / {{ usage.cap | number }}
-                    </span>
-                  }
-                </span>
-                <span class="text-[var(--color-text-secondary)]">
-                  @if (usage.cap === null) {
-                    ilimitado
-                  } @else {
-                    {{ usagePercent() }}% del plan
-                  }
-                  · {{ usage.period === 'daily' ? 'diario' : 'mensual' }} ·
-                  {{ usagePeriodLabel() }}
-                </span>
-              </div>
-              @if (usage.cap !== null) {
-                <div
-                  class="mt-2 h-2 rounded-full bg-[var(--color-border)] overflow-hidden"
-                  role="progressbar"
-                  [attr.aria-valuenow]="usagePercent()"
-                  aria-valuemin="0"
-                  aria-valuemax="100"
-                  aria-label="Uso de Vex en el periodo"
-                >
-                  <div
-                    class="h-full rounded-full bg-primary-600 transition-all"
-                    [style.width.%]="usagePercent()"
-                  ></div>
-                </div>
-              }
-            </div>
-          }
-        }
-      </div>
     </div>
   `,
   styles: [
@@ -241,54 +165,8 @@ export class VexSettingsComponent {
   readonly blockedByPlan = computed(() => this.status()?.plan_includes === false);
   readonly reason = computed(() => this.status()?.reason ?? null);
 
-  readonly vexUsage = signal<AiUsageEntry | null>(null);
-  readonly loadingUsage = signal(false);
-
-  readonly usagePercent = computed(() => {
-    const usage = this.vexUsage();
-    if (!usage || usage.cap === null || usage.cap <= 0) return 0;
-    return Math.min(100, Math.round((usage.used / usage.cap) * 100));
-  });
-
-  /** "Uso del día" for a daily counter, "Uso del mes" for a monthly one. */
-  readonly usageTitle = computed(() =>
-    this.vexUsage()?.period === 'daily' ? 'Uso del día' : 'Uso del mes',
-  );
-
-  /**
-   * Concrete quota period behind "Uso del mes" (`octubre de 2026` for a
-   * monthly cap, `01/10/2026` for a daily one), computed on the STORE clock:
-   * timezone and language come from store settings, never the browser.
-   */
-  readonly usagePeriodLabel = computed(() => {
-    const period = this.vexUsage()?.period ?? 'monthly';
-    const general = this.settingsFacade.settings()?.general;
-    const tz = general?.timezone || 'America/Bogota';
-    const locale = general?.language === 'en' ? 'en-US' : 'es-CO';
-    if (period === 'daily') return formatStoreDate(new Date(), tz);
-    return new Intl.DateTimeFormat(locale, {
-      timeZone: tz,
-      month: 'long',
-      year: 'numeric',
-    }).format(new Date());
-  });
-
   constructor() {
     void this.statusService.loadFor('vex').then((s) => this.status.set(s));
-    void this.loadUsage();
-  }
-
-  async loadUsage(): Promise<void> {
-    if (this.loadingUsage()) return;
-
-    this.loadingUsage.set(true);
-
-    try {
-      const snapshot = await this.subscriptionAccess.getAiUsage();
-      this.vexUsage.set(snapshot['vex_agent'] ?? null);
-    } finally {
-      this.loadingUsage.set(false);
-    }
   }
 
   /**
@@ -304,6 +182,12 @@ export class VexSettingsComponent {
     () => this.override() ?? this.settingsFacade.vexEnabled(),
   );
 
+  /**
+   * The plan only blocks turning Vex ON: a Vex left on after the plan dropped
+   * it must still be switchable off (the backend accepts it).
+   */
+  readonly toggleLocked = computed(() => this.blockedByPlan() && !this.enabled());
+
   readonly toggleDescription = computed(() =>
     this.enabled()
       ? 'Vex aparece para el propietario y los administradores de la tienda.'
@@ -311,7 +195,11 @@ export class VexSettingsComponent {
   );
 
   async onToggle(next: boolean): Promise<void> {
-    if (this.saving() || this.blockedByPlan() || next === this.enabled()) {
+    if (
+      this.saving() ||
+      next === this.enabled() ||
+      (next && this.blockedByPlan())
+    ) {
       return;
     }
 
@@ -330,6 +218,8 @@ export class VexSettingsComponent {
       this.toast.success(
         next ? 'Vex quedó activo en esta tienda.' : 'Vex quedó desactivado.',
       );
+      // Same as Vexi: the reason depends on the switch, so it is re-read.
+      void this.statusService.loadFor('vex').then((s) => this.status.set(s));
     } catch (error) {
       this.override.set(previous);
       this.toast.error(

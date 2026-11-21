@@ -43,7 +43,7 @@ import { AgentUsageMetersComponent } from '../ai-agents/agent-usage-meters.compo
         <app-setting-toggle
           label="Usar Vexi"
           [description]="toggleDescription()"
-          [disabled]="saving() || blockedByPlan()"
+          [disabled]="saving() || toggleLocked()"
           [ngModel]="enabled()"
           (ngModelChange)="onToggle($event)"
         />
@@ -92,6 +92,12 @@ export class VexiSettingsComponent {
     () => this.override() ?? this.settingsFacade.vexiEnabled(),
   );
 
+  /**
+   * The plan only blocks turning the agent ON: an agent left on after the plan
+   * dropped it must still be switchable off (the backend accepts it).
+   */
+  readonly toggleLocked = computed(() => this.blockedByPlan() && !this.enabled());
+
   readonly toggleDescription = computed(() =>
     this.enabled()
       ? 'Vexi aparece para todos los usuarios de la tienda.'
@@ -99,7 +105,11 @@ export class VexiSettingsComponent {
   );
 
   async onToggle(next: boolean): Promise<void> {
-    if (this.saving() || this.blockedByPlan() || next === this.enabled()) {
+    if (
+      this.saving() ||
+      next === this.enabled() ||
+      (next && this.blockedByPlan())
+    ) {
       return;
     }
 
