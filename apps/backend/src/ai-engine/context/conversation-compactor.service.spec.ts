@@ -11,6 +11,14 @@ const msgs = (n: number, size = 40) =>
     content: `${i % 2 === 0 ? 'pregunta' : 'respuesta'} ${i + 1} ${'x'.repeat(size)}`,
   }));
 
+const budgetOf = (percent: number, window = 32768) => ({
+  estimated_input_tokens: Math.round((window * percent) / 100),
+  omitted_messages: 0,
+  context_window_tokens: window,
+  provenance: 'configured' as const,
+  method: 'conservative_estimate' as const,
+});
+
 function build(run: jest.Mock) {
   const update = jest.fn().mockResolvedValue({});
   const service = new ConversationCompactorService(
@@ -21,12 +29,16 @@ function build(run: jest.Mock) {
 }
 
 describe('T22 ConversationCompactorService', () => {
-  it('does nothing under 75% of the window', async () => {
+  it('does nothing under 75 % of the ring measure or without a budget', async () => {
     const { service, update, run } = build(jest.fn());
-    const out = await service.compactIfNeeded(
-      { id: 7, summary: null, summary_through_message_id: null, messages: msgs(12) },
-      32768,
-    );
+    const conv = {
+      id: 7,
+      summary: null,
+      summary_through_message_id: null,
+      messages: msgs(40),
+    };
+    expect(await service.compactIfNeeded(conv, budgetOf(74))).toBeNull();
+    const out = await service.compactIfNeeded(conv, null);
     expect(out).toBeNull();
     expect(run).not.toHaveBeenCalled();
     expect(update).not.toHaveBeenCalled();
@@ -44,7 +56,7 @@ describe('T22 ConversationCompactorService', () => {
         summary_through_message_id: 2,
         messages: msgs(40),
       },
-      1500,
+      budgetOf(80),
     );
     expect(out).toEqual({
       summary: 'Resumen del modelo',
@@ -76,7 +88,7 @@ describe('T22 ConversationCompactorService', () => {
         summary_through_message_id: null,
         messages: msgs(200, 60),
       },
-      2000,
+      budgetOf(80),
     );
     expect(out).not.toBeNull();
     expect(out!.summary.startsWith('previo')).toBe(true);
@@ -92,7 +104,7 @@ describe('T22 ConversationCompactorService', () => {
     update.mockRejectedValue(new Error('db'));
     const out = await service.compactIfNeeded(
       { id: 7, summary: null, summary_through_message_id: null, messages: msgs(60) },
-      1500,
+      budgetOf(80),
     );
     expect(out?.summary_through_message_id).toBe(50);
   });

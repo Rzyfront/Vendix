@@ -1,6 +1,10 @@
 import { vexApplyState } from './vex-plan-state';
 import { validateConversationTitle } from './vex-conversation-groups.util';
-import { computeContextPercent, isContextWarning } from './vex-context-meter.util';
+import {
+  computeContextPercent,
+  isContextWarning,
+  latestContextBudget,
+} from './vex-context-meter.util';
 import { VexiVoiceSafetyService } from '../../../../../core/services/vexi-voice-safety.service';
 import { VexiVoicePipelineService } from '../../../../../core/services/vexi-voice-pipeline.service';
 import {
@@ -1730,6 +1734,7 @@ export class VexChatStore {
         );
         this.loaded_ids.add(id);
         this.hydrateCompaction(id, row);
+        this.hydrateContextBudget(id, row);
         // Blocks arrive as refs; their payloads (with fresh signed URLs)
         // land per message as each read resolves. Plans need no fetch —
         // their steps + status already adapted above.
@@ -1745,6 +1750,23 @@ export class VexChatStore {
         this.toast.error(extractApiErrorMessage(error), VEX_COPY.store.open_failed);
       })
       .finally(() => this._loading_thread.set(false));
+  }
+
+  /**
+   * Restores «Contexto N %» from the budget persisted with the newest answer,
+   * the same value the server compacts on. Cleared when no answer carries one.
+   */
+  private hydrateContextBudget(id: string, row: VexBackendConversation): void {
+    const budget = latestContextBudget(row.messages);
+    this._context_budgets.update((all) => {
+      if (!budget) {
+        if (!(id in all)) return all;
+        const rest = { ...all };
+        delete rest[id];
+        return rest;
+      }
+      return { ...all, [id]: budget };
+    });
   }
 
   /** Loads the persisted summary of a conversation (cleared when the server has none). */

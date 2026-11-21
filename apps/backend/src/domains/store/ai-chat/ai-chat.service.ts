@@ -67,6 +67,7 @@ import {
 } from '../../../ai-engine/context/conversation-compactor.service';
 import {
   estimateContextBudget,
+  latestPersistedContextBudget,
   renderTurnActionsLine,
 } from '../../../ai-engine/context/agent-context-budget';
 import { randomUUID } from 'node:crypto';
@@ -509,6 +510,8 @@ export class AIChatService {
     let tokensUsed = 0;
     // Costo real del turno; 0 solo cuando el motor no lo informó.
     let turnCostUsd = 0;
+    // Presupuesto real del último paso del motor (ruta agéntica en stream).
+    let turnContextBudget: AIStreamChunk['context_budget'];
     // Solo los turnos Vex coleccionan: en cualquier otro agente es `null` y
     // el cierre persiste byte-idéntico a hoy.
     const vexTurn: VexTurnCollection | null =
@@ -555,6 +558,7 @@ export class AIChatService {
       responseContent = agentResult.content;
       tokensUsed = agentResult.total_tokens;
       turnCostUsd = agentResult.cost_usd ?? 0;
+      turnContextBudget = agentResult.context_budget;
       vexPlan = agentResult.pending_plan ?? null;
       vexToolsUsed = agentResult.tools_used ?? [];
     } else {
@@ -600,6 +604,11 @@ export class AIChatService {
       vexPlan ?? vexTurn?.plan ?? null,
       vexTurn ? extractSuggestedFollowups(vexToolsUsed) : [],
     );
+    // T21: the ring (and the next turn's compaction) read this exact value.
+    const turnBudget = vexTurn
+      ? (turnContextBudget ??
+        this.estimateTurnBudget(conversation, dto.content))
+      : undefined;
     const assistantMessage = await this.prisma.ai_messages.create({
       data: {
         conversation_id: conversationId,
@@ -607,12 +616,13 @@ export class AIChatService {
         content: responseContent,
         tokens_used: tokensUsed,
         cost_usd: turnCostUsd,
-        ...(vexMetadata || execution || objective
+        ...(vexMetadata || execution || objective || turnBudget
           ? {
               metadata: {
                 ...vexMetadata,
                 ...(execution ? { execution } : {}),
                 ...(objective ? { objective } : {}),
+                ...(turnBudget ? { context_budget: turnBudget } : {}),
               } as unknown as Prisma.InputJsonValue,
             }
           : {}),
@@ -1213,6 +1223,12 @@ export class AIChatService {
       vexPlan ?? vexTurn?.plan ?? null,
       turnFollowups,
     );
+    // T21: presupuesto real que el motor midió en el último paso del turno
+    // (reenviado por el agente); estimado solo si el motor no lo informó.
+    const turnBudget = vexTurn
+      ? ((doneChunk as AIStreamChunk | null)?.context_budget ??
+        this.estimateTurnBudget(conversation, intent.content))
+      : undefined;
     let assistantMessage: { id: number } | null = null;
     if (
       fullContent ||
@@ -1231,6 +1247,9 @@ export class AIChatService {
         ...{ stream_id: streamId },
         ...(pendingProposal ? { pending_confirmation: pendingProposal } : {}),
         ...vexMetadata,
+        // T21: lo que el anillo pinta tras recargar y lo que decide la
+        // compactación del turno siguiente (una sola medida).
+        ...(turnBudget ? { context_budget: turnBudget } : {}),
         ...(execution ? { execution } : {}),
         ...(objective ? { objective } : {}),
         ...(intent.continuation
@@ -1315,15 +1334,9 @@ export class AIChatService {
     if (doneChunk) {
       // Client boundary: model guidance never rides on the final frame.
       const safeDone = clientSafeChunk(doneChunk);
-      // T21: el anillo «Contexto N %» de Vex necesita el presupuesto en cada
-      // `done`; si el motor no lo calculó (ruta no agéntica) se estima acá.
-      const budget =
-        safeDone.context_budget ??
-        (vexTurn
-          ? this.estimateTurnBudget(conversation, intent.content)
-          : undefined);
-      const withBudget = budget
-        ? { ...safeDone, context_budget: budget }
+      // T21: el anillo «Contexto N %» de Vex recibe el mismo valor persistido.
+      const withBudget: AIStreamChunk = turnBudget
+        ? { ...safeDone, context_budget: turnBudget }
         : safeDone;
       yield assistantMessage
         ? { ...withBudget, message_id: assistantMessage.id }
@@ -2374,10 +2387,13 @@ export class AIChatService {
     }
   }
 
-  /** Estimate for `done` when the engine reported no context budget. */
+  /**
+   * Estimate for turns whose engine path reported no budget (buffered POST,
+   * non-agentic stream): same estimator over the same window that is sent.
+   */
   private estimateTurnBudget(
     conversation: ConversationWithMessages,
-    content: string,
+    content: string | undefined,
   ): AIStreamChunk['context_budget'] | undefined {
     try {
       return estimateContextBudget(
@@ -2402,7 +2418,12 @@ export class AIChatService {
     if (agentKey !== VEX_AGENT_KEY || !this.compactor) {
       return { conversation, frame: null };
     }
-    const result = await this.compactor.compactIfNeeded(conversation);
+    // One measure: the budget the ring showed after the last answer. Without
+    // a persisted one (legacy thread) nothing compacts; the turn persists it.
+    const result = await this.compactor.compactIfNeeded(
+      conversation,
+      latestPersistedContextBudget(conversation.messages),
+    );
     if (!result) return { conversation, frame: null };
     return {
       conversation: {

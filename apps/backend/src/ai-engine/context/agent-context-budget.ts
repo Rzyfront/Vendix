@@ -147,6 +147,60 @@ export interface ContextBudgetReport {
   method: 'conservative_estimate';
 }
 
+/**
+ * Usage percent the «Contexto N %» ring shows and the compactor decides on:
+ * rounded, capped at 100; `null` when it cannot be computed. The frontend
+ * mirrors this exact formula (`vex-context-meter.util.ts`), so the warning
+ * and the compaction read one number.
+ */
+export function contextUsagePercent(
+  budget: Pick<
+    ContextBudgetReport,
+    'estimated_input_tokens' | 'context_window_tokens'
+  > | null | undefined,
+): number | null {
+  if (!budget) return null;
+  const used = budget.estimated_input_tokens;
+  const window = budget.context_window_tokens;
+  if (typeof used !== 'number' || typeof window !== 'number') return null;
+  if (!Number.isFinite(used) || !Number.isFinite(window)) return null;
+  if (window <= 0 || used < 0) return null;
+  return Math.round(Math.min(100, (used / window) * 100));
+}
+
+/** At or above this percent the ring warns and the next turn compacts. */
+export const CONTEXT_COMPACTION_PERCENT = 75;
+
+export function isContextBudgetReport(
+  value: unknown,
+): value is ContextBudgetReport {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) return false;
+  const v = value as Record<string, unknown>;
+  return (
+    contextUsagePercent(v as unknown as ContextBudgetReport) !== null &&
+    typeof v.omitted_messages === 'number' &&
+    (v.provenance === 'configured' || v.provenance === 'fallback') &&
+    v.method === 'conservative_estimate'
+  );
+}
+
+/**
+ * Budget persisted on the newest assistant row (`metadata.context_budget`):
+ * what the ring showed after the last answer. `null` for threads older than
+ * the field or turns that never reported one.
+ */
+export function latestPersistedContextBudget(
+  messages: ReadonlyArray<{ role: string; metadata?: unknown }>,
+): ContextBudgetReport | null {
+  for (let i = messages.length - 1; i >= 0; i--) {
+    const message = messages[i];
+    if (message.role !== 'assistant') continue;
+    const candidate = asRecord(message.metadata)?.context_budget;
+    if (isContextBudgetReport(candidate)) return candidate;
+  }
+  return null;
+}
+
 /** Estimate-only budget for turns that did not run through the agentic engine
  * path: same estimator, default window, provenance `fallback`. */
 export function estimateContextBudget(

@@ -363,6 +363,8 @@ export interface AgentResult {
   total_tokens: number;
   /** Real USD cost summed over every provider call of the turn; absent = unknown. */
   cost_usd?: number;
+  /** Context budget the engine measured on the LAST streamed step of the turn. */
+  context_budget?: AIStreamChunk['context_budget'];
   success: boolean;
   error?: string;
   execution?: AgentExecutionSummary;
@@ -420,10 +422,17 @@ export class AIAgentService {
   private readonly scheduler = new ToolSchedulerService();
   private readonly DEFAULT_MAX_ITERATIONS = 10;
   private readonly DEFAULT_TIMEOUT_MS = 60000;
-  /** Per-turn real-cost accumulator (every provider step, fallback included). */
+  /**
+   * Per-turn accumulator: real cost of every provider step (fallback included)
+   * and the context budget the engine measured on the last streamed step.
+   */
   private readonly turnCosts = new WeakMap<
     AgentRunParams,
-    { sum: number; unknown: boolean }
+    {
+      sum: number;
+      unknown: boolean;
+      contextBudget?: AIStreamChunk['context_budget'];
+    }
   >();
 
   constructor(
@@ -1226,7 +1235,11 @@ export class AIAgentService {
     );
   }
 
-  /** `streamAgentInference` drops `cost_usd`; read it from the raw `done` frame. */
+  /**
+   * `streamAgentInference` drops `cost_usd` and `context_budget`; read both
+   * from the raw engine `done` frame. The last step's budget wins: it is the
+   * fullest window the turn sent.
+   */
   private async *tapStepCost(
     params: AgentRunParams,
     source: AsyncGenerator<AIStreamChunk>,
@@ -1237,6 +1250,9 @@ export class AIAgentService {
         if (chunk.type === 'done') {
           sawDone = true;
           this.noteStepCost(params, chunk.cost_usd);
+          const acc = this.turnCosts.get(params);
+          if (acc && chunk.context_budget)
+            acc.contextBudget = chunk.context_budget;
         }
         yield chunk;
       }
@@ -1253,7 +1269,11 @@ export class AIAgentService {
     else acc.unknown = true;
   }
 
-  /** Exposes the accumulated turn cost on the final `done` frame and the result. */
+  /**
+   * Exposes the accumulated turn cost and the engine's last context budget on
+   * the final `done` frame and the result (T21: the chat forwards the budget
+   * to the «Contexto N %» ring instead of re-estimating it).
+   */
   private async *withTurnCost(
     source: AsyncGenerator<AIStreamChunk, AgentResult>,
     params: AgentRunParams,
@@ -1262,15 +1282,22 @@ export class AIAgentService {
       const acc = this.turnCosts.get(params);
       return acc && !acc.unknown ? acc.sum : undefined;
     };
+    const budget = () => this.turnCosts.get(params)?.contextBudget;
     try {
       let step = await source.next();
       while (!step.done) {
         let input: unknown;
         const frame = step.value;
         const total = cost();
+        const contextBudget = budget();
         try {
-          input = yield frame.type === 'done' && total !== undefined
-            ? { ...frame, cost_usd: total }
+          input = yield frame.type === 'done'
+            ? {
+                ...frame,
+                ...(total !== undefined && { cost_usd: total }),
+                ...(contextBudget &&
+                  !frame.context_budget && { context_budget: contextBudget }),
+              }
             : frame;
         } catch (error) {
           step = await source.throw(error);
@@ -1280,6 +1307,9 @@ export class AIAgentService {
       }
       const total = cost();
       if (total !== undefined) step.value.cost_usd = total;
+      const contextBudget = budget();
+      if (contextBudget && !step.value.context_budget)
+        step.value.context_budget = contextBudget;
       return step.value;
     } finally {
       await source.return(undefined as never);

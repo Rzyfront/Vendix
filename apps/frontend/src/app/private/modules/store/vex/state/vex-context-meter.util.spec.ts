@@ -1,6 +1,7 @@
 import {
   computeContextPercent,
   isContextWarning,
+  latestContextBudget,
 } from './vex-context-meter.util';
 
 describe('computeContextPercent', () => {
@@ -48,5 +49,46 @@ describe('isContextWarning', () => {
   it('does not warn without a value', () => {
     expect(isContextWarning(null)).toBe(false);
     expect(isContextWarning(undefined)).toBe(false);
+  });
+});
+
+describe('latestContextBudget', () => {
+  const budget = (tokens: number) => ({
+    estimated_input_tokens: tokens,
+    omitted_messages: 2,
+    context_window_tokens: 10000,
+    provenance: 'configured' as const,
+    method: 'conservative_estimate' as const,
+  });
+
+  it('reads the budget persisted with the newest assistant answer', () => {
+    expect(
+      latestContextBudget([
+        { role: 'assistant', metadata: { context_budget: budget(1000) } },
+        { role: 'user', metadata: null },
+        { role: 'assistant', metadata: { context_budget: budget(8000) } },
+        { role: 'user', metadata: { context_budget: budget(9999) } },
+      ]),
+    ).toEqual(budget(8000));
+  });
+
+  it('skips answers whose budget is missing or invalid', () => {
+    expect(
+      latestContextBudget([
+        { role: 'assistant', metadata: { context_budget: budget(3000) } },
+        { role: 'assistant', metadata: { context_budget: { bogus: true } } },
+        {
+          role: 'assistant',
+          metadata: { context_budget: { ...budget(5), context_window_tokens: 0 } },
+        },
+        { role: 'assistant', metadata: null },
+      ]),
+    ).toEqual(budget(3000));
+  });
+
+  it('returns null when no answer carries a budget', () => {
+    expect(latestContextBudget([])).toBeNull();
+    expect(latestContextBudget(undefined)).toBeNull();
+    expect(latestContextBudget([{ role: 'assistant', metadata: null }])).toBeNull();
   });
 });

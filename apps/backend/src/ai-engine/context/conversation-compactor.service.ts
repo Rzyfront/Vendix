@@ -3,13 +3,13 @@ import type { Prisma } from '@prisma/client';
 import { AIEngineService } from '../ai-engine.service';
 import { StorePrismaService } from '../../prisma/services/store-prisma.service';
 import {
-  DEFAULT_CONTEXT_WINDOW_TOKENS,
-  estimateAgentInputTokens,
+  CONTEXT_COMPACTION_PERCENT,
+  type ContextBudgetReport,
+  contextUsagePercent,
 } from './agent-context-budget';
 
 /** Aplicación de IA que resume el hilo (fila de `ai_engine_applications`). */
 export const VEX_SUMMARIZER_APP_KEY = 'vex_context_summarizer';
-export const COMPACTION_THRESHOLD = 0.75;
 export const KEEP_LAST_MESSAGES = 10;
 export const SUMMARY_TIMEOUT_MS = 10_000;
 export const MAX_FALLBACK_SUMMARY_CHARS = 2000;
@@ -53,10 +53,15 @@ export class ConversationCompactorService {
 
   async compactIfNeeded(
     conversation: CompactableConversation,
-    contextWindowTokens: number = DEFAULT_CONTEXT_WINDOW_TOKENS,
+    budget: ContextBudgetReport | null | undefined,
     timeoutMs: number = SUMMARY_TIMEOUT_MS,
   ): Promise<CompactionResult | null> {
     try {
+      // One measure with the «Contexto N %» ring: the budget persisted with
+      // the last answer (what the person saw), compacting from the same 75 %.
+      const percent = contextUsagePercent(budget);
+      if (percent === null || percent < CONTEXT_COMPACTION_PERCENT) return null;
+
       const through = conversation.summary_through_message_id ?? 0;
       const previous = conversation.summary?.trim() || '';
       const live = conversation.messages.filter(
@@ -65,20 +70,6 @@ export class ConversationCompactorService {
           (m.role === 'user' || m.role === 'assistant' || m.role === 'system'),
       );
       if (live.length <= KEEP_LAST_MESSAGES) return null;
-
-      const estimate = estimateAgentInputTokens(
-        [
-          ...(previous
-            ? [{ role: 'system' as const, content: previous }]
-            : []),
-          ...live.map((m) => ({
-            role: m.role as 'user' | 'assistant' | 'system',
-            content: m.content,
-          })),
-        ],
-        [],
-      );
-      if (estimate <= contextWindowTokens * COMPACTION_THRESHOLD) return null;
 
       const older = live.slice(0, -KEEP_LAST_MESSAGES);
       const lastOlder = older[older.length - 1];

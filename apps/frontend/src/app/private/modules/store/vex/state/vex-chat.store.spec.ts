@@ -436,4 +436,36 @@ describe('VexChatStore', () => {
       ).toEqual(['1', '2']);
     });
   });
+
+  describe('«Contexto N %» after a reload (F3 FIX B1)', () => {
+    const budget = (tokens: number) => ({
+      estimated_input_tokens: tokens,
+      omitted_messages: 0,
+      context_window_tokens: 100000,
+      provenance: 'configured' as const,
+      method: 'conservative_estimate' as const,
+    });
+
+    it('shows the budget persisted with the newest answer, warning included', async () => {
+      const older = message(12, 'assistant', 'Vendiste 42 pedidos.');
+      older.metadata = { context_budget: budget(40000) };
+      const newest = message(14, 'assistant', 'Listo.');
+      newest.metadata = { context_budget: budget(78000) };
+      api.rows[0].messages = [
+        message(11, 'user', '¿Cuánto vendí esta semana?'),
+        older,
+        message(13, 'user', '¿Y el mes?'),
+        newest,
+      ];
+      await open('1');
+      expect(store.context_percent()).toBe(78);
+      expect(store.context_warning()).toBeTrue();
+    });
+
+    it('shows no ring when no answer carries a budget', async () => {
+      await open('2');
+      expect(store.context_percent()).toBeNull();
+      expect(store.context_warning()).toBeFalse();
+    });
+  });
 });
