@@ -13,6 +13,7 @@ import { InventoryModule } from './inventory/inventory.module';
 import { PurchaseOrdersModule } from './orders/purchase-orders/purchase-orders.module';
 import { StoreUsersModule } from './store-users/store-users.module';
 import { SettingsModule } from './settings/settings.module';
+import { StoreAIAgentsModule } from './ai-agents/ai-agents.module';
 import { CustomersModule } from './customers/customers.module';
 import { CrmInboxModule } from './customers/crm/conversations/crm-inbox.module';
 import { CustomerCrmModule } from './customers/crm/customer-crm.module';
@@ -102,6 +103,7 @@ import { RemindersModule } from './reminders/reminders.module';
 
 @Module({
   imports: [
+    StoreAIAgentsModule,
     BrandsModule,
     CategoriesModule,
     ProductsModule,

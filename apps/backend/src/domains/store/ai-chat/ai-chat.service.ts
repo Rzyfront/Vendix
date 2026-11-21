@@ -43,11 +43,20 @@ import { SPEECH_REGISTER_BLOCK } from '../vexi/vexi-speech.constants';
 import type {
   VexiSpeechTurn,
   VexiVoiceFrame,
+  VexiVoiceNoticeFrame,
+  VoiceMeter,
 } from '../vexi/vexi-speech.pipeline';
 import { RequestContextService } from '@common/context/request-context.service';
 import { UserRole } from '../../auth/enums/user-role.enum';
 import { SubscriptionAccessService } from '../subscriptions/services/subscription-access.service';
 import { SubscriptionGateConfig } from '../subscriptions/config/subscription-gate.config';
+import {
+  AgentQuotaService,
+  VOICE_QUOTA_EXHAUSTED_MESSAGE,
+  isQuotaAgentKey,
+  voiceNotInPlanMessage,
+  type QuotaAgentKey,
+} from '../subscriptions/services/agent-quota.service';
 import { VexBlockService } from '../vex/services/vex-block.service';
 import { PlanApprovalService } from '../vex/services/plan-approval.service';
 import { VexiConfirmationService } from '../vexi/vexi-confirmation.service';
@@ -282,6 +291,10 @@ export class AIChatService {
     @Optional() private readonly titles?: ConversationTitleService,
     // Borrado físico de hilos de Vex (T4). Opcional-final como los demás.
     @Optional() private readonly purges?: ConversationPurgeService,
+    // Cupos por agente (T14): voz de lectura por agente y su medición en
+    // milisegundos. Opcional-final como los demás: sin él la voz se comporta
+    // como antes de T14 (habla sin cupo por agente).
+    @Optional() private readonly agentQuota?: AgentQuotaService,
   ) {}
 
   async createConversation(dto: CreateConversationDto) {
@@ -645,6 +658,9 @@ export class AIChatService {
     // re-valida y lo emite como frame `error` (ver `sendMessageStream`).
     const agentKey = this.turnAgentKey(conversation);
     await this.assertVexTurnAccess(agentKey);
+    // Solo al crear el turno, nunca en la revalidación del attach: el turno
+    // que gastó el último mensaje tiene que poder reconectarse.
+    await this.assertVexTurnQuota(agentKey);
 
     // Solo hilos de Vex (los únicos que se borran de verdad): el adjunto del
     // primer turno se subió sin conversación y hay que atarlo a esta.
@@ -806,8 +822,21 @@ export class AIChatService {
     // milliseconds each, but they are milliseconds spent in the only window
     // where the user is hearing nothing at all.
     let voice: VexiSpeechTurn | null = null;
-    if (intent.speak) {
-      voice = await this.speech.openTurn(streamStartedAt);
+    const voiceGate = intent.speak
+      ? await this.resolveTurnVoice(
+          this.turnAgentKey(conversation),
+          streamId,
+          streamStartedAt,
+        )
+      : null;
+    // Sin voz por plan o con el cupo agotado la respuesta llega en texto: el
+    // aviso sale una vez, antes de cualquier otro frame del turno.
+    if (voiceGate?.notice) yield voiceGate.notice;
+    if (voiceGate?.speak) {
+      voice = await this.speech.openTurn(streamStartedAt, {
+        agentKey: voiceGate.agentKey,
+        meter: voiceGate.meter,
+      });
       const turn = voice;
       if (signal?.aborted) {
         turn.abort();
@@ -1553,6 +1582,119 @@ export class AIChatService {
       };
       throw new VendixHttpException(entry, undefined, details);
     }
+  }
+
+  /**
+   * T14 — cupos de mensajes y tokens de Vex antes de crear el turno, con un
+   * mensaje que la persona entiende (el loop vuelve a chequearlos y consume;
+   * esto solo evita abrir un turno que va a morir con un 429 genérico).
+   *
+   * Mismo criterio que `enforceVexTurnCaps`, que corta en cualquier modo del
+   * gate: solo `degradation: 'block'` corta. No-op para cualquier agente que
+   * no sea Vex y sin tienda en contexto.
+   */
+  private async assertVexTurnQuota(agentKey: string | null): Promise<void> {
+    if (agentKey !== VEX_AGENT_KEY) return;
+    const storeId = RequestContextService.getContext()?.store_id;
+    if (!storeId || !this.subscriptionAccess) return;
+
+    const [daily, tokens] = await Promise.all([
+      this.subscriptionAccess.checkExtraQuota(
+        storeId,
+        'vex_agent',
+        'daily_messages',
+      ),
+      this.subscriptionAccess.checkExtraQuota(
+        storeId,
+        'vex_agent',
+        'monthly_tokens',
+      ),
+    ]);
+    for (const [counter, status, message] of [
+      [
+        'daily_messages',
+        daily,
+        'Vex ya usó todos los mensajes de hoy de tu plan. Mañana se renueva el cupo; si lo necesitas antes, puedes mejorar el plan.',
+      ],
+      [
+        'monthly_tokens',
+        tokens,
+        'Vex ya usó todo el cupo de uso del modelo de este mes de tu plan. Se renueva el próximo mes; si lo necesitas antes, puedes mejorar el plan.',
+      ],
+    ] as const) {
+      if (!status.exceeded || status.degradation !== 'block') continue;
+      throw new VendixHttpException(ErrorCodes.SUBSCRIPTION_006, message, {
+        feature: 'vex_agent',
+        counter,
+        cap: status.cap,
+        used: status.used,
+      });
+    }
+  }
+
+  /**
+   * T14 — decide si el turno lee su respuesta en voz, por agente.
+   *
+   * - `ok`: habla y mide cada segmento generado en milisegundos, con dedup por
+   *   stream y segmento (un reintento del mismo segmento no cobra dos veces).
+   * - `disabled` / `exhausted`: la respuesta va en texto con su aviso.
+   * - `unavailable`, sin servicio o un agente sin cupo propio: habla como
+   *   antes de T14 (fail-open; la voz nunca bloquea una respuesta).
+   */
+  private async resolveTurnVoice(
+    agentKey: string | null,
+    streamId: string,
+    streamStartedAt: number,
+  ): Promise<{
+    speak: boolean;
+    agentKey: string | null;
+    notice?: VexiVoiceNoticeFrame;
+    meter?: VoiceMeter;
+  }> {
+    const storeId = RequestContextService.getContext()?.store_id;
+    if (!this.agentQuota || !storeId || !isQuotaAgentKey(agentKey)) {
+      return { speak: true, agentKey };
+    }
+    const quotaAgent: QuotaAgentKey = agentKey;
+    const decision = await this.agentQuota.checkAgentVoice(storeId, quotaAgent);
+    if (decision.status === 'exhausted') {
+      return {
+        speak: false,
+        agentKey,
+        notice: {
+          type: 'voice_notice',
+          code: 'voice_quota_exhausted',
+          message: VOICE_QUOTA_EXHAUSTED_MESSAGE,
+        },
+      };
+    }
+    if (decision.status === 'disabled') {
+      return {
+        speak: false,
+        agentKey,
+        notice: {
+          type: 'voice_notice',
+          code: 'voice_not_in_plan',
+          message: voiceNotInPlanMessage(quotaAgent),
+        },
+      };
+    }
+    const quota = this.agentQuota;
+    const meter: VoiceMeter = (seconds, index) => {
+      void quota
+        .consumeAgentVoice(
+          storeId,
+          quotaAgent,
+          Math.round(seconds * 1000),
+          `${streamId}:tts:${streamStartedAt}:${index}`,
+        )
+        .catch((err: unknown) =>
+          this.logger.warn(
+            `AGENT_VOICE_METER failed store=${storeId} agent=${quotaAgent}: ${(err as Error).message}`,
+          ),
+        );
+    };
+    return { speak: true, agentKey, meter };
   }
 
   /**

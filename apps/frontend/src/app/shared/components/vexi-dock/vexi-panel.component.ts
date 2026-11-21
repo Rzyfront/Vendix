@@ -1444,9 +1444,8 @@ export class VexiPanelComponent {
    * Which of the two views of this panel is showing.
    *
    * Runtime state, not a setting: the person flips it mid-conversation with the
-   * header icon. What engine answers a voice turn *is* a setting
-   * (`store_settings.vexi.voice_engine`) — two independent axes that must not be
-   * conflated.
+   * header icon. There is no engine choice any more: realtime voice is retired
+   * (N5) and the pipeline is the only voice.
    */
   protected readonly voiceUi = linkedSignal(() => this.openInVoice());
 

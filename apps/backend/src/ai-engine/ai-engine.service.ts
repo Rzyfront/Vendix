@@ -64,6 +64,7 @@ import { EventEmitter2 } from '@nestjs/event-emitter';
 import { AILoggingService } from './ai-logging.service';
 import { RequestContextService } from '../common/context/request-context.service';
 import { SubscriptionAccessService } from '../domains/store/subscriptions/services/subscription-access.service';
+import { AgentQuotaService } from '../domains/store/subscriptions/services/agent-quota.service';
 import { SubscriptionGateConfig } from '../domains/store/subscriptions/config/subscription-gate.config';
 import {
   AIFeatureKey,
@@ -109,6 +110,9 @@ export class AIEngineService implements OnModuleInit {
     private readonly subscriptionAccess: SubscriptionAccessService,
     private readonly gateConfig: SubscriptionGateConfig,
     @Optional() private readonly trace?: AgentTraceService,
+    // T14 — contador de tokens de Vexi por agente. Opcional y al final por las
+    // construcciones posicionales; sin él no se mide (como antes de T14).
+    @Optional() private readonly agentQuota?: AgentQuotaService,
   ) {
     if (trace)
       this.providerObserver = new ProviderAttemptObserver(
@@ -2680,6 +2684,10 @@ export class AIEngineService implements OnModuleInit {
     let perCall: boolean;
     if (featureCategory === 'conversations') {
       if (opts.appKey !== 'chat_assistant') return;
+      // T14 — los tokens de Vexi (`chat_assistant`) se miden en su contador
+      // propio, por llamada al proveedor. Solo medición: el plan no corta a
+      // Vexi por tokens (N2/N4); alimenta su barra de consumo (N7).
+      await this.consumeVexiTokens(storeId, units, opts.callId);
       feature = 'streaming_chat';
       effectiveUnits = 1;
       perCall = false;
@@ -2723,6 +2731,28 @@ export class AIEngineService implements OnModuleInit {
       );
     } catch {
       // Already logged inside the service. Never bubble.
+    }
+  }
+
+  /** T14 — best-effort; nunca lanza ni bloquea el turno. */
+  private async consumeVexiTokens(
+    storeId: number,
+    units: number,
+    callId?: string,
+  ): Promise<void> {
+    const tokens = Math.max(0, Math.floor(units));
+    if (!this.agentQuota || !(tokens > 0)) return;
+    try {
+      const base =
+        RequestContextService.getRequestId() ?? `internal-${randomUUID()}`;
+      await this.agentQuota.consumeAgentTokens(
+        storeId,
+        'vexi',
+        tokens,
+        `${base}:${callId ?? randomUUID()}:vexi-tokens`,
+      );
+    } catch {
+      // consumeAgentTokens ya registra y no lanza; defensivo.
     }
   }
 

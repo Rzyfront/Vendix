@@ -213,7 +213,12 @@ export interface VexStreamChunk {
     | 'audio'
     | 'timing'
     | 'conversation_title'
-    | 'followup_suggestion';
+    | 'followup_suggestion'
+    // T14: this answer is not read aloud; `message` says why.
+    | 'voice_notice';
+  /** `voice_notice`: `voice_quota_exhausted` or `voice_not_in_plan`. */
+  code?: string;
+  message?: string;
   audio_base64?: string;
   content_type?: string;
   index?: number;

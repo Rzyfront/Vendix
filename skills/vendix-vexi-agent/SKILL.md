@@ -5,7 +5,7 @@ description: >
 license: MIT
 metadata:
   author: rzyfront
-  version: "1.1"
+  version: "1.2"
   scope: [root]
   auto_invoke:
     - "Widening Vexi's reach to a new module or domain"
@@ -34,6 +34,9 @@ metadata:
 - `ApiCatalogService` discovers every route at boot (`DiscoveryService` + `Reflector`: `@Permissions`, `@ApiOperation.summary`, DTO class-validator metadata, `FileInterceptor`). `list_endpoints` / `list_capabilities` filter by the caller's real permissions; a permission without a route is reported as a gap.
 - Anti-pattern: per-domain hand-written write tools (~400 tools, don't fit context). The six legacy write tools in `writes.tools.ts` survive only because they encode business rules the catalog cannot see; they are not a whitelist.
 - Publish fields as `{ name, type, required, enum_values }`: the global `ValidationPipe` uses `forbidNonWhitelisted`, so a guessed field fails after the person approved.
+
+- The user's role is the ONLY limit on what Vexi can do: the plan has no tool list and no action quota (`tools_allowed` is inert; the legacy `monthly_tool_calls_cap` is still metered by `consumeToolCallQuota` until it is retired). A role without the permission gets "tu rol no permite <acción>; pídeselo al dueño", no card and no tool call. What the plan gives Vexi is its switch, capabilities and caps of messages/day, tokens/month and voice-readout seconds/month (`plan_ai_entitlements`, `NULL` = unlimited, `0` = nothing; `vendix-subscription-gate`).
+- Agentic config (model, provider, voice) is set only in superadmin's agent sheet; the store has only the Vexi switch, usage bars and history. Voice is per-reply TTS through the API: realtime voice is retired (a new `POST store/vexi/realtime/session` answers a typed 410 `VEXI_REALTIME_UNAVAILABLE`; `tool-call` and `session/close` stay alive and close still bills) and `vexi.voice_engine` is accepted and ignored.
 
 ## 2. Vision runs in its own model, with feedback
 

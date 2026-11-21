@@ -187,6 +187,28 @@ describe('AI entitlements model — pure rules (T10)', () => {
       ]);
     });
 
+    it('a feature without a boolean enabled has access at the gate: rows copied off are a divergence', () => {
+      const gateFlags = { vex_agent: { daily_messages_cap: 10 } };
+      // What M3 wrote before the corrective migration: every vex_agent row off.
+      const m3Rows = legacyFlagsToAIEntitlements({
+        vex_agent: { enabled: false, daily_messages_cap: 10 },
+      });
+      const diffs = compareAIEntitlements(gateFlags, m3Rows);
+      expect(diffs.find((d) => d.capability === 'vex.agent')).toEqual({
+        capability: 'vex.agent',
+        kind: 'divergence',
+        legacy: '10 mensajes al día, avisa al llegar al tope',
+        current: 'no incluido',
+      });
+    });
+
+    it('enabled as text "true" and an explicit false are decided like the gate', () => {
+      const textTrue = { streaming_chat: { enabled: 'true', daily_messages_cap: 5 } };
+      expect(compareAIEntitlements(textTrue, legacyFlagsToAIEntitlements(textTrue))).toEqual([]);
+      const off = { vex_agent: { enabled: false, daily_messages_cap: 5 } };
+      expect(compareAIEntitlements(off, legacyFlagsToAIEntitlements(off))).toEqual([]);
+    });
+
     it('per-agent splits the legacy JSON cannot express are new_model_only, not divergences', () => {
       let rows = legacyFlagsToAIEntitlements(FULL_FLAGS);
       rows = setRow(rows, 'vexi.voice_readout', { enabled: false });
@@ -368,6 +390,20 @@ describe('AIEntitlementsShadowService (T10)', () => {
     expect(tx.hincrby).toHaveBeenCalledWith(expect.stringMatching(/^ai:entitlements:shadow:\d{8}$/), 'checks', 1);
     expect(tx.hincrby).not.toHaveBeenCalledWith(expect.any(String), 'divergent', 1);
     expect(warn).not.toHaveBeenCalled();
+  });
+
+  it('reports a diff for a plan the gate lets through whose row was copied off (F1)', async () => {
+    const gateFlags = { vex_agent: { daily_messages_cap: 10 } };
+    const { service, tx, warn } = build(
+      legacyFlagsToAIEntitlements({ vex_agent: { enabled: false, daily_messages_cap: 10 } }),
+    );
+    const diffs = await service.compareAndRecord(7, 'vex_agent', gateFlags as any);
+    expect(diffs.find((d) => d.capability === 'vex.agent')).toMatchObject({
+      kind: 'divergence',
+      current: 'no incluido',
+    });
+    expect(tx.hincrby).toHaveBeenCalledWith(expect.any(String), 'divergent', 1);
+    expect(warn).toHaveBeenCalledWith(expect.stringContaining('AI_ENTITLEMENT_SHADOW_DIFF'));
   });
 
   it('counts a divergence per store and logs AI_ENTITLEMENT_SHADOW_DIFF once per store/difference/day', async () => {

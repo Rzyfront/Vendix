@@ -57,6 +57,13 @@ import {
   RejectAgentObjectiveProposalDto,
 } from './dto/resume-agent-objective.dto';
 import { VendixHttpException, ErrorCodes } from '../../../common/errors';
+import {
+  AgentQuotaService,
+  VOICE_QUOTA_EXHAUSTED_MESSAGE,
+  isQuotaAgentKey,
+  voiceNotInPlanMessage,
+} from '../subscriptions/services/agent-quota.service';
+import { StorePrismaService } from '../../../prisma/services/store-prisma.service';
 
 /**
  * Vexi's non-realtime surface.
@@ -93,6 +100,10 @@ export class VexiController {
     private readonly planState: VexiPlanStateService,
     @Optional()
     private readonly voiceConfirmations?: VexiVoiceConfirmationService,
+    // T14 — voz de lectura por agente en el acuse. Opcionales y al final por
+    // las construcciones posicionales: sin ellos el acuse habla como antes.
+    @Optional() private readonly agentQuota?: AgentQuotaService,
+    @Optional() private readonly prisma?: StorePrismaService,
   ) {}
 
   /**
@@ -258,16 +269,30 @@ export class VexiController {
     // acknowledgement — much less suggest the write did not happen. It already
     // happened, above.
     let audio: { audioBase64: string; contentType: string } | null = null;
+    let voiceNotice: { code: string; message: string } | null = null;
     if (dto.speak && summary) {
       // La moneda va también acá porque el resumen de una escritura es
       // justamente donde aparecen los montos: "subí el precio de la Coca a
       // $3.500" es el caso típico de este camino, no la excepción.
       try {
-        const [params, currency] = await Promise.all([
-          this.speech.resolveParams(),
-          this.speech.resolveCurrency(),
-        ]);
-        audio = await this.speech.synthesize(summary, params, currency);
+        // T14: el acuse habla con la voz y el cupo del agente del hilo.
+        const ackAgent =
+          voice?.proposal.agentKey ??
+          (await this.conversationAgentKey(dto.conversation_id));
+        voiceNotice = await this.ackVoiceNotice(ackAgent);
+        if (!voiceNotice) {
+          const [params, currency] = await Promise.all([
+            this.speech.resolveParams(ackAgent),
+            this.speech.resolveCurrency(),
+          ]);
+          const spoken = await this.speech.synthesize(
+            summary,
+            params,
+            currency,
+          );
+          audio = spoken;
+          this.meterAckVoice(ackAgent, spoken, dto.conversation_id);
+        }
       } catch {
         this.logger.warn(
           'El cambio quedó aplicado; el acuse de voz no está disponible.',
@@ -288,9 +313,82 @@ export class VexiController {
           audio_base64: audio.audioBase64,
           content_type: audio.contentType,
         }),
+        ...(voiceNotice && { voice_notice: voiceNotice }),
       },
       'Cambio aplicado',
     );
+  }
+
+  /**
+   * Agente dueño del hilo, con la misma regla que el chat: `metadata.agent_key`
+   * o, en el chat por defecto, Vexi. Sin hilo o sin lectura posible, Vexi.
+   */
+  private async conversationAgentKey(
+    conversationId?: number,
+  ): Promise<string | null> {
+    if (!conversationId || !this.prisma) return 'vexi';
+    const row = await this.prisma.ai_conversations.findFirst({
+      where: { id: conversationId },
+      select: { metadata: true, app_key: true },
+    });
+    const raw = (row?.metadata as Record<string, unknown> | null)?.agent_key;
+    if (typeof raw === 'string' && raw.trim()) return raw;
+    // Otra app con su propio agente: sin cupo por agente, como en el chat.
+    return !row?.app_key || row.app_key === 'chat_assistant' ? 'vexi' : null;
+  }
+
+  /**
+   * T14 — aviso cuando el acuse no puede hablar: voz fuera del plan del agente
+   * o cupo del mes agotado. `null` = habla (también si la decisión no está
+   * disponible: fail-open, como antes de T14).
+   */
+  private async ackVoiceNotice(
+    agentKey: string | null,
+  ): Promise<{ code: string; message: string } | null> {
+    const storeId = RequestContextService.getContext()?.store_id;
+    if (!this.agentQuota || !storeId || !isQuotaAgentKey(agentKey)) return null;
+    const decision = await this.agentQuota.checkAgentVoice(storeId, agentKey);
+    if (decision.status === 'exhausted')
+      return {
+        code: 'voice_quota_exhausted',
+        message: VOICE_QUOTA_EXHAUSTED_MESSAGE,
+      };
+    if (decision.status === 'disabled')
+      return {
+        code: 'voice_not_in_plan',
+        message: voiceNotInPlanMessage(agentKey),
+      };
+    return null;
+  }
+
+  /** T14 — mide el audio del acuse; un acierto de caché no cuenta. */
+  private meterAckVoice(
+    agentKey: string | null,
+    spoken: { generated?: boolean; seconds?: number } | null,
+    conversationId?: number,
+  ): void {
+    const storeId = RequestContextService.getContext()?.store_id;
+    if (
+      !this.agentQuota ||
+      !storeId ||
+      !isQuotaAgentKey(agentKey) ||
+      !spoken?.generated ||
+      !(spoken.seconds && spoken.seconds > 0)
+    )
+      return;
+    const requestId = `${RequestContextService.getRequestId() ?? `ack-${conversationId ?? 0}-${Date.now()}`}:ack-tts`;
+    void this.agentQuota
+      .consumeAgentVoice(
+        storeId,
+        agentKey,
+        Math.round(spoken.seconds * 1000),
+        requestId,
+      )
+      .catch((err: unknown) =>
+        this.logger.warn(
+          `AGENT_VOICE_METER failed (ack) store=${storeId}: ${(err as Error).message}`,
+        ),
+      );
   }
 
   // G endpoints choose the agent toggle from the server-bound conversation.

@@ -1,3 +1,4 @@
+import { Prisma } from '@prisma/client';
 import { RequestContextService } from '../../../../common/context/request-context.service';
 import {
   AGENT_LIVE_EVENT_TYPE,
@@ -173,6 +174,34 @@ describe('VexActivityFeedService', () => {
       ) as any,
     );
     await expect(service.list()).resolves.toEqual([]);
+  });
+
+  it('filters by agent inside the query, before its own cut', async () => {
+    const prisma = makePrisma([], []);
+    const service = new VexActivityFeedService(prisma as any);
+    const whereOfLastCall = () =>
+      (prisma.ai_messages.findMany.mock.calls.at(-1) as any[])[0].where;
+
+    await service.recentAgentActions(5, 'vex');
+    expect(whereOfLastCall()).toEqual({
+      tool_calls: { not: null },
+      conversation: { metadata: { path: ['agent_key'], equals: 'vex' } },
+    });
+
+    // Legacy threads (NULL metadata) belong to Vexi, like the chat listing.
+    await service.recentAgentActions(5, 'vexi');
+    expect(whereOfLastCall()).toEqual({
+      tool_calls: { not: null },
+      conversation: {
+        OR: [
+          { metadata: { path: ['agent_key'], equals: 'vexi' } },
+          { metadata: { equals: Prisma.AnyNull } },
+        ],
+      },
+    });
+
+    await service.recentAgentActions(5);
+    expect(whereOfLastCall()).toEqual({ tool_calls: { not: null } });
   });
 
   it('merges both sources newest-first and caps at the limit', async () => {

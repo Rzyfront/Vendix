@@ -254,7 +254,7 @@ export const AI_FEATURE_CATEGORY_LABELS: Record<AIFeatureCategory, string> = {
   tool_agents: 'Agentes con herramientas',
   rag_embeddings: 'RAG / Embeddings',
   async_queue: 'Cola asincrona',
-  realtime_voice: 'Voz en tiempo real',
+  realtime_voice: 'Voz (dictado y lectura de respuestas)',
 };
 
 export interface AIEngineApp {

@@ -138,6 +138,10 @@ export interface VexiSettings {
   enabled?: boolean;
 
   /**
+   * @deprecated T16/N5 — la tienda ya no configura el motor de voz (lo define
+   * superadmin; la voz es solo por API). El backend lo acepta y lo ignora.
+   * Se conserva el tipo mientras otros archivos aún lo leen.
+   *
    * Which engine answers a voice turn: `realtime` (WebRTC speech-to-speech) or
    * `pipeline` (transcribe → the chat's text agent → dictate).
    *

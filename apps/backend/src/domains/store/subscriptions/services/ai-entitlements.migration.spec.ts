@@ -5,9 +5,11 @@ import {
   aiFeatureFlagsFor,
 } from '../../../../../prisma/seeds/plan-commercial-lines.seed';
 import { syncSeedPlanAIEntitlements } from '../../../../../prisma/seeds/shared/plan-ai-entitlements';
+import { writeAIEntitlementsToLegacyFlags } from './ai-entitlements.logic';
 import {
   AI_CAPABILITIES,
   AIEntitlement,
+  legacyCapToCapValue,
   legacyFlagsToAIEntitlements,
 } from '../types/ai-capabilities';
 
@@ -89,7 +91,7 @@ describe('M3 — backfill of plan_ai_entitlements from ai_feature_flags (T11)', 
       {},
       [],
       {
-        vex_agent: { enabled: 'true', daily_messages_cap: '100', degradation: 'block' },
+        vex_agent: { enabled: true, daily_messages_cap: '100', degradation: 'block' },
         streaming_chat: { enabled: true, daily_messages_cap: 0 },
         realtime_voice: { enabled: true, monthly_voice_seconds_cap: -5 },
         text_generation: { enabled: true, monthly_tokens_cap: 12.9 },
@@ -104,6 +106,16 @@ describe('M3 — backfill of plan_ai_entitlements from ai_feature_flags (T11)', 
         rows: legacyFlagsToAIEntitlements(flags),
       });
     }
+  });
+
+  it('still copies a feature without a boolean enabled as off: the reason for the corrective migration (separate data PR)', () => {
+    const flags = { vex_agent: { daily_messages_cap: 10 } };
+    expect(evaluateM3(flags).find((r) => r.agent_key === 'vex' && r.capability_key === 'agent')).toMatchObject({
+      enabled: false,
+    });
+    expect(
+      legacyFlagsToAIEntitlements(flags).find((r) => r.agent_key === 'vex' && r.capability_key === 'agent'),
+    ).toMatchObject({ enabled: true, cap_value: 10 });
   });
 
   it('the SQL carries the rules the evaluator models', () => {
@@ -127,6 +139,57 @@ describe('M3 — backfill of plan_ai_entitlements from ai_feature_flags (T11)', 
     expect(STATEMENTS).toMatch(
       /ON CONFLICT \("plan_id", "agent_key", "capability_key"\) DO NOTHING;/,
     );
+  });
+});
+
+describe('catalog translation mirrors the gate (F1, F6)', () => {
+  const find = (flags: unknown, agent: string, capability: string) =>
+    legacyFlagsToAIEntitlements(flags).find(
+      (r) => r.agent_key === agent && r.capability_key === capability,
+    )!;
+
+  it('a feature object without enabled is on (the gate only blocks enabled === false)', () => {
+    expect(find({ vex_agent: { daily_messages_cap: 10 } }, 'vex', 'agent').enabled).toBe(true);
+  });
+
+  it('enabled as the text "true" is on (the gate does not block it)', () => {
+    expect(find({ streaming_chat: { enabled: 'true' } }, 'vexi', 'agent').enabled).toBe(true);
+  });
+
+  it('enabled: false is off, and an absent feature stays off', () => {
+    expect(find({ vex_agent: { enabled: false } }, 'vex', 'agent').enabled).toBe(false);
+    expect(find({}, 'vex', 'agent').enabled).toBe(false);
+  });
+
+  it('a cap of 2^63 or more is no limit (NULL), like the SQL', () => {
+    const flags = { vex_agent: { enabled: true, daily_messages_cap: 2 ** 63 } };
+    expect(find(flags, 'vex', 'agent').cap_value).toBeNull();
+    expect(legacyCapToCapValue(Number.POSITIVE_INFINITY)).toBeNull();
+    expect(legacyCapToCapValue(Number.NaN)).toBeNull();
+  });
+
+  it('a fractional cap that truncates to 0 is no limit, never 0', () => {
+    const flags = { vex_agent: { enabled: true, daily_messages_cap: 0.5 } };
+    expect(find(flags, 'vex', 'agent').cap_value).toBeNull();
+  });
+
+  it('a fractional cap above 1 truncates', () => {
+    const flags = { vex_agent: { enabled: true, daily_messages_cap: 3.7 } };
+    expect(find(flags, 'vex', 'agent').cap_value).toBe(3);
+  });
+
+  it('the matrix always writes a boolean enabled for every gated legacy feature', () => {
+    const rows = legacyFlagsToAIEntitlements({}).map((row) =>
+      row.agent_key === 'vex' &&
+      (row.capability_key === 'agent' || row.capability_key === 'voice_readout')
+        ? { ...row, enabled: true }
+        : { ...row, enabled: false },
+    );
+    const flags = writeAIEntitlementsToLegacyFlags({ realtime_voice: {} }, rows);
+    expect((flags.realtime_voice as Record<string, unknown>).enabled).toBe(true);
+    for (const feature of ['vex_agent', 'streaming_chat', 'text_generation', 'rag_embeddings']) {
+      expect(typeof (flags[feature] as Record<string, unknown>).enabled).toBe('boolean');
+    }
   });
 });
 
