@@ -10,9 +10,12 @@ import {
   readArtifactPage,
 } from '../../../../ai-engine/context/tool-result-compaction';
 import {
+  applyAggregate,
   applyCompare,
   applyDerive,
+  applyFilters,
   applyJoin,
+  applySort,
   VexBlockCompareSpec,
   VexBlockDeriveError,
   VexBlockDeriveSpec,
@@ -1029,125 +1032,24 @@ export class VexBlockService {
 
   // ── transform ops ─────────────────────────────────────────────────────
 
+  /** filter → sort → aggregate, numeric-aware (see vex-block-derive.ts). */
   private applyOps(
     rows: Array<Record<string, any>>,
     ops: VexBlockTransform,
   ): Array<Record<string, any>> {
-    let out = [...rows];
-    for (const f of ops.filter ?? []) {
-      out = out.filter((r) => this.matches(r[f.field], f.op, f.value));
-    }
-    const sorts = ops.sort ?? [];
-    if (sorts.length > 0) {
-      out.sort((a, b) => {
-        for (const s of sorts) {
-          const dir = s.direction === 'desc' ? -1 : 1;
-          const av = a[s.field];
-          const bv = b[s.field];
-          if (av === bv) continue;
-          if (av === null || av === undefined) return 1;
-          if (bv === null || bv === undefined) return -1;
-          return (av < bv ? -1 : 1) * dir;
-        }
-        return 0;
-      });
-    }
-    if (ops.group_by || ops.aggregate) {
-      out = this.aggregate(out, ops.group_by, ops.aggregate);
-    }
-    return out;
-  }
-
-  private matches(field: unknown, op: string, value: unknown): boolean {
-    switch (op) {
-      case 'eq':
-        return field === value;
-      case 'neq':
-        return field !== value;
-      case 'gt':
-        return (
-          typeof field === 'number' &&
-          typeof value === 'number' &&
-          field > value
+    try {
+      let out = applyFilters(rows, ops.filter ?? []);
+      out = applySort(out, ops.sort ?? []);
+      if (ops.aggregate) out = applyAggregate(out, ops.group_by, ops.aggregate);
+      return out;
+    } catch (error) {
+      if (error instanceof VexBlockDeriveError) {
+        throw new VendixHttpException(
+          ErrorCodes.SYS_VALIDATION_001,
+          error.message,
         );
-      case 'gte':
-        return (
-          typeof field === 'number' &&
-          typeof value === 'number' &&
-          field >= value
-        );
-      case 'lt':
-        return (
-          typeof field === 'number' &&
-          typeof value === 'number' &&
-          field < value
-        );
-      case 'lte':
-        return (
-          typeof field === 'number' &&
-          typeof value === 'number' &&
-          field <= value
-        );
-      case 'contains':
-        return (
-          typeof field === 'string' &&
-          typeof value === 'string' &&
-          field.toLowerCase().includes(value.toLowerCase())
-        );
-      case 'in':
-        return Array.isArray(value) && value.includes(field);
-      default:
-        return false;
-    }
-  }
-
-  private aggregate(
-    rows: Array<Record<string, any>>,
-    groupBy: string | undefined,
-    aggregate: VexBlockTransform['aggregate'],
-  ): Array<Record<string, any>> {
-    if (!aggregate) return rows;
-    const groups = new Map<string, Array<Record<string, any>>>();
-    for (const row of rows) {
-      const key = groupBy ? String(row[groupBy] ?? '—') : 'total';
-      const bucket = groups.get(key);
-      if (bucket) bucket.push(row);
-      else groups.set(key, [row]);
-    }
-    const out: Array<Record<string, any>> = [];
-    for (const [key, bucket] of groups) {
-      const numbers = bucket
-        .map((r) => r[aggregate.field])
-        .filter((v): v is number => typeof v === 'number');
-      let value: number;
-      switch (aggregate.function) {
-        case 'sum':
-          value = numbers.reduce((a, b) => a + b, 0);
-          break;
-        case 'avg':
-          value = numbers.length
-            ? numbers.reduce((a, b) => a + b, 0) / numbers.length
-            : 0;
-          break;
-        case 'count':
-          value = bucket.length;
-          break;
-        case 'min':
-          value = numbers.length ? Math.min(...numbers) : 0;
-          break;
-        case 'max':
-          value = numbers.length ? Math.max(...numbers) : 0;
-          break;
       }
-      out.push(
-        groupBy
-          ? {
-              [groupBy]: key,
-              [`${aggregate.function}_${aggregate.field}`]: value,
-            }
-          : { [`${aggregate.function}_${aggregate.field}`]: value },
-      );
+      throw error;
     }
-    return out;
   }
 }

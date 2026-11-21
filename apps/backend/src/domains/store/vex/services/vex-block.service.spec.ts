@@ -689,6 +689,127 @@ describe('VexBlockService', () => {
     expect((original.data as any).rows[0].margen).toBeUndefined();
   });
 
+  describe('derived decimal columns through filter, sort and aggregate', () => {
+    const marginTable = () =>
+      service.create({
+        conversation_id: 1,
+        kind: 'table',
+        data: {
+          columns: [
+            { key: 'categoria', label: 'Categoría' },
+            { key: 'ingreso', label: 'Ingreso' },
+            { key: 'costo', label: 'Costo' },
+          ],
+          rows: [
+            { categoria: 'pan', ingreso: 100, costo: 91 }, // 9
+            { categoria: 'café', ingreso: 1000, costo: 548 }, // 45.2
+            { categoria: 'agua', ingreso: 50, costo: 0 }, // 100
+            { categoria: 'regalo', ingreso: 0, costo: 10 }, // sin base
+          ],
+        },
+      });
+    const derive = [{ name: 'margen', expression: 'margin(ingreso, costo)' }];
+
+    it('derive + sort ranks by number, not by text', async () => {
+      const created = await marginTable();
+      const out = await service.transform(created.id, {
+        derive,
+        sort: [{ field: 'margen', direction: 'desc' }],
+      });
+      expect((out.data as any).rows.map((r: any) => r.margen)).toEqual([
+        '100',
+        '45.2',
+        '9',
+        null,
+      ]);
+    });
+
+    it('derive + filter keeps the rows above the threshold', async () => {
+      const created = await marginTable();
+      const out = await service.transform(created.id, {
+        derive,
+        filter: [{ field: 'margen', op: 'gt', value: 5 }],
+      });
+      expect((out.data as any).rows.map((r: any) => r.categoria)).toEqual([
+        'pan',
+        'café',
+        'agua',
+      ]);
+    });
+
+    it('derive + aggregate adds the derived column', async () => {
+      const created = await marginTable();
+      const sum = await service.transform(created.id, {
+        derive,
+        aggregate: { field: 'margen', function: 'sum' },
+      });
+      expect((sum.data as any).rows).toEqual([{ sum_margen: '154.2' }]);
+      const max = await service.transform(created.id, {
+        derive,
+        aggregate: { field: 'margen', function: 'max' },
+      });
+      expect((max.data as any).rows).toEqual([{ max_margen: '100' }]);
+    });
+
+    it('compare + sort ranks pct_change by number, and aggregates it', async () => {
+      const created = await service.create({
+        conversation_id: 1,
+        kind: 'table',
+        data: {
+          columns: [
+            { key: 'categoria', label: 'Categoría' },
+            { key: 'mes', label: 'Mes' },
+            { key: 'total', label: 'Total' },
+          ],
+          rows: [
+            { categoria: 'pan', mes: '2026-09', total: 100 },
+            { categoria: 'pan', mes: '2026-10', total: 109 }, // 9
+            { categoria: 'café', mes: '2026-09', total: 100 },
+            { categoria: 'café', mes: '2026-10', total: 200 }, // 100
+            { categoria: 'té', mes: '2026-09', total: 100 },
+            { categoria: 'té', mes: '2026-10', total: 55 }, // -45
+          ],
+        },
+      });
+      const compare = {
+        key: 'categoria',
+        period_field: 'mes',
+        current: '2026-10',
+        previous: '2026-09',
+        value_field: 'total',
+      };
+      const sorted = await service.transform(created.id, {
+        compare,
+        sort: [{ field: 'pct_change', direction: 'desc' }],
+      });
+      expect(
+        (sorted.data as any).rows.map((r: any) => [r.categoria, r.pct_change]),
+      ).toEqual([
+        ['café', '100'],
+        ['pan', '9'],
+        ['té', '-45'],
+      ]);
+      const grew = await service.transform(created.id, {
+        compare,
+        filter: [{ field: 'pct_change', op: 'gte', value: 9 }],
+        aggregate: { field: 'delta', function: 'sum' },
+      });
+      expect((grew.data as any).rows).toEqual([{ sum_delta: '109' }]);
+    });
+
+    it('a range filter on a text column is a validation error, not zero rows', async () => {
+      const created = await marginTable();
+      await expect(
+        service.transform(created.id, {
+          filter: [{ field: 'categoria', op: 'gt', value: 5 }],
+        }),
+      ).rejects.toMatchObject({
+        errorCode: 'SYS_VALIDATION_001',
+        message: expect.stringContaining('no aplica a "categoria"'),
+      });
+    });
+  });
+
   it('compares two periods per key with a null variation when there is no base', async () => {
     const created = await service.create({
       conversation_id: 1,

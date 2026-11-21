@@ -1,8 +1,11 @@
 import {
   VexBlockDeriveError,
+  applyAggregate,
   applyCompare,
   applyDerive,
+  applyFilters,
   applyJoin,
+  applySort,
   normalizeColumnName,
 } from './vex-block-derive';
 import {
@@ -195,5 +198,129 @@ describe('magnitud acotada en celdas (sin DoS por exponente)', () => {
     for (const v of Object.values(out[0])) {
       expect(String(v).length).toBeLessThanOrEqual(128);
     }
+  });
+});
+
+describe('filter / sort / aggregate sobre decimales en texto', () => {
+  const rows = [
+    { cat: 'a', margen: '9' },
+    { cat: 'b', margen: '45.2' },
+    { cat: 'c', margen: '100' },
+    { cat: 'd', margen: null },
+  ];
+
+  it('ordena numéricamente, con nulos al final en ambos sentidos', () => {
+    const desc = applySort(rows, [{ field: 'margen', direction: 'desc' }]);
+    expect(desc.map((r) => r.margen)).toEqual(['100', '45.2', '9', null]);
+    const asc = applySort(rows, [{ field: 'margen' }]);
+    expect(asc.map((r) => r.margen)).toEqual(['9', '45.2', '100', null]);
+    // No muta la entrada.
+    expect(rows[0].margen).toBe('9');
+  });
+
+  it('mezcla números y decimales en texto en la misma columna', () => {
+    const out = applySort([{ v: '10' }, { v: 9 }, { v: '-2.5' }, { v: 100 }], [
+      { field: 'v' },
+    ]);
+    expect(out.map((r) => r.v)).toEqual(['-2.5', 9, '10', 100]);
+  });
+
+  it('una columna de texto sigue ordenándose como texto', () => {
+    const out = applySort(
+      [{ n: 'pera' }, { n: 'café' }, { n: '10 cajas' }, { n: '9 cajas' }],
+      [{ field: 'n' }],
+    );
+    expect(out.map((r) => r.n)).toEqual(['10 cajas', '9 cajas', 'café', 'pera']);
+  });
+
+  it('desempata por el segundo criterio cuando el decimal es igual', () => {
+    const out = applySort(
+      [
+        { m: '5.0', n: 'b' },
+        { m: '5', n: 'a' },
+        { m: '7', n: 'c' },
+      ],
+      [{ field: 'm', direction: 'desc' }, { field: 'n' }],
+    );
+    expect(out.map((r) => r.n)).toEqual(['c', 'a', 'b']);
+  });
+
+  it.each([
+    ['gt', 9, ['45.2', '100']],
+    ['gte', 9, ['9', '45.2', '100']],
+    ['lt', '45.2', ['9']],
+    ['lte', 45.2, ['9', '45.2']],
+  ])('filtra %s %s con decimales exactos', (op, value, expected) => {
+    const out = applyFilters(rows, [{ field: 'margen', op, value }]);
+    expect(out.map((r) => r.margen)).toEqual(expected);
+  });
+
+  it('un filtro de rango sobre texto es un error claro, no 0 filas', () => {
+    expect(() =>
+      applyFilters([{ n: 'café' }], [{ field: 'n', op: 'gt', value: 5 }]),
+    ).toThrow(/no aplica a "n".*fila 1.*café/);
+    expect(() =>
+      applyFilters(rows, [{ field: 'margen', op: 'gt', value: 'alto' }]),
+    ).toThrow(/necesita un valor numérico/);
+    expect(() =>
+      applyFilters(rows, [{ field: 'marjen', op: 'gt', value: 5 }]),
+    ).toThrow(/no existe/);
+    expect(() =>
+      applyFilters([{ v: '1e20000000' }], [{ field: 'v', op: 'gt', value: 5 }]),
+    ).toThrow(VexBlockDeriveError);
+  });
+
+  it('eq, neq e in igualan un decimal en texto con su número', () => {
+    expect(applyFilters(rows, [{ field: 'margen', op: 'eq', value: 9 }])).toHaveLength(1);
+    expect(applyFilters(rows, [{ field: 'margen', op: 'neq', value: 9 }])).toHaveLength(3);
+    expect(
+      applyFilters(rows, [{ field: 'margen', op: 'in', value: [100, 45.2] }]),
+    ).toHaveLength(2);
+    // El texto sigue siendo estricto.
+    expect(applyFilters(rows, [{ field: 'cat', op: 'eq', value: 'a' }])).toHaveLength(1);
+    expect(applyFilters(rows, [{ field: 'cat', op: 'contains', value: 'B' }])).toHaveLength(1);
+  });
+
+  it.each([
+    ['sum', '154.2'],
+    ['avg', '51.4'],
+    ['min', '9'],
+    ['max', '100'],
+  ] as const)('agrega %s sobre decimales en texto', (fn, expected) => {
+    const out = applyAggregate(rows, undefined, { field: 'margen', function: fn });
+    expect(out).toEqual([{ [`${fn}_margen`]: expected }]);
+  });
+
+  it('la suma decimal es exacta (0.1 + 0.2 = 0.3) y agrupa', () => {
+    const out = applyAggregate(
+      [
+        { g: 'x', v: '0.1' },
+        { g: 'x', v: '0.2' },
+        { g: 'y', v: '5' },
+      ],
+      'g',
+      { field: 'v', function: 'sum' },
+    );
+    expect(out).toEqual([
+      { g: 'x', sum_v: '0.3' },
+      { g: 'y', sum_v: '5' },
+    ]);
+  });
+
+  it('una columna solo de números JS conserva el resultado numérico de siempre', () => {
+    const nums = [{ v: 2 }, { v: 9 }, { v: 5 }, { v: 'n/d' }];
+    expect(applyAggregate(nums, undefined, { field: 'v', function: 'sum' })).toEqual([{ sum_v: 16 }]);
+    expect(applyAggregate(nums, undefined, { field: 'v', function: 'max' })).toEqual([{ max_v: 9 }]);
+    expect(applyAggregate(nums, undefined, { field: 'v', function: 'count' })).toEqual([{ count_v: 4 }]);
+    expect(applyAggregate([{ v: 'x' }], undefined, { field: 'v', function: 'avg' })).toEqual([{ avg_v: 0 }]);
+  });
+
+  it('agregar una celda fuera de rango es un error, no una cifra parcial', () => {
+    expect(() =>
+      applyAggregate([{ v: '1e20000000' }, { v: '2' }], undefined, {
+        field: 'v',
+        function: 'sum',
+      }),
+    ).toThrow(VexBlockDeriveError);
   });
 });
