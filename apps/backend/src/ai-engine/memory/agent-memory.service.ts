@@ -113,7 +113,7 @@ const SECRET_PATTERNS: RegExp[] = [
 /** True when the text looks like a password, card, identity document or API key. */
 export function looksLikeSecret(text: string): boolean {
   if (SECRET_PATTERNS.some((pattern) => pattern.test(text))) return true;
-  const runs = text.match(/\d(?:[ -]?\d){12,18}/g) ?? [];
+  const runs: string[] = text.match(/\d(?:[ -]?\d){12,18}/g) ?? [];
   return runs.some((run) => luhn(run.replace(/\D/g, '')));
 }
 
