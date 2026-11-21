@@ -38,9 +38,11 @@
 --   Dry-run: no ejecutado en esta máquina (sin Postgres local ni Docker en
 --     marcha). La equivalencia con legacyFlagsToAIEntitlements está fijada
 --     por src/domains/store/subscriptions/services/ai-entitlements.migration.spec.ts.
---   Approval: plan Vex Plus aprobado por Rafael (encargo F2, 2026-11-20):
---     "sin UPDATE/INSERT salvo lo que T11 exija para migrar planes — en ese
---     caso, dentro de la migración con WHERE acotado y explicando el rollback".
+--   Approval: Rafael aprobó el plan Vex Plus y ordenó implementarlo (2026-11-20).
+--     La regla (INSERT acotado solo para T11, con rollback explicado) viene del
+--     brief de implementación, no de una cita de Rafael. Esto NO es el GO de
+--     producción: requiere snapshot + dry-run sobre planes reales y GO explícito
+--     de Rafael en el release.
 
 INSERT INTO "plan_ai_entitlements"
   ("plan_id", "agent_key", "capability_key", "enabled", "cap_value", "on_limit")

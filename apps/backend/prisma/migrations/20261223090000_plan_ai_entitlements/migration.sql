@@ -28,9 +28,10 @@
 --   Reversa: la tabla no tiene lector que decida acceso mientras dure el modo
 --     sombra. Para retirarla, renombrar a plan_ai_entitlements_deprecated_YYYYMMDD
 --     en una migración nueva; nunca DROP directo.
---   Approval: plan Vex Plus aprobado por Rafael (encargo F2, 2026-11-20):
---     "Migraciones Prisma (M2, M3): solo aditivas, con cabecera DATA IMPACT
---     honesta, idempotentes".
+--   Approval: Rafael aprobó el plan Vex Plus y ordenó implementarlo (2026-11-20).
+--     La forma (aditiva, idempotente, cabecera DATA IMPACT) viene del brief de
+--     implementación, no de una cita de Rafael. Esto NO es el GO de producción:
+--     aplicarla en prod requiere GO explícito de Rafael en el release.
 
 DO $$ BEGIN
   IF NOT EXISTS (SELECT 1 FROM pg_type WHERE typname = 'ai_entitlement_on_limit_enum') THEN
