@@ -11,6 +11,7 @@ import {
   AICapabilityDefinition,
   AIEntitlement,
   AIOnLimit,
+  aiCapAcceptsZero,
   aiCapabilityHasCap,
   aiCapabilityId,
   defaultAIEntitlement,
@@ -210,8 +211,9 @@ export const LEGACY_FEATURES_FOLDED_INTO_VEXI = ['conversations', 'tool_agents']
  * - `degradation` is `block` when any of those rows blocks at the limit.
  *
  * A cap of 0 is not representable in the legacy JSON (absent or <= 0 meant
- * unlimited): the shadow comparison reads it as new granularity, never as a
- * legacy field out of step.
+ * unlimited). A 0 that blocks on a switched row projects as that switch off;
+ * any other 0 is refused at save (`aiCapAcceptsZero`) and, if a row still
+ * holds one, the shadow comparison reports it as a divergence.
  */
 export function projectAIEntitlementsToLegacy(
   rows: readonly AIEntitlement[],
@@ -364,11 +366,20 @@ export function compareAIEntitlements(
       if (before.on_limit !== after.on_limit) dims.push('on_limit');
     }
     if (!dims.length) continue;
+    const row = current.get(aiCapabilityId(def.agent_key, def.capability_key));
+    // A 0 the save refuses (cap-only row, or a 0 that warns) reads as unlimited
+    // in the legacy JSON: that widens what the gate enforces, so it can never
+    // pass as new granularity.
+    const unenforceableZero =
+      after.effective &&
+      row?.cap_value === 0 &&
+      !aiCapAcceptsZero(def, row.on_limit);
     diffs.push({
       capability: aiCapabilityId(def.agent_key, def.capability_key),
-      kind: legacyFieldMismatch(def, dims, legacyRoot, projection)
-        ? 'divergence'
-        : 'new_model_only',
+      kind:
+        unenforceableZero || legacyFieldMismatch(def, dims, legacyRoot, projection)
+          ? 'divergence'
+          : 'new_model_only',
       legacy: describeDecision(def, before),
       current: describeDecision(def, after),
     });
@@ -388,7 +399,9 @@ export function aiEntitlementDiffSignature(diffs: AIEntitlementDiff[]): string {
  * still decides with it, given the rows the superadmin saved. Only the fields
  * the rows own change (`enabled` of a gated feature, its cap fields and
  * `degradation`); a NULL or 0 cap removes the field (absent = unlimited in the
- * old model, which cannot hold "0 = nothing"). `conversations` and
+ * old model, which cannot hold "0 = nothing"; the save only lets through a 0
+ * that blocks on a switched row, which projects as that switch off).
+ * `conversations` and
  * `tool_agents` take the `enabled` of the Vexi agent (they fold into it); their
  * other fields stay. Every other key (`tools_allowed`, `agents_allowed`, other features,
  * unknown fields) is kept as it was. Never mutates `flags`.

@@ -9,6 +9,7 @@ import { CreatePlanDto } from '../dto';
 import {
   AI_CAPABILITIES,
   AIEntitlement,
+  aiCapAcceptsZero,
   aiCapabilityId,
   legacyFlagsToAIEntitlements,
 } from '../../../store/subscriptions/types/ai-capabilities';
@@ -262,6 +263,16 @@ describe('PlansService — ai_entitlements (T12)', () => {
       ['an unknown capability', [row('vex.teleport')], 'vex.teleport is not an AI capability'],
       ['a repeated capability', [row('vex.agent'), row('vex.agent')], 'vex.agent is repeated'],
       ['a cap on a capability without one', [row('vex.files', { cap_value: 3 })], 'vex.files does not take a cap'],
+      [
+        'a cap of 0 on a cap-only capability (the legacy gate would read it as unlimited)',
+        [row('vex.model_tokens', { cap_value: 0 })],
+        'vex.model_tokens cannot take a cap of 0',
+      ],
+      [
+        'a cap of 0 that warns at the limit',
+        [row('vex.voice_readout', { cap_value: 0, on_limit: 'warn' })],
+        'vex.voice_readout cannot take a cap of 0',
+      ],
     ])('rejects %s with SUBSCRIPTION_VALIDATION and writes nothing', async (_label, rows, message) => {
       prisma.subscription_plans.findUnique.mockResolvedValue(null);
 
@@ -479,6 +490,14 @@ describe('dual write keeps the shadow comparison at zero divergences (T12)', () 
         cap_value: def.kind === 'toggle' ? null : r < 0.2 ? null : r < 0.3 ? 0 : Math.floor(r * 10_000),
         on_limit: next() > 0.5 ? 'block' : 'warn',
       } as AIEntitlement;
+    }).map((row) => {
+      // Only what the save accepts: a 0 the legacy gate cannot enforce is a 400.
+      const def = AI_CAPABILITIES.find(
+        (c) => c.agent_key === row.agent_key && c.capability_key === row.capability_key,
+      )!;
+      return row.cap_value === 0 && !aiCapAcceptsZero(def, row.on_limit)
+        ? { ...row, cap_value: 1 }
+        : row;
     });
   }
 
@@ -493,6 +512,29 @@ describe('dual write keeps the shadow comparison at zero divergences (T12)', () 
     }
     expect(ids).toHaveLength(11);
   });
+
+  it.each([
+    ['vex.model_tokens', 'vex_agent'],
+    ['vexi.model_tokens', 'text_generation'],
+  ])(
+    'a 0 on %s that the legacy JSON cannot hold (it reads as unlimited) is a divergence, never new_model_only',
+    (id, feature) => {
+      const legacy = {
+        ...LEGACY_FLAGS,
+        vex_agent: { enabled: true, daily_messages_cap: 200, monthly_tokens_cap: 200_000_000, degradation: 'block' },
+        text_generation: { enabled: true, monthly_tokens_cap: 5_000_000, degradation: 'block' },
+      };
+      const rows = legacyFlagsToAIEntitlements(legacy).map((r) =>
+        aiCapabilityId(r.agent_key, r.capability_key) === id
+          ? { ...r, cap_value: 0, on_limit: 'block' as const }
+          : r,
+      );
+      const flags = writeAIEntitlementsToLegacyFlags(legacy, rows);
+      const diff = compareAIEntitlements(flags, rows).find((d) => d.capability === id);
+      expect(diff?.kind).toBe('divergence');
+      expect((flags[feature] as Record<string, unknown>).enabled).toBe(true);
+    },
+  );
 
   it('a NULL cap removes the legacy field (absent = unlimited) and keeps unrelated keys', () => {
     const flags = writeAIEntitlementsToLegacyFlags(

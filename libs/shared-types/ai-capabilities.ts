@@ -284,6 +284,21 @@ export function aiCapabilityHasCap(def: AICapabilityDefinition): boolean {
   return def.kind !== 'toggle';
 }
 
+/**
+ * Whether a plan may save a cap of 0 («nada») on a capability. While the gate
+ * still decides with the legacy `ai_feature_flags` (shadow mode, until T20), a
+ * 0 is only enforceable when it blocks on a capability with its own switch:
+ * the dual write turns that switch off. A cap-only capability (model tokens)
+ * has no switch and a 0 that warns projects nothing, so the legacy gate would
+ * read either as unlimited.
+ */
+export function aiCapAcceptsZero(
+  def: AICapabilityDefinition,
+  onLimit: AIOnLimit,
+): boolean {
+  return def.kind !== 'cap' && onLimit === 'block';
+}
+
 /** The entitlement of a capability that a plan has no row for: off, no cap. */
 export function defaultAIEntitlement(
   def: AICapabilityDefinition,

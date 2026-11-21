@@ -3,6 +3,7 @@ import { VendixHttpException, ErrorCodes } from '../../../../common/errors';
 import {
   AI_CAPABILITIES,
   AIEntitlement,
+  aiCapAcceptsZero,
   aiCapabilityHasCap,
   aiCapabilityId,
   findAICapability,
@@ -34,8 +35,9 @@ type PlanAIEntitlementClient = Pick<
 
 /**
  * `ai_entitlements` checked against the catalog before any write: an unknown
- * or repeated agent/capability pair, or a number on a capability without a
- * cap, is a 400 (SUBSCRIPTION_VALIDATION), never dropped in silence.
+ * or repeated agent/capability pair, a number on a capability without a cap,
+ * or a 0 the legacy gate cannot enforce (`aiCapAcceptsZero`) is a 400
+ * (SUBSCRIPTION_VALIDATION), never dropped in silence.
  * `undefined` = the caller did not send the field.
  */
 export function parsePlanAIEntitlements(
@@ -51,6 +53,14 @@ export function parsePlanAIEntitlements(
     else if (seen.has(id)) problems.push(`${id} is repeated`);
     else if (!aiCapabilityHasCap(def) && row.cap_value != null) {
       problems.push(`${id} does not take a cap`);
+    } else if (
+      row.cap_value === 0 &&
+      !aiCapAcceptsZero(def, row.on_limit as AIEntitlement['on_limit'])
+    ) {
+      // The legacy gate still decides and reads a 0 there as unlimited.
+      problems.push(
+        `${id} cannot take a cap of 0 (it would not be enforced); set a positive cap or switch it off`,
+      );
     }
     seen.add(id);
   }

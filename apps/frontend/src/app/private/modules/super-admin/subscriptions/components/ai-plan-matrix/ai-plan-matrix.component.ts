@@ -9,6 +9,7 @@ import {
   AIAgentKey,
   AIEntitlement,
   AIOnLimit,
+  aiCapAcceptsZero,
   aiCapabilityHasCap,
   aiCapabilityId,
   aiCapabilitiesForAgent,
@@ -39,7 +40,9 @@ interface AIRowView {
   unlimited: boolean;
   inputValue: string;
   unitText: string;
-  isZero: boolean;
+  /** Lowest value the input takes, in its display unit (0 only where a 0 is enforced). */
+  minDisplay: number;
+  capHint: string;
 }
 
 interface AICardView {
@@ -126,8 +129,8 @@ const ON_LIMIT_OPTIONS: { value: AIOnLimit; label: string }[] = [
                       <app-input
                         type="number"
                         [label]="item.unitText"
-                        [min]="0"
-                        [helperText]="item.isZero && !item.unlimited ? '0 = no permite usarlo' : ''"
+                        [min]="item.minDisplay"
+                        [helperText]="item.capHint"
                         [disabled]="item.locked || item.unlimited"
                         [ngModel]="item.inputValue"
                         (ngModelChange)="setCap(item.def, $event)"
@@ -218,6 +221,7 @@ export class AIPlanMatrixComponent {
         const hasCap = aiCapabilityHasCap(def);
         const showSwitch = def.kind !== 'cap';
         const unlimited = row.cap_value === null;
+        const zeroOk = aiCapAcceptsZero(def, row.on_limit);
         return {
           id,
           def,
@@ -228,7 +232,14 @@ export class AIPlanMatrixComponent {
           unlimited,
           inputValue: unlimited ? '' : String(this.toDisplay(def, row.cap_value as number)),
           unitText: this.unitText(def),
-          isZero: row.cap_value === 0,
+          minDisplay: zeroOk ? 0 : this.toDisplay(def, this.minPositiveCap(def)),
+          capHint: unlimited
+            ? ''
+            : row.cap_value === 0
+              ? '0 = no permite usarlo'
+              : def.kind === 'cap'
+                ? 'Para no permitirlo, apaga el agente.'
+                : '',
         };
       });
       return { agent, title: AI_AGENT_LABELS[agent], rows };
@@ -240,21 +251,29 @@ export class AIPlanMatrixComponent {
   }
 
   setUnlimited(def: AICapabilityDefinition, unlimited: boolean): void {
-    // Unchecking starts from an explicit 0 («nada») so the choice stays visible.
-    this.patch(aiCapabilityId(def.agent_key, def.capability_key), { cap_value: unlimited ? null : 0 });
+    // Unchecking starts from the lowest cap the plan can enforce: an explicit 0
+    // («nada») where a 0 blocks a switched capability, otherwise the minimum.
+    const id = aiCapabilityId(def.agent_key, def.capability_key);
+    this.patch(id, { cap_value: unlimited ? null : this.lowestCap(def, this.rowOf(id).on_limit) });
   }
 
   setCap(def: AICapabilityDefinition, text: string | number | null): void {
-    const typed = Number(text === null || text === '' ? 0 : text);
-    const shown = Number.isFinite(typed) ? Math.max(0, typed) : 0;
-    this.patch(aiCapabilityId(def.agent_key, def.capability_key), {
-      cap_value: this.fromDisplay(def, shown),
-    });
+    const id = aiCapabilityId(def.agent_key, def.capability_key);
+    const lowest = this.lowestCap(def, this.rowOf(id).on_limit);
+    const typed = Number(text === null || text === '' ? Number.NaN : text);
+    const stored = Number.isFinite(typed) ? this.fromDisplay(def, Math.max(0, typed)) : lowest;
+    this.patch(id, { cap_value: Math.max(lowest, stored) });
   }
 
   setOnLimit(def: AICapabilityDefinition, value: string | number | null): void {
     if (value !== 'block' && value !== 'warn') return;
-    this.patch(aiCapabilityId(def.agent_key, def.capability_key), { on_limit: value });
+    const id = aiCapabilityId(def.agent_key, def.capability_key);
+    const cap = this.rowOf(id).cap_value;
+    // A 0 is only enforced while it blocks: switching to «avisar» lifts it to the minimum.
+    this.patch(id, {
+      on_limit: value,
+      ...(cap !== null ? { cap_value: Math.max(this.lowestCap(def, value), cap) } : {}),
+    });
   }
 
   onPickCopySource(value: string | number | null): void {
@@ -286,6 +305,20 @@ export class AIPlanMatrixComponent {
         aiCapabilityId(row.agent_key, row.capability_key) === id ? { ...row, ...change } : row,
       ),
     );
+  }
+
+  private rowOf(id: string): AIEntitlement {
+    return this.complete().find((row) => aiCapabilityId(row.agent_key, row.capability_key) === id)!;
+  }
+
+  /** Lowest stored cap a save accepts (mirrors the backend `aiCapAcceptsZero` check). */
+  private lowestCap(def: AICapabilityDefinition, onLimit: AIEntitlement['on_limit']): number {
+    return aiCapAcceptsZero(def, onLimit) ? 0 : this.minPositiveCap(def);
+  }
+
+  /** One unit as shown: one minute of voice, otherwise one message, token or record. */
+  private minPositiveCap(def: AICapabilityDefinition): number {
+    return def.cap_unit === 'seconds' ? 60 : 1;
   }
 
   /** Voice is stored in seconds and shown in minutes. */

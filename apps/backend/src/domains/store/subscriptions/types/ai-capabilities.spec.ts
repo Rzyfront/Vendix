@@ -3,6 +3,7 @@ import { join } from 'path';
 import {
   AI_AGENT_KEYS,
   AI_CAPABILITIES,
+  aiCapAcceptsZero,
   aiCapabilityId,
   defaultAIEntitlement,
   describeAIEntitlements,
@@ -107,6 +108,23 @@ describe('ai-capabilities — single catalog of plan AI capabilities (T9)', () =
       expect({ id: c.capability_key, unit: c.cap_unit, period: c.cap_period })
         .toEqual({ id: c.capability_key, unit: null, period: null });
     });
+  });
+
+  it('a cap of 0 is only accepted where the legacy gate can enforce it: blocking, on a capability with its own switch', () => {
+    const accepts = (id: string, onLimit: 'block' | 'warn') => {
+      const [agent, capability] = id.split('.');
+      return aiCapAcceptsZero(findAICapability(agent, capability)!, onLimit);
+    };
+    // Cap-only rows have no switch: the legacy JSON would read 0 as unlimited.
+    expect(accepts('vex.model_tokens', 'block')).toBe(false);
+    expect(accepts('vexi.model_tokens', 'block')).toBe(false);
+    // A 0 that warns projects nothing the legacy gate holds.
+    expect(accepts('vex.voice_readout', 'warn')).toBe(false);
+    expect(accepts('vex.agent', 'warn')).toBe(false);
+    // A 0 that blocks on a switched capability is the same as switching it off.
+    expect(accepts('vex.agent', 'block')).toBe(true);
+    expect(accepts('vexi.voice_readout', 'block')).toBe(true);
+    expect(accepts('platform.smart_search', 'block')).toBe(true);
   });
 
   it('contains no tools and no tool-call cap (N4)', () => {
