@@ -1,4 +1,9 @@
-import { Module } from '@nestjs/common';
+import { Module, OnModuleInit } from '@nestjs/common';
+import { S3Service } from '@common/services/s3.service';
+import { S3PathHelper } from '@common/helpers/s3-path.helper';
+import { StorePrismaService } from '../../../prisma/services/store-prisma.service';
+import { AIToolRegistry } from '../../../ai-engine/tools/ai-tool-registry';
+import { createDocumentTools } from '../../../ai-engine/tools/domains/documents.tools';
 import { ResponseModule } from '@common/responses/response.module';
 import { S3Module } from '@common/services/s3.module';
 import { PrismaModule } from '../../../prisma/prisma.module';
@@ -104,4 +109,26 @@ import { DocumentSearchService } from './search/document-search.service';
     DocumentTemplatesService,
   ],
 })
-export class DocumentsModule {}
+export class DocumentsModule implements OnModuleInit {
+  constructor(
+    private readonly toolRegistry: AIToolRegistry,
+    private readonly prisma: StorePrismaService,
+    private readonly storedFiles: StoredFilesService,
+    private readonly dossiers: DossiersService,
+    private readonly s3: S3Service,
+    private readonly paths: S3PathHelper,
+  ) {}
+
+  /** T44: Vex saves a chat attachment into a record's folder (permission per target entity). */
+  onModuleInit(): void {
+    this.toolRegistry.registerMany(
+      createDocumentTools({
+        prisma: this.prisma,
+        storedFiles: this.storedFiles,
+        dossiers: this.dossiers,
+        s3: this.s3,
+        paths: this.paths,
+      }),
+    );
+  }
+}

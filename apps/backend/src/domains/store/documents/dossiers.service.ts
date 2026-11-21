@@ -27,6 +27,22 @@ export interface AddFileItemInput {
   actor: DocumentActor;
 }
 
+export interface EnsureSubjectDossierInput {
+  subject_type: string;
+  subject_id: number;
+  title: string;
+}
+
+export interface AddSubjectFileItemInput {
+  dossier_id: number;
+  file_id: number;
+  stage_key: string;
+  /** Free label of the kind of document (e.g. `factura`); never a workflow requirement. */
+  field_key: string;
+  note?: string | null;
+  actor: DocumentActor;
+}
+
 export interface AddDocumentItemInput {
   dossier_id: number;
   kind: 'issued_document' | 'signed_document';
@@ -78,6 +94,76 @@ export class DossiersService {
         subject_type: instance.subject_type,
         subject_id: instance.subject_id,
         workflow_instance_id: instance.id,
+      },
+    });
+  }
+
+  /**
+   * Folder of a business record (customer, order, purchase order...) that is
+   * not tied to a workflow: finds the dossier of `subject_type`/`subject_id`
+   * with no workflow instance, or creates it. The store row is locked first
+   * (same strategy as `nextReference`), so two concurrent calls for one record
+   * end with one dossier. Runs in the caller's transaction.
+   */
+  async ensureForSubject(tx: any, input: EnsureSubjectDossierInput) {
+    const c = this.ctx();
+    await tx.$queryRaw`SELECT id FROM stores WHERE id = ${c.store_id} FOR NO KEY UPDATE`;
+    const existing = await tx.dossiers.findFirst({
+      where: {
+        store_id: c.store_id,
+        subject_type: input.subject_type,
+        subject_id: input.subject_id,
+        workflow_instance_id: null,
+      },
+      orderBy: { id: 'asc' },
+    });
+    if (existing) return existing;
+    const reference = await this.nextReference(tx, c.store_id);
+    return tx.dossiers.create({
+      data: {
+        organization_id: c.organization_id,
+        store_id: c.store_id,
+        reference,
+        title: input.title.slice(0, 200),
+        subject_type: input.subject_type,
+        subject_id: input.subject_id,
+        workflow_instance_id: null,
+      },
+    });
+  }
+
+  /**
+   * Files a document in the folder of a record. Unlike `addFileItem` it never
+   * supersedes an earlier item: two invoices of one purchase order are two
+   * documents, not versions of one requirement.
+   */
+  async addSubjectFileItem(tx: any, input: AddSubjectFileItemInput) {
+    const c = this.ctx();
+    const touched = await tx.dossiers.updateMany({
+      where: { id: input.dossier_id, store_id: c.store_id },
+      data: { updated_at: new Date() },
+    });
+    const file = await tx.stored_files.findFirst({
+      where: { id: input.file_id, store_id: c.store_id, deleted_at: null },
+      select: { id: true },
+    });
+    if (touched.count === 0 || !file) {
+      throw new VendixHttpException(ErrorCodes.DOCUMENT_NOT_FOUND);
+    }
+    return tx.dossier_items.create({
+      data: {
+        store_id: c.store_id,
+        dossier_id: input.dossier_id,
+        kind: 'uploaded_file',
+        requirement_key: null,
+        stage_key: input.stage_key,
+        field_key: input.field_key,
+        file_id: input.file_id,
+        note: input.note ?? null,
+        status: 'received',
+        supersedes_id: null,
+        added_by_type: input.actor.type,
+        added_by_id: input.actor.id,
       },
     });
   }
