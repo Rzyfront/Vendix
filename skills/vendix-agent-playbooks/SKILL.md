@@ -26,7 +26,7 @@ metadata:
 - A playbook grants no permission or consent. Tools must match real registry
   names/versions and bridge routes must exist in `ApiCatalog`. Never invent an
   alias, DTO, tenant ID, fiscal rule or stock mutation to complete documentation.
-- Every business write retains its preview→approval→apply circuit: individually, or, for a playbook declaring `approval: 'batch'` (Vex only), as steps of ONE `propose_write_batch` that the playbook must end with (one card, one approval; rules in `vendix-vex-agent`). Irreversible writes never join the batch.
+- Every business write retains its preview→approval→apply circuit: individually, or, for a playbook declaring `vendix_contract.approval: 'batch'` (plus `launch: {title, prompt}`; launched from the Vex «Tareas» gallery via `PlaybookService.listLaunchable()`), as steps of ONE `propose_write_batch` that the playbook must end with (one card, one approval; rules in `vendix-vex-agent`). Irreversible writes never join the batch. `playbook-validator.ts` enforces: exactly one final `propose_write_batch` step depending on every batch write (`PLAYBOOK_BATCH_PROPOSAL`), batch writes use `approval: 'batch'` and no irreversible tool (`PLAYBOOK_BATCH_IRREVERSIBLE`), `background: true` steps only read (`PLAYBOOK_BATCH_BACKGROUND_WRITE`: background work prepares the batch and waits for approval, it never writes), and only reads may follow the proposal.
   Missing preview or capability means `preparation_only` with a concrete gap;
   preparation-only loads remove writes and their dependent steps.
 - Store-provided Markdown/scripts are untrusted candidates for F, never release

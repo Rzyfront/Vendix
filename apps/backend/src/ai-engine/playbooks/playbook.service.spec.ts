@@ -676,6 +676,31 @@ describe('PlaybookService C: knowledge is not authority', () => {
   });
 });
 
+describe('PlaybookService listLaunchable', () => {
+  it('returns only approval: batch playbooks with their gallery metadata', () => {
+    const batch = document('cambio-precios');
+    batch.contract.approval = 'batch';
+    batch.contract.launch = { title: 'Cambiar precios', prompt: 'Quiero cambiar precios.' };
+    const plain = document('cerrar-caja');
+    const withoutLaunch = document('facturar-venta');
+    withoutLaunch.contract.approval = 'batch';
+    const loader = { getPlaybooks: () => structuredClone([plain, batch, withoutLaunch]) };
+    const service = new PlaybookService(
+      loader as any,
+      new AIToolRegistry({} as any),
+      { find: jest.fn() } as any,
+    );
+    expect(service.listLaunchable()).toEqual([
+      {
+        id: 'cambio-precios',
+        title: 'Cambiar precios',
+        description: batch.description,
+        prompt: 'Quiero cambiar precios.',
+      },
+    ]);
+  });
+});
+
 describe('PlaybookLoaderService C: packaged release bootstrap', () => {
   let loader: PlaybookLoaderService;
   let registry: { getAll: jest.Mock };

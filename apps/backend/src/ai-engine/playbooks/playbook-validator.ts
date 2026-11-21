@@ -9,6 +9,8 @@ import {
   PlaybookContract,
 } from './playbook.interface';
 
+/** Vex-only virtual tool that ends a batch playbook; it is not in the shared catalog. */
+export const PROPOSE_WRITE_BATCH = 'propose_write_batch';
 const IDENTIFIER = /^[a-z][a-z0-9]*(?:-[a-z0-9]+)*$/;
 const REQUIRED_SECTIONS = [
   'activation',
@@ -198,6 +200,14 @@ export function parsePlaybookMarkdown(
     !['executable', 'preparation_only'].includes(String(c.mode))
   )
     fail('PLAYBOOK_SCHEMA', 'contract version/mode');
+  if (c.approval !== undefined && c.approval !== 'batch')
+    fail('PLAYBOOK_SCHEMA', 'contract approval');
+  if (c.launch !== undefined) {
+    if (!object(c.launch)) fail('PLAYBOOK_SCHEMA', 'launch');
+    string(c.launch.title, 'launch.title');
+    string(c.launch.prompt, 'launch.prompt');
+  }
+  if (c.approval === 'batch' && !c.launch) fail('PLAYBOOK_SCHEMA', 'launch');
   strings(c.gaps, 'gaps');
   if (
     !Array.isArray(c.inputs) ||
@@ -226,11 +236,13 @@ export function parsePlaybookMarkdown(
       string(step[key], `step.${key}`);
     if (
       !IDENTIFIER.test(step.id as string) ||
-      !['none', 'individual'].includes(String(step.approval))
+      !['none', 'individual', 'batch'].includes(String(step.approval))
     )
       fail('PLAYBOOK_SCHEMA', 'step id/approval');
     strings(step.depends_on, 'depends_on');
     if (step.tool !== undefined) string(step.tool, 'step.tool');
+    if (step.background !== undefined && typeof step.background !== 'boolean')
+      fail('PLAYBOOK_SCHEMA', 'step.background');
     if (step.arguments !== undefined && !object(step.arguments))
       fail('PLAYBOOK_SCHEMA', 'arguments');
     if (
@@ -318,6 +330,52 @@ export function parsePlaybookMarkdown(
   return doc;
 }
 
+/**
+ * A batch playbook ends by proposing exactly one batch: the proposal depends on
+ * every batch write, nothing that writes follows it, and every batch write is
+ * reachable only through it.
+ */
+function validateBatchShape(
+  doc: PlaybookDocument,
+  tools: Map<string, RegisteredTool>,
+): void {
+  const steps = doc.contract.steps;
+  const proposals = steps.filter((s) => s.tool === PROPOSE_WRITE_BATCH);
+  if (proposals.length !== 1) fail('PLAYBOOK_BATCH_PROPOSAL', doc.id);
+  const proposal = proposals[0];
+  const writes = steps.filter(
+    (s) => s.tool && tools.get(s.tool)?.readOnly !== true && s !== proposal,
+  );
+  if (!writes.length) fail('PLAYBOOK_BATCH_PROPOSAL', `${doc.id}:no writes`);
+  for (const write of writes)
+    if (!proposal.depends_on.includes(write.id))
+      fail('PLAYBOOK_BATCH_PROPOSAL', `${doc.id}:${write.id}:not in proposal`);
+  if (proposal.approval !== 'none')
+    fail('PLAYBOOK_BATCH_PROPOSAL', `${doc.id}:proposal approval`);
+  // Whatever follows the proposal may only read (verification after approval).
+  const after = new Set<string>();
+  let grew = true;
+  while (grew) {
+    grew = false;
+    for (const s of steps)
+      if (
+        !after.has(s.id) &&
+        s !== proposal &&
+        (s.depends_on.includes(proposal.id) ||
+          s.depends_on.some((d) => after.has(d)))
+      ) {
+        after.add(s.id);
+        grew = true;
+      }
+  }
+  for (const s of steps)
+    if (
+      after.has(s.id) &&
+      (!s.tool || tools.get(s.tool)?.readOnly !== true)
+    )
+      fail('PLAYBOOK_BATCH_PROPOSAL', `${doc.id}:${s.id}:write after proposal`);
+}
+
 export interface PlaybookValidationCatalog {
   tools: RegisteredTool[];
   endpoints: CatalogEntry[];
@@ -362,6 +420,7 @@ export function validatePlaybookCatalog(
     ];
     for (const [, name] of proseReferences)
       if (
+        name !== PROPOSE_WRITE_BATCH &&
         !doc.contract.inputs.some((input) => input.key === name) &&
         !tools.has(name)
       )
@@ -382,10 +441,15 @@ export function validatePlaybookCatalog(
       visited.add(id);
     };
     doc.contract.steps.forEach((s) => visit(s.id));
+    const batch = doc.contract.approval === 'batch';
+    if (batch) validateBatchShape(doc, tools);
+    else if (doc.contract.steps.some((s) => s.approval === 'batch' || s.tool === PROPOSE_WRITE_BATCH))
+      fail('PLAYBOOK_BATCH_UNDECLARED', doc.id);
     for (const step of doc.contract.steps) {
       if (!doc.sections.some((s) => s.id === step.section))
         fail('PLAYBOOK_SCHEMA', `${doc.id}:step section`);
       if (!step.tool) continue;
+      if (batch && step.tool === PROPOSE_WRITE_BATCH) continue;
       if (!contracts.has(step.tool))
         fail('PLAYBOOK_TOOL_UNDECLARED', `${doc.id}:${step.tool}`);
       const tool = tools.get(step.tool)!;
@@ -405,8 +469,12 @@ export function validatePlaybookCatalog(
       });
       if (tool.clientSide)
         fail('PLAYBOOK_TOOL_CLIENT_SIDE', `${doc.id}:${step.tool}`);
+      if (batch && step.background && tool.readOnly !== true)
+        fail('PLAYBOOK_BATCH_BACKGROUND_WRITE', `${doc.id}:${step.id}`);
+      if (batch && tool.irreversible === true)
+        fail('PLAYBOOK_BATCH_IRREVERSIBLE', `${doc.id}:${step.id}`);
       if (tool.readOnly !== true) {
-        if (step.approval !== 'individual')
+        if (step.approval !== (batch ? 'batch' : 'individual'))
           fail('PLAYBOOK_APPROVAL', `${doc.id}:${step.id}`);
         if (!tool.requiresConfirmation || typeof tool.preview !== 'function') {
           doc.contract.mode = 'preparation_only';

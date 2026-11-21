@@ -58,6 +58,13 @@ export interface LoadedPlaybook {
     remaining_tokens: number;
   };
 }
+/** Gallery entry of a playbook that ends by proposing one write batch. */
+export interface LaunchablePlaybook {
+  id: string;
+  title: string;
+  description: string;
+  prompt: string;
+}
 const INITIAL_TOKENS = 2000;
 const MAX_ACTIVE = 2;
 const estimatedTokens = (value: unknown): number =>
@@ -187,6 +194,20 @@ export class PlaybookService {
       }
     }
     return [...names].sort();
+  }
+
+  /** Only `approval: 'batch'` playbooks: they prepare in background and end in a batch to approve. */
+  listLaunchable(): LaunchablePlaybook[] {
+    return this.loader
+      .getPlaybooks()
+      .filter((doc) => doc.contract.approval === 'batch' && doc.contract.launch)
+      .map((doc) => ({
+        id: doc.id,
+        title: doc.contract.launch!.title,
+        description: doc.description,
+        prompt: doc.contract.launch!.prompt,
+      }))
+      .sort((a, b) => a.title.localeCompare(b.title, 'es'));
   }
 
   getActivePins(session: PlaybookSession): ActivePlaybookPin[] {
