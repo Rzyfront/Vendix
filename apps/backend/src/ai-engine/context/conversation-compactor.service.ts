@@ -127,6 +127,14 @@ function previousLines(previous: string): string[] {
 
 const sizeOf = (xs: string[]) => xs.reduce((n, x) => n + x.length + 1, 0);
 const omittedMarker = (n: number) => `- (… ${n} puntos intermedios omitidos)`;
+const OMITTED_MARKER = /^- \(… (\d+) puntos intermedios omitidos\)$/;
+/** Rows a summary line stands for: an earlier marker keeps its own count. */
+const pointsOf = (line: string) => {
+  const marker = OMITTED_MARKER.exec(line);
+  return marker ? Number(marker[1]) : 1;
+};
+const pointsIn = (lines: string[]) =>
+  lines.reduce((n, line) => n + pointsOf(line), 0);
 
 /**
  * Fits `lines` into `budget` chars without dropping any silently: as-is when
@@ -139,13 +147,14 @@ function fitLines(lines: string[], budget: number): string[] {
   const head = lines.slice(0, HEAD_LINES);
   const rest = lines.slice(HEAD_LINES);
   const tail: string[] = [];
-  let used = sizeOf(head) + omittedMarker(rest.length).length + 1;
+  let used = sizeOf(head) + omittedMarker(pointsIn(rest)).length + 1;
   for (let i = rest.length - 1; i >= 0; i--) {
     if (used + rest[i].length + 1 > budget) break;
     tail.unshift(rest[i]);
     used += rest[i].length + 1;
   }
-  const omitted = rest.length - tail.length;
+  // Nested passes: a dropped marker carries its count into the new one.
+  const omitted = pointsIn(rest.slice(0, rest.length - tail.length));
   const out = [...head, ...(omitted ? [omittedMarker(omitted)] : []), ...tail];
   // A single huge line (prose summary) still has to respect the cap.
   return sizeOf(out) <= budget ? out : [clip(out.join(' '), budget - 1)];

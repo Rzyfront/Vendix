@@ -280,6 +280,38 @@ describe('T22 ConversationCompactorService', () => {
     expect(out!.summary.length).toBeLessThanOrEqual(MAX_SUMMARY_CHARS);
   });
 
+  it('P3-5: across nested passes every covered row is a line or counted in a marker', async () => {
+    const { service } = build(down());
+    /** Rows the summary accounts for: its lines plus the points each marker counts. */
+    const accounted = (summary: string) =>
+      summary
+        .split('\n')
+        .slice(1)
+        .reduce((n, line) => {
+          const marker = /\(… (\d+) puntos intermedios omitidos\)/.exec(line);
+          return n + (marker ? Number(marker[1]) : 1);
+        }, 0);
+    let summary: string | null = null;
+    let through: number | null = null;
+    let total = 80;
+    for (let pass = 0; pass < 3; pass++) {
+      const out = await service.compactIfNeeded(
+        {
+          id: 7,
+          summary,
+          summary_through_message_id: through,
+          messages: msgs(total, 300),
+        },
+        budgetOf(80),
+      );
+      summary = out!.summary;
+      through = out!.summary_through_message_id;
+      expect(accounted(summary)).toBe(through);
+      expect(summary.length).toBeLessThanOrEqual(MAX_SUMMARY_CHARS);
+      total += 60;
+    }
+  });
+
   it('a failed persist is no compaction: no result, so no «Resumí…» notice', async () => {
     const { service, update } = build(down());
     update.mockRejectedValue(new Error('db'));
