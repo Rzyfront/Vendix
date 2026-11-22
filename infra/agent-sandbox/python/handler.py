@@ -4,7 +4,9 @@ Contract mirrored from apps/backend/src/ai-engine/sandbox/interfaces/
 analysis-protocol.interface.ts. Containment is the Lambda itself: VPC without
 egress, empty execution role, no secrets, read-only code. On top of it, EVERY
 execution gets a private /tmp dir and a NEW child process in its own session
-with rlimits; the whole process group, and then every other task of the guest
+with rlimits; right before the guest code runs, runner.py seals descriptor
+creation (RLIMIT_NOFILE=0) so the guest cannot open a socket to the Lambda
+Runtime API; the whole process group, and then every other task of the guest
 uid (kill(-1)), is SIGKILLed afterwards and /tmp wiped, because the execution
 environment is reused between invocations.
 

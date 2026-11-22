@@ -23,9 +23,10 @@ AWS Lambda (imagen contenedor Python 3.12 · Dockerfile + template.json)
           1. Valida petición y recorta límites contra HARD_LIMITS.
           2. Limpia /tmp antes y después de ejecutar.
           3. Exige que el proceso padre sea no-dumpable (ver abajo) para impedir que el hijo lea `/proc/<ppid>/environ`, `mem`, `maps` o `fd`, use `process_vm_readv` o haga `ptrace`, y lanza un proceso hijo nuevo (`python -I runner.py`) en sesión propia con entorno limpio (sin `AWS_*`), `RLIMIT_AS` / `RLIMIT_CPU` / `RLIMIT_NPROC` / `RLIMIT_FSIZE` / `RLIMIT_CORE` y timeout de pared.
-          4. El hijo recibe `wall_ms` menos una reserva de 2 s, para que la respuesta (incluida la limpieza) llegue antes de que el backend aborte a `wall_ms` exactos: un análisis que agota el tiempo llega como `ANALYSIS_TIMEOUT`, no como `ANALYSIS_EXPIRED`.
-          5. Mata todo el grupo de procesos (`SIGKILL`) al terminar o vencer el tiempo y, después, a todo superviviente del uid del invitado (`kill(-1, SIGKILL)`); lo mismo antes de cargar los datos de cada tienda.
-          6. Lee `result.json` con `O_NOFOLLOW`, revalida `result` (tables/series/figures/notes) y devuelve solo JSON acotado.
+          4. El hijo importa y precarga sus módulos, carga los datos y abre su archivo de resultado; justo antes de ejecutar el código del invitado baja `RLIMIT_NOFILE` a `(0, 0)` y comprueba que ya no puede crear descriptores (ver abajo). Si no lo consigue, falla cerrado sin ejecutar al invitado.
+          5. El hijo recibe `wall_ms` menos una reserva de 2 s, para que la respuesta (incluida la limpieza) llegue antes de que el backend aborte a `wall_ms` exactos: un análisis que agota el tiempo llega como `ANALYSIS_TIMEOUT`, no como `ANALYSIS_EXPIRED`.
+          6. Mata todo el grupo de procesos (`SIGKILL`) al terminar o vencer el tiempo y, después, a todo superviviente del uid del invitado (`kill(-1, SIGKILL)`); lo mismo antes de cargar los datos de cada tienda.
+          7. Lee `result.json` con `O_NOFOLLOW`, revalida `result` (tables/series/figures/notes) y devuelve solo JSON acotado.
 ```
 
 ### Por qué el intérprete es solo-ejecución (paso 3)
@@ -36,7 +37,15 @@ La vía normal es `prctl(PR_SET_DUMPABLE, 0)`, pero el perfil seccomp de Lambda 
 
 Por eso el `Dockerfile` deja `/var/lang/bin/python3.12` en `0711`: al ejecutar un binario que el usuario no puede leer, el kernel marca el proceso como no-dumpable sin necesidad de `prctl`, tanto al runtime de Lambda (y con él al handler) como a cada hijo. `handler.py` intenta `prctl` primero y acepta el `EPERM` **solo** si comprueba que el kernel ya lo marcó (`/proc/self/environ` es de root siendo el proceso no-root); con cualquier otro errno, o sin esa prueba, falla cerrado sin lanzar al hijo ni escribir datos de la tienda.
 
-### Por qué `kill(-1)` además de matar el grupo (paso 5)
+### Por qué el invitado no puede crear descriptores (paso 4)
+
+La Runtime API de Lambda (`169.254.100.1:9001`) vive dentro de la microVM: ningún security group, ruta ni NACL la filtra, y no pide autenticación. En T53 (segunda corrida, sobre el digest que ya traía los arreglos de `prctl` y `kill(-1)`) un invitado de la tienda C abrió un socket TCP a esa API, pidió su propia invocación (`GET /runtime/invocation/next` devuelve el evento en curso, con su `nonce`), publicó una respuesta falsificada con un sobre válido y se quedó escuchando: Lambda dio la invocación por terminada y le entregó al invitado, todavía vivo dentro del handler, la invocación siguiente de la tienda A. El invitado la respondió y luego devolvió el marcador de A en la respuesta de C.
+
+Las barreras habituales no existen en Lambda: el perfil seccomp deniega la syscall `seccomp` (no hay filtro propio posible) y `unshare` (no hay espacio de red vacío). Lo que sí existe es `RLIMIT_NOFILE`. Con límite blando y duro en 0, toda syscall que crea un descriptor (`socket`, `open`, `pipe`, `dup`, `memfd_create`, `eventfd`, `epoll`, `pidfd_open`…) falla con `EMFILE`; el invitado no puede volver a subirlo (no tiene `CAP_SYS_RESOURCE`) y los descriptores ya abiertos (stdio y el archivo de resultado) siguen funcionando. `exec` del intérprete e `import` de pandas necesitan descriptores, por eso el sellado lo hace `runner.py` justo antes del código del invitado y no el `preexec_fn` del handler.
+
+Consecuencia para el código generado (coherente con su contrato: «`pd`, `np` y `sm` ya están disponibles; sin imports de red, sin archivos»): no puede abrir archivos, lanzar procesos ni importar módulos que no estén ya cargados. `runner.py` precarga la biblioteca estándar de cálculo (`math`, `statistics`, `datetime`, `decimal`, `collections`…), `scipy.stats`/`optimize`/`interpolate`, `statsmodels.formula.api`/`tsa.api`, `dateutil`, `pytz`, y calienta las zonas `UTC` y `America/Bogota`. Si el invitado choca con el sello recibe `ANALYSIS_RUNTIME` con un mensaje que lo explica, y el modelo tiene una corrección.
+
+### Por qué `kill(-1)` además de matar el grupo (paso 6)
 
 `killpg` solo alcanza al grupo del hijo. Un invitado que hace doble `fork` + `setsid` deja un daemon en otra sesión que sobrevive a la invocación. En T53 (primera corrida) ese daemon quedó escuchando en un socket abstracto, leyó desde `/tmp` los datos de la tienda siguiente y se los entregó a la ejecución posterior.
 
@@ -79,7 +88,7 @@ PYTHONDONTWRITEBYTECODE=1 python3 -m unittest \
   infra/agent-sandbox/python/test_handler.py -v
 ```
 
-Las pruebas de `handler.py` mockean `subprocess.Popen` y validan limpieza de `/tmp`, variables de entorno del hijo, códigos de error, truncado de mensajes y validación estricta. Estas pruebas **no** certifican el aislamiento real de AWS.
+Las pruebas de `handler.py` mockean `subprocess.Popen` y validan limpieza de `/tmp`, variables de entorno del hijo, códigos de error, truncado de mensajes y validación estricta. Las de `runner.py` ejecutan el sellado de descriptores real en un subproceso con pandas/numpy simulados y programas de prueba benignos. Estas pruebas **no** certifican el aislamiento real de AWS.
 
 ---
 
@@ -87,7 +96,7 @@ Las pruebas de `handler.py` mockean `subprocess.Popen` y validan limpieza de `/t
 
 Resultado de la corrida del 2026-11-22 y evidencia: [`CERTIFICACION-T53.md`](CERTIFICACION-T53.md). Antes de encender `AI_ANALYSIS_SANDBOX_ENABLED=true` en cualquier entorno real, un operador debe construir la imagen (sección anterior), desplegar `template.json` y producir un informe de certificación que enlace el `runtime_digest` final con la evidencia real de:
 
-1. **Egreso cero**: intentos de DNS, HTTP/HTTPS, sockets TCP/UDP crudos, enlace al metadata service (`169.254.169.254`) y conexiones hacia la VPC de producción fallan con bloqueo total.
+1. **Egreso cero**: intentos de DNS, HTTP/HTTPS, sockets TCP/UDP crudos, enlace al metadata service (`169.254.169.254`), la Runtime API de Lambda (`169.254.100.1:9001`, incluida la interceptación de la invocación siguiente) y conexiones hacia la VPC de producción fallan con bloqueo total.
 2. **Sistema de archivos, `/proc` y secretos**: intento de escritura fuera de `/tmp` falla (`Read-only file system`); symlink en `/tmp/result.json` rechazado (`O_NOFOLLOW`); entorno del hijo sin `AWS_*` ni credenciales; lectura de `/proc/<ppid>/environ`, `/proc/<ppid>/mem`, `process_vm_readv` y `ptrace` sobre el padre fallan (padre no-dumpable por el intérprete solo-ejecución); ningún secreto presente en proceso ni en logs.
 3. **Límites de recursos**: bomba de memoria (`ANALYSIS_MEMORY`), ciclo infinito de CPU (`ANALYSIS_TIMEOUT`), fork bomb (`RLIMIT_NPROC`), inundación de stdout/stderr y archivo grande en `/tmp` (`RLIMIT_FSIZE`) terminan dentro del presupuesto sin dejar procesos huérfanos, incluido un daemon que hace doble `fork` + `setsid` para escapar del grupo de procesos.
 4. **Aislamiento multi-tenant (100 ejecuciones alternando 3 tiendas)**: ejecución de 100 invocaciones consecutivas alternando datos marcados de 3 tiendas distintas (reutilizando el mismo entorno caliente de Lambda) con verificación de cero residuos en `/tmp`, memoria, variables globales o respuestas cruzadas.
