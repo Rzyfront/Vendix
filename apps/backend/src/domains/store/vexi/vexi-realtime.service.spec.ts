@@ -1144,6 +1144,7 @@ describe('VexiRealtimeService G session authority', () => {
       retrievalSource: 'lexical',
       degraded: [],
       catalogHash: 'hash',
+      fullCatalogReason: null,
     });
     const result = await run(() =>
       service.executeSessionToolCall(sessionId, 'search_tools', {

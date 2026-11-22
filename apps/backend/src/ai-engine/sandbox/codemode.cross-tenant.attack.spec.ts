@@ -460,7 +460,9 @@ describe('(1) store_id / organization_id in the arguments', () => {
     expect(r.state.tenantIds).toEqual([codeModeTenantId(1)]);
     const sent = JSON.stringify(r.state.requests);
     expect(sent).not.toMatch(/store_id|organization_id|"store"|tenant_id/i);
-    expect(r.audit.start.mock.calls[0][0].tenant_hash).toBe(codeModeTenantId(1));
+    expect(
+      (r.audit.start.mock.calls[0][0] as { tenant_hash: string }).tenant_hash,
+    ).toBe(codeModeTenantId(1));
   });
 });
 

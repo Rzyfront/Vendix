@@ -171,9 +171,16 @@ export class CodeModeRunsService {
         : [],
     ]);
     return {
-      stores: new Map(stores.map((s) => [s.id, s.name as string | null])),
-      users: new Map(
-        users.map((u) => [u.id, `${u.first_name} ${u.last_name}`.trim()]),
+      stores: new Map<number, string | null>(
+        stores.map((s): [number, string | null] => [s.id, s.name]),
+      ),
+      users: new Map<number, string>(
+        users.map(
+          (u): [number, string] => [
+            u.id,
+            `${u.first_name} ${u.last_name}`.trim(),
+          ],
+        ),
       ),
     };
   }
