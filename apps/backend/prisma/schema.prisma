@@ -7621,7 +7621,7 @@ model ai_agent_script_runs {
   store_id          Int
   organization_id   Int
   user_id           Int
-  objective_id      String    @db.Uuid
+  objective_id      String?   @db.Uuid
   source_hash       String    @db.VarChar(64)
   source_ciphertext Bytes
   source_nonce      Bytes
@@ -7638,6 +7638,13 @@ model ai_agent_script_runs {
   expires_at        DateTime  @db.Timestamptz(6)
   created_at        DateTime  @default(now()) @db.Timestamptz(6)
   finished_at       DateTime? @db.Timestamptz(6)
+  // F10 Code Mode audit (all nullable; objective_id is NULL for normal turns).
+  executor           String?   @db.VarChar(20)
+  rounds             Int?
+  lambda_request_ids Json?
+  tenant_hash        String?   @db.VarChar(64)
+  cut_reason         String?   @db.VarChar(40)
+  returned_bytes     Int?
 
   @@index([store_id, organization_id, user_id, created_at], map: "ai_agent_script_runs_owner_created_idx")
   @@index([store_id, organization_id, user_id, objective_id], map: "ai_agent_script_runs_owner_objective_idx")

@@ -34,7 +34,12 @@ const LIMIT_FIELDS = new Set([
   'input_bytes',
   'output_bytes',
   'source_bytes',
+  // F10 Code Mode: Lambda invocations per execution.
+  'rounds',
 ]);
+const EXECUTOR = /^[a-z][a-z0-9-]{0,19}$/;
+const REQUEST_ID = /^[A-Za-z0-9-]{1,64}$/;
+const CUT_REASON = /^[A-Z][A-Z_]{0,39}$/;
 const OUTCOMES = new Set([
   'ok',
   'partial',
@@ -81,13 +86,31 @@ interface AuditScope {
 
 export interface SandboxAuditStart {
   id: string;
-  objective_id: string;
+  /**
+   * Durable objective the run belongs to. OMITTED for scripts that run in
+   * normal turns (F10 Code Mode): no objective admission/attempt checks apply
+   * and `objective_id` is stored NULL. The per-store and global admission
+   * checks always apply.
+   */
+  objective_id?: string;
   source: string;
   source_hash: string;
   policy_digest: string;
   runtime_digest: string;
   limits: Record<string, number>;
   manifest: string[];
+  /** e.g. 'lambda-js'. Present for Code Mode runs. */
+  executor?: string;
+  /** Opaque per-store key sent to Lambda (never the store id). */
+  tenant_hash?: string;
+}
+
+/** Terminal facts of a Code Mode run. Passing it also releases the admission lease. */
+export interface SandboxAuditFinishExtra {
+  rounds?: number;
+  lambda_request_ids?: string[];
+  cut_reason?: string;
+  returned_bytes?: number;
 }
 
 export interface SandboxAuditCall {
@@ -102,7 +125,7 @@ export interface SandboxAuditCall {
 /** Deliberately contains neither plaintext nor ciphertext/key/nonce/tag fields. */
 export interface SandboxAuditRecord extends AuditScope {
   id: string;
-  objective_id: string;
+  objective_id: string | null;
   source_hash: string;
   policy_digest: string;
   runtime_digest: string;
@@ -230,7 +253,16 @@ export class SandboxAuditRepository {
   async start(input: SandboxAuditStart): Promise<void> {
     const scope = requireScope();
     this.validId(input.id);
-    this.validId(input.objective_id);
+    if (input.objective_id !== undefined) this.validId(input.objective_id);
+    if (
+      (input.executor !== undefined &&
+        (typeof input.executor !== 'string' ||
+          !EXECUTOR.test(input.executor))) ||
+      (input.tenant_hash !== undefined &&
+        (typeof input.tenant_hash !== 'string' ||
+          !HASH.test(input.tenant_hash)))
+    )
+      throw new BadRequestException('Invalid sandbox audit metadata');
     if (
       typeof input.source !== 'string' ||
       !HASH.test(input.source_hash) ||
@@ -290,7 +322,8 @@ export class SandboxAuditRepository {
           JSON.stringify([
             'vendix-sandbox-source-v1',
             input.id,
-            input.objective_id,
+            // Legacy rows bind the objective UUID; objective-less rows bind null.
+            input.objective_id ?? null,
             scope.organization_id,
             scope.store_id,
             scope.user_id,
@@ -318,29 +351,31 @@ export class SandboxAuditRepository {
       await tx.$executeRaw(
         Prisma.sql`SELECT pg_advisory_xact_lock(${ADMISSION_LOCK}::bigint)`,
       );
-      const objective = await tx.$queryRaw<Array<{ id: string }>>(Prisma.sql`
-        SELECT id FROM ai_agent_objectives WHERE id = ${input.objective_id}::uuid
-        AND ${scopeSql(scope)} AND expires_at > CURRENT_TIMESTAMP
-        AND semantic_status NOT IN ('cancelled', 'superseded', 'completed_verified', 'expired')
-        FOR KEY SHARE`);
-      if (!objective[0])
-        throw new NotFoundException('Sandbox objective not found');
-      // One original script plus at most one repair for this durable objective.
-      // Count terminal/expired leases too: new source, turn or cooldown is not a reset.
-      const attempts = await tx.$queryRaw<
-        Array<{ attempt_count: number }>
-      >(Prisma.sql`
-        SELECT COUNT(*)::int AS attempt_count FROM ai_agent_script_runs
-        WHERE objective_id = ${input.objective_id}::uuid AND ${scopeSql(scope)}`);
-      if (
-        !attempts[0] ||
-        !Number.isSafeInteger(attempts[0].attempt_count) ||
-        attempts[0].attempt_count < 0 ||
-        attempts[0].attempt_count >= 2
-      )
-        throw new ConflictException(
-          'Sandbox objective script attempts are exhausted',
-        );
+      if (input.objective_id !== undefined) {
+        const objective = await tx.$queryRaw<Array<{ id: string }>>(Prisma.sql`
+          SELECT id FROM ai_agent_objectives WHERE id = ${input.objective_id}::uuid
+          AND ${scopeSql(scope)} AND expires_at > CURRENT_TIMESTAMP
+          AND semantic_status NOT IN ('cancelled', 'superseded', 'completed_verified', 'expired')
+          FOR KEY SHARE`);
+        if (!objective[0])
+          throw new NotFoundException('Sandbox objective not found');
+        // One original script plus at most one repair for this durable objective.
+        // Count terminal/expired leases too: new source, turn or cooldown is not a reset.
+        const attempts = await tx.$queryRaw<
+          Array<{ attempt_count: number }>
+        >(Prisma.sql`
+          SELECT COUNT(*)::int AS attempt_count FROM ai_agent_script_runs
+          WHERE objective_id = ${input.objective_id}::uuid AND ${scopeSql(scope)}`);
+        if (
+          !attempts[0] ||
+          !Number.isSafeInteger(attempts[0].attempt_count) ||
+          attempts[0].attempt_count < 0 ||
+          attempts[0].attempt_count >= 2
+        )
+          throw new ConflictException(
+            'Sandbox objective script attempts are exhausted',
+          );
+      }
       const admission = await tx.$queryRaw<
         Array<{ global_count: number; store_count: number }>
       >(Prisma.sql`
@@ -358,6 +393,27 @@ export class SandboxAuditRepository {
         admission[0].global_count >= globalLimit
       )
         throw new ConflictException('Sandbox runner capacity is unavailable');
+      // Legacy statement (durable objective, no Code Mode metadata) is kept
+      // byte-for-byte below; Code Mode rows add executor/tenant_hash and may
+      // have no objective.
+      if (
+        input.objective_id === undefined ||
+        input.executor !== undefined ||
+        input.tenant_hash !== undefined
+      ) {
+        await tx.$executeRaw(Prisma.sql`
+        INSERT INTO ai_agent_script_runs
+          (id, store_id, organization_id, user_id, objective_id, source_hash,
+           source_ciphertext, source_nonce, source_auth_tag, source_key_id,
+           policy_digest, runtime_digest, limits, manifest, lease_until, expires_at,
+           executor, tenant_hash)
+        VALUES (${input.id}::uuid, ${scope.store_id}, ${scope.organization_id}, ${scope.user_id},
+          ${input.objective_id ?? null}::uuid, ${input.source_hash}, ${ciphertext}, ${nonce}, ${authTag}, ${keyId},
+          ${input.policy_digest}, ${input.runtime_digest}, ${json(limits)}, ${json(manifest)},
+          CURRENT_TIMESTAMP + INTERVAL '30 seconds', CURRENT_TIMESTAMP + INTERVAL '7 days',
+          ${input.executor ?? null}, ${input.tenant_hash ?? null})`);
+        return;
+      }
       await tx.$executeRaw(Prisma.sql`
         INSERT INTO ai_agent_script_runs
           (id, store_id, organization_id, user_id, objective_id, source_hash,
@@ -432,6 +488,7 @@ export class SandboxAuditRepository {
     id: string,
     outcome: string,
     usage: Record<string, unknown>,
+    extra?: SandboxAuditFinishExtra,
   ): Promise<void> {
     const scope = requireScope();
     this.validId(id);
@@ -443,12 +500,30 @@ export class SandboxAuditRepository {
     )
       throw new BadRequestException('Invalid sandbox final audit metadata');
     const safeUsage = redactUsage(usage);
+    const codeMode = extra === undefined ? undefined : this.safeExtra(extra);
     await this.transaction(async (tx) => {
-      const rows = await tx.$queryRaw<Array<{ id: string }>>(Prisma.sql`
+      const rows = await tx.$queryRaw<Array<{ id: string }>>(
+        codeMode
+          ? // Code Mode runs release the admission lease on finish: up to three
+            // scripts per turn run back to back and the 30 s cooldown of the
+            // durable flow would block the second one. Capacity while RUNNING
+            // is unchanged (store 1, global AI_SANDBOX_MAX_RUNNERS).
+            Prisma.sql`
+        UPDATE ai_agent_script_runs SET outcome = ${outcome}, usage = ${json(safeUsage)},
+          finished_at = CURRENT_TIMESTAMP,
+          lease_until = LEAST(lease_until, CURRENT_TIMESTAMP),
+          rounds = ${codeMode.rounds}::int,
+          lambda_request_ids = ${json(codeMode.lambda_request_ids)},
+          cut_reason = ${codeMode.cut_reason},
+          returned_bytes = ${codeMode.returned_bytes}::int
+        WHERE id = ${id}::uuid AND ${scopeSql(scope)} AND outcome = 'running'
+        AND expires_at > CURRENT_TIMESTAMP RETURNING id`
+          : Prisma.sql`
         UPDATE ai_agent_script_runs SET outcome = ${outcome}, usage = ${json(safeUsage)},
           finished_at = CURRENT_TIMESTAMP
         WHERE id = ${id}::uuid AND ${scopeSql(scope)} AND outcome = 'running'
-        AND expires_at > CURRENT_TIMESTAMP RETURNING id`);
+        AND expires_at > CURRENT_TIMESTAMP RETURNING id`,
+      );
       if (rows[0]) return;
       const previous = await tx.$queryRaw<
         Array<{ outcome: string }>
@@ -459,6 +534,37 @@ export class SandboxAuditRepository {
       if (previous[0]?.outcome === outcome) return;
       throw new ConflictException('Sandbox run is not current');
     });
+  }
+
+  private safeExtra(extra: SandboxAuditFinishExtra): {
+    rounds: number | null;
+    lambda_request_ids: string[];
+    cut_reason: string | null;
+    returned_bytes: number | null;
+  } {
+    const nonnegative = (value: unknown, max: number): boolean =>
+      Number.isSafeInteger(value) && (value as number) >= 0 && (value as number) <= max;
+    const ids = extra.lambda_request_ids ?? [];
+    if (
+      !extra ||
+      typeof extra !== 'object' ||
+      (extra.rounds !== undefined && !nonnegative(extra.rounds, 100)) ||
+      (extra.returned_bytes !== undefined &&
+        !nonnegative(extra.returned_bytes, 1_073_741_823)) ||
+      (extra.cut_reason !== undefined &&
+        (typeof extra.cut_reason !== 'string' ||
+          !CUT_REASON.test(extra.cut_reason))) ||
+      !Array.isArray(ids) ||
+      ids.length > 20 ||
+      !ids.every((requestId) => typeof requestId === 'string' && REQUEST_ID.test(requestId))
+    )
+      throw new BadRequestException('Invalid sandbox final audit metadata');
+    return {
+      rounds: extra.rounds ?? null,
+      lambda_request_ids: [...ids],
+      cut_reason: extra.cut_reason ?? null,
+      returned_bytes: extra.returned_bytes ?? null,
+    };
   }
 
   async get(id: string): Promise<SandboxAuditRecord> {

@@ -10,6 +10,7 @@ import { SandboxClientService } from './sandbox/sandbox-client.service';
 import { SandboxPolicyService } from './sandbox/sandbox-policy.service';
 import { SandboxAuditRepository } from './sandbox/sandbox-audit.repository';
 import { SandboxLambdaClientService } from './sandbox/sandbox-lambda-client.service';
+import { CodeModeBridgeService } from './sandbox/codemode-bridge.service';
 import { SandboxAnalysisBrokerService } from './sandbox/sandbox-analysis-broker.service';
 
 import { createCodeExecutionTools } from './tools/domains/code-execution.tools';
@@ -104,6 +105,7 @@ import { ConversationCompactorService } from './context/conversation-compactor.s
     SandboxAuditRepository,
     SandboxLambdaClientService,
     SandboxAnalysisBrokerService,
+    CodeModeBridgeService,
     AIToolRegistry,
     ToolRouterService,
     ToolCatalogIndexerService,
@@ -148,6 +150,7 @@ import { ConversationCompactorService } from './context/conversation-compactor.s
     AgentVerifierService,
     SandboxLambdaClientService,
     SandboxAnalysisBrokerService,
+    CodeModeBridgeService,
     AIEngineService,
     AgentRuntimeConfigService,
     AILoggingService,

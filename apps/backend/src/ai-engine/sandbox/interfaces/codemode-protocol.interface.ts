@@ -284,12 +284,15 @@ export function codeModeArgsHash(args: unknown): string {
     .digest('hex');
 }
 
-/** Shared vectors: both implementations must reproduce them exactly. */
-export const CODEMODE_HASH_VECTORS: ReadonlyArray<{
+export interface CodeModeHashVector {
   args: CodeModeJson;
   canonical: string;
   sha256: string;
-}> = Object.freeze([
+}
+
+/** Shared vectors: both implementations must reproduce them exactly. */
+export const CODEMODE_HASH_VECTORS: ReadonlyArray<CodeModeHashVector> =
+  Object.freeze<CodeModeHashVector[]>([
   {
     args: { b: 1, a: [{ d: 2, c: 'x' }], ñ: 'é' },
     canonical: '{"a":[{"c":"x","d":2}],"b":1,"ñ":"é"}',
