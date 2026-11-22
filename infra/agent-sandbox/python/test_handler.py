@@ -18,10 +18,13 @@ import handler  # noqa: E402
 DIGEST = "sha256:" + "c" * 64
 
 
+VALID_OUTPUT = {"figures": [{"label": "n", "value": 1}]}
+
+
 def request(**over):
     base = {
         "protocol": "vendix.analysis/v1", "execution_id": "exec-1", "nonce": "a" * 64,
-        "language": "python", "source": "result = {'notes': ['hi']}",
+        "language": "python", "source": "result = {'figures': [{'label': 'n', 'value': 1}]}",
         "inputs": [{"name": "sales", "columns": ["m", "v"], "rows": [["2026-01", 10], ["2026-02", 12]]}],
         "limits": dict(handler.HARD_LIMITS),
     }
@@ -75,6 +78,14 @@ class ValidationTests(unittest.TestCase):
         del ev["limits"]["cpu_s"]
         self.assert_rejected(ev)
 
+    def test_rejects_long_or_duplicate_input_columns(self):
+        ev = request()
+        ev["inputs"][0]["columns"] = ["a" * 65, "v"]
+        self.assert_rejected(ev)
+        ev = request()
+        ev["inputs"][0]["columns"] = ["m", "m"]
+        self.assert_rejected(ev)
+
     def test_invalid_request_echoes_ids_with_input_error_and_no_popen(self):
         with patch.dict(os.environ, {"ANALYSIS_RUNTIME_DIGEST": DIGEST}), \
                 patch.object(handler.subprocess, "Popen") as popen:
@@ -113,17 +124,17 @@ class ExecutionTests(unittest.TestCase):
         return factory, captured
 
     def test_ok_echoes_ids_digest_and_cleans_tmp(self):
-        factory, captured = self.popen_writing({"status": "ok", "output": {"notes": ["done"]}})
+        factory, captured = self.popen_writing({"status": "ok", "output": VALID_OUTPUT})
         with patch.object(handler.subprocess, "Popen", side_effect=factory):
             res = handler.handler(request())
         self.assertEqual(res["status"], "ok")
-        self.assertEqual(res["output"], {"notes": ["done"]})
+        self.assertEqual(res["output"], VALID_OUTPUT)
         self.assertEqual((res["execution_id"], res["nonce"], res["runtime_digest"]), ("exec-1", "a" * 64, DIGEST))
         self.assertEqual(os.listdir(self.root), [])
         self.killpg.assert_called_with(4242, signal.SIGKILL)
 
     def test_child_spawn_contract_and_env_has_no_aws_keys(self):
-        factory, captured = self.popen_writing({"status": "ok", "output": {"notes": ["x"]}})
+        factory, captured = self.popen_writing({"status": "ok", "output": VALID_OUTPUT})
         with patch.object(handler.subprocess, "Popen", side_effect=factory):
             handler.handler(request())
         kw = captured["kwargs"]
@@ -153,7 +164,7 @@ class ExecutionTests(unittest.TestCase):
 
     def test_residue_in_tmp_root_is_wiped(self):
         open(os.path.join(self.root, "leftover.bin"), "w").close()
-        factory, _ = self.popen_writing({"status": "ok", "output": {"notes": ["x"]}})
+        factory, _ = self.popen_writing({"status": "ok", "output": VALID_OUTPUT})
         with patch.object(handler.subprocess, "Popen", side_effect=factory):
             handler.handler(request())
         self.assertEqual(os.listdir(self.root), [])
@@ -175,12 +186,13 @@ class ExecutionTests(unittest.TestCase):
                 self.assertEqual(handler.handler(request())["error_code"], code)
 
     def test_invalid_child_output_is_rejected_by_parent(self):
-        factory, _ = self.popen_writing({"status": "ok", "output": {"tables": "nope"}})
-        with patch.object(handler.subprocess, "Popen", side_effect=factory):
-            self.assertEqual(handler.handler(request())["error_code"], "ANALYSIS_OUTPUT")
+        for bad in ({"tables": "nope"}, {"notes": ["only"]}, {"tables": []}):
+            factory, _ = self.popen_writing({"status": "ok", "output": bad})
+            with patch.object(handler.subprocess, "Popen", side_effect=factory):
+                self.assertEqual(handler.handler(request())["error_code"], "ANALYSIS_OUTPUT")
 
     def test_missing_digest_is_runtime_error_without_spawning(self):
-        factory, _ = self.popen_writing({"status": "ok", "output": {"notes": ["x"]}})
+        factory, _ = self.popen_writing({"status": "ok", "output": VALID_OUTPUT})
         with patch.dict(os.environ, {"ANALYSIS_RUNTIME_DIGEST": ""}), \
                 patch.object(handler.subprocess, "Popen", side_effect=factory) as popen:
             res = handler.handler(request())
@@ -293,10 +305,10 @@ class ExecutionTests(unittest.TestCase):
         self.assertEqual((res["status"], res["error_code"]), ("error", "ANALYSIS_RUNTIME"))
 
     def test_never_prints_payloads(self):
-        factory, _ = self.popen_writing({"status": "ok", "output": {"notes": ["x"]}})
+        factory, _ = self.popen_writing({"status": "ok", "output": VALID_OUTPUT})
         with patch.object(handler.subprocess, "Popen", side_effect=factory), \
                 patch("builtins.print") as printed:
-            handler.handler(request(source="result = {'notes': ['TOPSECRET']}"))
+            handler.handler(request(source="result = {'figures': [{'label': 'TOPSECRET', 'value': 1}]}"))
         printed.assert_not_called()
 
 

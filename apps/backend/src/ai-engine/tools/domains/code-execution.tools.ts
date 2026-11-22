@@ -122,12 +122,33 @@ const fail = (error: string, nextStep: string): string =>
 /** Thrown while materializing inputs; carries a ready Spanish message. */
 class InputRejected extends Error {}
 
+const MAX_INPUT_COLUMN_CHARS = 64;
+
 const toCell = (value: unknown): AnalysisCell => {
   if (value === null || value === undefined) return null;
   if (typeof value === 'number') return Number.isFinite(value) ? value : null;
   if (typeof value === 'string' || typeof value === 'boolean') return value;
   return JSON.stringify(value);
 };
+
+/** Ensures every input column is non-empty, <= 64 chars and unique (matches Lambda). */
+function normalizeInputColumns(raw: string[]): string[] {
+  const used = new Set<string>();
+  return raw.map((entry, idx) => {
+    const base = (entry.trim() || `col_${idx + 1}`).slice(
+      0,
+      MAX_INPUT_COLUMN_CHARS,
+    );
+    let candidate = base;
+    let suffix = 2;
+    while (used.has(candidate)) {
+      const tag = `_${suffix++}`;
+      candidate = `${base.slice(0, MAX_INPUT_COLUMN_CHARS - tag.length)}${tag}`;
+    }
+    used.add(candidate);
+    return candidate;
+  });
+}
 
 /** Converts a table or chart block into a DataFrame-shaped input. */
 function blockToInput(
@@ -164,7 +185,10 @@ function blockToInput(
       : [];
     columns = [
       'label',
-      ...series.map((s, i) => (s.name ? String(s.name) : `serie_${i + 1}`)),
+      ...series.map((s, i) => {
+        const label = typeof s.name === 'string' ? s.name.trim() : '';
+        return label || `serie_${i + 1}`;
+      }),
     ];
     const count = Math.max(
       labels.length,
@@ -190,6 +214,7 @@ function blockToInput(
     columns = columns.slice(0, ANALYSIS_LIMITS.input_columns);
     rows = rows.map((r) => r.slice(0, ANALYSIS_LIMITS.input_columns));
   }
+  columns = normalizeInputColumns(columns);
   if (rows.length > ANALYSIS_LIMITS.input_rows) {
     notes.push(
       `«${name}»: se usaron solo las primeras ${ANALYSIS_LIMITS.input_rows} de ${rows.length} filas.`,

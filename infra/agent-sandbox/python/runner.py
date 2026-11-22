@@ -17,6 +17,7 @@ import sys
 
 MAX_CELL_CHARS = 500
 MAX_TITLE_CHARS = 120
+MAX_FIGURE_VALUE_CHARS = 120
 MAX_UNIT_CHARS = 40
 MAX_NOTES = 5
 MAX_NOTE_CHARS = 300
@@ -143,7 +144,10 @@ def _series(raw, limits):
 def _figure(raw):
     if not isinstance(raw, dict) or set(raw) - {"label", "value", "unit"}:
         raise OutputError("figure must be {label, value, unit?}")
-    out = {"label": _text(raw.get("label"), "figure label", MAX_TITLE_CHARS), "value": _cell(raw.get("value"))}
+    value = _cell(raw.get("value"))
+    if isinstance(value, str) and len(value) > MAX_FIGURE_VALUE_CHARS:
+        raise OutputError("figure value exceeds %d characters" % MAX_FIGURE_VALUE_CHARS)
+    out = {"label": _text(raw.get("label"), "figure label", MAX_TITLE_CHARS), "value": value}
     if raw.get("unit") is not None:
         out["unit"] = _text(raw["unit"], "figure unit", MAX_UNIT_CHARS)
     return out
@@ -180,8 +184,8 @@ def validate_output(result, limits):
         if len(notes) > MAX_NOTES:
             raise OutputError("more than %d notes" % MAX_NOTES)
         out["notes"] = [_text(n, "note", MAX_NOTE_CHARS) for n in notes]
-    if not out:
-        raise OutputError("result is empty")
+    if not (out.get("tables") or out.get("series") or out.get("figures")):
+        raise OutputError("result must include at least one table, series or figure")
     size = len(json.dumps(out, allow_nan=False, separators=(",", ":")).encode("utf-8"))
     if size > limits["output_bytes"]:
         raise OutputError("output exceeds %d bytes" % limits["output_bytes"])

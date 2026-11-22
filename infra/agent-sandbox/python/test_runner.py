@@ -38,25 +38,42 @@ class OutputValidationTests(unittest.TestCase):
         self.assertEqual(out["figures"][0]["value"], "true")
 
     def test_rejects_non_dict_empty_and_unknown_keys(self):
-        for bad in ([], {}, {"plot": 1}):
+        for bad in (
+            [],
+            {},
+            {"plot": 1},
+            {"notes": ["only note"]},
+            {"tables": []},
+            {"series": []},
+            {"figures": []},
+            {"tables": [], "notes": ["only note"]},
+        ):
             with self.assertRaises(runner.OutputError):
                 validate(bad)
 
     def test_caps(self):
         table = {"title": "t", "columns": ["a"], "rows": [[1]] * 1001}
+        valid_fig = [{"label": "n", "value": 1}]
         with self.assertRaises(runner.OutputError):
             validate({"tables": [table]})
         with self.assertRaises(runner.OutputError):
             validate({"tables": [{"title": "x" * 121, "columns": ["a"], "rows": []}]})
         with self.assertRaises(runner.OutputError):
-            validate({"notes": ["n"] * 6})
+            validate({"figures": valid_fig, "notes": ["n"] * 6})
         with self.assertRaises(runner.OutputError):
-            validate({"notes": ["n" * 301]})
+            validate({"figures": valid_fig, "notes": ["n" * 301]})
         with self.assertRaises(runner.OutputError):
             validate({"figures": [{"label": "f", "value": 1}] * 21})
         with self.assertRaises(runner.OutputError):
+            validate({"figures": [{"label": "f", "value": "v" * 121}]})
+        with self.assertRaises(runner.OutputError):
+            validate({"figures": [{"label": "f", "value": 1, "unit": "u" * 41}]})
+        with self.assertRaises(runner.OutputError):
             validate({"series": [{"title": "s", "chart": "line", "x": list(range(1001)),
                                   "datasets": [{"label": "d", "values": [0] * 1001}]}]})
+        ok = validate({"figures": [{"label": "f", "value": "v" * 120, "unit": "u" * 40}]})
+        self.assertEqual(len(ok["figures"][0]["value"]), 120)
+        self.assertEqual(len(ok["figures"][0]["unit"]), 40)
 
     def test_schema_errors(self):
         with self.assertRaises(runner.OutputError):  # ragged row

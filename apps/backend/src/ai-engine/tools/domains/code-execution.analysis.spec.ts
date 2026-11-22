@@ -1,6 +1,7 @@
 import { createAnalysisTools } from './code-execution.tools';
 import { RequestContextService } from '../../../common/context/request-context.service';
 import { publicSandboxArgs } from '../../sandbox/sandbox-invocation.context';
+import { validateAnalysisInputs } from '../../sandbox/analysis-output.validator';
 import {
   AnalysisError,
   type AnalysisOutput,
@@ -328,6 +329,81 @@ describe('run_analysis', () => {
     expect(r.error).toBe(
       'Ya hay otro análisis en curso en esta tienda; espera a que termine.',
     );
+  });
+
+  it('chart block deduplicates label/series names and bounds columns to <=64 chars', async () => {
+    const longPrefix = 's'.repeat(64);
+    const { runner, call } = setup({
+      block: {
+        id: 'blk-chart',
+        store_id: STORE,
+        conversation_id: CONVERSATION,
+        kind: 'chart',
+        spec: {},
+        data: {
+          labels: ['2026-01', '2026-02'],
+          series: [
+            { name: 'label', data: [10, 20] },
+            { name: 'Ventas', data: [30, 40] },
+            { name: 'Ventas', data: [50, 60] },
+            { name: `${longPrefix}_extra_a`, data: [70, 80] },
+            { name: `${longPrefix}_extra_b`, data: [90, 100] },
+          ],
+        },
+      },
+      output: { figures: [{ label: 'n', value: 1 }] },
+    });
+
+    await call({ inputs: [{ name: 'graf', block_id: 'blk-chart' }] });
+    const sentInputs = runner.run.mock.calls[0][0].inputs;
+    expect(sentInputs).toHaveLength(1);
+    const cols: string[] = sentInputs[0].columns;
+    expect(cols).toEqual([
+      'label',
+      'label_2',
+      'Ventas',
+      'Ventas_2',
+      longPrefix,
+      `${'s'.repeat(62)}_2`,
+    ]);
+    expect(cols.every((c) => c.length <= 64)).toBe(true);
+    expect(new Set(cols).size).toBe(cols.length);
+    expect(() => validateAnalysisInputs(sentInputs)).not.toThrow();
+  });
+
+  it('table block deduplicates and bounds column keys to <=64 chars while keeping row values', async () => {
+    const longKeyA = `${'k'.repeat(64)}_1`;
+    const longKeyB = `${'k'.repeat(64)}_2`;
+    const { runner, call } = setup({
+      block: {
+        id: 'blk-dup-table',
+        store_id: STORE,
+        conversation_id: CONVERSATION,
+        kind: 'table',
+        spec: {},
+        data: {
+          columns: [
+            { key: 'total', label: 'Total 1' },
+            { key: 'total', label: 'Total 2' },
+            { key: longKeyA, label: 'Largo A' },
+            { key: longKeyB, label: 'Largo B' },
+          ],
+          rows: [{ total: 10, [longKeyA]: 20, [longKeyB]: 30 }],
+        },
+      },
+      output: { figures: [{ label: 'n', value: 1 }] },
+    });
+
+    await call({ inputs: [{ name: 'tabla', block_id: 'blk-dup-table' }] });
+    const sentInputs = runner.run.mock.calls[0][0].inputs;
+    expect(sentInputs[0].columns).toEqual([
+      'total',
+      'total_2',
+      'k'.repeat(64),
+      `${'k'.repeat(62)}_2`,
+    ]);
+    expect(sentInputs[0].rows).toEqual([[10, 10, 20, 30]]);
+    expect(() => validateAnalysisInputs(sentInputs)).not.toThrow();
   });
 
   it('publicSandboxArgs omits source and keeps block ids', () => {

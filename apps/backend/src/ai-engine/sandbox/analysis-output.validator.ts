@@ -10,8 +10,8 @@ import {
 
 const NAME = /^[a-z][a-z0-9_]{0,39}$/;
 const MAX_LABEL = 120;
-const MAX_COLUMNS = 50;
-const MAX_DATASETS = 6;
+const MAX_INPUT_COLUMN = 64;
+const MAX_UNIT = 40;
 const MAX_NOTES = 5;
 const MAX_NOTE_CHARS = 300;
 const CHARTS = new Set(['line', 'bar', 'scatter']);
@@ -74,7 +74,7 @@ export function validateAnalysisOutput(
         const t = g.obj(entry, ['title', 'columns', 'rows'], `tables[${i}]`);
         const title = g.text(t.title, MAX_LABEL, 'table title');
         const columns = g
-          .array(t.columns, MAX_COLUMNS, 'table columns')
+          .array(t.columns, limits.input_columns, 'table columns')
           .map((c) => g.text(c, MAX_LABEL, 'table column'));
         g.ensure(columns.length > 0, 'table needs columns');
         const rows = g
@@ -121,7 +121,7 @@ export function validateAnalysisOutput(
         if (s.y_label !== undefined)
           item.y_label = g.text(s.y_label, MAX_LABEL, 'y_label');
         item.datasets = g
-          .array(s.datasets, MAX_DATASETS, 'series datasets')
+          .array(s.datasets, limits.output_series, 'series datasets')
           .map((d) => {
             const ds = g.obj(d, ['label', 'values'], 'dataset');
             const values = g
@@ -150,7 +150,7 @@ export function validateAnalysisOutput(
         if (typeof figure.value === 'string')
           g.ensure(figure.value.length <= MAX_LABEL, 'figure value too long');
         if (f.unit !== undefined)
-          figure.unit = g.text(f.unit, MAX_LABEL, 'figure unit');
+          figure.unit = g.text(f.unit, MAX_UNIT, 'figure unit');
         return figure;
       });
   }
@@ -184,8 +184,12 @@ export function validateAnalysisInputs(
     names.add(name);
     const columns = g
       .array(t.columns, limits.input_columns, 'input columns')
-      .map((c) => g.text(c, MAX_LABEL, 'input column'));
+      .map((c) => g.text(c, MAX_INPUT_COLUMN, 'input column'));
     g.ensure(columns.length > 0, 'input needs columns');
+    g.ensure(
+      new Set(columns).size === columns.length,
+      'input columns must be unique',
+    );
     const rows = g.array(t.rows, limits.input_rows, 'input rows').map((row) => {
       const cells = g.array(row, columns.length, 'input row');
       g.ensure(cells.length === columns.length, 'row/column mismatch');

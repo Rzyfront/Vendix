@@ -73,6 +73,8 @@ describe('validateAnalysisOutput', () => {
     ['long title', (o) => (o.tables[0].title = 't'.repeat(121))],
     ['non-string note', (o) => (o.notes = [1])],
     ['non-finite figure', (o) => (o.figures[0].value = NaN)],
+    ['long figure value (>120)', (o) => (o.figures[0].value = 'v'.repeat(121))],
+    ['long figure unit (>40)', (o) => (o.figures[0].unit = 'u'.repeat(41))],
   ];
   it.each(mutations)('rejects %s with ANALYSIS_OUTPUT', (_name, mutate) => {
     const output = valid();
@@ -80,12 +82,41 @@ describe('validateAnalysisOutput', () => {
     expect(codeOf(() => validateAnalysisOutput(output))).toBe('ANALYSIS_OUTPUT');
   });
 
+  it('accepts boundary lengths for figure value (120) and unit (40)', () => {
+    const output = {
+      figures: [{ label: 'f', value: 'v'.repeat(120), unit: 'u'.repeat(40) }],
+    };
+    expect(validateAnalysisOutput(output)).toEqual(output);
+  });
+
+  it('respects custom limits.input_columns on output tables', () => {
+    const output = {
+      tables: [{ title: 'T', columns: ['a', 'b', 'c'], rows: [] }],
+    };
+    expect(
+      codeOf(() =>
+        validateAnalysisOutput(output, {
+          ...ANALYSIS_LIMITS,
+          input_columns: 2,
+        }),
+      ),
+    ).toBe('ANALYSIS_OUTPUT');
+  });
+
   it('rejects an empty output and non-objects', () => {
-    expect(codeOf(() => validateAnalysisOutput({ notes: ['x'] }))).toBe(
-      'ANALYSIS_OUTPUT',
-    );
-    expect(codeOf(() => validateAnalysisOutput(null))).toBe('ANALYSIS_OUTPUT');
-    expect(codeOf(() => validateAnalysisOutput([]))).toBe('ANALYSIS_OUTPUT');
+    for (const empty of [
+      { notes: ['x'] },
+      { tables: [] },
+      { series: [] },
+      { figures: [] },
+      { tables: [], notes: ['x'] },
+      null,
+      [],
+    ]) {
+      expect(codeOf(() => validateAnalysisOutput(empty))).toBe(
+        'ANALYSIS_OUTPUT',
+      );
+    }
   });
 
   it('rejects output above the byte limit', () => {
@@ -99,8 +130,9 @@ describe('validateAnalysisOutput', () => {
 describe('validateAnalysisInputs', () => {
   const table = () => ({ name: 'sales', columns: ['a', 'b'], rows: [[1, 'x']] });
 
-  it('accepts valid inputs', () => {
-    expect(validateAnalysisInputs([table()])).toEqual([table()]);
+  it('accepts valid inputs including 64-char unique columns', () => {
+    const t = { name: 'sales', columns: ['a'.repeat(64), 'b'], rows: [[1, 'x']] };
+    expect(validateAnalysisInputs([t])).toEqual([t]);
   });
 
   const cases: Array<[string, unknown]> = [
@@ -108,6 +140,8 @@ describe('validateAnalysisInputs', () => {
     ['duplicate names', [table(), table()]],
     ['too many tables', Array.from({ length: 6 }, (_, i) => ({ ...table(), name: `t${i}` }))],
     ['too many columns', [{ name: 't', columns: Array.from({ length: 51 }, (_, i) => `c${i}`), rows: [] }]],
+    ['column name >64 chars', [{ name: 't', columns: ['c'.repeat(65)], rows: [] }]],
+    ['duplicate columns', [{ name: 't', columns: ['label', 'label'], rows: [[1, 2]] }]],
     ['too many rows', [{ name: 't', columns: ['a'], rows: Array(5001).fill([1]) }]],
     ['object cell', [{ name: 't', columns: ['a'], rows: [[{}]] }]],
     ['NaN cell', [{ name: 't', columns: ['a'], rows: [[NaN]] }]],
