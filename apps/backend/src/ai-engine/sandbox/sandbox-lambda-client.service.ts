@@ -34,6 +34,7 @@ const ARN =
   /^arn:aws(?:-[a-z]+)*:lambda:([a-z]{2}(?:-[a-z]+)+-\d):\d{12}:function:[A-Za-z0-9_-]{1,64}(?::[A-Za-z0-9_-]{1,128})?$/;
 const REGION = /^[a-z]{2}(?:-[a-z]+)+-\d$/;
 const DIGEST = /^sha256:[a-f0-9]{64}$/;
+const ZERO_DIGEST = `sha256:${'0'.repeat(64)}`;
 const NONCE = /^[a-f0-9]{64}$/;
 const RESPONSE_SLACK_BYTES = 16 * 1024;
 const REQUEST_SLACK_BYTES = 64 * 1024;
@@ -131,6 +132,7 @@ export class SandboxLambdaClientService {
       !REGION.test(region) ||
       match[1] !== region ||
       !DIGEST.test(digest) ||
+      digest === ZERO_DIGEST ||
       certified !== digest
     )
       return null;

@@ -90,7 +90,21 @@ describe('AIAgentService.runAgentStream', () => {
       def('send_invoice_dian'),
       def('vex_render_table'),
       def('remember'),
-      def('run_analysis'),
+      {
+        type: 'function' as const,
+        function: {
+          name: 'run_analysis',
+          description: 'run_analysis',
+          parameters: {
+            type: 'object',
+            properties: {
+              source: { type: 'string' },
+              inputs: { type: 'array' },
+              purpose: { type: 'string' },
+            },
+          },
+        },
+      },
     ];
     const domains: Record<string, string> = {
       list_things: 'things',
@@ -131,6 +145,7 @@ describe('AIAgentService.runAgentStream', () => {
         domains[n] ? { name: n, domain: domains[n] } : undefined,
       getDeprecation: () => undefined,
       isClientSide: (n: string) => n.startsWith('ui_'),
+      isReadOnly: (n: string) => n === 'run_analysis' || n.startsWith('list_'),
       executeTool,
       executeToolResult: async (name, args, options) => {
         executionOptions(name, options);
@@ -809,7 +824,50 @@ describe('AIAgentService.runAgentStream', () => {
     });
   });
 
+  it('(vex-f9) excludes run_analysis from tool catalog when durable is absent', async () => {
+    configureStorePlan(['*'], ['p']);
+    await drain({ agent_key: 'vex' });
+    expect(offeredToolNames()).not.toContain('run_analysis');
+  });
+
   it('(vex-f9) run_analysis emits every created ui_block frame with spec.analysis', async () => {
+    configureStorePlan(['*'], ['p']);
+    registry.getAgentDefinitions = jest.fn((scopes: string[]) =>
+      registry.getAvailableDefinitions(scopes),
+    );
+    const durable = {
+      objective_id: 'obj-f9',
+      objective: {
+        authority_snapshot: ['p'],
+        budget: { active_runtime_ms: 0 },
+        expires_at: new Date(Date.now() + 60_000),
+      },
+      recoveryState: jest.fn().mockResolvedValue({
+        schema_version: '1',
+        replans: 0,
+        expansions: 0,
+        corrections: 0,
+        transient_retries: 0,
+        failures: [],
+        unknown_effect: false,
+        exhausted: false,
+      }),
+      checkpointRecovery: jest.fn(),
+      assertBudget: jest.fn(),
+      assertCurrent: jest.fn(),
+      excludeWait: jest.fn(),
+      runProvider: jest.fn(async (fn) => fn()),
+      runTool: jest.fn(async (fn) => fn()),
+      addBudget: jest.fn(),
+      checkpointTool: jest.fn().mockResolvedValue('art-1'),
+      proposeWrite: jest.fn(),
+      finish: jest.fn(async () => ({
+        id: 'obj-f9',
+        version: 1,
+        semantic_status: 'complete',
+      })),
+      close: jest.fn(),
+    } as any;
     executeTool.mockResolvedValueOnce(
       JSON.stringify({
         tool: 'run_analysis',
@@ -860,6 +918,7 @@ describe('AIAgentService.runAgentStream', () => {
         },
       }),
     );
+    chat.mockReset();
     chat
       .mockResolvedValueOnce(
         ok({
@@ -874,7 +933,8 @@ describe('AIAgentService.runAgentStream', () => {
       )
       .mockResolvedValueOnce(ok({ content: 'listo' }));
 
-    const { chunks, result } = await drain({ agent_key: 'vex' });
+    const { chunks, result } = await drain({ agent_key: 'vex', durable });
+    expect(offeredToolNames()).toContain('run_analysis');
     const uiBlocks = chunks.filter((c) => c.type === 'ui_block').map((c) => c.ui_block);
     expect(uiBlocks).toHaveLength(2);
     expect(uiBlocks[0]).toMatchObject({ block_id: 'b-chart', kind: 'chart', version: 1 });
@@ -888,9 +948,12 @@ describe('AIAgentService.runAgentStream', () => {
         }),
       }),
     });
-    // Transcript tool args, tool result and SSE tool_result must NOT carry raw Python source or ui_blocks.
+    // Transcript tool args, checkpoint args, tool result and SSE tool_result must NOT carry raw Python source or ui_blocks.
     expect(JSON.stringify(result.tools_used)).not.toContain('SECRET_PY_TOKEN');
     expect(JSON.stringify(result.tools_used)).not.toContain('ui_blocks');
+    expect(JSON.stringify(durable.checkpointTool.mock.calls)).not.toContain(
+      'SECRET_PY_TOKEN',
+    );
     const toolResultChunks = chunks.filter((c) => c.type === 'tool_result');
     expect(JSON.stringify(toolResultChunks)).not.toContain('SECRET_PY_TOKEN');
     expect(JSON.stringify(toolResultChunks)).not.toContain('ui_blocks');

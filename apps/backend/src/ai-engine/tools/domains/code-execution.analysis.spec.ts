@@ -406,6 +406,17 @@ describe('run_analysis', () => {
     expect(() => validateAnalysisInputs(sentInputs)).not.toThrow();
   });
 
+  it('persists LF/NFC-normalized source on the last block matching source_hash', async () => {
+    const { blocks, call } = setup({
+      output: { figures: [{ label: 'Total', value: 42 }] },
+    });
+    const crlfSource = 'a = 1\r\nresult = {"figures": [{"label": "Total", "value": a}]}';
+    await call({ source: crlfSource });
+    expect(blocks.create.mock.calls[0][0].spec.analysis.source).toBe(
+      'a = 1\nresult = {"figures": [{"label": "Total", "value": a}]}',
+    );
+  });
+
   it('publicSandboxArgs omits source and keeps block ids', () => {
     const out = publicSandboxArgs('run_analysis', {
       conversation_id: CONVERSATION,

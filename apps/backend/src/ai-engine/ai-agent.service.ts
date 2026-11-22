@@ -1577,7 +1577,9 @@ export class AIAgentService {
       }
     return allowed.filter(
       (d) =>
-        (d.function.name !== 'run_readonly_script' || !!params.durable) &&
+        ((d.function.name !== 'run_readonly_script' &&
+          d.function.name !== 'run_analysis') ||
+          !!params.durable) &&
         !isForeignSurfaceTool(d.function.name, params.agent_key),
     );
   }
@@ -1775,7 +1777,9 @@ export class AIAgentService {
 
     filteredTools = filteredTools.filter(
       (d) =>
-        (d.function.name !== 'run_readonly_script' || !!params.durable) &&
+        ((d.function.name !== 'run_readonly_script' &&
+          d.function.name !== 'run_analysis') ||
+          !!params.durable) &&
         !isForeignSurfaceTool(d.function.name, params.agent_key),
     );
 
@@ -4340,7 +4344,7 @@ export class AIAgentService {
                 await params.durable.checkpointTool(
                   toolCall.id,
                   toolName,
-                  toolArgs!,
+                  publicSandboxArgs(toolName, toolArgs!),
                   execution,
                   this.toolRegistry.get(toolName)?.version ?? '1',
                 );

@@ -67,6 +67,7 @@ export interface VexTableSpec {
   /** Row selection enabled (default true). Selection emits a block interaction. */
   selectable?: boolean;
   page_size?: number;
+  analysis?: VexAnalysisInfo;
 }
 
 export interface VexChartSeries {
@@ -98,6 +99,7 @@ export interface VexChartSpec {
   /** Keys of each row holding the series values. */
   series?: VexChartSeries[];
   stacked?: boolean;
+  analysis?: VexAnalysisInfo;
 }
 
 export interface VexKpiSpec {
@@ -111,6 +113,7 @@ export interface VexKpiSpec {
   delta_label?: string;
   /** When true the delta renders with inverted sentiment colors. */
   invert_delta?: boolean;
+  analysis?: VexAnalysisInfo;
 }
 
 export interface VexImageSpec {

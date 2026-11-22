@@ -56,9 +56,8 @@ export class VexAnalysisCodeComponent {
   protected readonly copy = VEX_COPY.analysis;
   protected readonly copied = signal(false);
   protected readonly analysis = computed<VexAnalysisInfo | null>(() => {
-    const analysis = (
-      this.block().spec as { analysis?: VexAnalysisInfo } | null | undefined
-    )?.analysis;
+    const spec = this.block().spec;
+    const analysis = spec && 'analysis' in spec ? spec.analysis : undefined;
     return analysis?.source ? analysis : null;
   });
 

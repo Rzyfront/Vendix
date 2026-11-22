@@ -20,6 +20,7 @@ import type {
   AnalysisRunner,
 } from '../../sandbox/interfaces/analysis-protocol.interface';
 import { RequestContextService } from '../../../common/context/request-context.service';
+import { normalizeSandboxSource } from '../../sandbox/sandbox-invocation.context';
 
 /** Read-only computation, not a confirmation shortcut or a general runtime. */
 export function createCodeExecutionTools(
@@ -570,6 +571,7 @@ export function createAnalysisTools({
           spec: Record<string, any>;
           data: Record<string, any>;
         }> = [];
+        const normalizedSource = normalizeSandboxSource(source);
         try {
           for (const [i, item] of planned.entries()) {
             // The code is shown once per analysis: only the LAST block carries it.
@@ -580,7 +582,7 @@ export function createAnalysisTools({
               spec: {
                 ...item.spec,
                 analysis: isLast
-                  ? { ...analysisMeta, source }
+                  ? { ...analysisMeta, source: normalizedSource }
                   : analysisMeta,
               },
               data: item.data,

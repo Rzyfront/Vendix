@@ -112,6 +112,13 @@ describe('SandboxLambdaClientService', () => {
       ['region invalid', { AI_ANALYSIS_LAMBDA_REGION: 'nowhere' }],
       ['region differs from ARN', { AI_ANALYSIS_LAMBDA_REGION: 'us-west-2' }],
       ['runtime digest invalid', { AI_ANALYSIS_RUNTIME_DIGEST: 'sha256:abc' }],
+      [
+        'zero placeholder digest',
+        {
+          AI_ANALYSIS_RUNTIME_DIGEST: `sha256:${'0'.repeat(64)}`,
+          AI_ANALYSIS_CERTIFIED_DIGEST: `sha256:${'0'.repeat(64)}`,
+        },
+      ],
       ['certified digest missing', { AI_ANALYSIS_CERTIFIED_DIGEST: undefined }],
       [
         'certified digest differs from runtime',
