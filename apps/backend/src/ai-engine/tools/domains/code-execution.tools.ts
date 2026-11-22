@@ -497,6 +497,21 @@ export function createAnalysisTools({
           });
         }
         for (const series of output.series ?? []) {
+          // VexBlockChartComponent plots `scatter` from the first two series
+          // ([x_def, y_def]), so scatter puts `series.x` as the first series.
+          const chartSeries =
+            series.chart === 'scatter'
+              ? [
+                  { name: series.x_label ?? 'X', data: series.x },
+                  ...series.datasets.map((d) => ({
+                    name: d.label,
+                    data: d.values,
+                  })),
+                ]
+              : series.datasets.map((d) => ({
+                  name: d.label,
+                  data: d.values,
+                }));
           planned.push({
             kind: 'chart',
             spec: {
@@ -507,10 +522,7 @@ export function createAnalysisTools({
             },
             data: {
               labels: series.x.map(String),
-              series: series.datasets.map((d) => ({
-                name: d.label,
-                data: d.values,
-              })),
+              series: chartSeries,
             },
           });
         }

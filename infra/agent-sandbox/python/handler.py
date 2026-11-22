@@ -9,11 +9,14 @@ because the execution environment is reused between invocations.
 
 Never log source, inputs or outputs.
 """
+import ctypes
+import ctypes.util
 import json
 import os
 import re
 import shutil
 import signal
+import stat
 import subprocess
 import sys
 import tempfile
@@ -42,6 +45,24 @@ _NAME_RE = re.compile(r"^[a-z][a-z0-9_]{0,39}$")
 _NONCE_RE = re.compile(r"^[0-9a-f]{64}$")
 _EXEC_ID_RE = re.compile(r"^[A-Za-z0-9_.:-]{1,128}$")
 _DIGEST_RE = re.compile(r"^sha256:[0-9a-f]{64}$")
+_PR_SET_DUMPABLE = 4
+
+
+def _valid_runtime_digest():
+    digest = os.environ.get("ANALYSIS_RUNTIME_DIGEST", "")
+    if not _DIGEST_RE.match(digest) or digest == "sha256:" + "0" * 64:
+        return None
+    return digest
+
+
+def _harden_parent_dumpable():
+    """On Linux, mark parent non-dumpable so same-UID child cannot read /proc/<ppid>/environ or ptrace."""
+    if not sys.platform.startswith("linux"):
+        return
+    libc_name = ctypes.util.find_library("c") or "libc.so.6"
+    libc = ctypes.CDLL(libc_name, use_errno=True)
+    if libc.prctl(_PR_SET_DUMPABLE, 0, 0, 0, 0) != 0:
+        raise OSError(ctypes.get_errno(), "prctl(PR_SET_DUMPABLE, 0) failed")
 
 
 class RequestError(Exception):
@@ -200,14 +221,27 @@ def _read_tail(path, limit=LOG_READ_BYTES):
 
 def _read_result(tmpdir, limits):
     path = os.path.join(tmpdir, "result.json")
+    flags = os.O_RDONLY | getattr(os, "O_NOFOLLOW", 0)
     try:
-        size = os.stat(path).st_size
-    except OSError:
+        fd = os.open(path, flags)
+    except FileNotFoundError:
         return None
-    if size > limits["output_bytes"] + 1024:
+    except OSError:
+        raise runner.OutputError("result file cannot be opened safely")
+    try:
+        st = os.fstat(fd)
+        if not stat.S_ISREG(st.st_mode):
+            raise runner.OutputError("result file is not a regular file")
+        if st.st_size > limits["output_bytes"] + 1024:
+            raise runner.OutputError("output exceeds %d bytes" % limits["output_bytes"])
+        with os.fdopen(fd, "rb") as fh:
+            fd = -1
+            data = fh.read(limits["output_bytes"] + 1025)
+    finally:
+        if fd >= 0:
+            os.close(fd)
+    if len(data) > limits["output_bytes"] + 1024:
         raise runner.OutputError("output exceeds %d bytes" % limits["output_bytes"])
-    with open(path, "rb") as fh:
-        data = fh.read(size)
     try:
         return json.loads(data.decode("utf-8"), parse_constant=_reject_constant)
     except ValueError:
@@ -216,6 +250,7 @@ def _read_result(tmpdir, limits):
 
 def _execute(tmpdir, source, inputs, limits):
     """Run one child. Returns (code, message, output); code None means ok."""
+    _harden_parent_dumpable()
     os.mkdir(os.path.join(tmpdir, "in"), 0o700)
     for table in inputs:
         _write_private(os.path.join(tmpdir, "in", table["name"] + ".json"),
@@ -275,8 +310,8 @@ def _execute(tmpdir, source, inputs, limits):
 
 
 def _response(execution_id, nonce, status, started, code=None, message=None, output=None):
-    digest = os.environ.get("ANALYSIS_RUNTIME_DIGEST", "")
-    if not _DIGEST_RE.match(digest) or digest == "sha256:" + "0" * 64:
+    digest = _valid_runtime_digest()
+    if digest is None:
         status, code, message, output = "error", "ANALYSIS_RUNTIME", "runtime digest missing", None
         digest = "sha256:" + "0" * 64  # shape-valid placeholder; the host rejects it
     body = {
@@ -297,6 +332,8 @@ def handler(event, context=None):
     echo_nonce = event.get("nonce") if isinstance(event, dict) else None
     echo_id = echo_id if isinstance(echo_id, str) and _EXEC_ID_RE.match(echo_id) else ""
     echo_nonce = echo_nonce if isinstance(echo_nonce, str) and _NONCE_RE.match(echo_nonce) else ""
+    if _valid_runtime_digest() is None:
+        return _response(echo_id, echo_nonce, "error", started, "ANALYSIS_RUNTIME", "runtime digest missing")
     try:
         execution_id, nonce, source, inputs, limits = validate_request(event)
     except RequestError as exc:

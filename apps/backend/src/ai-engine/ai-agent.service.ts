@@ -1191,6 +1191,25 @@ export class AIAgentService {
   }
 
   /**
+   * F9/T52: strips `data.ui_blocks` (which carries full rows and raw Python
+   * `spec.analysis.source`) before checkpointing, compaction, LLM context and
+   * transcript persistence, keeping only block ids, figures and notes.
+   */
+  private stripAnalysisUiBlocks(toolName: string, raw: string): string {
+    if (toolName !== 'run_analysis') return raw;
+    try {
+      const parsed = JSON.parse(raw) as {
+        data?: Record<string, unknown>;
+      };
+      if (!parsed?.data || !('ui_blocks' in parsed.data)) return raw;
+      const { ui_blocks: _omitted, ...rest } = parsed.data;
+      return JSON.stringify({ ...parsed, data: rest });
+    } catch {
+      return raw;
+    }
+  }
+
+  /**
    * Non-streaming entry point. Drains the streaming loop and keeps its return
    * value, so there is exactly one implementation of the agent protocol —
    * a second copy for the SSE path would drift the moment either is touched.
@@ -3845,7 +3864,12 @@ export class AIAgentService {
                       ? activeTrace.run(toolSpan, meteredExecute)
                       : meteredExecute(),
                   );
-              const normalized = normalizeToolResult(raw, {
+              // F9/T52: extract panel-ready blocks before stripping ui_blocks
+              // (which carries raw Python `spec.analysis.source`) from all
+              // transcript, checkpoint and LLM-visible payloads.
+              const analysisBlocks = this.analysisBlocksOf(toolName, raw);
+              const safeRaw = this.stripAnalysisUiBlocks(toolName, raw);
+              const normalized = normalizeToolResult(safeRaw, {
                 write:
                   this.toolRegistry.get(toolName)?.requiresConfirmation ===
                   true,
@@ -3859,7 +3883,7 @@ export class AIAgentService {
                 artifactId = await params.durable.checkpointTool(
                   toolCall.id,
                   toolName,
-                  toolArgs,
+                  publicSandboxArgs(toolName, toolArgs),
                   durableResult,
                   this.toolRegistry.get(toolName)?.version ?? '1',
                 );
@@ -3875,7 +3899,7 @@ export class AIAgentService {
               // rows}`, never the full payload twice.
               const result = await this.compactToolResult(
                 toolName,
-                raw,
+                safeRaw,
                 params,
                 artifactId,
                 toolArgs,
@@ -3883,7 +3907,7 @@ export class AIAgentService {
               // Compaction is transport: the full result is persisted behind a
               // reference, so the receipt stays `observed` (no `truncated`, no
               // recovery instruction, no incomplete_data).
-              if (normalized && result !== raw) normalized.compacted = true;
+              if (normalized && result !== safeRaw) normalized.compacted = true;
 
               toolsUsed.push({
                 name: toolName,
@@ -3944,7 +3968,7 @@ export class AIAgentService {
                 yield { type: 'ui_block', ui_block: part };
               }
               // F9/T52: run_analysis produces table/chart/kpi blocks in order.
-              for (const block of this.analysisBlocksOf(toolName, raw)) {
+              for (const block of analysisBlocks) {
                 yield { type: 'ui_block', ui_block: block };
               }
             } catch (error: any) {

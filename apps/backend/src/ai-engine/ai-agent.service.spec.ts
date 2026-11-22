@@ -851,7 +851,7 @@ describe('AIAgentService.runAgentStream', () => {
                   source_hash: 'h-1',
                   language: 'python',
                   purpose: 'projection',
-                  source: 'result = {}',
+                  source: 'SECRET_PY_TOKEN = 42\nresult = {}',
                 },
               },
               data: { value: 150 },
@@ -862,11 +862,19 @@ describe('AIAgentService.runAgentStream', () => {
     );
     chat
       .mockResolvedValueOnce(
-        ok({ tool_calls: [call('c1', 'run_analysis', { source: 'result = {}', inputs: [], purpose: 'projection' })] }),
+        ok({
+          tool_calls: [
+            call('c1', 'run_analysis', {
+              source: 'SECRET_PY_TOKEN = 42\nresult = {}',
+              inputs: [],
+              purpose: 'projection',
+            }),
+          ],
+        }),
       )
       .mockResolvedValueOnce(ok({ content: 'listo' }));
 
-    const { chunks } = await drain({ agent_key: 'vex' });
+    const { chunks, result } = await drain({ agent_key: 'vex' });
     const uiBlocks = chunks.filter((c) => c.type === 'ui_block').map((c) => c.ui_block);
     expect(uiBlocks).toHaveLength(2);
     expect(uiBlocks[0]).toMatchObject({ block_id: 'b-chart', kind: 'chart', version: 1 });
@@ -875,9 +883,17 @@ describe('AIAgentService.runAgentStream', () => {
       kind: 'kpi',
       version: 1,
       spec: expect.objectContaining({
-        analysis: expect.objectContaining({ source: 'result = {}' }),
+        analysis: expect.objectContaining({
+          source: 'SECRET_PY_TOKEN = 42\nresult = {}',
+        }),
       }),
     });
+    // Transcript tool args, tool result and SSE tool_result must NOT carry raw Python source or ui_blocks.
+    expect(JSON.stringify(result.tools_used)).not.toContain('SECRET_PY_TOKEN');
+    expect(JSON.stringify(result.tools_used)).not.toContain('ui_blocks');
+    const toolResultChunks = chunks.filter((c) => c.type === 'tool_result');
+    expect(JSON.stringify(toolResultChunks)).not.toContain('SECRET_PY_TOKEN');
+    expect(JSON.stringify(toolResultChunks)).not.toContain('ui_blocks');
   });
 
   it('(vex-vi) a write proposal emits plan_approval and ends the turn', async () => {

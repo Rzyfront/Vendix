@@ -182,10 +182,34 @@ class ExecutionTests(unittest.TestCase):
     def test_missing_digest_is_runtime_error_without_spawning(self):
         factory, _ = self.popen_writing({"status": "ok", "output": {"notes": ["x"]}})
         with patch.dict(os.environ, {"ANALYSIS_RUNTIME_DIGEST": ""}), \
-                patch.object(handler.subprocess, "Popen", side_effect=factory):
+                patch.object(handler.subprocess, "Popen", side_effect=factory) as popen:
             res = handler.handler(request())
+        popen.assert_not_called()
         self.assertEqual((res["status"], res["error_code"], res["error_message"]),
                          ("error", "ANALYSIS_RUNTIME", "runtime digest missing"))
+
+    def test_result_symlink_is_rejected(self):
+        secret = os.path.join(self.root, "secret.json")
+        with open(secret, "w", encoding="utf-8") as fh:
+            fh.write('{"status":"ok","output":{"notes":["leak"]}}')
+
+        def symlink_result(cmd, **kwargs):
+            tmpdir = cmd[3]
+            os.symlink(secret, os.path.join(tmpdir, "result.json"))
+            proc = MagicMock(pid=7777, returncode=0)
+            proc.wait.return_value = 0
+            return proc
+
+        with patch.object(handler.subprocess, "Popen", side_effect=symlink_result):
+            res = handler.handler(request())
+        self.assertEqual((res["status"], res["error_code"]), ("error", "ANALYSIS_OUTPUT"))
+
+    def test_linux_dumpable_failure_fails_closed_without_spawning(self):
+        with patch.object(handler, "_harden_parent_dumpable", side_effect=OSError("prctl failed")), \
+                patch.object(handler.subprocess, "Popen") as popen:
+            res = handler.handler(request())
+        popen.assert_not_called()
+        self.assertEqual((res["status"], res["error_code"]), ("error", "ANALYSIS_RUNTIME"))
 
     def test_never_prints_payloads(self):
         factory, _ = self.popen_writing({"status": "ok", "output": {"notes": ["x"]}})

@@ -21,11 +21,9 @@ AWS Lambda (imagen contenedor Python 3.12 · Dockerfile + template.json)
    └── Por cada invocación (handler.py → runner.py):
           1. Valida petición y recorta límites contra HARD_LIMITS.
           2. Limpia /tmp antes y después de ejecutar.
-          3. Lanza un proceso hijo nuevo (`python -I runner.py`) en sesión propia con
-             entorno limpio (sin AWS_*), RLIMIT_AS / RLIMIT_CPU / RLIMIT_NPROC /
-             RLIMIT_FSIZE / RLIMIT_CORE y timeout de pared.
+          3. Marca al proceso padre no-dumpable en Linux (`prctl(PR_SET_DUMPABLE, 0)`) para impedir lectura de `/proc/<ppid>/environ` o `ptrace` desde el hijo, y lanza un proceso hijo nuevo (`python -I runner.py`) en sesión propia con entorno limpio (sin `AWS_*`), `RLIMIT_AS` / `RLIMIT_CPU` / `RLIMIT_NPROC` / `RLIMIT_FSIZE` / `RLIMIT_CORE` y timeout de pared.
           4. Mata todo el grupo de procesos (`SIGKILL`) al terminar o vencer el tiempo.
-          5. Revalida `result` (tables/series/figures/notes) y devuelve solo JSON acotado.
+          5. Lee `result.json` con `O_NOFOLLOW`, revalida `result` (tables/series/figures/notes) y devuelve solo JSON acotado.
 ```
 
 ---
@@ -64,7 +62,7 @@ Las pruebas de `handler.py` mockean `subprocess.Popen` y validan limpieza de `/t
 Antes de encender `AI_ANALYSIS_SANDBOX_ENABLED=true` en cualquier entorno real, un operador con credenciales de QA debe construir la imagen (`pip-compile --generate-hashes` + `FROM ...@sha256:<digest>`), desplegar `template.json` en una cuenta/región QA y producir un informe firmado de certificación que enlace el `runtime_digest` final con la evidencia real de:
 
 1. **Egreso cero**: intentos de DNS, HTTP/HTTPS, sockets TCP/UDP crudos, enlace al metadata service (`169.254.169.254`) y conexiones hacia la VPC de producción fallan con bloqueo total.
-2. **Sistema de archivos y secretos**: intento de escritura fuera de `/tmp` falla (`Read-only file system`); entorno del hijo sin `AWS_*` ni credenciales; ningún secreto presente en proceso ni en logs.
+2. **Sistema de archivos, `/proc` y secretos**: intento de escritura fuera de `/tmp` falla (`Read-only file system`); symlink en `/tmp/result.json` rechazado (`O_NOFOLLOW`); entorno del hijo sin `AWS_*` ni credenciales; lectura de `/proc/<ppid>/environ`, `/proc/<ppid>/mem` y `ptrace` sobre el padre fallan (`PermissionError` gracias a `PR_SET_DUMPABLE=0`); ningún secreto presente en proceso ni en logs.
 3. **Límites de recursos**: bomba de memoria (`ANALYSIS_MEMORY`), ciclo infinito de CPU (`ANALYSIS_TIMEOUT`), fork bomb (`RLIMIT_NPROC`), inundación de stdout/stderr y archivo grande en `/tmp` (`RLIMIT_FSIZE`) terminan dentro del presupuesto sin dejar procesos huérfanos.
 4. **Aislamiento multi-tenant (100 ejecuciones alternando 3 tiendas)**: ejecución de 100 invocaciones consecutivas alternando datos marcados de 3 tiendas distintas (reutilizando el mismo entorno caliente de Lambda) con verificación de cero residuos en `/tmp`, memoria, variables globales o respuestas cruzadas.
 5. **Revisión de política IAM**: verificación en AWS de que el rol de ejecución de la Lambda solo tiene permisos ENI y el rol del backend solo tiene `lambda:InvokeFunction` sobre ese único ARN.

@@ -259,6 +259,31 @@ describe('run_analysis', () => {
     });
   });
 
+  it('scatter chart places x as the first series for VexBlockChartComponent', async () => {
+    const { blocks, call } = setup({
+      output: {
+        series: [
+          {
+            title: 'Descuento vs Ventas',
+            chart: 'scatter',
+            x_label: 'Descuento (%)',
+            y_label: 'Unidades',
+            x: [5, 10, 15],
+            datasets: [{ label: 'Unidades', values: [20, 35, 50] }],
+          },
+        ],
+      },
+    });
+    await call({ purpose: 'correlation' });
+    const created = blocks.create.mock.calls[0][0];
+    expect(created.kind).toBe('chart');
+    expect(created.spec.chart_type).toBe('scatter');
+    expect(created.data.series).toEqual([
+      { name: 'Descuento (%)', data: [5, 10, 15] },
+      { name: 'Unidades', data: [20, 35, 50] },
+    ]);
+  });
+
   it('segmentation: tables then figures, only the last carries the code', async () => {
     const { blocks, call } = setup({
       output: {
