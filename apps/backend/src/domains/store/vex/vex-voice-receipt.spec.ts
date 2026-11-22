@@ -66,9 +66,17 @@ function fixture(
   jest.spyOn(voice, 'effectStepId').mockResolvedValue(`${planId}:s1`);
   const quota = jest.fn();
   const registry: any = { registerMany: jest.fn() };
-  new VexModule(registry, {} as any, voice, plans, {
-    consumeAIQuota: quota,
-  } as any).onModuleInit();
+  // The batch service only feeds createWriteBatchTools at registration; the
+  // voice receipt sink under test never calls it.
+  const writeBatches: any = { propose: jest.fn() };
+  new VexModule(
+    registry,
+    {} as any,
+    voice,
+    plans,
+    { consumeAIQuota: quota } as any,
+    writeBatches,
+  ).onModuleInit();
   const controller: any = Object.create(VexiController.prototype);
   controller.responseService = { success: (data: unknown) => data };
   controller.voiceConfirmations = voice;

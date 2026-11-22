@@ -9,7 +9,9 @@ describe('propose_write_batch tool (T34)', () => {
 
   function build(propose: jest.Mock = jest.fn()) {
     const [tool] = createWriteBatchTools({ batches: { propose } as any });
-    const call = async (args: Record<string, unknown>) => JSON.parse(await tool.handler(args as any, {} as any));
+    // `handler` is optional on RegisteredTool; this tool always declares one.
+    expect(tool.handler).toBeDefined();
+    const call = async (args: Record<string, unknown>) => JSON.parse(await tool.handler!(args as any, {} as any));
     return { tool, propose, call };
   }
 
