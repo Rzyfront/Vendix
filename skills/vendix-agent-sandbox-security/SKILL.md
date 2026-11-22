@@ -1,17 +1,19 @@
 ---
 name: vendix-agent-sandbox-security
 description: >
-  Optional read-only Deno sandbox for Vex/Vexi, immutable host authority,
-  stdio RPC, gVisor lifecycle, encrypted audit and isolation release gates.
-  Trigger: Changing run_readonly_script, its broker, policy or Linux runner.
+  Optional read-only sandboxes for Vex/Vexi: Deno run_readonly_script and the
+  Code Mode Lambda (run_code), immutable host authority, encrypted audit and
+  isolation release gates. Trigger: Changing run_readonly_script, run_code,
+  their broker/bridge, policy, allowlist or runner.
 license: MIT
 metadata:
   author: rzyfront
-  version: "1.1"
+  version: "1.2"
   scope: [root]
   auto_invoke:
     - "Changing run_readonly_script or the sandbox RPC broker"
     - "Changing agent sandbox isolation, limits or deployment adapter"
+    - "Changing run_code, the Code Mode bridge, its allowlist or infra/agent-sandbox/js"
 ---
 
 # Agent sandbox security
@@ -71,6 +73,45 @@ metadata:
   cleanup. Successful delivery awaits supervisor exit0; timeout/late RPC cannot
   publish a result. Orphan/daemon failure monitoring is a mandatory Linux gate.
 
+## Code Mode (F10, `run_code`, channel A)
+
+- Executor: Lambda `vendix-agent-codemode` (`infra/agent-sandbox/js/`): QuickJS
+  WASM in a fresh child process per round (`env: {}`, /tmp wiped), `TenancyConfig`
+  `PER_TENANT`, VPC without egress, role ENI-only. Globals: `tools`, `console`,
+  `vex.block`; `Date` frozen, `Math.random` seeded; no require/process/fetch/timers.
+- The Lambda NEVER executes a tool. It returns `pending` calls; the host runs them
+  with the session's authority and keeps the journal ONLY server-side. The
+  response has no journal; unknown keys, wrong nonce/execution_id/round or a
+  non-contiguous `seq` are `CODEMODE_PROTOCOL`. Contract and hash vectors:
+  `sandbox/interfaces/codemode-protocol.interface.ts`, mirrored in the Lambda
+  (`template.test.cjs` guards drift). `TenantId` = HMAC of the store, never its id.
+- Per call: manifest ∩ generated allowlist ∩ the turn's authorized names ∩ live
+  authority re-derived by `SandboxPolicyService.authorize` (Code Mode scope);
+  plain-JSON args ≤ 16 KiB; `store_id`/`organization_id`/tenant keys rejected at
+  any depth; schema validation; rows ≤ 5000; result to the model ≤ 8 KiB. A store
+  change between rounds aborts with `CODEMODE_TENANT_CHANGED`.
+- Allowlist lives in code: `sandbox/codemode-allowlist.generated.ts`, built by
+  `scripts/generate-codemode-allowlist.ts` from `codemode-allowlist.derive.ts`
+  (readOnly, not clientSide, no confirmation, not irreversible, a declared
+  permission, not public, no `ui_*`, minus third parties: DIAN, payment gateways,
+  AI models, shipping providers, loopback HTTP reports, file artifacts). The
+  snapshot spec fails on any drift; regenerate and review, never edit by hand.
+- Limits `CODEMODE_LIMITS`: 6 rounds, 20 calls, 8 pending/round, 20 tools,
+  2 s CPU/round, 30 s wall, 256 MB; ≤ 3 scripts per turn. Stage 1 is read-only:
+  any write, irreversible or client tool in the manifest is rejected before invoking.
+- Switches, all off by default: capability `vex.code_mode` (missing plan row = off)
+  and `AI_CODEMODE_SANDBOX_ENABLED` + ARN + region + runtime digest equal to the
+  certified digest. Without the T69 certification `available()` stays false and
+  `run_code` is not even registered (catalog hash and knowledge index unchanged);
+  when available it is offered only to the `vex` agent with the capability.
+- Public args: `publicSandboxArgs('run_code')` keeps only `source_hash`, `tools`,
+  `purpose` and `source_omitted`; the source never reaches the SSE `tool_call`
+  frame, the transcript or generic tool logs (`sandbox-logging.spec.ts`).
+- Audit: `ai_agent_script_runs` (`executor` lambda-js, rounds, Lambda request ids,
+  tenant hash, cut reason, returned bytes; per-call rows/duration), one child span
+  per call (`call_seq`, hashed tool). Source decrypts only for the owner within
+  7 days; superadmin sees metadata only.
+
 ## Verification / rollout
 
 Run exact modified specs one process at a time, bounded heap; see
@@ -90,6 +131,8 @@ infrastructure provisioning or paid service choice is implicit in this skill.
 - `apps/backend/src/ai-engine/sandbox/` — broker, policy, client, host capability, audit.
 - `apps/backend/src/ai-engine/tools/domains/code-execution.tools.ts` — optional tool.
 - `infra/agent-sandbox/README.md` — deployment contract and unexecuted Linux gates.
+- `infra/agent-sandbox/js/README.md` — Code Mode Lambda, IaC and the pending T69 certification.
+- `apps/backend/src/ai-engine/sandbox/codemode-*.ts` — bridge, policy, allowlist, response validator.
 - `docs/agentic-sandbox-E.md` — phase boundaries and verification status.
 - Related: `vendix-agent-durable-tasks`, `vendix-ai-agent-tools`,
   `vendix-multi-tenant-context`, `vendix-prisma-migrations`, `buildcheck-dev`.

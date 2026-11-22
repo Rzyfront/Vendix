@@ -61,6 +61,8 @@ El backend devuelve "no disponible" (y Vex no ofrece `run_code`) salvo que **tod
 
 Además, la capacidad de plan `vex.code_mode` (apagada en todos los planes) y la suite de ataque entre tiendas en verde.
 
+Con el interruptor apagado, `run_code` ni siquiera se registra: el catálogo de herramientas, su hash y el índice de conocimiento quedan idénticos. Encendido, se ofrece solo al agente `vex`, con un máximo de 3 scripts por turno (el cuarto devuelve `CODEMODE_TURN_LIMIT`). La fuente del script viaja solo como hash en el SSE, la transcripción y los logs; el texto queda cifrado en `ai_agent_script_runs` y solo lo ve quien lo ejecutó, durante 7 días.
+
 ---
 
 ## Pruebas offline (sin AWS ni Docker)
