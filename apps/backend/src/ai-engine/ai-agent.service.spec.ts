@@ -1562,8 +1562,9 @@ describe('AIAgentService.runAgentStream', () => {
         expect.objectContaining({
           tool_count: expect.any(Number),
           catalog_hash: expect.any(String),
-          definition_tokens: null,
-          context_tokens: null,
+          definition_tokens: expect.any(Number),
+          context_tokens: expect.any(Number),
+          token_estimator: 'bytes_v1',
         }),
       );
       expect(byKind('root')[0].outcome).toBe('partial');

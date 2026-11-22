@@ -8,7 +8,10 @@ import {
   sandboxInvocation,
 } from './sandbox/sandbox-invocation.context';
 import { streamAgentInference } from './context/agent-stream-inference';
-import { historicalAssistantProse } from './context/agent-context-budget';
+import {
+  estimateAgentInputTokens,
+  historicalAssistantProse,
+} from './context/agent-context-budget';
 import {
   FREE_DISCOVERY_ROUNDS_PER_TURN,
   maximumRecoveryReplans,
@@ -44,6 +47,7 @@ import {
   recentToolNames,
 } from './tools/tool-working-set';
 import {
+  fullCatalogReasonOf,
   ToolRouterService,
   ToolRoutingSession,
 } from './tools/tool-router.service';
@@ -424,6 +428,29 @@ export interface AgentResult {
       irreversible: boolean;
     }>;
   };
+}
+
+/**
+ * T60: size of what a turn sends to the model, for the trace. Always the
+ * repository's bytes-based estimator (`bytes_v1`): pessimistic and NOT a
+ * tokenizer, so it must never be read as provider-observed tokens. A message
+ * the estimator refuses (unsupported multimodal part) leaves the context
+ * measure null instead of failing the turn.
+ */
+function turnTokenMeasure(
+  messages: AIMessage[],
+  tools: AIToolDefinition[],
+): { definition_tokens: number; context_tokens: number | null } {
+  // estimateAgentInputTokens([], tools) = 32 (base) + definitions.
+  const definition_tokens = estimateAgentInputTokens([], tools) - 32;
+  try {
+    return {
+      definition_tokens,
+      context_tokens: estimateAgentInputTokens(messages, tools),
+    };
+  } catch {
+    return { definition_tokens, context_tokens: null };
+  }
 }
 
 @Injectable()
@@ -1865,16 +1892,8 @@ export class AIAgentService {
         recipes: !!recipeSession,
       });
 
-    if (contextSpan)
-      activeTrace?.endSpan(contextSpan, {
-        attributes: {
-          tool_count: filteredTools.length,
-          catalog_hash: activeTrace?.hash(JSON.stringify(filteredTools)),
-          catalog_version: '1',
-          definition_tokens: null,
-          context_tokens: null,
-        },
-      });
+    // The context span ends once the initial messages exist (just before the
+    // loop) so its context measure covers them; see `turnTokenMeasure`.
 
     // An already-active plan (a continuation turn) gets the wide budget from the
     // first iteration instead of waiting for a propose_plan that will not come.
@@ -2093,6 +2112,28 @@ export class AIAgentService {
         ? [{ type: 'text', text: params.goal }, ...params.goal_images]
         : params.goal,
     });
+
+    if (contextSpan)
+      activeTrace?.endSpan(contextSpan, {
+        attributes: {
+          tool_count: filteredTools.length,
+          catalog_hash: activeTrace?.hash(JSON.stringify(filteredTools)),
+          catalog_version: '1',
+          ...turnTokenMeasure(messages, filteredTools),
+          token_estimator: 'bytes_v1',
+          // Routed turns swap `filteredTools` for the working set per round
+          // (the `router` span carries that exact measure); here it is the
+          // scope the turn starts from.
+          offered_tool_count: filteredTools.length,
+          authorized_tool_count: routingSession
+            ? routingAuthority.length
+            : filteredTools.length,
+          full_catalog_fallback: !!routingSession?.fullCatalog,
+          full_catalog_reason: fullCatalogReasonOf(
+            routingSession?.fullCatalog,
+          ),
+        },
+      });
 
     const toolsUsed: AgentResult['tools_used'] = [];
     let pendingConfirmation: AgentResult['pending_confirmation'];
@@ -2410,9 +2451,12 @@ export class AIAgentService {
                 attributes: {
                   tool_count: filteredTools.length,
                   catalog_hash: selection.catalogHash,
-                  definition_tokens: Math.ceil(
-                    JSON.stringify(filteredTools).length / 4,
-                  ),
+                  ...turnTokenMeasure(messages, filteredTools),
+                  token_estimator: 'bytes_v1',
+                  offered_tool_count: filteredTools.length,
+                  authorized_tool_count: routingAuthority.length,
+                  full_catalog_fallback: selection.fullCatalogReason !== null,
+                  full_catalog_reason: selection.fullCatalogReason,
                   ...workingSet,
                 },
               });

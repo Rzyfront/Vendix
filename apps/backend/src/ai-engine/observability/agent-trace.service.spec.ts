@@ -324,6 +324,35 @@ describe('AgentTraceService (bounded explicit-scope observability)', () => {
     });
   });
 
+  it('keeps the F10/T60 tool-definition measurement keys and rejects unknown codes', () => {
+    expect(
+      redactTraceAttributes({
+        definition_tokens: 23_000,
+        context_tokens: 31_000,
+        token_estimator: 'bytes_v1',
+        offered_tool_count: 19,
+        authorized_tool_count: 362,
+        full_catalog_fallback: true,
+        full_catalog_reason: 'index_coverage_below_90',
+      }),
+    ).toEqual({
+      definition_tokens: 23_000,
+      context_tokens: 31_000,
+      token_estimator: 'bytes_v1',
+      offered_tool_count: 19,
+      authorized_tool_count: 362,
+      full_catalog_fallback: true,
+      full_catalog_reason: 'index_coverage_below_90',
+    });
+    expect(
+      redactTraceAttributes({
+        token_estimator: 'tiktoken',
+        full_catalog_reason: 'free text',
+        full_catalog_fallback: 'yes',
+      }),
+    ).toEqual({});
+  });
+
   it('drops unknown keys, free text and invalid numbers from metadata allowlist', () => {
     expect(
       redactTraceAttributes({

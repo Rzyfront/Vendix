@@ -135,6 +135,35 @@ export interface ToolRouterSelection {
   degraded: string[];
   catalogHash: string;
   retrievalSource: string;
+  /**
+   * Stable code of why the turn serves the full authorized catalog, or null on
+   * a normal (routed) selection. Telemetry only: it never changes what is offered.
+   */
+  fullCatalogReason: FullCatalogReason | null;
+}
+
+export type FullCatalogReason =
+  | 'index_coverage_below_90'
+  | 'no_evidence'
+  | 'router_timeout'
+  | 'router_error';
+
+/** Maps the session's internal fallback marker to its stable telemetry code. */
+export function fullCatalogReasonOf(
+  marker: string | undefined,
+): FullCatalogReason | null {
+  switch (marker) {
+    case undefined:
+    case '':
+      return null;
+    case 'index_coverage':
+      return 'index_coverage_below_90';
+    case 'no_evidence':
+    case 'router_timeout':
+      return marker;
+    default:
+      return 'router_error';
+  }
 }
 
 function withTimeout<T>(promise: Promise<T>, ms: number): Promise<T> {
@@ -512,6 +541,7 @@ export class ToolRouterService {
       retrievalSource: session.fullCatalog
         ? 'full_catalog_fallback'
         : (session.retrieval?.source ?? 'none'),
+      fullCatalogReason: fullCatalogReasonOf(session.fullCatalog),
     };
   }
 

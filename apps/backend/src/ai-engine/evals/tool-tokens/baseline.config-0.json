@@ -1,0 +1,1413 @@
+{
+ "config": 0,
+ "config_name": "enrutador actual (working set dinámico) vs catálogo completo de referencia",
+ "token_estimator": "bytes_v1",
+ "assumptions": {
+  "system_prompt_bytes": 6000,
+  "final_answer_output_bytes": 600,
+  "prefetch_top": 8
+ },
+ "tools": {
+  "declared_unique": 389,
+  "factory_outputs": 391,
+  "authorized_for_owner_vex": 362,
+  "owner_permissions_used": 193,
+  "denied_ui_tools": 25
+ },
+ "definition_tokens_full_catalog": 350483,
+ "digest_bytes": 7813,
+ "totals": {
+  "routed": {
+   "single": {
+    "tasks": 5,
+    "input_total": 1659571,
+    "output_estimate": 3466,
+    "round_trips": 10,
+    "reachable": 5
+   },
+   "multi_step": {
+    "tasks": 25,
+    "input_total": 4627549,
+    "output_estimate": 22860,
+    "round_trips": 86,
+    "reachable": 25
+   },
+   "all": {
+    "tasks": 30,
+    "input_total": 6287120,
+    "output_estimate": 26326,
+    "round_trips": 96,
+    "reachable": 30
+   }
+  },
+  "full_catalog": {
+   "single": {
+    "tasks": 5,
+    "input_total": 3575723,
+    "output_estimate": 3466,
+    "round_trips": 10,
+    "reachable": 5
+   },
+   "multi_step": {
+    "tasks": 25,
+    "input_total": 31012681,
+    "output_estimate": 22860,
+    "round_trips": 86,
+    "reachable": 25
+   },
+   "all": {
+    "tasks": 30,
+    "input_total": 34588404,
+    "output_estimate": 26326,
+    "round_trips": 96,
+    "reachable": 30
+   }
+  }
+ },
+ "tasks": [
+  {
+   "id": "t01",
+   "source": "golden:g21-vex-resumen-grafica",
+   "kind": "multi_step",
+   "message": "Dame un resumen de ventas de la semana con gráfica",
+   "round_trips": 3,
+   "oracle_tools": [
+    "get_sales_report",
+    "vex_render_chart"
+   ],
+   "reachable": true,
+   "missing": [],
+   "unauthorized": [],
+   "variants": {
+    "routed": {
+     "offered_tool_count": 18,
+     "full_catalog_reason": null,
+     "definition_tokens_turn0": 23923,
+     "round_trips": 3,
+     "input_by_round": [
+      38093,
+      38691,
+      39023
+     ],
+     "input_total": 115807,
+     "output_estimate": 810,
+     "intermediate_result_bytes": 376
+    },
+    "full_catalog": {
+     "offered_tool_count": 355,
+     "full_catalog_reason": "index_coverage_below_90",
+     "definition_tokens_turn0": 343074,
+     "round_trips": 3,
+     "input_by_round": [
+      357244,
+      357842,
+      358174
+     ],
+     "input_total": 1073260,
+     "output_estimate": 810,
+     "intermediate_result_bytes": 376
+    }
+   }
+  },
+  {
+   "id": "t02",
+   "source": "golden:g22-vex-gastos-comparar",
+   "kind": "multi_step",
+   "message": "Analiza mis gastos del mes",
+   "round_trips": 3,
+   "oracle_tools": [
+    "list_expenses",
+    "get_income_statement",
+    "vex_render_chart"
+   ],
+   "reachable": true,
+   "missing": [],
+   "unauthorized": [],
+   "variants": {
+    "routed": {
+     "offered_tool_count": 19,
+     "full_catalog_reason": null,
+     "definition_tokens_turn0": 24527,
+     "round_trips": 3,
+     "input_by_round": [
+      38672,
+      43938,
+      44270
+     ],
+     "input_total": 126880,
+     "output_estimate": 904,
+     "intermediate_result_bytes": 4246
+    },
+    "full_catalog": {
+     "offered_tool_count": 355,
+     "full_catalog_reason": "index_coverage_below_90",
+     "definition_tokens_turn0": 343074,
+     "round_trips": 3,
+     "input_by_round": [
+      357219,
+      362485,
+      362817
+     ],
+     "input_total": 1082521,
+     "output_estimate": 904,
+     "intermediate_result_bytes": 4246
+    }
+   }
+  },
+  {
+   "id": "t03",
+   "source": "golden:g23-vex-oc-stock",
+   "kind": "multi_step",
+   "message": "Prepara una orden de compra para reponer stock bajo",
+   "round_trips": 4,
+   "oracle_tools": [
+    "get_low_stock_alerts",
+    "find_supplier",
+    "propose_write_batch"
+   ],
+   "reachable": true,
+   "missing": [],
+   "unauthorized": [],
+   "variants": {
+    "routed": {
+     "offered_tool_count": 20,
+     "full_catalog_reason": null,
+     "definition_tokens_turn0": 25877,
+     "round_trips": 4,
+     "input_by_round": [
+      40047,
+      42414,
+      43101,
+      43661
+     ],
+     "input_total": 169223,
+     "output_estimate": 883,
+     "intermediate_result_bytes": 2570
+    },
+    "full_catalog": {
+     "offered_tool_count": 355,
+     "full_catalog_reason": "index_coverage_below_90",
+     "definition_tokens_turn0": 343074,
+     "round_trips": 4,
+     "input_by_round": [
+      357244,
+      359611,
+      360298,
+      360858
+     ],
+     "input_total": 1438011,
+     "output_estimate": 883,
+     "intermediate_result_bytes": 2570
+    }
+   }
+  },
+  {
+   "id": "t04",
+   "source": "golden:g24-vex-tres-temas",
+   "kind": "multi_step",
+   "message": "¿Cómo van mis ventas este mes? ¿Y cuánto vale mi inventario valorizado?",
+   "round_trips": 3,
+   "oracle_tools": [
+    "get_sales_report",
+    "get_stock_levels"
+   ],
+   "reachable": true,
+   "missing": [],
+   "unauthorized": [],
+   "variants": {
+    "routed": {
+     "offered_tool_count": 19,
+     "full_catalog_reason": null,
+     "definition_tokens_turn0": 24492,
+     "round_trips": 3,
+     "input_by_round": [
+      38686,
+      39285,
+      45114
+     ],
+     "input_total": 123085,
+     "output_estimate": 811,
+     "intermediate_result_bytes": 5227
+    },
+    "full_catalog": {
+     "offered_tool_count": 355,
+     "full_catalog_reason": "index_coverage_below_90",
+     "definition_tokens_turn0": 343074,
+     "round_trips": 3,
+     "input_by_round": [
+      357268,
+      357867,
+      363696
+     ],
+     "input_total": 1078831,
+     "output_estimate": 811,
+     "intermediate_result_bytes": 5227
+    }
+   }
+  },
+  {
+   "id": "t05",
+   "source": "golden:g25-vex-vender-mas",
+   "kind": "single",
+   "message": "¿Qué debería hacer esta semana para vender más?",
+   "round_trips": 2,
+   "oracle_tools": [
+    "get_business_snapshot"
+   ],
+   "reachable": true,
+   "missing": [],
+   "unauthorized": [],
+   "variants": {
+    "routed": {
+     "offered_tool_count": 18,
+     "full_catalog_reason": null,
+     "definition_tokens_turn0": 23145,
+     "round_trips": 2,
+     "input_by_round": [
+      37315,
+      37957
+     ],
+     "input_total": 75272,
+     "output_estimate": 698,
+     "intermediate_result_bytes": 347
+    },
+    "full_catalog": {
+     "offered_tool_count": 355,
+     "full_catalog_reason": "index_coverage_below_90",
+     "definition_tokens_turn0": 343074,
+     "round_trips": 2,
+     "input_by_round": [
+      357244,
+      357886
+     ],
+     "input_total": 715130,
+     "output_estimate": 698,
+     "intermediate_result_bytes": 347
+    }
+   }
+  },
+  {
+   "id": "t06",
+   "source": "golden:g26-vex-diagnostico",
+   "kind": "multi_step",
+   "message": "Haz un diagnóstico completo del negocio",
+   "round_trips": 3,
+   "oracle_tools": [
+    "get_business_snapshot",
+    "get_sales_report",
+    "get_low_stock_alerts",
+    "get_income_statement"
+   ],
+   "reachable": true,
+   "missing": [],
+   "unauthorized": [],
+   "variants": {
+    "routed": {
+     "offered_tool_count": 21,
+     "full_catalog_reason": null,
+     "definition_tokens_turn0": 25821,
+     "round_trips": 3,
+     "input_by_round": [
+      39980,
+      40622,
+      44316
+     ],
+     "input_total": 124918,
+     "output_estimate": 983,
+     "intermediate_result_bytes": 3109
+    },
+    "full_catalog": {
+     "offered_tool_count": 355,
+     "full_catalog_reason": "index_coverage_below_90",
+     "definition_tokens_turn0": 343074,
+     "round_trips": 3,
+     "input_by_round": [
+      357233,
+      357875,
+      361569
+     ],
+     "input_total": 1076677,
+     "output_estimate": 983,
+     "intermediate_result_bytes": 3109
+    }
+   }
+  },
+  {
+   "id": "t07",
+   "source": "golden:g27-vex-nomina-parafiscales",
+   "kind": "multi_step",
+   "message": "¿Cuánto me cuesta la nómina este mes con parafiscales?",
+   "round_trips": 3,
+   "oracle_tools": [
+    "list_payroll_runs",
+    "get_payroll_run"
+   ],
+   "reachable": true,
+   "missing": [],
+   "unauthorized": [],
+   "variants": {
+    "routed": {
+     "offered_tool_count": 19,
+     "full_catalog_reason": null,
+     "definition_tokens_turn0": 24078,
+     "round_trips": 3,
+     "input_by_round": [
+      38254,
+      39151,
+      40838
+     ],
+     "input_total": 118243,
+     "output_estimate": 786,
+     "intermediate_result_bytes": 1882
+    },
+    "full_catalog": {
+     "offered_tool_count": 355,
+     "full_catalog_reason": "index_coverage_below_90",
+     "definition_tokens_turn0": 343074,
+     "round_trips": 3,
+     "input_by_round": [
+      357250,
+      358147,
+      359834
+     ],
+     "input_total": 1075231,
+     "output_estimate": 786,
+     "intermediate_result_bytes": 1882
+    }
+   }
+  },
+  {
+   "id": "t08",
+   "source": "golden:g28-vex-proveedores",
+   "kind": "single",
+   "message": "Lista mis proveedores",
+   "round_trips": 2,
+   "oracle_tools": [
+    "find_supplier"
+   ],
+   "reachable": true,
+   "missing": [],
+   "unauthorized": [],
+   "variants": {
+    "routed": {
+     "offered_tool_count": 18,
+     "full_catalog_reason": null,
+     "definition_tokens_turn0": 23755,
+     "round_trips": 2,
+     "input_by_round": [
+      37895,
+      39317
+     ],
+     "input_total": 77212,
+     "output_estimate": 690,
+     "intermediate_result_bytes": 1027
+    },
+    "full_catalog": {
+     "offered_tool_count": 355,
+     "full_catalog_reason": "index_coverage_below_90",
+     "definition_tokens_turn0": 343074,
+     "round_trips": 2,
+     "input_by_round": [
+      357214,
+      358636
+     ],
+     "input_total": 715850,
+     "output_estimate": 690,
+     "intermediate_result_bytes": 1027
+    }
+   }
+  },
+  {
+   "id": "t09",
+   "source": "golden:g29-vex-realtime-top",
+   "kind": "multi_step",
+   "message": "¿Cómo van las ventas? Muéstrame el top de productos",
+   "round_trips": 3,
+   "oracle_tools": [
+    "get_sales_report",
+    "get_top_products"
+   ],
+   "reachable": true,
+   "missing": [],
+   "unauthorized": [],
+   "variants": {
+    "routed": {
+     "offered_tool_count": 19,
+     "full_catalog_reason": null,
+     "definition_tokens_turn0": 25501,
+     "round_trips": 3,
+     "input_by_round": [
+      39674,
+      40248,
+      42551
+     ],
+     "input_total": 122473,
+     "output_estimate": 786,
+     "intermediate_result_bytes": 2151
+    },
+    "full_catalog": {
+     "offered_tool_count": 355,
+     "full_catalog_reason": "index_coverage_below_90",
+     "definition_tokens_turn0": 343074,
+     "round_trips": 3,
+     "input_by_round": [
+      357247,
+      357821,
+      360124
+     ],
+     "input_total": 1075192,
+     "output_estimate": 786,
+     "intermediate_result_bytes": 2151
+    }
+   }
+  },
+  {
+   "id": "t10",
+   "source": "golden:g36-vex-conciliacion-diferencia",
+   "kind": "multi_step",
+   "message": "Quiero dejar conciliado el banco de septiembre: el extracto de Bancolombia cierra en 5.200.000 y el sistema me da otra cifra",
+   "round_trips": 3,
+   "oracle_tools": [
+    "list_reconciliations",
+    "get_income_statement"
+   ],
+   "reachable": true,
+   "missing": [],
+   "unauthorized": [],
+   "variants": {
+    "routed": {
+     "offered_tool_count": 19,
+     "full_catalog_reason": null,
+     "definition_tokens_turn0": 24131,
+     "round_trips": 3,
+     "input_by_round": [
+      38374,
+      39148,
+      40045
+     ],
+     "input_total": 117567,
+     "output_estimate": 794,
+     "intermediate_result_bytes": 1027
+    },
+    "full_catalog": {
+     "offered_tool_count": 355,
+     "full_catalog_reason": "index_coverage_below_90",
+     "definition_tokens_turn0": 343074,
+     "round_trips": 3,
+     "input_by_round": [
+      357317,
+      358091,
+      358988
+     ],
+     "input_total": 1074396,
+     "output_estimate": 794,
+     "intermediate_result_bytes": 1027
+    }
+   }
+  },
+  {
+   "id": "t11",
+   "source": "golden:g39-vex-playbook-devolucion",
+   "kind": "multi_step",
+   "message": "¿Cómo se hace paso a paso una devolución con reembolso? Solo explícame el proceso",
+   "round_trips": 3,
+   "oracle_tools": [
+    "search_playbooks",
+    "load_playbook"
+   ],
+   "reachable": true,
+   "missing": [],
+   "unauthorized": [],
+   "variants": {
+    "routed": {
+     "offered_tool_count": 355,
+     "full_catalog_reason": "no_evidence",
+     "definition_tokens_turn0": 343074,
+     "round_trips": 3,
+     "input_by_round": [
+      357278,
+      358053,
+      359091
+     ],
+     "input_total": 1074422,
+     "output_estimate": 783,
+     "intermediate_result_bytes": 1184
+    },
+    "full_catalog": {
+     "offered_tool_count": 355,
+     "full_catalog_reason": "index_coverage_below_90",
+     "definition_tokens_turn0": 343074,
+     "round_trips": 3,
+     "input_by_round": [
+      357278,
+      358053,
+      359091
+     ],
+     "input_total": 1074422,
+     "output_estimate": 783,
+     "intermediate_result_bytes": 1184
+    }
+   }
+  },
+  {
+   "id": "t12",
+   "source": "golden:g65-seguimiento-compromiso-con-fecha",
+   "kind": "single",
+   "message": "Listo, el viernes llamo al proveedor de lácteos para cuadrar el pedido de diciembre",
+   "round_trips": 2,
+   "oracle_tools": [
+    "suggest_followup"
+   ],
+   "reachable": true,
+   "missing": [],
+   "unauthorized": [],
+   "variants": {
+    "routed": {
+     "offered_tool_count": 355,
+     "full_catalog_reason": "no_evidence",
+     "definition_tokens_turn0": 343074,
+     "round_trips": 2,
+     "input_by_round": [
+      357277,
+      357674
+     ],
+     "input_total": 714951,
+     "output_estimate": 693,
+     "intermediate_result_bytes": 137
+    },
+    "full_catalog": {
+     "offered_tool_count": 355,
+     "full_catalog_reason": "index_coverage_below_90",
+     "definition_tokens_turn0": 343074,
+     "round_trips": 2,
+     "input_by_round": [
+      357277,
+      357674
+     ],
+     "input_total": 714951,
+     "output_estimate": 693,
+     "intermediate_result_bytes": 137
+    }
+   }
+  },
+  {
+   "id": "t13",
+   "source": "golden:g66-seguimiento-acuerdo-cliente",
+   "kind": "single",
+   "message": "Quedamos en que la señora Marta pasa a pagar la cuenta el martes en la tarde",
+   "round_trips": 2,
+   "oracle_tools": [
+    "suggest_followup"
+   ],
+   "reachable": true,
+   "missing": [],
+   "unauthorized": [],
+   "variants": {
+    "routed": {
+     "offered_tool_count": 355,
+     "full_catalog_reason": "no_evidence",
+     "definition_tokens_turn0": 343074,
+     "round_trips": 2,
+     "input_by_round": [
+      357270,
+      357667
+     ],
+     "input_total": 714937,
+     "output_estimate": 693,
+     "intermediate_result_bytes": 137
+    },
+    "full_catalog": {
+     "offered_tool_count": 355,
+     "full_catalog_reason": "index_coverage_below_90",
+     "definition_tokens_turn0": 343074,
+     "round_trips": 2,
+     "input_by_round": [
+      357270,
+      357667
+     ],
+     "input_total": 714937,
+     "output_estimate": 693,
+     "intermediate_result_bytes": 137
+    }
+   }
+  },
+  {
+   "id": "t14",
+   "source": "golden:g67-recordatorio-explicito-directo",
+   "kind": "single",
+   "message": "Recuérdame mañana a las 9 revisar el inventario de bebidas",
+   "round_trips": 2,
+   "oracle_tools": [
+    "create_reminder"
+   ],
+   "reachable": true,
+   "missing": [],
+   "unauthorized": [],
+   "variants": {
+    "routed": {
+     "offered_tool_count": 18,
+     "full_catalog_reason": null,
+     "definition_tokens_turn0": 24246,
+     "round_trips": 2,
+     "input_by_round": [
+      38425,
+      38774
+     ],
+     "input_total": 77199,
+     "output_estimate": 692,
+     "intermediate_result_bytes": 102
+    },
+    "full_catalog": {
+     "offered_tool_count": 355,
+     "full_catalog_reason": "index_coverage_below_90",
+     "definition_tokens_turn0": 343074,
+     "round_trips": 2,
+     "input_by_round": [
+      357253,
+      357602
+     ],
+     "input_total": 714855,
+     "output_estimate": 692,
+     "intermediate_result_bytes": 102
+    }
+   }
+  },
+  {
+   "id": "t15",
+   "source": "golden:g71-vex-lote-tres-cambios-un-clic",
+   "kind": "multi_step",
+   "message": "Sube 5% el precio de la categoría Accesorios, registra un gasto de 80.000 por papelería de hoy y anota en el cliente Carlos Pérez que prefiere pago en efectivo",
+   "round_trips": 3,
+   "oracle_tools": [
+    "find_customer",
+    "propose_write_batch"
+   ],
+   "reachable": true,
+   "missing": [],
+   "unauthorized": [],
+   "variants": {
+    "routed": {
+     "offered_tool_count": 19,
+     "full_catalog_reason": null,
+     "definition_tokens_turn0": 25391,
+     "round_trips": 3,
+     "input_by_round": [
+      39672,
+      40668,
+      41228
+     ],
+     "input_total": 121568,
+     "output_estimate": 786,
+     "intermediate_result_bytes": 946
+    },
+    "full_catalog": {
+     "offered_tool_count": 355,
+     "full_catalog_reason": "index_coverage_below_90",
+     "definition_tokens_turn0": 343074,
+     "round_trips": 3,
+     "input_by_round": [
+      357355,
+      358351,
+      358911
+     ],
+     "input_total": 1074617,
+     "output_estimate": 786,
+     "intermediate_result_bytes": 946
+    }
+   }
+  },
+  {
+   "id": "t16",
+   "source": "authored",
+   "kind": "multi_step",
+   "message": "Dame el top 10 por margen de mis 3 categorías con más ventas este mes",
+   "round_trips": 4,
+   "oracle_tools": [
+    "list_categories",
+    "get_top_products",
+    "vex_render_table"
+   ],
+   "reachable": true,
+   "missing": [],
+   "unauthorized": [],
+   "variants": {
+    "routed": {
+     "offered_tool_count": 19,
+     "full_catalog_reason": null,
+     "definition_tokens_turn0": 24949,
+     "round_trips": 4,
+     "input_by_round": [
+      39139,
+      40507,
+      47326,
+      47658
+     ],
+     "input_total": 174630,
+     "output_estimate": 1116,
+     "intermediate_result_bytes": 6580
+    },
+    "full_catalog": {
+     "offered_tool_count": 355,
+     "full_catalog_reason": "index_coverage_below_90",
+     "definition_tokens_turn0": 343074,
+     "round_trips": 4,
+     "input_by_round": [
+      357264,
+      358632,
+      365451,
+      365783
+     ],
+     "input_total": 1447130,
+     "output_estimate": 1116,
+     "intermediate_result_bytes": 6580
+    }
+   }
+  },
+  {
+   "id": "t17",
+   "source": "authored",
+   "kind": "multi_step",
+   "message": "¿Qué clientes compraron la Camiseta M pero no la Gorra negra este mes?",
+   "round_trips": 4,
+   "oracle_tools": [
+    "find_product",
+    "find_customers_by_criteria",
+    "vex_render_list"
+   ],
+   "reachable": true,
+   "missing": [],
+   "unauthorized": [],
+   "variants": {
+    "routed": {
+     "offered_tool_count": 19,
+     "full_catalog_reason": null,
+     "definition_tokens_turn0": 25505,
+     "round_trips": 4,
+     "input_by_round": [
+      39696,
+      41415,
+      44825,
+      45155
+     ],
+     "input_total": 171091,
+     "output_estimate": 1123,
+     "intermediate_result_bytes": 3871
+    },
+    "full_catalog": {
+     "offered_tool_count": 355,
+     "full_catalog_reason": "index_coverage_below_90",
+     "definition_tokens_turn0": 343074,
+     "round_trips": 4,
+     "input_by_round": [
+      357265,
+      358984,
+      362394,
+      362724
+     ],
+     "input_total": 1441367,
+     "output_estimate": 1123,
+     "intermediate_result_bytes": 3871
+    }
+   }
+  },
+  {
+   "id": "t18",
+   "source": "authored",
+   "kind": "multi_step",
+   "message": "¿Qué órdenes están atrasadas, agrupadas por repartidor?",
+   "round_trips": 4,
+   "oracle_tools": [
+    "list_dispatch_routes",
+    "list_orders",
+    "vex_render_table"
+   ],
+   "reachable": true,
+   "missing": [],
+   "unauthorized": [],
+   "variants": {
+    "routed": {
+     "offered_tool_count": 19,
+     "full_catalog_reason": null,
+     "definition_tokens_turn0": 26706,
+     "round_trips": 4,
+     "input_by_round": [
+      40884,
+      43987,
+      50719,
+      51051
+     ],
+     "input_total": 186641,
+     "output_estimate": 878,
+     "intermediate_result_bytes": 8276
+    },
+    "full_catalog": {
+     "offered_tool_count": 355,
+     "full_catalog_reason": "index_coverage_below_90",
+     "definition_tokens_turn0": 343074,
+     "round_trips": 4,
+     "input_by_round": [
+      357252,
+      360355,
+      367087,
+      367419
+     ],
+     "input_total": 1452113,
+     "output_estimate": 878,
+     "intermediate_result_bytes": 8276
+    }
+   }
+  },
+  {
+   "id": "t19",
+   "source": "authored",
+   "kind": "multi_step",
+   "message": "De las 3 categorías que más vendieron este mes, ¿qué productos tienen margen bajo y stock para más de 60 días?",
+   "round_trips": 5,
+   "oracle_tools": [
+    "list_categories",
+    "get_sales_report",
+    "get_top_products",
+    "get_stock_levels",
+    "vex_render_table"
+   ],
+   "reachable": true,
+   "missing": [],
+   "unauthorized": [],
+   "variants": {
+    "routed": {
+     "offered_tool_count": 21,
+     "full_catalog_reason": null,
+     "definition_tokens_turn0": 26787,
+     "round_trips": 5,
+     "input_by_round": [
+      41022,
+      42892,
+      55081,
+      60910,
+      61242
+     ],
+     "input_total": 261147,
+     "output_estimate": 1301,
+     "intermediate_result_bytes": 16637
+    },
+    "full_catalog": {
+     "offered_tool_count": 355,
+     "full_catalog_reason": "index_coverage_below_90",
+     "definition_tokens_turn0": 343074,
+     "round_trips": 5,
+     "input_by_round": [
+      357309,
+      359179,
+      371368,
+      377197,
+      377529
+     ],
+     "input_total": 1842582,
+     "output_estimate": 1301,
+     "intermediate_result_bytes": 16637
+    }
+   }
+  },
+  {
+   "id": "t20",
+   "source": "authored",
+   "kind": "multi_step",
+   "message": "Muéstrame quién me debe y el historial de compra de los 3 que más deben",
+   "round_trips": 3,
+   "oracle_tools": [
+    "list_receivables",
+    "get_customer_history"
+   ],
+   "reachable": true,
+   "missing": [],
+   "unauthorized": [],
+   "variants": {
+    "routed": {
+     "offered_tool_count": 19,
+     "full_catalog_reason": null,
+     "definition_tokens_turn0": 24335,
+     "round_trips": 3,
+     "input_by_round": [
+      38528,
+      43007,
+      48245
+     ],
+     "input_total": 129780,
+     "output_estimate": 982,
+     "intermediate_result_bytes": 7773
+    },
+    "full_catalog": {
+     "offered_tool_count": 355,
+     "full_catalog_reason": "index_coverage_below_90",
+     "definition_tokens_turn0": 343074,
+     "round_trips": 3,
+     "input_by_round": [
+      357267,
+      361746,
+      366984
+     ],
+     "input_total": 1085997,
+     "output_estimate": 982,
+     "intermediate_result_bytes": 7773
+    }
+   }
+  },
+  {
+   "id": "t21",
+   "source": "authored",
+   "kind": "multi_step",
+   "message": "¿Qué órdenes de compra tengo abiertas y cómo está la deuda con cada proveedor?",
+   "round_trips": 3,
+   "oracle_tools": [
+    "list_purchase_orders",
+    "get_supplier_summary"
+   ],
+   "reachable": true,
+   "missing": [],
+   "unauthorized": [],
+   "variants": {
+    "routed": {
+     "offered_tool_count": 19,
+     "full_catalog_reason": null,
+     "definition_tokens_turn0": 24601,
+     "round_trips": 3,
+     "input_by_round": [
+      38803,
+      45508,
+      46600
+     ],
+     "input_total": 130911,
+     "output_estimate": 890,
+     "intermediate_result_bytes": 6303
+    },
+    "full_catalog": {
+     "offered_tool_count": 355,
+     "full_catalog_reason": "index_coverage_below_90",
+     "definition_tokens_turn0": 343074,
+     "round_trips": 3,
+     "input_by_round": [
+      357276,
+      363981,
+      365073
+     ],
+     "input_total": 1086330,
+     "output_estimate": 890,
+     "intermediate_result_bytes": 6303
+    }
+   }
+  },
+  {
+   "id": "t22",
+   "source": "authored",
+   "kind": "multi_step",
+   "message": "¿Qué productos tienen buen margen pero precio por debajo del promedio de su categoría?",
+   "round_trips": 3,
+   "oracle_tools": [
+    "get_top_products",
+    "get_product_pricing"
+   ],
+   "reachable": true,
+   "missing": [],
+   "unauthorized": [],
+   "variants": {
+    "routed": {
+     "offered_tool_count": 19,
+     "full_catalog_reason": null,
+     "definition_tokens_turn0": 25061,
+     "round_trips": 3,
+     "input_by_round": [
+      39269,
+      43362,
+      44392
+     ],
+     "input_total": 127023,
+     "output_estimate": 884,
+     "intermediate_result_bytes": 4005
+    },
+    "full_catalog": {
+     "offered_tool_count": 355,
+     "full_catalog_reason": "index_coverage_below_90",
+     "definition_tokens_turn0": 343074,
+     "round_trips": 3,
+     "input_by_round": [
+      357282,
+      361375,
+      362405
+     ],
+     "input_total": 1081062,
+     "output_estimate": 884,
+     "intermediate_result_bytes": 4005
+    }
+   }
+  },
+  {
+   "id": "t23",
+   "source": "authored",
+   "kind": "multi_step",
+   "message": "¿Qué proveedores debo llamar para reponer lo que se está agotando y qué les tengo pedido?",
+   "round_trips": 4,
+   "oracle_tools": [
+    "get_low_stock_alerts",
+    "find_supplier",
+    "list_purchase_orders"
+   ],
+   "reachable": true,
+   "missing": [],
+   "unauthorized": [],
+   "variants": {
+    "routed": {
+     "offered_tool_count": 20,
+     "full_catalog_reason": null,
+     "definition_tokens_turn0": 25323,
+     "round_trips": 4,
+     "input_by_round": [
+      39535,
+      41902,
+      42589,
+      45169
+     ],
+     "input_total": 169195,
+     "output_estimate": 884,
+     "intermediate_result_bytes": 4345
+    },
+    "full_catalog": {
+     "offered_tool_count": 355,
+     "full_catalog_reason": "index_coverage_below_90",
+     "definition_tokens_turn0": 343074,
+     "round_trips": 4,
+     "input_by_round": [
+      357286,
+      359653,
+      360340,
+      362920
+     ],
+     "input_total": 1440199,
+     "output_estimate": 884,
+     "intermediate_result_bytes": 4345
+    }
+   }
+  },
+  {
+   "id": "t24",
+   "source": "authored",
+   "kind": "multi_step",
+   "message": "Clientes que no compran hace 90 días y me deben plata",
+   "round_trips": 4,
+   "oracle_tools": [
+    "find_customers_by_criteria",
+    "get_customer_history",
+    "list_receivables"
+   ],
+   "reachable": true,
+   "missing": [],
+   "unauthorized": [],
+   "variants": {
+    "routed": {
+     "offered_tool_count": 20,
+     "full_catalog_reason": null,
+     "definition_tokens_turn0": 26026,
+     "round_trips": 4,
+     "input_by_round": [
+      40199,
+      41940,
+      43734,
+      48213
+     ],
+     "input_total": 174086,
+     "output_estimate": 893,
+     "intermediate_result_bytes": 6398
+    },
+    "full_catalog": {
+     "offered_tool_count": 355,
+     "full_catalog_reason": "index_coverage_below_90",
+     "definition_tokens_turn0": 343074,
+     "round_trips": 4,
+     "input_by_round": [
+      357247,
+      358988,
+      360782,
+      365261
+     ],
+     "input_total": 1442278,
+     "output_estimate": 893,
+     "intermediate_result_bytes": 6398
+    }
+   }
+  },
+  {
+   "id": "t25",
+   "source": "authored",
+   "kind": "multi_step",
+   "message": "Compara ventas del POS contra ecommerce este mes con una gráfica",
+   "round_trips": 3,
+   "oracle_tools": [
+    "get_sales_report",
+    "vex_render_chart"
+   ],
+   "reachable": true,
+   "missing": [],
+   "unauthorized": [],
+   "variants": {
+    "routed": {
+     "offered_tool_count": 18,
+     "full_catalog_reason": null,
+     "definition_tokens_turn0": 23923,
+     "round_trips": 3,
+     "input_by_round": [
+      38107,
+      39227,
+      39559
+     ],
+     "input_total": 116893,
+     "output_estimate": 922,
+     "intermediate_result_bytes": 676
+    },
+    "full_catalog": {
+     "offered_tool_count": 355,
+     "full_catalog_reason": "index_coverage_below_90",
+     "definition_tokens_turn0": 343074,
+     "round_trips": 3,
+     "input_by_round": [
+      357258,
+      358378,
+      358710
+     ],
+     "input_total": 1074346,
+     "output_estimate": 922,
+     "intermediate_result_bytes": 676
+    }
+   }
+  },
+  {
+   "id": "t26",
+   "source": "authored",
+   "kind": "multi_step",
+   "message": "¿Cuánto gasté este mes frente a lo que muestra el estado de resultados, y qué margen neto me queda?",
+   "round_trips": 4,
+   "oracle_tools": [
+    "list_expenses",
+    "get_income_statement",
+    "compute",
+    "vex_render_kpi"
+   ],
+   "reachable": true,
+   "missing": [],
+   "unauthorized": [],
+   "variants": {
+    "routed": {
+     "offered_tool_count": 19,
+     "full_catalog_reason": null,
+     "definition_tokens_turn0": 24527,
+     "round_trips": 4,
+     "input_by_round": [
+      38749,
+      43990,
+      44337,
+      44665
+     ],
+     "input_total": 171741,
+     "output_estimate": 961,
+     "intermediate_result_bytes": 4346
+    },
+    "full_catalog": {
+     "offered_tool_count": 355,
+     "full_catalog_reason": "index_coverage_below_90",
+     "definition_tokens_turn0": 343074,
+     "round_trips": 4,
+     "input_by_round": [
+      357296,
+      362537,
+      362884,
+      363212
+     ],
+     "input_total": 1445929,
+     "output_estimate": 961,
+     "intermediate_result_bytes": 4346
+    }
+   }
+  },
+  {
+   "id": "t27",
+   "source": "authored",
+   "kind": "multi_step",
+   "message": "Revisa las cajas de esta semana y explícame cuáles no cuadraron",
+   "round_trips": 3,
+   "oracle_tools": [
+    "list_cash_sessions",
+    "get_cash_session_close_report"
+   ],
+   "reachable": true,
+   "missing": [],
+   "unauthorized": [],
+   "variants": {
+    "routed": {
+     "offered_tool_count": 20,
+     "full_catalog_reason": null,
+     "definition_tokens_turn0": 25022,
+     "round_trips": 3,
+     "input_by_round": [
+      39206,
+      41856,
+      42814
+     ],
+     "input_total": 123876,
+     "output_estimate": 906,
+     "intermediate_result_bytes": 2584
+    },
+    "full_catalog": {
+     "offered_tool_count": 355,
+     "full_catalog_reason": "index_coverage_below_90",
+     "definition_tokens_turn0": 343074,
+     "round_trips": 3,
+     "input_by_round": [
+      357258,
+      359908,
+      360866
+     ],
+     "input_total": 1078032,
+     "output_estimate": 906,
+     "intermediate_result_bytes": 2584
+    }
+   }
+  },
+  {
+   "id": "t28",
+   "source": "authored",
+   "kind": "multi_step",
+   "message": "¿Qué obligaciones fiscales vencen pronto y cuánto IVA debo pagar?",
+   "round_trips": 3,
+   "oracle_tools": [
+    "list_fiscal_obligations",
+    "get_vat_summary",
+    "vex_render_table"
+   ],
+   "reachable": true,
+   "missing": [],
+   "unauthorized": [],
+   "variants": {
+    "routed": {
+     "offered_tool_count": 19,
+     "full_catalog_reason": null,
+     "definition_tokens_turn0": 24807,
+     "round_trips": 3,
+     "input_by_round": [
+      38994,
+      40963,
+      41295
+     ],
+     "input_total": 121252,
+     "output_estimate": 884,
+     "intermediate_result_bytes": 1429
+    },
+    "full_catalog": {
+     "offered_tool_count": 355,
+     "full_catalog_reason": "index_coverage_below_90",
+     "definition_tokens_turn0": 343074,
+     "round_trips": 3,
+     "input_by_round": [
+      357261,
+      359230,
+      359562
+     ],
+     "input_total": 1076053,
+     "output_estimate": 884,
+     "intermediate_result_bytes": 1429
+    }
+   }
+  },
+  {
+   "id": "t29",
+   "source": "authored",
+   "kind": "multi_step",
+   "message": "¿Cuánto costó la última nómina por empleado y cuál es el costo total para la empresa?",
+   "round_trips": 4,
+   "oracle_tools": [
+    "list_payroll_runs",
+    "get_payroll_run",
+    "compute"
+   ],
+   "reachable": true,
+   "missing": [],
+   "unauthorized": [],
+   "variants": {
+    "routed": {
+     "offered_tool_count": 19,
+     "full_catalog_reason": null,
+     "definition_tokens_turn0": 24078,
+     "round_trips": 4,
+     "input_by_round": [
+      38288,
+      39185,
+      40872,
+      41219
+     ],
+     "input_total": 159564,
+     "output_estimate": 870,
+     "intermediate_result_bytes": 1984
+    },
+    "full_catalog": {
+     "offered_tool_count": 355,
+     "full_catalog_reason": "index_coverage_below_90",
+     "definition_tokens_turn0": 343074,
+     "round_trips": 4,
+     "input_by_round": [
+      357284,
+      358181,
+      359868,
+      360215
+     ],
+     "input_total": 1435548,
+     "output_estimate": 870,
+     "intermediate_result_bytes": 1984
+    }
+   }
+  },
+  {
+   "id": "t30",
+   "source": "authored",
+   "kind": "multi_step",
+   "message": "De los pedidos del ecommerce pendientes de despacho, dame el detalle de los 3 más viejos y si ya tienen remisión",
+   "round_trips": 4,
+   "oracle_tools": [
+    "list_orders",
+    "get_order",
+    "list_dispatch_notes"
+   ],
+   "reachable": true,
+   "missing": [],
+   "unauthorized": [],
+   "variants": {
+    "routed": {
+     "offered_tool_count": 20,
+     "full_catalog_reason": null,
+     "definition_tokens_turn0": 26818,
+     "round_trips": 4,
+     "input_by_round": [
+      41051,
+      47783,
+      50201,
+      56498
+     ],
+     "input_total": 195533,
+     "output_estimate": 1040,
+     "intermediate_result_bytes": 12618
+    },
+    "full_catalog": {
+     "offered_tool_count": 355,
+     "full_catalog_reason": "index_coverage_below_90",
+     "definition_tokens_turn0": 343074,
+     "round_trips": 4,
+     "input_by_round": [
+      357307,
+      364039,
+      366457,
+      372754
+     ],
+     "input_total": 1460557,
+     "output_estimate": 1040,
+     "intermediate_result_bytes": 12618
+    }
+   }
+  }
+ ]
+}

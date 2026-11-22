@@ -171,6 +171,9 @@ const COUNT_KEYS = new Set([
   'empty_retry_count',
   'closing_call_count',
   'active_span_count',
+  // F10/T60: per-turn tool-definition measurement.
+  'offered_tool_count',
+  'authorized_tool_count',
 ]);
 const BOOLEAN_KEYS = new Set([
   'ui_result_known',
@@ -179,8 +182,17 @@ const BOOLEAN_KEYS = new Set([
   'cancelled',
   'retryable',
   'streaming',
+  'full_catalog_fallback',
 ]);
 const ENUM_KEYS: Record<string, ReadonlySet<string>> = {
+  // F10/T60: bytes-based estimate, never provider-observed tokens.
+  token_estimator: new Set(['bytes_v1']),
+  full_catalog_reason: new Set([
+    'index_coverage_below_90',
+    'no_evidence',
+    'router_timeout',
+    'router_error',
+  ]),
   retrieval_source: new Set([
     'vector',
     'lexical_sql',

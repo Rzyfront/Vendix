@@ -245,6 +245,55 @@ describe('ToolRouterService B: relevance is not authority', () => {
     expect(result.retrievalSource).toBe('full_catalog_fallback');
     expect(result.definitions).toHaveLength(all.length);
   });
+  it('T60: exposes a stable fallback reason when the index covers under 90 %', async () => {
+    rank.mockImplementation(async (query, docs) => ({
+      ...lexicalRank(query, docs),
+      coverage: 0.5,
+    }));
+    const result = await router.select(
+      router.createSession('find_coffee', 's'),
+      registry.getAllDefinitions(),
+      false,
+      false,
+    );
+    expect(result.fullCatalogReason).toBe('index_coverage_below_90');
+  });
+  it('T60: exposes the no_evidence reason when no layer finds anything', async () => {
+    const result = await router.select(
+      router.createSession('zzqqxx_nothing_matches', 's'),
+      registry.getAllDefinitions(),
+      false,
+      false,
+    );
+    expect(result.retrievalSource).toBe('full_catalog_fallback');
+    expect(result.fullCatalogReason).toBe('no_evidence');
+  });
+  it('T60: exposes router_error and router_timeout reasons', async () => {
+    rank.mockRejectedValue(new Error('offline'));
+    const result = await router.select(
+      router.createSession('buscar_cafe', 's'),
+      registry.getAllDefinitions(),
+      false,
+      false,
+    );
+    expect(result.fullCatalogReason).toBe('router_error');
+  });
+  it('T60: a normal selection reports no fallback reason and keeps its shape', async () => {
+    const all = registry.getAllDefinitions();
+    const selection = await router.select(
+      router.createSession('find_coffee', 'scope'),
+      all,
+      false,
+      false,
+    );
+    expect(selection.fullCatalogReason).toBeNull();
+    expect(selection.retrievalSource).not.toBe('full_catalog_fallback');
+    expect(selection.degraded).not.toContain('full_catalog_fallback');
+    expect(selection.definitions.length).toBeLessThan(all.length);
+    expect(selection.definitions[selection.coreCount].function.name).toBe(
+      'find_coffee',
+    );
+  });
   it('a hung search times out to the full catalog instead of blocking the turn', async () => {
     jest.useFakeTimers();
     try {
