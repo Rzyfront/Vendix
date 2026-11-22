@@ -207,3 +207,52 @@ export const WRITE_BATCH_COMPENSATION_OUTPUT_MAX = 8000;
 export function writeBatchOperationId(batchId: string, stepId: string): string {
   return `vex-batch:${batchId}:${stepId}`;
 }
+
+/**
+ * Pure: the D2 sentence and counters of a batch, from its steps AFTER the run.
+ * The message is chosen by what happened, never by what was planned:
+ *  - an unknown step wins (nothing may be retried before it is reviewed);
+ *  - a failure after at least one applied step reads "hasta el paso N", N
+ *    being the last APPLIED step (a failing step 2 reads "hasta el paso 1");
+ *  - a failure before any applied step reads "ningún cambio".
+ */
+export function summarizeWriteBatch(
+  steps: Pick<
+    WriteBatchStepRecord,
+    'order' | 'status' | 'compensable'
+  >[],
+): WriteBatchSummary {
+  const count = (status: WriteBatchStepRecord['status']) =>
+    steps.filter((s) => s.status === status).length;
+  const applied = steps.filter((s) => s.status === 'applied');
+  const unknownStep = steps.find((s) => s.status === 'unknown');
+  const failed = count('failed');
+  const appliedThrough = applied.reduce((max, s) => Math.max(max, s.order), 0);
+
+  let message: string;
+  if (unknownStep) {
+    message = `El paso ${unknownStep.order} quedó sin verificar; revisa antes de reintentar. El resto se omitió.`;
+  } else if (failed > 0) {
+    message =
+      applied.length > 0
+        ? `Se aplicó hasta el paso ${appliedThrough}, el resto se omitió.`
+        : 'No se aplicó ningún cambio.';
+  } else if (applied.length === 0) {
+    message = 'No se aplicó ningún cambio.';
+  } else if (applied.length === 1) {
+    message = 'Se aplicó el cambio.';
+  } else {
+    message = `Se aplicaron los ${applied.length} cambios.`;
+  }
+
+  return {
+    applied: applied.length,
+    failed,
+    unknown: count('unknown'),
+    skipped: count('skipped'),
+    unselected: count('unselected'),
+    compensable: applied.filter((s) => s.compensable).length,
+    applied_through_order: appliedThrough,
+    message,
+  };
+}

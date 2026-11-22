@@ -1,12 +1,23 @@
 import { readFileSync } from 'fs';
 import { resolve } from 'path';
 import { GoldenTurnObservation, gradeGoldenTurn } from './graders';
+import { summarizeWriteBatch } from '../../src/domains/store/vex/services/write-batch.types';
 
 /**
- * Shape spec for the F5 write-batch cases (T40): happy batch, step denied by
- * role, partial failure, double approval and irreversible step outside the
- * batch. Reads the corpus only: no model, no database, no network.
+ * Shape spec for the F5 write-batch cases (T40): happy batch, an irreversible
+ * order cancellation asked "en un solo paso", partial failure, double approval
+ * and irreversible step outside the batch. Reads the corpus only: no model, no
+ * database, no network.
+ *
+ * Every case must describe what the system really does:
+ *  - only harness principals that pass `VexController`'s `@Roles(OWNER, ADMIN)`
+ *    (a cashier never reaches Vex);
+ *  - the partial-failure sentence is the executor's own
+ *    (`summarizeWriteBatch`: failing step N reads "hasta el paso N-1").
  */
+
+/** Harness principals (`live-http.adapter.ts`) whose role can open Vex. */
+const VEX_PRINCIPALS = ['owner', 'restaurant_owner'];
 interface BatchExpectation {
   steps_min?: number;
   domains_min?: number;
@@ -16,6 +27,8 @@ interface BatchExpectation {
   summary_mentions_any?: string[];
   proposed?: boolean;
   fail_step?: number;
+  /** Why the step fails at execution although its preview passed. */
+  fail_cause?: string;
   remaining_steps?: string;
   second_approval_replayed?: boolean;
   effects_exactly_once?: boolean;
@@ -25,7 +38,7 @@ interface BatchExpectation {
 interface BatchCase {
   id: string;
   agent: 'vex' | 'vexi';
-  principal: string;
+  principal: 'owner' | 'restaurant_owner' | 'cashier';
   turns: Array<{
     message: string;
     permission_notice?: 'allowed';
@@ -66,7 +79,7 @@ describe('golden write-batch cases — shape', () => {
     expect(batchCases).toHaveLength(5);
     for (const fragment of [
       'tres-cambios-un-clic',
-      'rol-no-permite',
+      'anular-orden',
       'falla-parcial',
       'doble-aprobacion',
       'irreversible',
@@ -74,7 +87,7 @@ describe('golden write-batch cases — shape', () => {
       expect(batchCases.filter((c) => c.id.includes(fragment))).toHaveLength(1);
     for (const c of batchCases) {
       expect(c.agent).toBe('vex');
-      expect(['owner', 'cashier']).toContain(c.principal);
+      expect(VEX_PRINCIPALS).toContain(c.principal);
       expect(c.turns).toHaveLength(1);
       expect(c.turns[0].message.length).toBeGreaterThan(0);
     }
@@ -92,18 +105,23 @@ describe('golden write-batch cases — shape', () => {
     expect(batch(c).domains_min).toBeGreaterThanOrEqual(3);
   });
 
-  it('denied step: no batch, role refusal, data unchanged', () => {
-    const c = byId('rol-no-permite');
+  it('order cancellation asked "en un solo paso": never inside a batch, own card, data unchanged', () => {
+    const c = byId('anular-orden');
     const turn = c.turns[0];
-    expect(c.principal).toBe('cashier');
-    expect(turn.expect_batch).toEqual({ proposed: false });
-    expect(turn.permission_notice).toBe('allowed');
+    // A real Vex role: owner and admin inherit every `store:` permission, so
+    // no principal that can open Vex is refused by role; what the system does
+    // here is keep the irreversible cancellation out of the batch.
+    expect(VEX_PRINCIPALS).toContain(c.principal);
+    expect(turn.permission_notice).toBeUndefined();
+    expect(turn.expect_batch).toEqual({
+      excludes_irreversible: ['cancel_order'],
+      irreversible_own_card: true,
+    });
     expect(turn.oracle?.unchanged).toBe(true);
-    expect(turn.expect_answer!.mentions_any).toContain('tu rol no permite');
     const checks = gradeGoldenTurn(
-      { permission_notice: 'allowed', expect_answer: turn.expect_answer! },
+      { expect_answer: turn.expect_answer! },
       observe(
-        'No pude armar el lote: tu rol no permite anular órdenes. Pídeselo al dueño y, si quieres, cambio solo el precio del café.',
+        'Anular la orden no se puede deshacer, así que va con su propia tarjeta de confirmación. El cambio de precio del café lo dejé listo para que lo apruebes aparte.',
         false,
       ),
     );
@@ -119,9 +137,25 @@ describe('golden write-batch cases — shape', () => {
     });
     expect(b.fail_step).toBeGreaterThan(1);
     expect(b.fail_step!).toBeLessThan(b.steps_min!);
-    expect(b.summary_mentions_any).toEqual([
-      `Se aplicó hasta el paso ${b.fail_step}, el resto se omitió.`,
-    ]);
+    // The failure must happen at execution: a value the preview rejects never
+    // becomes a batch (it is refused when proposing).
+    expect(b.fail_cause).toEqual(expect.stringContaining('not_applied'));
+    // The expected sentence is the executor's own for that run.
+    const steps = Array.from({ length: b.steps_min! }, (_, i) => ({
+      order: i + 1,
+      compensable: false,
+      status:
+        i + 1 < b.fail_step!
+          ? ('applied' as const)
+          : i + 1 === b.fail_step!
+            ? ('failed' as const)
+            : ('skipped' as const),
+    }));
+    const { message } = summarizeWriteBatch(steps);
+    expect(message).toBe(
+      `Se aplicó hasta el paso ${b.fail_step! - 1}, el resto se omitió.`,
+    );
+    expect(b.summary_mentions_any).toEqual([message]);
   });
 
   it('double approval: second click replays and never duplicates effects', () => {
