@@ -2,16 +2,39 @@
 
 | | |
 | --- | --- |
-| **Resultado vigente (corrida 2)** | **NO CERTIFICADA.** Fallan los puntos 1 y 4: el invitado alcanza la Runtime API de Lambda, lee su propio `nonce` e intercepta la invocación de otra tienda. `AI_ANALYSIS_CERTIFIED_DIGEST` **no se fija**. |
-| Fecha | 2026-11-22, 19:57-20:12 UTC (14:57-15:12 Bogotá) |
-| Cuenta / región | `637423209959` / `us-east-1` (perfil `default`), corrida autorizada por el dueño |
-| Función | `arn:aws:lambda:us-east-1:637423209959:function:vendix-vex-analysis-sandbox` |
-| Imagen desplegada | `637423209959.dkr.ecr.us-east-1.amazonaws.com/vendix-vex-analysis-runtime@sha256:35346aa5de5f2bca9749525f31c00ba180571f22dd51ae533191bd95332c67a2` (tag inmutable `rt-3a4f233be693`, `linux/arm64`, subida 14:28:32 Bogotá) |
-| Runtime digest | `sha256:3a4f233be693ab7e00a02724b9db9fd619148b15ce485cfc7701b9ca8114168e` (`./runtime-digest.sh` sobre el commit `e27f50b5b`) |
-| Código medido | `e27f50b5b`: arreglos de la corrida 1 (`9535c476d` intérprete solo-ejecución, `92a9869cf` `kill(-1)`, `78464bb96` reserva de 2 s, `e27f50b5b` uid efectivo) |
+| **Resultado vigente (corrida 3)** | **NO CERTIFICADA.** Punto 1 pasa. Los puntos 2, 3 y 4 no quedan certificados por comprobaciones incompletas; además, el handler falla en preflight con `ANALYSIS_RUNTIME: sandbox error: OSError`. El punto 5 pasa. El punto 6 no se fija. |
+| Fecha | 2026-11-22, 22:00-22:20 UTC (17:00-17:20 Bogotá) |
+| Cuenta / región | `us-east-1` (perfil `default`; autorización vigente del dueño) |
+| Función | `vendix-vex-analysis-sandbox` |
+| Imagen desplegada | `vendix-vex-analysis-runtime@sha256:2535679ca19143d876a3e3a15b62d617a59d086dc71e07077cd355ca9502bfc9` (tag inmutable `rt-a6e1eade84bb`, `linux/arm64`) |
+| Runtime digest | `sha256:a6e1eade84bb2ee29b6793c83fa33839f8684f85bc68b3aea4abdcdb80b05c77` (`./runtime-digest.sh` sobre `8e39339b6`) |
+| Código medido | `8e39339b6`, incluye el fix `28ac85534` que sella `RLIMIT_NOFILE=(0,0)` antes del código invitado |
+| CodeSha256 / digest ECR | `2535679ca19143d876a3e3a15b62d617a59d086dc71e07077cd355ca9502bfc9` (coinciden; `ImageUri` fijado por digest; actualización completada 21:59:20Z) |
 | Base | `public.ecr.aws/lambda/python:3.12@sha256:ed196260cbf6f74e3f64dd141ebe2401d78a15e6355925da98a3d3c3b4d35c6a` (sin cambios) |
 
 La corrida 1 (digest `c5aca9a0…`, runtime `0a0ed8a9…`) queda abajo como historial, sin cambios.
+
+## Corrida 3 · resultados T53 sobre el digest desplegado
+
+| # | Punto | Resultado |
+| --- | --- | --- |
+| 1 | Egreso cero | **PASA.** La VPC tiene DNS y hostnames deshabilitados; el SG no tiene ingress y solo permite el placeholder `127.0.0.1/32`; las tablas solo tienen rutas `local`; IGW, NAT y endpoints: 0. La syscall `libc.socket(AF_INET, SOCK_STREAM, 0)` desde el invitado devuelve `EMFILE` (24) con `RLIMIT_NOFILE=(0,0)`, antes de poder conectar a `169.254.100.1:9001`. La sonda HTTP `/runtime/invocation/next` y el robo de `nonce` no pudieron abrir un socket; no se observó ninguna conexión ni intercepción. |
+| 2 | FS, `/proc` y secretos | **FALLA / INCOMPLETO.** Sí se midió: `/proc/self/environ` y `/proc/<ppid>/{environ,mem,maps,fd}` pertenecen a UID 0; las lecturas devuelven `EMFILE`; `process_vm_readv` y `ptrace` devuelven `EPERM`; el entorno del hijo no contiene claves `AWS_*` ni `LAMBDA_*`. No se pudo completar la prueba de escritura fuera de `/tmp` ni symlink/FIFO de `result.json`: al intentarlas después, el handler rechazó la invocación durante el preflight, antes de ejecutar al invitado. |
+| 3 | Límites de recursos | **FALLA.** La sonda de doble `fork` + `setsid` no llegó a ejecutar. Tras la corrida 100×3, la invocación del probe y al menos cuatro invocaciones posteriores devolvieron `ANALYSIS_RUNTIME`, `sandbox error: OSError`, `duration_ms: 0`. El código del handler emite este error cuando falla `_harden_parent_dumpable()` o `_reap_strays()` antes de lanzar el proceso hijo; las respuestas y el log tail no permiten distinguir cuál. Por tanto no se certifican los límites ni la limpieza de daemon en esta corrida. |
+| 4 | Multi-tenant (100 × 3 tiendas) | **FALLA / INCOMPLETO.** Las 100 invocaciones secuenciales respondieron `status: ok`, digest correcto, marcador propio, número de filas y suma esperados; fallos de cruce: 0. El `handler_pid` reportado fue `2` en las 100. No se registró un `boot_id` u otro identificador único del entorno caliente; el PID `2` por sí solo no demuestra que Lambda no reciclara el entorno. Por criterio estricto, el requisito de 100 ejecuciones verificadas en un único entorno caliente queda sin certificar. |
+| 5 | Política IAM | **PASA.** La función está en la VPC dedicada; rol de ejecución confiado solo a Lambda, sin políticas administradas, con única inline `VpcEniOnly` y las cinco acciones ENI. Sin policy resource, Function URL, alias, event source mapping, layer, variable de entorno ni log group. VPC DNS `false/false`, SG sin ingress y egress solo loopback, 2 tablas con rutas `local`, 0 IGW/NAT/endpoints, subnets privadas. La simulación de `backend-invoke-policy.json` permite `lambda:InvokeFunction` al ARN de esta función y deniega `UpdateFunctionCode` y `InvokeFunctionUrl`; no se inspeccionó ni modificó el rol de producción del backend. |
+| 6 | Firma y digest | **FALLA (no se fija).** ECR tag inmutable, `CodeSha256`, digest ECR y `ResolvedImageUri` coinciden; las 100 respuestas T53 medidas reportan el runtime digest del repo. Como los puntos 2–4 no pasan la certificación, `AI_ANALYSIS_CERTIFIED_DIGEST` queda **sin fijar**. |
+
+### Evidencia y límites de la corrida 3
+
+- Con Colima apagado, `./runtime-digest.sh` dio `sha256:a6e1eade…b05c77`, igual al digest asociado al tag local `rt-a6e1eade84bb`; la imagen existente es `linux/arm64` y no se reconstruyó. El tag ECR es `rt-a6e1eade84bb`, inmutable, con digest `sha256:2535679c…50bfc9`. La Lambda quedó `Active` / `LastUpdateStatus=Successful`, fijada a ese mismo digest y con `LastModified=2026-11-22T21:59:20Z`.
+- Calentamiento: análisis trivial devuelve `status: ok`, total `6`, y el runtime digest esperado. Prueba de Runtime API: el import de `socket` falla cerrado; la llamada directa a `libc.socket` devuelve `-1/EMFILE`. No se llegó a enviar HTTP a `/2018-06-01/runtime/invocation/next` ni a observar un `nonce`.
+- `/proc`: UID propietario `0` para los ficheros de entorno del invitado y padre; lecturas bloqueadas con `OSError:24`; `process_vm_readv` y `ptrace` devuelven `-1/EPERM`; lista de variables AWS/Lambda del hijo vacía.
+- Multi-tenant: llamadas 1–100 alternaron A/B/C con marcadores únicos, respectivamente 40/55/70 filas por tienda; todas calcularon sumas esperadas y devolvieron solo su propio marcador. Las 100 respuestas conservaron `sha256:a6e1eade…b05c77`; se observó `handler_pid=2` en todas, pero no se midió un identificador único del entorno.
+- Fallo de preflight reproducido en tres invocaciones posteriores, incluida una tras esperar el posible recambio del entorno: `ANALYSIS_RUNTIME: sandbox error: OSError`, `duration_ms=0`; Lambda respondió HTTP 200 sin `FunctionError`. No se pudo determinar cuál de las dos comprobaciones de preflight (`_harden_parent_dumpable` / `_reap_strays`) lanzó la excepción. Ningún probe hostil se ejecutó en la Mac.
+- Colima quedó apagado y se cerró la sesión Docker de ECR al terminar el push.
+
+La corrida 2 queda a continuación como historial; sus resultados no se transfieren a este digest.
 
 ## Historia de usuario
 
@@ -34,7 +57,7 @@ La corrida 1 (digest `c5aca9a0…`, runtime `0a0ed8a9…`) queda abajo como hist
 
 **Lo que se observó:** el análisis trivial responde `status: ok` con `total = 6` en ~2,1 s, y los arreglos de la corrida 1 funcionan (padre ilegible, daemon eliminado, 100/100 del checklist). Pero el invitado de la tienda C, abriendo un socket a `169.254.100.1:9001`, falsificó su propia respuesta, recibió la invocación siguiente de la tienda A con todos sus datos, le respondió a A con un resultado inventado y entregó el marcador de A en la invocación siguiente de C. Las tres respuestas traen un sobre válido (`execution_id`, `nonce`, `runtime_digest`): el backend las aceptaría.
 
-## Resultado por punto (corrida 2, digest desplegado `35346aa5…` / runtime `3a4f233b…`)
+## Corrida 2 (historial) · resultado por punto, digest desplegado `35346aa5…` / runtime `3a4f233b…`
 
 | # | Punto | Resultado |
 | --- | --- | --- |
