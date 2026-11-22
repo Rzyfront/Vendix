@@ -53,6 +53,20 @@ describe('B5 sandbox source never enters generic tool logs', () => {
       expect(logs).not.toContain('const ');
     },
   );
+  it('F10: run_code public args carry the source hash, never the source', () => {
+    const view = publicSandboxArgs('run_code', {
+      source,
+      tools: ['list_products'],
+      purpose: 'Cruce de ventas',
+    });
+    expect(view).toEqual({
+      source_hash: publicSandboxArgs('run_readonly_script', args).source_hash,
+      tools: ['list_products'],
+      purpose: 'Cruce de ventas',
+      source_omitted: true,
+    });
+    expect(JSON.stringify(view)).not.toContain('PRIVATE_CLIENT_DATA_930');
+  });
   it('does not leak guest source through generic exception logging', async () => {
     const registry = new AIToolRegistry({} as never);
     const logger = { log: jest.fn(), warn: jest.fn(), error: jest.fn() };

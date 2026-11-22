@@ -19,6 +19,7 @@ import { createComputeTools } from '../../../ai-engine/tools/domains/compute.too
 import {
   createAnalysisTools,
   createCodeModeTools,
+  planGrantsVexCapability,
 } from '../../../ai-engine/tools/domains/code-execution.tools';
 import { CodeModeBridgeService } from '../../../ai-engine/sandbox/codemode-bridge.service';
 import { CodeModePolicyService } from '../../../ai-engine/sandbox/codemode-policy.service';
@@ -33,31 +34,6 @@ import { VexiVoiceConfirmationService } from '../vexi/vexi-voice-confirmation.se
 import { SubscriptionAccessService } from '../subscriptions/services/subscription-access.service';
 import { RequestContextService } from '../../../common/context/request-context.service';
 import { randomUUID } from 'node:crypto';
-
-/**
- * Whether the store's effective plan grants a Vex capability. Fails closed: no
- * plan, no row, a disabled row, a cap of 0 or any resolver error is OFF. One
- * predicate for every plan-gated Vex tool (`code_analysis`, `code_mode`).
- */
-async function planGrantsVexCapability(
-  entitlements: AIEntitlementsResolverService,
-  storeId: number,
-  capabilityKey: string,
-): Promise<boolean> {
-  try {
-    const resolved = await entitlements.resolveForStore(storeId);
-    if (!resolved.found || resolved.planId === null) return false;
-    return resolved.rows.some(
-      (r) =>
-        r.agent_key === 'vex' &&
-        r.capability_key === capabilityKey &&
-        r.enabled &&
-        r.cap_value !== 0,
-    );
-  } catch {
-    return false; // fail closed
-  }
-}
 
 /**
  * Vex: whole-plan approval, UI blocks and the business log.
@@ -158,20 +134,22 @@ export class VexModule implements OnModuleInit {
         },
       }),
     );
-    // F10/T65: Code Mode scripts over allowlisted reads, gated by plan. The
-    // runner stays off until the Lambda is enabled and certified.
-    this.toolRegistry.registerMany(
-      createCodeModeTools({
-        runner: this.codeModeRunner,
-        blocks: this.blocks,
-        registry: this.toolRegistry,
-        policy: this.codeModePolicy,
-        entitlements: {
-          codeModeEnabled: (storeId) =>
-            planGrantsVexCapability(this.entitlements, storeId, 'code_mode'),
-        },
-      }),
-    );
+    // F10/T65: Code Mode scripts over allowlisted reads, gated by plan. Only
+    // registered when the Lambda is enabled, configured and certified at boot:
+    // off, the registry (catalog hash, global knowledge index) stays as before.
+    if (this.codeModeRunner.available())
+      this.toolRegistry.registerMany(
+        createCodeModeTools({
+          runner: this.codeModeRunner,
+          blocks: this.blocks,
+          registry: this.toolRegistry,
+          policy: this.codeModePolicy,
+          entitlements: {
+            codeModeEnabled: (storeId) =>
+              planGrantsVexCapability(this.entitlements, storeId, 'code_mode'),
+          },
+        }),
+      );
     // F5/T34: the batch circuit's entry; it proposes, the card approves.
     this.toolRegistry.registerMany(
       createWriteBatchTools({ batches: this.writeBatches }),

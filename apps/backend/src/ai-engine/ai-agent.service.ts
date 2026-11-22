@@ -7,6 +7,14 @@ import {
   publicSandboxArgs,
   sandboxInvocation,
 } from './sandbox/sandbox-invocation.context';
+import { codeModeInvocation } from './sandbox/codemode-invocation.context';
+import { CodeModeBridgeService } from './sandbox/codemode-bridge.service';
+import { CODEMODE_SCRIPTS_PER_TURN } from './sandbox/interfaces/codemode-protocol.interface';
+import {
+  CODE_TOOL,
+  planGrantsVexCapability,
+} from './tools/domains/code-execution.tools';
+import { AIEntitlementsResolverService } from '../domains/store/subscriptions/services/ai-entitlements-resolver.service';
 import { streamAgentInference } from './context/agent-stream-inference';
 import {
   estimateAgentInputTokens,
@@ -493,6 +501,9 @@ export class AIAgentService {
     @Optional() private readonly toolRouter?: ToolRouterService,
     @Optional() private readonly playbooks?: PlaybookService,
     @Optional() private readonly proceduralMemory?: ProceduralMemoryService,
+    // F10/T65b: both are needed to OFFER `run_code`; either missing = never offered.
+    @Optional() private readonly entitlements?: AIEntitlementsResolverService,
+    @Optional() private readonly codeModeBridge?: CodeModeBridgeService,
   ) {}
 
   /**
@@ -1185,7 +1196,7 @@ export class AIAgentService {
     toolName: string,
     result: string,
   ): NonNullable<AIStreamChunk['ui_block']>[] {
-    if (toolName !== 'run_analysis') return [];
+    if (toolName !== 'run_analysis' && toolName !== CODE_TOOL) return [];
     const KINDS = new Set(['table', 'chart', 'kpi']);
     try {
       const data = (
@@ -1237,7 +1248,7 @@ export class AIAgentService {
    * transcript persistence, keeping only block ids, figures and notes.
    */
   private stripAnalysisUiBlocks(toolName: string, raw: string): string {
-    if (toolName !== 'run_analysis') return raw;
+    if (toolName !== 'run_analysis' && toolName !== CODE_TOOL) return raw;
     try {
       const parsed = JSON.parse(raw) as {
         data?: Record<string, unknown>;
@@ -1570,6 +1581,20 @@ export class AIAgentService {
     }
   }
 
+  /**
+   * F10/T65b: `run_code` is offered only to Vex, with the runner available AND
+   * the plan granting `vex.code_mode`. The cheap synchronous runner check goes
+   * first so with the runner off nothing else is consulted (the turn stays
+   * byte-identical to the pre-T65 one). Fails closed.
+   */
+  private async codeModeOffered(params: AgentRunParams): Promise<boolean> {
+    if (params.agent_key !== 'vex') return false;
+    if (!this.codeModeBridge?.available()) return false;
+    const storeId = RequestContextService.getContext()?.store_id;
+    if (!storeId || !this.entitlements) return false;
+    return planGrantsVexCapability(this.entitlements, storeId, 'code_mode');
+  }
+
   /** B authority is rebuilt per inference AND execution; relevance never grants it. */
   async resolveToolAuthority(
     params: AgentRunParams,
@@ -1598,6 +1623,7 @@ export class AIAgentService {
       params.agent_key,
       true,
     );
+    const scriptsOffered = await this.codeModeOffered(params);
     const scope = params.tools?.length
       ? new Set(params.tools.map((n) => this.toolRegistry.canonicalName(n)))
       : null;
@@ -1621,6 +1647,7 @@ export class AIAgentService {
         ((d.function.name !== 'run_readonly_script' &&
           d.function.name !== 'run_analysis') ||
           !!params.durable) &&
+        (d.function.name !== CODE_TOOL || scriptsOffered) &&
         !isForeignSurfaceTool(d.function.name, params.agent_key),
     );
   }
@@ -1816,11 +1843,15 @@ export class AIAgentService {
       }
     }
 
+    // F10/T65b: `run_code` leaves the turn's authority here, before routing,
+    // search, index, stubs and the catalog hash see it, unless it is offered.
+    const scriptsOffered = await this.codeModeOffered(params);
     filteredTools = filteredTools.filter(
       (d) =>
         ((d.function.name !== 'run_readonly_script' &&
           d.function.name !== 'run_analysis') ||
           !!params.durable) &&
+        (d.function.name !== CODE_TOOL || scriptsOffered) &&
         !isForeignSurfaceTool(d.function.name, params.agent_key),
     );
 
@@ -2154,6 +2185,8 @@ export class AIAgentService {
       });
 
     const toolsUsed: AgentResult['tools_used'] = [];
+    // F10/T65b: `run_code` executions started in THIS turn (not per round).
+    let codeScriptsThisTurn = 0;
     let pendingConfirmation: AgentResult['pending_confirmation'];
     const observeResult = async (
       name: string,
@@ -3684,7 +3717,12 @@ export class AIAgentService {
             )
               yield {
                 type: 'progress',
-                content: 'Voy a consultar los datos autorizados.',
+                // The bridge exposes no per-round progress, so a script gets one
+                // generic notice instead of «paso k de n».
+                content:
+                  toolName === CODE_TOOL
+                    ? 'Consultando datos con un script…'
+                    : 'Voy a consultar los datos autorizados.',
               };
             yield {
               type: 'tool_call',
@@ -3957,6 +3995,35 @@ export class AIAgentService {
                             params.agent_key,
                           );
                         return artifact;
+                      },
+                    },
+                    registryExecute,
+                  );
+                }
+                if (toolName === CODE_TOOL) {
+                  if (++codeScriptsThisTurn > CODEMODE_SCRIPTS_PER_TURN)
+                    return JSON.stringify({
+                      tool: CODE_TOOL,
+                      error: `Ya se ejecutaron ${CODEMODE_SCRIPTS_PER_TURN} scripts en este turno; es el máximo.`,
+                      error_code: 'CODEMODE_TURN_LIMIT',
+                      next_step:
+                        'Responde con lo que ya tienes o usa las herramientas directas; no pidas otro script en este turno.',
+                    });
+                  // Authority is the turn's role-filtered set, re-derived from the
+                  // session; the script can never widen it.
+                  const names = async () =>
+                    (await this.resolveRoutedAuthority(params)).map(
+                      (d) => d.function.name,
+                    );
+                  const durable = params.durable;
+                  return codeModeInvocation.run(
+                    {
+                      agentKey: params.agent_key ?? 'vexi',
+                      initialNames: await names(),
+                      ...(durable ? { durable } : {}),
+                      revalidate: async () => {
+                        await durable?.assertCurrent();
+                        return names();
                       },
                     },
                     registryExecute,

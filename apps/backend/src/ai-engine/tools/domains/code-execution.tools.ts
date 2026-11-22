@@ -19,6 +19,7 @@ import type {
   AnalysisRunResult,
   AnalysisRunner,
 } from '../../sandbox/interfaces/analysis-protocol.interface';
+import type { AIEntitlementsResolverService } from '../../../domains/store/subscriptions/services/ai-entitlements-resolver.service';
 import { RequestContextService } from '../../../common/context/request-context.service';
 import { normalizeSandboxSource } from '../../sandbox/sandbox-invocation.context';
 import { codeModeInvocation } from '../../sandbox/codemode-invocation.context';
@@ -631,7 +632,33 @@ export function createAnalysisTools({
 
 // ── run_code (F10/T65) ──────────────────────────────────────────────────────
 
-const CODE_TOOL = 'run_code';
+export const CODE_TOOL = 'run_code';
+
+/**
+ * Whether the store's effective plan grants a Vex capability. Fails closed: no
+ * plan, no row, a disabled row, a cap of 0 or any resolver error is OFF. One
+ * predicate for every plan-gated Vex tool (`code_analysis`, `code_mode`) and for
+ * the agent loop's decision to OFFER `run_code` at all (F10/T65b).
+ */
+export async function planGrantsVexCapability(
+  entitlements: Pick<AIEntitlementsResolverService, 'resolveForStore'>,
+  storeId: number,
+  capabilityKey: string,
+): Promise<boolean> {
+  try {
+    const resolved = await entitlements.resolveForStore(storeId);
+    if (!resolved.found || resolved.planId === null) return false;
+    return resolved.rows.some(
+      (r) =>
+        r.agent_key === 'vex' &&
+        r.capability_key === capabilityKey &&
+        r.enabled &&
+        r.cap_value !== 0,
+    );
+  } catch {
+    return false; // fail closed
+  }
+}
 const CODE_PURPOSE_MAX = 200;
 const CODE_PREVIEW_ROWS = 5;
 const CODE_BLOCK_KINDS = new Set(['table', 'chart', 'kpi']);
