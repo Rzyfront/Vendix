@@ -201,9 +201,15 @@ describe('VexiAttachmentsService · métodos para el agente (T44)', () => {
       stored_file_id: 31,
     };
     prisma.ai_attachments.findFirst.mockResolvedValue(row);
-    await expect(service.findAttachmentForAgent(41)).resolves.toEqual(row);
+    // B2: the caller's own rows only (no record read permission in context).
+    await expect(
+      RequestContextService.runIsolated(
+        { is_super_admin: false, store_id: 7, user_id: 5, permissions: [] } as any,
+        () => service.findAttachmentForAgent(41),
+      ),
+    ).resolves.toEqual(row);
     expect(prisma.ai_attachments.findFirst).toHaveBeenCalledWith({
-      where: { id: 41 },
+      where: { AND: [{ id: 41 }, { user_id: 5 }] },
       select: {
         id: true,
         s3_key: true,

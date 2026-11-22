@@ -7,6 +7,10 @@ import { VendixHttpException, ErrorCodes } from '../../../common/errors';
 import { S3PathHelper } from '../../../common/helpers/s3-path.helper';
 import { bytesMatchMime } from '../documents/file-signature';
 import {
+  ATTACHABLE_ENTITY_TYPES,
+  RECORD_READ_PERMISSION,
+} from '../documents/documents.constants';
+import {
   AI_ATTACHMENT_LABEL,
   AI_ATTACHMENT_MAX_BYTES,
   resolveAttachmentType,
@@ -15,6 +19,42 @@ import type { AttachmentContent } from './attachment-content.types';
 import { extractAttachmentContent } from './attachment-text-extractor';
 
 const HANDLE_PREFIX = 'att_';
+
+/** Matches no row: the filter of a caller without a user in context. */
+const NO_ROW = { id: -1 } as const;
+
+/**
+ * Who may read a chat attachment by its handle (B2). A handle is a sequential
+ * id the model or the client hands over, so it is never trusted on its own:
+ * the row must belong to the caller (`user_id`), or already be saved into a
+ * record whose read permission the caller holds (`RECORD_READ_PERMISSION`,
+ * the same one its own `GET :id` asks). Store isolation stays with
+ * `StorePrismaService`; this adds the per-user boundary inside the store.
+ */
+export function attachmentAccessWhere(): Record<string, unknown> {
+  const context = RequestContextService.getContext();
+  const userId = context?.user_id;
+  if (!userId) return NO_ROW;
+  const granted = context?.permissions?.length
+    ? context.permissions
+    : (context?.roles ?? []);
+  const readableRecords = ATTACHABLE_ENTITY_TYPES.filter((type) =>
+    granted.includes(RECORD_READ_PERMISSION[type]),
+  );
+  if (!readableRecords.length) return { user_id: userId };
+  return {
+    OR: [
+      { user_id: userId },
+      { linked_entity_type: { in: [...readableRecords] } },
+    ],
+  };
+}
+
+/** Mutations by handle only touch the caller's own rows. */
+function ownerWhere(): Record<string, unknown> {
+  const userId = RequestContextService.getContext()?.user_id;
+  return userId ? { user_id: userId } : NO_ROW;
+}
 
 export interface StoredAttachment {
   attachment_id: string;
@@ -270,7 +310,7 @@ export class VexiAttachmentsService {
 
     try {
       await this.prisma.ai_attachments.updateMany({
-        where: { id },
+        where: { id, ...ownerWhere() },
         data: {
           linked_entity_type: entityType,
           linked_entity_id: entityId,
@@ -291,7 +331,7 @@ export class VexiAttachmentsService {
 
     try {
       await this.prisma.ai_attachments.updateMany({
-        where: { id },
+        where: { id, ...ownerWhere() },
         data: { consumed_by_app_key: appKey },
       });
     } catch {
@@ -347,7 +387,7 @@ export class VexiAttachmentsService {
     if (!ids.length) return [];
 
     const rows = await this.prisma.ai_attachments.findMany({
-      where: { id: { in: ids } },
+      where: { AND: [{ id: { in: ids } }, attachmentAccessWhere()] },
       select: {
         id: true,
         original_name: true,
@@ -400,12 +440,13 @@ export class VexiAttachmentsService {
 
   /**
    * The attachment row behind `att_<id>` for the document tools (T44), or null
-   * when it does not exist in the current store. Scoped by `StorePrismaService`:
-   * another store's id simply does not resolve.
+   * when the caller cannot read it (`attachmentAccessWhere`): another store's
+   * id, or another person's attachment that is not in a record they can read,
+   * simply does not resolve.
    */
   async findAttachmentForAgent(id: number): Promise<AgentAttachmentRow | null> {
     const row = await this.prisma.ai_attachments.findFirst({
-      where: { id },
+      where: { AND: [{ id }, attachmentAccessWhere()] },
       select: {
         id: true,
         s3_key: true,
@@ -450,8 +491,10 @@ export class VexiAttachmentsService {
       );
     }
 
+    // B2: someone else's handle reads as "no longer available" — the same
+    // answer as a missing one, so the id space cannot be probed.
     const record = await this.prisma.ai_attachments.findFirst({
-      where: { id },
+      where: { AND: [{ id }, attachmentAccessWhere()] },
       select: {
         id: true,
         s3_key: true,

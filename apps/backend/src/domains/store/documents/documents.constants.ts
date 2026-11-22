@@ -36,3 +36,19 @@ export const ATTACHABLE_ENTITY_TYPES = [
   'product',
 ] as const;
 export type AttachableEntityType = (typeof ATTACHABLE_ENTITY_TYPES)[number];
+
+/**
+ * Read permission of each record's own controller (`GET :id`). It opens the
+ * record's documents (`store/record-documents`, B1) and lets a person read a
+ * chat attachment someone else already saved into that record (B2).
+ */
+export const RECORD_READ_PERMISSION: Readonly<
+  Record<AttachableEntityType, string>
+> = {
+  customer: 'store:customers:read',
+  order: 'store:orders:read',
+  purchase_order: 'store:orders:purchase_orders:read',
+  supplier: 'store:inventory:suppliers:read',
+  expense: 'store:expenses:read',
+  product: 'store:products:read',
+};

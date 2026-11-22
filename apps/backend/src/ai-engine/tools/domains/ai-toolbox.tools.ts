@@ -581,7 +581,7 @@ export function createAiToolboxTools({
       name: 'read_attachment',
       access: 'public',
       accessReason:
-        "Reads only a file uploaded by the caller to this store's Vex/Vexi chat (tenant-scoped handle); reads no business table.",
+        "Reads only a chat attachment the caller uploaded, or one already saved into a record the caller can read; VexiAttachmentsService enforces it per user (attachmentAccessWhere) and per store. Reads no business table.",
       version: '1',
       domain: 'ai-toolbox',
       readOnly: true,

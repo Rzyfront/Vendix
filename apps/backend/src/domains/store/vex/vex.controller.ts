@@ -578,8 +578,9 @@ export class VexController {
 
   /**
    * Short-lived signed read URL of a staged attachment, so the chat can open an
-   * image or PDF inline. Tenant-scoped through the attachments service: a
-   * handle from another store resolves to nothing.
+   * image or PDF inline. Scoped by store and by user through the attachments
+   * service (B2): another person's handle, like one from another store,
+   * resolves to nothing.
    */
   @Get('attachments/:handle/url')
   @UseGuards(AiAccessGuard)
