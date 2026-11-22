@@ -123,12 +123,14 @@ export class VexModule implements OnModuleInit {
         entitlements: {
           codeAnalysisEnabled: async (storeId) => {
             try {
-              const { rows } = await this.entitlements.resolveForStore(storeId);
-              return rows.some(
+              const resolved = await this.entitlements.resolveForStore(storeId);
+              if (!resolved.found || resolved.planId === null) return false;
+              return resolved.rows.some(
                 (r) =>
                   r.agent_key === 'vex' &&
                   r.capability_key === 'code_analysis' &&
-                  r.enabled,
+                  r.enabled &&
+                  r.cap_value !== 0,
               );
             } catch {
               return false; // fail closed

@@ -1136,6 +1136,61 @@ export class AIAgentService {
   }
 
   /**
+   * F9/T52: `run_analysis` emits 1..N blocks (table, chart, kpi), carrying the
+   * Python source on the last block's `spec.analysis`. Empty for any other
+   * tool, an error envelope or a non-JSON result.
+   */
+  private analysisBlocksOf(
+    toolName: string,
+    result: string,
+  ): NonNullable<AIStreamChunk['ui_block']>[] {
+    if (toolName !== 'run_analysis') return [];
+    const KINDS = new Set(['table', 'chart', 'kpi']);
+    try {
+      const data = (
+        JSON.parse(result) as {
+          data?: { ui_blocks?: unknown; blocks?: unknown };
+        }
+      )?.data;
+      const items = Array.isArray(data?.ui_blocks)
+        ? data.ui_blocks
+        : Array.isArray(data?.blocks)
+          ? data.blocks
+          : [];
+      return items
+        .filter(
+          (
+            item,
+          ): item is {
+            block_id: string;
+            kind: 'table' | 'chart' | 'kpi';
+            version?: number;
+            spec?: Record<string, any>;
+            data?: unknown;
+          } =>
+            !!item &&
+            typeof item === 'object' &&
+            typeof (item as { block_id?: unknown }).block_id === 'string' &&
+            typeof (item as { kind?: unknown }).kind === 'string' &&
+            KINDS.has((item as { kind: string }).kind),
+        )
+        .map((item) => ({
+          block_id: item.block_id,
+          kind: item.kind,
+          ...(typeof item.version === 'number'
+            ? { version: item.version }
+            : {}),
+          ...(item.spec && typeof item.spec === 'object'
+            ? { spec: item.spec }
+            : {}),
+          ...(item.data !== undefined ? { data: item.data } : {}),
+        }));
+    } catch {
+      return [];
+    }
+  }
+
+  /**
    * Non-streaming entry point. Drains the streaming loop and keeps its return
    * value, so there is exactly one implementation of the agent protocol —
    * a second copy for the SSE path would drift the moment either is touched.
@@ -3887,6 +3942,10 @@ export class AIAgentService {
               // F5: a batch split in parts (> 25 steps) opens one card each.
               for (const part of this.writeBatchPartBlocksOf(toolName, raw)) {
                 yield { type: 'ui_block', ui_block: part };
+              }
+              // F9/T52: run_analysis produces table/chart/kpi blocks in order.
+              for (const block of this.analysisBlocksOf(toolName, raw)) {
+                yield { type: 'ui_block', ui_block: block };
               }
             } catch (error: any) {
               // A confirmation demand is not a failure — it is the proposal

@@ -1381,4 +1381,67 @@ describe('VexBlockService', () => {
       });
     });
   });
+
+  describe('F9/T52 spec.analysis preservation in toUiBlock', () => {
+    it('preserves spec.analysis on table, chart and kpi blocks (with optional source) and ignores malformed shapes', async () => {
+      const scope = {
+        store_id: 7,
+        user_id: 9,
+        organization_id: 1,
+        permissions: [],
+        roles: [],
+        is_super_admin: false,
+        is_owner: true,
+      };
+      const analysisWithSource = {
+        run_id: 'run-42',
+        source_hash: 'a'.repeat(64),
+        language: 'python',
+        purpose: 'projection',
+        source: 'result = {"figures": [{"label": "x", "value": 1}]}',
+      };
+      const analysisNoSource = {
+        run_id: 'run-42',
+        source_hash: 'a'.repeat(64),
+        language: 'python',
+        purpose: 'projection',
+      };
+      await RequestContextService.runIsolated(scope, async () => {
+        const tbl = await service.create({
+          conversation_id: 1,
+          kind: 'table',
+          spec: { title: 'Tabla', analysis: analysisNoSource },
+          data: { columns: [{ key: 'c0', label: 'Mes' }], rows: [{ c0: '2026-01' }] },
+        });
+        const chart = await service.create({
+          conversation_id: 1,
+          kind: 'chart',
+          spec: { title: 'Proyección', chart_type: 'line', analysis: analysisNoSource },
+          data: { labels: ['2026-03'], series: [{ name: 'Ventas', data: [120] }] },
+        });
+        const kpi = await service.create({
+          conversation_id: 1,
+          kind: 'kpi',
+          spec: { analysis: analysisWithSource },
+          data: { label: 'Total', value: 120 },
+        });
+        const bad = await service.create({
+          conversation_id: 1,
+          kind: 'kpi',
+          spec: { analysis: { language: 'bash', source: 'rm -rf /' } },
+          data: { label: 'Sin análisis', value: 1 },
+        });
+
+        const tblView = await service.toUiBlock(tbl);
+        const chartView = await service.toUiBlock(chart);
+        const kpiView = await service.toUiBlock(kpi);
+        const badView = await service.toUiBlock(bad);
+
+        expect(tblView.spec.analysis).toEqual(analysisNoSource);
+        expect(chartView.spec.analysis).toEqual(analysisNoSource);
+        expect(kpiView.spec.analysis).toEqual(analysisWithSource);
+        expect(badView.spec.analysis).toBeUndefined();
+      });
+    });
+  });
 });

@@ -85,7 +85,21 @@ export interface AnalysisBlocksPort {
     kind: 'table' | 'chart' | 'kpi';
     spec?: Record<string, any>;
     data: Record<string, any>;
-  }): Promise<{ id: string; version: number }>;
+  }): Promise<{
+    id: string;
+    version: number;
+    kind?: string;
+    spec?: Record<string, any>;
+    data?: Record<string, any>;
+    [key: string]: any;
+  }>;
+  toUiBlock?(row: any): Promise<{
+    block_id: string;
+    kind: string;
+    version: number;
+    spec: Record<string, any>;
+    data: Record<string, any>;
+  }>;
 }
 
 export interface AnalysisEntitlementPort {
@@ -252,8 +266,21 @@ export function createAnalysisTools({
       version: '1',
       domain: 'sandbox',
       readOnly: true,
+      discovery: {
+        synonyms: [
+          'proyección de ventas',
+          'proyectar ventas',
+          'tendencia',
+          'correlación',
+          'regresión',
+          'segmentación de clientes',
+          'análisis estadístico',
+          'análisis con python',
+          'análisis con código',
+        ],
+      },
       description:
-        'Análisis estadístico con código Python (pandas, numpy, statsmodels) sobre datos que YA están en bloques de esta conversación: proyecciones y tendencias, correlaciones, regresiones, segmentaciones (por frecuencia, ticket, etc.). NO lo uses para sumas, porcentajes, variaciones o márgenes (usa compute) ni para consultas simples (usa las tools de reporte): primero trae los datos con un reporte y muéstralos en un bloque de tabla. Contrato del código: `inputs['<name>']` es un DataFrame de pandas por cada entrada; `pd`, `np` y `sm` ya están disponibles; sin imports de red, sin archivos, sin dibujar (el panel pinta los gráficos). Termina asignando `result = {"tables": [{"title", "columns", "rows"}], "series": [{"title", "chart": "line|bar|scatter", "x", "datasets": [{"label", "values"}]}], "figures": [{"label", "value", "unit"?}], "notes": ["..."]}`. La persona verá el código usado en un desplegable. Requiere un plan con «Análisis con código»; si no está disponible, usa compute. No reintentar automáticamente: si falla, corrige el código una sola vez.',
+        'Análisis estadístico con código Python (pandas, numpy, statsmodels) sobre datos que YA están en bloques de esta conversación: proyecciones y tendencias, correlaciones, regresiones, segmentaciones (por frecuencia, ticket, etc.). NO lo uses para sumas, porcentajes, variaciones o márgenes (usa compute) ni para consultas simples (usa las tools de reporte): primero trae los datos con un reporte y muéstralos en un bloque de tabla. Contrato del código: `inputs["<name>"]` es un DataFrame de pandas por cada entrada; `pd`, `np` y `sm` ya están disponibles; sin imports de red, sin archivos, sin dibujar (el panel pinta los gráficos). Termina asignando `result = {"tables": [{"title", "columns", "rows"}], "series": [{"title", "chart": "line|bar|scatter", "x", "datasets": [{"label", "values"}]}], "figures": [{"label", "value", "unit"?}], "notes": ["..."]}`. La persona verá el código usado en un desplegable. Requiere un plan con «Análisis con código»; si no está disponible, usa compute. No reintentar automáticamente: si falla, corrige el código una sola vez.',
       parameters: {
         type: 'object',
         additionalProperties: false,
@@ -261,7 +288,7 @@ export function createAnalysisTools({
           conversation_id: {
             type: 'number',
             description:
-              'Conversación actual: de ella salen los bloques de entrada y en ella se guardan los resultados.',
+              'No lo envíes: el servidor siempre usa la conversación actual y reemplaza cualquier valor.',
           },
           source: {
             type: 'string',
@@ -296,7 +323,7 @@ export function createAnalysisTools({
             description: 'Título opcional para los bloques resultantes.',
           },
         },
-        required: ['conversation_id', 'source', 'inputs', 'purpose'],
+        required: ['source', 'inputs', 'purpose'],
       },
       handler: async (
         args: Record<string, any>,
@@ -499,6 +526,13 @@ export function createAnalysisTools({
           });
         }
         const created: Array<{ block_id: string; kind: string }> = [];
+        const uiBlocks: Array<{
+          block_id: string;
+          kind: string;
+          version: number;
+          spec: Record<string, any>;
+          data: Record<string, any>;
+        }> = [];
         try {
           for (const [i, item] of planned.entries()) {
             // The code is shown once per analysis: only the LAST block carries it.
@@ -515,6 +549,9 @@ export function createAnalysisTools({
               data: item.data,
             });
             created.push({ block_id: block.id, kind: item.kind });
+            if (blocks.toUiBlock) {
+              uiBlocks.push(await blocks.toUiBlock(block));
+            }
           }
         } catch (error: any) {
           return fail(
@@ -529,6 +566,7 @@ export function createAnalysisTools({
             source_hash: run.source_hash,
             purpose,
             blocks: created,
+            ...(uiBlocks.length ? { ui_blocks: uiBlocks } : {}),
             figures: (output.figures ?? []).map((f) => ({
               label: f.label,
               value: f.value,

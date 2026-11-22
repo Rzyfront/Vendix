@@ -15,6 +15,8 @@ export const VEX_ONLY_TOOL_NAMES: ReadonlySet<string> = new Set([
   'forget',
   // F5: the batch card only exists on the Vex surface.
   'propose_write_batch',
+  // F9/T52: reads and renders blocks of the Vex conversation; Vexi has no blocks.
+  'run_analysis',
 ]);
 
 export function isVexOnlyTool(name: string): boolean {
@@ -41,6 +43,8 @@ const TURN_CONVERSATION_TOOL_NAMES: ReadonlySet<string> = new Set(['remember']);
  */
 export const TURN_BOUND_CONVERSATION_TOOLS: ReadonlySet<string> = new Set([
   'propose_write_batch',
+  // F9/T52: input and output blocks always belong to the active turn's thread.
+  'run_analysis',
 ]);
 
 /**

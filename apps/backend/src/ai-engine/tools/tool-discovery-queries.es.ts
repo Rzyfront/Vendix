@@ -3160,6 +3160,15 @@ export const TOOL_DISCOVERY_QUERIES_ES: Readonly<
     'Saca el promedio y la variación de estas cifras',
     'Cuánto es el 19% de esa cifra',
   ],
+  // F9/T52 — análisis estadístico con código Python en Lambda aislada.
+  run_analysis: [
+    'Proyecta las ventas del próximo mes con mis últimos 12 meses',
+    'Haz una regresión lineal o tendencia de ventas por mes',
+    'Calcula la correlación entre descuentos y volumen de ventas',
+    'Segmenta mis clientes por frecuencia de compra y ticket promedio',
+    'Analiza con Python y pandas esta tabla de ventas históricas',
+    'Corre un análisis estadístico avanzado sobre los bloques de esta conversación',
+  ],
   // F1/T5 — sugerencia de seguimiento (escritas a mano, sin datos de clientes).
   suggest_followup: [
     'El viernes llamo al proveedor para cuadrar el pedido',

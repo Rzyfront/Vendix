@@ -90,6 +90,7 @@ describe('AIAgentService.runAgentStream', () => {
       def('send_invoice_dian'),
       def('vex_render_table'),
       def('remember'),
+      def('run_analysis'),
     ];
     const domains: Record<string, string> = {
       list_things: 'things',
@@ -103,6 +104,7 @@ describe('AIAgentService.runAgentStream', () => {
       send_invoice_dian: 'invoicing',
       vex_render_table: 'vex',
       remember: 'memory',
+      run_analysis: 'sandbox',
     };
     registry = {
       getAvailableDefinitions: jest.fn((scopes: string[]) =>
@@ -804,6 +806,77 @@ describe('AIAgentService.runAgentStream', () => {
     expect(chunks).toContainEqual({
       type: 'ui_block',
       ui_block: { block_id: 'b-9', kind: 'table', version: 1 },
+    });
+  });
+
+  it('(vex-f9) run_analysis emits every created ui_block frame with spec.analysis', async () => {
+    executeTool.mockResolvedValueOnce(
+      JSON.stringify({
+        tool: 'run_analysis',
+        version: '1',
+        data: {
+          run_id: 'run-1',
+          source_hash: 'h-1',
+          purpose: 'projection',
+          blocks: [
+            { block_id: 'b-chart', kind: 'chart' },
+            { block_id: 'b-kpi', kind: 'kpi' },
+          ],
+          ui_blocks: [
+            {
+              block_id: 'b-chart',
+              kind: 'chart',
+              version: 1,
+              spec: {
+                kind: 'chart',
+                chart_type: 'line',
+                analysis: {
+                  run_id: 'run-1',
+                  source_hash: 'h-1',
+                  language: 'python',
+                  purpose: 'projection',
+                },
+              },
+              data: { rows: [] },
+            },
+            {
+              block_id: 'b-kpi',
+              kind: 'kpi',
+              version: 1,
+              spec: {
+                kind: 'kpi',
+                label: 'Proyección',
+                analysis: {
+                  run_id: 'run-1',
+                  source_hash: 'h-1',
+                  language: 'python',
+                  purpose: 'projection',
+                  source: 'result = {}',
+                },
+              },
+              data: { value: 150 },
+            },
+          ],
+        },
+      }),
+    );
+    chat
+      .mockResolvedValueOnce(
+        ok({ tool_calls: [call('c1', 'run_analysis', { source: 'result = {}', inputs: [], purpose: 'projection' })] }),
+      )
+      .mockResolvedValueOnce(ok({ content: 'listo' }));
+
+    const { chunks } = await drain({ agent_key: 'vex' });
+    const uiBlocks = chunks.filter((c) => c.type === 'ui_block').map((c) => c.ui_block);
+    expect(uiBlocks).toHaveLength(2);
+    expect(uiBlocks[0]).toMatchObject({ block_id: 'b-chart', kind: 'chart', version: 1 });
+    expect(uiBlocks[1]).toMatchObject({
+      block_id: 'b-kpi',
+      kind: 'kpi',
+      version: 1,
+      spec: expect.objectContaining({
+        analysis: expect.objectContaining({ source: 'result = {}' }),
+      }),
     });
   });
 

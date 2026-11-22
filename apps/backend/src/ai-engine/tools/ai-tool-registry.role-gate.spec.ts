@@ -45,8 +45,10 @@ const PUBLIC_TOOLS = [
   'list_attachments',
   // business identity every store member sees
   'get_store_profile',
-  // sandbox re-derives live permissions
+  // sandbox re-derives live permissions; run_analysis reads only the caller's
+  // own Vex conversation blocks and runs in an isolated no-network Lambda
   'run_readonly_script',
+  'run_analysis',
   // agent scaffolding
   'search_tools',
   'suggest_followup',

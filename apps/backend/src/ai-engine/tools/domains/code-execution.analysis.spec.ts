@@ -87,12 +87,48 @@ function setup(
 }
 
 describe('run_analysis', () => {
-  it('declares a public read-only sandbox tool', () => {
+  it('declares a public read-only sandbox tool with turn-bound conversation_id', () => {
     const { tool } = setup();
     expect(tool.name).toBe('run_analysis');
     expect(tool.access).toBe('public');
     expect(tool.readOnly).toBe(true);
     expect(tool.domain).toBe('sandbox');
+    expect(tool.parameters.required).not.toContain('conversation_id');
+    expect(tool.discovery?.synonyms?.length).toBeGreaterThan(0);
+  });
+
+  it('attaches panel-ready ui_blocks when blocks.toUiBlock is provided', async () => {
+    const { blocks, call } = setup({
+      output: {
+        series: [
+          {
+            title: 'Tendencia',
+            chart: 'line',
+            x: ['2026-03'],
+            datasets: [{ label: 'Ventas', values: [150] }],
+          },
+        ],
+        figures: [{ label: 'Proyección', value: 150 }],
+      },
+    });
+    (blocks as any).create = jest.fn().mockImplementation(async (input) => ({
+      id: `blk-${input.kind}`,
+      version: 1,
+      kind: input.kind,
+      spec: input.spec,
+      data: input.data,
+    }));
+    (blocks as any).toUiBlock = jest.fn().mockImplementation(async (row) => ({
+      block_id: row.id,
+      kind: row.kind,
+      version: row.version,
+      spec: { kind: row.kind, analysis: row.spec.analysis },
+      data: row.data,
+    }));
+    const r = await call();
+    expect(r.data.ui_blocks).toHaveLength(2);
+    expect(r.data.ui_blocks[0].spec.analysis.source).toBeUndefined();
+    expect(r.data.ui_blocks[1].spec.analysis.source).toBe(SOURCE);
   });
 
   it('plan without code_analysis: Spanish message, runner never called', async () => {
