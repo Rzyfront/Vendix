@@ -295,7 +295,9 @@ describe('CodeModePolicyService argument and result bounds', () => {
 describe('CodeModePolicyService authority scope', () => {
   it('derives authority through the base policy with an allowlist scope, never the Deno list_products one', async () => {
     const base = {
-      authorize: jest.fn(async (_s, _a, names, _p, cb) => cb({}, names)),
+      authorize: jest.fn(async (...args: unknown[]) =>
+        (args[4] as (snapshot: unknown, names: unknown) => unknown)({}, args[2]),
+      ),
     };
     const p = new CodeModePolicyService(
       { get: (name: string) => live.get(name) } as never,
@@ -305,7 +307,10 @@ describe('CodeModePolicyService authority scope', () => {
     await expect(
       p.authorize({} as never, 'vex', [SAMPLE], ['x'], callback),
     ).resolves.toBe('done');
-    const scope = base.authorize.mock.calls[0][5];
+    const scope = base.authorize.mock.calls[0][5] as {
+      allowedName(name: unknown): boolean;
+      eligible(tool: unknown): boolean;
+    };
     expect(scope.allowedName(SAMPLE)).toBe(true);
     expect(scope.allowedName('run_code')).toBe(false);
     expect(scope.allowedName(7)).toBe(false);

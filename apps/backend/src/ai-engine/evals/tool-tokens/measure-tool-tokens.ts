@@ -162,8 +162,7 @@ async function main(): Promise<void> {
     { role: 'user', content: message },
   ];
 
-  const rows = [];
-  for (const task of tasks) {
+  const rows = await inOrder(tasks, async (task) => {
     const oracleTools = task.oracle.groups.flat().map((c) => c.tool);
     const proxy = successProxy(oracleTools, authorizedSet, known);
     const variants: Record<string, any> = {};
@@ -204,7 +203,7 @@ async function main(): Promise<void> {
         ...m,
       };
     }
-    rows.push({
+    return {
       id: task.id,
       source: task.source,
       kind: task.kind,
@@ -215,8 +214,8 @@ async function main(): Promise<void> {
       missing: proxy.missing,
       unauthorized: proxy.unauthorized,
       variants,
-    });
-  }
+    };
+  });
 
   const totals = (variant: string) =>
     summarizeByKind(
@@ -282,6 +281,16 @@ function keptConfig1Section(path: string): string {
   return at < 0 ? '' : text.slice(at);
 }
 
+/** Maps items one at a time, in order (each task awaits its own router). */
+async function inOrder<T, R>(
+  items: readonly T[],
+  fn: (item: T) => Promise<R>,
+): Promise<R[]> {
+  const out: R[] = [];
+  for (const item of items) out.push(await fn(item));
+  return out;
+}
+
 interface Config1World {
   cli: { config: number; out: string };
   tasks: BankTask[];
@@ -311,8 +320,7 @@ async function runConfig1(w: Config1World): Promise<void> {
   const base0 = JSON.parse(readFileSync(base0Path, 'utf8'));
   const c0ById = new Map<string, any>(base0.tasks.map((t: any) => [t.id, t]));
   const sentenceDigest = `${w.digest}\n${TOOL_STUBS_ROUTING_SENTENCE}`;
-  const rows = [];
-  for (const task of w.tasks) {
+  const rows = await inOrder(w.tasks, async (task) => {
     const oracleTools = task.oracle.groups.flat().map((c) => c.tool);
     const proxy = successProxy(oracleTools, w.authorizedSet, w.known);
     const c0 = c0ById.get(task.id);
@@ -373,7 +381,7 @@ async function runConfig1(w: Config1World): Promise<void> {
     });
     done.push(task.oracle.groups.length);
     const withDescribe = measure(describedGroups, done);
-    rows.push({
+    return {
       id: task.id,
       kind: task.kind,
       reachable: proxy.reachable,
@@ -392,8 +400,8 @@ async function runConfig1(w: Config1World): Promise<void> {
       input_describe: withDescribe.input_total,
       output_c0: c0.variants.routed.output_estimate,
       output_describe: withDescribe.output_estimate,
-    });
-  }
+    };
+  });
   const sum = (kind: string, key: string) =>
     rows
       .filter((r) => kind === 'all' || r.kind === kind)
@@ -538,8 +546,7 @@ async function runConfig2(w: Config2World): Promise<void> {
     { role: 'user', content: message },
   ];
 
-  const rows = [];
-  for (const task of w.tasks) {
+  const rows = await inOrder(w.tasks, async (task) => {
     const oracleCalls = task.oracle.groups.flat();
     const oracleTools = oracleCalls.map((c) => c.tool);
     const proxy = successProxy(oracleTools, w.authorizedSet, w.known);
@@ -614,7 +621,7 @@ async function runConfig2(w: Config2World): Promise<void> {
       : null;
     const source = scriptedMax ? buildScriptSource(task.oracle.groups) : '';
     const pick = (use: boolean) => (use && scripted ? scripted : directOffer);
-    rows.push({
+    return {
       id: task.id,
       kind: task.kind,
       reachable: proxy.reachable,
@@ -649,8 +656,8 @@ async function runConfig2(w: Config2World): Promise<void> {
       output_c0: c0r.output_estimate,
       output_policy: pick(scriptedPolicy).output_estimate,
       output_max: pick(scriptedMax).output_estimate,
-    });
-  }
+    };
+  });
 
   const sel = (kind: string) =>
     rows.filter((r) => kind === 'all' || r.kind === kind);
