@@ -15,9 +15,8 @@ import {
   Query,
   UploadedFile,
   UseGuards,
-  UseInterceptors,
 } from '@nestjs/common';
-import { FileInterceptor } from '@nestjs/platform-express';
+import { AiAttachmentUpload } from '../vexi/ai-attachment-upload.decorator';
 import { randomUUID } from 'node:crypto';
 import { ResponseService } from '../../../common/responses/response.service';
 import { RequestContextService } from '../../../common/context/request-context.service';
@@ -567,7 +566,7 @@ export class VexController {
   @Post('attachments')
   @UseGuards(AiAccessGuard)
   @RequireAIFeature('vex_agent' as AIFeatureKey)
-  @UseInterceptors(FileInterceptor('file'))
+  @AiAttachmentUpload()
   async uploadAttachment(
     @UploadedFile() file: Express.Multer.File,
     @Body() dto: UploadAttachmentDto,
