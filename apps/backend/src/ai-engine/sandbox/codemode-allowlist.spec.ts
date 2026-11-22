@@ -123,6 +123,21 @@ describe('Code Mode allowlist snapshot', () => {
     }).toEqual({ name: 'list_entry_failures', excluded: true, listed: false });
   });
 
+  it('keeps read tools with hidden DB writes out of Stage 1 scripts (F10 audit B2)', () => {
+    const names = new Set(CODEMODE_ALLOWLIST.map((entry) => entry.name));
+    for (const name of [
+      'get_employee_fiscal_profile',
+      'list_tables',
+      'get_crm_pipeline',
+      'get_store_settings',
+    ])
+      expect({
+        name,
+        excluded: Object.prototype.hasOwnProperty.call(CODEMODE_EXCLUDED, name),
+        listed: names.has(name),
+      }).toEqual({ name, excluded: true, listed: false });
+  });
+
   it('keeps every exclusion alive and justified: a stale entry fails instead of hiding a tool', () => {
     for (const [name, reason] of Object.entries(CODEMODE_EXCLUDED)) {
       expect({ name, reason: reason.length > 10 }).toEqual({ name, reason: true });

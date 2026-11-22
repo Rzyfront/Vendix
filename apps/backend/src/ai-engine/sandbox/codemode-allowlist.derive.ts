@@ -46,6 +46,14 @@ export const CODEMODE_EXCLUDED: Readonly<Record<string, string>> = Object.freeze
   get_pila_flatfile: 'generates a file artifact instead of reading rows',
   list_entry_failures:
     'queries accounting_entry_failures via withoutScope() without store/organization filter; pending tenant-scoped listUnresolved with tests',
+  get_employee_fiscal_profile:
+    'creates missing employee_fiscal_profiles rows in getOrCreate() and queries via withoutScope() filtering only by organization_id',
+  list_tables:
+    'passing table_id calls getQr(), which updates tables.public_token in the database',
+  get_crm_pipeline:
+    'listPipelines() calls ensureDefaultCrmPipeline(), inserting default CRM pipeline and stages',
+  get_store_settings:
+    'getSettings() calls ensureDefaults() and lazily updates store_settings JSON in the database',
 });
 
 /** Shape every allowlisted tool must hold, today (generation) and live (policy). */
