@@ -1,6 +1,6 @@
 # Sandbox de análisis en Python sobre AWS Lambda aislada (F9 · D3)
 
-**Estado (2026-11-22): desplegada en la cuenta de Vendix (`us-east-1`) como `vendix-vex-analysis-sandbox`, APAGADA y NO certificada. T53 FALLA sobre el digest desplegado: ver [`CERTIFICACION-T53.md`](CERTIFICACION-T53.md). `AI_ANALYSIS_CERTIFIED_DIGEST` no se fija hasta re-certificar.**
+**Estado (2026-11-22): desplegada en la cuenta de Vendix (`us-east-1`) como `vendix-vex-analysis-sandbox`, APAGADA y NO certificada. T53 corrida 4 FALLA en el punto 3 (inundación de enlaces duros en `/tmp`) sobre el digest desplegado: ver [`CERTIFICACION-T53.md`](CERTIFICACION-T53.md). `AI_ANALYSIS_CERTIFIED_DIGEST` no se fija hasta re-certificar.**
 
 La infraestructura solo la despliega un operador con autorización explícita; nunca se ejecuta código del invitado en una máquina de desarrollo. El backend y sus workers **nunca** ejecutan código generado por IA en el host: el worker solo orquesta la cola, materializa tablas de la misma conversación, invoca la Lambda con `lambda:InvokeFunction`, valida el JSON de salida y persiste bloques (`table`, `chart`, `kpi`).
 
