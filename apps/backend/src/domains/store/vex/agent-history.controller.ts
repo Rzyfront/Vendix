@@ -1,4 +1,4 @@
-import { Controller, Get, Query, UseGuards } from '@nestjs/common';
+import { Controller, Get, Param, Query, UseGuards } from '@nestjs/common';
 import { Type } from 'class-transformer';
 import { IsIn, IsInt, IsOptional, Max, Min } from 'class-validator';
 import { ResponseService } from '../../../common/responses/response.service';
@@ -64,6 +64,15 @@ export class AgentHistoryController {
       page.page,
       page.limit,
       'Conversaciones de la tienda con los agentes',
+    );
+  }
+
+  /** «Ver cómo lo calculé»: one Code Mode run of THIS store (source only for its owner). */
+  @Get('script-runs/:id')
+  async scriptRun(@Param('id') id: string) {
+    return this.responseService.success(
+      await this.history.getScriptRun(id),
+      'Detalle de la ejecución',
     );
   }
 }

@@ -16,6 +16,7 @@ import {
   VexFollowupEdits,
   VexPlanProposal,
   VexPlanStep,
+  VexScriptRun,
   VexLaunchablePlaybook,
   VexUiBlock,
   VexWriteBatch,
@@ -355,6 +356,15 @@ export class VexApiService {
         `${this.vexBase}/playbooks/launchable`,
       )
       .pipe(map((res) => res.data ?? []));
+  }
+
+  /** F10 T67: «Ver cómo lo calculé» for one Code Mode run of this store. */
+  getScriptRun(runId: string): Observable<VexScriptRun> {
+    return this.http
+      .get<{ data: VexScriptRun }>(
+        `${environment.apiUrl}/store/ai-agents/history/script-runs/${encodeURIComponent(runId)}`,
+      )
+      .pipe(map((res) => res.data));
   }
 
   /** F5: current state of a write batch (the card polls this while executing). */

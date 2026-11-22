@@ -10,6 +10,8 @@ import { SandboxClientService } from './sandbox/sandbox-client.service';
 import { SandboxPolicyService } from './sandbox/sandbox-policy.service';
 import { SandboxAuditRepository } from './sandbox/sandbox-audit.repository';
 import { SandboxLambdaClientService } from './sandbox/sandbox-lambda-client.service';
+import { CodeModeBridgeService } from './sandbox/codemode-bridge.service';
+import { CodeModePolicyService } from './sandbox/codemode-policy.service';
 import { SandboxAnalysisBrokerService } from './sandbox/sandbox-analysis-broker.service';
 
 import { createCodeExecutionTools } from './tools/domains/code-execution.tools';
@@ -104,6 +106,8 @@ import { ConversationCompactorService } from './context/conversation-compactor.s
     SandboxAuditRepository,
     SandboxLambdaClientService,
     SandboxAnalysisBrokerService,
+    CodeModePolicyService,
+    CodeModeBridgeService,
     AIToolRegistry,
     ToolRouterService,
     ToolCatalogIndexerService,
@@ -148,6 +152,10 @@ import { ConversationCompactorService } from './context/conversation-compactor.s
     AgentVerifierService,
     SandboxLambdaClientService,
     SandboxAnalysisBrokerService,
+    CodeModeBridgeService,
+    CodeModePolicyService,
+    // F10/T67: «Ver cómo lo calculé» reads runs from the Vex history service.
+    SandboxAuditRepository,
     AIEngineService,
     AgentRuntimeConfigService,
     AILoggingService,

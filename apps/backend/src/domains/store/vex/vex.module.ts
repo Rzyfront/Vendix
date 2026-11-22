@@ -16,7 +16,13 @@ import { VexActivityFeedService } from './services/vex-activity-feed.service';
 import { VexSuggestionsService } from './services/vex-suggestions.service';
 import { AIToolRegistry } from '../../../ai-engine/tools/ai-tool-registry';
 import { createComputeTools } from '../../../ai-engine/tools/domains/compute.tools';
-import { createAnalysisTools } from '../../../ai-engine/tools/domains/code-execution.tools';
+import {
+  createAnalysisTools,
+  createCodeModeTools,
+  planGrantsVexCapability,
+} from '../../../ai-engine/tools/domains/code-execution.tools';
+import { CodeModeBridgeService } from '../../../ai-engine/sandbox/codemode-bridge.service';
+import { CodeModePolicyService } from '../../../ai-engine/sandbox/codemode-policy.service';
 import { SandboxAnalysisBrokerService } from '../../../ai-engine/sandbox/sandbox-analysis-broker.service';
 import { AIEntitlementsResolverService } from '../subscriptions/services/ai-entitlements-resolver.service';
 import { createVexBlockTools } from '../../../ai-engine/tools/domains/vex-blocks.tools';
@@ -77,6 +83,8 @@ export class VexModule implements OnModuleInit {
     private readonly writeBatches: WriteBatchService,
     private readonly analysisRunner: SandboxAnalysisBrokerService,
     private readonly entitlements: AIEntitlementsResolverService,
+    private readonly codeModeRunner: CodeModeBridgeService,
+    private readonly codeModePolicy: CodeModePolicyService,
   ) {}
 
   onModuleInit(): void {
@@ -121,24 +129,27 @@ export class VexModule implements OnModuleInit {
         runner: this.analysisRunner,
         blocks: this.blocks,
         entitlements: {
-          codeAnalysisEnabled: async (storeId) => {
-            try {
-              const resolved = await this.entitlements.resolveForStore(storeId);
-              if (!resolved.found || resolved.planId === null) return false;
-              return resolved.rows.some(
-                (r) =>
-                  r.agent_key === 'vex' &&
-                  r.capability_key === 'code_analysis' &&
-                  r.enabled &&
-                  r.cap_value !== 0,
-              );
-            } catch {
-              return false; // fail closed
-            }
-          },
+          codeAnalysisEnabled: (storeId) =>
+            planGrantsVexCapability(this.entitlements, storeId, 'code_analysis'),
         },
       }),
     );
+    // F10/T65: Code Mode scripts over allowlisted reads, gated by plan. Only
+    // registered when the Lambda is enabled, configured and certified at boot:
+    // off, the registry (catalog hash, global knowledge index) stays as before.
+    if (this.codeModeRunner.available())
+      this.toolRegistry.registerMany(
+        createCodeModeTools({
+          runner: this.codeModeRunner,
+          blocks: this.blocks,
+          registry: this.toolRegistry,
+          policy: this.codeModePolicy,
+          entitlements: {
+            codeModeEnabled: (storeId) =>
+              planGrantsVexCapability(this.entitlements, storeId, 'code_mode'),
+          },
+        }),
+      );
     // F5/T34: the batch circuit's entry; it proposes, the card approves.
     this.toolRegistry.registerMany(
       createWriteBatchTools({ batches: this.writeBatches }),

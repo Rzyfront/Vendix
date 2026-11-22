@@ -135,3 +135,101 @@ describe('B 50-case corpus routing contract (NOT a measured product baseline)', 
     expect(buildToolManifest(registry).hash).toBe(manifest.hash);
   });
 });
+
+describe('F10/T62 golden routing: progressive discovery stubs', () => {
+  const original = process.env.AI_TOOL_DISCOVERY_STUBS;
+  afterEach(() => {
+    if (original === undefined) delete process.env.AI_TOOL_DISCOVERY_STUBS;
+    else process.env.AI_TOOL_DISCOVERY_STUBS = original;
+  });
+  const tool = (name: string, description: string, readOnly: boolean) => ({
+    name,
+    access: 'public' as const,
+    accessReason: 'golden fixture',
+    domain: 'inventory',
+    description,
+    parameters: { type: 'object', properties: {} },
+    readOnly,
+    handler: async () => '{}',
+  });
+  const build = () => {
+    const local = new AIToolRegistry({} as any);
+    local.registerMany(createDiscoveryTools());
+    local.register(
+      tool('list_products', 'Lista productos con su stock. Filtra por sede.', true),
+    );
+    local.register(tool('adjust_stock', 'Ajusta el stock de un producto.', false));
+    local.register({
+      ...tool('payroll_close', 'Cierra la nómina del mes.', false),
+      domain: 'payroll',
+    });
+    const router = new ToolRouterService(local, {
+      rank: async (q: string, docs: any[], _s: string, domain?: string) => ({
+        names: localToolRanking(q, docs, domain),
+        degraded: [],
+        scores: { list_products: 1, adjust_stock: 0.9 },
+        coverage: 1,
+        source: 'golden',
+      }),
+    } as any);
+    const authorized = local
+      .getAllDefinitions()
+      .filter((d) => d.function.name !== 'payroll_close');
+    return { local, router, authorized };
+  };
+
+  it('stubs on: the preload is a one-line stub, not a definition', async () => {
+    process.env.AI_TOOL_DISCOVERY_STUBS = 'true';
+    const { router, authorized } = build();
+    const selected = await router.select(
+      router.createSession('productos con stock', 'scope'),
+      authorized,
+      false,
+      false,
+      { stubs: true },
+    );
+    const offered = selected.definitions.map((d) => d.function.name);
+    expect(offered).toContain('describe_tool');
+    expect(offered).not.toContain('list_products');
+    expect(selected.stubs).toEqual(
+      expect.arrayContaining([
+        {
+          name: 'list_products',
+          one_line: 'Lista productos con su stock.',
+          access: 'read',
+        },
+      ]),
+    );
+    expect(JSON.stringify(selected)).not.toContain('payroll_close');
+  });
+
+  it('stubs on: describe_tool of a tool the role lacks answers «Tu rol no permite…» and leaks nothing', async () => {
+    process.env.AI_TOOL_DISCOVERY_STUBS = 'true';
+    const { router, authorized } = build();
+    const denied = JSON.parse(
+      router.describe({ name: 'payroll_close' }, authorized),
+    );
+    expect(denied.error).toMatch(/^Tu rol no permite/);
+    expect(JSON.stringify(denied)).not.toContain('nómina');
+    const allowed = JSON.parse(
+      router.describe({ name: 'list_products' }, authorized),
+    );
+    expect(allowed.access).toBe('read');
+  });
+
+  it('switch off: the same request gets the pre-F10 offer, no stubs and no describe_tool', async () => {
+    delete process.env.AI_TOOL_DISCOVERY_STUBS;
+    const { router, authorized } = build();
+    const selected = await router.select(
+      router.createSession('productos con stock', 'scope'),
+      authorized,
+      false,
+      false,
+    );
+    const offered = selected.definitions.map((d) => d.function.name);
+    expect(selected).not.toHaveProperty('stubs');
+    expect(offered).not.toContain('describe_tool');
+    expect(offered).toContain('list_products');
+    expect(offered).toContain('adjust_stock');
+  });
+});

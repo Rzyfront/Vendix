@@ -13,6 +13,16 @@ import {
   legacyFlagsToAIEntitlements,
 } from '../types/ai-capabilities';
 
+/**
+ * M3 is an applied migration: it backfills the capabilities that existed then.
+ * Later capabilities (F10 `vex.code_mode`) deliberately have NO backfill row: a
+ * missing row resolves to the catalog default (a toggle without legacy = OFF)
+ * through `completeAIEntitlements`, so no data migration is needed.
+ */
+const AFTER_M3 = new Set(['vex.code_mode']);
+const inM3 = (c: { agent_key: string; capability_key: string }) =>
+  !AFTER_M3.has(`${c.agent_key}.${c.capability_key}`);
+
 const BACKEND = join(__dirname, '../../../../..');
 const M3 = readFileSync(
   join(
@@ -73,7 +83,7 @@ function evaluateM3(flags: unknown): AIEntitlement[] {
 describe('M3 — backfill of plan_ai_entitlements from ai_feature_flags (T11)', () => {
   it('encodes exactly the catalog legacy mapping, one VALUES row per capability in order', () => {
     expect(m3Sources()).toEqual(
-      AI_CAPABILITIES.map((c) => [
+      AI_CAPABILITIES.filter(inM3).map((c) => [
         c.agent_key,
         c.capability_key,
         c.legacy?.feature ?? null,
@@ -103,7 +113,7 @@ describe('M3 — backfill of plan_ai_entitlements from ai_feature_flags (T11)', 
     for (const flags of fixtures) {
       expect({ flags, rows: evaluateM3(flags) }).toEqual({
         flags,
-        rows: legacyFlagsToAIEntitlements(flags),
+        rows: legacyFlagsToAIEntitlements(flags).filter(inM3),
       });
     }
   });
@@ -199,10 +209,10 @@ describe('seeds keep plan_ai_entitlements in step with ai_feature_flags (T11)', 
   }
   const flags = aiFeatureFlagsFor('ia_business' as keyof typeof AI_CAPS_BY_LINE);
 
-  it('upserts the 11 catalog rows with BIGINT caps', async () => {
+  it('upserts every catalog row (12, M3 backfilled 11) with BIGINT caps', async () => {
     const c = client();
-    expect(await syncSeedPlanAIEntitlements(c as any, 5, flags)).toBe(11);
-    expect(c.plan_ai_entitlements.upsert).toHaveBeenCalledTimes(11);
+    expect(await syncSeedPlanAIEntitlements(c as any, 5, flags)).toBe(12);
+    expect(c.plan_ai_entitlements.upsert).toHaveBeenCalledTimes(12);
     const expected = legacyFlagsToAIEntitlements(flags);
     c.plan_ai_entitlements.upsert.mock.calls.forEach(([args], i) => {
       const row = expected[i];
@@ -232,7 +242,7 @@ describe('seeds keep plan_ai_entitlements in step with ai_feature_flags (T11)', 
         args.update,
       ]),
     );
-    expect(Object.keys(updates)).toHaveLength(11);
+    expect(Object.keys(updates)).toHaveLength(12);
     expect(updates['vex.agent']).toMatchObject({ enabled: expect.any(Boolean) });
     expect(updates['vex.model_tokens']).toHaveProperty('cap_value');
     expect(updates['vex.files']).toHaveProperty('enabled');

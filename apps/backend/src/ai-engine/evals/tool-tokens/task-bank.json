@@ -1,0 +1,772 @@
+{
+ "_comment": "30 tareas: t01-t15 salen de test/agentic/golden-conversations.es.jsonl (agente vex; source golden:<id>), t16-t30 son multi-paso redactadas para esta línea base. oracle.groups: grupos secuenciales de llamadas paralelas con nombres reales del registro; rows = filas esperadas del resultado. Trayectorias escritas a mano: son el oráculo, no lo que hace el modelo.",
+ "tasks": [
+  {
+   "id": "t01",
+   "source": "golden:g21-vex-resumen-grafica",
+   "message": "Dame un resumen de ventas de la semana con gráfica",
+   "kind": "multi_step",
+   "oracle": {
+    "groups": [
+     [
+      {
+       "tool": "get_sales_report",
+       "args": {
+        "period": "this_week"
+       }
+      }
+     ],
+     [
+      {
+       "tool": "vex_render_chart"
+      }
+     ]
+    ]
+   }
+  },
+  {
+   "id": "t02",
+   "source": "golden:g22-vex-gastos-comparar",
+   "message": "Analiza mis gastos del mes",
+   "kind": "multi_step",
+   "oracle": {
+    "groups": [
+     [
+      {
+       "tool": "list_expenses",
+       "args": {
+        "period": "this_month"
+       },
+       "rows": 20
+      },
+      {
+       "tool": "get_income_statement"
+      }
+     ],
+     [
+      {
+       "tool": "vex_render_chart"
+      }
+     ]
+    ]
+   }
+  },
+  {
+   "id": "t03",
+   "source": "golden:g23-vex-oc-stock",
+   "message": "Prepara una orden de compra para reponer stock bajo",
+   "kind": "multi_step",
+   "oracle": {
+    "groups": [
+     [
+      {
+       "tool": "get_low_stock_alerts"
+      }
+     ],
+     [
+      {
+       "tool": "find_supplier",
+       "rows": 3
+      }
+     ],
+     [
+      {
+       "tool": "propose_write_batch"
+      }
+     ]
+    ]
+   }
+  },
+  {
+   "id": "t04",
+   "source": "golden:g24-vex-tres-temas",
+   "message": "¿Cómo van mis ventas este mes? ¿Y cuánto vale mi inventario valorizado?",
+   "kind": "multi_step",
+   "oracle": {
+    "groups": [
+     [
+      {
+       "tool": "get_sales_report",
+       "args": {
+        "period": "this_month"
+       }
+      }
+     ],
+     [
+      {
+       "tool": "get_stock_levels",
+       "rows": 25
+      }
+     ]
+    ]
+   }
+  },
+  {
+   "id": "t05",
+   "source": "golden:g25-vex-vender-mas",
+   "message": "¿Qué debería hacer esta semana para vender más?",
+   "kind": "single",
+   "oracle": {
+    "groups": [
+     [
+      {
+       "tool": "get_business_snapshot"
+      }
+     ]
+    ]
+   }
+  },
+  {
+   "id": "t06",
+   "source": "golden:g26-vex-diagnostico",
+   "message": "Haz un diagnóstico completo del negocio",
+   "kind": "multi_step",
+   "oracle": {
+    "groups": [
+     [
+      {
+       "tool": "get_business_snapshot"
+      }
+     ],
+     [
+      {
+       "tool": "get_sales_report"
+      },
+      {
+       "tool": "get_low_stock_alerts"
+      },
+      {
+       "tool": "get_income_statement"
+      }
+     ]
+    ]
+   }
+  },
+  {
+   "id": "t07",
+   "source": "golden:g27-vex-nomina-parafiscales",
+   "message": "¿Cuánto me cuesta la nómina este mes con parafiscales?",
+   "kind": "multi_step",
+   "oracle": {
+    "groups": [
+     [
+      {
+       "tool": "list_payroll_runs",
+       "rows": 3
+      }
+     ],
+     [
+      {
+       "tool": "get_payroll_run"
+      }
+     ]
+    ]
+   }
+  },
+  {
+   "id": "t08",
+   "source": "golden:g28-vex-proveedores",
+   "message": "Lista mis proveedores",
+   "kind": "single",
+   "oracle": {
+    "groups": [
+     [
+      {
+       "tool": "find_supplier",
+       "rows": 10
+      }
+     ]
+    ]
+   }
+  },
+  {
+   "id": "t09",
+   "source": "golden:g29-vex-realtime-top",
+   "message": "¿Cómo van las ventas? Muéstrame el top de productos",
+   "kind": "multi_step",
+   "oracle": {
+    "groups": [
+     [
+      {
+       "tool": "get_sales_report"
+      }
+     ],
+     [
+      {
+       "tool": "get_top_products",
+       "rows": 10
+      }
+     ]
+    ]
+   }
+  },
+  {
+   "id": "t10",
+   "source": "golden:g36-vex-conciliacion-diferencia",
+   "message": "Quiero dejar conciliado el banco de septiembre: el extracto de Bancolombia cierra en 5.200.000 y el sistema me da otra cifra",
+   "kind": "multi_step",
+   "oracle": {
+    "groups": [
+     [
+      {
+       "tool": "list_reconciliations",
+       "rows": 3
+      }
+     ],
+     [
+      {
+       "tool": "get_income_statement"
+      }
+     ]
+    ]
+   }
+  },
+  {
+   "id": "t11",
+   "source": "golden:g39-vex-playbook-devolucion",
+   "message": "¿Cómo se hace paso a paso una devolución con reembolso? Solo explícame el proceso",
+   "kind": "multi_step",
+   "oracle": {
+    "groups": [
+     [
+      {
+       "tool": "search_playbooks",
+       "rows": 3
+      }
+     ],
+     [
+      {
+       "tool": "load_playbook"
+      }
+     ]
+    ]
+   }
+  },
+  {
+   "id": "t12",
+   "source": "golden:g65-seguimiento-compromiso-con-fecha",
+   "message": "Listo, el viernes llamo al proveedor de lácteos para cuadrar el pedido de diciembre",
+   "kind": "single",
+   "oracle": {
+    "groups": [
+     [
+      {
+       "tool": "suggest_followup"
+      }
+     ]
+    ]
+   }
+  },
+  {
+   "id": "t13",
+   "source": "golden:g66-seguimiento-acuerdo-cliente",
+   "message": "Quedamos en que la señora Marta pasa a pagar la cuenta el martes en la tarde",
+   "kind": "single",
+   "oracle": {
+    "groups": [
+     [
+      {
+       "tool": "suggest_followup"
+      }
+     ]
+    ]
+   }
+  },
+  {
+   "id": "t14",
+   "source": "golden:g67-recordatorio-explicito-directo",
+   "message": "Recuérdame mañana a las 9 revisar el inventario de bebidas",
+   "kind": "single",
+   "oracle": {
+    "groups": [
+     [
+      {
+       "tool": "create_reminder"
+      }
+     ]
+    ]
+   }
+  },
+  {
+   "id": "t15",
+   "source": "golden:g71-vex-lote-tres-cambios-un-clic",
+   "message": "Sube 5% el precio de la categoría Accesorios, registra un gasto de 80.000 por papelería de hoy y anota en el cliente Carlos Pérez que prefiere pago en efectivo",
+   "kind": "multi_step",
+   "oracle": {
+    "groups": [
+     [
+      {
+       "tool": "find_customer",
+       "rows": 2
+      }
+     ],
+     [
+      {
+       "tool": "propose_write_batch"
+      }
+     ]
+    ]
+   }
+  },
+  {
+   "id": "t16",
+   "source": "authored",
+   "message": "Dame el top 10 por margen de mis 3 categorías con más ventas este mes",
+   "kind": "multi_step",
+   "oracle": {
+    "groups": [
+     [
+      {
+       "tool": "list_categories",
+       "rows": 14
+      }
+     ],
+     [
+      {
+       "tool": "get_top_products",
+       "args": {
+        "category": "A"
+       },
+       "rows": 10
+      },
+      {
+       "tool": "get_top_products",
+       "args": {
+        "category": "B"
+       },
+       "rows": 10
+      },
+      {
+       "tool": "get_top_products",
+       "args": {
+        "category": "C"
+       },
+       "rows": 10
+      }
+     ],
+     [
+      {
+       "tool": "vex_render_table"
+      }
+     ]
+    ]
+   }
+  },
+  {
+   "id": "t17",
+   "source": "authored",
+   "message": "¿Qué clientes compraron la Camiseta M pero no la Gorra negra este mes?",
+   "kind": "multi_step",
+   "oracle": {
+    "groups": [
+     [
+      {
+       "tool": "find_product",
+       "args": {
+        "query": "Camiseta M"
+       },
+       "rows": 3
+      },
+      {
+       "tool": "find_product",
+       "args": {
+        "query": "Gorra negra"
+       },
+       "rows": 3
+      }
+     ],
+     [
+      {
+       "tool": "find_customers_by_criteria",
+       "rows": 10
+      },
+      {
+       "tool": "find_customers_by_criteria",
+       "rows": 10
+      }
+     ],
+     [
+      {
+       "tool": "vex_render_list"
+      }
+     ]
+    ]
+   }
+  },
+  {
+   "id": "t18",
+   "source": "authored",
+   "message": "¿Qué órdenes están atrasadas, agrupadas por repartidor?",
+   "kind": "multi_step",
+   "oracle": {
+    "groups": [
+     [
+      {
+       "tool": "list_dispatch_routes",
+       "rows": 9
+      }
+     ],
+     [
+      {
+       "tool": "list_orders",
+       "rows": 20
+      }
+     ],
+     [
+      {
+       "tool": "vex_render_table"
+      }
+     ]
+    ]
+   }
+  },
+  {
+   "id": "t19",
+   "source": "authored",
+   "message": "De las 3 categorías que más vendieron este mes, ¿qué productos tienen margen bajo y stock para más de 60 días?",
+   "kind": "multi_step",
+   "oracle": {
+    "groups": [
+     [
+      {
+       "tool": "list_categories",
+       "rows": 14
+      },
+      {
+       "tool": "get_sales_report"
+      }
+     ],
+     [
+      {
+       "tool": "get_top_products",
+       "args": {
+        "category": "A"
+       },
+       "rows": 20
+      },
+      {
+       "tool": "get_top_products",
+       "args": {
+        "category": "B"
+       },
+       "rows": 20
+      },
+      {
+       "tool": "get_top_products",
+       "args": {
+        "category": "C"
+       },
+       "rows": 20
+      }
+     ],
+     [
+      {
+       "tool": "get_stock_levels",
+       "rows": 25
+      }
+     ],
+     [
+      {
+       "tool": "vex_render_table"
+      }
+     ]
+    ]
+   }
+  },
+  {
+   "id": "t20",
+   "source": "authored",
+   "message": "Muéstrame quién me debe y el historial de compra de los 3 que más deben",
+   "kind": "multi_step",
+   "oracle": {
+    "groups": [
+     [
+      {
+       "tool": "list_receivables",
+       "rows": 20
+      }
+     ],
+     [
+      {
+       "tool": "get_customer_history"
+      },
+      {
+       "tool": "get_customer_history"
+      },
+      {
+       "tool": "get_customer_history"
+      }
+     ]
+    ]
+   }
+  },
+  {
+   "id": "t21",
+   "source": "authored",
+   "message": "¿Qué órdenes de compra tengo abiertas y cómo está la deuda con cada proveedor?",
+   "kind": "multi_step",
+   "oracle": {
+    "groups": [
+     [
+      {
+       "tool": "list_purchase_orders",
+       "rows": 17
+      }
+     ],
+     [
+      {
+       "tool": "get_supplier_summary"
+      },
+      {
+       "tool": "get_supplier_summary"
+      }
+     ]
+    ]
+   }
+  },
+  {
+   "id": "t22",
+   "source": "authored",
+   "message": "¿Qué productos tienen buen margen pero precio por debajo del promedio de su categoría?",
+   "kind": "multi_step",
+   "oracle": {
+    "groups": [
+     [
+      {
+       "tool": "get_top_products",
+       "rows": 20
+      }
+     ],
+     [
+      {
+       "tool": "get_product_pricing"
+      },
+      {
+       "tool": "get_product_pricing"
+      }
+     ]
+    ]
+   }
+  },
+  {
+   "id": "t23",
+   "source": "authored",
+   "message": "¿Qué proveedores debo llamar para reponer lo que se está agotando y qué les tengo pedido?",
+   "kind": "multi_step",
+   "oracle": {
+    "groups": [
+     [
+      {
+       "tool": "get_low_stock_alerts",
+       "rows": 12
+      }
+     ],
+     [
+      {
+       "tool": "find_supplier",
+       "rows": 3
+      }
+     ],
+     [
+      {
+       "tool": "list_purchase_orders",
+       "rows": 6
+      }
+     ]
+    ]
+   }
+  },
+  {
+   "id": "t24",
+   "source": "authored",
+   "message": "Clientes que no compran hace 90 días y me deben plata",
+   "kind": "multi_step",
+   "oracle": {
+    "groups": [
+     [
+      {
+       "tool": "find_customers_by_criteria",
+       "rows": 10
+      }
+     ],
+     [
+      {
+       "tool": "get_customer_history"
+      }
+     ],
+     [
+      {
+       "tool": "list_receivables",
+       "rows": 20
+      }
+     ]
+    ]
+   }
+  },
+  {
+   "id": "t25",
+   "source": "authored",
+   "message": "Compara ventas del POS contra ecommerce este mes con una gráfica",
+   "kind": "multi_step",
+   "oracle": {
+    "groups": [
+     [
+      {
+       "tool": "get_sales_report",
+       "args": {
+        "channel": "pos"
+       }
+      },
+      {
+       "tool": "get_sales_report",
+       "args": {
+        "channel": "ecommerce"
+       }
+      }
+     ],
+     [
+      {
+       "tool": "vex_render_chart"
+      }
+     ]
+    ]
+   }
+  },
+  {
+   "id": "t26",
+   "source": "authored",
+   "message": "¿Cuánto gasté este mes frente a lo que muestra el estado de resultados, y qué margen neto me queda?",
+   "kind": "multi_step",
+   "oracle": {
+    "groups": [
+     [
+      {
+       "tool": "list_expenses",
+       "rows": 20
+      },
+      {
+       "tool": "get_income_statement"
+      }
+     ],
+     [
+      {
+       "tool": "compute"
+      }
+     ],
+     [
+      {
+       "tool": "vex_render_kpi"
+      }
+     ]
+    ]
+   }
+  },
+  {
+   "id": "t27",
+   "source": "authored",
+   "message": "Revisa las cajas de esta semana y explícame cuáles no cuadraron",
+   "kind": "multi_step",
+   "oracle": {
+    "groups": [
+     [
+      {
+       "tool": "list_cash_sessions",
+       "rows": 10
+      }
+     ],
+     [
+      {
+       "tool": "get_cash_session_close_report"
+      },
+      {
+       "tool": "get_cash_session_close_report"
+      }
+     ]
+    ]
+   }
+  },
+  {
+   "id": "t28",
+   "source": "authored",
+   "message": "¿Qué obligaciones fiscales vencen pronto y cuánto IVA debo pagar?",
+   "kind": "multi_step",
+   "oracle": {
+    "groups": [
+     [
+      {
+       "tool": "list_fiscal_obligations",
+       "rows": 9
+      },
+      {
+       "tool": "get_vat_summary"
+      }
+     ],
+     [
+      {
+       "tool": "vex_render_table"
+      }
+     ]
+    ]
+   }
+  },
+  {
+   "id": "t29",
+   "source": "authored",
+   "message": "¿Cuánto costó la última nómina por empleado y cuál es el costo total para la empresa?",
+   "kind": "multi_step",
+   "oracle": {
+    "groups": [
+     [
+      {
+       "tool": "list_payroll_runs",
+       "rows": 3
+      }
+     ],
+     [
+      {
+       "tool": "get_payroll_run"
+      }
+     ],
+     [
+      {
+       "tool": "compute"
+      }
+     ]
+    ]
+   }
+  },
+  {
+   "id": "t30",
+   "source": "authored",
+   "message": "De los pedidos del ecommerce pendientes de despacho, dame el detalle de los 3 más viejos y si ya tienen remisión",
+   "kind": "multi_step",
+   "oracle": {
+    "groups": [
+     [
+      {
+       "tool": "list_orders",
+       "rows": 20
+      }
+     ],
+     [
+      {
+       "tool": "get_order"
+      },
+      {
+       "tool": "get_order"
+      },
+      {
+       "tool": "get_order"
+      }
+     ],
+     [
+      {
+       "tool": "list_dispatch_notes",
+       "rows": 20
+      }
+     ]
+    ]
+   }
+  }
+ ]
+}

@@ -1,5 +1,9 @@
-import { Injectable } from '@nestjs/common';
+import { Injectable, NotFoundException } from '@nestjs/common';
 import { Prisma } from '@prisma/client';
+import {
+  SandboxAuditRepository,
+  SandboxOwnerView,
+} from '../../../../ai-engine/sandbox/sandbox-audit.repository';
 import { StorePrismaService } from '../../../../prisma/services/store-prisma.service';
 import { RequestContextService } from '../../../../common/context/request-context.service';
 import {
@@ -87,7 +91,23 @@ export class AgentHistoryService {
   constructor(
     private readonly prisma: StorePrismaService,
     private readonly feed: VexActivityFeedService,
+    /** Exported by the global AIEngineModule; every query pins the caller's store and organization. */
+    private readonly scriptRuns: SandboxAuditRepository,
   ) {}
+
+  /**
+   * «Ver cómo lo calculé» (F10 T67). A run of another store and a missing run
+   * answer the exact same 404, so ids cannot be probed across stores.
+   */
+  async getScriptRun(runId: string): Promise<SandboxOwnerView> {
+    try {
+      return await this.scriptRuns.readOwnerView(runId);
+    } catch (error) {
+      if (error instanceof NotFoundException)
+        throw new NotFoundException('La ejecución no existe en esta tienda.');
+      throw error;
+    }
+  }
 
   async listChanges(
     query: HistoryQuery,

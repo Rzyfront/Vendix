@@ -86,6 +86,7 @@ A flag every dangerous tool must carry needs a registry-wide spec, not review. E
 
 ## Gates and anti-patterns
 
+- Adding or changing a read-only tool can change the Code Mode allowlist (`sandbox/codemode-allowlist.spec.ts` fails): run `scripts/generate-codemode-allowlist.ts`, review the diff, and add a third-party caller to the exclusion list in `codemode-allowlist.derive.ts` with its reason (`vendix-agent-sandbox-security`).
 - `readOnly` is not `parallelSafe`; parallel reads need explicit audited metadata (`vendix-agent-durable-tasks`).
 - A resolved Promise containing `{error}` is not success; don't change quota/completion semantics without a discriminated contract.
 - Prefer scoped discovery + existing domain seams over hundreds of wrappers; never infer a full dataset from a truncated page. Benchmarks: `docs/vex-agent-improvement-process.md`.

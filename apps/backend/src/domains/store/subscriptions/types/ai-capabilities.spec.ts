@@ -74,6 +74,7 @@ describe('ai-capabilities — single catalog of plan AI capabilities (T9)', () =
       'vex.voice_readout',
       'vex.files',
       'vex.code_analysis',
+      'vex.code_mode',
       'vex.advanced_model',
       'vexi.agent',
       'vexi.model_tokens',
@@ -241,6 +242,14 @@ describe('ai-capabilities — single catalog of plan AI capabilities (T9)', () =
       // Capabilities that do not exist yet migrate switched off.
       expect(rows['vex.code_analysis'].enabled).toBe(false);
       expect(rows['vex.advanced_model'].enabled).toBe(false);
+      // F10 (N12): Code Mode is a plain switch, no cap, off in every plan.
+      expect(rows['vex.code_mode']).toMatchObject({ enabled: false, cap_value: null });
+      expect(findAICapability('vex', 'code_mode')).toMatchObject({
+        kind: 'toggle',
+        cap_unit: null,
+        legacy: null,
+        label: 'Scripts de herramientas',
+      });
       // The tool-call cap has nowhere to go (N4).
       expect(JSON.stringify(rows)).not.toMatch(/5000/);
     });
@@ -338,7 +347,7 @@ describe('ai-capabilities — single catalog of plan AI capabilities (T9)', () =
         }),
       );
       expect(lines).toEqual([
-        'Vex: 200 mensajes al día, 50 M de tokens al mes, 60 minutos de lectura en voz al mes, con archivos e imágenes, sin análisis con código, sin modelo avanzado.',
+        'Vex: 200 mensajes al día, 50 M de tokens al mes, 60 minutos de lectura en voz al mes, con archivos e imágenes, sin análisis con código, sin scripts de herramientas, sin modelo avanzado.',
         'Vexi: no incluido.',
         expect.stringMatching(/^IA en los módulos: .*búsqueda inteligente sin límite\.$/),
       ]);

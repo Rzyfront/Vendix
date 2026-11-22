@@ -80,6 +80,9 @@ function fixture(
     // registration; a voice receipt never runs Python.
     { run: jest.fn() } as any,
     { resolve: jest.fn() } as any,
+    // F10/T65: Code Mode stays unavailable here, so registration is unchanged.
+    { available: () => false } as any,
+    {} as any,
   ).onModuleInit();
   const controller: any = Object.create(VexiController.prototype);
   controller.responseService = { success: (data: unknown) => data };

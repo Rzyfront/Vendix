@@ -40,6 +40,18 @@ export function publicSandboxArgs(
       source_omitted: true,
     };
   }
+  if (name === 'run_code') {
+    // F10: Code Mode source is encrypted in the audit (owner, 7 days); SSE,
+    // transcript and generic tool logs carry only its hash.
+    return {
+      source_hash: createHash('sha256')
+        .update(normalizeSandboxSource(String(args.source ?? '')))
+        .digest('hex'),
+      tools: args.tools,
+      purpose: args.purpose,
+      source_omitted: true,
+    };
+  }
   if (name !== 'run_readonly_script') return args;
   return {
     source_hash: createHash('sha256')

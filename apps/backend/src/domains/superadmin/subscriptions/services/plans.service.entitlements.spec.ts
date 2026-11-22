@@ -581,7 +581,7 @@ describe('dual write keeps the shadow comparison at zero divergences (T12)', () 
       );
       expect({ seed, divergences }).toEqual({ seed, divergences: [] });
     }
-    expect(ids).toHaveLength(11);
+    expect(ids).toHaveLength(12);
   });
 
   it.each([
