@@ -101,6 +101,16 @@ describe('Code Mode allowlist snapshot', () => {
       .toEqual([]);
   });
 
+  it('keeps the geocoding and routing callers out of scripts (F10 verifier B1)', () => {
+    const names = new Set(CODEMODE_ALLOWLIST.map((entry) => entry.name));
+    for (const name of ['get_route_map', 'list_shipping_config', 'quote_shipping'])
+      expect({
+        name,
+        excluded: Object.prototype.hasOwnProperty.call(CODEMODE_EXCLUDED, name),
+        listed: names.has(name),
+      }).toEqual({ name, excluded: true, listed: false });
+  });
+
   it('keeps every exclusion alive and justified: a stale entry fails instead of hiding a tool', () => {
     for (const [name, reason] of Object.entries(CODEMODE_EXCLUDED)) {
       expect({ name, reason: reason.length > 10 }).toEqual({ name, reason: true });

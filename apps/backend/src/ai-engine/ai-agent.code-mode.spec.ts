@@ -48,6 +48,8 @@ describe('T65b: run_code in the agent turn', () => {
     runResult?: any;
     streaming?: boolean;
     denied?: string[];
+    /** Inner reads the fake runner reports as successful: [seq, tool]. */
+    innerOk?: Array<[number, string]>;
   }
 
   function build(opts: Options = {}) {
@@ -94,6 +96,8 @@ describe('T65b: run_code in the agent turn', () => {
           durable: invocation?.durable,
           request,
         });
+        for (const [seq, name] of opts.innerOk ?? [])
+          await invocation?.onToolSuccess?.(seq, name);
         return (
           opts.runResult ?? {
             run_id: 'run-1',
@@ -173,6 +177,7 @@ describe('T65b: run_code in the agent turn', () => {
       } as any;
     });
     const resolveForStore = jest.fn(async () => entitlementRows(capability));
+    const consumeAIQuota = jest.fn();
     const service = new AIAgentService(
       {
         chat,
@@ -192,7 +197,7 @@ describe('T65b: run_code in the agent turn', () => {
         getAIFeatureConfig: async () => ({ tools_allowed: ['*'] }),
         checkExtraQuota: async () => ({ exceeded: false }),
         consumeExtraQuota: jest.fn(),
-        consumeAIQuota: jest.fn(),
+        consumeAIQuota,
       } as any,
       undefined,
       router,
@@ -267,6 +272,7 @@ describe('T65b: run_code in the agent turn', () => {
       run,
       chat,
       runner,
+      consumeAIQuota,
       seen,
       created,
       routerAttrs,
@@ -417,6 +423,22 @@ describe('T65b: run_code in the agent turn', () => {
         expect.arrayContaining(['list_orders', 'list_products', 'create_order']),
       );
       expect(seen.revalidated).toEqual(seen.initialNames);
+    });
+
+    it('meters one action per successful inner read and none for the run_code wrapper (§F10.3 e)', async () => {
+      const f = build({
+        script: [[script('c1')]],
+        innerOk: [
+          [1, 'list_orders'],
+          [2, 'list_products'],
+        ],
+      });
+      await f.run();
+      const keys = f.consumeAIQuota.mock.calls.map((c: any[]) => c[3] as string);
+      expect(keys).toHaveLength(2);
+      expect(keys[0]).toMatch(/:tool:codemode:c1:1$/);
+      expect(keys[1]).toMatch(/:tool:codemode:c1:2$/);
+      expect(keys.some((k) => /:tool:c1$/.test(k))).toBe(false);
     });
 
     it('a tool denied to the agent is absent from the invocation authority', async () => {

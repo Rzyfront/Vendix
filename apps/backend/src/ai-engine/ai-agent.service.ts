@@ -4048,6 +4048,15 @@ export class AIAgentService {
                         await durable?.assertCurrent();
                         return names();
                       },
+                      // One action per successful inner read, like a direct
+                      // call; the wrapper below is not metered.
+                      onToolSuccess: (seq, name) =>
+                        this.consumeToolCallQuota(
+                          context?.store_id,
+                          `codemode:${toolCall.id}:${seq}`,
+                          name,
+                          params.agent_key,
+                        ),
                     },
                     registryExecute,
                   );
@@ -4120,6 +4129,7 @@ export class AIAgentService {
               // propuestas, errores y despachos clientSide no consumen.
               if (
                 toolName !== 'run_readonly_script' &&
+                toolName !== CODE_TOOL &&
                 (!normalized || countsAsToolSuccess(normalized))
               )
                 await this.consumeToolCallQuota(

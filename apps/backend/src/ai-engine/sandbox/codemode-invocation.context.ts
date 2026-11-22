@@ -17,6 +17,11 @@ export interface CodeModeInvocation {
   revalidate(): Promise<string[]>;
   /** Present only inside durable (objective) turns. */
   durable?: AgentDurableSession;
+  /**
+   * Meters one action per successful inner call, the same rule as a direct
+   * tool call (§F10.3 e). The `run_code` wrapper itself is not metered.
+   */
+  onToolSuccess?(seq: number, tool: string): Promise<void>;
 }
 
 export const codeModeInvocation = new AsyncLocalStorage<CodeModeInvocation>();

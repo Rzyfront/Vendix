@@ -5,6 +5,7 @@ import { AgentDeadline, agentDeadlineContext } from '../tasks/agent-deadline';
 import { AgentTraceService } from '../observability/agent-trace.service';
 import { AIToolRegistry } from '../tools/ai-tool-registry';
 import type { ToolExecutionResult } from '../tools/interfaces/tool.interface';
+import { countsAsToolSuccess } from '../tools/tool-result.normalizer';
 import { codeModeInvocation } from './codemode-invocation.context';
 import { CodeModePolicyService } from './codemode-policy.service';
 import { validateCodeModeResponse } from './codemode-response.validator';
@@ -519,6 +520,8 @@ export class CodeModeBridgeService implements CodeModeRunner {
         rows,
         duration_ms: Date.now() - t0,
       });
+      if (status === 'ok' && countsAsToolSuccess(filtered))
+        await input.invocation.onToolSuccess?.(call.seq, call.tool);
       return {
         entry: entry(outcome),
         summary: {

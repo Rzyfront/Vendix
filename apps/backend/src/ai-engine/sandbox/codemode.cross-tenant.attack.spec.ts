@@ -1025,3 +1025,36 @@ describe('(8) tool outside the allowlist or a write tool', () => {
     }
   });
 });
+
+// Verifier finding A1: with a one-tool manifest, deny() on the empty authorized
+// list fires first, so the per-tool checks were never exercised. Two tools, one
+// revoked, the other still held.
+describe('(7b) multi-tool revocation: the per-tool check denies only the revoked tool', () => {
+  it('revoked WHILE the read runs with another tool still held: result never published', async () => {
+    const r = rig();
+    r.state.steps = [pending(['get_order', { order_id: 100 }]), finishWithJournal];
+    r.hooks.afterRead = () => {
+      r.world.assignments[0].roles.role_permissions = r.world.assignments[0].roles.role_permissions.filter(
+        (p) => p.permissions.name !== 'store:orders:read',
+      );
+    };
+    const result = await r.run(r.session('A'), ['get_order', 'get_product']);
+    expect(result.calls[0].status).toBe('denied');
+    expect(JSON.stringify(r.state.requests[1].journal)).not.toMatch(SECRET_A);
+    expect(JSON.stringify(result)).not.toMatch(SECRET_A);
+  });
+  it('revoked between rounds with another tool still held: the next call is denied', async () => {
+    const r = rig();
+    r.state.steps = [pending(['get_product', { product_id: 700 }]), pending(['get_order', { order_id: 100 }]), finishWithJournal];
+    let n = 0;
+    r.state.onInvoke = () => {
+      if (++n === 2)
+        r.world.assignments[0].roles.role_permissions = r.world.assignments[0].roles.role_permissions.filter(
+          (p) => p.permissions.name !== 'store:orders:read',
+        );
+    };
+    const result = await r.run(r.session('A'), ['get_order', 'get_product']);
+    expect(r.ordersService.findOne).not.toHaveBeenCalled();
+    expect(result.calls.map((c) => c.status)).toEqual(['ok', 'denied']);
+  });
+});

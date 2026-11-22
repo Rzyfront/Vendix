@@ -94,7 +94,7 @@ metadata:
   `scripts/generate-codemode-allowlist.ts` from `codemode-allowlist.derive.ts`
   (readOnly, not clientSide, no confirmation, not irreversible, a declared
   permission, not public, no `ui_*`, minus third parties: DIAN, payment gateways,
-  AI models, shipping providers, loopback HTTP reports, file artifacts). The
+  AI models, shipping, geocoding and routing providers (`quote_shipping`, `list_shipping_config`, `get_route_map`), loopback HTTP reports, file artifacts). The
   snapshot spec fails on any drift; regenerate and review, never edit by hand.
 - Limits `CODEMODE_LIMITS`: 6 rounds, 20 calls, 8 pending/round, 20 tools,
   2 s CPU/round, 30 s wall, 256 MB; ≤ 3 scripts per turn. Stage 1 is read-only:

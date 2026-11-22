@@ -349,6 +349,25 @@ describe('CodeModeBridgeService (T64, channel A host bridge)', () => {
     expect(f.audit.finish.mock.calls[0][2]).toMatchObject({ denials: 1 });
   });
 
+  it('meters only successful inner calls through the invocation hook, never a denied one', async () => {
+    const f = fixture();
+    const onToolSuccess = jest.fn(async () => undefined);
+    Object.assign(f.invocation, { onToolSuccess });
+    f.state.script = [
+      pendingBody(['list_products', { page: 1 }], ['list_orders', { page: 1 }]),
+      doneBody('after'),
+    ];
+    let grants = 0;
+    f.policy.authorize.mockImplementation(async (snapshot: any, _a: any, names: any, _p: any, cb: any) => {
+      grants++;
+      if (grants >= 4) throw new ForbiddenException('SANDBOX_DENIED');
+      return RequestContextService.runIsolated({ ...snapshot, roles: [], permissions: ['read'] }, () => cb(snapshot, names));
+    });
+    const result = await f.run();
+    expect(result.calls.map((c) => c.status)).toEqual(['ok', 'denied']);
+    expect(onToolSuccess.mock.calls).toEqual([[1, 'list_products']]);
+  });
+
   it.each(['store_id', 'organization_id', 'storeId', 'organizationId', 'tenant_id'])(
     'denies a %s key at any depth in the args without executing the tool',
     async (key) => {

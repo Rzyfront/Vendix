@@ -36,6 +36,10 @@ export const CODEMODE_EXCLUDED: Readonly<Record<string, string>> = Object.freeze
   get_payment_status: 'may query the payment gateway for the live state of a payment',
   semantic_search: 'calls the AI embedding model to vectorize the query',
   quote_shipping: 'geocoding and routing providers are consulted to price the shipment',
+  list_shipping_config:
+    'check_buyer forward-geocodes the buyer address and asks the routing provider for the distance',
+  get_route_map:
+    'geocodes stops without coordinates through the external geocoder and saves them to addresses',
   analyze_report: 'goes back out over HTTP to the API (loopback fetch), outside the registry ALS',
   export_report: 'loopback HTTP fetch that also uploads a file artifact',
   get_report: 'loopback HTTP fetch of the report endpoints, outside the registry ALS',

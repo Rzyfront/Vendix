@@ -13,7 +13,7 @@
   "result_bytes_limit": 8192,
   "preview_rows": 5,
   "scripts_per_turn": 3,
-  "allowlist_size": 141,
+  "allowlist_size": 139,
   "write_tools_declared": 189
  },
  "gate_n14": {
