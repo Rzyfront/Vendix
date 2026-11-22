@@ -11,6 +11,7 @@ import type {
 export const MAX_ROWS_PER_SHEET = 20_000;
 export const MAX_TEXT_CHARS = 2_000_000;
 const MAX_PDF_PAGES = 200;
+const MAX_PDF_BYTES = 20 * 1024 * 1024;
 const MAX_DOCX_XML_BYTES = 20 * 1024 * 1024;
 
 /**
@@ -216,18 +217,20 @@ interface ParsedSheet {
 }
 
 interface WorkerJob {
-  /** Label used in error messages (`XLSX`, `DOCX`). */
+  /** Label used in error messages (`XLSX`, `DOCX`, `PDF`). */
   label: string;
   /** Plain CommonJS source, run with `eval: true`. */
   source: string;
   workerData: Record<string, unknown>;
   timeoutMs: number;
   heapMb: number;
+  /** Optional incremental progress messages before the final worker result. */
+  onProgress?: (payload: Record<string, unknown>) => void;
 }
 
 /**
- * Runs a parse off the API event loop (B3, B4): a worker thread with its own
- * heap ceiling, terminated when it runs past `timeoutMs`. Whatever the file
+ * Runs a parse off the API event loop (B3, B4, B5): a worker thread with its
+ * own heap ceiling, terminated when it runs past `timeoutMs`. Whatever the file
  * does, the request that uploaded it waits at most that long and every other
  * store keeps being served. Hitting the time or heap ceiling rejects with
  * `WorkerLimitError`; a malformed file rejects with the worker's own error.
@@ -258,12 +261,21 @@ function runParseInWorker<T>(job: WorkerJob): Promise<T> {
         }),
       job.timeoutMs,
     );
-    worker.once('message', (result: T) =>
+    worker.on('message', (result: unknown) => {
+      if (
+        job.onProgress &&
+        result &&
+        typeof result === 'object' &&
+        (result as Record<string, unknown>).__progress === true
+      ) {
+        job.onProgress(result as Record<string, unknown>);
+        return;
+      }
       settle(() => {
         void worker.terminate();
-        resolve(result);
-      }),
-    );
+        resolve(result as T);
+      });
+    });
     worker.once('error', (error: NodeJS.ErrnoException) =>
       settle(() =>
         reject(
@@ -430,8 +442,9 @@ export async function readDocxText(
 
 // ── PDF ─────────────────────────────────────────────────────────────────────
 
-/** P1: a PDF is read for at most this long; slower pages are left out. */
+/** B5: a PDF is read in a worker thread, killed past this time or heap. */
 export const PDF_PARSE_TIMEOUT_MS = 5_000;
+const PDF_WORKER_HEAP_MB = 256;
 export const PDF_UNREADABLE_MESSAGE =
   'No pudimos leer el PDF (tarda demasiado o está dañado). Vuelve a exportarlo o guárdalo de nuevo e inténtalo otra vez.';
 
@@ -455,6 +468,69 @@ export interface PdfJsLib {
   };
 }
 
+/**
+ * Plain CommonJS run by the PDF worker (B5). pdfjs-dist is ESM-only and runs
+ * CPU-heavy `getTextContent()` synchronously on whichever thread invokes it:
+ * running it inside `runParseInWorker` keeps the API event loop responsive,
+ * lets the 5 s timer terminate stuck pages, and contains OOMs inside the
+ * worker's heap ceiling. Completed pages are streamed back as progress so a
+ * timeout on a later page still preserves `pages_read`.
+ */
+const PDF_WORKER_SOURCE = `
+const { parentPort, workerData } = require('node:worker_threads');
+const { pathToFileURL } = require('node:url');
+
+(async () => {
+  const lib = await import(pathToFileURL(workerData.pdfjsPath).href);
+  const task = lib.getDocument({
+    data: new Uint8Array(
+      workerData.bytes.buffer,
+      workerData.bytes.byteOffset,
+      workerData.bytes.byteLength,
+    ),
+    isEvalSupported: false,
+    enableXfa: false,
+    useSystemFonts: false,
+    disableRange: true,
+    disableStream: true,
+    disableAutoFetch: true,
+    useWorkerFetch: false,
+    useWasm: false,
+    verbosity: 0,
+  });
+  const parts = [];
+  let pages = 0;
+  try {
+    const doc = await task.promise;
+    pages = doc.numPages;
+    let size = 0;
+    const limit = Math.min(doc.numPages, workerData.maxPages);
+    for (let n = 1; n <= limit && size < workerData.maxTextChars; n++) {
+      const page = await doc.getPage(n);
+      const content = await page.getTextContent();
+      const pageText = content.items
+        .map((i) => (i.str ?? '') + (i.hasEOL ? '\\n' : ''))
+        .join(' ')
+        .replace(/[ \\t]+/g, ' ')
+        .trim();
+      parts.push(pageText);
+      size += pageText.length;
+      parentPort.postMessage({ __progress: true, pages, pageText });
+    }
+  } finally {
+    await task.destroy().catch(() => undefined);
+  }
+  parentPort.postMessage({
+    text: parts.join('\\n\\n').trim(),
+    pages,
+  });
+})().catch((error) => {
+  setImmediate(() => {
+    throw error;
+  });
+});
+`;
+
 class PdfDeadlineError extends Error {}
 
 /** Settles with `promise`, or rejects with `PdfDeadlineError` at `deadline`. */
@@ -469,29 +545,12 @@ function beforeDeadline<T>(promise: Promise<T>, deadline: number): Promise<T> {
   return Promise.race([promise, expired]).finally(() => clearTimeout(timer));
 }
 
-function loadPdfJs(): Promise<PdfJsLib> {
-  // Native dynamic import: pdfjs-dist is ESM-only under the CommonJS build.
-  const nativeImport = new Function(
-    'specifier',
-    'return import(specifier)',
-  ) as (specifier: string) => Promise<PdfJsLib>;
-  return nativeImport('pdfjs-dist/legacy/build/pdf.mjs');
-}
-
-/**
- * Text layer of a PDF, read for at most `timeoutMs` (P1): each pdfjs step
- * races the same deadline and the loading task is destroyed when it passes.
- * Pages read in time are kept (`pages_read` tells how many when it stops
- * early); a PDF that yields no page in time throws `AttachmentUnreadableError`
- * with a message for the person.
- */
-export async function readPdfText(
+async function readPdfTextWithLib(
   buffer: Buffer,
-  timeoutMs = PDF_PARSE_TIMEOUT_MS,
-  pdfjs?: PdfJsLib,
+  timeoutMs: number,
+  lib: PdfJsLib,
 ): Promise<{ text: string; pages: number; pages_read?: number }> {
   const deadline = Date.now() + timeoutMs;
-  const lib = pdfjs ?? (await loadPdfJs());
   const task = lib.getDocument({
     data: new Uint8Array(buffer),
     isEvalSupported: false,
@@ -538,4 +597,62 @@ export async function readPdfText(
     await task.destroy().catch(() => undefined);
   }
   return { text: clip(parts.join('\n\n').trim()), pages };
+}
+
+/**
+ * Text layer of a PDF, read in a bounded worker thread (B5). Past `timeoutMs`
+ * or the worker heap ceiling, pages already finished are returned with
+ * `pages_read`; if no page finished in time, throws `AttachmentUnreadableError`
+ * with a message for the person. A malformed PDF throws the worker's own error,
+ * which `extractAttachmentContent` turns into empty text as before.
+ */
+export async function readPdfText(
+  buffer: Buffer,
+  timeoutMs = PDF_PARSE_TIMEOUT_MS,
+  pdfjs?: PdfJsLib,
+): Promise<{ text: string; pages: number; pages_read?: number }> {
+  if (buffer.length > MAX_PDF_BYTES) {
+    throw new AttachmentUnreadableError(PDF_UNREADABLE_MESSAGE);
+  }
+  if (pdfjs) {
+    return readPdfTextWithLib(buffer, timeoutMs, pdfjs);
+  }
+  const partialParts: string[] = [];
+  let partialPages = 0;
+  try {
+    const result = await runParseInWorker<{ text: string; pages: number }>({
+      label: 'PDF',
+      source: PDF_WORKER_SOURCE,
+      workerData: {
+        pdfjsPath: require.resolve('pdfjs-dist/legacy/build/pdf.mjs'),
+        bytes: buffer,
+        maxPages: MAX_PDF_PAGES,
+        maxTextChars: MAX_TEXT_CHARS,
+      },
+      timeoutMs,
+      heapMb: PDF_WORKER_HEAP_MB,
+      onProgress: (payload) => {
+        if (typeof payload.pages === 'number') partialPages = payload.pages;
+        if (typeof payload.pageText === 'string') {
+          partialParts.push(payload.pageText);
+        }
+      },
+    });
+    return { text: clip(result.text), pages: result.pages };
+  } catch (error) {
+    if (error instanceof WorkerLimitError) {
+      logger.warn(
+        `PDF not read (${error.message}) after ${partialParts.length} of ${partialPages} pages`,
+      );
+      if (partialParts.length === 0) {
+        throw new AttachmentUnreadableError(PDF_UNREADABLE_MESSAGE);
+      }
+      return {
+        text: clip(partialParts.join('\n\n').trim()),
+        pages: partialPages,
+        pages_read: partialParts.length,
+      };
+    }
+    throw error;
+  }
 }

@@ -199,6 +199,33 @@ describe('VexiAttachmentsService.store (T41)', () => {
     }
   });
 
+  it('B5: a PDF that cannot be read in time is refused with its message, before storing anything', async () => {
+    const { service, prisma, s3 } = build();
+    const spy = jest
+      .spyOn(extractor, 'extractAttachmentContent')
+      .mockRejectedValueOnce(
+        new extractor.AttachmentUnreadableError(
+          extractor.PDF_UNREADABLE_MESSAGE,
+        ),
+      );
+    try {
+      await expect(
+        run(() =>
+          service.store(
+            file(Buffer.from('%PDF-1.4\n%%EOF'), 'application/pdf', 'lento.pdf'),
+          ),
+        ),
+      ).rejects.toMatchObject({
+        message: extractor.PDF_UNREADABLE_MESSAGE,
+        errorCode: 'INV_SCAN_INVALID_FILE',
+      });
+      expect(s3.uploadFile).not.toHaveBeenCalled();
+      expect(prisma.ai_attachments.create).not.toHaveBeenCalled();
+    } finally {
+      spy.mockRestore();
+    }
+  });
+
   it('an extraction/upload failure of the derived JSON does not fail the upload', async () => {
     const { service, prisma, s3 } = build();
     s3.uploadFile

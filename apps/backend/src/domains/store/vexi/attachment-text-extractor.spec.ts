@@ -1,3 +1,5 @@
+import { monitorEventLoopDelay } from 'node:perf_hooks';
+import * as zlib from 'node:zlib';
 import * as AdmZip from 'adm-zip';
 import * as XLSX from 'xlsx';
 import {
@@ -336,5 +338,154 @@ describe('PDF time limit (P1)', () => {
       { text: 'Uno\n\nDos', pages: 2 },
     );
     expect(destroy).toHaveBeenCalledTimes(1);
+  });
+});
+
+describe('PDF limits in worker (B5)', () => {
+  /** Builds a real PDF with FlateDecode page content streams and a valid xref. */
+  const buildPdf = (pageStreams: string[]): Buffer => {
+    const pageCount = pageStreams.length;
+    const kids = Array.from(
+      { length: pageCount },
+      (_, i) => `${4 + i * 2} 0 R`,
+    ).join(' ');
+    const header = Buffer.from('%PDF-1.4\n', 'latin1');
+    const parts: Buffer[] = [header];
+    const offsets: number[] = [0];
+    let pos = header.length;
+
+    const pushObj = (id: number, body: Buffer | string) => {
+      offsets[id] = pos;
+      const head = Buffer.from(`${id} 0 obj\n`, 'latin1');
+      const mid = typeof body === 'string' ? Buffer.from(body, 'latin1') : body;
+      const tail = Buffer.from('\nendobj\n', 'latin1');
+      parts.push(head, mid, tail);
+      pos += head.length + mid.length + tail.length;
+    };
+
+    pushObj(1, '<< /Type /Catalog /Pages 2 0 R >>');
+    pushObj(2, `<< /Type /Pages /Kids [${kids}] /Count ${pageCount} >>`);
+    pushObj(3, '<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica >>');
+
+    pageStreams.forEach((raw, idx) => {
+      const pageId = 4 + idx * 2;
+      const streamId = pageId + 1;
+      pushObj(
+        pageId,
+        `<< /Type /Page /Parent 2 0 R /MediaBox [0 0 612 792] /Resources << /Font << /F1 3 0 R >> >> /Contents ${streamId} 0 R >>`,
+      );
+      const compressed = zlib.deflateSync(Buffer.from(raw, 'latin1'));
+      pushObj(
+        streamId,
+        Buffer.concat([
+          Buffer.from(
+            `<< /Length ${compressed.length} /Filter /FlateDecode >>\nstream\n`,
+            'latin1',
+          ),
+          compressed,
+          Buffer.from('\nendstream', 'latin1'),
+        ]),
+      );
+    });
+
+    const totalObjs = 4 + pageCount * 2;
+    const xrefPos = pos;
+    let xref = `xref\n0 ${totalObjs}\n0000000000 65535 f \n`;
+    for (let i = 1; i < totalObjs; i++) {
+      xref += String(offsets[i]).padStart(10, '0') + ' 00000 n \n';
+    }
+    xref += `trailer\n<< /Size ${totalObjs} /Root 1 0 R >>\nstartxref\n${xrefPos}\n%%EOF\n`;
+    parts.push(Buffer.from(xref, 'latin1'));
+    return Buffer.concat(parts);
+  };
+
+  const heavyPageStream = (reps: number) =>
+    'BT /F1 12 Tf (hola mundo) Tj ET\n'.repeat(reps);
+
+  it('extracts text from a valid multi-page PDF inside the worker with no pages_read', async () => {
+    const pdf = buildPdf([
+      'BT /F1 12 Tf (Factura 12) Tj ET\n',
+      'BT /F1 12 Tf (Total 5000) Tj ET\n',
+    ]);
+    const out = await extractAttachmentContent(
+      pdf,
+      'application/pdf',
+      'factura.pdf',
+    );
+    expect(out).toEqual({
+      kind: 'text',
+      original_name: 'factura.pdf',
+      mime_type: 'application/pdf',
+      text: 'Factura 12\n\nTotal 5000',
+      pages: 2,
+    });
+  });
+
+  it('a real ~228 KB PDF with 3M text operators finishes within the time cap without blocking the event loop', async () => {
+    const heavyPdf = buildPdf([heavyPageStream(3_000_000)]);
+    expect(heavyPdf.length).toBeGreaterThan(70 * 1024);
+    expect(heavyPdf.length).toBeLessThan(300 * 1024);
+
+    const delay = monitorEventLoopDelay({ resolution: 10 });
+    delay.enable();
+    const started = Date.now();
+    let outcome:
+      | { ok: true; value: Awaited<ReturnType<typeof extractAttachmentContent>> }
+      | { ok: false; error: unknown };
+    try {
+      outcome = {
+        ok: true,
+        value: await extractAttachmentContent(
+          heavyPdf,
+          'application/pdf',
+          'pesado.pdf',
+        ),
+      };
+    } catch (error) {
+      outcome = { ok: false, error };
+    }
+    const elapsed = Date.now() - started;
+    delay.disable();
+    const maxLagMs = delay.max / 1e6;
+
+    // (a) Bounded wall-clock time (5 s worker cap, never the 10-27 s hang).
+    expect(elapsed).toBeLessThan(7_500);
+    // (b) Main thread event loop stays free while pdfjs works in the worker.
+    expect(maxLagMs).toBeLessThan(200);
+    // (c) Clear AttachmentUnreadableError (or bounded partial text), never a hang.
+    if (outcome.ok) {
+      expect(outcome.value.kind).toBe('text');
+    } else {
+      expect(outcome.error).toBeInstanceOf(AttachmentUnreadableError);
+      expect((outcome.error as Error).message).toBe(PDF_UNREADABLE_MESSAGE);
+    }
+  }, 15_000);
+
+  it('keeps pages read before the worker timeout and reports pages_read on a real multi-page PDF', async () => {
+    const partialPdf = buildPdf([
+      'BT /F1 12 Tf (Pagina uno) Tj ET\n',
+      heavyPageStream(3_000_000),
+    ]);
+    const delay = monitorEventLoopDelay({ resolution: 10 });
+    delay.enable();
+    const started = Date.now();
+    const result = await readPdfText(partialPdf, 1_500);
+    const elapsed = Date.now() - started;
+    delay.disable();
+
+    expect(elapsed).toBeLessThan(3_500);
+    expect(delay.max / 1e6).toBeLessThan(200);
+    expect(result).toEqual({
+      text: 'Pagina uno',
+      pages: 2,
+      pages_read: 1,
+    });
+  }, 10_000);
+
+  it('refuses a PDF buffer larger than 20 MB without spawning a worker', async () => {
+    const oversized = Buffer.alloc(20 * 1024 * 1024 + 1, 0x20);
+    const read = readPdfText(oversized);
+    await expect(read).rejects.toBeInstanceOf(AttachmentUnreadableError);
+    await expect(read).rejects.toThrow(PDF_UNREADABLE_MESSAGE);
   });
 });
