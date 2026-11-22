@@ -1,0 +1,120 @@
+{
+  "AWSTemplateFormatVersion": "2010-09-09",
+  "Description": "Vex analysis sandbox: Lambda image in a VPC with private subnets only (no IGW, no NAT, no VPC endpoints), no egress security group and an execution role limited to ENI management. Deployed by an operator, not by the app.",
+  "Parameters": {
+    "ImageUri": { "Type": "String", "Description": "ECR image URI pinned by digest (repo@sha256:...)", "AllowedPattern": "^.+@sha256:[0-9a-f]{64}$" },
+    "FunctionName": { "Type": "String", "Default": "vendix-agent-analysis" },
+    "ReservedConcurrency": { "Type": "Number", "Default": 3, "MinValue": 1 },
+    "Architecture": { "Type": "String", "Default": "arm64", "AllowedValues": ["arm64", "x86_64"] },
+    "VpcCidr": { "Type": "String", "Default": "10.77.0.0/24" },
+    "SubnetACidr": { "Type": "String", "Default": "10.77.0.0/26" },
+    "SubnetBCidr": { "Type": "String", "Default": "10.77.0.64/26" }
+  },
+  "Resources": {
+    "SandboxVpc": {
+      "Type": "AWS::EC2::VPC",
+      "Properties": {
+        "CidrBlock": { "Ref": "VpcCidr" },
+        "EnableDnsSupport": true,
+        "EnableDnsHostnames": false,
+        "Tags": [{ "Key": "Name", "Value": "vendix-agent-analysis-isolated" }]
+      }
+    },
+    "PrivateSubnetA": {
+      "Type": "AWS::EC2::Subnet",
+      "Properties": {
+        "VpcId": { "Ref": "SandboxVpc" },
+        "CidrBlock": { "Ref": "SubnetACidr" },
+        "AvailabilityZone": { "Fn::Select": [0, { "Fn::GetAZs": "" }] },
+        "MapPublicIpOnLaunch": false
+      }
+    },
+    "PrivateSubnetB": {
+      "Type": "AWS::EC2::Subnet",
+      "Properties": {
+        "VpcId": { "Ref": "SandboxVpc" },
+        "CidrBlock": { "Ref": "SubnetBCidr" },
+        "AvailabilityZone": { "Fn::Select": [1, { "Fn::GetAZs": "" }] },
+        "MapPublicIpOnLaunch": false
+      }
+    },
+    "PrivateRouteTable": {
+      "Type": "AWS::EC2::RouteTable",
+      "Properties": { "VpcId": { "Ref": "SandboxVpc" } }
+    },
+    "PrivateSubnetARouteTableAssociation": {
+      "Type": "AWS::EC2::SubnetRouteTableAssociation",
+      "Properties": { "SubnetId": { "Ref": "PrivateSubnetA" }, "RouteTableId": { "Ref": "PrivateRouteTable" } }
+    },
+    "PrivateSubnetBRouteTableAssociation": {
+      "Type": "AWS::EC2::SubnetRouteTableAssociation",
+      "Properties": { "SubnetId": { "Ref": "PrivateSubnetB" }, "RouteTableId": { "Ref": "PrivateRouteTable" } }
+    },
+    "NoEgressSecurityGroup": {
+      "Type": "AWS::EC2::SecurityGroup",
+      "Properties": {
+        "GroupDescription": "Analysis sandbox: no ingress, no real egress (loopback placeholder replaces the default allow-all rule)",
+        "VpcId": { "Ref": "SandboxVpc" },
+        "SecurityGroupIngress": [],
+        "SecurityGroupEgress": [
+          { "IpProtocol": "tcp", "FromPort": 1, "ToPort": 1, "CidrIp": "127.0.0.1/32", "Description": "Placeholder: specifying any egress rule removes the default 0.0.0.0/0 allow-all" }
+        ]
+      }
+    },
+    "ExecutionRole": {
+      "Type": "AWS::IAM::Role",
+      "Properties": {
+        "Description": "Analysis sandbox execution role: ENI management for VPC attachment ONLY. No logs, no S3, no secrets, no managed policies.",
+        "AssumeRolePolicyDocument": {
+          "Version": "2012-10-17",
+          "Statement": [
+            { "Effect": "Allow", "Principal": { "Service": "lambda.amazonaws.com" }, "Action": "sts:AssumeRole" }
+          ]
+        },
+        "Policies": [
+          {
+            "PolicyName": "VpcEniOnly",
+            "PolicyDocument": {
+              "Version": "2012-10-17",
+              "Statement": [
+                {
+                  "Sid": "LambdaVpcEniManagement",
+                  "Effect": "Allow",
+                  "Action": [
+                    "ec2:CreateNetworkInterface",
+                    "ec2:DescribeNetworkInterfaces",
+                    "ec2:DeleteNetworkInterface",
+                    "ec2:AssignPrivateIpAddresses",
+                    "ec2:UnassignPrivateIpAddresses"
+                  ],
+                  "Resource": "*"
+                }
+              ]
+            }
+          }
+        ]
+      }
+    },
+    "AnalysisFunction": {
+      "Type": "AWS::Lambda::Function",
+      "Properties": {
+        "FunctionName": { "Ref": "FunctionName" },
+        "PackageType": "Image",
+        "Code": { "ImageUri": { "Ref": "ImageUri" } },
+        "Role": { "Fn::GetAtt": ["ExecutionRole", "Arn"] },
+        "MemorySize": 1024,
+        "Timeout": 30,
+        "EphemeralStorage": { "Size": 512 },
+        "ReservedConcurrentExecutions": { "Ref": "ReservedConcurrency" },
+        "Architectures": [{ "Ref": "Architecture" }],
+        "VpcConfig": {
+          "SubnetIds": [{ "Ref": "PrivateSubnetA" }, { "Ref": "PrivateSubnetB" }],
+          "SecurityGroupIds": [{ "Ref": "NoEgressSecurityGroup" }]
+        }
+      }
+    }
+  },
+  "Outputs": {
+    "FunctionArn": { "Value": { "Fn::GetAtt": ["AnalysisFunction", "Arn"] } }
+  }
+}

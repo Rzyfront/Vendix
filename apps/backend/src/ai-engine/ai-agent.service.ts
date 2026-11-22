@@ -3740,7 +3740,11 @@ export class AIAgentService {
                       },
                     ),
                   );
-                if (toolName === 'run_readonly_script' && params.durable) {
+                if (
+                  (toolName === 'run_readonly_script' ||
+                    toolName === 'run_analysis') &&
+                  params.durable
+                ) {
                   const durable = params.durable;
                   return sandboxInvocation.run(
                     {

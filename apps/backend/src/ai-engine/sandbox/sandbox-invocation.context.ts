@@ -23,6 +23,22 @@ export function publicSandboxArgs(
   name: string,
   args: Record<string, unknown>,
 ): Record<string, unknown> {
+  if (name === 'run_analysis') {
+    return {
+      source_hash: createHash('sha256')
+        .update(
+          String(args.source ?? '')
+            .replace(/\r\n?/g, '\n')
+            .normalize('NFC'),
+        )
+        .digest('hex'),
+      conversation_id: args.conversation_id,
+      inputs: args.inputs,
+      purpose: args.purpose,
+      title: args.title,
+      source_omitted: true,
+    };
+  }
   if (name !== 'run_readonly_script') return args;
   return {
     source_hash: createHash('sha256')
