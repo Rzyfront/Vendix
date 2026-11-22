@@ -234,6 +234,11 @@ export class TaskFormModalComponent {
   readonly task = input<CrmTask | null>(null);
   /** Customer the task belongs to when opened from the customer profile. */
   readonly fixedCustomer = input<CrmPerson | null>(null);
+  /**
+   * Open opportunity a new task starts linked to (opened from a pipeline
+   * card). Ignored when it is no longer open for the customer.
+   */
+  readonly presetOpportunityId = input<number | null>(null);
   readonly saved = output<CrmTask>();
 
   protected readonly title = signal('');
@@ -397,8 +402,9 @@ export class TaskFormModalComponent {
     this.opportunitiesLoaded.set(false);
     if (!customerId) return;
     try {
-      // Editing asks for its own opportunity too, so it is there past 20.
-      const linkedId = task?.opportunity?.id;
+      // Editing (or a preset) asks for its own opportunity too, so it is there past 20.
+      const preset = task ? null : this.presetOpportunityId();
+      const linkedId = task?.opportunity?.id ?? preset;
       const list = await firstValueFrom(
         linkedId
           ? this.crm.openOpportunities(customerId, linkedId)
@@ -407,7 +413,10 @@ export class TaskFormModalComponent {
       if (request !== this.opportunityRequest) return;
       this.opportunities.set(list);
       this.opportunitiesLoaded.set(true);
-      if (!task && list.length === 1) this.opportunityId.set(list[0].id);
+      if (!task) {
+        if (preset && list.some((item) => item.id === preset)) this.opportunityId.set(preset);
+        else if (!preset && list.length === 1) this.opportunityId.set(list[0].id);
+      }
       // A saved target that is no longer offered is cleared: choose again.
       if (task && !this.targetStageValid()) this.targetStageId.set(null);
     } catch {
