@@ -11,9 +11,7 @@ import {
 import { takeUntilDestroyed } from '@angular/core/rxjs-interop';
 import { HttpErrorResponse } from '@angular/common/http';
 import { StoreSettingsFacade } from '../../../core/store/store-settings/store-settings.facade';
-import { DocumentsLibraryApiService } from '../../../private/modules/store/documents/services/documents-library-api.service';
 import { LibraryFile } from '../../../private/modules/store/documents/interfaces/document-library.interfaces';
-import { WorkflowsApiService } from '../../../private/modules/store/workflows/services/workflows-api.service';
 import { formatFileSize } from '../../../private/modules/store/workflows/utils/workflow-labels.util';
 import { formatStoreDateTime } from '../../utils/date.util';
 import { ButtonComponent } from '../button/button.component';
@@ -21,6 +19,7 @@ import { IconComponent } from '../icon/icon.component';
 import { SpinnerComponent } from '../spinner/spinner.component';
 import { ToastService } from '../toast/toast.service';
 import { DocumentViewerComponent, documentViewerKind } from './document-viewer.component';
+import { RecordDocumentsApiService } from './record-documents-api.service';
 
 /** Singular noun by subject type, for the empty state. */
 const SUBJECT_NOUN: Record<string, string> = {
@@ -30,7 +29,9 @@ const SUBJECT_NOUN: Record<string, string> = {
 
 /**
  * "Documentos" panel of a record: files stored against a subject (by Vex or by
- * flows). A missing dossier (404) is the empty state; a 403 is a calm notice.
+ * flows). Reads `store/record-documents`, open in every industry to whoever can
+ * read the record; a record without folders is the empty state and a 403 (no
+ * read permission on the record) is a calm notice.
  */
 @Component({
   selector: 'app-record-documents',
@@ -111,8 +112,7 @@ const SUBJECT_NOUN: Record<string, string> = {
   `,
 })
 export class RecordDocumentsComponent {
-  private readonly library = inject(DocumentsLibraryApiService);
-  private readonly workflows = inject(WorkflowsApiService);
+  private readonly records = inject(RecordDocumentsApiService);
   private readonly settings = inject(StoreSettingsFacade);
   private readonly toast = inject(ToastService);
   private readonly destroyRef = inject(DestroyRef);
@@ -148,18 +148,17 @@ export class RecordDocumentsComponent {
     this.loading.set(true);
     this.forbidden.set(false);
     this.failed.set(false);
-    this.library
-      .folderFiles(this.subjectType(), this.subjectId(), { limit: 50 })
+    this.records
+      .list(this.subjectType(), this.subjectId(), { limit: 50 })
       .pipe(takeUntilDestroyed(this.destroyRef))
       .subscribe({
-        next: (result) => {
-          this.files.set(result.data ?? []);
+        next: (files) => {
+          this.files.set(files);
           this.loading.set(false);
         },
         error: (error: unknown) => {
           const status = error instanceof HttpErrorResponse ? error.status : 0;
           this.files.set([]);
-          // No dossier yet is the empty state, not an error.
           if (status === 403) this.forbidden.set(true);
           else if (status !== 404) this.failed.set(true);
           this.loading.set(false);
@@ -206,8 +205,8 @@ export class RecordDocumentsComponent {
   private signed(file: LibraryFile, done: (result: { url: string }) => void): void {
     if (this.busy() !== null) return;
     this.busy.set(file.id);
-    this.workflows
-      .getFileDownload(file.id)
+    this.records
+      .download(this.subjectType(), this.subjectId(), file.id)
       .pipe(takeUntilDestroyed(this.destroyRef))
       .subscribe({
         next: (result) => {

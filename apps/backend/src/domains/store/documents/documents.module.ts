@@ -8,6 +8,8 @@ import { PrismaModule } from '../../../prisma/prisma.module';
 import { DossiersController } from './documents.controller';
 import { DossiersService } from './dossiers.service';
 import { RecordAttachmentsService } from './record-attachments.service';
+import { RecordDocumentsController } from './record-documents.controller';
+import { RecordDocumentsService } from './record-documents.service';
 import { StoredFilesService } from './stored-files.service';
 import { ReceivedDocumentPagesService } from '../../received-documents/services/received-document-pages.service';
 import { BasePdfPagesService } from './templates/base-pdf-pages.service';
@@ -66,6 +68,8 @@ import { DocumentSearchService } from './search/document-search.service';
     DocumentExpiryController,
     DocumentRetentionController,
     DocumentSearchController,
+    // B1: a record's documents in every industry, behind the record's read permission.
+    RecordDocumentsController,
     SignaturesController,
     DocumentTemplatesController,
     IssuedDocumentsController,
@@ -75,6 +79,7 @@ import { DocumentSearchService } from './search/document-search.service';
     DossiersService,
     // T44: Vex saves a chat attachment into a record's folder.
     RecordAttachmentsService,
+    RecordDocumentsService,
     // P4.4/P4.6/P4.7: perfil del archivo, retención y purga, vencimientos, búsqueda y carpetas.
     DocumentFileProfilesService,
     DocumentRetentionService,
