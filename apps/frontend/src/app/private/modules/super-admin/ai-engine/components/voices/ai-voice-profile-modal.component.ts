@@ -118,7 +118,7 @@ interface VoiceProfileForm {
             [required]="true"
             [control]="form.controls.language"
             [disabled]="saving()"
-            helpText="Código corto, por ejemplo es"
+            helperText="Código corto, por ejemplo es"
           ></app-input>
           <app-input
             formControlName="speed"
@@ -128,7 +128,7 @@ interface VoiceProfileForm {
             min="0.5"
             [control]="form.controls.speed"
             [disabled]="saving()"
-            helpText="Opcional, 0,5 a 2"
+            helperText="Opcional, 0,5 a 2"
           ></app-input>
           <app-input
             formControlName="vol"
@@ -138,7 +138,7 @@ interface VoiceProfileForm {
             min="0.1"
             [control]="form.controls.vol"
             [disabled]="saving()"
-            helpText="Opcional, 0,1 a 10"
+            helperText="Opcional, 0,1 a 10"
           ></app-input>
         </div>
         <app-input
@@ -147,7 +147,7 @@ interface VoiceProfileForm {
           placeholder="Hola, soy Vex. ¿En qué te ayudo hoy?"
           [control]="form.controls.sample_text"
           [disabled]="saving()"
-          [helpText]="'Opcional, máximo ' + sampleMax + ' caracteres'"
+          [helperText]="'Opcional, máximo ' + sampleMax + ' caracteres'"
         ></app-input>
         <label class="flex cursor-pointer items-center gap-2">
           <input
