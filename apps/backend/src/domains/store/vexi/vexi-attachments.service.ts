@@ -9,6 +9,7 @@ import { bytesMatchMime } from '../documents/file-signature';
 import {
   ATTACHABLE_ENTITY_TYPES,
   RECORD_READ_PERMISSION,
+  XLSX_MIME,
 } from '../documents/documents.constants';
 import {
   AI_ATTACHMENT_LABEL,
@@ -16,7 +17,10 @@ import {
   resolveAttachmentType,
 } from './ai-attachments';
 import type { AttachmentContent } from './attachment-content.types';
-import { extractAttachmentContent } from './attachment-text-extractor';
+import {
+  extractAttachmentContent,
+  spreadsheetLimitProblem,
+} from './attachment-text-extractor';
 
 const HANDLE_PREFIX = 'att_';
 
@@ -158,6 +162,15 @@ export class VexiAttachmentsService {
         ErrorCodes.INV_SCAN_INVALID_FILE,
         `El contenido de "${this.safeName(file.originalname)}" no coincide con su extensión. Acepto: ${AI_ATTACHMENT_LABEL}.`,
       );
+    }
+
+    // B3: a workbook that would expand past the ceilings is refused here,
+    // from its ZIP directory alone, before it is stored or parsed.
+    if (type.mime === XLSX_MIME) {
+      const problem = spreadsheetLimitProblem(file.buffer);
+      if (problem) {
+        throw new VendixHttpException(ErrorCodes.INV_SCAN_INVALID_FILE, problem);
+      }
     }
 
     const context = RequestContextService.getContext();

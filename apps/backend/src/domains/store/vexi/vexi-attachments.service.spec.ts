@@ -105,6 +105,25 @@ describe('VexiAttachmentsService.store (T41)', () => {
     ).resolves.toMatchObject({ mime_type: 'application/pdf' });
   });
 
+  it('B3: rejects a workbook that declares more than 50 MB, fast, before storing or parsing it', async () => {
+    const { service, s3, prisma } = build();
+    const zip = new AdmZip(xlsxBuffer());
+    // ~60 MB of sheet XML compressed to a few dozen KB: the shape of a bomb.
+    zip.addFile('xl/worksheets/sheet9.xml', Buffer.alloc(60 * 1024 * 1024, 0x61));
+    const bomb = zip.toBuffer();
+    expect(bomb.length).toBeLessThan(1024 * 1024);
+
+    const started = Date.now();
+    await expect(
+      run(() => service.store(file(bomb, XLSX_MIME, 'bomba.xlsx'))),
+    ).rejects.toMatchObject({
+      message: expect.stringMatching(/ocupa \d+ MB al abrirlo y el máximo son 50 MB/),
+    });
+    expect(Date.now() - started).toBeLessThan(2000);
+    expect(s3.uploadFile).not.toHaveBeenCalled();
+    expect(prisma.ai_attachments.create).not.toHaveBeenCalled();
+  });
+
   it('rejects a .xlsx whose bytes are not a ZIP', async () => {
     const { service, s3 } = build();
     await expect(

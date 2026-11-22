@@ -1,6 +1,10 @@
 import * as AdmZip from 'adm-zip';
 import * as XLSX from 'xlsx';
-import { extractAttachmentContent } from './attachment-text-extractor';
+import {
+  extractAttachmentContent,
+  parseXlsxInWorker,
+  spreadsheetLimitProblem,
+} from './attachment-text-extractor';
 
 const XLSX_MIME =
   'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet';
@@ -99,5 +103,54 @@ describe('extractAttachmentContent', () => {
       'a.pdf',
     );
     expect(pdf).toMatchObject({ kind: 'text', text: '' });
+  });
+});
+
+describe('XLSX limits (B3)', () => {
+  const workbook = (sheets: number) => {
+    const wb = XLSX.utils.book_new();
+    for (let i = 0; i < sheets; i++) {
+      XLSX.utils.book_append_sheet(wb, XLSX.utils.aoa_to_sheet([['a'], [String(i)]]), `S${i}`);
+    }
+    return XLSX.write(wb, { type: 'buffer', bookType: 'xlsx' }) as Buffer;
+  };
+
+  it('a workbook declaring 60 MB is refused from its ZIP directory, without parsing', async () => {
+    const zip = new AdmZip(workbook(1));
+    zip.addFile('xl/worksheets/sheet9.xml', Buffer.alloc(60 * 1024 * 1024, 0x61));
+    const bomb = zip.toBuffer();
+
+    const started = Date.now();
+    expect(spreadsheetLimitProblem(bomb)).toMatch(
+      /^El Excel ocupa \d+ MB al abrirlo y el máximo son 50 MB/,
+    );
+    const out = await extractAttachmentContent(bomb, XLSX_MIME, 'bomba.xlsx');
+    expect(Date.now() - started).toBeLessThan(1500);
+    expect(out).toEqual({
+      kind: 'table',
+      original_name: 'bomba.xlsx',
+      mime_type: XLSX_MIME,
+      sheets: [],
+    });
+  });
+
+  it('more than 20 sheets is refused with the count', () => {
+    expect(spreadsheetLimitProblem(workbook(21))).toBe(
+      'El Excel tiene 21 hojas y el máximo son 20. Guarda solo las hojas que necesitas e inténtalo otra vez.',
+    );
+    expect(spreadsheetLimitProblem(workbook(20))).toBeNull();
+  });
+
+  it('the worker parse is killed past its time limit', async () => {
+    await expect(parseXlsxInWorker(workbook(1), 1)).rejects.toThrow(
+      /XLSX parse exceeded 1 ms/,
+    );
+  });
+
+  it('a normal workbook still parses through the worker', async () => {
+    await expect(parseXlsxInWorker(workbook(2))).resolves.toEqual([
+      { name: 'S0', matrix: [['a'], ['0']] },
+      { name: 'S1', matrix: [['a'], ['1']] },
+    ]);
   });
 });

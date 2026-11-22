@@ -1,6 +1,6 @@
 import { Logger } from '@nestjs/common';
+import { Worker } from 'node:worker_threads';
 import * as AdmZip from 'adm-zip';
-import * as XLSX from 'xlsx';
 import { resolveAttachmentType } from './ai-attachments';
 import type {
   AttachmentContent,
@@ -12,6 +12,17 @@ export const MAX_ROWS_PER_SHEET = 20_000;
 export const MAX_TEXT_CHARS = 2_000_000;
 const MAX_PDF_PAGES = 200;
 const MAX_DOCX_XML_BYTES = 20 * 1024 * 1024;
+
+/**
+ * B3: ceilings read from the ZIP directory before anything is inflated. A
+ * 1.76 MB workbook can declare 433 MB of sheet XML and hang a synchronous
+ * `XLSX.read` for minutes, so the declared sizes decide first.
+ */
+export const MAX_XLSX_UNCOMPRESSED_BYTES = 50 * 1024 * 1024;
+export const MAX_XLSX_SHEETS = 20;
+/** B3: the parse runs in a worker thread, killed past this time or heap. */
+export const XLSX_PARSE_TIMEOUT_MS = 20_000;
+const XLSX_WORKER_HEAP_MB = 512;
 
 const logger = new Logger('AttachmentTextExtractor');
 
@@ -32,7 +43,7 @@ export async function extractAttachmentContent(
       case 'text/csv':
         return { kind: 'table', ...base, sheets: [csvSheet(buffer)] };
       case 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet':
-        return { kind: 'table', ...base, sheets: xlsxSheets(buffer) };
+        return { kind: 'table', ...base, sheets: await xlsxSheets(buffer) };
       case 'application/vnd.openxmlformats-officedocument.wordprocessingml.document':
         return { kind: 'text', ...base, text: docxText(buffer) };
       case 'text/plain':
@@ -125,20 +136,124 @@ function csvSheet(buffer: Buffer): AttachmentSheet {
 
 // ── XLSX ────────────────────────────────────────────────────────────────────
 
-function xlsxSheets(buffer: Buffer): AttachmentSheet[] {
-  const workbook = XLSX.read(buffer, { type: 'buffer', cellDates: true });
-  return workbook.SheetNames.map((name) => {
-    const matrix = XLSX.utils.sheet_to_json<unknown[]>(workbook.Sheets[name], {
+const toMb = (bytes: number): number => Math.ceil(bytes / 1024 / 1024);
+
+/**
+ * Why a workbook must not be opened, or null when it fits (B3). Reads only the
+ * ZIP central directory (declared sizes and entry names): nothing is inflated,
+ * so a bomb is rejected in milliseconds. The message is for the person who
+ * uploaded it.
+ */
+export function spreadsheetLimitProblem(buffer: Buffer): string | null {
+  let entries: AdmZip.IZipEntry[];
+  try {
+    entries = new AdmZip(buffer).getEntries();
+  } catch {
+    return 'No pude abrir el Excel: su contenido comprimido está dañado. Vuelve a guardarlo desde Excel e inténtalo otra vez.';
+  }
+  let declared = 0;
+  let sheets = 0;
+  for (const entry of entries) {
+    declared += Math.max(0, Number(entry.header.size) || 0);
+    if (/^xl\/worksheets\/[^/]+\.xml$/i.test(entry.entryName)) sheets++;
+  }
+  if (declared > MAX_XLSX_UNCOMPRESSED_BYTES) {
+    return `El Excel ocupa ${toMb(declared)} MB al abrirlo y el máximo son ${toMb(MAX_XLSX_UNCOMPRESSED_BYTES)} MB. Divídelo en archivos más pequeños o guarda solo las hojas que necesitas.`;
+  }
+  if (sheets > MAX_XLSX_SHEETS) {
+    return `El Excel tiene ${sheets} hojas y el máximo son ${MAX_XLSX_SHEETS}. Guarda solo las hojas que necesitas e inténtalo otra vez.`;
+  }
+  return null;
+}
+
+/**
+ * Plain CommonJS run by the worker. SheetJS is required by the absolute path the
+ * parent resolved, so it works the same under ts-jest and from `dist`.
+ */
+const XLSX_WORKER_SOURCE = `
+const { parentPort, workerData } = require('node:worker_threads');
+const XLSX = require(workerData.xlsxPath);
+const bytes = Buffer.from(workerData.bytes.buffer, workerData.bytes.byteOffset, workerData.bytes.byteLength);
+const workbook = XLSX.read(bytes, { type: 'buffer', cellDates: true, sheetRows: workerData.sheetRows });
+parentPort.postMessage(
+  workbook.SheetNames.slice(0, workerData.maxSheets).map((name) => ({
+    name,
+    matrix: XLSX.utils.sheet_to_json(workbook.Sheets[name], {
       header: 1,
       blankrows: false,
       raw: false,
       defval: '',
+    }),
+  })),
+);
+`;
+
+interface ParsedSheet {
+  name: string;
+  matrix: unknown[][];
+}
+
+/**
+ * Parses a workbook off the API event loop (B3): a worker thread with its own
+ * heap ceiling, terminated when it runs past `timeoutMs`. Whatever the file
+ * does, the request that uploaded it waits at most that long and every other
+ * store keeps being served.
+ */
+export function parseXlsxInWorker(
+  buffer: Buffer,
+  timeoutMs = XLSX_PARSE_TIMEOUT_MS,
+): Promise<ParsedSheet[]> {
+  return new Promise((resolve, reject) => {
+    const worker = new Worker(XLSX_WORKER_SOURCE, {
+      eval: true,
+      workerData: {
+        xlsxPath: require.resolve('xlsx'),
+        bytes: buffer,
+        sheetRows: MAX_ROWS_PER_SHEET + 1,
+        maxSheets: MAX_XLSX_SHEETS,
+      },
+      resourceLimits: { maxOldGenerationSizeMb: XLSX_WORKER_HEAP_MB },
     });
-    const rows = matrix
-      .slice(0, MAX_ROWS_PER_SHEET + 1)
-      .map((r) => r.map((c) => String(c ?? '')));
-    return toSheet(name, rows);
+    let settled = false;
+    const settle = (done: () => void) => {
+      if (settled) return;
+      settled = true;
+      clearTimeout(timer);
+      done();
+    };
+    const timer = setTimeout(
+      () =>
+        settle(() => {
+          void worker.terminate();
+          reject(new Error(`XLSX parse exceeded ${timeoutMs} ms`));
+        }),
+      timeoutMs,
+    );
+    worker.once('message', (sheets: ParsedSheet[]) =>
+      settle(() => {
+        void worker.terminate();
+        resolve(sheets);
+      }),
+    );
+    worker.once('error', (error) => settle(() => reject(error)));
+    worker.once('exit', (code) =>
+      settle(() => reject(new Error(`XLSX worker exited with code ${code}`))),
+    );
   });
+}
+
+async function xlsxSheets(buffer: Buffer): Promise<AttachmentSheet[]> {
+  const problem = spreadsheetLimitProblem(buffer);
+  if (problem) throw new Error(problem);
+  const parsed = await parseXlsxInWorker(buffer);
+  return parsed.map(({ name, matrix }) =>
+    toSheet(
+      name,
+      matrix
+        .slice(0, MAX_ROWS_PER_SHEET + 1)
+        .map((r) => r.map((c) => String(c ?? ''))),
+    ),
+  );
 }
 
 // ── DOCX ────────────────────────────────────────────────────────────────────
