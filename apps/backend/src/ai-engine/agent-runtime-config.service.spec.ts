@@ -104,6 +104,10 @@ describe('AgentRuntimeConfigService', () => {
         }),
         findMany: jest.fn().mockResolvedValue([]),
       },
+      ai_voice_profiles: {
+        findUnique: jest.fn().mockResolvedValue(null),
+        findMany: jest.fn().mockResolvedValue([]),
+      },
       store_settings: { findUnique: jest.fn() },
     };
     audit = { log: jest.fn().mockResolvedValue(undefined) };
@@ -195,6 +199,125 @@ describe('AgentRuntimeConfigService', () => {
       { text: expect.any(String) },
       expect.objectContaining({ voice: 'vexi-voice', responseFormat: 'mp3' }),
     );
+  });
+
+  describe('catalog voice (F8 T49)', () => {
+    const profile = {
+      id: 5,
+      name: 'Kore',
+      voice_id: 'Kore',
+      language: 'es',
+      speed: null,
+      vol: null,
+      is_active: true,
+      config: {
+        id: 42,
+        label: 'Gemini TTS',
+        provider: 'google',
+        model_id: 'gemini-tts',
+        is_active: true,
+      },
+    };
+
+    it('shows the assigned profile and the active catalog on the sheet', async () => {
+      prisma.ai_agents.findUnique.mockResolvedValue({
+        id: 7,
+        key: 'vex',
+        app_key: 'vex_app',
+        voice_profile_id: 5,
+      });
+      prisma.ai_voice_profiles.findUnique.mockResolvedValue(profile);
+      prisma.ai_voice_profiles.findMany.mockResolvedValue([profile]);
+
+      const sheet = await service.getAgentSheet('vex');
+
+      expect(sheet.voice.profile).toEqual({
+        id: 5,
+        name: 'Kore',
+        voice_id: 'Kore',
+        language: 'es',
+        provider: 'google',
+        config_label: 'Gemini TTS',
+        is_active: true,
+      });
+      expect(sheet.available_voice_profiles).toEqual([
+        {
+          id: 5,
+          name: 'Kore',
+          voice_id: 'Kore',
+          language: 'es',
+          provider: 'google',
+          config_label: 'Gemini TTS',
+        },
+      ]);
+      expect(prisma.ai_voice_profiles.findMany).toHaveBeenCalledWith(
+        expect.objectContaining({
+          where: { is_active: true, config: { is_active: true } },
+        }),
+      );
+    });
+
+    it('assigns the voice to that agent row only', async () => {
+      prisma.ai_voice_profiles.findUnique.mockResolvedValue(profile);
+
+      await service.updateAgentSheet('vex', { voice_profile_id: 5 }, 99);
+
+      expect(prisma.ai_agents.update).toHaveBeenCalledTimes(1);
+      expect(prisma.ai_agents.update).toHaveBeenCalledWith({
+        where: { id: 7 },
+        data: expect.objectContaining({ voice_profile_id: 5 }),
+      });
+      // The fallback voice of the transition is read-only here.
+      expect(prisma.ai_engine_applications.update).not.toHaveBeenCalled();
+    });
+
+    it('clears the voice with null without validating a profile', async () => {
+      await service.updateAgentSheet('vex', { voice_profile_id: null }, 99);
+
+      expect(prisma.ai_agents.update).toHaveBeenCalledWith({
+        where: { id: 7 },
+        data: expect.objectContaining({ voice_profile_id: null }),
+      });
+    });
+
+    it.each([
+      ['missing', null],
+      ['inactive', { ...profile, is_active: false }],
+      [
+        'on an inactive provider',
+        { ...profile, config: { ...profile.config, is_active: false } },
+      ],
+    ])('rejects a %s voice without writing', async (_name, row) => {
+      prisma.ai_voice_profiles.findUnique.mockResolvedValue(row);
+
+      await expect(
+        service.updateAgentSheet('vex', { voice_profile_id: 5 }, 99),
+      ).rejects.toMatchObject({ errorCode: 'SYS_VALIDATION_001' });
+      expect(prisma.ai_agents.update).not.toHaveBeenCalled();
+    });
+
+    it('previews with the assigned profile on its own provider', async () => {
+      prisma.ai_agents.findUnique.mockResolvedValue({
+        id: 7,
+        key: 'vex',
+        voice_profile_id: 5,
+      });
+      prisma.ai_voice_profiles.findUnique.mockResolvedValue(profile);
+      aiEngine.runSpeech.mockResolvedValue({
+        success: true,
+        audioBase64: 'AAAA',
+        contentType: 'audio/wav',
+      });
+
+      await service.previewVoice('vex');
+
+      expect(aiEngine.runSpeech).toHaveBeenCalledWith(
+        'vexi_voice_tts',
+        expect.any(Object),
+        expect.objectContaining({ voice: 'Kore', model: 'gemini-tts' }),
+        { configId: 42 },
+      );
+    });
   });
 
   it('rejects preview text over 120 characters', async () => {

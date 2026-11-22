@@ -1885,6 +1885,12 @@ export class AIEngineService implements OnModuleInit {
     appKey: string,
     variables?: Record<string, string>,
     speechOptions?: AISpeechRequestOptions,
+    /**
+     * F8 T49 — a catalog voice lives on its own provider config. The app still
+     * owns the gate, the rate limit and the log; only the provider that
+     * synthesizes changes. Absent = the app's config, as before.
+     */
+    execution?: { configId?: number },
   ): Promise<AISpeechResponse> {
     const startTime = Date.now();
     const callId = randomUUID();
@@ -1897,10 +1903,25 @@ export class AIEngineService implements OnModuleInit {
     let featureCategory: string | null = null;
 
     try {
-      const { app, provider, configId } =
-        await this.resolveApplicationExecution(appKey);
-      resolvedConfigId = configId;
+      const resolved = await this.resolveApplicationExecution(appKey);
+      const app = resolved.app;
+      let provider: AIProvider | undefined = resolved.provider;
+      resolvedConfigId = resolved.configId;
       featureCategory = app.ai_feature_category;
+
+      if (execution?.configId) {
+        // No silent fallback to the app's provider: the voice id belongs to
+        // the profile's provider and means nothing to another one.
+        provider = this.providers.get(execution.configId);
+        resolvedConfigId = execution.configId;
+        if (!provider) {
+          logResponse = {
+            success: false,
+            error: `Voice provider configuration ${execution.configId} is not loaded or inactive`,
+          };
+          return logResponse;
+        }
+      }
 
       if (!provider.generateSpeech) {
         logResponse = {

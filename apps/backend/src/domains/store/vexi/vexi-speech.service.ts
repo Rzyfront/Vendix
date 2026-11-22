@@ -219,6 +219,8 @@ export class VexiSpeechService {
    */
   async resolveParams(agentKey?: string | null): Promise<SpeechCacheParams> {
     try {
+      const profile = agentKey ? await this.resolveVoiceProfile(agentKey) : null;
+
       const app = await this.prisma.ai_engine_applications.findUnique({
         where: { key: VOICE_TTS_APP_KEY },
         select: { metadata: true, config: { select: { model_id: true } } },
@@ -228,6 +230,28 @@ export class VexiSpeechService {
         ((app?.metadata as Record<string, any> | null)?.speech as
           | Record<string, any>
           | undefined) ?? {};
+
+      // F8 T49 — single source: the catalog voice assigned to the agent wins
+      // whole (voice, provider, model). `metadata.speech` below is only the
+      // read-only fallback for an agent with no profile, plus the format,
+      // which is a property of the playback path and not of a voice.
+      if (profile) {
+        return {
+          model: profile.model,
+          voice: profile.voice,
+          format:
+            this.text(speech.response_format) ?? DEFAULT_SPEECH_PARAMS.format,
+          speed:
+            profile.speed ??
+            this.positive(speech.speed) ??
+            DEFAULT_SPEECH_PARAMS.speed,
+          vol:
+            profile.vol ??
+            this.positive(speech.vol) ??
+            DEFAULT_SPEECH_PARAMS.vol,
+          configId: profile.configId,
+        };
+      }
 
       const own = agentKey ? agentVoiceFromSpeechMetadata(speech, agentKey) : {};
 
@@ -256,6 +280,58 @@ export class VexiSpeechService {
         `Falling back to default speech params: ${(error as Error).message}`,
       );
       return DEFAULT_SPEECH_PARAMS;
+    }
+  }
+
+  /**
+   * F8 T49 — the catalog voice a super admin assigned to this agent, or null.
+   *
+   * Null on every doubt (no profile, profile or provider turned off, lookup
+   * failed): the caller then reads with the fallback voice instead of going
+   * silent. Vex and Vexi each read their own row, so assigning one never
+   * moves the other.
+   */
+  private async resolveVoiceProfile(agentKey: string): Promise<{
+    configId: number;
+    model: string;
+    voice: string;
+    speed: number | null;
+    vol: number | null;
+  } | null> {
+    try {
+      const agent = await this.prisma.ai_agents.findUnique({
+        where: { key: agentKey },
+        select: {
+          voice_profile: {
+            select: {
+              voice_id: true,
+              speed: true,
+              vol: true,
+              is_active: true,
+              config: {
+                select: { id: true, model_id: true, is_active: true },
+              },
+            },
+          },
+        },
+      });
+      const profile = agent?.voice_profile;
+      const voice = this.text(profile?.voice_id);
+      if (!profile || !profile.is_active || !profile.config?.is_active || !voice) {
+        return null;
+      }
+      return {
+        configId: profile.config.id,
+        model: profile.config.model_id,
+        voice,
+        speed: this.positive(profile.speed),
+        vol: this.positive(profile.vol),
+      };
+    } catch (error) {
+      this.logger.warn(
+        `Voice profile lookup failed for ${agentKey}; using the fallback voice: ${(error as Error).message}`,
+      );
+      return null;
     }
   }
 
@@ -431,7 +507,11 @@ export class VexiSpeechService {
           // caché, y una entrada nunca puede describir un volumen distinto del
           // que realmente se sintetizó.
           vol: params.vol,
+          // Only with a catalog voice: its model belongs to its provider. The
+          // fallback path keeps letting the app decide the model, as before.
+          ...(params.configId ? { model: params.model } : {}),
         },
+        ...(params.configId ? [{ configId: params.configId }] : []),
       );
 
       if (!response.success || !response.audioBase64) {

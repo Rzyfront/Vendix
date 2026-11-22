@@ -476,6 +476,10 @@ export class GlobalPrismaService extends BasePrismaService {
   }
 
   // F4 T32–T33: skills de Vex (contenido global administrado en superadmin).
+  get ai_voice_profiles() {
+    return this.baseClient.ai_voice_profiles;
+  }
+
   get ai_agent_skills() {
     return this.baseClient.ai_agent_skills;
   }

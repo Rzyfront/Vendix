@@ -12,3 +12,7 @@ export {
   AgentVoiceDto,
   VoicePreviewDto,
 } from './update-agent-runtime.dto';
+export {
+  CreateAIVoiceProfileDto,
+  UpdateAIVoiceProfileDto,
+} from './ai-voice-profile.dto';
