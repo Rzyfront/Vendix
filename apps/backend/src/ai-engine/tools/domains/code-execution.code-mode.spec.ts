@@ -142,6 +142,38 @@ describe('run_code gates (nothing is invoked unless all pass)', () => {
     expect(f.runner.run).not.toHaveBeenCalled();
   });
 
+  it('refuses when ALS is empty even if static currentContext and handler context hold another store_id (F10 audit B3)', async () => {
+    const f = setup();
+    // Populate legacy static RequestContextService.currentContext with another store,
+    // then exit the ALS scope so asyncLocalStorage.getStore() is undefined.
+    RequestContextService.run(
+      { store_id: 999, user_id: 99, is_super_admin: false } as never,
+      () => undefined,
+    );
+    try {
+      expect(RequestContextService.asyncLocalStorage.getStore()).toBeUndefined();
+      expect(RequestContextService.getContext()?.store_id).toBe(999);
+      const raw = await codeModeInvocation.run(
+        {
+          agentKey: 'vex',
+          initialNames: [READ, 'run_code'],
+          revalidate: async () => [],
+        } as never,
+        () =>
+          f.tool.handler!(
+            { source: 'return 1;', tools: [READ], purpose: 'stock total' },
+            { store_id: 999, conversation_id: CONVERSATION },
+          ),
+      );
+      const r = JSON.parse(raw);
+      expect(r.error).toBe('No pude identificar la tienda de esta conversación.');
+      expect(f.entitlements.codeModeEnabled).not.toHaveBeenCalled();
+      expect(f.runner.run).not.toHaveBeenCalled();
+    } finally {
+      RequestContextService.run(undefined as never, () => undefined);
+    }
+  });
+
   it.each([
     ['requires confirmation', { requiresConfirmation: true, readOnly: false }],
     ['is irreversible', { irreversible: true, requiresConfirmation: true }],

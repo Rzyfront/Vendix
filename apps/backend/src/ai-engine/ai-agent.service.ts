@@ -1602,7 +1602,7 @@ export class AIAgentService {
   private async codeModeOffered(params: AgentRunParams): Promise<boolean> {
     if (params.agent_key !== 'vex') return false;
     if (!this.codeModeBridge?.available()) return false;
-    const storeId = RequestContextService.getContext()?.store_id;
+    const storeId = RequestContextService.asyncLocalStorage.getStore()?.store_id;
     if (!storeId || !this.entitlements) return false;
     return planGrantsVexCapability(this.entitlements, storeId, 'code_mode');
   }

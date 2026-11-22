@@ -839,10 +839,9 @@ export function createCodeModeTools({
           );
         const manifest = toolNames as string[];
 
-        // 2. Store from the request context (never from args), then plan.
+        // 2. Store from strict ALS only (never from args or static currentContext), then plan.
         const storeId =
-          RequestContextService.asyncLocalStorage.getStore()?.store_id ??
-          context?.store_id;
+          RequestContextService.asyncLocalStorage.getStore()?.store_id;
         if (!storeId)
           return codeFail(
             'No pude identificar la tienda de esta conversación.',

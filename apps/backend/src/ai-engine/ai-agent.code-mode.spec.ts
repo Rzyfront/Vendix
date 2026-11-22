@@ -269,6 +269,7 @@ describe('T65b: run_code in the agent turn', () => {
           ).map((d) => d.function.name),
       );
     return {
+      service,
       run,
       chat,
       runner,
@@ -401,6 +402,43 @@ describe('T65b: run_code in the agent turn', () => {
         (m: any) => m.role === 'tool',
       );
       expect(tool.content).toContain('AI_AGENT_TOOL_NOT_ALLOWED');
+    });
+
+    it('never offers run_code when ALS is empty even if static currentContext points to another store (F10 audit B3)', async () => {
+      const f = build();
+      RequestContextService.run(
+        {
+          organization_id: 99,
+          store_id: 999,
+          user_id: 99,
+          permissions: [],
+          roles: [],
+          is_owner: true,
+          is_super_admin: false,
+        },
+        () => undefined,
+      );
+      try {
+        expect(RequestContextService.asyncLocalStorage.getStore()).toBeUndefined();
+        expect(RequestContextService.getContext()?.store_id).toBe(999);
+        const defs = await f.service.resolveToolAuthority({
+          goal: 'x',
+          agent_key: 'vex',
+        });
+        expect(defs.map((d) => d.function.name)).not.toContain('run_code');
+        const gen = f.service.runAgentStream({
+          goal: 'list_orders',
+          max_iterations: 4,
+          conversation_id: 42,
+          agent_key: 'vex',
+        });
+        let next = await gen.next();
+        while (!next.done) next = await gen.next();
+        expect(toolNames(f.chat.mock.calls[0][1])).not.toContain('run_code');
+        expect(f.resolveForStore).not.toHaveBeenCalled();
+      } finally {
+        RequestContextService.run(undefined as never, () => undefined);
+      }
     });
   });
 
