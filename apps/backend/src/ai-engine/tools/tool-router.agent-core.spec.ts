@@ -145,9 +145,17 @@ describe('ToolRouterService: núcleo fijo por agente + conjunto dinámico (regis
     expect(
       CORE_DISCOVERY.length + AGENT_TOOL_CORE.vexi.length,
     ).toBeLessThanOrEqual(14);
+    // Vex = the 14 budget + 2 per-turn tools its prompt orders by name:
+    // suggest_followup (F1/T5, evaluated every turn) and compute (F7/T48, exact
+    // arithmetic). Cost measured from the definitions: ~3.2k schema chars,
+    // ~800 tokens on every Vex turn. Raise only for a tool the Vex prompt names
+    // by exact identifier; everything else arrives through discovery.
     expect(
       CORE_DISCOVERY.length + AGENT_TOOL_CORE.vex.length,
-    ).toBeLessThanOrEqual(14);
+    ).toBeLessThanOrEqual(16);
+    // F5/T34: the batch circuit is reached through discovery and playbooks,
+    // never by widening the fixed core.
+    expect(AGENT_TOOL_CORE.vex).not.toContain('propose_write_batch');
   });
 
   it('Vexi: "analiza el cierre de caja de hoy" carga caja + núcleo, no el catálogo completo', async () => {
