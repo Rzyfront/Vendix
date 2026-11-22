@@ -461,7 +461,6 @@ export class WriteBatchService {
         tool: toolName,
         arguments: args,
         label,
-        ...(step.depends_on?.length ? { depends_on: step.depends_on } : {}),
         args_hash: writeBatchArgsHash(toolName, args),
         preview_hash: toolPreviewHash(consent.preview),
         tool_version: this.registry.getToolVersion(toolName),

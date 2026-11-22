@@ -370,6 +370,22 @@ describe('WriteBatchService (T34 · propose / read)', () => {
       expect(res.batches[0].block_id).toBeUndefined();
     });
 
+    it('P2-2: a depends_on sent by the model is never persisted', async () => {
+      const h = build({ t: writeTool() });
+      await run(() =>
+        h.service.propose({
+          conversationId: 1,
+          goal: 'g',
+          steps: [
+            { tool: 't', arguments: { id: 1 }, label: 'A' },
+            { tool: 't', arguments: { id: 2 }, label: 'B', depends_on: ['s1'] } as any,
+          ],
+        }),
+      );
+      const [row] = h.createMany.mock.calls[0][0].data;
+      for (const step of row.steps) expect(step).not.toHaveProperty('depends_on');
+    });
+
     it('P2-3: refuses no_conversation without a valid conversation and persists nothing', async () => {
       for (const conversationId of [null, 0, -3, 1.5]) {
         const h = build({ t: writeTool() });

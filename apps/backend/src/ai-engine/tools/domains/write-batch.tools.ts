@@ -77,7 +77,7 @@ export function createWriteBatchTools({
           steps: {
             type: 'array',
             description:
-              'Pasos en el orden en que se aplican. Cada paso: {tool, arguments, label, depends_on?}.',
+              'Pasos en el orden exacto en que se aplican; si uno falla, los siguientes se omiten. Cada paso: {tool, arguments, label}.',
             items: {
               type: 'object',
               properties: {
@@ -93,11 +93,6 @@ export function createWriteBatchTools({
                   type: 'string',
                   description:
                     'Frase corta que la persona entiende: «Subir 5 % Coca Cola 1L».',
-                },
-                depends_on: {
-                  type: 'array',
-                  items: { type: 'string' },
-                  description: 'step_id (s1, s2…) de pasos previos que necesita.',
                 },
               },
               required: ['tool', 'arguments', 'label'],

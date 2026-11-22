@@ -44,6 +44,13 @@ describe('propose_write_batch tool (T34)', () => {
     }
   });
 
+  it('P2-2: the step schema offers no depends_on (the executor runs in order and never reads it)', () => {
+    const { tool } = build();
+    const items = tool.parameters.properties.steps.items;
+    expect(Object.keys(items.properties)).toEqual(['tool', 'arguments', 'label']);
+    expect(JSON.stringify(tool.parameters)).not.toContain('depends_on');
+  });
+
   it('rejects more than 100 steps without calling propose', async () => {
     const { call, propose } = build();
     const steps = Array.from({ length: WRITE_BATCH_MAX_STEPS_PER_CALL + 1 }, (_, i) => step(i));

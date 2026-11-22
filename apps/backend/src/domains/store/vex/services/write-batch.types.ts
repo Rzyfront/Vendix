@@ -19,9 +19,10 @@
  *  - The executor claims the batch with ONE conditional update
  *    (`status='proposed'` → `executing`). A second approval (double click, two
  *    tabs) loses the claim and returns the current state; it never re-runs.
- *  - Steps run in order; the first failure stops the batch. Every step that did
- *    not run ends in a TERMINAL status (`skipped` / `unselected`), never
- *    `pending` or `running`.
+ *  - Steps run in their stored order; there are no declared dependencies
+ *    (`depends_on` was retired: nothing honored it). The first failure stops
+ *    the batch. Every step that did not run ends in a TERMINAL status
+ *    (`skipped` / `unselected`), never `pending` or `running`.
  *  - Undo exists only for steps whose tool declares `compensate` and only within
  *    {@link WRITE_BATCH_UNDO_WINDOW_MS}; everything else reads "no reversible
  *    desde Vex".
@@ -101,8 +102,6 @@ export interface WriteBatchStepInput {
   arguments: Record<string, unknown>;
   /** Short human label: "Subir 5 % Coca Cola 1L". */
   label: string;
-  /** step_ids of earlier steps this one needs (informational ordering). */
-  depends_on?: string[];
 }
 
 /** Before → after projection kept from the tool's real `preview()`. */
@@ -123,7 +122,6 @@ export interface WriteBatchStepRecord {
   tool: string;
   arguments: Record<string, unknown>;
   label: string;
-  depends_on?: string[];
   /** sha256 of canonical JSON of {tool, arguments} (same canonicalJson as plan-approval). */
   args_hash: string;
   /** `toolPreviewHash(preview)` from ai-tool-registry. */
