@@ -130,6 +130,14 @@ export const VEX_COPY = {
     copy_code_aria: 'Copiar el código',
     send_failed: 'No se envió',
   },
+  analysis: {
+    summary: 'Ver código del análisis',
+    copy: 'Copiar',
+    copied: 'Copiado',
+    copy_aria: 'Copiar el código del análisis',
+    code_aria: 'Código Python del análisis',
+    caption: 'Calculado con Python en un entorno aislado',
+  },
   chats: {
     panel_label: 'Chats',
     brand: 'Vex',

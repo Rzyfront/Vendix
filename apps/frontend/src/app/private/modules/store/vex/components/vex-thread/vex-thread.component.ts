@@ -15,6 +15,7 @@ import { ButtonComponent } from '../../../../../../shared/components/button/butt
 import { IconComponent } from '../../../../../../shared/components/icon/icon.component';
 import { VexChatStore } from '../../state/vex-chat.store';
 import { VexPresenceStore } from '../../state/vex-presence.store';
+import { VexAnalysisCodeComponent } from '../vex-blocks/vex-analysis-code/vex-analysis-code.component';
 import { VEX_COPY } from '../../vex-copy';
 import { VEXI_RESTART_LABEL } from '../../../../../../core/store/vexi/vexi-user-copy.utils';
 import { VexBlockInteraction, VexUiBlock } from '../../models/vex.models';
@@ -36,6 +37,7 @@ import { StoreSettingsFacade } from '../../../../../../core/store/store-settings
     IconComponent,
     VexMarkdownComponent,
     VexBlockHostComponent,
+    VexAnalysisCodeComponent,
     VexToolTraceComponent,
     VexPlanCardComponent,
     VexFollowupChipComponent,
@@ -118,6 +120,7 @@ import { StoreSettingsFacade } from '../../../../../../core/store/store-settings
                     [block]="block"
                     (interaction)="onBlockInteraction(block, $event)"
                   />
+                  <vendix-vex-analysis-code [block]="block" />
                 }
                 @if (message.plan) {
                   <vendix-vex-plan-card

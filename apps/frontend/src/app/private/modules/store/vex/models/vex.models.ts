@@ -31,6 +31,15 @@ export interface VexUiBlock {
   version: number;
 }
 
+/** Python analysis behind a block's figures (server-owned, optional on any spec). */
+export interface VexAnalysisInfo {
+  run_id: string;
+  source_hash: string;
+  language: 'python';
+  purpose: string;
+  source: string;
+}
+
 export type VexBlockSpec =
   | VexTableSpec
   | VexChartSpec
