@@ -1,8 +1,8 @@
 # Sandbox de análisis en Python sobre AWS Lambda aislada (F9 · D3)
 
-**Estado: implementación lista en código/IaC, APAGADA por defecto y NO desplegada. T53 (certificación de aislamiento sobre la Lambda real) está PENDIENTE.**
+**Estado (2026-11-22): desplegada en la cuenta de Vendix (`us-east-1`) como `vendix-vex-analysis-sandbox`, APAGADA y NO certificada. T53 FALLA sobre el digest desplegado: ver [`CERTIFICACION-T53.md`](CERTIFICACION-T53.md). `AI_ANALYSIS_CERTIFIED_DIGEST` no se fija hasta re-certificar.**
 
-Nunca se crea ni despliega infraestructura AWS desde el entorno de desarrollo ni desde esta rama. El backend y sus workers **nunca** ejecutan código generado por IA en el host: el worker solo orquesta la cola, materializa tablas de la misma conversación, invoca la Lambda con `lambda:InvokeFunction`, valida el JSON de salida y persiste bloques (`table`, `chart`, `kpi`).
+La infraestructura solo la despliega un operador con autorización explícita; nunca se ejecuta código del invitado en una máquina de desarrollo. El backend y sus workers **nunca** ejecutan código generado por IA en el host: el worker solo orquesta la cola, materializa tablas de la misma conversación, invoca la Lambda con `lambda:InvokeFunction`, valida el JSON de salida y persiste bloques (`table`, `chart`, `kpi`).
 
 ---
 
@@ -15,6 +15,7 @@ NestJS (API / worker ai-agent) — autoridad vigente, plan, admisión y auditor�
    ▼
 AWS Lambda (imagen contenedor Python 3.12 · Dockerfile + template.json)
    ├── VPC dedicada con subredes privadas únicamente (sin IGW, sin NAT, sin VPC endpoints)
+   │   y resolvedor DNS de la VPC deshabilitado (los security groups no filtran el DNS de Amazon)
    ├── Security group sin ingress y sin egress real (regla loopback reemplaza allow-all)
    ├── Rol IAM limitado exclusivamente a gestión de ENI para adjuntar la Lambda a la VPC
    ├── Código en LAMBDA_TASK_ROOT de solo lectura (chmod a-w); solo /tmp escribible
@@ -25,6 +26,18 @@ AWS Lambda (imagen contenedor Python 3.12 · Dockerfile + template.json)
           4. Mata todo el grupo de procesos (`SIGKILL`) al terminar o vencer el tiempo.
           5. Lee `result.json` con `O_NOFOLLOW`, revalida `result` (tables/series/figures/notes) y devuelve solo JSON acotado.
 ```
+
+> **Hallazgos de T53 sobre la Lambda real (no corregidos en este código):** el perfil seccomp de Lambda deniega `prctl`, así que el paso 3 lanza `PermissionError` y toda ejecución falla cerrada; y el paso 4 no alcanza a un daemon que hace doble `fork` + `setsid`. El arreglo validado en una imagen de diagnóstico (intérprete `chmod 0711` + `kill(-1, SIGKILL)` dentro del espacio de PIDs de Lambda) está en `CERTIFICACION-T53.md` y requiere decisión y re-certificación.
+
+---
+
+## Construcción y despliegue de la imagen (operador)
+
+1. **Lockfile con hashes, generado dentro de la base fijada** (mismo Python y plataforma que Lambda): `requirements.in` lista los pines directos; `requirements.txt` sale de `pip-compile --generate-hashes --strip-extras requirements.in` ejecutado en `public.ecr.aws/lambda/python:3.12@sha256:…` (`linux/arm64`). `pip install --require-hashes` falla cerrado si algo no coincide.
+2. **Identidad del runtime:** `./runtime-digest.sh` imprime `sha256:` sobre Dockerfile, lockfile, `handler.py` y `runner.py` (mismo valor en macOS y Linux). Se pasa como `--build-arg ANALYSIS_RUNTIME_DIGEST=…` y es el valor de `AI_ANALYSIS_RUNTIME_DIGEST`.
+3. **Build `linux/arm64`** (la arquitectura del template: Graviton, ~20 % más barato por GB-s y la base oficial publica manifiesto arm64). Usar el builder clásico (`DOCKER_BUILDKIT=0`) o `buildx --provenance=false`: Lambda rechaza índices de imagen con atestaciones.
+4. **ECR inmutable** `vendix-vex-analysis-runtime`, tag `rt-<12 hex del runtime digest>`; el stack recibe `ImageUri` fijado por digest (`…@sha256:…`), nunca por tag.
+5. Cualquier cambio en estos archivos o en `template.json` invalida la certificación y reabre T53.
 
 ---
 
@@ -57,13 +70,13 @@ Las pruebas de `handler.py` mockean `subprocess.Popen` y validan limpieza de `/t
 
 ---
 
-## Compuertas pendientes de T53 (certificación de aislamiento)
+## Compuertas de T53 (certificación de aislamiento)
 
-Antes de encender `AI_ANALYSIS_SANDBOX_ENABLED=true` en cualquier entorno real, un operador con credenciales de QA debe construir la imagen (`pip-compile --generate-hashes` + `FROM ...@sha256:<digest>`), desplegar `template.json` en una cuenta/región QA y producir un informe firmado de certificación que enlace el `runtime_digest` final con la evidencia real de:
+Resultado de la corrida del 2026-11-22 y evidencia: [`CERTIFICACION-T53.md`](CERTIFICACION-T53.md). Antes de encender `AI_ANALYSIS_SANDBOX_ENABLED=true` en cualquier entorno real, un operador debe construir la imagen (sección anterior), desplegar `template.json` y producir un informe de certificación que enlace el `runtime_digest` final con la evidencia real de:
 
 1. **Egreso cero**: intentos de DNS, HTTP/HTTPS, sockets TCP/UDP crudos, enlace al metadata service (`169.254.169.254`) y conexiones hacia la VPC de producción fallan con bloqueo total.
 2. **Sistema de archivos, `/proc` y secretos**: intento de escritura fuera de `/tmp` falla (`Read-only file system`); symlink en `/tmp/result.json` rechazado (`O_NOFOLLOW`); entorno del hijo sin `AWS_*` ni credenciales; lectura de `/proc/<ppid>/environ`, `/proc/<ppid>/mem` y `ptrace` sobre el padre fallan (`PermissionError` gracias a `PR_SET_DUMPABLE=0`); ningún secreto presente en proceso ni en logs.
-3. **Límites de recursos**: bomba de memoria (`ANALYSIS_MEMORY`), ciclo infinito de CPU (`ANALYSIS_TIMEOUT`), fork bomb (`RLIMIT_NPROC`), inundación de stdout/stderr y archivo grande en `/tmp` (`RLIMIT_FSIZE`) terminan dentro del presupuesto sin dejar procesos huérfanos.
+3. **Límites de recursos**: bomba de memoria (`ANALYSIS_MEMORY`), ciclo infinito de CPU (`ANALYSIS_TIMEOUT`), fork bomb (`RLIMIT_NPROC`), inundación de stdout/stderr y archivo grande en `/tmp` (`RLIMIT_FSIZE`) terminan dentro del presupuesto sin dejar procesos huérfanos, incluido un daemon que hace doble `fork` + `setsid` para escapar del grupo de procesos.
 4. **Aislamiento multi-tenant (100 ejecuciones alternando 3 tiendas)**: ejecución de 100 invocaciones consecutivas alternando datos marcados de 3 tiendas distintas (reutilizando el mismo entorno caliente de Lambda) con verificación de cero residuos en `/tmp`, memoria, variables globales o respuestas cruzadas.
 5. **Revisión de política IAM**: verificación en AWS de que el rol de ejecución de la Lambda solo tiene permisos ENI y el rol del backend solo tiene `lambda:InvokeFunction` sobre ese único ARN.
 6. **Firma y fijación de digest**: registrar el `runtime_digest` verificado en el informe firmado y fijar `AI_ANALYSIS_CERTIFIED_DIGEST` a ese valor exacto. Cualquier cambio de imagen, dependencias o plantilla invalida la certificación y exige re-certificar.
