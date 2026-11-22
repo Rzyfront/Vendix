@@ -101,7 +101,6 @@ export const CODEMODE_ALLOWLIST: readonly CodeModeAllowlistEntry[] = Object.free
   { name: 'list_dispatch_routes', domain: 'dispatch', version: '1', permissions: ['store:dispatch_routes:read'], parameters_hash: 'a2be3a079fc4b0ca7e1c9d3ecb5bcd6d77545008979ec309006bbb3af12eb5be' },
   { name: 'list_employee_advances', domain: 'payroll', version: '1', permissions: ['store:payroll:advances:read'], parameters_hash: '509e3fa37d9db52c689eedaaa2335182466ae0441907eafbb5c0961a3f5b55b8' },
   { name: 'list_employees', domain: 'payroll', version: '1', permissions: ['store:payroll:employees:read'], parameters_hash: 'c408c4f870668885e3386fc39f0680e3faf91829529b0bcf7dbac681c95c91d1' },
-  { name: 'list_entry_failures', domain: 'accounting', version: '1', permissions: ['store:accounting:journal_entries:read'], parameters_hash: 'ad05997cab71aaf6852d0426bb33075686766d42d74fe3285676f6229d0e21ef' },
   { name: 'list_exogenous_reports', domain: 'withholding', version: '1', permissions: ['exogenous:read'], parameters_hash: '7fb78cabf956b97292dcfb073b914d2166a4d7de2a99994a9cda79c8990e470b' },
   { name: 'list_expenses', domain: 'expenses', version: '1', permissions: ['store:expenses:read'], parameters_hash: '6da6d2f11d5a916dc157ce9e91850f775613ce5fc207f8fe8299d6e9bed29e14' },
   { name: 'list_fiscal_obligations', domain: 'fiscal', version: '1', permissions: ['store:fiscal:obligations:read'], parameters_hash: 'e6740a41a6f1be6bd4030bb5fe5c4601ee91fc42c1672eecfa9b36ba2d996bdb' },

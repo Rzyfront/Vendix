@@ -111,6 +111,18 @@ describe('Code Mode allowlist snapshot', () => {
       }).toEqual({ name, excluded: true, listed: false });
   });
 
+  it('keeps unscoped cross-tenant readers out of scripts (F10 audit B1)', () => {
+    const names = new Set(CODEMODE_ALLOWLIST.map((entry) => entry.name));
+    expect({
+      name: 'list_entry_failures',
+      excluded: Object.prototype.hasOwnProperty.call(
+        CODEMODE_EXCLUDED,
+        'list_entry_failures',
+      ),
+      listed: names.has('list_entry_failures'),
+    }).toEqual({ name: 'list_entry_failures', excluded: true, listed: false });
+  });
+
   it('keeps every exclusion alive and justified: a stale entry fails instead of hiding a tool', () => {
     for (const [name, reason] of Object.entries(CODEMODE_EXCLUDED)) {
       expect({ name, reason: reason.length > 10 }).toEqual({ name, reason: true });

@@ -44,6 +44,8 @@ export const CODEMODE_EXCLUDED: Readonly<Record<string, string>> = Object.freeze
   export_report: 'loopback HTTP fetch that also uploads a file artifact',
   get_report: 'loopback HTTP fetch of the report endpoints, outside the registry ALS',
   get_pila_flatfile: 'generates a file artifact instead of reading rows',
+  list_entry_failures:
+    'queries accounting_entry_failures via withoutScope() without store/organization filter; pending tenant-scoped listUnresolved with tests',
 });
 
 /** Shape every allowlisted tool must hold, today (generation) and live (policy). */
