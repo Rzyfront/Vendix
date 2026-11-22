@@ -4,9 +4,14 @@ import {
   FINAL_ANSWER_OUTPUT_BYTES,
   ResultFixture,
   assertBank,
+  buildScriptSource,
   fixtureResult,
+  measureScriptedTrajectory,
   measureTrajectory,
   roundTrips,
+  scriptResultText,
+  scriptability,
+  shouldScript,
   successProxy,
   summarizeByKind,
 } from './tool-token-metrics';
@@ -232,6 +237,90 @@ describe('tool-token-metrics (pure, no model/DB/network)', () => {
       expect(() =>
         assertBank([ok('a', 'multi_step', [[{ tool: 'x' }, { tool: 'y' }]])]),
       ).toThrow(/kind/i);
+    });
+  });
+
+  describe('scriptability (config 2)', () => {
+    const allow = new Set(['list_things', 'get_one']);
+    const writes = new Set(['get_one']);
+    it('is scriptable only when every tool is allowlisted and none is a write', () => {
+      expect(scriptability(['list_things'], allow, writes)).toEqual({
+        scriptable: true,
+        blockers: [],
+      });
+      expect(scriptability(['list_things', 'vex_render_chart'], allow, writes))
+        .toEqual({ scriptable: false, blockers: ['not_in_allowlist:vex_render_chart'] });
+      expect(scriptability(['get_one'], allow, writes).blockers).toEqual([
+        'write:get_one',
+      ]);
+    });
+  });
+
+  describe('shouldScript (routing rule)', () => {
+    it('follows the rule: 3+ calls or 50+ intermediate rows, never 1-2 small reads', () => {
+      expect(shouldScript({ calls: 2, intermediateRows: 10 })).toBe(false);
+      expect(shouldScript({ calls: 3, intermediateRows: 3 })).toBe(true);
+      expect(shouldScript({ calls: 2, intermediateRows: 50 })).toBe(true);
+    });
+  });
+
+  describe('buildScriptSource', () => {
+    const groups = [
+      [{ tool: 'list_things', args: { q: 'a' } }],
+      [{ tool: 'get_one' }, { tool: 'get_one', args: { id: 2 } }],
+    ];
+    it('is deterministic and uses Promise.all only for parallel groups', () => {
+      const a = buildScriptSource(groups);
+      expect(a).toBe(buildScriptSource(groups));
+      expect(a).toContain('await tools.list_things({"q":"a"})');
+      expect(a.match(/Promise\.all/g)).toHaveLength(1);
+      expect(a).toContain('return');
+    });
+  });
+
+  describe('scriptResultText', () => {
+    it('keeps a 5-row preview per list and the row count, inside the 8 KiB bound', () => {
+      const text = scriptResultText([fixtureResult(fixtures.list_things, 40)]);
+      const parsed = JSON.parse(text);
+      const first = parsed.data.result[0];
+      expect(first.data).toHaveLength(5);
+      expect(first.data_rows).toBe(40);
+      expect(parsed.data.calls[0].rows).toBe(40);
+      expect(Buffer.byteLength(JSON.stringify(parsed.data.result))).toBeLessThanOrEqual(8192);
+    });
+    it('truncates an oversized result to the bound and flags it', () => {
+      const big = JSON.stringify({ blob: 'x'.repeat(20000) });
+      const parsed = JSON.parse(scriptResultText([big]));
+      expect(parsed.data.result_truncated).toBe(true);
+      expect(Buffer.byteLength(JSON.stringify(parsed.data.result))).toBeLessThanOrEqual(8192);
+    });
+  });
+
+  describe('measureScriptedTrajectory', () => {
+    const groups = [
+      [{ tool: 'list_things', rows: 40 }],
+      [{ tool: 'get_one' }],
+      [{ tool: 'get_one' }],
+    ];
+    const input = {
+      base: [{ role: 'user' as const, content: 'hola' }],
+      groups,
+      fixtures,
+      definitions: [tool('list_things'), tool('get_one'), tool('run_code')],
+      purpose: 'p',
+    };
+    it('is always 2 model rounds and drops the intermediate results from the context', () => {
+      const direct = measureTrajectory({
+        base: input.base,
+        groups,
+        fixtures,
+        toolsForRound: () => input.definitions,
+      });
+      const scripted = measureScriptedTrajectory(input);
+      expect(scripted.round_trips).toBe(2);
+      expect(direct.round_trips).toBe(4);
+      expect(scripted.input_total).toBeLessThan(direct.input_total);
+      expect(scripted.input_by_round).toHaveLength(2);
     });
   });
 });

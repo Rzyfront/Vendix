@@ -70,7 +70,7 @@ Estimador: `bytes_v1` (bytes del JSON; pesimista, no es un tokenizador). Generad
 - **Enrutado = mejor caso.** El ranker es un sustituto que puntúa las herramientas del oráculo, así que la precarga (máx. 8) acierta siempre; el enrutador real puede fallar y caer al catálogo completo. Una herramienta fuera de la precarga se ofrece desde la vuelta siguiente a su primera llamada (regla dura), sin vuelta extra de `search_tools`.
 - **No se modela** la compactación de resultados, la caché de prompt del proveedor, la latencia ni el costo en dinero. La salida estimada son los mensajes de tool_calls más un cierre de 600 bytes.
 - **Alcanzable** es una prueba estructural (todas las herramientas del oráculo existen y están autorizadas para el owner), no una tasa de éxito del modelo.
-- **Pendiente:** medición en vivo con modelo (requiere backend y gasto de proveedor; fuera de alcance de T60). Config 1 y 2 las añade T70.
+- **Pendiente:** medición en vivo con modelo (requiere backend y gasto de proveedor; fuera de alcance de T60). Las configs 1 (T62) y 2 (T70) añaden sus secciones al final.
 ## Configuración 1 (T62, fichas cortas y describe_tool)
 
 **ESTIMACIÓN determinista bytes_v1; no son tokens observados del proveedor.** Generado por `measure-tool-tokens.ts --config 1`; no edites a mano. Misma autoridad, banco, fixtures y supuestos que la config 0; compara contra su columna "enrutado".
@@ -122,4 +122,86 @@ Entrada = suma de todas las vueltas al modelo, en tokens estimados. Las tareas q
 | t29 | multi | — | 24.078 → 22.654 | 2 | 159.564 | 156.364 | 286.599 | 4 → 7 | sí |
 | t30 | multi | — | 26.818 → 22.654 | 3 | 195.533 | 182.069 | 332.578 | 4 → 7 | sí |
 
-**Límites propios de la config 1:** el oráculo siempre acierta la precarga, así que las fichas cubren las herramientas necesarias; el modelo real puede pedir `describe_tool` de más o de menos, y la compactación de resultados y la caché de prompt no se modelan (cambiar de ficha a definición entre vueltas invalida el prefijo cacheado en algunos proveedores: `describe_tool` entrega la ficha como resultado de tool para no tocar la lista). La config 2 (Code Mode) llega con T70.
+**Límites propios de la config 1:** el oráculo siempre acierta la precarga, así que las fichas cubren las herramientas necesarias; el modelo real puede pedir `describe_tool` de más o de menos, y la compactación de resultados y la caché de prompt no se modelan (cambiar de ficha a definición entre vueltas invalida el prefijo cacheado en algunos proveedores: `describe_tool` entrega la ficha como resultado de tool para no tocar la lista). La config 2 (Code Mode, scripts) está en su propia sección, más abajo.
+## Configuración 2 (T70, Code Mode: scripts de solo lectura)
+
+**ESTIMACIÓN determinista bytes_v1; no son tokens observados del proveedor.** Generado por `measure-tool-tokens.ts --config 2`; no edites a mano. Misma autoridad, banco, fixtures y supuestos que la config 0; compara contra su columna "enrutado".
+
+- **Base: config 0.** El descubrimiento (config 1) queda apagado porque no pasó su compuerta (N14: −2,5 % / +65,1 %, lejos del −30 %). Config 2 = config 0 + `run_code` ofrecido en cada turno, con su definición real (construida por `createCodeModeTools`) y el mensaje de sistema `CODE_MODE_ROUTING_RULE` (leído del código del producto).
+- **Costo fijo de ofrecer scripts:** definición de `run_code` ≈ 2.034 tokens + regla de ruteo 533 bytes (≈ 587 tokens) en CADA vuelta de CADA tarea, también las que no usan script. Esos tokens están incluidos en todas las cifras de la config 2.
+- **Qué es "scriptable":** tarea multi-paso cuyas herramientas están todas en la lista blanca generada (141 herramientas), ninguna es escritura (`readOnly !== true`) y todas se ofrecen en el turno 0 (el manifiesto de `run_code` solo admite las ya autorizadas en el turno). Una tarea de una llamada nunca se convierte en script.
+- **Dos lecturas:** *política* (titular) = el modelo sigue la regla de ruteo: solo hace script con ≥ 3 llamadas o ≥ 50 filas intermedias; con 1-2 lecturas pequeñas llama directo. *máx* (cota superior) = todo lo scriptable va por script. Las tareas no convertidas conservan su trayectoria de la config 0 (más el costo fijo de arriba).
+- **Un script = 2 vueltas** (la que pide `run_code` y la que redacta la respuesta). Entrada = contexto + definiciones (turno + `run_code`) + la llamada `run_code` con el script + el resultado acotado que recibe el modelo (sobre `result` ≤ 8 KiB, vista previa de 5 filas por lista y conteo de filas), en lugar de los N resultados intermedios.
+
+### Totales: configuraciones 0, 1 y 2 (entrada en tokens estimados; vueltas = suma de vueltas al modelo; los porcentajes son la variación contra la config 0)
+
+| Grupo | Tareas | Config 0 entrada | Config 2 política | Config 2 máx | Def. turno 0 (0 → 2) | Vueltas (0 → política / máx) | Con script (política / máx) |
+|---|---|---|---|---|---|---|---|
+| una llamada | 5 | 1.659.571 | 1.685.451 (1,6 %) | 1.685.451 (1,6 %) | 757.294 → 767.464 | 10 → 10 / 10 | 0 / 0 de 5 (scriptables 0) |
+| multi-paso | 25 | 4.627.549 | 4.315.901 (-6,7 %) | 4.144.183 (-10,4 %) | 945.283 → 996.133 | 86 → 75 / 71 | 8 / 12 de 25 (scriptables 12) |
+| todas | 30 | 6.287.120 | 6.001.352 (-4,5 %) | 5.829.634 (-7,3 %) | 1.702.577 → 1.763.597 | 96 → 85 / 81 | 8 / 12 de 30 (scriptables 12) |
+
+Referencia, config 1 (fichas + describe_tool, lectura pesimista; sin scripts):
+
+| Grupo | Tareas | Config 0 entrada | Config 1 con describe_tool | Vueltas (0 → 1) |
+|---|---|---|---|---|
+| una llamada | 5 | 1.659.571 | 2.500.575 (50,7 %) | 10 → 15 |
+| multi-paso | 25 | 4.627.549 | 7.879.281 (70,3 %) | 86 → 147 |
+| todas | 30 | 6.287.120 | 10.379.856 (65,1 %) | 96 → 162 |
+
+### Compuerta N14 de scripts (tareas multi-paso)
+
+Umbral: ≥ 50 % menos tokens de entrada Y ≥ 40 % menos vueltas, sin bajar la tasa de éxito. Las cifras son la variación contra la config 0 (negativo = ahorro); config 0 = 100 %.
+
+| Pata | Política (titular) | Máx (cota superior) |
+|---|---|---|
+| Tokens de entrada (≥ 50 %) | -6,7 % → NO cumple | -10,4 % → NO cumple |
+| Vueltas (≥ 40 %) | -12,8 % → NO cumple | -17,4 % → NO cumple |
+| Éxito (sin bajar) | PENDIENTE de corrida en vivo | PENDIENTE de corrida en vivo |
+
+**Veredicto: la compuerta NO se da por cumplida.** La tasa de éxito no se puede observar sin un modelo en vivo (el "alcanzable" estructural no es éxito), así que esa pata queda pendiente y los scripts siguen apagados por defecto (interruptor y capacidad por plan). Las otras dos patas son solo estimaciones de este banco, no tokens del proveedor.
+
+### Por tarea
+
+| Id | Tipo | Llamadas | Filas interm. | Scriptable (bloqueos) | Script (política / máx) | Def. turno 0 (0 → 2) | Entrada config 0 | Entrada política | Entrada máx | Vueltas (0 → política / máx) |
+|---|---|---|---|---|---|---|---|---|---|---|
+| t01 | multi | 2 | 0 | no: not_in_allowlist:vex_render_chart | no / no | 23.923 → 25.957 | 115.807 | 123.571 | 123.571 | 3 → 3 / 3 |
+| t02 | multi | 3 | 20 | no: not_in_allowlist:vex_render_chart | no / no | 24.527 → 26.561 | 126.880 | 134.644 | 134.644 | 3 → 3 / 3 |
+| t03 | multi | 3 | 15 | no: not_in_allowlist:propose_write_batch | no / no | 25.877 → 27.911 | 169.223 | 179.575 | 179.575 | 4 → 4 / 4 |
+| t04 | multi | 2 | 25 | sí | no / sí | 24.492 → 26.526 | 123.085 | 130.849 | 85.112 | 3 → 3 / 2 |
+| t05 | una | 1 | 0 | n/a (una llamada) | no / no | 23.145 → 25.179 | 75.272 | 80.448 | 80.448 | 2 → 2 / 2 |
+| t06 | multi | 4 | 12 | sí | sí / sí | 25.821 → 27.855 | 124.918 | 88.758 | 88.758 | 3 → 2 / 2 |
+| t07 | multi | 2 | 11 | sí | no / sí | 24.078 → 26.112 | 118.243 | 126.007 | 84.344 | 3 → 3 / 2 |
+| t08 | una | 1 | 10 | n/a (una llamada) | no / no | 23.755 → 25.789 | 77.212 | 82.388 | 82.388 | 2 → 2 / 2 |
+| t09 | multi | 2 | 10 | sí | no / sí | 25.501 → 27.535 | 122.473 | 130.237 | 87.013 | 3 → 3 / 2 |
+| t10 | multi | 2 | 3 | sí | no / sí | 24.131 → 26.165 | 117.567 | 125.331 | 84.237 | 3 → 3 / 2 |
+| t11 | multi | 2 | 9 | no: not_in_allowlist:search_playbooks, not_in_allowlist:load_playbook | no / no | 343.074 → 345.108 | 1.074.422 | 1.082.186 | 1.082.186 | 3 → 3 / 3 |
+| t12 | una | 1 | 0 | n/a (una llamada) | no / no | 343.074 → 345.108 | 714.951 | 720.127 | 720.127 | 2 → 2 / 2 |
+| t13 | una | 1 | 0 | n/a (una llamada) | no / no | 343.074 → 345.108 | 714.937 | 720.113 | 720.113 | 2 → 2 / 2 |
+| t14 | una | 1 | 0 | n/a (una llamada) | no / no | 24.246 → 26.280 | 77.199 | 82.375 | 82.375 | 2 → 2 / 2 |
+| t15 | multi | 2 | 2 | no: not_in_allowlist:propose_write_batch | no / no | 25.391 → 27.425 | 121.568 | 129.332 | 129.332 | 3 → 3 / 3 |
+| t16 | multi | 5 | 44 | no: not_in_allowlist:vex_render_table | no / no | 24.949 → 26.983 | 174.630 | 184.982 | 184.982 | 4 → 4 / 4 |
+| t17 | multi | 5 | 26 | no: not_in_allowlist:vex_render_list | no / no | 25.505 → 27.539 | 171.091 | 181.443 | 181.443 | 4 → 4 / 4 |
+| t18 | multi | 3 | 29 | no: not_in_allowlist:vex_render_table | no / no | 26.706 → 28.740 | 186.641 | 196.993 | 196.993 | 4 → 4 / 4 |
+| t19 | multi | 7 | 99 | no: not_in_allowlist:vex_render_table | no / no | 26.787 → 28.821 | 261.147 | 274.087 | 274.087 | 5 → 5 / 5 |
+| t20 | multi | 4 | 35 | sí | sí / sí | 24.335 → 26.369 | 129.780 | 89.392 | 89.392 | 3 → 2 / 2 |
+| t21 | multi | 3 | 17 | sí | sí / sí | 24.601 → 26.635 | 130.911 | 86.581 | 86.581 | 3 → 2 / 2 |
+| t22 | multi | 3 | 20 | sí | sí / sí | 25.061 → 27.095 | 127.023 | 86.646 | 86.646 | 3 → 2 / 2 |
+| t23 | multi | 3 | 21 | sí | sí / sí | 25.323 → 27.357 | 169.195 | 88.805 | 88.805 | 4 → 2 / 2 |
+| t24 | multi | 3 | 35 | sí | sí / sí | 26.026 → 28.060 | 174.086 | 90.374 | 90.374 | 4 → 2 / 2 |
+| t25 | multi | 3 | 0 | no: not_in_allowlist:vex_render_chart | no / no | 23.923 → 25.957 | 116.893 | 124.657 | 124.657 | 3 → 3 / 3 |
+| t26 | multi | 4 | 20 | no: not_in_allowlist:compute, not_in_allowlist:vex_render_kpi | no / no | 24.527 → 26.561 | 171.741 | 182.093 | 182.093 | 4 → 4 / 4 |
+| t27 | multi | 3 | 10 | sí | sí / sí | 25.022 → 27.056 | 123.876 | 86.515 | 86.515 | 3 → 2 / 2 |
+| t28 | multi | 3 | 9 | no: not_in_allowlist:vex_render_table | no / no | 24.807 → 26.841 | 121.252 | 129.016 | 129.016 | 3 → 3 / 3 |
+| t29 | multi | 3 | 11 | no: not_in_allowlist:compute | no / no | 24.078 → 26.112 | 159.564 | 169.916 | 169.916 | 4 → 4 / 4 |
+| t30 | multi | 5 | 40 | sí | sí / sí | 26.818 → 28.852 | 195.533 | 93.911 | 93.911 | 4 → 2 / 2 |
+
+### Supuestos de la config 2 (todos son del modelo, no medidos)
+
+- **Script generado, no escrito por un modelo.** `buildScriptSource` arma el script de forma determinista desde las llamadas planeadas de cada tarea: un `await` por grupo secuencial (`Promise.all` si es paralelo), con los argumentos del oráculo, y un `return` genérico que recorta cada lista a 5 filas y añade el conteo. No se ajusta por tarea. Un modelo real puede escribir scripts más largos, más cortos, o fallar y reintentar (el reintento y el máximo de 3 scripts por turno no se modelan).
+- **Resultado que ve el modelo.** Se reutiliza el sobre real de `run_code` (`status`, `result`, `logs` vacíos, `calls` con filas, `rows_seen`) con el resultado ya recortado; el recorte es una elección del script modelado, así que el modelo no recibe las filas completas. Si el modelo pidiera más datos, habría vueltas extra que aquí no existen.
+- **Los intermedios dependientes no se enhebran.** El oráculo trae argumentos estáticos; el script los usa tal cual y solo expresa la dependencia con `await` secuencial.
+- **Tareas con salida a pantalla (`vex_render_*`), `compute`, playbooks y escrituras no son scriptables:** esas herramientas no están en la lista blanca de solo lectura. `vex.block` dentro de un script permitiría renderizar desde el script, pero el modelo no lo usa aquí (cota conservadora; los bloqueos de cada tarea están en la tabla por tarea).
+- **Costo fijo en todas las tareas.** Se carga a las tareas directas el costo de ofrecer `run_code` (definición + regla). Si la oferta dependiera de la tarea (p. ej. solo con varias lecturas), las tareas de una llamada no lo pagarían; aquí se paga siempre, que es lo que hace hoy `ai-agent.service.ts` cuando la capacidad está activa.
+- **Éxito.** "Alcanzable" sigue siendo estructural. Que el script correcto salga a la primera, que el modelo elija bien entre directo y script (≥ 80 % en las conversaciones de oro es una verificación sobre transcripciones, no sobre un modelo) y que la respuesta final no pierda cifras por el recorte requieren corrida en vivo.
+- **No se modela** la latencia de la Lambda, la caché de prompt (ofrecer `run_code` añade un mensaje de sistema que cambia el prefijo cuando se activa), el costo de salida del script más allá del tamaño del mensaje de llamada, ni el dinero.
