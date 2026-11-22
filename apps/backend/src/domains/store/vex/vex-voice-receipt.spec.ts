@@ -76,6 +76,10 @@ function fixture(
     plans,
     { consumeAIQuota: quota } as any,
     writeBatches,
+    // F9/T52: the analysis broker only feeds createAnalysisTools at
+    // registration; a voice receipt never runs Python.
+    { run: jest.fn() } as any,
+    { resolve: jest.fn() } as any,
   ).onModuleInit();
   const controller: any = Object.create(VexiController.prototype);
   controller.responseService = { success: (data: unknown) => data };

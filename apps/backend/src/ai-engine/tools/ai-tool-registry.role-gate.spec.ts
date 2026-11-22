@@ -49,6 +49,9 @@ const PUBLIC_TOOLS = [
   // own Vex conversation blocks and runs in an isolated no-network Lambda
   'run_readonly_script',
   'run_analysis',
+  // F5/T34: proposes a batch and never writes; every step is re-checked by
+  // this same role gate at approval, so it grants no business permission.
+  'propose_write_batch',
   // agent scaffolding
   'search_tools',
   'suggest_followup',
