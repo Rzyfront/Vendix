@@ -2,41 +2,200 @@
 
 | | |
 | --- | --- |
-| **Resultado vigente (corrida 3)** | **NO CERTIFICADA.** Punto 1 pasa. Los puntos 2, 3 y 4 no quedan certificados por comprobaciones incompletas; además, el handler falla en preflight con `ANALYSIS_RUNTIME: sandbox error: OSError`. El punto 5 pasa. El punto 6 no se fija. |
-| Fecha | 2026-11-22, 22:00-22:20 UTC (17:00-17:20 Bogotá) |
-| Cuenta / región | `us-east-1` (perfil `default`; autorización vigente del dueño) |
-| Función | `vendix-vex-analysis-sandbox` |
-| Imagen desplegada | `vendix-vex-analysis-runtime@sha256:2535679ca19143d876a3e3a15b62d617a59d086dc71e07077cd355ca9502bfc9` (tag inmutable `rt-a6e1eade84bb`, `linux/arm64`) |
+| **Resultado vigente (corrida 3)** | **NO CERTIFICADA.** Pasan 1, 2 y 5. **Fallan 3 y 4**: un invitado puede dejar marcadores en IPC SysV (`shm`/`msg`) que lee la tienda siguiente (99/100), bajar con `prlimit` los límites del handler y dejar el entorno inutilizable para las tiendas siguientes durante unos 15-19 min, y agotar los inodos de `/tmp` hasta que la invocación muere por `Sandbox.Timedout` a 30 s. `AI_ANALYSIS_CERTIFIED_DIGEST` **no se fija**. |
+| Fecha | 2026-11-22, 22:02-22:40 UTC (17:02-17:40 Bogotá) |
+| Cuenta / región | `us-east-1` (perfil `default`), corrida autorizada por el dueño |
+| Función | `vendix-vex-analysis-sandbox` (stack `vendix-vex-analysis-stack`) |
+| Imagen desplegada | `vendix-vex-analysis-runtime@sha256:2535679ca19143d876a3e3a15b62d617a59d086dc71e07077cd355ca9502bfc9` (tag inmutable `rt-a6e1eade84bb`, `linux/arm64`, subida 16:58:37 Bogotá) |
 | Runtime digest | `sha256:a6e1eade84bb2ee29b6793c83fa33839f8684f85bc68b3aea4abdcdb80b05c77` (`./runtime-digest.sh` sobre `8e39339b6`) |
-| Código medido | `8e39339b6`, incluye el fix `28ac85534` que sella `RLIMIT_NOFILE=(0,0)` antes del código invitado |
-| CodeSha256 / digest ECR | `2535679ca19143d876a3e3a15b62d617a59d086dc71e07077cd355ca9502bfc9` (coinciden; `ImageUri` fijado por digest; actualización completada 21:59:20Z) |
+| Código medido | `28ac85534` (sello `RLIMIT_NOFILE=(0,0)` antes del código del invitado); `8e39339b6` solo añade documentación |
+| Despliegue | `update-stack` con la plantilla previa (igual a `template.json`) y solo el parámetro `ImageUri` cambiado; actualizó únicamente `AnalysisFunction`. `CodeSha256 = 2535679c…bfc9`, `LastModified 2026-11-22T21:59:20Z`, `Active`/`Successful` |
 | Base | `public.ecr.aws/lambda/python:3.12@sha256:ed196260cbf6f74e3f64dd141ebe2401d78a15e6355925da98a3d3c3b4d35c6a` (sin cambios) |
 
-La corrida 1 (digest `c5aca9a0…`, runtime `0a0ed8a9…`) queda abajo como historial, sin cambios.
+Las corridas 2 y 1 quedan abajo como historial, sin cambios.
 
-## Corrida 3 · resultados T53 sobre el digest desplegado
+## Corrida 3 · historia de usuario
+
+**Como** dueño de Vendix en producción, **quiero** que el análisis en Python de Vex corra en una Lambda aislada y certificada **para** encender `AI_ANALYSIS_SANDBOX_ENABLED` sin que el código generado pueda salir a internet, leer credenciales de AWS ni ver, alterar o bloquear el análisis de otra tienda.
+
+**Pasos para probarlo** (consola del operador; el código hostil solo corre dentro de Lambda):
+
+1. Invocar un análisis trivial (sumar 1, 2 y 3) y ver la respuesta.
+2. Invocar programas hostiles: red (incluida la Runtime API, `/runtime/invocation/next` y la intercepción de la tienda siguiente), escritura fuera de `/tmp`, `/proc` del padre, agotar memoria/CPU/procesos/disco/inodos, daemon con doble `fork` y tocar los límites del handler.
+3. Invocar 100 veces alternando 3 tiendas en el mismo entorno caliente; cada ejecución deja residuos (daemon, symlink en `/tmp`, IPC SysV) y la siguiente los busca.
+4. Revisar IAM y red; comparar digests.
+
+**Criterios de aceptación observables:** el análisis trivial responde `status: ok`; cada programa hostil termina con un código acotado dentro del presupuesto de 25 s y sin dejar nada que afecte a la invocación siguiente; ninguna tienda ve datos de otra; los 6 puntos pasan sobre el mismo digest.
+
+**Lo que se observó:** el sello cierra la red por completo (la Runtime API ya no es alcanzable: 377/377 intentos de intercepción dan `EMFILE`) y la tienda A recibe su propio resultado. Pero quedan tres canales que no necesitan descriptores: IPC SysV entre tiendas, `prlimit` sobre el handler y el agotamiento de inodos de `/tmp`.
+
+## Corrida 3 · resultado por punto (digest desplegado `2535679c…` / runtime `a6e1eade…`)
 
 | # | Punto | Resultado |
 | --- | --- | --- |
-| 1 | Egreso cero | **PASA.** La VPC tiene DNS y hostnames deshabilitados; el SG no tiene ingress y solo permite el placeholder `127.0.0.1/32`; las tablas solo tienen rutas `local`; IGW, NAT y endpoints: 0. La syscall `libc.socket(AF_INET, SOCK_STREAM, 0)` desde el invitado devuelve `EMFILE` (24) con `RLIMIT_NOFILE=(0,0)`, antes de poder conectar a `169.254.100.1:9001`. La sonda HTTP `/runtime/invocation/next` y el robo de `nonce` no pudieron abrir un socket; no se observó ninguna conexión ni intercepción. |
-| 2 | FS, `/proc` y secretos | **FALLA / INCOMPLETO.** Sí se midió: `/proc/self/environ` y `/proc/<ppid>/{environ,mem,maps,fd}` pertenecen a UID 0; las lecturas devuelven `EMFILE`; `process_vm_readv` y `ptrace` devuelven `EPERM`; el entorno del hijo no contiene claves `AWS_*` ni `LAMBDA_*`. No se pudo completar la prueba de escritura fuera de `/tmp` ni symlink/FIFO de `result.json`: al intentarlas después, el handler rechazó la invocación durante el preflight, antes de ejecutar al invitado. |
-| 3 | Límites de recursos | **FALLA.** La sonda de doble `fork` + `setsid` no llegó a ejecutar. Tras la corrida 100×3, la invocación del probe y al menos cuatro invocaciones posteriores devolvieron `ANALYSIS_RUNTIME`, `sandbox error: OSError`, `duration_ms: 0`. El código del handler emite este error cuando falla `_harden_parent_dumpable()` o `_reap_strays()` antes de lanzar el proceso hijo; las respuestas y el log tail no permiten distinguir cuál. Por tanto no se certifican los límites ni la limpieza de daemon en esta corrida. |
-| 4 | Multi-tenant (100 × 3 tiendas) | **FALLA / INCOMPLETO.** Las 100 invocaciones secuenciales respondieron `status: ok`, digest correcto, marcador propio, número de filas y suma esperados; fallos de cruce: 0. El `handler_pid` reportado fue `2` en las 100. No se registró un `boot_id` u otro identificador único del entorno caliente; el PID `2` por sí solo no demuestra que Lambda no reciclara el entorno. Por criterio estricto, el requisito de 100 ejecuciones verificadas en un único entorno caliente queda sin certificar. |
-| 5 | Política IAM | **PASA.** La función está en la VPC dedicada; rol de ejecución confiado solo a Lambda, sin políticas administradas, con única inline `VpcEniOnly` y las cinco acciones ENI. Sin policy resource, Function URL, alias, event source mapping, layer, variable de entorno ni log group. VPC DNS `false/false`, SG sin ingress y egress solo loopback, 2 tablas con rutas `local`, 0 IGW/NAT/endpoints, subnets privadas. La simulación de `backend-invoke-policy.json` permite `lambda:InvokeFunction` al ARN de esta función y deniega `UpdateFunctionCode` y `InvokeFunctionUrl`; no se inspeccionó ni modificó el rol de producción del backend. |
-| 6 | Firma y digest | **FALLA (no se fija).** ECR tag inmutable, `CodeSha256`, digest ECR y `ResolvedImageUri` coinciden; las 100 respuestas T53 medidas reportan el runtime digest del repo. Como los puntos 2–4 no pasan la certificación, `AI_ANALYSIS_CERTIFIED_DIGEST` queda **sin fijar**. |
+| 1 | Egreso cero | **PASA.** Con `RLIMIT_NOFILE=(0,0)`, todo `socket` da `EMFILE` (Runtime API, IMDS, credenciales, proxy DNS, internet, EC2/RDS de producción, NTP, UDP, IPv6, `AF_UNIX`, netlink); raw y `AF_PACKET` → `EPERM`. **R1** (`GET /runtime/invocation/next`) → `EMFILE`; **R2** (19 s de intentos de intercepción desde la tienda C) → 377/377 `EMFILE`, y la víctima A recibe su total correcto, calculado por el handler (`duration_ms` 2395). El sello no se puede levantar y lo heredan los hijos y los `exec` |
+| 2 | FS, `/proc` y secretos | **PASA.** `mkdir`/`truncate`/`chmod`/`rename`/`symlink`/`utime` fuera de `/tmp` → `EROFS`; cualquier `open` → `EMFILE`; `/proc/<ppid>/{environ,mem}` de root; `readlink` de `exe`/`cwd`/`root`/`fd` del padre → `EACCES`; `process_vm_readv` y `ptrace` del padre → `EPERM` (64 bytes reales, 4 de 4); entorno del hijo sin `AWS_*`/`LAMBDA_*`; uid 993, capacidades 0; las cuatro variantes de `result.json` (symlink/FIFO antes y después del sello, directorio) → `ANALYSIS_OUTPUT` |
+| 3 | Límites de recursos | **FALLA.** 16 de los 17 casos de la lista y el daemon con doble `fork` terminan acotados y sin residuos. Fallan dos: (a) **`prlimit` sobre el handler**: el invitado baja el `RLIMIT_NOFILE` blando del padre (mismo uid) y todas las invocaciones siguientes de ese entorno, de cualquier tienda, responden `ANALYSIS_RUNTIME "sandbox error: OSError"` en 0 ms durante 15-19 min; (b) **llenar `/tmp` de inodos con `mkdir`** (no necesita descriptores) → `Sandbox.Timedout` a 30 s, sin sobre del handler, fuera del presupuesto de 25 s, 4 de 4 veces; la invocación siguiente tarda 6,7-8,9 s más |
+| 4 | Multi-tenant (100 × 3 tiendas) | **FALLA.** 11 de 12 controles dan 100/100 (sobre, `ok`, marcador propio, respuesta solo con el propio, total, log, symlink en `/tmp`, variables globales, procesos, `/tmp` estable, `environ` del padre). Pero **IPC SysV**: en 99/100 ejecuciones, la tienda lee por `shm` y `msg` el marcador que dejó la tienda anterior (la primera no tiene anterior). Además, la manipulación de `prlimit` del punto 3 deja a la tienda C bloqueando el análisis de A |
+| 5 | Política IAM | **PASA.** Rol de confianza solo `lambda.amazonaws.com`, sin permissions boundary ni administradas, inline única `VpcEniOnly` (5 acciones ENI); sin política de recurso, URL, alias, mapeos, capas, variables ni log group; concurrencia reservada 3. VPC con DNS `false/false`, rutas solo `local`, IGW/NAT/endpoints/peering/egress-only/TGW 0, subredes sin IP pública, SG sin ingress y egress solo `127.0.0.1/32` tcp/1. Drift `IN_SYNC` (0). `simulate-custom-policy` de `backend-invoke-policy.json`: `InvokeFunction` permitido solo sobre esta función; `UpdateFunctionCode`/`UpdateFunctionConfiguration`/`InvokeFunctionUrl` → `implicitDeny`; la política `vendix-vex-analysis-invoke` no existe (no aplicada) |
+| 6 | Firma y digest | **NO SE FIJA.** La cadena es trazable: `CodeSha256` = digest ECR del tag `rt-a6e1eade84bb` = `ResolvedImageUri` = parámetro `ImageUri`; las 171 respuestas del handler con sobre válido (de 176 invocaciones; las otras 5 son `Sandbox.Timedout`/`Runtime.ExitError` de Lambda) traen `runtime_digest = sha256:a6e1eade…b05c77` = `./runtime-digest.sh` en HEAD = `origin/feat/vex-plus-aws`. La imagen local se verificó antes del push: `ENV ANALYSIS_RUNTIME_DIGEST` igual, y `handler.py`/`runner.py` dentro de la imagen idénticos byte a byte a los del repo. Fallan 3 y 4 |
 
-### Evidencia y límites de la corrida 3
+## Hallazgo bloqueante 4 · IPC SysV entre tiendas (punto 4)
 
-- Con Colima apagado, `./runtime-digest.sh` dio `sha256:a6e1eade…b05c77`, igual al digest asociado al tag local `rt-a6e1eade84bb`; la imagen existente es `linux/arm64` y no se reconstruyó. El tag ECR es `rt-a6e1eade84bb`, inmutable, con digest `sha256:2535679c…50bfc9`. La Lambda quedó `Active` / `LastUpdateStatus=Successful`, fijada a ese mismo digest y con `LastModified=2026-11-22T21:59:20Z`.
-- Calentamiento: análisis trivial devuelve `status: ok`, total `6`, y el runtime digest esperado. Prueba de Runtime API: el import de `socket` falla cerrado; la llamada directa a `libc.socket` devuelve `-1/EMFILE`. No se llegó a enviar HTTP a `/2018-06-01/runtime/invocation/next` ni a observar un `nonce`.
-- `/proc`: UID propietario `0` para los ficheros de entorno del invitado y padre; lecturas bloqueadas con `OSError:24`; `process_vm_readv` y `ptrace` devuelven `-1/EPERM`; lista de variables AWS/Lambda del hijo vacía.
-- Multi-tenant: llamadas 1–100 alternaron A/B/C con marcadores únicos, respectivamente 40/55/70 filas por tienda; todas calcularon sumas esperadas y devolvieron solo su propio marcador. Las 100 respuestas conservaron `sha256:a6e1eade…b05c77`; se observó `handler_pid=2` en todas, pero no se midió un identificador único del entorno.
-- Fallo de preflight reproducido en tres invocaciones posteriores, incluida una tras esperar el posible recambio del entorno: `ANALYSIS_RUNTIME: sandbox error: OSError`, `duration_ms=0`; Lambda respondió HTTP 200 sin `FunctionError`. No se pudo determinar cuál de las dos comprobaciones de preflight (`_harden_parent_dumpable` / `_reap_strays`) lanzó la excepción. Ningún probe hostil se ejecutó en la Mac.
-- Colima quedó apagado y se cerró la sesión Docker de ECR al terminar el push.
+El sello solo impide **crear descriptores**. `shmget`/`shmat`/`msgget`/`msgsnd`/`semget` devuelven identificadores, no descriptores, y `ctypes` ya está cargado (lo importa numpy). Los objetos IPC son del kernel, no de un proceso: sobreviven a `killpg`, a `kill(-1)` y a la limpieza de `/tmp`. El handler no los borra.
 
-La corrida 2 queda a continuación como historial; sus resultados no se transfieren a este digest.
+```text
+i=0  A  ipc = {shm: ABSENT ENOENT, msg: ABSENT ENOENT}         planta TENANT-A-df1e…
+i=1  B  ipc = {shm: TENANT-A-df1e665973cec081, msg: TENANT-A-df1e…}   <- B lee el marcador de A
+i=2  C  ipc = {shm: TENANT-B-4275…, msg: TENANT-B-4275…}
+...  99/100 con el marcador de la tienda anterior; el symlink en /tmp: 0/100 (lo borra la limpieza)
+```
 
-## Historia de usuario
+**Impacto:** un invitado de una tienda (por ejemplo, inducido por un prompt incrustado en sus datos) deja datos en memoria del kernel y el invitado de otra tienda los lee después en el mismo entorno caliente. También sirve como canal persistente entre ejecuciones de la misma tienda.
+
+**Arreglo propuesto (no aplicado):** antes de cargar cada tienda y después de matar al invitado, el handler (mismo uid) enumera `/proc/sysvipc/{shm,msg,sem}` y elimina con `IPC_RMID` todo objeto del uid del invitado; si no puede leer o eliminar alguno, falla cerrado. Prueba offline: un invitado que planta `shm`/`msg`/`sem` y una ejecución posterior que los busca.
+
+## Hallazgo bloqueante 5 · el invitado puede bajar los límites del handler (punto 3)
+
+El invitado y el handler comparten uid 993. `prlimit64(ppid, …)` permite **bajar** límites de otro proceso del mismo uid sin capacidades. El invitado bajó el `RLIMIT_NOFILE` blando del handler de 1024 a 4:
+
+```text
+22:12Z  prlimit parent      -> parent NOFILE before (1024, 1024), after (4, 1024); su propia respuesta: ANALYSIS_OUTPUT
+        next tenant A       -> ANALYSIS_RUNTIME "sandbox error: OSError", duration_ms 1
+        6 sondas (0-78 s)   -> idéntico, duration_ms 0
+22:17Z  sonda               -> idéntico
+22:32Z  (tras 15 min sin invocar) -> status ok: Lambda recicló el entorno
+```
+
+Falla cerrado (no se filtran datos), pero un invitado deja inutilizable un entorno para todas las tiendas durante unos 15-19 min, y con concurrencia reservada 3 basta con tres invocaciones para bloquear todos los entornos. Con el mismo mecanismo puede bajar `RLIMIT_AS`, `RLIMIT_NPROC`, `RLIMIT_FSIZE` o `RLIMIT_CPU` del handler.
+
+**Arreglo propuesto (no aplicado):** al inicio de cada invocación, el handler verifica que sus propios límites (`getrlimit`) siguen en los valores de arranque y, si no, termina el proceso (`os._exit`) para que Lambda reinicie el runtime limpio (el caso «matar al padre» ya demuestra que eso falla cerrado y se recupera); más robusto: que el hijo corra con otro uid, lo que exige privilegios que Lambda no da. Prueba: el caso `prlimit parent` seguido de una tienda víctima debe dar el error solo en la invocación del atacante.
+
+## Hallazgo bloqueante 6 · agotar los inodos de `/tmp` rompe el presupuesto (punto 3)
+
+`mkdir` no crea descriptores. El invitado crea unos 3 500 directorios/s; la limpieza posterior de `/tmp` no cabe en la reserva de 2 s:
+
+| Caso | Resultado |
+| --- | --- |
+| 20 000 `mkdir` | `ok`; invitado 5,6 s, handler 9,5 s en total |
+| 60 000 / 200 000 `mkdir` / hasta `ENOSPC` | `Sandbox.Timedout` a 30 s (4 de 4), sin sobre del handler; el backend lo vería como `ANALYSIS_EXPIRED` a 25 s |
+| invocación siguiente | `ok`, pero 6,7-8,9 s de handler (el runtime reinicia y limpia lo que quedó); inodos de vuelta en 147 983 |
+
+No se observa fuga de datos ni residuo visible para la tienda siguiente, pero un programa hostil no termina con un código acotado dentro del presupuesto.
+
+**Arreglo propuesto (no aplicado):** acotar la limpieza (borrar el directorio del invitado por renombrado + borrado diferido o con presupuesto de tiempo) y/o limitar las entradas que el invitado puede crear; prueba con 200 000 `mkdir`.
+
+## Evidencia por punto (corrida 3)
+
+Arnés: el de la corrida 2 (`aws lambda invoke`, `AWS_MAX_ATTEMPTS=1`, `--log-type Tail`, validación del sobre contra `execution_id`, `nonce` y `runtime_digest` esperados), con sondas reescritas para no usar descriptores (`stat`, `readlink`, `statvfs`, `kill(pid, 0)`, `fstat`, syscalls por `ctypes`). Ningún programa hostil se ejecutó en la Mac. Calentamiento: el primer análisis trivial tardó **17,8 s de handler en frío** (precarga de scipy/statsmodels, ver hallazgos operativos); los siguientes, 2,2-2,5 s, `status: ok`, `total = 6`.
+
+### 1 · Egreso cero
+
+| Sonda desde el invitado | Resultado |
+| --- | --- |
+| Módulos ya cargados | `socket`, `ssl`, `ctypes`, `select`, `urllib.request`, `http.client`, `subprocess`, `threading`, `mmap`: todos presentes (los arrastra pandas/numpy) |
+| `RLIMIT_NOFILE` / descriptores abiertos | `(0, 0)` / `0:/dev/null`, `1` y `2` (archivos borrados del handler), `3:<own>/result.json.part` |
+| TCP a `169.254.100.1:9001`, IMDS, `169.254.170.2`, `169.254.100.5:53`, `1.1.1.1:443`, `8.8.8.8:53`, EC2 `10.0.10.80:443`, RDS `10.0.20.75:5432`, NTP | `EMFILE` |
+| Socket UDP, TCP6, `AF_UNIX`, netlink / raw, `AF_PACKET` | `EMFILE` / `EPERM` |
+| `getaddrinfo('example.com')`, `urllib` a la Runtime API | `EMFILE` |
+| **R1** `GET /2018-06-01/runtime/invocation/next` | `EMFILE`: no hay conexión, ni evento, ni `nonce` |
+| **R2** atacante C 19 s → víctima A → atacante C | C: 377 intentos, 377 `EMFILE`; A: `ok`, total 212 549 = esperado, `duration_ms` 2395; C: sin el marcador de A |
+| Syscalls crudas: `socket` (4 familias), `eventfd2`, `epoll_create1`, `memfd_create`, `userfaultfd`, `openat`, `dup`, `pipe2`, `inotify_init1` | `EMFILE`; `dup3(1, 0)` → `EBADF`; `bpf` → `EPERM`; `io_uring_setup`, `pidfd_open` → `ENOSYS` |
+| Levantar el sello: `setrlimit` (1,1)/(0,1)/(1024,1024); `prlimit64(self, 64)` | `ValueError` / `EPERM` |
+| Hijo con `fork` abre un socket; `exec` de `python3 -c socket…` | `EMFILE`; exit 127 (el intérprete no puede abrir sus archivos) |
+
+### 2 · Sistema de archivos, `/proc` y secretos
+
+| Sonda | Resultado |
+| --- | --- |
+| `mkdir` en `/var/task`, `/var/runtime`, `/opt`, `/etc`, `/usr/lib`, `/`, `/var/lang/bin`, `/var/tmp`, `/run`, `/home` | `EROFS` |
+| `truncate`/`chmod`/`rename` de `handler.py`, symlink en `/var/task`, `utime` del intérprete | `EROFS` |
+| `open` de `handler.py` (rw), `core_pattern` (w), `/proc/self/status` | `EMFILE` |
+| `mkdir` en el directorio propio de `/tmp` (control) | permitido |
+| Entorno del hijo | `HOME, LANG, MKL/OMP/OPENBLAS_NUM_THREADS, PATH, PYTHONDONTWRITEBYTECODE, TMPDIR`; sin `AWS_*` ni `LAMBDA_*` |
+| Identidad | uid/euid 993, gid 990, sin grupos; `capget` eff/prm/inh = 0 |
+| Dueño de `/proc/<ppid>/environ`, `/proc/<ppid>/mem`, `/proc/self/environ`, `/proc/1/environ` | uid 0 (no-dumpables) |
+| `open` de `/proc/<ppid>/{environ,mem,maps}` / `readlink` de `exe`, `cwd`, `root`, `fd/0`, `fd/3` | `EMFILE` / `EACCES` |
+| Intérprete | `/var/lang/bin/python3.12`, modo `0711` |
+| `process_vm_readv(ppid)` 64 bytes, `ptrace(ATTACH)` al padre y a init | `EPERM` |
+| `unshare(NEWUSER/NEWNET)`, `seccomp`, `prctl` | `EPERM` |
+| `result.json.part` sustituido por symlink / FIFO; `result.json` symlink previo / directorio | `ANALYSIS_OUTPUT "result file cannot be opened safely"` / `"…is not a regular file"` / `"…cannot be opened safely"` / `"…is not a regular file"` |
+
+### 3 · Límites de recursos
+
+Cada caso va seguido de una sonda de estado (procesos visibles por `stat`/`kill(0)` y `statvfs` de `/tmp`); en todas: solo `init`, 513 MB libres (511 tras «cerrar el fd», ver hallazgos operativos), 147 983 inodos libres.
+
+| Caso hostil | Respuesta | Handler (s) |
+| --- | --- | --- |
+| `bytearray` 2 GiB / lista sin fin / numpy 30 000² | `ANALYSIS_MEMORY` | 2,2 / 2,9 / 2,2 |
+| CPU infinita / `sleep(120)` | `ANALYSIS_TIMEOUT` | 23,0 / 23,0 |
+| Fork bomb (hijos dormidos) | `ok` (tope `RLIMIT_NPROC`) | 3,4 |
+| Fork bomb exponencial + `setsid` | `ANALYSIS_TIMEOUT` | 23,5 |
+| Thread bomb | `ok` | 2,3 |
+| Inundación de stdout / stderr con rutas | `ANALYSIS_RUNTIME "File too large"` (sin rutas) | 2,3 / 2,4 |
+| 600 MB por el descriptor de resultado | `ANALYSIS_RUNTIME "File too large"` | 2,4 |
+| Abrir un archivo nuevo en `/tmp` | `ANALYSIS_RUNTIME` con el mensaje del sello | 2,2 |
+| Salida de más de 256 KB | `ANALYSIS_OUTPUT` | 2,4 |
+| `setsid()` / cerrar el descriptor de resultado | `ANALYSIS_RUNTIME` (`EPERM` / `EBADF`) | 2,4 / 2,4 |
+| Matar al padre | `Runtime.ExitError` (falla cerrado); la sonda siguiente, limpia | 2,8 (cliente) |
+| Daemon con doble `fork` + `setsid` | control: vivo en su ejecución (pid 10, uid 993); tienda A siguiente y sonda posterior: solo `init` | 3,1 |
+| **Llenar `/tmp` de inodos (`mkdir`)** | **`Sandbox.Timedout` 30 s** (hallazgo 6) | — |
+| **`prlimit` del handler** | **entorno inutilizable 15-19 min** (hallazgo 5) | — |
+
+### 4 · Aislamiento multi-tenant
+
+100 invocaciones consecutivas, A → B → C (34/33/33), con 40, 55 y 70 filas marcadas, 22:32:52-22:38:54Z; 2848-3053 ms por análisis (mediana 2953). Las 100 reportan el mismo identificador de entorno (hora de creación de `/proc/1` y del handler, `ppid = 2`; sin `boot_id`, que ya no se puede leer). Cada ejecución deja un daemon con doble `fork` + `setsid`, un symlink `/tmp/vex-t53-plant` y objetos IPC SysV (`shm` + `msg`) con su marcador; la siguiente los busca.
+
+| Comprobación por ejecución | Pasan |
+| --- | --- |
+| Sobre válido / `status: ok` / total correcto | 100/100 / 100/100 / 100/100 |
+| Marcador propio visto / la respuesta solo trae el propio | 100/100 / 100/100 |
+| Ningún marcador en el log de la invocación | 100/100 |
+| Symlink de la ejecución anterior en `/tmp` | 100/100 ausente |
+| Ninguna variable global de la ejecución anterior | 100/100 |
+| Ningún proceso de la ejecución anterior (solo `init`) | 100/100 |
+| `/tmp` estable (espacio e inodos libres) | 100/100 |
+| `/proc/<ppid>/environ` denegado | 100/100 |
+| **Ningún marcador ajeno en IPC SysV** | **1/100** (hallazgo 4) |
+
+El control «memoria del padre» de esta tanda usó una sonda defectuosa (`process_vm_readv` con 0 iovecs devuelve 0 sin leer nada); se repitió con 64 bytes reales sobre A, B y C: `EPERM` 3/3, igual que en el punto 2.
+
+### 5 · Política IAM y red
+
+Ver la tabla de resultados; todo de solo lectura (`get-role`, `get-role-policy`, `get-policy`, `list-*`, `describe-*`, `detect-stack-drift`, `simulate-custom-policy`).
+
+## Hallazgos operativos (corrida 3)
+
+1. **Ejecución paralela en la misma función.** Entre 22:00 y 22:20Z otra sesión ejecutó en paralelo una «corrida 3» sobre la misma función y la publicó en `34d786d10`, con los puntos 2-4 incompletos por un `ANALYSIS_RUNTIME "sandbox error: OSError"` en el preflight. Ese error coincide en hora con la sonda `prlimit parent` de esta corrida (22:12-22:13Z), que bajó el `RLIMIT_NOFILE` del handler: es el hallazgo 5, no un defecto del preflight. Esta sección reemplaza ese informe. Sus mediciones coincidentes (digests, punto 1, `/proc`, IAM, 100 ejecuciones sin cruce de marcadores en las respuestas) se reproducen aquí.
+2. **Arranque en frío de 17,8 s** de handler para un análisis trivial (precarga de scipy/statsmodels antes del sello); deja solo 7 s del presupuesto de 25 s. No es de aislamiento, pero conviene medirlo y, si se repite, reducir la precarga o subir memoria.
+3. **2 MB de espacio de `/tmp` que no vuelven** tras «cerrar el descriptor de resultado» (513 → 511 MB, mismos inodos libres): probablemente un archivo borrado que sigue abierto en el handler. No se investigó; no es visible para el invitado.
+4. **Escaneo de ECR de `rt-a6e1eade84bb`:** 4 HIGH, 6 MEDIUM, 1 LOW: los mismos conteos que las imágenes anteriores (vienen de la base).
+5. **Recursos:** solo se subió la imagen `rt-a6e1eade84bb` a ECR y se actualizó el parámetro `ImageUri` del stack (una detección de drift). En el entorno caliente pueden quedar objetos IPC SysV de la prueba con marcadores sintéticos (no son datos reales) hasta que Lambda lo recicle. Colima se apagó tras el push.
+
+## Valores para el release (corrida 3)
+
+| Variable | Valor |
+| --- | --- |
+| `AI_ANALYSIS_SANDBOX_ENABLED` | sin definir o `false`. No hay digest certificado |
+| `AI_ANALYSIS_LAMBDA_FUNCTION_ARN` | ARN de `vendix-vex-analysis-sandbox` en `us-east-1` |
+| `AI_ANALYSIS_LAMBDA_REGION` | `us-east-1` |
+| `AI_ANALYSIS_RUNTIME_DIGEST` | `sha256:a6e1eade84bb2ee29b6793c83fa33839f8684f85bc68b3aea4abdcdb80b05c77` (desplegado, **no certificado**) |
+| `AI_ANALYSIS_CERTIFIED_DIGEST` | **NO SE FIJA.** T53 falla en los puntos 3 y 4 |
+
+## Para re-certificar (tras la corrida 3)
+
+1. Borrar en el handler los objetos IPC SysV del uid del invitado antes y después de cada tienda (hallazgo 4).
+2. Detectar en el handler límites propios alterados y reiniciar el runtime (hallazgo 5).
+3. Acotar la limpieza de `/tmp` ante agotamiento de inodos (hallazgo 6).
+4. Pruebas offline de los tres casos; nuevo runtime digest, imagen `rt-<12 hex>`, `ImageUri` fijado por digest y T53 completa con R1, R2, IPC SysV, `prlimit` del padre y 200 000 `mkdir` como casos obligatorios.
+
+---
+
+## Historial · corrida 2 (digest `35346aa5…`, runtime `3a4f233b…`)
+
+Corrida del mismo día, 19:57-20:12 UTC (14:57-15:12 Bogotá), sobre `e27f50b5b`, imagen `rt-3a4f233be693` (`sha256:35346aa5de5f2bca9749525f31c00ba180571f22dd51ae533191bd95332c67a2`). **NO CERTIFICADA**: fallan los puntos 1 y 4 (Runtime API). Se conserva tal como se publicó.
+
+### Historia de usuario
 
 **Como** dueño de Vendix en producción, **quiero** que el análisis en Python de Vex corra en una Lambda aislada y certificada **para** encender `AI_ANALYSIS_SANDBOX_ENABLED` sin que el código generado pueda salir a internet, leer credenciales de AWS ni ver o alterar datos de otra tienda.
 
@@ -57,7 +216,7 @@ La corrida 2 queda a continuación como historial; sus resultados no se transfie
 
 **Lo que se observó:** el análisis trivial responde `status: ok` con `total = 6` en ~2,1 s, y los arreglos de la corrida 1 funcionan (padre ilegible, daemon eliminado, 100/100 del checklist). Pero el invitado de la tienda C, abriendo un socket a `169.254.100.1:9001`, falsificó su propia respuesta, recibió la invocación siguiente de la tienda A con todos sus datos, le respondió a A con un resultado inventado y entregó el marcador de A en la invocación siguiente de C. Las tres respuestas traen un sobre válido (`execution_id`, `nonce`, `runtime_digest`): el backend las aceptaría.
 
-## Corrida 2 (historial) · resultado por punto, digest desplegado `35346aa5…` / runtime `3a4f233b…`
+### Resultado por punto (corrida 2), digest desplegado `35346aa5…` / runtime `3a4f233b…`
 
 | # | Punto | Resultado |
 | --- | --- | --- |
@@ -68,7 +227,7 @@ La corrida 2 queda a continuación como historial; sus resultados no se transfie
 | 5 | Política IAM | **PASA.** Rol solo ENI; sin política de recurso, URL, alias, mapeos ni logs; la política del backend solo permite `InvokeFunction` sobre este ARN y **no está aplicada** |
 | 6 | Firma y digest | **NO SE FIJA.** La identidad es trazable (CodeSha256 = digest ECR = `ImageUri` fijado; `runtime_digest` de todas las respuestas del handler, ~170 invocaciones, = `runtime-digest.sh` de `e27f50b5b`), pero fallan 1 y 4 |
 
-## Hallazgo bloqueante 3 · el invitado secuestra la Runtime API de Lambda
+### Hallazgo bloqueante 3 · el invitado secuestra la Runtime API de Lambda
 
 La Runtime API vive dentro de la microVM (`169.254.100.1:9001`): ningún security group, ruta ni NACL la filtra y no pide autenticación. El handler ya no deja leer su memoria ni su entorno, pero el invitado no lo necesita: le pide el evento directamente a Lambda.
 
@@ -101,11 +260,11 @@ Al recibir la respuesta falsificada, Lambda da por terminada la invocación de C
 
 **Arreglo:** no se aplicó en esta corrida (prohibido reconstruir). Hace falta que el invitado no pueda abrir conexiones hacia la Runtime API antes de ejecutar su código, construir una imagen nueva, desplegarla y repetir T53 completa con R1 y R2 como casos obligatorios de los puntos 1 y 4. Durante esta corrida otra sesión preparó ese arreglo (sellar `RLIMIT_NOFILE` antes del código del invitado) y lo dejó en el commit local `28ac85534`, sin publicar al cierre. No forma parte de lo medido aquí: su runtime digest es `sha256:a6e1eade84bb2ee29b6793c83fa33839f8684f85bc68b3aea4abdcdb80b05c77`, no está construido ni desplegado y exige su propia T53.
 
-## Evidencia por punto (corrida 2)
+### Evidencia por punto (corrida 2)
 
 Arnés: `aws lambda invoke` con `AWS_MAX_ATTEMPTS=1` (un intento, sin reintentos) y `--log-type Tail` desde la Mac del operador; ningún programa hostil se ejecutó en la Mac. Cada respuesta se validó contra el sobre (`vendix.analysis/v1`, `execution_id`, `nonce` y `runtime_digest` esperados): **todas las respuestas del handler pasan**, y también las falsificadas por R2. Calentamiento: 3 invocaciones triviales, `status: ok`, `total = 6`, 2122-2159 ms. Las invocaciones secuenciales caen en el mismo entorno caliente (`boot_id 70a2903a`, runtime pid 2 / ppid 0); una sonda aislada cayó en un segundo entorno (`828f582a`), también limpio.
 
-### 1 · Egreso cero
+#### 1 · Egreso cero
 
 | Destino | Resultado |
 | --- | --- |
@@ -121,7 +280,7 @@ Arnés: `aws lambda invoke` con `AWS_MAX_ATTEMPTS=1` (un intento, sin reintentos
 | TCP `169.254.100.5:53` (proxy DNS local) | conecta, no responde |
 | **TCP `169.254.100.1:9001` (Runtime API)** | **abierto y explotable: R1 y R2** |
 
-### 2 · Sistema de archivos, `/proc` y secretos
+#### 2 · Sistema de archivos, `/proc` y secretos
 
 | Sonda | Resultado |
 | --- | --- |
@@ -139,7 +298,7 @@ Arnés: `aws lambda invoke` con `AWS_MAX_ATTEMPTS=1` (un intento, sin reintentos
 | `result.json` como symlink / como FIFO | `ANALYSIS_OUTPUT "result file cannot be opened safely"` / `"result file is not a regular file"` |
 | Logs | el grupo `/aws/lambda/vendix-vex-analysis-sandbox` no existe y el rol no puede crearlo; el `Tail` solo trae `START/END/REPORT` |
 
-### 3 · Límites de recursos
+#### 3 · Límites de recursos
 
 Cada caso va entre una sonda previa y una posterior; las tres cayeron en el mismo entorno (`70a2903a`) y el salto de PID entre ellas confirma que el caso corrió allí.
 
@@ -171,7 +330,7 @@ after               ok   NO_DAEMON; solo init
 
 Los tiempos de espera ahora responden a 23,0 s (`wall_ms` menos la reserva de 2 s), dentro del presupuesto de 25 s del backend: queda resuelto el hallazgo operativo 2 de la corrida 1.
 
-### 4 · Aislamiento multi-tenant
+#### 4 · Aislamiento multi-tenant
 
 100 invocaciones consecutivas, A → B → C (34/33/33), con 40, 55 y 70 filas marcadas. Las 100 cayeron en el entorno `70a2903a/ppid=2`. Duración por análisis: 2631-2909 ms (mediana 2720 ms). Además del checklist de la corrida 1, **cada ejecución deja un daemon con doble `fork` + `setsid` y un archivo en la raíz de `/tmp`** con su marcador, y la siguiente los busca.
 
@@ -191,7 +350,7 @@ Los tiempos de espera ahora responden a 23,0 s (`wall_ms` menos la reserva de 2 
 
 El arnés comparaba el total como entero y la tabla lo devuelve como texto; se re-evaluó desde las respuestas guardadas con los totales esperados (deterministas). **Este 100/100 no certifica el punto**: la sonda R2 (hallazgo bloqueante 3) demuestra la fuga entre tiendas sobre el mismo digest.
 
-### 5 · Política IAM (digest desplegado)
+#### 5 · Política IAM (digest desplegado)
 
 ```text
 rol de ejecución   trust: lambda.amazonaws.com · sts:AssumeRole · sin permissions boundary
@@ -217,7 +376,7 @@ backend            política vendix-vex-analysis-invoke: NoSuchEntity (no aplica
 | `lambda:UpdateFunctionConfiguration` | implicitDeny | implicitDeny | implicitDeny |
 | `lambda:InvokeFunctionUrl` | implicitDeny | implicitDeny | implicitDeny |
 
-### 6 · Identidad del digest
+#### 6 · Identidad del digest
 
 | Fuente | Valor |
 | --- | --- |
@@ -229,7 +388,7 @@ backend            política vendix-vex-analysis-invoke: NoSuchEntity (no aplica
 
 La cadena es trazable de punta a punta, pero el digest no se certifica: fallan los puntos 1 y 4.
 
-## Hallazgos operativos (corrida 2, no bloquean por sí solos)
+### Hallazgos operativos (corrida 2, no bloquean por sí solos)
 
 1. **Arranque en frío:** no se repitió; la primera invocación respondió en 2,2 s (la imagen ya estaba cargada por la corrida interrumpida).
 2. **Matar al padre** reinicia el runtime dentro de la misma microVM (mismo `boot_id`, pid desde 5), no necesariamente un entorno nuevo; el `kill(-1)` previo a cada tienda cubre ese caso y la sonda siguiente lo confirma. La sonda R2 también provocó un reinicio del runtime.
@@ -237,7 +396,7 @@ La cadena es trazable de punta a punta, pero el digest no se certifica: fallan l
 4. **Código posterior a lo medido:** durante la corrida otra sesión commiteó localmente `28ac85534` (`handler.py`, `runner.py`, `test_runner.py`, `README.md`). Lo medido es exactamente `e27f50b5b`; desde `28ac85534` el repo calcula otro runtime digest y la T53 de esta corrida no lo cubre.
 5. **Recursos:** no se creó, modificó ni borró ningún recurso en esta corrida (solo invocaciones y lecturas; una detección de drift del stack). La imagen `rt-0a0ed8a9655b` de la corrida 1 sigue en ECR.
 
-## Valores para el release (corrida 2)
+### Valores para el release (corrida 2)
 
 | Variable | Valor |
 | --- | --- |
@@ -249,7 +408,7 @@ La cadena es trazable de punta a punta, pero el digest no se certifica: fallan l
 
 La política del backend, el comando para adjuntarla y el costo estimado no cambian respecto de la corrida 1 (ver historial); la política sigue sin aplicarse.
 
-## Para re-certificar
+### Para re-certificar (tras la corrida 2)
 
 1. Impedir que el invitado alcance la Runtime API (`169.254.100.1:9001`) antes de ejecutar su código, con pruebas offline del bloqueo.
 2. `./runtime-digest.sh` → nuevo `AI_ANALYSIS_RUNTIME_DIGEST`; construir `linux/arm64` y subir con tag inmutable `rt-<12 hex>`.
