@@ -1,9 +1,9 @@
 {
   "AWSTemplateFormatVersion": "2010-09-09",
-  "Description": "Vex analysis sandbox: Lambda image in a VPC with private subnets only (no IGW, no NAT, no VPC endpoints), no egress security group and an execution role limited to ENI management. Deployed by an operator, not by the app.",
+  "Description": "Vex analysis sandbox: Lambda image in a VPC with private subnets only (no IGW, no NAT, no VPC endpoints, VPC DNS resolver disabled), no egress security group and an execution role limited to ENI management. Deployed by an operator, not by the app.",
   "Parameters": {
     "ImageUri": { "Type": "String", "Description": "ECR image URI pinned by digest (repo@sha256:...)", "AllowedPattern": "^.+@sha256:[0-9a-f]{64}$" },
-    "FunctionName": { "Type": "String", "Default": "vendix-agent-analysis" },
+    "FunctionName": { "Type": "String", "Default": "vendix-vex-analysis-sandbox", "AllowedPattern": "^vendix-vex-analysis-[a-z0-9-]{1,40}$" },
     "ReservedConcurrency": { "Type": "Number", "Default": 3, "MinValue": 1 },
     "Architecture": { "Type": "String", "Default": "arm64", "AllowedValues": ["arm64", "x86_64"] },
     "VpcCidr": { "Type": "String", "Default": "10.77.0.0/24" },
@@ -15,9 +15,9 @@
       "Type": "AWS::EC2::VPC",
       "Properties": {
         "CidrBlock": { "Ref": "VpcCidr" },
-        "EnableDnsSupport": true,
+        "EnableDnsSupport": false,
         "EnableDnsHostnames": false,
-        "Tags": [{ "Key": "Name", "Value": "vendix-agent-analysis-isolated" }]
+        "Tags": [{ "Key": "Name", "Value": { "Fn::Sub": "${FunctionName}-isolated" } }]
       }
     },
     "PrivateSubnetA": {

@@ -18,6 +18,14 @@ test('no internet path: no IGW, NAT, endpoints or default routes', () => {
   assert.strictEqual(ofType('AWS::EC2::Route').length, 0);
 });
 
+test('no DNS channel: the VPC resolver is disabled (T53: security groups never filter Amazon DNS)', () => {
+  const vpcs = ofType('AWS::EC2::VPC');
+  assert.strictEqual(vpcs.length, 1);
+  assert.strictEqual(vpcs[0].Properties.EnableDnsSupport, false);
+  assert.strictEqual(vpcs[0].Properties.EnableDnsHostnames, false);
+  assert.strictEqual(ofType('AWS::Route53Resolver::ResolverEndpoint').length, 0);
+});
+
 test('subnets are private', () => {
   const subnets = ofType('AWS::EC2::Subnet');
   assert.ok(subnets.length >= 2);

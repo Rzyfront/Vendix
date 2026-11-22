@@ -1,13 +1,13 @@
 # Vex analysis sandbox image (vendix.analysis/v1). Built and pushed by an
-# operator pipeline, never on a developer machine.
+# operator, never run with guest code on a developer machine.
 #
-# Base image: official AWS Lambda Python 3.12, pinned by digest. The pipeline
-# replaces the placeholder with the digest it resolved and reviewed.
-FROM public.ecr.aws/lambda/python:3.12@sha256:<PIN_AT_BUILD>
+# Base image: official AWS Lambda Python 3.12, linux/arm64 manifest pinned by
+# digest (template.json Architecture defaults to arm64). Changing it re-opens T53.
+FROM public.ecr.aws/lambda/python:3.12@sha256:ed196260cbf6f74e3f64dd141ebe2401d78a15e6355925da98a3d3c3b4d35c6a
 
-# Content identity of this build (sha256 over code + lockfile), computed by the
-# pipeline. An image cannot contain its own digest, so certification (T53)
-# binds this value to the real image digest in certification-report.json.
+# Content identity of this build: output of ./runtime-digest.sh (sha256 over
+# Dockerfile + lockfile + code). An image cannot contain its own digest, so
+# certification (CERTIFICACION-T53.md) binds this value to the ECR image digest.
 ARG ANALYSIS_RUNTIME_DIGEST
 ENV ANALYSIS_RUNTIME_DIGEST=${ANALYSIS_RUNTIME_DIGEST}
 
