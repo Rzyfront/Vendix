@@ -5,6 +5,7 @@ import { AgentDeadline, agentDeadlineContext } from '../tasks/agent-deadline';
 import { AIToolRegistry } from '../tools/ai-tool-registry';
 import type { ToolExecutionResult } from '../tools/interfaces/tool.interface';
 import { codeModeInvocation } from './codemode-invocation.context';
+import { CodeModePolicyService } from './codemode-policy.service';
 import { validateCodeModeResponse } from './codemode-response.validator';
 import {
   CODEMODE_LIMITS,
@@ -32,7 +33,6 @@ import {
   codeModeTenantId,
   SandboxLambdaClientService,
 } from './sandbox-lambda-client.service';
-import { SandboxPolicyService } from './sandbox-policy.service';
 
 /** Constant fingerprint of the Code Mode protocol and its numeric limits. */
 const POLICY_DIGEST = `sha256:${createHash('sha256')
@@ -99,7 +99,7 @@ export class CodeModeBridgeService implements CodeModeRunner {
 
   constructor(
     private readonly registry: AIToolRegistry,
-    private readonly policy: SandboxPolicyService,
+    private readonly policy: CodeModePolicyService,
     private readonly client: SandboxLambdaClientService,
     private readonly audit: SandboxAuditRepository,
   ) {}

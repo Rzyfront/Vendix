@@ -16,7 +16,12 @@ import { VexActivityFeedService } from './services/vex-activity-feed.service';
 import { VexSuggestionsService } from './services/vex-suggestions.service';
 import { AIToolRegistry } from '../../../ai-engine/tools/ai-tool-registry';
 import { createComputeTools } from '../../../ai-engine/tools/domains/compute.tools';
-import { createAnalysisTools } from '../../../ai-engine/tools/domains/code-execution.tools';
+import {
+  createAnalysisTools,
+  createCodeModeTools,
+} from '../../../ai-engine/tools/domains/code-execution.tools';
+import { CodeModeBridgeService } from '../../../ai-engine/sandbox/codemode-bridge.service';
+import { CodeModePolicyService } from '../../../ai-engine/sandbox/codemode-policy.service';
 import { SandboxAnalysisBrokerService } from '../../../ai-engine/sandbox/sandbox-analysis-broker.service';
 import { AIEntitlementsResolverService } from '../subscriptions/services/ai-entitlements-resolver.service';
 import { createVexBlockTools } from '../../../ai-engine/tools/domains/vex-blocks.tools';
@@ -28,6 +33,31 @@ import { VexiVoiceConfirmationService } from '../vexi/vexi-voice-confirmation.se
 import { SubscriptionAccessService } from '../subscriptions/services/subscription-access.service';
 import { RequestContextService } from '../../../common/context/request-context.service';
 import { randomUUID } from 'node:crypto';
+
+/**
+ * Whether the store's effective plan grants a Vex capability. Fails closed: no
+ * plan, no row, a disabled row, a cap of 0 or any resolver error is OFF. One
+ * predicate for every plan-gated Vex tool (`code_analysis`, `code_mode`).
+ */
+async function planGrantsVexCapability(
+  entitlements: AIEntitlementsResolverService,
+  storeId: number,
+  capabilityKey: string,
+): Promise<boolean> {
+  try {
+    const resolved = await entitlements.resolveForStore(storeId);
+    if (!resolved.found || resolved.planId === null) return false;
+    return resolved.rows.some(
+      (r) =>
+        r.agent_key === 'vex' &&
+        r.capability_key === capabilityKey &&
+        r.enabled &&
+        r.cap_value !== 0,
+    );
+  } catch {
+    return false; // fail closed
+  }
+}
 
 /**
  * Vex: whole-plan approval, UI blocks and the business log.
@@ -77,6 +107,8 @@ export class VexModule implements OnModuleInit {
     private readonly writeBatches: WriteBatchService,
     private readonly analysisRunner: SandboxAnalysisBrokerService,
     private readonly entitlements: AIEntitlementsResolverService,
+    private readonly codeModeRunner: CodeModeBridgeService,
+    private readonly codeModePolicy: CodeModePolicyService,
   ) {}
 
   onModuleInit(): void {
@@ -121,21 +153,22 @@ export class VexModule implements OnModuleInit {
         runner: this.analysisRunner,
         blocks: this.blocks,
         entitlements: {
-          codeAnalysisEnabled: async (storeId) => {
-            try {
-              const resolved = await this.entitlements.resolveForStore(storeId);
-              if (!resolved.found || resolved.planId === null) return false;
-              return resolved.rows.some(
-                (r) =>
-                  r.agent_key === 'vex' &&
-                  r.capability_key === 'code_analysis' &&
-                  r.enabled &&
-                  r.cap_value !== 0,
-              );
-            } catch {
-              return false; // fail closed
-            }
-          },
+          codeAnalysisEnabled: (storeId) =>
+            planGrantsVexCapability(this.entitlements, storeId, 'code_analysis'),
+        },
+      }),
+    );
+    // F10/T65: Code Mode scripts over allowlisted reads, gated by plan. The
+    // runner stays off until the Lambda is enabled and certified.
+    this.toolRegistry.registerMany(
+      createCodeModeTools({
+        runner: this.codeModeRunner,
+        blocks: this.blocks,
+        registry: this.toolRegistry,
+        policy: this.codeModePolicy,
+        entitlements: {
+          codeModeEnabled: (storeId) =>
+            planGrantsVexCapability(this.entitlements, storeId, 'code_mode'),
         },
       }),
     );

@@ -22,6 +22,16 @@ export const SANDBOX_READONLY_ALLOWLIST = Object.freeze([
 ] as const);
 export const SANDBOX_POLICY_VERSION = 'readonly-products-v1';
 
+/**
+ * Which tool names an execution may name and which live tools still qualify.
+ * The default (Deno `list_products`) is the policy's own; Code Mode passes its
+ * own scope so the authority derivation below stays the single implementation.
+ */
+export interface SandboxAuthorityScope {
+  allowedName(name: unknown): boolean;
+  eligible(tool: RegisteredTool | undefined): boolean;
+}
+
 export interface SandboxScriptRequest {
   source: string;
   language: 'javascript' | 'typescript';
@@ -52,7 +62,8 @@ function schemaContract(value: unknown): unknown {
       .map((key) => [key, schemaContract(value[key])]),
   );
 }
-const hashContract = (value: unknown): string =>
+/** Shared with Code Mode so both allowlists pin parameters with one hash. */
+export const hashContract = (value: unknown): string =>
   createHash('sha256')
     .update(JSON.stringify(schemaContract(value)))
     .digest('hex');
@@ -275,6 +286,7 @@ export class SandboxPolicyService {
     initialNames: string[],
     objectivePermissions: string[],
     callback: (context: RequestContext, names: string[]) => Promise<T>,
+    scope: SandboxAuthorityScope = this.denoScope(),
   ): Promise<T> {
     let grant: { context: RequestContext; names: string[] };
     try {
@@ -283,6 +295,7 @@ export class SandboxPolicyService {
         agentKey,
         initialNames,
         objectivePermissions,
+        scope,
       );
     } catch {
       // No DB, permission, credential or subscription details reach the guest.
@@ -298,6 +311,7 @@ export class SandboxPolicyService {
     agentKey: string,
     initialNames: string[],
     objectivePermissions: string[],
+    scope: SandboxAuthorityScope,
   ): Promise<{ context: RequestContext; names: string[] }> {
     if (
       !snapshot ||
@@ -308,7 +322,7 @@ export class SandboxPolicyService {
       !Array.isArray(initialNames) ||
       initialNames.length === 0 ||
       initialNames.length > 20 ||
-      initialNames.some((name) => !this.allowedName(name)) ||
+      initialNames.some((name) => !scope.allowedName(name)) ||
       new Set(initialNames).size !== initialNames.length ||
       !Array.isArray(snapshot.permissions) ||
       snapshot.roles?.includes('kitchen') ||
@@ -432,7 +446,7 @@ export class SandboxPolicyService {
     const names = manifest.filter(
       (name) =>
         offered.has(name) &&
-        this.eligible(this.registry.get(name)),
+        scope.eligible(this.registry.get(name)),
     );
     if (!names.length) this.deny();
     return { context: base, names };
@@ -549,6 +563,13 @@ export class SandboxPolicyService {
     } finally {
       seen.delete(value);
     }
+  }
+
+  private denoScope(): SandboxAuthorityScope {
+    return {
+      allowedName: (name) => this.allowedName(name),
+      eligible: (tool) => this.eligible(tool),
+    };
   }
 
   private allowedName(name: unknown): name is 'list_products' {

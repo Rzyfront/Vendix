@@ -142,6 +142,17 @@ export const AI_CAPABILITIES: readonly AICapabilityDefinition[] = [
   },
   {
     agent_key: 'vex',
+    capability_key: 'code_mode',
+    label: 'Scripts de herramientas',
+    description:
+      'Vex combina varias lecturas en un script aislado y solo de lectura.',
+    kind: 'toggle',
+    cap_unit: null,
+    cap_period: null,
+    legacy: null,
+  },
+  {
+    agent_key: 'vex',
     capability_key: 'advanced_model',
     label: 'Modelo avanzado',
     description: 'Vex usa el modelo de frontera para las tareas difíciles.',
@@ -391,6 +402,7 @@ const SUMMARY_NOUNS: Record<string, string> = {
   'vex.voice_readout': 'lectura en voz',
   'vex.files': 'archivos e imágenes',
   'vex.code_analysis': 'análisis con código',
+  'vex.code_mode': 'scripts de herramientas',
   'vex.advanced_model': 'modelo avanzado',
   'vexi.voice_readout': 'lectura en voz',
   'platform.smart_search': 'búsqueda inteligente',

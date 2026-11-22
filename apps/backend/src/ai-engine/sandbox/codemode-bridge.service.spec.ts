@@ -2,7 +2,9 @@ import { ForbiddenException } from '@nestjs/common';
 import { RequestContextService } from '../../common/context/request-context.service';
 import { AIToolRegistry } from '../tools/ai-tool-registry';
 import { normalizeToolResult } from '../tools/tool-result.normalizer';
+import { collectToolCatalog } from '../tools/tool-catalog.test-helper';
 import { CodeModeBridgeService } from './codemode-bridge.service';
+import { CodeModePolicyService } from './codemode-policy.service';
 import { codeModeInvocation } from './codemode-invocation.context';
 import {
   CODEMODE_LIMITS,
@@ -452,5 +454,77 @@ describe('CodeModeBridgeService (T64, channel A host bridge)', () => {
     );
     expect(f.audit.start.mock.calls[0][0].objective_id).toBe(durable.objective_id);
     expect(f.policy.authorize.mock.calls[0][3]).toEqual(['read']);
+  });
+});
+
+describe('CodeModeBridgeService with the real Code Mode policy (T65)', () => {
+  const REAL = 'get_stock_levels';
+  const real = collectToolCatalog().map((e) => e.tool);
+  const def = (name: string) => real.find((t) => t.name === name)!;
+  beforeEach(() => {
+    for (const k of Object.keys(ENV)) saved[k] = process.env[k];
+    setEnv();
+  });
+  afterEach(() => {
+    for (const [k, v] of Object.entries(saved)) {
+      if (v === undefined) delete process.env[k];
+      else process.env[k] = v;
+    }
+  });
+
+  function withRealPolicy(parameters?: Record<string, any>) {
+    const f = fixture();
+    const handler = jest.fn<any, any[]>(async () => JSON.stringify({ rows: [{ id: 1 }, { id: 2 }] }));
+    const registry = new AIToolRegistry({} as never);
+    for (const name of [REAL, 'run_analysis'])
+      registry.register({ ...def(name), parameters: parameters ?? def(name).parameters, handler });
+    const base = {
+      authorize: jest.fn(async (snapshot: any, _a: string, names: string[], _p: string[], cb: any, scope: any) => {
+        if (names.some((n) => !scope.allowedName(n))) throw new ForbiddenException('SANDBOX_DENIED');
+        return RequestContextService.runIsolated(
+          { ...snapshot, roles: [], permissions: def(REAL).requiredPermissions },
+          () => cb(snapshot, names),
+        );
+      }),
+    };
+    const policy = new CodeModePolicyService(registry, base as never);
+    const bridge = new CodeModeBridgeService(registry, policy, f.client, f.audit as never);
+    const invocation = { agentKey: 'vex', initialNames: [REAL, 'run_analysis'], revalidate: async () => [REAL, 'run_analysis'] };
+    const run = (tools: string[]) =>
+      RequestContextService.runIsolated(f.context as never, () =>
+        codeModeInvocation.run(invocation as never, () => bridge.run({ source: 'return 1;', tools, purpose: 'p' })),
+      );
+    return { f, handler, run, base };
+  }
+
+  it('executes an allowlisted read through the generated list and counts its rows', async () => {
+    const { f, handler, run, base } = withRealPolicy();
+    f.state.script = [pendingBody([REAL, {}]), doneBody({ ok: true })];
+    const result = await run([REAL]);
+    expect(result).toMatchObject({ rows_seen: 2, calls: [{ tool: REAL, status: 'ok', rows: 2 }] });
+    expect(handler).toHaveBeenCalledTimes(1);
+    expect(base.authorize).toHaveBeenCalled();
+  });
+
+  it('denies a script runner in the manifest before any Lambda round', async () => {
+    const { f, run } = withRealPolicy();
+    f.state.script = [doneBody(1)];
+    await expect(run([REAL, 'run_analysis'])).rejects.toMatchObject({ code: 'CODEMODE_DENIED' });
+    expect(f.transport.invoke).not.toHaveBeenCalled();
+  });
+
+  it('denies a tool whose live parameters drifted from the audited hash', async () => {
+    const { f, run } = withRealPolicy({ type: 'object', properties: { sneaky: { type: 'string' } } });
+    f.state.script = [doneBody(1)];
+    await expect(run([REAL])).rejects.toMatchObject({ code: 'CODEMODE_DENIED' });
+    expect(f.transport.invoke).not.toHaveBeenCalled();
+  });
+
+  it('refuses a call whose args break the shared schema or name a tenant, without running the tool', async () => {
+    const { f, handler, run } = withRealPolicy();
+    f.state.script = [pendingBody([REAL, { store_id: 9 }]), doneBody(1)];
+    const result = await run([REAL]);
+    expect(result.calls[0]).toMatchObject({ status: 'denied' });
+    expect(handler).not.toHaveBeenCalled();
   });
 });
