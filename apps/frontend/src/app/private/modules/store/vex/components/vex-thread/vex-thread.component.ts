@@ -8,7 +8,6 @@ import {
   Injector,
   signal,
   viewChild,
-  signal,
 } from '@angular/core';
 import { NgTemplateOutlet } from '@angular/common';
 import { SpinnerComponent } from '../../../../../../shared/components/spinner/spinner.component';
