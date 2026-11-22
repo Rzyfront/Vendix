@@ -40,6 +40,10 @@ HARD_LIMITS = {
     "output_figures": 20, "output_rows": 1_000, "output_points": 1_000,
 }
 NPROC_LIMIT = 64
+# The host aborts at exactly wall_ms. The child gets wall_ms minus this reserve
+# so kill, reap and /tmp removal still reply in time: a timed-out run must reach
+# the host as ANALYSIS_TIMEOUT, not as an expired call (T53: ~0.7 s teardown).
+TEARDOWN_RESERVE_MS = 2_000
 FSIZE_SLACK = 1024 * 1024
 LOG_READ_BYTES = 4096
 
@@ -318,7 +322,7 @@ def _execute(tmpdir, source, inputs, limits):
             preexec_fn=_limit_child(limits),
         )
         try:
-            proc.wait(timeout=limits["wall_ms"] / 1000.0)
+            proc.wait(timeout=max(1, limits["wall_ms"] - TEARDOWN_RESERVE_MS) / 1000.0)
         except subprocess.TimeoutExpired:
             timed_out = True
         finally:

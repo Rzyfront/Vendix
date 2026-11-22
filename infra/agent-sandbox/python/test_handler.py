@@ -324,6 +324,16 @@ class ExecutionTests(unittest.TestCase):
         self.assertTrue(any(e.startswith(handler.TMP_PREFIX) for e in seen[1][2]))
         self.killpg.assert_called_with(4242, signal.SIGKILL)
 
+    def test_child_wall_leaves_a_teardown_reserve_inside_the_host_budget(self):
+        # The host aborts at exactly wall_ms; the reply (kill, reap, rm) must land before it.
+        for wall_ms, child_s in ((25_000, 23.0), (10_000, 8.0), (1_500, 0.001)):
+            proc = MagicMock(pid=779, returncode=None)
+            proc.wait.side_effect = [subprocess.TimeoutExpired("x", 1), 0]
+            with patch.object(handler.subprocess, "Popen", return_value=proc):
+                res = handler.handler(request(limits=dict(handler.HARD_LIMITS, wall_ms=wall_ms)))
+            self.assertEqual(res["error_code"], "ANALYSIS_TIMEOUT")
+            self.assertEqual(proc.wait.call_args_list[0].kwargs, {"timeout": child_s})
+
     def test_strays_are_reaped_after_a_timeout(self):
         proc = MagicMock(pid=778, returncode=None)
         proc.wait.side_effect = [subprocess.TimeoutExpired("x", 1), 0]

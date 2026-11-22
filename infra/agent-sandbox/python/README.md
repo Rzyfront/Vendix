@@ -23,8 +23,9 @@ AWS Lambda (imagen contenedor Python 3.12 · Dockerfile + template.json)
           1. Valida petición y recorta límites contra HARD_LIMITS.
           2. Limpia /tmp antes y después de ejecutar.
           3. Exige que el proceso padre sea no-dumpable (ver abajo) para impedir que el hijo lea `/proc/<ppid>/environ`, `mem`, `maps` o `fd`, use `process_vm_readv` o haga `ptrace`, y lanza un proceso hijo nuevo (`python -I runner.py`) en sesión propia con entorno limpio (sin `AWS_*`), `RLIMIT_AS` / `RLIMIT_CPU` / `RLIMIT_NPROC` / `RLIMIT_FSIZE` / `RLIMIT_CORE` y timeout de pared.
-          4. Mata todo el grupo de procesos (`SIGKILL`) al terminar o vencer el tiempo y, después, a todo superviviente del uid del invitado (`kill(-1, SIGKILL)`); lo mismo antes de cargar los datos de cada tienda.
-          5. Lee `result.json` con `O_NOFOLLOW`, revalida `result` (tables/series/figures/notes) y devuelve solo JSON acotado.
+          4. El hijo recibe `wall_ms` menos una reserva de 2 s, para que la respuesta (incluida la limpieza) llegue antes de que el backend aborte a `wall_ms` exactos: un análisis que agota el tiempo llega como `ANALYSIS_TIMEOUT`, no como `ANALYSIS_EXPIRED`.
+          5. Mata todo el grupo de procesos (`SIGKILL`) al terminar o vencer el tiempo y, después, a todo superviviente del uid del invitado (`kill(-1, SIGKILL)`); lo mismo antes de cargar los datos de cada tienda.
+          6. Lee `result.json` con `O_NOFOLLOW`, revalida `result` (tables/series/figures/notes) y devuelve solo JSON acotado.
 ```
 
 ### Por qué el intérprete es solo-ejecución (paso 3)
@@ -35,7 +36,7 @@ La vía normal es `prctl(PR_SET_DUMPABLE, 0)`, pero el perfil seccomp de Lambda 
 
 Por eso el `Dockerfile` deja `/var/lang/bin/python3.12` en `0711`: al ejecutar un binario que el usuario no puede leer, el kernel marca el proceso como no-dumpable sin necesidad de `prctl`, tanto al runtime de Lambda (y con él al handler) como a cada hijo. `handler.py` intenta `prctl` primero y acepta el `EPERM` **solo** si comprueba que el kernel ya lo marcó (`/proc/self/environ` es de root siendo el proceso no-root); con cualquier otro errno, o sin esa prueba, falla cerrado sin lanzar al hijo ni escribir datos de la tienda.
 
-### Por qué `kill(-1)` además de matar el grupo (paso 4)
+### Por qué `kill(-1)` además de matar el grupo (paso 5)
 
 `killpg` solo alcanza al grupo del hijo. Un invitado que hace doble `fork` + `setsid` deja un daemon en otra sesión que sobrevive a la invocación. En T53 (primera corrida) ese daemon quedó escuchando en un socket abstracto, leyó desde `/tmp` los datos de la tienda siguiente y se los entregó a la ejecución posterior.
 
