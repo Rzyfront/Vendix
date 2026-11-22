@@ -778,6 +778,17 @@ export class VexApiService {
       .pipe(map((res) => res.data));
   }
 
+  /** Short-lived signed URL (plus mime/name) of a chat attachment handle. */
+  getAttachmentUrl(
+    handle: string,
+  ): Observable<{ url: string; mime_type: string; original_name: string }> {
+    return this.http
+      .get<{
+        data: { url: string; mime_type: string; original_name: string };
+      }>(`${this.vexBase}/attachments/${encodeURIComponent(handle)}/url`)
+      .pipe(map((res) => res.data));
+  }
+
   getBlock(blockId: string): Observable<VexUiBlock> {
     return this.http
       .get<{

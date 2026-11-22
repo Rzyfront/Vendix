@@ -22,6 +22,7 @@ import { VexMarkdownComponent } from '../vex-markdown/vex-markdown.component';
 import { VexBlockHostComponent } from '../vex-blocks/vex-block-host.component';
 import { VexToolTraceComponent } from '../vex-tool-trace/vex-tool-trace.component';
 import { VexPlanCardComponent } from '../vex-plan-card/vex-plan-card.component';
+import { VexAttachmentViewerComponent } from '../vex-attachment-viewer/vex-attachment-viewer.component';
 import { VexFollowupChipComponent } from '../vex-followup-chip/vex-followup-chip.component';
 import { ModalComponent } from '../../../../../../shared/components/modal/modal.component';
 import { StoreSettingsFacade } from '../../../../../../core/store/store-settings/store-settings.facade';
@@ -40,6 +41,7 @@ import { StoreSettingsFacade } from '../../../../../../core/store/store-settings
     VexPlanCardComponent,
     VexFollowupChipComponent,
     ModalComponent,
+    VexAttachmentViewerComponent,
   ],
   template: `
     <div #scroller class="h-full overflow-y-auto" role="log" aria-live="polite">
@@ -61,6 +63,21 @@ import { StoreSettingsFacade } from '../../../../../../core/store/store-settings
               >
                 {{ message.content }}
               </div>
+              @if (message.attachment_ids?.length) {
+                <div class="flex flex-wrap justify-end gap-2">
+                  @for (handle of message.attachment_ids; track handle) {
+                    <button
+                      type="button"
+                      class="min-h-10 inline-flex items-center gap-2 px-3 rounded-xl border border-border bg-surface text-xs font-medium text-text-primary hover:bg-background"
+                      [attr.aria-label]="attachmentCopy.chip"
+                      (click)="openAttachment(handle)"
+                    >
+                      <app-icon name="file-text" [size]="14"></app-icon>
+                      {{ attachmentCopy.default_name }}
+                    </button>
+                  }
+                </div>
+              }
               @if (message.send_failed) {
                 <div
                   class="flex items-center gap-2 flex-wrap justify-end text-sm text-error"
@@ -274,6 +291,9 @@ import { StoreSettingsFacade } from '../../../../../../core/store/store-settings
         {{ store.active_compaction()?.summary }}
       </p>
     </app-modal>
+    @if (viewerHandle(); as handle) {
+      <vendix-vex-attachment-viewer [handle]="handle" [(isOpen)]="viewerOpen" />
+    }
   `,
 })
 export class VexThreadComponent {
@@ -288,6 +308,15 @@ export class VexThreadComponent {
   protected readonly restartLabel = VEXI_RESTART_LABEL;
   private readonly injector = inject(Injector);
   private readonly scroller = viewChild<ElementRef<HTMLElement>>('scroller');
+
+  protected readonly attachmentCopy = VEX_COPY.attachment_viewer;
+  readonly viewerHandle = signal<string | null>(null);
+  readonly viewerOpen = signal(false);
+
+  openAttachment(handle: string): void {
+    this.viewerHandle.set(handle);
+    this.viewerOpen.set(true);
+  }
 
   readonly messages = () => this.store.active_conversation()?.messages ?? [];
 

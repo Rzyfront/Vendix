@@ -307,6 +307,18 @@ import {
               />
               <span class="text-sm text-text-primary">Thinking Mode</span>
             </label>
+
+            <label class="flex items-center gap-2 cursor-pointer">
+              <input
+                type="checkbox"
+                formControlName="supports_vision"
+                class="rounded border-gray-300 text-primary focus:ring-primary"
+                [disabled]="isSubmitting()"
+              />
+              <span class="text-sm text-text-primary"
+                >Este modelo acepta imágenes (visión)</span
+              >
+            </label>
           </div>
           @if (isAudio()) {
             <p class="text-xs text-amber-600 mt-1">
@@ -463,6 +475,7 @@ export class AIEngineConfigModalComponent implements OnChanges {
     is_default: [false],
     is_active: [true],
     thinking: [false],
+    supports_vision: [false],
     voice: [''],
     turn_detection_type: [''],
     turn_detection_silence_ms: [null],
@@ -559,6 +572,7 @@ export class AIEngineConfigModalComponent implements OnChanges {
         is_default: c.is_default,
         is_active: c.is_active,
         thinking: c.settings?.thinking ?? false,
+        supports_vision: c.settings?.['supports_vision'] === true,
         ...this.embeddingFormValues(c),
         ...this.audioFormValues(c),
       });
@@ -580,6 +594,7 @@ export class AIEngineConfigModalComponent implements OnChanges {
         is_default: false,
         is_active: p.is_active,
         thinking: p.settings?.thinking ?? false,
+        supports_vision: p.settings?.['supports_vision'] === true,
         ...this.embeddingFormValues(p),
         ...this.audioFormValues(p),
       });
@@ -608,6 +623,7 @@ export class AIEngineConfigModalComponent implements OnChanges {
       delete settings['maxTokens'];
     }
     settings['thinking'] = !!raw.thinking;
+    settings['supports_vision'] = !!raw.supports_vision;
     const modelType = (raw.model_type || 'text') as AIModelType;
     settings['model_type'] = modelType;
 
@@ -674,6 +690,7 @@ export class AIEngineConfigModalComponent implements OnChanges {
       is_default: false,
       is_active: true,
       thinking: false,
+      supports_vision: false,
       voice: '',
       turn_detection_type: '',
       turn_detection_silence_ms: null,

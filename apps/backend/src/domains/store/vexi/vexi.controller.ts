@@ -14,6 +14,7 @@ import {
   UseInterceptors,
 } from '@nestjs/common';
 import { FileInterceptor } from '@nestjs/platform-express';
+import { AiAttachmentUpload } from './ai-attachment-upload.decorator';
 import { VexiContextService } from './vexi-context.service';
 import { ResponseService } from '../../../common/responses/response.service';
 import { AIToolRegistry } from '../../../ai-engine/tools/ai-tool-registry';
@@ -531,7 +532,7 @@ export class VexiController {
   @Post('attachments')
   @UseGuards(AiAccessGuard)
   @RequireAIFeature('text_generation')
-  @UseInterceptors(FileInterceptor('file'))
+  @AiAttachmentUpload()
   async uploadAttachment(
     @UploadedFile() file: Express.Multer.File,
     @Body() dto: UploadAttachmentDto,

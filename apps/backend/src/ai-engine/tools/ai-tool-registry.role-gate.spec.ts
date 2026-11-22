@@ -43,6 +43,7 @@ const PUBLIC_TOOLS = [
   'ai_write_copy',
   'ai_generate_image',
   'list_attachments',
+  'read_attachment',
   // business identity every store member sees
   'get_store_profile',
   // sandbox re-derives live permissions

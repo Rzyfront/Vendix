@@ -191,7 +191,7 @@ export const VEX_COPY = {
     attachments_label: 'Archivos adjuntos',
     remove_aria: (name: string) => `Quitar ${name}`,
     attach: 'Adjuntar archivos',
-    attach_title: 'Adjuntar (máx. 5 archivos de 15 MB)',
+    attach_title: 'Adjuntar (máx. 5 archivos de 10 MB)',
     placeholder: 'Pregúntale a Vex',
     message_label: 'Mensaje para Vex',
     hold_to_dictate: 'Mantén para dictar un mensaje a Vex; no confirma cambios',
@@ -212,7 +212,7 @@ export const VEX_COPY = {
     file_fallback: 'El archivo',
     max_files: (max: number) => `Máximo ${max} archivos por mensaje.`,
     not_allowed: (name: string) => `${name} no es un tipo permitido.`,
-    too_big: (name: string) => `${name} supera los 15 MB.`,
+    too_big: (name: string) => `${name} supera los 10 MB.`,
     only_attached: (room: number) => `Solo se adjuntaron ${room} archivo(s).`,
     attach_failed: 'No se pudo adjuntar',
   },
@@ -291,12 +291,19 @@ export const VEX_COPY = {
   title_editor: {
     label: 'Nombre de la conversación',
   },
+  attachment_viewer: {
+    chip: 'Ver documento adjunto',
+    loading: 'Abriendo documento',
+    error: 'No pudimos abrir el documento. Puede haber expirado.',
+    default_name: 'Documento adjunto',
+  },
   blocks: {
     file: {
       label: 'Archivo de Vex',
       download: 'Descargar',
       expired: 'Enlace expirado',
       default_name: 'Archivo',
+      view: 'Ver',
     },
     image: {
       alt: 'Imagen generada por Vex',

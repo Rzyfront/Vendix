@@ -1,3 +1,4 @@
+import { DOCUMENTS_DISCOVERY_QUERIES_ES } from './domains/documents.discovery.es';
 import { CRM_CUSTOMERS_DISCOVERY_QUERIES_ES } from './domains/crm-customers.discovery.es';
 import { CRM_PIPELINE_DISCOVERY_QUERIES_ES } from './domains/crm-pipeline.discovery.es';
 import { CRM_SEGMENTS_DISCOVERY_QUERIES_ES } from './domains/crm-segments.discovery.es';
@@ -1488,6 +1489,16 @@ export const TOOL_DISCOVERY_QUERIES_ES: Readonly<
     'qué documentos tengo subidos en este chat',
     'muéstrame los archivos que te mandé',
     'necesito ver los adjuntos que ya te pasé',
+  ],
+  read_attachment: [
+    'lee el excel que te subí',
+    'qué dice el archivo que adjunté',
+    'muéstrame las filas de la hoja que te mandé',
+    'revisa el CSV que subí y dime cuántas filas tiene',
+    'abre el documento de Word que te pasé',
+    'dame las siguientes filas del archivo',
+    'léeme el PDF que adjunté',
+    'analiza la hoja de cálculo que subí al chat',
   ],
   list_available_permissions: [
     'qué permisos existen',
@@ -3216,4 +3227,5 @@ export const TOOL_DISCOVERY_QUERIES_ES: Readonly<
   ...CRM_SEGMENTS_DISCOVERY_QUERIES_ES,
   ...CRM_PIPELINE_DISCOVERY_QUERIES_ES,
   ...CRM_TASKS_CAMPAIGNS_DISCOVERY_QUERIES_ES,
+  ...DOCUMENTS_DISCOVERY_QUERIES_ES,
 };

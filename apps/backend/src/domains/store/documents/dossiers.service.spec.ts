@@ -297,4 +297,84 @@ describe.each([
     expect(byFile(gone.id)).toMatchObject({ purged_at: purgedAt, purge_policy_name: 'Laboral' });
     expect(byFile(live.id)).toMatchObject({ purged_at: null, purge_policy_name: null });
   });
+  it('T44: ensureForSubject crea un expediente del registro y lo reutiliza en la segunda llamada', async () => {
+    kit.as({ store_id: 1 });
+    const ensure = (title = 'Orden de compra #123') =>
+      kit.prisma.$transaction((tx: any) =>
+        kit.dossiers.ensureForSubject(tx, { subject_type: 'purchase_order', subject_id: 123, title }),
+      );
+    const first = await ensure();
+    const second = await ensure('otro título');
+    expect(second.id).toBe(first.id);
+    expect(first).toMatchObject({
+      subject_type: 'purchase_order',
+      subject_id: 123,
+      workflow_instance_id: null,
+      title: 'Orden de compra #123',
+    });
+    expect(kit.db.table('dossiers').filter((d: any) => d.subject_type === 'purchase_order')).toHaveLength(1);
+    // another record of the same type gets its own folder
+    const other = await kit.prisma.$transaction((tx: any) =>
+      kit.dossiers.ensureForSubject(tx, { subject_type: 'purchase_order', subject_id: 124, title: 'OC 124' }),
+    );
+    expect(other.id).not.toBe(first.id);
+  });
+
+  it('T44: ensureForSubject no reutiliza el expediente de una solicitud', async () => {
+    kit.as({ store_id: 1 });
+    const instance = await kit.prisma.$transaction((tx: any) =>
+      kit.dossiers.createForInstance(tx, { ...instanceRef(5), subject_type: 'order', subject_id: 9 }),
+    );
+    const mine = await kit.prisma.$transaction((tx: any) =>
+      kit.dossiers.ensureForSubject(tx, { subject_type: 'order', subject_id: 9, title: 'Orden #9' }),
+    );
+    expect(mine.id).not.toBe(instance.id);
+    expect(mine.workflow_instance_id).toBeNull();
+  });
+
+  it('T44: addSubjectFileItem agrega varios documentos sin reemplazar el anterior', async () => {
+    kit.as({ store_id: 1 });
+    const d = await kit.prisma.$transaction((tx: any) =>
+      kit.dossiers.ensureForSubject(tx, { subject_type: 'customer', subject_id: 4, title: 'Cliente #4' }),
+    );
+    const f1 = file(1);
+    const f2 = file(1);
+    const add = (fileId: number) =>
+      kit.prisma.$transaction((tx: any) =>
+        kit.dossiers.addSubjectFileItem(tx, {
+          dossier_id: d.id,
+          file_id: fileId,
+          stage_key: 'records',
+          field_key: 'factura',
+          actor,
+        }),
+      );
+    const first = await add(f1.id);
+    const second = await add(f2.id);
+    const rows = kit.db.table('dossier_items').filter((i: any) => i.dossier_id === d.id);
+    expect(rows.map((r: any) => r.status)).toEqual(['received', 'received']);
+    expect(second.supersedes_id).toBeNull();
+    expect(first.id).not.toBe(second.id);
+  });
+
+  it('T44: addSubjectFileItem rechaza un archivo de otra tienda', async () => {
+    kit.as({ store_id: 1 });
+    const d = await kit.prisma.$transaction((tx: any) =>
+      kit.dossiers.ensureForSubject(tx, { subject_type: 'customer', subject_id: 4, title: 'Cliente #4' }),
+    );
+    const foreign = file(2);
+    expect(
+      await codeOf(
+        kit.prisma.$transaction((tx: any) =>
+          kit.dossiers.addSubjectFileItem(tx, {
+            dossier_id: d.id,
+            file_id: foreign.id,
+            stage_key: 'records',
+            field_key: 'factura',
+            actor,
+          }),
+        ),
+      ),
+    ).toBe('DOCUMENT_NOT_FOUND');
+  });
 });

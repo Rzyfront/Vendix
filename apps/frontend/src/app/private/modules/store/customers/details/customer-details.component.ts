@@ -35,6 +35,7 @@ import {
   CustomerSectionEmptyComponent,
 } from '../components/customer-section/customer-section.component';
 import { CustomerDataSheetComponent } from '../components/customer-data-sheet/customer-data-sheet.component';
+import { RecordDocumentsComponent } from '../../../../../shared/components/record-documents/record-documents.component';
 import { CustomerCrmPanelComponent } from '../crm/profile/customer-crm-panel.component';
 import { CustomerLocationsComponent } from '../components/customer-locations/customer-locations.component';
 import {
@@ -61,6 +62,7 @@ import {
     StickyHeaderComponent,
     UserAvatarComponent,
     CustomerCrmPanelComponent,
+    RecordDocumentsComponent,
     CustomerDataSheetComponent,
     CustomerLocationsComponent,
     CustomerSectionComponent,
@@ -91,6 +93,10 @@ import {
           [customerId]="customerId()!"
           (changed)="loadCustomer()"
         ></app-customer-locations>
+      }
+
+      @if (activeTab() === 'documentos' && customerId()) {
+        <app-record-documents subjectType="customer" [subjectId]="customerId()!"></app-record-documents>
       }
 
       @if (activeTab() === 'crm' && customerId()) {
@@ -758,8 +764,9 @@ export class CustomerDetailsComponent {
     { id: 'info', label: 'Información', icon: 'user' },
     { id: 'ubicaciones', label: 'Ubicaciones', icon: 'map-pin' },
     { id: 'crm', label: 'CRM', icon: 'trending-up' },
+    { id: 'documentos', label: 'Documentos', icon: 'folder-open' },
   ];
-  readonly activeTab = signal<'info' | 'ubicaciones' | 'crm'>('info');
+  readonly activeTab = signal<'info' | 'ubicaciones' | 'crm' | 'documentos'>('info');
   readonly showCrmTab = computed(
     () =>
       this.authFacade.isOwner() ||
@@ -771,8 +778,8 @@ export class CustomerDetailsComponent {
     this.profileTabs.filter((t) => t.id !== 'crm' || this.showCrmTab()),
   );
 
-  private resolveTab(tab: string | null): 'info' | 'ubicaciones' | 'crm' {
-    return tab === 'crm' || tab === 'ubicaciones' ? tab : 'info';
+  private resolveTab(tab: string | null): 'info' | 'ubicaciones' | 'crm' | 'documentos' {
+    return tab === 'crm' || tab === 'ubicaciones' || tab === 'documentos' ? tab : 'info';
   }
 
   selectTab(tab: string): void {

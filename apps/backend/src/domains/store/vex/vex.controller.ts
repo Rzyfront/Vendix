@@ -15,9 +15,8 @@ import {
   Query,
   UploadedFile,
   UseGuards,
-  UseInterceptors,
 } from '@nestjs/common';
-import { FileInterceptor } from '@nestjs/platform-express';
+import { AiAttachmentUpload } from '../vexi/ai-attachment-upload.decorator';
 import { randomUUID } from 'node:crypto';
 import { ResponseService } from '../../../common/responses/response.service';
 import { RequestContextService } from '../../../common/context/request-context.service';
@@ -663,13 +662,37 @@ export class VexController {
   @Post('attachments')
   @UseGuards(AiAccessGuard)
   @RequireAIFeature('vex_agent' as AIFeatureKey)
-  @UseInterceptors(FileInterceptor('file'))
+  @AiAttachmentUpload()
   async uploadAttachment(
     @UploadedFile() file: Express.Multer.File,
     @Body() dto: UploadAttachmentDto,
   ) {
     const stored = await this.attachments.store(file, dto.conversation_id);
     return this.responseService.created(stored, 'Documento recibido');
+  }
+
+  /**
+   * Short-lived signed read URL of a staged attachment, so the chat can open an
+   * image or PDF inline. Scoped by store and by user through the attachments
+   * service (B2): another person's handle, like one from another store,
+   * resolves to nothing.
+   */
+  @Get('attachments/:handle/url')
+  @UseGuards(AiAccessGuard)
+  @RequireAIFeature('vex_agent' as AIFeatureKey)
+  async attachmentUrl(@Param('handle') handle: string) {
+    const [meta] = await this.attachments.describeMany([handle]);
+    if (!meta) {
+      throw new VendixHttpException(
+        ErrorCodes.AI_AGENT_003,
+        'El documento adjunto no existe o ya no está disponible.',
+      );
+    }
+    const url = await this.attachments.signedUrl(handle, 300);
+    return this.responseService.success(
+      { url, mime_type: meta.mime_type, original_name: meta.original_name },
+      'Documento adjunto',
+    );
   }
 
   // ── internals ─────────────────────────────────────────────────────────
