@@ -4,3 +4,4 @@ export { AIEngineAgentModalComponent } from './ai-engine-agent-modal.component';
 export { AIAppHealthPanelComponent } from './ai-app-health-panel.component';
 export { AIEngineAgentSheetComponent } from './ai-engine-agent-sheet.component';
 export { AISkillsPanelComponent } from './skills/index';
+export { AiVoicesPanelComponent } from './voices/index';
