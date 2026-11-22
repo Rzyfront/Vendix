@@ -231,9 +231,10 @@ export class WriteBatchExecutorService {
         await this.persistSteps(input.batchId, steps);
       }
     } catch (error) {
-      // Unexpected failure (e.g. the ledger write): the in-memory state is the
-      // truth. A step caught mid-dispatch is `unknown` — its write may have
-      // landed — never silently failed or applied.
+      // Unexpected failure (e.g. persisting the steps): the in-memory state is
+      // the truth. A step caught mid-dispatch is `unknown` — its write may have
+      // landed — never silently failed or applied. (`runStep` already turns a
+      // ledger throw after the dispatch into `unknown` on its own.)
       this.logger.error(
         `Write batch ${input.batchId} aborted: ${(error as Error)?.message}`,
       );
@@ -333,6 +334,15 @@ export class WriteBatchExecutorService {
       }
     }
 
+    // What the business write itself did, observed from INSIDE the dispatch
+    // callback. `applyDurableEffect` can still throw after the write returned
+    // (`applying → applied` transition, `checkpoint` conflict): from out here
+    // that throw looks like any failure, so only this marker tells them apart.
+    const dispatch: {
+      outcome: 'not_started' | 'returned' | 'threw';
+      output?: string;
+      error?: unknown;
+    } = { outcome: 'not_started' };
     try {
       const token = await this.confirmations.issue(
         step.tool,
@@ -348,10 +358,22 @@ export class WriteBatchExecutorService {
           tool: step.tool,
           args: step.arguments,
         },
-        () =>
-          this.toolRegistry.executeTool(step.tool, step.arguments, {
-            confirmationToken: token,
-          }),
+        async () => {
+          try {
+            const output = await this.toolRegistry.executeTool(
+              step.tool,
+              step.arguments,
+              { confirmationToken: token },
+            );
+            dispatch.outcome = 'returned';
+            dispatch.output = output;
+            return output;
+          } catch (error) {
+            dispatch.outcome = 'threw';
+            dispatch.error = error;
+            throw error;
+          }
+        },
       );
       state.dispatching = false;
 
@@ -384,9 +406,31 @@ export class WriteBatchExecutorService {
       };
     } catch (error) {
       state.dispatching = false;
-      step.compensable = false;
-      step.compensation_snapshot = undefined;
-      return { outcome: 'failed', error: this.humanError(error) };
+      // Known failure: nothing was dispatched (token, lease, ledger before
+      // `applying`), or the handler threw and the ledger recorded and rethrew
+      // that SAME error (`applyDurableEffect` only rethrows non-unknown ones).
+      const knownFailure =
+        dispatch.outcome === 'not_started' ||
+        (dispatch.outcome === 'threw' && error === dispatch.error);
+      if (knownFailure) {
+        step.compensable = false;
+        step.compensation_snapshot = undefined;
+        return { outcome: 'failed', error: this.humanError(error) };
+      }
+      // The write may have landed and the ledger threw afterwards: never call
+      // it failed (the person would repeat it). `unknown` stops the batch and
+      // asks for a review; the snapshot and the handler output are kept for
+      // that review (undo stays closed: the view offers it only when applied).
+      this.logger.error(
+        `Step ${row.id}/${step.step_id} dispatched but the ledger threw: ${(error as Error)?.message}`,
+      );
+      if (step.compensable && dispatch.output !== undefined) {
+        step.compensation_output = String(dispatch.output).slice(
+          0,
+          WRITE_BATCH_COMPENSATION_OUTPUT_MAX,
+        );
+      }
+      return { outcome: 'unknown', error: USER_NOTICES.unknown_effect };
     }
   }
 

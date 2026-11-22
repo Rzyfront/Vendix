@@ -1,4 +1,7 @@
+import { ConflictException } from '@nestjs/common';
 import { RequestContextService } from '../../../../common/context/request-context.service';
+import { ErrorCodes, VendixHttpException } from '../../../../common/errors';
+import { USER_NOTICES } from '../../../../ai-engine/agent-execution.contract';
 import {
   WriteBatchExecutorService,
   summarizeWriteBatch,
@@ -14,7 +17,20 @@ describe('WriteBatchExecutorService (T35 approve / T38 audit + metering)', () =>
   const STORE = 7;
   const ORG = 3;
 
-  type Behavior = 'ok' | 'fail' | 'unknown' | 'throw';
+  /**
+   * - `throw`: the ledger fails BEFORE dispatching (nothing was written).
+   * - `landed_then_conflict`: probe A of the audit — the real dispatch runs and
+   *   then the ledger's `checkpoint` throws (`vexi-plan-state.service.ts`).
+   * - `handler_rethrow`: the handler itself throws; the ledger records it and
+   *   rethrows the SAME error (known failure, nothing applied).
+   */
+  type Behavior =
+    | 'ok'
+    | 'fail'
+    | 'unknown'
+    | 'throw'
+    | 'landed_then_conflict'
+    | 'handler_rethrow';
 
   const mkStep = (n: number, over: Record<string, unknown> = {}) => {
     const tool = `tool${n}`;
@@ -44,6 +60,8 @@ describe('WriteBatchExecutorService (T35 approve / T38 audit + metering)', () =>
       compensate?: Record<string, any>;
       persistThrowsOnRunning?: boolean;
       auditThrows?: boolean;
+      /** The handler (registry `executeTool`) throws this for the tool. */
+      toolErrors?: Record<string, Error>;
     } = {},
   ) {
     const steps = opts.steps ?? [mkStep(1), mkStep(2), mkStep(3)];
@@ -82,7 +100,11 @@ describe('WriteBatchExecutorService (T35 approve / T38 audit + metering)', () =>
       loadOwned: jest.fn().mockResolvedValue(row),
       getView: jest.fn().mockResolvedValue(view),
     } as any;
-    const executeTool = jest.fn().mockResolvedValue('{"summary":"Listo"}');
+    const executeTool = jest.fn(async (tool: string) => {
+      const error = opts.toolErrors?.[tool];
+      if (error) throw error;
+      return '{"summary":"Listo"}';
+    });
     const registry = {
       canonicalName: (n: string) => n,
       get: jest.fn((n: string) => ({ name: n, compensate: opts.compensate?.[n] })),
@@ -93,6 +115,17 @@ describe('WriteBatchExecutorService (T35 approve / T38 audit + metering)', () =>
       applyDurableEffect: jest.fn(async (input: any, dispatch: () => Promise<string>) => {
         const behavior = opts.behaviors?.[input.tool] ?? 'ok';
         if (behavior === 'throw') throw new Error('ledger exploded');
+        if (behavior === 'landed_then_conflict') {
+          await dispatch();
+          throw new ConflictException(
+            'El resultado quedó en auditoría; el ejecutor ya fue reemplazado.',
+          );
+        }
+        if (behavior === 'handler_rethrow') {
+          // Mirrors applyDurableEffect: records the failure, rethrows as is.
+          await dispatch();
+          throw new Error('unreachable: the handler double always throws');
+        }
         if (behavior === 'unknown') {
           return { output: '', result: { status: 'unknown_effect', effect_status: 'unknown' } };
         }
@@ -232,6 +265,58 @@ describe('WriteBatchExecutorService (T35 approve / T38 audit + metering)', () =>
     expect(fin.data.status).toBe('partially_applied');
     expect(statuses(h)).toEqual(['applied', 'failed', 'skipped']);
     expect(fin.data.steps[1].error).toBe(BATCH_STEP_MESSAGES.generic);
+  });
+
+  describe('P1-1 — the write landed and the ledger threw afterwards', () => {
+    it('first step: unknown, batch unknown_effect, snapshot kept, never "ningún cambio"', async () => {
+      const capture = jest.fn().mockResolvedValue({ prev: 100 });
+      const h = build({
+        behaviors: { tool1: 'landed_then_conflict' },
+        compensate: { tool1: { label: 'u', capture, undo: jest.fn() } },
+      });
+      await approve(h);
+      const fin = finalWrite(h);
+
+      // landed = ['tool1']: the business write ran exactly once.
+      expect(h.executeTool.mock.calls.map((c: any[]) => c[0])).toEqual(['tool1']);
+      expect(statuses(h)).toEqual(['unknown', 'skipped', 'skipped']);
+      expect(fin.data.status).toBe('unknown_effect');
+      expect(fin.data.steps[0].error).toBe(USER_NOTICES.unknown_effect);
+      // The undo snapshot survives for the review (undo itself stays closed:
+      // the view only offers it for `applied` steps).
+      expect(fin.data.steps[0].compensation_snapshot).toEqual({ prev: 100 });
+      expect(fin.data.steps[0].compensation_output).toBe('{"summary":"Listo"}');
+      expect(fin.data.summary).toMatchObject({ applied: 0, failed: 0, unknown: 1, skipped: 2 });
+      expect(fin.data.summary.message).toBe(
+        'El paso 1 quedó sin verificar; revisa antes de reintentar. El resto se omitió.',
+      );
+      expect(fin.data.summary.message).not.toContain('No se aplicó ningún cambio');
+    });
+
+    it('mid-batch: the applied step stays applied, the landed one is unknown', async () => {
+      const h = build({ behaviors: { tool2: 'landed_then_conflict' } });
+      await approve(h);
+      const fin = finalWrite(h);
+      expect(h.executeTool.mock.calls.map((c: any[]) => c[0])).toEqual(['tool1', 'tool2']);
+      expect(statuses(h)).toEqual(['applied', 'unknown', 'skipped']);
+      expect(fin.data.status).toBe('unknown_effect');
+      expect(fin.data.summary.message).toBe(
+        'El paso 2 quedó sin verificar; revisa antes de reintentar. El resto se omitió.',
+      );
+    });
+
+    it('a handler that throws a known error and is rethrown as is stays failed (permission lost)', async () => {
+      const h = build({
+        behaviors: { tool2: 'handler_rethrow' },
+        toolErrors: { tool2: new VendixHttpException(ErrorCodes.AI_AGENT_004) },
+      });
+      await approve(h);
+      const fin = finalWrite(h);
+      expect(statuses(h)).toEqual(['applied', 'failed', 'skipped']);
+      expect(fin.data.steps[1].error).toBe(BATCH_STEP_MESSAGES.permission_lost);
+      expect(fin.data.status).toBe('partially_applied');
+      expect(fin.data.summary.message).toBe('Se aplicó hasta el paso 1, el resto se omitió.');
+    });
   });
 
   describe('double approval', () => {
