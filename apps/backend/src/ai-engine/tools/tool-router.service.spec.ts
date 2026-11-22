@@ -8,6 +8,13 @@ import {
   localToolScores,
 } from './tool-catalog';
 import { TOOL_WORKING_SET } from './tool-working-set';
+import {
+  FullCatalogRateMonitor,
+  FULL_CATALOG_RATE_CODE,
+  FULL_CATALOG_RATE_MIN_SAMPLE,
+  FULL_CATALOG_RATE_THRESHOLD,
+  FULL_CATALOG_RATE_WINDOW,
+} from './tool-router.full-catalog-rate';
 import { createPlaybookTools } from './domains/playbook.tools';
 import { createProceduralRecipeTools } from './domains/recipe.tools';
 import { createDiscoveryTools } from './domains/discovery.tools';
@@ -762,5 +769,74 @@ describe('Discovery pagination B', () => {
         ),
       ).data[0].omitted_large_row,
     ).toBe(true);
+  });
+});
+
+describe('F10/T62 full-catalog fallback rate alert', () => {
+  const monitor = (warn = jest.fn()) => ({
+    warn,
+    m: new FullCatalogRateMonitor({ warn } as any),
+  });
+
+  it('names its constants and stable code', () => {
+    expect(FULL_CATALOG_RATE_CODE).toBe('TOOL_ROUTER_FULL_CATALOG_RATE');
+    expect(FULL_CATALOG_RATE_THRESHOLD).toBe(0.05);
+    expect(FULL_CATALOG_RATE_MIN_SAMPLE).toBeGreaterThanOrEqual(20);
+    expect(FULL_CATALOG_RATE_WINDOW).toBeGreaterThanOrEqual(
+      FULL_CATALOG_RATE_MIN_SAMPLE,
+    );
+  });
+
+  it('stays silent below the minimum sample even at 100 % fallbacks', () => {
+    const { m, warn } = monitor();
+    for (let i = 0; i < FULL_CATALOG_RATE_MIN_SAMPLE - 1; i++)
+      m.record(true, 'no_evidence');
+    expect(warn).not.toHaveBeenCalled();
+  });
+
+  it('stays silent at or under 5 % and alerts once when it is crossed', () => {
+    const { m, warn } = monitor();
+    for (let i = 0; i < 19; i++) m.record(false, null);
+    m.record(true, 'no_evidence'); // 1/20 = 5 %: not above
+    expect(warn).not.toHaveBeenCalled();
+    m.record(true, 'router_timeout'); // 2/21 > 5 %
+    expect(warn).toHaveBeenCalledTimes(1);
+    const line = String(warn.mock.calls[0][0]);
+    expect(line).toContain('TOOL_ROUTER_FULL_CATALOG_RATE');
+    expect(line).toContain('router_timeout');
+    m.record(true, 'router_timeout'); // still above: no second line
+    expect(warn).toHaveBeenCalledTimes(1);
+  });
+
+  it('re-arms after the rate recovers and logs the next crossing', () => {
+    const { m, warn } = monitor();
+    for (let i = 0; i < 20; i++) m.record(i < 3, i < 3 ? 'no_evidence' : null);
+    expect(warn).toHaveBeenCalledTimes(1);
+    for (let i = 0; i < FULL_CATALOG_RATE_WINDOW; i++) m.record(false, null);
+    expect(m.snapshot().fallbacks).toBe(0);
+    for (let i = 0; i < 20; i++) m.record(true, 'router_error');
+    expect(warn).toHaveBeenCalledTimes(2);
+  });
+
+  it('counts each routed turn once in the router, however many rounds', async () => {
+    const registry = new AIToolRegistry({} as any);
+    registry.registerMany(createDiscoveryTools());
+    registry.register(tool('find_coffee'));
+    const rank = jest.fn(async () => ({
+      names: [],
+      degraded: [],
+      scores: {},
+      coverage: 0.1,
+      source: 'x',
+    }));
+    const router = new ToolRouterService(registry, { rank } as any);
+    const session = router.createSession('algo', 'scope');
+    const auth = registry.getAllDefinitions();
+    await router.select(session, auth, false, false);
+    await router.select(session, auth, false, false);
+    expect(router.fullCatalogRate.snapshot()).toEqual({
+      turns: 1,
+      fallbacks: 1,
+    });
   });
 });

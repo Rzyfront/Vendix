@@ -19,7 +19,7 @@ npx ts-node --transpile-only --project tsconfig.json -r tsconfig-paths/register 
   src/ai-engine/evals/tool-tokens/measure-tool-tokens.ts --config 0
 ```
 
-`--config 0` es la única implementada; T70 añade 1 y 2. Sale con código 1 si alguna tarea usa una herramienta inexistente o no autorizada.
+`--config 0` es el enrutador actual. `--config 1` (T62; correr antes la 0) mide fichas cortas + `describe_tool` y añade su sección a `REPORT.md` y `baseline.config-1.json`; T70 añade la 2. Sale con código 1 si alguna tarea usa una herramienta inexistente o no autorizada.
 
 ## Reglas del banco
 

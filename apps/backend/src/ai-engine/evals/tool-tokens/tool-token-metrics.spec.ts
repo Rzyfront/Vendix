@@ -134,6 +134,30 @@ describe('tool-token-metrics (pure, no model/DB/network)', () => {
       const r = run();
       expect(r.output_estimate).toBeGreaterThan(FINAL_ANSWER_OUTPUT_BYTES);
     });
+    it('T62: baseForRound replaces the leading messages per round and resultFor feeds non-fixture tools', () => {
+      const bigger = [{ role: 'system' as const, content: 'sys'.repeat(500) }];
+      const r = measureTrajectory({
+        base,
+        groups: [[{ tool: 'describe_tool', args: { name: 'x' } }], groups[1]],
+        fixtures,
+        toolsForRound: () => tools,
+        baseForRound: (k) => (k === 0 ? base : [...bigger, base[1]]),
+        resultFor: (c) =>
+          c.tool === 'describe_tool' ? 'declaration of x' : undefined,
+      });
+      const plain = measureTrajectory({
+        base,
+        groups: [[{ tool: 'describe_tool', args: { name: 'x' } }], groups[1]],
+        fixtures,
+        toolsForRound: () => tools,
+        resultFor: () => 'declaration of x',
+      });
+      expect(r.input_by_round[0]).toBe(plain.input_by_round[0]);
+      expect(r.input_by_round[1]).toBeGreaterThan(plain.input_by_round[1]);
+      expect(r.intermediate_result_bytes).toBeGreaterThan(
+        'declaration of x'.length,
+      );
+    });
     it('fails loudly when a trajectory uses a tool without a result fixture', () => {
       expect(() =>
         measureTrajectory({

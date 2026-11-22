@@ -8,8 +8,8 @@
   "prefetch_top": 8
  },
  "tools": {
-  "declared_unique": 389,
-  "factory_outputs": 391,
+  "declared_unique": 390,
+  "factory_outputs": 392,
   "authorized_for_owner_vex": 362,
   "owner_permissions_used": 193,
   "denied_ui_tools": 25

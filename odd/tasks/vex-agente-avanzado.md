@@ -1159,14 +1159,14 @@ Ninguna bloquea el arranque de F1 (T1–T3 y T5–T8); cada una indica qué tare
 | T49–T50 | S6, S12 | F8 — inline | pendiente (D6 y N5 resueltas; depende de T15) | — |
 | T51–T53 | S3 | F9 — inline + verificador independiente (alto riesgo) | pendiente (D3 resuelta) | — |
 | T0-F10 | S14 | inline + Mapping: dos exploradores `sonnet` de solo lectura y un lector web (`sopus`) | ✅ plan de F10 entregado (2026-11-22) | este archivo, rama `feat/vex-plus-f10` |
-| T60 | S14 | F10 1a — escritor `sonnet` (carril A: router/medición, en paralelo con B y C) | en curso | — |
-| T61 | S14 | F10 1a — escritor `sonnet` (carril A, tras T60: comparte `tool-router.service.ts`) | pendiente | — |
-| T62 | S14 | F10 1a — escritor `sonnet` (carril A, tras T61) | pendiente | — |
-| T63 | S14 | F10 1b — escritor `sonnet` (carril C, `infra/agent-sandbox/js/`, disjunto) | en curso | — |
-| T64 | S14 | F10 1b — contrato fijado por el orquestador; puente: escritor `sonnet` (carril B, `AE/sandbox/`); alto riesgo → verificador independiente | en curso | — |
-| T65 | S14 | F10 1b — escritor `sonnet` (tras T64 y T62: comparte `ai-agent.service.ts`); alto riesgo → verificador | pendiente | — |
+| T60 | S14 | F10 1a — escritor `sonnet` (carril A: router/medición, en paralelo con B y C) | hecho (specs: definition-tokens 3/3, tool-router 48/48, agent-trace 17/17, ai-agent.service 109/109, tool-token-metrics 15/15) | `2d53e0ea3` |
+| T61 | S14 | F10 1a — escritor `sonnet` (carril A, tras T60: comparte `tool-router.service.ts`); fichas y `describe_tool` detrás de `AI_TOOL_DISCOVERY_STUBS` (apagado = turno idéntico) | hecho (stubs 6/6, describe-tool 8/8, tool-router 48/48, working-set 11/11; sin RED previo observado; `tool-router.agent-core.spec.ts` 8/9 falla antes del cambio: tope 16 vs 17) | `7099f1a45` |
+| T62 | S14 | F10 1a — escritor `sonnet` (carril A, tras T61; incluye `--config 1` de la medición) | hecho (tool-router 53/53, ai-agent.service 109/109, discovery-stubs 3/3, routing-budget 18/18, b-routing 54/54, metrics 16/16). Config 1 (bytes_v1): −2,5 % directo / +65,1 % con `describe_tool`; 30/30 alcanzables; índice `dominio: nombres` se mantiene | commit de T62 |
+| T63 | S14 | F10 1b — escritor `sonnet` (carril C, `infra/agent-sandbox/js/`, disjunto) | hecho (handler 22/22, template 9/9; apagado, sin desplegar) | `d89f77e45` |
+| T64 | S14 | F10 1b — contrato fijado por el orquestador; puente: escritor `sonnet` (carril B, `AE/sandbox/`); alto riesgo → verificador independiente | hecho (bridge 22, validator 8, lambda-client 33, broker 38, audit 58; M15 aditiva); verificador pendiente | `00640503d` + `835e7feb9` |
+| T65 | S14 | F10 1b — partida: **T65a** escritor `sonnet` (lista blanca generada + política propia de Code Mode, `run_code`, capacidad `vex.code_mode`, registro en `vex.module.ts`; en paralelo con T61, superficies disjuntas) y **T65b** (tras T62: `ai-agent.service.ts`, turnos normales ≤ 3 scripts, contexto de invocación, ofrecer `run_code` solo con capacidad, `ui_blocks` fuera del contexto); alto riesgo → verificador | T65a hecho (allowlist 32/32, code-mode 20/20, bridge 26/26, capacidades 17/17, entitlements 15/15+30/30+33/33, analysis 17/17, policy 87/87, broker 38/38; 141 tools; sin M13); T65b pendiente | T65a `660a7e5d6` |
 | T66 | S14 | F10 1b — escritor `sonnet` (tras T61 y T65) | pendiente | — |
-| T67 | S14 | F10 1b — escritor `sonnet` (tras T64) | pendiente | — |
+| T67 | S14 | F10 1b — escritor `sonnet` (tras T64; en paralelo con T61/T65a, sin `vex.module.ts` ni `tools/**`); Playwright diferido: sin servidores en esta corrida (L16) | hecho backend + desplegable Vex (codemode-audit 8/8, audit repo 58/58, agent-history 13/13, trace 17/17); vista FE de superadmin pendiente; propósito no persistido | `7ca687762` |
 | T68 | S14 | F10 1b — escritor `sonnet` (tras T65); alto riesgo → verificador | pendiente | — |
 | T69 | S14 | F10 1b — certificación en la Lambda real | **fuera de esta corrida**: no se crean ni tocan recursos de AWS (L16); queda el checklist | — |
 | T70 | S14 | F10 1b — escritor `sonnet` (tras T62 y T65) | pendiente | — |

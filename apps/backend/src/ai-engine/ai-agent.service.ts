@@ -44,13 +44,20 @@ import { AIEngineService } from './ai-engine.service';
 import { AILoggingService } from './ai-logging.service';
 import {
   describeToolSignature,
+  DESCRIBE_TOOL,
   recentToolNames,
+  toolDiscoveryStubsEnabled,
 } from './tools/tool-working-set';
 import {
   fullCatalogReasonOf,
   ToolRouterService,
   ToolRoutingSession,
 } from './tools/tool-router.service';
+import {
+  TOOL_STUBS_HEADER,
+  TOOL_STUBS_ROUTING_SENTENCE,
+  toolStubsText,
+} from './tools/tool-stubs-text';
 import { PlaybookService, PlaybookSession } from './playbooks/playbook.service';
 
 import { AIToolRegistry } from './tools/ai-tool-registry';
@@ -1946,9 +1953,12 @@ export class AIAgentService {
         !isAgentPlanTool(name) &&
         !['search_playbooks', 'load_playbook'].includes(name) &&
         (!routing ||
-          !['search_tools', 'list_capabilities', 'list_endpoints'].includes(
-            name,
-          )),
+          ![
+            'search_tools',
+            'list_capabilities',
+            'list_endpoints',
+            DESCRIBE_TOOL,
+          ].includes(name)),
     );
     if (!hasOperationalTools || !offeredNames.has('ui_navigate')) {
       const limits: string[] = [];
@@ -1990,6 +2000,7 @@ export class AIAgentService {
       // principal without search_tools that is told to use it spends rounds
       // on AI_AGENT_TOOL_NOT_ALLOWED (roku cashier-like roles, 43 tools).
       const granted = new Set(routingAuthority.map((d) => d.function.name));
+      const stubsOn = toolDiscoveryStubsEnabled();
       const rare = ['list_capabilities', 'list_endpoints'].filter((name) =>
         granted.has(name),
       );
@@ -2004,6 +2015,9 @@ export class AIAgentService {
             'Cuando la persona cambie de tema, usa las herramientas del tema nuevo. No inventes nombres de herramientas ni DTOs anidados.',
             granted.has('explain_capability')
               ? 'Si dudas del contrato, consulta explain_capability.'
+              : '',
+            stubsOn && granted.has(DESCRIBE_TOOL)
+              ? TOOL_STUBS_ROUTING_SENTENCE
               : '',
             rare.length
               ? `Para capacidades raras usa ${rare.join('/')} y el bridge solo si están autorizados.`
@@ -2020,6 +2034,10 @@ export class AIAgentService {
           .filter(Boolean)
           .join('\n\n'),
       });
+      // F10/T62: one extra system message, refreshed every round with the
+      // stubs of that round. Only with the switch on: off adds nothing.
+      if (stubsOn)
+        messages.push({ role: 'system', content: toolStubsText(undefined) });
     }
 
     // Pre-verificación guiada de discrepancias: bloque estático y cacheable.
@@ -2414,12 +2432,23 @@ export class AIAgentService {
                 routingAuthority,
               );
             }
+            const stubsOn = toolDiscoveryStubsEnabled();
             const selection = await this.toolRouter!.select(
               routingSession,
               routingAuthority,
               !!params.plan,
               !!(params.plan && (await params.plan.snapshot())),
+              stubsOn ? { stubs: true } : {},
             );
+            if (stubsOn) {
+              const card = messages.find(
+                (m) =>
+                  m.role === 'system' &&
+                  typeof m.content === 'string' &&
+                  m.content.startsWith(TOOL_STUBS_HEADER),
+              );
+              if (card) card.content = toolStubsText(selection.stubs);
+            }
             // Atomic swap at the boundary: no in-batch discovery mutates this pair.
             filteredTools = selection.definitions;
             toolCachePrefix = selection.coreCount;
@@ -3299,6 +3328,26 @@ export class AIAgentService {
               if (unloadedCall && robustLoaded === undefined)
                 routingSession.unloadedAuthorizedCalls++;
               offeredNames.add(toolName);
+              if (toolName === DESCRIBE_TOOL) {
+                // F10/T62: same dispatch shape as search_tools; the answer is
+                // a tool result, the definitions list is never touched.
+                messages.push({
+                  role: 'tool',
+                  content: this.toolRouter!.describe(toolArgs, currentAuthority),
+                  tool_call_id: toolCall.id,
+                });
+                toolOutcome = 'partial';
+                yield {
+                  type: 'tool_result',
+                  tool: {
+                    id: toolCall.id,
+                    name: toolName,
+                    summary: 'Consultando la ficha de la herramienta.',
+                    execution: observedReceipt(),
+                  },
+                };
+                continue;
+              }
               if (toolName === 'search_tools') {
                 const result = await this.toolRouter!.search(
                   routingSession,
@@ -4410,6 +4459,7 @@ export class AIAgentService {
               discoveryOnlyRound &&
               !(
                 toolName === 'search_tools' ||
+                toolName === DESCRIBE_TOOL ||
                 toolErrorCode === TOOL_NOT_ALLOWED_CODE ||
                 (unloadedCall && toolErrorCode === 'INVALID_ARGS')
               )

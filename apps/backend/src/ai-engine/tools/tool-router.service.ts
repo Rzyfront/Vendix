@@ -9,6 +9,7 @@ import {
   localToolScores,
   ToolDocument,
 } from './tool-catalog';
+import { FullCatalogRateMonitor } from './tool-router.full-catalog-rate';
 import { buildToolDeclaration } from './tool-declaration.builder';
 import {
   appendLoaded,
@@ -205,6 +206,11 @@ function withTimeout<T>(promise: Promise<T>, ms: number): Promise<T> {
 
 @Injectable()
 export class ToolRouterService {
+  /** F10/T62: rolling full-catalog fallback rate, one entry per routed turn. */
+  readonly fullCatalogRate = new FullCatalogRateMonitor();
+  private readonly rateSeen = new WeakSet<ToolRoutingSession>();
+  private readonly rateFallback = new WeakSet<ToolRoutingSession>();
+
   constructor(
     private readonly registry: AIToolRegistry,
     private readonly knowledge: KnowledgeSearchService,
@@ -561,6 +567,7 @@ export class ToolRouterService {
     ).length;
     // Stub level (opt-in): the loaded tools travel as schema-less cards, not
     // as definitions. A full-catalog turn keeps serving everything as today.
+    this.recordTurnRate(session);
     const stubbed = options.stubs && !session.fullCatalog ? loaded : null;
     const offered = stubbed ? names.filter((n) => !stubbed.includes(n)) : names;
     return {
@@ -578,6 +585,24 @@ export class ToolRouterService {
         : (session.retrieval?.source ?? 'none'),
       fullCatalogReason: fullCatalogReasonOf(session.fullCatalog),
     };
+  }
+
+  /**
+   * Feeds the fallback-rate monitor once per turn (the session), however many
+   * rounds call `select`; a fallback that only appears in a later round is
+   * recorded as its own entry so it is never lost.
+   */
+  private recordTurnRate(session: ToolRoutingSession): void {
+    const fallback = !!session.fullCatalog;
+    const reason = fullCatalogReasonOf(session.fullCatalog);
+    if (!this.rateSeen.has(session)) {
+      this.rateSeen.add(session);
+      if (fallback) this.rateFallback.add(session);
+      this.fullCatalogRate.record(fallback, reason);
+    } else if (fallback && !this.rateFallback.has(session)) {
+      this.rateFallback.add(session);
+      this.fullCatalogRate.record(true, reason);
+    }
   }
 
   /**

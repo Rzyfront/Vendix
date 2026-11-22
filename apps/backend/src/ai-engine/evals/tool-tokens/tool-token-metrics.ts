@@ -70,6 +70,13 @@ export interface TrajectoryInput {
   fixtures: Record<string, ResultFixture>;
   /** Tool definitions offered to round `k` (0 = turn 0). */
   toolsForRound: (round: number) => AIToolDefinition[];
+  /**
+   * Config 1: the leading messages of round `k` (the stubs message changes per
+   * round). Absent = `base` on every round, which is what config 0 measures.
+   */
+  baseForRound?: (round: number) => AIMessage[];
+  /** Result text of a call when it is not a fixture (e.g. `describe_tool`). */
+  resultFor?: (call: OracleCall) => string | undefined;
 }
 
 export interface TrajectoryMeasure {
@@ -81,13 +88,16 @@ export interface TrajectoryMeasure {
 }
 
 export function measureTrajectory(input: TrajectoryInput): TrajectoryMeasure {
-  const messages: AIMessage[] = [...input.base];
+  const history: AIMessage[] = [];
   const input_by_round: number[] = [];
   let output = FINAL_ANSWER_OUTPUT_BYTES;
   let intermediate = 0;
   for (let round = 0; round <= input.groups.length; round++) {
     input_by_round.push(
-      estimateAgentInputTokens(messages, input.toolsForRound(round)),
+      estimateAgentInputTokens(
+        [...(input.baseForRound?.(round) ?? input.base), ...history],
+        input.toolsForRound(round),
+      ),
     );
     const group = input.groups[round];
     if (!group) break;
@@ -99,14 +109,16 @@ export function measureTrajectory(input: TrajectoryInput): TrajectoryMeasure {
         arguments: JSON.stringify(call.args ?? {}),
       },
     }));
-    messages.push({ role: 'assistant', content: '', tool_calls: calls });
+    history.push({ role: 'assistant', content: '', tool_calls: calls });
     output += Buffer.byteLength(JSON.stringify(calls), 'utf8');
     group.forEach((call, i) => {
       const fixture = input.fixtures[call.tool];
-      if (!fixture) throw new Error(`No result fixture for tool ${call.tool}`);
-      const content = fixtureResult(fixture, call.rows);
+      const override = input.resultFor?.(call);
+      if (!fixture && override === undefined)
+        throw new Error(`No result fixture for tool ${call.tool}`);
+      const content = override ?? fixtureResult(fixture, call.rows);
       intermediate += Buffer.byteLength(content, 'utf8');
-      messages.push({
+      history.push({
         role: 'tool',
         tool_call_id: calls[i].id,
         content,
