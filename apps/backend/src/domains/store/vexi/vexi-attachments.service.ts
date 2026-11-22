@@ -18,6 +18,7 @@ import {
 } from './ai-attachments';
 import type { AttachmentContent } from './attachment-content.types';
 import {
+  AttachmentUnreadableError,
   extractAttachmentContent,
   spreadsheetLimitProblem,
 } from './attachment-text-extractor';
@@ -173,6 +174,16 @@ export class VexiAttachmentsService {
       }
     }
 
+    // B4: the content is extracted before anything is stored, in a bounded
+    // worker; a file that cannot be read in time is refused with a message
+    // instead of hanging the request (or the API for every store).
+    const originalName = this.safeName(file.originalname);
+    const content = await this.extractForUpload(
+      file.buffer,
+      type.mime,
+      originalName,
+    );
+
     const context = RequestContextService.getContext();
     const storeId = context?.store_id;
     const organizationId = context?.organization_id;
@@ -208,11 +219,9 @@ export class VexiAttachmentsService {
 
     await this.s3.uploadFile(file.buffer, key, type.mime);
 
-    const originalName = this.safeName(file.originalname);
     const derivedKey = await this.storeDerived(
       `${basePath}/derived/${id}.json`,
-      file.buffer,
-      type.mime,
+      content,
       originalName,
     );
 
@@ -547,18 +556,43 @@ export class VexiAttachmentsService {
   }
 
   /**
-   * Extracts and uploads the derived JSON next to the original. Never throws:
-   * a failed extraction or upload leaves `derived_text_key` null and the
+   * Extracted content for a new upload. A file that cannot be read within its
+   * limits (B4) is refused with the extractor's message; any other failure
+   * yields null and the upload goes on without a derived JSON.
+   */
+  private async extractForUpload(
+    buffer: Buffer,
+    mime: string,
+    originalName: string,
+  ): Promise<AttachmentContent | null> {
+    try {
+      return await extractAttachmentContent(buffer, mime, originalName);
+    } catch (error) {
+      if (error instanceof AttachmentUnreadableError) {
+        throw new VendixHttpException(
+          ErrorCodes.INV_SCAN_INVALID_FILE,
+          error.message,
+        );
+      }
+      this.logger.warn(
+        `Extraction failed for ${originalName}: ${(error as Error)?.message}`,
+      );
+      return null;
+    }
+  }
+
+  /**
+   * Uploads the derived JSON next to the original. Never throws: a missing
+   * extraction or a failed upload leaves `derived_text_key` null and the
    * original untouched (readContent extracts on the fly).
    */
   private async storeDerived(
     key: string,
-    buffer: Buffer,
-    mime: string,
+    content: AttachmentContent | null,
     originalName: string,
   ): Promise<string | null> {
+    if (!content) return null;
     try {
-      const content = await extractAttachmentContent(buffer, mime, originalName);
       await this.s3.uploadFile(
         Buffer.from(JSON.stringify(content), 'utf8'),
         key,

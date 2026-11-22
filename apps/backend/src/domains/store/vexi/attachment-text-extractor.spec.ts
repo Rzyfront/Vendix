@@ -1,8 +1,11 @@
 import * as AdmZip from 'adm-zip';
 import * as XLSX from 'xlsx';
 import {
+  AttachmentUnreadableError,
+  DOCX_UNREADABLE_MESSAGE,
   extractAttachmentContent,
   parseXlsxInWorker,
+  readDocxText,
   spreadsheetLimitProblem,
 } from './attachment-text-extractor';
 
@@ -152,5 +155,130 @@ describe('XLSX limits (B3)', () => {
       { name: 'S0', matrix: [['a'], ['0']] },
       { name: 'S1', matrix: [['a'], ['1']] },
     ]);
+  });
+});
+
+describe('DOCX limits (B4)', () => {
+  const docx = (documentXml: string) => {
+    const zip = new AdmZip();
+    zip.addFile('word/document.xml', Buffer.from(documentXml));
+    return zip.toBuffer();
+  };
+
+  /**
+   * The regex extraction this replaced, kept as the oracle for valid files:
+   * the new linear walk must return the same text for them.
+   */
+  const previousDocxText = (xml: string): string => {
+    const decode = (v: string) =>
+      v
+        .replace(/&#x([0-9a-fA-F]+);/g, (_, h) => String.fromCodePoint(parseInt(h, 16)))
+        .replace(/&#(\d+);/g, (_, d) => String.fromCodePoint(Number(d)))
+        .replace(/&lt;/g, '<')
+        .replace(/&gt;/g, '>')
+        .replace(/&quot;/g, '"')
+        .replace(/&apos;/g, "'")
+        .replace(/&amp;/g, '&');
+    const lines: string[] = [];
+    for (const paragraph of xml.match(/<w:p[ >][\s\S]*?<\/w:p>/g) ?? []) {
+      const withBreaks = paragraph
+        .replace(/<w:tab\s*\/>/g, '<w:t>\t</w:t>')
+        .replace(/<w:br\s*\/>/g, '<w:t>\n</w:t>');
+      let line = '';
+      for (const m of withBreaks.matchAll(/<w:t(?:\s[^>]*)?>([\s\S]*?)<\/w:t>/g)) {
+        line += decode(m[1]);
+      }
+      lines.push(line);
+    }
+    return lines.join('\n').trim();
+  };
+
+  it('2 MB of unclosed `<w:p ` (a ~3 KB upload) answers in under 2 s instead of blocking the API', async () => {
+    const bomb = docx('<w:p '.repeat((2 * 1024 * 1024) / 5));
+    expect(bomb.length).toBeLessThan(4096);
+
+    let beats = 0;
+    const heartbeat = setInterval(() => beats++, 50);
+    const started = Date.now();
+    const out = await extractAttachmentContent(bomb, DOCX_MIME, 'malo.docx');
+    const elapsed = Date.now() - started;
+    clearInterval(heartbeat);
+
+    expect(elapsed).toBeLessThan(2000);
+    expect(out).toEqual({
+      kind: 'text',
+      original_name: 'malo.docx',
+      mime_type: DOCX_MIME,
+      text: '',
+    });
+    // The event loop kept running while the file was read (half the
+    // expected beats, to absorb timer drift on a busy CI runner).
+    expect(beats).toBeGreaterThanOrEqual(Math.floor(elapsed / 50 / 2));
+  });
+
+  it('keeps the closed paragraphs before an unclosed flood (partial text, fast)', async () => {
+    const xml =
+      '<w:body><w:p><w:r><w:t>Factura 12</w:t></w:r></w:p>' +
+      '<w:p ><w:r><w:t>Total 5.000</w:t></w:r></w:p>' +
+      '<w:p '.repeat(400_000);
+    const started = Date.now();
+    const out = await extractAttachmentContent(docx(xml), DOCX_MIME, 'a.docx');
+    expect(Date.now() - started).toBeLessThan(2000);
+    expect(out).toMatchObject({ text: 'Factura 12\nTotal 5.000' });
+  });
+
+  it('unclosed `<w:t>` runs inside one paragraph stay linear too', async () => {
+    const xml = '<w:p><w:r>' + '<w:t>x'.repeat(400_000) + '</w:r></w:p>';
+    const started = Date.now();
+    const out = await extractAttachmentContent(docx(xml), DOCX_MIME, 'a.docx');
+    expect(Date.now() - started).toBeLessThan(2000);
+    expect(out).toMatchObject({ kind: 'text', text: '' });
+  });
+
+  it('returns the same text as the previous extraction for valid documents', async () => {
+    const valid = [
+      '<?xml version="1.0" encoding="UTF-8" standalone="yes"?>' +
+        '<w:document xmlns:w="http://schemas.openxmlformats.org/wordprocessingml/2006/main"><w:body>' +
+        '<w:p w:rsidR="00A1"><w:pPr><w:pStyle w:val="Title"/><w:tabs><w:tab w:val="left" w:pos="720"/></w:tabs></w:pPr>' +
+        '<w:r><w:t>Cotización</w:t></w:r></w:p>' +
+        '<w:p><w:proofErr w:type="spellStart"/><w:r><w:t xml:space="preserve">Cliente: </w:t></w:r>' +
+        '<w:r><w:rPr><w:b/></w:rPr><w:t>Pérez &amp; Hijos &lt;SAS&gt;</w:t></w:r><w:proofErr w:type="spellEnd"/></w:p>' +
+        '<w:p><w:r><w:t>Ítem</w:t><w:tab/><w:t>Valor</w:t></w:r></w:p>' +
+        '<w:p><w:r><w:t>Línea uno</w:t><w:br/><w:t>Línea dos</w:t><w:br w:type="page"/></w:r></w:p>' +
+        '<w:p/>' +
+        '<w:p></w:p>' +
+        '<w:tbl><w:tr><w:tc><w:p><w:r><w:t>Celda &#233; &#x00F1; &quot;x&quot; &apos;y&apos;</w:t></w:r></w:p></w:tc></w:tr></w:tbl>' +
+        '<w:p><w:r><w:t>Fin</w:t></w:r></w:p>' +
+        '<w:sectPr/></w:body></w:document>',
+      '<w:document><w:body><w:p><w:r><w:t>Hola &amp; adiós</w:t></w:r></w:p>' +
+        '<w:p><w:r><w:t xml:space="preserve">Línea </w:t></w:r><w:r><w:t>dos</w:t></w:r></w:p></w:body></w:document>',
+    ];
+    for (const xml of valid) {
+      const out = await extractAttachmentContent(docx(xml), DOCX_MIME, 'a.docx');
+      expect(out).toMatchObject({ kind: 'text', text: previousDocxText(xml) });
+    }
+    const first = await extractAttachmentContent(docx(valid[0]), DOCX_MIME, 'a.docx');
+    expect(first).toMatchObject({
+      text: 'Cotización\nCliente: Pérez & Hijos <SAS>\nÍtem\tValor\nLínea uno\nLínea dos\n\nCelda é ñ "x" \'y\'\nFin',
+    });
+  });
+
+  it('a Word read past its time limit is refused with a message for the person', async () => {
+    const valid = docx('<w:p><w:r><w:t>Hola</w:t></w:r></w:p>');
+    const read = readDocxText(valid, 1);
+    await expect(read).rejects.toBeInstanceOf(AttachmentUnreadableError);
+    await expect(read).rejects.toThrow(DOCX_UNREADABLE_MESSAGE);
+    expect(DOCX_UNREADABLE_MESSAGE).toMatch(
+      /^No pudimos leer el Word \(tarda demasiado o está dañado\)/,
+    );
+  });
+
+  it('a document.xml declared over 20 MB is skipped without inflating it', async () => {
+    const zip = new AdmZip();
+    zip.addFile('word/document.xml', Buffer.alloc(21 * 1024 * 1024, 0x20));
+    const started = Date.now();
+    const out = await extractAttachmentContent(zip.toBuffer(), DOCX_MIME, 'a.docx');
+    expect(Date.now() - started).toBeLessThan(2000);
+    expect(out).toMatchObject({ kind: 'text', text: '' });
   });
 });

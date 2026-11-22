@@ -2,6 +2,7 @@ import * as AdmZip from 'adm-zip';
 import * as XLSX from 'xlsx';
 import { RequestContextService } from '../../../common/context/request-context.service';
 import { VexiAttachmentsService } from './vexi-attachments.service';
+import * as extractor from './attachment-text-extractor';
 
 const XLSX_MIME =
   'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet';
@@ -155,6 +156,47 @@ describe('VexiAttachmentsService.store (T41)', () => {
         ),
       ),
     ).rejects.toThrow(/no se puede leer/);
+  });
+
+  it('B4: a 3 KB Word of unclosed paragraphs uploads in under 2 s with empty text', async () => {
+    const { service, prisma, s3 } = build();
+    const zip = new AdmZip();
+    zip.addFile(
+      'word/document.xml',
+      Buffer.from('<w:p '.repeat((2 * 1024 * 1024) / 5)),
+    );
+    const started = Date.now();
+    const stored = await run(() =>
+      service.store(file(zip.toBuffer(), DOCX_MIME, 'malo.docx')),
+    );
+    expect(Date.now() - started).toBeLessThan(2000);
+    expect(stored.attachment_id).toBe('att_41');
+    const derived = (s3.uploadFile.mock.calls as unknown as Array<[Buffer]>)[1][0];
+    expect(JSON.parse(derived.toString('utf8'))).toMatchObject({ text: '' });
+    expect(prisma.ai_attachments.create).toHaveBeenCalledTimes(1);
+  });
+
+  it('B4: a Word that cannot be read in time is refused with its message, before storing anything', async () => {
+    const { service, prisma, s3 } = build();
+    const spy = jest
+      .spyOn(extractor, 'extractAttachmentContent')
+      .mockRejectedValueOnce(
+        new extractor.AttachmentUnreadableError(
+          extractor.DOCX_UNREADABLE_MESSAGE,
+        ),
+      );
+    try {
+      await expect(
+        run(() => service.store(file(docxBuffer(), DOCX_MIME, 'lento.docx'))),
+      ).rejects.toMatchObject({
+        message: extractor.DOCX_UNREADABLE_MESSAGE,
+        errorCode: 'INV_SCAN_INVALID_FILE',
+      });
+      expect(s3.uploadFile).not.toHaveBeenCalled();
+      expect(prisma.ai_attachments.create).not.toHaveBeenCalled();
+    } finally {
+      spy.mockRestore();
+    }
   });
 
   it('an extraction/upload failure of the derived JSON does not fail the upload', async () => {
