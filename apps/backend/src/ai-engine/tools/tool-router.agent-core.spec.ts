@@ -31,6 +31,8 @@ import { createSalesTools } from './domains/sales.tools';
 import { createTaskTools } from './domains/tasks.tools';
 import { uiTools } from './domains/ui.tools';
 import { createVexBlockTools } from './domains/vex-blocks.tools';
+import { createWriteBatchTools } from './domains/write-batch.tools';
+import { createComputeTools } from './domains/compute.tools';
 import {
   createCustomerWriteTools,
   createInventoryWriteTools,
@@ -60,6 +62,9 @@ function realRegistry(): AIToolRegistry {
   registry.registerMany(createTaskTools(deps));
   registry.registerMany(createReportTools(deps));
   registry.registerMany(createVexBlockTools(deps));
+  // VexModule registers these next to the block tools (F7/T48, F5/T34).
+  registry.registerMany(createComputeTools());
+  registry.registerMany(createWriteBatchTools(deps));
   registry.registerMany(createFollowupTools(deps));
   for (const factory of [
     createAccountingTools,
@@ -140,9 +145,17 @@ describe('ToolRouterService: núcleo fijo por agente + conjunto dinámico (regis
     expect(
       CORE_DISCOVERY.length + AGENT_TOOL_CORE.vexi.length,
     ).toBeLessThanOrEqual(14);
+    // Vex = the 14 budget + 2 per-turn tools its prompt orders by name:
+    // suggest_followup (F1/T5, evaluated every turn) and compute (F7/T48, exact
+    // arithmetic). Cost measured from the definitions: ~3.2k schema chars,
+    // ~800 tokens on every Vex turn. Raise only for a tool the Vex prompt names
+    // by exact identifier; everything else arrives through discovery.
     expect(
       CORE_DISCOVERY.length + AGENT_TOOL_CORE.vex.length,
-    ).toBeLessThanOrEqual(14);
+    ).toBeLessThanOrEqual(16);
+    // F5/T34: the batch circuit is reached through discovery and playbooks,
+    // never by widening the fixed core.
+    expect(AGENT_TOOL_CORE.vex).not.toContain('propose_write_batch');
   });
 
   it('Vexi: "analiza el cierre de caja de hoy" carga caja + núcleo, no el catálogo completo', async () => {

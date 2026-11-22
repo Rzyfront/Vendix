@@ -5,6 +5,7 @@ import {
   DOCUMENT_TYPE_RULES,
   DocumentTypeCode,
 } from '@common/constants/document-types';
+import { ErrorCodes, VendixHttpException } from '../../../common/errors';
 import { RegisteredTool, ToolPreview } from '../interfaces/tool.interface';
 import {
   cleanString,
@@ -767,6 +768,15 @@ interface PriceTarget {
   taxRate: number;
 }
 
+/** State kept by `update_product_price.compensate.capture`. */
+interface PriceUndoSnapshot {
+  product_id: number;
+  variant_id: number | null;
+  field: PriceField;
+  previous: number;
+  applied: number;
+}
+
 const PRICE_FIELD_LABELS: Record<PriceField, string> = {
   base_price: 'Precio base (sin impuestos)',
   sale_price: 'Precio de oferta (sin impuestos)',
@@ -1322,6 +1332,76 @@ export function createProductWriteTools(
             `No se pudo cambiar el precio${code ? ` (${code})` : ''}: ${message}`,
           );
         }
+      },
+      // T36 "Deshacer": honest inverse only for the normal price of a product
+      // (`base_price`) or of a variant (`price_override`) that HAD its own
+      // value. The sale price toggles `is_on_sale` too, and a variant without
+      // override inherits the product price: restoring those would invent
+      // state, so they stay "no reversible desde Vex" (capture returns null).
+      compensate: {
+        label: 'Restaurar el precio anterior',
+        capture: async (args, context) => {
+          const resolved = await resolvePriceTarget(args, context.store_id);
+          if (!resolved.ok) return null;
+          const target = resolved.value;
+          if (target.field === 'sale_price') return null;
+          let previous: number | null = target.currentPrice;
+          if (target.field === 'price_override') {
+            const product: any =
+              await productsService.findProductForPriceChangeForAgent(
+                target.productId,
+              );
+            const variant = (product?.product_variants ?? []).find(
+              (row: any) => row.id === target.variantId,
+            );
+            previous = toNumberOrNull(variant?.price_override);
+          }
+          if (previous === null) return null;
+          return {
+            product_id: target.productId,
+            variant_id: target.variantId,
+            field: target.field,
+            previous,
+            applied: target.newPrice,
+          } satisfies PriceUndoSnapshot;
+        },
+        undo: async ({ snapshot }) => {
+          const snap = snapshot as PriceUndoSnapshot;
+          const product: any =
+            await productsService.findProductForPriceChangeForAgent(
+              snap.product_id,
+            );
+          const variant = snap.variant_id
+            ? (product?.product_variants ?? []).find(
+                (row: any) => row.id === snap.variant_id,
+              )
+            : null;
+          const current = snap.variant_id
+            ? toNumberOrNull(variant?.price_override)
+            : toNumberOrNull(product?.base_price);
+          if (current === null || round2(current) !== round2(snap.applied)) {
+            throw new VendixHttpException(
+              ErrorCodes.SYS_CONFLICT_001,
+              'El valor cambió después del lote; no lo revertí.',
+            );
+          }
+          if (snap.variant_id) {
+            const checked = toValidatedDto(UpdateProductVariantDto, {
+              price_override: snap.previous,
+            });
+            if (!checked.ok) throw new Error(checked.message);
+            await productsService.updateVariant(snap.variant_id, checked.dto);
+          } else {
+            const checked = toValidatedDto(UpdateProductDto, {
+              base_price: snap.previous,
+            });
+            if (!checked.ok) throw new Error(checked.message);
+            await productsService.update(snap.product_id, checked.dto, {
+              lean: true,
+            });
+          }
+          return `Precio restaurado a ${snap.previous}.`;
+        },
       },
     },
 

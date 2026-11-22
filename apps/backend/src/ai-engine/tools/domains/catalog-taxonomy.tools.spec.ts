@@ -280,6 +280,102 @@ describe('catalog-taxonomy.tools · categorías', () => {
     expect(out.error).toContain('no existen en la tienda');
     expect(out.next_step).toBeDefined();
   });
+
+  describe('assign_products_to_category · compensate (T36)', () => {
+    const comp = (tools: any[]) =>
+      byName(tools, 'assign_products_to_category').compensate!;
+    const ctx = CTX as any;
+
+    it('capture keeps only the products whose membership changes (add)', async () => {
+      const { tools } = build();
+      const snap = await comp(tools).capture(
+        { category_id: 1, mode: 'add', product_ids: [10, 20, 21] },
+        ctx,
+      );
+      // 10 is already in the category (mock: 10, 11, 12).
+      expect(snap).toEqual({
+        category_id: 1,
+        mode: 'add',
+        product_ids: [20, 21],
+      });
+    });
+
+    it('capture on remove keeps the products that were in the category', async () => {
+      const { tools } = build();
+      const snap = await comp(tools).capture(
+        { category_id: 1, mode: 'remove', product_ids: [10, 99] },
+        ctx,
+      );
+      expect(snap).toEqual({
+        category_id: 1,
+        mode: 'remove',
+        product_ids: [10],
+      });
+    });
+
+    it('capture returns null when nothing changes', async () => {
+      const { tools } = build();
+      const snap = await comp(tools).capture(
+        { category_id: 1, mode: 'add', product_ids: [10] },
+        ctx,
+      );
+      expect(snap).toBeNull();
+    });
+
+    it('undo of an add removes exactly the products it added', async () => {
+      const { service, tools } = build({
+        getProductIds: jest
+          .fn()
+          .mockResolvedValue({ product_ids: [10, 20, 21], total: 3 }),
+      });
+      const out = await comp(tools).undo({
+        args: {},
+        snapshot: { category_id: 1, mode: 'add', product_ids: [20, 21] },
+        handlerOutput: '',
+        context: ctx,
+      });
+      expect(service.assignProducts).toHaveBeenCalledWith(
+        1,
+        expect.objectContaining({ action: 'remove', product_ids: [20, 21] }),
+      );
+      expect(out).toContain('2');
+    });
+
+    it('undo of a remove puts the products back', async () => {
+      const { service, tools } = build({
+        getProductIds: jest
+          .fn()
+          .mockResolvedValue({ product_ids: [11], total: 1 }),
+      });
+      await comp(tools).undo({
+        args: {},
+        snapshot: { category_id: 1, mode: 'remove', product_ids: [10] },
+        handlerOutput: '',
+        context: ctx,
+      });
+      expect(service.assignProducts).toHaveBeenCalledWith(
+        1,
+        expect.objectContaining({ action: 'add', product_ids: [10] }),
+      );
+    });
+
+    it('undo throws and writes nothing when the membership changed after the batch', async () => {
+      const { service, tools } = build({
+        getProductIds: jest
+          .fn()
+          .mockResolvedValue({ product_ids: [10, 20], total: 2 }), // 21 left
+      });
+      await expect(
+        comp(tools).undo({
+          args: {},
+          snapshot: { category_id: 1, mode: 'add', product_ids: [20, 21] },
+          handlerOutput: '',
+          context: ctx,
+        }),
+      ).rejects.toThrow();
+      expect(service.assignProducts).not.toHaveBeenCalled();
+    });
+  });
 });
 
 describe('catalog-taxonomy.tools · marcas', () => {

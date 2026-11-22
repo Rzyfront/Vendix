@@ -241,7 +241,8 @@ export interface AIStreamChunk {
       | 'file'
       | 'markdown'
       | 'timeline'
-      | 'list';
+      | 'list'
+      | 'write_batch';
     version?: number;
     spec?: Record<string, any>;
     data?: unknown;

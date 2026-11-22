@@ -12,7 +12,9 @@ export type VexUiBlockKind =
   // F4 T29: learning blocks (help center post, video, learning path).
   | 'help_article'
   | 'video'
-  | 'learning_path';
+  | 'learning_path'
+  // F5 T34: batch write card
+  | 'write_batch';
 
 /**
  * A UI block Vex rendered inside a turn.
@@ -38,7 +40,8 @@ export type VexBlockSpec =
   | VexMarkdownSpec
   | VexTimelineSpec
   | VexListSpec
-  | VexLearningSpec;
+  | VexLearningSpec
+  | VexWriteBatchSpec;
 
 export interface VexTableColumn {
   key: string;
@@ -340,3 +343,97 @@ export const VEX_MODEL_OPTIONS: VexModelOption[] = [
   { id: 'vex-flash', label: 'Flash' },
   { id: 'vex-pro', label: 'Pro' },
 ];
+
+// ── F5: write batch (one approval for up to 25 reversible writes) ──
+
+/** `write_batch` blocks carry everything in `data`; the spec is empty. */
+export type VexWriteBatchSpec = Record<string, never>;
+
+/** `data` of a persisted `write_batch` block (the card re-fetches by id). */
+export interface VexWriteBatchBlockData {
+  batch_id: string;
+  goal: string;
+  part_index: number;
+  part_total: number;
+  step_count: number;
+}
+
+export type VexWriteBatchStatus =
+  | 'proposed'
+  | 'executing'
+  | 'applied'
+  | 'partially_applied'
+  | 'failed'
+  | 'unknown_effect'
+  | 'rejected'
+  | 'expired';
+
+export type VexWriteBatchStepStatus =
+  | 'pending'
+  | 'running'
+  | 'applied'
+  | 'failed'
+  | 'unknown'
+  | 'skipped'
+  | 'unselected'
+  | 'cancelled'
+  | 'compensating'
+  | 'compensated'
+  | 'compensation_failed';
+
+export interface VexWriteBatchStep {
+  step_id: string;
+  order: number;
+  tool: string;
+  label: string;
+  preview: {
+    status: 'ok' | 'warning';
+    target: string;
+    changes: Array<{ field: string; label: string; from: unknown; to: unknown }>;
+    message?: string;
+    domain?: string;
+  };
+  compensable: boolean;
+  can_undo: boolean;
+  status: VexWriteBatchStepStatus;
+  result_summary?: string;
+  error?: string;
+}
+
+export interface VexWriteBatchSummary {
+  applied: number;
+  failed: number;
+  unknown: number;
+  skipped: number;
+  unselected: number;
+  compensable: number;
+  applied_through_order: number;
+  message: string;
+}
+
+/** Mirror of the backend `WriteBatchView` (fields the card uses). */
+export interface VexWriteBatch {
+  id: string;
+  goal: string;
+  status: VexWriteBatchStatus;
+  part_index: number;
+  part_total: number;
+  step_count: number;
+  steps: VexWriteBatchStep[];
+  summary: VexWriteBatchSummary | null;
+  undo_until: string | null;
+  expires_at: string;
+}
+
+export interface VexWriteBatchResult {
+  batch: VexWriteBatch;
+  replayed: boolean;
+}
+
+/** T39: a prebuilt task offered in the welcome gallery «Tareas». */
+export interface VexLaunchablePlaybook {
+  id: string;
+  title: string;
+  description: string;
+  prompt: string;
+}

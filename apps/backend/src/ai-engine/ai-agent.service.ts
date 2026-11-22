@@ -84,7 +84,7 @@ import { PROPOSE_PLAN_TOOL } from './tools/domains/planning.tools';
 import { DISCREPANCY_GUIDANCE_BLOCK } from './tools/discrepancy-signal';
 import {
   isForeignSurfaceTool,
-  withTurnConversationId,
+  withTurnConversation,
 } from './tools/surface-tools';
 import { IRREVERSIBLE_DOMAIN_SEGMENTS } from './tools/bridge/capability-registry.service';
 import {
@@ -1039,7 +1039,9 @@ export class AIAgentService {
                   ? 'image'
                   : toolName === 'vex_render_file'
                     ? 'file'
-                    : null;
+                    : toolName === 'propose_write_batch'
+                      ? 'write_batch'
+                      : null;
     if (!renderKind && toolName !== 'vex_block_transform') return null;
     try {
       const parsed = JSON.parse(result) as {
@@ -1097,6 +1099,39 @@ export class AIAgentService {
       };
     } catch {
       return null;
+    }
+  }
+
+  /**
+   * F5: `write_batch` blocks of parts 2..n of a split batch
+   * (`propose_write_batch` envelope `data.part_blocks`). Empty for any other
+   * tool, an error envelope or a non-JSON result.
+   */
+  private writeBatchPartBlocksOf(
+    toolName: string,
+    result: string,
+  ): NonNullable<AIStreamChunk['ui_block']>[] {
+    if (toolName !== 'propose_write_batch') return [];
+    try {
+      const parts = (JSON.parse(result) as { data?: { part_blocks?: unknown } })
+        ?.data?.part_blocks;
+      if (!Array.isArray(parts)) return [];
+      return parts
+        .filter(
+          (part): part is { block_id: string; version?: number; spec?: Record<string, any>; data?: unknown } =>
+            !!part &&
+            typeof part === 'object' &&
+            typeof (part as { block_id?: unknown }).block_id === 'string',
+        )
+        .map((part) => ({
+          block_id: part.block_id,
+          kind: 'write_batch' as const,
+          ...(typeof part.version === 'number' ? { version: part.version } : {}),
+          ...(part.spec && typeof part.spec === 'object' ? { spec: part.spec } : {}),
+          ...(part.data !== undefined ? { data: part.data } : {}),
+        }));
+    } catch {
+      return [];
     }
   }
 
@@ -2673,7 +2708,7 @@ export class AIAgentService {
                 this.toolRegistry.canonicalName(d.function.name) ===
                 call.tool_name,
             );
-            call.arguments = withTurnConversationId(
+            call.arguments = withTurnConversation(
               call.tool_name,
               call.arguments,
               params.conversation_id,
@@ -3615,8 +3650,8 @@ export class AIAgentService {
               // Las `vex_*` de bloques viven bajo una conversación que el modelo
               // no conoce: el turno inyecta su id como default para que la
               // herramienta no tenga que inventarlo (y no falle validación).
-              // `remember` recibe SIEMPRE el id del turno (H6).
-              toolArgs = withTurnConversationId(
+              // `propose_write_batch` usa SIEMPRE la del turno (P2-3).
+              toolArgs = withTurnConversation(
                 toolName,
                 toolArgs,
                 params.conversation_id,
@@ -3844,6 +3879,10 @@ export class AIAgentService {
               const uiBlock = this.uiBlockOf(toolName, raw);
               if (uiBlock) {
                 yield { type: 'ui_block', ui_block: uiBlock };
+              }
+              // F5: a batch split in parts (> 25 steps) opens one card each.
+              for (const part of this.writeBatchPartBlocksOf(toolName, raw)) {
+                yield { type: 'ui_block', ui_block: part };
               }
             } catch (error: any) {
               // A confirmation demand is not a failure — it is the proposal

@@ -34,7 +34,8 @@ export type VexBlockKind =
   | 'list'
   | 'help_article'
   | 'video'
-  | 'learning_path';
+  | 'learning_path'
+  | 'write_batch';
 
 export const VEX_BLOCK_KINDS: readonly VexBlockKind[] = [
   'table',
@@ -48,6 +49,7 @@ export const VEX_BLOCK_KINDS: readonly VexBlockKind[] = [
   'help_article',
   'video',
   'learning_path',
+  'write_batch',
 ];
 
 /** Chart types Vex can render; `doughnut` stays accepted for older blocks. */
@@ -494,6 +496,22 @@ export class VexBlockService {
           version: row.version,
           spec: { kind: 'learning_path' },
           data: { series: data.series ?? null },
+        };
+      case 'write_batch':
+        // Pointer only: the card reads the live batch (`GET batches/:id`), so
+        // steps, hashes and status never go stale inside the block row.
+        return {
+          block_id: row.id,
+          kind: 'write_batch',
+          version: row.version,
+          spec: { kind: 'write_batch' },
+          data: {
+            batch_id: typeof data.batch_id === 'string' ? data.batch_id : '',
+            goal: typeof data.goal === 'string' ? data.goal : '',
+            part_index: Number(data.part_index) || 1,
+            part_total: Number(data.part_total) || 1,
+            step_count: Number(data.step_count) || 0,
+          },
         };
       case 'markdown':
       default:
@@ -1050,6 +1068,21 @@ export class VexBlockService {
         return this.validateVideoData(data);
       case 'learning_path':
         return this.validateLearningPathData(data);
+      case 'write_batch': {
+        const errors: string[] = [];
+        if (typeof data.batch_id !== 'string' || !data.batch_id) {
+          errors.push('data.batch_id es obligatorio.');
+        }
+        if (typeof data.goal !== 'string') {
+          errors.push('data.goal debe ser texto.');
+        }
+        for (const key of ['part_index', 'part_total', 'step_count']) {
+          if (!Number.isInteger(data[key]) || data[key] < 1) {
+            errors.push(`data.${key} debe ser un entero positivo.`);
+          }
+        }
+        return errors;
+      }
     }
   }
 

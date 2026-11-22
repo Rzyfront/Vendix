@@ -16,7 +16,10 @@ import {
   VexFollowupEdits,
   VexPlanProposal,
   VexPlanStep,
+  VexLaunchablePlaybook,
   VexUiBlock,
+  VexWriteBatch,
+  VexWriteBatchResult,
 } from '../models/vex.models';
 
 /**
@@ -344,6 +347,55 @@ export class VexApiService {
   private readonly chatBase = `${environment.apiUrl}/store/ai-chat`;
   private readonly vexBase = `${environment.apiUrl}/store/vex`;
   private readonly vexiBase = `${environment.apiUrl}/store/vexi`;
+
+  /** F5/T39: playbooks the person can start from the welcome gallery. */
+  getLaunchablePlaybooks(): Observable<VexLaunchablePlaybook[]> {
+    return this.http
+      .get<{ data: VexLaunchablePlaybook[] }>(
+        `${this.vexBase}/playbooks/launchable`,
+      )
+      .pipe(map((res) => res.data ?? []));
+  }
+
+  /** F5: current state of a write batch (the card polls this while executing). */
+  getBatch(batchId: string): Observable<VexWriteBatch> {
+    return this.http
+      .get<{ data: VexWriteBatch }>(
+        `${this.vexBase}/batches/${encodeURIComponent(batchId)}`,
+      )
+      .pipe(map((res) => res.data));
+  }
+
+  /** F5: approves the ticked steps; returns once the batch is terminal. */
+  approveBatch(
+    batchId: string,
+    stepIds: string[],
+  ): Observable<VexWriteBatchResult> {
+    return this.http
+      .post<{ data: VexWriteBatchResult }>(
+        `${this.vexBase}/batches/${encodeURIComponent(batchId)}/approve`,
+        { step_ids: stepIds },
+      )
+      .pipe(map((res) => res.data));
+  }
+
+  rejectBatch(batchId: string): Observable<VexWriteBatchResult> {
+    return this.http
+      .post<{ data: VexWriteBatchResult }>(
+        `${this.vexBase}/batches/${encodeURIComponent(batchId)}/reject`,
+        {},
+      )
+      .pipe(map((res) => res.data));
+  }
+
+  undoBatchStep(batchId: string, stepId: string): Observable<VexWriteBatch> {
+    return this.http
+      .post<{ data: VexWriteBatch }>(
+        `${this.vexBase}/batches/${encodeURIComponent(batchId)}/steps/${encodeURIComponent(stepId)}/undo`,
+        {},
+      )
+      .pipe(map((res) => res.data));
+  }
 
   listConversations(params?: {
     page?: number;

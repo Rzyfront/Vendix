@@ -9,6 +9,7 @@ import { VexBlockListComponent } from './vex-block-list.component';
 import { VexBlockMarkdownComponent } from './vex-block-markdown.component';
 import { VexBlockTableComponent } from './vex-block-table.component';
 import { VexBlockTimelineComponent } from './vex-block-timeline.component';
+import { VexBatchCardComponent } from '../vex-batch-card/vex-batch-card.component';
 import { VexBlockUnknownComponent } from './vex-block-unknown.component';
 import { VexBlockVideoComponent } from './vex-block-video.component';
 
@@ -29,6 +30,7 @@ export const VEX_BLOCK_REGISTRY: Readonly<Record<string, Type<unknown>>> = {
   help_article: VexBlockHelpArticleComponent,
   video: VexBlockVideoComponent,
   learning_path: VexBlockLearningPathComponent,
+  write_batch: VexBatchCardComponent,
 };
 
 /** Never returns `undefined`: unknown kinds get the notice component. */

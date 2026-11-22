@@ -42,6 +42,8 @@ export const VEX_COPY = {
     greeting: '¿Con qué seguimos?',
     greeting_named: (first_name: string) => `¿Con qué seguimos, ${first_name}?`,
     suggestions_label: 'Sugerencias para empezar',
+    tasks_title: 'Tareas',
+    tasks_label: 'Tareas prediseñadas de Vex',
     how_it_works: '¿Cómo funciona Vex?',
     suggestions: {
       reminders_today: {
@@ -308,6 +310,50 @@ export const VEX_COPY = {
     chart: {
       label: 'Gráfico de Vex',
       empty: 'Sin datos para graficar',
+    },
+    write_batch: {
+      label: 'Cambios propuestos por Vex',
+      part: (i: number, n: number) => `Parte ${i} de ${n}`,
+      changes_count: (n: number) => (n === 1 ? '1 cambio' : `${n} cambios`),
+      loading: 'Cargando los cambios…',
+      load_failed: 'No se pudo cargar este lote de cambios.',
+      retry: 'Reintentar',
+      approve_all: 'Aprobar todo',
+      approve_selected: (k: number) => `Aprobar seleccionados (${k})`,
+      cancel: 'Cancelar',
+      applying: 'Aplicando…',
+      progress: (done: number, total: number) =>
+        `Aplicando cambios: ${done} de ${total}`,
+      none_selected: 'Marca al menos un cambio para aprobar.',
+      select_step: (label: string) => `Incluir: ${label}`,
+      empty_value: '—',
+      undo: 'Deshacer',
+      undoing: 'Deshaciendo…',
+      not_reversible: 'No reversible desde Vex',
+      undo_until: (when: string) => `Puedes deshacer hasta las ${when}.`,
+      approve_failed: 'No se pudo aprobar los cambios',
+      reject_failed: 'No se pudo cancelar los cambios',
+      undo_failed: 'No se pudo deshacer el cambio',
+      rejected: 'Cancelaste estos cambios. No se aplicó nada.',
+      expired: 'Estos cambios vencieron sin aprobarse. Pídele a Vex que los proponga de nuevo.',
+      unknown_effect:
+        'No se pudo verificar el resultado de un cambio. Revísalo antes de continuar.',
+      counts: (applied: number, failed: number, skipped: number) =>
+        `${applied} aplicados · ${failed} fallidos · ${skipped} omitidos`,
+      other_domain: 'Otros',
+      status: {
+        pending: 'Pendiente',
+        running: 'Aplicando',
+        applied: 'Aplicado',
+        failed: 'Falló',
+        unknown: 'Sin verificar',
+        skipped: 'Omitido',
+        unselected: 'Sin seleccionar',
+        cancelled: 'Cancelado',
+        compensating: 'Deshaciendo',
+        compensated: 'Deshecho',
+        compensation_failed: 'No se pudo deshacer',
+      } as Record<string, string>,
     },
     unknown: {
       message:
