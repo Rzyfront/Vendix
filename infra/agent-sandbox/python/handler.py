@@ -8,7 +8,12 @@ with rlimits; right before the guest code runs, runner.py seals descriptor
 creation (RLIMIT_NOFILE=0) so the guest cannot open a socket to the Lambda
 Runtime API; the whole process group, and then every other task of the guest
 uid (kill(-1)), is SIGKILLed afterwards and /tmp wiped, because the execution
-environment is reused between invocations.
+environment is reused between invocations. Three channels need no descriptor
+and are closed here (T53 run 3): System V IPC objects of the guest uid are
+removed before each tenant and after each run; limits/nice/affinity the guest
+changed in this process with prlimit & co. are restored or the runtime is
+restarted inside the attacker's own invocation; inodes the guest creates in
+/tmp are capped while it runs and the wipe is iterative and deadline-bound.
 
 Never log source, inputs or outputs.
 """
@@ -18,7 +23,7 @@ import errno
 import json
 import os
 import re
-import shutil
+import resource
 import signal
 import stat
 import subprocess
@@ -48,6 +53,26 @@ NPROC_LIMIT = 64
 TEARDOWN_RESERVE_MS = 2_000
 FSIZE_SLACK = 1024 * 1024
 LOG_READ_BYTES = 4096
+# The reply (validation, serialization) must leave the handler this long before
+# the host aborts at wall_ms; the /tmp wipe after a run stops at that point.
+RESPONSE_MARGIN_MS = 500
+# Time the child needs at least (exec + pandas import) once the /tmp wipe of a
+# previous run finished; with less left the run is refused, never started.
+MIN_CHILD_MS = 3_000
+# mkdir/symlink/link/mknod create inodes without descriptors, so the seal does
+# not stop them (T53 run 3: 3 500 mkdir/s until /tmp ran out of inodes and the
+# cleanup blew the budget). The parent watches the inodes the guest consumes
+# and kills it past this cap, so the wipe always fits in the reserve.
+TMP_INODE_CAP = 10_000
+WATCH_INTERVAL_S = 0.05
+# System V IPC objects are kernel objects identified by ids, not descriptors:
+# they survive the guest, kill(-1) and the /tmp wipe (T53 run 3: a tenant read
+# the previous tenant's marker through shm/msg in 99/100 runs).
+SYSVIPC_ROOT = "/proc/sysvipc"
+SYSVIPC_KINDS = (("shm", "shmid"), ("msg", "msqid"), ("sem", "semid"))
+IPC_RMID = 0
+IPC_SETTLE_ATTEMPTS = 25
+IPC_SETTLE_S = 0.02
 
 _NAME_RE = re.compile(r"^[a-z][a-z0-9_]{0,39}$")
 _NONCE_RE = re.compile(r"^[0-9a-f]{64}$")
@@ -95,6 +120,148 @@ def _harden_parent_dumpable():
     if err == errno.EPERM and _kernel_marked_non_dumpable():
         return
     raise OSError(err, "prctl(PR_SET_DUMPABLE, 0) failed")
+
+
+def _process_state():
+    """Every attribute of THIS process a same-uid guest can change from outside.
+
+    prlimit64(ppid) lets the guest lower the handler's limits (T53 run 3: soft
+    RLIMIT_NOFILE 1024 -> 4 made every later invocation of the environment fail
+    for 15-19 min); setpriority/sched_setaffinity/sched_setscheduler reach it
+    the same way and are inherited by every later child.
+    """
+    state = {}
+    for name in sorted(dir(resource)):
+        if name.startswith("RLIMIT_"):
+            try:
+                state[name] = resource.getrlimit(getattr(resource, name))
+            except (OSError, ValueError):
+                pass
+    try:
+        state["nice"] = os.getpriority(os.PRIO_PROCESS, 0)
+    except (AttributeError, OSError):
+        pass
+    if hasattr(os, "sched_getaffinity"):
+        try:
+            state["affinity"] = frozenset(os.sched_getaffinity(0))
+        except OSError:
+            pass
+    if hasattr(os, "sched_getscheduler"):
+        try:
+            state["scheduler"] = os.sched_getscheduler(0)
+        except OSError:
+            pass
+    return state
+
+
+_BASELINE_STATE = _process_state()  # import time: before any guest has run
+
+
+def _restore_attribute(name, value):
+    if name.startswith("RLIMIT_"):
+        resource.setrlimit(getattr(resource, name), value)
+    elif name == "nice":
+        os.setpriority(os.PRIO_PROCESS, 0, value)
+    elif name == "affinity":
+        os.sched_setaffinity(0, value)
+    elif name == "scheduler":
+        os.sched_setscheduler(0, value, os.sched_param(0))
+
+
+def _restart_runtime():
+    """Lambda restarts a runtime that exits; the reply of THIS invocation is lost
+    (Runtime.ExitError, fails closed) and the next one starts clean."""
+    try:
+        os.write(2, b"analysis sandbox: handler process state was altered; restarting the runtime\n")
+    finally:
+        os._exit(70)
+
+
+def _guard_process_state():
+    """Put back what a guest changed in this process, or restart the runtime.
+
+    A lowered soft limit, a raised nice or a narrowed affinity can be restored
+    without privileges; a lowered hard limit or a nice below the current one
+    cannot, and then the only safe outcome is a fresh runtime. Runs after every
+    guest was killed (so nothing can change it again) and before anything that
+    needs descriptors, memory or processes.
+    """
+    current = _process_state()
+    if current == _BASELINE_STATE:
+        return
+    for name, value in _BASELINE_STATE.items():
+        if current.get(name) != value:
+            try:
+                _restore_attribute(name, value)
+            except (OSError, ValueError, AttributeError):
+                pass
+    if _process_state() != _BASELINE_STATE:
+        _restart_runtime()
+
+
+class SysvIpcError(Exception):
+    """A System V IPC object of the guest uid could not be listed or removed."""
+
+
+def _libc():
+    return ctypes.CDLL(ctypes.util.find_library("c") or "libc.so.6", use_errno=True)
+
+
+def _sysvipc_objects():
+    """[(kind, id, uid, cuid)] from /proc/sysvipc; columns located by header."""
+    objects = []
+    for kind, id_column in SYSVIPC_KINDS:
+        try:
+            with open(os.path.join(SYSVIPC_ROOT, kind), encoding="ascii") as fh:
+                lines = fh.read().splitlines()
+        except OSError as exc:
+            raise SysvIpcError("cannot list %s: %s" % (kind, errno.errorcode.get(exc.errno, exc.errno)))
+        if not lines:
+            raise SysvIpcError("empty %s listing" % kind)
+        header = lines[0].split()
+        try:
+            idx = [header.index(c) for c in (id_column, "uid", "cuid")]
+        except ValueError:
+            raise SysvIpcError("unexpected %s header" % kind)
+        for line in lines[1:]:
+            cols = line.split()
+            if not cols:
+                continue
+            try:
+                objects.append((kind,) + tuple(int(cols[i]) for i in idx))
+            except (IndexError, ValueError):
+                raise SysvIpcError("unexpected %s row" % kind)
+    return objects
+
+
+def _purge_sysv_ipc():
+    """IPC_RMID every shm/msg/sem object owned or created by this uid (the guest
+    shares it), then prove none is left. Runs after kill(-1): no guest can be
+    attached any more, so a removed segment disappears once its last attacher's
+    exit finished detaching it. Fails closed. No-op off Linux.
+    """
+    if not sys.platform.startswith("linux"):
+        return
+    me = os.geteuid()
+    libc = None
+    for _ in range(IPC_SETTLE_ATTEMPTS):
+        ours = [o for o in _sysvipc_objects() if me in (o[2], o[3])]
+        if not ours:
+            return
+        libc = libc or _libc()
+        for kind, ident, _uid, _cuid in ours:
+            if kind == "shm":
+                rc = libc.shmctl(ident, IPC_RMID, None)
+            elif kind == "msg":
+                rc = libc.msgctl(ident, IPC_RMID, None)
+            else:
+                rc = libc.semctl(ident, 0, IPC_RMID, 0)
+            if rc != 0:
+                err = ctypes.get_errno()
+                if err not in (errno.EINVAL, errno.EIDRM):  # already gone
+                    raise SysvIpcError("cannot remove %s: %s" % (kind, errno.errorcode.get(err, err)))
+        time.sleep(IPC_SETTLE_S)
+    raise SysvIpcError("System V IPC objects survive removal")
 
 
 class RequestError(Exception):
@@ -174,31 +341,134 @@ def validate_request(event):
     return event["execution_id"], event["nonce"], source, inputs, limits
 
 
-def _rm(path):
-    def onerror(func, p, _exc):
+def _unique_name(dir_fd, counter):
+    while True:
+        counter[0] += 1
+        name = ".wipe-%d" % counter[0]
         try:
-            os.chmod(os.path.dirname(p) or ".", 0o700)
-            os.chmod(p, 0o700)
-            func(p)
-        except OSError:
-            pass
-    if os.path.isdir(path) and not os.path.islink(path):
-        shutil.rmtree(path, onerror=onerror)
-    else:
-        try:
-            os.unlink(path)
-        except OSError:
-            pass
+            os.stat(name, dir_fd=dir_fd, follow_symlinks=False)
+        except FileNotFoundError:
+            return name
 
 
-def wipe_tmp():
-    """Remove everything under TMP_ROOT (one invocation at a time per environment)."""
+def _drain_dir(root_fd, name, deadline, counter):
+    """Move every child of root/name up into root, then rmdir it.
+
+    O(1) descriptors and no recursion whatever the depth (a guest can build a
+    chain far deeper than the recursion limit or PATH_MAX with mkdir + chdir);
+    the children are removed when the caller reaches them in root.
+    Returns True when name is gone.
+    """
     try:
-        entries = os.listdir(TMP_ROOT)
+        os.chmod(name, 0o700, dir_fd=root_fd)  # the guest may have chmod'ed it 000
+    except OSError:
+        pass
+    flags = os.O_RDONLY | getattr(os, "O_DIRECTORY", 0) | getattr(os, "O_NOFOLLOW", 0)
+    try:
+        dfd = os.open(name, flags, dir_fd=root_fd)
+    except OSError:
+        return False
+    try:
+        children = [e.name for e in os.scandir(dfd)]
+        for child in children:
+            if time.monotonic() >= deadline:
+                return False
+            target = _unique_name(root_fd, counter)
+            try:
+                os.rename(child, target, src_dir_fd=dfd, dst_dir_fd=root_fd)
+            except PermissionError:  # moving a directory needs write on it
+                try:
+                    os.chmod(child, 0o700, dir_fd=dfd)
+                    os.rename(child, target, src_dir_fd=dfd, dst_dir_fd=root_fd)
+                except OSError:
+                    return False
+            except FileNotFoundError:
+                pass
+            except OSError:
+                return False
+    finally:
+        os.close(dfd)
+    try:
+        os.rmdir(name, dir_fd=root_fd)
+        return True
+    except OSError:
+        return False
+
+
+def wipe_tmp(deadline):
+    """Remove everything under TMP_ROOT before `deadline` (time.monotonic()).
+
+    Returns True when nothing this uid can remove is left. Iterative and
+    bounded: one pass over TMP_ROOT at a time, a deadline check per entry, so a
+    hostile tree of directories delays the reply by at most the remaining
+    budget (T53 run 3: rmtree of 60 000+ directories ended in Sandbox.Timedout).
+    """
+    me = os.geteuid()
+    counter = [0]
+    flags = os.O_RDONLY | getattr(os, "O_DIRECTORY", 0)
+    try:
+        root_fd = os.open(TMP_ROOT, flags)
+    except OSError:
+        return False
+    try:
+        while True:
+            names = [e.name for e in os.scandir(root_fd)]
+            progress, stuck_ours = False, False
+            for name in names:
+                if time.monotonic() >= deadline:
+                    return False
+                try:
+                    st = os.stat(name, dir_fd=root_fd, follow_symlinks=False)
+                except FileNotFoundError:
+                    continue
+                except OSError:
+                    stuck_ours = True
+                    continue
+                try:
+                    if stat.S_ISDIR(st.st_mode):
+                        try:
+                            os.rmdir(name, dir_fd=root_fd)
+                            removed = True
+                        except OSError:
+                            removed = _drain_dir(root_fd, name, deadline, counter)
+                    else:
+                        os.unlink(name, dir_fd=root_fd)
+                        removed = True
+                except FileNotFoundError:
+                    removed = True
+                except OSError:
+                    removed = False
+                if removed:
+                    progress = True
+                elif st.st_uid == me:
+                    stuck_ours = True
+            if not progress:
+                return not stuck_ours
+    finally:
+        os.close(root_fd)
+
+
+def _remove_tenant_files(tmpdir):
+    """Tenant data first, by name, before the bounded wipe of the rest."""
+    for rel in ("source.py", "limits.json", "result.json", "result.json.part"):
+        try:
+            os.unlink(os.path.join(tmpdir, rel))
+        except OSError:
+            pass
+    in_dir = os.path.join(tmpdir, "in")
+    try:
+        names = os.listdir(in_dir)
     except OSError:
         return
-    for entry in entries:
-        _rm(os.path.join(TMP_ROOT, entry))
+    for name in names:
+        try:
+            os.unlink(os.path.join(in_dir, name))
+        except OSError:
+            pass
+
+
+def _tmp_free_inodes():
+    return os.statvfs(TMP_ROOT).f_ffree
 
 
 def _write_private(path, data):
@@ -304,7 +574,26 @@ def _read_result(tmpdir, limits):
         raise runner.OutputError("result file is not valid JSON")
 
 
-def _execute(tmpdir, source, inputs, limits):
+def _wait_child(proc, deadline, inode_floor):
+    """Wait until the child exits, the deadline passes or the guest consumed
+    TMP_INODE_CAP inodes. Returns None, "timeout" or "inodes"."""
+    while True:
+        remaining = deadline - time.monotonic()
+        if remaining <= 0:
+            return "timeout"
+        try:
+            proc.wait(timeout=min(WATCH_INTERVAL_S, remaining))
+            return None
+        except subprocess.TimeoutExpired:
+            pass
+        try:
+            if _tmp_free_inodes() < inode_floor:
+                return "inodes"
+        except OSError:
+            return "inodes"  # cannot watch: stop the guest
+
+
+def _execute(tmpdir, source, inputs, limits, child_deadline):
     """Run one child. Returns (code, message, output); code None means ok."""
     os.mkdir(os.path.join(tmpdir, "in"), 0o700)
     for table in inputs:
@@ -313,11 +602,12 @@ def _execute(tmpdir, source, inputs, limits):
     _write_private(os.path.join(tmpdir, "source.py"), source)
     _write_private(os.path.join(tmpdir, "limits.json"), json.dumps(limits))
 
-    timed_out = False
+    stopped = None
     err_tail = ""
     # Anonymous unlinked descriptors in TMP_ROOT: the child cannot unlink,
     # symlink or replace them with a FIFO inside tmpdir.
     with tempfile.TemporaryFile(dir=TMP_ROOT) as fo, tempfile.TemporaryFile(dir=TMP_ROOT) as fe:
+        inode_floor = _tmp_free_inodes() - TMP_INODE_CAP
         proc = subprocess.Popen(
             [sys.executable, "-I", RUNNER_PATH, tmpdir],
             cwd=tmpdir, env=_child_env(tmpdir), stdin=subprocess.DEVNULL,
@@ -325,23 +615,23 @@ def _execute(tmpdir, source, inputs, limits):
             preexec_fn=_limit_child(limits),
         )
         try:
-            proc.wait(timeout=max(1, limits["wall_ms"] - TEARDOWN_RESERVE_MS) / 1000.0)
-        except subprocess.TimeoutExpired:
-            timed_out = True
+            stopped = _wait_child(proc, child_deadline, inode_floor)
         finally:
             try:
                 _kill_group(proc.pid)
             finally:
                 _reap_strays()  # also what escaped the group (double fork + setsid)
-        if timed_out:
+        if stopped:
             try:
-                proc.wait(timeout=5)
+                proc.wait(timeout=1)
             except subprocess.TimeoutExpired:
                 pass
         else:
             err_tail = _read_stream(fe)
-    if timed_out:
+    if stopped == "timeout":
         return "ANALYSIS_TIMEOUT", "wall time limit exceeded", None
+    if stopped == "inodes":
+        return "ANALYSIS_RUNTIME", "too many files or directories created in the sandbox", None
 
     try:
         payload = _read_result(tmpdir, limits)
@@ -390,6 +680,10 @@ def _response(execution_id, nonce, status, started, code=None, message=None, out
 
 def handler(event, context=None):
     started = time.monotonic()
+    # A guest of the previous invocation may have changed this process; restore
+    # it or restart the runtime before touching anything (normally a no-op: the
+    # previous invocation already did it after killing its guest).
+    _guard_process_state()
     echo_id = event.get("execution_id") if isinstance(event, dict) else None
     echo_nonce = event.get("nonce") if isinstance(event, dict) else None
     echo_id = echo_id if isinstance(echo_id, str) and _EXEC_ID_RE.match(echo_id) else ""
@@ -401,25 +695,40 @@ def handler(event, context=None):
     except RequestError as exc:
         return _response(echo_id, echo_nonce, "error", started, "ANALYSIS_INPUT", str(exc))
 
-    # Both run BEFORE /tmp is wiped and before any data of this tenant exists:
-    # no survivor of a previous run may see it, and the guest must not be able
-    # to read the parent. Either failing stops the run without spawning.
+    child_deadline = started + max(1, limits["wall_ms"] - TEARDOWN_RESERVE_MS) / 1000.0
+    reply_deadline = started + max(0, limits["wall_ms"] - RESPONSE_MARGIN_MS) / 1000.0
+    # All of this runs BEFORE any data of this tenant exists: no survivor of a
+    # previous run may see it, nothing it left (processes, IPC objects, /tmp
+    # entries) may reach this tenant, and the guest must not be able to read the
+    # parent. Any failure stops the run without spawning.
     try:
         _harden_parent_dumpable()
         _reap_strays()
+        _purge_sysv_ipc()
     except Exception as exc:
         return _response(execution_id, nonce, "error", started, "ANALYSIS_RUNTIME",
                          "sandbox error: %s" % type(exc).__name__)
-    wipe_tmp()
-    tmpdir = tempfile.mkdtemp(prefix=TMP_PREFIX, dir=TMP_ROOT)
-    os.chmod(tmpdir, 0o700)
+    if not wipe_tmp(child_deadline - MIN_CHILD_MS / 1000.0):
+        return _response(execution_id, nonce, "error", started, "ANALYSIS_RUNTIME",
+                         "sandbox busy: cleanup of a previous run did not finish, retry")
+    tmpdir = None
     try:
-        code, message, output = _execute(tmpdir, source, inputs, limits)
+        tmpdir = tempfile.mkdtemp(prefix=TMP_PREFIX, dir=TMP_ROOT)
+        os.chmod(tmpdir, 0o700)
+        code, message, output = _execute(tmpdir, source, inputs, limits, child_deadline)
     except Exception as exc:  # infrastructure failure; never echo guest data
         code, message, output = "ANALYSIS_RUNTIME", "sandbox error: %s" % type(exc).__name__, None
     finally:
-        _rm(tmpdir)
-        wipe_tmp()
+        # Every guest task is dead here (_execute reaped them), so nothing can
+        # alter this process again before the next invocation.
+        _guard_process_state()
+        try:
+            _purge_sysv_ipc()
+        except Exception as exc:
+            code, message, output = "ANALYSIS_RUNTIME", "sandbox error: %s" % type(exc).__name__, None
+        if tmpdir is not None:
+            _remove_tenant_files(tmpdir)
+        wipe_tmp(reply_deadline)  # unfinished: the next run finishes it before spawning
     if code is None:
         return _response(execution_id, nonce, "ok", started, output=output)
     return _response(execution_id, nonce, "error", started, code, message)

@@ -21,11 +21,13 @@ AWS Lambda (imagen contenedor Python 3.12 · Dockerfile + template.json)
    ├── Código en LAMBDA_TASK_ROOT de solo lectura (chmod a-w); solo /tmp escribible
    └── Por cada invocación (handler.py → runner.py):
           1. Valida petición y recorta límites contra HARD_LIMITS.
-          2. Limpia /tmp antes y después de ejecutar.
+          2. Antes de cada tienda y después de cada ejecución: borra los objetos IPC SysV (`shm`/`msg`/`sem`) del uid del invitado y comprueba que no queda ninguno (falla cerrado), y limpia /tmp de forma iterativa y con plazo (si la limpieza de una ejecución anterior no terminó, la invocación responde `sandbox busy` sin lanzar al invitado).
           3. Exige que el proceso padre sea no-dumpable (ver abajo) para impedir que el hijo lea `/proc/<ppid>/environ`, `mem`, `maps` o `fd`, use `process_vm_readv` o haga `ptrace`, y lanza un proceso hijo nuevo (`python -I runner.py`) en sesión propia con entorno limpio (sin `AWS_*`), `RLIMIT_AS` / `RLIMIT_CPU` / `RLIMIT_NPROC` / `RLIMIT_FSIZE` / `RLIMIT_CORE` y timeout de pared.
           4. El hijo importa y precarga sus módulos, carga los datos y abre su archivo de resultado; justo antes de ejecutar el código del invitado baja `RLIMIT_NOFILE` a `(0, 0)` y comprueba que ya no puede crear descriptores (ver abajo). Si no lo consigue, falla cerrado sin ejecutar al invitado.
           5. El hijo recibe `wall_ms` menos una reserva de 2 s, para que la respuesta (incluida la limpieza) llegue antes de que el backend aborte a `wall_ms` exactos: un análisis que agota el tiempo llega como `ANALYSIS_TIMEOUT`, no como `ANALYSIS_EXPIRED`.
           6. Mata todo el grupo de procesos (`SIGKILL`) al terminar o vencer el tiempo y, después, a todo superviviente del uid del invitado (`kill(-1, SIGKILL)`); lo mismo antes de cargar los datos de cada tienda.
+          6b. Mientras corre el invitado vigila los inodos de /tmp y lo mata si crea más de 10 000 entradas (`mkdir`/`symlink`/`link` no necesitan descriptores), para que la limpieza quepa en la reserva.
+          6c. Tras matar al invitado, comprueba sus propios límites (`RLIMIT_*`), `nice`, afinidad y planificador frente a los del arranque: el invitado comparte uid y puede bajarlos con `prlimit`. Restaura lo que puede; si no (por ejemplo, un límite duro bajado), termina el proceso para que Lambda reinicie el runtime en la invocación del atacante, no en la de la tienda siguiente.
           7. Lee `result.json` con `O_NOFOLLOW`, revalida `result` (tables/series/figures/notes) y devuelve solo JSON acotado.
 ```
 

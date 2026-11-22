@@ -1,5 +1,6 @@
-"""Offline contracts ONLY: subprocess.Popen, os.killpg, os.kill, os.getppid and
-libc.prctl are mocked (kill(-1) must never reach the developer machine).
+"""Offline contracts ONLY: subprocess.Popen, os.killpg, os.kill, os.getppid,
+libc.prctl, the System V IPC syscalls and setrlimit are mocked (kill(-1) must
+never reach the developer machine, nor a limit change this test process).
 No generated or adversarial code runs here.
 Run: python3 -m unittest -v test_handler test_runner
 These tests do not certify isolation; T53 against the real Lambda does."""
@@ -7,6 +8,7 @@ import copy
 import errno
 import json
 import os
+import resource
 import shutil
 import signal
 import subprocess
@@ -22,6 +24,32 @@ DIGEST = "sha256:" + "c" * 64
 
 
 VALID_OUTPUT = {"figures": [{"label": "n", "value": 1}]}
+OK_PAYLOAD = {"status": "ok", "output": VALID_OUTPUT}
+
+
+class FakeClock:
+    """time.monotonic() for the handler: advances `tick` per read, plus waits."""
+
+    def __init__(self, start=1000.0, tick=0.0):
+        self.now, self.tick = start, tick
+
+    def __call__(self):
+        self.now += self.tick
+        return self.now
+
+    def advance(self, seconds):
+        self.now += seconds
+
+
+def hanging_proc(clock, pid=777):
+    """A child that never exits on its own; every wait() consumes its timeout."""
+    proc = MagicMock(pid=pid, returncode=None)
+
+    def wait(timeout=None):
+        clock.advance(timeout or 0)
+        raise subprocess.TimeoutExpired("x", timeout)
+    proc.wait.side_effect = wait
+    return proc
 
 
 def request(**over):
@@ -98,7 +126,7 @@ class ValidationTests(unittest.TestCase):
         self.assertEqual((res["execution_id"], res["nonce"]), ("exec-1", "a" * 64))
 
 
-class ExecutionTests(unittest.TestCase):
+class HandlerFixture(unittest.TestCase):
     def setUp(self):
         self.root = tempfile.mkdtemp(prefix="handler-test-")
         self.addCleanup(shutil.rmtree, self.root, True)
@@ -109,10 +137,12 @@ class ExecutionTests(unittest.TestCase):
             patch.object(handler.os, "killpg"),  # never signal a real group in tests
             patch.object(handler.os, "kill"),  # never kill(-1) the developer machine
             patch.object(handler.os, "getppid", return_value=0),  # as inside Lambda's PID namespace
+            patch.object(handler, "_tmp_free_inodes", return_value=10**9),
         ]
         self.killpg = patches[2].start()
         self.kill = patches[3].start()
         self.getppid = patches[4].start()
+        self.free_inodes = patches[5].start()
         patches[0].start(); patches[1].start()
         for p in patches:
             self.addCleanup(p.stop)
@@ -130,6 +160,8 @@ class ExecutionTests(unittest.TestCase):
             return proc
         return factory, captured
 
+
+class ExecutionTests(HandlerFixture):
     def test_ok_echoes_ids_digest_and_cleans_tmp(self):
         factory, captured = self.popen_writing({"status": "ok", "output": VALID_OUTPUT})
         with patch.object(handler.subprocess, "Popen", side_effect=factory):
@@ -154,9 +186,10 @@ class ExecutionTests(unittest.TestCase):
         self.assertTrue(callable(kw["preexec_fn"]))
 
     def test_timeout_kills_process_group(self):
-        proc = MagicMock(pid=777, returncode=None)
-        proc.wait.side_effect = [subprocess.TimeoutExpired("x", 1), 0]
-        with patch.object(handler.subprocess, "Popen", return_value=proc):
+        clock = FakeClock()
+        proc = hanging_proc(clock)
+        with patch.object(handler.subprocess, "Popen", return_value=proc), \
+                patch.object(handler.time, "monotonic", clock):
             res = handler.handler(request())
         self.killpg.assert_called_with(777, signal.SIGKILL)
         self.assertEqual(res["error_code"], "ANALYSIS_TIMEOUT")
@@ -327,12 +360,19 @@ class ExecutionTests(unittest.TestCase):
     def test_child_wall_leaves_a_teardown_reserve_inside_the_host_budget(self):
         # The host aborts at exactly wall_ms; the reply (kill, reap, rm) must land before it.
         for wall_ms, child_s in ((25_000, 23.0), (10_000, 8.0), (1_500, 0.001)):
-            proc = MagicMock(pid=779, returncode=None)
-            proc.wait.side_effect = [subprocess.TimeoutExpired("x", 1), 0]
-            with patch.object(handler.subprocess, "Popen", return_value=proc):
+            clock = FakeClock()
+            proc = hanging_proc(clock)
+            killed_at = []
+            self.killpg.side_effect = lambda pid, sig: killed_at.append(clock.now - 1000.0)
+            with patch.object(handler.subprocess, "Popen", return_value=proc), \
+                    patch.object(handler.time, "monotonic", clock):
                 res = handler.handler(request(limits=dict(handler.HARD_LIMITS, wall_ms=wall_ms)))
             self.assertEqual(res["error_code"], "ANALYSIS_TIMEOUT")
-            self.assertEqual(proc.wait.call_args_list[0].kwargs, {"timeout": child_s})
+            self.assertAlmostEqual(killed_at[0], child_s, places=6)
+            for call in proc.wait.call_args_list[:-1]:  # the watch polls, never one long wait
+                self.assertLessEqual(call.kwargs["timeout"], handler.WATCH_INTERVAL_S)
+            self.assertLessEqual(res["usage"]["duration_ms"], wall_ms)
+        self.killpg.side_effect = None
 
     def test_strays_are_reaped_even_if_killing_the_group_fails(self):
         factory, _ = self.popen_writing({"status": "ok", "output": VALID_OUTPUT})
@@ -344,9 +384,10 @@ class ExecutionTests(unittest.TestCase):
         self.assertEqual(os.listdir(self.root), [])
 
     def test_strays_are_reaped_after_a_timeout(self):
-        proc = MagicMock(pid=778, returncode=None)
-        proc.wait.side_effect = [subprocess.TimeoutExpired("x", 1), 0]
-        with patch.object(handler.subprocess, "Popen", return_value=proc):
+        clock = FakeClock()
+        proc = hanging_proc(clock, pid=778)
+        with patch.object(handler.subprocess, "Popen", return_value=proc), \
+                patch.object(handler.time, "monotonic", clock):
             res = handler.handler(request())
         self.assertEqual(res["error_code"], "ANALYSIS_TIMEOUT")
         self.assertEqual(self.kill.call_count, 2)
@@ -448,6 +489,398 @@ class DumpableTests(unittest.TestCase):
             with self.assertRaises(OSError) as ctx:
                 self.harden(err=err)
             self.assertEqual(ctx.exception.errno, err)
+
+
+GUEST_UID = 993
+
+
+class FakeSysvKernel:
+    """/proc/sysvipc/{shm,msg,sem} plus the IPC_RMID syscalls, in a temp dir.
+
+    Real header layout of Linux (columns are located by name, not position)."""
+
+    HEADERS = {
+        "shm": "       key      shmid perms                  size  cpid  lpid nattch   uid   gid  cuid  cgid",
+        "msg": "       key      msqid perms      cbytes       qnum lspid lrpid   uid   gid  cuid  cgid",
+        "sem": "       key      semid perms      nsems   uid   gid  cuid  cgid",
+    }
+
+    def __init__(self, root):
+        self.root = root
+        self.objects = {}  # (kind, id) -> {"uid", "cuid", "linger"}
+        self.next_id = 100
+        self.refuse = set()
+        self.rmid_calls = []
+        self.errno = 0
+        self.write()
+
+    def plant(self, kind, uid=GUEST_UID, cuid=GUEST_UID, linger=0):
+        self.next_id += 1
+        self.objects[(kind, self.next_id)] = {"uid": uid, "cuid": cuid, "linger": linger, "removed": False}
+        self.write()
+        return self.next_id
+
+    def write(self):
+        for kind, header in self.HEADERS.items():
+            rows = [header]
+            for (k, ident), o in sorted(self.objects.items()):
+                if k != kind:
+                    continue
+                if kind == "shm":
+                    rows.append("  1234 %10d   666  4096 10 10 0 %5d %5d %5d %5d" % (ident, o["uid"], 990, o["cuid"], 990))
+                elif kind == "msg":
+                    rows.append("  1234 %10d   666  64 1 10 10 %5d %5d %5d %5d" % (ident, o["uid"], 990, o["cuid"], 990))
+                else:
+                    rows.append("  1234 %10d   666  1 %5d %5d %5d %5d" % (ident, o["uid"], 990, o["cuid"], 990))
+            with open(os.path.join(self.root, kind), "w", encoding="ascii") as fh:
+                fh.write("\n".join(rows) + "\n")
+
+    def _rmid(self, kind, ident):
+        self.rmid_calls.append((kind, ident))
+        o = self.objects.get((kind, ident))
+        if o is None or o["removed"] and o["linger"] <= 0:
+            self.errno = errno.EINVAL
+            return -1
+        if (kind, ident) in self.refuse:
+            self.errno = errno.EPERM
+            return -1
+        o["removed"] = True
+        if o["linger"] <= 0:
+            del self.objects[(kind, ident)]
+        self.write()
+        return 0
+
+    def settle(self):
+        """A removed shm segment stays listed until its attacher finishes exiting."""
+        for key, o in list(self.objects.items()):
+            if o["removed"]:
+                o["linger"] -= 1
+                if o["linger"] <= 0:
+                    del self.objects[key]
+        self.write()
+
+    def libc(self):
+        libc = MagicMock()
+        libc.shmctl.side_effect = lambda ident, cmd, buf: self._rmid("shm", ident)
+        libc.msgctl.side_effect = lambda ident, cmd, buf: self._rmid("msg", ident)
+        libc.semctl.side_effect = lambda ident, num, cmd, arg: self._rmid("sem", ident)
+        return libc
+
+    def markers_of(self, uid=GUEST_UID):
+        return sorted(k for k, o in self.objects.items() if uid in (o["uid"], o["cuid"]))
+
+
+class SysvIpcTests(HandlerFixture):
+    """T53 run 3, finding 4: a tenant read the previous tenant's marker through
+    shm/msg in 99/100 runs. The handler now removes every IPC object of the
+    guest uid before each tenant and after each run, and fails closed."""
+
+    def setUp(self):
+        super().setUp()
+        self.ipc_root = tempfile.mkdtemp(prefix="sysvipc-")
+        self.addCleanup(shutil.rmtree, self.ipc_root, True)
+        self.kernel = FakeSysvKernel(self.ipc_root)
+        patches = [
+            patch.object(handler.sys, "platform", "linux"),
+            patch.object(handler, "SYSVIPC_ROOT", self.ipc_root),
+            patch.object(handler, "_libc", side_effect=self.kernel.libc),
+            patch.object(handler.ctypes, "get_errno", side_effect=lambda: self.kernel.errno),
+            patch.object(handler.os, "geteuid", return_value=GUEST_UID),
+            patch.object(handler, "_harden_parent_dumpable"),
+            patch.object(handler.time, "sleep", side_effect=lambda s: self.kernel.settle()),
+        ]
+        for p in patches:
+            p.start()
+            self.addCleanup(p.stop)
+
+    def tenant(self, plant=(), expect_clean=True):
+        seen = {}
+
+        def spawn(args, **kwargs):
+            seen["at_spawn"] = self.kernel.markers_of()
+            for kind, kw in plant:  # what the guest leaves behind
+                self.kernel.plant(kind, **kw)
+            with open(os.path.join(kwargs["cwd"], "result.json"), "w") as fh:
+                json.dump(OK_PAYLOAD, fh)
+            proc = MagicMock(pid=4242, returncode=0)
+            proc.wait.return_value = 0
+            return proc
+
+        with patch.object(handler.subprocess, "Popen", side_effect=spawn) as popen:
+            res = handler.handler(request())
+        return res, seen, popen
+
+    def test_marker_planted_by_one_tenant_never_reaches_the_next(self):
+        plant = (("shm", {}), ("msg", {}), ("sem", {}),
+                 ("shm", {"uid": 0}),  # IPC_SET gave it away; the creator uid still identifies it
+                 ("msg", {"linger": 2}))  # still attached while the guest finishes exiting
+        res_a, seen_a, _ = self.tenant(plant=plant)
+        self.assertEqual(res_a["status"], "ok")
+        self.assertEqual(self.kernel.markers_of(), [], "removed after the run of tenant A")
+        # Belt and braces: even if A's objects were still there, B starts clean.
+        for kind, kw in plant:
+            self.kernel.plant(kind, **kw)
+        res_b, seen_b, _ = self.tenant()
+        self.assertEqual(res_b["status"], "ok")
+        self.assertEqual(seen_b["at_spawn"], [], "tenant B must not see any object of tenant A")
+        self.assertEqual(self.kernel.markers_of(), [])
+
+    def test_objects_of_other_users_are_left_alone(self):
+        foreign = self.kernel.plant("shm", uid=0, cuid=0)
+        res, seen, _ = self.tenant()
+        self.assertEqual(res["status"], "ok")
+        self.assertIn(("shm", foreign), self.kernel.objects)
+        self.assertNotIn(("shm", foreign), self.kernel.rmid_calls)
+
+    def test_unreadable_listing_fails_closed_without_spawning(self):
+        os.unlink(os.path.join(self.ipc_root, "msg"))
+        res, _, popen = self.tenant()
+        popen.assert_not_called()
+        self.assertEqual((res["status"], res["error_code"], res["error_message"]),
+                         ("error", "ANALYSIS_RUNTIME", "sandbox error: SysvIpcError"))
+
+    def test_object_that_cannot_be_removed_fails_closed_without_spawning(self):
+        ident = self.kernel.plant("shm")
+        self.kernel.refuse.add(("shm", ident))
+        res, _, popen = self.tenant()
+        popen.assert_not_called()
+        self.assertEqual(res["error_code"], "ANALYSIS_RUNTIME")
+
+    def test_object_that_never_disappears_fails_closed(self):
+        self.kernel.plant("shm", linger=10**6)
+        res, _, popen = self.tenant()
+        popen.assert_not_called()
+        self.assertEqual(res["error_code"], "ANALYSIS_RUNTIME")
+
+    def test_failed_removal_after_the_run_turns_the_result_into_an_error(self):
+        def spawn(args, **kwargs):
+            ident = self.kernel.plant("msg")
+            self.kernel.refuse.add(("msg", ident))
+            with open(os.path.join(kwargs["cwd"], "result.json"), "w") as fh:
+                json.dump(OK_PAYLOAD, fh)
+            proc = MagicMock(pid=4242, returncode=0)
+            proc.wait.return_value = 0
+            return proc
+
+        with patch.object(handler.subprocess, "Popen", side_effect=spawn):
+            res = handler.handler(request())
+        self.assertEqual((res["status"], res["error_code"]), ("error", "ANALYSIS_RUNTIME"))
+        self.assertNotIn("output", res)
+
+    def test_header_columns_are_located_by_name(self):
+        with open(os.path.join(self.ipc_root, "sem"), "w") as fh:
+            fh.write("key semid perms nsems cuid cgid uid gid\n1 55 666 1 993 990 0 0\n")
+        self.assertIn(("sem", 55, 0, GUEST_UID), handler._sysvipc_objects())
+
+
+class FakeLimits:
+    """getrlimit/setrlimit with kernel rules: soft <= hard, hard only goes down."""
+
+    def __init__(self):
+        self.table = {getattr(resource, n): resource.getrlimit(getattr(resource, n))
+                      for n in dir(resource) if n.startswith("RLIMIT_")}
+
+    def getrlimit(self, res):
+        return self.table[res]
+
+    def setrlimit(self, res, value):
+        soft, hard = value
+        cur_hard = self.table[res][1]
+        unlimited = resource.RLIM_INFINITY
+
+        def gt(a, b):
+            if a == unlimited:
+                return b != unlimited
+            return b != unlimited and a > b
+        if gt(soft, hard) or gt(hard, cur_hard):
+            raise ValueError("not allowed to raise maximum limit")
+        self.table[res] = (soft, hard)
+
+    def prlimit_from_guest(self, res, soft=None, hard=None):
+        cur_soft, cur_hard = self.table[res]
+        self.table[res] = (cur_soft if soft is None else soft, cur_hard if hard is None else hard)
+
+
+class RuntimeRestart(BaseException):
+    pass
+
+
+class ProcessStateTests(HandlerFixture):
+    """T53 run 3, finding 5: the guest lowered the handler's soft RLIMIT_NOFILE
+    with prlimit and every later invocation of the environment failed with
+    "sandbox error: OSError" for 15-19 min. Now the handler restores what it
+    can after killing the guest, or restarts the runtime inside the attacker's
+    own invocation; the next tenant always runs."""
+
+    def setUp(self):
+        super().setUp()
+        self.limits = FakeLimits()
+        patches = [
+            patch.object(handler.resource, "getrlimit", side_effect=self.limits.getrlimit),
+            patch.object(handler.resource, "setrlimit", side_effect=self.limits.setrlimit),
+            patch.object(handler, "_BASELINE_STATE", handler._process_state()),
+        ]
+        for p in patches:
+            p.start()
+            self.addCleanup(p.stop)
+        # Baseline from the fake table (identical to the real one at this point).
+        handler._BASELINE_STATE = handler._process_state()
+        self.exit = patch.object(handler.os, "_exit", side_effect=RuntimeRestart).start()
+        self.addCleanup(patch.stopall)
+
+    def run_tenant(self, guest=None):
+        def spawn(args, **kwargs):
+            if guest:
+                guest()
+            with open(os.path.join(kwargs["cwd"], "result.json"), "w") as fh:
+                json.dump(OK_PAYLOAD, fh)
+            proc = MagicMock(pid=4242, returncode=0)
+            proc.wait.return_value = 0
+            return proc
+
+        with patch.object(handler.subprocess, "Popen", side_effect=spawn):
+            return handler.handler(request())
+
+    def test_lowered_soft_limits_are_restored_and_the_next_tenant_runs(self):
+        lowered = ("RLIMIT_NOFILE", "RLIMIT_AS", "RLIMIT_NPROC", "RLIMIT_FSIZE", "RLIMIT_CPU")
+
+        def attacker():
+            for name in lowered:
+                if hasattr(resource, name):
+                    self.limits.prlimit_from_guest(getattr(resource, name), soft=4)
+        self.run_tenant(attacker)
+        self.exit.assert_not_called()
+        self.assertEqual(handler._process_state(), handler._BASELINE_STATE)
+        victim = self.run_tenant()
+        self.assertEqual(victim["status"], "ok")
+        self.exit.assert_not_called()
+
+    def test_lowered_hard_limit_restarts_the_runtime_inside_the_attackers_invocation(self):
+        nofile = resource.RLIMIT_NOFILE
+        with self.assertRaises(RuntimeRestart):
+            self.run_tenant(lambda: self.limits.prlimit_from_guest(nofile, soft=4, hard=4))
+        self.exit.assert_called_once_with(70)
+
+    def test_state_altered_before_an_invocation_is_handled_before_anything_else(self):
+        self.limits.prlimit_from_guest(resource.RLIMIT_NOFILE, soft=4)
+        with patch.object(handler.subprocess, "Popen") as popen:
+            popen.side_effect = AssertionError("must not get here unrestored")
+            handler._guard_process_state()
+        self.assertEqual(handler._process_state(), handler._BASELINE_STATE)
+        with patch.object(handler, "validate_request", side_effect=AssertionError("too late")):
+            self.limits.prlimit_from_guest(resource.RLIMIT_NOFILE, soft=4, hard=4)
+            with self.assertRaises(RuntimeRestart):
+                handler.handler(request())
+
+    def test_unchanged_state_is_a_no_op(self):
+        with patch.object(handler.resource, "setrlimit") as setr:
+            self.assertEqual(self.run_tenant()["status"], "ok")
+        setr.assert_not_called()
+        self.exit.assert_not_called()
+
+
+def make_chain(root, depth, name="d"):
+    """A directory chain deeper than the recursion limit and PATH_MAX."""
+    fd = os.open(root, os.O_RDONLY)
+    try:
+        for _ in range(depth):
+            os.mkdir(name, dir_fd=fd)
+            nfd = os.open(name, os.O_RDONLY, dir_fd=fd)
+            os.close(fd)
+            fd = nfd
+    finally:
+        os.close(fd)
+
+
+class TmpInodeTests(HandlerFixture):
+    """T53 run 3, finding 6: filling /tmp with directories (mkdir needs no
+    descriptor) ended in Sandbox.Timedout at 30 s. The guest is now stopped
+    past TMP_INODE_CAP, the wipe is iterative and stops at the reply deadline,
+    and a run never starts on top of an unfinished wipe."""
+
+    def count_entries(self):
+        n = 0
+        for _dirpath, dirnames, filenames in os.walk(self.root):
+            n += len(dirnames) + len(filenames)
+        return n
+
+    def test_guest_creating_too_many_inodes_is_stopped_and_cleaned_in_budget(self):
+        clock = FakeClock()
+        proc = hanging_proc(clock)
+        self.free_inodes.side_effect = lambda: 10**6 - self.count_entries()
+
+        def spawn(args, **kwargs):
+            for i in range(60):  # the guest keeps creating directories
+                os.mkdir(os.path.join(self.root, "junk-%d" % i))
+            make_chain(kwargs["cwd"], 80)
+            return proc
+
+        with patch.object(handler, "TMP_INODE_CAP", 50), \
+                patch.object(handler.subprocess, "Popen", side_effect=spawn), \
+                patch.object(handler.time, "monotonic", clock):
+            res = handler.handler(request())
+        self.assertEqual((res["status"], res["error_code"], res["error_message"]),
+                         ("error", "ANALYSIS_RUNTIME", "too many files or directories created in the sandbox"))
+        # first watch (50 ms) + the 1 s grace wait for the killed child; wall_ms would be 23 s
+        self.assertLess(res["usage"]["duration_ms"], 1_200, "stopped at the first watch, not at wall_ms")
+        self.kill.assert_called_with(-1, signal.SIGKILL)
+        self.assertEqual(os.listdir(self.root), [])
+
+    def test_chain_deeper_than_the_recursion_limit_with_locked_dirs_is_wiped(self):
+        make_chain(self.root, sys.getrecursionlimit() + 200)
+        os.chmod(os.path.join(self.root, "d", "d", "d"), 0)  # chmod 000 by the guest
+        os.chmod(os.path.join(self.root, "d"), 0o500)  # and a read-only parent
+        os.symlink("/etc/passwd", os.path.join(self.root, "link"))
+        self.assertTrue(handler.wipe_tmp(float("inf")))
+        self.assertEqual(os.listdir(self.root), [])
+        self.assertTrue(os.path.exists("/etc/passwd"))
+
+    def test_worst_case_replies_inside_the_budget_and_the_next_run_waits_for_a_clean_tmp(self):
+        # Every clock read costs 5 ms: wiping thousands of entries cannot fit,
+        # yet the reply must come with the handler's envelope before wall_ms.
+        clock = FakeClock(tick=0.005)
+        proc = hanging_proc(clock)
+        tenant_marker = "TENANT-A-SECRET"
+
+        def spawn(args, **kwargs):
+            for i in range(3000):
+                os.mkdir(os.path.join(self.root, "junk-%d" % i))
+            return proc
+
+        ev = request()
+        ev["inputs"][0]["rows"] = [[tenant_marker, 1]]
+        with patch.object(handler.subprocess, "Popen", side_effect=spawn), \
+                patch.object(handler.time, "monotonic", clock):
+            res = handler.handler(ev)
+        self.assertEqual(res["error_code"], "ANALYSIS_TIMEOUT")
+        self.assertLessEqual(res["usage"]["duration_ms"], 25_000 - handler.RESPONSE_MARGIN_MS + 10)
+        left = self.count_entries()
+        self.assertGreater(left, 0, "the wipe stopped at the reply deadline")
+        for dirpath, _dirs, files in os.walk(self.root):  # tenant data went first
+            for f in files:
+                with open(os.path.join(dirpath, f), errors="replace") as fh:
+                    self.assertNotIn(tenant_marker, fh.read())
+
+        # Next invocation: the wipe cannot finish in time -> refused, never spawned, in budget.
+        slow = FakeClock(tick=0.05)
+        with patch.object(handler.subprocess, "Popen") as popen, \
+                patch.object(handler.time, "monotonic", slow):
+            busy = handler.handler(request())
+        popen.assert_not_called()
+        self.assertEqual((busy["status"], busy["error_code"]), ("error", "ANALYSIS_RUNTIME"))
+        self.assertTrue(busy["error_message"].startswith("sandbox busy"))
+        self.assertLessEqual(busy["usage"]["duration_ms"], 25_000)
+
+        # With normal time the wipe finishes first and the guest sees an empty /tmp.
+        factory, _ = self.popen_writing(OK_PAYLOAD)
+
+        def spawn_clean(args, **kwargs):
+            self.assertEqual(os.listdir(self.root), [os.path.basename(kwargs["cwd"])])
+            return factory(args, **kwargs)
+
+        with patch.object(handler.subprocess, "Popen", side_effect=spawn_clean):
+            self.assertEqual(handler.handler(request())["status"], "ok")
+        self.assertEqual(os.listdir(self.root), [])
 
 
 if __name__ == "__main__":
