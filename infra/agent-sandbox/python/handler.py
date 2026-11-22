@@ -12,8 +12,10 @@ environment is reused between invocations. Three channels need no descriptor
 and are closed here (T53 run 3): System V IPC objects of the guest uid are
 removed before each tenant and after each run; limits/nice/affinity the guest
 changed in this process with prlimit & co. are restored or the runtime is
-restarted inside the attacker's own invocation; inodes the guest creates in
-/tmp are capped while it runs and the wipe is iterative and deadline-bound.
+restarted inside the attacker's own invocation; inodes AND directory entries
+(hard links create entries without inodes, T53 run 4) the guest creates in
+/tmp are capped while it runs, and the wipe unlinks in place, iteratively and
+deadline-bound, without growing any directory.
 
 Never log source, inputs or outputs.
 """
@@ -64,6 +66,14 @@ MIN_CHILD_MS = 3_000
 # cleanup blew the budget). The parent watches the inodes the guest consumes
 # and kills it past this cap, so the wipe always fits in the reserve.
 TMP_INODE_CAP = 10_000
+# link() adds a directory entry to an existing inode: no inode, no descriptor
+# (T53 run 4: 963 000 hard links on 32 inodes in 15 s; the wipe needed ~2 min
+# and every later tenant got "sandbox busy"). Directory entries live in
+# directory blocks, so the parent also caps the /tmp blocks the guest consumes
+# beyond the data it may legitimately write (stdout, stderr, result file):
+# 256 KiB is ~16 000 entries or ~64 directories, far below what the wipe
+# removes inside the teardown reserve, and a real analysis creates none.
+TMP_DIR_BYTES_CAP = 256 * 1024
 WATCH_INTERVAL_S = 0.05
 # System V IPC objects are kernel objects identified by ids, not descriptors:
 # they survive the guest, kill(-1) and the /tmp wipe (T53 run 3: a tenant read
@@ -341,111 +351,112 @@ def validate_request(event):
     return event["execution_id"], event["nonce"], source, inputs, limits
 
 
-def _unique_name(dir_fd, counter):
-    while True:
-        counter[0] += 1
-        name = ".wipe-%d" % counter[0]
-        try:
-            os.stat(name, dir_fd=dir_fd, follow_symlinks=False)
-        except FileNotFoundError:
-            return name
+_DIR_FLAGS = os.O_RDONLY | getattr(os, "O_DIRECTORY", 0) | getattr(os, "O_CLOEXEC", 0)
 
 
-def _drain_dir(root_fd, name, deadline, counter):
-    """Move every child of root/name up into root, then rmdir it.
+def _is_ours(name, dir_fd, me):
+    try:
+        return os.stat(name, dir_fd=dir_fd, follow_symlinks=False).st_uid == me
+    except FileNotFoundError:
+        return False
+    except OSError:
+        return True  # cannot tell: assume it is ours and fail closed
 
-    O(1) descriptors and no recursion whatever the depth (a guest can build a
-    chain far deeper than the recursion limit or PATH_MAX with mkdir + chdir);
-    the children are removed when the caller reaches them in root.
-    Returns True when name is gone.
+
+def _sweep(dfd, deadline, me):
+    """One lazy pass over the directory `dfd`.
+
+    Every non-directory is unlinked relative to `dfd` and every empty
+    subdirectory removed in place; the type comes from d_type (no stat per
+    entry) and nothing is moved, so no directory grows (T53 run 4: moving each
+    entry up into /tmp cost ~4 syscalls per entry and left the /tmp root 14 MB
+    larger for the life of the environment). The deadline is checked per
+    entry, inside the listing. Returns (state, subdir): "deadline", "descend"
+    with the first non-empty subdirectory, "progress", "stuck" (an entry
+    this uid owns cannot be removed), "foreign" (only entries of other users
+    are left) or "empty".
     """
-    try:
-        os.chmod(name, 0o700, dir_fd=root_fd)  # the guest may have chmod'ed it 000
-    except OSError:
-        pass
-    flags = os.O_RDONLY | getattr(os, "O_DIRECTORY", 0) | getattr(os, "O_NOFOLLOW", 0)
-    try:
-        dfd = os.open(name, flags, dir_fd=root_fd)
-    except OSError:
-        return False
-    try:
-        children = [e.name for e in os.scandir(dfd)]
-        for child in children:
+    removed, stuck_ours, others, descend = False, False, False, None
+    with os.scandir(dfd) as entries:
+        for entry in entries:
             if time.monotonic() >= deadline:
-                return False
-            target = _unique_name(root_fd, counter)
+                return "deadline", None
+            name = entry.name
             try:
-                os.rename(child, target, src_dir_fd=dfd, dst_dir_fd=root_fd)
-            except PermissionError:  # moving a directory needs write on it
-                try:
-                    os.chmod(child, 0o700, dir_fd=dfd)
-                    os.rename(child, target, src_dir_fd=dfd, dst_dir_fd=root_fd)
-                except OSError:
-                    return False
-            except FileNotFoundError:
-                pass
+                is_dir = entry.is_dir(follow_symlinks=False)
             except OSError:
-                return False
-    finally:
-        os.close(dfd)
-    try:
-        os.rmdir(name, dir_fd=root_fd)
-        return True
-    except OSError:
-        return False
+                is_dir = False
+            try:
+                if is_dir:
+                    os.rmdir(name, dir_fd=dfd)
+                else:
+                    os.unlink(name, dir_fd=dfd)
+                removed = True
+            except FileNotFoundError:
+                removed = True
+            except OSError as exc:
+                if not _is_ours(name, dfd, me):
+                    others = True
+                elif is_dir and exc.errno in (errno.ENOTEMPTY, errno.EEXIST):
+                    if descend is None:
+                        descend = name
+                else:
+                    stuck_ours = True
+    if descend is not None:
+        return "descend", descend
+    if removed:
+        return "progress", None
+    if stuck_ours:
+        return "stuck", None
+    if others:
+        return "foreign", None
+    return "empty", None
 
 
 def wipe_tmp(deadline):
     """Remove everything under TMP_ROOT before `deadline` (time.monotonic()).
 
-    Returns True when nothing this uid can remove is left. Iterative and
-    bounded: one pass over TMP_ROOT at a time, a deadline check per entry, so a
-    hostile tree of directories delays the reply by at most the remaining
-    budget (T53 run 3: rmtree of 60 000+ directories ended in Sandbox.Timedout).
+    Returns True when nothing this uid can remove is left. Depth-first with
+    O(1) descriptors and no recursion or paths (a guest can build a chain far
+    deeper than the recursion limit or PATH_MAX with mkdir + chdir): it walks
+    down into a non-empty subdirectory by its descriptor, clears it, and goes
+    back up through "..", whose next pass removes the now empty child. Every
+    guest task is dead when this runs, so the tree no longer changes.
     """
     me = os.geteuid()
-    counter = [0]
-    flags = os.O_RDONLY | getattr(os, "O_DIRECTORY", 0)
     try:
-        root_fd = os.open(TMP_ROOT, flags)
+        dfd = os.open(TMP_ROOT, _DIR_FLAGS)
     except OSError:
         return False
+    depth = 0
     try:
         while True:
-            names = [e.name for e in os.scandir(root_fd)]
-            progress, stuck_ours = False, False
-            for name in names:
-                if time.monotonic() >= deadline:
+            state, child = _sweep(dfd, deadline, me)
+            if state == "deadline":
+                return False
+            if state == "progress":
+                continue
+            if state == "descend":
+                try:
+                    os.chmod(child, 0o700, dir_fd=dfd)  # the guest may have chmod'ed it 000
+                    cfd = os.open(child, _DIR_FLAGS | getattr(os, "O_NOFOLLOW", 0), dir_fd=dfd)
+                except OSError:
                     return False
-                try:
-                    st = os.stat(name, dir_fd=root_fd, follow_symlinks=False)
-                except FileNotFoundError:
-                    continue
-                except OSError:
-                    stuck_ours = True
-                    continue
-                try:
-                    if stat.S_ISDIR(st.st_mode):
-                        try:
-                            os.rmdir(name, dir_fd=root_fd)
-                            removed = True
-                        except OSError:
-                            removed = _drain_dir(root_fd, name, deadline, counter)
-                    else:
-                        os.unlink(name, dir_fd=root_fd)
-                        removed = True
-                except FileNotFoundError:
-                    removed = True
-                except OSError:
-                    removed = False
-                if removed:
-                    progress = True
-                elif st.st_uid == me:
-                    stuck_ours = True
-            if not progress:
-                return not stuck_ours
+                os.close(dfd)
+                dfd, depth = cfd, depth + 1
+                continue
+            if depth == 0:
+                return state != "stuck"  # /tmp itself may keep entries of other users
+            if state != "empty":
+                return False  # below /tmp everything was created by the guest
+            try:
+                pfd = os.open("..", _DIR_FLAGS, dir_fd=dfd)
+            except OSError:
+                return False
+            os.close(dfd)
+            dfd, depth = pfd, depth - 1
     finally:
-        os.close(root_fd)
+        os.close(dfd)
 
 
 def _remove_tenant_files(tmpdir):
@@ -469,6 +480,88 @@ def _remove_tenant_files(tmpdir):
 
 def _tmp_free_inodes():
     return os.statvfs(TMP_ROOT).f_ffree
+
+
+def _tmp_free_bytes():
+    st = os.statvfs(TMP_ROOT)
+    return st.f_bfree * st.f_frsize
+
+
+def _blocks_bytes(st):
+    return getattr(st, "st_blocks", 0) * 512
+
+
+class _TmpWatch:
+    """What the guest consumes in TMP_ROOT while it runs, from outside.
+
+    Inodes come from statvfs. Directory entries have no counter of their own,
+    so they are measured as the blocks /tmp lost minus the data the guest may
+    legitimately write: its stdout/stderr (fstat of the handler's descriptors)
+    and the result file (stat by name). The tenant files written before the
+    spawn are held open, so a guest that unlinks or truncates them to free
+    blocks and hide entries is credited back (only a few KiB of directories
+    it could remove stay uncounted).
+    """
+
+    def __init__(self, tmpdir, streams):
+        self.tmpdir = tmpdir
+        self.streams = [s.fileno() for s in streams]
+        self.held = []
+        try:
+            paths = [os.path.join(tmpdir, "source.py"), os.path.join(tmpdir, "limits.json")]
+            in_dir = os.path.join(tmpdir, "in")
+            paths += [os.path.join(in_dir, n) for n in sorted(os.listdir(in_dir))]
+            for path in paths:
+                self.held.append(os.open(path, os.O_RDONLY | getattr(os, "O_NOFOLLOW", 0)
+                                         | getattr(os, "O_CLOEXEC", 0)))
+            self.held_bytes = self._held_bytes()
+            self.free_inodes = _tmp_free_inodes()
+            self.free_bytes = _tmp_free_bytes()
+        except BaseException:
+            self.close()
+            raise
+
+    def _held_bytes(self):
+        return sum(_blocks_bytes(os.fstat(fd)) for fd in self.held)
+
+    def _result_bytes(self):
+        # .part first: os.replace(.part, result.json) is atomic, so in this order
+        # the file is seen at least once; max() because both names may be links
+        # to the same inode.
+        sizes = [0]
+        for name in ("result.json.part", "result.json"):
+            try:
+                st = os.stat(os.path.join(self.tmpdir, name), follow_symlinks=False)
+            except OSError:
+                continue
+            if stat.S_ISREG(st.st_mode):
+                sizes.append(_blocks_bytes(st))
+        return max(sizes)
+
+    def directory_bytes(self):
+        consumed = self.free_bytes - _tmp_free_bytes()
+        data = sum(_blocks_bytes(os.fstat(fd)) for fd in self.streams) + self._result_bytes()
+        freed = max(0, self.held_bytes - self._held_bytes())
+        return consumed - data + freed
+
+    def exceeded(self):
+        """None, or why the guest must be stopped."""
+        try:
+            if self.free_inodes - _tmp_free_inodes() > TMP_INODE_CAP:
+                return "inodes"
+            if self.directory_bytes() > TMP_DIR_BYTES_CAP:
+                return "entries"
+        except OSError:
+            return "inodes"  # cannot watch: stop the guest
+        return None
+
+    def close(self):
+        for fd in self.held:
+            try:
+                os.close(fd)
+            except OSError:
+                pass
+        self.held = []
 
 
 def _write_private(path, data):
@@ -574,9 +667,10 @@ def _read_result(tmpdir, limits):
         raise runner.OutputError("result file is not valid JSON")
 
 
-def _wait_child(proc, deadline, inode_floor):
-    """Wait until the child exits, the deadline passes or the guest consumed
-    TMP_INODE_CAP inodes. Returns None, "timeout" or "inodes"."""
+def _wait_child(proc, deadline, watch):
+    """Wait until the child exits, the deadline passes or the guest went past
+    TMP_INODE_CAP inodes or TMP_DIR_BYTES_CAP of directory entries. Returns
+    None, "timeout", "inodes" or "entries"."""
     while True:
         remaining = deadline - time.monotonic()
         if remaining <= 0:
@@ -586,11 +680,9 @@ def _wait_child(proc, deadline, inode_floor):
             return None
         except subprocess.TimeoutExpired:
             pass
-        try:
-            if _tmp_free_inodes() < inode_floor:
-                return "inodes"
-        except OSError:
-            return "inodes"  # cannot watch: stop the guest
+        reason = watch.exceeded()
+        if reason:
+            return reason
 
 
 def _execute(tmpdir, source, inputs, limits, child_deadline):
@@ -607,20 +699,23 @@ def _execute(tmpdir, source, inputs, limits, child_deadline):
     # Anonymous unlinked descriptors in TMP_ROOT: the child cannot unlink,
     # symlink or replace them with a FIFO inside tmpdir.
     with tempfile.TemporaryFile(dir=TMP_ROOT) as fo, tempfile.TemporaryFile(dir=TMP_ROOT) as fe:
-        inode_floor = _tmp_free_inodes() - TMP_INODE_CAP
-        proc = subprocess.Popen(
-            [sys.executable, "-I", RUNNER_PATH, tmpdir],
-            cwd=tmpdir, env=_child_env(tmpdir), stdin=subprocess.DEVNULL,
-            stdout=fo, stderr=fe, close_fds=True, start_new_session=True,
-            preexec_fn=_limit_child(limits),
-        )
+        watch = _TmpWatch(tmpdir, (fo, fe))
         try:
-            stopped = _wait_child(proc, child_deadline, inode_floor)
-        finally:
+            proc = subprocess.Popen(
+                [sys.executable, "-I", RUNNER_PATH, tmpdir],
+                cwd=tmpdir, env=_child_env(tmpdir), stdin=subprocess.DEVNULL,
+                stdout=fo, stderr=fe, close_fds=True, start_new_session=True,
+                preexec_fn=_limit_child(limits),
+            )
             try:
-                _kill_group(proc.pid)
+                stopped = _wait_child(proc, child_deadline, watch)
             finally:
-                _reap_strays()  # also what escaped the group (double fork + setsid)
+                try:
+                    _kill_group(proc.pid)
+                finally:
+                    _reap_strays()  # also what escaped the group (double fork + setsid)
+        finally:
+            watch.close()
         if stopped:
             try:
                 proc.wait(timeout=1)
@@ -630,7 +725,7 @@ def _execute(tmpdir, source, inputs, limits, child_deadline):
             err_tail = _read_stream(fe)
     if stopped == "timeout":
         return "ANALYSIS_TIMEOUT", "wall time limit exceeded", None
-    if stopped == "inodes":
+    if stopped in ("inodes", "entries"):
         return "ANALYSIS_RUNTIME", "too many files or directories created in the sandbox", None
 
     try:

@@ -138,11 +138,13 @@ class HandlerFixture(unittest.TestCase):
             patch.object(handler.os, "kill"),  # never kill(-1) the developer machine
             patch.object(handler.os, "getppid", return_value=0),  # as inside Lambda's PID namespace
             patch.object(handler, "_tmp_free_inodes", return_value=10**9),
+            patch.object(handler, "_tmp_free_bytes", return_value=10**15),
         ]
         self.killpg = patches[2].start()
         self.kill = patches[3].start()
         self.getppid = patches[4].start()
         self.free_inodes = patches[5].start()
+        self.free_bytes = patches[6].start()
         patches[0].start(); patches[1].start()
         for p in patches:
             self.addCleanup(p.stop)
@@ -881,6 +883,110 @@ class TmpInodeTests(HandlerFixture):
         with patch.object(handler.subprocess, "Popen", side_effect=spawn_clean):
             self.assertEqual(handler.handler(request())["status"], "ok")
         self.assertEqual(os.listdir(self.root), [])
+
+
+class TmpEntryTests(HandlerFixture):
+    """T53 run 4, finding 7: hard links (link() creates directory entries, not
+    inodes or descriptors) flooded /tmp past the inode cap; the wipe needed
+    ~2 min and the next 6 invocations got "sandbox busy". The parent now caps
+    the directory blocks the guest consumes and the wipe unlinks in place."""
+
+    DIRENT = 16  # bytes of directory block per entry, as in ext4 with short names
+
+    def setUp(self):
+        super().setUp()
+        self.free_bytes.side_effect = self.modelled_free_bytes
+
+    def modelled_free_bytes(self):
+        """/tmp as ext4 sees it: entries cost directory bytes, each inode its blocks once."""
+        entries, data, seen = 0, 0, set()
+        for dirpath, dirnames, filenames in os.walk(self.root):
+            entries += len(dirnames) + len(filenames)
+            for name in filenames:
+                st = os.lstat(os.path.join(dirpath, name))
+                if st.st_ino not in seen:
+                    seen.add(st.st_ino)
+                    data += st.st_blocks * 512
+        return 10**12 - entries * self.DIRENT - data
+
+    def flood_links(self, where, inodes, links):
+        os.makedirs(where, exist_ok=True)
+        for i in range(inodes):
+            base = os.path.join(where, "f%d" % i)
+            os.mkfifo(base)
+            for j in range(links):
+                os.link(base, "%s-%d" % (base, j))
+
+    def test_hard_links_over_many_inodes_are_stopped_in_under_2s_and_the_next_tenant_runs(self):
+        clock = FakeClock()
+        proc = hanging_proc(clock)
+
+        def spawn(args, **kwargs):  # 4 inodes x 4 500 links (~288 KiB of entries), some in /tmp itself
+            self.flood_links(os.path.join(kwargs["cwd"], "x"), 4, 4_000)
+            self.flood_links(self.root, 1, 2_000)
+            return proc
+
+        rename = MagicMock(wraps=os.rename)
+        with patch.object(handler.subprocess, "Popen", side_effect=spawn), \
+                patch.object(handler.time, "monotonic", clock), \
+                patch.object(handler.os, "rename", rename):
+            res = handler.handler(request())
+        self.assertEqual((res["status"], res["error_code"], res["error_message"]),
+                         ("error", "ANALYSIS_RUNTIME", "too many files or directories created in the sandbox"))
+        self.assertLess(res["usage"]["duration_ms"], 2_000, "stopped at the first watch, not at wall_ms")
+        self.kill.assert_called_with(-1, signal.SIGKILL)
+        self.assertEqual(os.listdir(self.root), [], "/tmp restored before the reply")
+        rename.assert_not_called()  # entries removed in place: no directory grows
+
+        factory, _ = self.popen_writing(OK_PAYLOAD)
+        with patch.object(handler.subprocess, "Popen", side_effect=factory):
+            self.assertEqual(handler.handler(request(execution_id="exec-2"))["status"], "ok")
+        self.assertEqual(os.listdir(self.root), [])
+
+    def test_blocks_freed_from_tenant_files_do_not_hide_entries(self):
+        clock = FakeClock()
+        proc = hanging_proc(clock)
+        ev = request()
+        ev["inputs"][0]["rows"] = [["x" * 60, i] for i in range(4_000)]  # ~300 KB of input
+
+        def spawn(args, **kwargs):  # frees the input's blocks, then adds ~270 KiB of entries
+            os.truncate(os.path.join(kwargs["cwd"], "in", "sales.json"), 0)
+            self.flood_links(os.path.join(kwargs["cwd"], "x"), 4, 4_250)
+            return proc
+
+        with patch.object(handler.subprocess, "Popen", side_effect=spawn), \
+                patch.object(handler.time, "monotonic", clock):
+            res = handler.handler(ev)
+        self.assertEqual((res["error_code"], res["error_message"]),
+                         ("ANALYSIS_RUNTIME", "too many files or directories created in the sandbox"))
+        self.assertEqual(os.listdir(self.root), [])
+
+    def test_a_large_legitimate_result_is_not_mistaken_for_entries(self):
+        clock = FakeClock()
+        output = {"tables": [{"title": "t", "columns": ["a", "b"],
+                              "rows": [["y" * 200, i] for i in range(1_000)]}]}
+        proc = MagicMock(pid=4242, returncode=0)
+        waits = []
+
+        def wait(timeout=None):  # alive at the first watch, with its ~210 KB result written
+            waits.append(timeout)
+            if len(waits) == 1:
+                clock.advance(timeout or 0)
+                raise subprocess.TimeoutExpired("x", timeout)
+            return 0
+        proc.wait.side_effect = wait
+
+        def spawn(args, **kwargs):
+            with open(os.path.join(kwargs["cwd"], "result.json.part"), "w") as fh:
+                json.dump({"status": "ok", "output": output}, fh)
+            os.replace(os.path.join(kwargs["cwd"], "result.json.part"), os.path.join(kwargs["cwd"], "result.json"))
+            return proc
+
+        with patch.object(handler.subprocess, "Popen", side_effect=spawn), \
+                patch.object(handler.time, "monotonic", clock):
+            res = handler.handler(request())
+        self.assertEqual(res["status"], "ok", res.get("error_message"))
+        self.assertGreater(len(waits), 1, "the watch ran while the child was alive")
 
 
 if __name__ == "__main__":
