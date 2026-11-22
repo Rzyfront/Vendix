@@ -543,7 +543,15 @@ export class VexBatchCardComponent {
     this.api
       .getBatch(id)
       .pipe(takeUntilDestroyed(this.destroyRef))
-      .subscribe({ next: (batch) => this.apply(batch) });
+      .subscribe({
+        next: (batch) => {
+          this.apply(batch);
+          // The approve request failed (network, proxy timeout) while the
+          // server keeps running the batch: follow it until it settles, like
+          // a reload mid-run does in `load()`.
+          if (batch.status === 'executing') this.startPolling();
+        },
+      });
   }
 
   /** Polls `GET` every second until terminal, `finish()` or destroy. */
