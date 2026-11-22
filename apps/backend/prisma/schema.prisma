@@ -7016,6 +7016,7 @@ model ai_engine_configs {
   /// F3 T24: aplicaciones que usan esta configuración como respaldo.
   fallback_applications ai_engine_applications[] @relation("ai_engine_application_fallback_config")
   logs         ai_engine_logs[]
+  voice_profiles        ai_voice_profiles[]
 
   @@unique([provider, model_id])
   @@index([model_type])
@@ -7091,11 +7092,38 @@ model ai_agents {
   timeout_seconds               Int?
   requires_confirmation_default Boolean   @default(false)
   is_active                     Boolean   @default(true)
+  /// F8 T49: voz del catálogo que lee las respuestas de este agente. NULL = respaldo (`metadata.speech`).
+  voice_profile_id              Int?
   created_at                    DateTime? @default(now()) @db.Timestamp(6)
   updated_at                    DateTime? @default(now()) @db.Timestamp(6)
 
+  voice_profile ai_voice_profiles? @relation(fields: [voice_profile_id], references: [id], onDelete: SetNull, onUpdate: NoAction)
+
   @@index([is_active])
   @@index([app_key])
+  @@index([voice_profile_id])
+}
+
+/// F8 T49: catálogo de voces de lectura (TTS) que arma superadmin. Una voz = un
+/// proveedor de voz (`ai_engine_configs`) + el id de voz de ese proveedor.
+model ai_voice_profiles {
+  id          Int       @id @default(autoincrement())
+  config_id   Int
+  voice_id    String    @db.VarChar(150)
+  name        String    @db.VarChar(120)
+  language    String    @default("es") @db.VarChar(16)
+  speed       Decimal?  @db.Decimal(4, 2)
+  vol         Decimal?  @db.Decimal(4, 2)
+  sample_text String?   @db.VarChar(120)
+  is_active   Boolean   @default(true)
+  created_at  DateTime? @default(now()) @db.Timestamp(6)
+  updated_at  DateTime? @default(now()) @db.Timestamp(6)
+
+  config ai_engine_configs @relation(fields: [config_id], references: [id], onDelete: Restrict, onUpdate: NoAction)
+  agents ai_agents[]
+
+  @@unique([config_id, voice_id])
+  @@index([is_active])
 }
 
 model ai_engine_logs {

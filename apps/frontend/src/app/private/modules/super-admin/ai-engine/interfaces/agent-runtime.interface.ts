@@ -16,6 +16,15 @@ export interface AgentRuntimeConfigOption {
   model_type: string;
 }
 
+export interface AgentVoiceProfileSummary {
+  id: number;
+  name: string;
+  voice_id: string;
+  language: string;
+  provider: string;
+  config_label: string;
+}
+
 export interface AgentRuntimeSheet {
   agent: {
     key: string;
@@ -53,7 +62,10 @@ export interface AgentRuntimeSheet {
     effective: AgentVoiceValues;
     base: AgentVoiceValues;
     has_override: boolean;
+    /** Voz del catálogo asignada al agente; manda sobre base/override. */
+    profile: (AgentVoiceProfileSummary & { is_active: boolean }) | null;
   };
+  available_voice_profiles: AgentVoiceProfileSummary[];
 }
 
 export interface UpdateAgentRuntimeDto {
@@ -65,6 +77,8 @@ export interface UpdateAgentRuntimeDto {
   timeout_seconds?: number | null;
   /** `null` quita el ajuste propio del agente y vuelve a la voz base. */
   voice?: AgentVoiceValues | null;
+  /** Voz del catálogo para este agente; `null` la quita. */
+  voice_profile_id?: number | null;
 }
 
 export interface AgentVoicePreview {

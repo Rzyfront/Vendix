@@ -6,7 +6,8 @@ import type {
 export type SdkType =
   | 'openai_compatible'
   | 'anthropic_compatible'
-  | 'minimax_t2a';
+  | 'minimax_t2a'
+  | 'gemini_tts';
 export type AIModelType =
   | 'text'
   | 'image'

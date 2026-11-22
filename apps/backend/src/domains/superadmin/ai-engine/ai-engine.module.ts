@@ -10,6 +10,8 @@ import { AIAgentsService } from './ai-agents.service';
 import { AgentRuntimeController } from './agent-runtime.controller';
 import { AISkillsController } from './ai-skills.controller';
 import { AISkillsService } from './ai-skills.service';
+import { AIVoiceProfilesController } from './ai-voice-profiles.controller';
+import { AIVoiceProfilesService } from './ai-voice-profiles.service';
 import { SkillsModule } from '../../../ai-engine/skills/skills.module';
 
 @Module({
@@ -21,6 +23,7 @@ import { SkillsModule } from '../../../ai-engine/skills/skills.module';
     AgentRuntimeController,
     AIAgentsController,
     AISkillsController,
+    AIVoiceProfilesController,
     AIEngineController,
   ],
   providers: [
@@ -28,6 +31,7 @@ import { SkillsModule } from '../../../ai-engine/skills/skills.module';
     AIEngineAppsService,
     AIAgentsService,
     AISkillsService,
+    AIVoiceProfilesService,
   ],
   exports: [AIEngineConfigService, AIEngineAppsService, AIAgentsService],
 })

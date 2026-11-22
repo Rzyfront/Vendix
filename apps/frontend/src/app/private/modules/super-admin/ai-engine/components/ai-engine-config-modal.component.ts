@@ -377,6 +377,7 @@ export class AIEngineConfigModalComponent implements OnChanges {
   sdkTypeOptions: SelectorOption[] = [
     { value: 'openai_compatible', label: 'OpenAI Compatible' },
     { value: 'anthropic_compatible', label: 'Anthropic Compatible' },
+    { value: 'gemini_tts', label: 'Gemini TTS (voz)' },
   ];
 
   modelTypeOptions: SelectorOption[] = MODEL_TYPES.map((value) => ({

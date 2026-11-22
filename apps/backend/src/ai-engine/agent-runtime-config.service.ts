@@ -47,7 +47,60 @@ export interface AgentSheetUpdate {
   timeout_seconds?: number | null;
   /** `null` removes the agent's voice override (falls back to the base). */
   voice?: { voice?: string; speed?: number; vol?: number } | null;
+  /** F8 T49 — catalog voice of this agent; `null` goes back to the fallback. */
+  voice_profile_id?: number | null;
 }
+
+/** Catalog voice as the agent sheet shows it. Never carries provider secrets. */
+export interface AgentVoiceProfileView {
+  id: number;
+  name: string;
+  voice_id: string;
+  language: string;
+  provider: string;
+  config_label: string;
+  is_active: boolean;
+}
+
+const VOICE_PROFILE_SELECT = {
+  id: true,
+  name: true,
+  voice_id: true,
+  language: true,
+  speed: true,
+  vol: true,
+  is_active: true,
+  config: {
+    select: {
+      id: true,
+      label: true,
+      provider: true,
+      model_id: true,
+      is_active: true,
+    },
+  },
+} satisfies Prisma.ai_voice_profilesSelect;
+
+type VoiceProfileRow = Prisma.ai_voice_profilesGetPayload<{
+  select: typeof VOICE_PROFILE_SELECT;
+}>;
+
+const toProfileView = (row: VoiceProfileRow): AgentVoiceProfileView => ({
+  id: row.id,
+  name: row.name,
+  voice_id: row.voice_id,
+  language: row.language,
+  provider: row.config.provider,
+  config_label: row.config.label,
+  // A voice whose provider is off cannot read: the sheet must say so.
+  is_active: row.is_active && row.config.is_active,
+});
+
+const positiveOf = (v: unknown): number | undefined => {
+  if (v === null || v === undefined) return undefined;
+  const n = Number(v);
+  return Number.isFinite(n) && n > 0 ? n : undefined;
+};
 
 const AGENT_LABELS: Record<RuntimeAgentKey, 'Vex' | 'Vexi'> = {
   vex: 'Vex',
@@ -216,6 +269,20 @@ export class AgentRuntimeConfigService {
       orderBy: [{ provider: 'asc' }, { label: 'asc' }],
     });
 
+    const [profileRow, availableProfiles] = await Promise.all([
+      agent.voice_profile_id
+        ? this.prisma.ai_voice_profiles.findUnique({
+            where: { id: agent.voice_profile_id },
+            select: VOICE_PROFILE_SELECT,
+          })
+        : null,
+      this.prisma.ai_voice_profiles.findMany({
+        where: { is_active: true, config: { is_active: true } },
+        select: VOICE_PROFILE_SELECT,
+        orderBy: [{ name: 'asc' }],
+      }),
+    ]);
+
     const voiceApp = await this.loadVoiceApp();
     const meta = isRecord(voiceApp?.metadata) ? voiceApp?.metadata : null;
     const speech = meta?.speech;
@@ -271,7 +338,14 @@ export class AgentRuntimeConfigService {
         effective: agentVoiceFromSpeechMetadata(speech, key),
         base: agentVoiceFromSpeechMetadata(speech, '__base__'),
         has_override: isRecord(own),
+        // F8 T49 — when set and active this is THE voice; the three keys
+        // above are the read-only fallback of the transition.
+        profile: profileRow ? toProfileView(profileRow) : null,
       },
+      available_voice_profiles: availableProfiles.map((row) => {
+        const { is_active: _active, ...view } = toProfileView(row);
+        return view;
+      }),
     };
   }
 
@@ -327,6 +401,36 @@ export class AgentRuntimeConfigService {
 
     if (dto.voice !== undefined) {
       await this.writeVoice(key, dto.voice);
+    }
+
+    // The sheet sends the voice on every save. Re-sending the one already
+    // assigned is not a change, so it is neither validated nor written: an
+    // operator must still be able to save the prompt of an agent whose voice
+    // provider was turned off.
+    if (
+      dto.voice_profile_id !== undefined &&
+      dto.voice_profile_id !== (agent.voice_profile_id ?? null)
+    ) {
+      if (dto.voice_profile_id !== null) {
+        const profile = await this.prisma.ai_voice_profiles.findUnique({
+          where: { id: dto.voice_profile_id },
+          select: VOICE_PROFILE_SELECT,
+        });
+        if (!profile || !profile.is_active || !profile.config.is_active) {
+          throw new VendixHttpException(
+            ErrorCodes.SYS_VALIDATION_001,
+            'La voz elegida no existe o está inactiva.',
+          );
+        }
+      }
+      // Only this agent's row: Vex and Vexi choose their voice separately.
+      await this.prisma.ai_agents.update({
+        where: { id: agent.id },
+        data: {
+          voice_profile_id: dto.voice_profile_id,
+          updated_at: new Date(),
+        },
+      });
     }
 
     const after = await this.getAgentSheet(key);
@@ -391,7 +495,7 @@ export class AgentRuntimeConfigService {
     agentKey: string,
     text?: string,
   ): Promise<{ audioBase64: string; contentType: string }> {
-    await this.loadAgent(agentKey);
+    const agent = await this.loadAgent(agentKey);
     const key = agentKey as RuntimeAgentKey;
     const sample = (text ?? '').trim() || VOICE_PREVIEW_DEFAULT_TEXT;
     if (sample.length > VOICE_PREVIEW_MAX_CHARS) {
@@ -401,16 +505,39 @@ export class AgentRuntimeConfigService {
       );
     }
     const voice = await this.getEffectiveVoice(key);
-    const response = await this.aiEngine.runSpeech(
-      VOICE_TTS_APP_KEY,
-      { text: sample },
-      {
-        voice: voice.voice,
-        responseFormat: 'mp3',
-        speed: voice.speed,
-        vol: voice.vol,
-      },
-    );
+    // Same precedence as the runtime (`VexiSpeechService.resolveParams`): the
+    // preview must sound like the next answer will.
+    const profile = agent.voice_profile_id
+      ? await this.prisma.ai_voice_profiles.findUnique({
+          where: { id: agent.voice_profile_id },
+          select: VOICE_PROFILE_SELECT,
+        })
+      : null;
+    const useProfile =
+      !!profile && profile.is_active && profile.config.is_active;
+    const response = useProfile
+      ? await this.aiEngine.runSpeech(
+          VOICE_TTS_APP_KEY,
+          { text: sample },
+          {
+            model: profile.config.model_id,
+            voice: profile.voice_id,
+            responseFormat: 'mp3',
+            speed: positiveOf(profile.speed) ?? voice.speed,
+            vol: positiveOf(profile.vol) ?? voice.vol,
+          },
+          { configId: profile.config.id },
+        )
+      : await this.aiEngine.runSpeech(
+          VOICE_TTS_APP_KEY,
+          { text: sample },
+          {
+            voice: voice.voice,
+            responseFormat: 'mp3',
+            speed: voice.speed,
+            vol: voice.vol,
+          },
+        );
     if (!response.success || !response.audioBase64) {
       throw new VendixHttpException(
         ErrorCodes.AI_PROVIDER_001,

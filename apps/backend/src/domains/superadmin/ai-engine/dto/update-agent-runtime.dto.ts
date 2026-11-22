@@ -74,6 +74,12 @@ export class UpdateAgentRuntimeDto {
   @ValidateNested()
   @Type(() => AgentVoiceDto)
   voice?: AgentVoiceDto | null;
+
+  /** F8 T49 — catalog voice of this agent; `null` goes back to the fallback. */
+  @IsOptional()
+  @IsInt()
+  @Min(1)
+  voice_profile_id?: number | null;
 }
 
 export class VoicePreviewDto {

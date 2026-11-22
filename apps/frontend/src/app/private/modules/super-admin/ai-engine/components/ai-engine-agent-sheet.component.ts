@@ -10,7 +10,7 @@ import {
   signal,
   untracked,
 } from '@angular/core';
-import { takeUntilDestroyed } from '@angular/core/rxjs-interop';
+import { takeUntilDestroyed, toSignal } from '@angular/core/rxjs-interop';
 import {
   FormBuilder,
   FormControl,
@@ -31,6 +31,7 @@ import { extractApiErrorMessage } from '../../../../../core/utils/api-error-hand
 import { AIToolCatalogEntry } from '../interfaces';
 import {
   AgentRuntimeSheet,
+  AgentVoiceProfileSummary,
   RuntimeAgentKey,
   UpdateAgentRuntimeDto,
 } from '../interfaces/agent-runtime.interface';
@@ -128,6 +129,23 @@ import { AiToolPickerComponent } from './ai-tool-picker/ai-tool-picker.component
             <h3 id="sheet-voice" class="text-sm font-semibold text-text-primary">
               Voz
             </h3>
+            <app-selector
+              label="Voz del catálogo"
+              placeholder="Sin voz asignada (usa la voz base)"
+              [options]="voiceProfileOptions()"
+              [formControl]="voiceProfileControl"
+              [disabled]="saving()"
+              helpText="Se administra en la pestaña Voces."
+            ></app-selector>
+            @if (hasProfileSelected()) {
+              <p
+                class="rounded-lg border border-border bg-background p-3 text-xs text-text-secondary"
+                role="status"
+              >
+                La voz del catálogo manda. Los campos de voz base y ajuste propio
+                solo se usan como respaldo.
+              </p>
+            }
             <div class="grid grid-cols-1 gap-3 sm:grid-cols-3">
               <app-input
                 formControlName="voice"
@@ -303,8 +321,28 @@ export class AIEngineAgentSheetComponent {
     })),
   );
 
+  protected readonly voiceProfileOptions = computed<SelectorOption[]>(() => {
+    const data = this.sheet();
+    const profiles: AgentVoiceProfileSummary[] = [
+      ...(data?.available_voice_profiles ?? []),
+    ];
+    const assigned = data?.voice.profile;
+    // Keep the assigned voice selectable even if the catalog no longer lists it.
+    if (assigned && !profiles.some((p) => p.id === assigned.id)) {
+      profiles.push(assigned);
+    }
+    return [
+      { value: '', label: 'Sin voz asignada (usa la voz base)' },
+      ...profiles.map((p) => ({
+        value: String(p.id),
+        label: `${p.name} · ${p.provider} (${p.language})`,
+      })),
+    ];
+  });
+
   protected readonly form = this.fb.group({
     config_id: [''],
+    voice_profile_id: [''],
     voice: [''],
     speed: [null as number | null, [Validators.min(0.5), Validators.max(2)]],
     vol: [null as number | null, [Validators.min(0.1), Validators.max(10)]],
@@ -324,6 +362,9 @@ export class AIEngineAgentSheetComponent {
   protected get configControl(): FormControl<string> {
     return this.form.controls.config_id as FormControl<string>;
   }
+  protected get voiceProfileControl(): FormControl<string> {
+    return this.form.controls.voice_profile_id as FormControl<string>;
+  }
   protected get voiceControl(): FormControl<string> {
     return this.form.controls.voice as FormControl<string>;
   }
@@ -339,6 +380,14 @@ export class AIEngineAgentSheetComponent {
   protected get timeoutControl(): FormControl<number | null> {
     return this.form.controls.timeout_seconds;
   }
+
+  private readonly voiceProfileValue = toSignal(
+    this.form.controls.voice_profile_id.valueChanges,
+    { initialValue: '' },
+  );
+  protected readonly hasProfileSelected = computed(
+    () => !!this.voiceProfileValue(),
+  );
 
   constructor() {
     effect(() => {
@@ -374,6 +423,8 @@ export class AIEngineAgentSheetComponent {
         data.application?.config_id != null
           ? String(data.application.config_id)
           : '',
+      voice_profile_id:
+        data.voice.profile?.id != null ? String(data.voice.profile.id) : '',
       voice: data.voice.effective.voice ?? '',
       speed: data.voice.effective.speed ?? null,
       vol: data.voice.effective.vol ?? null,
@@ -428,6 +479,10 @@ export class AIEngineAgentSheetComponent {
       max_iterations: this.toInt(raw.max_iterations),
       timeout_seconds: this.toInt(raw.timeout_seconds),
     };
+
+    const profileId = Number(raw.voice_profile_id);
+    dto.voice_profile_id =
+      Number.isInteger(profileId) && profileId > 0 ? profileId : null;
 
     const configId = Number(raw.config_id);
     if (data.application && Number.isInteger(configId) && configId > 0) {

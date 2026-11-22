@@ -36,6 +36,7 @@ import {
   AIEngineAgentSheetComponent,
   AIAppHealthPanelComponent,
   AISkillsPanelComponent,
+  AiVoicesPanelComponent,
 } from './components/index';
 
 import {
@@ -78,6 +79,7 @@ type ActiveTab =
   | 'jobs'
   | 'agents'
   | 'skills'
+  | 'voices'
   | 'health';
 
 @Component({
@@ -93,6 +95,7 @@ type ActiveTab =
     AIEngineAgentSheetComponent,
     AIAppHealthPanelComponent,
     AISkillsPanelComponent,
+    AiVoicesPanelComponent,
     EmptyStateComponent,
     ResponsiveDataViewComponent,
     InputsearchComponent,
