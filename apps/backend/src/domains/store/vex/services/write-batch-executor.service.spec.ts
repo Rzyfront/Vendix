@@ -62,6 +62,12 @@ describe('WriteBatchExecutorService (T35 approve / T38 audit + metering)', () =>
       auditThrows?: boolean;
       /** The handler (registry `executeTool`) throws this for the tool. */
       toolErrors?: Record<string, Error>;
+      /**
+       * From this 1-based write after the claim on, `updateMany` matches no
+       * row (`count: 0`): the batch left `executing` under the executor (e.g.
+       * `getView` reconciled it as interrupted).
+       */
+      lostOwnershipFromWrite?: number;
     } = {},
   ) {
     const steps = opts.steps ?? [mkStep(1), mkStep(2), mkStep(3)];
@@ -77,11 +83,19 @@ describe('WriteBatchExecutorService (T35 approve / T38 audit + metering)', () =>
     };
     let claimed = false;
     let threw = false;
+    let writesAfterClaim = 0;
     const updateMany = jest.fn(async (args: any) => {
       if (args.where.status === 'proposed') {
         const count = opts.claimCount ?? 1;
         claimed = count > 0;
         return { count };
+      }
+      writesAfterClaim += 1;
+      if (
+        opts.lostOwnershipFromWrite !== undefined &&
+        writesAfterClaim >= opts.lostOwnershipFromWrite
+      ) {
+        return { count: 0 };
       }
       if (
         opts.persistThrowsOnRunning &&
@@ -316,6 +330,40 @@ describe('WriteBatchExecutorService (T35 approve / T38 audit + metering)', () =>
       expect(fin.data.steps[1].error).toBe(BATCH_STEP_MESSAGES.permission_lost);
       expect(fin.data.status).toBe('partially_applied');
       expect(fin.data.summary.message).toBe('Se aplicó hasta el paso 1, el resto se omitió.');
+    });
+  });
+
+  describe('P2-1 — the executor stops writing once it lost the batch', () => {
+    // Writes after the claim in a 3-step run: #1 initial persist, #2 step 1
+    // running, #3 step 1 outcome, #4 step 2 running, ...
+    it('lost after step 1 applied: steps 2 and 3 never run, no finalize over the new owner', async () => {
+      const h = build({ lostOwnershipFromWrite: 3 });
+      const res = await approve(h);
+      expect(res).toEqual({ batch: h.view, replayed: false });
+      expect(h.executeTool.mock.calls.map((c: any[]) => c[0])).toEqual(['tool1']);
+      expect(h.confirmations.issue).toHaveBeenCalledTimes(1);
+      // Nothing is written after the first `count: 0`.
+      expect(h.updateMany).toHaveBeenCalledTimes(1 + 3);
+      expect(h.updateMany.mock.calls.filter((c: any[]) => c[0].data?.summary)).toHaveLength(0);
+      // The real write is still on the record (receipt + audit), and the audit
+      // says the rest never ran.
+      expect(h.activity.recordApplied).toHaveBeenCalledTimes(1);
+      const meta = h.audit.log.mock.calls[0][0].metadata;
+      expect(meta.steps.map((s: any) => s.status)).toEqual(['applied', 'skipped', 'skipped']);
+      expect(meta.ownership_lost).toBe(true);
+      // The card shows the reconciled state; no contradicting narration.
+      expect(h.activity.recordAppliedNarration).not.toHaveBeenCalled();
+    });
+
+    it('lost before dispatching step 1: nothing runs at all', async () => {
+      const h = build({ lostOwnershipFromWrite: 2 });
+      await approve(h);
+      expect(h.executeTool).not.toHaveBeenCalled();
+      expect(h.confirmations.issue).not.toHaveBeenCalled();
+      expect(h.planState.applyDurableEffect).not.toHaveBeenCalled();
+      expect(h.updateMany).toHaveBeenCalledTimes(1 + 2);
+      expect(h.activity.recordApplied).not.toHaveBeenCalled();
+      expect(h.access.consumeAIQuota).not.toHaveBeenCalled();
     });
   });
 

@@ -202,11 +202,15 @@ export class WriteBatchExecutorService {
     // Raw outputs of applied steps, for the activity receipts (never persisted
     // in the batch row beyond the compensation budget).
     const outputs = new Map<string, string>();
+    // False once a write of ours matched no row: the batch left `executing`
+    // under us (`getView` reconciled it as interrupted). From then on the row
+    // has another truth, so nothing else runs and nothing else is written.
+    let owned = true;
     try {
-      await this.persistSteps(input.batchId, steps);
+      owned = await this.persistSteps(input.batchId, steps);
       let stopped = false;
       for (const step of runnable) {
-        if (stopped) {
+        if (stopped || !owned) {
           step.status = 'skipped';
           continue;
         }
@@ -214,7 +218,15 @@ export class WriteBatchExecutorService {
         step.started_at = new Date().toISOString();
         step.operation_id = writeBatchOperationId(input.batchId, step.step_id);
         state.running = step;
-        await this.persistSteps(input.batchId, steps);
+        owned = await this.persistSteps(input.batchId, steps);
+        if (!owned) {
+          // Lost before dispatching: this step never ran.
+          state.running = undefined;
+          step.status = 'skipped';
+          step.started_at = undefined;
+          step.operation_id = undefined;
+          continue;
+        }
 
         const outcome = await this.runStep(row, step, input.userId, state);
         state.running = undefined;
@@ -228,7 +240,7 @@ export class WriteBatchExecutorService {
           step.error = outcome.error;
           stopped = true;
         }
-        await this.persistSteps(input.batchId, steps);
+        owned = await this.persistSteps(input.batchId, steps);
       }
     } catch (error) {
       // Unexpected failure (e.g. persisting the steps): the in-memory state is
@@ -260,8 +272,18 @@ export class WriteBatchExecutorService {
 
     const terminal = writeBatchTerminalStatus(steps);
     const summary = summarizeWriteBatch(steps);
-    await this.finalize(input.batchId, terminal, steps, summary);
-    await this.afterFinish(row, input.userId, terminal, steps, summary, outputs);
+    if (owned) {
+      await this.finalize(input.batchId, terminal, steps, summary);
+    } else {
+      // The row already carries the reconciled state; never overwrite it.
+      this.logger.error(
+        `Write batch ${input.batchId} lost ownership mid-run; stopped after ${summary.applied} applied step(s).`,
+      );
+    }
+    // Receipts and audit still record the writes that DID land.
+    await this.afterFinish(row, input.userId, terminal, steps, summary, outputs, {
+      ownershipLost: !owned,
+    });
 
     return {
       batch: await this.batches.getView(input.batchId, input.userId),
@@ -475,15 +497,19 @@ export class WriteBatchExecutorService {
 
   // ── persistence ───────────────────────────────────────────────────────
 
-  /** Single writer: only the claim winner updates, and only while executing. */
+  /**
+   * Single writer: only the claim winner updates, and only while executing.
+   * Returns false when no row matched — the batch is no longer ours.
+   */
   private async persistSteps(
     batchId: string,
     steps: WriteBatchStepRecord[],
-  ): Promise<void> {
-    await this.prisma.ai_agent_write_batches.updateMany({
+  ): Promise<boolean> {
+    const { count } = await this.prisma.ai_agent_write_batches.updateMany({
       where: { id: batchId, status: 'executing' },
       data: { steps: steps as any, version: { increment: 1 } },
     });
+    return count > 0;
   }
 
   private async finalize(
@@ -501,13 +527,25 @@ export class WriteBatchExecutorService {
     };
     // `rejected` (empty selection) finalizes from `executing` as well.
     const where = { id: batchId, status: 'executing' };
+    let count: number;
     try {
-      await this.prisma.ai_agent_write_batches.updateMany({ where, data });
+      ({ count } = await this.prisma.ai_agent_write_batches.updateMany({
+        where,
+        data,
+      }));
     } catch (first) {
       this.logger.error(
         `Finalizing batch ${batchId} failed, retrying: ${(first as Error)?.message}`,
       );
-      await this.prisma.ai_agent_write_batches.updateMany({ where, data });
+      ({ count } = await this.prisma.ai_agent_write_batches.updateMany({
+        where,
+        data,
+      }));
+    }
+    if (count === 0) {
+      this.logger.error(
+        `Finalizing batch ${batchId} matched no executing row; the stored state was kept.`,
+      );
     }
   }
 
@@ -524,6 +562,7 @@ export class WriteBatchExecutorService {
     steps: WriteBatchStepRecord[],
     summary: WriteBatchSummary,
     outputs: Map<string, string> = new Map(),
+    opts: { ownershipLost?: boolean } = {},
   ): Promise<void> {
     // One `role: 'tool'` receipt per applied step, attributed to Vex: the
     // business log and the store history (T18) rebuild applied actions from
@@ -563,15 +602,19 @@ export class WriteBatchExecutorService {
         }
       }
     }
-    try {
-      await this.activity.recordAppliedNarration({
-        conversationId: row.conversation_id ?? undefined,
-        summary: summary.message,
-      });
-    } catch (error) {
-      this.logger.warn(
-        `Batch narration failed (${row.id}): ${(error as Error)?.message}`,
-      );
+    // Without ownership the card shows the reconciled state; a narration from
+    // here would contradict what the person reads there.
+    if (!opts.ownershipLost) {
+      try {
+        await this.activity.recordAppliedNarration({
+          conversationId: row.conversation_id ?? undefined,
+          summary: summary.message,
+        });
+      } catch (error) {
+        this.logger.warn(
+          `Batch narration failed (${row.id}): ${(error as Error)?.message}`,
+        );
+      }
     }
     try {
       const ctx = RequestContextService.getContext();
@@ -591,6 +634,7 @@ export class WriteBatchExecutorService {
           conversation_id: row.conversation_id,
           goal: row.goal,
           status,
+          ...(opts.ownershipLost ? { ownership_lost: true } : {}),
           // Measurement only (N4): no action quota is consumed.
           applied_count: summary.applied,
           steps: steps.map((s) => ({
