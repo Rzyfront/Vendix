@@ -18,19 +18,32 @@ export interface SandboxInvocation {
 }
 export const sandboxInvocation = new AsyncLocalStorage<SandboxInvocation>();
 
+/** Execute and persist precisely this normalized source (LF + NFC). */
+export function normalizeSandboxSource(source: string): string {
+  return source.replace(/\r\n?/g, '\n').normalize('NFC');
+}
+
 /** Generated source may contain PII: public SSE/transcript carries a hash, not source. */
 export function publicSandboxArgs(
   name: string,
   args: Record<string, unknown>,
 ): Record<string, unknown> {
+  if (name === 'run_analysis') {
+    return {
+      source_hash: createHash('sha256')
+        .update(normalizeSandboxSource(String(args.source ?? '')))
+        .digest('hex'),
+      conversation_id: args.conversation_id,
+      inputs: args.inputs,
+      purpose: args.purpose,
+      title: args.title,
+      source_omitted: true,
+    };
+  }
   if (name !== 'run_readonly_script') return args;
   return {
     source_hash: createHash('sha256')
-      .update(
-        String(args.source ?? '')
-          .replace(/\r\n?/g, '\n')
-          .normalize('NFC'),
-      )
+      .update(normalizeSandboxSource(String(args.source ?? '')))
       .digest('hex'),
     language: args.language,
     tools: args.tools,

@@ -10,6 +10,9 @@ import { Prisma } from '@prisma/client';
 import { createCipheriv, createHash, randomBytes } from 'crypto';
 import { RequestContextService } from '../../common/context/request-context.service';
 import { GlobalPrismaService } from '../../prisma/services/global-prisma.service';
+import { normalizeSandboxSource } from './sandbox-invocation.context';
+
+export { normalizeSandboxSource };
 
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 const HASH = /^[a-f0-9]{64}$/;
@@ -112,11 +115,6 @@ export interface SandboxAuditRecord extends AuditScope {
   expires_at: Date;
   created_at: Date;
   finished_at: Date | null;
-}
-
-/** Execute precisely this normalized source, not a different pre-normalized string. */
-export function normalizeSandboxSource(source: string): string {
-  return source.replace(/\r\n?/g, '\n').normalize('NFC');
 }
 
 export function sandboxSourceHash(source: string): string {

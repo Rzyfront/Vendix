@@ -46,8 +46,13 @@ const PUBLIC_TOOLS = [
   'read_attachment',
   // business identity every store member sees
   'get_store_profile',
-  // sandbox re-derives live permissions
+  // sandbox re-derives live permissions; run_analysis reads only the caller's
+  // own Vex conversation blocks and runs in an isolated no-network Lambda
   'run_readonly_script',
+  'run_analysis',
+  // F5/T34: proposes a batch and never writes; every step is re-checked by
+  // this same role gate at approval, so it grants no business permission.
+  'propose_write_batch',
   // agent scaffolding
   'search_tools',
   'suggest_followup',

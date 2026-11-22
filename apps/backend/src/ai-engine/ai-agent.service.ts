@@ -1143,6 +1143,80 @@ export class AIAgentService {
   }
 
   /**
+   * F9/T52: `run_analysis` emits 1..N blocks (table, chart, kpi), carrying the
+   * Python source on the last block's `spec.analysis`. Empty for any other
+   * tool, an error envelope or a non-JSON result.
+   */
+  private analysisBlocksOf(
+    toolName: string,
+    result: string,
+  ): NonNullable<AIStreamChunk['ui_block']>[] {
+    if (toolName !== 'run_analysis') return [];
+    const KINDS = new Set(['table', 'chart', 'kpi']);
+    try {
+      const data = (
+        JSON.parse(result) as {
+          data?: { ui_blocks?: unknown; blocks?: unknown };
+        }
+      )?.data;
+      const items = Array.isArray(data?.ui_blocks)
+        ? data.ui_blocks
+        : Array.isArray(data?.blocks)
+          ? data.blocks
+          : [];
+      return items
+        .filter(
+          (
+            item,
+          ): item is {
+            block_id: string;
+            kind: 'table' | 'chart' | 'kpi';
+            version?: number;
+            spec?: Record<string, any>;
+            data?: unknown;
+          } =>
+            !!item &&
+            typeof item === 'object' &&
+            typeof (item as { block_id?: unknown }).block_id === 'string' &&
+            typeof (item as { kind?: unknown }).kind === 'string' &&
+            KINDS.has((item as { kind: string }).kind),
+        )
+        .map((item) => ({
+          block_id: item.block_id,
+          kind: item.kind,
+          ...(typeof item.version === 'number'
+            ? { version: item.version }
+            : {}),
+          ...(item.spec && typeof item.spec === 'object'
+            ? { spec: item.spec }
+            : {}),
+          ...(item.data !== undefined ? { data: item.data } : {}),
+        }));
+    } catch {
+      return [];
+    }
+  }
+
+  /**
+   * F9/T52: strips `data.ui_blocks` (which carries full rows and raw Python
+   * `spec.analysis.source`) before checkpointing, compaction, LLM context and
+   * transcript persistence, keeping only block ids, figures and notes.
+   */
+  private stripAnalysisUiBlocks(toolName: string, raw: string): string {
+    if (toolName !== 'run_analysis') return raw;
+    try {
+      const parsed = JSON.parse(raw) as {
+        data?: Record<string, unknown>;
+      };
+      if (!parsed?.data || !('ui_blocks' in parsed.data)) return raw;
+      const { ui_blocks: _omitted, ...rest } = parsed.data;
+      return JSON.stringify({ ...parsed, data: rest });
+    } catch {
+      return raw;
+    }
+  }
+
+  /**
    * Non-streaming entry point. Drains the streaming loop and keeps its return
    * value, so there is exactly one implementation of the agent protocol —
    * a second copy for the SSE path would drift the moment either is touched.
@@ -1510,7 +1584,9 @@ export class AIAgentService {
       }
     return allowed.filter(
       (d) =>
-        (d.function.name !== 'run_readonly_script' || !!params.durable) &&
+        ((d.function.name !== 'run_readonly_script' &&
+          d.function.name !== 'run_analysis') ||
+          !!params.durable) &&
         !isForeignSurfaceTool(d.function.name, params.agent_key),
     );
   }
@@ -1708,7 +1784,9 @@ export class AIAgentService {
 
     filteredTools = filteredTools.filter(
       (d) =>
-        (d.function.name !== 'run_readonly_script' || !!params.durable) &&
+        ((d.function.name !== 'run_readonly_script' &&
+          d.function.name !== 'run_analysis') ||
+          !!params.durable) &&
         !isForeignSurfaceTool(d.function.name, params.agent_key),
     );
 
@@ -3752,7 +3830,11 @@ export class AIAgentService {
                       },
                     ),
                   );
-                if (toolName === 'run_readonly_script' && params.durable) {
+                if (
+                  (toolName === 'run_readonly_script' ||
+                    toolName === 'run_analysis') &&
+                  params.durable
+                ) {
                   const durable = params.durable;
                   return sandboxInvocation.run(
                     {
@@ -3798,7 +3880,12 @@ export class AIAgentService {
                       ? activeTrace.run(toolSpan, meteredExecute)
                       : meteredExecute(),
                   );
-              const normalized = normalizeToolResult(raw, {
+              // F9/T52: extract panel-ready blocks before stripping ui_blocks
+              // (which carries raw Python `spec.analysis.source`) from all
+              // transcript, checkpoint and LLM-visible payloads.
+              const analysisBlocks = this.analysisBlocksOf(toolName, raw);
+              const safeRaw = this.stripAnalysisUiBlocks(toolName, raw);
+              const normalized = normalizeToolResult(safeRaw, {
                 write:
                   this.toolRegistry.get(toolName)?.requiresConfirmation ===
                   true,
@@ -3812,7 +3899,7 @@ export class AIAgentService {
                 artifactId = await params.durable.checkpointTool(
                   toolCall.id,
                   toolName,
-                  toolArgs,
+                  publicSandboxArgs(toolName, toolArgs),
                   durableResult,
                   this.toolRegistry.get(toolName)?.version ?? '1',
                 );
@@ -3828,7 +3915,7 @@ export class AIAgentService {
               // rows}`, never the full payload twice.
               const result = await this.compactToolResult(
                 toolName,
-                raw,
+                safeRaw,
                 params,
                 artifactId,
                 toolArgs,
@@ -3836,7 +3923,7 @@ export class AIAgentService {
               // Compaction is transport: the full result is persisted behind a
               // reference, so the receipt stays `observed` (no `truncated`, no
               // recovery instruction, no incomplete_data).
-              if (normalized && result !== raw) normalized.compacted = true;
+              if (normalized && result !== safeRaw) normalized.compacted = true;
 
               toolsUsed.push({
                 name: toolName,
@@ -3895,6 +3982,10 @@ export class AIAgentService {
               // F5: a batch split in parts (> 25 steps) opens one card each.
               for (const part of this.writeBatchPartBlocksOf(toolName, raw)) {
                 yield { type: 'ui_block', ui_block: part };
+              }
+              // F9/T52: run_analysis produces table/chart/kpi blocks in order.
+              for (const block of analysisBlocks) {
+                yield { type: 'ui_block', ui_block: block };
               }
             } catch (error: any) {
               // A confirmation demand is not a failure — it is the proposal
@@ -4265,7 +4356,7 @@ export class AIAgentService {
                 await params.durable.checkpointTool(
                   toolCall.id,
                   toolName,
-                  toolArgs!,
+                  publicSandboxArgs(toolName, toolArgs!),
                   execution,
                   this.toolRegistry.get(toolName)?.version ?? '1',
                 );

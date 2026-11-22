@@ -328,11 +328,36 @@ export class VexBlockService {
     return this.toUiBlock(await this.getById(id));
   }
 
+  private analysisSpecOf(
+    spec: Record<string, any>,
+  ): { analysis: Record<string, any> } | Record<string, never> {
+    const a = spec.analysis;
+    if (
+      !isRecord(a) ||
+      typeof a.run_id !== 'string' ||
+      typeof a.source_hash !== 'string' ||
+      a.language !== 'python' ||
+      typeof a.purpose !== 'string'
+    ) {
+      return {};
+    }
+    return {
+      analysis: {
+        run_id: a.run_id,
+        source_hash: a.source_hash,
+        language: 'python',
+        purpose: a.purpose,
+        ...(typeof a.source === 'string' && a.source ? { source: a.source } : {}),
+      },
+    };
+  }
+
   async toUiBlock(
     row: VexBlockRow & { signed_url?: string },
   ): Promise<VexUiBlockView> {
     const spec = isRecord(row.spec) ? row.spec : {};
     const data = isRecord(row.data) ? row.data : {};
+    const analysis = this.analysisSpecOf(spec);
     switch (row.kind) {
       case 'table':
         return {
@@ -344,6 +369,7 @@ export class VexBlockService {
             ...(typeof spec.title === 'string' ? { title: spec.title } : {}),
             columns: Array.isArray(data.columns) ? data.columns : [],
             selectable: true,
+            ...analysis,
           },
           data: { rows: Array.isArray(data.rows) ? data.rows : [] },
         };
@@ -388,6 +414,7 @@ export class VexBlockService {
                 ? { type: s.type }
                 : {}),
             })),
+            ...analysis,
           },
           data: { rows },
         };
@@ -403,6 +430,7 @@ export class VexBlockService {
               typeof data.label === 'string' && data.label
                 ? data.label
                 : 'Indicador',
+            ...analysis,
           },
           data: {
             value: data.value ?? null,

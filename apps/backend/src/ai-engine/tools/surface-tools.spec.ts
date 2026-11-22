@@ -1,4 +1,6 @@
 import {
+  isForeignSurfaceTool,
+  isVexOnlyTool,
   TURN_BOUND_CONVERSATION_TOOLS,
   withTurnConversation,
   withTurnConversationId,
@@ -96,5 +98,26 @@ describe('withTurnConversation (P2-3)', () => {
     const args = { conversation_id: 7, product_id: 1 };
     expect(withTurnConversation('update_product_price', args, TURN)).toBe(args);
     expect(withTurnConversation('queue_task', {}, TURN)).toEqual({});
+  });
+
+  it('run_analysis is Vex-only and always bound to the turn conversation (F9/T52)', () => {
+    expect(isVexOnlyTool('run_analysis')).toBe(true);
+    expect(isForeignSurfaceTool('run_analysis', 'vexi')).toBe(true);
+    expect(isForeignSurfaceTool('run_analysis', 'vex')).toBe(false);
+    expect(TURN_BOUND_CONVERSATION_TOOLS.has('run_analysis')).toBe(true);
+    expect(
+      withTurnConversation(
+        'run_analysis',
+        { conversation_id: 999, purpose: 'projection' },
+        TURN,
+      ),
+    ).toEqual({ conversation_id: TURN, purpose: 'projection' });
+    expect(
+      withTurnConversation(
+        'run_analysis',
+        { conversation_id: 999, purpose: 'projection' },
+        null,
+      ),
+    ).toEqual({ purpose: 'projection' });
   });
 });

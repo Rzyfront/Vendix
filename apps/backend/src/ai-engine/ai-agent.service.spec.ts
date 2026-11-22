@@ -90,6 +90,21 @@ describe('AIAgentService.runAgentStream', () => {
       def('send_invoice_dian'),
       def('vex_render_table'),
       def('remember'),
+      {
+        type: 'function' as const,
+        function: {
+          name: 'run_analysis',
+          description: 'run_analysis',
+          parameters: {
+            type: 'object',
+            properties: {
+              source: { type: 'string' },
+              inputs: { type: 'array' },
+              purpose: { type: 'string' },
+            },
+          },
+        },
+      },
     ];
     const domains: Record<string, string> = {
       list_things: 'things',
@@ -103,6 +118,7 @@ describe('AIAgentService.runAgentStream', () => {
       send_invoice_dian: 'invoicing',
       vex_render_table: 'vex',
       remember: 'memory',
+      run_analysis: 'sandbox',
     };
     registry = {
       getAvailableDefinitions: jest.fn((scopes: string[]) =>
@@ -129,6 +145,7 @@ describe('AIAgentService.runAgentStream', () => {
         domains[n] ? { name: n, domain: domains[n] } : undefined,
       getDeprecation: () => undefined,
       isClientSide: (n: string) => n.startsWith('ui_'),
+      isReadOnly: (n: string) => n === 'run_analysis' || n.startsWith('list_'),
       executeTool,
       executeToolResult: async (name, args, options) => {
         executionOptions(name, options);
@@ -805,6 +822,141 @@ describe('AIAgentService.runAgentStream', () => {
       type: 'ui_block',
       ui_block: { block_id: 'b-9', kind: 'table', version: 1 },
     });
+  });
+
+  it('(vex-f9) excludes run_analysis from tool catalog when durable is absent', async () => {
+    configureStorePlan(['*'], ['p']);
+    await drain({ agent_key: 'vex' });
+    expect(offeredToolNames()).not.toContain('run_analysis');
+  });
+
+  it('(vex-f9) run_analysis emits every created ui_block frame with spec.analysis', async () => {
+    configureStorePlan(['*'], ['p']);
+    registry.getAgentDefinitions = jest.fn((scopes: string[]) =>
+      registry.getAvailableDefinitions(scopes),
+    );
+    const durable = {
+      objective_id: 'obj-f9',
+      objective: {
+        authority_snapshot: ['p'],
+        budget: { active_runtime_ms: 0 },
+        expires_at: new Date(Date.now() + 60_000),
+      },
+      recoveryState: jest.fn().mockResolvedValue({
+        schema_version: '1',
+        replans: 0,
+        expansions: 0,
+        corrections: 0,
+        transient_retries: 0,
+        failures: [],
+        unknown_effect: false,
+        exhausted: false,
+      }),
+      checkpointRecovery: jest.fn(),
+      assertBudget: jest.fn(),
+      assertCurrent: jest.fn(),
+      excludeWait: jest.fn(),
+      runProvider: jest.fn(async (fn) => fn()),
+      runTool: jest.fn(async (fn) => fn()),
+      addBudget: jest.fn(),
+      checkpointTool: jest.fn().mockResolvedValue('art-1'),
+      proposeWrite: jest.fn(),
+      finish: jest.fn(async () => ({
+        id: 'obj-f9',
+        version: 1,
+        semantic_status: 'complete',
+      })),
+      close: jest.fn(),
+    } as any;
+    executeTool.mockResolvedValueOnce(
+      JSON.stringify({
+        tool: 'run_analysis',
+        version: '1',
+        data: {
+          run_id: 'run-1',
+          source_hash: 'h-1',
+          purpose: 'projection',
+          blocks: [
+            { block_id: 'b-chart', kind: 'chart' },
+            { block_id: 'b-kpi', kind: 'kpi' },
+          ],
+          ui_blocks: [
+            {
+              block_id: 'b-chart',
+              kind: 'chart',
+              version: 1,
+              spec: {
+                kind: 'chart',
+                chart_type: 'line',
+                analysis: {
+                  run_id: 'run-1',
+                  source_hash: 'h-1',
+                  language: 'python',
+                  purpose: 'projection',
+                },
+              },
+              data: { rows: [] },
+            },
+            {
+              block_id: 'b-kpi',
+              kind: 'kpi',
+              version: 1,
+              spec: {
+                kind: 'kpi',
+                label: 'Proyección',
+                analysis: {
+                  run_id: 'run-1',
+                  source_hash: 'h-1',
+                  language: 'python',
+                  purpose: 'projection',
+                  source: 'SECRET_PY_TOKEN = 42\nresult = {}',
+                },
+              },
+              data: { value: 150 },
+            },
+          ],
+        },
+      }),
+    );
+    chat.mockReset();
+    chat
+      .mockResolvedValueOnce(
+        ok({
+          tool_calls: [
+            call('c1', 'run_analysis', {
+              source: 'SECRET_PY_TOKEN = 42\nresult = {}',
+              inputs: [],
+              purpose: 'projection',
+            }),
+          ],
+        }),
+      )
+      .mockResolvedValueOnce(ok({ content: 'listo' }));
+
+    const { chunks, result } = await drain({ agent_key: 'vex', durable });
+    expect(offeredToolNames()).toContain('run_analysis');
+    const uiBlocks = chunks.filter((c) => c.type === 'ui_block').map((c) => c.ui_block);
+    expect(uiBlocks).toHaveLength(2);
+    expect(uiBlocks[0]).toMatchObject({ block_id: 'b-chart', kind: 'chart', version: 1 });
+    expect(uiBlocks[1]).toMatchObject({
+      block_id: 'b-kpi',
+      kind: 'kpi',
+      version: 1,
+      spec: expect.objectContaining({
+        analysis: expect.objectContaining({
+          source: 'SECRET_PY_TOKEN = 42\nresult = {}',
+        }),
+      }),
+    });
+    // Transcript tool args, checkpoint args, tool result and SSE tool_result must NOT carry raw Python source or ui_blocks.
+    expect(JSON.stringify(result.tools_used)).not.toContain('SECRET_PY_TOKEN');
+    expect(JSON.stringify(result.tools_used)).not.toContain('ui_blocks');
+    expect(JSON.stringify(durable.checkpointTool.mock.calls)).not.toContain(
+      'SECRET_PY_TOKEN',
+    );
+    const toolResultChunks = chunks.filter((c) => c.type === 'tool_result');
+    expect(JSON.stringify(toolResultChunks)).not.toContain('SECRET_PY_TOKEN');
+    expect(JSON.stringify(toolResultChunks)).not.toContain('ui_blocks');
   });
 
   it('(vex-vi) a write proposal emits plan_approval and ends the turn', async () => {

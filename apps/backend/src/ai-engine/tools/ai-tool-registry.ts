@@ -670,7 +670,7 @@ export class AIToolRegistry {
       if (onHandlerStart) throw error;
       if (error instanceof VendixHttpException) throw error;
       const message =
-        resolvedName === 'run_readonly_script'
+        resolvedName === 'run_readonly_script' || resolvedName === 'run_analysis'
           ? 'SANDBOX_EXECUTION_FAILED'
           : error.message;
       this.logger.error(`Tool "${name}" execution failed: ${message}`);

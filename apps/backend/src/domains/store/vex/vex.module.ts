@@ -16,6 +16,9 @@ import { VexActivityFeedService } from './services/vex-activity-feed.service';
 import { VexSuggestionsService } from './services/vex-suggestions.service';
 import { AIToolRegistry } from '../../../ai-engine/tools/ai-tool-registry';
 import { createComputeTools } from '../../../ai-engine/tools/domains/compute.tools';
+import { createAnalysisTools } from '../../../ai-engine/tools/domains/code-execution.tools';
+import { SandboxAnalysisBrokerService } from '../../../ai-engine/sandbox/sandbox-analysis-broker.service';
+import { AIEntitlementsResolverService } from '../subscriptions/services/ai-entitlements-resolver.service';
 import { createVexBlockTools } from '../../../ai-engine/tools/domains/vex-blocks.tools';
 import { createWriteBatchTools } from '../../../ai-engine/tools/domains/write-batch.tools';
 import { WriteBatchService } from './services/write-batch.service';
@@ -72,6 +75,8 @@ export class VexModule implements OnModuleInit {
     private readonly planApproval: PlanApprovalService,
     private readonly access: SubscriptionAccessService,
     private readonly writeBatches: WriteBatchService,
+    private readonly analysisRunner: SandboxAnalysisBrokerService,
+    private readonly entitlements: AIEntitlementsResolverService,
   ) {}
 
   onModuleInit(): void {
@@ -110,6 +115,30 @@ export class VexModule implements OnModuleInit {
       createVexBlockTools({ blocks: this.blocks }),
     );
     this.toolRegistry.registerMany(createComputeTools());
+    // F9/T52: code analysis over this conversation's blocks, gated by plan.
+    this.toolRegistry.registerMany(
+      createAnalysisTools({
+        runner: this.analysisRunner,
+        blocks: this.blocks,
+        entitlements: {
+          codeAnalysisEnabled: async (storeId) => {
+            try {
+              const resolved = await this.entitlements.resolveForStore(storeId);
+              if (!resolved.found || resolved.planId === null) return false;
+              return resolved.rows.some(
+                (r) =>
+                  r.agent_key === 'vex' &&
+                  r.capability_key === 'code_analysis' &&
+                  r.enabled &&
+                  r.cap_value !== 0,
+              );
+            } catch {
+              return false; // fail closed
+            }
+          },
+        },
+      }),
+    );
     // F5/T34: the batch circuit's entry; it proposes, the card approves.
     this.toolRegistry.registerMany(
       createWriteBatchTools({ batches: this.writeBatches }),

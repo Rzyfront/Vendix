@@ -80,6 +80,9 @@ export { createDiscoveryTools } from './domains/discovery.tools';
 export { ToolRouterService } from './tool-router.service';
 
 export { createPlaybookTools } from './domains/playbook.tools';
-export { createCodeExecutionTools } from './domains/code-execution.tools';
+export {
+  createCodeExecutionTools,
+  createAnalysisTools,
+} from './domains/code-execution.tools';
 
 export { createProceduralRecipeTools } from './domains/recipe.tools';
