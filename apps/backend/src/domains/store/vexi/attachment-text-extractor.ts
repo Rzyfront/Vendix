@@ -71,10 +71,8 @@ export async function extractAttachmentContent(
         return { kind: 'text', ...base, text: await readDocxText(buffer) };
       case 'text/plain':
         return { kind: 'text', ...base, text: clip(decodeText(buffer)) };
-      case 'application/pdf': {
-        const { text, pages } = await pdfText(buffer);
-        return { kind: 'text', ...base, text, pages };
-      }
+      case 'application/pdf':
+        return { kind: 'text', ...base, ...(await readPdfText(buffer)) };
       default:
         if (type?.kind === 'image') return { kind: 'image', ...base };
         return { kind: 'text', ...base, text: '' };
@@ -432,31 +430,69 @@ export async function readDocxText(
 
 // ── PDF ─────────────────────────────────────────────────────────────────────
 
+/** P1: a PDF is read for at most this long; slower pages are left out. */
+export const PDF_PARSE_TIMEOUT_MS = 5_000;
+export const PDF_UNREADABLE_MESSAGE =
+  'No pudimos leer el PDF (tarda demasiado o está dañado). Vuelve a exportarlo o guárdalo de nuevo e inténtalo otra vez.';
+
 interface PdfTextItem {
   str?: string;
   hasEOL?: boolean;
 }
 
-async function pdfText(
-  buffer: Buffer,
-): Promise<{ text: string; pages: number }> {
+interface PdfDocument {
+  numPages: number;
+  getPage: (n: number) => Promise<{
+    getTextContent: () => Promise<{ items: PdfTextItem[] }>;
+  }>;
+}
+
+/** The slice of pdfjs-dist this reader uses (injectable for tests). */
+export interface PdfJsLib {
+  getDocument: (opts: Record<string, unknown>) => {
+    promise: Promise<PdfDocument>;
+    destroy: () => Promise<void>;
+  };
+}
+
+class PdfDeadlineError extends Error {}
+
+/** Settles with `promise`, or rejects with `PdfDeadlineError` at `deadline`. */
+function beforeDeadline<T>(promise: Promise<T>, deadline: number): Promise<T> {
+  let timer: NodeJS.Timeout | undefined;
+  const expired = new Promise<never>((_, reject) => {
+    timer = setTimeout(
+      () => reject(new PdfDeadlineError('PDF read deadline')),
+      Math.max(0, deadline - Date.now()),
+    );
+  });
+  return Promise.race([promise, expired]).finally(() => clearTimeout(timer));
+}
+
+function loadPdfJs(): Promise<PdfJsLib> {
   // Native dynamic import: pdfjs-dist is ESM-only under the CommonJS build.
   const nativeImport = new Function(
     'specifier',
     'return import(specifier)',
-  ) as (specifier: string) => Promise<{
-    getDocument: (opts: Record<string, unknown>) => {
-      promise: Promise<{
-        numPages: number;
-        getPage: (n: number) => Promise<{
-          getTextContent: () => Promise<{ items: PdfTextItem[] }>;
-        }>;
-        destroy: () => Promise<void>;
-      }>;
-    };
-  }>;
-  const pdfjs = await nativeImport('pdfjs-dist/legacy/build/pdf.mjs');
-  const doc = await pdfjs.getDocument({
+  ) as (specifier: string) => Promise<PdfJsLib>;
+  return nativeImport('pdfjs-dist/legacy/build/pdf.mjs');
+}
+
+/**
+ * Text layer of a PDF, read for at most `timeoutMs` (P1): each pdfjs step
+ * races the same deadline and the loading task is destroyed when it passes.
+ * Pages read in time are kept (`pages_read` tells how many when it stops
+ * early); a PDF that yields no page in time throws `AttachmentUnreadableError`
+ * with a message for the person.
+ */
+export async function readPdfText(
+  buffer: Buffer,
+  timeoutMs = PDF_PARSE_TIMEOUT_MS,
+  pdfjs?: PdfJsLib,
+): Promise<{ text: string; pages: number; pages_read?: number }> {
+  const deadline = Date.now() + timeoutMs;
+  const lib = pdfjs ?? (await loadPdfJs());
+  const task = lib.getDocument({
     data: new Uint8Array(buffer),
     isEvalSupported: false,
     enableXfa: false,
@@ -466,14 +502,17 @@ async function pdfText(
     disableAutoFetch: true,
     useWorkerFetch: false,
     useWasm: false,
-  }).promise;
+  });
+  const parts: string[] = [];
+  let pages = 0;
   try {
-    const parts: string[] = [];
+    const doc = await beforeDeadline(task.promise, deadline);
+    pages = doc.numPages;
     let size = 0;
     const limit = Math.min(doc.numPages, MAX_PDF_PAGES);
     for (let n = 1; n <= limit && size < MAX_TEXT_CHARS; n++) {
-      const page = await doc.getPage(n);
-      const content = await page.getTextContent();
+      const page = await beforeDeadline(doc.getPage(n), deadline);
+      const content = await beforeDeadline(page.getTextContent(), deadline);
       const pageText = content.items
         .map((i) => (i.str ?? '') + (i.hasEOL ? '\n' : ''))
         .join(' ')
@@ -482,9 +521,21 @@ async function pdfText(
       parts.push(pageText);
       size += pageText.length;
     }
-    const text = clip(parts.join('\n\n').trim());
-    return { text, pages: doc.numPages };
+  } catch (error) {
+    if (!(error instanceof PdfDeadlineError)) throw error;
+    logger.warn(
+      `PDF read stopped at ${timeoutMs} ms after ${parts.length} of ${pages} pages`,
+    );
+    if (parts.length === 0) {
+      throw new AttachmentUnreadableError(PDF_UNREADABLE_MESSAGE);
+    }
+    return {
+      text: clip(parts.join('\n\n').trim()),
+      pages,
+      pages_read: parts.length,
+    };
   } finally {
-    await doc.destroy().catch(() => undefined);
+    await task.destroy().catch(() => undefined);
   }
+  return { text: clip(parts.join('\n\n').trim()), pages };
 }

@@ -123,6 +123,33 @@ describe('read_attachment', () => {
     expect(last.next_offset).toBeNull();
   });
 
+  it('tells when a PDF was cut at its time limit (pages_read)', async () => {
+    readContent.mockResolvedValue({
+      kind: 'text',
+      original_name: 'largo.pdf',
+      mime_type: 'application/pdf',
+      text: 'Factura 12',
+      pages: 3,
+      pages_read: 1,
+    });
+    const out = await call({});
+    expect(out.pages).toBe(3);
+    expect(out.pages_read).toBe(1);
+    expect(out.note).toBe(
+      'Solo se alcanzaron a leer 1 de 3 páginas en el tiempo máximo: dile a la persona que el texto está incompleto.',
+    );
+    readContent.mockResolvedValue({
+      kind: 'text',
+      original_name: 'corto.pdf',
+      mime_type: 'application/pdf',
+      text: 'Factura 12',
+      pages: 1,
+    });
+    const whole = await call({});
+    expect(whole.pages_read).toBeUndefined();
+    expect(whole.note).toBeUndefined();
+  });
+
   it('points images and scanned PDFs to ai_extract_document', async () => {
     readContent.mockResolvedValue({
       kind: 'image',

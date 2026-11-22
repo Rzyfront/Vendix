@@ -30,6 +30,8 @@ export type AttachmentContent =
       text: string;
       /** PDF page count when known. */
       pages?: number;
+      /** PDF pages read before the time limit, only when it stopped early. */
+      pages_read?: number;
     }
   | {
       /** Images (and anything without a text layer): use vision / OCR instead. */

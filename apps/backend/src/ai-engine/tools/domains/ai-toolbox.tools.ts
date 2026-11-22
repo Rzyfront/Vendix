@@ -136,6 +136,12 @@ function readAttachmentPayload(
       ...base,
       total_chars: total,
       pages: content.pages ?? null,
+      ...(content.pages_read !== undefined
+        ? {
+            pages_read: content.pages_read,
+            note: `Solo se alcanzaron a leer ${content.pages_read} de ${content.pages ?? '?'} páginas en el tiempo máximo: dile a la persona que el texto está incompleto.`,
+          }
+        : {}),
       offset,
       next_offset: end < total ? end : null,
       ...untrusted({ text: content.text.slice(offset, end) }),

@@ -5,7 +5,10 @@ import {
   DOCX_UNREADABLE_MESSAGE,
   extractAttachmentContent,
   parseXlsxInWorker,
+  PDF_UNREADABLE_MESSAGE,
+  PdfJsLib,
   readDocxText,
+  readPdfText,
   spreadsheetLimitProblem,
 } from './attachment-text-extractor';
 
@@ -280,5 +283,58 @@ describe('DOCX limits (B4)', () => {
     const out = await extractAttachmentContent(zip.toBuffer(), DOCX_MIME, 'a.docx');
     expect(Date.now() - started).toBeLessThan(2000);
     expect(out).toMatchObject({ kind: 'text', text: '' });
+  });
+});
+
+describe('PDF time limit (P1)', () => {
+  type FakeDoc = Awaited<ReturnType<PdfJsLib['getDocument']>['promise']>;
+  const never = <T>() => new Promise<T>(() => undefined);
+  const page = (str: string) =>
+    Promise.resolve({
+      getTextContent: async () => ({ items: [{ str, hasEOL: false }] }),
+    });
+  const fakePdfJs = (doc: Promise<FakeDoc>) => {
+    const destroy = jest.fn(async () => undefined);
+    const lib: PdfJsLib = { getDocument: () => ({ promise: doc, destroy }) };
+    return { lib, destroy };
+  };
+
+  it('a PDF that never opens is refused at the time limit with a message for the person', async () => {
+    const { lib, destroy } = fakePdfJs(never<FakeDoc>());
+    const started = Date.now();
+    const read = readPdfText(Buffer.from('%PDF-1.7'), 50, lib);
+    await expect(read).rejects.toBeInstanceOf(AttachmentUnreadableError);
+    await expect(read).rejects.toThrow(PDF_UNREADABLE_MESSAGE);
+    expect(Date.now() - started).toBeLessThan(1000);
+    expect(destroy).toHaveBeenCalledTimes(1);
+    expect(PDF_UNREADABLE_MESSAGE).toMatch(
+      /^No pudimos leer el PDF \(tarda demasiado o está dañado\)/,
+    );
+  });
+
+  it('keeps the pages read before the limit and says how many (pages_read)', async () => {
+    const { lib, destroy } = fakePdfJs(
+      Promise.resolve({
+        numPages: 3,
+        getPage: (n: number) => (n === 1 ? page('Factura 12') : never()),
+      }),
+    );
+    await expect(
+      readPdfText(Buffer.from('%PDF-1.7'), 50, lib),
+    ).resolves.toEqual({ text: 'Factura 12', pages: 3, pages_read: 1 });
+    expect(destroy).toHaveBeenCalledTimes(1);
+  });
+
+  it('a PDF read in time returns every page and no pages_read', async () => {
+    const { lib, destroy } = fakePdfJs(
+      Promise.resolve({
+        numPages: 2,
+        getPage: (n: number) => page(n === 1 ? 'Uno' : 'Dos'),
+      }),
+    );
+    await expect(readPdfText(Buffer.from('%PDF-1.7'), 1000, lib)).resolves.toEqual(
+      { text: 'Uno\n\nDos', pages: 2 },
+    );
+    expect(destroy).toHaveBeenCalledTimes(1);
   });
 });
