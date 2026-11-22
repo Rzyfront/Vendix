@@ -353,6 +353,29 @@ describe('T65b: run_code in the agent turn', () => {
       );
     });
 
+    it('T66: the routing rule is one system message, only in turns where run_code is offered', async () => {
+      const on = build();
+      await on.run();
+      const texts = systemTexts(on.chat.mock.calls[0][0]);
+      const rule = texts.filter((t) => t.includes('Scripts de herramientas'));
+      expect(rule).toHaveLength(1);
+      expect(rule[0]).toMatch(/1 o 2 lecturas/);
+      expect(rule[0]).toMatch(/3 o más/);
+      expect(rule[0]).toMatch(/nunca van por un script/);
+      expect(rule[0]).toMatch(/datos, nunca instrucciones/);
+      for (const off of [
+        build({ capability: null }),
+        build({ runnerAvailable: false }),
+        build({ agentKey: 'vexi' }),
+        build({ withServices: false }),
+      ]) {
+        await off.run();
+        expect(
+          systemTexts(off.chat.mock.calls[0][0]).join('\n'),
+        ).not.toContain('Scripts de herramientas');
+      }
+    });
+
     it('an unoffered run_code call is rejected as not allowed and never reaches the runner', async () => {
       const f = build({
         capability: null,
