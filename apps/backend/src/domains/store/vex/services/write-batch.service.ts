@@ -217,6 +217,29 @@ export class WriteBatchService {
       throw new VendixHttpException(ErrorCodes.AUTH_PERM_001);
     }
 
+    // The conversation anchors the card, the receipts and the durable
+    // objective: it must be this user's, in this store. The agent always
+    // passes the turn's id (`withTurnConversation`); this also covers any
+    // other caller. 404-style refusal: a foreign id is not confirmed to exist.
+    const conversationId = input.conversationId;
+    const ownConversation =
+      typeof conversationId === 'number' &&
+      Number.isInteger(conversationId) &&
+      conversationId > 0
+        ? await this.prisma.ai_conversations.findFirst({
+            where: { id: conversationId, user_id: userId, store_id: storeId },
+            select: { id: true },
+          })
+        : null;
+    if (!ownConversation) {
+      return {
+        refused: true,
+        reason: 'no_conversation',
+        explanation:
+          'No encontré la conversación de Vex donde mostrar la tarjeta. No propuse el lote; vuelve a pedirlo desde Vex.',
+      };
+    }
+
     if (!Array.isArray(input.steps) || input.steps.length === 0) {
       return {
         refused: true,
@@ -270,7 +293,7 @@ export class WriteBatchService {
         store_id: storeId,
         organization_id: organizationId,
         user_id: userId,
-        conversation_id: input.conversationId,
+        conversation_id: ownConversation.id,
         goal,
         status: 'proposed' as const,
         steps: steps.map(({ operation_id: _omit, ...rest }) => rest),
@@ -291,30 +314,28 @@ export class WriteBatchService {
     for (const row of rows) {
       let blockId: string | undefined;
       let blockView: VexUiBlockView | undefined;
-      if (input.conversationId) {
-        try {
-          const block = await this.blocks.create({
-            conversation_id: input.conversationId,
-            kind: 'write_batch',
-            data: {
-              batch_id: row.id,
-              goal: row.goal,
-              part_index: row.part_index,
-              part_total: row.part_total,
-              step_count: row.step_count,
-            },
-          });
-          blockId = block.id;
-          blockView = await this.blocks.toUiBlock(block);
-        } catch (error) {
-          // The batch is valid and approvable by id; only the reload-proof
-          // card is missing. Never fail the proposal for it.
-          this.logger.warn(
-            `write_batch block not created for batch ${row.id}: ${
-              error instanceof Error ? error.message : 'unknown error'
-            }`,
-          );
-        }
+      try {
+        const block = await this.blocks.create({
+          conversation_id: ownConversation.id,
+          kind: 'write_batch',
+          data: {
+            batch_id: row.id,
+            goal: row.goal,
+            part_index: row.part_index,
+            part_total: row.part_total,
+            step_count: row.step_count,
+          },
+        });
+        blockId = block.id;
+        blockView = await this.blocks.toUiBlock(block);
+      } catch (error) {
+        // The batch is valid and approvable by id; only the reload-proof
+        // card is missing. Never fail the proposal for it.
+        this.logger.warn(
+          `write_batch block not created for batch ${row.id}: ${
+            error instanceof Error ? error.message : 'unknown error'
+          }`,
+        );
       }
       result.push({
         batch_id: row.id,

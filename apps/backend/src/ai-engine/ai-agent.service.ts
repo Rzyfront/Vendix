@@ -84,7 +84,7 @@ import { PROPOSE_PLAN_TOOL } from './tools/domains/planning.tools';
 import { DISCREPANCY_GUIDANCE_BLOCK } from './tools/discrepancy-signal';
 import {
   isForeignSurfaceTool,
-  withTurnConversationId,
+  withTurnConversation,
 } from './tools/surface-tools';
 import { IRREVERSIBLE_DOMAIN_SEGMENTS } from './tools/bridge/capability-registry.service';
 import {
@@ -2708,7 +2708,7 @@ export class AIAgentService {
                 this.toolRegistry.canonicalName(d.function.name) ===
                 call.tool_name,
             );
-            call.arguments = withTurnConversationId(
+            call.arguments = withTurnConversation(
               call.tool_name,
               call.arguments,
               params.conversation_id,
@@ -3650,8 +3650,8 @@ export class AIAgentService {
               // Las `vex_*` de bloques viven bajo una conversación que el modelo
               // no conoce: el turno inyecta su id como default para que la
               // herramienta no tenga que inventarlo (y no falle validación).
-              // `remember` recibe SIEMPRE el id del turno (H6).
-              toolArgs = withTurnConversationId(
+              // `propose_write_batch` usa SIEMPRE la del turno (P2-3).
+              toolArgs = withTurnConversation(
                 toolName,
                 toolArgs,
                 params.conversation_id,

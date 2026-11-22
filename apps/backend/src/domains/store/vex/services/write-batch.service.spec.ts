@@ -31,8 +31,13 @@ describe('WriteBatchService (T34 · propose / read)', () => {
     const createMany = jest.fn().mockResolvedValue({ count: 1 });
     const findFirst = jest.fn();
     const updateMany = jest.fn().mockResolvedValue({ count: 1 });
+    // The turn's conversation: this user's, in this store, unless a test says otherwise.
+    const findConversation = jest.fn(
+      async (args: any): Promise<{ id: number } | null> => ({ id: args.where.id }),
+    );
     const prisma = {
       ai_agent_write_batches: { createMany, findFirst, updateMany },
+      ai_conversations: { findFirst: findConversation },
     } as any;
     const previewForConsent = jest.fn(async (name: string) => ({
       preview: {
@@ -63,6 +68,7 @@ describe('WriteBatchService (T34 · propose / read)', () => {
       createMany,
       findFirst,
       updateMany,
+      findConversation,
       registry,
       previewForConsent: registry.previewForConsent as jest.Mock,
       blocks,
@@ -364,12 +370,33 @@ describe('WriteBatchService (T34 · propose / read)', () => {
       expect(res.batches[0].block_id).toBeUndefined();
     });
 
-    it('creates no block without a conversation', async () => {
+    it('P2-3: refuses no_conversation without a valid conversation and persists nothing', async () => {
+      for (const conversationId of [null, 0, -3, 1.5]) {
+        const h = build({ t: writeTool() });
+        const res: any = await run(() =>
+          h.service.propose({ conversationId, goal: 'g', steps: [{ tool: 't', arguments: {}, label: 'L' }] }),
+        );
+        expect(res).toMatchObject({ refused: true, reason: 'no_conversation' });
+        expect(res.explanation).toContain('No propuse el lote');
+        expect(h.findConversation).not.toHaveBeenCalled();
+        expect(h.createMany).not.toHaveBeenCalled();
+        expect(h.blocks.create).not.toHaveBeenCalled();
+      }
+    });
+
+    it('P2-3: refuses no_conversation when the conversation is not this user\'s in this store', async () => {
       const h = build({ t: writeTool() });
-      await run(() =>
-        h.service.propose({ conversationId: null, goal: 'g', steps: [{ tool: 't', arguments: {}, label: 'L' }] }),
+      h.findConversation.mockResolvedValue(null);
+      const res: any = await run(() =>
+        h.service.propose({ conversationId: 404, goal: 'g', steps: [{ tool: 't', arguments: {}, label: 'L' }] }),
       );
-      expect(h.blocks.create).not.toHaveBeenCalled();
+      expect(res).toMatchObject({ refused: true, reason: 'no_conversation' });
+      expect(h.findConversation).toHaveBeenCalledWith({
+        where: { id: 404, user_id: USER, store_id: STORE },
+        select: { id: true },
+      });
+      expect(h.createMany).not.toHaveBeenCalled();
+      expect(h.previewForConsent).not.toHaveBeenCalled();
     });
   });
 

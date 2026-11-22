@@ -1,4 +1,8 @@
-import { withTurnConversationId } from './surface-tools';
+import {
+  TURN_BOUND_CONVERSATION_TOOLS,
+  withTurnConversation,
+  withTurnConversationId,
+} from './surface-tools';
 
 describe('withTurnConversationId (H6)', () => {
   it('remember never carries a conversation_id argument: the turn binds it outside the args', () => {
@@ -43,5 +47,54 @@ describe('withTurnConversationId (H6)', () => {
   it('tools outside the Vex surface are untouched', () => {
     const args = { conversation_id: 999, q: 'x' };
     expect(withTurnConversationId('search_help', args, 55)).toBe(args);
+  });
+});
+
+describe('withTurnConversation (P2-3)', () => {
+  const TURN = 42;
+
+  it('propose_write_batch always runs under the turn conversation, whatever the model sent', () => {
+    expect(TURN_BOUND_CONVERSATION_TOOLS.has('propose_write_batch')).toBe(true);
+    for (const modelValue of [7, 42, undefined, 'abc', 0]) {
+      expect(
+        withTurnConversation(
+          'propose_write_batch',
+          { conversation_id: modelValue, goal: 'g' },
+          TURN,
+        ),
+      ).toEqual({ conversation_id: TURN, goal: 'g' });
+    }
+  });
+
+  it('propose_write_batch without a turn conversation drops the model value', () => {
+    for (const turn of [null, undefined]) {
+      expect(
+        withTurnConversation(
+          'propose_write_batch',
+          { conversation_id: 7, goal: 'g' },
+          turn,
+        ),
+      ).toEqual({ goal: 'g' });
+    }
+  });
+
+  it('other vex tools keep the previous rule: the turn only fills a missing or invalid id', () => {
+    expect(withTurnConversation('vex_render_table', { title: 't' }, TURN)).toEqual({
+      title: 't',
+      conversation_id: TURN,
+    });
+    expect(
+      withTurnConversation('vex_render_table', { conversation_id: 'x' }, TURN),
+    ).toEqual({ conversation_id: TURN });
+    const explicit = { conversation_id: 7 };
+    expect(withTurnConversation('vex_render_table', explicit, TURN)).toBe(explicit);
+    const noTurn = { title: 't' };
+    expect(withTurnConversation('vex_render_table', noTurn, null)).toBe(noTurn);
+  });
+
+  it('non-vex tools are untouched', () => {
+    const args = { conversation_id: 7, product_id: 1 };
+    expect(withTurnConversation('update_product_price', args, TURN)).toBe(args);
+    expect(withTurnConversation('queue_task', {}, TURN)).toEqual({});
   });
 });

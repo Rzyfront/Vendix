@@ -24,16 +24,24 @@ describe('propose_write_batch tool (T34)', () => {
     expect(tool.accessReason).toEqual(expect.any(String));
   });
 
-  it('returns an error envelope without conversation_id and does not propose', async () => {
-    const { call, propose } = build();
+  it('without a valid conversation_id asks the service with null and forwards its no_conversation refusal', async () => {
+    const explanation =
+      'No encontré la conversación de Vex donde mostrar la tarjeta. No propuse el lote; vuelve a pedirlo desde Vex.';
+    const propose = jest
+      .fn()
+      .mockResolvedValue({ refused: true, reason: 'no_conversation', explanation });
+    const { call } = build(propose);
     for (const conversation_id of [undefined, 0, -1, 1.5, 'abc']) {
       const out = await call({ conversation_id, goal: 'g', steps: [step(1)] });
       expect(out.tool).toBe('propose_write_batch');
-      expect(out.error).toContain('conversation_id');
+      expect(out.error).toBe(explanation);
       expect(out.next_step).toEqual(expect.any(String));
       expect(out.data).toBeUndefined();
     }
-    expect(propose).not.toHaveBeenCalled();
+    expect(propose).toHaveBeenCalledTimes(5);
+    for (const [input] of propose.mock.calls) {
+      expect(input.conversationId).toBeNull();
+    }
   });
 
   it('rejects more than 100 steps without calling propose', async () => {

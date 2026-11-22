@@ -35,6 +35,15 @@ export function isForeignSurfaceTool(name: string, agentKey?: string): boolean {
 const TURN_CONVERSATION_TOOL_NAMES: ReadonlySet<string> = new Set(['remember']);
 
 /**
+ * Tools whose `conversation_id` is ALWAYS the turn's: whatever the model sent
+ * is discarded. A write batch anchors its receipts and durable objective to
+ * that conversation, so the model must never be able to point it elsewhere.
+ */
+export const TURN_BOUND_CONVERSATION_TOOLS: ReadonlySet<string> = new Set([
+  'propose_write_batch',
+]);
+
+/**
  * Tool arguments with the conversation the turn owns. `remember` loses any
  * `conversation_id` the model sent (the turn binds it outside the arguments);
  * the other Vex-only tools get the turn's id only as a default when the
@@ -58,4 +67,27 @@ export function withTurnConversationId(
     return { ...args, conversation_id: turnConversationId };
   }
   return args;
+}
+
+/**
+ * Arguments a Vex-only tool runs with, regarding `conversation_id`:
+ *  - turn-bound tools: always the turn's id; without one, the key is removed
+ *    (the tool refuses, it never runs under a conversation the model chose);
+ *  - other Vex-only tools: the turn's id only fills a missing/invalid value
+ *    (the model does not know the id; `vex_*` blocks validate ownership);
+ *  - anything else: untouched.
+ */
+export function withTurnConversation(
+  toolName: string,
+  args: Record<string, unknown>,
+  turnConversationId: number | null | undefined,
+): Record<string, unknown> {
+  if (TURN_BOUND_CONVERSATION_TOOLS.has(toolName)) {
+    const rest = { ...args };
+    delete rest.conversation_id;
+    return turnConversationId != null
+      ? { ...rest, conversation_id: turnConversationId }
+      : rest;
+  }
+  return withTurnConversationId(toolName, args, turnConversationId);
 }

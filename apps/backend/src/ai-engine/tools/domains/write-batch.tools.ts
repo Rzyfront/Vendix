@@ -67,7 +67,7 @@ export function createWriteBatchTools({
           conversation_id: {
             type: 'number',
             description:
-              'Conversación donde vive la tarjeta. Opcional: el servidor usa la actual.',
+              'No lo envíes: el servidor siempre usa la conversación actual y reemplaza cualquier valor.',
           },
           goal: {
             type: 'string',
@@ -107,16 +107,14 @@ export function createWriteBatchTools({
         required: ['goal', 'steps'],
       },
       handler: async (args) => {
-        const conversationId = Number(args.conversation_id);
-        if (!Number.isInteger(conversationId) || conversationId <= 0) {
-          return JSON.stringify(
-            buildToolErrorEnvelope(
-              PROPOSE_WRITE_BATCH,
-              'Falta conversation_id: no sé en qué conversación mostrar la tarjeta.',
-              'Vuelve a llamar pasando el conversation_id del turno actual.',
-            ),
-          );
-        }
+        // The agent turn always sets this to its own conversation
+        // (`withTurnConversation`); the service refuses `no_conversation`
+        // when it is missing or not this user's.
+        const rawConversationId = Number(args.conversation_id);
+        const conversationId =
+          Number.isInteger(rawConversationId) && rawConversationId > 0
+            ? rawConversationId
+            : null;
         const steps = Array.isArray(args.steps)
           ? (args.steps as WriteBatchStepInput[])
           : [];
