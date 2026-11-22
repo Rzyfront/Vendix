@@ -211,17 +211,22 @@ def _kill_group(pid):
         pass
 
 
-def _read_tail(path, limit=LOG_READ_BYTES):
+def _read_stream(fh, limit=LOG_READ_BYTES):
     try:
-        with open(path, "rb") as fh:
-            return fh.read(limit).decode("utf-8", "replace")
+        fh.flush()
+        fh.seek(0)
+        return fh.read(limit).decode("utf-8", "replace")
     except OSError:
         return ""
 
 
 def _read_result(tmpdir, limits):
     path = os.path.join(tmpdir, "result.json")
-    flags = os.O_RDONLY | getattr(os, "O_NOFOLLOW", 0)
+    flags = (
+        os.O_RDONLY
+        | getattr(os, "O_NOFOLLOW", 0)
+        | getattr(os, "O_NONBLOCK", 0)
+    )
     try:
         fd = os.open(path, flags)
     except FileNotFoundError:
@@ -259,8 +264,10 @@ def _execute(tmpdir, source, inputs, limits):
     _write_private(os.path.join(tmpdir, "limits.json"), json.dumps(limits))
 
     timed_out = False
-    out_log, err_log = os.path.join(tmpdir, "stdout.log"), os.path.join(tmpdir, "stderr.log")
-    with open(out_log, "wb") as fo, open(err_log, "wb") as fe:
+    err_tail = ""
+    # Anonymous unlinked descriptors in TMP_ROOT: the child cannot unlink,
+    # symlink or replace them with a FIFO inside tmpdir.
+    with tempfile.TemporaryFile(dir=TMP_ROOT) as fo, tempfile.TemporaryFile(dir=TMP_ROOT) as fe:
         proc = subprocess.Popen(
             [sys.executable, "-I", RUNNER_PATH, tmpdir],
             cwd=tmpdir, env=_child_env(tmpdir), stdin=subprocess.DEVNULL,
@@ -278,6 +285,8 @@ def _execute(tmpdir, source, inputs, limits):
                 proc.wait(timeout=5)
             except subprocess.TimeoutExpired:
                 pass
+        else:
+            err_tail = _read_stream(fe)
     if timed_out:
         return "ANALYSIS_TIMEOUT", "wall time limit exceeded", None
 
@@ -293,7 +302,7 @@ def _execute(tmpdir, source, inputs, limits):
                 return "ANALYSIS_TIMEOUT", "cpu time limit exceeded", None
             if sig in (signal.SIGKILL, signal.SIGSEGV, signal.SIGABRT, signal.SIGBUS):
                 return "ANALYSIS_MEMORY", "process killed (memory limit)", None
-        tail = runner.sanitize_message(_read_tail(err_log)) or "child exited without a result"
+        tail = runner.sanitize_message(err_tail) or "child exited without a result"
         return "ANALYSIS_RUNTIME", tail, None
     if not isinstance(payload, dict):
         return "ANALYSIS_OUTPUT", "result file malformed", None

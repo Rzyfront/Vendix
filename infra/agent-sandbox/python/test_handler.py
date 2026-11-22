@@ -189,9 +189,11 @@ class ExecutionTests(unittest.TestCase):
                          ("error", "ANALYSIS_RUNTIME", "runtime digest missing"))
 
     def test_result_symlink_is_rejected(self):
-        secret = os.path.join(self.root, "secret.json")
+        outside = tempfile.mkdtemp(prefix="handler-outside-")
+        self.addCleanup(shutil.rmtree, outside, True)
+        secret = os.path.join(outside, "secret.json")
         with open(secret, "w", encoding="utf-8") as fh:
-            fh.write('{"status":"ok","output":{"notes":["leak"]}}')
+            fh.write('{"status":"ok","output":{"figures":[{"label":"leak","value":1}]}}')
 
         def symlink_result(cmd, **kwargs):
             tmpdir = cmd[3]
@@ -202,7 +204,86 @@ class ExecutionTests(unittest.TestCase):
 
         with patch.object(handler.subprocess, "Popen", side_effect=symlink_result):
             res = handler.handler(request())
+        self.assertTrue(os.path.exists(secret))
         self.assertEqual((res["status"], res["error_code"]), ("error", "ANALYSIS_OUTPUT"))
+        self.assertNotIn("leak", json.dumps(res))
+
+    def test_result_fifo_is_rejected_without_blocking(self):
+        def fifo_result(cmd, **kwargs):
+            tmpdir = cmd[3]
+            os.mkfifo(os.path.join(tmpdir, "result.json"))
+            proc = MagicMock(pid=7778, returncode=0)
+            proc.wait.return_value = 0
+            return proc
+
+        with patch.object(handler.subprocess, "Popen", side_effect=fifo_result):
+            res = handler.handler(request())
+        self.assertEqual((res["status"], res["error_code"]), ("error", "ANALYSIS_OUTPUT"))
+        self.assertEqual(os.listdir(self.root), [])
+
+    def test_stderr_symlink_outside_tmp_does_not_leak(self):
+        outside = tempfile.mkdtemp(prefix="handler-outside-")
+        self.addCleanup(shutil.rmtree, outside, True)
+        secret = os.path.join(outside, "environ")
+        with open(secret, "wb") as fh:
+            fh.write(
+                b"AWS_ACCESS_KEY_ID=ASIAEXAMPLEKEY\x00"
+                b"AWS_SECRET_ACCESS_KEY=SuperSecretValue123\x00"
+                b"AWS_SESSION_TOKEN=TokXYZ\x00"
+            )
+
+        def symlink_stderr(cmd, **kwargs):
+            tmpdir = cmd[3]
+            self.assertFalse(os.path.exists(os.path.join(tmpdir, "stderr.log")))
+            self.assertFalse(os.path.exists(os.path.join(tmpdir, "stdout.log")))
+            os.symlink(secret, os.path.join(tmpdir, "stderr.log"))
+            proc = MagicMock(pid=7779, returncode=1)
+            proc.wait.return_value = 1
+            return proc
+
+        with patch.object(handler.subprocess, "Popen", side_effect=symlink_stderr):
+            res = handler.handler(request())
+        self.assertTrue(os.path.exists(secret))
+        self.assertEqual(
+            (res["status"], res["error_code"], res["error_message"]),
+            ("error", "ANALYSIS_RUNTIME", "child exited without a result"),
+        )
+        serialized = json.dumps(res)
+        self.assertNotIn("AWS_ACCESS_KEY_ID", serialized)
+        self.assertNotIn("SuperSecretValue123", serialized)
+        self.assertNotIn("TokXYZ", serialized)
+        self.assertEqual(os.listdir(self.root), [])
+
+    def test_stderr_fifo_does_not_block(self):
+        def fifo_stderr(cmd, **kwargs):
+            tmpdir = cmd[3]
+            os.mkfifo(os.path.join(tmpdir, "stderr.log"))
+            proc = MagicMock(pid=7780, returncode=1)
+            proc.wait.return_value = 1
+            return proc
+
+        with patch.object(handler.subprocess, "Popen", side_effect=fifo_stderr):
+            res = handler.handler(request())
+        self.assertEqual(
+            (res["status"], res["error_code"], res["error_message"]),
+            ("error", "ANALYSIS_RUNTIME", "child exited without a result"),
+        )
+        self.assertEqual(os.listdir(self.root), [])
+
+    def test_stderr_from_anonymous_fd_is_sanitized(self):
+        def write_stderr(cmd, **kwargs):
+            kwargs["stderr"].write(b"Traceback\nRuntimeError: boom in /var/task/secret.py\n")
+            proc = MagicMock(pid=7781, returncode=1)
+            proc.wait.return_value = 1
+            return proc
+
+        with patch.object(handler.subprocess, "Popen", side_effect=write_stderr):
+            res = handler.handler(request())
+        self.assertEqual(
+            (res["status"], res["error_code"], res["error_message"]),
+            ("error", "ANALYSIS_RUNTIME", "RuntimeError: boom in <path>"),
+        )
+        self.assertNotIn("/var/task", res["error_message"])
 
     def test_linux_dumpable_failure_fails_closed_without_spawning(self):
         with patch.object(handler, "_harden_parent_dumpable", side_effect=OSError("prctl failed")), \
