@@ -9,10 +9,12 @@ import {
   localToolScores,
   ToolDocument,
 } from './tool-catalog';
+import { buildToolDeclaration } from './tool-declaration.builder';
 import {
   appendLoaded,
   composeWorkingSet,
-  CORE_DISCOVERY,
+  coreDiscovery,
+  DESCRIBE_TOOL,
   relevantTop,
   TOOL_WORKING_SET,
 } from './tool-working-set';
@@ -33,6 +35,8 @@ const DISCOVERY = new Set([
   'call_endpoint',
   'write_endpoint',
   'explain_capability',
+  // F10/T61: only registered/offered with AI_TOOL_DISCOVERY_STUBS=true.
+  DESCRIBE_TOOL,
 ]);
 /**
  * Fixed per-agent core: every business tool the agent's system prompt names by
@@ -140,6 +144,29 @@ export interface ToolRouterSelection {
    * a normal (routed) selection. Telemetry only: it never changes what is offered.
    */
   fullCatalogReason: FullCatalogReason | null;
+  /**
+   * Only present when `select` ran with `{ stubs: true }` (F10/T61): the loaded
+   * tools demoted from full definitions to schema-less stubs.
+   */
+  stubs?: ToolStub[];
+}
+
+/** Schema-less card of a loaded tool: what it is and whether it reads or writes. */
+export interface ToolStub {
+  name: string;
+  one_line: string;
+  access: 'read' | 'write';
+}
+
+const STUB_LINE_MAX = 140;
+
+/** First sentence of a description, bounded, on one line. */
+function oneLine(description: string): string {
+  const flat = description.replace(/\s+/g, ' ').trim();
+  const sentence = flat.match(/^.*?[.!?](?=\s|$)/)?.[0] ?? flat;
+  return sentence.length > STUB_LINE_MAX
+    ? `${sentence.slice(0, STUB_LINE_MAX - 1)}…`
+    : sentence;
 }
 
 export type FullCatalogReason =
@@ -297,7 +324,7 @@ export class ToolRouterService {
   /** Fixed core of the turn: discovery (+ session-backed) and agent core. */
   private coreNames(session: ToolRoutingSession): string[] {
     return [
-      ...CORE_DISCOVERY,
+      ...coreDiscovery(),
       ...this.sessionDiscoveryNames(session),
       ...agentToolCore(session.agent),
     ].map((n) => this.registry.canonicalName(n));
@@ -483,6 +510,7 @@ export class ToolRouterService {
     authorizedDefinitions: AIToolDefinition[],
     hasPlan: boolean,
     activePlan: boolean,
+    options: { stubs?: boolean } = {},
   ): Promise<ToolRouterSelection> {
     this.restore(session);
     await this.prefetch(session, authorizedDefinitions);
@@ -531,8 +559,15 @@ export class ToolRouterService {
     const operationalCount = names.filter(
       (n) => !DISCOVERY.has(n) && !isAgentPlanTool(n),
     ).length;
+    // Stub level (opt-in): the loaded tools travel as schema-less cards, not
+    // as definitions. A full-catalog turn keeps serving everything as today.
+    const stubbed = options.stubs && !session.fullCatalog ? loaded : null;
+    const offered = stubbed ? names.filter((n) => !stubbed.includes(n)) : names;
     return {
-      definitions: names.map((n) => allowed.get(n)!),
+      ...(stubbed
+        ? { stubs: this.stubsFor(stubbed, authorizedDefinitions) }
+        : {}),
+      definitions: offered.map((n) => allowed.get(n)!),
       operationalCount,
       coreCount: core.length,
       loadedCount: names.length - core.length - planNames.length,
@@ -543,6 +578,88 @@ export class ToolRouterService {
         : (session.retrieval?.source ?? 'none'),
       fullCatalogReason: fullCatalogReasonOf(session.fullCatalog),
     };
+  }
+
+  /**
+   * Stubs of `names` (in the given order), derived from the same authorized
+   * documents as search/index/describe: a name outside the authority is dropped.
+   */
+  private stubsFor(
+    names: readonly string[],
+    authorizedDefinitions: AIToolDefinition[],
+  ): ToolStub[] {
+    const byName = new Map(
+      this.documents(authorizedDefinitions).docs.map((d) => [d.name, d]),
+    );
+    return names.flatMap((name) => {
+      const doc = byName.get(name);
+      if (!doc) return [];
+      return [
+        {
+          name,
+          one_line: oneLine(String(doc.metadata.description ?? '')),
+          access:
+            doc.metadata.read_only === true
+              ? ('read' as const)
+              : ('write' as const),
+        },
+      ];
+    });
+  }
+
+  /**
+   * F10/T61: `describe_tool`. Returns the TypeScript signature and examples of
+   * ONE tool of the turn, as a tool result (the turn's definitions list is
+   * never touched). Authority comes from the same authorized definitions as
+   * search: a tool the role lacks answers «tu rol no permite…» and reveals
+   * nothing else; an unknown name answers with the same shape.
+   */
+  describe(
+    args: Record<string, unknown>,
+    authorized: AIToolDefinition[],
+  ): string {
+    const raw = typeof args.name === 'string' ? args.name.trim() : '';
+    if (!raw || raw.length > 100)
+      return JSON.stringify({
+        error:
+          'Indica el nombre exacto de la herramienta (1 a 100 caracteres).',
+        error_code: 'INVALID_ARGS',
+        next_step:
+          'Busca el nombre con search_tools o en el índice del taller.',
+      });
+    const name = this.registry.canonicalName(raw);
+    const doc = this.documents(authorized).docs.find((d) => d.name === name);
+    if (!doc) {
+      const exists = this.registry.getAll().some((t) => t.name === name);
+      return JSON.stringify({
+        error: exists
+          ? `Tu rol no permite usar la herramienta "${raw}".`
+          : `No existe una herramienta llamada "${raw}".`,
+        error_code: 'TOOL_NOT_AVAILABLE',
+        next_step: 'Busca otra con search_tools o revisa el índice del taller.',
+      });
+    }
+    const meta = doc.metadata as {
+      description?: string;
+      parameters?: Record<string, unknown>;
+      read_only?: boolean;
+      examples?: Array<{ intent?: string; arguments?: unknown }>;
+    };
+    return JSON.stringify({
+      name,
+      access: meta.read_only === true ? 'read' : 'write',
+      declaration: buildToolDeclaration(
+        name,
+        meta.parameters,
+        meta.description,
+      ),
+      examples: (meta.examples ?? []).slice(0, 3).map((example) => ({
+        intent: example.intent,
+        arguments: example.arguments,
+      })),
+      next_step:
+        'Llama la herramienta por su nombre exacto con esos argumentos. Cada escritura necesita su aprobación.',
+    });
   }
 
   /**
