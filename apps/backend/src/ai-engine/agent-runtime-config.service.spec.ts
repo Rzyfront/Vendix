@@ -271,7 +271,39 @@ describe('AgentRuntimeConfigService', () => {
       expect(prisma.ai_engine_applications.update).not.toHaveBeenCalled();
     });
 
+    it('re-saving the voice the agent already has validates and writes nothing', async () => {
+      prisma.ai_agents.findUnique.mockResolvedValue({
+        id: 7,
+        key: 'vex',
+        app_key: 'vex_app',
+        voice_profile_id: 5,
+      });
+      // Its provider was turned off meanwhile: the rest of the sheet must
+      // still be saveable.
+      prisma.ai_voice_profiles.findUnique.mockResolvedValue({
+        ...profile,
+        config: { ...profile.config, is_active: false },
+      });
+
+      await service.updateAgentSheet(
+        'vex',
+        { voice_profile_id: 5, system_prompt: 'p' },
+        99,
+      );
+
+      expect(prisma.ai_agents.update).toHaveBeenCalledTimes(1);
+      expect(prisma.ai_agents.update.mock.calls[0][0].data).not.toHaveProperty(
+        'voice_profile_id',
+      );
+    });
+
     it('clears the voice with null without validating a profile', async () => {
+      prisma.ai_agents.findUnique.mockResolvedValue({
+        id: 7,
+        key: 'vex',
+        app_key: 'vex_app',
+        voice_profile_id: 5,
+      });
       await service.updateAgentSheet('vex', { voice_profile_id: null }, 99);
 
       expect(prisma.ai_agents.update).toHaveBeenCalledWith({

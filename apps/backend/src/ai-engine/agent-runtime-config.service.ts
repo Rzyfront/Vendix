@@ -403,7 +403,14 @@ export class AgentRuntimeConfigService {
       await this.writeVoice(key, dto.voice);
     }
 
-    if (dto.voice_profile_id !== undefined) {
+    // The sheet sends the voice on every save. Re-sending the one already
+    // assigned is not a change, so it is neither validated nor written: an
+    // operator must still be able to save the prompt of an agent whose voice
+    // provider was turned off.
+    if (
+      dto.voice_profile_id !== undefined &&
+      dto.voice_profile_id !== (agent.voice_profile_id ?? null)
+    ) {
       if (dto.voice_profile_id !== null) {
         const profile = await this.prisma.ai_voice_profiles.findUnique({
           where: { id: dto.voice_profile_id },

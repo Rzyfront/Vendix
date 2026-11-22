@@ -60,6 +60,7 @@ import {
 import { OpenAICompatibleProvider } from './providers/openai-compatible.provider';
 import { AnthropicCompatibleProvider } from './providers/anthropic-compatible.provider';
 import { MinimaxSpeechProvider } from './providers/minimax-speech.provider';
+import { GeminiSpeechProvider } from './providers/gemini-speech.provider';
 import { VendixHttpException, ErrorCodes } from '../common/errors';
 import Redis from 'ioredis';
 import { REDIS_CLIENT } from '../common/redis/redis.module';
@@ -212,6 +213,9 @@ export class AIEngineService implements OnModuleInit {
           break;
         case 'minimax_t2a':
           provider = new MinimaxSpeechProvider(providerConfig);
+          break;
+        case 'gemini_tts':
+          provider = new GeminiSpeechProvider(providerConfig);
           break;
         default: {
           const unknown = `Unknown sdk_type: ${config.sdk_type} for provider ${config.provider}`;
