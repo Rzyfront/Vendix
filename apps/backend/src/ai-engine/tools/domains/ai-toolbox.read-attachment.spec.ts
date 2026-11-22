@@ -3,6 +3,11 @@ import {
   UNTRUSTED_DATA_POLICY,
 } from './ai-toolbox.tools';
 import type { AttachmentContent } from '../../../domains/store/vexi/attachment-content.types';
+import {
+  AttachmentUnreadableError,
+  PDF_UNREADABLE_MESSAGE,
+} from '../../../domains/store/vexi/attachment-text-extractor';
+import { ErrorCodes, VendixHttpException } from '../../../common/errors';
 import { RegisteredTool } from '../interfaces/tool.interface';
 
 const rowsOf = (n: number): string[][] =>
@@ -263,5 +268,33 @@ describe('read_attachment', () => {
     await expect(call({ attachment_id: 'att_999' })).rejects.toThrow(
       'not found',
     );
+  });
+
+  it('translates unreadable on-the-fly extraction errors into a structured tool error', async () => {
+    readContent.mockRejectedValueOnce(
+      new VendixHttpException(
+        ErrorCodes.INV_SCAN_INVALID_FILE,
+        PDF_UNREADABLE_MESSAGE,
+      ),
+    );
+    const fromService = await call({ attachment_id: 'att_41' });
+    expect(fromService).toMatchObject({
+      attachment_id: 'att_41',
+      error: PDF_UNREADABLE_MESSAGE,
+      error_code: 'INV_SCAN_INVALID_FILE',
+      next_offset: null,
+    });
+    expect(fromService.next_step).toMatch(/no se pudo leer el archivo/i);
+
+    readContent.mockRejectedValueOnce(
+      new AttachmentUnreadableError(PDF_UNREADABLE_MESSAGE),
+    );
+    const direct = await call({ attachment_id: 'att_41' });
+    expect(direct).toMatchObject({
+      attachment_id: 'att_41',
+      error: PDF_UNREADABLE_MESSAGE,
+      error_code: 'INV_SCAN_INVALID_FILE',
+      next_offset: null,
+    });
   });
 });

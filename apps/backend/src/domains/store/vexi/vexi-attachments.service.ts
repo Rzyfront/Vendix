@@ -275,11 +275,21 @@ export class VexiAttachmentsService {
       }
     }
     const buffer = await this.s3.downloadFile(record.s3_key);
-    return extractAttachmentContent(
-      buffer,
-      record.mime_type,
-      record.original_name,
-    );
+    try {
+      return await extractAttachmentContent(
+        buffer,
+        record.mime_type,
+        record.original_name,
+      );
+    } catch (error) {
+      if (error instanceof AttachmentUnreadableError) {
+        throw new VendixHttpException(
+          ErrorCodes.INV_SCAN_INVALID_FILE,
+          error.message,
+        );
+      }
+      throw error;
+    }
   }
 
   /** The bytes behind a handle, for a vision tool or a multipart forward. */

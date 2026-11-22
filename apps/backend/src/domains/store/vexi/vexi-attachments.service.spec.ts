@@ -275,6 +275,33 @@ describe('VexiAttachmentsService.readContent', () => {
     expect(out).toMatchObject({ kind: 'table' });
     expect(s3.uploadFile).not.toHaveBeenCalled();
   });
+
+  it('translates AttachmentUnreadableError into INV_SCAN_INVALID_FILE when extracting on the fly', async () => {
+    const { service, prisma, s3 } = build();
+    prisma.ai_attachments.findFirst.mockResolvedValue({
+      id: 41,
+      s3_key: 'o.pdf',
+      mime_type: 'application/pdf',
+      original_name: 'lento.pdf',
+      derived_text_key: null,
+    });
+    s3.downloadFile.mockResolvedValue(Buffer.from('%PDF-1.4\n%%EOF'));
+    const spy = jest
+      .spyOn(extractor, 'extractAttachmentContent')
+      .mockRejectedValueOnce(
+        new extractor.AttachmentUnreadableError(
+          extractor.PDF_UNREADABLE_MESSAGE,
+        ),
+      );
+    try {
+      await expect(service.readContent('att_41')).rejects.toMatchObject({
+        message: extractor.PDF_UNREADABLE_MESSAGE,
+        errorCode: 'INV_SCAN_INVALID_FILE',
+      });
+    } finally {
+      spy.mockRestore();
+    }
+  });
 });
 
 describe('VexiAttachmentsService · métodos para el agente (T44)', () => {

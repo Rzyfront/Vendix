@@ -10,7 +10,9 @@ import {
   IMAGE_KIND_TO_APP,
 } from '../../toolbox/ai-toolbox.service';
 import { VexiAttachmentsService } from '../../../domains/store/vexi/vexi-attachments.service';
+import { AttachmentUnreadableError } from '../../../domains/store/vexi/attachment-text-extractor';
 import { S3Service } from '../../../common/services/s3.service';
+import { ErrorCodes, VendixHttpException } from '../../../common/errors';
 import { RequestContextService } from '@common/context/request-context.service';
 import type {
   AttachmentContent,
@@ -650,10 +652,31 @@ export function createAiToolboxTools({
       handler: async (args) => {
         // Unknown / foreign handles throw the service's not-found exception;
         // it propagates so the registry reports it like any tool failure.
-        const content = await attachments.readContent(
-          String(args.attachment_id),
-        );
-        return JSON.stringify(readAttachmentPayload(content, args));
+        // An unreadable file extracted on the fly (legacy row without derived
+        // JSON) is returned as a structured tool error so Vex relays the reason.
+        try {
+          const content = await attachments.readContent(
+            String(args.attachment_id),
+          );
+          return JSON.stringify(readAttachmentPayload(content, args));
+        } catch (error) {
+          const unreadableCode = ErrorCodes.INV_SCAN_INVALID_FILE.code;
+          const isUnreadable =
+            error instanceof AttachmentUnreadableError ||
+            (error instanceof VendixHttpException &&
+              error.errorCode === unreadableCode);
+          if (isUnreadable) {
+            return JSON.stringify({
+              attachment_id: String(args.attachment_id),
+              error: (error as Error).message,
+              error_code: unreadableCode,
+              next_step:
+                'Dile a la persona que no se pudo leer el archivo y pídele que vuelva a exportarlo o subirlo de nuevo.',
+              next_offset: null,
+            });
+          }
+          throw error;
+        }
       },
     },
   ];
