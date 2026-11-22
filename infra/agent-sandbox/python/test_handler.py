@@ -1,7 +1,9 @@
-"""Offline contracts ONLY: subprocess.Popen, os.killpg are mocked. No generated or
-adversarial code runs here. Run: python3 -m unittest -v test_handler test_runner
-These tests do not certify isolation; certify/ against the real Lambda does."""
+"""Offline contracts ONLY: subprocess.Popen, os.killpg and libc.prctl are mocked.
+No generated or adversarial code runs here.
+Run: python3 -m unittest -v test_handler test_runner
+These tests do not certify isolation; T53 against the real Lambda does."""
 import copy
+import errno
 import json
 import os
 import shutil
@@ -310,6 +312,58 @@ class ExecutionTests(unittest.TestCase):
                 patch("builtins.print") as printed:
             handler.handler(request(source="result = {'figures': [{'label': 'TOPSECRET', 'value': 1}]}"))
         printed.assert_not_called()
+
+
+class FakeStat:
+    def __init__(self, uid):
+        self.st_uid = uid
+
+
+class DumpableTests(unittest.TestCase):
+    """_harden_parent_dumpable under a simulated Linux libc. AWS Lambda's seccomp
+    denies every prctl with EPERM (T53); that EPERM is accepted ONLY when the
+    kernel already made the process non-dumpable (/proc/self owned by root)."""
+
+    def harden(self, prctl_rc=-1, err=errno.EPERM, uid=993, environ_uid=0, stat_error=None):
+        libc = MagicMock()
+        libc.prctl.return_value = prctl_rc
+        stat = MagicMock(side_effect=stat_error) if stat_error else MagicMock(return_value=FakeStat(environ_uid))
+        with patch.object(handler.sys, "platform", "linux"), \
+                patch.object(handler.ctypes.util, "find_library", return_value="libc.so.6"), \
+                patch.object(handler.ctypes, "CDLL", return_value=libc), \
+                patch.object(handler.ctypes, "get_errno", return_value=err), \
+                patch.object(handler.os, "getuid", return_value=uid), \
+                patch.object(handler.os, "stat", stat):
+            handler._harden_parent_dumpable()
+        return libc, stat
+
+    def test_prctl_success_needs_no_proof(self):
+        libc, stat = self.harden(prctl_rc=0)
+        libc.prctl.assert_called_once_with(4, 0, 0, 0, 0)
+        stat.assert_not_called()
+
+    def test_eperm_accepted_when_kernel_already_marked_non_dumpable(self):
+        _, stat = self.harden()
+        stat.assert_called_once_with("/proc/self/environ")
+
+    def test_eperm_rejected_when_proc_self_is_still_ours(self):
+        with self.assertRaises(OSError) as ctx:
+            self.harden(environ_uid=993)
+        self.assertEqual(ctx.exception.errno, errno.EPERM)
+
+    def test_eperm_rejected_when_running_as_root(self):
+        with self.assertRaises(OSError):
+            self.harden(uid=0, environ_uid=0)
+
+    def test_eperm_rejected_when_proof_cannot_be_read(self):
+        with self.assertRaises(OSError):
+            self.harden(stat_error=PermissionError(errno.EACCES, "denied"))
+
+    def test_any_other_errno_fails_closed_without_proof(self):
+        for err in (errno.EINVAL, errno.ENOSYS, errno.EACCES):
+            with self.assertRaises(OSError) as ctx:
+                self.harden(err=err)
+            self.assertEqual(ctx.exception.errno, err)
 
 
 if __name__ == "__main__":

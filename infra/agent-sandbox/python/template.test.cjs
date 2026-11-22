@@ -73,6 +73,16 @@ test('function: image, sized, VPC-attached, no environment', () => {
   assert.ok(template.Outputs.FunctionArn);
 });
 
+test('image: pinned base, read-only code and execute-only interpreter (T53: Lambda denies prctl)', () => {
+  const dockerfile = fs.readFileSync(path.join(__dirname, 'Dockerfile'), 'utf8');
+  assert.match(dockerfile, /^FROM public\.ecr\.aws\/lambda\/python:3\.12@sha256:[0-9a-f]{64}$/m);
+  assert.match(dockerfile, /chmod -R a-w \$\{LAMBDA_TASK_ROOT\}/);
+  // Unreadable binary => the kernel marks every process exec'd from it non-dumpable.
+  assert.match(dockerfile, /chmod 0711 \/var\/lang\/bin\/python3\.12\b/);
+  const runs = dockerfile.replace(/\\\n/g, ' ').split('\n').filter((l) => /^RUN /.test(l));
+  assert.match(runs[runs.length - 1], /chmod 0711/, 'no later RUN may need to read the interpreter');
+});
+
 test('backend invoke policy: only lambda:InvokeFunction on one non-wildcard ARN', () => {
   assert.strictEqual(policy.Statement.length, 1);
   const [s] = policy.Statement;

@@ -11,6 +11,7 @@ Never log source, inputs or outputs.
 """
 import ctypes
 import ctypes.util
+import errno
 import json
 import os
 import re
@@ -55,14 +56,37 @@ def _valid_runtime_digest():
     return digest
 
 
+def _kernel_marked_non_dumpable():
+    """True when the kernel already treats this process as non-dumpable.
+
+    The /proc/<pid> inodes of a non-dumpable task are owned by root, so a
+    non-root process whose /proc/self/environ belongs to uid 0 is non-dumpable.
+    """
+    try:
+        return os.getuid() != 0 and os.stat("/proc/self/environ").st_uid == 0
+    except OSError:
+        return False
+
+
 def _harden_parent_dumpable():
-    """On Linux, mark parent non-dumpable so same-UID child cannot read /proc/<ppid>/environ or ptrace."""
+    """On Linux, make the parent non-dumpable so the same-uid child cannot read
+    /proc/<ppid>/{environ,mem,maps,fd}, use process_vm_readv or ptrace it.
+
+    AWS Lambda's seccomp profile denies every prctl with EPERM (T53). There the
+    interpreter is execute-only (Dockerfile: chmod 0711), and exec'ing an
+    unreadable binary already made this process non-dumpable. The EPERM is
+    accepted ONLY under that proof; anything else fails closed.
+    """
     if not sys.platform.startswith("linux"):
         return
     libc_name = ctypes.util.find_library("c") or "libc.so.6"
     libc = ctypes.CDLL(libc_name, use_errno=True)
-    if libc.prctl(_PR_SET_DUMPABLE, 0, 0, 0, 0) != 0:
-        raise OSError(ctypes.get_errno(), "prctl(PR_SET_DUMPABLE, 0) failed")
+    if libc.prctl(_PR_SET_DUMPABLE, 0, 0, 0, 0) == 0:
+        return
+    err = ctypes.get_errno()
+    if err == errno.EPERM and _kernel_marked_non_dumpable():
+        return
+    raise OSError(err, "prctl(PR_SET_DUMPABLE, 0) failed")
 
 
 class RequestError(Exception):

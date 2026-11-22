@@ -18,6 +18,12 @@ RUN pip install --no-cache-dir --require-hashes -r ${LAMBDA_TASK_ROOT}/requireme
 
 COPY handler.py runner.py ${LAMBDA_TASK_ROOT}/
 # Code is read-only for the function user; only /tmp is writable at runtime.
-RUN chmod -R a-w ${LAMBDA_TASK_ROOT} && chmod 0444 ${LAMBDA_TASK_ROOT}/handler.py ${LAMBDA_TASK_ROOT}/runner.py
+# Execute-only interpreter (T53): Lambda's seccomp denies prctl, so
+# PR_SET_DUMPABLE cannot be set. Exec'ing an unreadable binary makes the kernel
+# mark the handler AND every child non-dumpable (/proc/<pid> owned by root), so
+# the guest cannot read the parent's environ/mem. handler.py verifies it at
+# runtime and fails closed otherwise. Must stay the LAST step that runs python.
+RUN chmod -R a-w ${LAMBDA_TASK_ROOT} && chmod 0444 ${LAMBDA_TASK_ROOT}/handler.py ${LAMBDA_TASK_ROOT}/runner.py \
+    && chmod 0711 /var/lang/bin/python3.12
 
 CMD ["handler.handler"]
