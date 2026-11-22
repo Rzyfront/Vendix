@@ -390,3 +390,114 @@ test('no residue in /tmp after a round, even when the round fails', async () => 
   await handler(request({ source: 'while (true) {}', limits: { ...LIMITS, round_cpu_ms: 200 } }));
   assert.deepStrictEqual(fs.readdirSync(SCRATCH), []);
 });
+
+// ---- T68 case (9): residue between invocations of DIFFERENT tenants -------------
+// The guest has no file system or process API, so the attack is run from every
+// angle that exists: guest-side writes to globals/prototypes, every attempt at a
+// file-system route, and host-side residue planted in /tmp (what a hostile
+// dependency or a crashed round would leave) before the next tenant's round.
+// Distinct from the runtime digest ('a' x 64) and the nonce so a hit is a real leak.
+const TENANT_A_ID = '0123456789abcdef'.repeat(4);
+const TENANT_B_ID = 'fedcba9876543210'.repeat(4);
+const TENANT_A = { clientContext: { custom: { TenantId: TENANT_A_ID } } };
+const TENANT_B = { clientContext: { custom: { TenantId: TENANT_B_ID } } };
+
+test('T68(9): globals, prototypes, builtins and registries written by tenant A are pristine for tenant B', async () => {
+  const a = await handler(request({
+    execution_id: 'exec-a', source: `
+      globalThis.leak = 'SECRET-A'; globalThis['__tenant'] = 'SECRET-A';
+      Object.prototype.leakedProto = 'SECRET-A'; Array.prototype.leakedArr = 'SECRET-A';
+      Function.prototype.leakedFn = 'SECRET-A'; String.prototype.leakedStr = 'SECRET-A';
+      JSON.stringify = () => '"SECRET-A"'; Date.now = () => 1; Math.floor = () => 7;
+      Error.prepareStackTrace = () => 'SECRET-A';
+      Symbol.for('vx.tenant'); Object.defineProperty(globalThis, 'hidden', { value: 'SECRET-A', enumerable: false });
+      return [typeof leak, ({}).leakedProto, JSON.stringify({}) ];`,
+  }), TENANT_A);
+  assert.strictEqual(a.status, 'completed');
+  assert.deepStrictEqual(a.result, ['string', 'SECRET-A', '"SECRET-A"']);
+  const b = await handler(request({
+    execution_id: 'exec-b', source: `
+      const seen = {
+        leak: typeof globalThis.leak, tenant: typeof globalThis.__tenant, hidden: typeof globalThis.hidden,
+        proto: ({}).leakedProto, arr: [].leakedArr, fn: (function () {}).leakedFn, str: 'x'.leakedStr,
+        json: JSON.stringify({ a: 1 }), floor: Math.floor(1.9), prep: typeof Error.prepareStackTrace,
+        sym: Symbol.keyFor(Symbol.for('vx.tenant')),
+        globals: Object.getOwnPropertyNames(globalThis).filter((k) => /leak|tenant|hidden|SECRET/i.test(k)),
+      };
+      return seen;`,
+  }), TENANT_B);
+  assert.strictEqual(b.status, 'completed');
+  assert.strictEqual(JSON.stringify(b).includes('SECRET-A'), false, 'nothing of tenant A in the reply');
+  assert.deepStrictEqual(b.result.globals, []);
+  assert.strictEqual(b.result.leak, 'undefined');
+  assert.strictEqual(b.result.tenant, 'undefined');
+  assert.strictEqual(b.result.hidden, 'undefined');
+  assert.strictEqual(b.result.proto, undefined);
+  assert.strictEqual(b.result.arr, undefined);
+  assert.strictEqual(b.result.fn, undefined);
+  assert.strictEqual(b.result.str, undefined);
+  assert.strictEqual(b.result.json, '{"a":1}');
+  assert.strictEqual(b.result.floor, 1);
+});
+
+test('T68(9): the guest cannot write to /tmp by any route, and /tmp is empty after the round', async () => {
+  const attempts = [
+    'return require("fs").writeFileSync("/tmp/leak.txt", "SECRET-A");',
+    'const fs = await import("fs"); fs.writeFileSync("/tmp/leak.txt", "SECRET-A"); return 1;',
+    'return process.mainModule.require("fs").writeFileSync("/tmp/leak.txt", "SECRET-A");',
+    'return std.open("/tmp/leak.txt", "w").puts("SECRET-A");',
+    'return os.open("/tmp/leak.txt", os.O_WRONLY | os.O_CREAT);',
+    'return (new Function("return this")()).process.binding("fs");',
+    'return await fetch("file:///tmp/leak.txt");',
+    'return typeof globalThis.require + typeof globalThis.process + typeof globalThis.std + typeof globalThis.os;',
+  ];
+  for (const src of attempts) {
+    const res = await handler(request({ execution_id: 'exec-a', source: src }), TENANT_A);
+    if (res.status === 'completed') assert.match(String(res.result ?? ''), /^(undefined)*$|^null$/, src);
+    else assert.ok(['CODEMODE_RUNTIME', 'CODEMODE_SYNTAX'].includes(res.error_code), src);
+    assert.deepStrictEqual(fs.readdirSync(SCRATCH), [], `no residue after: ${src}`);
+    assert.ok(!fs.existsSync('/tmp/leak.txt'), `nothing created outside the private root: ${src}`);
+  }
+});
+
+test('T68(9): residue planted in /tmp by tenant A (files, hidden files, nested dirs, symlinks) is gone and unreadable for tenant B', async () => {
+  const outside = fs.mkdtempSync(path.join(os.tmpdir(), 'codemode-outside-'));
+  try {
+    fs.writeFileSync(path.join(outside, 'target.txt'), 'outside-must-survive');
+    fs.writeFileSync(path.join(SCRATCH, 'a-secret.txt'), 'SECRET-A');
+    fs.writeFileSync(path.join(SCRATCH, '.hidden-a'), 'SECRET-A');
+    fs.mkdirSync(path.join(SCRATCH, 'codemode-stale', 'deep'), { recursive: true });
+    fs.writeFileSync(path.join(SCRATCH, 'codemode-stale', 'deep', 'x.json'), '{"t":"SECRET-A"}');
+    fs.symlinkSync(path.join(outside, 'target.txt'), path.join(SCRATCH, 'link-to-outside'));
+    const b = await handler(request({ execution_id: 'exec-b', source: 'return "b-ran";' }), TENANT_B);
+    assert.strictEqual(b.result, 'b-ran');
+    assert.strictEqual(JSON.stringify(b).includes('SECRET-A'), false);
+    assert.deepStrictEqual(fs.readdirSync(SCRATCH), [], 'every residue is wiped before and after tenant B\'s round');
+    // wiping a symlink removes the link, never what it points to
+    assert.strictEqual(fs.readFileSync(path.join(outside, 'target.txt'), 'utf8'), 'outside-must-survive');
+  } finally {
+    fs.rmSync(outside, { recursive: true, force: true });
+  }
+});
+
+test('T68(9): the TenantId of the invoking tenant never reaches the guest or the reply', async () => {
+  const res = await handler(request({
+    execution_id: 'exec-a',
+    source: 'return Object.getOwnPropertyNames(globalThis).concat(Object.keys(globalThis)).join(",");',
+  }), TENANT_A);
+  assert.strictEqual(res.status, 'completed');
+  assert.strictEqual(JSON.stringify(res).includes(TENANT_A_ID), false);
+  assert.ok(!/tenant/i.test(String(res.result)), 'no tenant-looking global is exposed to the script');
+});
+
+test('T68(9): interleaved invocations of two tenants do not share state or leave residue', async () => {
+  const [a, b] = await Promise.all([
+    handler(request({ execution_id: 'exec-a', source: 'globalThis.k = "SECRET-A"; return globalThis.k;' }), TENANT_A),
+    handler(request({ execution_id: 'exec-b', source: 'return typeof globalThis.k;' }), TENANT_B),
+  ]);
+  assert.strictEqual(a.result, 'SECRET-A');
+  assert.strictEqual(b.result, 'undefined');
+  assert.strictEqual(a.execution_id, 'exec-a');
+  assert.strictEqual(b.execution_id, 'exec-b');
+  assert.deepStrictEqual(fs.readdirSync(SCRATCH), []);
+});
