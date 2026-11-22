@@ -12,6 +12,8 @@ import { AISkillsController } from './ai-skills.controller';
 import { AISkillsService } from './ai-skills.service';
 import { AIVoiceProfilesController } from './ai-voice-profiles.controller';
 import { AIVoiceProfilesService } from './ai-voice-profiles.service';
+import { CodeModeRunsController } from './codemode-runs.controller';
+import { CodeModeRunsService } from './codemode-runs.service';
 import { SkillsModule } from '../../../ai-engine/skills/skills.module';
 
 @Module({
@@ -24,6 +26,7 @@ import { SkillsModule } from '../../../ai-engine/skills/skills.module';
     AIAgentsController,
     AISkillsController,
     AIVoiceProfilesController,
+    CodeModeRunsController,
     AIEngineController,
   ],
   providers: [
@@ -32,6 +35,7 @@ import { SkillsModule } from '../../../ai-engine/skills/skills.module';
     AIAgentsService,
     AISkillsService,
     AIVoiceProfilesService,
+    CodeModeRunsService,
   ],
   exports: [AIEngineConfigService, AIEngineAppsService, AIAgentsService],
 })

@@ -29,7 +29,7 @@ function setup(opts: {
         .slice(0, limit),
     ),
   };
-  const service = new AgentHistoryService(prisma as any, feed as any);
+  const service = new AgentHistoryService(prisma as any, feed as any, {} as never);
   return { service, prisma, feed };
 }
 

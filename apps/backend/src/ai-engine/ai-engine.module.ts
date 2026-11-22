@@ -154,6 +154,8 @@ import { ConversationCompactorService } from './context/conversation-compactor.s
     SandboxAnalysisBrokerService,
     CodeModeBridgeService,
     CodeModePolicyService,
+    // F10/T67: «Ver cómo lo calculé» reads runs from the Vex history service.
+    SandboxAuditRepository,
     AIEngineService,
     AgentRuntimeConfigService,
     AILoggingService,

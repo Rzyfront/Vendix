@@ -173,6 +173,8 @@ const COUNT_KEYS = new Set([
   'active_span_count',
   // F10/T60: per-turn tool-definition measurement.
   'offered_tool_count',
+  // F10/T67: seq of a Code Mode internal call (child span of run_code).
+  'call_seq',
   'authorized_tool_count',
 ]);
 const BOOLEAN_KEYS = new Set([

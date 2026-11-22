@@ -1,7 +1,8 @@
-import { ConflictException, ForbiddenException, Injectable, Logger } from '@nestjs/common';
+import { ConflictException, ForbiddenException, Injectable, Logger, Optional } from '@nestjs/common';
 import { createHash, randomBytes, randomUUID } from 'node:crypto';
 import { RequestContextService } from '../../common/context/request-context.service';
 import { AgentDeadline, agentDeadlineContext } from '../tasks/agent-deadline';
+import { AgentTraceService } from '../observability/agent-trace.service';
 import { AIToolRegistry } from '../tools/ai-tool-registry';
 import type { ToolExecutionResult } from '../tools/interfaces/tool.interface';
 import { codeModeInvocation } from './codemode-invocation.context';
@@ -102,6 +103,7 @@ export class CodeModeBridgeService implements CodeModeRunner {
     private readonly policy: CodeModePolicyService,
     private readonly client: SandboxLambdaClientService,
     private readonly audit: SandboxAuditRepository,
+    @Optional() private readonly trace?: AgentTraceService,
   ) {}
 
   /** Off unless enabled, configured AND certified for the deployed digest. */
@@ -303,18 +305,33 @@ export class CodeModeBridgeService implements CodeModeRunner {
             `El script superó el máximo de ${limits.calls} llamadas a herramientas; reduce las consultas o usa herramientas directas.`,
           );
         for (const call of response.pending) {
-          const done = await this.executeCall({
-            call,
-            manifest,
-            executionId,
-            snapshot,
-            objectivePermissions,
-            invocation,
-            durable,
-            deadline,
-            assertLive,
-            assertTenant,
-            rowsSeen,
+          // One child span per internal call under the run_code tool span.
+          // Allowlisted keys only (call seq, hashed tool name).
+          const span = this.trace?.startSpan('tool', {
+            call_seq: call.seq,
+            tool_name_hash: this.trace.hash(call.tool),
+          });
+          let done: Awaited<ReturnType<CodeModeBridgeService['executeCall']>>;
+          try {
+            done = await this.executeCall({
+              call,
+              manifest,
+              executionId,
+              snapshot,
+              objectivePermissions,
+              invocation,
+              durable,
+              deadline,
+              assertLive,
+              assertTenant,
+              rowsSeen,
+            });
+          } catch (error) {
+            this.trace?.endSpan(span, { status: 'error' });
+            throw error;
+          }
+          this.trace?.endSpan(span, {
+            status: done.summary.status === 'ok' ? 'ok' : 'error',
           });
           rowsSeen += done.rows;
           if (done.summary.status === 'denied') denials++;
@@ -499,6 +516,8 @@ export class CodeModeBridgeService implements CodeModeRunner {
         tool: call.tool,
         args_hash: argsHash,
         status: status === 'ok' ? filtered.status : 'blocked',
+        rows,
+        duration_ms: Date.now() - t0,
       });
       return {
         entry: entry(outcome),

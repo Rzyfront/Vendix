@@ -334,6 +334,7 @@ describe('AgentTraceService (bounded explicit-scope observability)', () => {
         authorized_tool_count: 362,
         full_catalog_fallback: true,
         full_catalog_reason: 'index_coverage_below_90',
+        call_seq: 3,
       }),
     ).toEqual({
       definition_tokens: 23_000,
@@ -343,6 +344,7 @@ describe('AgentTraceService (bounded explicit-scope observability)', () => {
       authorized_tool_count: 362,
       full_catalog_fallback: true,
       full_catalog_reason: 'index_coverage_below_90',
+      call_seq: 3,
     });
     expect(
       redactTraceAttributes({

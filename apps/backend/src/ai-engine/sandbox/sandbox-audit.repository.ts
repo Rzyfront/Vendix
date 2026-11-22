@@ -7,7 +7,12 @@ import {
   UnauthorizedException,
 } from '@nestjs/common';
 import { Prisma } from '@prisma/client';
-import { createCipheriv, createHash, randomBytes } from 'crypto';
+import {
+  createCipheriv,
+  createDecipheriv,
+  createHash,
+  randomBytes,
+} from 'crypto';
 import { RequestContextService } from '../../common/context/request-context.service';
 import { GlobalPrismaService } from '../../prisma/services/global-prisma.service';
 import { normalizeSandboxSource } from './sandbox-invocation.context';
@@ -120,6 +125,46 @@ export interface SandboxAuditCall {
   status: string;
   result_ref?: string;
   denial?: string;
+  /** F10 T67: row count and duration of the call, for the owner's «Ver cómo lo calculé». */
+  rows?: number;
+  duration_ms?: number;
+}
+
+/** Why the owner view carries no source. Person-facing Spanish. */
+export const SANDBOX_SOURCE_HIDDEN_REASON = {
+  not_owner:
+    'Solo quien pidió el análisis puede ver el código; los demás ven el resumen.',
+  expired:
+    'El código se conserva 7 días y esta ejecución ya venció; queda solo el resumen.',
+  unavailable: 'El código no está disponible para esta ejecución.',
+} as const;
+
+/**
+ * Store-scoped view of one run for «Ver cómo lo calculé». `source` is plaintext
+ * ONLY when the requester is the run's owner and the retention window is open.
+ * Never carries args, results, ciphertext, key id, nonce or tag.
+ */
+export interface SandboxOwnerView {
+  id: string;
+  executor: string | null;
+  outcome: string;
+  manifest: string[];
+  calls: Array<{
+    seq: number;
+    tool: string;
+    status: string;
+    rows: number | null;
+    duration_ms: number | null;
+  }>;
+  rounds: number | null;
+  duration_ms: number | null;
+  cut_reason: string | null;
+  created_at: Date;
+  expires_at: Date;
+  is_owner: boolean;
+  expired: boolean;
+  source: string | null;
+  source_hidden_reason: string | null;
 }
 
 /** Deliberately contains neither plaintext nor ciphertext/key/nonce/tag fields. */
@@ -220,7 +265,8 @@ function redactUsage(usage: Record<string, unknown>): Record<string, unknown> {
 /**
  * System sink with explicit owner ACL in EVERY data query. No generic Store/Org
  * delegate is exposed: their ordinary scopes do not enforce user ownership.
- * No source decryption API, raw args/results, bearer tokens, or logging here.
+ * Source decryption exists only in `readOwnerView` (owner + retention window);
+ * no raw args/results, bearer tokens, or logging here.
  */
 @Injectable()
 export class SandboxAuditRepository {
@@ -452,6 +498,12 @@ export class SandboxAuditRepository {
       status: entry.status,
       ...(entry.result_ref ? { result_ref: entry.result_ref } : {}),
       ...(entry.denial ? { denial: entry.denial } : {}),
+      ...(Number.isSafeInteger(entry.rows) && entry.rows! >= 0
+        ? { rows: entry.rows }
+        : {}),
+      ...(Number.isSafeInteger(entry.duration_ms) && entry.duration_ms! >= 0
+        ? { duration_ms: entry.duration_ms }
+        : {}),
     };
     await this.transaction(async (tx) => {
       const rows = await tx.$queryRaw<Array<{ id: string }>>(Prisma.sql`
@@ -565,6 +617,153 @@ export class SandboxAuditRepository {
       cut_reason: extra.cut_reason ?? null,
       returned_bytes: extra.returned_bytes ?? null,
     };
+  }
+
+  /**
+   * «Ver cómo lo calculé». Pinned to the caller's store AND organization (a run
+   * of another store is indistinguishable from a missing one: same 404). The
+   * user ACL is NOT in the WHERE so a colleague of the same store still sees the
+   * summary; the source is decrypted only when `user_id` equals the caller's
+   * (the same ACL `get()` enforces in SQL) and the 7-day window is open.
+   */
+  async readOwnerView(id: string): Promise<SandboxOwnerView> {
+    const scope = requireScope();
+    this.validId(id);
+    const rows = await this.transaction((tx) =>
+      tx.$queryRaw<
+        Array<{
+          id: string;
+          store_id: number;
+          organization_id: number;
+          user_id: number;
+          objective_id: string | null;
+          source_hash: string;
+          source_ciphertext: Buffer;
+          source_nonce: Buffer;
+          source_auth_tag: Buffer;
+          policy_digest: string;
+          runtime_digest: string;
+          manifest: string[];
+          calls: SandboxAuditCall[];
+          outcome: string;
+          lease_until: Date;
+          expires_at: Date;
+          created_at: Date;
+          finished_at: Date | null;
+          executor: string | null;
+          rounds: number | null;
+          cut_reason: string | null;
+          expired: boolean;
+        }>
+      >(Prisma.sql`
+        SELECT id, store_id, organization_id, user_id, objective_id, source_hash,
+          source_ciphertext, source_nonce, source_auth_tag, policy_digest,
+          runtime_digest, manifest, calls, outcome, lease_until, expires_at,
+          created_at, finished_at, executor, rounds, cut_reason,
+          (expires_at <= CURRENT_TIMESTAMP) AS expired
+        FROM ai_agent_script_runs
+        WHERE id = ${id}::uuid AND store_id = ${scope.store_id}
+        AND organization_id = ${scope.organization_id}`),
+    );
+    const row = rows[0];
+    if (!row) throw new NotFoundException('Sandbox run not found');
+    const isOwner = row.user_id === scope.user_id;
+    let source: string | null = null;
+    let reason: string | null = null;
+    if (!isOwner) reason = SANDBOX_SOURCE_HIDDEN_REASON.not_owner;
+    else if (row.expired) reason = SANDBOX_SOURCE_HIDDEN_REASON.expired;
+    else {
+      source = this.decryptSource(row);
+      if (source === null) reason = SANDBOX_SOURCE_HIDDEN_REASON.unavailable;
+    }
+    // Rows hold a `dispatching` entry and then the final one per seq: keep the last.
+    const bySeq = new Map<number, SandboxAuditCall>();
+    for (const entry of Array.isArray(row.calls) ? row.calls : [])
+      bySeq.set(entry.seq, entry);
+    const calls = [...bySeq.values()]
+      .sort((a, b) => a.seq - b.seq)
+      .map((entry) => ({
+        seq: entry.seq,
+        tool: entry.tool,
+        status: entry.status,
+        rows: typeof entry.rows === 'number' ? entry.rows : null,
+        duration_ms:
+          typeof entry.duration_ms === 'number' ? entry.duration_ms : null,
+      }));
+    return {
+      id: row.id,
+      executor: row.executor,
+      outcome:
+        row.outcome === 'running' && row.lease_until.getTime() <= Date.now()
+          ? 'timeout'
+          : row.outcome,
+      manifest: Array.isArray(row.manifest) ? row.manifest : [],
+      calls,
+      rounds: row.rounds,
+      duration_ms: row.finished_at
+        ? row.finished_at.getTime() - row.created_at.getTime()
+        : null,
+      cut_reason: row.cut_reason,
+      created_at: row.created_at,
+      expires_at: row.expires_at,
+      is_owner: isOwner,
+      expired: row.expired,
+      source,
+      source_hidden_reason: reason,
+    };
+  }
+
+  /** AAD mirrors `start()`; any mismatch (wrong key, tampered row) yields null. */
+  private decryptSource(row: {
+    id: string;
+    objective_id: string | null;
+    organization_id: number;
+    store_id: number;
+    user_id: number;
+    source_hash: string;
+    policy_digest: string;
+    runtime_digest: string;
+    source_ciphertext: Buffer;
+    source_nonce: Buffer;
+    source_auth_tag: Buffer;
+  }): string | null {
+    let key: Buffer;
+    try {
+      key = sourceKey();
+    } catch {
+      return null;
+    }
+    try {
+      const decipher = createDecipheriv(
+        'aes-256-gcm',
+        key,
+        Buffer.from(row.source_nonce),
+      );
+      decipher.setAAD(
+        Buffer.from(
+          JSON.stringify([
+            'vendix-sandbox-source-v1',
+            row.id,
+            row.objective_id ?? null,
+            row.organization_id,
+            row.store_id,
+            row.user_id,
+            row.source_hash,
+            row.policy_digest,
+            row.runtime_digest,
+          ]),
+        ),
+      );
+      decipher.setAuthTag(Buffer.from(row.source_auth_tag));
+      return Buffer.concat([
+        decipher.update(Buffer.from(row.source_ciphertext)),
+        decipher.final(),
+      ]).toString('utf8');
+    } catch {
+      return null;
+    } finally {
+      key.fill(0);
+    }
   }
 
   async get(id: string): Promise<SandboxAuditRecord> {

@@ -35,9 +35,33 @@ export interface VexUiBlock {
 export interface VexAnalysisInfo {
   run_id: string;
   source_hash: string;
-  language: 'python';
+  /** `js` = Code Mode run (F10): the source is NOT in the block, it is fetched by `run_id`. */
+  language: 'python' | 'js';
   purpose: string;
   source: string;
+}
+
+/** «Ver cómo lo calculé»: one Code Mode run, read-only (never args or results). */
+export interface VexScriptRun {
+  id: string;
+  outcome: string;
+  manifest: string[];
+  calls: Array<{
+    seq: number;
+    tool: string;
+    status: string;
+    rows: number | null;
+    duration_ms: number | null;
+  }>;
+  rounds: number | null;
+  duration_ms: number | null;
+  cut_reason: string | null;
+  created_at: string;
+  is_owner: boolean;
+  expired: boolean;
+  /** Null unless the requester ran it and it is inside the 7-day window. */
+  source: string | null;
+  source_hidden_reason: string | null;
 }
 
 export type VexBlockSpec =
