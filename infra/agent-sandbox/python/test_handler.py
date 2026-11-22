@@ -1,4 +1,5 @@
-"""Offline contracts ONLY: subprocess.Popen, os.killpg and libc.prctl are mocked.
+"""Offline contracts ONLY: subprocess.Popen, os.killpg, os.kill, os.getppid and
+libc.prctl are mocked (kill(-1) must never reach the developer machine).
 No generated or adversarial code runs here.
 Run: python3 -m unittest -v test_handler test_runner
 These tests do not certify isolation; T53 against the real Lambda does."""
@@ -106,8 +107,12 @@ class ExecutionTests(unittest.TestCase):
             patch.dict(os.environ, {"ANALYSIS_RUNTIME_DIGEST": DIGEST, "AWS_SECRET_ACCESS_KEY": "s3cr3t",
                                     "AWS_SESSION_TOKEN": "tok"}),
             patch.object(handler.os, "killpg"),  # never signal a real group in tests
+            patch.object(handler.os, "kill"),  # never kill(-1) the developer machine
+            patch.object(handler.os, "getppid", return_value=0),  # as inside Lambda's PID namespace
         ]
         self.killpg = patches[2].start()
+        self.kill = patches[3].start()
+        self.getppid = patches[4].start()
         patches[0].start(); patches[1].start()
         for p in patches:
             self.addCleanup(p.stop)
@@ -298,6 +303,60 @@ class ExecutionTests(unittest.TestCase):
             ("error", "ANALYSIS_RUNTIME", "RuntimeError: boom in <path>"),
         )
         self.assertNotIn("/var/task", res["error_message"])
+
+    def test_strays_are_reaped_before_tenant_data_and_after_the_child(self):
+        # killpg cannot reach a guest daemon that double-forked + setsid (T53).
+        open(os.path.join(self.root, "leftover.bin"), "w").close()
+        seen = []
+        self.kill.side_effect = lambda pid, sig: seen.append((pid, sig, sorted(os.listdir(self.root))))
+        factory, _ = self.popen_writing({"status": "ok", "output": VALID_OUTPUT})
+
+        def spawn(args, **kwargs):
+            self.assertEqual(len(seen), 1, "strays must be reaped before the child starts")
+            return factory(args, **kwargs)
+
+        with patch.object(handler.subprocess, "Popen", side_effect=spawn):
+            res = handler.handler(request())
+        self.assertEqual(res["status"], "ok")
+        self.assertEqual([(p, s) for p, s, _ in seen], [(-1, signal.SIGKILL), (-1, signal.SIGKILL)])
+        # First reap: before /tmp is wiped and before any data of this tenant exists.
+        self.assertEqual(seen[0][2], ["leftover.bin"])
+        self.assertTrue(any(e.startswith(handler.TMP_PREFIX) for e in seen[1][2]))
+        self.killpg.assert_called_with(4242, signal.SIGKILL)
+
+    def test_strays_are_reaped_after_a_timeout(self):
+        proc = MagicMock(pid=778, returncode=None)
+        proc.wait.side_effect = [subprocess.TimeoutExpired("x", 1), 0]
+        with patch.object(handler.subprocess, "Popen", return_value=proc):
+            res = handler.handler(request())
+        self.assertEqual(res["error_code"], "ANALYSIS_TIMEOUT")
+        self.assertEqual(self.kill.call_count, 2)
+        self.kill.assert_called_with(-1, signal.SIGKILL)
+
+    def test_reaper_refuses_outside_the_lambda_pid_namespace(self):
+        self.getppid.return_value = 4321  # a developer machine: kill(-1) would hit everything
+        with patch.object(handler.subprocess, "Popen") as popen:
+            res = handler.handler(request())
+        popen.assert_not_called()
+        self.kill.assert_not_called()
+        self.assertEqual((res["status"], res["error_code"]), ("error", "ANALYSIS_RUNTIME"))
+        self.assertEqual(os.listdir(self.root), [])
+
+    def test_reaper_without_other_processes_continues(self):
+        self.kill.side_effect = ProcessLookupError(errno.ESRCH, "no process")
+        factory, _ = self.popen_writing({"status": "ok", "output": VALID_OUTPUT})
+        with patch.object(handler.subprocess, "Popen", side_effect=factory):
+            res = handler.handler(request())
+        self.assertEqual(res["status"], "ok")
+
+    def test_reaper_failure_fails_closed_before_tenant_data(self):
+        self.kill.side_effect = PermissionError(errno.EPERM, "denied")
+        with patch.object(handler.subprocess, "Popen") as popen, \
+                patch.object(handler, "_write_private") as write:
+            res = handler.handler(request())
+        popen.assert_not_called()
+        write.assert_not_called()
+        self.assertEqual((res["status"], res["error_code"]), ("error", "ANALYSIS_RUNTIME"))
 
     def test_linux_dumpable_failure_fails_closed_without_spawning(self):
         with patch.object(handler, "_harden_parent_dumpable", side_effect=OSError("prctl failed")), \

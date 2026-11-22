@@ -4,8 +4,9 @@ Contract mirrored from apps/backend/src/ai-engine/sandbox/interfaces/
 analysis-protocol.interface.ts. Containment is the Lambda itself: VPC without
 egress, empty execution role, no secrets, read-only code. On top of it, EVERY
 execution gets a private /tmp dir and a NEW child process in its own session
-with rlimits; the whole process group is SIGKILLed afterwards and /tmp wiped,
-because the execution environment is reused between invocations.
+with rlimits; the whole process group, and then every other task of the guest
+uid (kill(-1)), is SIGKILLed afterwards and /tmp wiped, because the execution
+environment is reused between invocations.
 
 Never log source, inputs or outputs.
 """
@@ -235,6 +236,25 @@ def _kill_group(pid):
         pass
 
 
+def _reap_strays():
+    """SIGKILL every task this process may signal, except itself and init.
+
+    killpg cannot reach a guest that double-forked and called setsid: such a
+    daemon survived and read the next tenant's data from /tmp (T53). Inside
+    Lambda the handler is the top task of its PID namespace (ppid 0) and shares
+    its uid only with guest processes (no layers/extensions), so kill(-1)
+    removes every guest survivor. The kernel applies it under the tasklist lock
+    (no race with fork) and SIGKILL cannot be caught. Outside that namespace
+    (a developer machine) it refuses and fails closed.
+    """
+    if os.getppid() != 0:
+        raise OSError(errno.EPERM, "refusing kill(-1) outside the Lambda PID namespace")
+    try:
+        os.kill(-1, signal.SIGKILL)
+    except ProcessLookupError:  # ESRCH: nothing else alive in the namespace
+        pass
+
+
 def _read_stream(fh, limit=LOG_READ_BYTES):
     try:
         fh.flush()
@@ -279,7 +299,6 @@ def _read_result(tmpdir, limits):
 
 def _execute(tmpdir, source, inputs, limits):
     """Run one child. Returns (code, message, output); code None means ok."""
-    _harden_parent_dumpable()
     os.mkdir(os.path.join(tmpdir, "in"), 0o700)
     for table in inputs:
         _write_private(os.path.join(tmpdir, "in", table["name"] + ".json"),
@@ -304,6 +323,7 @@ def _execute(tmpdir, source, inputs, limits):
             timed_out = True
         finally:
             _kill_group(proc.pid)
+            _reap_strays()  # also what escaped the group (double fork + setsid)
         if timed_out:
             try:
                 proc.wait(timeout=5)
@@ -372,6 +392,15 @@ def handler(event, context=None):
     except RequestError as exc:
         return _response(echo_id, echo_nonce, "error", started, "ANALYSIS_INPUT", str(exc))
 
+    # Both run BEFORE /tmp is wiped and before any data of this tenant exists:
+    # no survivor of a previous run may see it, and the guest must not be able
+    # to read the parent. Either failing stops the run without spawning.
+    try:
+        _harden_parent_dumpable()
+        _reap_strays()
+    except Exception as exc:
+        return _response(execution_id, nonce, "error", started, "ANALYSIS_RUNTIME",
+                         "sandbox error: %s" % type(exc).__name__)
     wipe_tmp()
     tmpdir = tempfile.mkdtemp(prefix=TMP_PREFIX, dir=TMP_ROOT)
     os.chmod(tmpdir, 0o700)

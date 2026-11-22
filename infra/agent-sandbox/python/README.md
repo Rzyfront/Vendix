@@ -23,7 +23,7 @@ AWS Lambda (imagen contenedor Python 3.12 · Dockerfile + template.json)
           1. Valida petición y recorta límites contra HARD_LIMITS.
           2. Limpia /tmp antes y después de ejecutar.
           3. Exige que el proceso padre sea no-dumpable (ver abajo) para impedir que el hijo lea `/proc/<ppid>/environ`, `mem`, `maps` o `fd`, use `process_vm_readv` o haga `ptrace`, y lanza un proceso hijo nuevo (`python -I runner.py`) en sesión propia con entorno limpio (sin `AWS_*`), `RLIMIT_AS` / `RLIMIT_CPU` / `RLIMIT_NPROC` / `RLIMIT_FSIZE` / `RLIMIT_CORE` y timeout de pared.
-          4. Mata todo el grupo de procesos (`SIGKILL`) al terminar o vencer el tiempo.
+          4. Mata todo el grupo de procesos (`SIGKILL`) al terminar o vencer el tiempo y, después, a todo superviviente del uid del invitado (`kill(-1, SIGKILL)`); lo mismo antes de cargar los datos de cada tienda.
           5. Lee `result.json` con `O_NOFOLLOW`, revalida `result` (tables/series/figures/notes) y devuelve solo JSON acotado.
 ```
 
@@ -34,6 +34,12 @@ El hijo corre con el mismo uid que el handler, y el handler tiene en su entorno 
 La vía normal es `prctl(PR_SET_DUMPABLE, 0)`, pero el perfil seccomp de Lambda deniega **todo** `prctl` con `EPERM` (T53, primera corrida: el 100 % de las ejecuciones fallaba cerrado). Tolerar ese error a ciegas dejaba legibles `/proc/<ppid>/environ` (nombres `AWS_*`) y el heap del padre, donde aparecía el marcador de la tienda anterior (8 de 9 respuestas cruzadas).
 
 Por eso el `Dockerfile` deja `/var/lang/bin/python3.12` en `0711`: al ejecutar un binario que el usuario no puede leer, el kernel marca el proceso como no-dumpable sin necesidad de `prctl`, tanto al runtime de Lambda (y con él al handler) como a cada hijo. `handler.py` intenta `prctl` primero y acepta el `EPERM` **solo** si comprueba que el kernel ya lo marcó (`/proc/self/environ` es de root siendo el proceso no-root); con cualquier otro errno, o sin esa prueba, falla cerrado sin lanzar al hijo ni escribir datos de la tienda.
+
+### Por qué `kill(-1)` además de matar el grupo (paso 4)
+
+`killpg` solo alcanza al grupo del hijo. Un invitado que hace doble `fork` + `setsid` deja un daemon en otra sesión que sobrevive a la invocación. En T53 (primera corrida) ese daemon quedó escuchando en un socket abstracto, leyó desde `/tmp` los datos de la tienda siguiente y se los entregó a la ejecución posterior.
+
+Dentro de Lambda el handler es la tarea superior de su espacio de PIDs (`ppid 0`) y solo comparte uid con procesos del invitado (la función no tiene capas ni extensiones). Por eso `kill(-1, SIGKILL)` (toda tarea que podemos señalar salvo nosotros mismos e init) elimina a cualquier superviviente: el kernel lo aplica bajo el lock de la lista de tareas, sin carrera con `fork`, y `SIGKILL` no se puede capturar. El handler lo ejecuta **antes** de limpiar `/tmp` y escribir los datos de la tienda, y otra vez tras matar el grupo del hijo. Fuera de ese espacio de PIDs (una Mac de desarrollo) se niega y la invocación falla cerrada; las pruebas offline siempre lo simulan.
 
 ---
 

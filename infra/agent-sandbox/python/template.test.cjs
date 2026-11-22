@@ -68,6 +68,8 @@ test('function: image, sized, VPC-attached, no environment', () => {
   assert.strictEqual(p.EphemeralStorage.Size, 512);
   assert.ok(p.ReservedConcurrentExecutions);
   assert.strictEqual(p.Environment, undefined);
+  // No layers/extensions: the handler's kill(-1) assumes only guest processes share its uid.
+  assert.strictEqual(p.Layers, undefined);
   assert.ok(p.VpcConfig.SubnetIds.length >= 2 && p.VpcConfig.SecurityGroupIds.length === 1);
   assert.strictEqual(template.Parameters.ReservedConcurrency.Default, 3);
   assert.ok(template.Outputs.FunctionArn);
