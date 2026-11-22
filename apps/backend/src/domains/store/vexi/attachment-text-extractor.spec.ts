@@ -6,6 +6,9 @@ import {
   AttachmentUnreadableError,
   DOCX_UNREADABLE_MESSAGE,
   extractAttachmentContent,
+  getParseWorkerStats,
+  MAX_CONCURRENT_PARSE_WORKERS,
+  MAX_PARSE_WORKER_QUEUE,
   parseXlsxInWorker,
   PDF_UNREADABLE_MESSAGE,
   PdfJsLib,
@@ -343,7 +346,7 @@ describe('PDF time limit (P1)', () => {
 
 describe('PDF limits in worker (B5)', () => {
   /** Builds a real PDF with FlateDecode page content streams and a valid xref. */
-  const buildPdf = (pageStreams: string[]): Buffer => {
+  const buildPdf = (pageStreams: Array<string | Buffer>): Buffer => {
     const pageCount = pageStreams.length;
     const kids = Array.from(
       { length: pageCount },
@@ -374,7 +377,9 @@ describe('PDF limits in worker (B5)', () => {
         pageId,
         `<< /Type /Page /Parent 2 0 R /MediaBox [0 0 612 792] /Resources << /Font << /F1 3 0 R >> >> /Contents ${streamId} 0 R >>`,
       );
-      const compressed = zlib.deflateSync(Buffer.from(raw, 'latin1'));
+      const compressed = Buffer.isBuffer(raw)
+        ? raw
+        : zlib.deflateSync(Buffer.from(raw, 'latin1'));
       pushObj(
         streamId,
         Buffer.concat([
@@ -399,8 +404,35 @@ describe('PDF limits in worker (B5)', () => {
     return Buffer.concat(parts);
   };
 
-  const heavyPageStream = (reps: number) =>
-    'BT /F1 12 Tf (hola mundo) Tj ET\n'.repeat(reps);
+  /** Pre-compressed 3M-operator page stream (~228 KB) built once to avoid fixture GC skew. */
+  let heavyCompressedStream: Buffer;
+  let heavyPdf: Buffer;
+  let partialPdf: Buffer;
+
+  beforeAll(() => {
+    heavyCompressedStream = zlib.deflateSync(
+      Buffer.from('BT /F1 12 Tf (hola mundo) Tj ET\n'.repeat(3_000_000), 'latin1'),
+    );
+    heavyPdf = buildPdf([heavyCompressedStream]);
+    partialPdf = buildPdf([
+      'BT /F1 12 Tf (Pagina uno) Tj ET\n',
+      heavyCompressedStream,
+    ]);
+  });
+
+  const waitForWorkersIdle = async (maxMs = 3_000) => {
+    const deadline = Date.now() + maxMs;
+    while (
+      (getParseWorkerStats().active > 0 || getParseWorkerStats().queued > 0) &&
+      Date.now() < deadline
+    ) {
+      await new Promise((r) => setTimeout(r, 25));
+    }
+  };
+
+  afterEach(async () => {
+    await waitForWorkersIdle();
+  });
 
   it('extracts text from a valid multi-page PDF inside the worker with no pages_read', async () => {
     const pdf = buildPdf([
@@ -422,10 +454,11 @@ describe('PDF limits in worker (B5)', () => {
   });
 
   it('a real ~228 KB PDF with 3M text operators finishes within the time cap without blocking the event loop', async () => {
-    const heavyPdf = buildPdf([heavyPageStream(3_000_000)]);
     expect(heavyPdf.length).toBeGreaterThan(70 * 1024);
     expect(heavyPdf.length).toBeLessThan(300 * 1024);
 
+    // Yield once before starting the monitor so prior test teardown does not skew max lag.
+    await new Promise((r) => setTimeout(r, 25));
     const delay = monitorEventLoopDelay({ resolution: 10 });
     delay.enable();
     const started = Date.now();
@@ -462,10 +495,7 @@ describe('PDF limits in worker (B5)', () => {
   }, 15_000);
 
   it('keeps pages read before the worker timeout and reports pages_read on a real multi-page PDF', async () => {
-    const partialPdf = buildPdf([
-      'BT /F1 12 Tf (Pagina uno) Tj ET\n',
-      heavyPageStream(3_000_000),
-    ]);
+    await new Promise((r) => setTimeout(r, 25));
     const delay = monitorEventLoopDelay({ resolution: 10 });
     delay.enable();
     const started = Date.now();
@@ -488,4 +518,116 @@ describe('PDF limits in worker (B5)', () => {
     await expect(read).rejects.toBeInstanceOf(AttachmentUnreadableError);
     await expect(read).rejects.toThrow(PDF_UNREADABLE_MESSAGE);
   });
+});
+
+describe('parse worker concurrency limit (P2)', () => {
+  const docx = (text: string) => {
+    const zip = new AdmZip();
+    zip.addFile(
+      'word/document.xml',
+      Buffer.from(`<w:p><w:r><w:t>${text}</w:t></w:r></w:p>`),
+    );
+    return zip.toBuffer();
+  };
+
+  const waitForWorkersIdle = async (maxMs = 3_000) => {
+    const deadline = Date.now() + maxMs;
+    while (
+      (getParseWorkerStats().active > 0 || getParseWorkerStats().queued > 0) &&
+      Date.now() < deadline
+    ) {
+      await new Promise((r) => setTimeout(r, 25));
+    }
+  };
+
+  let busyPdf: Buffer;
+  beforeAll(() => {
+    const raw = 'BT /F1 12 Tf (hola mundo) Tj ET\n'.repeat(1_500_000);
+    const compressed = zlib.deflateSync(Buffer.from(raw, 'latin1'));
+    const header = Buffer.from('%PDF-1.4\n', 'latin1');
+    const objs = [
+      '1 0 obj\n<< /Type /Catalog /Pages 2 0 R >>\nendobj\n',
+      '2 0 obj\n<< /Type /Pages /Kids [4 0 R] /Count 1 >>\nendobj\n',
+      '3 0 obj\n<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica >>\nendobj\n',
+      '4 0 obj\n<< /Type /Page /Parent 2 0 R /MediaBox [0 0 612 792] /Resources << /Font << /F1 3 0 R >> >> /Contents 5 0 R >>\nendobj\n',
+    ];
+    const parts: Buffer[] = [header];
+    const offsets: number[] = [0];
+    let pos = header.length;
+    for (const o of objs) {
+      offsets.push(pos);
+      const b = Buffer.from(o, 'latin1');
+      parts.push(b);
+      pos += b.length;
+    }
+    offsets.push(pos);
+    const head5 = Buffer.from(
+      `5 0 obj\n<< /Length ${compressed.length} /Filter /FlateDecode >>\nstream\n`,
+      'latin1',
+    );
+    const tail5 = Buffer.from('\nendstream\nendobj\n', 'latin1');
+    parts.push(head5, compressed, tail5);
+    pos += head5.length + compressed.length + tail5.length;
+    let xref = 'xref\n0 6\n0000000000 65535 f \n';
+    for (let i = 1; i <= 5; i++) {
+      xref += String(offsets[i]).padStart(10, '0') + ' 00000 n \n';
+    }
+    xref += `trailer\n<< /Size 6 /Root 1 0 R >>\nstartxref\n${pos}\n%%EOF\n`;
+    parts.push(Buffer.from(xref, 'latin1'));
+    busyPdf = Buffer.concat(parts);
+  });
+
+  beforeEach(async () => {
+    await waitForWorkersIdle();
+  });
+
+  it('caps active workers at MAX_CONCURRENT_PARSE_WORKERS and queues extra uploads', async () => {
+    const jobs = [
+      readDocxText(docx('uno')),
+      readDocxText(docx('dos')),
+      readDocxText(docx('tres')),
+      readDocxText(docx('cuatro')),
+    ];
+    const peak = getParseWorkerStats();
+    expect(peak.active).toBe(MAX_CONCURRENT_PARSE_WORKERS);
+    expect(peak.queued).toBe(4 - MAX_CONCURRENT_PARSE_WORKERS);
+
+    await expect(Promise.all(jobs)).resolves.toEqual([
+      'uno',
+      'dos',
+      'tres',
+      'cuatro',
+    ]);
+    await waitForWorkersIdle();
+    expect(getParseWorkerStats()).toEqual({ active: 0, queued: 0 });
+  });
+
+  it('rejects queued jobs past timeout or queue cap without spawning unbounded workers', async () => {
+    // Occupy all active slots for 600 ms.
+    const blockers = Array.from({ length: MAX_CONCURRENT_PARSE_WORKERS }, () =>
+      readPdfText(busyPdf, 600).catch((e) => e),
+    );
+    // Fill the queue with short-timeout requests.
+    const queued = Array.from({ length: MAX_PARSE_WORKER_QUEUE }, () =>
+      readDocxText(docx('en-cola'), 100).catch((e) => e),
+    );
+    // Overflow past the queue cap fails fast immediately.
+    const overflow = readDocxText(docx('desborde'), 5_000);
+    await expect(overflow).rejects.toBeInstanceOf(AttachmentUnreadableError);
+    expect(getParseWorkerStats().active).toBe(MAX_CONCURRENT_PARSE_WORKERS);
+    expect(getParseWorkerStats().queued).toBeLessThanOrEqual(
+      MAX_PARSE_WORKER_QUEUE,
+    );
+
+    const queuedResults = await Promise.all(queued);
+    for (const r of queuedResults) {
+      expect(r).toBeInstanceOf(AttachmentUnreadableError);
+    }
+    const blockerResults = await Promise.all(blockers);
+    for (const r of blockerResults) {
+      expect(r).toBeInstanceOf(AttachmentUnreadableError);
+    }
+    await waitForWorkersIdle();
+    expect(getParseWorkerStats()).toEqual({ active: 0, queued: 0 });
+  }, 15_000);
 });

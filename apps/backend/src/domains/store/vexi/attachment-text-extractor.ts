@@ -229,37 +229,108 @@ interface WorkerJob {
 }
 
 /**
+ * P2: caps how many parse workers can hold V8 heaps (256–512 MB each) at once
+ * across all stores. Extra uploads wait in a short FIFO queue sharing their
+ * timeout budget; past the queue cap they fail fast with `WorkerLimitError`.
+ */
+export const MAX_CONCURRENT_PARSE_WORKERS = 2;
+export const MAX_PARSE_WORKER_QUEUE = 8;
+
+interface QueuedWorkerSlot {
+  grant: () => void;
+  timer: NodeJS.Timeout;
+}
+
+let activeParseWorkers = 0;
+const parseWorkerQueue: QueuedWorkerSlot[] = [];
+
+/** Current parse worker occupancy (active workers and queued waiters). */
+export function getParseWorkerStats(): { active: number; queued: number } {
+  return { active: activeParseWorkers, queued: parseWorkerQueue.length };
+}
+
+function acquireWorkerSlot(label: string, timeoutMs: number): Promise<void> {
+  if (activeParseWorkers < MAX_CONCURRENT_PARSE_WORKERS) {
+    activeParseWorkers++;
+    return Promise.resolve();
+  }
+  if (parseWorkerQueue.length >= MAX_PARSE_WORKER_QUEUE) {
+    return Promise.reject(
+      new WorkerLimitError(`${label} parse queue is full`),
+    );
+  }
+  return new Promise((resolve, reject) => {
+    const entry: QueuedWorkerSlot = {
+      grant: () => {
+        clearTimeout(entry.timer);
+        resolve();
+      },
+      timer: setTimeout(() => {
+        const idx = parseWorkerQueue.indexOf(entry);
+        if (idx >= 0) parseWorkerQueue.splice(idx, 1);
+        reject(new WorkerLimitError(`${label} parse exceeded ${timeoutMs} ms`));
+      }, timeoutMs),
+    };
+    parseWorkerQueue.push(entry);
+  });
+}
+
+function releaseWorkerSlot(): void {
+  const next = parseWorkerQueue.shift();
+  if (next) {
+    next.grant();
+    return;
+  }
+  activeParseWorkers = Math.max(0, activeParseWorkers - 1);
+}
+
+/**
  * Runs a parse off the API event loop (B3, B4, B5): a worker thread with its
- * own heap ceiling, terminated when it runs past `timeoutMs`. Whatever the file
- * does, the request that uploaded it waits at most that long and every other
- * store keeps being served. Hitting the time or heap ceiling rejects with
+ * own heap ceiling, terminated when it runs past `timeoutMs`, and gated by a
+ * small concurrency pool + FIFO queue (P2). Whatever the file does, the
+ * request that uploaded it waits at most `timeoutMs` and every other store
+ * keeps being served. Hitting the time, heap, or queue ceiling rejects with
  * `WorkerLimitError`; a malformed file rejects with the worker's own error.
  */
-function runParseInWorker<T>(job: WorkerJob): Promise<T> {
+async function runParseInWorker<T>(job: WorkerJob): Promise<T> {
+  const deadline = Date.now() + job.timeoutMs;
+  await acquireWorkerSlot(job.label, job.timeoutMs);
+  const remainingMs = Math.max(1, deadline - Date.now());
+
   return new Promise((resolve, reject) => {
-    const worker = new Worker(job.source, {
-      eval: true,
-      workerData: job.workerData,
-      resourceLimits: { maxOldGenerationSizeMb: job.heapMb },
-    });
+    let worker: Worker;
+    try {
+      worker = new Worker(job.source, {
+        eval: true,
+        workerData: job.workerData,
+        resourceLimits: { maxOldGenerationSizeMb: job.heapMb },
+      });
+    } catch (error) {
+      releaseWorkerSlot();
+      reject(error);
+      return;
+    }
     let settled = false;
     const settle = (done: () => void) => {
       if (settled) return;
       settled = true;
       clearTimeout(timer);
       done();
+      void worker
+        .terminate()
+        .catch(() => undefined)
+        .finally(() => releaseWorkerSlot());
     };
     const timer = setTimeout(
       () =>
-        settle(() => {
-          void worker.terminate();
+        settle(() =>
           reject(
             new WorkerLimitError(
               `${job.label} parse exceeded ${job.timeoutMs} ms`,
             ),
-          );
-        }),
-      job.timeoutMs,
+          ),
+        ),
+      remainingMs,
     );
     worker.on('message', (result: unknown) => {
       if (
@@ -271,10 +342,7 @@ function runParseInWorker<T>(job: WorkerJob): Promise<T> {
         job.onProgress(result as Record<string, unknown>);
         return;
       }
-      settle(() => {
-        void worker.terminate();
-        resolve(result as T);
-      });
+      settle(() => resolve(result as T));
     });
     worker.once('error', (error: NodeJS.ErrnoException) =>
       settle(() =>
