@@ -83,6 +83,16 @@ const PUBLIC_TOOLS = [
   // mirrors of auth-only subscription reads (banner/paywall)
   'get_subscription_access',
   'get_ai_usage',
+  // help center: published, platform-wide content; no store data
+  'search_help',
+  'get_help_article',
+  // published learning paths; the progress it shows is the caller's own
+  'get_learning_path',
+  // writes only the caller's own progress, and only on a published video
+  'mark_learning_progress',
+  // published how-to guides, read-only; load_skill filters by agent_keys (H7)
+  'search_skills',
+  'load_skill',
   // client-side UI commands: the browser dispatcher applies the panel's
   // visibility chain; the server never executes them
   ...uiTools.map((t) => t.name),

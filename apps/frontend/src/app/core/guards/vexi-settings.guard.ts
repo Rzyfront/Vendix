@@ -20,16 +20,22 @@ const TRUSTED_ROLES = ['owner', 'admin', 'STORE_OWNER', 'ORG_OWNER'];
 const DENIED_MESSAGE =
   'Solo el propietario o un administrador puede configurar los agentes de IA.';
 
+/**
+ * Owner/admin check shared by this guard and the blocks of the page that call
+ * owner/admin-only endpoints (e.g. `<app-store-memory />`).
+ */
+export function canConfigureAiAgents(
+  auth: Pick<AuthFacade, 'isOwner' | 'isAdmin' | 'hasAnyRole'>,
+): boolean {
+  return auth.isOwner() || auth.isAdmin() || auth.hasAnyRole(TRUSTED_ROLES);
+}
+
 export const aiAgentsSettingsGuard: CanActivateFn = () => {
   const authFacade = inject(AuthFacade);
   const router = inject(Router);
   const toast = inject(ToastService);
 
-  if (
-    authFacade.isOwner() ||
-    authFacade.isAdmin() ||
-    authFacade.hasAnyRole(TRUSTED_ROLES)
-  ) {
+  if (canConfigureAiAgents(authFacade)) {
     return true;
   }
 

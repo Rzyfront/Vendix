@@ -8,7 +8,11 @@ export type VexUiBlockKind =
   | 'file'
   | 'markdown'
   | 'timeline'
-  | 'list';
+  | 'list'
+  // F4 T29: learning blocks (help center post, video, learning path).
+  | 'help_article'
+  | 'video'
+  | 'learning_path';
 
 /**
  * A UI block Vex rendered inside a turn.
@@ -33,7 +37,8 @@ export type VexBlockSpec =
   | VexFileSpec
   | VexMarkdownSpec
   | VexTimelineSpec
-  | VexListSpec;
+  | VexListSpec
+  | VexLearningSpec;
 
 export interface VexTableColumn {
   key: string;
@@ -151,6 +156,12 @@ export interface VexListItem {
 
 export interface VexListData {
   items: VexListItem[];
+}
+
+/** F4 T29: payload lives in `data` (article / video / series), see CONTRACT. */
+export interface VexLearningSpec {
+  kind: 'help_article' | 'video' | 'learning_path';
+  title?: string;
 }
 
 /** Table/chart payload shape: rows plus the total the server counted. */

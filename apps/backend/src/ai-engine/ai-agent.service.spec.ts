@@ -56,6 +56,8 @@ const step = (order: number, status: any) => ({
 describe('AIAgentService.runAgentStream', () => {
   let chat: jest.Mock;
   let executeTool: jest.Mock;
+  /** Execution options the loop handed the registry, by tool name (H6). */
+  let executionOptions: jest.Mock;
   let awaitResult: jest.Mock;
   let emit: jest.Mock;
   let registry: any;
@@ -73,6 +75,7 @@ describe('AIAgentService.runAgentStream', () => {
     } as any);
     chat = jest.fn();
     executeTool = jest.fn().mockResolvedValue('{"ok":true}');
+    executionOptions = jest.fn();
     awaitResult = jest.fn().mockResolvedValue('{"ui":"ok"}');
     emit = jest.fn();
     const definitions = [
@@ -86,6 +89,7 @@ describe('AIAgentService.runAgentStream', () => {
       def('create_expense'),
       def('send_invoice_dian'),
       def('vex_render_table'),
+      def('remember'),
     ];
     const domains: Record<string, string> = {
       list_things: 'things',
@@ -98,6 +102,7 @@ describe('AIAgentService.runAgentStream', () => {
       create_expense: 'expenses',
       send_invoice_dian: 'invoicing',
       vex_render_table: 'vex',
+      remember: 'memory',
     };
     registry = {
       getAvailableDefinitions: jest.fn((scopes: string[]) =>
@@ -126,6 +131,7 @@ describe('AIAgentService.runAgentStream', () => {
       isClientSide: (n: string) => n.startsWith('ui_'),
       executeTool,
       executeToolResult: async (name, args, options) => {
+        executionOptions(name, options);
         try {
           return normalizeToolResult(
             options?.confirmationToken
@@ -736,6 +742,44 @@ describe('AIAgentService.runAgentStream', () => {
     );
     expect(JSON.parse(result.tools_used[0].result).data.block_id).toBe(
       'block-1',
+    );
+  });
+
+  // The durable path calls the same `withTurnConversationId` (surface-tools
+  // spec); no durable-session harness exists in this spec to drive it here.
+  it('(H6) remember gets the turn conversation, never the id the model sends', async () => {
+    chat
+      .mockResolvedValueOnce(
+        ok({
+          tool_calls: [
+            call('c1', 'remember', {
+              key: 'learning.format',
+              content: 'video',
+              conversation_id: 999,
+            }),
+          ],
+        }),
+      )
+      .mockResolvedValueOnce(ok({ content: 'listo' }));
+
+    await drain({ agent_key: 'vex', conversation_id: 7 });
+
+    const remembered = executeTool.mock.calls.filter(
+      ([name]) => name === 'remember',
+    );
+    expect(remembered).toHaveLength(1);
+    // P0-1: the arguments never carry a conversation; the turn's travels in
+    // the execution options, which the registry puts in the tool context.
+    expect(remembered[0][1]).toEqual({
+      key: 'learning.format',
+      content: 'video',
+    });
+    const options = executionOptions.mock.calls.filter(
+      ([name]) => name === 'remember',
+    );
+    expect(options).toHaveLength(1);
+    expect(options[0][1]).toEqual(
+      expect.objectContaining({ conversationId: 7 }),
     );
   });
 

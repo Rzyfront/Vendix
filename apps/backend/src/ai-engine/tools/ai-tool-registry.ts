@@ -545,6 +545,9 @@ export class AIToolRegistry {
       store_id: requestContext?.store_id,
       user_id: requestContext?.user_id,
       roles: requestContext?.roles,
+      ...(options?.conversationId != null
+        ? { conversation_id: options.conversationId }
+        : {}),
       ...(agentDeadlineContext.getStore()
         ? {
             signal: agentDeadlineContext.getStore()!.signal,

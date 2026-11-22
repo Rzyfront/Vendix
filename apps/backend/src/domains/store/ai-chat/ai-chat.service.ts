@@ -31,6 +31,7 @@ import type {
 import { RAGService } from '../../../ai-engine/embeddings/rag.service';
 import { recentStoredToolNames } from '../../../ai-engine/tools/tool-working-set';
 import { VexiContextService } from '../vexi/vexi-context.service';
+import type { VexiSnapshot } from '../vexi/vexi-context.service';
 import { VexiStreamIntentService } from '../vexi/vexi-stream-intent.service';
 import { VexiUiChannelService } from '../vexi/vexi-ui-channel.service';
 import {
@@ -542,10 +543,17 @@ export class AIChatService {
       // duplicate and every `{{placeholder}}` would reach the model verbatim.
       // (Con agente y sin app enlazada —ni en la fila ni en la conversación—,
       // `resolveAgentLoopArgs` omite `app_key` y el prompt propio sí viaja.)
-      const variables =
-        agentKey === VEX_AGENT_KEY
-          ? await this.buildVexVariables(conversationId)
-          : await this.vexiContext.buildSnapshot();
+      // `store_memory` solo existe en el snapshot de Vex (VexSnapshot); el de
+      // Vexi no lo trae, así que se lee en la rama y no del tipo unión.
+      let variables: Record<string, string> | VexiSnapshot;
+      let storeMemory: string | undefined;
+      if (agentKey === VEX_AGENT_KEY) {
+        const vexVariables = await this.buildVexVariables(conversationId);
+        variables = vexVariables;
+        storeMemory = vexVariables.store_memory;
+      } else {
+        variables = await this.vexiContext.buildSnapshot();
+      }
       const base = this.resolveAgentLoopArgs(chatAgent, conversation, vexTurn);
       const goal = await this.withBlockSelection(
         dto.content,
@@ -557,6 +565,7 @@ export class AIChatService {
         agentKey ?? 'vexi',
         goal,
         base,
+        { storeMemory },
       );
       const agentResult = await this.aiAgent.runAgent({
         goal,
@@ -1021,13 +1030,21 @@ export class AIChatService {
         ? null
         : await this.planState.get(conversationId);
       const base = this.resolveAgentLoopArgs(chatAgent, conversation, vexTurn);
-      const variables =
-        agentKey === VEX_AGENT_KEY
-          ? await this.buildVexVariables(conversationId, intent.attachment_ids)
-          : await this.vexiContext.buildSnapshot({
-              uiContext: intent.ui_context,
-              attachmentIds: intent.attachment_ids,
-            });
+      let variables: Record<string, string> | VexiSnapshot;
+      let storeMemory: string | undefined;
+      if (agentKey === VEX_AGENT_KEY) {
+        const vexVariables = await this.buildVexVariables(
+          conversationId,
+          intent.attachment_ids,
+        );
+        variables = vexVariables;
+        storeMemory = vexVariables.store_memory;
+      } else {
+        variables = await this.vexiContext.buildSnapshot({
+          uiContext: intent.ui_context,
+          attachmentIds: intent.attachment_ids,
+        });
+      }
       const durableArgs = await this.durableTurnArgs(
         conversation,
         agentKey ?? 'vexi',
@@ -1036,6 +1053,7 @@ export class AIChatService {
         {
           speak: intent.speak,
           continuation: !!intent.continuation,
+          storeMemory,
         },
       );
       if (durableArgs.durable) {
@@ -1909,7 +1927,12 @@ export class AIChatService {
     agentKey: string,
     goal: string,
     base: { plan_approval?: AgentPlanApprovalHook },
-    options: { speak?: boolean; continuation?: boolean } = {},
+    options: {
+      speak?: boolean;
+      continuation?: boolean;
+      /** F4 T31: "Memoria de la tienda" block from `buildVexSnapshot`. */
+      storeMemory?: string;
+    } = {},
   ) {
     if (!this.durableSessions)
       throw new BadRequestException('AI_OBJECTIVE_UNAVAILABLE');
@@ -1944,6 +1967,13 @@ export class AIChatService {
         const resume = resumeReferenceBlock(conversation.messages, goal);
         if (resume) messages.push({ role: 'system', content: resume });
       }
+      // F4 T31: the store memory travels as a turn system message, NOT as a
+      // {{placeholder}} in the stored `system_prompt` (same reasoning as the
+      // speech register in buildContextWindow: an operator can edit that prompt
+      // from Super Admin, and a migration inserting the placeholder would
+      // overwrite production edits). Vex only; Vexi never receives it.
+      if (agentKey === VEX_AGENT_KEY && options.storeMemory?.trim())
+        messages.unshift({ role: 'system', content: options.storeMemory });
       // Durable structured facts take precedence; transcript is a bounded secondary window.
       if (session.context)
         messages.unshift({ role: 'system', content: session.context });

@@ -5,6 +5,7 @@ import { IconComponent } from '../../../../../shared/components/icon/icon.compon
 import { VexiSettingsComponent } from '../vexi/vexi-settings.component';
 import { VexSettingsComponent } from './vex-settings.component';
 import { AgentHistoryComponent } from './history/agent-history.component';
+import { StoreMemoryComponent } from './memory/store-memory.component';
 
 type AiAgentsTab = 'vexi' | 'vex' | 'history';
 
@@ -27,6 +28,7 @@ type AiAgentsTab = 'vexi' | 'vex' | 'history';
     VexiSettingsComponent,
     VexSettingsComponent,
     AgentHistoryComponent,
+    StoreMemoryComponent,
   ],
   template: `
     <div class="w-full" [class.max-w-3xl]="activeTab() !== 'history'">
@@ -107,6 +109,8 @@ type AiAgentsTab = 'vexi' | 'vex' | 'history';
           <app-agent-history />
         </div>
       }
+
+      <app-store-memory />
     </div>
   `,
   styles: [

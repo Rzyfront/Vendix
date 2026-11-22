@@ -73,6 +73,12 @@ export interface ToolExecutionContext {
   store_id?: number;
   user_id?: number;
   roles?: string[];
+  /**
+   * Conversation of the agent turn running the tool, from
+   * `ToolExecutionOptions.conversationId` (the server's turn binding). Never
+   * a tool argument; absent outside a turn (MCP, scripts).
+   */
+  conversation_id?: number;
   /** Cooperative cancellation only; never an authority or rollback guarantee. */
   signal?: AbortSignal;
   deadlineMs?: number;

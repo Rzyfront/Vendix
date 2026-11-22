@@ -1,6 +1,7 @@
 import { Injectable } from '@nestjs/common';
 import { AIToolRegistry } from '../../../../ai-engine/tools/ai-tool-registry';
 import { ToolDeprecation } from '../../../../ai-engine/tools/interfaces/tool.interface';
+import { isVexOnlyTool } from '../../../../ai-engine/tools/surface-tools';
 import { RequestContextService } from '@common/context/request-context.service';
 
 export interface McpToolDefinition {
@@ -22,11 +23,22 @@ export interface McpToolResult {
 export class McpToolProvider {
   constructor(private readonly toolRegistry: AIToolRegistry) {}
 
+  /**
+   * Vex-surface tools (`vex_*`, `suggest_followup`, `remember`, `forget`)
+   * never travel through MCP: they assume a Vex turn (its conversation, its
+   * panel) that an MCP client does not have. Second layer behind each tool's
+   * own access rule, so a new Vex-only tool cannot leak here by omission.
+   * Resolved through the registry so a namespaced name or alias is caught too.
+   */
+  private isHiddenFromMcp(name: string): boolean {
+    return isVexOnlyTool(this.toolRegistry.canonicalName(name));
+  }
+
   listTools(): McpToolDefinition[] {
     const context = RequestContextService.getContext();
-    const definitions = this.toolRegistry.getAvailableDefinitions(
-      context?.permissions || context?.roles,
-    );
+    const definitions = this.toolRegistry
+      .getAvailableDefinitions(context?.permissions || context?.roles)
+      .filter((d) => !this.isHiddenFromMcp(d.function.name));
 
     return definitions.map((d) => {
       const deprecated = this.toolRegistry.getDeprecation(d.function.name);
@@ -53,6 +65,17 @@ export class McpToolProvider {
     name: string,
     args: Record<string, any>,
   ): Promise<McpToolResult> {
+    if (this.isHiddenFromMcp(name)) {
+      return {
+        content: [
+          {
+            type: 'text',
+            text: `Error: Tool "${name}" is not available over MCP`,
+          },
+        ],
+        isError: true,
+      };
+    }
     try {
       const result = await this.toolRegistry.executeTool(name, args);
       return {

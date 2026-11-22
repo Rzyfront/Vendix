@@ -47,6 +47,7 @@ function build(opts?: {
   activeObjectives?: number;
   attachments?: Array<Record<string, unknown>>;
   convDeleteCount?: number;
+  memoriesDeleted?: number;
 }) {
   const calls: Calls = [];
   const o = opts ?? {};
@@ -70,6 +71,12 @@ function build(opts?: {
         return { count: o.convDeleteCount ?? 1 };
       }),
     }),
+    ai_agent_memories: delegate('memories', calls, {
+      deleteMany: jest.fn(async () => {
+        calls.push('memories.deleteMany');
+        return { count: o.memoriesDeleted ?? 0 };
+      }),
+    }),
     ai_conversation_purges: delegate('purges', calls),
     // Any access to user_reminders would be a bug: it is not defined here.
   };
@@ -84,6 +91,7 @@ function build(opts?: {
     ai_messages: { count: jest.fn(async () => 42) },
     ai_ui_blocks: { count: jest.fn(async () => 5) },
     ai_attachments: { count: jest.fn(async () => 3) },
+    ai_agent_memories: { count: jest.fn(async () => o.memoriesDeleted ?? 0) },
     ai_agent_tasks: { count: jest.fn(async () => o.runningTasks ?? 0) },
     ai_agent_objectives: {
       count: jest.fn(async () => o.activeObjectives ?? 0),
@@ -121,6 +129,7 @@ function totalMutations(tx: Record<string, Record<string, jest.Mock>>) {
 describe('ConversationPurgeService.purge', () => {
   it('deletes every table of §3.13 with a conversation-scoped where, in Restrict order', async () => {
     const { service, tx, calls } = build({
+      memoriesDeleted: 2,
       attachments: [
         {
           id: 1,
@@ -201,10 +210,17 @@ describe('ConversationPurgeService.purge', () => {
       where: { id: { in: [2] } },
       data: { conversation_id: null },
     });
+    // memories: only un-edited agent rows born in this conversation, this store
+    expect(w('ai_agent_memories', 'deleteMany')).toEqual({
+      store_id: 1,
+      agent_key: 'vex',
+      source_conversation_id: CONV,
+      origin: 'agent',
+    });
 
     expect(result).toEqual({
       purged: true,
-      counts: { messages: 3, attachments: 1, blocks: 3, memories: 0 },
+      counts: { messages: 3, attachments: 1, blocks: 3, memories: 2 },
     });
   });
 
@@ -373,13 +389,21 @@ describe('ConversationPurgeService.purge', () => {
 
 describe('ConversationPurgeService.preview', () => {
   it('returns the real figures without mutating anything', async () => {
-    const { service, tx } = build();
+    const { service, tx, prisma } = build({ memoriesDeleted: 4 });
     const preview = await run(() => service.preview(CONV));
+    expect(prisma.ai_agent_memories.count).toHaveBeenCalledWith({
+      where: {
+        store_id: 1,
+        agent_key: 'vex',
+        source_conversation_id: CONV,
+        origin: 'agent',
+      },
+    });
     expect(preview).toEqual({
       messages: 42,
       attachments: 3,
       blocks: 5,
-      memories: 0,
+      memories: 4,
       has_running_task: false,
     });
     expect(totalMutations(tx)).toBe(0);
