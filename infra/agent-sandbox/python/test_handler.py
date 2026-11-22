@@ -334,6 +334,15 @@ class ExecutionTests(unittest.TestCase):
             self.assertEqual(res["error_code"], "ANALYSIS_TIMEOUT")
             self.assertEqual(proc.wait.call_args_list[0].kwargs, {"timeout": child_s})
 
+    def test_strays_are_reaped_even_if_killing_the_group_fails(self):
+        factory, _ = self.popen_writing({"status": "ok", "output": VALID_OUTPUT})
+        self.killpg.side_effect = OSError(errno.EIO, "unexpected")
+        with patch.object(handler.subprocess, "Popen", side_effect=factory):
+            res = handler.handler(request())
+        self.assertEqual(res["error_code"], "ANALYSIS_RUNTIME")
+        self.assertEqual(self.kill.call_count, 2)
+        self.assertEqual(os.listdir(self.root), [])
+
     def test_strays_are_reaped_after_a_timeout(self):
         proc = MagicMock(pid=778, returncode=None)
         proc.wait.side_effect = [subprocess.TimeoutExpired("x", 1), 0]
@@ -393,7 +402,7 @@ class DumpableTests(unittest.TestCase):
     denies every prctl with EPERM (T53); that EPERM is accepted ONLY when the
     kernel already made the process non-dumpable (/proc/self owned by root)."""
 
-    def harden(self, prctl_rc=-1, err=errno.EPERM, uid=993, environ_uid=0, stat_error=None):
+    def harden(self, prctl_rc=-1, err=errno.EPERM, uid=993, environ_uid=0, stat_error=None, real_uid=993):
         libc = MagicMock()
         libc.prctl.return_value = prctl_rc
         stat = MagicMock(side_effect=stat_error) if stat_error else MagicMock(return_value=FakeStat(environ_uid))
@@ -401,7 +410,8 @@ class DumpableTests(unittest.TestCase):
                 patch.object(handler.ctypes.util, "find_library", return_value="libc.so.6"), \
                 patch.object(handler.ctypes, "CDLL", return_value=libc), \
                 patch.object(handler.ctypes, "get_errno", return_value=err), \
-                patch.object(handler.os, "getuid", return_value=uid), \
+                patch.object(handler.os, "geteuid", return_value=uid), \
+                patch.object(handler.os, "getuid", return_value=real_uid), \
                 patch.object(handler.os, "stat", stat):
             handler._harden_parent_dumpable()
         return libc, stat
@@ -423,6 +433,11 @@ class DumpableTests(unittest.TestCase):
     def test_eperm_rejected_when_running_as_root(self):
         with self.assertRaises(OSError):
             self.harden(uid=0, environ_uid=0)
+
+    def test_eperm_rejected_when_effective_uid_is_root(self):
+        # /proc ownership follows the effective uid, not the real one.
+        with self.assertRaises(OSError):
+            self.harden(uid=0, real_uid=993, environ_uid=0)
 
     def test_eperm_rejected_when_proof_cannot_be_read(self):
         with self.assertRaises(OSError):

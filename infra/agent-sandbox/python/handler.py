@@ -65,10 +65,11 @@ def _kernel_marked_non_dumpable():
     """True when the kernel already treats this process as non-dumpable.
 
     The /proc/<pid> inodes of a non-dumpable task are owned by root, so a
-    non-root process whose /proc/self/environ belongs to uid 0 is non-dumpable.
+    process whose effective uid is not root but whose /proc/self/environ belongs
+    to uid 0 is non-dumpable.
     """
     try:
-        return os.getuid() != 0 and os.stat("/proc/self/environ").st_uid == 0
+        return os.geteuid() != 0 and os.stat("/proc/self/environ").st_uid == 0
     except OSError:
         return False
 
@@ -326,8 +327,10 @@ def _execute(tmpdir, source, inputs, limits):
         except subprocess.TimeoutExpired:
             timed_out = True
         finally:
-            _kill_group(proc.pid)
-            _reap_strays()  # also what escaped the group (double fork + setsid)
+            try:
+                _kill_group(proc.pid)
+            finally:
+                _reap_strays()  # also what escaped the group (double fork + setsid)
         if timed_out:
             try:
                 proc.wait(timeout=5)
