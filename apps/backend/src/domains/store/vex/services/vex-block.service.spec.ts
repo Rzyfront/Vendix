@@ -2,6 +2,7 @@ import { AIAgentService } from '../../../../ai-engine/ai-agent.service';
 import { AIToolRegistry } from '../../../../ai-engine/tools/ai-tool-registry';
 import { createVexBlockTools } from '../../../../ai-engine/tools/domains/vex-blocks.tools';
 import { RequestContextService } from '../../../../common/context/request-context.service';
+import { S3Service } from '../../../../common/services/s3.service';
 import { VexBlockService } from './vex-block.service';
 import { compactRecoverableToolResult } from '../../../../ai-engine/context/tool-result-compaction';
 
@@ -77,6 +78,7 @@ function makeDelegate() {
 describe('VexBlockService', () => {
   let delegate: ReturnType<typeof makeDelegate>;
   let findConversation: jest.Mock;
+  let s3Presign: jest.Mock;
   let service: VexBlockService;
   let getStoreId: jest.SpyInstance;
   let getContext: jest.SpyInstance;
@@ -105,10 +107,14 @@ describe('VexBlockService', () => {
       ai_ui_blocks: delegate,
       ai_conversations: { findFirst: findConversation },
     };
-    const s3 = {
-      getPresignedUrl: jest.fn(async (key: string) => `https://signed/${key}`),
-    };
-    service = new VexBlockService(prisma as any, s3 as any);
+    s3Presign = jest.fn(async (key: string) => `https://signed/${key}`);
+    const s3 = Object.create(S3Service.prototype) as S3Service;
+    Object.assign(s3, {
+      bucketName: 'vendix-assets-storage',
+      logger: { warn: jest.fn(), error: jest.fn(), log: jest.fn() },
+      getPresignedUrl: s3Presign,
+    });
+    service = new VexBlockService(prisma as any, s3);
     getStoreId = jest
       .spyOn(RequestContextService, 'getStoreId')
       .mockReturnValue(7);
@@ -724,6 +730,102 @@ describe('VexBlockService', () => {
       await expect(
         service.create({ conversation_id: 1, kind: 'kpi', data: { value: 1 } }),
       ).rejects.toMatchObject({ errorCode: 'SYS_VALIDATION_001' });
+    });
+
+    it('signs help_article markdown S3 keys on render and re-read without persisting signed URLs', async () => {
+      const key1 =
+        'global/help-center/articles/1777651583587-step1.webp';
+      const key2 =
+        'global/help-center/articles/1777651607637-step2.webp';
+      const expiredOwnUrl = `https://vendix-assets-storage.s3.us-east-1.amazonaws.com/${key2}?X-Amz-Algorithm=AWS4-HMAC-SHA256&X-Amz-Signature=expired`;
+      const externalUrl = 'https://cdn.example.com/help/diagram.png';
+      const foreignS3Url =
+        'https://other-bucket.s3.us-east-1.amazonaws.com/docs/ext.png';
+
+      let call = 0;
+      s3Presign.mockImplementation(
+        async (key: string) => `https://signed.vendix/${key}?v=${++call}`,
+      );
+
+      const created = await service.create({
+        conversation_id: 1,
+        kind: 'help_article',
+        data: {
+          article: article({
+            cover_image_url: `https://vendix-assets-storage.s3.us-east-1.amazonaws.com/global/help-center/articles/cover.webp?X-Amz-Signature=old`,
+            content: [
+              'Ve a productos en el menú izquierdo',
+              `![image](${key1})`,
+              'Selecciona el botón más',
+              `![image](${expiredOwnUrl})`,
+              `![externa](${externalUrl})`,
+              `![ajeno](${foreignS3Url})`,
+            ].join('\n'),
+          }),
+        },
+      });
+
+      // Persisted row NEVER stores signed URLs — only S3 keys and external URLs
+      const storedArticle = (delegate.rows[0].data as any).article;
+      expect(storedArticle.content).toContain(`![image](${key1})`);
+      expect(storedArticle.content).toContain(`![image](${key2})`);
+      expect(storedArticle.content).not.toContain('X-Amz-Signature');
+      expect(storedArticle.content).toContain(`![externa](${externalUrl})`);
+      expect(storedArticle.content).toContain(`![ajeno](${foreignS3Url})`);
+      expect(storedArticle.cover_image_url).toBe(
+        'global/help-center/articles/cover.webp',
+      );
+
+      // Initial render (live ui_block) signs every own-bucket image fresh
+      const firstView = await service.toUiBlock(created);
+      const firstArticle = (firstView.data as any).article;
+      expect(firstArticle.content).toContain(
+        `![image](https://signed.vendix/${key1}?v=1)`,
+      );
+      expect(firstArticle.content).toContain(
+        `![image](https://signed.vendix/${key2}?v=2)`,
+      );
+      expect(firstArticle.content).toContain(`![externa](${externalUrl})`);
+      expect(firstArticle.content).toContain(`![ajeno](${foreignS3Url})`);
+      expect(firstArticle.cover_image_url).toBe(
+        'https://signed.vendix/global/help-center/articles/cover.webp?v=3',
+      );
+
+      // Re-reading the persisted block mints fresh URLs again and never mutates DB
+      const reloadedView = await service.getUiBlock(created.id);
+      const reloadedArticle = (reloadedView.data as any).article;
+      expect(reloadedArticle.content).toContain(
+        `![image](https://signed.vendix/${key1}?v=4)`,
+      );
+      expect(reloadedArticle.content).toContain(
+        `![image](https://signed.vendix/${key2}?v=5)`,
+      );
+      expect(reloadedArticle.cover_image_url).toBe(
+        'https://signed.vendix/global/help-center/articles/cover.webp?v=6',
+      );
+      expect((delegate.rows[0].data as any).article.content).not.toContain(
+        'https://signed.vendix/',
+      );
+    });
+
+    it('keeps help_article markdown without images unchanged without calling S3', async () => {
+      const created = await service.create({
+        conversation_id: 1,
+        kind: 'help_article',
+        data: {
+          article: article({
+            content: '## Paso 1\nAbre Productos.\n\n## Paso 2\nGuarda.',
+            cover_image_url: null,
+          }),
+        },
+      });
+      s3Presign.mockClear();
+
+      const view = await service.getUiBlock(created.id);
+      expect((view.data as any).article.content).toBe(
+        '## Paso 1\nAbre Productos.\n\n## Paso 2\nGuarda.',
+      );
+      expect(s3Presign).not.toHaveBeenCalled();
     });
   });
 

@@ -20,13 +20,19 @@ const S3_SIGNED_URL_PARAMS = [
 ];
 
 /**
- * Pattern to match S3 bucket hostnames.
- * Supports various S3 URL formats:
+ * Pattern to match virtual-hosted S3 bucket hostnames:
  * - https://bucket-name.s3.region.amazonaws.com/key
- * - https://s3.region.amazonaws.com/bucket-name/key
  * - https://bucket-name.s3.amazonaws.com/key
  */
-const S3_HOSTNAME_PATTERN = /^(?:[\w-]+\.)?s3(?:\.[\w-]+)?\.amazonaws\.com$/i;
+const S3_VIRTUAL_HOST_PATTERN =
+  /^([\w-]+)\.s3(?:\.[\w-]+)?\.amazonaws\.com$/i;
+
+/**
+ * Pattern to match path-style S3 hostnames:
+ * - https://s3.region.amazonaws.com/bucket-name/key
+ * - https://s3.amazonaws.com/bucket-name/key
+ */
+const S3_PATH_STYLE_PATTERN = /^s3(?:\.[\w-]+)?\.amazonaws\.com$/i;
 
 /**
  * Extracts the S3 key from a signed URL or returns the key unchanged if already valid.
@@ -35,7 +41,12 @@ const S3_HOSTNAME_PATTERN = /^(?:[\w-]+\.)?s3(?:\.[\w-]+)?\.amazonaws\.com$/i;
  * Signed URLs expire (typically 24 hours), and storing them causes images to become
  * inaccessible after expiration.
  *
+ * When `bucketName` is supplied, only URLs targeting that bucket are stripped to
+ * their S3 key; URLs pointing to a different S3 bucket are treated as external
+ * assets and returned unchanged.
+ *
  * @param urlOrKey - A signed S3 URL, an S3 key, or null/undefined
+ * @param bucketName - Optional expected bucket name to restrict S3 URL matching
  * @returns The extracted S3 key, or null if input is null/undefined/empty
  *
  * @example
@@ -60,6 +71,7 @@ const S3_HOSTNAME_PATTERN = /^(?:[\w-]+\.)?s3(?:\.[\w-]+)?\.amazonaws\.com$/i;
  */
 export function extractS3KeyFromUrl(
   urlOrKey: string | null | undefined,
+  bucketName?: string,
 ): string | null {
   // Handle null, undefined, or empty strings
   if (!urlOrKey || urlOrKey.trim() === '') {
@@ -82,27 +94,28 @@ export function extractS3KeyFromUrl(
     return trimmed;
   }
 
-  // Check if this is an S3 URL by hostname pattern
-  const isS3Url = S3_HOSTNAME_PATTERN.test(url.hostname);
+  const virtualMatch = S3_VIRTUAL_HOST_PATTERN.exec(url.hostname);
+  const isPathStyleUrl = !virtualMatch && S3_PATH_STYLE_PATTERN.test(url.hostname);
 
-  if (!isS3Url) {
+  if (!virtualMatch && !isPathStyleUrl) {
     // Not an S3 URL - return as-is (external CDN, etc.)
     return trimmed;
   }
 
-  // Check if this is a signed URL by looking for signature parameters
-  const hasSignedParams = S3_SIGNED_URL_PARAMS.some((param) =>
-    url.searchParams.has(param),
-  );
-
-  if (!hasSignedParams) {
-    // S3 URL but not signed - still extract the key to normalize
-    // This handles cases where someone stored a non-signed S3 URL
+  const expectedBucket = bucketName?.trim().toLowerCase();
+  if (virtualMatch && expectedBucket && virtualMatch[1].toLowerCase() !== expectedBucket) {
+    // S3 URL pointing to a foreign bucket — preserve as external URL
+    return trimmed;
   }
 
   // Extract the key from the pathname
   // The pathname starts with '/' so we remove it
-  let key = decodeURIComponent(url.pathname);
+  let key: string;
+  try {
+    key = decodeURIComponent(url.pathname);
+  } catch {
+    return trimmed;
+  }
 
   // Remove leading slash
   if (key.startsWith('/')) {
@@ -111,16 +124,17 @@ export function extractS3KeyFromUrl(
 
   // Handle path-style URLs: s3.region.amazonaws.com/bucket-name/key
   // In this case, the first segment is the bucket name, not part of the key
-  // We detect this by checking if the hostname is exactly s3.*.amazonaws.com (no bucket prefix)
-  const isPathStyleUrl = /^s3(?:\.[\w-]+)?\.amazonaws\.com$/i.test(
-    url.hostname,
-  );
   if (isPathStyleUrl) {
-    // Remove the bucket name (first segment)
     const slashIndex = key.indexOf('/');
-    if (slashIndex !== -1) {
-      key = key.substring(slashIndex + 1);
+    if (slashIndex === -1) {
+      return expectedBucket ? trimmed : key || null;
     }
+    const pathBucket = key.substring(0, slashIndex);
+    if (expectedBucket && pathBucket.toLowerCase() !== expectedBucket) {
+      // Path-style S3 URL pointing to a foreign bucket — preserve as external URL
+      return trimmed;
+    }
+    key = key.substring(slashIndex + 1);
   }
 
   return key || null;
