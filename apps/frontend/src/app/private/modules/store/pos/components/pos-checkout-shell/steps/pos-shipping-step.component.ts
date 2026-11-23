@@ -44,6 +44,7 @@ import {
 } from '../../../../../../../shared/components/address-form-fields/address-form-fields.component';
 import { CountryService } from '../../../../../../../core/services/country.service';
 import { preferredEstablishment } from '../../../../../../../shared/utils/customer-establishment-rows.util';
+import { customerDisplayName } from '../../../../../../../shared/utils/customer-display-name.util';
 import {
   GeocodingService,
   type GeocodePrecision,
@@ -448,9 +449,8 @@ export class PosShippingStepComponent {
     if (alias) return alias;
     const customer = this.cartState()?.customer;
     if (!customer) return 'Seleccionar cliente';
-    const firstName = customer.first_name || '';
-    const lastName = customer.last_name || '';
-    return `${firstName} ${lastName}`.trim() || 'Cliente sin nombre';
+    // Razón social primero (persona jurídica), luego nombre y apellido.
+    return customerDisplayName(customer, 'Cliente sin nombre');
   }
 
   /**

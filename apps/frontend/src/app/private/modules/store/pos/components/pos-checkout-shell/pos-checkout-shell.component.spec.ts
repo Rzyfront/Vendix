@@ -1044,6 +1044,8 @@ describe('PosCheckoutShellComponent — matriz de teclado (CP-POS-CHECKOUT-KEYBO
       component.clienteSubStep.set(1);
       fixture.detectChanges();
       expect(component.customerChipDetail()).toBe('NIT 900123 · Sede Sur');
+      // Persona jurídica: el chip muestra la razón social, no "Cliente sin nombre".
+      expect(component.customerDisplayName).toBe('ACME SAS');
     });
 
     it('"Cambiar cliente" muestra el selector', () => {

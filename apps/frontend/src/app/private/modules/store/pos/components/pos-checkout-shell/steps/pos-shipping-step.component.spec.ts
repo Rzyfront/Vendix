@@ -1533,6 +1533,13 @@ describe('PosShippingStepComponent — preserve order shipping and explicit edit
       expect(component.addressId()).toBe(61);
       expect(component.editorValidationError() ?? '').not.toContain('Cambiaste el cliente');
     });
+
+    it('persona jurídica: el destinatario usa la razón social', () => {
+      const state = cart();
+      state.customer = { ...state.customer!, first_name: '', last_name: '', legal_name: 'ACME SAS' } as any;
+      mount(state);
+      expect(component.customerDisplayName).toBe('ACME SAS');
+    });
   });
 
   it('B6 — cambiar de tarifa en el selector actualiza el costo de envío', () => {

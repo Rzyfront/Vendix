@@ -48,6 +48,7 @@ import { PosOrderCreateResult } from '../../models/order.model';
 // división que `pos-payment.service.ts`/`pos-order.service.ts` ya usan.
 import { resolveLineUnits } from '../../utils/line-units.util';
 import { preferredEstablishment } from '../../../../../../shared/utils/customer-establishment-rows.util';
+import { customerDisplayName } from '../../../../../../shared/utils/customer-display-name.util';
 import { extractApiErrorMessage } from '../../../../../../core/utils/api-error-handler';
 import { ERROR_MESSAGES } from '../../../../../../core/utils/error-messages';
 import { formatStockWarningSummary } from '../../../../../../core/utils/stock-shortage.util';
@@ -679,9 +680,8 @@ export class PosCheckoutShellComponent {
   get customerDisplayName(): string {
     const customer = this.cartState()?.customer;
     if (!customer) return 'Seleccionar cliente';
-    const firstName = customer.first_name || '';
-    const lastName = customer.last_name || '';
-    return `${firstName} ${lastName}`.trim() || 'Cliente sin nombre';
+    // Razón social primero (persona jurídica), luego nombre y apellido.
+    return customerDisplayName(customer, 'Cliente sin nombre');
   }
 
   /** El cajero pidió cambiar el cliente: reabre el selector aunque ya haya uno. */
