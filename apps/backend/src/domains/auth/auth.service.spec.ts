@@ -1000,10 +1000,11 @@ describe('AuthService Login Flow', () => {
   });
 
   describe('session user without auth-only columns', () => {
+    // An expired lock: login must go through it and still drop the columns.
     const AUTH_ONLY = {
       two_factor_secret: 'JBSWY3DPEHPK3PXP',
       failed_login_attempts: 2,
-      locked_until: new Date('2026-11-23T12:00:00Z'),
+      locked_until: new Date('2020-01-01T00:00:00Z'),
     };
 
     function expectNoAuthOnlyColumns(user: object) {
@@ -1068,6 +1069,34 @@ describe('AuthService Login Flow', () => {
           permissions: expect.any(Array),
         }),
       );
+    });
+
+    it('login still rejects an account whose lock has not expired', async () => {
+      mockPrismaService.users.findMany.mockResolvedValue([
+        accountRow({
+          email: 'owner@test.com',
+          password: await bcrypt.hash('123', 4),
+          ...AUTH_ONLY,
+          locked_until: new Date(Date.now() + 60 * 60 * 1000),
+          user_roles: [{ roles: { name: 'owner', role_permissions: [] } }],
+        }),
+      ]);
+      mockPrismaService.stores.findFirst.mockResolvedValue({
+        id: 10,
+        slug: 'store-a',
+        organization_id: 1,
+        organizations: { slug: 'org-a' },
+      });
+      mockPrismaService.refresh_tokens.create.mockClear();
+
+      await expect(
+        service.login({
+          email: 'owner@test.com',
+          password: '123',
+          store_slug: 'store-a',
+        }),
+      ).rejects.toMatchObject({ errorCode: 'AUTH_VALIDATE_001' });
+      expect(mockPrismaService.refresh_tokens.create).not.toHaveBeenCalled();
     });
 
     it('getCurrentUser (/auth/me) returns the user without auth-only columns', async () => {

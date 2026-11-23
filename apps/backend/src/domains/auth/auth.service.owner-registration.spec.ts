@@ -17,6 +17,7 @@ import {
   NotFoundException,
 } from '@nestjs/common';
 import * as bcrypt from 'bcrypt';
+import { SENSITIVE_USER_FIELDS } from '@common/utils/safe-user-select.util';
 
 describe('AuthService - Owner Registration Flow', () => {
   let service: AuthService;
@@ -183,6 +184,9 @@ describe('AuthService - Owner Registration Flow', () => {
         email_verified: false,
         organization_id: 1,
         username: 'owner@test.com',
+        two_factor_secret: 'JBSWY3DPEHPK3PXP',
+        failed_login_attempts: 0,
+        locked_until: null,
         user_roles: [
           {
             roles: {
@@ -248,6 +252,9 @@ describe('AuthService - Owner Registration Flow', () => {
       expect(result.access_token).toBe('mock-access-token');
       expect(result.refresh_token).toBeDefined();
       expect(result.wasExistingUser).toBe(false);
+      for (const field of SENSITIVE_USER_FIELDS) {
+        expect(result.user).not.toHaveProperty(field);
+      }
 
       // Verify service calls
       expect(mockPrismaService.organizations.findUnique).toHaveBeenCalledWith({
