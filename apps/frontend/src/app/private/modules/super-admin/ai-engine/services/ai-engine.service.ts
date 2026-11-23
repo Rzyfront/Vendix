@@ -3,6 +3,7 @@ import { HttpClient, HttpParams } from '@angular/common/http';
 import { Observable } from 'rxjs';
 import { map, shareReplay, tap } from 'rxjs/operators';
 import { environment } from '../../../../../../environments/environment';
+import { withUserActionTimeout } from '../../../../../core/utils/backend-availability.util';
 import {
   AIEngineConfig,
   CreateAIConfigDto,
@@ -39,6 +40,13 @@ interface CacheEntry<T> {
 }
 
 let statsCache: CacheEntry<Observable<any>> | null = null;
+
+/**
+ * Las pruebas llaman al proveedor de IA (el backend corta a los 90 s); el
+ * cliente espera un poco más para recibir ese error controlado antes de
+ * rendirse. Un guardado/prueba colgado termina en toast, nunca en el gato.
+ */
+export const AI_TEST_ACTION_TIMEOUT_MS = 120_000;
 
 @Injectable({
   providedIn: 'root',
@@ -92,17 +100,18 @@ export class AIEngineService {
   }
 
   createConfig(data: CreateAIConfigDto): Observable<AIEngineConfig> {
-    return this.http.post<any>(`${this.apiUrl}/superadmin/ai-engine`, data);
+    return this.http
+      .post<any>(`${this.apiUrl}/superadmin/ai-engine`, data)
+      .pipe(withUserActionTimeout());
   }
 
   updateConfig(
     id: number,
     data: UpdateAIConfigDto,
   ): Observable<AIEngineConfig> {
-    return this.http.patch<any>(
-      `${this.apiUrl}/superadmin/ai-engine/${id}`,
-      data,
-    );
+    return this.http
+      .patch<any>(`${this.apiUrl}/superadmin/ai-engine/${id}`, data)
+      .pipe(withUserActionTimeout());
   }
 
   deleteConfig(id: number): Observable<void> {
@@ -114,10 +123,9 @@ export class AIEngineService {
   testConnection(
     id: number,
   ): Observable<{ success: boolean; message: string }> {
-    return this.http.post<any>(
-      `${this.apiUrl}/superadmin/ai-engine/${id}/test`,
-      {},
-    );
+    return this.http
+      .post<any>(`${this.apiUrl}/superadmin/ai-engine/${id}/test`, {})
+      .pipe(withUserActionTimeout(AI_TEST_ACTION_TIMEOUT_MS));
   }
 
   // --- AI Applications ---
@@ -146,17 +154,18 @@ export class AIEngineService {
   }
 
   createApp(data: CreateAIAppDto): Observable<AIEngineApp> {
-    return this.http.post<any>(
-      `${this.apiUrl}/superadmin/ai-engine/applications`,
-      data,
-    );
+    return this.http
+      .post<any>(`${this.apiUrl}/superadmin/ai-engine/applications`, data)
+      .pipe(withUserActionTimeout());
   }
 
   updateApp(id: number, data: UpdateAIAppDto): Observable<AIEngineApp> {
-    return this.http.patch<any>(
-      `${this.apiUrl}/superadmin/ai-engine/applications/${id}`,
-      data,
-    );
+    return this.http
+      .patch<any>(
+        `${this.apiUrl}/superadmin/ai-engine/applications/${id}`,
+        data,
+      )
+      .pipe(withUserActionTimeout());
   }
 
   deleteApp(id: number): Observable<void> {
@@ -168,10 +177,12 @@ export class AIEngineService {
   testApp(
     id: number,
   ): Observable<{ success: boolean; content?: string; error?: string }> {
-    return this.http.post<any>(
-      `${this.apiUrl}/superadmin/ai-engine/applications/${id}/test`,
-      {},
-    );
+    return this.http
+      .post<any>(
+        `${this.apiUrl}/superadmin/ai-engine/applications/${id}/test`,
+        {},
+      )
+      .pipe(withUserActionTimeout(AI_TEST_ACTION_TIMEOUT_MS));
   }
 
   // --- AI Tools (F5: catálogo vivo, sin paginación) ---

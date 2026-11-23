@@ -42,6 +42,9 @@ export interface NormalizedApiPayload {
   retryAfter?: number;
 }
 
+export const NETWORK_ERROR_MESSAGE =
+  'No pudimos comunicarnos con el servidor. Revisa tu conexión e inténtalo de nuevo.';
+
 function extractNestedMessage(value: any): string | null {
   if (typeof value === 'string') {
     return value;
@@ -76,6 +79,13 @@ function extractNestedMessage(value: any): string | null {
  * @returns Mensaje de error formateado
  */
 export function extractApiErrorMessage(response: any): string {
+  // status 0 = la petición no obtuvo respuesta (red, CORS, cola del navegador).
+  // Su `error` es un TypeError del transporte ("Failed to fetch"), nunca un
+  // mensaje de negocio: se devuelve un texto legible para el toast.
+  if (response?.name === 'HttpErrorResponse' && response.status === 0) {
+    return NETWORK_ERROR_MESSAGE;
+  }
+
   // Detectar error_code del nuevo sistema de error codes estandarizado
   const body = response?.error ?? response;
   if (body?.error_code) {
