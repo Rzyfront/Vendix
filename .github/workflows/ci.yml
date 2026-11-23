@@ -880,6 +880,9 @@ jobs:
           --include='**/shared/utils/customer-establishment-rows.util.spec.ts'
           --include='**/pos/components/pos-customer-selector/pos-customer-selector.component.spec.ts'
           --include='**/pos/components/pos-customer-modal.component.spec.ts'
+          --include='**/core/utils/backend-availability.util.spec.ts'
+          --include='**/app/app-init-boot.spec.ts'
+          --include='**/super-admin/ai-engine/ai-engine.component.spec.ts'
           --include='**/planillas-rutas/components/planilla-wizard/planilla-wizard.component.spec.ts'
           --include='**/planillas-rutas/components/add-notes-modal/add-notes-modal.component.spec.ts'
 

@@ -14,7 +14,12 @@ import {
 import { provideStore, Store, provideState } from '@ngrx/store';
 import { provideEffects } from '@ngrx/effects';
 import { provideStoreDevtools } from '@ngrx/store-devtools';
-import { firstValueFrom, timeout, catchError, of, filter } from 'rxjs';
+import { firstValueFrom, timeout, catchError, filter, from, map } from 'rxjs';
+import { environment } from '../environments/environment';
+import {
+  isBackendReachable,
+  settleSlowAppInit,
+} from './core/utils/backend-availability.util';
 import { authInterceptorFn } from './core/interceptors/auth.interceptor';
 import { subscriptionPaywallInterceptor } from './core/interceptors/subscription-paywall.interceptor';
 import { fiscalGateInterceptor } from './core/interceptors/fiscal-gate.interceptor';
@@ -40,8 +45,10 @@ import { ToastService } from './shared/components/toast/toast.service';
 
 import { routes } from './app.routes';
 
-// Timeout for app initialization (10 seconds)
-const APP_INIT_TIMEOUT_MS = 10000;
+// Plazo de arranque (10 s). ÚNICO temporizador de arranque de la app: al
+// vencer se confirma con /health antes de despachar initializeAppFailure (el
+// gato). RouteManagerService ya no tiene un temporizador propio.
+export const APP_INIT_TIMEOUT_MS = 10000;
 
 // Factory para el APP_INITIALIZER
 export function initializeApp(
@@ -62,19 +69,32 @@ export function initializeApp(
       routeManager.routesConfigured$.pipe(
         filter((configured) => configured === true),
         timeout(APP_INIT_TIMEOUT_MS),
+        map(() => true),
         catchError((error) => {
-          console.error(
-            '[APP_INITIALIZER] Timeout or error waiting for routes:',
+          console.warn(
+            '[APP_INITIALIZER] Slow init, confirming backend health:',
             error,
           );
-          // NO degradar a VENDIX_LANDING. Marcamos un fallo transitorio tipado:
-          // el handler de initializeAppFailure configura rutas neutras y la UI
-          // muestra el estado de error con opción de reintentar. Devolvemos
-          // true para no bloquear el arranque de la app.
-          store.dispatch(
-            ConfigActions.initializeAppFailure({ error: { kind: 'transient' } }),
+          // NO degradar a VENDIX_LANDING. Un arranque lento NO es un backend
+          // caído: se confirma con /health antes de mostrar el gato global
+          // (fallo transitorio tipado: el handler de initializeAppFailure
+          // configura rutas neutras y la UI ofrece reintentar). Con el
+          // backend vivo reintenta la resolución y sigue en el splash.
+          return from(
+            settleSlowAppInit({
+              routesConfigured$: routeManager.routesConfigured$,
+              probeBackend: () => isBackendReachable(environment.apiUrl),
+              onFailure: () =>
+                store.dispatch(
+                  ConfigActions.initializeAppFailure({
+                    error: { kind: 'transient' },
+                  }),
+                ),
+              // Backend vivo pero la resolución no llega: reintentarla (sigue
+              // el splash) en vez de mostrar un gato falso.
+              onRetry: () => store.dispatch(ConfigActions.retryResolution()),
+            }),
           );
-          return of(true);
         }),
       ),
     );
