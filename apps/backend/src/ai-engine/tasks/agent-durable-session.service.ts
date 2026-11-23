@@ -19,6 +19,7 @@ import { AgentTaskContextService } from './agent-task-context.service';
 import { objectiveProviderMeter } from './agent-budget-context';
 import {
   AgentObjective,
+  clientObjectiveBudget,
   ObjectiveBudget,
   ObjectiveProgress,
   ObjectiveLease,
@@ -33,7 +34,7 @@ export function objectiveProgress(row: AgentObjective): ObjectiveProgress {
     version: row.version,
     semantic_status: row.semantic_status,
     next_step: row.next_step,
-    budget: row.budget,
+    budget: clientObjectiveBudget(row.budget),
     expires_at: new Date(row.expires_at).toISOString(),
     requires_revalidation: row.requires_revalidation,
   };

@@ -603,3 +603,37 @@ describe('VexiPlanStateService durable adapter', () => {
     },
   );
 });
+
+describe('VexiPlanStateService objective progress (P2-6)', () => {
+  it('GET objectives/:id returns token counters without the internal cost', async () => {
+    const row: any = {
+      id: '00000000-0000-4000-8000-000000000001',
+      conversation_id: 7,
+      goal: 'g',
+      semantic_status: 'active',
+      version: 3,
+      expires_at: new Date(Date.now() + 60_000),
+      next_step: null,
+      requires_revalidation: false,
+      budget: {
+        provider_attempts: 2,
+        prompt_tokens: 800,
+        completion_tokens: 90,
+        cost_usd: 0.0456,
+        tools: 1,
+        active_runtime_ms: 10,
+        expansions: 0,
+        recovery: 0,
+      },
+    };
+    const repo: any = { get: jest.fn().mockResolvedValue(row) };
+    const svc = new VexiPlanStateService({} as any, repo);
+    const progress = await svc.getObjectiveProgress(row.id);
+    expect(progress.budget).not.toHaveProperty('cost_usd');
+    expect(progress.budget).toMatchObject({
+      prompt_tokens: 800,
+      completion_tokens: 90,
+    });
+    expect(row.budget.cost_usd).toBe(0.0456);
+  });
+});

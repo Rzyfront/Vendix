@@ -101,7 +101,6 @@ export interface AIMessage {
   content: string;
   tool_calls: any;
   tokens_used: number;
-  cost_usd: number;
   metadata: any;
   created_at: string;
 }

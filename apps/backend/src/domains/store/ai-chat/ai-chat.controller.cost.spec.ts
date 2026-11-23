@@ -20,7 +20,10 @@ describe('AIChatController keeps cost_usd out of message rows', () => {
         .fn()
         .mockResolvedValue({ id: 7, title: 'x', messages: [row(1), row(2)] }),
       listConversations: jest.fn().mockResolvedValue({
-        data: [{ id: 7, title: 'x', messages: [row(2)] }, { id: 8, title: 'y' }],
+        data: [
+          { id: 7, title: 'x', messages: [row(2)] },
+          { id: 8, title: 'y' },
+        ],
         meta: { total: 2, page: 1, limit: 20, totalPages: 1 },
       }),
     };
@@ -64,5 +67,33 @@ describe('AIChatController keeps cost_usd out of message rows', () => {
     expect(out.data[0].messages![0].content).toBe('Listo.');
     expect(out.data[1]).toEqual({ id: 8, title: 'y' });
     expect(out.meta).toEqual({ total: 2, page: 1, limit: 20, totalPages: 1 });
+  });
+
+  it('P2-6: legacy rows lose the objective cost nested in metadata', async () => {
+    const legacy = {
+      ...row(3),
+      metadata: {
+        context_budget: { estimated_input_tokens: 1 },
+        objective: { id: 'o1', budget: { prompt_tokens: 5, cost_usd: 0.02 } },
+      },
+    };
+    const chatService = {
+      getConversation: jest
+        .fn()
+        .mockResolvedValue({ id: 7, title: 'x', messages: [legacy] }),
+    };
+    const controller = new AIChatController(
+      chatService as never,
+      { success: jest.fn((data: unknown) => ({ data })) } as never,
+      {} as never,
+    );
+    const out = (await controller.getConversation(7)) as {
+      data: { messages: Record<string, unknown>[] };
+    };
+    expect(JSON.stringify(out.data)).not.toMatch(/cost/);
+    expect(out.data.messages[0].metadata).toEqual({
+      context_budget: { estimated_input_tokens: 1 },
+      objective: { id: 'o1', budget: { prompt_tokens: 5 } },
+    });
   });
 });

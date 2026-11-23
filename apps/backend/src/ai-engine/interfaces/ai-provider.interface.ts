@@ -217,6 +217,22 @@ export interface AIStreamChunk {
     /** Ring percent at which the UI warns and the next turn compacts. */
     compaction_percent?: number;
   };
+  /**
+   * P2-6: present on the Vex/Vexi chat `done` frame instead of any cost — the
+   * store's plan limit for the agent (used / cap per period; `cap: null` = no
+   * limit). Read from `AgentQuotaService.getAgentUsage`; absent when unknown.
+   */
+  quota?: {
+    agent_key: 'vex' | 'vexi';
+    meters: Array<{
+      capability_key: string;
+      label: string;
+      unit: 'messages' | 'tokens' | 'seconds';
+      period: 'daily' | 'monthly';
+      used: number;
+      cap: number | null;
+    }>;
+  };
   /** Transport cursor is observational and grants no execution authority. */
   replay?: {
     stream_id: string;

@@ -1,4 +1,5 @@
 import { Inject, Injectable, Logger, MessageEvent } from '@nestjs/common';
+import { withoutClientCost } from '../../../ai-engine/agent-execution.contract';
 import { Prisma } from '@prisma/client';
 import Redis from 'ioredis';
 import { Observable, interval } from 'rxjs';
@@ -585,7 +586,7 @@ export class MarketingAdCreativesService {
               await this.markFailed(id, chunk.error || 'Generation failed');
               subscriber.next({
                 type: 'ai-chunk',
-                data: JSON.stringify(chunk),
+                data: JSON.stringify(withoutClientCost(chunk)),
               } as MessageEvent);
               subscriber.complete();
               return;
@@ -593,7 +594,7 @@ export class MarketingAdCreativesService {
 
             subscriber.next({
               type: 'ai-chunk',
-              data: JSON.stringify(chunk),
+              data: JSON.stringify(withoutClientCost(chunk)),
             } as MessageEvent);
 
             if (chunk.type === 'done') {
