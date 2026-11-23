@@ -84,7 +84,9 @@ Dentro de Lambda el handler es la tarea superior de su espacio de PIDs (`ppid 0`
 | `AI_ANALYSIS_RUNTIME_DIGEST` | `sha256:<64 hex>` inyectado en la imagen construida |
 | `AI_ANALYSIS_CERTIFIED_DIGEST` | `sha256:<64 hex>` **idéntico** a `AI_ANALYSIS_RUNTIME_DIGEST`, fijado solo tras completar T53 |
 
-Además, el backend requiere `SandboxAuditRepository.sourceAvailable()` (cifrado de fuente en `ai_agent_script_runs`), el SDK opcional `@aws-sdk/client-lambda` instalado en runtime y la capacidad de plan `vex.code_analysis` activa para la tienda.
+Además, el backend requiere `SandboxAuditRepository.sourceAvailable()` (cifrado de fuente en `ai_agent_script_runs`), `@aws-sdk/client-lambda` (dependencia de `apps/backend`; se carga en tiempo de ejecución), Redis para la ranura de 1 análisis simultáneo por tienda y la capacidad de plan `vex.code_analysis` activa para la tienda.
+
+**Encendido en producción:** checklist ordenado (permiso `lambda:InvokeFunction`, las 5 variables, verificación con Vex y rollback) en la sección «Encendido en el release» de `CERTIFICACION-T53.md`.
 
 ---
 
