@@ -74,6 +74,13 @@ TMP_INODE_CAP = 10_000
 # 256 KiB is ~16 000 entries or ~64 directories, far below what the wipe
 # removes inside the teardown reserve, and a real analysis creates none.
 TMP_DIR_BYTES_CAP = 256 * 1024
+# /tmp itself is the one directory that outlives every run (ext4 never shrinks
+# it). Entries the guest puts there reuse the free slots earlier runs left in
+# its blocks without consuming new ones, so the block cap above cannot see
+# them and each attack could fill more slots than the last (T53 run 5). The
+# guest has no business in /tmp itself: the parent counts its entries, up to
+# this many beyond the baseline, at every watch.
+TMP_ROOT_ENTRY_CAP = 64
 WATCH_INTERVAL_S = 0.05
 # System V IPC objects are kernel objects identified by ids, not descriptors:
 # they survive the guest, kill(-1) and the /tmp wipe (T53 run 3: a tenant read
@@ -487,6 +494,17 @@ def _tmp_free_bytes():
     return st.f_bfree * st.f_frsize
 
 
+def _count_entries(path, stop=None):
+    """Entries of `path`, counting no further than `stop`."""
+    n = 0
+    with os.scandir(path) as entries:
+        for _entry in entries:
+            n += 1
+            if stop is not None and n >= stop:
+                break
+    return n
+
+
 def _blocks_bytes(st):
     return getattr(st, "st_blocks", 0) * 512
 
@@ -500,7 +518,8 @@ class _TmpWatch:
     and the result file (stat by name). The tenant files written before the
     spawn are held open, so a guest that unlinks or truncates them to free
     blocks and hide entries is credited back (only a few KiB of directories
-    it could remove stay uncounted).
+    it could remove stay uncounted). Entries in /tmp itself are counted
+    directly: they can reuse free slots and cost no new block.
     """
 
     def __init__(self, tmpdir, streams):
@@ -517,6 +536,7 @@ class _TmpWatch:
             self.held_bytes = self._held_bytes()
             self.free_inodes = _tmp_free_inodes()
             self.free_bytes = _tmp_free_bytes()
+            self.root_entries = _count_entries(TMP_ROOT)
         except BaseException:
             self.close()
             raise
@@ -550,6 +570,9 @@ class _TmpWatch:
             if self.free_inodes - _tmp_free_inodes() > TMP_INODE_CAP:
                 return "inodes"
             if self.directory_bytes() > TMP_DIR_BYTES_CAP:
+                return "entries"
+            limit = self.root_entries + TMP_ROOT_ENTRY_CAP
+            if _count_entries(TMP_ROOT, limit + 1) > limit:
                 return "entries"
         except OSError:
             return "inodes"  # cannot watch: stop the guest
@@ -669,7 +692,8 @@ def _read_result(tmpdir, limits):
 
 def _wait_child(proc, deadline, watch):
     """Wait until the child exits, the deadline passes or the guest went past
-    TMP_INODE_CAP inodes or TMP_DIR_BYTES_CAP of directory entries. Returns
+    TMP_INODE_CAP inodes, TMP_DIR_BYTES_CAP of directory entries or
+    TMP_ROOT_ENTRY_CAP entries in /tmp itself. Returns
     None, "timeout", "inodes" or "entries"."""
     while True:
         remaining = deadline - time.monotonic()

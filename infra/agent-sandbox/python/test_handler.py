@@ -851,7 +851,9 @@ class TmpInodeTests(HandlerFixture):
 
         ev = request()
         ev["inputs"][0]["rows"] = [[tenant_marker, 1]]
+        # caps out of the way: this measures the wipe deadline, not the watch
         with patch.object(handler.subprocess, "Popen", side_effect=spawn), \
+                patch.object(handler, "TMP_ROOT_ENTRY_CAP", 10**6), \
                 patch.object(handler.time, "monotonic", clock):
             res = handler.handler(ev)
         self.assertEqual(res["error_code"], "ANALYSIS_TIMEOUT")
@@ -959,6 +961,26 @@ class TmpEntryTests(HandlerFixture):
             res = handler.handler(ev)
         self.assertEqual((res["error_code"], res["error_message"]),
                          ("ANALYSIS_RUNTIME", "too many files or directories created in the sandbox"))
+        self.assertEqual(os.listdir(self.root), [])
+
+    def test_entries_in_tmp_itself_are_capped_even_when_they_reuse_free_slots(self):
+        # An earlier attack left free slots in /tmp's blocks: new entries there
+        # consume no block, so only counting them stops the guest.
+        self.free_bytes.side_effect = None
+        self.free_bytes.return_value = 10**12
+        clock = FakeClock()
+        proc = hanging_proc(clock)
+
+        def spawn(args, **kwargs):
+            self.flood_links(self.root, 1, handler.TMP_ROOT_ENTRY_CAP + 10)
+            return proc
+
+        with patch.object(handler.subprocess, "Popen", side_effect=spawn), \
+                patch.object(handler.time, "monotonic", clock):
+            res = handler.handler(request())
+        self.assertEqual((res["error_code"], res["error_message"]),
+                         ("ANALYSIS_RUNTIME", "too many files or directories created in the sandbox"))
+        self.assertLess(res["usage"]["duration_ms"], 2_000)
         self.assertEqual(os.listdir(self.root), [])
 
     def test_a_large_legitimate_result_is_not_mistaken_for_entries(self):
