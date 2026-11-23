@@ -1,6 +1,6 @@
 # Sandbox de análisis en Python sobre AWS Lambda aislada (F9 · D3)
 
-**Estado (2026-11-22): desplegada en la cuenta de Vendix (`us-east-1`) como `vendix-vex-analysis-sandbox`, APAGADA y CERTIFICADA. T53 corrida 5 pasa los 6 puntos sobre la imagen `sha256:b8868d57…d74c` (runtime digest `sha256:1f10b7243591f87e9357b5c3a0fe8d2e11d3f375c7178b4076721d8fd1aa49eb`, `AI_ANALYSIS_CERTIFIED_DIGEST`): ver [`CERTIFICACION-T53.md`](CERTIFICACION-T53.md). Encender `AI_ANALYSIS_SANDBOX_ENABLED` sigue siendo decisión del dueño.**
+**Estado (2026-11-23): desplegada en la cuenta de Vendix (`us-east-1`) como `vendix-vex-analysis-sandbox`, APAGADA y NO CERTIFICADA, pendiente de decisión del dueño.** T53 corrida 6 sobre la imagen `sha256:b62b6f9f…015b` (runtime digest `sha256:ada2b02f1d0001dbb588377aea6abed9e35417f8e89c33b85c1c51d35751fd25`): pasan los puntos 1, 2, 4, 5 y 6; en el 3 todos los topes pasan, pero el invitado puede detener al vigilante (auditoría independiente, B1) y queda un riesgo de disponibilidad medido. Ver [`CERTIFICACION-T53.md`](CERTIFICACION-T53.md), «Decisión pendiente de Rafael». `AI_ANALYSIS_CERTIFIED_DIGEST` no se fija.
 
 La infraestructura solo la despliega un operador con autorización explícita; nunca se ejecuta código del invitado en una máquina de desarrollo. El backend y sus workers **nunca** ejecutan código generado por IA en el host: el worker solo orquesta la cola, materializa tablas de la misma conversación, invoca la Lambda con `lambda:InvokeFunction`, valida el JSON de salida y persiste bloques (`table`, `chart`, `kpi`).
 
@@ -27,9 +27,16 @@ AWS Lambda (imagen contenedor Python 3.12 · Dockerfile + template.json)
           5. El hijo recibe `wall_ms` menos una reserva de 2 s, para que la respuesta (incluida la limpieza) llegue antes de que el backend aborte a `wall_ms` exactos: un análisis que agota el tiempo llega como `ANALYSIS_TIMEOUT`, no como `ANALYSIS_EXPIRED`.
           6. Mata todo el grupo de procesos (`SIGKILL`) al terminar o vencer el tiempo y, después, a todo superviviente del uid del invitado (`kill(-1, SIGKILL)`); lo mismo antes de cargar los datos de cada tienda.
           6b. Mientras corre el invitado vigila /tmp cada 50 ms y lo mata si crea más de 10 000 inodos, más de 256 KiB de bloques de directorio (enlaces duros: entradas sin inodo) o más de 64 entradas en la raíz de /tmp (`mkdir`/`symlink`/`link` no necesitan descriptores), para que la limpieza, en el sitio y con plazo, quepa en la reserva.
-          6c. Tras matar al invitado, comprueba sus propios límites (`RLIMIT_*`), `nice`, afinidad y planificador frente a los del arranque: el invitado comparte uid y puede bajarlos con `prlimit`. Restaura lo que puede; si no (por ejemplo, un límite duro bajado), termina el proceso para que Lambda reinicie el runtime en la invocación del atacante, no en la de la tienda siguiente.
+          6c. Compara sus propios límites (`RLIMIT_*`), `nice`, afinidad y planificador con una **tabla fija** de los valores que da Lambda (medidos en T53, corrida 6), nunca con lo observado al importar: el invitado comparte uid y puede cambiarlos con `prlimit`/`setpriority`/`sched_*`. Lo hace tras el `kill(-1)` del principio de cada invocación, en cada vigilancia de 50 ms mientras corre el invitado y tras la limpieza posterior. Restaura lo que puede; si no (un límite duro bajado, un `nice` subido), termina el proceso para que Lambda reinicie el runtime en la invocación del atacante, no en la de la tienda siguiente.
+          6d. Antes de cada invitado comprueba que `/tmp` sigue siendo el directorio de root `1777` sin atributos extendidos (el invitado no puede cambiarlo en Lambda: `EPERM`); si no, falla cerrado.
           7. Lee `result.json` con `O_NOFOLLOW`, revalida `result` (tables/series/figures/notes) y devuelve solo JSON acotado.
 ```
+
+### Lo que el handler no puede impedir: que el invitado lo detenga (auditoría independiente, B1)
+
+Todos los topes del paso 6b los aplica el proceso padre, y el invitado comparte su uid: puede enviarle `SIGSTOP` (o `SIGKILL`). En Lambda no hay un segundo uid, ni `seccomp()` propio, ni `prctl`, ni espacios de nombres, así que nada lo impide. Con el vigilante detenido, el invitado trabaja sin topes hasta el tiempo máximo de la función (30 s); entonces Lambda da `Sandbox.Timedout`, **reinicia el entorno** (proceso `init` nuevo, ningún proceso del invitado sobrevive) y **conserva `/tmp`**. Lo que queda es un riesgo de **disponibilidad**, no de fuga: el entorno nuevo arranca sin datos de ninguna tienda y el handler limpia lo que el atacante dejó antes de lanzar a nadie.
+
+El handler acota ese coste: mata supervivientes y fija su estado contra la tabla de Lambda en INIT (antes de la primera invocación del runtime nuevo) y al principio de cada invocación; limpia `/tmp` en INIT hasta 7 s y luego como mucho 2 s por invocación, respondiendo `sandbox busy` en lugar de hacer esperar a la tienda. El coste medido por ataque y el tiempo de recuperación están en `CERTIFICACION-T53.md` (corrida 6, B1).
 
 ### Por qué el intérprete es solo-ejecución (paso 3)
 
@@ -51,17 +58,17 @@ Consecuencia para el código generado (coherente con su contrato: «`pd`, `np` y
 
 `killpg` solo alcanza al grupo del hijo. Un invitado que hace doble `fork` + `setsid` deja un daemon en otra sesión que sobrevive a la invocación. En T53 (primera corrida) ese daemon quedó escuchando en un socket abstracto, leyó desde `/tmp` los datos de la tienda siguiente y se los entregó a la ejecución posterior.
 
-Dentro de Lambda el handler es la tarea superior de su espacio de PIDs (`ppid 0`) y solo comparte uid con procesos del invitado (la función no tiene capas ni extensiones). Por eso `kill(-1, SIGKILL)` (toda tarea que podemos señalar salvo nosotros mismos e init) elimina a cualquier superviviente: el kernel lo aplica bajo el lock de la lista de tareas, sin carrera con `fork`, y `SIGKILL` no se puede capturar. El handler lo ejecuta **antes** de limpiar `/tmp` y escribir los datos de la tienda, y otra vez tras matar el grupo del hijo. Fuera de ese espacio de PIDs (una Mac de desarrollo) se niega y la invocación falla cerrada; las pruebas offline siempre lo simulan.
+Dentro de Lambda el handler es la tarea superior de su espacio de PIDs (`ppid 0`) y solo comparte uid con procesos del invitado (la función no tiene capas ni extensiones). Por eso `kill(-1, SIGKILL)` (toda tarea que podemos señalar salvo nosotros mismos e init) elimina a cualquier superviviente: el kernel lo aplica bajo el lock de la lista de tareas, sin carrera con `fork`, y `SIGKILL` no se puede capturar. El handler lo ejecuta en INIT (al importar, antes de la primera invocación del runtime), **al principio** de cada invocación (antes de validarla, de fijar su estado, de limpiar `/tmp` y de escribir los datos de la tienda), y otra vez tras matar el grupo del hijo. Fuera de ese espacio de PIDs (una Mac de desarrollo) se niega y la invocación falla cerrada; las pruebas offline siempre lo simulan.
 
 ---
 
 ## Construcción y despliegue de la imagen (operador)
 
 1. **Lockfile con hashes, generado dentro de la base fijada** (mismo Python y plataforma que Lambda): `requirements.in` lista los pines directos; `requirements.txt` sale de `pip-compile --generate-hashes --strip-extras requirements.in` ejecutado en `public.ecr.aws/lambda/python:3.12@sha256:…` (`linux/arm64`). `pip install --require-hashes` falla cerrado si algo no coincide.
-2. **Identidad del runtime:** `./runtime-digest.sh` imprime `sha256:` sobre Dockerfile, lockfile, `handler.py` y `runner.py` (mismo valor en macOS y Linux). Se pasa como `--build-arg ANALYSIS_RUNTIME_DIGEST=…` y es el valor de `AI_ANALYSIS_RUNTIME_DIGEST`.
+2. **Identidad del runtime:** `./runtime-digest.sh` imprime `sha256:` sobre Dockerfile, lockfile, `handler.py`, `runner.py` y `template.json` (mismo valor en macOS y Linux). `template.json` no va dentro de la imagen, pero cubrirlo hace que cualquier cambio de red, memoria, tiempo o rol produzca otro digest y obligue a reconstruir y a repetir T53. Un cambio aplicado en AWS sin pasar por el repo no lo detecta el digest: lo detectan la detección de drift de CloudFormation y el `sha256` de `template.json` registrado en la certificación. Se pasa como `--build-arg ANALYSIS_RUNTIME_DIGEST=…` y es el valor de `AI_ANALYSIS_RUNTIME_DIGEST`.
 3. **Build `linux/arm64`** (la arquitectura del template: Graviton, ~20 % más barato por GB-s y la base oficial publica manifiesto arm64). Usar el builder clásico (`DOCKER_BUILDKIT=0`) o `buildx --provenance=false`: Lambda rechaza índices de imagen con atestaciones.
 4. **ECR inmutable** `vendix-vex-analysis-runtime`, tag `rt-<12 hex del runtime digest>`; el stack recibe `ImageUri` fijado por digest (`…@sha256:…`), nunca por tag.
-5. Cualquier cambio en estos archivos o en `template.json` invalida la certificación y reabre T53.
+5. Cualquier cambio en estos archivos o en `template.json` cambia el runtime digest, invalida la certificación y reabre T53, incluido el experimento de B1.
 
 ---
 
@@ -90,17 +97,30 @@ PYTHONDONTWRITEBYTECODE=1 python3 -m unittest \
   infra/agent-sandbox/python/test_handler.py -v
 ```
 
+CI: `.github/workflows/agent-sandbox-python.yml` corre `test_runner` y `test_handler` en Linux (Python 3.12) en cada PR que toque este directorio; en local, una clase o archivo por invocación.
+
 Las pruebas de `handler.py` mockean `subprocess.Popen` y validan limpieza de `/tmp`, variables de entorno del hijo, códigos de error, truncado de mensajes y validación estricta. Las de `runner.py` ejecutan el sellado de descriptores real en un subproceso con pandas/numpy simulados y programas de prueba benignos. Estas pruebas **no** certifican el aislamiento real de AWS.
+
+---
+
+## Rollback
+
+1. **Apagar (inmediato, sin tocar AWS):** quitar `AI_ANALYSIS_SANDBOX_ENABLED` (o dejarlo distinto de `'true'`) en el backend y reiniciarlo. `configuration()` devuelve `null` y Vex vuelve a `compute`.
+2. **Volver a una imagen anterior:** actualizar solo el parámetro `ImageUri` del stack con el digest de la imagen certificada anterior y fijar `AI_ANALYSIS_RUNTIME_DIGEST`/`AI_ANALYSIS_CERTIFIED_DIGEST` a su runtime digest:
+   `aws cloudformation update-stack --stack-name vendix-vex-analysis-stack --use-previous-template --capabilities CAPABILITY_IAM CAPABILITY_NAMED_IAM --parameters ParameterKey=ImageUri,ParameterValue=<account>.dkr.ecr.us-east-1.amazonaws.com/vendix-vex-analysis-runtime@sha256:<digest> ParameterKey=FunctionName,UsePreviousValue=true ParameterKey=ReservedConcurrency,UsePreviousValue=true ParameterKey=Architecture,UsePreviousValue=true ParameterKey=VpcCidr,UsePreviousValue=true ParameterKey=SubnetACidr,UsePreviousValue=true ParameterKey=SubnetBCidr,UsePreviousValue=true`.
+   Solo imágenes con una corrida T53 certificada; las demás no se usan.
+3. **Retirar del todo:** con la feature apagada, `aws cloudformation delete-stack --stack-name vendix-vex-analysis-stack` (borra función, VPC, subredes, SG y rol; no hay datos) y después las imágenes: `aws ecr batch-delete-image --repository-name vendix-vex-analysis-runtime --image-ids imageTag=rt-…` y, si no queda ninguna, `aws ecr delete-repository --repository-name vendix-vex-analysis-runtime`.
+4. **Imágenes que sobran hoy:** todas las `rt-*` salvo la desplegada (`rt-ada2b02f1d00`, corrida 6) y, como vuelta atrás, la de la corrida 5 (`rt-1f10b7243591`); ver «Recursos» en `CERTIFICACION-T53.md`. Borrarlas es decisión del dueño.
 
 ---
 
 ## Compuertas de T53 (certificación de aislamiento)
 
-Resultado vigente (corrida 5, 2026-11-23 UTC, certificada) y evidencia: [`CERTIFICACION-T53.md`](CERTIFICACION-T53.md). Antes de encender `AI_ANALYSIS_SANDBOX_ENABLED=true` en cualquier entorno real, un operador debe construir la imagen (sección anterior), desplegar `template.json` y producir un informe de certificación que enlace el `runtime_digest` final con la evidencia real de:
+Resultado vigente (corrida 6, 2026-11-23 UTC, no certificada por B1) y evidencia: [`CERTIFICACION-T53.md`](CERTIFICACION-T53.md). Antes de encender `AI_ANALYSIS_SANDBOX_ENABLED=true` en cualquier entorno real, un operador debe construir la imagen (sección anterior), desplegar `template.json` y producir un informe de certificación que enlace el `runtime_digest` final con la evidencia real de:
 
 1. **Egreso cero**: intentos de DNS, HTTP/HTTPS, sockets TCP/UDP crudos, enlace al metadata service (`169.254.169.254`), la Runtime API de Lambda (`169.254.100.1:9001`, incluida la interceptación de la invocación siguiente) y conexiones hacia la VPC de producción fallan con bloqueo total.
 2. **Sistema de archivos, `/proc` y secretos**: intento de escritura fuera de `/tmp` falla (`Read-only file system`); symlink en `/tmp/result.json` rechazado (`O_NOFOLLOW`); entorno del hijo sin `AWS_*` ni credenciales; lectura de `/proc/<ppid>/environ`, `/proc/<ppid>/mem`, `process_vm_readv` y `ptrace` sobre el padre fallan (padre no-dumpable por el intérprete solo-ejecución); ningún secreto presente en proceso ni en logs.
 3. **Límites de recursos**: bomba de memoria (`ANALYSIS_MEMORY`), ciclo infinito de CPU (`ANALYSIS_TIMEOUT`), fork bomb (`RLIMIT_NPROC`), inundación de stdout/stderr y archivo grande en `/tmp` (`RLIMIT_FSIZE`) terminan dentro del presupuesto sin dejar procesos huérfanos, incluido un daemon que hace doble `fork` + `setsid` para escapar del grupo de procesos.
 4. **Aislamiento multi-tenant (100 ejecuciones alternando 3 tiendas)**: ejecución de 100 invocaciones consecutivas alternando datos marcados de 3 tiendas distintas (reutilizando el mismo entorno caliente de Lambda) con verificación de cero residuos en `/tmp`, memoria, variables globales o respuestas cruzadas.
 5. **Revisión de política IAM**: verificación en AWS de que el rol de ejecución de la Lambda solo tiene permisos ENI y el rol del backend solo tiene `lambda:InvokeFunction` sobre ese único ARN.
-6. **Firma y fijación de digest**: registrar el `runtime_digest` verificado en el informe firmado y fijar `AI_ANALYSIS_CERTIFIED_DIGEST` a ese valor exacto. Cualquier cambio de imagen, dependencias o plantilla invalida la certificación y exige re-certificar.
+6. **Firma y fijación de digest**: registrar el `runtime_digest` verificado en el informe firmado (commit y tag firmados con SSH; ver «Evidencia auditable y firma» en la certificación) y fijar `AI_ANALYSIS_CERTIFIED_DIGEST` a ese valor exacto. Cualquier cambio de imagen, dependencias o plantilla invalida la certificación y exige re-certificar.

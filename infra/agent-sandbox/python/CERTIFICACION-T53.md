@@ -2,7 +2,227 @@
 
 | | |
 | --- | --- |
-| **Resultado vigente (corrida 5)** | **CERTIFICADA.** Pasan los 6 puntos sobre el mismo digest. El hallazgo 7 (enlaces duros en `/tmp`) queda cerrado: los ataques de 15 y 23 s se cortan en 2,0-2,3 s y las tiendas siguientes responden `ok` (27/27). La corrida destapó una variante (hallazgo 8: entradas en la raíz de `/tmp` que reutilizan huecos libres, invisibles al tope de bloques), corregida en `dfb1667be` **antes** de la imagen certificada; toda la evidencia de abajo es sobre esa imagen. `AI_ANALYSIS_CERTIFIED_DIGEST = sha256:1f10b7243591f87e9357b5c3a0fe8d2e11d3f375c7178b4076721d8fd1aa49eb`. |
+| **Resultado vigente (corrida 6)** | **NO CERTIFICADA: pendiente de decisión de Rafael (B1).** Pasan 1, 2, 4, 5 y 6 sobre el mismo digest. Punto 3: todos los topes y los arreglos de B1 funcionan, pero el invitado **sigue pudiendo detener al vigilante** (`SIGSTOP`) hasta el tiempo máximo de la función. Es un riesgo de **disponibilidad, no de fuga**, medido y acotado abajo; por eso el punto 3 no se declara certificado. `AI_ANALYSIS_CERTIFIED_DIGEST` no se fija ni se toca; `AI_ANALYSIS_SANDBOX_ENABLED` sigue apagado. |
+| Fecha | 2026-11-23 UTC (2026-11-22 Bogotá): B1 sobre la imagen anterior 00:50-01:02; despliegue 01:07-01:08; T53 completa sobre la imagen nueva 01:09-01:38 |
+| Cuenta / región | `<account>` / `us-east-1`, corrida autorizada por el dueño |
+| Función | `vendix-vex-analysis-sandbox` (stack `vendix-vex-analysis-stack`) |
+| Imagen medida | `vendix-vex-analysis-runtime@sha256:b62b6f9f8964304299f807a1a9845c22ecccf1863fefa6e7b668bacf6cd6015b` (tag inmutable `rt-ada2b02f1d00`, `linux/arm64`, manifiesto OCI único) |
+| Runtime digest | `sha256:ada2b02f1d0001dbb588377aea6abed9e35417f8e89c33b85c1c51d35751fd25` (`./runtime-digest.sh` sobre `26dd8aa11`; desde esta corrida cubre también `template.json`, `sha256 41ec84b7…8ab8`) |
+| Código medido | `ab9e17822` (observaciones 1, 5 y 6 de la auditoría) + `26dd8aa11` (B1) |
+| Despliegue | `update-stack --use-previous-template`, solo `ImageUri`; actualizó únicamente `AnalysisFunction` (01:07:43-01:08:00Z). `CodeSha256 = b62b6f9f…015b`, `Active`/`Successful`. Plantilla desplegada = `template.json` del repo (comparación JSON), drift `IN_SYNC` |
+| Base | `public.ecr.aws/lambda/python:3.12@sha256:ed196260cbf6f74e3f64dd141ebe2401d78a15e6355925da98a3d3c3b4d35c6a` (sin cambios) |
+| Evidencia | Arnés, resultados crudos de las 388 invocaciones y salidas de AWS, **fuera del repo público**: `~/.openclaw/tmp/encargos/vex-plus-f10/evidencia-t53/evidencia-t53-r6.tar.gz`, SHA-256 `9a1bebe0186c37bc85450a911ae54adfd4efefd269252593587a6fe8677ab4ec`; dentro, `r6/SHA256SUMS` (95 archivos, SHA-256 `8b1044b63576f69e023d1ef5c0d5a27c51cad99ce5b2acf53afa474d887926c4`) y `r6/MANIFIESTO.md` (`f2e7cbeb45f2bae1938a5dd2b1a3ca5df2da78541d74a6c28f0b95f7455fcbdb`). Ver «Evidencia auditable y firma» |
+| Firma | Commit de este documento y tag anotado `t53-r6-cert`, firmados con SSH (ed25519, huella `SHA256:adPIjYArS9wqXupW+g2x59pToW+/CxA2zEfQ1mWSrYQ`) |
+
+Las corridas 5, 4, 3, 2 y 1 quedan abajo como historial. Higiene: en este documento la cuenta, el rol, la VPC, subredes, security group e IPs internas se sustituyeron por `<account>`, `<role>`, `<vpc-id>`, `<subnet-id>`, `<sg-id>`, `<internal-ip>`; los valores reales están solo en la evidencia privada (`valores-reales.txt`). **Commits anteriores de la rama todavía contienen el ID de cuenta y esos valores**; no se reescribió la historia (lo decide Rafael).
+
+## Corrida 6 · historia de usuario
+
+**Como** dueño de Vendix en producción, **quiero** saber, con evidencia que un tercero pueda repetir y verificar, si un análisis hostil puede detener o matar al vigilante de la Lambda y dejar inservibles los entornos reservados para las demás tiendas, **para** decidir si enciendo `AI_ANALYSIS_SANDBOX_ENABLED` o si hace falta otra arquitectura.
+
+**Pasos para probarlo** (consola del operador; el código hostil solo corre dentro de Lambda):
+
+1. Sobre la imagen certificada anterior, invocar un análisis que detiene a su padre (`SIGSTOP`) y luego: nada; crea enlaces duros en la raíz de `/tmp` durante 25 s (un inodo, y rotando inodos); o crea directorios durante 25 s. Tras cada uno, tres tiendas A, B y C.
+2. Invocar un análisis que deja un daemon (doble `fork` + `setsid`) bajando límites y subiendo `nice` de todo proceso del uid mientras inunda `/tmp`, y mata a su padre; después A, B y C leen límites y `nice` del handler nuevo.
+3. Desplegar la imagen con los arreglos, repetir 1 y 2 y la T53 completa (egreso, FS/`/proc`/secretos, límites, 100 × 3 tiendas, IAM/red, digests).
+4. Comprobar el SHA-256 de la evidencia y la firma del tag (`git tag -v t53-r6-cert`).
+
+**Criterios de aceptación observables:** ninguna tienda ve datos de otra; tras cada ataque el entorno vuelve a `ok` con `/tmp` estable y el handler con los valores de Lambda; el atacante no consume el presupuesto de la tienda siguiente (como mucho una respuesta rápida `sandbox busy`); la evidencia y la firma se verifican sin acceso a la cuenta.
+
+**Lo que se observó:** ninguna fuga (100/100 en los 16 controles, 293/293 sobres con el digest esperado). Lambda **reinicia el entorno** tras `Sandbox.Timedout` o la muerte del runtime (proceso `init` nuevo; ningún proceso del invitado sobrevive en 36 de 36 casos, sumando ambas imágenes) y **conserva `/tmp`**. Con los arreglos, la limpieza sale del presupuesto de la tienda y pasa a INIT; pero un invitado que para al vigilante y crea directorios durante 25 s deja ~16 s de limpieza que, repartidos, producen 4 respuestas `sandbox busy` seguidas. El vigilante **no se puede proteger** de `SIGSTOP` en Lambda (mismo uid; `seccomp`, `prctl`, `unshare` y `ptrace` denegados).
+
+## Corrida 6 · resultado por punto (digest `b62b6f9f…` / runtime `ada2b02f…`)
+
+| # | Punto | Resultado |
+| --- | --- | --- |
+| 1 | Egreso cero | **PASA.** `RLIMIT_NOFILE=(0,0)`, descriptores `0-3`; TCP a Runtime API, IMDS, credenciales, proxy DNS, internet, EC2/RDS de producción (`<internal-ip>`), DNS de la VPC, NTP/UDP, TCP6, `AF_UNIX`, netlink, `getaddrinfo` → `EMFILE`; raw y `AF_PACKET` → `EPERM`. **R1** (`/runtime/invocation/next` con `urllib`) → falla sin abrir nada. **R2**: atacante C 19 s, 380/380 `EMFILE` → A `ok` con solo su marcador → C 2 s, 40/40 `EMFILE` |
+| 2 | FS, `/proc` y secretos | **PASA.** Igual que la corrida 5 (detalle abajo) |
+| 3 | Límites de recursos | **Topes: PASAN. B1: riesgo residual abierto → NO CERTIFICADO.** 25 casos clásicos, daemon, 9 ataques de enlaces duros (2,0-2,3 s), 8 ataques a los atributos del handler y la observación 1, cada uno seguido de tiendas: 79/79 `ok`, `/tmp` estable, solo `init`, handler con los valores de Lambda. B1: ver abajo |
+| 4 | Multi-tenant (100 × 3) | **PASA.** 100/100 en los 16 controles |
+| 5 | Política IAM y red | **PASA.** Sin cambios; drift `IN_SYNC` (0); `simulate-custom-policy`: `InvokeFunction` `allowed` solo sobre esta función |
+| 6 | Firma y digest | **PASA.** Digest ECR del tag `rt-ada2b02f1d00` = `CodeSha256` = `ResolvedImageUri` = `Code.ImageUri` = parámetro `ImageUri` = `sha256:b62b6f9f…015b`; las 293 respuestas con sobre (de 313 invocaciones sobre la imagen; las 20 restantes son `Sandbox.Timedout`/`Runtime.ExitError` buscados) traen `runtime_digest = sha256:ada2b02f…fd25` = `./runtime-digest.sh` en `26dd8aa11`. Imagen local verificada antes del push (`ENV`, `handler.py`/`runner.py` byte a byte, intérprete `0711`). Commit y tag firmados (SSH) |
+
+## B1 · el invitado detiene o mata al vigilante
+
+Todos los topes de `/tmp` los aplica el proceso padre, y el invitado comparte su uid: puede enviarle `SIGSTOP` o `SIGKILL`. Se midió primero sobre la imagen anterior (`rt-1f10b7243591`, sin arreglos) y después sobre la nueva. Cada ataque, seguido de tres tiendas A, B y C con una sonda sin descriptores (`statvfs`/`stat` de `/tmp`, `prlimit64`/`getpriority`/`sched_*` del handler, PIDs vivos). «handler» es la duración que informa el handler; «cliente», la latencia total (incluye el INIT del runtime nuevo).
+
+| Experimento | Imagen anterior `1f10…` | Imagen nueva `ada2…` |
+| --- | --- | --- |
+| **`SIGSTOP` al padre, sin inundar** (×2) | `Sandbox.Timedout` a 30,1 s; entorno reiniciado (`init` nuevo); A, B, C `ok` en 2,4-2,5 s; `/tmp` intacto | igual (30,1-30,3 s; A, B, C `ok` 2,4-2,5 s) |
+| **`SIGSTOP` + enlaces duros en la raíz de `/tmp` 25 s, un inodo** (×5; ext4 corta en 65 000 enlaces por inodo, `EMLINK`) | la raíz pasa de 4 KiB a 1,5 MB (−370 bloques) la primera vez y no crece más; tienda siguiente `ok`, handler 3,1-3,2 s (+0,65 s de limpieza dentro de su presupuesto) | la raíz igual (1,5 MB, una vez); tienda siguiente `ok`, handler 2,4-2,5 s (la limpieza pasa a INIT), cliente 3,1-3,4 s |
+| **`SIGSTOP` + enlaces duros rotando inodos (`mkfifo`) 25 s** (×5) | la raíz pasa a 10,0 MB (−2 078 bloques, 8,1 MB) la primera vez y no crece más; tienda siguiente `ok`, handler 7,2 s la primera vez y 4,6-4,8 s después | la raíz a 10,0 MB (−2 062 bloques), una vez; tienda siguiente `ok`, handler 2,5-2,6 s, cliente 5,4 s la primera vez y 4,0-4,2 s después |
+| **`SIGSTOP` + `mkdir` 25 s** (×2) | tienda siguiente `ok` tras **19,2 / 19,9 s** de handler (la limpieza consume su presupuesto) | INIT limpia 7 s; tienda siguiente `sandbox busy` (cliente 9,4 s, handler 2,0 s); dos tiendas más y la repetición del atacante `sandbox busy` en 2,0-2,2 s; la quinta invocación `ok` (2,9 s). Recuperación ≈ 16 s de limpieza, **4 respuestas `sandbox busy`** |
+| **Daemon** (doble `fork` + `setsid`) que baja `NOFILE` y sube `nice` (`PRIO_USER`) de todo el uid e inunda `/tmp`; el invitado mata al padre (×2) | `Runtime.ExitError` a 2,4 s; Lambda reinicia también `init`; A, B, C: `NOFILE (1024, 1024)`, `nice 0`, solo `init` | igual (2,2-2,3 s) |
+| **Raíz de `/tmp` y E/S** (obs. 2 y 3): `chmod`, `chown`, `utime`, `setxattr` (`user.`/`trusted.`) sobre `/tmp`; `ioprio_set` y `uclamp` sobre el handler | todo `EPERM`; `uclamp` `ENOTSUP`; `/tmp` es `041777`, uid 0, sin xattrs; A, B, C sin cambios | igual |
+
+**Qué se arregló** (`26dd8aa11`):
+
+1. **Sin base capturada al importar.** La guarda compara con una tabla fija de los valores que Lambda da al runtime (los 16 `RLIMIT_*` medidos con `prlimit64` desde un invitado, `nice 0`, afinidad = CPUs en línea por `sysconf`, `SCHED_OTHER`), no con lo observado al importar. Restaura lo restaurable y, si no, reinicia el runtime en la invocación del atacante.
+2. **Supervivientes muertos antes de fijar el estado.** `kill(-1, SIGKILL)` en INIT (al importar, antes de la primera invocación del runtime nuevo) y al principio de cada invocación, antes de la guarda y de validar la petición. Se mantiene `kill(-1)` y no un recorrido de `/proc` con `pidfd`/`starttime`: el kernel lo aplica bajo el lock de la lista de tareas, sin carrera con `fork`, y nunca alcanza al propio handler ni a `init` (el runtime nuevo **es** el handler); medido: ningún proceso del invitado sobrevive al reinicio de Lambda (36/36).
+3. **Limpieza de arranque acotada.** INIT limpia `/tmp` hasta 7 s (fuera del presupuesto de la tienda); después, como mucho 2 s por invocación antes de responder `sandbox busy`, en lugar de hasta ~20 s.
+4. **Guarda periódica.** La guarda corre en cada vigilancia de 50 ms mientras corre el invitado y tras la limpieza posterior: el ataque `prlimit NOFILE` blando → 4, que en la corrida 5 terminaba en un `ANALYSIS_RUNTIME` engañoso, ahora termina en `ok`. No es un hilo aparte: `SIGSTOP` detiene todos los hilos del proceso, así que un hilo no añade nada frente a B1 y el bucle de vigilancia ya existe.
+5. **Raíz de `/tmp` vigilada.** Antes de cada invitado se comprueba `041777`, uid 0 y ausencia de xattrs; si cambia, falla cerrado (el handler no puede restaurarla: no es su dueño).
+
+**Qué no se puede arreglar en Lambda: aislar al vigilante por uid o por seccomp.** El handler corre como uid 993 sin capacidades (`capget` 0/0), así que no puede lanzar al invitado con otro uid; `seccomp()` (`EPERM`) impide un filtro que bloquee `kill(getppid())`; `prctl` (`EPERM`) impide `PR_SET_NO_NEW_PRIVS`/`PDEATHSIG`; `unshare(CLONE_NEWPID)`/`CLONE_NEWNET` (`EPERM`) impide esconder el PID del padre en otro espacio; `ptrace` (`EPERM`) impide supervisar al invitado desde fuera. Evidencia: punto 2 de esta corrida.
+
+### Riesgo residual (disponibilidad, no fuga)
+
+Un invitado puede dejar ciego al vigilante. Lo que eso permite, medido:
+
+- **Por invocación hostil:** ocupa uno de los 3 entornos reservados durante **≤ 30 s** (tiempo máximo de la función) y deja `/tmp` con restos. El entorno se reinicia sin ningún proceso del atacante, y la limpieza termina **antes** de que ninguna tienda escriba datos.
+- **Recuperación medida:** enlaces duros (peor caso medido): +1-3 s de latencia de cliente para la primera tienda; `mkdir` 25 s: ~16 s de limpieza, 4 respuestas `sandbox busy` (cada una en ~2 s) antes de la primera `ok`.
+- **Disco:** la raíz de `/tmp` crece una sola vez hasta ~10 MB por entorno (de 512 MB; ext4 no la encoge) y los ataques siguientes reutilizan sus huecos: 5 de 5 sin crecimiento.
+- **Sostenido:** un atacante que repite el ataque con 3 invocaciones simultáneas puede ocupar los 3 entornos reservados y dejar el análisis **sin servicio para todas las tiendas** mientras siga. No se midió el límite de tasa del backend por tienda.
+- **Fuga:** ninguna medida. Sigue en pie todo lo de los puntos 1, 2 y 4.
+
+### Experimento obligatorio en cada corrida
+
+`harness/b1.py` (evidencia privada) con `stop 2`, `flood 5`, `floodmany 5`, `mkdir 2`, `daemon 2`, `attrs 1`. Criterios: cero marcadores ajenos; tras cada ataque, entorno con solo `init`, handler con los valores de la tabla, `/tmp` sin crecer después de la primera vez; respuestas `sandbox busy` ≤ 4 por ataque y ninguna tienda con más de 3 s de handler.
+
+## Decisión pendiente de Rafael
+
+| Opción | Qué implica | Costo |
+| --- | --- | --- |
+| **(a) Aceptar el riesgo documentado y mantener el interruptor apagado hasta una nueva arquitectura** | El código y la imagen de la corrida 6 quedan desplegados y apagados. Si algún día se encendiera tal cual, un análisis hostil (una tienda maliciosa o una inyección en el prompt) puede degradar el análisis de **todas** las tiendas: ≤ 30 s por ataque más la recuperación medida, y sin servicio mientras repita el ataque en paralelo. Sin fuga de datos medida | USD 0 y ningún esfuerzo adicional |
+| **(b) Aislamiento por inquilino** | Lambda ofrece `TenancyConfig.TenantIsolationMode = PER_TENANT` (verificado en el CLI 2.33 y en el esquema de CloudFormation de `AWS::Lambda::Function`; es de solo creación, así que **reemplaza la función**) y cada invocación lleva `TenantId`: los entornos de ejecución nunca se comparten entre inquilinos. Con `TenantId` = id de la tienda, un `SIGSTOP` o una inundación solo afectan a entornos de la propia tienda. Complemento necesario en ambos casos: limitar a 1 análisis simultáneo por tienda en el backend, para que una tienda no ocupe toda la concurrencia reservada. **No probado.** | Estimación: 2-3 días (plantilla y recreación de la función, `TenantId` en `sandbox-lambda-client.service.ts` con su spec, límite por tienda, T53 corrida 7 con B1 cruzado entre tiendas). Más arranques en frío (15-20 s medidos por entorno nuevo) y precio del modo por inquilino **no verificado**. Alternativa sin Lambda (contenedor por tienda en ECS/Fargate): 1-2 semanas |
+
+## Observaciones de la auditoría independiente: estado
+
+| # | Observación | Estado |
+| --- | --- | --- |
+| 1 | Tope de 256 KiB estirable 9× enlazando una entrada como `result.json` | **Cerrada** (`ab9e17822`): solo se acredita el inodo de resultado del runner (regular, un enlace, ni entrada ni flujo). Spec RED/GREEN; en Lambda, 2 de 2 ataques → `ANALYSIS_RUNTIME` en 2,25-2,26 s, tienda siguiente `ok` |
+| 2 | Raíz de `/tmp` no vigilada | **Cerrada con evidencia** (`EPERM` en las 6 operaciones; `041777`, uid 0, sin xattrs) y comprobada antes de cada invitado |
+| 3 | `ioprio`/`uclamp` fuera de la guarda | **Cerrada con evidencia**: `ioprio_set` sobre el handler `EPERM`, `uclamp` `ENOTSUP`; no se añaden a la guarda |
+| 4 | Memoria fuera de `RLIMIT_AS` (`shm`/`msg`, 64 × 768 MB) | **No probada** en esta corrida |
+| 5 | Specs de Python fuera de CI | **Cerrada**: `.github/workflows/agent-sandbox-python.yml`; el archivo entero ya no falla en Linux (libc por `dlopen(NULL)`; ganchos solo-Lambda neutralizados en el fixture). En la base de la imagen (Linux arm64, root) pasan 13/13 de `test_runner` y 65/65 de `test_handler`, clase por clase |
+| 6 | El digest no cubre `template.json` | **Cerrada**: `runtime-digest.sh` lo incluye. Un cambio aplicado en AWS sin pasar por el repo lo detectan el drift de CloudFormation y el `sha256` de `template.json` de esta tabla. La comparación `certified !== digest` del backend no se tocó (fuera de alcance) |
+| 7 | Cifras de costo | **Corregidas** (abajo) |
+| 8 | Sin rollback | **Cerrada**: sección «Rollback» del README |
+| 9 | Sin diagnóstico en producción | Sin cambios (sin logs por diseño). `numpy 30 000²` → `ANALYSIS_MEMORY` en 2,2 s, 1 de 1 |
+| 10 | 4 HIGH en ECR | Mismos conteos en `rt-ada2b02f1d00` (4 HIGH, 6 MEDIUM, 1 LOW); **sin análisis de alcance** |
+
+## Evidencia por punto (corrida 6)
+
+Arnés: `boto3` desde la evidencia privada (ver «Evidencia auditable y firma»); ningún programa hostil se ejecutó en la Mac. Primer análisis tras el despliegue: **20,3 s de handler en frío**; después, 2,2-2,8 s.
+
+### 1 · Egreso cero
+
+Además de la tabla: `prlimit64(self, NOFILE, 64)` → `EPERM`; `setrlimit` (1,1)/(0,1)/(1024,1024) → `ValueError`; sigue `(0, 0)`; hijo con `fork` → `socket` `EMFILE`; `exec` de `python3` → exit 127.
+
+### 2 · Sistema de archivos, `/proc` y secretos
+
+`mkdir` en 9 rutas de sistema `EROFS` y en `/root` `EACCES`; `/dev/shm`, `/dev/mqueue` `ENOENT`; `truncate`/`chmod`/`rename` de `handler.py`, symlink en `/var/task`, `utime` del intérprete `EROFS`; `open` `EMFILE`; entorno `HOME, LANG, MKL/OMP/OPENBLAS_NUM_THREADS, PATH, PYTHONDONTWRITEBYTECODE, TMPDIR`; uid/euid 993, gid 990, sin grupos, `capget` 0/0; `/proc/<ppid>/{environ,mem}`, `/proc/self/environ`, `/proc/1/environ` de uid 0; `readlink` de `exe`, `cwd`, `root`, `fd/0`, `fd/3` `EACCES`; `process_vm_readv`, `ptrace`, `unshare`, `seccomp`, `prctl`, `add_key` `EPERM`; intérprete `0711`. `result.json` symlink, FIFO o directorio → `ANALYSIS_OUTPUT` (`cannot be opened safely` / `is not a regular file`); `.part` cambiado por symlink → `cannot be opened safely`; `result.json` symlink previo y fin normal → `ok` con el resultado propio. Sonda tras cada uno: limpia.
+
+### 3 · Límites de recursos
+
+Cada caso va seguido de una sonda (tres tras enlaces duros, atributos y obs. 1): 79/79 `ok` en 2,2-2,4 s, solo `init`, handler `NOFILE (1024, 1024)`, `CPU` ilimitado, `nice 0`, afinidad `[0, 1]`, `SCHED_OTHER`; `/tmp` en 147 982 inodos y la raíz crece de 4 KiB a 72 KiB con los ataques a la raíz (tope de 64 entradas) y luego se mantiene.
+
+| Caso hostil | Respuesta | Handler (s) |
+| --- | --- | --- |
+| `bytearray` 2 GiB / lista sin fin / numpy 30 000² | `ANALYSIS_MEMORY` | 2,2 / 5,4 / 2,2 |
+| CPU infinita / `sleep(120)` | `ANALYSIS_TIMEOUT` | 23,0 / 23,0 |
+| Fork bomb (hijos dormidos) / exponencial + `setsid` | `ok` / `ANALYSIS_TIMEOUT` | 3,3 / 23,4 |
+| Thread bomb | `ok` | 2,4 |
+| Inundación de stdout / stderr con rutas / 600 MB por el descriptor de resultado | `ANALYSIS_RUNTIME "File too large"` (sin rutas) | 2,3 |
+| Abrir un archivo nuevo en `/tmp` | `ANALYSIS_RUNTIME` con el mensaje del sello | 2,3 |
+| Salida de más de 256 KB | `ANALYSIS_OUTPUT` | 2,3 |
+| `setsid()` / cerrar el descriptor de resultado | `ANALYSIS_RUNTIME` (`EPERM` / `EBADF`) | 2,3 |
+| Matar al padre | `Runtime.ExitError`; la sonda siguiente, limpia | 2,1 (cliente) |
+| Daemon con doble `fork` + `setsid` | control: vivo en su ejecución; tienda siguiente: solo `init` | 2,9 |
+| `mkdir` 20 000 / 60 000 / 200 000 / hasta `ENOSPC` / cadena `mkdir` + `chdir` / 8 procesos / symlinks largos | `ANALYSIS_RUNTIME "too many files or directories created in the sandbox"` | 1,96-2,09 |
+| Enlaces duros a la entrada de la tienda / a un FIFO | el mismo `ANALYSIS_RUNTIME` | 2,2 |
+| **Enlaces duros 15 s / 23 s en su directorio; en la raíz 15 s × 1 y 23 s × 6**, cada uno + A, B, C | el mismo `ANALYSIS_RUNTIME`; 27/27 tiendas `ok` | 1,94-2,30 |
+| **Obs. 1:** `link(in/n.json, result.json)` + ~300 KiB de entradas (× 2) | el mismo `ANALYSIS_RUNTIME` | 2,25 / 2,26 |
+
+**Atributos del handler** (cada uno + A, B, C; 24/24 `ok` con el handler en los valores de la tabla):
+
+| Ataque | Atacante |
+| --- | --- |
+| `prlimit` `NOFILE` blando → 4 / varios blandos (`NOFILE`, `AS`, `NPROC`, `FSIZE`, `CPU`, `STACK`) | `ok` (la guarda de cada vigilancia lo restaura; en la corrida 5, `ANALYSIS_RUNTIME` engañoso) |
+| `prlimit` `NOFILE` duro → 4 | `Runtime.ExitError` (reinicio en la invocación del atacante) |
+| `prlimit` `CPU` blando → 1 s / `sched_setaffinity(ppid, {0})` | `ok` |
+| `setpriority(ppid, 19)` / `setpriority(PRIO_USER, uid, 19)` / `sched_setscheduler(ppid, SCHED_IDLE)` | `Runtime.ExitError` |
+
+B1: tabla de la sección B1.
+
+### 4 · Aislamiento multi-tenant
+
+100 invocaciones consecutivas A → B → C (34/33/33) con 40, 55 y 70 filas marcadas, 01:33:06-01:37:55Z, en el mismo entorno; 2 608-2 827 ms por análisis (mediana 2 726). Cada ejecución busca y luego deja un daemon con doble `fork` + `setsid` y el `shm` adjunto, un symlink `/tmp/vex-t53-plant`, `shm` + `msg` + `sem` con claves fijas y su marcador y una variable en `builtins`, e intenta `add_key`/`keyctl`.
+
+| Comprobación por ejecución | Resultado |
+| --- | --- |
+| Sobre válido / `status: ok` / total correcto | 100/100 |
+| Marcador propio / la respuesta solo trae el propio / log sin marcadores | 100/100 |
+| Symlink, variable global, `shm`, `msg` y `sem` de la anterior ausentes (`ENOENT`) / solo `init` / `environ` del padre de root | 100/100 |
+| Siembra confirmada (`msgsnd`, `semctl SETVAL` → 0) y control positivo (`shm`, `msg`, `sem` = 930, symlink) | 100/100 |
+| `/tmp` estable (131 947 bloques, 147 982 inodos) | 100/100 |
+| Keyring: `add_key` / `keyctl SEARCH` | `EPERM` / `EPERM` |
+
+Nota del arnés: el control «solo `init`» se evaluó al principio contra un formato equivocado (`['1:u0']`, cuando el programa escribe `only init`); se reevaluaron los 16 controles desde los resultados crudos, sin invocar nada (`p4-recheck.log` en la evidencia).
+
+### 5 · Política IAM y red
+
+Solo lectura (más una detección de drift). Rol de ejecución `<role>`: confianza solo `lambda.amazonaws.com`, sin boundary, 0 políticas administradas, inline única `VpcEniOnly` (5 acciones ENI sobre `*`). Función sin política de recurso, URL, alias, mapeos, capas ni variables; concurrencia reservada 3; `MemorySize` 1024, `Timeout` 30, `arm64`; el log group `/aws/lambda/vendix-vex-analysis-sandbox` no existe. VPC `<vpc-id>` (`10.77.0.0/24`): DNS support/hostnames `false/false`, rutas solo `local`, IGW/NAT/endpoints/peering/TGW 0, subredes sin IP pública, SG sin ingress y egress solo `127.0.0.1/32` tcp/1. Drift `IN_SYNC` (0). `simulate-custom-policy` de `backend-invoke-policy.json` (con región y cuenta instanciadas): `InvokeFunction` `allowed` sobre esta función e `implicitDeny` sobre otra; `UpdateFunctionCode`, `UpdateFunctionConfiguration` e `InvokeFunctionUrl` `implicitDeny`. La política `vendix-vex-analysis-invoke` no existe (no aplicada).
+
+### 6 · Digest
+
+Ver la tabla de resultados. `./runtime-digest.sh` en `26dd8aa11` = `sha256:ada2b02f…fd25`; `ENV ANALYSIS_RUNTIME_DIGEST` de la imagen igual; `handler.py` `25bc77d3…13d1` y `runner.py` `8c8b4f0e…6cc8` idénticos en la imagen y en el repo.
+
+## Evidencia auditable y firma (B2)
+
+- **Dónde:** `~/.openclaw/tmp/encargos/vex-plus-f10/evidencia-t53/` en la máquina del operador, fuera del repo público (contiene la cuenta, IDs de red e IPs internas). Se entrega bajo pedido.
+- **Qué:** `evidencia-t53-r6.tar.gz` (SHA-256 `9a1bebe0186c37bc85450a911ae54adfd4efefd269252593587a6fe8677ab4ec`) con `r6/`: el arnés (`harness/`), cada invocación completa en `<fase>/raw.jsonl` (B1 antes y después, puntos 1-4), las salidas de AWS de los puntos 5 y 6 (`p56/`), la plantilla desplegada, el log de construcción, `MANIFIESTO.md` (qué se ejecutó, cuándo y con qué resultado, por fase) y `SHA256SUMS` (95 archivos).
+- **Cómo verificar:** `shasum -a 256 evidencia-t53-r6.tar.gz`; `tar xzf …` y `cd r6 && shasum -a 256 -c SHA256SUMS`; repetir un punto con `T53_DIGEST=<runtime digest> python -I harness/<fase>.py <dir>` (requiere `lambda:InvokeFunction` sobre la función).
+- **Firma:** el commit que publica este documento y el tag anotado `t53-r6-cert` están firmados con una clave SSH dedicada (ed25519, comentario `vendix-t53-signing`, huella `SHA256:adPIjYArS9wqXupW+g2x59pToW+/CxA2zEfQ1mWSrYQ`). Clave pública: `ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIC4JLezCK3YzQGbRTZvfjpmmuMD4SoRP9D26i+GQHWhz`. Verificación:
+
+  ```sh
+  echo 'aurora@abkbusiness.com ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIC4JLezCK3YzQGbRTZvfjpmmuMD4SoRP9D26i+GQHWhz' > /tmp/allowed_signers
+  git -c gpg.ssh.allowedSignersFile=/tmp/allowed_signers tag -v t53-r6-cert
+  git -c gpg.ssh.allowedSignersFile=/tmp/allowed_signers log --show-signature -1 t53-r6-cert
+  ```
+
+  La firma ata el texto de este documento (y con él los SHA-256 de la evidencia y los digests) a esa clave; no hay firma de la imagen ni atestación de procedencia (el build usa `--provenance=false`).
+
+## Hallazgos operativos (corrida 6)
+
+1. **Lambda reinicia el entorno** tras `Sandbox.Timedout` o la muerte del runtime: `init` nuevo y ningún proceso del uid del invitado (36/36: 16 sobre la imagen anterior y 20 sobre la nueva, cada uno seguido de una sonda); `/tmp` se conserva.
+2. **Recursos:** se subió a ECR `rt-ada2b02f1d00`; el stack se actualizó una vez, solo `ImageUri`. En ECR quedan 7 imágenes `rt-*` (suma de tamaños 2,04 GB). Colima se apagó tras el push.
+3. **Arranque en frío:** 20,3 s de handler en el primer análisis tras el despliegue (15,2 s en la corrida 5).
+4. **Arnés:** el control «solo `init`» del punto 4 se corrigió y reevaluó desde los crudos (ver punto 4).
+
+## Costo mensual estimado (corregido, obs. 7)
+
+| Concepto | Estimación |
+| --- | --- |
+| ECR: 7 imágenes `rt-*`, 2,04 GB sumando tamaños, a USD 0,10/GB-mes | ≤ USD 0,20 (ECR cobra capas únicas: el real es menor, no verificado) |
+| Lambda en reposo, VPC, subredes, SG, IAM, CloudFormation, ENI | USD 0 |
+| Lambda arm64 por análisis: 2,73 s (mediana de la corrida 6; 2,76 en la 5) × 1 GB × USD 0,0000133334/GB-s + USD 0,0000002 por solicitud | ~USD 0,000037 |
+| 10 000 / 30 000 análisis al mes | ~USD 0,37 / ~USD 1,10 (sin capa gratuita) |
+| NAT, endpoints, CloudWatch Logs, transferencia | USD 0 (no existen) |
+
+Borrar las imágenes no certificadas (ver Rollback en el README) deja el reposo en ~USD 0,03-0,06.
+
+## Valores para el release (corrida 6)
+
+| Variable | Valor |
+| --- | --- |
+| `AI_ANALYSIS_SANDBOX_ENABLED` | sin definir o `false` (decisión pendiente de Rafael) |
+| `AI_ANALYSIS_LAMBDA_FUNCTION_ARN` | `arn:aws:lambda:us-east-1:<account>:function:vendix-vex-analysis-sandbox` |
+| `AI_ANALYSIS_LAMBDA_REGION` | `us-east-1` |
+| `AI_ANALYSIS_RUNTIME_DIGEST` | `sha256:ada2b02f1d0001dbb588377aea6abed9e35417f8e89c33b85c1c51d35751fd25` |
+| `AI_ANALYSIS_CERTIFIED_DIGEST` | **sin fijar**: esta corrida no certifica. No se tocó ninguna variable del backend |
+
+Cualquier cambio en `Dockerfile`, `requirements.txt`, `handler.py`, `runner.py` o `template.json` cambia el runtime digest y obliga a repetir T53 completa, incluido el experimento de B1.
+
+---
+
+## Historial · corrida 5 (digest `b8868d57…`, runtime `1f10b724…`)
+
+Declarada CERTIFICADA por el autor; la auditoría independiente (64/100) no aceptó el sello: el caso «el invitado detiene o mata al vigilante» no estaba probado (B1), el arnés y los resultados crudos no se conservaron y el punto 6 se llamó «Firma» sin firma (B2). La corrida 6 cierra esos puntos.
+
+| | |
+| --- | --- |
+| **Resultado (corrida 5)** | **CERTIFICADA.** Pasan los 6 puntos sobre el mismo digest. El hallazgo 7 (enlaces duros en `/tmp`) queda cerrado: los ataques de 15 y 23 s se cortan en 2,0-2,3 s y las tiendas siguientes responden `ok` (27/27). La corrida destapó una variante (hallazgo 8: entradas en la raíz de `/tmp` que reutilizan huecos libres, invisibles al tope de bloques), corregida en `dfb1667be` **antes** de la imagen certificada; toda la evidencia de abajo es sobre esa imagen. `AI_ANALYSIS_CERTIFIED_DIGEST = sha256:1f10b7243591f87e9357b5c3a0fe8d2e11d3f375c7178b4076721d8fd1aa49eb`. |
 | Fecha | 2026-11-23, 00:10-00:23 UTC (2026-11-22, 19:10-19:23 Bogotá); intento previo sobre `rt-9c358ee0acb8`, 23:47-00:05 UTC, descartado (hallazgo 8) |
 | Cuenta / región | `<account>` / `us-east-1` (perfil `default`), corrida autorizada por el dueño |
 | Función | `vendix-vex-analysis-sandbox` (stack `vendix-vex-analysis-stack`) |
@@ -12,9 +232,9 @@
 | Despliegue | `update-stack --use-previous-template`, solo `ImageUri` cambiado; actualizó únicamente `AnalysisFunction` (00:09:28-00:09:45Z). `CodeSha256 = b8868d57…d74c`, `LastModified 2026-11-23T00:09:29Z`, `Active`/`Successful` |
 | Base | `public.ecr.aws/lambda/python:3.12@sha256:ed196260cbf6f74e3f64dd141ebe2401d78a15e6355925da98a3d3c3b4d35c6a` (sin cambios) |
 
-Las corridas 4, 3, 2 y 1 quedan abajo como historial. Higiene: en este documento los IDs de cuenta AWS se sustituyeron por `<account>`; **commits anteriores de la rama todavía contienen el ID completo** (en este archivo y en `infra/ec2-iam/`). No se reescribió la historia: lo decide Rafael.
+Higiene: en este documento los IDs de cuenta AWS se sustituyeron por `<account>`; **commits anteriores de la rama todavía contienen el ID completo** (en este archivo y en `infra/ec2-iam/`). No se reescribió la historia: lo decide Rafael.
 
-## Corrida 5 · historia de usuario
+### Corrida 5 · historia de usuario
 
 **Como** dueño de Vendix en producción, **quiero** que el análisis en Python de Vex corra en una Lambda aislada y certificada **para** encender `AI_ANALYSIS_SANDBOX_ENABLED` sin que el código generado pueda salir a internet, leer credenciales de AWS ni ver, alterar o bloquear el análisis de otra tienda.
 
@@ -29,7 +249,7 @@ Las corridas 4, 3, 2 y 1 quedan abajo como historial. Higiene: en este documento
 
 **Lo que se observó:** todos los criterios se cumplen. El atacante responde en 2,0-2,3 s en total (un análisis trivial tarda 2,4 s; cruza el tope a ~0,3 s de empezar), las 27 tiendas posteriores responden `ok` en 2,4-2,5 s y `/tmp` queda en los mismos inodos (147 982) y bloques, salvo 0,1 MB una sola vez en la raíz de `/tmp` (ver hallazgo 8).
 
-## Corrida 5 · resultado por punto (digest `b8868d57…` / runtime `1f10b724…`)
+### Corrida 5 · resultado por punto (digest `b8868d57…` / runtime `1f10b724…`)
 
 | # | Punto | Resultado |
 | --- | --- | --- |
@@ -40,7 +260,7 @@ Las corridas 4, 3, 2 y 1 quedan abajo como historial. Higiene: en este documento
 | 5 | Política IAM y red | **PASA.** Sin cambios respecto de la corrida 4; drift `IN_SYNC` (0); `simulate-custom-policy` de `backend-invoke-policy.json`: `InvokeFunction` `allowed` solo sobre esta función |
 | 6 | Firma y digest | **PASA.** Digest ECR del tag `rt-1f10b7243591` = `CodeSha256` = `ResolvedImageUri` = `Code.ImageUri` = parámetro `ImageUri` = `sha256:b8868d57…d74c`; las 231 respuestas con sobre de la corrida (de 236 invocaciones; las otras 5 son `Runtime.ExitError` buscados: matar al padre, `NOFILE` duro, dos `setpriority` y `SCHED_IDLE`) traen `runtime_digest = sha256:1f10b724…49eb` = `./runtime-digest.sh` en `dfb1667be`. Imagen local verificada antes del push: `ENV ANALYSIS_RUNTIME_DIGEST` igual, `handler.py`/`runner.py` idénticos byte a byte al repo, intérprete `0711` |
 
-## Hallazgo 7 · cerrado
+### Hallazgo 7 · cerrado
 
 Arreglo aplicado (`11754e911`), las tres opciones propuestas en la corrida 4:
 
@@ -50,25 +270,25 @@ Arreglo aplicado (`11754e911`), las tres opciones propuestas en la corrida 4:
 
 Specs nuevos (`TmpEntryTests`, `test_handler.py`): enlaces duros sobre 4 inodos por encima del tope → `ANALYSIS_RUNTIME` en menos de 2 s, `/tmp` vacío, sin `rename`, la tienda siguiente `ok`; truncar la entrada de la tienda para esconder entradas no evade el tope; un resultado legítimo de ~210 KB no se confunde con entradas. RED observado contra `df5bbdf4b` (2 fallan con `ANALYSIS_TIMEOUT`), GREEN después; 58 specs del archivo en verde en macOS. En Linux (dentro de la imagen) pasan los 29 de `TmpEntryTests`, `TmpInodeTests` y `ExecutionTests` con los ganchos solo-Lambda neutralizados; el archivo completo ya fallaba en Linux antes de este cambio (22 de 54 en `df5bbdf4b`: el arnés simula `subprocess.Popen`, que `ctypes.util.find_library` usa en Linux).
 
-## Hallazgo 8 · entradas en la raíz de `/tmp` (encontrado y corregido en esta corrida)
+### Hallazgo 8 · entradas en la raíz de `/tmp` (encontrado y corregido en esta corrida)
 
 Sobre la primera imagen con el arreglo 7 (`rt-9c358ee0acb8`, digest `2e478671…4ebe`), los ataques en el directorio propio quedaban limpios, pero los que enlazaban **en la raíz de `/tmp`** (abierta a todos, `1777`) le quitaban ~0,3 MB cada uno y cada vez metían más entradas: 4 ataques seguidos respondieron en 2,2 / 2,5 / 2,7 / 3,0 s y `/tmp` bajó de 550,4 a 549,2 MB. Causa: la raíz de `/tmp` es el único directorio que sobrevive a cada ejecución y ext4 no la encoge; las entradas nuevas reutilizan los huecos que dejó el ataque anterior **sin consumir bloques**, así que el tope de bloques no las ve y cada ataque añade 256 KiB más de capacidad (diagnóstico en Lambda: 2 000 enlaces en la raíz ya crecida consumen 0 bloques). Repetido, volvería el `sandbox busy`.
 
 Arreglo (`dfb1667be`): en cada vigilancia el padre cuenta, sin pasar de 65, las entradas de la raíz de `/tmp`; con más de **64** sobre la base mata al invitado con el mismo `ANALYSIS_RUNTIME`. Spec: enlaces en la raíz que no consumen bloques → `ANALYSIS_RUNTIME` en menos de 2 s y `/tmp` vacío (RED contra `11754e911`, GREEN después). Sobre la imagen certificada, 7 ataques seguidos en la raíz responden en 2,0-2,1 s, sin tendencia, y `/tmp` pierde 0,1 MB una sola vez (550,4 → 550,3 MB; 538,3 → 538,2 MB disponibles) y luego se mantiene.
 
-## Evidencia por punto (corrida 5)
+### Evidencia por punto (corrida 5)
 
 Arnés: `boto3` (`invoke` con `LogType=Tail`, `max_attempts=1`, lectura de 90 s) desde un directorio temporal fuera del repo; validación del sobre (`execution_id`, `nonce`, `runtime_digest` esperados) y sondas sin descriptores (`kill(pid, 0)`, `statvfs`, `stat`, `fstat`, `prlimit64` de solo lectura sobre el padre, syscalls por `ctypes`). Ningún programa hostil se ejecutó en la Mac. Primer análisis trivial: **15,2 s de handler en frío**; después, 2,4 s. Identificador de entorno: hora de creación de `/proc/1` y del handler (`ppid = 2`). `/tmp` se informa como bloques libres (`f_bfree`), disponibles (`f_bavail`) e inodos: 550,4 MB / 538,3 MB / 147 982 al empezar (las corridas anteriores daban 513 MB con otra medida).
 
-### 1 · Egreso cero
+#### 1 · Egreso cero
 
 Mismas sondas y resultados que la corrida 4 (tabla de la corrida 4 abajo), más: `prlimit64(self, NOFILE, 64)` → `EPERM`; `setrlimit` (1,1)/(0,1)/(1024,1024) → `ValueError`; sigue `(0, 0)`; hijo con `fork` → `EMFILE`; `exec` de `python3` → exit 127. **R1**: `urllib` no puede ni cargar el códec (`EMFILE`). **R2**: C 19 s (379/379 `EMFILE`) → A `ok`, total 6, solo `MARK-A-…` → C 2 s (40/40 `EMFILE`), solo su marcador.
 
-### 2 · Sistema de archivos, `/proc` y secretos
+#### 2 · Sistema de archivos, `/proc` y secretos
 
 Mismos resultados que la corrida 4, uno a uno (`mkdir` en 10 rutas de sistema `EROFS`; `/dev/shm`, `/dev/mqueue` `ENOENT`; `truncate`/`chmod`/`rename` de `handler.py`, symlink en `/var/task`, `utime` del intérprete `EROFS`; `open` `EMFILE`; entorno `HOME, LANG, MKL/OMP/OPENBLAS_NUM_THREADS, PATH, PYTHONDONTWRITEBYTECODE, TMPDIR`; uid/euid 993, gid 990, sin grupos, `capget` 0; `/proc/2/{environ,mem}`, `/proc/self/environ`, `/proc/1/environ` de uid 0; `readlink` de `exe`, `cwd`, `root`, `fd/0`, `fd/3` `EACCES`; `result.json.part` symlink → `ANALYSIS_OUTPUT "…cannot be opened safely"`, FIFO y `result.json` directorio → `"…is not a regular file"`, `result.json` symlink previo → `ok` con el resultado propio).
 
-### 3 · Límites de recursos
+#### 3 · Límites de recursos
 
 Cada caso va seguido de una tienda sonda: en todas, solo `init` y el handler, `/tmp` en 550,3 MB y 147 982 inodos.
 
@@ -101,7 +321,7 @@ Cada caso va seguido de una tienda sonda: en todas, solo `init` y el handler, `/
 | `sched_setaffinity(ppid, {0})` | `ok` |
 | `sched_setscheduler(ppid, SCHED_IDLE)` | `Runtime.ExitError` |
 
-### 4 · Aislamiento multi-tenant
+#### 4 · Aislamiento multi-tenant
 
 100 invocaciones consecutivas A → B → C (34/33/33) con 40, 55 y 70 filas marcadas, 00:18:14-00:23:03Z, todas en el mismo entorno; 2677-2872 ms por análisis (mediana 2757). Cada ejecución busca y luego deja un daemon con doble `fork` + `setsid` y el `shm` adjunto, un symlink `/tmp/vex-t53-plant`, `shm` + `msg` + `sem` con claves fijas y su marcador, una variable en `builtins`, e intenta `add_key`/`keyctl`.
 
@@ -114,11 +334,11 @@ Cada caso va seguido de una tienda sonda: en todas, solo `init` y el handler, `/
 | `/tmp` estable (134 351 bloques, 147 982 inodos) | 100/100 |
 | Keyring: `add_key` / `keyctl SEARCH` | `EPERM` / `EPERM` |
 
-### 5 · Política IAM y red
+#### 5 · Política IAM y red
 
 Solo lectura. Rol de ejecución: confianza solo `lambda.amazonaws.com`, sin boundary, 0 políticas administradas, inline única `VpcEniOnly` (5 acciones ENI sobre `*`). Función sin política de recurso, URL, alias, mapeos, capas ni variables; concurrencia reservada 3; `LoggingConfig` apunta a `/aws/lambda/vendix-vex-analysis-sandbox`, que **no existe** (el rol no tiene permisos de logs). VPC `10.77.0.0/24`: DNS support/hostnames `false/false`, rutas solo `local`, IGW/NAT/endpoints/peering/egress-only/TGW 0, subredes sin IP pública, SG sin ingress y egress solo `127.0.0.1/32` tcp/1. Drift `IN_SYNC` (0 recursos). `simulate-custom-policy` de `backend-invoke-policy.json`: `InvokeFunction` `allowed` sobre esta función e `implicitDeny` sobre otra; `UpdateFunctionCode`, `UpdateFunctionConfiguration` e `InvokeFunctionUrl` `implicitDeny`. La política `vendix-vex-analysis-invoke` no existe (no aplicada).
 
-## Hallazgos operativos (corrida 5)
+### Hallazgos operativos (corrida 5)
 
 1. **`numpy 30 000²` sin respuesta (corrida 4): no se reprodujo.** 3 de 3 (una sobre `rt-9c358ee0acb8`, dos sobre la imagen certificada) dieron `ANALYSIS_MEMORY` en 2,3-2,4 s, con la cola del log de la invocación a la vista (`Max Memory Used` 259-335 MB). El log group de CloudWatch **no existe** (por diseño: el rol no puede escribir logs), así que no hay registro del caso original; sigue sin explicar.
 2. **Raíz de `/tmp`:** pierde hasta ~0,1 MB una sola vez por entorno si un invitado escribe en ella (hallazgo 8); no crece más con ataques repetidos.
@@ -128,7 +348,7 @@ Solo lectura. Rol de ejecución: confianza solo `lambda.amazonaws.com`, sin boun
 6. **Recursos:** se subieron a ECR `rt-9c358ee0acb8` (descartada, hallazgo 8) y `rt-1f10b7243591` (certificada); el stack se actualizó dos veces, solo `ImageUri`; la función queda en la imagen certificada. Colima se apagó tras cada push y antes de certificar.
 7. **Specs en Linux:** `test_handler.py` completo ya fallaba en Linux antes de esta corrida (ver hallazgo 7); se ejecuta en macOS, como indica el README.
 
-## Valores para el release (corrida 5)
+### Valores para el release (corrida 5)
 
 | Variable | Valor |
 | --- | --- |
@@ -215,7 +435,7 @@ Arnés: `aws lambda invoke` con `AWS_MAX_ATTEMPTS=1`, `--log-type Tail`, validac
 | Sonda desde el invitado | Resultado |
 | --- | --- |
 | `RLIMIT_NOFILE` / descriptores abiertos | `(0, 0)` / `0`, `1`, `2`, `3` |
-| TCP a `169.254.100.1:9001`, IMDS, `169.254.170.2`, `169.254.100.5:53`, `1.1.1.1:443`, `8.8.8.8:53`, EC2 `10.0.10.80:443`, RDS `10.0.20.75:5432`, NTP `169.254.169.123` | `EMFILE` |
+| TCP a `169.254.100.1:9001`, IMDS, `169.254.170.2`, `169.254.100.5:53`, `1.1.1.1:443`, `8.8.8.8:53`, EC2 `<internal-ip>:443`, RDS `<internal-ip>:5432`, NTP `169.254.169.123` | `EMFILE` |
 | UDP, TCP6, `AF_UNIX`, netlink / raw, `AF_PACKET` | `EMFILE` / `EPERM` |
 | `getaddrinfo('example.com')`; **R1** `urllib` a `/runtime/invocation/next` | `EMFILE` (no puede ni cargar el códec `idna`) |
 | **R2** atacante C 19 s → víctima A → atacante C | C: 379 intentos, 379 `EMFILE`; A: `ok`, total esperado, 1687 ms, sin el marcador de C; C: sin el marcador de A |
@@ -415,7 +635,7 @@ Arnés: el de la corrida 2 (`aws lambda invoke`, `AWS_MAX_ATTEMPTS=1`, `--log-ty
 | --- | --- |
 | Módulos ya cargados | `socket`, `ssl`, `ctypes`, `select`, `urllib.request`, `http.client`, `subprocess`, `threading`, `mmap`: todos presentes (los arrastra pandas/numpy) |
 | `RLIMIT_NOFILE` / descriptores abiertos | `(0, 0)` / `0:/dev/null`, `1` y `2` (archivos borrados del handler), `3:<own>/result.json.part` |
-| TCP a `169.254.100.1:9001`, IMDS, `169.254.170.2`, `169.254.100.5:53`, `1.1.1.1:443`, `8.8.8.8:53`, EC2 `10.0.10.80:443`, RDS `10.0.20.75:5432`, NTP | `EMFILE` |
+| TCP a `169.254.100.1:9001`, IMDS, `169.254.170.2`, `169.254.100.5:53`, `1.1.1.1:443`, `8.8.8.8:53`, EC2 `<internal-ip>:443`, RDS `<internal-ip>:5432`, NTP | `EMFILE` |
 | Socket UDP, TCP6, `AF_UNIX`, netlink / raw, `AF_PACKET` | `EMFILE` / `EPERM` |
 | `getaddrinfo('example.com')`, `urllib` a la Runtime API | `EMFILE` |
 | **R1** `GET /2018-06-01/runtime/invocation/next` | `EMFILE`: no hay conexión, ni evento, ni `nonce` |
@@ -590,12 +810,12 @@ Arnés: `aws lambda invoke` con `AWS_MAX_ATTEMPTS=1` (un intento, sin reintentos
 | --- | --- |
 | `resolv.conf` del invitado | `nameserver 169.254.100.5`, `timeout:2 attempts:5` |
 | DNS: `example.com`, subdominio aleatorio, `sts.amazonaws.com`, `lambda.us-east-1.amazonaws.com`, endpoint RDS de producción | BLOCKED (sin respuesta en 12 s) |
-| UDP/53 a `10.77.0.2`, `169.254.169.253`, `169.254.100.5`, `8.8.8.8`, `1.1.1.1`, `172.31.0.2` | BLOCKED (timeout) |
+| UDP/53 a `10.77.0.2`, `169.254.169.253`, `169.254.100.5`, `8.8.8.8`, `1.1.1.1`, `<internal-ip>` | BLOCKED (timeout) |
 | TCP a `1.1.1.1` (53/80/443) y `8.8.8.8` (53/443); `https://example.com/` | BLOCKED (timeout) |
 | IPv6 `2606:4700:4700::1111:443` | BLOCKED (`EADDRNOTAVAIL`) |
 | IMDS `169.254.169.254` (TCP, HTTP v1, token v2), credenciales `169.254.170.2` | BLOCKED (`ECONNREFUSED`) |
 | NTP `169.254.169.123:123` | BLOCKED (`EPERM`) |
-| EC2 de producción `10.0.10.80` (22/80/443/3000), RDS `10.0.20.75:5432`, IP pública de la EC2 `:443` | BLOCKED (timeout) |
+| EC2 de producción `<internal-ip>` (22/80/443/3000), RDS `<internal-ip>:5432`, IP pública de la EC2 `:443` | BLOCKED (timeout) |
 | `SOCK_RAW` ICMP, `AF_PACKET` | BLOCKED (`EPERM`) |
 | TCP `169.254.100.5:53` (proxy DNS local) | conecta, no responde |
 | **TCP `169.254.100.1:9001` (Runtime API)** | **abierto y explotable: R1 y R2** |
@@ -689,7 +909,7 @@ backend            política vendix-vex-analysis-invoke: NoSuchEntity (no aplica
 
 `aws iam simulate-custom-policy` con `backend-invoke-policy.json` (ARN real):
 
-| Acción | `vendix-vex-analysis-sandbox` | `vendix-production-alerts-telegram` | otra función del prefijo |
+| Acción | `vendix-vex-analysis-sandbox` | `<otra-función-de-producción>` | otra función del prefijo |
 | --- | --- | --- | --- |
 | `lambda:InvokeFunction` | **allowed** | implicitDeny | implicitDeny |
 | `lambda:UpdateFunctionCode` | implicitDeny | implicitDeny | implicitDeny |
@@ -793,11 +1013,11 @@ Todos con prefijo `vendix-vex-analysis-*`, tags `project=vendix-vex-analysis` y 
 | --- | --- |
 | Repositorio ECR (IMMUTABLE, scan on push, AES256) | `arn:aws:ecr:us-east-1:<account>:repository/vendix-vex-analysis-runtime` |
 | Stack CloudFormation (desde `template.json`) | `vendix-vex-analysis-stack` |
-| VPC `10.77.0.0/24`, DNS support/hostnames **false** | `vpc-033d4159415935325` |
-| Subredes privadas (`MapPublicIpOnLaunch=false`) | `subnet-0ea4879910308ee13` (1a), `subnet-0e91710d8f4162007` (1b) |
+| VPC `10.77.0.0/24`, DNS support/hostnames **false** | `<vpc-id>` |
+| Subredes privadas (`MapPublicIpOnLaunch=false`) | `<subnet-id>` (1a), `<subnet-id>` (1b) |
 | Tabla de rutas (solo `local`) | `rtb-0b86b1aebcb136966` |
-| Security group (sin ingress; egress solo `127.0.0.1/32` tcp/1) | `sg-0e29560d2637f407e` |
-| Rol de ejecución (solo ENI) | `arn:aws:iam::<account>:role/vendix-vex-analysis-stack-ExecutionRole-0IwvkeIA9hkU` |
+| Security group (sin ingress; egress solo `127.0.0.1/32` tcp/1) | `<sg-id>` |
+| Rol de ejecución (solo ENI) | `<role>` |
 | Función (arm64, 1024 MB, 30 s, `/tmp` 512 MB, concurrencia reservada 3, sin variables de entorno) | `arn:aws:lambda:us-east-1:<account>:function:vendix-vex-analysis-sandbox` |
 
 Temporales de diagnóstico, **ya eliminados** al cerrar la corrida: función `vendix-vex-analysis-diag` (misma VPC, SG y rol) e imágenes ECR `diag-1`, `diag-2`, `variant-1`, `variant-2`, `variant-3`.
@@ -931,7 +1151,7 @@ Arnés: `aws lambda invoke` (un intento, sin reintentos) desde la Mac del operad
 | UDP/53 a `10.77.0.2`, `169.254.169.253`, `169.254.100.5`, `8.8.8.8`, `1.1.1.1` | BLOCKED (timeout) |
 | TCP/UDP a `1.1.1.1` y `8.8.8.8` (53/80/443), `https://example.com/`, IPv6 `2606:4700:4700::1111` | BLOCKED |
 | IMDS `169.254.169.254` (TCP y HTTP), credenciales ECS `169.254.170.2`, Time Sync `169.254.169.123` | BLOCKED |
-| IP privada de la EC2 de producción (22/80/443/3000), IP privada del RDS de producción (5432), VPC por defecto `172.31.0.2:53` | BLOCKED (timeout) |
+| IP privada de la EC2 de producción (22/80/443/3000), IP privada del RDS de producción (5432), VPC por defecto `<internal-ip>:53` | BLOCKED (timeout) |
 | Sockets `SOCK_RAW` ICMP y `AF_PACKET` | BLOCKED (`EPERM`) |
 | TCP connect a `169.254.100.5:53` (proxy DNS local de Lambda) | conecta, pero no responde a nada |
 | TCP a `169.254.100.1:9001` (Runtime API de Lambda) | abierto: inherente a Lambda, solo sirve al propio entorno |
@@ -1010,7 +1230,7 @@ red                rutas solo local · IGW 0 · NAT 0 · endpoints 0 · peering 
 
 `aws iam simulate-custom-policy` con `backend-invoke-policy.json` (ARN real):
 
-| Acción | `vendix-vex-analysis-sandbox` | `vendix-production-alerts-telegram` | otra función del prefijo |
+| Acción | `vendix-vex-analysis-sandbox` | `<otra-función-de-producción>` | otra función del prefijo |
 | --- | --- | --- | --- |
 | `lambda:InvokeFunction` | **allowed** | implicitDeny | implicitDeny |
 | `lambda:UpdateFunctionCode` | implicitDeny | implicitDeny | implicitDeny |
