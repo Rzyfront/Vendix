@@ -12,6 +12,7 @@ import {
 } from './dto/role.dto';
 import { Prisma } from '@prisma/client';
 import { VendixHttpException, ErrorCodes } from 'src/common/errors';
+import { vendixUserWhere } from '@common/utils/vendix-user.util';
 import {
   HIDDEN_ROLE_NAMES,
   RoleScope,
@@ -44,7 +45,11 @@ const ROLE_INCLUDE: Prisma.rolesInclude = {
       permissions: { select: { id: true, name: true, description: true } },
     },
   },
+  // Usuarios del rol y su conteo: solo usuarios de Vendix. Para cualquier rol
+  // distinto de `customer` es la misma cifra; en `customer` evita listar y
+  // contar a los clientes finales de las tiendas.
   user_roles: {
+    where: { users: vendixUserWhere() },
     include: {
       users: {
         select: { id: true, email: true, first_name: true, last_name: true },
@@ -52,7 +57,12 @@ const ROLE_INCLUDE: Prisma.rolesInclude = {
       stores: { select: { id: true, name: true } },
     },
   },
-  _count: { select: { role_permissions: true, user_roles: true } },
+  _count: {
+    select: {
+      role_permissions: true,
+      user_roles: { where: { users: vendixUserWhere() } },
+    },
+  },
 };
 
 /**
@@ -302,6 +312,8 @@ export class RolesService {
       throw new ConflictException('Cannot delete system roles');
     }
 
+    // Guarda de integridad, no métrica: cualquier asignación (también la de un
+    // cliente final) bloquea el borrado, por eso este conteo no se filtra.
     if (
       existingRole._count.role_permissions > 0 ||
       existingRole._count.user_roles > 0
@@ -437,7 +449,7 @@ export class RolesService {
       this.prisma.roles.findMany({
         include: {
           _count: {
-            select: { user_roles: true },
+            select: { user_roles: { where: { users: vendixUserWhere() } } },
           },
         },
       }),
@@ -448,7 +460,7 @@ export class RolesService {
           _count: {
             select: {
               role_permissions: true,
-              user_roles: true,
+              user_roles: { where: { users: vendixUserWhere() } },
             },
           },
         },

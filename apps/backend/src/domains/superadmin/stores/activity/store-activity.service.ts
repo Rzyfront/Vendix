@@ -12,6 +12,7 @@ import {
 } from '../../../store/analytics/analytics-metrics.contract';
 import { StoreActivityQueryDto } from './dto/store-activity-query.dto';
 import { StoreActivityDetailQueryDto } from './dto/store-activity-detail-query.dto';
+import { vendixUserWhere } from '@common/utils/vendix-user.util';
 
 /**
  * Read-only aggregates behind `Cuentas > Actividad`.
@@ -24,6 +25,8 @@ import { StoreActivityDetailQueryDto } from './dto/store-activity-detail-query.d
  *
  * Scoring (closed by plan):
  * - score = orders_count * 1 + audit_events * 0.2 + active_users * 2
+ * - active_users = staff of the store (Vendix users, see `vendixUserWhere`)
+ *   with a session in the window; ecommerce customers never count.
  * - active store = is_active AND (orders_count >= 1 OR audit_events >= 5)
  * - activity meta = 80 (% of active stores)
  * - avg hours/day = distinct UTC (day, hour) pairs with >= 1 audit/order
@@ -557,8 +560,11 @@ export class StoreActivityService {
         },
         _max: { attempted_at: true },
       }),
+      // Solo el personal de la tienda (usuarios de Vendix): `store_users`
+      // también vincula a los clientes de ecommerce, y sus sesiones no son
+      // uso del producto por parte del comercio.
       this.prisma.store_users.findMany({
-        where: { store_id: { in: ids } },
+        where: { store_id: { in: ids }, user: vendixUserWhere() },
         select: { store_id: true, user_id: true },
       }),
     ]);

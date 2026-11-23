@@ -2,6 +2,7 @@ import { Injectable } from '@nestjs/common';
 import { Prisma } from '@prisma/client';
 import { GlobalPrismaService } from '../../../prisma/services/global-prisma.service';
 import { RequestContextService } from '@common/context/request-context.service';
+import { vendixUserWhere } from '@common/utils/vendix-user.util';
 
 import {
   AuditAction,
@@ -142,10 +143,12 @@ export class SuperAdminAuditService {
           where,
           _count: { id: true },
         }),
-        // Top users by activity
+        // Top users by activity: solo usuarios de Vendix (el filtro va antes
+        // del `take` para que el top no incluya ni se quede corto por
+        // clientes finales).
         this.prismaService.audit_logs.groupBy({
           by: ['user_id'],
-          where,
+          where: { ...where, users: vendixUserWhere() },
           _count: { id: true },
           orderBy: { _count: { id: 'desc' } },
           take: 10,
