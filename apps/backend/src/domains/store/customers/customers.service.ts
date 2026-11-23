@@ -1934,6 +1934,58 @@ export class CustomersService {
       });
   }
 
+  /**
+   * Segmentos del CRM que existen en ESTA tienda. Un id de otra tienda se
+   * descarta en silencio: nunca se evalua ni se filtra con el.
+   */
+  async segmentsOfStore(storeId: number, segmentIds: number[]) {
+    return this.prisma.crm_segments.findMany({
+      where: { store_id: storeId, id: { in: segmentIds } },
+      select: { id: true, filter: true, is_dynamic: true },
+    });
+  }
+
+  /**
+   * Valores vivos para los filtros del listado (segmento y etiqueta). Solo se
+   * devuelve lo que devolveria al menos un cliente de ESTA tienda; si una lista
+   * viene vacia, el frontend no pinta ese filtro.
+   */
+  async filterOptions(storeId: number) {
+    const [tags, segments] = await Promise.all([
+      this.prisma.crm_tags.findMany({
+        where: { store_id: storeId },
+        select: {
+          id: true,
+          name: true,
+          color: true,
+          group_name: true,
+          _count: { select: { customer_tags: true } },
+        },
+        orderBy: [{ group_name: 'asc' }, { name: 'asc' }],
+      }),
+      // `last_count` nulo es "nunca contado", no "vacio": se conserva.
+      this.prisma.crm_segments.findMany({
+        where: {
+          store_id: storeId,
+          OR: [{ last_count: null }, { last_count: { gt: 0 } }],
+        },
+        select: { id: true, name: true, last_count: true },
+        orderBy: { name: 'asc' },
+      }),
+    ]);
+
+    return {
+      tags: tags
+        .filter((tag) => tag._count.customer_tags > 0)
+        .map(({ _count, ...tag }): { id: number; name: string; color: string | null; group_name: string | null } => tag),
+      segments: segments.map((segment) => ({
+        id: segment.id,
+        name: segment.name,
+        count: segment.last_count,
+      })),
+    };
+  }
+
   async findAll(
     storeId: number,
     query?: {
@@ -1942,6 +1994,14 @@ export class CustomersService {
       limit?: number;
       state_province?: string;
       city?: string;
+      /** Etiquetas del CRM: se queda con quien tenga ALGUNA de ellas. */
+      tag_ids?: number[];
+      /**
+       * Clientes que cumplen el/los segmentos elegidos (los resuelve el
+       * controlador). `[]` = el filtro no devuelve a nadie; `undefined` = sin
+       * filtro. Se aplica aqui, en la consulta, nunca en memoria.
+       */
+      customer_ids?: number[];
     },
   ) {
     const { search, page = 1, limit = 20 } = query || {};
@@ -1995,6 +2055,25 @@ export class CustomersService {
           },
         },
       ];
+    }
+
+    // Etiqueta del CRM: relacion directa (`crm_customer_tags`), asi que el
+    // filtro va en la consulta y el scope de tienda es explicito: una etiqueta
+    // de otra tienda nunca matchea.
+    if (query?.tag_ids?.length) {
+      where.crm_customer_tags = {
+        some: {
+          store_id: storeId,
+          tag_id: { in: query.tag_ids },
+        },
+      };
+    }
+
+    // Segmento: el controlador ya resolvio los ids con el compilador de reglas.
+    // `in: []` no devuelve filas, que es justo lo que se quiere cuando el
+    // segmento no tiene a nadie.
+    if (query?.customer_ids !== undefined) {
+      where.id = { in: query.customer_ids };
     }
 
     // Location filter: the customer matches when ANY of its addresses

@@ -14,6 +14,7 @@ import {
   CreateCustomerRequest,
   ExistingCustomerSummary,
   UpdateCustomerRequest,
+  CustomerFilterOptions,
 } from './models/customer.model';
 import { ToastService, DialogService, type AddressPayload } from '../../../../shared/components';
 import { AuthFacade } from '../../../../core/store/auth/auth.facade';
@@ -86,6 +87,9 @@ import { customerDisplayName } from '../../../../shared/utils/customer-display-n
         [limit]="limit()"
         (search)="onSearch($event)"
         (locationFilter)="onLocationFilter($event)"
+        (crmFilter)="onCrmFilter($event)"
+        [segments]="filterOptions().segments"
+        [tags]="filterOptions().tags"
         (pageChange)="onPageChange($event)"
         (create)="openCreateModal()"
         (edit)="openEditModal($event)"
@@ -156,6 +160,10 @@ export class CustomersComponent {
   totalItems = signal(0);
   private searchQuery = signal('');
   private readonly locationFilter = signal<CustomerLocationFilter>({});
+  /** Segmento/etiqueta elegidos; el backend los aplica en la consulta. */
+  private readonly crmFilter = signal<{ tag_id?: number; segment_id?: number }>({});
+  /** Valores vivos de la tienda para los dos filtros nuevos. */
+  readonly filterOptions = signal<CustomerFilterOptions>({ tags: [], segments: [] });
 
   // Modal
   isModalOpen = signal(false);
@@ -395,6 +403,7 @@ export class CustomersComponent {
         }
       });
 
+    this.loadFilterOptions();
     this.loadCustomers();
   }
 
@@ -422,6 +431,7 @@ export class CustomersComponent {
       .getCustomers(this.page(), this.limit(), {
         search: this.searchQuery(),
         ...this.locationFilter(),
+        ...this.crmFilter(),
       })
       .pipe(
         takeUntilDestroyed(this.destroyRef),
@@ -445,6 +455,26 @@ export class CustomersComponent {
     this.searchQuery.set(query);
     this.page.set(1);
     this.loadCustomers();
+  }
+
+  onCrmFilter(filter: { tag_id?: number; segment_id?: number }) {
+    this.crmFilter.set(filter);
+    this.page.set(1);
+    this.loadCustomers();
+  }
+
+  /**
+   * Segmentos y etiquetas de la tienda. Sin datos, el filtro correspondiente no
+   * aparece (el componente oculta el selector con la lista vacia).
+   */
+  private loadFilterOptions() {
+    this.customersService
+      .getFilterOptions()
+      .pipe(takeUntilDestroyed(this.destroyRef))
+      .subscribe({
+        next: (options) => this.filterOptions.set(options ?? { tags: [], segments: [] }),
+        error: () => this.filterOptions.set({ tags: [], segments: [] }),
+      });
   }
 
   onLocationFilter(filter: CustomerLocationFilter) {

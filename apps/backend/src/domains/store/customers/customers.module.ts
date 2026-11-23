@@ -3,7 +3,7 @@ import { BulkUploadHandlerRegistry } from '../bulk-uploads/bulk-upload-handler.r
 import { CustomersBulkJobHandler } from './customers-bulk-job.handler';
 import { S3Module } from '@common/services/s3.module';
 import { AiIngestModule } from '@common/ai-ingest/ai-ingest.module';
-import { Module, OnModuleInit } from '@nestjs/common';
+import { Module, OnModuleInit, forwardRef } from '@nestjs/common';
 import { AIToolRegistry } from '../../../ai-engine/tools/ai-tool-registry';
 import { createCustomerTools } from '../../../ai-engine/tools/domains/customers.tools';
 import { createCustomerWriteTools } from '../../../ai-engine/tools/domains/writes.tools';
@@ -27,6 +27,7 @@ import { ResponseModule } from '../../../common/responses/response.module';
 import { MetadataModule } from '../metadata/metadata.module';
 import { EmailModule } from '../../../email/email.module';
 import { AddressesModule } from '../addresses/addresses.module';
+import { CustomerCrmModule } from './crm/customer-crm.module';
 
 @Module({
   imports: [
@@ -37,6 +38,9 @@ import { AddressesModule } from '../addresses/addresses.module';
     BulkUploadsModule,
     S3Module,
     AiIngestModule,
+    // El listado filtra por segmento con `CrmSegmentQueryService` (evaluacion de
+    // reglas); el CRM ya importa este modulo, asi que el ciclo es explicito.
+    forwardRef(() => CustomerCrmModule),
   ],
   controllers: [
     CustomersController,

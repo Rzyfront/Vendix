@@ -84,7 +84,9 @@ import { CrmUnsubscribeService } from './campaigns/crm-unsubscribe.service';
   ],
   // Flujos (bloque 13): la acción `vendix.crm_task.create` crea tareas por aquí.
   // CustomerCrmService: the Flujos action "asignar etiqueta" uses setTags.
-  exports: [CrmTasksService, CustomerCrmService],
+  // CrmSegmentQueryService: el listado de clientes (CustomersController) filtra
+  // por segmento con la MISMA evaluacion de reglas que campanas y segmentos.
+  exports: [CrmTasksService, CustomerCrmService, CrmSegmentQueryService],
 })
 export class CustomerCrmModule implements OnModuleInit {
   constructor(

@@ -166,6 +166,15 @@ export class CustomerListComponent {
   readonly pageChange = output<number>();
   /** Department/city filter, as the names stored on `addresses`. */
   readonly locationFilter = output<CustomerLocationFilter>();
+  /** Segment/tag filter. Solo se emite lo que el usuario elige. */
+  readonly crmFilter = output<{ tag_id?: number; segment_id?: number }>();
+
+  /**
+   * Valores vivos de la tienda. Si una lista viene vacia, su filtro no se
+   * pinta: nunca hay selectores sin opciones.
+   */
+  readonly segments = input<Array<{ id: number; name: string }>>([]);
+  readonly tags = input<Array<{ id: number; name: string }>>([]);
 
   // ── Department / city filter (DANE catalog) ─────────────────────────────
   private readonly destroyRef = inject(DestroyRef);
@@ -192,8 +201,40 @@ export class CustomerListComponent {
         disabled: !hasDepartment,
         options: this.municipalities().map((m) => ({ value: m.code, label: m.name })),
       },
+      // Filtros dinamicos: solo aparecen si la tienda tiene valores.
+      ...(this.segments().length
+        ? [
+            {
+              key: 'segment',
+              label: 'Segmento',
+              type: 'select' as const,
+              placeholder: 'Todos los segmentos',
+              options: this.segments().map((segment) => ({
+                value: String(segment.id),
+                label: segment.name,
+              })),
+            },
+          ]
+        : []),
+      ...(this.tags().length
+        ? [
+            {
+              key: 'tag',
+              label: 'Etiqueta',
+              type: 'select' as const,
+              placeholder: 'Todas las etiquetas',
+              options: this.tags().map((tag) => ({
+                value: String(tag.id),
+                label: tag.name,
+              })),
+            },
+          ]
+        : []),
     ];
   });
+
+  /** Filtro de segmento/etiqueta vigente, para no perderlo al cambiar otro. */
+  private readonly crmFilterValues = signal<{ tag_id?: number; segment_id?: number }>({});
 
   get totalPages(): number {
     return Math.ceil(this.totalItems() / this.limit());
@@ -390,12 +431,23 @@ export class CustomerListComponent {
     this.filterValues.set({ department, city });
     if (departmentChanged) this.loadMunicipalities(department);
     this.emitLocationFilter();
+
+    const segmentId = toId(values['segment']);
+    const tagId = toId(values['tag']);
+    const next = { segment_id: segmentId, tag_id: tagId };
+    const previous = this.crmFilterValues();
+    this.crmFilterValues.set(next);
+    if (previous.segment_id !== segmentId || previous.tag_id !== tagId) {
+      this.crmFilter.emit(next);
+    }
   }
 
   clearFilters(): void {
     this.filterValues.set({ department: null, city: null });
     this.municipalities.set([]);
     this.emitLocationFilter();
+    this.crmFilterValues.set({});
+    this.crmFilter.emit({});
   }
 
   private loadMunicipalities(departmentCode: string | null): void {
@@ -445,4 +497,10 @@ export class CustomerListComponent {
   formatCurrency(value: number): string {
     return this.currencyService.format(value);
   }
+
+/** `"12"` → 12; vacio o invalido → undefined. */
+function toId(value: unknown): number | undefined {
+  const id = Number(value);
+  return Number.isInteger(id) && id > 0 ? id : undefined;
+}
 }
