@@ -16,6 +16,10 @@ import { Prisma } from '@prisma/client';
 import slugify from 'slugify';
 import { VendixHttpException, ErrorCodes } from 'src/common/errors';
 import { S3Service } from '../../../common/services/s3.service';
+import {
+  vendixUserWhere,
+  withVendixUser,
+} from '@common/utils/vendix-user.util';
 import type {
   OrganizationDetailContract,
   OrganizationPrimaryAddressContract,
@@ -175,7 +179,7 @@ export class OrganizationsService {
           },
           _count: {
             select: {
-              users: true,
+              users: { where: vendixUserWhere() },
               stores: true,
             },
           },
@@ -218,7 +222,7 @@ export class OrganizationsService {
         _count: {
           select: {
             stores: true,
-            users: true,
+            users: { where: vendixUserWhere() },
             addresses: true,
             suppliers: true,
             employees: true,
@@ -240,7 +244,7 @@ export class OrganizationsService {
       include: {
         stores: true,
         addresses: true,
-        users: true,
+        users: { where: vendixUserWhere() },
       },
     });
 
@@ -453,7 +457,7 @@ export class OrganizationsService {
           _count: {
             select: {
               stores: true,
-              users: true,
+              users: { where: vendixUserWhere() },
               addresses: true,
               suppliers: true,
               employees: true,
@@ -487,6 +491,8 @@ export class OrganizationsService {
       throw new VendixHttpException(ErrorCodes.SUP_ADMIN_ORG_001);
     }
 
+    // Guarda de integridad, no métrica: cualquier usuario (también un cliente
+    // final) bloquea el borrado, por eso este `_count.users` no se filtra.
     if (existingOrg._count.stores > 0 || existingOrg._count.users > 0) {
       throw new BadRequestException(
         'Cannot delete organization with existing stores or users',
@@ -553,7 +559,7 @@ export class OrganizationsService {
           _count: {
             select: {
               stores: true,
-              users: true,
+              users: { where: vendixUserWhere() },
             },
           },
         },
@@ -604,11 +610,12 @@ export class OrganizationsService {
       this.prisma.stores.count({
         where: { organization_id: id, is_active: true },
       }),
+      // Usuarios de Vendix de la organización (sin clientes finales).
       this.prisma.users.count({
-        where: { organization_id: id },
+        where: withVendixUser({ organization_id: id }),
       }),
       this.prisma.users.count({
-        where: { organization_id: id, state: 'active' },
+        where: withVendixUser({ organization_id: id, state: 'active' }),
       }),
       this.prisma.orders.count({
         where: { stores: { organization_id: id }, ...dateFilter },
@@ -639,7 +646,9 @@ export class OrganizationsService {
           _count: {
             select: {
               orders: true,
-              store_users: true,
+              // `store_users` también vincula clientes de ecommerce: contar
+              // solo el personal (usuarios de Vendix) de la tienda.
+              store_users: { where: { user: vendixUserWhere() } },
               products: true,
             },
           },
