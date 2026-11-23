@@ -169,6 +169,7 @@ class CustomerSelectorStub {
   readonly requiresElectronicInvoicing = input(false);
   readonly showTopSuggestions = input(false);
   readonly searchLimit = input(3);
+  readonly splitByEstablishment = input(false);
   readonly customerSelected = output<unknown>();
   readonly customerCleared = output<void>();
   resolveIfNeeded() {
@@ -1024,6 +1025,25 @@ describe('PosCheckoutShellComponent — matriz de teclado (CP-POS-CHECKOUT-KEYBO
       const chip = fixture.nativeElement.querySelector('.cliente-collapsed') as HTMLElement;
       expect(chip.textContent).toContain('Camila Torres');
       expect(chip.textContent).toContain('CC 52123456');
+    });
+
+    it('el chip agrega el establecimiento elegido en el buscador', () => {
+      fixture.componentRef.setInput('cartState', {
+        customer: {
+          id: 99, legal_name: 'ACME SAS', document_type: 'NIT', document_number: '900123',
+          preferred_address_id: 11,
+          addresses: [
+            { id: 10, label: 'Sede Norte', address_line1: 'Calle 10', is_primary: true },
+            { id: 11, label: 'Sede Sur', address_line1: 'Calle 11', is_primary: false },
+          ],
+        },
+        items: [{ id: 1, product: { name: 'Producto' } }],
+        summary: { total: 10 },
+      });
+      component.currentStep.set(1);
+      component.clienteSubStep.set(1);
+      fixture.detectChanges();
+      expect(component.customerChipDetail()).toBe('NIT 900123 · Sede Sur');
     });
 
     it('"Cambiar cliente" muestra el selector', () => {

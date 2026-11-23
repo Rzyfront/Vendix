@@ -342,6 +342,7 @@
                         [requiresElectronicInvoicing]="requiresElectronicInvoicing()"
                         [showTopSuggestions]="true"
                         [searchLimit]="3"
+                        [splitByEstablishment]="true"
                         (customerSelected)="onSelectCustomerAndAdvance($event)"
                         (customerCleared)="onCustomerCleared()"
                       ></app-pos-customer-selector>
