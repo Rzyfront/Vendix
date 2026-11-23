@@ -129,6 +129,22 @@ function writeFlag(key: string, value: boolean): void {
             {{ conversation_title() }}
           </span>
           <span class="hidden lg:block flex-1"></span>
+          @if (store.voice_mode()) {
+            <button
+              type="button"
+              class="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full bg-[rgba(var(--color-primary-rgb),0.14)] border border-[rgba(var(--color-primary-rgb),0.45)] text-[var(--color-primary)] text-xs font-semibold shrink-0 transition-colors hover:bg-[rgba(var(--color-primary-rgb),0.2)]"
+              aria-label="Modo voz activo, clic para desactivar"
+              title="Modo voz activo (respuestas con audio)"
+              (click)="store.toggleVoiceMode()"
+            >
+              <span
+                class="w-2 h-2 rounded-full bg-[var(--color-primary)] animate-pulse"
+                aria-hidden="true"
+              ></span>
+              <app-icon name="audio-lines" [size]="14"></app-icon>
+              <span>Modo voz</span>
+            </button>
+          }
           <button
             type="button"
             class="lg:hidden w-10 h-10 rounded-full flex items-center justify-center text-[var(--color-text-secondary)] hover:text-[var(--color-text-primary)]"
@@ -139,21 +155,30 @@ function writeFlag(key: string, value: boolean): void {
           </button>
         </header>
 
-        @if (store.active_conversation()) {
-          <div class="relative z-10 flex-1 min-h-0">
-            <vendix-vex-thread />
-          </div>
-          <div class="relative z-10 max-w-3xl mx-auto w-full px-4 pb-4">
-            <vendix-vex-composer />
-          </div>
-        } @else {
+        <!-- Single composer instance across welcome ↔ thread so switching or
+             creating a conversation never destroys recording/playback state. -->
+        <div
+          class="relative z-10 flex-1 min-h-0 flex flex-col"
+          [class.justify-center]="!store.active_conversation()"
+          [class.gap-8]="!store.active_conversation()"
+          [class.pb-16]="!store.active_conversation()"
+        >
+          @if (store.active_conversation()) {
+            <div class="flex-1 min-h-0">
+              <vendix-vex-thread />
+            </div>
+          } @else {
+            <div class="max-w-3xl mx-auto w-full px-4 flex justify-center">
+              <vendix-vex-welcome />
+            </div>
+          }
           <div
-            class="relative z-10 flex-1 flex flex-col items-center justify-center gap-8 max-w-3xl mx-auto w-full px-4 pb-16"
+            class="max-w-3xl mx-auto w-full px-4"
+            [class.pb-4]="!!store.active_conversation()"
           >
-            <vendix-vex-welcome />
             <vendix-vex-composer />
           </div>
-        }
+        </div>
       </main>
 
       <div

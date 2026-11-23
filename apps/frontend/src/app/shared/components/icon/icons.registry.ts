@@ -355,6 +355,9 @@ import {
   // Un nombre no registrado no rompe el build ni la consola — degrada en
   // silencio a un icono equivocado, que es por qué sobrevivió al deploy.
   Mic,
+  AudioLines,
+  Volume2,
+  VolumeX,
   Video,
   Clapperboard,
   Hotel,
@@ -441,8 +444,11 @@ export const ICON_REGISTRY: Record<string, LucideIconData> = {
   // UI elements
   circle: Circle,
 
-  // Modo voz de Vexi
+  // Modo voz de Vexi / Vex
   mic: Mic,
+  'audio-lines': AudioLines,
+  'volume-2': Volume2,
+  'volume-x': VolumeX,
 
   // User action icons
   'user-plus': UserPlus,

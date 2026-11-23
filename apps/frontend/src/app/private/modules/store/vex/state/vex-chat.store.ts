@@ -33,6 +33,7 @@ import {
   VexApplyStepResult,
   VexBackendConversation,
   VexBackendMessage,
+  VexSpeechSegment,
 } from '../services/vex-api.service';
 import {
   VexBlockInteraction,
@@ -47,6 +48,7 @@ import {
 
 const TITLE_MAX_LENGTH = 40;
 const LIST_PAGE_SIZE = 50;
+const MESSAGE_AUDIO_CACHE_LIMIT = 20;
 
 function normalizeText(value: string): string {
   return value.normalize('NFD').replace(/[̀-ͯ]/g, '').toLowerCase();
@@ -376,6 +378,18 @@ export class VexChatStore {
     return id ? (this._objectives()[id] ?? null) : null;
   });
   private readonly _busy_plan_id = signal<string | null>(null);
+  /** Persistent across conversations: when active, every Vex reply auto-plays via TTS. */
+  private readonly _voice_mode = signal(false);
+  /** Message id currently fetching on-demand TTS via «Escuchar». */
+  private readonly _loading_audio_message_id = signal<string | null>(null);
+  /** Maps the currently playing voice turn id back to the message it belongs to. */
+  private readonly _active_audio_message = signal<{
+    turnId: string;
+    messageId: string;
+  } | null>(null);
+  private listen_request_id = 0;
+  /** Session-scoped LRU cache of synthesized segments keyed by `${messageId}::${text}`. */
+  private readonly audio_cache = new Map<string, VexSpeechSegment[]>();
 
   readonly conversations = computed(() =>
     [...this._conversations()].sort(
@@ -407,15 +421,105 @@ export class VexChatStore {
   readonly loading_thread = this._loading_thread.asReadonly();
   readonly error = this._error.asReadonly();
   readonly busy_plan_id = this._busy_plan_id.asReadonly();
+  readonly voice_mode = this._voice_mode.asReadonly();
+  readonly loading_audio_message_id =
+    this._loading_audio_message_id.asReadonly();
+  readonly speaking_message_id = computed<string | null>(() => {
+    const activeTurn = this.voice.activeTurnId?.();
+    const current = this._active_audio_message();
+    if (!activeTurn || !current || current.turnId !== activeTurn) return null;
+    return current.messageId;
+  });
 
   constructor() {
-    this.destroyRef.onDestroy(() => this.closeStream());
+    this.destroyRef.onDestroy(() => {
+      this.closeStream();
+      this.stopAudio();
+      this.voice.cancelRecording?.();
+    });
     void this.loadConversations();
+  }
+
+  toggleVoiceMode(): void {
+    this.voice.primeAudio?.();
+    const next = !this._voice_mode();
+    this._voice_mode.set(next);
+    if (next) {
+      void this.voice.warm?.();
+    } else {
+      this.stopAudio();
+    }
+  }
+
+  stopAudio(): void {
+    this.listen_request_id++;
+    this._loading_audio_message_id.set(null);
+    this._active_audio_message.set(null);
+    this.voice.interrupt?.();
+  }
+
+  /**
+   * Plays or stops a single Vex message on explicit click («Escuchar»).
+   * Never pre-generated: reuses the in-memory session cache first and falls
+   * back to `POST /store/vex/speech` (which itself reuses `VexiSpeechCache`).
+   */
+  toggleListenMessage(message: VexMessage): void {
+    if (message.role !== 'agent' || message.streaming) return;
+    const text = message.content.trim();
+    if (!text) return;
+
+    this.voice.primeAudio?.();
+
+    if (
+      this.speaking_message_id() === message.id ||
+      this._loading_audio_message_id() === message.id
+    ) {
+      this.stopAudio();
+      return;
+    }
+
+    this.stopAudio();
+    const requestId = this.listen_request_id;
+    const cacheKey = this.audioCacheKey(message.id, text);
+    const cached = this.audio_cache.get(cacheKey);
+    if (cached?.length) {
+      // Refresh LRU position.
+      this.audio_cache.delete(cacheKey);
+      this.audio_cache.set(cacheKey, cached);
+      this.playMessageSegments(message.id, cached);
+      return;
+    }
+
+    this._loading_audio_message_id.set(message.id);
+    void firstValueFrom(this.api.synthesizeSpeech(text))
+      .then((segments) => {
+        if (requestId !== this.listen_request_id) return;
+        if (!segments.length) {
+          this.toast.warning?.(
+            'Este mensaje no tiene texto para reproducir en voz alta.',
+          );
+          return;
+        }
+        this.cacheMessageAudio(cacheKey, segments);
+        this.playMessageSegments(message.id, segments);
+      })
+      .catch((error) => {
+        if (requestId !== this.listen_request_id) return;
+        this.toast.error(
+          extractApiErrorMessage(error),
+          'No se pudo reproducir el audio',
+        );
+      })
+      .finally(() => {
+        if (requestId === this.listen_request_id) {
+          this._loading_audio_message_id.set(null);
+        }
+      });
   }
 
   newConversation(): void {
     this.voiceSafety.invalidate();
-    this.voice.interrupt();
+    this.stopAudio();
     this.closeStream();
     this._error.set(null);
     this._active_id.set(null);
@@ -423,7 +527,7 @@ export class VexChatStore {
 
   selectConversation(id: string): void {
     this.voiceSafety.invalidate();
-    this.voice.interrupt();
+    this.stopAudio();
     if (!this._conversations().some((c) => c.id === id)) return;
     this.closeStream();
     this._error.set(null);
@@ -491,8 +595,11 @@ export class VexChatStore {
   }
 
   sendVoiceMessage(content: string): void {
-    if (!content.trim() || this._is_agent_typing()) return;
-    void this.runTurn(content.trim(), [], true);
+    const text = content.trim();
+    if (!text || this._is_agent_typing()) return;
+    const speak = this._voice_mode();
+    if (speak) this.voice.primeAudio?.();
+    void this.runTurn(text, [], speak);
   }
 
   /** Adopts only the receipt from the already consumed voice request; never reapplies. */
@@ -603,7 +710,9 @@ export class VexChatStore {
   sendMessage(content: string, attachment_ids: string[] = []): void {
     const text = content.trim();
     if (!text || this._is_agent_typing()) return;
-    void this.runTurn(text, attachment_ids);
+    const speak = this._voice_mode();
+    if (speak) this.voice.primeAudio?.();
+    void this.runTurn(text, attachment_ids, speak);
   }
 
   deleteConversation(id: string): void {
@@ -611,6 +720,7 @@ export class VexChatStore {
     this._conversations.update((list) => list.filter((c) => c.id !== id));
     this.loaded_ids.delete(id);
     if (this._active_id() === id) {
+      this.stopAudio();
       this.closeStream();
       this._active_id.set(null);
     }
@@ -626,7 +736,7 @@ export class VexChatStore {
   /** Stops the live stream; the turn already persisted stays as-is. */
   stopStream(): void {
     this.voiceSafety.invalidate();
-    this.voice.interrupt();
+    this.stopAudio();
     const active = this._active_id();
     this.closeStream();
     this._is_agent_typing.set(false);
@@ -1527,7 +1637,13 @@ export class VexChatStore {
         )
           .then((stream_id) => {
             if (generation !== this.stream_generation) return;
-            if (speak) this.voice.startTurn(stream_id);
+            if (speak) {
+              this._active_audio_message.set({
+                turnId: stream_id,
+                messageId: full.id,
+              });
+              this.voice.startTurn?.(stream_id);
+            }
             this.subscribeStream(numeric, conversation_id, full.id, stream_id);
           })
           .catch((error) => {
@@ -1631,6 +1747,13 @@ export class VexChatStore {
     // when the backend reports it; otherwise the local id stays.
     let target = message_id;
     let reconcileRequired = false;
+    let voiceFinished = false;
+    const liveAudioSegments: VexSpeechSegment[] = [];
+    const finishVoiceTurn = () => {
+      if (voiceFinished) return;
+      voiceFinished = true;
+      this.voice.finishTurn?.(stream_id);
+    };
     this.stream_sub = this.api
       .streamConversation(numeric, stream_id)
       .subscribe({
@@ -1647,16 +1770,39 @@ export class VexChatStore {
               target = server_id;
             }
           }
-          if (chunk.type === 'audio' && chunk.audio_base64)
-            this.voice.enqueue(stream_id, {
-              index: chunk.index ?? 0,
+          if (chunk.type === 'audio' && chunk.audio_base64) {
+            const index = chunk.index ?? 0;
+            const content_type = chunk.content_type || 'audio/mpeg';
+            this.voice.enqueue?.(stream_id, {
+              index,
               audio_base64: chunk.audio_base64,
-              content_type: chunk.content_type || 'audio/mpeg',
+              content_type,
               filler: chunk.filler,
             });
-          if (chunk.type === 'done' || chunk.type === 'error')
-            this.voice.finishTurn(stream_id);
+            if (!chunk.filler) {
+              liveAudioSegments.push({
+                index,
+                audio_base64: chunk.audio_base64,
+                content_type,
+              });
+            }
+          }
+          if (chunk.type === 'done' || chunk.type === 'error') {
+            finishVoiceTurn();
+          }
           this.applyChunk(conversation_id, target, chunk);
+          if (chunk.type === 'done' && liveAudioSegments.length > 0) {
+            const finalText = this.findMessageContent(conversation_id, target);
+            if (finalText) {
+              const ordered = [...liveAudioSegments]
+                .sort((a, b) => a.index - b.index)
+                .map((seg, idx) => ({ ...seg, index: idx }));
+              this.cacheMessageAudio(
+                this.audioCacheKey(target, finalText),
+                ordered,
+              );
+            }
+          }
           if (
             reconcileRequired &&
             (chunk.type === 'done' || chunk.type === 'error')
@@ -1665,6 +1811,7 @@ export class VexChatStore {
           }
         },
         error: (error: unknown) => {
+          finishVoiceTurn();
           this.failMessage(
             conversation_id,
             target,
@@ -1674,6 +1821,7 @@ export class VexChatStore {
           );
         },
         complete: () => {
+          finishVoiceTurn();
           this.stream_sub = undefined;
         },
       });
@@ -1695,6 +1843,56 @@ export class VexChatStore {
             }
           : c,
       ),
+    );
+    const activeAudio = this._active_audio_message();
+    if (activeAudio?.messageId === from) {
+      this._active_audio_message.set({ ...activeAudio, messageId: to });
+    }
+  }
+
+  private audioCacheKey(messageId: string, text: string): string {
+    return `${messageId}::${text.trim()}`;
+  }
+
+  private cacheMessageAudio(key: string, segments: VexSpeechSegment[]): void {
+    if (this.audio_cache.has(key)) this.audio_cache.delete(key);
+    this.audio_cache.set(key, segments);
+    while (this.audio_cache.size > MESSAGE_AUDIO_CACHE_LIMIT) {
+      const oldest = this.audio_cache.keys().next().value;
+      if (oldest === undefined) break;
+      this.audio_cache.delete(oldest);
+    }
+  }
+
+  private playMessageSegments(
+    messageId: string,
+    segments: VexSpeechSegment[],
+  ): void {
+    const turnId = `vex-msg:${messageId}:${Date.now()}`;
+    this._active_audio_message.set({ turnId, messageId });
+    this.voice.startTurn?.(turnId);
+    const ordered = [...segments].sort((a, b) => a.index - b.index);
+    ordered.forEach((segment, idx) => {
+      this.voice.enqueue?.(turnId, {
+        index: idx,
+        audio_base64: segment.audio_base64,
+        content_type: segment.content_type || 'audio/mpeg',
+      });
+    });
+    this.voice.finishTurn?.(turnId);
+  }
+
+  private findMessageContent(
+    conversation_id: string,
+    message_id: string,
+  ): string {
+    const conversation = this._conversations().find(
+      (c) => c.id === conversation_id,
+    );
+    return (
+      conversation?.messages
+        .find((m) => m.id === message_id)
+        ?.content?.trim() ?? ''
     );
   }
 

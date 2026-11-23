@@ -83,8 +83,52 @@ interface StagedFile {
           }
         </div>
       }
+      @if (store.voice_mode()) {
+        <div
+          class="mb-2 flex items-center justify-between gap-2 rounded-2xl border border-[rgba(var(--color-primary-rgb),0.45)] bg-[rgba(var(--color-primary-rgb),0.1)] px-3 py-1.5 text-xs font-medium text-[var(--color-primary)]"
+          role="status"
+          aria-live="polite"
+        >
+          <span class="flex items-center gap-2 min-w-0">
+            <span
+              class="w-2 h-2 shrink-0 rounded-full bg-[var(--color-primary)] animate-pulse"
+              aria-hidden="true"
+            ></span>
+            <app-icon name="audio-lines" [size]="14"></app-icon>
+            <span class="truncate">
+              {{
+                pipeline.speaking()
+                  ? 'Modo voz activo · Reproduciendo respuesta…'
+                  : 'Modo voz activo · Respuestas automáticas con audio'
+              }}
+            </span>
+          </span>
+          <div class="flex items-center gap-2 shrink-0">
+            @if (pipeline.speaking()) {
+              <button
+                type="button"
+                class="rounded-full border border-[rgba(var(--color-primary-rgb),0.5)] px-2.5 py-0.5 text-xs font-semibold hover:bg-[rgba(var(--color-primary-rgb),0.15)]"
+                (click)="store.stopAudio()"
+              >
+                Detener audio
+              </button>
+            }
+            <button
+              type="button"
+              class="underline underline-offset-2 text-xs font-semibold hover:opacity-80"
+              (click)="toggleVoiceMode()"
+            >
+              Desactivar
+            </button>
+          </div>
+        </div>
+      }
       <div
-        class="rounded-3xl bg-[var(--color-surface)] border border-[var(--color-border)] shadow-lg px-3 py-2 flex items-end gap-2"
+        [class]="
+          store.voice_mode()
+            ? 'rounded-3xl bg-[var(--color-surface)] border border-[var(--color-primary)] ring-2 ring-[rgba(var(--color-primary-rgb),0.22)] shadow-lg px-3 py-2 flex items-end gap-1.5 sm:gap-2 transition-all'
+            : 'rounded-3xl bg-[var(--color-surface)] border border-[var(--color-border)] shadow-lg px-3 py-2 flex items-end gap-1.5 sm:gap-2 transition-all'
+        "
       >
         <input
           #file_input
@@ -119,10 +163,20 @@ interface StagedFile {
         ></textarea>
 
         @if (voiceEnabled()) {
+          <!-- Micrófono = solo entrada: transcribe lo que dice la persona; la
+               respuesta sigue en texto salvo que el modo voz (ondas) esté activo. -->
           <button
             type="button"
-            class="voice-button"
-            aria-label="Mantén para dictar un mensaje a Vex; no confirma cambios"
+            [class]="
+              pipeline.recording()
+                ? 'voice-button w-10 h-10 shrink-0 rounded-full flex items-center justify-center transition-colors disabled:opacity-40 bg-[var(--color-error)] text-white animate-pulse'
+                : 'voice-button w-10 h-10 shrink-0 rounded-full flex items-center justify-center transition-colors disabled:opacity-40 text-[var(--color-text-secondary)] hover:text-[var(--color-text-primary)]'
+            "
+            [disabled]="
+              store.is_agent_typing() || pipeline.state() === 'transcribing'
+            "
+            aria-label="Mantén presionado para dictar por micrófono (solo entrada)"
+            title="Mantén presionado para dictar (solo entrada)"
             [attr.aria-pressed]="pipeline.recording()"
             (pointerdown)="voiceDown($event)"
             (pointerup)="voiceUp($event)"
@@ -132,19 +186,14 @@ interface StagedFile {
             (keydown.enter)="voiceDown($event)"
             (keyup.enter)="voiceUp($event)"
           >
-            <app-icon
-              [name]="pipeline.recording() ? 'square' : 'mic'"
-              [size]="20"
-            />
-          </button>
-          <button
-            type="button"
-            class="voice-button"
-            (click)="toggleRealtime()"
-            [attr.aria-pressed]="realtimeActive()"
-            aria-label="Iniciar o detener conversación de voz en tiempo real con Vex"
-          >
-            {{ realtimeActive() ? 'Detener voz' : 'Voz en vivo' }}
+            @if (pipeline.state() === 'transcribing') {
+              <app-icon name="loader-2" [size]="18" [spin]="true" />
+            } @else {
+              <app-icon
+                [name]="pipeline.recording() ? 'square' : 'mic'"
+                [size]="19"
+              />
+            }
           </button>
         } @else {
           <button
@@ -155,9 +204,34 @@ interface StagedFile {
             aria-label="Dictar por voz"
             title="Próximamente"
           >
-            <app-icon name="mic" [size]="20" />
+            <app-icon name="mic" [size]="19" />
           </button>
         }
+
+        <!-- Icono de ondas = modo voz: mientras esté activo, cada respuesta de
+             Vex se sintetiza automáticamente y se reproduce completa. -->
+        <button
+          type="button"
+          [class]="
+            store.voice_mode()
+              ? 'voice-button w-10 h-10 shrink-0 rounded-full flex items-center justify-center transition-all bg-[var(--color-primary)] text-[var(--color-text-on-primary)] shadow-sm'
+              : 'voice-button w-10 h-10 shrink-0 rounded-full flex items-center justify-center transition-all text-[var(--color-text-secondary)] hover:text-[var(--color-text-primary)] hover:bg-[rgba(var(--color-primary-rgb),0.08)]'
+          "
+          [attr.aria-pressed]="store.voice_mode()"
+          [attr.aria-label]="
+            store.voice_mode()
+              ? 'Desactivar modo voz'
+              : 'Activar modo voz (respuestas automáticas con audio)'
+          "
+          [title]="
+            store.voice_mode()
+              ? 'Modo voz activo (clic para desactivar)'
+              : 'Modo voz: escuchar respuestas automáticamente'
+          "
+          (click)="toggleVoiceMode()"
+        >
+          <app-icon name="audio-lines" [size]="19" />
+        </button>
 
         @if (can_send()) {
           <button
@@ -170,11 +244,12 @@ interface StagedFile {
           </button>
         }
       </div>
-      @if (voiceEnabled()) {
-        <p class="text-xs text-[var(--color-text-secondary)]" role="status">
-          {{
-            pipeline.errorMessage() || realtime.errorMessage() || voiceHint()
-          }}
+      @if (statusNotice()) {
+        <p
+          class="mt-1.5 px-2 text-xs text-[var(--color-text-secondary)]"
+          role="status"
+        >
+          {{ statusNotice() }}
         </p>
       }
       @if (realtimeProposal(); as pending) {
@@ -195,12 +270,6 @@ interface StagedFile {
   styles: [
     `
       .voice-button {
-        min-width: 44px;
-        min-height: 44px;
-        padding: 4px 8px;
-        border-radius: 16px;
-        background: var(--color-surface);
-        color: var(--color-text-primary);
         touch-action: none;
       }
       .voice-button:focus-visible {
@@ -217,10 +286,19 @@ export class VexComposerComponent {
   private readonly destroyRef = inject(DestroyRef);
   readonly voiceEnabled = signal(false);
   readonly realtimeActive = signal(false);
-  readonly voiceHint = signal(
-    'Mantén el micrófono para enviar un mensaje. El dictado no aprueba cambios.',
-  );
+  readonly voiceHint = signal<string | null>(null);
   private voiceHeld = false;
+  readonly statusNotice = computed(() => {
+    const err = this.pipeline.errorMessage() || this.realtime.errorMessage();
+    if (err) return err;
+    if (this.pipeline.recording()) {
+      return 'Grabando… suelta el micrófono para transcribir y enviar.';
+    }
+    if (this.pipeline.state() === 'transcribing') {
+      return 'Transcribiendo tu voz…';
+    }
+    return this.voiceHint();
+  });
   readonly realtimeProposal = computed(() => {
     const pending = this.realtime.pendingProposal();
     return pending?.context.agent_key === 'vex' &&
@@ -236,7 +314,6 @@ export class VexComposerComponent {
     this.destroyRef.onDestroy(() => {
       this.voiceHeld = false;
       this.pipeline.cancelRecording();
-      this.pipeline.interrupt();
       if (this.realtimeActive()) void this.realtime.stop();
     });
     let previous: string | null = null;
@@ -254,9 +331,22 @@ export class VexComposerComponent {
     });
   }
 
+  toggleVoiceMode(): void {
+    this.voiceHint.set(null);
+    this.store.toggleVoiceMode();
+  }
+
   voiceDown(event: Event): void {
     event.preventDefault();
-    if ((event as KeyboardEvent).repeat || !this.voiceEnabled()) return;
+    if (
+      (event as KeyboardEvent).repeat ||
+      !this.voiceEnabled() ||
+      this.store.is_agent_typing() ||
+      this.pipeline.state() === 'transcribing'
+    )
+      return;
+    this.voiceHint.set(null);
+    if (this.store.voice_mode()) this.pipeline.primeAudio();
     this.voiceHeld = true;
     const pointer = event as PointerEvent;
     if (pointer.pointerId !== undefined)
@@ -289,10 +379,13 @@ export class VexComposerComponent {
   voiceUp(event: Event): void {
     event.preventDefault();
     this.voiceHeld = false;
+    if (this.store.voice_mode()) this.pipeline.primeAudio();
     const conversation = this.store.active_id();
     void this.pipeline.stopRecording().then((text) => {
       if (text && this.store.active_id() === conversation)
-        this.store.sendVoiceMessage(text);
+        // Micrófono = solo entrada: envía por el flujo normal del store, que
+        // responde en texto salvo cuando el modo voz (ondas) está activo.
+        this.store.sendMessage(text);
     });
   }
 

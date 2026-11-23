@@ -162,6 +162,40 @@ import { VexPlanCardComponent } from '../vex-plan-card/vex-plan-card.component';
                     ></span>
                   </div>
                 }
+                @if (!message.streaming && message.content.trim()) {
+                  <div class="flex items-center gap-2 pt-0.5">
+                    <button
+                      type="button"
+                      [class]="
+                        store.speaking_message_id() === message.id
+                          ? 'min-h-8 inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full border border-[var(--color-primary)] bg-[rgba(var(--color-primary-rgb),0.12)] text-xs font-medium text-[var(--color-primary)] transition-colors'
+                          : 'min-h-8 inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full border border-[var(--color-border)] bg-[var(--color-surface)] text-xs font-medium text-[var(--color-text-secondary)] hover:text-[var(--color-text-primary)] transition-colors'
+                      "
+                      [attr.aria-pressed]="
+                        store.speaking_message_id() === message.id
+                      "
+                      [attr.aria-label]="
+                        store.loading_audio_message_id() === message.id
+                          ? 'Cancelar generación de audio'
+                          : store.speaking_message_id() === message.id
+                            ? 'Detener lectura de este mensaje'
+                            : 'Escuchar este mensaje'
+                      "
+                      (click)="store.toggleListenMessage(message)"
+                    >
+                      @if (store.loading_audio_message_id() === message.id) {
+                        <app-icon name="loader-2" [size]="14" [spin]="true" />
+                        <span>Generando audio…</span>
+                      } @else if (store.speaking_message_id() === message.id) {
+                        <app-icon name="square" [size]="12" />
+                        <span>Detener</span>
+                      } @else {
+                        <app-icon name="volume-2" [size]="14" />
+                        <span>Escuchar</span>
+                      }
+                    </button>
+                  </div>
+                }
               </div>
             </div>
           }
