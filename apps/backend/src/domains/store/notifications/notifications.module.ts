@@ -13,6 +13,9 @@ import { NotificationPreferencesService } from './notification-preferences.servi
 import { NotificationRecipientsService } from './notification-recipients.service';
 import { NotificationEmailService } from './notification-email.service';
 import { NotificationDeliveriesJob } from './notification-deliveries.job';
+import { ReminderScheduler } from './reminders/reminder-scheduler.service';
+import { ReminderSourceRegistry } from './reminders/reminder-source.registry';
+import { ScheduledRemindersJob } from './reminders/scheduled-reminders.job';
 import { ResponseModule } from '../../../common/responses/response.module';
 import { PrismaModule } from '../../../prisma/prisma.module';
 import { EmailModule } from '../../../email/email.module';
@@ -53,6 +56,11 @@ import { InvoiceDeliveryModule } from '../invoicing/delivery/invoice-delivery.mo
     NotificationEmailService,
     // Cron: solo corre en el worker (la API desmonta los @Cron en main.ts).
     NotificationDeliveriesJob,
+    // Recordatorios con fecha (plan §3.1b): cada módulo registra su fuente en
+    // `ReminderSourceRegistry` y programa con `ReminderScheduler`.
+    ReminderScheduler,
+    ReminderSourceRegistry,
+    ScheduledRemindersJob,
   ],
   exports: [
     NotificationsService,
@@ -60,6 +68,8 @@ import { InvoiceDeliveryModule } from '../invoicing/delivery/invoice-delivery.mo
     NotificationsPushService,
     NotificationDispatcher,
     NotificationPreferencesService,
+    ReminderScheduler,
+    ReminderSourceRegistry,
   ],
 })
 export class NotificationsModule implements OnModuleInit {
