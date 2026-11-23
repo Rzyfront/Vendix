@@ -105,6 +105,7 @@ import {
   isForeignSurfaceTool,
   withTurnConversation,
 } from './tools/surface-tools';
+import { vexLearningBlockKind } from './tools/domains/vex-learning-blocks.kinds';
 import { IRREVERSIBLE_DOMAIN_SEGMENTS } from './tools/bridge/capability-registry.service';
 import {
   AgentPlan,
@@ -1105,7 +1106,7 @@ export class AIAgentService {
                     ? 'file'
                     : toolName === 'propose_write_batch'
                       ? 'write_batch'
-                      : null;
+                      : vexLearningBlockKind(toolName);
     if (!renderKind && toolName !== 'vex_block_transform') return null;
     try {
       const parsed = JSON.parse(result) as {

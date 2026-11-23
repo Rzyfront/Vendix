@@ -26,6 +26,8 @@ import { CodeModePolicyService } from '../../../ai-engine/sandbox/codemode-polic
 import { SandboxAnalysisBrokerService } from '../../../ai-engine/sandbox/sandbox-analysis-broker.service';
 import { AIEntitlementsResolverService } from '../subscriptions/services/ai-entitlements-resolver.service';
 import { createVexBlockTools } from '../../../ai-engine/tools/domains/vex-blocks.tools';
+import { createVexLearningBlockTools } from '../../../ai-engine/tools/domains/vex-learning-blocks.tools';
+import { HelpKnowledgeIndexerService } from '../../../ai-engine/embeddings/help-knowledge-indexer.service';
 import { createWriteBatchTools } from '../../../ai-engine/tools/domains/write-batch.tools';
 import { WriteBatchService } from './services/write-batch.service';
 import { WriteBatchExecutorService } from './services/write-batch-executor.service';
@@ -85,6 +87,8 @@ export class VexModule implements OnModuleInit {
     private readonly entitlements: AIEntitlementsResolverService,
     private readonly codeModeRunner: CodeModeBridgeService,
     private readonly codeModePolicy: CodeModePolicyService,
+    // From the @Global AIEngineModule (it re-exports EmbeddingModule).
+    private readonly helpKnowledge: HelpKnowledgeIndexerService,
   ) {}
 
   onModuleInit(): void {
@@ -121,6 +125,14 @@ export class VexModule implements OnModuleInit {
     });
     this.toolRegistry.registerMany(
       createVexBlockTools({ blocks: this.blocks }),
+    );
+    // Help videos, posts and learning paths shown and played inside the chat
+    // (T29 blocks): published help-center rows only, never a model-given URL.
+    this.toolRegistry.registerMany(
+      createVexLearningBlockTools({
+        blocks: this.blocks,
+        knowledge: this.helpKnowledge,
+      }),
     );
     this.toolRegistry.registerMany(createComputeTools());
     // F9/T52: code analysis over this conversation's blocks, gated by plan.
