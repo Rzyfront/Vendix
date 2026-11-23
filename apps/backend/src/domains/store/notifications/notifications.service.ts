@@ -5,7 +5,10 @@ import { GlobalPrismaService } from '../../../prisma/services/global-prisma.serv
 import { RequestContextService } from '@common/context/request-context.service';
 import { NotificationsSseService } from './notifications-sse.service';
 import { NotificationsPushService } from './notifications-push.service';
-import { NotificationDispatcher } from './notification-dispatcher.service';
+import {
+  NotificationDispatcher,
+  NotifyRecipientResult,
+} from './notification-dispatcher.service';
 import { resolveEffectiveChannels } from './notification-catalog';
 import { NotificationQueryDto, UpdateSubscriptionDto } from './dto';
 
@@ -108,6 +111,30 @@ export class NotificationsService {
     body: string,
     data?: any,
   ) {
+    const result = await this.sendToUserDetailed(
+      store_id,
+      user_id,
+      type,
+      title,
+      body,
+      data,
+    );
+    return result?.notification ?? null;
+  }
+
+  /**
+   * Same as `sendToUser`, but answers the dispatcher outcome so a caller can
+   * tell a recipient that was discarded (`skipped`: no longer active staff or
+   * customer of the store, nothing to retry) from a failed send (`failed`).
+   */
+  async sendToUserDetailed(
+    store_id: number,
+    user_id: number,
+    type: string | notification_type_enum,
+    title: string,
+    body: string,
+    data?: any,
+  ): Promise<NotifyRecipientResult | null> {
     const [result] = await this.dispatcher.notify({
       store_id,
       user_ids: [user_id],
@@ -117,7 +144,7 @@ export class NotificationsService {
       data,
       allow_store_customers: true,
     });
-    return result?.notification ?? null;
+    return result ?? null;
   }
 
   /**

@@ -274,4 +274,12 @@ describe('NotificationsService — sendToUser delega en NotificationDispatcher',
       service.sendToUser(42, 5, 'crm_task_due' as notification_type_enum, 't', 'b'),
     ).resolves.toBeNull();
   });
+
+  it('sendToUserDetailed expone el motivo del descarte (no es miembro de la tienda)', async () => {
+    const skipped = { user_id: 5, status: 'skipped', reason: 'not_store_member', notification: null, push: false, email: null };
+    const { service } = buildService([skipped]);
+    await expect(
+      service.sendToUserDetailed(42, 5, 'reminder_due', 't', 'b'),
+    ).resolves.toEqual(skipped);
+  });
 });

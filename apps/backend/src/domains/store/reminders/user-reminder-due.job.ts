@@ -49,7 +49,7 @@ interface NoticeTarget {
 
 /**
  * QUI-580 — notifies the OWNER of a pending reminder once, when it falls due:
- * in Vendix (bell + web push, via `sendToUser`) and by e-mail. Runs without a
+ * in Vendix (bell + web push, via `sendToUserDetailed`) and by e-mail. Runs without a
  * store context (like `ScheduledRemindersJob`), so every row names its store and its
  * user, and every lookup carries that store explicitly: never a store-wide
  * broadcast.
@@ -124,7 +124,7 @@ export class UserReminderDueJob {
       });
       if (claimed.count !== 1) continue;
       const target = await this.target(reminder);
-      const notification = await this.notifications.sendToUser(
+      const result = await this.notifications.sendToUserDetailed(
         reminder.store_id,
         reminder.user_id,
         REMINDER_DUE_NOTIFICATION,
@@ -134,8 +134,16 @@ export class UserReminderDueJob {
           : reminder.title,
         { kind: 'user_reminder', reminder_id: reminder.id, url: target.url },
       );
-      if (!notification) {
-        // `sendToUser` swallows its errors and answers null: release this
+      if (result?.status === 'skipped') {
+        // The owner is no longer a member of the store: nothing to retry.
+        // Keep the claim so the reminder is not picked up again every minute.
+        this.logger.debug(
+          `Reminder ${reminder.id} skipped: user ${reminder.user_id} is not a member of store ${reminder.store_id}`,
+        );
+        continue;
+      }
+      if (!result?.notification) {
+        // The dispatcher swallows its errors (failed/null): release this
         // run's claim (only if still ours) so the next run retries it.
         await this.prisma.user_reminders.updateMany({
           where: { id: reminder.id, notified_at: now },
