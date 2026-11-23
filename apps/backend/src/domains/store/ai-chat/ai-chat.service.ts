@@ -108,6 +108,7 @@ import {
   extractSuggestedFollowups,
   Followup,
 } from '../../../ai-engine/tools/domains/followup.tools';
+import { vexLearningBlockKind } from '../../../ai-engine/tools/domains/vex-learning-blocks.kinds';
 import {
   ConversationTitleFrame,
   ConversationTitleService,
@@ -2404,7 +2405,7 @@ export class AIChatService {
                       ? 'file'
                       : tool.name === 'vex_block_transform'
                         ? 'table'
-                        : null;
+                        : vexLearningBlockKind(tool.name);
       if (!fallbackKind) continue;
       try {
         const data = (JSON.parse(tool.result) as any)?.data;

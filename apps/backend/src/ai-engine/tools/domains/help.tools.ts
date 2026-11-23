@@ -34,6 +34,15 @@ const MAX_CONTENT_CHARS = 8000;
 
 const LEARNING_FORMAT_RULE = `Si la persona quiere aprender algo y la memoria de la tienda NO tiene \`${LEARNING_FORMAT_KEY}\`, pregúntale «¿Video o paso a paso?» y, con su respuesta, llama a \`remember\` con key \`${LEARNING_FORMAT_KEY}\`: ${LEARNING_FORMAT_VALUES_TEXT}. Si ya existe \`${LEARNING_FORMAT_KEY}\`, úsalo sin preguntar: ${LEARNING_FORMAT_DELIVERY_TEXT}. Cita siempre el título devuelto.`;
 
+/**
+ * On the Vex surface the content is SHOWN in the chat, not linked: the block
+ * tools (`vex-learning-blocks.tools.ts`) render the player, the post and the
+ * playlist. Vexi has no blocks; there these tools are not offered and the
+ * sentence just does not apply.
+ */
+const SHOW_IN_CHAT_RULE =
+  'Si tienes `vex_show_help_video` disponible, muéstralo en el chat en vez de describirlo o pegar enlaces: video → `vex_show_help_video` con su id (la persona lo reproduce ahí mismo); artículo → `vex_show_help_article`; ruta → `vex_show_learning_path`. Con esas herramientas nunca digas que no puedes mostrar o reproducir videos.';
+
 const json = (value: unknown) => JSON.stringify(value);
 const guidedError = (error: string, next_step?: string) =>
   json({ error, ...(next_step ? { next_step } : {}) });
@@ -87,7 +96,7 @@ export function createHelpTools(deps: HelpToolDeps): RegisteredTool[] {
       version: '1',
       domain: 'help',
       readOnly: true,
-      description: `Busca en el centro de ayuda de Vendix (artículos, videos y rutas de aprendizaje publicados) para responder «cómo hago X». Devuelve solo contenido real: type (article|video|learning_path), id, title, slug, summary y score. Si no hay resultados responde found=false: dile a la persona que no encontraste nada, NUNCA inventes un artículo o video. ${LEARNING_FORMAT_RULE}`,
+      description: `Busca en el centro de ayuda de Vendix (artículos, videos y rutas de aprendizaje publicados) para responder «cómo hago X». Devuelve solo contenido real: type (article|video|learning_path), id, title, slug, summary y score. Si no hay resultados responde found=false: dile a la persona que no encontraste nada, NUNCA inventes un artículo o video. ${LEARNING_FORMAT_RULE} ${SHOW_IN_CHAT_RULE}`,
       parameters: {
         type: 'object',
         properties: {
@@ -97,6 +106,7 @@ export function createHelpTools(deps: HelpToolDeps): RegisteredTool[] {
         },
         required: ['query'],
       },
+      discovery: { dependencies: ['vex_show_help_video', 'vex_show_help_article'] },
       handler: async (args) => {
         const query = typeof args.query === 'string' ? args.query.trim() : '';
         if (query.length < 2) return guidedError('query es obligatorio.', 'Pasa las palabras de la persona.');
@@ -111,7 +121,7 @@ export function createHelpTools(deps: HelpToolDeps): RegisteredTool[] {
         return json({
           found: true,
           items,
-          instruction: `Cita el título exacto de lo que recomiendes. ${LEARNING_FORMAT_RULE}`,
+          instruction: `Cita el título exacto de lo que recomiendes. ${LEARNING_FORMAT_RULE} ${SHOW_IN_CHAT_RULE}`,
         });
       },
     },
@@ -130,6 +140,7 @@ export function createHelpTools(deps: HelpToolDeps): RegisteredTool[] {
           slug: { type: 'string', description: 'Slug del artículo (alternativa al id).' },
         },
       },
+      discovery: { dependencies: ['vex_show_help_article', 'vex_show_help_video'] },
       handler: async (args) => {
         const id = positiveInt(args.id);
         const slug = typeof args.slug === 'string' ? args.slug.trim() : '';
@@ -148,7 +159,7 @@ export function createHelpTools(deps: HelpToolDeps): RegisteredTool[] {
             content_truncated: content.length > MAX_CONTENT_CHARS,
           },
           video: video ? videoRef(video) : null,
-          instruction: 'Cita el título del artículo; si hay video enlazado, ofrécelo.',
+          instruction: `Cita el título del artículo; si hay video enlazado, ofrécelo. ${SHOW_IN_CHAT_RULE}`,
         });
       },
     },
@@ -160,7 +171,7 @@ export function createHelpTools(deps: HelpToolDeps): RegisteredTool[] {
       domain: 'help',
       readOnly: true,
       description:
-        'Devuelve una ruta de aprendizaje PUBLICADA (serie de videos ordenada por id o slug) con el progreso del usuario actual en cada video y el siguiente video por ver. Sin id ni slug lista las rutas publicadas. Cita el título de la ruta.',
+        `Devuelve una ruta de aprendizaje PUBLICADA (serie de videos ordenada por id o slug) con el progreso del usuario actual en cada video y el siguiente video por ver. Sin id ni slug lista las rutas publicadas. Cita el título de la ruta. ${SHOW_IN_CHAT_RULE}`,
       parameters: {
         type: 'object',
         properties: {
@@ -168,6 +179,7 @@ export function createHelpTools(deps: HelpToolDeps): RegisteredTool[] {
           slug: { type: 'string', description: 'Slug de la ruta (alternativa al id).' },
         },
       },
+      discovery: { dependencies: ['vex_show_learning_path', 'vex_show_help_video'] },
       handler: async (args, context: ToolExecutionContext) => {
         const id = positiveInt(args.id);
         const slug = typeof args.slug === 'string' ? args.slug.trim() : '';

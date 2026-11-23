@@ -258,7 +258,10 @@ export interface AIStreamChunk {
       | 'markdown'
       | 'timeline'
       | 'list'
-      | 'write_batch';
+      | 'write_batch'
+      | 'help_article'
+      | 'video'
+      | 'learning_path';
     version?: number;
     spec?: Record<string, any>;
     data?: unknown;

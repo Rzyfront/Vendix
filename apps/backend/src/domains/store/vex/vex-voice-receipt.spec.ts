@@ -83,6 +83,8 @@ function fixture(
     // F10/T65: Code Mode stays unavailable here, so registration is unchanged.
     { available: () => false } as any,
     {} as any,
+    // Help knowledge only feeds createVexLearningBlockTools at registration.
+    {} as any,
   ).onModuleInit();
   const controller: any = Object.create(VexiController.prototype);
   controller.responseService = { success: (data: unknown) => data };

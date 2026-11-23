@@ -456,4 +456,20 @@ describe('agent-execution.contract (P2-6): the store never sees costs', () => {
     });
     expect(JSON.stringify(chunk)).not.toMatch(/cost/);
   });
+
+  it('clientSafeObjective passes an objective without budget through instead of crashing', () => {
+    const objective = clientSafeObjective({
+      id: 'o1',
+      goal: 'g',
+      conversation_id: 1,
+      version: 1,
+      semantic_status: 'active',
+      next_step: 'internal',
+      budget: undefined as any,
+      expires_at: '',
+      requires_revalidation: false,
+    });
+    expect(objective.budget).toBeUndefined();
+    expect(objective.next_step).toBeNull();
+  });
 });
