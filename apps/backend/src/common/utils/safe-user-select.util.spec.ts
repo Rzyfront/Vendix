@@ -58,7 +58,10 @@ describe('omitSensitiveUserFields', () => {
         user_roles: [{ roles: { name: 'owner' } }],
       }),
     );
-    expect(row.password).toBe('$2b$10$abcdefghijklmnopqrstuv');
+    // La fila original no se muta.
+    expect((row as Record<string, unknown>).password).toBe(
+      '$2b$10$abcdefghijklmnopqrstuv',
+    );
   });
 });
 

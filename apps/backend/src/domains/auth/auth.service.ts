@@ -1670,7 +1670,9 @@ export class AuthService {
 
     // La consulta trae la fila completa: la respuesta va sin credenciales ni
     // contadores de bloqueo.
-    const userWithoutPassword = omitSensitiveUserFields(userWithRoles);
+    const userWithoutPassword = userWithRoles
+      ? omitSensitiveUserFields(userWithRoles)
+      : null;
 
     return {
       message: `Usuario ${role} creado exitosamente`,
