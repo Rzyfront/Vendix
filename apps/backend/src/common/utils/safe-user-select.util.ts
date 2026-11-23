@@ -15,10 +15,10 @@ export const SENSITIVE_USER_FIELDS = [
 export type SensitiveUserField = (typeof SENSITIVE_USER_FIELDS)[number];
 
 /**
- * Keys that `ResponseSecretsInterceptor` removes from every response body,
- * at any depth. Limited to credentials: the lockout counters are business
- * data for the Super Admin unlock screen, so endpoints that need them keep
- * selecting them explicitly.
+ * Keys that `ResponseSecretsInterceptor` removes from every `users` row of a
+ * response body, at any depth. Limited to credentials: the lockout counters
+ * are business data for the Super Admin unlock screen, so endpoints that need
+ * them keep selecting them explicitly.
  */
 export const RESPONSE_SECRET_KEYS = ['password', 'two_factor_secret'] as const;
 

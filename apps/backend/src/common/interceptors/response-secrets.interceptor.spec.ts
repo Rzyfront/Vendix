@@ -100,7 +100,7 @@ describe('ResponseSecretsInterceptor', () => {
   });
 
   it('terminates on a cyclic object instead of recursing forever', () => {
-    const node: Record<string, unknown> = { id: 1, password: 'x' };
+    const node: Record<string, unknown> = userRow(1);
     node.self = node;
 
     const result = stripResponseSecrets(node) as Record<string, unknown>;
@@ -163,5 +163,49 @@ describe('ResponseSecretsInterceptor', () => {
       }),
     );
     expect(result.data.user).not.toHaveProperty('two_factor_secret');
+  });
+
+  it('removes a stored password hash even when the query picked few columns', () => {
+    const body = { data: { id: 5, email: 'user5@tienda.co', password: userRow(5).password } };
+
+    const result = stripResponseSecrets(body);
+
+    expect(result.data).toEqual({ id: 5, email: 'user5@tienda.co' });
+  });
+
+  it('keeps the password typed into an AI proposal, which comes back on approval', () => {
+    const body = {
+      data: {
+        tool: 'store_users_create',
+        arguments: {
+          first_name: 'Ana',
+          email: 'ana@tienda.co',
+          password: 'Temporal-2026!',
+        },
+        confirmation_token: 'token-1',
+      },
+    };
+
+    expect(stripResponseSecrets(body)).toBe(body);
+  });
+
+  it('keeps the password property of a tool input schema', () => {
+    const body = {
+      tools: [
+        {
+          name: 'invoicing_upload_certificate',
+          inputSchema: {
+            type: 'object',
+            properties: {
+              p12_base64: { type: 'string' },
+              password: { type: 'string', description: 'Opens the .p12' },
+            },
+            required: ['p12_base64', 'password'],
+          },
+        },
+      ],
+    };
+
+    expect(stripResponseSecrets(body)).toBe(body);
   });
 });
