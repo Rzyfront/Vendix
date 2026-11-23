@@ -63,6 +63,9 @@ import { TaskFormModalComponent } from '../shared/task-form-modal.component';
 
 type PipelineView = 'board' | 'list';
 
+/** Same breakpoint as the shared mobile search bar (`md`). */
+const MOBILE_QUERY = '(max-width: 767.98px)';
+
 /** The confirmation modal renders its message as HTML: escape user text. */
 function escapeHtml(value: string): string {
   return value
@@ -177,6 +180,32 @@ function verticalScrollParent(element: HTMLElement): HTMLElement | null {
         ></app-stats>
       </div>
 
+      <!-- Mobile: search + options live outside the card, in the shared sticky search bar style; the view switch moves into the options dropdown. -->
+      @if (isMobile()) {
+        <div class="sticky top-[99px] z-10 bg-background px-2 py-1.5 -mt-[5px] mb-2">
+          <div class="flex items-center gap-2 w-full">
+            <app-inputsearch
+              class="flex-1 shadow-[0_2px_8px_rgba(0,0,0,0.07)] rounded-[10px]"
+              size="sm"
+              placeholder="Buscar oportunidad o cliente..."
+              [debounceTime]="350"
+              (searchChange)="search.set($event)"
+            ></app-inputsearch>
+            <app-options-dropdown
+              class="shadow-[0_2px_8px_rgba(0,0,0,0.07)] rounded-[10px]"
+              [filters]="filterConfigs()"
+              [filterValues]="filterValues()"
+              [actions]="dropdownActions()"
+              [singleActionAsMenu]="true"
+              [isLoading]="loading()"
+              (filterChange)="onFilterChange($event)"
+              (clearAllFilters)="onClearFilters()"
+              (actionClick)="onActionClick($event)"
+            ></app-options-dropdown>
+          </div>
+        </div>
+      }
+
       <app-card [showHeader]="true" customClasses="overflow-hidden">
         <div slot="header" class="flex flex-col gap-3 lg:flex-row lg:items-center lg:justify-between">
           <div class="flex min-w-0 flex-wrap items-center gap-3">
@@ -184,6 +213,7 @@ function verticalScrollParent(element: HTMLElement): HTMLElement | null {
               <app-icon name="columns" [size]="18"></app-icon>
               <span class="truncate">Tablero · {{ board()?.pipeline?.name ?? 'Pipeline' }}</span>
             </h2>
+            @if (!isMobile()) {
             <div class="inline-flex w-fit rounded-lg border border-[var(--color-border)] p-0.5" role="group" aria-label="Vista">
               <button
                 type="button"
@@ -206,7 +236,9 @@ function verticalScrollParent(element: HTMLElement): HTMLElement | null {
                 <app-icon name="list" [size]="14"></app-icon> Lista
               </button>
             </div>
+            }
           </div>
+          @if (!isMobile()) {
           <div class="flex flex-wrap items-center gap-2">
             <app-inputsearch
               class="min-w-0 flex-1 sm:w-64 sm:flex-none"
@@ -225,6 +257,7 @@ function verticalScrollParent(element: HTMLElement): HTMLElement | null {
               (actionClick)="onActionClick($event)"
             ></app-options-dropdown>
           </div>
+          }
         </div>
 
         @if (error() && !board()) {
@@ -577,6 +610,12 @@ export class PipelineComponent {
   protected readonly error = signal<string | null>(null);
   protected readonly moving = signal(false);
   protected readonly view = signal<PipelineView>('board');
+  /** Below `md` (768px): the search row leaves the card and the view switch goes into the options dropdown. */
+  protected readonly isMobile = signal(
+    typeof window !== 'undefined' &&
+      typeof window.matchMedia === 'function' &&
+      window.matchMedia(MOBILE_QUERY).matches,
+  );
   protected readonly pipelineId = signal<number | null>(null);
   protected readonly owner = signal<string>('');
   protected readonly search = signal('');
@@ -627,6 +666,18 @@ export class PipelineComponent {
   /** Pipeline (only with 2+ pipelines) and owner (only see-all) filters for the dropdown. */
   protected readonly filterConfigs = computed<FilterConfig[]>(() => {
     const filters: FilterConfig[] = [];
+    if (this.isMobile()) {
+      filters.push({
+        key: 'view',
+        label: 'Vista',
+        type: 'select',
+        placeholder: 'Tablero',
+        options: [
+          { value: 'board', label: 'Tablero' },
+          { value: 'list', label: 'Lista' },
+        ],
+      });
+    }
     const pipelines = this.board()?.pipelines ?? [];
     if (pipelines.length > 1) {
       filters.push({
@@ -653,6 +704,8 @@ export class PipelineComponent {
   });
   /** Only explicit choices count as active filters: the default pipeline and "Todo el equipo" stay null. */
   protected readonly filterValues = computed<FilterValues>(() => ({
+    // Only the non-default view counts as a choice, so "Tablero" never shows as an active filter.
+    ...(this.isMobile() ? { view: this.view() === 'list' ? 'list' : null } : {}),
     pipeline_id: this.pipelineId() !== null ? String(this.pipelineId()) : null,
     owner: this.owner() || null,
   }));
@@ -691,6 +744,7 @@ export class PipelineComponent {
       untracked(() => void this.load());
     });
     afterNextRender(() => {
+      this.watchMobileViewport();
       this.registerPageScroller();
       this.shieldHandlesFromPullToRefresh();
     });
@@ -715,6 +769,15 @@ export class PipelineComponent {
     this.destroyRef.onDestroy(() => this.scrollDispatcher.deregister(scrollable));
   }
 
+  /** Keeps `isMobile` in step with the viewport (rotation, resize). */
+  private watchMobileViewport(): void {
+    if (typeof window === 'undefined' || typeof window.matchMedia !== 'function') return;
+    const query = window.matchMedia(MOBILE_QUERY);
+    const listener = (event: MediaQueryListEvent) => this.isMobile.set(event.matches);
+    query.addEventListener('change', listener);
+    this.destroyRef.onDestroy(() => query.removeEventListener('change', listener));
+  }
+
   /**
    * A touch that starts on a drag handle belongs to the drag: keep it from the
    * layout's pull-to-refresh, which would otherwise reload the page when a card
@@ -736,6 +799,7 @@ export class PipelineComponent {
   }
 
   onFilterChange(values: FilterValues): void {
+    if ('view' in values) this.view.set(values['view'] === 'list' ? 'list' : 'board');
     const pipelineId = values['pipeline_id'];
     this.pipelineId.set(typeof pipelineId === 'string' && pipelineId ? +pipelineId : null);
     const owner = values['owner'];
