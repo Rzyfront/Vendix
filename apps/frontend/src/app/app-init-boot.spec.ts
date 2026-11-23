@@ -120,6 +120,45 @@ describe('Arranque de la app: cuándo sale el gato global', () => {
     expect(failures()).toEqual([]);
   });
 
+  it('backend vivo + la resolución nunca llega → NO hay gato: reintenta y sigue cargando', async () => {
+    fetchSpy.and.callFake(() =>
+      Promise.resolve(new Response('{}', { status: 200 })),
+    );
+    boot();
+
+    // Plazo de arranque + varias rondas de margen sin que llegue la resolución.
+    await advance(APP_INIT_TIMEOUT_MS + 3 * APP_INIT_GRACE_MS + 1_000);
+
+    expect(failures()).toEqual([]);
+    expect(await resolutionError()).toBeNull();
+    expect(initResult).toBeUndefined(); // sigue en el splash
+    const retries = dispatched.filter(
+      (a) => a.type === ConfigActions.retryResolution.type,
+    );
+    expect(retries.length).toBe(3); // reintenta la resolución en cada margen
+    expect(fetchSpy).toHaveBeenCalledTimes(4); // re-confirma /health cada vez
+
+    // Cuando por fin llega la resolución, arranca sin gato.
+    store.dispatch(
+      ConfigActions.initializeAppSuccess({ config: {} as AppConfig }),
+    );
+    await advance(1_000);
+    expect(initResult).toBeTrue();
+    expect(failures()).toEqual([]);
+  });
+
+  it('backend vivo con 4xx en /health (proxy/WAF) → NO es caída', async () => {
+    fetchSpy.and.callFake(() =>
+      Promise.resolve(new Response('', { status: 403 })),
+    );
+    boot();
+
+    await advance(APP_INIT_TIMEOUT_MS + 1_000);
+    expect(fetchSpy).toHaveBeenCalledTimes(1);
+    expect(failures()).toEqual([]);
+    expect(initResult).toBeUndefined();
+  });
+
   it('backend caído (/health falla) → gato al vencer el plazo de arranque', async () => {
     fetchSpy.and.rejectWith(new TypeError('Failed to fetch'));
     boot();

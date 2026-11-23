@@ -80,7 +80,7 @@ describe('backend-availability.util', () => {
         .and.rejectWith(new TypeError('Failed to fetch'));
       const badGateway = jasmine
         .createSpy('fetch')
-        .and.resolveTo({ ok: false });
+        .and.resolveTo({ ok: false, status: 502 });
 
       await expectAsync(
         isBackendReachable('https://api.test/api', 50, network),
@@ -90,6 +90,33 @@ describe('backend-availability.util', () => {
       ).toBeResolvedTo(false);
       expect(network).toHaveBeenCalledTimes(1);
       expect(badGateway).toHaveBeenCalledTimes(1);
+    });
+  });
+
+  describe('isBackendReachable: qué cuenta como caída', () => {
+    const probe = (status: number) =>
+      isBackendReachable(
+        'https://api.test/api',
+        50,
+        jasmine
+          .createSpy('fetch')
+          .and.resolveTo({ ok: status >= 200 && status < 300, status }),
+      );
+
+    it('cualquier respuesta HTTP < 500 (incluido 4xx) → vivo', async () => {
+      for (const status of [200, 204, 301, 401, 403, 404, 429]) {
+        await expectAsync(probe(status))
+          .withContext(`status ${status}`)
+          .toBeResolvedTo(true);
+      }
+    });
+
+    it('status 0 (sin respuesta) o 5xx → caído', async () => {
+      for (const status of [0, 500, 502, 503, 504]) {
+        await expectAsync(probe(status))
+          .withContext(`status ${status}`)
+          .toBeResolvedTo(false);
+      }
     });
   });
 
@@ -134,6 +161,49 @@ describe('backend-availability.util', () => {
         graceMs: 20,
       });
 
+      expect(onFailure).toHaveBeenCalledTimes(1);
+    });
+
+    it('con onRetry: backend vivo y la resolución no llega → reintenta, sin gato', async () => {
+      const routes$ = new BehaviorSubject(false);
+      const onFailure = jasmine.createSpy('onFailure');
+      const probeBackend = jasmine.createSpy('probe').and.resolveTo(true);
+      let retries = 0;
+      const onRetry = jasmine.createSpy('onRetry').and.callFake(() => {
+        retries++;
+        if (retries === 2) setTimeout(() => routes$.next(true), 5);
+      });
+
+      await expectAsync(
+        settleSlowAppInit({
+          routesConfigured$: routes$,
+          probeBackend,
+          onFailure,
+          onRetry,
+          graceMs: 20,
+        }),
+      ).toBeResolvedTo(true);
+      expect(onRetry).toHaveBeenCalledTimes(2);
+      expect(probeBackend).toHaveBeenCalledTimes(3);
+      expect(onFailure).not.toHaveBeenCalled();
+    });
+
+    it('con onRetry: si al reintentar /health ya no responde → gato', async () => {
+      const onFailure = jasmine.createSpy('onFailure');
+      const probeBackend = jasmine
+        .createSpy('probe')
+        .and.returnValues(Promise.resolve(true), Promise.resolve(false));
+      const onRetry = jasmine.createSpy('onRetry');
+
+      await settleSlowAppInit({
+        routesConfigured$: new BehaviorSubject(false),
+        probeBackend,
+        onFailure,
+        onRetry,
+        graceMs: 20,
+      });
+
+      expect(onRetry).toHaveBeenCalledTimes(1);
       expect(onFailure).toHaveBeenCalledTimes(1);
     });
   });

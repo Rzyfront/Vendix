@@ -78,8 +78,8 @@ export function initializeApp(
           // NO degradar a VENDIX_LANDING. Un arranque lento NO es un backend
           // caído: se confirma con /health antes de mostrar el gato global
           // (fallo transitorio tipado: el handler de initializeAppFailure
-          // configura rutas neutras y la UI ofrece reintentar). Siempre
-          // devuelve true para no bloquear el arranque de la app.
+          // configura rutas neutras y la UI ofrece reintentar). Con el
+          // backend vivo reintenta la resolución y sigue en el splash.
           return from(
             settleSlowAppInit({
               routesConfigured$: routeManager.routesConfigured$,
@@ -90,6 +90,9 @@ export function initializeApp(
                     error: { kind: 'transient' },
                   }),
                 ),
+              // Backend vivo pero la resolución no llega: reintentarla (sigue
+              // el splash) en vez de mostrar un gato falso.
+              onRetry: () => store.dispatch(ConfigActions.retryResolution()),
             }),
           );
         }),

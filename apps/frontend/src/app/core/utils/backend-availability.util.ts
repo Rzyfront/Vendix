@@ -47,7 +47,7 @@ export const USER_ACTION_TIMEOUT_MESSAGE =
 type FetchLike = (
   input: string,
   init?: { signal?: AbortSignal; cache?: RequestCache },
-) => Promise<{ ok: boolean }>;
+) => Promise<{ ok: boolean; status?: number }>;
 
 type HealthProbeResult = 'up' | 'down' | 'timeout';
 
@@ -67,7 +67,10 @@ async function probeHealthOnce(
       signal: controller.signal,
       cache: 'no-store',
     });
-    return response?.ok ? 'up' : 'down';
+    // Cualquier respuesta HTTP < 500 (incluidos 4xx de un proxy/WAF) prueba que
+    // el servidor está vivo. Solo status 0 (sin respuesta) o 5xx es caída.
+    const status = response?.status ?? (response?.ok ? 200 : 0);
+    return status > 0 && status < 500 ? 'up' : 'down';
   } catch {
     return timedOut ? 'timeout' : 'down';
   } finally {
@@ -76,10 +79,12 @@ async function probeHealthOnce(
 }
 
 /**
- * `true` si `GET {apiUrl}/health` responde 2xx. Va por `fetch` directo (sin
+ * `true` si `GET {apiUrl}/health` obtiene cualquier respuesta HTTP < 500
+ * (2xx, 3xx o 4xx: el servidor contestó). Va por `fetch` directo (sin
  * interceptores de auth/tenant) y nunca lanza. Cada intento tiene su propio
  * plazo corto; si se agota por tiempo se reintenta (hasta `attempts`) antes de
- * declarar caída. Un fallo rápido (error de red, 5xx) es caída sin reintento.
+ * declarar caída. Un fallo rápido (error de red/status 0, 5xx) es caída sin
+ * reintento.
  */
 export async function isBackendReachable(
   apiUrl: string,
@@ -103,34 +108,44 @@ export async function isBackendReachable(
  * plazo. Antes se mostraba el gato de inmediato; ahora se confirma con
  * `/health`:
  * - backend caído → `onFailure()` (gato) al instante;
- * - backend vivo → se espera `graceMs` más a que las rutas queden listas y
- *   solo si tampoco llegan se declara el fallo.
+ * - backend vivo → se espera `graceMs` más a que las rutas queden listas. Si
+ *   tampoco llegan: con `onRetry` se reintenta la resolución y se vuelve a
+ *   consultar `/health` (el gato solo sale si la sonda confirma la caída);
+ *   sin `onRetry` se declara el fallo.
  * Si la resolución falla de verdad (error HTTP tras reintentos) el effect de
  * config ya marca el error por su cuenta; esto solo cubre el caso "lento".
- * Siempre resuelve `true` para no bloquear el bootstrap.
+ * Cuando resuelve, resuelve `true` (nunca bloquea el bootstrap con un error);
+ * con `onRetry` y el backend vivo sigue esperando hasta que lleguen las rutas.
  */
 export async function settleSlowAppInit(options: {
   routesConfigured$: Observable<boolean>;
   probeBackend: () => Promise<boolean>;
   onFailure: () => void;
+  onRetry?: () => void;
   graceMs?: number;
 }): Promise<boolean> {
-  const alive = await options.probeBackend().catch(() => false);
-  if (!alive) {
-    options.onFailure();
-    return true;
-  }
+  for (;;) {
+    const alive = await options.probeBackend().catch(() => false);
+    if (!alive) {
+      options.onFailure();
+      return true;
+    }
 
-  const configured = await firstValueFrom(
-    options.routesConfigured$.pipe(
-      filter((value) => value === true),
-      timeout(options.graceMs ?? APP_INIT_GRACE_MS),
-      map(() => true),
-      catchError(() => of(false)),
-    ),
-  );
-  if (!configured) options.onFailure();
-  return true;
+    const configured = await firstValueFrom(
+      options.routesConfigured$.pipe(
+        filter((value) => value === true),
+        timeout(options.graceMs ?? APP_INIT_GRACE_MS),
+        map(() => true),
+        catchError(() => of(false)),
+      ),
+    );
+    if (configured) return true;
+    if (!options.onRetry) {
+      options.onFailure();
+      return true;
+    }
+    options.onRetry();
+  }
 }
 
 /**
