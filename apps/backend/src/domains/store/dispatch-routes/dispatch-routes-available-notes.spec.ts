@@ -75,14 +75,39 @@ describe('DispatchRoutesService — listAvailableNotes (remisiones disponibles)'
     expect(result.data.map((n) => n.id)).toEqual([30, 29]);
   });
 
-  it('pagina por defecto 50 por página desde la primera', async () => {
+  it('pagina por defecto 15 por página desde la primera', async () => {
     const result = await service.listAvailableNotes();
 
     const args = prisma.dispatch_notes.findMany.mock.calls[0][0];
     expect(args.skip).toBe(0);
-    expect(args.take).toBe(50);
+    expect(args.take).toBe(15);
     expect(args.orderBy).toEqual([{ created_at: 'desc' }, { id: 'desc' }]);
-    expect(result).toEqual(expect.objectContaining({ page: 1, limit: 50 }));
+    expect(result).toEqual(expect.objectContaining({ page: 1, limit: 15 }));
+  });
+
+  it('la página 2 por defecto salta las 15 primeras y el total no depende de la página', async () => {
+    const result = await service.listAvailableNotes({ page: 2 });
+
+    const args = prisma.dispatch_notes.findMany.mock.calls[0][0];
+    expect(args.skip).toBe(15);
+    expect(args.take).toBe(15);
+    // El count no lleva skip/take: es el total real, no el tamaño de la página.
+    const countArgs = prisma.dispatch_notes.count.mock.calls[0][0];
+    expect(countArgs).not.toHaveProperty('skip');
+    expect(countArgs).not.toHaveProperty('take');
+    expect(result.total).toBe(30);
+  });
+
+  it('el total cuenta con la misma búsqueda y los mismos ids que la lista', async () => {
+    await service.listAvailableNotes({ search: 'REM-7', ids: [7, 8], page: 2 });
+
+    const { where } = prisma.dispatch_notes.findMany.mock.calls[0][0];
+    expect(prisma.dispatch_notes.count).toHaveBeenCalledWith({ where });
+    expect(where.OR).toBeDefined();
+    expect(where.id).toEqual({ in: [7, 8] });
+    expect(where.dispatch_route_stops).toEqual({
+      none: { status: { not: 'released' } },
+    });
   });
 
   it('respeta page/limit y recorta el limit a 100', async () => {

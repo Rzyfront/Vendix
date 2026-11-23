@@ -40,8 +40,12 @@ import {
   RouteStopSequenceInput,
 } from './utils/route-stop-calc';
 
-/** Página por defecto y tope del selector de remisiones disponibles. */
-const AVAILABLE_NOTES_DEFAULT_LIMIT = 50;
+/**
+ * Página por defecto y tope del selector de remisiones disponibles. El wizard
+ * de planilla y el modal "Agregar remisiones" paginan de a 15 con el paginador
+ * estándar; el tope protege de clientes que pidan de más.
+ */
+const AVAILABLE_NOTES_DEFAULT_LIMIT = 15;
 const AVAILABLE_NOTES_MAX_LIMIT = 100;
 
 const DISPATCH_ROUTE_INCLUDE = {
