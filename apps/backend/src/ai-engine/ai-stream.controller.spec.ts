@@ -50,7 +50,12 @@ describe('AIStreamController (P2-6): no cost reaches the store', () => {
   });
 
   it('image stream: provider usage.cost is dropped from completed and done', async () => {
-    const usage = { promptTokens: 1, completionTokens: 1, totalTokens: 2, cost: 0.08 };
+    const usage = {
+      promptTokens: 1,
+      completionTokens: 1,
+      totalTokens: 2,
+      cost: 0.08,
+    };
     const { controller } = controllerFor('image', [
       { type: 'completed', imageBase64: 'AAA', usage, model: 'img' },
       { type: 'done', usage, model: 'img' },
