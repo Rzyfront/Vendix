@@ -54,3 +54,23 @@ export function toCrmFilterId(value: unknown): number | undefined {
   const id = Number(value);
   return Number.isInteger(id) && id > 0 ? id : undefined;
 }
+
+/**
+ * Estado que se le devuelve al panel de filtros. Conserva TODAS las claves
+ * (segmento y etiqueta incluidas): el panel compara el número de claves de su
+ * estado local y, si aquí se perdiera alguna, borraría el valor elegido.
+ * Un departamento nuevo invalida la ciudad del anterior.
+ */
+export function mergeFilterValues<T extends Record<string, string | string[] | null>>(
+  values: T,
+  previous: Partial<Record<keyof T, string | string[] | null>>,
+): { department: string | null; city: string | null; merged: T } {
+  const department = (values['department'] as string | null) || null;
+  const departmentChanged = department !== (previous['department'] ?? null);
+  const city = departmentChanged ? null : (values['city'] as string | null) || null;
+  return {
+    department,
+    city,
+    merged: { ...values, department, city } as T,
+  };
+}

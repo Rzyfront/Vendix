@@ -11,7 +11,7 @@ import {
   untracked,
   viewChild,
 } from '@angular/core';
-import { buildCrmFilterConfigs, toCrmFilterId } from './crm-filters.util';
+import { buildCrmFilterConfigs, mergeFilterValues, toCrmFilterId } from './crm-filters.util';
 import { firstValueFrom } from 'rxjs';
 import { takeUntilDestroyed } from '@angular/core/rxjs-interop';
 import { FormsModule } from '@angular/forms';
@@ -396,17 +396,15 @@ export class CustomerListComponent {
 
   onFilterChange(values: FilterValues): void {
     const previous = this.filterValues();
-    const department = (values['department'] as string | null) || null;
-    const departmentChanged = department !== previous['department'];
-    // A new department invalidates the city chosen for the previous one.
-    const city = departmentChanged ? null : (values['city'] as string | null) || null;
+    const { department, city, merged } = mergeFilterValues(values, previous);
 
     // Se guarda el objeto COMPLETO: el panel compara el numero de claves y
     // pisaria el valor elegido si aqui se perdieran `segment`/`tag`.
-    this.filterValues.set({ ...values, department, city });
-    if (departmentChanged) this.loadMunicipalities(department);
+    this.filterValues.set(merged);
+    if (department !== previous['department']) this.loadMunicipalities(department);
 
-    const locationChanged = departmentChanged || city !== previous['city'];
+    const locationChanged =
+      department !== previous['department'] || city !== (previous['city'] ?? null);
     if (locationChanged) this.emitLocationFilter();
 
     const segmentId = toCrmFilterId(values['segment']);
