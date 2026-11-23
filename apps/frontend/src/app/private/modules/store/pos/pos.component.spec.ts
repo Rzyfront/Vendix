@@ -1,4 +1,5 @@
 import { signal } from '@angular/core';
+import { of } from 'rxjs';
 import { PosComponent, resolvePosPaymentCustomerName } from './pos.component';
 
 describe('POS paid-order customer name', () => {
@@ -199,5 +200,42 @@ describe('POS Guardar al modificar un borrador', () => {
     expect(payload.customer_alias).toBe('Casa azul');
     expect(payload.shipping_cost).toBeUndefined();
     expect(payload.delivery_type).toBeUndefined();
+  });
+});
+
+describe('POS cotizar: ubicación del cliente', () => {
+  const quoting = (preferredId: number | null) => {
+    const component = Object.create(PosComponent.prototype) as PosComponent;
+    const locations = [
+      { id: 10, label: 'Sede Norte', is_primary: true },
+      { id: 11, label: 'Sede Sur', is_primary: false },
+    ];
+    Object.assign(component, {
+      selectedCustomer: signal({ id: 1, preferred_address_id: preferredId }),
+      cartState: signal({ items: [{ product: { id: '1' }, quantity: 1 }] }),
+      editingQuotationId: signal(null),
+      loading: signal(false),
+      showQuoteLocationModal: signal(false),
+      quoteLocations: signal([]),
+      quoteLocationId: signal(null),
+      customerLocations: { listByCustomer: () => of(locations) },
+      destroyRef: { onDestroy: () => () => {} },
+      toastService: { warning: jasmine.createSpy('warning') },
+    });
+    Object.defineProperty(component, 'isEmpty', { get: () => false });
+    return component;
+  };
+
+  it('preselecciona la sede elegida en el buscador', () => {
+    const component = quoting(11);
+    component.onQuote();
+    expect(component.showQuoteLocationModal()).toBeTrue();
+    expect(component.quoteLocationId()).toBe(11);
+  });
+
+  it('sin sede elegida conserva la primera (principal)', () => {
+    const component = quoting(null);
+    component.onQuote();
+    expect(component.quoteLocationId()).toBe(10);
   });
 });

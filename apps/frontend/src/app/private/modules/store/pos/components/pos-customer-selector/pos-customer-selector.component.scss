@@ -333,6 +333,54 @@
   text-overflow: ellipsis;
 }
 
+/* ── Línea por establecimiento (cliente dividido por sedes) ──────────
+   Misma tarjeta del resultado + una tercera línea con la sede. En 375 px el
+   texto de la sede se trunca con elipsis y la etiqueta "Principal" no se
+   encoge, así la fila nunca desborda en horizontal. */
+.result-establishment,
+.customer-establishment {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  min-width: 0;
+  font-size: 12px;
+  color: var(--color-text-primary);
+
+  app-icon {
+    flex-shrink: 0;
+    color: var(--color-primary);
+  }
+}
+
+.customer-establishment {
+  margin-top: 2px;
+}
+
+.result-establishment-text,
+.customer-establishment-text {
+  flex: 1;
+  min-width: 0;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+
+  strong {
+    font-weight: 600;
+  }
+}
+
+.result-establishment-badge {
+  flex-shrink: 0;
+  padding: 1px 8px;
+  border-radius: 9999px;
+  border: 1px solid color-mix(in srgb, var(--color-primary) 25%, transparent);
+  background: color-mix(in srgb, var(--color-primary) 10%, transparent);
+  color: var(--color-primary-on-tint);
+  font-size: 11px;
+  font-weight: 600;
+  line-height: 16px;
+}
+
 .overflow-hint {
   font-size: 12px;
   font-weight: 500;
