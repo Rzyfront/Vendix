@@ -444,6 +444,8 @@ export const ERROR_MESSAGES: Record<string, string> = {
   SUP_ADMIN_USER_001: 'Usuario de superadministrador no encontrado.',
   SUP_ADMIN_ORG_001: 'Organizacion no encontrada.',
   SUP_ADMIN_ROLE_001: 'Rol de superadministrador no encontrado.',
+  SUP_ADMIN_ROLE_002:
+    'El rol cliente no se asigna desde el Super Admin: identifica a los clientes finales de las tiendas.',
   SUP_ADMIN_PERM_001: 'Permiso de superadministrador denegado.',
 
   // Payroll

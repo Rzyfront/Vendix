@@ -4,6 +4,7 @@ import {
   AuditAction,
   AuditResource,
 } from '../../../common/audit/audit.service';
+import { redactAuditRows } from '../../../common/audit/audit-redaction.util';
 
 @Injectable()
 export class OrganizationAuditService {
@@ -65,7 +66,7 @@ export class OrganizationAuditService {
       this.prismaService.audit_logs.count({ where }),
     ]);
 
-    return { data, total };
+    return { data: redactAuditRows<(typeof data)[number]>(data), total };
   }
 
   /**
@@ -94,7 +95,7 @@ export class OrganizationAuditService {
       if (filters.to_date) where.created_at.lte = filters.to_date;
     }
 
-    return await this.prismaService.audit_logs.findMany({
+    const rows = await this.prismaService.audit_logs.findMany({
       where,
       include: {
         users: {
@@ -113,6 +114,7 @@ export class OrganizationAuditService {
       },
       orderBy: { created_at: 'desc' },
     });
+    return redactAuditRows<(typeof rows)[number]>(rows);
   }
 
   /**

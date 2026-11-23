@@ -867,6 +867,7 @@ jobs:
           --include='**/store/platform-crm/*.spec.ts'
           --include='**/shared/components/store-activity-charts/*.spec.ts'
           --include='**/super-admin/stores/activity/components/store-activity-detail-modal.component.spec.ts'
+          --include='**/super-admin/roles/utils/superadmin-assignable-roles.spec.ts'
           --include='**/pop/utils/receipt-uom-block.util.spec.ts'
           --include='**/shared/utils/compact-money.util.spec.ts'
           --include='**/shared/pipes/currency/currency.pipe.spec.ts'

@@ -2327,6 +2327,12 @@ export const ErrorCodes = {
     httpStatus: 404,
     devMessage: 'Superadmin role not found',
   },
+  SUP_ADMIN_ROLE_002: {
+    code: 'SUP_ADMIN_ROLE_002',
+    httpStatus: 403,
+    devMessage:
+      'The customer role cannot be assigned from the Super Admin (end customers are not Vendix users)',
+  },
   SUP_ADMIN_PERM_001: {
     code: 'SUP_ADMIN_PERM_001',
     httpStatus: 403,

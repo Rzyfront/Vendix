@@ -36,6 +36,7 @@ import { SubscriptionTrialService } from '../../store/subscriptions/services/sub
 import { StaffProvisioningService } from '@common/services/staff-provisioning.service';
 import { PwaCacheService } from '@common/services/pwa-cache.service';
 import { ensureDefaultStoreHomeApp } from '../../store/apps/store-home/store-home-default';
+import { SAFE_USER_SELECT } from '@common/utils/safe-user-select.util';
 
 // Aggregated store dashboards tolerate 1-2 min of staleness → short TTL (ms).
 const STORE_DASHBOARD_CACHE_TTL_MS = 120_000;
@@ -315,7 +316,7 @@ export class StoresService {
         organizations: true,
         addresses: true,
         store_settings: true,
-        store_users: { include: { user: true } },
+        store_users: { include: { user: { select: SAFE_USER_SELECT } } },
         _count: {
           select: {
             products: true,

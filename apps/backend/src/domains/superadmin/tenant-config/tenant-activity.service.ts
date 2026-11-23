@@ -15,7 +15,9 @@ import {
   resolveStoreTimezone,
 } from '@common/utils/store-timezone.util';
 import {
+  vendixActorAuditSql,
   vendixUserWhere,
+  withVendixActor,
   withVendixUser,
 } from '@common/utils/vendix-user.util';
 
@@ -229,18 +231,26 @@ export class TenantActivityService {
    * de la misma organización. Repartirlas entre todas las tiendas inflaría
    * cada ficha con el trabajo de las demás. Lo que se pierde por ese lado se
    * reporta aparte en `unattributed_events`.
+   *
+   * Solo actividad del personal: los eventos cuyo autor es un cliente final no
+   * cuentan en ninguna cifra de la ficha (`withVendixActor`); los de sistema
+   * (sin autor) sí.
    */
   private auditWhere(scope: ActivityScope): Prisma.audit_logsWhereInput {
-    return scope.store_id == null
-      ? { organization_id: scope.organization_id }
-      : { organization_id: scope.organization_id, store_id: scope.store_id };
+    return withVendixActor(
+      scope.store_id == null
+        ? { organization_id: scope.organization_id }
+        : { organization_id: scope.organization_id, store_id: scope.store_id },
+    );
   }
 
   /** Fragmento SQL equivalente a {@link auditWhere}, para la serie diaria. */
   private auditWhereSql(scope: ActivityScope): Prisma.Sql {
-    return scope.store_id == null
-      ? Prisma.sql`al.organization_id = ${scope.organization_id}`
-      : Prisma.sql`al.organization_id = ${scope.organization_id} AND al.store_id = ${scope.store_id}`;
+    const tenant =
+      scope.store_id == null
+        ? Prisma.sql`al.organization_id = ${scope.organization_id}`
+        : Prisma.sql`al.organization_id = ${scope.organization_id} AND al.store_id = ${scope.store_id}`;
+    return Prisma.sql`${tenant} AND ${vendixActorAuditSql('al.user_id')}`;
   }
 
   /**
@@ -573,11 +583,11 @@ export class TenantActivityService {
     }
 
     return this.db.audit_logs.count({
-      where: {
+      where: withVendixActor({
         organization_id: scope.organization_id,
         store_id: null,
         created_at: { gte: window.startDate, lte: window.endDate },
-      },
+      }),
     });
   }
 
