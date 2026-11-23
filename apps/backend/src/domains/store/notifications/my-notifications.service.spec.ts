@@ -76,14 +76,26 @@ function setup(
       );
     }),
   };
+  // Fake Redis `SET key value PX ttl NX`, on the clock passed as `value`.
+  const expiries = new Map<string, number>();
+  const redis = {
+    set: jest.fn(async (key: string, value: string, _px: 'PX', ttl: number, _nx: 'NX') => {
+      const now = Number(value);
+      const until = expiries.get(key);
+      if (until !== undefined && now < until) return null;
+      expiries.set(key, now + ttl);
+      return 'OK';
+    }),
+  };
   const service = new MyNotificationsService(
     global_prisma as any,
     preferences as any,
     push_service as any,
     email_service as any,
     recipients as any,
+    redis as any,
   );
-  return { service, global_prisma, preferences, push_service, email_service, recipients, groups };
+  return { service, global_prisma, preferences, push_service, email_service, recipients, groups, redis };
 }
 
 beforeEach(() => {
@@ -200,6 +212,27 @@ describe('MyNotificationsService.sendTest', () => {
     expect((error as VendixHttpException).errorCode).toBe('NOTIFICATION_TEST_RATE_LIMITED');
     expect((error as VendixHttpException).getStatus()).toBe(429);
 
+    await service.sendTest(STORE, USER, T0 + NOTIFICATION_TEST_COOLDOWN_MS);
+    expect(push_service.sendToUser).toHaveBeenCalledTimes(2);
+  });
+
+  it('the cooldown lives in Redis, shared by every API replica', async () => {
+    const { service, redis } = setup();
+    await service.sendTest(STORE, USER, T0);
+    expect(redis.set).toHaveBeenCalledWith(
+      `notifications:test:${STORE}:${USER}`,
+      String(T0),
+      'PX',
+      NOTIFICATION_TEST_COOLDOWN_MS,
+      'NX',
+    );
+  });
+
+  it('if Redis fails, the cooldown falls back to memory', async () => {
+    const { service, redis, push_service } = setup();
+    redis.set.mockRejectedValue(new Error('redis down'));
+    await service.sendTest(STORE, USER, T0);
+    await expect(service.sendTest(STORE, USER, T0 + 1)).rejects.toBeInstanceOf(VendixHttpException);
     await service.sendTest(STORE, USER, T0 + NOTIFICATION_TEST_COOLDOWN_MS);
     expect(push_service.sendToUser).toHaveBeenCalledTimes(2);
   });

@@ -1,4 +1,6 @@
-import { Injectable, Logger } from '@nestjs/common';
+import { Inject, Injectable, Logger } from '@nestjs/common';
+import type Redis from 'ioredis';
+import { REDIS_CLIENT } from '@common/redis/redis.module';
 import { GlobalPrismaService } from '../../../prisma/services/global-prisma.service';
 import { ErrorCodes, VendixHttpException } from '../../../common/errors';
 import {
@@ -51,7 +53,7 @@ export function maskEmail(email: string | null | undefined): string | null {
 @Injectable()
 export class MyNotificationsService {
   private readonly logger = new Logger(MyNotificationsService.name);
-  /** Última prueba por `tienda:usuario` (freno blando por proceso). */
+  /** Respaldo en memoria del freno de la prueba cuando Redis no responde. */
   private readonly lastTest = new Map<string, number>();
 
   constructor(
@@ -60,6 +62,7 @@ export class MyNotificationsService {
     private readonly push_service: NotificationsPushService,
     private readonly email_service: NotificationEmailService,
     private readonly recipients: NotificationRecipientsService,
+    @Inject(REDIS_CLIENT) private readonly redis: Redis,
   ) {}
 
   async getView(store_id: number, user_id: number): Promise<MyNotificationsView> {
@@ -89,12 +92,9 @@ export class MyNotificationsService {
     user_id: number,
     now: number = Date.now(),
   ): Promise<NotificationTestResult> {
-    const key = `${store_id}:${user_id}`;
-    const last = this.lastTest.get(key);
-    if (last !== undefined && now - last < NOTIFICATION_TEST_COOLDOWN_MS) {
+    if (!(await this.acquireTestSlot(store_id, user_id, now))) {
       throw new VendixHttpException(ErrorCodes.NOTIFICATION_TEST_RATE_LIMITED);
     }
-    this.lastTest.set(key, now);
 
     const recipient = (await this.recipients.classify(store_id, [user_id])).get(user_id);
     if (!recipient || recipient.kind !== 'staff') {
@@ -148,6 +148,31 @@ export class MyNotificationsService {
       return await this.email_service.isStoreEmailEnabled(store_id);
     } catch {
       return false;
+    }
+  }
+
+  /**
+   * One test per store and user every 30 s, shared by every API replica
+   * through Redis (`SET NX PX`). If Redis is unreachable, falls back to this
+   * process' memory so the button keeps working.
+   */
+  private async acquireTestSlot(store_id: number, user_id: number, now: number): Promise<boolean> {
+    const key = `${store_id}:${user_id}`;
+    try {
+      const ok = await this.redis.set(
+        `notifications:test:${key}`,
+        String(now),
+        'PX',
+        NOTIFICATION_TEST_COOLDOWN_MS,
+        'NX',
+      );
+      return ok === 'OK';
+    } catch (error) {
+      this.logger.warn(`Test cooldown falls back to memory: ${(error as Error)?.message}`);
+      const last = this.lastTest.get(key);
+      if (last !== undefined && now - last < NOTIFICATION_TEST_COOLDOWN_MS) return false;
+      this.lastTest.set(key, now);
+      return true;
     }
   }
 }
