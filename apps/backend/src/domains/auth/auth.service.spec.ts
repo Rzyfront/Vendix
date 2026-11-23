@@ -13,6 +13,7 @@ import { S3Service } from '@common/services/s3.service';
 import { EventEmitter2 } from '@nestjs/event-emitter';
 import { VendixHttpException } from 'src/common/errors';
 import * as bcrypt from 'bcrypt';
+import { SENSITIVE_USER_FIELDS } from '@common/utils/safe-user-select.util';
 
 /**
  * F-194: el servicio migró de `UnauthorizedException` (Nest) a
@@ -994,6 +995,190 @@ describe('AuthService Login Flow', () => {
       const result = await service.refreshToken({ refresh_token: 'rt' });
 
       expect(result.user.avatar_url).toBe(SIGNED);
+      expect(result.access_token).toBe('a');
+    });
+  });
+
+  describe('session user without auth-only columns', () => {
+    const AUTH_ONLY = {
+      two_factor_secret: 'JBSWY3DPEHPK3PXP',
+      failed_login_attempts: 2,
+      locked_until: new Date('2026-11-23T12:00:00Z'),
+    };
+
+    function expectNoAuthOnlyColumns(user: object) {
+      for (const field of SENSITIVE_USER_FIELDS) {
+        expect(user).not.toHaveProperty(field);
+      }
+    }
+
+    afterEach(() => {
+      mockConfigService.get.mockReset();
+      jest.restoreAllMocks();
+    });
+
+    it('login still checks the password and returns the session without auth-only columns (login non-regression)', async () => {
+      mockPrismaService.users.findMany.mockResolvedValue([
+        accountRow({
+          email: 'owner@test.com',
+          password: await bcrypt.hash('123', 4),
+          ...AUTH_ONLY,
+          user_roles: [{ roles: { name: 'owner', role_permissions: [] } }],
+        }),
+      ]);
+      mockPrismaService.stores.findFirst.mockResolvedValue({
+        id: 10,
+        slug: 'store-a',
+        organization_id: 1,
+        organizations: { slug: 'org-a' },
+      });
+      mockPrismaService.user_settings.findUnique.mockResolvedValue({
+        config: {},
+      });
+      mockPrismaService.stores.findUnique.mockResolvedValue({
+        id: 10,
+        slug: 'store-a',
+        organization_id: 1,
+        is_active: true,
+      });
+      mockPrismaService.store_users.findFirst.mockResolvedValue({
+        store: { id: 10, organizations: { id: 1 } },
+      });
+      mockPrismaService.refresh_tokens.create.mockResolvedValue({});
+      mockPrismaService.users.update.mockResolvedValue({});
+
+      const result: any = await service.login({
+        email: 'owner@test.com',
+        password: '123',
+        store_slug: 'store-a',
+      });
+
+      expectNoAuthOnlyColumns(result.user);
+      expect(result.user).toEqual(
+        expect.objectContaining({
+          id: 1,
+          email: 'owner@test.com',
+          roles: ['owner'],
+        }),
+      );
+      expect(result).toEqual(
+        expect.objectContaining({
+          access_token: 'token',
+          refresh_token: 'token',
+          permissions: expect.any(Array),
+        }),
+      );
+    });
+
+    it('getCurrentUser (/auth/me) returns the user without auth-only columns', async () => {
+      mockPrismaService.users.findUnique.mockResolvedValue({
+        id: 1,
+        email: 'test@test.com',
+        password: 'hashed',
+        avatar_url: null,
+        ...AUTH_ONLY,
+      });
+
+      const result: any = await service.getCurrentUser(1, null);
+
+      expectNoAuthOnlyColumns(result);
+      expect(result).toEqual(
+        expect.objectContaining({ id: 1, email: 'test@test.com' }),
+      );
+    });
+
+    it('getProfile (/auth/profile) returns the user without auth-only columns', async () => {
+      mockPrismaService.users.findUnique.mockResolvedValue({
+        id: 1,
+        email: 'test@test.com',
+        password: 'hashed',
+        avatar_url: null,
+        addresses: [],
+        ...AUTH_ONLY,
+      });
+
+      const result: any = await service.getProfile(1, null);
+
+      expectNoAuthOnlyColumns(result);
+      expect(result).toEqual(
+        expect.objectContaining({ id: 1, addresses: [], user_roles: [] }),
+      );
+    });
+
+    it('refreshToken returns the user without auth-only columns', async () => {
+      mockConfigService.get.mockImplementation((key: string) =>
+        key === 'JWT_REFRESH_SECRET' ? 'refresh-secret' : undefined,
+      );
+      mockJwtService.verify.mockReturnValue({
+        sub: 1,
+        organization_id: 1,
+        store_id: null,
+      });
+      mockPrismaService.refresh_tokens.findFirst.mockResolvedValue({
+        id: 7,
+        users: {
+          id: 1,
+          organization_id: 1,
+          password: 'hashed',
+          avatar_url: null,
+          user_roles: [],
+          ...AUTH_ONLY,
+        },
+      });
+      mockPrismaService.refresh_tokens.update.mockResolvedValue({});
+      jest
+        .spyOn(service as any, 'validateRefreshTokenSecurity')
+        .mockResolvedValue(undefined);
+      jest.spyOn(service as any, 'generateTokens').mockResolvedValue({
+        access_token: 'a',
+        refresh_token: 'r',
+        token_type: 'Bearer',
+        expires_in: 900,
+      });
+
+      const result = await service.refreshToken({ refresh_token: 'rt' });
+
+      expectNoAuthOnlyColumns(result.user);
+      expect(result.user).toEqual(expect.objectContaining({ id: 1 }));
+    });
+
+    it('loginCustomer returns the customer without auth-only columns', async () => {
+      mockPrismaService.stores.findUnique.mockResolvedValue({
+        id: 10,
+        organization_id: 1,
+      });
+      mockPrismaService.users.findFirst.mockResolvedValue({
+        id: 9,
+        email: 'cliente@test.com',
+        password: await bcrypt.hash('123', 4),
+        state: 'active',
+        organization_id: 1,
+        user_roles: [{ roles: { name: 'customer' } }],
+        store_users: [{ store_id: 10 }],
+        user_settings: { id: 1, config: {} },
+        ...AUTH_ONLY,
+      });
+      jest.spyOn(service as any, 'generateTokens').mockResolvedValue({
+        access_token: 'a',
+        refresh_token: 'r',
+        token_type: 'Bearer',
+        expires_in: 900,
+      });
+      jest
+        .spyOn(service as any, 'createUserSession')
+        .mockResolvedValue(undefined);
+      jest.spyOn(service as any, 'logLoginAttempt').mockResolvedValue(undefined);
+
+      const result: any = await service.loginCustomer({
+        email: 'cliente@test.com',
+        password: '123',
+        store_id: 10,
+      });
+
+      expectNoAuthOnlyColumns(result.user);
+      expect(result.user).toEqual(
+        expect.objectContaining({ id: 9, email: 'cliente@test.com' }),
+      );
       expect(result.access_token).toBe('a');
     });
   });

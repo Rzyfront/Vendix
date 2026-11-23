@@ -64,3 +64,40 @@ export const SAFE_USER_SELECT = {
 export type SafeUser = Prisma.usersGetPayload<{
   select: typeof SAFE_USER_SELECT;
 }>;
+
+type WithUserFields<T> = T & Partial<Record<SensitiveUserField, unknown>>;
+
+/**
+ * Copy of an already loaded user object without `SENSITIVE_USER_FIELDS`.
+ * For flows that must read the full row (sign-in compares the password hash,
+ * lockout counters) and then return that same user: the query stays as is
+ * and only the response object is narrowed.
+ */
+export function omitSensitiveUserFields<T extends object>(
+  user: T,
+): Omit<T, SensitiveUserField> {
+  const {
+    password: _password,
+    two_factor_secret: _twoFactorSecret,
+    failed_login_attempts: _failedLoginAttempts,
+    locked_until: _lockedUntil,
+    ...rest
+  } = user as WithUserFields<T>;
+  return rest as Omit<T, SensitiveUserField>;
+}
+
+/**
+ * Copy of a user object without its credentials (`RESPONSE_SECRET_KEYS`),
+ * keeping the lockout counters. Only for Super Admin user management, whose
+ * screen shows the lock and offers to unlock it.
+ */
+export function omitUserCredentials<T extends object>(
+  user: T,
+): Omit<T, (typeof RESPONSE_SECRET_KEYS)[number]> {
+  const {
+    password: _password,
+    two_factor_secret: _twoFactorSecret,
+    ...rest
+  } = user as WithUserFields<T>;
+  return rest as Omit<T, (typeof RESPONSE_SECRET_KEYS)[number]>;
+}

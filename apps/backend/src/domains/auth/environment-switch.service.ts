@@ -23,6 +23,7 @@ import {
 } from './constants/token.constants';
 import { STORE_AUTH_DOMAINS_INCLUDE } from './constants/store-public-domains.constants';
 import { buildActiveUserRolesWhere } from '@common/utils/role-scope.util';
+import { omitSensitiveUserFields } from '@common/utils/safe-user-select.util';
 import { signUserAvatar } from './helpers/sign-user-avatar.helper';
 import { VendixHttpException, ErrorCodes } from '../../common/errors';
 
@@ -423,8 +424,10 @@ export class EnvironmentSwitchService {
       },
     });
 
-    // Remover password del response
-    const { password, ...user_with_roles_and_password } = user_with_roles_array;
+    // Sin credenciales ni contadores de bloqueo en la respuesta
+    const user_with_roles_and_password = omitSensitiveUserFields(
+      user_with_roles_array,
+    );
 
     const signedLogoUrl = await this.s3Service.signUrl(active_store?.logo_url);
     const cleanStore = active_store

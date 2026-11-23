@@ -31,6 +31,7 @@ import { toTitleCase } from '@common/utils/format.util';
 import { emailEquals, normalizeEmail } from '@common/utils/email.util';
 import { mergeUserConfigPanelUi } from '../../common/utils/panel-ui-merge.util';
 import { buildActiveUserRolesWhere } from '@common/utils/role-scope.util';
+import { omitSensitiveUserFields } from '@common/utils/safe-user-select.util';
 import {
   isStrongPassword,
   passwordPolicyMessage,
@@ -738,7 +739,7 @@ export class AuthService {
       throw new ConflictException({
         message: 'Ya tienes un onboarding pendiente',
         pendingOnboarding: existingOrganization,
-        user: existingUser,
+        user: omitSensitiveUserFields(existingUser),
       });
     }
 
@@ -1032,8 +1033,8 @@ export class AuthService {
       roles, // Array simple: ["owner", "admin"]
     };
 
-    // Remover password del response
-    const { password: _, ...userWithRolesAndPassword } = userWithRolesArray;
+    // Sin credenciales ni contadores de bloqueo en la respuesta
+    const userWithRolesAndPassword = omitSensitiveUserFields(userWithRolesArray);
 
     // Obtener user_settings del usuario creado
     const userSettings = await this.prismaService.user_settings.findUnique({
@@ -1364,8 +1365,8 @@ export class AuthService {
       roles, // Array simple: ["owner", "admin"]
     };
 
-    // Remover password del response
-    const { password: _, ...userWithRolesAndPassword } = userWithRolesArray;
+    // Sin credenciales ni contadores de bloqueo en la respuesta
+    const userWithRolesAndPassword = omitSensitiveUserFields(userWithRolesArray);
 
     const defaultsForCustomerRegister =
       await this.defaultPanelUIService.generatePanelUI('');
@@ -1667,8 +1668,9 @@ export class AuthService {
       // No fallar el registro si el email no se puede enviar
     }
 
-    // Remover password del response (no es necesario ya que no se incluye en la query)
-    const userWithoutPassword = userWithRoles;
+    // La consulta trae la fila completa: la respuesta va sin credenciales ni
+    // contadores de bloqueo.
+    const userWithoutPassword = omitSensitiveUserFields(userWithRoles);
 
     return {
       message: `Usuario ${role} creado exitosamente`,
@@ -2241,11 +2243,11 @@ export class AuthService {
       .map((ur: any) => ur.roles?.name)
       .filter(Boolean);
 
-    const { password: _, ...userWithRolesAndPassword } = {
+    const userWithRolesAndPassword = omitSensitiveUserFields({
       ...userWithRolesArray,
       roles: effective_roles,
       store: cleanStore,
-    };
+    });
 
     const userSettingsForResponse = {
       id: userSettings.id,
@@ -2387,8 +2389,9 @@ export class AuthService {
         app_type: payload.app_type,
       });
 
-      // El password no está incluido en esta consulta por seguridad
-      const userWithoutPassword = user;
+      // La relación `users` trae la fila completa: la respuesta va sin
+      // credenciales ni contadores de bloqueo.
+      const userWithoutPassword = omitSensitiveUserFields(user);
 
       // Actualizar el refresh token en la base de datos
       const refreshTokenExpiry =
@@ -2475,8 +2478,8 @@ export class AuthService {
       throw new VendixHttpException(ErrorCodes.AUTH_FIND_001);
     }
 
-    // Remover password del response
-    const { password, ...userWithoutPassword } = user;
+    // Sin credenciales ni contadores de bloqueo en la respuesta
+    const userWithoutPassword = omitSensitiveUserFields(user);
 
     // Firmar el avatar_url si existe (convertir key de S3 a URL firmada)
     const signedAvatarUrl = await this.s3Service.signUrl(user.avatar_url);
@@ -3452,8 +3455,8 @@ export class AuthService {
       },
     );
 
-    // Remover password del response
-    const { password, ...userWithoutPassword } = updatedUser;
+    // Sin credenciales ni contadores de bloqueo en la respuesta
+    const userWithoutPassword = omitSensitiveUserFields(updatedUser);
 
     return {
       message: 'Email verificado exitosamente por super administrador',
@@ -3758,7 +3761,7 @@ export class AuthService {
       return null;
     }
 
-    const { password, ...userWithoutPassword } = user as any;
+    const userWithoutPassword = omitSensitiveUserFields(user);
     const roles = userRoles.map((ur) => ur.roles?.name).filter(Boolean);
 
     return signUserAvatar(this.s3Service, {
@@ -4319,7 +4322,7 @@ export class AuthService {
 
     // Construir el usuario completo con la misma estructura que el login
     const userWithEnvironment = {
-      ...user,
+      ...omitSensitiveUserFields(user),
       user_roles: effective_user_roles, // QUI-72: scopeado a la tienda destino
       store: activeStore, // Store con domain_settings incluido
       organizations: organizations, // Organization con domain_settings incluido
@@ -4441,7 +4444,7 @@ export class AuthService {
     const permissions = this.getPermissionsFromRoles(userRolesWithPermissions);
 
     return {
-      user: user,
+      user: omitSensitiveUserFields(user),
       user_settings: user.user_settings,
       permissions,
       access_token: tokens.access_token,

@@ -32,6 +32,7 @@ import { SettingsService } from '../../store/settings/settings.service';
 import { SettingsService as OrgSettingsService } from '../settings/settings.service';
 import { BASE_SYSTEM_PAYMENT_METHOD_NAMES } from './base-payment-methods.const';
 import { PLATFORM_PERMISSION_PREFIX } from '../../../common/constants/platform-permissions.constant';
+import { omitSensitiveUserFields } from '@common/utils/safe-user-select.util';
 import {
   normalizeFiscalStatusBlock,
   type FiscalStatusBlock,
@@ -336,8 +337,7 @@ export class OnboardingWizardService {
         existingAddress.postal_code === setupUserDto.postal_code);
 
     if (isSameUserData && isSameAddress) {
-      const { password, ...userWithoutPassword } = user;
-      return { ...userWithoutPassword, already_completed: true };
+      return { ...omitSensitiveUserFields(user), already_completed: true };
     }
 
     // Update user data
@@ -391,8 +391,7 @@ export class OnboardingWizardService {
       }
     }
 
-    const { password, ...userWithoutPassword } = updatedUser;
-    return userWithoutPassword;
+    return omitSensitiveUserFields(updatedUser);
   }
 
   /**
