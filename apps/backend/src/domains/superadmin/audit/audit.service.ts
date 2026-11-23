@@ -72,40 +72,39 @@ export class SuperAdminAuditService {
       if (filters.to_date) where.created_at.lte = filters.to_date;
     }
 
-    return redactAuditRows(
-      await this.prismaService.audit_logs.findMany({
-        where: withVendixActor(where),
-        include: {
-          users: {
-            select: {
-              id: true,
-              email: true,
-              first_name: true,
-              last_name: true,
-              organization_id: true,
-            },
-          },
-          stores: {
-            select: {
-              id: true,
-              name: true,
-              slug: true,
-              organization_id: true,
-            },
-          },
-          organizations: {
-            select: {
-              id: true,
-              name: true,
-              slug: true,
-            },
+    const rows = await this.prismaService.audit_logs.findMany({
+      where: withVendixActor(where),
+      include: {
+        users: {
+          select: {
+            id: true,
+            email: true,
+            first_name: true,
+            last_name: true,
+            organization_id: true,
           },
         },
-        orderBy: { created_at: 'desc' },
-        take: filters?.limit || 50,
-        skip: filters?.offset || 0,
-      }),
-    );
+        stores: {
+          select: {
+            id: true,
+            name: true,
+            slug: true,
+            organization_id: true,
+          },
+        },
+        organizations: {
+          select: {
+            id: true,
+            name: true,
+            slug: true,
+          },
+        },
+      },
+      orderBy: { created_at: 'desc' },
+      take: filters?.limit || 50,
+      skip: filters?.offset || 0,
+    });
+    return redactAuditRows(rows);
   }
 
   /**

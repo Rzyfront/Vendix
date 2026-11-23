@@ -95,27 +95,26 @@ export class OrganizationAuditService {
       if (filters.to_date) where.created_at.lte = filters.to_date;
     }
 
-    return redactAuditRows(
-      await this.prismaService.audit_logs.findMany({
-        where,
-        include: {
-          users: {
-            select: {
-              first_name: true,
-              last_name: true,
-              email: true,
-            },
-          },
-          stores: {
-            select: {
-              name: true,
-              slug: true,
-            },
+    const rows = await this.prismaService.audit_logs.findMany({
+      where,
+      include: {
+        users: {
+          select: {
+            first_name: true,
+            last_name: true,
+            email: true,
           },
         },
-        orderBy: { created_at: 'desc' },
-      }),
-    );
+        stores: {
+          select: {
+            name: true,
+            slug: true,
+          },
+        },
+      },
+      orderBy: { created_at: 'desc' },
+    });
+    return redactAuditRows(rows);
   }
 
   /**
