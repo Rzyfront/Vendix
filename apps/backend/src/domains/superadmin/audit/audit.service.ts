@@ -8,6 +8,7 @@ import {
   AuditAction,
   AuditResource,
 } from '../../../common/audit/audit.service';
+import { redactAuditRows } from '../../../common/audit/audit-redaction.util';
 
 /** Ventana fija de la serie `logs_by_day`, en días. */
 const LOGS_BY_DAY_WINDOW = 30;
@@ -64,38 +65,40 @@ export class SuperAdminAuditService {
       if (filters.to_date) where.created_at.lte = filters.to_date;
     }
 
-    return await this.prismaService.audit_logs.findMany({
-      where,
-      include: {
-        users: {
-          select: {
-            id: true,
-            email: true,
-            first_name: true,
-            last_name: true,
-            organization_id: true,
+    return redactAuditRows(
+      await this.prismaService.audit_logs.findMany({
+        where,
+        include: {
+          users: {
+            select: {
+              id: true,
+              email: true,
+              first_name: true,
+              last_name: true,
+              organization_id: true,
+            },
+          },
+          stores: {
+            select: {
+              id: true,
+              name: true,
+              slug: true,
+              organization_id: true,
+            },
+          },
+          organizations: {
+            select: {
+              id: true,
+              name: true,
+              slug: true,
+            },
           },
         },
-        stores: {
-          select: {
-            id: true,
-            name: true,
-            slug: true,
-            organization_id: true,
-          },
-        },
-        organizations: {
-          select: {
-            id: true,
-            name: true,
-            slug: true,
-          },
-        },
-      },
-      orderBy: { created_at: 'desc' },
-      take: filters?.limit || 50,
-      skip: filters?.offset || 0,
-    });
+        orderBy: { created_at: 'desc' },
+        take: filters?.limit || 50,
+        skip: filters?.offset || 0,
+      }),
+    );
   }
 
   /**

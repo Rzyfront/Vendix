@@ -12,6 +12,7 @@ import { UserRoleAssignmentService } from '@common/services/user-role-assignment
 import { RequestContextService } from '@common/context/request-context.service';
 import { VendixHttpException } from '@common/errors/vendix-http.exception';
 import { ErrorCodes } from '@common/errors/error-codes';
+import { SAFE_USER_SELECT } from '@common/utils/safe-user-select.util';
 import {
   RoleActor,
   buildActiveUserRolesWhere,
@@ -436,6 +437,7 @@ export class StoreUserManagementService {
         password: hashed_password,
         updated_at: new Date(),
       },
+      select: SAFE_USER_SELECT,
     });
   }
 

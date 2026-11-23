@@ -1,6 +1,7 @@
 import { Injectable } from '@nestjs/common';
 import { GlobalPrismaService } from '../../prisma/services/global-prisma.service';
 import { RequestContextService } from '@common/context/request-context.service';
+import { redactAuditSecrets } from './audit-redaction.util';
 
 export enum AuditAction {
   CREATE = 'CREATE',
@@ -140,13 +141,17 @@ export class AuditService {
           resource: auditData.resource as any,
           resource_id: auditData.resourceId,
           old_values: auditData.oldValues
-            ? JSON.parse(JSON.stringify(auditData.oldValues))
+            ? redactAuditSecrets(
+                JSON.parse(JSON.stringify(auditData.oldValues)),
+              )
             : null,
           new_values: auditData.newValues
-            ? JSON.parse(JSON.stringify(auditData.newValues))
+            ? redactAuditSecrets(
+                JSON.parse(JSON.stringify(auditData.newValues)),
+              )
             : null,
           metadata: auditData.metadata
-            ? JSON.parse(JSON.stringify(auditData.metadata))
+            ? redactAuditSecrets(JSON.parse(JSON.stringify(auditData.metadata)))
             : null,
           // CP-PURCHASE-TRANSPARENCY H.1.
           // La columna existe desde `20260822180000_purchase_transparency_

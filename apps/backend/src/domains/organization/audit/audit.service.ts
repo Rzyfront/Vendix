@@ -4,6 +4,7 @@ import {
   AuditAction,
   AuditResource,
 } from '../../../common/audit/audit.service';
+import { redactAuditRows } from '../../../common/audit/audit-redaction.util';
 
 @Injectable()
 export class OrganizationAuditService {
@@ -65,7 +66,7 @@ export class OrganizationAuditService {
       this.prismaService.audit_logs.count({ where }),
     ]);
 
-    return { data, total };
+    return { data: redactAuditRows(data), total };
   }
 
   /**
@@ -94,25 +95,27 @@ export class OrganizationAuditService {
       if (filters.to_date) where.created_at.lte = filters.to_date;
     }
 
-    return await this.prismaService.audit_logs.findMany({
-      where,
-      include: {
-        users: {
-          select: {
-            first_name: true,
-            last_name: true,
-            email: true,
+    return redactAuditRows(
+      await this.prismaService.audit_logs.findMany({
+        where,
+        include: {
+          users: {
+            select: {
+              first_name: true,
+              last_name: true,
+              email: true,
+            },
+          },
+          stores: {
+            select: {
+              name: true,
+              slug: true,
+            },
           },
         },
-        stores: {
-          select: {
-            name: true,
-            slug: true,
-          },
-        },
-      },
-      orderBy: { created_at: 'desc' },
-    });
+        orderBy: { created_at: 'desc' },
+      }),
+    );
   }
 
   /**
