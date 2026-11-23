@@ -1974,6 +1974,18 @@ export class CustomersService {
         { document_number: { contains: search, mode: 'insensitive' } },
         { legal_name: { contains: search, mode: 'insensitive' } },
         { phone: { contains: search, mode: 'insensitive' } },
+        // Nombre de la sede/establecimiento ("Sede Norte"): el buscador de
+        // venta muestra una línea por establecimiento y debe encontrarlo por
+        // su nombre. Subconsulta EXISTS sobre la relación del propio cliente,
+        // así que el scope tenant de arriba sigue aplicando.
+        {
+          addresses: {
+            some: {
+              type: address_type_enum.shipping,
+              label: { contains: search, mode: 'insensitive' },
+            },
+          },
+        },
       ];
     }
 
