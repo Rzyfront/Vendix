@@ -997,6 +997,119 @@ describe('OpenAICompatibleProvider', () => {
       );
     });
   });
+
+  describe('generateSpeech', () => {
+    const originalFetch = global.fetch;
+    let fetchMock: jest.Mock;
+
+    const speechProvider = (modelId: string) =>
+      new OpenAICompatibleProvider({
+        provider: 'Custom',
+        sdkType: 'openai_compatible',
+        apiKey: 'test-key',
+        modelId,
+        baseUrl: 'https://openrouter.ai/api/v1',
+        modelType: 'speech',
+        settings: {},
+      });
+
+    const audioResponse = (bytes: Buffer, contentType: string) => ({
+      ok: true,
+      arrayBuffer: async () =>
+        bytes.buffer.slice(bytes.byteOffset, bytes.byteOffset + bytes.length),
+      headers: {
+        get: (name: string) =>
+          name.toLowerCase() === 'content-type' ? contentType : null,
+      },
+    });
+
+    const sentBody = () => JSON.parse(fetchMock.mock.calls[0][1].body);
+
+    beforeEach(() => {
+      fetchMock = jest.fn();
+      global.fetch = fetchMock as any;
+    });
+
+    afterEach(() => {
+      global.fetch = originalFetch;
+    });
+
+    describe('Gemini TTS through OpenRouter', () => {
+      const pcm = Buffer.from([1, 0, 2, 0, 3, 0, 4, 0]);
+
+      it('asks for pcm, drops speed and returns the PCM wrapped as WAV', async () => {
+        fetchMock.mockResolvedValueOnce(
+          audioResponse(pcm, 'audio/pcm;rate=24000'),
+        );
+
+        const response = await speechProvider(
+          'google/gemini-3.8-flash-lite-tts',
+        ).generateSpeech('Hola', {
+          voice: 'Puck',
+          responseFormat: 'mp3',
+          speed: 1.2,
+        });
+
+        expect(fetchMock.mock.calls[0][0]).toBe(
+          'https://openrouter.ai/api/v1/audio/speech',
+        );
+        expect(sentBody()).toEqual({
+          model: 'google/gemini-3.8-flash-lite-tts',
+          input: 'Hola',
+          voice: 'Puck',
+          response_format: 'pcm',
+        });
+        expect(response.success).toBe(true);
+        expect(response.contentType).toBe('audio/wav');
+
+        const wav = Buffer.from(response.audioBase64!, 'base64');
+        expect(wav.toString('ascii', 0, 4)).toBe('RIFF');
+        expect(wav.toString('ascii', 8, 12)).toBe('WAVE');
+        expect(wav.readUInt16LE(22)).toBe(1); // mono
+        expect(wav.readUInt32LE(24)).toBe(24000);
+        expect(wav.readUInt16LE(34)).toBe(16);
+        expect(wav.readUInt32LE(40)).toBe(pcm.length);
+        expect(wav.subarray(44).equals(pcm)).toBe(true);
+      });
+
+      it('uses a Gemini voice when none is given (the config «Probar» path)', async () => {
+        fetchMock.mockResolvedValueOnce(
+          audioResponse(pcm, 'application/octet-stream'),
+        );
+
+        const response = await speechProvider(
+          'google/gemini-3.8-flash-lite-tts',
+        ).generateSpeech('OK');
+
+        expect(sentBody().voice).toBe('Kore');
+        expect(response.success).toBe(true);
+        // No rate in the content type: Gemini's native 24 kHz.
+        const wav = Buffer.from(response.audioBase64!, 'base64');
+        expect(wav.readUInt32LE(24)).toBe(24000);
+      });
+    });
+
+    it('keeps the OpenAI contract for other speech models', async () => {
+      const mp3 = Buffer.from('ID3fake-mp3');
+      fetchMock.mockResolvedValueOnce(audioResponse(mp3, 'audio/mpeg'));
+
+      const response = await speechProvider('gpt-4o-mini-tts').generateSpeech(
+        'Hola',
+        { responseFormat: 'mp3', speed: 1.2 },
+      );
+
+      expect(sentBody()).toEqual({
+        model: 'gpt-4o-mini-tts',
+        input: 'Hola',
+        voice: 'alloy',
+        response_format: 'mp3',
+        speed: 1.2,
+      });
+      expect(response.success).toBe(true);
+      expect(response.contentType).toBe('audio/mpeg');
+      expect(response.audioBase64).toBe(mp3.toString('base64'));
+    });
+  });
 });
 
 describe('OpenAI-compatible D2 opt-in cancellation', () => {
