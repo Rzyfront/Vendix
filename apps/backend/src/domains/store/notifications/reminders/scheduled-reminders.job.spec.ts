@@ -196,6 +196,57 @@ describe('ScheduledRemindersJob', () => {
     expect(fixture.rows[0].status).toBe('cancelled');
   });
 
+  it('a reminder cancelled while it was being resolved sends no notice', async () => {
+    const fixture = setup(async (reminder) => {
+      fixture.rows.find((row) => row.id === reminder.id)!.status = 'cancelled';
+      return {
+        action: 'notify',
+        notifications: [
+          { store_id: reminder.store_id, user_ids: [2], type: 'crm_task_due', title: 't', body: 'b' },
+        ],
+      };
+    });
+    await fixture.add(at(-MINUTE));
+    const result = await fixture.run(NOW);
+    expect(result.sent).toBe(0);
+    expect(fixture.dispatcher.notify).not.toHaveBeenCalled();
+    expect(fixture.rows[0].status).toBe('cancelled');
+  });
+
+  it('marks the row sent before dispatching: a failed close retries without a duplicate notice', async () => {
+    const fixture = setup();
+    await fixture.add(at(-MINUTE));
+    const table = (fixture.job as any).global_prisma.scheduled_reminders;
+    const original = table.updateMany.bind(table);
+    let failed = false;
+    table.updateMany = jest.fn(async (args: { data: { status?: string } }) => {
+      // Only the close that marks the row `sent` fails, once.
+      if (!failed && args.data.status === 'sent') {
+        failed = true;
+        throw new Error('db down');
+      }
+      return original(args);
+    });
+
+    expect((await fixture.run(NOW)).retried).toBe(1);
+    expect(fixture.dispatcher.notify).not.toHaveBeenCalled();
+    expect(fixture.rows[0]).toMatchObject({ status: 'pending', last_error: 'db down' });
+
+    expect((await fixture.run(at(12 * MINUTE))).sent).toBe(1);
+    expect(fixture.dispatcher.notify).toHaveBeenCalledTimes(1);
+    expect(fixture.rows[0].status).toBe('sent');
+  });
+
+  it('a dispatch error after marking sent is not retried', async () => {
+    const fixture = setup();
+    fixture.dispatcher.notify.mockRejectedValueOnce(new Error('boom'));
+    await fixture.add(at(-MINUTE));
+    expect((await fixture.run(NOW)).sent).toBe(1);
+    await fixture.run(at(12 * MINUTE));
+    expect(fixture.dispatcher.notify).toHaveBeenCalledTimes(1);
+    expect(fixture.rows[0].status).toBe('sent');
+  });
+
   it('each claimed row keeps its own store for the handler', async () => {
     const { run, add, handler } = setup();
     await add(at(-MINUTE), { store_id: 20, source_id: 7 });

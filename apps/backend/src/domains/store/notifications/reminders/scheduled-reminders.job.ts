@@ -132,29 +132,42 @@ export class ScheduledRemindersJob {
       await this.finish(row, { action: 'skip', reason: `No handler for ${row.source_type}` });
       return 'skipped';
     }
+    let resolution: ReminderResolution;
     try {
-      const resolution = await handler.resolve(row, now);
-      if (resolution.action === 'notify') {
-        for (const notification of resolution.notifications) {
-          await this.dispatcher.notify(notification);
-        }
-      }
-      await this.finish(row, resolution);
-      return resolution.action === 'notify' ? 'sent' : 'skipped';
+      resolution = await handler.resolve(row, now);
+      // Como mucho una vez: la fila queda `sent` ANTES de despachar. Si esa
+      // escritura falla, se reintenta sin haber avisado; si `sync` la canceló
+      // mientras tanto (0 filas), no se avisa.
+      const closed = await this.finish(row, resolution);
+      if (resolution.action !== 'notify') return 'skipped';
+      if (!closed) return 'skipped';
     } catch (error) {
       return this.fail(row, error);
     }
+    try {
+      for (const notification of resolution.notifications) {
+        await this.dispatcher.notify(notification);
+      }
+    } catch (error) {
+      // Ya está `sent`: reintentar duplicaría campana y push.
+      this.logger.error(
+        `Reminder ${row.id} dispatch failed after being marked sent: ${(error as Error)?.message ?? String(error)}`,
+      );
+    }
+    return 'sent';
   }
 
-  private async finish(row: ClaimedReminder, resolution: ReminderResolution): Promise<void> {
+  /** Cierra la fila; answers false when it was no longer pending. */
+  private async finish(row: ClaimedReminder, resolution: ReminderResolution): Promise<boolean> {
     // Solo si sigue pendiente: si `sync` la canceló mientras tanto, gana eso.
-    await this.global_prisma.scheduled_reminders.updateMany({
+    const { count } = await this.global_prisma.scheduled_reminders.updateMany({
       where: { id: row.id, status: 'pending' },
       data:
         resolution.action === 'notify'
           ? { status: 'sent', last_error: null }
           : { status: 'skipped', last_error: resolution.reason.slice(0, 1000) },
     });
+    return count === 1;
   }
 
   private async fail(row: ClaimedReminder, error: unknown): Promise<ProcessOutcome> {
