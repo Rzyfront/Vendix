@@ -769,6 +769,13 @@ export interface NotificationsSettings {
    * la fecha; `0` desactiva el aviso anticipado (la vencida se re-emite siempre).
    */
   ap_due_soon_days: number;
+  /**
+   * Minutos antes del vencimiento de una tarea CRM en que llega "Tarea por
+   * vencer" (5-1440, default 60). `ReminderScheduler` lo lee por tienda.
+   */
+  task_due_soon_minutes: number;
+  /** Hora local (0-23, default 7) del resumen diario de tareas por correo. */
+  daily_digest_hour: number;
 }
 
 export interface CustomerQueueSettings {

@@ -135,6 +135,11 @@ export function getDefaultStoreSettings(): StoreSettings {
       // cron `ApDueNotificationsJob` la lee por tienda; 0 desactiva el aviso
       // anticipado (la vencida se sigue emitiendo).
       ap_due_soon_days: 1,
+      // Tareas CRM: minutos antes del vencimiento en que llega "Tarea por
+      // vencer" (D2: 60) y hora local de la tienda del resumen diario por
+      // correo. Los lee `ReminderScheduler`; fuera de rango cae al default.
+      task_due_soon_minutes: 60,
+      daily_digest_hour: 7,
     },
     pos: {
       allow_anonymous_sales: true,

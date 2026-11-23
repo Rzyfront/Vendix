@@ -72,6 +72,22 @@ describe('NOTIFICATION_CATALOG', () => {
     expect(withEmail.sort()).toEqual([...CRM_TYPES].sort());
   });
 
+  it('el resumen diario de tareas solo ofrece correo (F1)', () => {
+    expect(getNotificationCatalogEntry('crm_task_digest')?.channels).toEqual({
+      push: false,
+      email: true,
+    });
+    expect(
+      NOTIFICATION_CATALOG.filter((e) => !e.channels.push).map((e) => e.type),
+    ).toEqual(['crm_task_digest']);
+  });
+
+  it('el aviso de reprogramación comparte el tipo de reasignación', () => {
+    expect(getNotificationCatalogEntry('crm_task_reassigned')?.label).toBe(
+      'Tarea reasignada o reprogramada',
+    );
+  });
+
   it('cada tipo pertenece a un grupo conocido y no se repite', () => {
     const groups = new Set(NOTIFICATION_GROUPS.map((g) => g.key));
     const seen = new Set<string>();
@@ -107,6 +123,12 @@ describe('resolveEffectiveChannels', () => {
     expect(
       resolveEffectiveChannels('new_order', { in_app: true, email: true }),
     ).toEqual({ push: true, email: false });
+  });
+
+  it('el dispositivo del resumen diario queda apagado aunque la fila lo encienda', () => {
+    expect(
+      resolveEffectiveChannels('crm_task_digest', { in_app: true, email: true }),
+    ).toEqual({ push: false, email: true });
   });
 
   it('un tipo fuera del catálogo: dispositivo según su fila o encendido, nunca correo', () => {

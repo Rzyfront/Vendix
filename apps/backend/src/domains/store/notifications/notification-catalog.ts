@@ -79,6 +79,8 @@ const PUSH_ONLY_DEFAULT: NotificationChannelFlags = { push: true, email: false }
 const BROADCAST_CHANNELS: NotificationChannelFlags = { push: true, email: false };
 /** Aviso personal: dispositivo y correo. */
 const PERSONAL_CHANNELS: NotificationChannelFlags = { push: true, email: true };
+/** Aviso personal que solo sale por correo (resumen diario). */
+const EMAIL_ONLY_CHANNELS: NotificationChannelFlags = { push: false, email: true };
 
 function broadcast(
   type: notification_type_enum,
@@ -103,6 +105,7 @@ function personal(
   label: string,
   description: string,
   defaults: NotificationChannelFlags = PUSH_ONLY_DEFAULT,
+  channels: NotificationChannelFlags = PERSONAL_CHANNELS,
 ): NotificationCatalogEntry {
   return {
     type,
@@ -110,7 +113,7 @@ function personal(
     label,
     description,
     defaults,
-    channels: PERSONAL_CHANNELS,
+    channels,
     user_configurable: true,
   };
 }
@@ -126,8 +129,8 @@ export const NOTIFICATION_CATALOG: readonly NotificationCatalogEntry[] = [
   personal(
     'crm_task_reassigned',
     'crm',
-    'Tarea reasignada',
-    'Cuando una tarea que era tuya pasa a otra persona.',
+    'Tarea reasignada o reprogramada',
+    'Cuando una tarea que era tuya pasa a otra persona, o cuando alguien más le cambia la fecha a una tarea tuya.',
   ),
   personal(
     'crm_task_due_soon',
@@ -139,7 +142,7 @@ export const NOTIFICATION_CATALOG: readonly NotificationCatalogEntry[] = [
     'crm_task_due',
     'crm',
     'Tarea vencida',
-    'Cuando una tarea tuya o en la que eres apoyo pasa su fecha sin completarse.',
+    'Cuando una tarea tuya o en la que eres apoyo pasa su fecha sin completarse, y cuando una tarea que creaste para otra persona sigue vencida 24 horas después.',
   ),
   personal(
     'crm_task_closed',
@@ -151,8 +154,9 @@ export const NOTIFICATION_CATALOG: readonly NotificationCatalogEntry[] = [
     'crm_task_digest',
     'crm',
     'Resumen diario de tareas',
-    'Cada mañana, las tareas que vencen hoy.',
+    'Cada mañana, a la hora que define la tienda, un correo con tus tareas que vencen ese día.',
     { push: false, email: false },
+    EMAIL_ONLY_CHANNELS,
   ),
 
   // ── Avisos a toda la tienda (createAndBroadcast) ──────────────────────────
@@ -289,7 +293,8 @@ export interface StoredSubscription {
 /**
  * Valor efectivo por canal: la fila de la persona si existe, si no el default
  * del tipo. Un canal que el tipo no ofrece queda siempre apagado aunque la
- * fila diga otra cosa (p. ej. correo en un aviso a toda la tienda).
+ * fila diga otra cosa (p. ej. correo en un aviso a toda la tienda, o
+ * dispositivo en el resumen diario, que es solo correo).
  */
 export function resolveEffectiveChannels(
   type: string,
@@ -297,9 +302,10 @@ export function resolveEffectiveChannels(
 ): NotificationChannelFlags {
   const entry = getNotificationCatalogEntry(type);
   const defaults = entry?.defaults ?? UNCATALOGUED_DEFAULTS;
+  const pushAllowed = entry?.channels.push ?? true;
   const emailAllowed = entry?.channels.email ?? false;
   return {
-    push: row ? row.in_app : defaults.push,
+    push: pushAllowed ? (row ? row.in_app : defaults.push) : false,
     email: emailAllowed ? (row ? row.email : defaults.email) : false,
   };
 }
