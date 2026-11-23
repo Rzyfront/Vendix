@@ -17,6 +17,17 @@ restarted inside the attacker's own invocation; inodes AND directory entries
 /tmp are capped while it runs, and the wipe unlinks in place, iteratively and
 deadline-bound, without growing any directory.
 
+The guest shares the handler's uid, so it can SIGSTOP or kill it; nothing in
+Lambda prevents that (no second uid, seccomp() and prctl() denied). The
+handler bounds what follows instead (independent audit, B1; T53 run 6):
+survivors die (kill(-1)) at INIT and before anything else in each
+invocation, the process state is compared with a fixed table of Lambda's
+values (never an import-time snapshot) at every watch and after every run,
+/tmp itself is checked before every guest, and leftovers of a run whose
+watcher was stopped are wiped at INIT and then in short, bounded slices that
+answer "sandbox busy" quickly. The residual availability cost is measured in
+CERTIFICACION-T53.md.
+
 Never log source, inputs or outputs.
 """
 import ctypes
@@ -81,6 +92,19 @@ TMP_DIR_BYTES_CAP = 256 * 1024
 # this many beyond the baseline, at every watch.
 TMP_ROOT_ENTRY_CAP = 64
 WATCH_INTERVAL_S = 0.05
+# A guest that SIGSTOPs the handler blinds every watch until Lambda's 30 s
+# timeout resets the environment; /tmp survives the reset (independent audit,
+# B1; T53 run 6). Leftovers are wiped at INIT, before the first invocation of
+# the new runtime, for up to INIT_WIPE_MS (Lambda allows 10 s of INIT), and
+# then for at most PRE_RUN_WIPE_MS per invocation: a tenant gets a quick
+# "sandbox busy" instead of waiting 7-9 s for an attacker's mess.
+INIT_WIPE_MS = 7_000
+PRE_RUN_WIPE_MS = 2_000
+# /tmp itself belongs to root in Lambda (T53 run 6: 041777, uid 0, gid 0, no
+# xattrs; chmod/chown/utime/setxattr from the guest -> EPERM). Checked before
+# every guest: anything else fails closed, the handler cannot restore it.
+TMP_ROOT_MODE = 0o1777
+TMP_ROOT_UID = 0
 # System V IPC objects are kernel objects identified by ids, not descriptors:
 # they survive the guest, kill(-1) and the /tmp wipe (T53 run 3: a tenant read
 # the previous tenant's marker through shm/msg in 99/100 runs).
@@ -179,7 +203,46 @@ def _process_state():
     return state
 
 
-_BASELINE_STATE = _process_state()  # import time: before any guest has run
+_INF = resource.RLIM_INFINITY
+# What Lambda gives the runtime process (T53 run 6: read with prlimit64,
+# getpriority and sched_get* from a guest on the certified image; arm64,
+# 1024 MB, 2 vCPU). The guard compares against these fixed values, never
+# against what this process saw at import: a survivor of an earlier runtime
+# could have lowered limits or raised nice before the first kill(-1), and an
+# import-time snapshot would then make the poisoned state the reference
+# (independent audit, B1). Some follow the function's configuration
+# (SIGPENDING scales with memory, the CPU count with it too): changing
+# template.json re-opens T53 anyway. If Lambda ever lowers one of them, every
+# invocation fails closed with Runtime.ExitError until this table is updated.
+EXPECTED_RLIMITS = {
+    "RLIMIT_AS": (_INF, _INF), "RLIMIT_CORE": (10737418240, 10737418240),
+    "RLIMIT_CPU": (_INF, _INF), "RLIMIT_DATA": (_INF, _INF), "RLIMIT_FSIZE": (_INF, _INF),
+    "RLIMIT_MEMLOCK": (65536, 65536), "RLIMIT_MSGQUEUE": (819200, 819200),
+    "RLIMIT_NICE": (0, 0), "RLIMIT_NOFILE": (1024, 1024), "RLIMIT_OFILE": (1024, 1024),
+    "RLIMIT_NPROC": (1024, 1024), "RLIMIT_RSS": (_INF, _INF), "RLIMIT_RTPRIO": (0, 0),
+    "RLIMIT_RTTIME": (_INF, _INF), "RLIMIT_SIGPENDING": (4609, 4609),
+    "RLIMIT_STACK": (8388608, _INF),
+}
+EXPECTED_NICE = 0
+EXPECTED_SCHEDULER = 0  # SCHED_OTHER
+
+
+def _expected_state():
+    """The fixed reference for _guard_process_state. Reads nothing the guest
+    can change: the online CPU count comes from sysconf, not the affinity."""
+    state = {name: value for name, value in EXPECTED_RLIMITS.items() if hasattr(resource, name)}
+    state["nice"] = EXPECTED_NICE
+    if hasattr(os, "sched_getaffinity"):
+        state["affinity"] = frozenset(range(os.cpu_count() or 1))
+    if hasattr(os, "sched_getscheduler"):
+        state["scheduler"] = EXPECTED_SCHEDULER
+    return state
+
+
+# Only inside Lambda: off it (developer machine, CI) the table above does not
+# describe the process and the offline tests install their own reference.
+_IN_LAMBDA = sys.platform.startswith("linux") and "AWS_LAMBDA_RUNTIME_API" in os.environ
+EXPECTED_STATE = _expected_state() if _IN_LAMBDA else None
 
 
 def _restore_attribute(name, value):
@@ -202,30 +265,39 @@ def _restart_runtime():
         os._exit(70)
 
 
+def _state_drift(expected):
+    current = _process_state()
+    return {name: value for name, value in expected.items() if current.get(name) != value}
+
+
 def _guard_process_state():
-    """Put back what a guest changed in this process, or restart the runtime.
+    """Put this process back to EXPECTED_STATE, or restart the runtime.
 
     A lowered soft limit, a raised nice or a narrowed affinity can be restored
-    without privileges; a lowered hard limit or a nice below the current one
-    cannot, and then the only safe outcome is a fresh runtime. Runs after every
-    guest was killed (so nothing can change it again) and before anything that
-    needs descriptors, memory or processes.
+    without privileges (and a value above the reference can always be
+    lowered); a lowered hard limit or a raised nice cannot, and then the only
+    safe outcome is a fresh runtime. Runs after kill(-1) at the start of every
+    invocation, at every watch while the guest runs and after it was killed.
     """
-    current = _process_state()
-    if current == _BASELINE_STATE:
+    expected = EXPECTED_STATE
+    if expected is None:
         return
-    for name, value in _BASELINE_STATE.items():
-        if current.get(name) != value:
-            try:
-                _restore_attribute(name, value)
-            except (OSError, ValueError, AttributeError):
-                pass
-    if _process_state() != _BASELINE_STATE:
+    drift = _state_drift(expected)
+    if not drift:
+        return
+    for name, value in drift.items():
+        try:
+            _restore_attribute(name, value)
+        except (OSError, ValueError, AttributeError):
+            pass
+    if _state_drift(expected):
         _restart_runtime()
 
 
 class SysvIpcError(Exception):
     """A System V IPC object of the guest uid could not be listed or removed."""
+
+
 
 
 def _sysvipc_objects():
@@ -605,6 +677,28 @@ class _TmpWatch:
         self.held = []
 
 
+def _tmp_root_ok():
+    """TMP_ROOT is the root-owned 1777 directory without xattrs Lambda gives.
+
+    The guest cannot change it there (EPERM, T53 run 6); a different owner,
+    mode or any extended attribute would be a channel between tenants, so the
+    run is refused. Only meaningful inside Lambda.
+    """
+    try:
+        st = os.lstat(TMP_ROOT)
+        if not stat.S_ISDIR(st.st_mode) or stat.S_IMODE(st.st_mode) != TMP_ROOT_MODE or st.st_uid != TMP_ROOT_UID:
+            return False
+        listxattr = getattr(os, "listxattr", None)  # Linux only
+        if listxattr is None:
+            return True
+        try:
+            return not listxattr(TMP_ROOT, follow_symlinks=False)
+        except OSError as exc:
+            return exc.errno in (errno.ENOTSUP, errno.EOPNOTSUPP)
+    except OSError:
+        return False
+
+
 def _write_private(path, data):
     fd = os.open(path, os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o600)
     with os.fdopen(fd, "w", encoding="utf-8") as fh:
@@ -722,6 +816,9 @@ def _wait_child(proc, deadline, watch):
             return None
         except subprocess.TimeoutExpired:
             pass
+        # Undo prlimit/setpriority/sched_* the guest applied to this process
+        # while it runs, so the watch below keeps its descriptors and CPU.
+        _guard_process_state()
         reason = watch.exceeded()
         if reason:
             return reason
@@ -817,14 +914,19 @@ def _response(execution_id, nonce, status, started, code=None, message=None, out
 
 def handler(event, context=None):
     started = time.monotonic()
-    # A guest of the previous invocation may have changed this process; restore
-    # it or restart the runtime before touching anything (normally a no-op: the
-    # previous invocation already did it after killing its guest).
-    _guard_process_state()
     echo_id = event.get("execution_id") if isinstance(event, dict) else None
     echo_nonce = event.get("nonce") if isinstance(event, dict) else None
     echo_id = echo_id if isinstance(echo_id, str) and _EXEC_ID_RE.match(echo_id) else ""
     echo_nonce = echo_nonce if isinstance(echo_nonce, str) and _NONCE_RE.match(echo_nonce) else ""
+    # Before touching anything: no survivor may still be changing this
+    # process, then put it back to the fixed reference or restart the runtime
+    # (normally a no-op: the previous invocation already did both).
+    try:
+        _reap_strays()
+    except Exception as exc:
+        return _response(echo_id, echo_nonce, "error", started, "ANALYSIS_RUNTIME",
+                         "sandbox error: %s" % type(exc).__name__)
+    _guard_process_state()
     if _valid_runtime_digest() is None:
         return _response(echo_id, echo_nonce, "error", started, "ANALYSIS_RUNTIME", "runtime digest missing")
     try:
@@ -840,14 +942,18 @@ def handler(event, context=None):
     # parent. Any failure stops the run without spawning.
     try:
         _harden_parent_dumpable()
-        _reap_strays()
-        _purge_sysv_ipc()
+        _purge_sysv_ipc()  # after the kill(-1) at the top: nothing is attached
     except Exception as exc:
         return _response(execution_id, nonce, "error", started, "ANALYSIS_RUNTIME",
                          "sandbox error: %s" % type(exc).__name__)
-    if not wipe_tmp(child_deadline - MIN_CHILD_MS / 1000.0):
+    wipe_deadline = min(child_deadline - MIN_CHILD_MS / 1000.0, started + PRE_RUN_WIPE_MS / 1000.0)
+    if not wipe_tmp(wipe_deadline):
         return _response(execution_id, nonce, "error", started, "ANALYSIS_RUNTIME",
                          "sandbox busy: cleanup of a previous run did not finish, retry")
+    _guard_process_state()  # the wipe ran with this process's limits; recheck
+    if _IN_LAMBDA and not _tmp_root_ok():
+        return _response(execution_id, nonce, "error", started, "ANALYSIS_RUNTIME",
+                         "sandbox error: /tmp was altered")
     tmpdir = None
     try:
         tmpdir = tempfile.mkdtemp(prefix=TMP_PREFIX, dir=TMP_ROOT)
@@ -866,6 +972,29 @@ def handler(event, context=None):
         if tmpdir is not None:
             _remove_tenant_files(tmpdir)
         wipe_tmp(reply_deadline)  # unfinished: the next run finishes it before spawning
+        _guard_process_state()
     if code is None:
         return _response(execution_id, nonce, "ok", started, output=output)
     return _response(execution_id, nonce, "error", started, code, message)
+
+
+def _init_environment():
+    """Once per runtime, at import (Lambda INIT, before the first invocation).
+
+    After Lambda resets an environment (timeout, runtime exit) the new runtime
+    starts with whatever the previous guest left in /tmp. Kill any survivor,
+    put this process to the fixed reference and wipe /tmp for up to
+    INIT_WIPE_MS, so the first tenant does not pay for it. Errors are left to
+    the per-invocation checks, which fail closed.
+    """
+    if not _IN_LAMBDA or os.getppid() != 0:
+        return
+    try:
+        _reap_strays()
+    except OSError:
+        return
+    _guard_process_state()
+    wipe_tmp(time.monotonic() + INIT_WIPE_MS / 1000.0)
+
+
+_init_environment()

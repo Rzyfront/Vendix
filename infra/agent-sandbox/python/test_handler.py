@@ -120,8 +120,11 @@ class ValidationTests(unittest.TestCase):
 
     def test_invalid_request_echoes_ids_with_input_error_and_no_popen(self):
         with patch.dict(os.environ, {"ANALYSIS_RUNTIME_DIGEST": DIGEST}), \
+                patch.object(handler.os, "getppid", return_value=0), \
+                patch.object(handler.os, "kill") as kill, \
                 patch.object(handler.subprocess, "Popen") as popen:
             res = handler.handler(request(protocol="nope"))
+        kill.assert_called_once_with(-1, signal.SIGKILL)  # survivors die even for a rejected request
         popen.assert_not_called()
         self.assertEqual((res["status"], res["error_code"]), ("error", "ANALYSIS_INPUT"))
         self.assertEqual((res["execution_id"], res["nonce"]), ("exec-1", "a" * 64))
@@ -156,7 +159,6 @@ class HandlerFixture(unittest.TestCase):
             hook = patch.object(handler, name)
             hook.start()
             self.addCleanup(hook.stop)
-
 
     def popen_writing(self, payload, returncode=0):
         captured = {}
@@ -716,12 +718,8 @@ class RuntimeRestart(BaseException):
     pass
 
 
-class ProcessStateTests(HandlerFixture):
-    """T53 run 3, finding 5: the guest lowered the handler's soft RLIMIT_NOFILE
-    with prlimit and every later invocation of the environment failed with
-    "sandbox error: OSError" for 15-19 min. Now the handler restores what it
-    can after killing the guest, or restarts the runtime inside the attacker's
-    own invocation; the next tenant always runs."""
+class ProcessStateFixture(HandlerFixture):
+    """Fake limits with kernel rules and a fixed reference for the guard."""
 
     def setUp(self):
         super().setUp()
@@ -729,13 +727,13 @@ class ProcessStateTests(HandlerFixture):
         patches = [
             patch.object(handler.resource, "getrlimit", side_effect=self.limits.getrlimit),
             patch.object(handler.resource, "setrlimit", side_effect=self.limits.setrlimit),
-            patch.object(handler, "_BASELINE_STATE", handler._process_state()),
+            patch.object(handler, "EXPECTED_STATE", handler._process_state()),
         ]
         for p in patches:
             p.start()
             self.addCleanup(p.stop)
         # Baseline from the fake table (identical to the real one at this point).
-        handler._BASELINE_STATE = handler._process_state()
+        handler.EXPECTED_STATE = handler._process_state()
         self.exit = patch.object(handler.os, "_exit", side_effect=RuntimeRestart).start()
         self.addCleanup(patch.stopall)
 
@@ -752,6 +750,14 @@ class ProcessStateTests(HandlerFixture):
         with patch.object(handler.subprocess, "Popen", side_effect=spawn):
             return handler.handler(request())
 
+
+class ProcessStateTests(ProcessStateFixture):
+    """T53 run 3, finding 5: the guest lowered the handler's soft RLIMIT_NOFILE
+    with prlimit and every later invocation of the environment failed with
+    "sandbox error: OSError" for 15-19 min. Now the handler restores what it
+    can after killing the guest, or restarts the runtime inside the attacker's
+    own invocation; the next tenant always runs."""
+
     def test_lowered_soft_limits_are_restored_and_the_next_tenant_runs(self):
         lowered = ("RLIMIT_NOFILE", "RLIMIT_AS", "RLIMIT_NPROC", "RLIMIT_FSIZE", "RLIMIT_CPU")
 
@@ -761,7 +767,7 @@ class ProcessStateTests(HandlerFixture):
                     self.limits.prlimit_from_guest(getattr(resource, name), soft=4)
         self.run_tenant(attacker)
         self.exit.assert_not_called()
-        self.assertEqual(handler._process_state(), handler._BASELINE_STATE)
+        self.assertEqual(handler._process_state(), handler.EXPECTED_STATE)
         victim = self.run_tenant()
         self.assertEqual(victim["status"], "ok")
         self.exit.assert_not_called()
@@ -777,7 +783,7 @@ class ProcessStateTests(HandlerFixture):
         with patch.object(handler.subprocess, "Popen") as popen:
             popen.side_effect = AssertionError("must not get here unrestored")
             handler._guard_process_state()
-        self.assertEqual(handler._process_state(), handler._BASELINE_STATE)
+        self.assertEqual(handler._process_state(), handler.EXPECTED_STATE)
         with patch.object(handler, "validate_request", side_effect=AssertionError("too late")):
             self.limits.prlimit_from_guest(resource.RLIMIT_NOFILE, soft=4, hard=4)
             with self.assertRaises(RuntimeRestart):
@@ -788,6 +794,107 @@ class ProcessStateTests(HandlerFixture):
             self.assertEqual(self.run_tenant()["status"], "ok")
         setr.assert_not_called()
         self.exit.assert_not_called()
+
+
+class WatcherTests(ProcessStateFixture):
+    """Independent audit, B1: the guest shares the handler's uid and can signal
+    or reconfigure it. The reference for the guard is a fixed table (never a
+    snapshot a survivor could have poisoned), survivors die before anything
+    else, the guard also runs at every watch, and /tmp itself is checked
+    before every guest. SIGSTOP of the handler cannot be prevented from here:
+    T53 run 6 measures its cost against the real Lambda."""
+
+    def test_expected_state_is_a_fixed_table_not_read_from_the_process(self):
+        with patch.object(handler.resource, "getrlimit", side_effect=AssertionError("observed")), \
+                patch.object(handler.os, "getpriority", side_effect=AssertionError("observed")):
+            expected = handler._expected_state()
+        self.assertEqual(expected["RLIMIT_NOFILE"], (1024, 1024))
+        self.assertEqual(expected["RLIMIT_NPROC"], (1024, 1024))
+        self.assertEqual(expected["nice"], 0)
+        self.assertEqual(expected["RLIMIT_STACK"], (8388608, resource.RLIM_INFINITY))
+
+    def test_survivors_die_before_the_state_is_checked_and_poison_is_undone(self):
+        # A survivor lowered the soft NOFILE before this runtime's first invocation.
+        self.limits.prlimit_from_guest(resource.RLIMIT_NOFILE, soft=64)
+        order = []
+        self.kill.side_effect = lambda pid, sig: order.append(("kill", pid, self.limits.getrlimit(resource.RLIMIT_NOFILE)))
+        victim = self.run_tenant()
+        self.assertEqual(victim["status"], "ok")
+        self.assertEqual(order[0][:2], ("kill", -1))
+        self.assertEqual(order[0][2][0], 64, "kill(-1) runs before the guard restores")
+        self.assertEqual(handler._process_state(), handler.EXPECTED_STATE)
+        self.exit.assert_not_called()
+
+    def test_guest_changes_during_the_run_are_undone_at_every_watch(self):
+        clock = FakeClock()
+        nofile = resource.RLIMIT_NOFILE
+        seen = []
+        proc = MagicMock(pid=4242, returncode=0)
+        waits = []
+
+        def wait(timeout=None):
+            waits.append(timeout)
+            if len(waits) <= 2:  # two watches while the guest keeps lowering the limit
+                self.limits.prlimit_from_guest(nofile, soft=4)
+                clock.advance(timeout or 0)
+                raise subprocess.TimeoutExpired("x", timeout)
+            return 0
+        proc.wait.side_effect = wait
+
+        def spawn(args, **kwargs):
+            with open(os.path.join(kwargs["cwd"], "result.json"), "w") as fh:
+                json.dump(OK_PAYLOAD, fh)
+            return proc
+
+        real_exceeded = handler._TmpWatch.exceeded
+
+        def exceeded(watch):
+            seen.append(self.limits.getrlimit(nofile)[0])
+            return real_exceeded(watch)
+
+        with patch.object(handler.subprocess, "Popen", side_effect=spawn), \
+                patch.object(handler.time, "monotonic", clock), \
+                patch.object(handler._TmpWatch, "exceeded", exceeded):
+            res = handler.handler(request())
+        self.assertEqual(res["status"], "ok", res.get("error_message"))
+        self.assertEqual(len(seen), 2)
+        self.assertTrue(all(soft == handler.EXPECTED_STATE["RLIMIT_NOFILE"][0] for soft in seen),
+                        "restored before every watch: %r" % seen)
+
+    def test_a_hard_limit_lowered_during_the_run_restarts_inside_the_attackers_invocation(self):
+        clock = FakeClock()
+        proc = hanging_proc(clock)
+
+        def spawn(args, **kwargs):
+            self.limits.prlimit_from_guest(resource.RLIMIT_NOFILE, soft=4, hard=4)
+            return proc
+
+        with patch.object(handler.subprocess, "Popen", side_effect=spawn), \
+                patch.object(handler.time, "monotonic", clock):
+            with self.assertRaises(RuntimeRestart):
+                handler.handler(request())
+        # Raised from the first watch, not after the run (the mock returns, os._exit does not).
+        self.assertEqual(self.exit.call_args_list[0].args, (70,))
+        self.assertLess(clock.now - 1000.0, 1.0)
+
+    def test_an_altered_tmp_root_fails_closed_without_spawning(self):
+        with patch.object(handler, "_IN_LAMBDA", True), \
+                patch.object(handler, "_tmp_root_ok", return_value=False), \
+                patch.object(handler.subprocess, "Popen") as popen:
+            res = handler.handler(request())
+        popen.assert_not_called()
+        self.assertEqual((res["error_code"], res["error_message"]), ("ANALYSIS_RUNTIME", "sandbox error: /tmp was altered"))
+
+    def test_tmp_root_check_reads_mode_and_owner(self):
+        os.chmod(self.root, 0o1777)
+        with patch.object(handler, "TMP_ROOT_UID", os.geteuid()):
+            self.assertTrue(handler._tmp_root_ok())
+            os.chmod(self.root, 0o0777)
+            self.assertFalse(handler._tmp_root_ok())
+            os.chmod(self.root, 0o1777)
+        with patch.object(handler, "TMP_ROOT_UID", os.geteuid() + 1):
+            self.assertFalse(handler._tmp_root_ok())
+        os.chmod(self.root, 0o700)
 
 
 def make_chain(root, depth, name="d"):
@@ -882,7 +989,9 @@ class TmpInodeTests(HandlerFixture):
         popen.assert_not_called()
         self.assertEqual((busy["status"], busy["error_code"]), ("error", "ANALYSIS_RUNTIME"))
         self.assertTrue(busy["error_message"].startswith("sandbox busy"))
-        self.assertLessEqual(busy["usage"]["duration_ms"], 25_000)
+        # Independent audit, B1: the refusal is quick (PRE_RUN_WIPE_MS), not a
+        # tenant waiting 7-9 s for an attacker's leftovers.
+        self.assertLessEqual(busy["usage"]["duration_ms"], 2_500)
 
         # With normal time the wipe finishes first and the guest sees an empty /tmp.
         factory, _ = self.popen_writing(OK_PAYLOAD)
