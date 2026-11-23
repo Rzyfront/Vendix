@@ -39,6 +39,40 @@ describe('audit-redaction.util', () => {
     expect(redactAuditSecrets('password')).toBe('password');
   });
 
+  it('covers invoicing, provider and camelCase credentials', () => {
+    const out = redactAuditSecrets({
+      software_pin: '12345',
+      certificate_password: 'p',
+      integrity_secret: 's',
+      personal_auth_token: 't',
+      newPassword: 'x',
+      apiKey: 'k',
+      max_tokens: 4000,
+      total_tokens: 12,
+      pin_code_length: 4,
+      shipping: 'standard',
+    });
+    expect(out).toEqual({
+      software_pin: AUDIT_REDACTED,
+      certificate_password: AUDIT_REDACTED,
+      integrity_secret: AUDIT_REDACTED,
+      personal_auth_token: AUDIT_REDACTED,
+      newPassword: AUDIT_REDACTED,
+      apiKey: AUDIT_REDACTED,
+      max_tokens: 4000,
+      total_tokens: 12,
+      pin_code_length: 4,
+      shipping: 'standard',
+    });
+  });
+
+  it('redacts an object that appears twice without a cycle', () => {
+    const shared = { password: 'p' };
+    const out = redactAuditSecrets({ a: shared, b: shared });
+    expect(out.a).toEqual({ password: AUDIT_REDACTED });
+    expect(out.b).toEqual({ password: AUDIT_REDACTED });
+  });
+
   it('tolerates cycles', () => {
     const input: Record<string, unknown> = { password: 'p' };
     input.self = input;

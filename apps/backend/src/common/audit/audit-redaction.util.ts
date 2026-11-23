@@ -7,13 +7,41 @@ export const AUDIT_REDACTED = '[REDACTED]';
 /**
  * Keys whose value is a credential. The audit interceptor stores request
  * bodies as-is, so any of these keys can arrive with a plaintext value
- * (password changes, token or secret settings).
+ * (password changes, invoicing PINs and certificates, provider tokens and
+ * secrets). Keys are compared in snake_case, so `newPassword` and `apiKey`
+ * match too.
  */
-const SECRET_KEY =
-  /^(password|passwd|current_password|old_password|new_password|confirm_password|password_confirmation|two_factor_secret|secret|client_secret|api_key|access_token|refresh_token|token)$/i;
+const SECRET_KEYS: ReadonlySet<string> = new Set([
+  'password',
+  'passwd',
+  'pin',
+  'secret',
+  'token',
+  'api_key',
+  'apikey',
+  'private_key',
+  'technical_key',
+  'p12',
+  'certificate_base64',
+  'certificate_file',
+]);
+
+/**
+ * Suffixes (and the `password_` prefix) that mark a credential:
+ * `certificate_password`, `software_pin_encrypted`, `integrity_secret`,
+ * `personal_auth_token`, `password_confirmation`... Counters such as
+ * `max_tokens` or `total_tokens` do not match.
+ */
+const SECRET_PATTERN =
+  /(^password_|_password(_encrypted)?$|_pin(_encrypted)?$|_secret$|_token$|_api_key$|_private_key$)/;
+
+function toSnakeCase(key: string): string {
+  return key.replace(/([a-z0-9])([A-Z])/g, '$1_$2').toLowerCase();
+}
 
 export function isAuditSecretKey(key: string): boolean {
-  return SECRET_KEY.test(key);
+  const normalized = toSnakeCase(key);
+  return SECRET_KEYS.has(normalized) || SECRET_PATTERN.test(normalized);
 }
 
 function isPlainObject(value: unknown): value is Record<string, unknown> {
@@ -22,10 +50,10 @@ function isPlainObject(value: unknown): value is Record<string, unknown> {
   return proto === Object.prototype || proto === null;
 }
 
-function redact(value: unknown, seen: WeakSet<object>): unknown {
+function redact(value: unknown, seen: WeakMap<object, unknown>): unknown {
   if (Array.isArray(value)) {
-    if (seen.has(value)) return value;
-    seen.add(value);
+    if (seen.has(value)) return seen.get(value);
+    seen.set(value, value);
     let copy: unknown[] | null = null;
     for (let i = 0; i < value.length; i++) {
       const next = redact(value[i], seen);
@@ -34,11 +62,12 @@ function redact(value: unknown, seen: WeakSet<object>): unknown {
         copy[i] = next;
       }
     }
+    if (copy) seen.set(value, copy);
     return copy ?? value;
   }
   if (!isPlainObject(value)) return value;
-  if (seen.has(value)) return value;
-  seen.add(value);
+  if (seen.has(value)) return seen.get(value);
+  seen.set(value, value);
   let copy: Record<string, unknown> | null = null;
   for (const key of Object.keys(value)) {
     const current = value[key];
@@ -51,6 +80,7 @@ function redact(value: unknown, seen: WeakSet<object>): unknown {
       copy[key] = next;
     }
   }
+  if (copy) seen.set(value, copy);
   return copy ?? value;
 }
 
@@ -61,7 +91,7 @@ function redact(value: unknown, seen: WeakSet<object>): unknown {
  * written before this existed are not exposed either.
  */
 export function redactAuditSecrets<T>(value: T): T {
-  return redact(value, new WeakSet()) as T;
+  return redact(value, new WeakMap()) as T;
 }
 
 /** Redacts the JSON columns of `audit_logs` rows that are about to be returned. */
