@@ -25,7 +25,10 @@ describe('DispatchRoutesService — remisión con nombre de referencia', () => {
     };
     const prisma = {
       dispatch_route_stops: { findMany: jest.fn().mockResolvedValue([]) },
-      dispatch_notes: { findMany: jest.fn().mockResolvedValue([note]) },
+      dispatch_notes: {
+        findMany: jest.fn().mockResolvedValue([note]),
+        count: jest.fn().mockResolvedValue(1),
+      },
       dispatch_routes: {
         findFirst: jest.fn().mockResolvedValue({
           id: 7,
@@ -36,12 +39,17 @@ describe('DispatchRoutesService — remisión con nombre de referencia', () => {
     };
     const service = new DispatchRoutesService(prisma as any, {} as any, {} as any, {} as any);
 
-    await expect(service.listAvailableNotes()).resolves.toEqual([
+    await expect(service.listAvailableNotes()).resolves.toEqual(
       expect.objectContaining({
-        customer_name: 'Portería Torre Norte',
-        customer_address: address,
+        data: [
+          expect.objectContaining({
+            customer_name: 'Portería Torre Norte',
+            customer_address: address,
+          }),
+        ],
+        total: 1,
       }),
-    ]);
+    );
     await expect(service.getMapStops(7)).resolves.toEqual(
       expect.objectContaining({
         stops: [expect.objectContaining({

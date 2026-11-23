@@ -54,10 +54,11 @@ describe('PublicSeoService (VENDIX_LANDING)', () => {
       'https://vendix.online/guias/comandas-restaurantes',
       'https://vendix.online/guias/ventas-mayoristas-al-detal',
       'https://vendix.online/guias/pasar-productos-excel-a-pos',
+      'https://vendix.online/guias/preparar-demostracion',
     ]);
     const document = new DOMParser().parseFromString(xml, 'application/xml');
     expect(document.documentElement.namespaceURI).toBe('http://www.sitemaps.org/schemas/sitemap/0.9');
-    expect(document.getElementsByTagName('loc').length).toBe(11);
+    expect(document.getElementsByTagName('loc').length).toBe(12);
     expect(document.getElementsByTagName('parsererror').length).toBe(0);
     expect(findMany).not.toHaveBeenCalled();
   });

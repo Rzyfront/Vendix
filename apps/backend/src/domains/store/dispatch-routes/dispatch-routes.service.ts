@@ -20,6 +20,7 @@ import {
   UpdateDispatchRouteDto,
   DispatchRouteQueryDto,
   AddStopsDto,
+  AvailableNotesQueryDto,
 } from './dto';
 import { RouteNumberGenerator } from './utils/route-number-generator';
 import { RequestContextService } from '@common/context/request-context.service';
@@ -38,6 +39,14 @@ import {
   RouteStopNoteInput,
   RouteStopSequenceInput,
 } from './utils/route-stop-calc';
+
+/**
+ * Página por defecto y tope del selector de remisiones disponibles. El wizard
+ * de planilla y el modal "Agregar remisiones" paginan de a 15 con el paginador
+ * estándar; el tope protege de clientes que pidan de más.
+ */
+const AVAILABLE_NOTES_DEFAULT_LIMIT = 15;
+const AVAILABLE_NOTES_MAX_LIMIT = 100;
 
 const DISPATCH_ROUTE_INCLUDE = {
   vehicle: true,
@@ -1115,9 +1124,9 @@ export class DispatchRoutesService {
    * editing a planilla. A note is "available" iff:
    * - it belongs to the current store
    * - it is not voided
-   * - it is NOT attached to a non-released stop of a non-draft route
-   *   (draft routes "hold" their stops in a soft reservation; any other
-   *   active/closed route locks the note).
+   * - it is NOT attached to a non-released stop of ANY route (draft routes
+   *   also reserve their stops; only a `released` stop frees the note, same
+   *   as the partial unique index on `dispatch_route_stops.dispatch_note_id`).
    *
    * Used by the wizard's stop picker — see
    * `DispatchRoutesController.listAvailableNotes`. Without this filter the
@@ -1287,76 +1296,102 @@ export class DispatchRoutesService {
     };
   }
 
-  async listAvailableNotes(search?: string) {
+  async listAvailableNotes(query: AvailableNotesQueryDto = {}) {
     const store_id = this.getStoreId();
+    const page = Math.max(1, Math.floor(Number(query.page) || 1));
+    const limit = Math.min(
+      AVAILABLE_NOTES_MAX_LIMIT,
+      Math.max(
+        1,
+        Math.floor(Number(query.limit) || AVAILABLE_NOTES_DEFAULT_LIMIT),
+      ),
+    );
+    const search = query.search?.trim();
 
     // Plan Despacho Economía — FASE 6 paso 18. Sólo remisiones planillables:
     // `outbound`/`customer_delivery` en `draft|confirmed`. Las `delivered`,
     // `invoiced` y `voided` NO aparecen. El filtro de status es el source of
     // truth del endpoint; antes dependía de la limpieza del cliente.
     //
-    // Find notes that are locked by an active (non-released) stop on ANY
-    // route. Matches the partial unique index
-    // `dispatch_route_stops_dispatch_note_id_active_idx` and the create()
-    // /addStops() blockers. We don't carve out parent=draft here because a
-    // draft route still holds its stops locked at the DB layer.
-    // QUI-484 — scope the lock lookup by store. `dispatch_route_stops` is NOT
-    // auto-scoped by the Prisma extension (this domain scopes manually), so a
-    // bare `status != released` filter would over-read active stops from EVERY
-    // tenant and could hide another store's notes from this store's picker.
-    // Constrain via the parent remisión's `store_id` (relation `dispatch_note`,
-    // schema.prisma dispatch_route_stops → dispatch_notes).
-    const lockedNoteIds = await this.prisma.dispatch_route_stops.findMany({
-      where: { status: { not: 'released' }, dispatch_note: { store_id } },
-      select: { dispatch_note_id: true },
-    });
-    const lockedSet = new Set(lockedNoteIds.map((s) => s.dispatch_note_id));
-
-    const where: any = {
+    // La exclusión de remisiones bloqueadas va EN LA CONSULTA (antes se hacía
+    // en memoria después de un `take: 100`, y si las 100 más recientes estaban
+    // en otras planillas el selector salía vacío). Bloquea cualquier parada no
+    // `released` de CUALQUIER ruta (también `draft`), igual que el índice único
+    // parcial `dispatch_route_stops_dispatch_note_id_active_idx`
+    // (`WHERE status != 'released'`) y los bloqueos de create()/addStops().
+    // Una parada `rejected` sigue ocupando ese índice, así que tratarla como
+    // libre aquí mostraría remisiones que luego fallan al crear la parada.
+    // QUI-484 — el filtro relacional cuelga de la propia remisión (ya acotada
+    // por `store_id`), así que no lee paradas de otras tiendas.
+    const where: Prisma.dispatch_notesWhereInput = {
       store_id,
       direction: 'outbound',
       subtype: 'customer_delivery',
       status: { in: ['draft', 'confirmed'] },
+      dispatch_route_stops: { none: { status: { not: 'released' } } },
     };
+    if (query.ids?.length) {
+      where.id = { in: query.ids };
+    }
     if (search) {
+      const contains = { contains: search, mode: 'insensitive' as const };
       where.OR = [
-        { dispatch_number: { contains: search, mode: 'insensitive' } },
-        { customer_name: { contains: search, mode: 'insensitive' } },
+        { dispatch_number: contains },
+        { customer_name: contains },
+        { customer_tax_id: contains },
+        {
+          customer: {
+            is: {
+              OR: [
+                { legal_name: contains },
+                { first_name: contains },
+                { last_name: contains },
+                { document_number: contains },
+              ],
+            },
+          },
+        },
       ];
     }
-    const notes = await this.prisma.dispatch_notes.findMany({
-      where,
-      orderBy: { created_at: 'desc' },
-      take: 100,
-      select: {
-        id: true,
-        dispatch_number: true,
-        customer_name: true,
-        customer: {
-          select: { legal_name: true, first_name: true, last_name: true },
+    const [notes, total] = await Promise.all([
+      this.prisma.dispatch_notes.findMany({
+        where,
+        orderBy: [{ created_at: 'desc' }, { id: 'desc' }],
+        skip: (page - 1) * limit,
+        take: limit,
+        select: {
+          id: true,
+          dispatch_number: true,
+          customer_name: true,
+          customer: {
+            select: { legal_name: true, first_name: true, last_name: true },
+          },
+          grand_total: true,
+          status: true,
+          needs_collection: true,
+          customer_address: true,
+          order: {
+            select: {
+              shipping_address_snapshot: true,
+              shipping_method_id: true,
+            },
+          },
         },
-        grand_total: true,
-        status: true,
-        needs_collection: true,
-        customer_address: true,
-        order: {
-          select: { shipping_address_snapshot: true, shipping_method_id: true },
-        },
-      },
-    });
-    return notes
-      .filter((n) => !lockedSet.has(n.id))
-      .map((n) => ({
-        id: n.id,
-        dispatch_number: n.dispatch_number,
-        customer_name: resolveCustomerSnapshotName(n.customer_name, n.customer),
-        grand_total: n.grand_total,
-        status: n.status,
-        needs_collection: n.needs_collection,
-        customer_address: n.customer_address,
-        shipping_address_snapshot: n.order?.shipping_address_snapshot ?? null,
-        shipping_method_id: n.order?.shipping_method_id ?? null,
-      }));
+      }),
+      this.prisma.dispatch_notes.count({ where }),
+    ]);
+    const data = notes.map((n) => ({
+      id: n.id,
+      dispatch_number: n.dispatch_number,
+      customer_name: resolveCustomerSnapshotName(n.customer_name, n.customer),
+      grand_total: n.grand_total,
+      status: n.status,
+      needs_collection: n.needs_collection,
+      customer_address: n.customer_address,
+      shipping_address_snapshot: n.order?.shipping_address_snapshot ?? null,
+      shipping_method_id: n.order?.shipping_method_id ?? null,
+    }));
+    return { data, total, page, limit };
   }
 
   // ==========================================================================

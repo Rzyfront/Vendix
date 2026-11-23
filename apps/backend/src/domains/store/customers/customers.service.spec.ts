@@ -1074,6 +1074,26 @@ describe('CustomersService — QUI-728 customer fiscal data', () => {
       expect(none[0].where.addresses).toBeUndefined();
     });
 
+    it('findAll: la búsqueda también encuentra por nombre de sede, sin soltar el scope de tienda', async () => {
+      mockPrismaService.users.findMany.mockResolvedValue([]);
+      mockPrismaService.users.count.mockResolvedValue(0);
+
+      await service.findAll(7, { search: 'Sede Norte' });
+
+      const where = mockPrismaService.users.findMany.mock.calls[0][0].where;
+      expect(where.store_users).toEqual({ some: { store_id: 7 } });
+      expect(where.OR).toContainEqual({
+        addresses: {
+          some: {
+            type: 'shipping',
+            label: { contains: 'Sede Norte', mode: 'insensitive' },
+          },
+        },
+      });
+      // count usa el mismo where: la paginación sigue cuadrando.
+      expect(mockPrismaService.users.count.mock.calls[0][0].where).toBe(where);
+    });
+
     it('sin billing primaria toma la más reciente', async () => {
       mockPrismaService.users.findFirst.mockResolvedValue({
         id: 5,
