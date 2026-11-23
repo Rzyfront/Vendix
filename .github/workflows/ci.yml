@@ -877,6 +877,9 @@ jobs:
           --include='**/data-collection/utils/document-responses.util.spec.ts'
           --include='**/data-collection/utils/submission-attachments.util.spec.ts'
           --include='**/shared/components/attachment-list/attachment-list.util.spec.ts'
+          --include='**/shared/utils/customer-establishment-rows.util.spec.ts'
+          --include='**/pos/components/pos-customer-selector/pos-customer-selector.component.spec.ts'
+          --include='**/pos/components/pos-customer-modal.component.spec.ts'
 
   mobile:
     name: Mobile
