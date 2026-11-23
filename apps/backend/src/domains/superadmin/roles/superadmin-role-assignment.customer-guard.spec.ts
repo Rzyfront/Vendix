@@ -79,6 +79,16 @@ describe('SuperadminRoleAssignmentService — customer role is not assignable', 
     expect(assignments.assign).toHaveBeenCalledTimes(1);
   });
 
+  it('leaves an unknown role to the assignment service, which rejects it as before', async () => {
+    prisma.roles.findUnique.mockResolvedValue(null);
+
+    await service.assign({ user_id: 5, role_id: 999, store_id: 4 });
+
+    expect(assignments.assign).toHaveBeenCalledWith(
+      expect.objectContaining({ user_id: 5, role_id: 999 }),
+    );
+  });
+
   it('still lets the Super Admin remove an existing customer role', async () => {
     prisma.roles.findUnique.mockResolvedValue({ id: 8, name: 'customer' });
 

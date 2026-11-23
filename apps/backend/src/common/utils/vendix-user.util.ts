@@ -112,10 +112,19 @@ export function withVendixActor(
   return { ...where, AND: [...existing, vendixActorAuditWhere()] };
 }
 
-/** Equivalente SQL de {@link vendixActorAuditWhere} para consultas crudas. */
+/**
+ * Equivalente SQL de {@link vendixActorAuditWhere} para consultas crudas.
+ *
+ * Usa `IN (subconsulta sin correlación)` y no el `EXISTS` de
+ * {@link vendixUserSql}: dentro de un `OR`, Postgres no convierte un `EXISTS`
+ * correlacionado en semi-join y lo evaluaría fila por fila sobre
+ * `audit_logs`; la subconsulta sin correlación se resuelve una sola vez
+ * (hashed SubPlan), igual que el `IN (SELECT …)` que genera Prisma para
+ * {@link vendixActorAuditWhere}.
+ */
 export function vendixActorAuditSql(userIdColumn: string): Prisma.Sql {
   const column = qualifiedColumn(userIdColumn);
-  return Prisma.sql`(${column} IS NULL OR ${vendixUserSql(userIdColumn)})`;
+  return Prisma.sql`(${column} IS NULL OR ${column} IN (SELECT vu_ur.user_id FROM user_roles vu_ur JOIN roles vu_r ON vu_r.id = vu_ur.role_id WHERE vu_r.name <> ${CUSTOMER_ROLE_NAME}))`;
 }
 
 /**

@@ -95,7 +95,7 @@ describe('vendix-user.util', () => {
       const fragment = vendixActorAuditSql('al.user_id');
 
       expect(fragment.text).toBe(
-        `(al.user_id IS NULL OR ${vendixUserSql('al.user_id').text})`,
+        '(al.user_id IS NULL OR al.user_id IN (SELECT vu_ur.user_id FROM user_roles vu_ur JOIN roles vu_r ON vu_r.id = vu_ur.role_id WHERE vu_r.name <> $1))',
       );
       expect(fragment.values).toEqual(['customer']);
       expect(() => vendixActorAuditSql('user_id')).toThrow();
