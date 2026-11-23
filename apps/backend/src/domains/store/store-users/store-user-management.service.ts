@@ -30,6 +30,7 @@ import {
 import * as bcrypt from 'bcryptjs';
 import { toTitleCase } from '@common/utils/format.util';
 import { emailEquals, normalizeEmail } from '@common/utils/email.util';
+import { SAFE_USER_SELECT } from '@common/utils/safe-user-select.util';
 
 @Injectable()
 export class StoreUserManagementService {
@@ -402,6 +403,7 @@ export class StoreUserManagementService {
         state: 'inactive',
         updated_at: new Date(),
       },
+      select: SAFE_USER_SELECT,
     });
   }
 
@@ -414,6 +416,7 @@ export class StoreUserManagementService {
         state: 'active',
         updated_at: new Date(),
       },
+      select: SAFE_USER_SELECT,
     });
   }
 

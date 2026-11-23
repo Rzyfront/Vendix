@@ -13,6 +13,7 @@ import {
 import { StockLevelManager } from '../shared/services/stock-level-manager.service';
 import { CostingService } from '../shared/services/costing.service';
 import { CostingMethodResolverService } from '../shared/services/costing-method-resolver.service';
+import { SAFE_USER_SELECT } from '@common/utils/safe-user-select.util';
 
 @Injectable()
 export class MovementsService {
@@ -69,7 +70,7 @@ export class MovementsService {
           product_variants: true,
           from_location: true,
           to_location: true,
-          users: true,
+          users: { select: SAFE_USER_SELECT },
         },
       });
 
@@ -194,7 +195,7 @@ export class MovementsService {
           product_variants: true,
           from_location: true,
           to_location: true,
-          users: true,
+          users: { select: SAFE_USER_SELECT },
         },
         orderBy: { [sort_by]: sort_order },
       }),
@@ -315,7 +316,7 @@ export class MovementsService {
         product_variants: true,
         from_location: true,
         to_location: true,
-        users: true,
+        users: { select: SAFE_USER_SELECT },
       },
     });
 

@@ -25,6 +25,7 @@ import {
 } from '../../../common/access/home-panels';
 import { SettingsService } from '../settings/settings.service';
 import { SubscriptionTrialService } from '../subscriptions/services/subscription-trial.service';
+import { SAFE_USER_SELECT } from '@common/utils/safe-user-select.util';
 
 @Injectable()
 export class StoresService {
@@ -228,7 +229,7 @@ export class StoresService {
         organizations: true,
         addresses: true,
         store_settings: true,
-        store_users: { include: { user: true } },
+        store_users: { include: { user: { select: SAFE_USER_SELECT } } },
         _count: {
           select: {
             products: true,

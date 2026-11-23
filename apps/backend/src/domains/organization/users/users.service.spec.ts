@@ -13,6 +13,7 @@ import { EmailService } from '../../../email/email.service';
 import { RequestContextService } from '@common/context/request-context.service';
 import { ErrorCodes, VendixHttpException } from '@common/errors';
 import { ConflictException, BadRequestException } from '@nestjs/common';
+import { SAFE_USER_SELECT } from '@common/utils/safe-user-select.util';
 
 // Mock the problematic import
 jest.mock('../../../prisma/services/organization-prisma.service', () => ({
@@ -188,6 +189,7 @@ describe('UsersService', () => {
       expect(mockPrismaService.users.update).toHaveBeenCalledWith({
         where: { id: 1 },
         data: expect.objectContaining({ email: 'test@example.com' }),
+        select: SAFE_USER_SELECT,
       });
     });
 
@@ -216,6 +218,7 @@ describe('UsersService', () => {
       expect(mockPrismaService.users.update).toHaveBeenCalledWith({
         where: { id: 1 },
         data: expect.objectContaining({ email: 'customer@example.com' }),
+        select: SAFE_USER_SELECT,
       });
     });
 
@@ -276,6 +279,7 @@ describe('UsersService', () => {
           email_verified: true,
           updated_at: expect.any(Date),
         },
+        select: SAFE_USER_SELECT,
       });
 
       expect(
@@ -335,6 +339,7 @@ describe('UsersService', () => {
           email_verified: true,
           updated_at: expect.any(Date),
         },
+        select: SAFE_USER_SELECT,
       });
 
       expect(result.state).toBe('active');
@@ -400,6 +405,7 @@ describe('UsersService', () => {
           password: expect.any(String), // Should be hashed
           updated_at: expect.any(Date),
         },
+        select: SAFE_USER_SELECT,
       });
 
       expect(auditService.logUpdate).toHaveBeenCalledWith(
