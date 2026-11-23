@@ -133,7 +133,9 @@ export class CrmTaskReminderSource implements ReminderSourceHandler {
    * Resumen de la mañana: un solo aviso por persona con sus tareas pendientes
    * que vencen ese día local (responsable; sin responsable, el creador). Es
    * solo correo (D1): llega únicamente a quien encendió el correo de
-   * "Resumen diario de tareas"; a los demás no les deja ni la campana.
+   * "Resumen diario de tareas"; a los demás no les deja ni la campana. A
+   * quien sí lo recibe, el despachador le deja además su fila en la campana
+   * como historial del envío (sin push: el tipo no tiene canal push).
    * Idempotente por persona + tienda + fecha (`dedupe_key` del correo).
    */
   private async resolveDigest(reminder: ClaimedReminder): Promise<ReminderResolution> {
