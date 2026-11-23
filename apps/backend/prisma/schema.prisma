@@ -131,6 +131,7 @@ model users {
   document_acceptances       document_acceptances[]
   notification_subscriptions notification_subscriptions[]
   push_subscriptions         push_subscriptions[]
+  notification_deliveries    notification_deliveries[]
   created_tickets            support_tickets[]            @relation("ticket_creator")
   assigned_tickets           support_tickets[]            @relation("ticket_assigned")
   uploaded_attachments       support_attachments[]        @relation("attachment_uploaded_by")
@@ -1081,6 +1082,8 @@ model stores {
   suppliers                   suppliers[]
   notification_subscriptions  notification_subscriptions[]
   push_subscriptions          push_subscriptions[]
+  notification_deliveries     notification_deliveries[]
+  scheduled_reminders         scheduled_reminders[]
   support_tickets             support_tickets[]
   invoices                    invoices[]
   invoice_resolutions         invoice_resolutions[]
@@ -5324,6 +5327,12 @@ enum notification_type_enum {
   checkout_reconciliation_required
   /// H4.3 — yearly reminder (March) to renew the hotel's RNT before March 31.
   lodging_rnt_renewal
+  /// Recordatorios CRM (odd/tasks/recordatorios-notificaciones.md §2.1):
+  /// tarea por vencer, reasignada, cerrada por otro y resumen diario.
+  crm_task_due_soon
+  crm_task_reassigned
+  crm_task_closed
+  crm_task_digest
 }
 
 model notifications {
@@ -5343,6 +5352,7 @@ model notifications {
   created_at DateTime                   @default(now()) @db.Timestamp(6)
   updated_at DateTime                   @default(now()) @db.Timestamp(6)
   stores     stores?                    @relation(fields: [store_id], references: [id], onDelete: Cascade)
+  deliveries notification_deliveries[]
 
   @@index([store_id])
   @@index([store_id, is_read])
@@ -5401,6 +5411,89 @@ model push_subscriptions {
 
   @@unique([store_id, user_id, endpoint])
   @@index([store_id, user_id])
+}
+
+/// Canal de entrega de un aviso personal (odd/tasks/recordatorios-notificaciones.md §3.1c).
+enum notification_channel_enum {
+  push
+  email
+}
+
+enum notification_delivery_status_enum {
+  pending
+  sent
+  failed
+  skipped
+}
+
+/// Outbox por destinatario y canal de los avisos personales. Una fila por
+/// (tienda, usuario, canal, dedupe_key): un mismo aviso nunca se entrega dos
+/// veces aunque el worker se reinicie. Hoy solo el correo pasa por aquí; lo
+/// drena `NotificationDeliveriesJob` (solo worker) con reintentos y backoff.
+/// Migración aditiva: 20261228100500_notification_deliveries.
+model notification_deliveries {
+  id              Int                               @id @default(autoincrement())
+  store_id        Int
+  /// Fila de la campana que originó la entrega (null si ya no existe).
+  notification_id Int?
+  user_id         Int
+  channel         notification_channel_enum
+  type            notification_type_enum
+  dedupe_key      String                            @db.VarChar(191)
+  status          notification_delivery_status_enum @default(pending)
+  attempts        Int                               @default(0)
+  /// Próximo intento; mientras un worker la procesa, fin de su lease.
+  next_attempt_at DateTime                          @default(now()) @db.Timestamp(6)
+  sent_at         DateTime?                         @db.Timestamp(6)
+  error           String?                           @db.Text
+  /// `{ title, body, url }` del aviso, tal como se mostró en la campana.
+  payload         Json
+  created_at      DateTime                          @default(now()) @db.Timestamp(6)
+  updated_at      DateTime                          @default(now()) @updatedAt @db.Timestamp(6)
+
+  store        stores         @relation(fields: [store_id], references: [id], onDelete: Restrict, onUpdate: NoAction)
+  user         users          @relation(fields: [user_id], references: [id], onDelete: Cascade, onUpdate: NoAction)
+  notification notifications? @relation(fields: [notification_id], references: [id], onDelete: SetNull, onUpdate: NoAction)
+
+  @@unique([store_id, user_id, channel, dedupe_key])
+  @@index([status, next_attempt_at])
+  @@index([store_id, created_at(sort: Desc)])
+  @@index([notification_id])
+}
+
+enum scheduled_reminder_status_enum {
+  pending
+  sent
+  cancelled
+  skipped
+}
+
+/// Disparos futuros de avisos con fecha (por vencer, vencida, escalamiento,
+/// resumen). Los escribe `ReminderScheduler.sync` (F1) y los toma un cron del
+/// worker con `FOR UPDATE SKIP LOCKED`. Cada fila nombra su tienda: el cron
+/// corre sin contexto. Migración aditiva: 20261228100400_scheduled_reminders.
+model scheduled_reminders {
+  id          Int                            @id @default(autoincrement())
+  store_id    Int
+  /// Módulo dueño de la fecha, p. ej. `crm_task`.
+  source_type String                         @db.VarChar(40)
+  source_id   Int
+  /// `due_soon`, `due`, `overdue_escalation`, `digest`…
+  kind        String                         @db.VarChar(40)
+  fire_at     DateTime                       @db.Timestamp(6)
+  /// Destinatarios congelados al programar (null = se resuelven al disparar).
+  recipients  Json?
+  status      scheduled_reminder_status_enum @default(pending)
+  attempts    Int                            @default(0)
+  last_error  String?                        @db.Text
+  created_at  DateTime                       @default(now()) @db.Timestamp(6)
+  updated_at  DateTime                       @default(now()) @updatedAt @db.Timestamp(6)
+
+  store stores @relation(fields: [store_id], references: [id], onDelete: Restrict, onUpdate: NoAction)
+
+  @@unique([source_type, source_id, kind, fire_at])
+  @@index([status, fire_at])
+  @@index([store_id])
 }
 
 enum address_type_enum {

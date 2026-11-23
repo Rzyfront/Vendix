@@ -356,6 +356,17 @@ export class GlobalPrismaService extends BasePrismaService {
     return this.baseClient.push_subscriptions;
   }
 
+  // Outbox de entregas de avisos personales y disparos programados: los usan
+  // el despachador y los crons sin contexto de tienda. Cada fila nombra su
+  // tienda y toda consulta debe filtrar por ella explícitamente.
+  get notification_deliveries() {
+    return this.baseClient.notification_deliveries;
+  }
+
+  get scheduled_reminders() {
+    return this.baseClient.scheduled_reminders;
+  }
+
   get notification_sounds() {
     return this.baseClient.notification_sounds;
   }
