@@ -421,6 +421,7 @@ export class OpportunityDetailModalComponent {
   });
 
   private request = 0;
+  private tasksRequest = 0;
 
   constructor() {
     effect(() => {
@@ -463,7 +464,7 @@ export class OpportunityDetailModalComponent {
 
   onTaskSaved(): void {
     const id = this.customerId();
-    if (id) void this.loadTasks(id, this.request);
+    if (id) void this.loadTasks(id);
     this.tasksChanged.emit();
   }
 
@@ -479,7 +480,7 @@ export class OpportunityDetailModalComponent {
       // Dismissed: nothing changed.
       if (!completed) return;
       this.toast.success(taskCompletedMessage(completed));
-      void this.loadTasks(id, this.request);
+      void this.loadTasks(id);
       // Completing may move an opportunity to another stage.
       this.tasksChanged.emit();
     } catch (error) {
@@ -490,8 +491,10 @@ export class OpportunityDetailModalComponent {
   }
 
   /** Pending tasks of the customer, as the customer panel lists them. */
-  private async loadTasks(id: number, request: number): Promise<void> {
+  private async loadTasks(id: number): Promise<void> {
     if (!this.canManageTasks()) return;
+    // Own token: a slower earlier reload never overwrites a newer list.
+    const request = ++this.tasksRequest;
     this.tasksLoading.set(true);
     this.tasksError.set(null);
     try {
@@ -503,11 +506,11 @@ export class OpportunityDetailModalComponent {
           limit: TASKS_SHOWN,
         }),
       );
-      if (request !== this.request) return;
+      if (request !== this.tasksRequest) return;
       this.tasks.set(page.data);
       this.tasksTotal.set(page.total);
     } catch (error) {
-      if (request !== this.request) return;
+      if (request !== this.tasksRequest) return;
       this.tasks.set([]);
       this.tasksTotal.set(0);
       this.tasksError.set(
@@ -516,7 +519,7 @@ export class OpportunityDetailModalComponent {
           : parseApiError(error).userMessage,
       );
     } finally {
-      if (request === this.request) this.tasksLoading.set(false);
+      if (request === this.tasksRequest) this.tasksLoading.set(false);
     }
   }
 
@@ -561,6 +564,6 @@ export class OpportunityDetailModalComponent {
         if (request === this.request) this.notesLoading.set(false);
       }
     };
-    await Promise.all([loadCustomer(), loadNotes(), this.loadTasks(id, request)]);
+    await Promise.all([loadCustomer(), loadNotes(), this.loadTasks(id)]);
   }
 }

@@ -1,7 +1,7 @@
 import { CUSTOM_ELEMENTS_SCHEMA, provideZonelessChangeDetection } from '@angular/core';
 import { ComponentFixture, TestBed } from '@angular/core/testing';
 import { RouterLink, provideRouter } from '@angular/router';
-import { of } from 'rxjs';
+import { Subject, of } from 'rxjs';
 import { AuthFacade } from '../../../../../../core/store/auth/auth.facade';
 import { ToastService } from '../../../../../../shared/components';
 import { CurrencyPipe } from '../../../../../../shared/pipes/currency';
@@ -180,6 +180,24 @@ describe('OpportunityDetailModalComponent — pending tasks of the customer', ()
     await settle();
     expect(crm.tasks).toHaveBeenCalledTimes(1);
     expect(changed).toHaveBeenCalledTimes(1);
+  });
+
+  it('never lets a slower earlier reload overwrite a newer list', async () => {
+    await setup();
+    const first = new Subject<any>();
+    const second = new Subject<any>();
+    crm.tasks.and.returnValues(first, second);
+    component().onTaskSaved();
+    component().onTaskSaved();
+
+    second.next({ data: [task(3, 'Nueva')], total: 1, page: 1, totalPages: 1 });
+    second.complete();
+    first.next({ data: [task(1, 'Vieja')], total: 1, page: 1, totalPages: 1 });
+    first.complete();
+    await settle();
+
+    const rows = Array.from(host().querySelectorAll('[data-testid="opp-task"]'));
+    expect(rows.map((row) => row.textContent)).toEqual([jasmine.stringContaining('Nueva')]);
   });
 
   it('hides the tasks block without the tasks permission and asks nothing', async () => {

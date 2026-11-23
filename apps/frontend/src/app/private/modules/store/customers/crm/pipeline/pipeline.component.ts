@@ -250,7 +250,6 @@ function verticalScrollParent(element: HTMLElement): HTMLElement | null {
             class="flex gap-4 overflow-x-auto pb-2"
             cdkDropListGroup
             cdkScrollable
-            (touchstart)="onBoardTouchStart($event)"
           >
             @for (stage of stages(); track stage.id) {
               <div class="board-column flex flex-col rounded-2xl border border-[var(--color-border)] bg-[var(--color-background)]">
@@ -691,7 +690,10 @@ export class PipelineComponent {
       this.search();
       untracked(() => void this.load());
     });
-    afterNextRender(() => this.registerPageScroller());
+    afterNextRender(() => {
+      this.registerPageScroller();
+      this.shieldHandlesFromPullToRefresh();
+    });
   }
 
   /**
@@ -716,10 +718,15 @@ export class PipelineComponent {
   /**
    * A touch that starts on a drag handle belongs to the drag: keep it from the
    * layout's pull-to-refresh, which would otherwise reload the page when a card
-   * is dragged down near the top.
+   * is dragged down near the top. Passive, so it never delays native scroll.
    */
-  onBoardTouchStart(event: TouchEvent): void {
-    if ((event.target as Element | null)?.closest?.('[cdkDragHandle]')) event.stopPropagation();
+  private shieldHandlesFromPullToRefresh(): void {
+    const host = this.host.nativeElement;
+    const listener = (event: Event) => {
+      if ((event.target as Element | null)?.closest?.('.cdk-drag-handle')) event.stopPropagation();
+    };
+    host.addEventListener('touchstart', listener, { passive: true });
+    this.destroyRef.onDestroy(() => host.removeEventListener('touchstart', listener));
   }
 
   openTask(card: CrmOpportunity): void {
