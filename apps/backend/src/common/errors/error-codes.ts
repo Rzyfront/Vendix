@@ -7222,6 +7222,11 @@ export const ErrorCodes = {
     devMessage:
       'El sonido está siendo usado por una o más tiendas y no puede eliminarse.',
   },
+  NOTIFICATION_TEST_RATE_LIMITED: {
+    code: 'NOTIFICATION_TEST_RATE_LIMITED',
+    httpStatus: 429,
+    devMessage: 'Espera unos segundos antes de enviarte otra prueba.',
+  },
 
   // Help Center
   HELP_ARTICLE_NOT_FOUND: {

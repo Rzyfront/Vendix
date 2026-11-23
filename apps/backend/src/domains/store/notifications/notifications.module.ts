@@ -13,6 +13,7 @@ import { NotificationPreferencesService } from './notification-preferences.servi
 import { NotificationRecipientsService } from './notification-recipients.service';
 import { NotificationEmailService } from './notification-email.service';
 import { NotificationDeliveriesJob } from './notification-deliveries.job';
+import { MyNotificationsService } from './my-notifications.service';
 import { ReminderScheduler } from './reminders/reminder-scheduler.service';
 import { ReminderSourceRegistry } from './reminders/reminder-source.registry';
 import { ScheduledRemindersJob } from './reminders/scheduled-reminders.job';
@@ -54,6 +55,7 @@ import { InvoiceDeliveryModule } from '../invoicing/delivery/invoice-delivery.mo
     NotificationPreferencesService,
     NotificationRecipientsService,
     NotificationEmailService,
+    MyNotificationsService,
     // Cron: solo corre en el worker (la API desmonta los @Cron en main.ts).
     NotificationDeliveriesJob,
     // Recordatorios con fecha (plan §3.1b): cada módulo registra su fuente en
