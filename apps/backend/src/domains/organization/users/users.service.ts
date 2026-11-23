@@ -954,9 +954,9 @@ export class UsersService {
       app,
     );
 
+    // The token travels only in the invitation email.
     return {
       user_id: user.id,
-      token,
     };
   }
 }

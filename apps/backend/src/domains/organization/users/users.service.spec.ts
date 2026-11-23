@@ -223,7 +223,7 @@ describe('UsersService', () => {
     });
 
     it('normalizes invitations without changing their app or pending state', async () => {
-      await service.invite({
+      const result = await service.invite({
         first_name: 'John',
         last_name: 'Doe',
         email: ' Test@Example.COM ',
@@ -244,6 +244,10 @@ describe('UsersService', () => {
       expect(mockPrismaService.user_settings.create).toHaveBeenCalledWith({
         data: expect.objectContaining({ app_type: 'ORG_ADMIN' }),
       });
+      // The invitation token goes by email only; the answer names the user.
+      const [, sentToken] = mockEmailService.sendInvitationEmail.mock.calls[0];
+      expect(sentToken).toEqual(expect.any(String));
+      expect(result).toEqual({ user_id: expect.any(Number) });
     });
   });
 
