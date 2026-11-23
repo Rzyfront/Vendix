@@ -21,9 +21,10 @@ import {
   requireObjectiveScope,
   objectiveOperationId,
 } from '../../../ai-engine/tasks/agent-objective.repository';
-import type {
-  AgentObjective,
-  ObjectiveLease,
+import {
+  clientObjectiveBudget,
+  type AgentObjective,
+  type ObjectiveLease,
 } from '../../../ai-engine/tasks/interfaces/agent-objective.interface';
 
 import { createHash, randomUUID } from 'crypto';
@@ -202,7 +203,7 @@ export class VexiPlanStateService {
       version: objective.version,
       expires_at: objective.expires_at.toISOString(),
       next_step: objective.next_step,
-      budget: objective.budget,
+      budget: clientObjectiveBudget(objective.budget),
       requires_revalidation: objective.requires_revalidation,
     };
   }

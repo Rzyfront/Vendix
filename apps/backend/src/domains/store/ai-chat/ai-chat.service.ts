@@ -18,6 +18,7 @@ import {
 import type { AgentExecutionSummary } from '../../../ai-engine/tools/interfaces/tool.interface';
 import {
   clientSafeChunk,
+  withoutClientCost,
   clientSafeExecution,
   clientSafeObjective,
   clientSafeReceipt,
@@ -1394,11 +1395,16 @@ export class AIChatService {
     if (doneChunk) {
       // Client boundary: model guidance never rides on the final frame, and
       // neither does the provider cost (internal; persisted in the row only).
-      const { cost_usd: _cost, ...safeDone } = clientSafeChunk(doneChunk);
+      const safeDone = withoutClientCost(clientSafeChunk(doneChunk));
       // T21: el anillo «Contexto N %» de Vex recibe el mismo valor persistido.
-      const withBudget: AIStreamChunk = turnBudget
+      const withContext: AIStreamChunk = turnBudget
         ? { ...safeDone, context_budget: turnBudget }
         : safeDone;
+      // P2-6: el cliente ve contexto y límite, nunca costos.
+      const quota = await this.turnQuota(agentKey);
+      const withBudget: AIStreamChunk = quota
+        ? { ...withContext, quota }
+        : withContext;
       yield assistantMessage
         ? { ...withBudget, message_id: assistantMessage.id }
         : withBudget;
@@ -1424,6 +1430,40 @@ export class AIChatService {
   }
 
   /** Cifras reales que muestra el aviso de borrado de un hilo de Vex. */
+  /**
+   * P2-6: the plan limit shown with the `done` frame. Best effort — a quota
+   * read failure must never cost the user the end of the turn.
+   */
+  private async turnQuota(
+    agentKey: string | null | undefined,
+  ): Promise<AIStreamChunk['quota']> {
+    const storeId = RequestContextService.getContext()?.store_id;
+    if (!this.agentQuota || !storeId || !isQuotaAgentKey(agentKey)) return;
+    try {
+      const usage = await this.agentQuota.getAgentUsage(storeId);
+      const view = usage?.[agentKey];
+      if (!view) return;
+      return {
+        agent_key: agentKey,
+        meters: view.meters
+          .filter((meter) => meter.enabled)
+          .map(({ capability_key, label, unit, period, used, cap }) => ({
+            capability_key,
+            label,
+            unit,
+            period,
+            used,
+            cap,
+          })),
+      };
+    } catch (err: unknown) {
+      this.logger.warn(
+        `Turn quota read failed: ${err instanceof Error ? err.message : String(err)}`,
+      );
+      return;
+    }
+  }
+
   async previewConversationPurge(
     id: number,
   ): Promise<ConversationPurgePreview> {

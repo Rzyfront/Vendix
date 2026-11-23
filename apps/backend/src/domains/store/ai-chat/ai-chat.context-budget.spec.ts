@@ -49,6 +49,7 @@ function build(opts: {
   messages?: any[];
   metadata?: Record<string, unknown> | null;
   compactor?: { compactIfNeeded: jest.Mock };
+  agentQuota?: { getAgentUsage: jest.Mock };
 }) {
   const prisma: any = {
     ai_conversations: {
@@ -152,7 +153,7 @@ function build(opts: {
     undefined,
     undefined,
     undefined,
-    undefined, // agentQuota (T14)
+    opts.agentQuota as any, // agentQuota (T14)
     opts.compactor as any,
   );
   jest
@@ -247,6 +248,72 @@ describe('T21 context budget: one measure for ring and compaction', () => {
     });
     const frames = await stream(b.service);
     const done = frames.find((f) => f.type === 'done');
+    expect(done).not.toHaveProperty('cost_usd');
+  });
+
+  it('P2-6: done shows context and plan limit, never the cost', async () => {
+    const meter = (over: Record<string, unknown>) => ({
+      capability_key: 'vex.messages',
+      kind: 'messages',
+      label: 'Mensajes',
+      unit: 'messages',
+      period: 'daily',
+      used: 12,
+      cap: 50,
+      enabled: true,
+      ...over,
+    });
+    const getAgentUsage = jest.fn().mockResolvedValue({
+      vex: {
+        enabled: true,
+        meters: [
+          meter({}),
+          meter({ capability_key: 'vex.voice', enabled: false }),
+        ],
+      },
+      vexi: { enabled: true, meters: [] },
+    });
+    const b = build({
+      agentQuota: { getAgentUsage },
+      chunks: [
+        { type: 'text', content: 'hola' },
+        {
+          type: 'done',
+          usage: { promptTokens: 1, completionTokens: 1, totalTokens: 2, cost: 0.4 },
+          context_budget: budgetOf(20000),
+          cost_usd: 0.003,
+        },
+      ],
+    });
+    const frames = await stream(b.service);
+    const done = frames.find((f) => f.type === 'done');
+    expect(JSON.stringify(done)).not.toMatch(/cost/);
+    expect(done.context_budget.context_window_tokens).toBe(100000);
+    expect(getAgentUsage).toHaveBeenCalledWith(1);
+    expect(done.quota).toEqual({
+      agent_key: 'vex',
+      meters: [
+        {
+          capability_key: 'vex.messages',
+          label: 'Mensajes',
+          unit: 'messages',
+          period: 'daily',
+          used: 12,
+          cap: 50,
+        },
+      ],
+    });
+    expect(assistantRow(b.prisma).cost_usd).toBe(0.003);
+  });
+
+  it('P2-6: a failed quota read still closes the turn, without quota', async () => {
+    const b = build({
+      agentQuota: { getAgentUsage: jest.fn().mockRejectedValue(new Error('redis')) },
+      chunks: [{ type: 'text', content: 'hola' }, { type: 'done', cost_usd: 0.01 }],
+    });
+    const done = (await stream(b.service)).find((f) => f.type === 'done');
+    expect(done).toBeDefined();
+    expect(done).not.toHaveProperty('quota');
     expect(done).not.toHaveProperty('cost_usd');
   });
 

@@ -1,3 +1,4 @@
+import { withoutClientCost } from '../../../../ai-engine/agent-execution.contract';
 import {
   Injectable,
   BadRequestException,
@@ -1630,7 +1631,7 @@ export class SessionsService {
                   } as MessageEvent);
                 }
                 subscriber.next({
-                  data: JSON.stringify(chunk),
+                  data: JSON.stringify(withoutClientCost(chunk)),
                   type: 'ai-chunk',
                 } as MessageEvent);
                 subscriber.complete();
@@ -1639,7 +1640,7 @@ export class SessionsService {
 
               if (chunk.type === 'error') {
                 subscriber.next({
-                  data: JSON.stringify(chunk),
+                  data: JSON.stringify(withoutClientCost(chunk)),
                   type: 'ai-chunk',
                 } as MessageEvent);
                 subscriber.complete();
@@ -1647,7 +1648,7 @@ export class SessionsService {
               }
 
               subscriber.next({
-                data: JSON.stringify(chunk),
+                data: JSON.stringify(withoutClientCost(chunk)),
                 type: 'ai-chunk',
               } as MessageEvent);
             }
