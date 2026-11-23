@@ -2362,8 +2362,12 @@ export class PosComponent {
       .subscribe((locations) => {
         this.loading.set(false);
         if (locations.length > 1) {
+          // Si el cliente se eligió por la línea de una sede, esa va
+          // preseleccionada (el cajero aún puede cambiarla).
+          const preferredId = this.selectedCustomer()?.preferred_address_id;
+          const preferred = locations.find((l) => l.id === preferredId);
           this.quoteLocations.set(locations);
-          this.quoteLocationId.set(locations[0].id);
+          this.quoteLocationId.set((preferred ?? locations[0]).id);
           this.showQuoteLocationModal.set(true);
           return;
         }
