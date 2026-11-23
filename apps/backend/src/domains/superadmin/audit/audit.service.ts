@@ -104,7 +104,7 @@ export class SuperAdminAuditService {
       take: filters?.limit || 50,
       skip: filters?.offset || 0,
     });
-    return redactAuditRows(rows);
+    return redactAuditRows<(typeof rows)[number]>(rows);
   }
 
   /**

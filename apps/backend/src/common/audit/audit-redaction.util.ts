@@ -95,20 +95,30 @@ export function redactAuditSecrets<T>(value: T): T {
 }
 
 /** Redacts the JSON columns of `audit_logs` rows that are about to be returned. */
-export function redactAuditRows<
-  T extends { old_values?: unknown; new_values?: unknown; metadata?: unknown },
->(rows: T[]): T[] {
+type AuditJsonColumns = {
+  old_values?: unknown;
+  new_values?: unknown;
+  metadata?: unknown;
+};
+
+/**
+ * `T` has no constraint on purpose: it is always inferred from the rows
+ * passed in (the Prisma payload, with its includes), never widened to the
+ * column shape.
+ */
+export function redactAuditRows<T>(rows: T[]): T[] {
   return rows.map((row) => {
-    const old_values = redactAuditSecrets(row.old_values);
-    const new_values = redactAuditSecrets(row.new_values);
-    const metadata = redactAuditSecrets(row.metadata);
+    const columns = row as unknown as AuditJsonColumns;
+    const old_values = redactAuditSecrets(columns.old_values);
+    const new_values = redactAuditSecrets(columns.new_values);
+    const metadata = redactAuditSecrets(columns.metadata);
     if (
-      old_values === row.old_values &&
-      new_values === row.new_values &&
-      metadata === row.metadata
+      old_values === columns.old_values &&
+      new_values === columns.new_values &&
+      metadata === columns.metadata
     ) {
       return row;
     }
-    return { ...row, old_values, new_values, metadata };
+    return { ...columns, old_values, new_values, metadata } as unknown as T;
   });
 }

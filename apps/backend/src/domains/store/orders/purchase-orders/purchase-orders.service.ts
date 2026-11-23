@@ -6440,7 +6440,7 @@ export class PurchaseOrdersService {
     ]);
 
     const timeline = [
-      ...redactAuditRows(auditLogs).map((l) => ({
+      ...redactAuditRows<(typeof auditLogs)[number]>(auditLogs).map((l) => ({
         type: 'audit' as const,
         date: l.created_at || new Date(0),
         data: l,

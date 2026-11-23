@@ -66,7 +66,7 @@ export class OrganizationAuditService {
       this.prismaService.audit_logs.count({ where }),
     ]);
 
-    return { data: redactAuditRows(data), total };
+    return { data: redactAuditRows<(typeof data)[number]>(data), total };
   }
 
   /**
@@ -114,7 +114,7 @@ export class OrganizationAuditService {
       },
       orderBy: { created_at: 'desc' },
     });
-    return redactAuditRows(rows);
+    return redactAuditRows<(typeof rows)[number]>(rows);
   }
 
   /**
