@@ -1429,7 +1429,6 @@ export class AIChatService {
     await this.uiChannel.releaseTurn(streamId);
   }
 
-  /** Cifras reales que muestra el aviso de borrado de un hilo de Vex. */
   /**
    * P2-6: the plan limit shown with the `done` frame. Best effort — a quota
    * read failure must never cost the user the end of the turn.
@@ -1464,6 +1463,7 @@ export class AIChatService {
     }
   }
 
+  /** Cifras reales que muestra el aviso de borrado de un hilo de Vex. */
   async previewConversationPurge(
     id: number,
   ): Promise<ConversationPurgePreview> {

@@ -41,8 +41,28 @@ export function withoutMessageCost<T extends object>(conversation: T): T {
   if (!('messages' in conversation) || !Array.isArray(conversation.messages))
     return conversation;
   const rows = conversation.messages as Array<Record<string, unknown>>;
-  const messages = rows.map(({ cost_usd: _cost, ...rest }) => rest);
+  const messages = rows.map(({ cost_usd: _cost, ...rest }) =>
+    'metadata' in rest
+      ? { ...rest, metadata: withoutNestedCost(rest.metadata) }
+      : rest,
+  );
   return { ...conversation, messages };
+}
+
+/**
+ * P2-6: rows persisted before the fix keep `metadata.objective.budget.cost_usd`.
+ * Drops every `cost_usd` key at read time; the stored row is untouched.
+ */
+function withoutNestedCost(value: unknown, depth = 0): unknown {
+  if (depth > 8 || value === null || typeof value !== 'object') return value;
+  if (Array.isArray(value))
+    return value.map((item) => withoutNestedCost(item, depth + 1));
+  const out: Record<string, unknown> = {};
+  for (const [key, item] of Object.entries(value)) {
+    if (key === 'cost_usd') continue;
+    out[key] = withoutNestedCost(item, depth + 1);
+  }
+  return out;
 }
 
 @Controller('store/ai-chat')
