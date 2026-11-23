@@ -181,7 +181,7 @@ function isDesktop(): boolean {
             [attr.aria-expanded]="!log_collapsed()"
             (click)="openLog()"
           >
-            <app-icon name="history" [size]="20"></app-icon>
+            <app-icon name="notebook-pen" [size]="20"></app-icon>
             @if (log.pending_count() > 0) {
               <span
                 class="absolute top-0.5 right-0.5 min-w-4 h-4 px-1 rounded-full bg-primary text-on-primary text-xs leading-4 text-center"
