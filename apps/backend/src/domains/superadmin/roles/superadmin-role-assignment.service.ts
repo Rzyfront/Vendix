@@ -4,7 +4,10 @@ import { GlobalPrismaService } from '../../../prisma/services/global-prisma.serv
 import { UserRoleAssignmentService } from '@common/services/user-role-assignment.service';
 import { StaffProvisioningService } from '@common/services/staff-provisioning.service';
 import { RoleActor } from '@common/utils/role-scope.util';
-import { vendixUserWhere } from '@common/utils/vendix-user.util';
+import {
+  CUSTOMER_ROLE_NAME,
+  vendixUserWhere,
+} from '@common/utils/vendix-user.util';
 import { VendixHttpException, ErrorCodes } from 'src/common/errors';
 
 /**
@@ -41,7 +44,8 @@ export interface SuperadminAssignmentInput {
  * plataforma y debe valer igual en las dos direcciones:
  *   1. el actor `superadmin` fijo,
  *   2. la guarda de roles irremovibles (`super_admin`),
- *   3. el efecto colateral CD7 de aprovisionamiento de staff.
+ *   3. el efecto colateral CD7 de aprovisionamiento de staff,
+ *   4. la guarda de roles no asignables (`customer`).
  *
  * Sin (3) aquí, asignar por `users/*` vincularía al usuario con su tienda y
  * asignar por `roles/*` no — misma fila en `user_roles`, distinto sistema.
@@ -75,7 +79,23 @@ export class SuperadminRoleAssignmentService {
 
   // ===== WRITE =====
 
+  /**
+   * El rol `customer` no se asigna desde el Super Admin: es lo que convierte a
+   * alguien en cliente final de una tienda, y el Super Admin administra
+   * usuarios de Vendix. Quitarlo (`remove`) sigue permitido. Un rol que no
+   * existe sigue el camino normal y lo rechaza `UserRoleAssignmentService`.
+   */
   async assign(input: SuperadminAssignmentInput) {
+    const role = await this.prisma.roles.findUnique({
+      where: { id: input.role_id },
+      select: { name: true },
+    });
+    if (role?.name === CUSTOMER_ROLE_NAME) {
+      throw new VendixHttpException(ErrorCodes.SUP_ADMIN_ROLE_002, undefined, {
+        role: role.name,
+      });
+    }
+
     const result = await this.assignments.assign({
       user_id: input.user_id,
       role_id: input.role_id,

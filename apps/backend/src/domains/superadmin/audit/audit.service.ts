@@ -2,7 +2,11 @@ import { Injectable } from '@nestjs/common';
 import { Prisma } from '@prisma/client';
 import { GlobalPrismaService } from '../../../prisma/services/global-prisma.service';
 import { RequestContextService } from '@common/context/request-context.service';
-import { vendixUserWhere } from '@common/utils/vendix-user.util';
+import {
+  vendixActorAuditSql,
+  vendixUserWhere,
+  withVendixActor,
+} from '@common/utils/vendix-user.util';
 
 import {
   AuditAction,
@@ -36,7 +40,10 @@ export class SuperAdminAuditService {
   constructor(private readonly prismaService: GlobalPrismaService) {}
 
   /**
-   * Obtiene logs de auditoría con filtros
+   * Obtiene logs de auditoría con filtros.
+   *
+   * Solo actividad del personal: los eventos cuyo autor es un cliente final
+   * no se listan (`withVendixActor`); los de sistema (sin autor) sí.
    */
   async getAuditLogs(filters?: {
     user_id?: number;
@@ -67,7 +74,7 @@ export class SuperAdminAuditService {
 
     return redactAuditRows(
       await this.prismaService.audit_logs.findMany({
-        where,
+        where: withVendixActor(where),
         include: {
           users: {
             select: {
@@ -111,7 +118,9 @@ export class SuperAdminAuditService {
    * imposible porque el `organization_id` del contexto se imponía siempre.
    */
   async getAuditStats(fromDate?: Date, toDate?: Date, scope?: AuditStatsScope) {
-    const where: any = {};
+    // Todos los totales (por acción, recurso, usuario y día) cuentan solo
+    // eventos del personal o de sistema; los de clientes finales no.
+    const where: any = withVendixActor();
 
     if (fromDate || toDate) {
       where.created_at = {};
@@ -240,21 +249,22 @@ export class SuperAdminAuditService {
     // Mismos filtros de tenant que el resto de estadísticas, escritos a mano
     // porque la consulta cruda no pasa por las extensiones de Prisma.
     const dayFilters: Prisma.Sql[] = [
-      Prisma.sql`created_at >= ${dayWindowStart}`,
-      Prisma.sql`created_at < ${dayWindowEnd}`,
+      Prisma.sql`al.created_at >= ${dayWindowStart}`,
+      Prisma.sql`al.created_at < ${dayWindowEnd}`,
+      vendixActorAuditSql('al.user_id'),
     ];
     if (organizationId) {
-      dayFilters.push(Prisma.sql`organization_id = ${organizationId}`);
+      dayFilters.push(Prisma.sql`al.organization_id = ${organizationId}`);
     }
     if (scope?.store_id) {
-      dayFilters.push(Prisma.sql`store_id = ${scope.store_id}`);
+      dayFilters.push(Prisma.sql`al.store_id = ${scope.store_id}`);
     }
 
     const dayRows = await this.prismaService.withoutScope().$queryRaw<
       Array<{ day: string; count: number }>
     >`
-      SELECT to_char(DATE_TRUNC('day', created_at), 'YYYY-MM-DD') AS day, COUNT(*)::int AS count -- tz-audit:ignore vista cross-tenant: el bucket UTC es deliberado
-      FROM audit_logs
+      SELECT to_char(DATE_TRUNC('day', al.created_at), 'YYYY-MM-DD') AS day, COUNT(*)::int AS count -- tz-audit:ignore vista cross-tenant: el bucket UTC es deliberado
+      FROM audit_logs al
       WHERE ${Prisma.join(dayFilters, ' AND ')}
       GROUP BY 1
     `;
