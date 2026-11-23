@@ -57,7 +57,7 @@ export const VEX_LOG_DASHBOARD_QUERY = { tab: 'bitacora' } as const;
             [attr.aria-expanded]="false"
             (click)="collapsed.set(false)"
           >
-            <app-icon name="panel-right-open" [size]="18" />
+            <app-icon name="notebook-pen" [size]="18" />
             @if (store.pending_count() > 0) {
               <span
                 class="absolute top-0.5 right-0.5 min-w-4 h-4 px-1 rounded-full bg-primary text-on-primary text-xs leading-4 text-center"
