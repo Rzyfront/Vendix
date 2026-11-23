@@ -197,10 +197,14 @@ export function clientSafeExecution(
 export function clientSafeObjective(
   objective: ObjectiveProgress,
 ): ObjectiveProgress {
+  // An objective row may carry no budget (legacy rows, partial progress):
+  // there is no cost to strip, so pass it through instead of crashing the stream.
   return {
     ...objective,
     next_step: null,
-    budget: clientObjectiveBudget(objective.budget),
+    budget: objective.budget
+      ? clientObjectiveBudget(objective.budget)
+      : objective.budget,
   };
 }
 
