@@ -42,11 +42,14 @@ interface CacheEntry<T> {
 let statsCache: CacheEntry<Observable<any>> | null = null;
 
 /**
- * Las pruebas llaman al proveedor de IA (el backend corta a los 90 s); el
- * cliente espera un poco más para recibir ese error controlado antes de
- * rendirse. Un guardado/prueba colgado termina en toast, nunca en el gato.
+ * Las pruebas llaman al proveedor de IA. El backend corta según el tipo de app
+ * (90 s texto, 120 s imagen, 180 s video: `AI_APP_TEST_TIMEOUT_BY_TYPE_MS`);
+ * el cliente espera un poco más que el mayor para recibir ese error
+ * controlado antes de rendirse. Si el cliente corta, el backend cancela la
+ * llamada al proveedor. Un guardado/prueba colgado termina en toast, nunca en
+ * el gato.
  */
-export const AI_TEST_ACTION_TIMEOUT_MS = 120_000;
+export const AI_TEST_ACTION_TIMEOUT_MS = 200_000;
 
 @Injectable({
   providedIn: 'root',
@@ -115,9 +118,9 @@ export class AIEngineService {
   }
 
   deleteConfig(id: number): Observable<void> {
-    return this.http.delete<void>(
-      `${this.apiUrl}/superadmin/ai-engine/${id}`,
-    );
+    return this.http
+      .delete<void>(`${this.apiUrl}/superadmin/ai-engine/${id}`)
+      .pipe(withUserActionTimeout());
   }
 
   testConnection(
@@ -169,9 +172,9 @@ export class AIEngineService {
   }
 
   deleteApp(id: number): Observable<void> {
-    return this.http.delete<void>(
-      `${this.apiUrl}/superadmin/ai-engine/applications/${id}`,
-    );
+    return this.http
+      .delete<void>(`${this.apiUrl}/superadmin/ai-engine/applications/${id}`)
+      .pipe(withUserActionTimeout());
   }
 
   testApp(

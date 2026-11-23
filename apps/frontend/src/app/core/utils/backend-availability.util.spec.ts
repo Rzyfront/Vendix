@@ -44,6 +44,55 @@ describe('backend-availability.util', () => {
     });
   });
 
+  describe('isBackendReachable: plazo corto por intento y un reintento', () => {
+    const hangingOnce = () => {
+      let calls = 0;
+      return jasmine
+        .createSpy('fetch')
+        .and.callFake(
+          (
+            _url: string,
+            init?: { signal?: AbortSignal },
+          ): Promise<{ ok: boolean }> => {
+            calls++;
+            if (calls > 1) return Promise.resolve({ ok: true });
+            return new Promise((_resolve, reject) =>
+              init?.signal?.addEventListener('abort', () =>
+                reject(new DOMException('aborted', 'AbortError')),
+              ),
+            );
+          },
+        );
+    };
+
+    it('el primer intento se agota por tiempo y el reintento responde → vivo', async () => {
+      const fetchImpl = hangingOnce();
+
+      await expectAsync(
+        isBackendReachable('https://api.test/api', 20, fetchImpl),
+      ).toBeResolvedTo(true);
+      expect(fetchImpl).toHaveBeenCalledTimes(2);
+    });
+
+    it('fallo rápido (red o 5xx) → caído sin reintentar', async () => {
+      const network = jasmine
+        .createSpy('fetch')
+        .and.rejectWith(new TypeError('Failed to fetch'));
+      const badGateway = jasmine
+        .createSpy('fetch')
+        .and.resolveTo({ ok: false });
+
+      await expectAsync(
+        isBackendReachable('https://api.test/api', 50, network),
+      ).toBeResolvedTo(false);
+      await expectAsync(
+        isBackendReachable('https://api.test/api', 50, badGateway),
+      ).toBeResolvedTo(false);
+      expect(network).toHaveBeenCalledTimes(1);
+      expect(badGateway).toHaveBeenCalledTimes(1);
+    });
+  });
+
   describe('settleSlowAppInit (cuándo sale el gato global)', () => {
     it('caída real: /health falla → muestra el gato al instante', async () => {
       const onFailure = jasmine.createSpy('onFailure');

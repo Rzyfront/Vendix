@@ -37,10 +37,7 @@ import {
 } from './core/store/notifications';
 import { vexiReducer } from './core/store/vexi/vexi.reducer';
 import { VexiEffects } from './core/store/vexi/vexi.effects';
-import {
-  subscriptionReducer,
-  SubscriptionEffects,
-} from './core/store/subscription';
+import { subscriptionReducer, SubscriptionEffects } from './core/store/subscription';
 import { hydrateAuthState } from './core/store/persistence';
 import * as ConfigActions from './core/store/config/config.actions';
 import { ThemeService } from './core/services/theme.service';
@@ -48,8 +45,10 @@ import { ToastService } from './shared/components/toast/toast.service';
 
 import { routes } from './app.routes';
 
-// Timeout for app initialization (10 seconds)
-const APP_INIT_TIMEOUT_MS = 10000;
+// Plazo de arranque (10 s). ÚNICO temporizador de arranque de la app: al
+// vencer se confirma con /health antes de despachar initializeAppFailure (el
+// gato). RouteManagerService ya no tiene un temporizador propio.
+export const APP_INIT_TIMEOUT_MS = 10000;
 
 // Factory para el APP_INITIALIZER
 export function initializeApp(

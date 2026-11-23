@@ -14,15 +14,32 @@ import { CreateAIAppDto, UpdateAIAppDto, AIAppQueryDto } from './dto';
  * Plazo máximo de la prueba manual de una aplicación (Super Admin › AI Engine).
  * Sin él, el SDK del proveedor espera hasta 10 min por defecto: la petición del
  * navegador queda colgada ocupando una conexión y la pantalla no responde.
- * El frontend corta a los 120 s, así que este plazo debe ser menor.
+ * Es el plazo por defecto (texto, audio, embeddings…). Imagen y video tardan
+ * más: ver `AI_APP_TEST_TIMEOUT_BY_TYPE_MS`. El frontend corta a los 200 s
+ * (`AI_TEST_ACTION_TIMEOUT_MS`), así que ningún plazo de aquí debe llegar a él.
  */
 export const AI_APP_TEST_TIMEOUT_MS = 90_000;
+
+/**
+ * Plazo de la prueba según el tipo de ejecución. La generación de video suele
+ * pasar de 90 s; con el plazo por defecto la prueba de una app de video
+ * quedaría siempre en `AI_APP_TEST_TIMEOUT`. Para cambiarlo, edita este mapa y
+ * mantén el máximo por debajo del plazo del frontend.
+ */
+export const AI_APP_TEST_TIMEOUT_BY_TYPE_MS: Readonly<Record<string, number>> =
+  {
+    image: 120_000,
+    video: 180_000,
+  };
 
 @Injectable()
 export class AIEngineAppsService {
   private readonly logger = new Logger(AIEngineAppsService.name);
   /** Sobrescribible solo en specs. */
   protected testTimeoutMs = AI_APP_TEST_TIMEOUT_MS;
+  /** Sobrescribible solo en specs. */
+  protected testTimeoutByTypeMs: Readonly<Record<string, number>> =
+    AI_APP_TEST_TIMEOUT_BY_TYPE_MS;
 
   constructor(
     private readonly prisma: GlobalPrismaService,
@@ -334,8 +351,12 @@ export class AIEngineAppsService {
    * app desactivada, error del proveedor o plazo vencido vuelven como
    * `{ success: false, error }` rápido y controlado, para que la pantalla lo
    * muestre en su propio mensaje. Solo una app inexistente sigue siendo 404.
+   *
+   * `clientSignal` (opcional) se aborta cuando el cliente cierra la conexión:
+   * se enlaza al plazo para cancelar la llamada al proveedor y no dejarla
+   * trabajando para nadie.
    */
-  async testApplication(id: number) {
+  async testApplication(id: number, clientSignal?: AbortSignal) {
     const app = await this.findOne(id);
 
     if (!app.is_active) {
@@ -365,10 +386,13 @@ export class AIEngineAppsService {
       app.output_format,
       modelType,
     );
+    const timeoutMs =
+      this.testTimeoutByTypeMs[executionType] ?? this.testTimeoutMs;
     const deadline = new AgentDeadline({
-      wallDeadlineMs: Date.now() + this.testTimeoutMs,
+      wallDeadlineMs: Date.now() + timeoutMs,
       activeBudgetMs: Infinity,
       reserveMs: 0,
+      signal: clientSignal,
     });
     let response: any;
     try {
@@ -380,24 +404,33 @@ export class AIEngineAppsService {
         ),
       );
     } catch (error) {
-      const timedOut = isAgentAbort(error, deadline.signal);
+      const clientGone = !!clientSignal?.aborted;
+      const timedOut = !clientGone && isAgentAbort(error, deadline.signal);
       this.logger.warn(
         `Test of AI app #${id} (${app.key}) failed: ${
-          timedOut
-            ? `timeout after ${this.testTimeoutMs}ms`
-            : error instanceof Error
-              ? error.message
-              : String(error)
+          clientGone
+            ? 'client disconnected, provider call cancelled'
+            : timedOut
+              ? `timeout after ${timeoutMs}ms`
+              : error instanceof Error
+                ? error.message
+                : String(error)
         }`,
       );
       return {
         success: false,
-        error: timedOut
-          ? `El proveedor de IA no respondió en ${Math.round(
-              this.testTimeoutMs / 1000,
-            )} s. Revisa la configuración o inténtalo más tarde.`
-          : this.describeTestFailure(error),
-        error_code: timedOut ? 'AI_APP_TEST_TIMEOUT' : 'AI_APP_TEST_FAILED',
+        error: clientGone
+          ? 'La prueba se canceló porque se cerró la conexión.'
+          : timedOut
+            ? `El proveedor de IA no respondió en ${Math.round(
+                timeoutMs / 1000,
+              )} s. Revisa la configuración o inténtalo más tarde.`
+            : this.describeTestFailure(error),
+        error_code: clientGone
+          ? 'AI_APP_TEST_CANCELLED'
+          : timedOut
+            ? 'AI_APP_TEST_TIMEOUT'
+            : 'AI_APP_TEST_FAILED',
         model_type: executionType,
       };
     } finally {

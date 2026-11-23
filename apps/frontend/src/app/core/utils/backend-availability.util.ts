@@ -21,8 +21,15 @@ import {
  * queda en su pantalla como toast/mensaje; nunca escala a la pantalla global.
  */
 
-/** Plazo para que `/health` conteste antes de considerar el backend caído. */
-export const BACKEND_HEALTH_TIMEOUT_MS = 5_000;
+/**
+ * Plazo corto de CADA intento de `/health`. Si el intento se agota por tiempo
+ * (la petición puede quedar en la cola de conexiones del navegador) se
+ * reintenta una vez antes de dar el backend por caído.
+ */
+export const BACKEND_HEALTH_TIMEOUT_MS = 4_000;
+
+/** Intentos de `/health` cuando el anterior se agotó por tiempo. */
+export const BACKEND_HEALTH_ATTEMPTS = 2;
 
 /**
  * Margen extra que se le da a la resolución del dominio cuando el arranque se
@@ -42,9 +49,37 @@ type FetchLike = (
   init?: { signal?: AbortSignal; cache?: RequestCache },
 ) => Promise<{ ok: boolean }>;
 
+type HealthProbeResult = 'up' | 'down' | 'timeout';
+
+async function probeHealthOnce(
+  apiUrl: string,
+  timeoutMs: number,
+  fetchImpl: FetchLike,
+): Promise<HealthProbeResult> {
+  const controller = new AbortController();
+  let timedOut = false;
+  const timer = setTimeout(() => {
+    timedOut = true;
+    controller.abort();
+  }, timeoutMs);
+  try {
+    const response = await fetchImpl(`${apiUrl}/health`, {
+      signal: controller.signal,
+      cache: 'no-store',
+    });
+    return response?.ok ? 'up' : 'down';
+  } catch {
+    return timedOut ? 'timeout' : 'down';
+  } finally {
+    clearTimeout(timer);
+  }
+}
+
 /**
- * `true` si `GET {apiUrl}/health` responde 2xx dentro del plazo. Va por
- * `fetch` directo (sin interceptores de auth/tenant) y nunca lanza.
+ * `true` si `GET {apiUrl}/health` responde 2xx. Va por `fetch` directo (sin
+ * interceptores de auth/tenant) y nunca lanza. Cada intento tiene su propio
+ * plazo corto; si se agota por tiempo se reintenta (hasta `attempts`) antes de
+ * declarar caída. Un fallo rápido (error de red, 5xx) es caída sin reintento.
  */
 export async function isBackendReachable(
   apiUrl: string,
@@ -52,21 +87,15 @@ export async function isBackendReachable(
   fetchImpl: FetchLike | undefined = typeof fetch === 'function'
     ? (fetch as unknown as FetchLike)
     : undefined,
+  attempts: number = BACKEND_HEALTH_ATTEMPTS,
 ): Promise<boolean> {
   if (!fetchImpl) return false;
-  const controller = new AbortController();
-  const timer = setTimeout(() => controller.abort(), timeoutMs);
-  try {
-    const response = await fetchImpl(`${apiUrl}/health`, {
-      signal: controller.signal,
-      cache: 'no-store',
-    });
-    return !!response?.ok;
-  } catch {
-    return false;
-  } finally {
-    clearTimeout(timer);
+  for (let attempt = 1; attempt <= Math.max(1, attempts); attempt++) {
+    const result = await probeHealthOnce(apiUrl, timeoutMs, fetchImpl);
+    if (result === 'up') return true;
+    if (result === 'down') return false;
   }
+  return false;
 }
 
 /**
