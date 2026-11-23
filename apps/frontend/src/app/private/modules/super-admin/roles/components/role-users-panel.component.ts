@@ -29,6 +29,7 @@ import {
 import { Role, RoleUserAssignment } from '../interfaces/role.interface';
 import { RolesService } from '../services/roles.service';
 import { superadminRoleErrorMessage } from '../utils/superadmin-role-errors';
+import { isSuperadminAssignableRole } from '../utils/superadmin-assignable-roles';
 import { UsersService } from '../../users/services/users.service';
 import { User } from '../../users/interfaces/user.interface';
 
@@ -84,61 +85,69 @@ const ORG_WIDE = '';
         </div>
 
         <!-- Asignar -->
-        <div class="flex flex-col gap-3">
-          <h4 class="text-sm font-semibold text-text-primary">
-            Asignar a un usuario
-          </h4>
+        @if (canAssign()) {
+          <div class="flex flex-col gap-3">
+            <h4 class="text-sm font-semibold text-text-primary">
+              Asignar a un usuario
+            </h4>
 
-          @if (canChooseStore()) {
-            <app-selector
-              label="Alcance de la asignación"
-              [options]="storeSelectorOptions()"
-              [formControl]="storeControl"
+            @if (canChooseStore()) {
+              <app-selector
+                label="Alcance de la asignación"
+                [options]="storeSelectorOptions()"
+                [formControl]="storeControl"
+                size="sm"
+                variant="outline"
+                (valueChange)="onStoreChange($event)"
+              ></app-selector>
+            }
+
+            <app-inputsearch
+              placeholder="Buscar usuario por nombre o email..."
+              [debounceTime]="400"
               size="sm"
-              variant="outline"
-              (valueChange)="onStoreChange($event)"
-            ></app-selector>
-          }
+              (searchChange)="onUserSearch($event)"
+            ></app-inputsearch>
 
-          <app-inputsearch
-            placeholder="Buscar usuario por nombre o email..."
-            [debounceTime]="400"
-            size="sm"
-            (searchChange)="onUserSearch($event)"
-          ></app-inputsearch>
-
-          @if (isSearching()) {
-            <p class="text-xs text-text-secondary">Buscando usuarios...</p>
-          } @else if (searchTerm() && candidates().length === 0) {
-            <p class="text-xs text-text-secondary">
-              Sin usuarios que coincidan con "{{ searchTerm() }}".
-            </p>
-          } @else if (candidates().length > 0) {
-            <ul class="flex flex-col divide-y divide-[var(--color-border)]">
-              @for (candidate of candidates(); track candidate.id) {
-                <li class="flex items-center justify-between gap-3 py-2">
-                  <div class="min-w-0">
-                    <p class="text-sm text-text-primary truncate">
-                      {{ candidate.first_name }} {{ candidate.last_name }}
-                    </p>
-                    <p class="text-xs text-text-secondary truncate">
-                      {{ candidate.email }}
-                    </p>
-                  </div>
-                  <app-button
-                    variant="outline"
-                    size="sm"
-                    iconName="user-plus"
-                    [disabled]="isMutating() || isAlreadyAssigned(candidate.id)"
-                    (clicked)="assign(candidate)"
-                  >
-                    {{ isAlreadyAssigned(candidate.id) ? 'Asignado' : 'Asignar' }}
-                  </app-button>
-                </li>
-              }
-            </ul>
-          }
-        </div>
+            @if (isSearching()) {
+              <p class="text-xs text-text-secondary">Buscando usuarios...</p>
+            } @else if (searchTerm() && candidates().length === 0) {
+              <p class="text-xs text-text-secondary">
+                Sin usuarios que coincidan con "{{ searchTerm() }}".
+              </p>
+            } @else if (candidates().length > 0) {
+              <ul class="flex flex-col divide-y divide-[var(--color-border)]">
+                @for (candidate of candidates(); track candidate.id) {
+                  <li class="flex items-center justify-between gap-3 py-2">
+                    <div class="min-w-0">
+                      <p class="text-sm text-text-primary truncate">
+                        {{ candidate.first_name }} {{ candidate.last_name }}
+                      </p>
+                      <p class="text-xs text-text-secondary truncate">
+                        {{ candidate.email }}
+                      </p>
+                    </div>
+                    <app-button
+                      variant="outline"
+                      size="sm"
+                      iconName="user-plus"
+                      [disabled]="isMutating() || isAlreadyAssigned(candidate.id)"
+                      (clicked)="assign(candidate)"
+                    >
+                      {{ isAlreadyAssigned(candidate.id) ? 'Asignado' : 'Asignar' }}
+                    </app-button>
+                  </li>
+                }
+              </ul>
+            }
+          </div>
+        } @else {
+          <p class="text-xs text-text-secondary">
+            El rol cliente identifica a los clientes finales de las tiendas y no
+            se asigna desde el Super Admin. Puedes quitarlo de un usuario si fue
+            asignado por error.
+          </p>
+        }
 
         <!-- Asignados -->
         <div class="flex flex-col gap-2">
@@ -152,7 +161,7 @@ const ORG_WIDE = '';
             <app-empty-state
               icon="users"
               title="Sin usuarios asignados"
-              description="Busca un usuario arriba para asignarle este rol."
+              [description]="emptyAssignmentsHint()"
               [showActionButton]="false"
             ></app-empty-state>
           } @else {
@@ -249,6 +258,18 @@ export class RoleUsersPanelComponent {
    * - `system`: no tiene organización dueña, así que se asigna org-wide.
    */
   readonly canChooseStore = computed(() => this.role()?.scope === 'organization');
+
+  /** El rol `customer` se lista (y se puede quitar) pero no se asigna aquí. */
+  readonly canAssign = computed(() => {
+    const role = this.role();
+    return role ? isSuperadminAssignableRole(role) : false;
+  });
+
+  readonly emptyAssignmentsHint = computed(() =>
+    this.canAssign()
+      ? 'Busca un usuario arriba para asignarle este rol.'
+      : 'Ningún usuario de Vendix tiene este rol.',
+  );
 
   readonly scopeHint = computed(() => {
     const role = this.role();
