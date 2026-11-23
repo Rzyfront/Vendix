@@ -84,7 +84,7 @@ Dentro de Lambda el handler es la tarea superior de su espacio de PIDs (`ppid 0`
 | `AI_ANALYSIS_RUNTIME_DIGEST` | `sha256:<64 hex>` inyectado en la imagen construida |
 | `AI_ANALYSIS_CERTIFIED_DIGEST` | `sha256:<64 hex>` **idéntico** a `AI_ANALYSIS_RUNTIME_DIGEST`, fijado solo tras completar T53 |
 
-Además, el backend requiere `SandboxAuditRepository.sourceAvailable()` (cifrado de fuente en `ai_agent_script_runs`), `@aws-sdk/client-lambda` (dependencia de `apps/backend`; se carga en tiempo de ejecución), Redis para la ranura de 1 análisis simultáneo por tienda y la capacidad de plan `vex.code_analysis` activa para la tienda.
+Además, el backend requiere que `SandboxAuditRepository.sourceAvailable()` devuelva `true`: `AI_SANDBOX_SOURCE_KEY` con 32 bytes en base64 canónico, la clave que cifra el código fuente en `ai_agent_script_runs` (si falta, el análisis queda no disponible), `@aws-sdk/client-lambda` (dependencia de `apps/backend`; se carga en tiempo de ejecución), Redis para la ranura de 1 análisis simultáneo por tienda y la capacidad de plan `vex.code_analysis` activa para la tienda.
 
 **Encendido en producción:** checklist ordenado (permiso `lambda:InvokeFunction`, las 5 variables, verificación con Vex y rollback) en la sección «Encendido en el release» de `CERTIFICACION-T53.md`.
 
@@ -108,11 +108,10 @@ Las pruebas de `handler.py` mockean `subprocess.Popen` y validan limpieza de `/t
 ## Rollback
 
 1. **Apagar (inmediato, sin tocar AWS):** quitar `AI_ANALYSIS_SANDBOX_ENABLED` (o dejarlo distinto de `'true'`) en el backend y reiniciarlo. `configuration()` devuelve `null` y Vex vuelve a `compute`.
-2. **Volver a una imagen anterior:** actualizar solo el parámetro `ImageUri` del stack con el digest de la imagen certificada anterior y fijar `AI_ANALYSIS_RUNTIME_DIGEST`/`AI_ANALYSIS_CERTIFIED_DIGEST` a su runtime digest:
+2. **No hay imagen anterior a la que volver.** El rollback es el paso 1. La imagen de la corrida 5 (`rt-1f10b7243591`) no sirve como vuelta atrás: no trae los arreglos de B1 (la limpieza de hasta ~19 s corre a cargo de la tienda siguiente) y la auditoría r1 no aceptó su sello. Una imagen nueva solo se despliega con su propia corrida T53 certificada o aceptada con riesgo documentado por el dueño, cambiando solo el parámetro `ImageUri` del stack y fijando `AI_ANALYSIS_RUNTIME_DIGEST`/`AI_ANALYSIS_CERTIFIED_DIGEST` a su runtime digest:
    `aws cloudformation update-stack --stack-name vendix-vex-analysis-stack --use-previous-template --capabilities CAPABILITY_IAM CAPABILITY_NAMED_IAM --parameters ParameterKey=ImageUri,ParameterValue=<account>.dkr.ecr.us-east-1.amazonaws.com/vendix-vex-analysis-runtime@sha256:<digest> ParameterKey=FunctionName,UsePreviousValue=true ParameterKey=ReservedConcurrency,UsePreviousValue=true ParameterKey=Architecture,UsePreviousValue=true ParameterKey=VpcCidr,UsePreviousValue=true ParameterKey=SubnetACidr,UsePreviousValue=true ParameterKey=SubnetBCidr,UsePreviousValue=true`.
-   Solo imágenes con una corrida T53 certificada o aceptada con riesgo documentado por el dueño; las demás no se usan.
 3. **Retirar del todo:** con la feature apagada, `aws cloudformation delete-stack --stack-name vendix-vex-analysis-stack` (borra función, VPC, subredes, SG y rol; no hay datos) y después las imágenes: `aws ecr batch-delete-image --repository-name vendix-vex-analysis-runtime --image-ids imageTag=rt-…` y, si no queda ninguna, `aws ecr delete-repository --repository-name vendix-vex-analysis-runtime`.
-4. **Imágenes que sobran hoy:** todas las `rt-*` salvo la desplegada (`rt-ada2b02f1d00`, corrida 6) y, como vuelta atrás, la de la corrida 5 (`rt-1f10b7243591`); ver «Recursos» en `CERTIFICACION-T53.md`. Borrarlas es decisión del dueño.
+4. **Imágenes que sobran hoy:** todas las `rt-*` salvo la desplegada (`rt-ada2b02f1d00`, corrida 6), incluida la de la corrida 5 (`rt-1f10b7243591`), que no es vuelta atrás válida; ver «Hallazgos operativos (corrida 6)», punto 2, en `CERTIFICACION-T53.md`. Borrarlas es decisión del dueño.
 
 ---
 
