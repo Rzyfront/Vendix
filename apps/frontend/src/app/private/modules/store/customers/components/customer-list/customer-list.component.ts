@@ -207,8 +207,6 @@ export class CustomerListComponent {
     ];
   });
 
-  /** Filtro de segmento/etiqueta vigente, para no perderlo al cambiar otro. */
-  private readonly crmFilterValues = signal<{ tag_id?: number; segment_id?: number }>({});
 
   get totalPages(): number {
     return Math.ceil(this.totalItems() / this.limit());
@@ -397,30 +395,32 @@ export class CustomerListComponent {
   }
 
   onFilterChange(values: FilterValues): void {
+    const previous = this.filterValues();
     const department = (values['department'] as string | null) || null;
-    const departmentChanged = department !== this.filterValues()['department'];
+    const departmentChanged = department !== previous['department'];
     // A new department invalidates the city chosen for the previous one.
     const city = departmentChanged ? null : (values['city'] as string | null) || null;
 
-    this.filterValues.set({ department, city });
+    // Se guarda el objeto COMPLETO: el panel compara el numero de claves y
+    // pisaria el valor elegido si aqui se perdieran `segment`/`tag`.
+    this.filterValues.set({ ...values, department, city });
     if (departmentChanged) this.loadMunicipalities(department);
-    this.emitLocationFilter();
+
+    const locationChanged = departmentChanged || city !== previous['city'];
+    if (locationChanged) this.emitLocationFilter();
 
     const segmentId = toCrmFilterId(values['segment']);
     const tagId = toCrmFilterId(values['tag']);
-    const next = { segment_id: segmentId, tag_id: tagId };
-    const previous = this.crmFilterValues();
-    this.crmFilterValues.set(next);
-    if (previous.segment_id !== segmentId || previous.tag_id !== tagId) {
-      this.crmFilter.emit(next);
-    }
+    const crmChanged =
+      segmentId !== toCrmFilterId(previous['segment']) ||
+      tagId !== toCrmFilterId(previous['tag']);
+    if (crmChanged) this.crmFilter.emit({ segment_id: segmentId, tag_id: tagId });
   }
 
   clearFilters(): void {
-    this.filterValues.set({ department: null, city: null });
+    this.filterValues.set({});
     this.municipalities.set([]);
     this.emitLocationFilter();
-    this.crmFilterValues.set({});
     this.crmFilter.emit({});
   }
 

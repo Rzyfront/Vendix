@@ -1,4 +1,4 @@
-import { Module, OnModuleInit } from '@nestjs/common';
+import { forwardRef, Module, OnModuleInit } from '@nestjs/common';
 import { AuditService } from '../../../../common/audit/audit.service';
 import { AIToolRegistry } from '../../../../ai-engine/tools/ai-tool-registry';
 import { createCrmCustomerTools } from '../../../../ai-engine/tools/domains/crm-customers.tools';
@@ -47,7 +47,9 @@ import { CrmUnsubscribeService } from './campaigns/crm-unsubscribe.service';
 @Module({
   imports: [
     ResponseModule,
-    CustomersModule,
+    // Ciclo explicito: CustomersModule importa este modulo por
+    // `CrmSegmentQueryService` (filtro por segmento del listado).
+    forwardRef(() => CustomersModule),
     NotificationsModule,
     S3Module,
     DataCollectionModule,

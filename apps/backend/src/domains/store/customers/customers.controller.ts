@@ -10,8 +10,6 @@ import {
   Req,
   ParseIntPipe,
   Query,
-  Inject,
-  forwardRef,
 } from '@nestjs/common';
 import { Throttle } from '@nestjs/throttler';
 import { CustomersService } from './customers.service';
@@ -35,12 +33,18 @@ import {
 
 
 /** `1,2,3` → `[1,2,3]`; ids invalidos se descartan en vez de romper el listado. */
+const MAX_FILTER_IDS = 50;
+const INT4_MAX = 2_147_483_647;
+
 function parseIdList(raw: string | undefined): number[] {
   if (!raw) return [];
   const ids = new Set<number>();
   for (const part of raw.split(',')) {
     const id = Number(part.trim());
-    if (Number.isInteger(id) && id > 0) ids.add(id);
+    // Fuera de int4 Postgres rechaza el bind y el listado daria 500.
+    if (!Number.isInteger(id) || id < 1 || id > INT4_MAX) continue;
+    ids.add(id);
+    if (ids.size >= MAX_FILTER_IDS) break;
   }
   return [...ids];
 }
@@ -54,7 +58,6 @@ export class CustomersController {
     private readonly externalIdentityLookupService: ExternalIdentityLookupService,
     private readonly responseService: ResponseService,
     private readonly addressesService: AddressesService,
-    @Inject(forwardRef(() => CrmSegmentQueryService))
     private readonly segmentQuery: CrmSegmentQueryService,
   ) {}
 
