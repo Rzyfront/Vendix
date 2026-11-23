@@ -25,9 +25,9 @@ Las corridas 5, 4, 3, 2 y 1 quedan abajo como historial. Higiene: en este docume
 1. Sobre la imagen certificada anterior, invocar un análisis que detiene a su padre (`SIGSTOP`) y luego: nada; crea enlaces duros en la raíz de `/tmp` durante 25 s (un inodo, y rotando inodos); o crea directorios durante 25 s. Tras cada uno, tres tiendas A, B y C.
 2. Invocar un análisis que deja un daemon (doble `fork` + `setsid`) bajando límites y subiendo `nice` de todo proceso del uid mientras inunda `/tmp`, y mata a su padre; después A, B y C leen límites y `nice` del handler nuevo.
 3. Desplegar la imagen con los arreglos, repetir 1 y 2 y la T53 completa (egreso, FS/`/proc`/secretos, límites, 100 × 3 tiendas, IAM/red, digests).
-4. Comprobar el SHA-256 de la evidencia y la firma del tag (`git tag -v t53-r6-cert`).
+4. Comprobar el SHA-256 de la evidencia y la firma del tag vigente (`git tag -v t53-r6-aceptada`).
 
-**Criterios de aceptación observables:** ninguna tienda ve datos de otra; tras cada ataque el entorno vuelve a `ok` con `/tmp` estable y el handler con los valores de Lambda; el atacante no consume el presupuesto de la tienda siguiente (como mucho una respuesta rápida `sandbox busy`); la evidencia y la firma se verifican sin acceso a la cuenta.
+**Criterios de aceptación observables:** ninguna tienda ve datos de otra; tras cada ataque el entorno vuelve a `ok` con `/tmp` estable y el handler con los valores de Lambda; el atacante no consume el presupuesto de la tienda siguiente (como mucho **4** respuestas rápidas `sandbox busy` por ataque, el mismo criterio de «Experimento obligatorio en cada corrida»; observadas: 4, en el límite); la evidencia y la firma se verifican sin acceso a la cuenta.
 
 **Lo que se observó:** ninguna fuga (100/100 en los 16 controles, 293/293 sobres con el digest esperado). Lambda **reinicia el entorno** tras `Sandbox.Timedout` o la muerte del runtime (proceso `init` nuevo; ningún proceso del invitado sobrevive en 36 de 36 casos, sumando ambas imágenes) y **conserva `/tmp`**. Con los arreglos, la limpieza sale del presupuesto de la tienda y pasa a INIT; pero un invitado que para al vigilante y crea directorios durante 25 s deja ~16 s de limpieza que, repartidos, producen 4 respuestas `sandbox busy` seguidas. El vigilante **no se puede proteger** de `SIGSTOP` en Lambda (mismo uid; `seccomp`, `prctl`, `unshare` y `ptrace` denegados).
 
@@ -40,7 +40,7 @@ Las corridas 5, 4, 3, 2 y 1 quedan abajo como historial. Higiene: en este docume
 | 3 | Límites de recursos | **Topes: PASAN. B1: riesgo residual de disponibilidad ACEPTADO por el dueño (2026-11-22), sin fuga medida.** 25 casos clásicos, daemon, 9 ataques de enlaces duros (2,0-2,3 s), 8 ataques a los atributos del handler y la observación 1, cada uno seguido de tiendas: 79/79 `ok`, `/tmp` estable, solo `init`, handler con los valores de Lambda. B1: ver abajo |
 | 4 | Multi-tenant (100 × 3) | **PASA.** 100/100 en los 16 controles |
 | 5 | Política IAM y red | **PASA.** Sin cambios; drift `IN_SYNC` (0); `simulate-custom-policy`: `InvokeFunction` `allowed` solo sobre esta función |
-| 6 | Firma y digest | **PASA.** Digest ECR del tag `rt-ada2b02f1d00` = `CodeSha256` = `ResolvedImageUri` = `Code.ImageUri` = parámetro `ImageUri` = `sha256:b62b6f9f…015b`; las 293 respuestas con sobre (de 313 invocaciones sobre la imagen; las 20 restantes son `Sandbox.Timedout`/`Runtime.ExitError` buscados) traen `runtime_digest = sha256:ada2b02f…fd25` = `./runtime-digest.sh` en `26dd8aa11`. Imagen local verificada antes del push (`ENV`, `handler.py`/`runner.py` byte a byte, intérprete `0711`). Commit y tag firmados (SSH) |
+| 6 | Firma y digest | **PASA.** Digest ECR del tag `rt-ada2b02f1d00` = `CodeSha256` = `ResolvedImageUri` = `Code.ImageUri` = parámetro `ImageUri` = `sha256:b62b6f9f…015b`; las 293 respuestas con sobre (de 313 invocaciones sobre la imagen; las 20 restantes son `Sandbox.Timedout`/`Runtime.ExitError` buscados) traen `runtime_digest = sha256:ada2b02f…fd25` = `./runtime-digest.sh` en `26dd8aa11`. Imagen local verificada antes del push (`ENV`, `handler.py`/`runner.py` byte a byte, intérprete `0711`). Firmados (SSH): el commit que publica este documento y los tags; los commits que definen el runtime digest (`26dd8aa11`, `ab9e17822`) **no** están firmados (en la rama, 5 de 23 commits firmados) |
 
 ## B1 · el invitado detiene o mata al vigilante
 
@@ -83,7 +83,7 @@ Un invitado puede dejar ciego al vigilante. Lo que eso permite, medido:
 
 **Elegida: (a2), aceptar el riesgo residual de B1 y encender el análisis en el próximo release a `main`** (Rafael, 2026-11-22 21:16 Bogotá).
 
-Motivo: el riesgo es de disponibilidad, no de fuga (cero marcadores ajenos medidos en los puntos 1, 2 y 4), y el código que corre lo escribe Vex con nuestras reglas; la vía de ataque es una inyección de prompt, cuyo efecto máximo medido es degradar el análisis unos segundos por ataque.
+Motivo: el riesgo es de disponibilidad, no de fuga (cero marcadores ajenos medidos en los puntos 1, 2 y 4), y el código que corre lo escribe Vex con nuestras reglas; la vía de ataque es una inyección de prompt. Su efecto máximo medido no es una espera sino **análisis fallidos de otras tiendas**: el entorno atacado queda ocupado hasta 30 s y después necesita ~16 s de limpieza, durante los cuales 3 análisis ajenos (y la repetición del atacante) recibieron `sandbox busy`, que la tienda ve como un análisis fallido (ver «Limitaciones conocidas»).
 
 **Mejora posterior, no se hace ahora: (b) aislamiento por inquilino.** Sigue como estaba evaluada:
 
@@ -98,12 +98,13 @@ Es el complemento que la opción (b) pedía «en ambos casos». No cambia la ima
 - **Antes:** la admisión en Postgres (`SandboxAuditRepository.start`, con `pg_advisory_xact_lock` compartido entre instancias) ya permitía 1 corrida por tienda, pero su lease vence **30 s después de la admisión** (fijado por un `CHECK` de la migración `20261018120000_ai_agent_script_runs`). La Lambda arranca después de la admisión y puede vivir hasta su timeout (30 s) más el despacho y un arranque en frío, así que una tienda podía lanzar una segunda invocación mientras la primera seguía ocupando un entorno.
 - **Ahora** (`sandbox-store-slot.service.ts`): antes de la fila de auditoría y de invocar, `SandboxAnalysisBrokerService` toma en Redis la ranura `ai:analysis:store-slot:<store_id>` con `SET NX PX 45000` (Redis compartido por todas las instancias del backend). TTL 45 s = timeout de la Lambda (30 s) + 15 s de despacho y arranque en frío.
 - **Liberación:** se libera (borrado condicionado a su token) en el `finally` cuando la Lambda ya respondió (`ok`, errores del invitado, `ANALYSIS_PROTOCOL`/`OUTPUT`/`LIMIT`) o nunca se despachó. Ante `ANALYSIS_EXPIRED` o `ANALYSIS_UNAVAILABLE` tras el despacho, la Lambda puede seguir viva (B1), así que la ranura se conserva hasta su TTL.
-- **Respuesta a la tienda ocupada:** `ANALYSIS_LIMIT` (código existente; Vex ya lo traduce como «Ya hay otro análisis en curso en esta tienda; espera a que termine»). No consume uno de los 2 intentos del objetivo. Redis caído: `ANALYSIS_UNAVAILABLE` (falla cerrado). Sin cambio de contrato.
+- **Respuesta a la tienda ocupada:** `ANALYSIS_LIMIT` (código existente; Vex ya lo traduce como «Ya hay otro análisis en curso en esta tienda; espera a que termine»). Esta respuesta de la ranura Redis no consume uno de los 2 intentos del objetivo. No confundir con `sandbox busy` de la Lambda, que sí lo consume (ver «Limitaciones conocidas»). Redis caído: `ANALYSIS_UNAVAILABLE` (falla cerrado). Sin cambio de contrato.
 - **Specs:** `sandbox-store-slot.service.spec.ts` (6) y `sandbox-analysis-broker.service.spec.ts` (29, 10 nuevos).
 
 ## Limitaciones conocidas de esta certificación
 
 - **El peor caso tiene una sola muestra.** En la imagen nueva, `SIGSTOP` + `mkdir` 25 s corrió una vez (la repetición recibió `sandbox busy`); las cifras de recuperación (~16 s de limpieza, 4 `sandbox busy`, 9,4 s de cliente en la primera) y el criterio «≤ 4 `sandbox busy` por ataque» descansan en n = 1.
+- **`sandbox busy` es un análisis fallido para una tienda inocente.** La Lambda lo devuelve como `ANALYSIS_RUNTIME` (`handler.py`, «sandbox busy: cleanup of a previous run did not finish, retry»), así que la tienda ve que su análisis falló, no una espera. Tras un ataque `SIGSTOP` + `mkdir` el coste medido es: hasta **30 s** de entorno ocupado (tiempo máximo de la función) más **~16 s** de recuperación, con 3 análisis de otras tiendas fallidos (más la repetición del atacante) antes de la primera `ok`. Como la fila de auditoría se crea antes de invocar la Lambda, ese fallo cuenta como uno de los 2 intentos del objetivo de la tienda (lectura de `sandbox-analysis-broker.service.ts` y `sandbox-audit.repository.ts`; no medido en Lambda).
 - **Nada se midió en paralelo.** Todas las fases fueron secuenciales; «3 ataques simultáneos dejan el análisis sin servicio para todas las tiendas» es un razonamiento, no una medición.
 - **Sin detección automática.** La Lambda no tiene logs por diseño y no hay alarma, consulta ni criterio automático de apagado ante un ataque B1; la única defensa operativa es el rollback manual del interruptor (`AI_ANALYSIS_SANDBOX_ENABLED=false`).
 - **La clave de firma es autoatestada.** La generó el operador y su parte pública solo consta en este documento; la firma prueba integridad y continuidad del texto, no identidad ni autoría de la decisión.
@@ -201,7 +202,7 @@ Ver la tabla de resultados. `./runtime-digest.sh` en `26dd8aa11` = `sha256:ada2b
   echo 'aurora@abkbusiness.com ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIC4JLezCK3YzQGbRTZvfjpmmuMD4SoRP9D26i+GQHWhz' > /tmp/allowed_signers
   git -c gpg.ssh.allowedSignersFile=/tmp/allowed_signers tag -v t53-r6-cert
   git -c gpg.ssh.allowedSignersFile=/tmp/allowed_signers tag -v t53-r6-aceptada
-  git -c gpg.ssh.allowedSignersFile=/tmp/allowed_signers log --show-signature -1 t53-r6-cert
+  git -c gpg.ssh.allowedSignersFile=/tmp/allowed_signers log --show-signature -1 t53-r6-aceptada
   ```
 
   La firma ata el texto de este documento (y con él los SHA-256 de la evidencia y los digests) a esa clave; no hay firma de la imagen ni atestación de procedencia (el build usa `--provenance=false`).
@@ -243,7 +244,7 @@ Cualquier cambio en `Dockerfile`, `requirements.txt`, `handler.py`, `runner.py` 
 
 Lo hace un operador autorizado **el día del release a `main`**, en este orden. Nada de esto se ejecutó al preparar el documento.
 
-**0. Antes del merge.** El release debe incluir `@aws-sdk/client-lambda` en `apps/backend/package.json` (commit `build(vex-analysis)` de esta rama). Sin el SDK, el transporte responde `ANALYSIS_UNAVAILABLE` aunque el interruptor esté encendido. Redis del backend operativo (lo usa la ranura por tienda).
+**0. Antes del merge.** El release debe incluir `@aws-sdk/client-lambda` en `apps/backend/package.json` (commit `build(vex-analysis)` de esta rama). Sin el SDK, el transporte responde `ANALYSIS_UNAVAILABLE` aunque el interruptor esté encendido. Redis del backend operativo (lo usa la ranura por tienda). `AI_SANDBOX_SOURCE_KEY` definida en el backend y el worker: `SandboxAuditRepository.sourceAvailable()` exige que sea una clave de 32 bytes en base64 canónico (44 caracteres terminados en `=`, por ejemplo generada con `openssl rand -base64 32`), con la que se cifra el código fuente guardado en `ai_agent_script_runs`. Si falta o no tiene esa forma, `sourceAvailable()` devuelve `false` y el análisis queda no disponible (falla cerrado, sin invocar la Lambda) aunque el interruptor esté encendido. Si ya existe, no se cambia: el código guardado con la clave anterior dejaría de poder leerse.
 
 **1. Permiso de invocación al principal del backend.** Primero identifica con qué principal llama el backend a AWS (rol de instancia o usuario IAM de `AWS_ACCESS_KEY_ID`, según el entorno), desde el contenedor `vendix_backend` de producción:
 
@@ -297,9 +298,9 @@ Antes de reiniciar, confirma en AWS que la función sirve esa imagen: `aws lambd
 4. **Se ve:** un bloque nuevo (tabla, serie o cifra) con el promedio móvil y el día pico, que muestra el código usado. El primer análisis tras el despliegue puede tardar ~20 s (arranque en frío); los siguientes, ~3 s.
 5. **Aviso de ocupado:** si en otra pestaña de la misma tienda se pide otro análisis mientras el primero corre, Vex dice «Ya hay otro análisis en curso en esta tienda; espera a que termine».
 
-Confirmación técnica: la fila de `ai_agent_script_runs` de esa tienda queda con `outcome = 'ok'` y `runtime_digest = 'sha256:ada2b02f…fd25'` (consulta de solo lectura por `store_id`, la más reciente). En `docker logs --tail 200 vendix_backend` **no** debe aparecer `analysis invoke failed`. Si Vex responde «El análisis avanzado con código no está disponible en este momento», revisa en este orden: variables y reinicio (paso 2), SDK en la imagen (paso 0), permiso (paso 1) y plan de la tienda.
+Confirmación técnica: la fila de `ai_agent_script_runs` de esa tienda queda con `outcome = 'ok'` y `runtime_digest = 'sha256:ada2b02f…fd25'` (consulta de solo lectura por `store_id`, la más reciente). En `docker logs --tail 200 vendix_backend` **no** debe aparecer `analysis invoke failed`. Si Vex responde «El análisis avanzado con código no está disponible en este momento», revisa en este orden: variables y reinicio (paso 2), `AI_SANDBOX_SOURCE_KEY` con la forma que exige `sourceAvailable()` (paso 0), SDK en la imagen (paso 0), permiso (paso 1) y plan de la tienda.
 
-**4. Rollback.** `AI_ANALYSIS_SANDBOX_ENABLED=false` (o quitar la variable) en el backend de producción y reiniciar backend y worker: `configuration()` devuelve `null` y Vex vuelve a `compute` sin tocar AWS. La política del paso 1 puede quedarse (solo permite invocar esta función) o retirarse con `aws iam delete-role-policy --role-name <role> --policy-name vendix-vex-analysis-invoke`. El resto, en «Rollback» del README.
+**4. Rollback.** `AI_ANALYSIS_SANDBOX_ENABLED=false` (o quitar la variable) en el backend de producción y reiniciar backend y worker: `configuration()` devuelve `null` y Vex vuelve a `compute` sin tocar AWS. Este es el rollback real y suficiente: no hay imagen anterior a la que volver (la de la corrida 5 no trae los arreglos de B1 y la auditoría r1 no aceptó su sello). La política del paso 1 puede quedarse (solo permite invocar esta función) o retirarse con `aws iam delete-role-policy --role-name <role> --policy-name vendix-vex-analysis-invoke`. El resto, en «Rollback» del README.
 
 ---
 
