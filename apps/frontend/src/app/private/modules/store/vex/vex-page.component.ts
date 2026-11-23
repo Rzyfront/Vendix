@@ -199,16 +199,35 @@ function isDesktop(): boolean {
           <div class="relative z-10 flex-1 min-h-0">
             <vendix-vex-thread />
           </div>
-          <div class="relative z-10 max-w-3xl mx-auto w-full px-4 pb-4" data-tour="vex-composer">
+          <div
+            class="relative z-10 shrink-0 max-w-3xl mx-auto w-full px-4 pb-[max(1rem,env(safe-area-inset-bottom))]"
+            data-tour="vex-composer"
+          >
             <vendix-vex-composer />
           </div>
         } @else {
+          <!--
+            Empty state: the welcome (greeting, questions, tasks) scrolls and
+            the composer sticks to the bottom, so on a phone the field to
+            write or talk is always on screen. When everything fits (desktop)
+            the block stays centered as before.
+          -->
           <div
-            class="relative z-10 flex-1 flex flex-col items-center justify-center gap-8 max-w-3xl mx-auto w-full px-4 pb-16"
+            class="relative z-10 flex-1 min-h-0 overflow-y-auto overscroll-contain"
+            data-testid="vex-welcome-scroll"
           >
-            <vendix-vex-welcome (helpRequested)="help_open.set(true)" />
-            <div class="w-full" data-tour="vex-composer">
-              <vendix-vex-composer />
+            <div
+              class="min-h-full max-w-3xl mx-auto w-full px-4 flex flex-col justify-center"
+            >
+              <div class="pt-2 pb-6 md:pb-8">
+                <vendix-vex-welcome (helpRequested)="help_open.set(true)" />
+              </div>
+              <div
+                class="sticky bottom-0 w-full pt-3 pb-[max(1rem,env(safe-area-inset-bottom))] lg:pb-16 max-lg:bg-gradient-to-t max-lg:from-background max-lg:from-90% max-lg:to-transparent"
+                data-tour="vex-composer"
+              >
+                <vendix-vex-composer />
+              </div>
             </div>
           </div>
         }

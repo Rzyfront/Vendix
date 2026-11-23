@@ -43,6 +43,12 @@ export interface PosCustomer {
   is_withholding_agent?: boolean;
   address?: string;
   addresses?: PosCustomerAddress[];
+  /**
+   * Establecimiento (id de `addresses`) elegido en el buscador de venta, que
+   * lista una línea por sede. Solo frontend: el paso de envío y la cotización
+   * lo preseleccionan; el usuario puede cambiarlo.
+   */
+  preferred_address_id?: number | null;
   created_at: Date;
   updated_at: Date;
   queueEntryId?: number;

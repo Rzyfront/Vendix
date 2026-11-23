@@ -9,3 +9,4 @@ export { CreateVehicleDto } from './create-vehicle.dto';
 export { UpdateVehicleDto } from './update-vehicle.dto';
 export { AddStopsDto, AddStopItemDto } from './add-stops.dto';
 export { ReorderStopsDto, ReorderStopItemDto } from './reorder-stops.dto';
+export { AvailableNotesQueryDto } from './available-notes-query.dto';

@@ -10,6 +10,7 @@ import {
 } from '@angular/core';
 import { FormsModule } from '@angular/forms';
 import { takeUntilDestroyed } from '@angular/core/rxjs-interop';
+import { Subscription } from 'rxjs';
 import { PlanillasRutasService } from '../../services/planillas-rutas.service';
 import { ToastService } from '../../../../../../shared/components/toast/toast.service';
 import { ModalComponent } from '../../../../../../shared/components/modal/modal.component';
@@ -22,6 +23,7 @@ import {
 } from '../../../../../../shared/components/input-buttons/input-buttons.component';
 import { EmptyStateComponent } from '../../../../../../shared/components/empty-state/empty-state.component';
 import { BadgeComponent } from '../../../../../../shared/components/badge/badge.component';
+import { PaginationComponent } from '../../../../../../shared/components/pagination/pagination.component';
 import { CurrencyPipe } from '../../../../../../shared/pipes/currency/currency.pipe';
 import { AuthFacade } from '../../../../../../core/store/auth/auth.facade';
 import { OrdersService } from '../../../orders/services/orders.service';
@@ -33,6 +35,9 @@ import {
 } from '../../../dispatch-notes/services/dispatch-notes.service';
 import { DispatchDeliveryAddress } from '../../interfaces/planilla.interface';
 import { customerDisplayName } from '../../../../../../shared/utils/customer-display-name.util';
+
+/** Tamaño de página del selector de remisiones disponibles (máx. 100 en backend). */
+const AVAILABLE_NOTES_PAGE_SIZE = 15;
 
 /**
  * Elegible dispatch note surfaced in the picker. Mirrors the shape returned by
@@ -83,6 +88,7 @@ interface AvailableNote {
     InputButtonsComponent,
     EmptyStateComponent,
     BadgeComponent,
+    PaginationComponent,
   ],
   template: `
     <app-modal
@@ -119,7 +125,7 @@ interface AvailableNote {
         >
           <p class="text-sm text-[var(--color-text-secondary)]">
             <strong class="text-[var(--color-text-primary)]">{{
-              availableForPicking().length
+              notesTotal()
             }}</strong>
             disponibles ·
             <strong class="text-[var(--color-text-primary)]">{{
@@ -141,9 +147,9 @@ interface AvailableNote {
 
         <!-- Buscador de remisiones disponibles -->
         <app-inputsearch
-          placeholder="Buscar remisión por número o cliente..."
-          [debounceTime]="250"
-          (searchChange)="noteSearch.set($event)"
+          placeholder="Buscar remisión por número, cliente o documento..."
+          [debounceTime]="300"
+          (searchChange)="onNoteSearch($event)"
         ></app-inputsearch>
 
         <!-- Remisiones disponibles -->
@@ -151,7 +157,7 @@ interface AvailableNote {
           <h3
             class="text-sm font-semibold text-[var(--color-text-primary)] mb-2"
           >
-            Disponibles ({{ availableForPicking().length }})
+            Disponibles ({{ notesTotal() }})
           </h3>
           <div
             class="max-h-64 overflow-y-auto rounded-lg border border-[var(--color-border)] bg-[var(--color-surface)] p-1.5 space-y-1"
@@ -172,12 +178,31 @@ interface AvailableNote {
                 [showRefreshButton]="true"
                 (refreshClick)="loadAvailableNotes()"
               ></app-empty-state>
+            } @else if (notesTotal() === 0) {
+              <!-- El vacío solo sale cuando el servidor no tiene ninguna. -->
+              <app-empty-state
+                size="sm"
+                icon="package"
+                title="Sin remisiones"
+                [description]="
+                  noteSearch()
+                    ? 'No hay coincidencias.'
+                    : 'No hay remisiones disponibles.'
+                "
+                [showActionButton]="false"
+              ></app-empty-state>
             } @else {
-              @for (note of availableForPicking(); track note.id) {
+              <!-- Página actual. Las ya elegidas se marcan (la selección vive
+                   fuera de la página). -->
+              @for (note of availableNotes(); track note.id) {
                 <button
                   type="button"
-                  (click)="addNote(note.id)"
+                  (click)="toggleNote(note.id)"
+                  [attr.aria-pressed]="isNoteSelected(note.id)"
                   class="w-full text-left flex items-center gap-3 p-2 rounded-md hover:bg-[var(--color-primary-light)] transition-colors min-h-[44px]"
+                  [style.background]="
+                    isNoteSelected(note.id) ? 'var(--color-primary-light)' : ''
+                  "
                 >
                   <div class="flex-1 min-w-0">
                     <p
@@ -209,26 +234,24 @@ interface AvailableNote {
                     >{{ +note.grand_total | currency }}</span
                   >
                   <app-icon
-                    name="plus"
+                    [name]="isNoteSelected(note.id) ? 'check-circle' : 'plus'"
                     [size]="18"
                     class="shrink-0 text-[var(--color-primary)]"
                   />
                 </button>
-              } @empty {
-                <app-empty-state
-                  size="sm"
-                  icon="package"
-                  title="Sin remisiones"
-                  [description]="
-                    noteSearch()
-                      ? 'No hay coincidencias.'
-                      : 'No hay remisiones disponibles.'
-                  "
-                  [showActionButton]="false"
-                ></app-empty-state>
               }
             }
           </div>
+          <!-- Paginador estándar (se oculta solo con una página). -->
+          <app-pagination
+            class="mt-2"
+            [currentPage]="notesPage()"
+            [totalPages]="notesTotalPages()"
+            [total]="notesTotal()"
+            [limit]="notesPageSize"
+            infoStyle="range"
+            (pageChange)="onNotesPageChange($event)"
+          />
         </div>
 
         <!-- Remisiones seleccionadas -->
@@ -444,9 +467,34 @@ export class AddNotesModalComponent {
   /** Emitted after the stops are appended so the parent can reload the route. */
   readonly added = output<void>();
 
+  /**
+   * Término de búsqueda de remisiones disponibles. Se busca en el servidor (el
+   * debounce lo hace `app-inputsearch`), no sobre la página ya cargada.
+   */
   readonly noteSearch = signal('');
+  /** Página actual del listado de disponibles para el término actual. */
   readonly availableNotes = signal<AvailableNote[]>([]);
   readonly loadingNotes = signal(false);
+  /** Tamaño de página del listado de disponibles (paginador estándar). */
+  readonly notesPageSize = AVAILABLE_NOTES_PAGE_SIZE;
+  /**
+   * Total real de remisiones disponibles para el término actual (`meta.total`
+   * del servidor, con la misma exclusión y búsqueda que la lista).
+   */
+  readonly notesTotal = signal(0);
+  /** Página mostrada del listado de disponibles. */
+  readonly notesPage = signal(1);
+  readonly notesTotalPages = computed<number>(() =>
+    Math.max(1, Math.ceil(this.notesTotal() / this.notesPageSize)),
+  );
+  /** Petición en curso del listado; se cancela al buscar o cambiar de página. */
+  private notesRequest: Subscription | null = null;
+  /**
+   * Toda remisión vista en cualquier búsqueda, por id. Las seleccionadas se
+   * resuelven contra este mapa para no perderse cuando la búsqueda actual ya
+   * no las incluye.
+   */
+  private readonly knownNotes = signal<Map<number, AvailableNote>>(new Map());
   /**
    * Error del picker de remisiones (paso 10). Distingue "falló la carga" de
    * "no hay remisiones": cuando está seteado se muestra un empty-state de error
@@ -511,24 +559,9 @@ export class AddNotesModalComponent {
     () => new Set(this.selectedOrderIds()),
   );
 
-  /**
-   * Eligible notes the operator can still add: those not already picked and
-   * matching the search term (dispatch number or customer name).
-   */
-  readonly availableForPicking = computed<AvailableNote[]>(() => {
-    const selected = this.selectedIdSet();
-    const term = this.noteSearch().trim().toLowerCase();
-    return this.availableNotes().filter((note) => {
-      if (selected.has(note.id)) return false;
-      if (!term) return true;
-      const haystack = `${note.dispatch_number} ${note.customer_name ?? ''}`.toLowerCase();
-      return haystack.includes(term);
-    });
-  });
-
-  /** Picked notes, resolved from `availableNotes`, preserving selection order. */
+  /** Picked notes, resolved from `knownNotes`, preserving selection order. */
   readonly selectedNotes = computed<AvailableNote[]>(() => {
-    const byId = new Map(this.availableNotes().map((n) => [n.id, n]));
+    const byId = this.knownNotes();
     return this.selectedIds()
       .map((id) => byId.get(id))
       .filter((n): n is AvailableNote => !!n);
@@ -581,25 +614,98 @@ export class AddNotesModalComponent {
   });
 
   /**
-   * Carga las remisiones elegibles para agregar a la ruta. Reintentable desde
-   * el empty-state de error (paso 10): limpia `notesError` al iniciar y lo setea
-   * en el `error` para mostrar el estado de error en vez del vacío.
+   * Carga la primera página de remisiones elegibles para el término actual
+   * (`noteSearch`). El backend ya excluye las que están en otra planilla,
+   * pagina y busca. Reintentable desde el empty-state de error (paso 10).
    */
   loadAvailableNotes(): void {
+    this.fetchNotesPage(1);
+  }
+
+  /**
+   * Busca en el servidor (el debounce lo aplica `app-inputsearch`) y vuelve a
+   * la página 1. La selección no cambia.
+   */
+  onNoteSearch(term: string): void {
+    const next = (term ?? '').trim();
+    if (next === this.noteSearch()) return;
+    this.noteSearch.set(next);
+    this.loadAvailableNotes();
+  }
+
+  /** Cambio de página desde `app-pagination`. No toca la selección. */
+  onNotesPageChange(page: number): void {
+    if (page < 1 || page === this.notesPage()) return;
+    this.fetchNotesPage(page);
+  }
+
+  /** ¿La remisión ya está seleccionada? (se marca en cualquier página). */
+  isNoteSelected(noteId: number): boolean {
+    return this.selectedIdSet().has(noteId);
+  }
+
+  /** Selecciona o quita la remisión desde la lista de disponibles. */
+  toggleNote(noteId: number): void {
+    if (this.isNoteSelected(noteId)) {
+      this.removeNote(noteId);
+    } else {
+      this.addNote(noteId);
+    }
+  }
+
+  /**
+   * Pide una página al servidor. Cancela la petición anterior para que una
+   * respuesta vieja (otra búsqueda u otra página) no pise la lista. Si falla la
+   * página 1 se muestra el estado de error; si falla otra página se avisa y se
+   * queda la que estaba.
+   */
+  private fetchNotesPage(page: number): void {
+    this.notesRequest?.unsubscribe();
     this.loadingNotes.set(true);
     this.notesError.set(null);
-    this.service
-      .listAvailableDispatchNotes()
+    this.notesRequest = this.service
+      .listAvailableDispatchNotes({
+        search: this.noteSearch(),
+        page,
+        limit: AVAILABLE_NOTES_PAGE_SIZE,
+      })
       .pipe(takeUntilDestroyed(this.destroyRef))
       .subscribe({
         next: (res) => {
-          this.availableNotes.set((res?.data ?? []) as AvailableNote[]);
+          const notes = (res?.data ?? []) as AvailableNote[];
+          const total = res?.pagination?.total ?? notes.length;
+          // La lista cambió entre páginas (otra persona planilló remisiones) y
+          // esta página ya no existe: se va a la última que sí tiene datos.
+          const lastPage = Math.max(1, Math.ceil(total / AVAILABLE_NOTES_PAGE_SIZE));
+          if (notes.length === 0 && page > lastPage) {
+            this.fetchNotesPage(lastPage);
+            return;
+          }
+          if (notes.length > 0) {
+            this.knownNotes.update((prev) => {
+              const next = new Map(prev);
+              for (const n of notes) next.set(n.id, n);
+              return next;
+            });
+          }
+          this.availableNotes.set(notes);
+          this.notesTotal.set(total);
+          this.notesPage.set(page);
           this.loadingNotes.set(false);
         },
         error: (e) => {
-          this.notesError.set(
-            e?.message ?? 'No se pudieron cargar las remisiones.',
-          );
+          if (page === 1) {
+            this.availableNotes.set([]);
+            this.notesTotal.set(0);
+            this.notesPage.set(1);
+            this.notesError.set(
+              e?.message ?? 'No se pudieron cargar las remisiones.',
+            );
+          } else {
+            this.toast.error(
+              e?.message ?? 'No se pudo cargar esa página de remisiones.',
+            );
+          }
           this.loadingNotes.set(false);
         },
       });

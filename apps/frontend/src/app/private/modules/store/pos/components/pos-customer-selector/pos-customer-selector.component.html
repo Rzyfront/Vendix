@@ -19,6 +19,12 @@
           <span class="customer-email">
             {{ customer.email || customer.phone || '—' }}
           </span>
+          @if (selectedEstablishment(); as establishment) {
+            <span class="customer-establishment">
+              <app-icon name="map-pin" [size]="12"></app-icon>
+              <span class="customer-establishment-text">{{ establishmentText(establishment) }}</span>
+            </span>
+          }
         </div>
         <button
           type="button"
@@ -108,22 +114,10 @@
           <div class="suggestions-block">
             <span class="suggestions-label">Clientes frecuentes (3)</span>
             <div class="search-results compact-results">
-              @for (customer of topCustomersSlice(); track customer.id) {
-                <button
-                  type="button"
-                  class="customer-result"
-                  (click)="selectCustomer(customer)"
-                >
-                  <span class="result-name">
-                    {{ displayName(customer) }}
-                  </span>
-                  <span class="result-email">
-                    {{ customer.email || customer.phone || '—' }}
-                    @if (customer.document_number) {
-                      · {{ customer.document_type || 'Doc' }}: {{ customer.document_number }}
-                    }
-                  </span>
-                </button>
+              @for (row of topCustomerRows(); track row.key) {
+                <ng-container
+                  *ngTemplateOutlet="customerRow; context: { $implicit: row }"
+                ></ng-container>
               }
             </div>
           </div>
@@ -139,22 +133,10 @@
 
       @if (!isSearching() && resultsSlice().length > 0) {
         <div class="search-results compact-results">
-          @for (customer of resultsSlice(); track customer.id) {
-            <button
-              type="button"
-              class="customer-result"
-              (click)="selectCustomer(customer)"
-            >
-              <span class="result-name">
-                {{ displayName(customer) }}
-              </span>
-              <span class="result-email">
-                {{ customer.email || customer.phone || '—' }}
-                @if (customer.document_number) {
-                  · {{ customer.document_type || 'Doc' }}: {{ customer.document_number }}
-                }
-              </span>
-            </button>
+          @for (row of resultRows(); track row.key) {
+            <ng-container
+              *ngTemplateOutlet="customerRow; context: { $implicit: row }"
+            ></ng-container>
           }
         </div>
         @if (resultsOverflow() > 0) {
@@ -275,3 +257,43 @@
     }
   }
 </div>
+
+<!-- Una línea del listado: cliente (como siempre) + establecimiento si el
+     cliente está dividido por sedes. -->
+<ng-template #customerRow let-row>
+  <button
+    type="button"
+    class="customer-result"
+    [class.customer-result--establishment]="!!row.establishment"
+    [attr.aria-label]="
+      row.establishment
+        ? 'Seleccionar ' + displayName(row.customer) + ', establecimiento ' + establishmentText(row.establishment)
+        : null
+    "
+    (click)="selectRow(row)"
+  >
+    <span class="result-name">
+      {{ displayName(row.customer) }}
+    </span>
+    <span class="result-email">
+      {{ row.customer.email || row.customer.phone || '—' }}
+      @if (row.customer.document_number) {
+        · {{ row.customer.document_type || 'Doc' }}: {{ row.customer.document_number }}
+      }
+    </span>
+    @if (row.establishment; as establishment) {
+      <span class="result-establishment">
+        <app-icon name="map-pin" [size]="12"></app-icon>
+        <span class="result-establishment-text">
+          @if (establishment.label) {
+            <strong>{{ establishment.label }}</strong>
+          }
+          {{ establishment.label ? '· ' : '' }}{{ establishment.address_line1 }}{{ establishment.city ? ', ' + establishment.city : '' }}
+        </span>
+        @if (establishment.is_primary) {
+          <span class="result-establishment-badge">Principal</span>
+        }
+      </span>
+    }
+  </button>
+</ng-template>

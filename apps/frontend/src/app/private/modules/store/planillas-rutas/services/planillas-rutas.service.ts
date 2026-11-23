@@ -402,22 +402,47 @@ export class PlanillasRutasService {
   /**
    * Lists dispatch notes that the operator can still pick when creating a
    * planilla. Uses the backend `GET /store/dispatch-routes/available-notes`
-   * endpoint, which already filters out notes that are locked by an active
-   * (non-draft, non-released) stop. The legacy
+   * endpoint, which already filters out notes that are locked by any
+   * non-released stop (draft routes included). The legacy
    * `/dispatch-notes?status=confirmed` query returns ALL confirmed notes
    * and triggered 500 errors when the wizard tried to assign locked ones.
+   *
+   * Paginado y con búsqueda en el servidor: `data` es la página pedida y
+   * `pagination.total` el total real de remisiones disponibles (`meta` de
+   * `ResponseService.paginated`).
    */
-  listAvailableDispatchNotes(search?: string): Observable<{ data: any[]; pagination: any }> {
+  listAvailableDispatchNotes(
+    query: { search?: string; page?: number; limit?: number; ids?: number[] } = {},
+  ): Observable<{
+    data: any[];
+    pagination: { total: number; page: number; limit: number; totalPages: number };
+  }> {
     const params = new URLSearchParams();
+    const search = query.search?.trim();
     if (search) params.append('search', search);
+    if (query.page) params.append('page', String(query.page));
+    if (query.limit) params.append('limit', String(query.limit));
+    if (query.ids?.length) params.append('ids', query.ids.join(','));
     const qs = params.toString();
     return this.http
       .get<any>(`${this.apiUrl}/store/dispatch-routes/available-notes${qs ? '?' + qs : ''}`)
       .pipe(
-        map((r) => ({
-          data: r.data ?? [],
-          pagination: { total: (r.data ?? []).length, page: 1, limit: (r.data ?? []).length || 1, totalPages: 1 },
-        })),
+        map((r) => {
+          const data: any[] = Array.isArray(r?.data) ? r.data : [];
+          const meta = r?.meta ?? {};
+          const total = Number(meta.total ?? data.length);
+          const page = Number(meta.page ?? query.page ?? 1);
+          const limit = Number(meta.limit ?? query.limit ?? (data.length || 1));
+          return {
+            data,
+            pagination: {
+              total,
+              page,
+              limit,
+              totalPages: Number(meta.totalPages ?? Math.ceil(total / (limit || 1))),
+            },
+          };
+        }),
         catchError((e) => throwError(() => new Error(this.extractMessage(e)))),
       );
   }

@@ -37,6 +37,13 @@ import {
   DocumentTypeOption,
 } from '../../../../../shared/constants/document-types';
 import { computeNitDv } from '../../../../../shared/utils/nit.util';
+import {
+  buildCustomerEstablishmentRows,
+  customerFromEstablishmentRow,
+  CustomerEstablishmentRow,
+  establishmentSummary,
+  EstablishmentLike,
+} from '../../../../../shared/utils/customer-establishment-rows.util';
 import { DocumentPrintService } from '../../../../../shared/services/print';
 import { PosCustomerService } from '../services/pos-customer.service';
 import { PosQueueService, QueueEntry } from '../services/pos-queue.service';
@@ -162,11 +169,12 @@ const CONSUMIDOR_FINAL_DOCUMENT = '222222222222';
                   Resultados de búsqueda:
                 </h3>
                 <div class="max-h-48 overflow-y-auto space-y-2">
-                  @for (customer of searchResults(); track customer.id) {
+                  @for (row of searchRows(); track row.key) {
+                    @let customer = row.customer;
                     <button
                       type="button"
-                      (click)="selectCustomer(customer)"
-                      [attr.aria-label]="'Seleccionar ' + displayName(customer)"
+                      (click)="selectRow(row)"
+                      [attr.aria-label]="'Seleccionar ' + displayName(customer) + (row.establishment ? ', establecimiento ' + establishmentText(row.establishment) : '')"
                       class="w-full min-h-[44px] p-3 border border-[var(--color-border)] rounded-lg text-left cursor-pointer hover:border-[var(--color-primary)] hover:bg-[var(--color-primary-light)] transition-colors focus:outline-none focus-visible:ring-[3px] focus-visible:ring-[var(--color-primary)]"
                       >
                       <div class="flex items-center justify-between gap-3">
@@ -180,6 +188,16 @@ const CONSUMIDOR_FINAL_DOCUMENT = '222222222222';
                           @if (documentLine(customer)) {
                             <p class="text-xs text-[var(--color-neutral-600)]">
                               {{ documentLine(customer) }}
+                            </p>
+                          }
+                          @if (row.establishment; as establishment) {
+                            <!-- Una línea por establecimiento del cliente -->
+                            <p class="flex items-center gap-1 text-xs text-text-primary min-w-0">
+                              <app-icon name="map-pin" [size]="12" color="var(--color-primary)"></app-icon>
+                              <span class="truncate">{{ establishmentText(establishment) }}</span>
+                              @if (establishment.is_primary) {
+                                <span class="shrink-0 rounded-full border border-primary/25 bg-primary/10 px-2 text-primary-on-tint font-semibold">Principal</span>
+                              }
                             </p>
                           }
                         </div>
@@ -667,6 +685,12 @@ export class PosCustomerModalComponent {
   readonly loading = signal(false);
   readonly currentStep = signal<'search' | 'create' | 'queue'>('search');
   readonly searchResults = signal<PosCustomer[]>([]);
+  /** Última consulta enviada (filtra las líneas de sede cuando la búsqueda es por sede). */
+  private readonly searchQuery = signal('');
+  /** Resultados expandidos: una línea por establecimiento si el cliente tiene 2+. */
+  readonly searchRows = computed(() =>
+    buildCustomerEstablishmentRows(this.searchResults(), this.searchQuery()),
+  );
   readonly searchPerformed = signal(false);
 
   // Queue
@@ -1037,6 +1061,7 @@ private searchSubject$ = new Subject<string>(); // LEGÍTIMO — debounceTime+di
   }
 
   private performSearch(query: string): void {
+    this.searchQuery.set(query.trim());
     this.loading.set(true);
     this.customerService
       .searchCustomers({ query: query, limit: 10 })
@@ -1057,6 +1082,15 @@ private searchSubject$ = new Subject<string>(); // LEGÍTIMO — debounceTime+di
   selectCustomer(customer: PosCustomer): void {
     this.customerSelected.emit(customer);
     this.onModalClosed();
+  }
+
+  /** Elige una línea del listado: el cliente viaja con su establecimiento si la línea lo tiene. */
+  selectRow(row: CustomerEstablishmentRow<PosCustomer>): void {
+    this.selectCustomer(customerFromEstablishmentRow(row));
+  }
+
+  establishmentText(establishment: EstablishmentLike | null): string {
+    return establishmentSummary(establishment);
   }
 
   switchToCreateMode(): void {
