@@ -20,7 +20,6 @@ deadline-bound, without growing any directory.
 Never log source, inputs or outputs.
 """
 import ctypes
-import ctypes.util
 import errno
 import json
 import os
@@ -105,6 +104,16 @@ def _valid_runtime_digest():
     return digest
 
 
+def _libc():
+    """libc through the global symbol scope (dlopen(NULL)): no file lookup.
+
+    ctypes.util.find_library runs ldconfig/gcc in a subprocess on Linux, which
+    is pointless inside the image and broke the offline tests on Linux, where
+    subprocess.Popen is mocked (independent audit, observation 5).
+    """
+    return ctypes.CDLL(None, use_errno=True)
+
+
 def _kernel_marked_non_dumpable():
     """True when the kernel already treats this process as non-dumpable.
 
@@ -129,8 +138,7 @@ def _harden_parent_dumpable():
     """
     if not sys.platform.startswith("linux"):
         return
-    libc_name = ctypes.util.find_library("c") or "libc.so.6"
-    libc = ctypes.CDLL(libc_name, use_errno=True)
+    libc = _libc()
     if libc.prctl(_PR_SET_DUMPABLE, 0, 0, 0, 0) == 0:
         return
     err = ctypes.get_errno()
@@ -218,10 +226,6 @@ def _guard_process_state():
 
 class SysvIpcError(Exception):
     """A System V IPC object of the guest uid could not be listed or removed."""
-
-
-def _libc():
-    return ctypes.CDLL(ctypes.util.find_library("c") or "libc.so.6", use_errno=True)
 
 
 def _sysvipc_objects():
@@ -534,6 +538,10 @@ class _TmpWatch:
                 self.held.append(os.open(path, os.O_RDONLY | getattr(os, "O_NOFOLLOW", 0)
                                          | getattr(os, "O_CLOEXEC", 0)))
             self.held_bytes = self._held_bytes()
+            # Inodes whose blocks are already accounted for: a guest that links
+            # one of them as result.json must not get them credited again.
+            self.known = {(st.st_dev, st.st_ino) for st in map(os.fstat, self.held + self.streams)}
+            self.result_inode = None
             self.free_inodes = _tmp_free_inodes()
             self.free_bytes = _tmp_free_bytes()
             self.root_entries = _count_entries(TMP_ROOT)
@@ -545,18 +553,28 @@ class _TmpWatch:
         return sum(_blocks_bytes(os.fstat(fd)) for fd in self.held)
 
     def _result_bytes(self):
-        # .part first: os.replace(.part, result.json) is atomic, so in this order
-        # the file is seen at least once; max() because both names may be links
-        # to the same inode.
-        sizes = [0]
+        """Blocks of the result file the runner opened, and of nothing else.
+
+        Only one inode is credited: the first regular, singly-linked file seen
+        under either name that is not a tenant file or a stream. Otherwise a
+        guest could link(in/<table>.json, result.json) without a descriptor and
+        have blocks already spent before the baseline subtracted again,
+        stretching the cap ~9x (independent audit, observation 1). .part is
+        looked at first: os.replace(.part, result.json) keeps the inode.
+        """
         for name in ("result.json.part", "result.json"):
             try:
                 st = os.stat(os.path.join(self.tmpdir, name), follow_symlinks=False)
             except OSError:
                 continue
-            if stat.S_ISREG(st.st_mode):
-                sizes.append(_blocks_bytes(st))
-        return max(sizes)
+            ident = (st.st_dev, st.st_ino)
+            if not stat.S_ISREG(st.st_mode) or st.st_nlink != 1 or ident in self.known:
+                continue
+            if self.result_inode is None:
+                self.result_inode = ident
+            if ident == self.result_inode:
+                return _blocks_bytes(st)
+        return 0
 
     def directory_bytes(self):
         consumed = self.free_bytes - _tmp_free_bytes()

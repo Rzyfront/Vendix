@@ -21,6 +21,7 @@ sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 import handler  # noqa: E402
 
 DIGEST = "sha256:" + "c" * 64
+REAL_PURGE_SYSV_IPC = handler._purge_sysv_ipc
 
 
 VALID_OUTPUT = {"figures": [{"label": "n", "value": 1}]}
@@ -148,6 +149,14 @@ class HandlerFixture(unittest.TestCase):
         patches[0].start(); patches[1].start()
         for p in patches:
             self.addCleanup(p.stop)
+        # Linux-only hooks act on the real process and kernel (prctl, System V
+        # IPC objects of this uid): neutralized so the same tests run on Linux
+        # CI; DumpableTests and SysvIpcTests exercise them with fakes.
+        for name in ("_harden_parent_dumpable", "_purge_sysv_ipc"):
+            hook = patch.object(handler, name)
+            hook.start()
+            self.addCleanup(hook.stop)
+
 
     def popen_writing(self, payload, returncode=0):
         captured = {}
@@ -450,7 +459,6 @@ class DumpableTests(unittest.TestCase):
         libc.prctl.return_value = prctl_rc
         stat = MagicMock(side_effect=stat_error) if stat_error else MagicMock(return_value=FakeStat(environ_uid))
         with patch.object(handler.sys, "platform", "linux"), \
-                patch.object(handler.ctypes.util, "find_library", return_value="libc.so.6"), \
                 patch.object(handler.ctypes, "CDLL", return_value=libc), \
                 patch.object(handler.ctypes, "get_errno", return_value=err), \
                 patch.object(handler.os, "geteuid", return_value=uid), \
@@ -584,6 +592,7 @@ class SysvIpcTests(HandlerFixture):
         self.kernel = FakeSysvKernel(self.ipc_root)
         patches = [
             patch.object(handler.sys, "platform", "linux"),
+            patch.object(handler, "_purge_sysv_ipc", REAL_PURGE_SYSV_IPC),
             patch.object(handler, "SYSVIPC_ROOT", self.ipc_root),
             patch.object(handler, "_libc", side_effect=self.kernel.libc),
             patch.object(handler.ctypes, "get_errno", side_effect=lambda: self.kernel.errno),
@@ -978,6 +987,28 @@ class TmpEntryTests(HandlerFixture):
         with patch.object(handler.subprocess, "Popen", side_effect=spawn), \
                 patch.object(handler.time, "monotonic", clock):
             res = handler.handler(request())
+        self.assertEqual((res["error_code"], res["error_message"]),
+                         ("ANALYSIS_RUNTIME", "too many files or directories created in the sandbox"))
+        self.assertLess(res["usage"]["duration_ms"], 2_000)
+        self.assertEqual(os.listdir(self.root), [])
+
+    def test_an_input_linked_as_result_does_not_stretch_the_block_cap(self):
+        # Independent audit, observation 1: link(in/<table>.json, result.json)
+        # needs no descriptor; crediting that inode as "result data" hid
+        # ~300 KiB of entries behind blocks already spent before the baseline.
+        clock = FakeClock()
+        proc = hanging_proc(clock)
+        ev = request()
+        ev["inputs"][0]["rows"] = [["x" * 60, i] for i in range(4_000)]  # ~300 KB of input
+
+        def spawn(args, **kwargs):
+            os.link(os.path.join(kwargs["cwd"], "in", "sales.json"), os.path.join(kwargs["cwd"], "result.json"))
+            self.flood_links(os.path.join(kwargs["cwd"], "x"), 4, 4_250)  # ~270 KiB of entries
+            return proc
+
+        with patch.object(handler.subprocess, "Popen", side_effect=spawn), \
+                patch.object(handler.time, "monotonic", clock):
+            res = handler.handler(ev)
         self.assertEqual((res["error_code"], res["error_message"]),
                          ("ANALYSIS_RUNTIME", "too many files or directories created in the sandbox"))
         self.assertLess(res["usage"]["duration_ms"], 2_000)

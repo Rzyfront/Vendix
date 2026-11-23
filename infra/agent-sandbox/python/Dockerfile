@@ -6,7 +6,7 @@
 FROM public.ecr.aws/lambda/python:3.12@sha256:ed196260cbf6f74e3f64dd141ebe2401d78a15e6355925da98a3d3c3b4d35c6a
 
 # Content identity of this build: output of ./runtime-digest.sh (sha256 over
-# Dockerfile + lockfile + code). An image cannot contain its own digest, so
+# Dockerfile + lockfile + code + template.json). An image cannot contain its own digest, so
 # certification (CERTIFICACION-T53.md) binds this value to the ECR image digest.
 ARG ANALYSIS_RUNTIME_DIGEST
 ENV ANALYSIS_RUNTIME_DIGEST=${ANALYSIS_RUNTIME_DIGEST}
