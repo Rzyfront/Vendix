@@ -17,13 +17,12 @@ import { FormsModule } from '@angular/forms';
 import { CardComponent } from '../../../../../../shared/components/card/card.component';
 import {
   ResponsiveDataViewComponent,
-  InputsearchComponent,
+  ListSearchBarComponent,
   IconComponent,
   ButtonComponent,
   TableColumn,
   TableAction,
   ItemListCardConfig,
-  OptionsDropdownComponent,
   DropdownAction,
   PaginationComponent,
   FilterConfig,
@@ -54,8 +53,7 @@ export interface CustomerLocationFilter {
   imports: [
     CardComponent,
     ResponsiveDataViewComponent,
-    InputsearchComponent,
-    OptionsDropdownComponent,
+    ListSearchBarComponent,
     IconComponent,
     ButtonComponent,
     FormsModule,
@@ -72,42 +70,19 @@ export interface CustomerLocationFilter {
 
     <!-- Contenedor de lista de clientes - Mobile First -->
     <app-card [responsive]="true" [padding]="false" overflow="visible">
-      <!-- Search Section: sticky below stats on mobile -->
-      <div
-        class="sticky top-[99px] z-10 bg-background px-2 py-1.5 -mt-[5px] md:mt-0 md:static md:bg-transparent md:px-6 md:py-4 md:border-b md:border-border"
-      >
-        <div
-          class="flex flex-col gap-2 md:flex-row md:justify-between md:items-center md:gap-4"
-        >
-          <!-- Title -->
-          <h2
-            class="text-[13px] font-bold text-gray-600 tracking-wide md:text-lg md:font-semibold md:text-text-primary"
-          >
-            Todos los Clientes ({{ totalItems() }})
-          </h2>
-
-          <!-- Search + Options -->
-          <div class="flex items-center gap-2 w-full md:w-auto">
-            <app-inputsearch
-              class="flex-1 md:w-64 shadow-[0_2px_8px_rgba(0,0,0,0.07)] md:shadow-none rounded-[10px]"
-              size="sm"
-              placeholder="Buscar clientes..."
-              (search)="onSearch($event)"
-            ></app-inputsearch>
-
-            <app-options-dropdown
-              class="shadow-[0_2px_8px_rgba(0,0,0,0.07)] md:shadow-none rounded-[10px]"
-              [filters]="filterConfigs()"
-              [filterValues]="filterValues()"
-              [actions]="dropdownActions"
-              [isLoading]="loading()"
-              (filterChange)="onFilterChange($event)"
-              (clearAllFilters)="clearFilters()"
-              (actionClick)="onActionClick($event)"
-            ></app-options-dropdown>
-          </div>
-        </div>
-      </div>
+      <!-- Search Section: shared mobile search bar (sticky below stats on mobile) -->
+      <app-list-search-bar
+        [title]="'Todos los Clientes (' + totalItems() + ')'"
+        placeholder="Buscar clientes..."
+        [filters]="filterConfigs()"
+        [filterValues]="filterValues()"
+        [actions]="dropdownActions"
+        [isLoading]="loading()"
+        (searchChange)="onSearch($event)"
+        (filterChange)="onFilterChange($event)"
+        (clearAllFilters)="clearFilters()"
+        (actionClick)="onActionClick($event)"
+      ></app-list-search-bar>
 
       <!-- Estado de carga -->
       @if (loading()) {
