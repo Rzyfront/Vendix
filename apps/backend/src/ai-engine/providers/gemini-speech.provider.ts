@@ -7,6 +7,7 @@ import {
   AISpeechRequestOptions,
   AISpeechResponse,
 } from '../interfaces/ai-provider.interface';
+import { sampleRateFromMime, wrapPcmAsWav } from './pcm-wav.util';
 
 /**
  * Google Gemini text-to-speech (F8 T50), through the Generative Language API.
@@ -32,10 +33,7 @@ import {
 export class GeminiSpeechProvider implements AIProvider {
   private static readonly DEFAULT_BASE_URL =
     'https://generativelanguage.googleapis.com/v1beta';
-  private static readonly DEFAULT_VOICE = 'Kore';
-  private static readonly DEFAULT_SAMPLE_RATE = 24000;
-  private static readonly CHANNELS = 1;
-  private static readonly BITS_PER_SAMPLE = 16;
+  static readonly DEFAULT_VOICE = 'Kore';
 
   constructor(private config: AIProviderConfig) {}
 
@@ -160,7 +158,7 @@ export class GeminiSpeechProvider implements AIProvider {
 
       return {
         success: true,
-        audioBase64: this.wrapPcmAsWav(pcm, this.sampleRateOf(mime)).toString(
+        audioBase64: wrapPcmAsWav(pcm, sampleRateFromMime(mime)).toString(
           'base64',
         ),
         contentType: 'audio/wav',
@@ -183,36 +181,6 @@ export class GeminiSpeechProvider implements AIProvider {
     if (/:generateContent$/.test(base)) return base;
     const root = base.replace(/\/models(\/.*)?$/, '');
     return `${root}/models/${encodeURIComponent(model)}:generateContent`;
-  }
-
-  private sampleRateOf(mime: string): number {
-    const match = /rate=(\d+)/.exec(mime);
-    const rate = match ? Number(match[1]) : NaN;
-    return Number.isFinite(rate) && rate > 0
-      ? rate
-      : GeminiSpeechProvider.DEFAULT_SAMPLE_RATE;
-  }
-
-  /** Canonical 44-byte RIFF/WAVE header for 16-bit mono PCM. */
-  private wrapPcmAsWav(pcm: Buffer, sampleRate: number): Buffer {
-    const channels = GeminiSpeechProvider.CHANNELS;
-    const bits = GeminiSpeechProvider.BITS_PER_SAMPLE;
-    const blockAlign = (channels * bits) / 8;
-    const header = Buffer.alloc(44);
-    header.write('RIFF', 0, 'ascii');
-    header.writeUInt32LE(36 + pcm.length, 4);
-    header.write('WAVE', 8, 'ascii');
-    header.write('fmt ', 12, 'ascii');
-    header.writeUInt32LE(16, 16);
-    header.writeUInt16LE(1, 20); // PCM
-    header.writeUInt16LE(channels, 22);
-    header.writeUInt32LE(sampleRate, 24);
-    header.writeUInt32LE(sampleRate * blockAlign, 28);
-    header.writeUInt16LE(blockAlign, 32);
-    header.writeUInt16LE(bits, 34);
-    header.write('data', 36, 'ascii');
-    header.writeUInt32LE(pcm.length, 40);
-    return Buffer.concat([header, pcm]);
   }
 
   /** The API's own message when it sent one; never the request or the key. */
