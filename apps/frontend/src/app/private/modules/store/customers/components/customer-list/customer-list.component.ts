@@ -11,6 +11,7 @@ import {
   untracked,
   viewChild,
 } from '@angular/core';
+import { buildCrmFilterConfigs, toCrmFilterId } from './crm-filters.util';
 import { firstValueFrom } from 'rxjs';
 import { takeUntilDestroyed } from '@angular/core/rxjs-interop';
 import { FormsModule } from '@angular/forms';
@@ -202,34 +203,7 @@ export class CustomerListComponent {
         options: this.municipalities().map((m) => ({ value: m.code, label: m.name })),
       },
       // Filtros dinamicos: solo aparecen si la tienda tiene valores.
-      ...(this.segments().length
-        ? [
-            {
-              key: 'segment',
-              label: 'Segmento',
-              type: 'select' as const,
-              placeholder: 'Todos los segmentos',
-              options: this.segments().map((segment) => ({
-                value: String(segment.id),
-                label: segment.name,
-              })),
-            },
-          ]
-        : []),
-      ...(this.tags().length
-        ? [
-            {
-              key: 'tag',
-              label: 'Etiqueta',
-              type: 'select' as const,
-              placeholder: 'Todas las etiquetas',
-              options: this.tags().map((tag) => ({
-                value: String(tag.id),
-                label: tag.name,
-              })),
-            },
-          ]
-        : []),
+      ...buildCrmFilterConfigs(this.segments(), this.tags()),
     ];
   });
 
@@ -432,8 +406,8 @@ export class CustomerListComponent {
     if (departmentChanged) this.loadMunicipalities(department);
     this.emitLocationFilter();
 
-    const segmentId = toId(values['segment']);
-    const tagId = toId(values['tag']);
+    const segmentId = toCrmFilterId(values['segment']);
+    const tagId = toCrmFilterId(values['tag']);
     const next = { segment_id: segmentId, tag_id: tagId };
     const previous = this.crmFilterValues();
     this.crmFilterValues.set(next);
@@ -498,9 +472,4 @@ export class CustomerListComponent {
     return this.currencyService.format(value);
   }
 
-/** `"12"` → 12; vacio o invalido → undefined. */
-function toId(value: unknown): number | undefined {
-  const id = Number(value);
-  return Number.isInteger(id) && id > 0 ? id : undefined;
-}
 }
