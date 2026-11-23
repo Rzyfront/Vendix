@@ -55,6 +55,7 @@ const KNOWN = [
   { path: '/guias/comandas-restaurantes', index: true },
   { path: '/guias/ventas-mayoristas-al-detal', index: true },
   { path: '/guias/pasar-productos-excel-a-pos', index: true },
+  { path: '/guias/preparar-demostracion', index: true },
   { path: '/pqr', index: false },
   { path: '/auth/login', index: false },
   { path: '/auth/register', index: false },

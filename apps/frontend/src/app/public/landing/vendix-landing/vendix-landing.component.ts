@@ -294,6 +294,7 @@ export class VendixLandingComponent implements OnInit {
     { key: 'comandas-restaurantes', label: 'Guía: comandas de restaurante' },
     { key: 'ventas-mayoristas-al-detal', label: 'Guía: precio mayorista y al detal' },
     { key: 'pasar-productos-excel-a-pos', label: 'Guía: de Excel a tu POS' },
+    { key: 'preparar-demostracion', label: 'Guía: preparar una demostración' },
   ].filter((guide) => PUBLISHED_SECTOR_GUIDES.includes(guide.key));
   // El pie solo enlaza páginas cuyas rutas existen: si se apaga un interruptor, no queda un enlace roto.
   readonly sectorPagesEnabled = SECTOR_PAGES_ENABLED;

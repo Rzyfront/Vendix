@@ -17,7 +17,7 @@ export const SECTOR_GUIDE_KEYS: readonly string[] = [
 
 /**
  * SEO-OPS-36: guías piloto aprobadas una por una por Adel (Producto y Ventas) el
- * 19-nov-2026. Son las únicas que se sirven en producción, indexables y con
+ * 19 y el 20-nov-2026. Son las únicas que se sirven en producción, indexables y con
  * canonical propio. Al publicar otra: agregarla aquí, al sitemap del backend
  * (marketing-sitemap.registry.ts) y al smoke SEO.
  */
@@ -25,6 +25,8 @@ export const PUBLISHED_SECTOR_GUIDES: readonly string[] = [
   'comandas-restaurantes',
   'ventas-mayoristas-al-detal',
   'pasar-productos-excel-a-pos',
+  // Quinto piloto, aprobado por Adel el 20-nov-2026.
+  'preparar-demostracion',
 ];
 
 /** Guías con ruta: todas en vista previa; solo las publicadas en producción. */
