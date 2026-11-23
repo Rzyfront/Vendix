@@ -1755,6 +1755,14 @@ export class BreadcrumbService {
       icon: 'settings',
     },
 
+    // Mis notificaciones (preferencias de avisos del usuario)
+    {
+      path: '/admin/my-notifications',
+      title: 'Mis notificaciones',
+      parent: 'Tienda',
+      icon: 'bell',
+    },
+
     // Help
     {
       path: '/admin/help',

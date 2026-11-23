@@ -26,6 +26,13 @@ import { orgAdminRoutes } from './org_admin.routes';
  */
 const EXEMPT_SEGMENTS = new Set(['', '**', 'no-access', 'onboarding']);
 
+/**
+ * Rutas del panel de TIENDA abiertas a todo el personal: no pertenecen a un
+ * módulo de `panel_ui`, así que no tienen key a propósito (el guard las deja
+ * pasar al no resolver ninguna).
+ */
+const OPEN_STAFF_URLS = new Set(['/admin/my-notifications']);
+
 function collectUrls(routes: Routes, prefix: string, out: string[]): string[] {
   for (const route of routes as Route[]) {
     if (route.redirectTo !== undefined) continue;
@@ -97,7 +104,9 @@ describe('apps-f4 S3: cobertura de rutas del panel con key', () => {
   });
 
   it('toda ruta de store_admin.routes.ts resuelve al menos una key con regla de industria', () => {
-    const urls = adminUrls(storeAdminRoutes);
+    const urls = adminUrls(storeAdminRoutes).filter(
+      (url) => !OPEN_STAFF_URLS.has(url),
+    );
     expect(urls.length).toBeGreaterThan(50);
     const missing = urls.filter(
       (url) => service.resolveGateKeysForRoute(url, 'STORE_ADMIN').length === 0,

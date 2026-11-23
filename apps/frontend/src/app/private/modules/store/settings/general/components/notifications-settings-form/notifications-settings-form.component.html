@@ -217,8 +217,8 @@
         dirección o número van dirigidas las alertas.
       </p>
       <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
-        <app-setting-toggle [formControl]="emailEnabledControl" label="Notificaciones por Email"
-          description="Habilita el correo como canal de alertas de la tienda y muestra los campos de destino."
+        <app-setting-toggle [formControl]="emailEnabledControl" label="Correos de avisos al personal"
+          description="Si lo apagas, nadie de la tienda recibe avisos por correo aunque los haya encendido en Mis notificaciones."
           (changed)="onFieldChange()"></app-setting-toggle>
         <app-setting-toggle [formControl]="smsEnabledControl" label="Notificaciones por SMS"
           description="Habilita el mensaje de texto como canal y muestra los campos de teléfono de destino."
@@ -319,6 +319,37 @@
           [min]="0"
           [max]="30"
           helperText="Anticipación del aviso de pago a proveedor por vencer"
+          (inputChange)="onFieldChange()"
+        ></app-input>
+      </div>
+    </div>
+
+    <!-- Tareas del CRM -->
+    <div>
+      <h4 class="section-kicker">
+        <app-icon name="calendar-clock" [size]="13"></app-icon>
+        <span>Tareas del CRM</span>
+        <app-badge variant="warning" size="xs" badgeStyle="outline">
+          Para toda la tienda
+        </app-badge>
+      </h4>
+      <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
+        <app-input
+          [formControl]="taskDueSoonMinutesControl"
+          type="number"
+          label="Aviso de tarea por vencer"
+          [min]="5"
+          [max]="1440"
+          helperText="Minutos antes del vencimiento en que se avisa al responsable y a los apoyos"
+          (inputChange)="onFieldChange()"
+        ></app-input>
+        <app-input
+          [formControl]="dailyDigestHourControl"
+          type="number"
+          label="Hora del resumen diario de tareas"
+          [min]="0"
+          [max]="23"
+          helperText="Hora de la tienda (0-23) en que sale el correo con las tareas que vencen ese día"
           (inputChange)="onFieldChange()"
         ></app-input>
       </div>
