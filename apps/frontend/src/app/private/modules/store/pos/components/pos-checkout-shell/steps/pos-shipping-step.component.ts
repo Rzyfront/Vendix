@@ -43,6 +43,7 @@ import {
   AddressPayload,
 } from '../../../../../../../shared/components/address-form-fields/address-form-fields.component';
 import { CountryService } from '../../../../../../../core/services/country.service';
+import { preferredEstablishment } from '../../../../../../../shared/utils/customer-establishment-rows.util';
 import {
   GeocodingService,
   type GeocodePrecision,
@@ -523,19 +524,24 @@ export class PosShippingStepComponent {
     let lastSnapshot: ShippingContext | null | undefined;
     let lastOrderId: number | null | undefined;
     let lastCustomerId: number | null | undefined;
+    let lastPreferredAddressId: number | null | undefined;
     effect(() => {
       const cart = this.cartState();
       const snapshot = cart?.shippingContext;
       const orderId = cart?.linkedOrderId;
       const customerId = cart?.customer?.id ?? null;
+      // Establecimiento elegido en el buscador (una línea por sede).
+      const preferredAddressId = cart?.customer?.preferred_address_id ?? null;
       untracked(() => {
         if (snapshot !== lastSnapshot || orderId !== lastOrderId) {
           lastSnapshot = snapshot;
           lastOrderId = orderId;
           lastCustomerId = customerId;
+          lastPreferredAddressId = preferredAddressId;
           this.hydrateShipping();
         } else if (customerId !== lastCustomerId) {
           lastCustomerId = customerId;
+          lastPreferredAddressId = preferredAddressId;
           this.invalidateQuote();
           this.freeAddressEdited.set(false);
           // A new customer never silently receives the former customer's address.
@@ -543,6 +549,13 @@ export class PosShippingStepComponent {
           this.setAddress(!this.customerChanged() && original ? original.shippingAddress ?? null : null,
             !this.customerChanged() && original ? original.shippingAddressId : null);
           if (!original) this.loadDefaultAddress();
+          // Editando una orden: elegir el cliente por una línea de sede es una
+          // elección explícita de dirección, no la "heredada" del cliente previo.
+          else if (this.customerChanged()) this.applyPreferredAddress();
+        } else if (preferredAddressId !== lastPreferredAddressId) {
+          // Mismo cliente, otra sede elegida en el buscador.
+          lastPreferredAddressId = preferredAddressId;
+          this.applyPreferredAddress();
         }
       });
     });
@@ -678,9 +691,18 @@ export class PosShippingStepComponent {
     }
   }
 
+  /** Preselecciona la sede elegida en el buscador, si sigue en la libreta del cliente. */
+  private applyPreferredAddress(): void {
+    const preferred = preferredEstablishment(this.cartState()?.customer);
+    if (preferred) this.selectSavedAddress(preferred.id);
+  }
+
   private loadDefaultAddress(): void {
-    const addresses = this.cartState()?.customer?.addresses;
-    const address = addresses?.find((a) => a.is_primary) ?? addresses?.[0];
+    const customer = this.cartState()?.customer;
+    const addresses = customer?.addresses;
+    // Sede elegida en el buscador → principal → primera (el usuario puede cambiarla).
+    const address = preferredEstablishment(customer) ??
+      addresses?.find((a) => a.is_primary) ?? addresses?.[0];
     if (address) {
       const payload = this.toAddressPayload(address);
       this.setAddress(payload, address.id);
