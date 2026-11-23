@@ -11,6 +11,7 @@ import { SandboxPolicyService } from './sandbox/sandbox-policy.service';
 import { SandboxAuditRepository } from './sandbox/sandbox-audit.repository';
 import { SandboxLambdaClientService } from './sandbox/sandbox-lambda-client.service';
 import { SandboxAnalysisBrokerService } from './sandbox/sandbox-analysis-broker.service';
+import { SandboxStoreSlotService } from './sandbox/sandbox-store-slot.service';
 
 import { createCodeExecutionTools } from './tools/domains/code-execution.tools';
 import { Global, Module, OnModuleInit } from '@nestjs/common';
@@ -103,6 +104,7 @@ import { ConversationCompactorService } from './context/conversation-compactor.s
     SandboxPolicyService,
     SandboxAuditRepository,
     SandboxLambdaClientService,
+    SandboxStoreSlotService,
     SandboxAnalysisBrokerService,
     AIToolRegistry,
     ToolRouterService,
