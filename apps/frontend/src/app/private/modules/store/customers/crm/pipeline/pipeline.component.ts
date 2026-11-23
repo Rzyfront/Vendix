@@ -28,6 +28,7 @@ import {
   EmptyStateComponent,
   IconComponent,
   InputsearchComponent,
+  ListSearchBarComponent,
   ModalComponent,
   OptionsDropdownComponent,
   SpinnerComponent,
@@ -121,6 +122,7 @@ function verticalScrollParent(element: HTMLElement): HTMLElement | null {
     EmptyStateComponent,
     IconComponent,
     InputsearchComponent,
+    ListSearchBarComponent,
     ModalComponent,
     OptionsDropdownComponent,
     SpinnerComponent,
@@ -180,30 +182,24 @@ function verticalScrollParent(element: HTMLElement): HTMLElement | null {
         ></app-stats>
       </div>
 
-      <!-- Mobile: search + options live outside the card, in the shared sticky search bar style; the view switch moves into the options dropdown. -->
+      <!-- Mobile: search + options leave the card (shared mobile search bar, under the sticky header); the view switch moves into the options dropdown. -->
       @if (isMobile()) {
-        <div class="sticky top-[99px] z-10 bg-background px-2 py-1.5 -mt-[5px] mb-2">
-          <div class="flex items-center gap-2 w-full">
-            <app-inputsearch
-              class="flex-1 shadow-[0_2px_8px_rgba(0,0,0,0.07)] rounded-[10px]"
-              size="sm"
-              placeholder="Buscar oportunidad o cliente..."
-              [debounceTime]="350"
-              (searchChange)="search.set($event)"
-            ></app-inputsearch>
-            <app-options-dropdown
-              class="shadow-[0_2px_8px_rgba(0,0,0,0.07)] rounded-[10px]"
-              [filters]="filterConfigs()"
-              [filterValues]="filterValues()"
-              [actions]="dropdownActions()"
-              [singleActionAsMenu]="true"
-              [isLoading]="loading()"
-              (filterChange)="onFilterChange($event)"
-              (clearAllFilters)="onClearFilters()"
-              (actionClick)="onActionClick($event)"
-            ></app-options-dropdown>
-          </div>
-        </div>
+        <app-list-search-bar
+          class="mb-2"
+          offset="header"
+          [desktopRow]="false"
+          placeholder="Buscar oportunidad o cliente..."
+          [debounceTime]="350"
+          [filters]="filterConfigs()"
+          [filterValues]="filterValues()"
+          [actions]="dropdownActions()"
+          [singleActionAsMenu]="true"
+          [isLoading]="loading()"
+          (searchChange)="search.set($event)"
+          (filterChange)="onFilterChange($event)"
+          (clearAllFilters)="onClearFilters()"
+          (actionClick)="onActionClick($event)"
+        ></app-list-search-bar>
       }
 
       <app-card [showHeader]="true" customClasses="overflow-hidden">
