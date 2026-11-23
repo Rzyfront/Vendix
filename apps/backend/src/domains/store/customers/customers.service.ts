@@ -1936,9 +1936,17 @@ export class CustomersService {
 
   async findAll(
     storeId: number,
-    query?: { search?: string; page?: number; limit?: number },
+    query?: {
+      search?: string;
+      page?: number;
+      limit?: number;
+      state_province?: string;
+      city?: string;
+    },
   ) {
     const { search, page = 1, limit = 20 } = query || {};
+    const stateProvince = query?.state_province?.trim();
+    const city = query?.city?.trim();
     const skip = (page - 1) * limit;
 
     const where: any = {
@@ -1987,6 +1995,21 @@ export class CustomersService {
           },
         },
       ];
+    }
+
+    // Location filter: the customer matches when ANY of its addresses
+    // (shipping or billing) is in that department/city. Exact,
+    // case-insensitive match because the values come from the DANE catalog
+    // (a `contains` would match "Santander" inside "Norte de Santander").
+    if (stateProvince || city) {
+      where.addresses = {
+        some: {
+          ...(stateProvince && {
+            state_province: { equals: stateProvince, mode: 'insensitive' },
+          }),
+          ...(city && { city: { equals: city, mode: 'insensitive' } }),
+        },
+      };
     }
 
     const [data, total] = await Promise.all([

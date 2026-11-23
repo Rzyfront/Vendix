@@ -9,7 +9,9 @@ import {
   Query,
   ParseIntPipe,
   UseGuards,
+  Req,
 } from '@nestjs/common';
+import type { Request } from 'express';
 import { ApiTags, ApiOperation, ApiResponse } from '@nestjs/swagger';
 import { AIEngineAppsService } from './ai-engine-apps.service';
 import { ResponseService } from '../../../common/responses/response.service';
@@ -97,8 +99,22 @@ export class AIEngineAppsController {
   @Post(':id/test')
   @ApiOperation({ summary: 'Test an AI application with sample data' })
   @ApiResponse({ status: 200, description: 'Test result returned' })
-  async testApplication(@Param('id', ParseIntPipe) id: number) {
-    const result = await this.appsService.testApplication(id);
-    return this.responseService.success(result, 'Application test completed');
+  async testApplication(
+    @Param('id', ParseIntPipe) id: number,
+    @Req() req?: Request,
+  ) {
+    // Si el navegador corta (su plazo o se cierra la pestaña), cancelamos la
+    // llamada al proveedor en vez de dejarla trabajando hasta su plazo.
+    const client = new AbortController();
+    const onClose = () => {
+      if (!req?.res?.writableFinished) client.abort();
+    };
+    req?.res?.once('close', onClose);
+    try {
+      const result = await this.appsService.testApplication(id, client.signal);
+      return this.responseService.success(result, 'Application test completed');
+    } finally {
+      req?.res?.off('close', onClose);
+    }
   }
 }

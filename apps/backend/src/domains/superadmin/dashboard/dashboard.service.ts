@@ -1,6 +1,10 @@
 import { Injectable } from '@nestjs/common';
 import { Prisma } from '@prisma/client';
 import { GlobalPrismaService } from '../../../prisma/services/global-prisma.service';
+import {
+  vendixUserWhere,
+  withVendixUser,
+} from '@common/utils/vendix-user.util';
 
 @Injectable()
 export class DashboardService {
@@ -73,21 +77,28 @@ export class DashboardService {
       recentPayments,
     ] = await Promise.all([
       this.prisma.organizations.count(),
-      this.prisma.users.count(),
+      // "Usuarios" = usuarios de Vendix; nunca clientes finales de las tiendas.
+      this.prisma.users.count({ where: withVendixUser() }),
       this.prisma.stores.count({ where: { is_active: true } }),
 
       this.prisma.organizations.count({
         where: { created_at: { gte: lastMonthStart, lte: lastMonthEnd } },
       }),
       this.prisma.users.count({
-        where: { created_at: { gte: lastMonthStart, lte: lastMonthEnd } },
+        where: withVendixUser({
+          created_at: { gte: lastMonthStart, lte: lastMonthEnd },
+        }),
       }),
       this.prisma.stores.count({
         where: { created_at: { gte: lastMonthStart, lte: lastMonthEnd } },
       }),
 
       this.prisma.organizations.findMany({
-        include: { _count: { select: { stores: true, users: true } } },
+        include: {
+          _count: {
+            select: { stores: true, users: { where: vendixUserWhere() } },
+          },
+        },
         orderBy: { stores: { _count: 'desc' } },
         take: 5,
       }),
@@ -98,6 +109,7 @@ export class DashboardService {
         select: { id: true, name: true, created_at: true },
       }),
       this.prisma.users.findMany({
+        where: withVendixUser(),
         orderBy: { created_at: 'desc' },
         take: 2,
         select: {
@@ -118,7 +130,7 @@ export class DashboardService {
         where: { created_at: { gte: currentMonthStart } },
       }),
       this.prisma.users.count({
-        where: { created_at: { gte: currentMonthStart } },
+        where: withVendixUser({ created_at: { gte: currentMonthStart } }),
       }),
       this.prisma.stores.count({
         where: { created_at: { gte: currentMonthStart } },
@@ -275,7 +287,9 @@ export class DashboardService {
             where: { created_at: { gte: dayDate, lt: nextDayDate } },
           }),
           this.prisma.users.count({
-            where: { created_at: { gte: dayDate, lt: nextDayDate } },
+            where: withVendixUser({
+              created_at: { gte: dayDate, lt: nextDayDate },
+            }),
           }),
           this.prisma.stores.count({
             where: { created_at: { gte: dayDate, lt: nextDayDate } },
@@ -472,7 +486,9 @@ export class DashboardService {
           where: { created_at: { gte: monthStart, lte: monthEnd } },
         }),
         this.prisma.users.count({
-          where: { created_at: { gte: monthStart, lte: monthEnd } },
+          where: withVendixUser({
+            created_at: { gte: monthStart, lte: monthEnd },
+          }),
         }),
         this.prisma.stores.count({
           where: { created_at: { gte: monthStart, lte: monthEnd } },

@@ -89,6 +89,7 @@ describe('AIAgentService.runAgentStream', () => {
       def('create_expense'),
       def('send_invoice_dian'),
       def('vex_render_table'),
+      def('vex_show_help_article'),
       def('remember'),
       {
         type: 'function' as const,
@@ -117,6 +118,7 @@ describe('AIAgentService.runAgentStream', () => {
       create_expense: 'expenses',
       send_invoice_dian: 'invoicing',
       vex_render_table: 'vex',
+      vex_show_help_article: 'vex',
       remember: 'memory',
       run_analysis: 'sandbox',
     };
@@ -798,6 +800,58 @@ describe('AIAgentService.runAgentStream', () => {
     expect(options[0][1]).toEqual(
       expect.objectContaining({ conversationId: 7 }),
     );
+  });
+
+  it('(vex-videos) a long help article paints one block and never a raw markdown copy', async () => {
+    const save = jest.fn().mockResolvedValue('block-raw');
+    const text = 'Paso a paso. '.repeat(700); // > 6000 chars
+    const block = {
+      block_id: 'b-art',
+      kind: 'help_article',
+      version: 1,
+      spec: {},
+      data: { title: 'Crear un producto', body: text },
+    };
+    executeTool.mockResolvedValueOnce(
+      JSON.stringify({
+        tool: 'vex_show_help_article',
+        version: '1',
+        data: {
+          block_id: 'b-art',
+          kind: 'help_article',
+          version: 1,
+          block,
+          instruction: 'Ya quedó en el chat.',
+        },
+      }),
+    );
+    chat
+      .mockResolvedValueOnce(
+        ok({ tool_calls: [call('c1', 'vex_show_help_article', {})] }),
+      )
+      .mockResolvedValueOnce(ok({ content: 'listo' }));
+
+    const { chunks, result } = await drain({
+      agent_key: 'vex',
+      block_sink: { save },
+      conversation_id: 7,
+    });
+
+    // No compaction: nothing stored as a markdown block.
+    expect(save).not.toHaveBeenCalled();
+    // The model sees the reference and the instruction, not the body.
+    const toModel = JSON.parse(result.tools_used[0].result);
+    expect(toModel.compacted).toBeUndefined();
+    expect(toModel.data.block_id).toBe('b-art');
+    expect(toModel.data.instruction).toBe('Ya quedó en el chat.');
+    expect(toModel.data.block).toBeUndefined();
+    // The chat frame still carries the full block.
+    const frames = chunks.filter((c) => c.type === 'ui_block');
+    expect(frames).toHaveLength(1);
+    expect(frames[0].ui_block).toEqual(
+      expect.objectContaining({ block_id: 'b-art', kind: 'help_article' }),
+    );
+    expect(JSON.stringify(frames[0].ui_block)).toContain('Crear un producto');
   });
 
   it('(vex-v) a render tool success emits a ui_block frame', async () => {

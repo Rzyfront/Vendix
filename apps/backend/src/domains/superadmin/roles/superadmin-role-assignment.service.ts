@@ -4,6 +4,7 @@ import { GlobalPrismaService } from '../../../prisma/services/global-prisma.serv
 import { UserRoleAssignmentService } from '@common/services/user-role-assignment.service';
 import { StaffProvisioningService } from '@common/services/staff-provisioning.service';
 import { RoleActor } from '@common/utils/role-scope.util';
+import { vendixUserWhere } from '@common/utils/vendix-user.util';
 import { VendixHttpException, ErrorCodes } from 'src/common/errors';
 
 /**
@@ -57,9 +58,14 @@ export class SuperadminRoleAssignmentService {
 
   // ===== READ =====
 
-  /** Dirección rol → usuarios. */
+  /**
+   * Dirección rol → usuarios. Solo usuarios de Vendix: en el rol `customer`
+   * el Super Admin no lista a los clientes finales de las tiendas.
+   */
   listRoleUsers(roleId: number) {
-    return this.assignments.listRoleUsers(roleId, SUPERADMIN_ROLE_ACTOR);
+    return this.assignments.listRoleUsers(roleId, SUPERADMIN_ROLE_ACTOR, {
+      userWhere: vendixUserWhere(),
+    });
   }
 
   /** Dirección usuario → roles. */

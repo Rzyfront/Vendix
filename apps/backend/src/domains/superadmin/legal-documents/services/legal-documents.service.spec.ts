@@ -55,3 +55,84 @@ describe('LegalDocumentsService.createSystemDocument', () => {
     expect(prisma.legal_documents.create).not.toHaveBeenCalled();
   });
 });
+
+/**
+ * Aceptación de documentos del sistema: población = usuarios de Vendix. Los
+ * clientes finales de las tiendas no entran ni en el denominador, ni en las
+ * aceptaciones contadas, ni en los listados de pendientes/aceptaciones.
+ */
+describe('LegalDocumentsService — acceptance over Vendix users only', () => {
+  const vendixUser = {
+    user_roles: { some: { roles: { name: { not: 'customer' } } } },
+  };
+  let service: LegalDocumentsService;
+  let prisma: any;
+
+  beforeEach(() => {
+    prisma = {
+      users: {
+        count: jest.fn().mockResolvedValue(4),
+        findMany: jest.fn().mockResolvedValue([]),
+      },
+      document_acceptances: {
+        groupBy: jest.fn().mockResolvedValue([
+          { acceptance_version: '1.0', _count: { acceptance_version: 3 } },
+        ]),
+        findMany: jest.fn().mockResolvedValue([]),
+      },
+      legal_documents: {
+        findFirst: jest.fn().mockResolvedValue({ id: 10, version: '1.0' }),
+      },
+    };
+    service = new LegalDocumentsService(prisma, {} as any, {} as any);
+  });
+
+  it('computes the acceptance rate over Vendix users on both sides', async () => {
+    const result = await service.getAcceptanceStats(10);
+
+    expect(prisma.users.count).toHaveBeenCalledWith({
+      where: { AND: [vendixUser, { state: 'active', email_verified: true }] },
+    });
+    expect(prisma.document_acceptances.groupBy).toHaveBeenCalledWith(
+      expect.objectContaining({
+        where: { document_id: 10, user: vendixUser },
+      }),
+    );
+    expect(result).toEqual(
+      expect.objectContaining({
+        total_users: 4,
+        total_acceptances: 3,
+        acceptance_rate: 0.75,
+      }),
+    );
+  });
+
+  it('lists pending users only among Vendix users', async () => {
+    prisma.users.findMany.mockResolvedValue([
+      { id: 5, email: 'ana@example.com', document_acceptances: [] },
+    ]);
+
+    const result = await service.getUsersPendingAcceptance(
+      'TERMS_OF_SERVICE' as any,
+    );
+
+    expect(prisma.users.findMany).toHaveBeenCalledWith(
+      expect.objectContaining({
+        where: { AND: [vendixUser, { state: 'active', email_verified: true }] },
+      }),
+    );
+    expect(result).toEqual([
+      expect.objectContaining({ id: 5, required_version: '1.0' }),
+    ]);
+  });
+
+  it('lists acceptances only from Vendix users', async () => {
+    await service.getDocumentAcceptances(10);
+
+    expect(prisma.document_acceptances.findMany).toHaveBeenCalledWith(
+      expect.objectContaining({
+        where: { document_id: 10, user: vendixUser },
+      }),
+    );
+  });
+});

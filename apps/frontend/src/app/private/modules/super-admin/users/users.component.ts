@@ -357,10 +357,19 @@ loadUsers(): void {
     this.showCreateModal.set(true);
   }
 
-  onUserCreated(): void {
+  /**
+   * El alta no asigna rol, y el listado solo muestra usuarios de Vendix (con
+   * al menos un rol distinto de `customer`). Sin este paso el usuario recién
+   * creado quedaría fuera del listado y del selector del rol, sin pantalla
+   * desde donde asignárselo. Por eso se abre su editor de roles enseguida.
+   */
+  onUserCreated(user: User): void {
     this.showCreateModal.set(false);
     this.refreshUsers();
-    this.toastService.success('Usuario creado correctamente');
+    this.toastService.success(
+      'Usuario creado. Asígnale un rol para que aparezca en el listado.',
+    );
+    this.manageRoles(user);
   }
 
   editUser(user: User): void {

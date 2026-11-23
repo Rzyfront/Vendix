@@ -62,7 +62,7 @@ test('production routes only the published pilot guides (SEO-OPS-36)', () => {
   const src = configSrc();
   assert.match(src, /ROUTED_SECTOR_GUIDES[^=]*=\s*SECTOR_GUIDES_ENABLED\s*\?\s*SECTOR_GUIDE_KEYS\s*:\s*PUBLISHED_SECTOR_GUIDES/);
   const published = listIn(src, 'PUBLISHED_SECTOR_GUIDES');
-  assert.deepEqual(published, ['comandas-restaurantes', 'ventas-mayoristas-al-detal', 'pasar-productos-excel-a-pos']);
+  assert.deepEqual(published, ['comandas-restaurantes', 'ventas-mayoristas-al-detal', 'pasar-productos-excel-a-pos', 'preparar-demostracion']);
   for (const key of published) assert.ok(GUIDE_KEYS.includes(key));
   const repo = path.resolve(front, '../../..');
   const sitemap = fs.readFileSync(path.join(repo, 'apps/backend/src/domains/public/seo/marketing-sitemap.registry.ts'), 'utf8');
@@ -78,7 +78,7 @@ test('published guides carry a dated proof and no draft label', () => {
   }
   const html = fs.readFileSync(path.join(dir, 'sector-guide.component.html'), 'utf8');
   assert.match(html, /@if \(!published\(\)\)\s*\{\s*<p class="preview-label">/);
-  assert.doesNotMatch(html, /routerLink="\/guias\/preparar-demostracion"/, 'related links must come from routed guides');
+  assert.doesNotMatch(html, /routerLink="\/guias\/[a-z-]+"/, 'related links must come from routed guides');
 });
 test('all seven guides exist and avoid unverified or forbidden claims', () => {
   const guides = load();

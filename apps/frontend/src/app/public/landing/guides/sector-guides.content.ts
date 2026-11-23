@@ -157,6 +157,13 @@ export const SECTOR_GUIDES: Readonly<Record<string, SectorGuide>> = {
           'Distingue lo demostrado de lo que falta. Que un descuento aparezca en el carrito no prueba un cobro final; que una comanda llegue a cocina no prueba preparación, entrega y cierre completos. Conserva evidencia sin datos personales.',
         ],
       },
+      {
+        heading: 'Así preparamos una demostración en Vendix',
+        paragraphs: [
+          'El 18 de noviembre de 2026 recorrimos un turno completo en la tienda de demostración de Vendix con datos ficticios y un usuario por rol: cajero, mesero y cocina. Antes de empezar anotamos el resultado esperado: con $200.000 de base, $34.000 en ventas en efectivo y un retiro de $15.000, la caja debía cerrar con $219.000. Cerró con $219.000 y sin diferencia.',
+          'Probar con cada rol mostró algo que una demostración con el usuario administrador no habría mostrado: en esa configuración, el cajero no podía cobrar las cuentas de mesa y el cobro lo hizo el administrador. Por eso conviene que cada persona de tu equipo pruebe con su propio rol.',
+        ],
+      },
     ],
     checklist: [
       'Sector y operación que quieres evaluar.',

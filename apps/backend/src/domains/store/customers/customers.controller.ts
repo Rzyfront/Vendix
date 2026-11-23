@@ -93,6 +93,8 @@ export class CustomersController {
     @Query('search') search?: string,
     @Query('page') page?: string,
     @Query('limit') limit?: string,
+    @Query('state_province') stateProvince?: string,
+    @Query('city') city?: string,
   ) {
     if (!req.user.store_id) throw new Error('Store context required');
     const pageNum = page ? parseInt(page, 10) : 1;
@@ -101,6 +103,8 @@ export class CustomersController {
       search,
       page: pageNum,
       limit: limitNum,
+      state_province: stateProvince,
+      city,
     });
   }
 

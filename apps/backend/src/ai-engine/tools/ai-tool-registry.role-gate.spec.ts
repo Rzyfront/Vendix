@@ -50,6 +50,9 @@ const PUBLIC_TOOLS = [
   // own Vex conversation blocks and runs in an isolated no-network Lambda
   'run_readonly_script',
   'run_analysis',
+  // F10/T65: Code Mode script; names only allowlisted read tools and each call
+  // re-derives the caller's live permissions in the host (CodeModeBridgeService)
+  'run_code',
   // F5/T34: proposes a batch and never writes; every step is re-checked by
   // this same role gate at approval, so it grants no business permission.
   'propose_write_batch',
@@ -78,6 +81,10 @@ const PUBLIC_TOOLS = [
   'vex_render_file',
   'vex_block_read',
   'vex_block_transform',
+  // show published help videos/posts/paths in the caller's own conversation
+  'vex_show_help_video',
+  'vex_show_help_article',
+  'vex_show_learning_path',
   // pure decimal arithmetic over the arguments: reads no business table
   'compute',
   // the caller's own reminders
