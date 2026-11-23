@@ -166,6 +166,28 @@ describe('H SSE replay is bounded transport, never an execution authority', () =
     expect(resumed[0].content).toContain('pendiente');
     expect(execute).toHaveBeenCalledTimes(1);
   });
+
+  it('delivers all audio frames to an active live reader even when total audio bytes exceed limits.bytes', async () => {
+    const replay = new ChatStreamReplay<Frame & { audio_base64?: string }>({
+      sessions: 2,
+      frames: 16,
+      bytes: 500,
+      ttlMs: 1000,
+    });
+    const chunk = 'A'.repeat(220);
+    const execute = jest.fn(async function* () {
+      yield { type: 'audio', audio_base64: `${chunk}-0` };
+      yield { type: 'audio', audio_base64: `${chunk}-1` };
+      yield { type: 'audio', audio_base64: `${chunk}-2` };
+      yield { type: 'audio', audio_base64: `${chunk}-3` };
+      yield { type: 'done' };
+    });
+
+    const delivered = await collect(replay.open('audio-turn', scope, {}, execute));
+    const audioFrames = delivered.filter((f) => f.type === 'audio');
+    expect(audioFrames).toHaveLength(4);
+    expect(delivered.at(-1)?.type).toBe('done');
+  });
 });
 
 describe('a failed producer leaves a frame the browser can act on', () => {

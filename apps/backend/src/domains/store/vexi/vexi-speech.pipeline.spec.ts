@@ -398,4 +398,73 @@ describe('VexiSpeechTurn', () => {
       expect(source.calls).toEqual(['y ya está']);
     });
   });
+
+  describe('settleOrdered', () => {
+    async function collect(
+      gen: AsyncGenerator<{ index: number; audio_base64: string }>,
+    ) {
+      const frames: Array<{ index: number; audio_base64: string }> = [];
+      for await (const frame of gen) frames.push(frame);
+      return frames;
+    }
+
+    it('emits every segment in strict ascending index order even when synthesis finishes backwards', async () => {
+      const source = new StubSource('manual');
+      const turn = new VexiSpeechTurn(source, PARAMS);
+
+      turn.push('Uno. Dos. Tres. Cuatro. ');
+      turn.flush();
+
+      const collecting = collect(turn.settleOrdered());
+      // Invert completion order of the first 3 jobs in flight.
+      source.releaseLast();
+      source.releaseLast();
+      source.releaseLast();
+      await tick();
+      await source.runToCompletion();
+
+      const frames = await collecting;
+      expect(frames.map((f) => f.index)).toEqual([0, 1, 2, 3]);
+      expect(frames.map((f) => f.audio_base64)).toEqual([
+        'b64:Uno.',
+        'b64:Dos.',
+        'b64:Tres.',
+        'b64:Cuatro.',
+      ]);
+    });
+
+    it('starts at index 1 when a filler claimed index 0', async () => {
+      const source = new StubSource();
+      const turn = new VexiSpeechTurn(source, PARAMS);
+
+      const filler = await turn.filler();
+      expect(filler?.index).toBe(0);
+
+      turn.push('Primero. Segundo. ');
+      turn.flush();
+
+      const frames = await collect(turn.settleOrdered());
+      expect(frames.map((f) => f.index)).toEqual([1, 2]);
+      expect(frames.map((f) => f.audio_base64)).toEqual([
+        'b64:Primero.',
+        'b64:Segundo.',
+      ]);
+    });
+
+    it('advances past a failed segment without stalling the remaining audio', async () => {
+      const source = new StubSource();
+      source.failOn.add('Dos.');
+      const turn = new VexiSpeechTurn(source, PARAMS);
+
+      turn.push('Uno. Dos. Tres. ');
+      turn.flush();
+
+      const frames = await collect(turn.settleOrdered());
+      expect(frames.map((f) => f.index)).toEqual([0, 2]);
+      expect(frames.map((f) => f.audio_base64)).toEqual([
+        'b64:Uno.',
+        'b64:Tres.',
+      ]);
+    });
+  });
 });

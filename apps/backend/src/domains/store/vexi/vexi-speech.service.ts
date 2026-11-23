@@ -4,7 +4,7 @@ import { AIEngineService } from '../../../ai-engine/ai-engine.service';
 import { SettingsService } from '../settings/settings.service';
 import { VexiSpeechCache, CachedAudio } from './vexi-speech.cache';
 import { VexiSpeechSegmenter, hasWordCharacter } from './vexi-speech.segmenter';
-import { VexiSpeechTurn } from './vexi-speech.pipeline';
+import { VexiSpeechTurn, type VexiAudioFrame } from './vexi-speech.pipeline';
 import type { SpeechCacheParams } from './vexi-speech.cache';
 import {
   CURRENCY_SPOKEN_WORDS,
@@ -252,6 +252,30 @@ export class VexiSpeechService {
     const audio = await this.callProvider(spoken, params);
     if (audio) this.cache.set(key, audio);
     return audio;
+  }
+
+  /**
+   * Synthesizes a full message on demand into ordered audio segments, reusing
+   * the exact same segmenter and synthesis cache as streaming voice turns.
+   *
+   * Because `VexiSpeechCache` keys on `(spokenText, params)` — never on turn
+   * index — clicking «Escuchar» on a message already spoken in voice mode (or
+   * previously listened to) hits the cache for every segment with zero provider
+   * calls.
+   */
+  async synthesizeText(rawText: string): Promise<VexiAudioFrame[]> {
+    const trimmed = (rawText ?? '').trim();
+    if (!trimmed) return [];
+
+    const turn = await this.openTurn();
+    turn.push(trimmed);
+    turn.flush();
+
+    const frames: VexiAudioFrame[] = [];
+    for await (const frame of turn.settleOrdered()) {
+      frames.push(frame);
+    }
+    return frames;
   }
 
   /**

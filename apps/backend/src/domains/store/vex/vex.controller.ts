@@ -9,6 +9,7 @@ import {
   Controller,
   Get,
   Logger,
+  Optional,
   Param,
   ParseUUIDPipe,
   Post,
@@ -37,10 +38,12 @@ import { VexiAttachmentsService } from '../vexi/vexi-attachments.service';
 import { VexiConfirmationService } from '../vexi/vexi-confirmation.service';
 import { VexiPlanStateService } from '../vexi/vexi-plan-state.service';
 import { VexiActivityService } from '../vexi/vexi-activity.service';
+import { VexiSpeechService } from '../vexi/vexi-speech.service';
 import { VexEnabledGuard } from './guards/vex-enabled.guard';
 import { ApprovePlanDto } from './dto/approve-plan.dto';
 import { ApplyVexStepDto, PlanConversationDto } from './dto/plan-lifecycle.dto';
 import { BlockInteractionDto } from './dto/block-interaction.dto';
+import { SynthesizeVexSpeechDto } from './dto/synthesize-speech.dto';
 import {
   PLAN_TOKEN_TTL_SECONDS,
   PlanApprovalService,
@@ -84,6 +87,7 @@ export class VexController {
     private readonly feed: VexActivityFeedService,
     private readonly attachments: VexiAttachmentsService,
     private readonly subscriptionAccess: SubscriptionAccessService,
+    @Optional() private readonly speech?: VexiSpeechService,
   ) {}
 
   /**
@@ -559,6 +563,28 @@ export class VexController {
   ) {
     const stored = await this.attachments.store(file, dto.conversation_id);
     return this.responseService.created(stored, 'Documento recibido');
+  }
+
+  /**
+   * Synthesizes a Vex message on demand when the user clicks «Escuchar».
+   *
+   * Never pre-generated: runs only on explicit click and reuses `VexiSpeechCache`
+   * segment-for-segment with streaming voice turns so repeated listens cost zero
+   * provider calls. Gated on `realtime_voice` (same feature bucket as
+   * `vexi_voice_tts`) and behind `VexEnabledGuard` (independent from Vexi).
+   */
+  @Post('speech')
+  @UseGuards(AiAccessGuard)
+  @RequireAIFeature('realtime_voice')
+  async synthesizeSpeech(@Body() dto: SynthesizeVexSpeechDto) {
+    if (!this.speech) {
+      throw new VendixHttpException(
+        ErrorCodes.AI_PROVIDER_002,
+        'La síntesis de voz no está disponible en este momento.',
+      );
+    }
+    const segments = await this.speech.synthesizeText(dto.text);
+    return this.responseService.success({ segments }, 'Audio generado');
   }
 
   // ── internals ─────────────────────────────────────────────────────────

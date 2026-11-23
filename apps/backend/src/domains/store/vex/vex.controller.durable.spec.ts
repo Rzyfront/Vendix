@@ -100,4 +100,18 @@ describe('Vex durable objective aliases', () => {
       'confirmation_token',
     );
   });
+
+  it('synthesizes message audio on demand via VexiSpeechService without depending on VexiEnabledGuard', async () => {
+    const c = fixture();
+    const segments = [
+      { type: 'audio', index: 0, audio_base64: 'AAA', content_type: 'audio/mp3' },
+      { type: 'audio', index: 1, audio_base64: 'BBB', content_type: 'audio/mp3' },
+    ];
+    c.speech = { synthesizeText: jest.fn(async () => segments) };
+
+    const result = await c.synthesizeSpeech({ text: 'Hola. Todo bien.' });
+
+    expect(c.speech.synthesizeText).toHaveBeenCalledWith('Hola. Todo bien.');
+    expect(result).toEqual({ segments });
+  });
 });

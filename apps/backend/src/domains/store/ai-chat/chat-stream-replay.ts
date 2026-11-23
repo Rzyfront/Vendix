@@ -67,6 +67,7 @@ type Session<T extends Frame> = {
   touched: number;
   abort: AbortController;
   wake: Set<() => void>;
+  readers: Set<{ sequence: number }>;
   checkpoint?: () => { objective_id: string; checkpoint: number };
 };
 
@@ -141,6 +142,7 @@ export class ChatStreamReplay<T extends Frame> {
         touched: this.now(),
         abort: new AbortController(),
         wake: new Set(),
+        readers: new Set(),
       };
       this.sessions.set(streamId, session);
       const created = session;
@@ -169,25 +171,29 @@ export class ChatStreamReplay<T extends Frame> {
     const abort = () => active.abort.abort();
     if (disconnected?.aborted) abort();
     else disconnected?.addEventListener('abort', abort, { once: true });
-    let sequence = request.after_sequence ?? 0;
+    const reader = { sequence: request.after_sequence ?? 0 };
+    active.readers.add(reader);
     try {
       while (true) {
         const first =
           active.frames[0]?.frame.replay?.sequence ?? active.sequence + 1;
-        if (sequence < first - 1)
+        if (reader.sequence < first - 1)
           throw new BadRequestException('AI_STREAM_RECONCILE_REQUIRED');
         for (const { frame } of active.frames.slice()) {
-          if (frame.replay!.sequence > sequence) {
-            sequence = frame.replay!.sequence;
+          if (frame.replay!.sequence > reader.sequence) {
+            reader.sequence = frame.replay!.sequence;
             active.touched = this.now();
             yield frame;
+            this.trim(active);
           }
         }
-        if (active.finished && sequence >= active.sequence) return;
-        if (active.sequence > sequence) continue;
+        if (active.finished && reader.sequence >= active.sequence) return;
+        if (active.sequence > reader.sequence) continue;
         await new Promise<void>((resolve) => active.wake.add(resolve));
       }
     } finally {
+      active.readers.delete(reader);
+      this.trim(active);
       disconnected?.removeEventListener('abort', abort);
     }
   }
@@ -204,20 +210,44 @@ export class ChatStreamReplay<T extends Frame> {
     const bytes = Buffer.byteLength(JSON.stringify(frame));
     session.frames.push({ frame, bytes });
     session.bytes += bytes;
+    this.trim(session);
+    session.touched = this.now();
+    this.wake(session);
+  }
+
+  /**
+   * Enforces the bounded replay window without evicting frames that an
+   * attached live reader has not yielded yet (e.g. a multi-segment audio turn
+   * whose base64 frames temporarily exceed `limits.bytes`). Once live readers
+   * advance past those frames — or disconnect — normal eviction reclaims them
+   * immediately. A hard ceiling still protects memory against wedged sockets.
+   */
+  private trim(session: Session<T>): void {
+    let minReader = Infinity;
+    for (const reader of session.readers) {
+      if (reader.sequence < minReader) minReader = reader.sequence;
+    }
+    const hardBytes = Math.max(this.limits.bytes * 8, 16_000_000);
     while (
       session.frames.length > 1 &&
       (session.frames.length > this.limits.frames ||
         session.bytes > this.limits.bytes)
     ) {
+      const oldestSequence = session.frames[0].frame.replay!.sequence;
+      if (oldestSequence > minReader && session.bytes <= hardBytes) break;
       session.bytes -= session.frames.shift()!.bytes;
     }
-    // Oversized audio/data cannot make the replay cache unbounded.
-    if (session.bytes > this.limits.bytes) {
+    // Oversized audio/data cannot make the replay cache unbounded once live
+    // readers have consumed it (or when no live reader is attached).
+    if (
+      session.bytes > this.limits.bytes &&
+      (session.frames.length === 0 ||
+        session.frames[0].frame.replay!.sequence <= minReader ||
+        session.bytes > hardBytes)
+    ) {
       session.frames = [];
       session.bytes = 0;
     }
-    session.touched = this.now();
-    this.wake(session);
   }
   private wake(session: Session<T>): void {
     for (const resolve of session.wake) resolve();

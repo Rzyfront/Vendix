@@ -518,6 +518,38 @@ describe('VexiSpeechService', () => {
     });
   });
 
+  describe('synthesizeText', () => {
+    it('segments a full message in order and reuses cache on repeated clicks', async () => {
+      prisma.ai_engine_applications.findUnique.mockResolvedValue(null);
+      aiEngine.runSpeech.mockImplementation(
+        async (_key: string, vars: { text: string }) => ({
+          success: true,
+          audioBase64: `b64:${vars.text}`,
+          contentType: 'audio/mpeg',
+        }),
+      );
+
+      const text =
+        'Tienes 47 ventas hoy por $1.500.000. El producto más vendido fue Café Sello Rojo y el margen promedio subió 12%.';
+
+      const first = await service.synthesizeText(text);
+      expect(first.length).toBeGreaterThanOrEqual(2);
+      expect(first.map((f) => f.index)).toEqual(first.map((_, idx) => idx));
+      const callsAfterFirst = aiEngine.runSpeech.mock.calls.length;
+      expect(callsAfterFirst).toBe(first.length);
+
+      // Second click on the same message hits VexiSpeechCache for every segment.
+      const second = await service.synthesizeText(text);
+      expect(second).toEqual(first);
+      expect(aiEngine.runSpeech).toHaveBeenCalledTimes(callsAfterFirst);
+    });
+
+    it('returns an empty array for blank text without calling the provider', async () => {
+      await expect(service.synthesizeText('   ')).resolves.toEqual([]);
+      expect(aiEngine.runSpeech).not.toHaveBeenCalled();
+    });
+  });
+
   describe('fillers', () => {
     it('warms the bank once and is free the second time', async () => {
       prisma.ai_engine_applications.findUnique.mockResolvedValue(null);
