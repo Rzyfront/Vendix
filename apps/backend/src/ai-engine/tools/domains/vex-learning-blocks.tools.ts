@@ -9,6 +9,7 @@ import type {
   HelpKnowledgeIndexerService,
 } from '../../embeddings/help-knowledge-indexer.service';
 import type { VexBlockService } from '../../../domains/store/vex/services/vex-block.service';
+import { isS3Key, isSafeS3Key } from '../../../common/helpers/s3-url.helper';
 
 /**
  * Help-center slice these tools read. Published rows only: every method is a
@@ -51,6 +52,24 @@ const httpUrl = (value: unknown): string | null => {
   } catch {
     return null;
   }
+};
+
+/** Accepts an http(s) URL or a stored S3 key (e.g. `global/help-center/...`). */
+const coverImageRef = (value: unknown): string | null => {
+  const url = httpUrl(value);
+  if (url) return url;
+  if (typeof value !== 'string') return null;
+  const trimmed = value.trim();
+  if (
+    !trimmed ||
+    /\s/.test(trimmed) ||
+    trimmed.startsWith('/') ||
+    /^[a-zA-Z][a-zA-Z0-9+.-]*:/.test(trimmed) ||
+    !trimmed.includes('/')
+  ) {
+    return null;
+  }
+  return isS3Key(trimmed) && isSafeS3Key(trimmed) ? trimmed : null;
 };
 
 const clip = (value: unknown, max: number): string | null =>
@@ -273,7 +292,7 @@ export function createVexLearningBlockTools({
               content: content.slice(0, MAX_ARTICLE_CONTENT),
               type: clip(article.type, 50),
               module: clip(article.module, 50),
-              cover_image_url: httpUrl(article.cover_image_url),
+              cover_image_url: coverImageRef(article.cover_image_url),
               video,
             },
           },

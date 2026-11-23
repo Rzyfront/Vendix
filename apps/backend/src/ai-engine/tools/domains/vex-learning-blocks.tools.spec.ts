@@ -166,6 +166,31 @@ describe('vex-learning-blocks.tools · mostrar ayuda en el chat', () => {
     expect(out.data.has_video).toBe(true);
   });
 
+  it('vex_show_help_article preserves stored S3 keys for cover_image_url and markdown images', async () => {
+    const article = {
+      id: 45,
+      title: 'Cómo crear un producto',
+      slug: 'como-crear-un-producto-1777651688059',
+      summary: 'Guía paso a paso',
+      content:
+        'Paso 1\n![image](global/help-center/articles/1777651583587-step1.webp)',
+      type: 'GUIDE',
+      module: 'products',
+      cover_image_url: 'global/help-center/articles/cover.webp',
+      video_id: null,
+    };
+    const { run, blocks } = build({ article: { article, video: null } });
+    await run('vex_show_help_article', {
+      conversation_id: 5,
+      id: 45,
+    });
+    const data = blocks.create.mock.calls[0][0].data;
+    expect(data.article.cover_image_url).toBe(
+      'global/help-center/articles/cover.webp',
+    );
+    expect(data.article.content).toBe(article.content);
+  });
+
   it('vex_show_learning_path renders the playlist with the caller progress, skipping unpublished videos', async () => {
     const path = {
       series: {
