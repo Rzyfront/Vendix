@@ -32,6 +32,7 @@ import { UserRoleAssignmentService } from '@common/services/user-role-assignment
 import { RoleActor, HIDDEN_ROLE_NAMES } from '@common/utils/role-scope.util';
 import { toTitleCase } from '@common/utils/format.util';
 import { normalizeEmail } from '@common/utils/email.util';
+import { SAFE_USER_SELECT } from '@common/utils/safe-user-select.util';
 
 @Injectable()
 export class UsersService {
@@ -368,7 +369,8 @@ export class UsersService {
 
     const user = await this.prisma.users.findFirst({
       where,
-      include: {
+      select: {
+        ...SAFE_USER_SELECT,
         organizations: true,
         user_roles: { include: { roles: true } },
         store_users: { include: { store: true } },
@@ -387,9 +389,7 @@ export class UsersService {
   async findUserSettings(id: number) {
     const user = await this.prisma.users.findUnique({
       where: { id },
-      include: {
-        user_settings: true,
-      },
+      select: { ...SAFE_USER_SELECT, user_settings: true },
     });
 
     if (!user) {
@@ -425,6 +425,7 @@ export class UsersService {
     return this.prisma.users.update({
       where: { id },
       data: { ...updateData, updated_at: new Date() },
+      select: SAFE_USER_SELECT,
     });
   }
 
@@ -436,6 +437,7 @@ export class UsersService {
         state: 'suspended',
         updated_at: new Date(),
       },
+      select: SAFE_USER_SELECT,
     });
   }
 
@@ -447,6 +449,7 @@ export class UsersService {
         state: 'archived',
         updated_at: new Date(),
       },
+      select: SAFE_USER_SELECT,
     });
   }
 
@@ -466,6 +469,7 @@ export class UsersService {
         state: 'active',
         updated_at: new Date(),
       },
+      select: SAFE_USER_SELECT,
     });
   }
 
@@ -570,6 +574,7 @@ export class UsersService {
         email_verified: true,
         updated_at: new Date(),
       },
+      select: SAFE_USER_SELECT,
     });
 
     // Delete any existing email verification tokens
@@ -634,6 +639,7 @@ export class UsersService {
         password: hashed_password,
         updated_at: new Date(),
       },
+      select: SAFE_USER_SELECT,
     });
 
     // Log the action
@@ -948,9 +954,9 @@ export class UsersService {
       app,
     );
 
+    // The token travels only in the invitation email.
     return {
       user_id: user.id,
-      token,
     };
   }
 }

@@ -36,6 +36,7 @@ import type { RentalQuote } from '../service-stations/rental-quote/rental-quote.
 import { RentalPrepayService } from './rental-prepay/rental-prepay.service';
 import { ServiceDepositsService } from '../service-deposits/service-deposits.service';
 import { recordTriggerEvent } from '../workflows/engine/workflow-trigger.outbox';
+import { SAFE_USER_SELECT } from '@common/utils/safe-user-select.util';
 
 @Injectable()
 export class ReservationsService {
@@ -2056,7 +2057,11 @@ export class ReservationsService {
   async checkIn(id: number, source: 'customer' | 'staff') {
     const booking = await this.prisma.bookings.findUnique({
       where: { id },
-      include: { customer: true, product: true, provider: true },
+      include: {
+        customer: { select: SAFE_USER_SELECT },
+        product: true,
+        provider: true,
+      },
     });
 
     if (!booking) throw new NotFoundException('Booking not found');

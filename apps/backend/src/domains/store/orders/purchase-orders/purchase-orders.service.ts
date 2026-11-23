@@ -114,6 +114,7 @@ import {
   PurchaseUomLite,
   resolvePurchaseUomFactor,
 } from './purchase-uom-factor.util';
+import { redactAuditRows } from '@common/audit/audit-redaction.util';
 
 /**
  * QUI-647 — marcador del pago real de un abono registrado al crear la OC.
@@ -6439,7 +6440,7 @@ export class PurchaseOrdersService {
     ]);
 
     const timeline = [
-      ...auditLogs.map((l) => ({
+      ...redactAuditRows<(typeof auditLogs)[number]>(auditLogs).map((l) => ({
         type: 'audit' as const,
         date: l.created_at || new Date(0),
         data: l,

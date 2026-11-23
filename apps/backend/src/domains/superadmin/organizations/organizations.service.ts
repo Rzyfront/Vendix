@@ -20,6 +20,7 @@ import {
   vendixUserWhere,
   withVendixUser,
 } from '@common/utils/vendix-user.util';
+import { SAFE_USER_SELECT } from '@common/utils/safe-user-select.util';
 import type {
   OrganizationDetailContract,
   OrganizationPrimaryAddressContract,
@@ -244,7 +245,7 @@ export class OrganizationsService {
       include: {
         stores: true,
         addresses: true,
-        users: { where: vendixUserWhere() },
+        users: { where: vendixUserWhere(), select: SAFE_USER_SELECT },
       },
     });
 

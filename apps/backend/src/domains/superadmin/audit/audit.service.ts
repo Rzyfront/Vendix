@@ -12,6 +12,7 @@ import {
   AuditAction,
   AuditResource,
 } from '../../../common/audit/audit.service';
+import { redactAuditRows } from '../../../common/audit/audit-redaction.util';
 
 /** Ventana fija de la serie `logs_by_day`, en días. */
 const LOGS_BY_DAY_WINDOW = 30;
@@ -71,7 +72,7 @@ export class SuperAdminAuditService {
       if (filters.to_date) where.created_at.lte = filters.to_date;
     }
 
-    return await this.prismaService.audit_logs.findMany({
+    const rows = await this.prismaService.audit_logs.findMany({
       where: withVendixActor(where),
       include: {
         users: {
@@ -103,6 +104,7 @@ export class SuperAdminAuditService {
       take: filters?.limit || 50,
       skip: filters?.offset || 0,
     });
+    return redactAuditRows<(typeof rows)[number]>(rows);
   }
 
   /**

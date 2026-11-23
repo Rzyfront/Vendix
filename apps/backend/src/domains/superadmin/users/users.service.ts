@@ -19,6 +19,7 @@ import { emailEquals, normalizeEmail } from '@common/utils/email.util';
 import { VendixHttpException, ErrorCodes } from 'src/common/errors';
 import { SyncPanelUiDto } from './dto/sync-panel-ui.dto';
 import { PRIVILEGED_ROLE_NAMES } from '../../../common/utils/privileged-roles.util';
+import { omitUserCredentials } from '@common/utils/safe-user-select.util';
 import { SuperadminRoleAssignmentService } from '../roles/superadmin-role-assignment.service';
 import {
   CUSTOMER_ROLE_NAME,
@@ -109,9 +110,8 @@ export class UsersService {
         });
       }
 
-      // Remove password from response
-      const { password, ...userWithoutPassword } = user;
-      return userWithoutPassword;
+      // Credentials never leave; the lockout stays for the unlock screen
+      return omitUserCredentials(user);
     });
   }
 
@@ -174,10 +174,9 @@ export class UsersService {
       this.prisma.users.count({ where }),
     ]);
 
-    // Remove passwords from response
+    // Credentials never leave; the lockout stays for the unlock screen
     const usersWithoutPasswords = users.map((user: any) => {
-      const { password, ...userWithoutPassword } = user;
-      return userWithoutPassword;
+      return omitUserCredentials(user);
     });
 
     return {
@@ -221,9 +220,8 @@ export class UsersService {
       throw new VendixHttpException(ErrorCodes.SUP_ADMIN_USER_001);
     }
 
-    // Remove password from response
-    const { password, ...userWithoutPassword } = user;
-    return userWithoutPassword;
+    // Credentials never leave; the lockout stays for the unlock screen
+    return omitUserCredentials(user);
   }
 
   async update(id: number, updateUserDto: UpdateUserDto) {
@@ -304,9 +302,8 @@ export class UsersService {
       },
     });
 
-    // Remove password from response
-    const { password, ...userWithoutPassword } = updatedUser;
-    return userWithoutPassword;
+    // Credentials never leave; the lockout stays for the unlock screen
+    return omitUserCredentials(updatedUser);
   }
 
   async remove(id: number) {
@@ -542,10 +539,9 @@ export class UsersService {
       };
     });
 
-    // Remove passwords from recent users
+    // Credentials never leave; the lockout stays for the unlock screen
     const recentUsersWithoutPasswords = recentUsers.map((user: any) => {
-      const { password, ...userWithoutPassword } = user;
-      return userWithoutPassword;
+      return omitUserCredentials(user);
     });
 
     return {
@@ -590,9 +586,8 @@ export class UsersService {
       },
     });
 
-    // Remove password from response
-    const { password, ...userWithoutPassword } = updatedUser;
-    return userWithoutPassword;
+    // Credentials never leave; the lockout stays for the unlock screen
+    return omitUserCredentials(updatedUser);
   }
 
   async toggle2FA(id: number, enabled: boolean) {
@@ -617,8 +612,7 @@ export class UsersService {
       },
     });
 
-    const { password, ...userWithoutPassword } = updatedUser;
-    return userWithoutPassword;
+    return omitUserCredentials(updatedUser);
   }
 
   async unlock(id: number) {
@@ -646,8 +640,7 @@ export class UsersService {
       },
     });
 
-    const { password, ...userWithoutPassword } = updatedUser;
-    return userWithoutPassword;
+    return omitUserCredentials(updatedUser);
   }
 
   async previewPanelUISync() {
