@@ -1,5 +1,6 @@
 import {
   Component,
+  DestroyRef,
   TemplateRef,
   computed,
   effect,
@@ -11,6 +12,7 @@ import {
   viewChild,
 } from '@angular/core';
 import { firstValueFrom } from 'rxjs';
+import { takeUntilDestroyed } from '@angular/core/rxjs-interop';
 import { FormsModule } from '@angular/forms';
 import { CardComponent } from '../../../../../../shared/components/card/card.component';
 import {
@@ -24,7 +26,14 @@ import {
   OptionsDropdownComponent,
   DropdownAction,
   PaginationComponent,
+  FilterConfig,
+  FilterValues,
 } from '../../../../../../shared/components';
+import {
+  DianDepartmentOption,
+  DianMunicipalityLookupService,
+  DianMunicipalityOption,
+} from '../../../../../../shared/services/dian-municipality-lookup.service';
 import { Customer } from '../../models/customer.model';
 import { CurrencyFormatService } from '../../../../../../shared/pipes/currency';
 import { getDocumentTypeLabel } from '../../../../../../shared/constants/document-types';
@@ -33,6 +42,11 @@ import { AuthFacade } from '../../../../../../core/store/auth/auth.facade';
 import { CrmService } from '../../crm/shared/crm.service';
 import { CustomerCrmMemberships } from '../../crm/shared/crm.interface';
 import { CrmMembershipChipsComponent } from '../../crm/shared/crm-membership-chips.component';
+
+export interface CustomerLocationFilter {
+  state_province?: string;
+  city?: string;
+}
 
 @Component({
   selector: 'app-customer-list',
@@ -83,8 +97,12 @@ import { CrmMembershipChipsComponent } from '../../crm/shared/crm-membership-chi
 
             <app-options-dropdown
               class="shadow-[0_2px_8px_rgba(0,0,0,0.07)] md:shadow-none rounded-[10px]"
+              [filters]="filterConfigs()"
+              [filterValues]="filterValues()"
               [actions]="dropdownActions"
               [isLoading]="loading()"
+              (filterChange)="onFilterChange($event)"
+              (clearAllFilters)="clearFilters()"
               (actionClick)="onActionClick($event)"
             ></app-options-dropdown>
           </div>
@@ -171,6 +189,36 @@ export class CustomerListComponent {
   readonly bulkUpload = output<void>();
   readonly aiImport = output<void>();
   readonly pageChange = output<number>();
+  /** Department/city filter, as the names stored on `addresses`. */
+  readonly locationFilter = output<CustomerLocationFilter>();
+
+  // ── Department / city filter (DANE catalog) ─────────────────────────────
+  private readonly destroyRef = inject(DestroyRef);
+  private readonly dane = inject(DianMunicipalityLookupService);
+  private readonly departments = signal<DianDepartmentOption[]>([]);
+  private readonly municipalities = signal<DianMunicipalityOption[]>([]);
+  readonly filterValues = signal<FilterValues>({ department: null, city: null });
+
+  readonly filterConfigs = computed<FilterConfig[]>(() => {
+    const hasDepartment = !!this.filterValues()['department'];
+    return [
+      {
+        key: 'department',
+        label: 'Departamento',
+        type: 'select',
+        placeholder: 'Todos los departamentos',
+        options: this.departments().map((d) => ({ value: d.code, label: d.name })),
+      },
+      {
+        key: 'city',
+        label: 'Ciudad',
+        type: 'select',
+        placeholder: hasDepartment ? 'Todas las ciudades' : 'Elige un departamento',
+        disabled: !hasDepartment,
+        options: this.municipalities().map((m) => ({ value: m.code, label: m.name })),
+      },
+    ];
+  });
 
   get totalPages(): number {
     return Math.ceil(this.totalItems() / this.limit());
@@ -183,6 +231,15 @@ export class CustomerListComponent {
   constructor() {
     // Asegurar que la moneda esté cargada
     this.currencyService.loadCurrency();
+
+    // Best effort: without the catalog the filter shows no options.
+    this.dane
+      .listDepartments()
+      .pipe(takeUntilDestroyed(this.destroyRef))
+      .subscribe({
+        next: (departments) => this.departments.set(departments),
+        error: () => this.departments.set([]),
+      });
 
     effect(() => {
       const ids = this.customers()
@@ -347,6 +404,49 @@ export class CustomerListComponent {
 
   onSearch(query: string) {
     this.search.emit(query);
+  }
+
+  onFilterChange(values: FilterValues): void {
+    const department = (values['department'] as string | null) || null;
+    const departmentChanged = department !== this.filterValues()['department'];
+    // A new department invalidates the city chosen for the previous one.
+    const city = departmentChanged ? null : (values['city'] as string | null) || null;
+
+    this.filterValues.set({ department, city });
+    if (departmentChanged) this.loadMunicipalities(department);
+    this.emitLocationFilter();
+  }
+
+  clearFilters(): void {
+    this.filterValues.set({ department: null, city: null });
+    this.municipalities.set([]);
+    this.emitLocationFilter();
+  }
+
+  private loadMunicipalities(departmentCode: string | null): void {
+    this.municipalities.set([]);
+    if (!departmentCode) return;
+    this.dane
+      .listByDepartment(departmentCode)
+      .pipe(takeUntilDestroyed(this.destroyRef))
+      .subscribe({
+        next: (rows) => {
+          // Ignore a late answer for a department that is no longer selected.
+          if (this.filterValues()['department'] === departmentCode) {
+            this.municipalities.set(rows);
+          }
+        },
+        error: () => this.municipalities.set([]),
+      });
+  }
+
+  /** Sends names, not DANE codes: `addresses` stores the names. */
+  private emitLocationFilter(): void {
+    const { department, city } = this.filterValues();
+    this.locationFilter.emit({
+      state_province: this.departments().find((d) => d.code === department)?.name,
+      city: this.municipalities().find((m) => m.code === city)?.name,
+    });
   }
 
   onPageChangeAction(page: number) {
