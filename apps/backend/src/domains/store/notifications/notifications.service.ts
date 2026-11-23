@@ -5,6 +5,7 @@ import { GlobalPrismaService } from '../../../prisma/services/global-prisma.serv
 import { RequestContextService } from '@common/context/request-context.service';
 import { NotificationsSseService } from './notifications-sse.service';
 import { NotificationsPushService } from './notifications-push.service';
+import { NotificationDispatcher } from './notification-dispatcher.service';
 import { resolveEffectiveChannels } from './notification-catalog';
 import { NotificationQueryDto, UpdateSubscriptionDto } from './dto';
 
@@ -15,6 +16,7 @@ export class NotificationsService {
     private readonly global_prisma: GlobalPrismaService,
     private readonly sse_service: NotificationsSseService,
     private readonly push_service: NotificationsPushService,
+    private readonly dispatcher: NotificationDispatcher,
   ) {}
 
   private getContext() {
@@ -84,9 +86,19 @@ export class NotificationsService {
    * Uses `booking_check_in` enum + `data.kind = 'provider_turn'` to flag the
    * provider-turn alert so the frontend can apply a distinctive sound + route.
    *
-   * Mirrors `createAndBroadcast` but targets the user's SSE subject and pushes
-   * to that user's push subscriptions only — other users in the store do NOT
-   * see the bell or get the web push.
+   * Delegates to `NotificationDispatcher` (odd/tasks/recordatorios-notificaciones.md
+   * §3.1a), so every targeted notice now honours the user's preferences: the
+   * bell + SSE always, the web push only while their "Dispositivo" preference
+   * is on, the e-mail only for catalog types whose "Correo" they turned on.
+   * Without a saved row the catalog default applies (push on, e-mail off), so
+   * nothing changes for anyone who never configured the type.
+   *
+   * The recipient must belong to THAT store: active staff, or — only through
+   * this legacy entry point — one of its customers (order status, booking
+   * reschedule…), who never gets e-mail from here. Anyone else gets nothing.
+   *
+   * Returns the bell row, or null when nothing was delivered (failure or a
+   * recipient outside the store). Never throws.
    */
   async sendToUser(
     store_id: number,
@@ -96,39 +108,16 @@ export class NotificationsService {
     body: string,
     data?: any,
   ) {
-    try {
-      const notification = await this.global_prisma.notifications.create({
-        data: {
-          store_id,
-          type: type as notification_type_enum,
-          title,
-          body,
-          data: { ...data, target_user_id: user_id },
-        },
-      });
-
-      // Targeted SSE push — only the user subject emits.
-      this.sse_service.pushToUser(store_id, user_id, {
-        id: notification.id,
-        type: notification.type,
-        title: notification.title,
-        body: notification.body,
-        data: notification.data,
-        created_at: notification.created_at.toISOString(),
-      });
-
-      // Targeted web push — only that user's devices.
-      this.push_service
-        .sendToUser(store_id, user_id, type, title, body, data)
-        .catch(() => {});
-
-      return notification;
-    } catch (error) {
-      console.error(
-        `[NotificationsService.sendToUser] Failed: ${error.message}`,
-      );
-      return null;
-    }
+    const [result] = await this.dispatcher.notify({
+      store_id,
+      user_ids: [user_id],
+      type,
+      title,
+      body,
+      data,
+      allow_store_customers: true,
+    });
+    return result?.notification ?? null;
   }
 
   /**

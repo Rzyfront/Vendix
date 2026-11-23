@@ -8,7 +8,11 @@ import { NotificationSoundsCatalogService } from './notification-sounds-catalog.
 import { NotificationsSseService } from './notifications-sse.service';
 import { NotificationsPushService } from './notifications-push.service';
 import { NotificationsEventsListener } from './notifications-events.listener';
+import { NotificationDispatcher } from './notification-dispatcher.service';
 import { NotificationPreferencesService } from './notification-preferences.service';
+import { NotificationRecipientsService } from './notification-recipients.service';
+import { NotificationEmailService } from './notification-email.service';
+import { NotificationDeliveriesJob } from './notification-deliveries.job';
 import { ResponseModule } from '../../../common/responses/response.module';
 import { PrismaModule } from '../../../prisma/prisma.module';
 import { EmailModule } from '../../../email/email.module';
@@ -42,13 +46,19 @@ import { InvoiceDeliveryModule } from '../invoicing/delivery/invoice-delivery.mo
     NotificationsPushService,
     NotificationsEventsListener,
     NotificationSoundsCatalogService,
-    // Preferencias por canal (plan recordatorios §3.1).
+    // Avisos personales con preferencias por canal (plan recordatorios §3.1).
+    NotificationDispatcher,
     NotificationPreferencesService,
+    NotificationRecipientsService,
+    NotificationEmailService,
+    // Cron: solo corre en el worker (la API desmonta los @Cron en main.ts).
+    NotificationDeliveriesJob,
   ],
   exports: [
     NotificationsService,
     NotificationsSseService,
     NotificationsPushService,
+    NotificationDispatcher,
     NotificationPreferencesService,
   ],
 })
