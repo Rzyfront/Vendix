@@ -50,7 +50,7 @@ interface NoticeTarget {
 /**
  * QUI-580 — notifies the OWNER of a pending reminder once, when it falls due:
  * in Vendix (bell + web push, via `sendToUser`) and by e-mail. Runs without a
- * store context (like `CrmTaskDueJob`), so every row names its store and its
+ * store context (like `ScheduledRemindersJob`), so every row names its store and its
  * user, and every lookup carries that store explicitly: never a store-wide
  * broadcast.
  *
