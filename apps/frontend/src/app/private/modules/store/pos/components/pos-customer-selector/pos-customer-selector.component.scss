@@ -373,9 +373,9 @@
   flex-shrink: 0;
   padding: 1px 8px;
   border-radius: 9999px;
-  border: 1px solid var(--color-border);
-  background: var(--color-primary-light);
-  color: var(--color-primary);
+  border: 1px solid color-mix(in srgb, var(--color-primary) 25%, transparent);
+  background: color-mix(in srgb, var(--color-primary) 10%, transparent);
+  color: var(--color-primary-on-tint);
   font-size: 11px;
   font-weight: 600;
   line-height: 16px;
