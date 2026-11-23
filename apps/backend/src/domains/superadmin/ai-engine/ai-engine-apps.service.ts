@@ -1,12 +1,29 @@
-import { Injectable } from '@nestjs/common';
+import { Injectable, Logger } from '@nestjs/common';
 import { Prisma, ai_model_type_enum } from '@prisma/client';
 import { GlobalPrismaService } from '../../../prisma/services/global-prisma.service';
 import { AIEngineService } from '../../../ai-engine/ai-engine.service';
+import {
+  AgentDeadline,
+  agentDeadlineContext,
+  isAgentAbort,
+} from '../../../ai-engine/tasks/agent-deadline';
 import { VendixHttpException, ErrorCodes } from '../../../common/errors';
 import { CreateAIAppDto, UpdateAIAppDto, AIAppQueryDto } from './dto';
 
+/**
+ * Plazo máximo de la prueba manual de una aplicación (Super Admin › AI Engine).
+ * Sin él, el SDK del proveedor espera hasta 10 min por defecto: la petición del
+ * navegador queda colgada ocupando una conexión y la pantalla no responde.
+ * El frontend corta a los 120 s, así que este plazo debe ser menor.
+ */
+export const AI_APP_TEST_TIMEOUT_MS = 90_000;
+
 @Injectable()
 export class AIEngineAppsService {
+  private readonly logger = new Logger(AIEngineAppsService.name);
+  /** Sobrescribible solo en specs. */
+  protected testTimeoutMs = AI_APP_TEST_TIMEOUT_MS;
+
   constructor(
     private readonly prisma: GlobalPrismaService,
     private readonly aiEngine: AIEngineService,
@@ -312,8 +329,23 @@ export class AIEngineAppsService {
     await this.prisma.ai_engine_applications.delete({ where: { id } });
   }
 
+  /**
+   * Prueba manual de una aplicación. Nunca lanza por un fallo de la prueba:
+   * app desactivada, error del proveedor o plazo vencido vuelven como
+   * `{ success: false, error }` rápido y controlado, para que la pantalla lo
+   * muestre en su propio mensaje. Solo una app inexistente sigue siendo 404.
+   */
   async testApplication(id: number) {
     const app = await this.findOne(id);
+
+    if (!app.is_active) {
+      return {
+        success: false,
+        error:
+          'La aplicación está desactivada. Actívala para poder probarla.',
+        error_code: ErrorCodes.AI_APP_003.code,
+      };
+    }
 
     // Build a minimal test using the app's template
     const testVars: Record<string, string> = {
@@ -333,11 +365,44 @@ export class AIEngineAppsService {
       app.output_format,
       modelType,
     );
-    const response = await this.executeTestByType(
-      app.key,
-      executionType,
-      testVars,
-    );
+    const deadline = new AgentDeadline({
+      wallDeadlineMs: Date.now() + this.testTimeoutMs,
+      activeBudgetMs: Infinity,
+      reserveMs: 0,
+    });
+    let response: any;
+    try {
+      // El contexto propaga la señal de aborto a los proveedores que la
+      // honran; `deadline.run` responde a tiempo aunque alguno no la honre.
+      response = await agentDeadlineContext.run(deadline, () =>
+        deadline.run(() =>
+          this.executeTestByType(app.key, executionType, testVars),
+        ),
+      );
+    } catch (error) {
+      const timedOut = isAgentAbort(error, deadline.signal);
+      this.logger.warn(
+        `Test of AI app #${id} (${app.key}) failed: ${
+          timedOut
+            ? `timeout after ${this.testTimeoutMs}ms`
+            : error instanceof Error
+              ? error.message
+              : String(error)
+        }`,
+      );
+      return {
+        success: false,
+        error: timedOut
+          ? `El proveedor de IA no respondió en ${Math.round(
+              this.testTimeoutMs / 1000,
+            )} s. Revisa la configuración o inténtalo más tarde.`
+          : this.describeTestFailure(error),
+        error_code: timedOut ? 'AI_APP_TEST_TIMEOUT' : 'AI_APP_TEST_FAILED',
+        model_type: executionType,
+      };
+    } finally {
+      deadline.dispose();
+    }
 
     return {
       success: response.success,
@@ -382,6 +447,13 @@ export class AIEngineAppsService {
         .filter((c) => c.config_id !== null)
         .reduce((sum, c) => sum + c._count, 0),
     };
+  }
+
+  /** Mensaje corto y legible del fallo de la prueba (sin stack ni cuerpo crudo). */
+  private describeTestFailure(error: unknown): string {
+    const detail = error instanceof Error ? error.message.trim() : '';
+    const base = 'La prueba de la aplicación falló';
+    return detail ? `${base}: ${detail.slice(0, 300)}` : `${base}.`;
   }
 
   private resolveExecutionType(

@@ -134,6 +134,55 @@ describe('AIEngineAppsService', () => {
     );
   });
 
+  describe('testApplication: un fallo de la prueba es un resultado, no una caída', () => {
+    it('app desactivada → success:false inmediato, sin llamar al proveedor', async () => {
+      prisma.ai_engine_applications.findUnique.mockResolvedValueOnce({
+        ...app,
+        is_active: false,
+      });
+
+      const result = await service.testApplication(10);
+
+      expect(result).toMatchObject({
+        success: false,
+        error_code: 'AI_APP_003',
+      });
+      expect(aiEngine.getApplicationModelType).not.toHaveBeenCalled();
+      expect(aiEngine.run).not.toHaveBeenCalled();
+    });
+
+    it('proveedor que no responde → error controlado al vencer el plazo', async () => {
+      prisma.ai_engine_applications.findUnique.mockResolvedValueOnce(app);
+      aiEngine.getApplicationModelType.mockResolvedValueOnce('text');
+      aiEngine.run.mockReturnValueOnce(new Promise(() => undefined));
+      (service as unknown as { testTimeoutMs: number }).testTimeoutMs = 30;
+
+      const started = Date.now();
+      const result = await service.testApplication(10);
+
+      expect(Date.now() - started).toBeLessThan(2000);
+      expect(result).toMatchObject({
+        success: false,
+        error_code: 'AI_APP_TEST_TIMEOUT',
+        model_type: 'text',
+      });
+    });
+
+    it('el proveedor lanza → success:false con el motivo, sin propagar la excepción', async () => {
+      prisma.ai_engine_applications.findUnique.mockResolvedValueOnce(app);
+      aiEngine.getApplicationModelType.mockResolvedValueOnce('text');
+      aiEngine.run.mockRejectedValueOnce(new Error('401 invalid api key'));
+
+      const result = await service.testApplication(10);
+
+      expect(result).toMatchObject({
+        success: false,
+        error_code: 'AI_APP_TEST_FAILED',
+      });
+      expect(result.error).toContain('401 invalid api key');
+    });
+  });
+
   describe('model_type cross-validation', () => {
     let prismaFull: {
       ai_engine_applications: {
