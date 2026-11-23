@@ -12,7 +12,7 @@
 | Despliegue | `update-stack --use-previous-template`, solo `ImageUri`; actualizó únicamente `AnalysisFunction` (01:07:43-01:08:00Z). `CodeSha256 = b62b6f9f…015b`, `Active`/`Successful`. Plantilla desplegada = `template.json` del repo (comparación JSON), drift `IN_SYNC` |
 | Base | `public.ecr.aws/lambda/python:3.12@sha256:ed196260cbf6f74e3f64dd141ebe2401d78a15e6355925da98a3d3c3b4d35c6a` (sin cambios) |
 | Evidencia | Arnés, resultados crudos de las 388 invocaciones y salidas de AWS, **fuera del repo público**: `~/.openclaw/tmp/encargos/vex-plus-f10/evidencia-t53/evidencia-t53-r6.tar.gz`, SHA-256 `9a1bebe0186c37bc85450a911ae54adfd4efefd269252593587a6fe8677ab4ec`; dentro, `r6/SHA256SUMS` (95 archivos, SHA-256 `8b1044b63576f69e023d1ef5c0d5a27c51cad99ce5b2acf53afa474d887926c4`) y `r6/MANIFIESTO.md` (`f2e7cbeb45f2bae1938a5dd2b1a3ca5df2da78541d74a6c28f0b95f7455fcbdb`). Ver «Evidencia auditable y firma» |
-| Firma | Commit de este documento y tag anotado `t53-r6-cert`, firmados con SSH (ed25519, huella `SHA256:adPIjYArS9wqXupW+g2x59pToW+/CxA2zEfQ1mWSrYQ`) |
+| Firma | Commit de este documento y tags anotados `t53-r6-cert` (historia, antes de la decisión) y `t53-r6-aceptada` (estado vigente), firmados con SSH (ed25519, huella `SHA256:adPIjYArS9wqXupW+g2x59pToW+/CxA2zEfQ1mWSrYQ`) |
 
 Las corridas 5, 4, 3, 2 y 1 quedan abajo como historial. Higiene: en este documento la cuenta, el rol, la VPC, subredes, security group e IPs internas se sustituyeron por `<account>`, `<role>`, `<vpc-id>`, `<subnet-id>`, `<sg-id>`, `<internal-ip>`; los valores reales están solo en la evidencia privada (`valores-reales.txt`). **Commits anteriores de la rama todavía contienen el ID de cuenta y esos valores**; no se reescribió la historia (lo decide Rafael).
 
@@ -51,7 +51,7 @@ Todos los topes de `/tmp` los aplica el proceso padre, y el invitado comparte su
 | **`SIGSTOP` al padre, sin inundar** (×2) | `Sandbox.Timedout` a 30,1 s; entorno reiniciado (`init` nuevo); A, B, C `ok` en 2,4-2,5 s; `/tmp` intacto | igual (30,1-30,3 s; A, B, C `ok` 2,4-2,5 s) |
 | **`SIGSTOP` + enlaces duros en la raíz de `/tmp` 25 s, un inodo** (×5; ext4 corta en 65 000 enlaces por inodo, `EMLINK`) | la raíz pasa de 4 KiB a 1,5 MB (−370 bloques) la primera vez y no crece más; tienda siguiente `ok`, handler 3,1-3,2 s (+0,65 s de limpieza dentro de su presupuesto) | la raíz igual (1,5 MB, una vez); tienda siguiente `ok`, handler 2,4-2,5 s (la limpieza pasa a INIT), cliente 3,1-3,4 s |
 | **`SIGSTOP` + enlaces duros rotando inodos (`mkfifo`) 25 s** (×5) | la raíz pasa a 10,0 MB (−2 078 bloques, 8,1 MB) la primera vez y no crece más; tienda siguiente `ok`, handler 7,2 s la primera vez y 4,6-4,8 s después | la raíz a 10,0 MB (−2 062 bloques), una vez; tienda siguiente `ok`, handler 2,5-2,6 s, cliente 5,4 s la primera vez y 4,0-4,2 s después |
-| **`SIGSTOP` + `mkdir` 25 s** (×2) | tienda siguiente `ok` tras **19,2 / 19,9 s** de handler (la limpieza consume su presupuesto) | INIT limpia 7 s; tienda siguiente `sandbox busy` (cliente 9,4 s, handler 2,0 s); dos tiendas más y la repetición del atacante `sandbox busy` en 2,0-2,2 s; la quinta invocación `ok` (2,9 s). Recuperación ≈ 16 s de limpieza, **4 respuestas `sandbox busy`** |
+| **`SIGSTOP` + `mkdir` 25 s** (×2 lanzados; en la imagen nueva solo 1 efectivo: la repetición recibió `sandbox busy` y no llegó a correr) | tienda siguiente `ok` tras **19,2 / 19,9 s** de handler (la limpieza consume su presupuesto) | INIT limpia 7 s; tienda siguiente `sandbox busy` (cliente 9,4 s, handler 2,0 s); dos tiendas más y la repetición del atacante `sandbox busy` en 2,0-2,2 s; la quinta invocación `ok` (2,9 s). Recuperación ≈ 16 s de limpieza, **4 respuestas `sandbox busy`** |
 | **Daemon** (doble `fork` + `setsid`) que baja `NOFILE` y sube `nice` (`PRIO_USER`) de todo el uid e inunda `/tmp`; el invitado mata al padre (×2) | `Runtime.ExitError` a 2,4 s; Lambda reinicia también `init`; A, B, C: `NOFILE (1024, 1024)`, `nice 0`, solo `init` | igual (2,2-2,3 s) |
 | **Raíz de `/tmp` y E/S** (obs. 2 y 3): `chmod`, `chown`, `utime`, `setxattr` (`user.`/`trusted.`) sobre `/tmp`; `ioprio_set` y `uclamp` sobre el handler | todo `EPERM`; `uclamp` `ENOTSUP`; `/tmp` es `041777`, uid 0, sin xattrs; A, B, C sin cambios | igual |
 
@@ -100,6 +100,13 @@ Es el complemento que la opción (b) pedía «en ambos casos». No cambia la ima
 - **Liberación:** se libera (borrado condicionado a su token) en el `finally` cuando la Lambda ya respondió (`ok`, errores del invitado, `ANALYSIS_PROTOCOL`/`OUTPUT`/`LIMIT`) o nunca se despachó. Ante `ANALYSIS_EXPIRED` o `ANALYSIS_UNAVAILABLE` tras el despacho, la Lambda puede seguir viva (B1), así que la ranura se conserva hasta su TTL.
 - **Respuesta a la tienda ocupada:** `ANALYSIS_LIMIT` (código existente; Vex ya lo traduce como «Ya hay otro análisis en curso en esta tienda; espera a que termine»). No consume uno de los 2 intentos del objetivo. Redis caído: `ANALYSIS_UNAVAILABLE` (falla cerrado). Sin cambio de contrato.
 - **Specs:** `sandbox-store-slot.service.spec.ts` (6) y `sandbox-analysis-broker.service.spec.ts` (29, 10 nuevos).
+
+## Limitaciones conocidas de esta certificación
+
+- **El peor caso tiene una sola muestra.** En la imagen nueva, `SIGSTOP` + `mkdir` 25 s corrió una vez (la repetición recibió `sandbox busy`); las cifras de recuperación (~16 s de limpieza, 4 `sandbox busy`, 9,4 s de cliente en la primera) y el criterio «≤ 4 `sandbox busy` por ataque» descansan en n = 1.
+- **Nada se midió en paralelo.** Todas las fases fueron secuenciales; «3 ataques simultáneos dejan el análisis sin servicio para todas las tiendas» es un razonamiento, no una medición.
+- **Sin detección automática.** La Lambda no tiene logs por diseño y no hay alarma, consulta ni criterio automático de apagado ante un ataque B1; la única defensa operativa es el rollback manual del interruptor (`AI_ANALYSIS_SANDBOX_ENABLED=false`).
+- **La clave de firma es autoatestada.** La generó el operador y su parte pública solo consta en este documento; la firma prueba integridad y continuidad del texto, no identidad ni autoría de la decisión.
 
 ## Observaciones de la auditoría independiente: estado
 
@@ -188,11 +195,12 @@ Ver la tabla de resultados. `./runtime-digest.sh` en `26dd8aa11` = `sha256:ada2b
 - **Dónde:** `~/.openclaw/tmp/encargos/vex-plus-f10/evidencia-t53/` en la máquina del operador, fuera del repo público (contiene la cuenta, IDs de red e IPs internas). Se entrega bajo pedido.
 - **Qué:** `evidencia-t53-r6.tar.gz` (SHA-256 `9a1bebe0186c37bc85450a911ae54adfd4efefd269252593587a6fe8677ab4ec`) con `r6/`: el arnés (`harness/`), cada invocación completa en `<fase>/raw.jsonl` (B1 antes y después, puntos 1-4), las salidas de AWS de los puntos 5 y 6 (`p56/`), la plantilla desplegada, el log de construcción, `MANIFIESTO.md` (qué se ejecutó, cuándo y con qué resultado, por fase) y `SHA256SUMS` (95 archivos).
 - **Cómo verificar:** `shasum -a 256 evidencia-t53-r6.tar.gz`; `tar xzf …` y `cd r6 && shasum -a 256 -c SHA256SUMS`; repetir un punto con `T53_DIGEST=<runtime digest> python -I harness/<fase>.py <dir>` (requiere `lambda:InvokeFunction` sobre la función).
-- **Firma:** el commit que publica este documento y el tag anotado `t53-r6-cert` están firmados con una clave SSH dedicada (ed25519, comentario `vendix-t53-signing`, huella `SHA256:adPIjYArS9wqXupW+g2x59pToW+/CxA2zEfQ1mWSrYQ`). Clave pública: `ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIC4JLezCK3YzQGbRTZvfjpmmuMD4SoRP9D26i+GQHWhz`. Verificación:
+- **Firma:** el commit que publica este documento y los tags anotados `t53-r6-cert` (corrida 6 antes de la decisión, «NO certificada»; se conserva como historia) y `t53-r6-aceptada` (estado vigente, aceptada con riesgo documentado) están firmados con una clave SSH dedicada (ed25519, comentario `vendix-t53-signing`, huella `SHA256:adPIjYArS9wqXupW+g2x59pToW+/CxA2zEfQ1mWSrYQ`). Clave pública: `ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIC4JLezCK3YzQGbRTZvfjpmmuMD4SoRP9D26i+GQHWhz`. Verificación:
 
   ```sh
   echo 'aurora@abkbusiness.com ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIC4JLezCK3YzQGbRTZvfjpmmuMD4SoRP9D26i+GQHWhz' > /tmp/allowed_signers
   git -c gpg.ssh.allowedSignersFile=/tmp/allowed_signers tag -v t53-r6-cert
+  git -c gpg.ssh.allowedSignersFile=/tmp/allowed_signers tag -v t53-r6-aceptada
   git -c gpg.ssh.allowedSignersFile=/tmp/allowed_signers log --show-signature -1 t53-r6-cert
   ```
 
