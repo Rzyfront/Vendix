@@ -1,33 +1,15 @@
 import { IsString, IsBoolean, IsOptional, IsIn } from 'class-validator';
+import { CONFIGURABLE_NOTIFICATION_TYPES } from '../notification-catalog';
 
-const NOTIFICATION_TYPES = [
-  'new_order',
-  'order_status_change',
-  'low_stock',
-  'new_customer',
-  'payment_received',
-  'layaway_payment_received',
-  'layaway_payment_reminder',
-  'layaway_overdue',
-  'layaway_completed',
-  'layaway_cancelled',
-  'new_review',
-  // QUI-647 — vencimientos de CxP: el usuario puede apagar/encender la campana
-  // y el web push de cada tipo desde Configuración → Notificaciones.
-  'ap_installment_due_soon',
-  'ap_installment_overdue',
-  // Recordatorio de cuota de venta a crédito: campana apagable por usuario.
-  'credit_installment_reminder',
-  // T9 — listo de cocina: el mesero puede apagar/encender la campana
-  // desde Configuración → Notificaciones, igual que el resto.
-  'kitchen_ticket_ready',
-  // H4.3 — recordatorio anual (marzo) de renovar el RNT del hotel.
-  'lodging_rnt_renewal',
-] as const;
-
+/**
+ * Preferencia de un tipo de aviso para el usuario en la tienda actual.
+ * `type` se valida contra el catálogo (`NOTIFICATION_CATALOG`), no contra una
+ * lista fija: agregar un tipo configurable es agregarlo allí.
+ * `in_app` = Dispositivo (web push); `email` = Correo.
+ */
 export class UpdateSubscriptionDto {
   @IsString()
-  @IsIn(NOTIFICATION_TYPES)
+  @IsIn(CONFIGURABLE_NOTIFICATION_TYPES)
   type: string;
 
   @IsOptional()

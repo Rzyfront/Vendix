@@ -1,3 +1,7 @@
+// El despachador se inyecta como doble; no hace falta cargar su cadena de
+// canales (push, correo SES) para probar este servicio.
+jest.mock('./notification-dispatcher.service', () => ({ NotificationDispatcher: class {} }));
+
 import { NotificationsService } from './notifications.service';
 import { RequestContextService } from '@common/context/request-context.service';
 import { notification_type_enum } from '@prisma/client';
@@ -17,12 +21,14 @@ describe('NotificationsService — initDefaultSubscriptions', () => {
     const globalPrismaMock = {} as any;
     const sseMock = { push: jest.fn() } as any;
     const pushMock = { sendToStore: jest.fn() } as any;
+    const dispatcherMock = { notify: jest.fn() } as any;
 
     const service = new NotificationsService(
       prismaMock,
       globalPrismaMock,
       sseMock,
       pushMock,
+      dispatcherMock,
     );
 
     return { service, subscriptionsFindMany, subscriptionsCreateMany };
@@ -120,12 +126,14 @@ describe('NotificationsService — QUI-854 multi-tenant fail-closed', () => {
     const globalPrismaMock = {} as any;
     const sseMock = { push: jest.fn() } as any;
     const pushMock = { sendToStore: jest.fn() } as any;
+    const dispatcherMock = { notify: jest.fn() } as any;
 
     const service = new NotificationsService(
       prismaMock,
       globalPrismaMock,
       sseMock,
       pushMock,
+      dispatcherMock,
     );
 
     return { service, prismaMock, queryRawUnsafe, executeRawUnsafe };
@@ -215,5 +223,63 @@ describe('NotificationsService — QUI-854 multi-tenant fail-closed', () => {
     expect(sql).toContain(`(n.data->>'target_user_id')::int = $2`);
     expect(executeRawUnsafe.mock.calls[0][1]).toBe(42);
     expect(executeRawUnsafe.mock.calls[0][2]).toBe(7);
+  });
+});
+
+describe('NotificationsService — sendToUser delega en NotificationDispatcher', () => {
+  function buildService(notifyResult: unknown) {
+    const notify = jest.fn().mockResolvedValue(notifyResult);
+    const service = new NotificationsService(
+      {} as any,
+      {} as any,
+      {} as any,
+      {} as any,
+      { notify } as any,
+    );
+    return { service, notify };
+  }
+
+  it('pasa tienda, usuario, tipo y contenido; acepta clientes de la tienda (puente legado)', async () => {
+    const notification = { id: 9 } as any;
+    const { service, notify } = buildService([
+      { user_id: 5, status: 'delivered', notification, push: true, email: 'off' },
+    ]);
+
+    const result = await service.sendToUser(
+      42,
+      5,
+      'crm_task_assigned' as notification_type_enum,
+      'Tarea asignada',
+      'Llamar a Ana',
+      { url: '/admin/customers/tasks' },
+    );
+
+    expect(notify).toHaveBeenCalledWith({
+      store_id: 42,
+      user_ids: [5],
+      type: 'crm_task_assigned',
+      title: 'Tarea asignada',
+      body: 'Llamar a Ana',
+      data: { url: '/admin/customers/tasks' },
+      allow_store_customers: true,
+    });
+    expect(result).toBe(notification);
+  });
+
+  it('devuelve null cuando el destinatario se descartó', async () => {
+    const { service } = buildService([
+      { user_id: 5, status: 'skipped', reason: 'not_store_member', notification: null, push: false, email: null },
+    ]);
+    await expect(
+      service.sendToUser(42, 5, 'crm_task_due' as notification_type_enum, 't', 'b'),
+    ).resolves.toBeNull();
+  });
+
+  it('sendToUserDetailed expone el motivo del descarte (no es miembro de la tienda)', async () => {
+    const skipped = { user_id: 5, status: 'skipped', reason: 'not_store_member', notification: null, push: false, email: null };
+    const { service } = buildService([skipped]);
+    await expect(
+      service.sendToUserDetailed(42, 5, 'reminder_due', 't', 'b'),
+    ).resolves.toEqual(skipped);
   });
 });

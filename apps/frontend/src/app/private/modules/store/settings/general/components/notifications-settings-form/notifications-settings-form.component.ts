@@ -57,6 +57,10 @@ export interface NotificationsSettings {
    * La consume el cron `ApDueNotificationsJob` por tienda.
    */
   ap_due_soon_days?: number;
+  /** Minutos antes del vencimiento en que se avisa de una tarea del CRM (5-1440). */
+  task_due_soon_minutes?: number;
+  /** Hora de la tienda (0-23) del resumen diario de tareas del CRM. */
+  daily_digest_hour?: number;
 }
 
 /**
@@ -263,6 +267,14 @@ export class NotificationsSettingsForm implements OnInit {
       Validators.min(0),
       Validators.max(30),
     ]),
+    task_due_soon_minutes: new FormControl<number>(60, [
+      Validators.min(5),
+      Validators.max(1440),
+    ]),
+    daily_digest_hour: new FormControl<number>(7, [
+      Validators.min(0),
+      Validators.max(23),
+    ]),
   });
 
   // Typed getters for FormControls
@@ -320,6 +332,14 @@ export class NotificationsSettingsForm implements OnInit {
 
   get apDueSoonDaysControl(): FormControl<number> {
     return this.form.get('ap_due_soon_days') as FormControl<number>;
+  }
+
+  get taskDueSoonMinutesControl(): FormControl<number> {
+    return this.form.get('task_due_soon_minutes') as FormControl<number>;
+  }
+
+  get dailyDigestHourControl(): FormControl<number> {
+    return this.form.get('daily_digest_hour') as FormControl<number>;
   }
 
   get isSoundMuted(): boolean {

@@ -1,0 +1,130 @@
+<div class="w-full max-w-3xl mx-auto space-y-4 p-2 md:p-4">
+  <div>
+    <h1 class="text-xl font-semibold text-[var(--color-text-primary)]">
+      Mis notificaciones
+    </h1>
+    <p class="text-sm text-[var(--color-text-secondary)]">
+      Elige qué avisos recibes y por qué canal. Solo afecta a tu usuario.
+    </p>
+  </div>
+
+  @if (!storeEmailEnabled()) {
+    <app-alert-banner variant="warning" icon="mail">
+      El correo de avisos está apagado para esta tienda. Pídele al
+      administrador que lo active en Configuración → Notificaciones.
+    </app-alert-banner>
+  }
+  @if (userEmail() === null && !loading()) {
+    <app-alert-banner variant="warning" icon="mail">
+      Tu usuario no tiene correo registrado; los avisos por correo no te
+      llegarán.
+    </app-alert-banner>
+  }
+
+  <app-card title="Este dispositivo">
+    <div class="space-y-3">
+      <p class="text-sm text-[var(--color-text-primary)]">
+        {{ deviceStatus() }}
+      </p>
+      <p class="text-xs text-[var(--color-text-secondary)]">
+        En iPhone y iPad los avisos al dispositivo solo llegan si instalaste
+        Vendix en la pantalla de inicio (Compartir → Agregar a inicio).
+      </p>
+      <div class="flex flex-wrap gap-2">
+        @if (canActivateDevice()) {
+          <app-button
+            variant="primary"
+            size="sm"
+            [loading]="activating()"
+            (clicked)="activateDevice()"
+          >
+            Activar avisos en este dispositivo
+          </app-button>
+        }
+        <app-button
+          variant="outline"
+          size="sm"
+          [loading]="testing()"
+          (clicked)="sendTest()"
+        >
+          Enviarme una prueba
+        </app-button>
+      </div>
+    </div>
+  </app-card>
+
+  @if (loading()) {
+    <p class="text-sm text-[var(--color-text-secondary)]">
+      Cargando tus avisos...
+    </p>
+  } @else if (loadFailed()) {
+    <app-alert-banner variant="danger" icon="alert-triangle">
+      No se pudieron cargar tus avisos. Recarga la página para intentar de
+      nuevo.
+    </app-alert-banner>
+  } @else {
+    @for (group of groups(); track group.key) {
+      <app-card [title]="group.label" [padding]="false">
+        <div class="divide-y divide-[var(--color-border)]">
+          <div
+            class="hidden sm:grid grid-cols-[1fr_6rem_6rem] gap-2 px-4 py-2 text-xs font-medium text-[var(--color-text-secondary)]"
+          >
+            <span></span>
+            <span class="text-center">Dispositivo</span>
+            <span class="text-center">Correo</span>
+          </div>
+          @for (item of group.types; track item.type) {
+            <div
+              class="grid grid-cols-1 sm:grid-cols-[1fr_6rem_6rem] gap-2 sm:items-center px-4 py-3"
+            >
+              <div class="min-w-0">
+                <p class="text-sm font-medium text-[var(--color-text-primary)]">
+                  {{ item.label }}
+                </p>
+                <p class="text-xs text-[var(--color-text-secondary)]">
+                  {{ item.description }}
+                </p>
+              </div>
+              <div class="flex items-center justify-between sm:justify-center gap-2">
+                <span class="sm:hidden text-xs text-[var(--color-text-secondary)]">
+                  Dispositivo
+                </span>
+                @if (item.channels.push) {
+                  <app-toggle
+                    [checked]="item.effective.push"
+                    [ariaLabel]="'Dispositivo: ' + item.label"
+                    (toggled)="onToggle(item.type, 'push', $event)"
+                  />
+                } @else {
+                  <span
+                    class="text-[var(--color-text-secondary)]"
+                    title="Este aviso no se envía al dispositivo"
+                    >-</span
+                  >
+                }
+              </div>
+              <div class="flex items-center justify-between sm:justify-center gap-2">
+                <span class="sm:hidden text-xs text-[var(--color-text-secondary)]">
+                  Correo
+                </span>
+                @if (item.channels.email) {
+                  <app-toggle
+                    [checked]="item.effective.email"
+                    [ariaLabel]="'Correo: ' + item.label"
+                    (toggled)="onToggle(item.type, 'email', $event)"
+                  />
+                } @else {
+                  <span
+                    class="text-[var(--color-text-secondary)]"
+                    title="Este aviso no se envía por correo"
+                    >-</span
+                  >
+                }
+              </div>
+            </div>
+          }
+        </div>
+      </app-card>
+    }
+  }
+</div>

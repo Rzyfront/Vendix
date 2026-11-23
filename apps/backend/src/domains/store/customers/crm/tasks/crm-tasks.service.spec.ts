@@ -143,7 +143,26 @@ function setup(
   (prisma as any).$transaction = jest.fn(async (work: (tx: unknown) => unknown) =>
     work(prisma),
   );
+  // What reached each person: the dispatcher mock flattens every notice to
+  // (store, user, type, title, body, data), one call per recipient.
   const notifications = { sendToUser: jest.fn(async (..._args: any[]) => null) };
+  const dispatcher = {
+    notify: jest.fn(async (input: any) => {
+      for (const user of input.user_ids) {
+        await notifications.sendToUser(
+          input.store_id,
+          user,
+          input.type,
+          input.title,
+          input.body,
+          input.data,
+        );
+      }
+    }),
+  };
+  const reminders = {
+    sync: jest.fn(async (..._args: any[]) => ({ scheduled: [], cancelled: 0 })),
+  };
   const pipeline = {
     assertTaskTargetStage: jest.fn(async (..._args: any[]) => undefined),
     moveForTask: jest.fn(async (..._args: any[]) => ({
@@ -154,10 +173,18 @@ function setup(
   };
   const service = new CrmTasksService(
     prisma as any,
-    notifications as any,
+    dispatcher as any,
     pipeline as any,
+    reminders as any,
   );
-  return { service, prisma: prisma as typeof prisma & Record<string, any>, notifications, pipeline };
+  return {
+    service,
+    prisma: prisma as typeof prisma & Record<string, any>,
+    notifications,
+    dispatcher,
+    reminders,
+    pipeline,
+  };
 }
 
 async function codeOf(promise: Promise<unknown>) {
@@ -375,12 +402,46 @@ describe('CrmTasksService', () => {
     });
   });
 
-  it('reassigning notifies the new assignee only', async () => {
+  it('reassigning tells the new assignee and the previous one, never the actor', async () => {
     as('owner');
     const { service, notifications } = setup();
     await service.update(50, { assigned_user_id: STAFF });
+    expect(notifications.sendToUser).toHaveBeenCalledTimes(2);
+    expect(notifications.sendToUser).toHaveBeenCalledWith(
+      STORE,
+      STAFF,
+      'crm_task_assigned',
+      'Nueva tarea asignada',
+      'Llamar a Laura · Laura Pérez',
+      { kind: 'crm_task', task_id: 50, url: '/admin/customers/tasks' },
+    );
+    expect(notifications.sendToUser).toHaveBeenCalledWith(
+      STORE,
+      SELLER,
+      'crm_task_reassigned',
+      'Tarea reasignada',
+      'Ya no está a tu cargo: Llamar a Laura · Laura Pérez',
+      {
+        kind: 'crm_task',
+        task_id: 50,
+        url: '/admin/customers/tasks',
+        role: 'previous_assignee',
+      },
+    );
+    const told = notifications.sendToUser.mock.calls.map((call) => call[1]);
+    expect(told).not.toContain(OWNER);
+  });
+
+  it('taking a task for yourself tells only the previous assignee', async () => {
+    as('owner');
+    const { service, notifications } = setup();
+    await service.update(50, { assigned_user_id: OWNER });
     expect(notifications.sendToUser).toHaveBeenCalledTimes(1);
-    expect((notifications.sendToUser.mock.calls[0] as unknown[])[1]).toBe(STAFF);
+    expect(notifications.sendToUser.mock.calls[0].slice(1, 4)).toEqual([
+      SELLER,
+      'crm_task_reassigned',
+      'Tarea reasignada',
+    ]);
   });
   describe('support people', () => {
     it('are saved without the assignee nor duplicates, and each one is told', async () => {
@@ -993,6 +1054,169 @@ describe('CrmTasksService', () => {
       expect(prisma.store_users.findMany.mock.calls[0][0].where).toEqual({
         user: { ...staffWhere, AND: [name('luis'), name('pé')] },
       });
+    });
+  });
+  describe('due date, closing and reminders', () => {
+    const DUE = new Date('2026-11-05T15:00:00Z'); // 10:00 a. m. en Bogotá
+
+    it('someone else moving the date tells the assignee, not the actor', async () => {
+      as('owner');
+      const { service, notifications } = setup({ task: { due_at: DUE } });
+      await service.update(50, { due_at: '2026-11-06T20:30:00Z' });
+      expect(notifications.sendToUser).toHaveBeenCalledTimes(1);
+      const [store, user, type, title, body, data] = notifications.sendToUser.mock
+        .calls[0] as unknown[];
+      expect([store, user, type, title]).toEqual([
+        STORE,
+        SELLER,
+        'crm_task_reassigned',
+        'Tarea reprogramada',
+      ]);
+      expect(body).toMatch(/^Llamar a Laura · Laura Pérez · nueva fecha: 06\/11, 03:30\sp/);
+      expect(data).toEqual({
+        kind: 'crm_task',
+        task_id: 50,
+        url: '/admin/customers/tasks',
+        role: 'rescheduled',
+      });
+    });
+
+    it('clearing the date says the task no longer has one', async () => {
+      as('owner');
+      const { service, notifications } = setup({ task: { due_at: DUE } });
+      await service.update(50, { due_at: null });
+      expect(notifications.sendToUser.mock.calls[0][4]).toBe(
+        'Llamar a Laura · Laura Pérez · ya no tiene fecha',
+      );
+    });
+
+    it('the assignee moving their own date is not told', async () => {
+      as('seller');
+      const { service, notifications } = setup({ task: { due_at: DUE } });
+      await service.update(50, { due_at: '2026-11-06T20:30:00Z' });
+      expect(notifications.sendToUser).not.toHaveBeenCalled();
+    });
+
+    it('an unassigned task rescheduled by someone else tells its creator', async () => {
+      as('owner');
+      const { service, notifications } = setup({
+        task: { due_at: DUE, assigned_user_id: null, assigned_user: null },
+      });
+      await service.update(50, { due_at: '2026-11-06T20:30:00Z' });
+      expect(notifications.sendToUser.mock.calls[0][1]).toBe(SELLER);
+    });
+
+    it('completed by someone else tells the creator', async () => {
+      as('owner');
+      const { service, notifications } = setup({
+        task: { assigned_user_id: STAFF, created_by_user_id: SELLER },
+      });
+      await service.complete(50);
+      expect(notifications.sendToUser).toHaveBeenCalledWith(
+        STORE,
+        SELLER,
+        'crm_task_closed',
+        'Tarea completada',
+        'Llamar a Laura · Laura Pérez',
+        { kind: 'crm_task', task_id: 50, url: '/admin/customers/tasks', status: 'done' },
+      );
+    });
+
+    it('cancelled by someone else tells the creator', async () => {
+      as('owner');
+      const { service, notifications } = setup();
+      await service.update(50, { status: 'cancelled' });
+      expect(notifications.sendToUser).toHaveBeenCalledTimes(1);
+      expect(notifications.sendToUser.mock.calls[0].slice(1, 4)).toEqual([
+        SELLER,
+        'crm_task_closed',
+        'Tarea cancelada',
+      ]);
+    });
+
+    it('the creator closing their own task is not told', async () => {
+      as('seller');
+      const { service, notifications } = setup();
+      await service.complete(50);
+      await service.update(50, { status: 'cancelled' });
+      expect(notifications.sendToUser).not.toHaveBeenCalled();
+    });
+
+    it('a task completed twice tells the creator once', async () => {
+      as('owner');
+      const { service, notifications } = setup();
+      await service.complete(50);
+      await service.complete(50);
+      expect(notifications.sendToUser).toHaveBeenCalledTimes(1);
+    });
+
+    it('creating a task with a date plans its reminders for its store', async () => {
+      as('owner');
+      const { service, reminders } = setup();
+      await service.create({
+        title: 'Cerrar venta',
+        assigned_user_id: STAFF,
+        due_at: '2026-11-05T15:00:00Z',
+        support_user_ids: [LUIS],
+      });
+      expect(reminders.sync).toHaveBeenCalledTimes(1);
+      expect(reminders.sync).toHaveBeenCalledWith({
+        source_type: 'crm_task',
+        source_id: 51,
+        store_id: STORE,
+        due_at: DUE,
+        status: 'pending',
+        recipients: { notify: [STAFF, LUIS], escalate: [OWNER] },
+        digest: true,
+      });
+    });
+
+    it('a task the creator keeps has nobody to escalate to', async () => {
+      as('seller');
+      const { service, reminders } = setup();
+      await service.create({ title: 'Visita', due_at: '2026-11-05T15:00:00Z' });
+      expect(reminders.sync.mock.calls[0][0]).toMatchObject({
+        recipients: { notify: [SELLER], escalate: [] },
+      });
+    });
+
+    it('every edit re-plans: completing, cancelling and reopening pass the new state', async () => {
+      as('seller');
+      const { service, reminders } = setup({ task: { due_at: DUE } });
+      await service.update(50, { due_at: '2026-11-06T20:30:00Z' });
+      await service.complete(50);
+      await service.reopen(50);
+      await service.update(50, { status: 'cancelled' });
+      expect(reminders.sync.mock.calls.map((call) => call[0].status)).toEqual([
+        'pending',
+        'done',
+        'pending',
+        'cancelled',
+      ]);
+      expect(reminders.sync.mock.calls[0][0].due_at).toEqual(
+        new Date('2026-11-06T20:30:00Z'),
+      );
+    });
+
+    it('a reminders failure never undoes the write', async () => {
+      as('seller');
+      const { service, reminders } = setup();
+      jest.spyOn(Logger.prototype, 'error').mockImplementation(() => undefined);
+      reminders.sync.mockRejectedValueOnce(new Error('db down'));
+      const task = await service.create({ title: 'Visita', due_at: '2026-11-05T15:00:00Z' });
+      expect(task.id).toBe(51);
+    });
+
+    it('every notice names the store of the task (never another one)', async () => {
+      as('owner');
+      const { service, dispatcher } = setup({ task: { due_at: DUE } });
+      await service.update(50, { assigned_user_id: STAFF, due_at: '2026-11-06T20:30:00Z' });
+      await service.complete(50);
+      expect(dispatcher.notify).toHaveBeenCalled();
+      for (const [input] of dispatcher.notify.mock.calls) {
+        expect(input.store_id).toBe(STORE);
+        expect(input.user_ids).not.toContain(OWNER);
+      }
     });
   });
 });

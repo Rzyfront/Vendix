@@ -9,6 +9,7 @@ import {
 } from '@angular/core';
 import { CommonModule } from '@angular/common';
 import { takeUntilDestroyed } from '@angular/core/rxjs-interop';
+import { Router } from '@angular/router';
 
 import { IconComponent } from '../icon/icon.component';
 import {
@@ -164,6 +165,7 @@ export class UserDropdownComponent implements OnInit {
   private environmentSwitchService = inject(EnvironmentSwitchService);
   private environmentContextService = inject(EnvironmentContextService);
   private destroyRef = inject(DestroyRef);
+  private router = inject(Router);
 
   private fullscreenService = inject(FullscreenService);
   private userUiService = inject(UserUiService);
@@ -249,6 +251,12 @@ export class UserDropdownComponent implements OnInit {
       label: 'Configuración de usuario',
       icon: 'user-cog',
       action: () => this.goToSettings(),
+    },
+    {
+      label: 'Mis notificaciones',
+      icon: 'bell',
+      action: () => this.goToMyNotifications(),
+      condition: () => this.isStoreAdminContext(),
     },
     {
       label: 'Pantalla Completa',
@@ -338,6 +346,18 @@ export class UserDropdownComponent implements OnInit {
     this.isOpen.set(false);
     // TODO: The 'emit' function requires a mandatory void argument
     this.closeDropdown.emit();
+  }
+
+  private goToMyNotifications() {
+    this.router.navigateByUrl('/admin/my-notifications');
+    this.isOpen.set(false);
+    // TODO: The 'emit' function requires a mandatory void argument
+    this.closeDropdown.emit();
+  }
+
+  /** El dropdown se comparte con org/superadmin: solo la tienda tiene esta página. */
+  private isStoreAdminContext(): boolean {
+    return this.authFacade.getUserSettings()?.app_type === 'STORE_ADMIN';
   }
 
   private logout() {

@@ -975,6 +975,15 @@ export const storeAdminRoutes: Routes = [
           },
         ],
       },
+      // Mis notificaciones: preferencias de avisos del propio usuario. Abierta a
+      // todo el personal de la tienda: sin guard de permisos ni key de panel_ui.
+      {
+        path: 'my-notifications',
+        loadComponent: () =>
+          import('../../private/modules/store/my-notifications/my-notifications.component').then(
+            (c) => c.MyNotificationsComponent,
+          ),
+      },
       // Help Routes
       {
         path: 'help',

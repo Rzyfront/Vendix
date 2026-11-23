@@ -741,6 +741,10 @@ export interface NotificationsSettings {
   sound_id: string | null;
   sound_volume: number;
   sound_muted: boolean;
+  /** Minutos antes del vencimiento en que se avisa de una tarea del CRM (5-1440). */
+  task_due_soon_minutes?: number;
+  /** Hora de la tienda (0-23) en que sale el resumen diario de tareas. */
+  daily_digest_hour?: number;
 }
 
 export interface CashRegisterSettings {
