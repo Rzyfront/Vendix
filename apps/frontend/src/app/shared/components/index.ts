@@ -103,6 +103,8 @@ export { BadgeComponent } from './badge/badge.component';
 export { ItemListComponent } from './item-list/item-list.component';
 export { ResponsiveDataViewComponent } from './responsive-data-view/responsive-data-view.component';
 export { OptionsDropdownComponent } from './options-dropdown';
+export { ListSearchBarComponent } from './list-search-bar/list-search-bar.component';
+export type { ListSearchBarOffset } from './list-search-bar/list-search-bar.component';
 export { TimelineComponent } from './timeline/timeline.component';
 export { TourModalComponent } from './tour/tour-modal/tour-modal.component';
 export { ImageLightboxComponent } from './image-lightbox/image-lightbox.component';
