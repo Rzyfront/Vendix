@@ -5,6 +5,7 @@ import { GlobalPrismaService } from '../../../prisma/services/global-prisma.serv
 import { RequestContextService } from '@common/context/request-context.service';
 import { NotificationsSseService } from './notifications-sse.service';
 import { NotificationsPushService } from './notifications-push.service';
+import { resolveEffectiveChannels } from './notification-catalog';
 import { NotificationQueryDto, UpdateSubscriptionDto } from './dto';
 
 @Injectable()
@@ -341,6 +342,7 @@ export class NotificationsService {
   async updateSubscription(user_id: number, dto: UpdateSubscriptionDto) {
     const context = this.getContext();
     const store_id = context.store_id!;
+    const defaults = resolveEffectiveChannels(dto.type);
 
     return this.subscriptionsModel.upsert({
       where: {
@@ -354,12 +356,14 @@ export class NotificationsService {
         ...(dto.in_app !== undefined && { in_app: dto.in_app }),
         ...(dto.email !== undefined && { email: dto.email }),
       },
+      // The channel the request does not send keeps the value the user had in
+      // effect until now: the catalog default (D1: e-mail off).
       create: {
         store_id,
         user_id,
         type: dto.type,
-        in_app: dto.in_app ?? true,
-        email: dto.email ?? false,
+        in_app: dto.in_app ?? defaults.push,
+        email: dto.email ?? defaults.email,
       },
     });
   }

@@ -15,6 +15,7 @@ import { Observable, interval, map, merge, filter } from 'rxjs';
 import { NotificationsService } from './notifications.service';
 import { NotificationsSseService } from './notifications-sse.service';
 import { NotificationsPushService } from './notifications-push.service';
+import { NotificationPreferencesService } from './notification-preferences.service';
 import { ResponseService } from '../../../common/responses/response.service';
 import { RequestContextService } from '@common/context/request-context.service';
 import {
@@ -31,6 +32,7 @@ export class NotificationsController {
     private readonly notifications_service: NotificationsService,
     private readonly sse_service: NotificationsSseService,
     private readonly push_service: NotificationsPushService,
+    private readonly preferences_service: NotificationPreferencesService,
     private readonly response_service: ResponseService,
   ) {}
 
@@ -73,6 +75,27 @@ export class NotificationsController {
     const result =
       await this.notifications_service.initDefaultSubscriptions(user_id);
     return this.response_service.success(result);
+  }
+
+  /**
+   * Preferencias del usuario actual en la tienda actual: el catálogo de tipos
+   * agrupado por módulo, con el valor efectivo por canal (Dispositivo /
+   * Correo) — su fila guardada o el default del tipo. Solo lectura: no crea
+   * filas (a diferencia de `GET subscriptions`, que se mantiene igual).
+   */
+  @Get('preferences')
+  async getPreferences() {
+    const context = RequestContextService.getContext();
+    const user_id = context?.user_id;
+    const store_id = context?.store_id;
+    if (!user_id || !store_id)
+      throw new ForbiddenException('User and store context required');
+
+    const groups = await this.preferences_service.getGroupedForUser(
+      store_id,
+      user_id,
+    );
+    return this.response_service.success({ groups });
   }
 
   @Patch('subscriptions')

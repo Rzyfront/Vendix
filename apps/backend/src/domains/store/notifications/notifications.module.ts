@@ -8,6 +8,7 @@ import { NotificationSoundsCatalogService } from './notification-sounds-catalog.
 import { NotificationsSseService } from './notifications-sse.service';
 import { NotificationsPushService } from './notifications-push.service';
 import { NotificationsEventsListener } from './notifications-events.listener';
+import { NotificationPreferencesService } from './notification-preferences.service';
 import { ResponseModule } from '../../../common/responses/response.module';
 import { PrismaModule } from '../../../prisma/prisma.module';
 import { EmailModule } from '../../../email/email.module';
@@ -41,11 +42,14 @@ import { InvoiceDeliveryModule } from '../invoicing/delivery/invoice-delivery.mo
     NotificationsPushService,
     NotificationsEventsListener,
     NotificationSoundsCatalogService,
+    // Preferencias por canal (plan recordatorios §3.1).
+    NotificationPreferencesService,
   ],
   exports: [
     NotificationsService,
     NotificationsSseService,
     NotificationsPushService,
+    NotificationPreferencesService,
   ],
 })
 export class NotificationsModule implements OnModuleInit {
